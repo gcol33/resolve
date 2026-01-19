@@ -55,8 +55,6 @@ class Trainer:
         device: str = "auto",
         use_amp: bool = True,
         species_aggregation: str = "abundance",
-        species_normalization: str = "relative_plot",
-        track_unknown_count: bool = False,
     ):
         self.model = model
         self.dataset = dataset
@@ -68,8 +66,10 @@ class Trainer:
         self.phases = phases
         self.phase_boundaries = phase_boundaries
         self.species_aggregation = species_aggregation
-        self.species_normalization = species_normalization
-        self.track_unknown_count = track_unknown_count
+        # Read species encoding config from dataset
+        self.species_normalization = dataset.species_normalization
+        self.track_unknown_fraction = dataset.track_unknown_fraction
+        self.track_unknown_count = dataset.track_unknown_count
 
         # Device selection
         if device == "auto":
@@ -131,9 +131,10 @@ class Trainer:
         if covariates is not None:
             parts.append(covariates)
         parts.append(encoded.hash_embedding)
-        # Always include unknown_fraction (model-awareness signal)
-        parts.append(encoded.unknown_fraction.reshape(-1, 1))
-        if encoded.unknown_count is not None:
+        # Include unknown tracking features based on dataset settings
+        if self.track_unknown_fraction:
+            parts.append(encoded.unknown_fraction.reshape(-1, 1))
+        if self.track_unknown_count and encoded.unknown_count is not None:
             parts.append(encoded.unknown_count.reshape(-1, 1).astype(np.float32))
         continuous = np.hstack(parts)
 
@@ -475,6 +476,7 @@ class Trainer:
             "vocab": self._species_encoder.vocab if self._species_encoder else None,
             "species_aggregation": self._species_encoder.aggregation if self._species_encoder else "abundance",
             "species_normalization": self._species_encoder.normalization if self._species_encoder else "relative_plot",
+            "track_unknown_fraction": self.track_unknown_fraction,
             "track_unknown_count": self._species_encoder.track_unknown_count if self._species_encoder else False,
             "species_vocab": self._species_encoder._species_vocab if self._species_encoder else set(),
         }

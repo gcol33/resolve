@@ -108,9 +108,11 @@ class Predictor:
         if covariates is not None:
             parts.append(covariates)
         parts.append(encoded.hash_embedding)
-        # Always include unknown_fraction (model-awareness signal)
-        parts.append(encoded.unknown_fraction.reshape(-1, 1))
-        if encoded.unknown_count is not None:
+        # Include unknown tracking features based on schema settings
+        schema = self.model.schema
+        if schema.track_unknown_fraction:
+            parts.append(encoded.unknown_fraction.reshape(-1, 1))
+        if schema.track_unknown_count and encoded.unknown_count is not None:
             parts.append(encoded.unknown_count.reshape(-1, 1).astype(np.float32))
         continuous = np.hstack(parts)
 

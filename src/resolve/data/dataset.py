@@ -13,6 +13,10 @@ from sklearn.model_selection import train_test_split
 from resolve.data.roles import RoleMapping, TargetConfig
 
 
+# Valid normalization modes for species abundance
+VALID_NORMALIZATIONS = ("raw", "relative_plot", "log_scaled")
+
+
 @dataclass
 class ResolveSchema:
     """Schema information derived from a ResolveDataset."""
@@ -27,6 +31,10 @@ class ResolveSchema:
     n_families: int
     targets: dict[str, TargetConfig]
     covariate_names: list[str]
+    # Species encoding configuration
+    species_normalization: str = "relative_plot"
+    track_unknown_fraction: bool = True
+    track_unknown_count: bool = False
 
 
 class ResolveDataset:
@@ -44,11 +52,24 @@ class ResolveDataset:
         species: pd.DataFrame,
         roles: RoleMapping,
         targets: dict[str, TargetConfig],
+        species_normalization: str = "relative_plot",
+        track_unknown_fraction: bool = True,
+        track_unknown_count: bool = False,
     ):
+        # Validate normalization mode
+        if species_normalization not in VALID_NORMALIZATIONS:
+            raise ValueError(
+                f"species_normalization must be one of {VALID_NORMALIZATIONS}, "
+                f"got {species_normalization!r}"
+            )
+
         self._header = header.copy()
         self._species = species.copy()
         self._roles = roles
         self._targets = targets
+        self._species_normalization = species_normalization
+        self._track_unknown_fraction = track_unknown_fraction
+        self._track_unknown_count = track_unknown_count
         self._validate()
 
     def _validate(self) -> None:
@@ -104,6 +125,9 @@ class ResolveDataset:
         species: str | Path,
         roles: dict[str, str | list[str]],
         targets: dict[str, dict],
+        species_normalization: str = "relative_plot",
+        track_unknown_fraction: bool = True,
+        track_unknown_count: bool = False,
     ) -> ResolveDataset:
         """
         Load dataset from CSV files.
@@ -113,6 +137,12 @@ class ResolveDataset:
             species: Path to species CSV (one row per species-plot occurrence)
             roles: Mapping of semantic roles to column names
             targets: Target configurations {name: {column, task, transform?, num_classes?}}
+            species_normalization: Abundance normalization mode
+                - "raw": use abundance values directly
+                - "relative_plot": normalize to sum to 1 per plot (default)
+                - "log_scaled": apply log1p transform
+            track_unknown_fraction: Track fraction of abundance from unknown species (default True)
+            track_unknown_count: Track count of unknown species (default False)
         """
         header_df = pd.read_csv(header, low_memory=False)
         species_df = pd.read_csv(species, low_memory=False)
@@ -122,7 +152,15 @@ class ResolveDataset:
             name: TargetConfig.from_dict(name, cfg) for name, cfg in targets.items()
         }
 
-        return cls(header_df, species_df, role_mapping, target_configs)
+        return cls(
+            header_df,
+            species_df,
+            role_mapping,
+            target_configs,
+            species_normalization=species_normalization,
+            track_unknown_fraction=track_unknown_fraction,
+            track_unknown_count=track_unknown_count,
+        )
 
     @property
     def header(self) -> pd.DataFrame:
@@ -143,6 +181,21 @@ class ResolveDataset:
     def targets(self) -> dict[str, TargetConfig]:
         """Target configurations."""
         return self._targets
+
+    @property
+    def species_normalization(self) -> str:
+        """Species abundance normalization mode."""
+        return self._species_normalization
+
+    @property
+    def track_unknown_fraction(self) -> bool:
+        """Whether to track fraction of unknown species."""
+        return self._track_unknown_fraction
+
+    @property
+    def track_unknown_count(self) -> bool:
+        """Whether to track count of unknown species."""
+        return self._track_unknown_count
 
     @property
     def plot_ids(self) -> np.ndarray:
@@ -178,6 +231,9 @@ class ResolveDataset:
             n_families=n_families,
             targets=self._targets,
             covariate_names=self._roles.covariates,
+            species_normalization=self._species_normalization,
+            track_unknown_fraction=self._track_unknown_fraction,
+            track_unknown_count=self._track_unknown_count,
         )
 
     def get_coordinates(self) -> Optional[np.ndarray]:
@@ -243,8 +299,18 @@ class ResolveDataset:
             self._species[self._roles.species_plot_id].isin(test_ids_set)
         ]
 
-        train_ds = ResolveDataset(train_header, train_species, self._roles, self._targets)
-        test_ds = ResolveDataset(test_header, test_species, self._roles, self._targets)
+        train_ds = ResolveDataset(
+            train_header, train_species, self._roles, self._targets,
+            species_normalization=self._species_normalization,
+            track_unknown_fraction=self._track_unknown_fraction,
+            track_unknown_count=self._track_unknown_count,
+        )
+        test_ds = ResolveDataset(
+            test_header, test_species, self._roles, self._targets,
+            species_normalization=self._species_normalization,
+            track_unknown_fraction=self._track_unknown_fraction,
+            track_unknown_count=self._track_unknown_count,
+        )
 
         return train_ds, test_ds
 
@@ -256,4 +322,9 @@ class ResolveDataset:
         filtered_species = self._species[
             self._species[self._roles.species_plot_id].isin(plot_ids)
         ].copy()
-        return ResolveDataset(filtered_header, filtered_species, self._roles, self._targets)
+        return ResolveDataset(
+            filtered_header, filtered_species, self._roles, self._targets,
+            species_normalization=self._species_normalization,
+            track_unknown_fraction=self._track_unknown_fraction,
+            track_unknown_count=self._track_unknown_count,
+        )

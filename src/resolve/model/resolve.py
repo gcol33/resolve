@@ -34,7 +34,7 @@ class ResolveModel(nn.Module):
         top_k: int = 3,
         hidden_dims: Optional[list[int]] = None,
         dropout: float = 0.3,
-        track_unknown_count: bool = False,
+        track_unknown_count: bool = None,  # Deprecated: read from schema
     ):
         super().__init__()
 
@@ -46,12 +46,15 @@ class ResolveModel(nn.Module):
         self.genus_emb_dim = genus_emb_dim
         self.family_emb_dim = family_emb_dim
         self.dropout = dropout
-        self.track_unknown_count = track_unknown_count
 
         # Number of continuous features:
-        # coordinates (if present) + covariates + hash_dim + unknown_fraction + (optional) unknown_count
+        # coordinates (if present) + covariates + hash_dim + unknown features
         n_coords = 2 if schema.has_coordinates else 0
-        n_unknown_features = 2 if track_unknown_count else 1  # fraction always, count optional
+        n_unknown_features = 0
+        if schema.track_unknown_fraction:
+            n_unknown_features += 1
+        if schema.track_unknown_count:
+            n_unknown_features += 1
         n_continuous = n_coords + len(schema.covariate_names) + hash_dim + n_unknown_features
 
         # Build encoder
