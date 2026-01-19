@@ -18,44 +18,54 @@ RESOLVE treats species composition as *biotic context* — a rich, structured si
 ## Quick Start
 
 ```python
-import resolve
-
-# Define semantic roles (map your column names)
-roles = {
-    "plot_id": "PlotObservationID",
-    "species_id": "Species",
-    "species_plot_id": "PlotObservationID",
-    "coords_lat": "Latitude",
-    "coords_lon": "Longitude",
-    "abundance": "Cover",
-    "taxonomy_genus": "Genus",
-    "taxonomy_family": "Family",
-}
-
-# Define targets
-targets = {
-    "area": {"column": "Area", "task": "regression", "transform": "log1p"},
-    "habitat": {"column": "Habitat", "task": "classification", "num_classes": 5},
-}
+from resolve import ResolveDataset, Trainer
 
 # Load data
-dataset = resolve.ResolveDataset.from_csv(
+dataset = ResolveDataset.from_csv(
     header="plots.csv",
     species="species.csv",
-    roles=roles,
-    targets=targets,
+    roles={
+        "plot_id": "plot_id",
+        "species_id": "species",
+        "species_plot_id": "plot_id",
+    },
+    targets={"y": {"column": "response", "task": "regression"}},
 )
 
-# Build and train model
-model = resolve.ResolveModel(schema=dataset.schema, targets=targets)
-trainer = resolve.Trainer(model, dataset)
-result = trainer.fit()
-trainer.save("model.pt")
+# Train
+trainer = Trainer(dataset)
+trainer.fit()
 
 # Predict
-predictor = resolve.Predictor.load("model.pt")
-predictions = predictor.predict(new_dataset)
-predictions.to_csv("predictions.csv")
+preds = trainer.predict(dataset)
+preds = trainer.predict(dataset, confidence_threshold=0.8)  # only confident predictions
+```
+
+For more complex use cases with taxonomy, coordinates, and multiple targets:
+
+```python
+dataset = ResolveDataset.from_csv(
+    header="plots.csv",
+    species="species.csv",
+    roles={
+        "plot_id": "PlotID",
+        "species_id": "Species",
+        "species_plot_id": "PlotID",
+        "abundance": "Cover",
+        "taxonomy_genus": "Genus",
+        "taxonomy_family": "Family",
+        "coords_lat": "Latitude",
+        "coords_lon": "Longitude",
+    },
+    targets={
+        "area": {"column": "Area", "task": "regression", "transform": "log1p"},
+        "habitat": {"column": "Habitat", "task": "classification", "num_classes": 5},
+    },
+)
+
+trainer = Trainer(dataset, hash_dim=64, top_k=10)
+trainer.fit()
+trainer.save("model.pt")
 ```
 
 ## Features
@@ -67,7 +77,8 @@ predictions.to_csv("predictions.csv")
 | **Phased training** | MAE → SMAPE → band accuracy optimization |
 | **Semantic role mapping** | Flexible column naming, strict structure |
 | **Unknown species tracking** | Detects and quantifies novel species at inference time |
-| **Abundance normalization** | Raw, relative (per-plot), or log-scaled modes |
+| **Abundance normalization** | Raw, normalized (sum-to-one), or log1p modes |
+| **Confidence filtering** | Set threshold to filter uncertain predictions |
 | **CPU-first** | Works without GPU, scales with CUDA when available |
 
 ## Installation
@@ -104,6 +115,10 @@ Covariates ───────┘
 ### Linear Compositional Pooling
 
 Species effects are aggregated linearly (abundance-weighted sum) before nonlinear mixing in PlotEncoder. This preserves interpretability: each species contributes additively to the latent signal before the network learns complex interactions.
+
+## What RESOLVE Assumes
+
+RESOLVE models plot-level attributes as a function of species composition using linear aggregation of species representations. Individual species contributions are summed or weighted before any nonlinear transformation, meaning that species–species interactions are not modeled directly at the species level but may emerge at the plot level through the encoder. Taxonomic information (e.g. genus or family) is optional and, when provided, acts as a structured prior that can improve generalization, especially for rare or sparsely observed species. Species not seen during training are handled explicitly and reduce prediction confidence, reflecting extrapolation beyond the learned species space rather than model uncertainty in a statistical sense.
 
 ## Documentation
 

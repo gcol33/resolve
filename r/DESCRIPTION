@@ -1,0 +1,23 @@
+Package: resolve
+Title: Species Composition Prediction via Linear Vector Embeddings
+Version: 0.1.0
+Authors@R:
+    person("Gilles", "Colling", email = "gilles@example.com", role = c("aut", "cre"))
+Description: R interface to the RESOLVE Python package for predicting plot-level
+    attributes from species composition using linear compositional pooling and
+    learned representations.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Imports:
+    reticulate (>= 1.28)
+Suggests:
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+Config/reticulate:
+  list(
+    packages = list(
+      list(package = "resolve", pip = TRUE)
+    )
+  )

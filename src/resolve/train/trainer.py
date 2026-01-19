@@ -34,31 +34,52 @@ class Trainer:
     """
     Trains ResolveModel with phased loss schedule.
 
+    Minimal usage:
+        trainer = Trainer(dataset)
+        trainer.fit()
+        predictions = trainer.predict(dataset)
+
     Handles:
+        - Model construction from dataset schema
         - Data preprocessing (encoding, scaling)
         - Training loop with early stopping
         - Checkpointing
-        - Evaluation
+        - Evaluation and prediction
     """
 
     def __init__(
         self,
-        model: ResolveModel,
         dataset: ResolveDataset,
-        batch_size: int = 4096,
+        # Model architecture
+        hash_dim: int = 32,
+        top_k: int = 5,
+        hidden_dims: Optional[list[int]] = None,
+        genus_emb_dim: int = 8,
+        family_emb_dim: int = 8,
+        dropout: float = 0.3,
+        # Training
+        batch_size: int = 512,
         max_epochs: int = 500,
         patience: int = 50,
         lr: float = 1e-3,
         weight_decay: float = 1e-4,
+        # Advanced
         phases: Optional[dict[int, PhaseConfig]] = None,
         phase_boundaries: Optional[list[int]] = None,
         device: str = "auto",
         use_amp: bool = True,
         species_aggregation: str = "abundance",
     ):
-        self.model = model
         self.dataset = dataset
+
+        self.hash_dim = hash_dim
+        self.top_k = top_k
+        self.hidden_dims = hidden_dims if hidden_dims is not None else [256, 128, 64]
         self.batch_size = batch_size
+        self.genus_emb_dim = genus_emb_dim
+        self.family_emb_dim = family_emb_dim
+        self.dropout = dropout
+
         self.max_epochs = max_epochs
         self.patience = patience
         self.lr = lr
@@ -66,6 +87,7 @@ class Trainer:
         self.phases = phases
         self.phase_boundaries = phase_boundaries
         self.species_aggregation = species_aggregation
+
         # Read species encoding config from dataset
         self.species_normalization = dataset.species_normalization
         self.track_unknown_fraction = dataset.track_unknown_fraction
@@ -79,6 +101,18 @@ class Trainer:
 
         # AMP (only on CUDA)
         self.use_amp = use_amp and self._device.type == "cuda"
+
+        # Build model from dataset schema
+        self.model = ResolveModel(
+            schema=dataset.schema,
+            targets=dataset.targets,
+            hash_dim=hash_dim,
+            genus_emb_dim=genus_emb_dim,
+            family_emb_dim=family_emb_dim,
+            top_k=top_k,
+            hidden_dims=hidden_dims,
+            dropout=dropout,
+        )
 
         # Components to be initialized in fit()
         self._species_encoder: Optional[SpeciesEncoder] = None
@@ -101,8 +135,8 @@ class Trainer:
 
         # Fit species encoder on training data
         self._species_encoder = SpeciesEncoder(
-            hash_dim=self.model.hash_dim,
-            top_k=self.model.top_k,
+            hash_dim=self.hash_dim,
+            top_k=self.top_k,
             aggregation=self.species_aggregation,
             normalization=self.species_normalization,
             track_unknown_count=self.track_unknown_count,
@@ -475,12 +509,102 @@ class Trainer:
             "scalers": self._scalers,
             "vocab": self._species_encoder.vocab if self._species_encoder else None,
             "species_aggregation": self._species_encoder.aggregation if self._species_encoder else "abundance",
-            "species_normalization": self._species_encoder.normalization if self._species_encoder else "relative",
+            "species_normalization": self._species_encoder.normalization if self._species_encoder else "norm",
             "track_unknown_fraction": self.track_unknown_fraction,
             "track_unknown_count": self._species_encoder.track_unknown_count if self._species_encoder else False,
             "species_vocab": self._species_encoder._species_vocab if self._species_encoder else set(),
         }
         torch.save(state, path)
+
+    @torch.no_grad()
+    def predict(
+        self,
+        dataset: ResolveDataset,
+        output_space: str = "raw",
+        confidence_threshold: float = 0.0,
+    ) -> dict[str, np.ndarray]:
+        """
+        Predict on a dataset.
+
+        Args:
+            dataset: ResolveDataset to predict on
+            output_space: "raw" (original scale) or "transformed" (model scale)
+            confidence_threshold: Minimum confidence for predictions (0-1).
+                Predictions below threshold are set to NaN.
+                Default 0 means all predictions are kept (gap-fill everything).
+
+                Confidence semantics:
+                - Regression: confidence = 1 - unknown_fraction, where unknown_fraction
+                  is the proportion of species abundance not seen during training.
+                  This reflects coverage of the species space, not statistical uncertainty.
+                - Classification: confidence = max softmax probability across classes.
+
+                These values are heuristic and intended for filtering/diagnostics,
+                not formal uncertainty quantification.
+
+        Returns:
+            Dict mapping target name to predictions array
+        """
+        if self._species_encoder is None:
+            raise RuntimeError("Trainer must be fit before predict")
+
+        self.model.eval()
+
+        # Encode and scale
+        encoded = self._species_encoder.transform(dataset)
+        coords = dataset.get_coordinates()
+        covariates = dataset.get_covariates()
+
+        parts = []
+        if coords is not None:
+            parts.append(coords)
+        if covariates is not None:
+            parts.append(covariates)
+        parts.append(encoded.hash_embedding)
+        if self.track_unknown_fraction:
+            parts.append(encoded.unknown_fraction.reshape(-1, 1))
+        if self.track_unknown_count and encoded.unknown_count is not None:
+            parts.append(encoded.unknown_count.reshape(-1, 1).astype(np.float32))
+        continuous = np.hstack(parts)
+        continuous = self._scalers["continuous"].transform(continuous).astype(np.float32)
+
+        # To tensors
+        continuous_t = torch.from_numpy(continuous).to(self._device)
+        genus_t = None
+        family_t = None
+        if encoded.genus_ids is not None:
+            genus_t = torch.from_numpy(encoded.genus_ids).to(self._device)
+            family_t = torch.from_numpy(encoded.family_ids).to(self._device)
+
+        # Forward
+        preds_raw = self.model(continuous_t, genus_t, family_t)
+
+        # Compute confidence per sample (1 - unknown_fraction for regression)
+        confidence = 1.0 - encoded.unknown_fraction
+
+        # Post-process
+        predictions = {}
+        for name, pred in preds_raw.items():
+            cfg = self.model.target_configs[name]
+            if cfg.task == "regression":
+                pred_np = pred.cpu().numpy()
+                scaler = self._scalers[f"target_{name}"]
+                pred_np = scaler.inverse_transform(pred_np).flatten()
+                if cfg.transform == "log1p" and output_space == "raw":
+                    pred_np = np.expm1(pred_np)
+                # Apply confidence threshold
+                pred_np = np.where(confidence >= confidence_threshold, pred_np, np.nan)
+                predictions[name] = pred_np
+            else:
+                # Classification: use max softmax probability as confidence
+                probs = torch.softmax(pred, dim=-1)
+                class_confidence = probs.max(dim=-1).values.cpu().numpy()
+                pred_np = pred.argmax(dim=-1).cpu().numpy().astype(np.float64)
+                # Apply confidence threshold
+                pred_np = np.where(class_confidence >= confidence_threshold, pred_np, np.nan)
+                predictions[name] = pred_np
+
+        return predictions
 
     @classmethod
     def load(cls, path: str | Path, device: str = "auto") -> tuple[ResolveModel, SpeciesEncoder, dict]:
@@ -517,7 +641,7 @@ class Trainer:
             hash_dim=state["hash_dim"],
             top_k=state["top_k"],
             aggregation=state.get("species_aggregation", "abundance"),
-            normalization=state.get("species_normalization", "relative"),
+            normalization=state.get("species_normalization", "norm"),
             track_unknown_count=track_unknown_count,
         )
         if state["vocab"] is not None:

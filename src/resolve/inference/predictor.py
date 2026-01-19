@@ -23,6 +23,7 @@ class ResolvePredictions:
     predictions: dict[str, np.ndarray]
     plot_ids: np.ndarray
     latent: Optional[np.ndarray] = None
+    confidence: Optional[dict[str, np.ndarray]] = None
 
     def __getitem__(self, target: str) -> np.ndarray:
         """Get predictions for a target."""
@@ -78,6 +79,7 @@ class Predictor:
         dataset: ResolveDataset,
         return_latent: bool = False,
         output_space: str = "raw",
+        confidence_threshold: float = 0.0,
     ) -> ResolvePredictions:
         """
         Predict on a dataset.
@@ -88,6 +90,18 @@ class Predictor:
             output_space: Output space for regression predictions.
                 "raw" (default): inverse-transform predictions to original scale
                 "transformed": keep predictions in transformed space (e.g., log1p)
+            confidence_threshold: Minimum confidence for predictions (0-1).
+                Predictions below threshold are set to NaN.
+                Default 0 means all predictions are kept (gap-fill everything).
+
+                Confidence semantics:
+                - Regression: confidence = 1 - unknown_fraction, where unknown_fraction
+                  is the proportion of species abundance not seen during training.
+                  This reflects coverage of the species space, not statistical uncertainty.
+                - Classification: confidence = max softmax probability across classes.
+
+                These values are heuristic and intended for filtering/diagnostics,
+                not formal uncertainty quantification.
 
         Returns:
             ResolvePredictions with results for all targets
@@ -138,8 +152,12 @@ class Predictor:
             latent = self.model.get_latent(continuous_t, genus_t, family_t)
             latent = latent.cpu().numpy()
 
+        # Compute confidence (1 - unknown_fraction for regression)
+        regression_confidence = 1.0 - encoded.unknown_fraction
+
         # Post-process predictions
         predictions = {}
+        confidence = {}
         for name, pred in predictions_raw.items():
             cfg = self.model.target_configs[name]
 
@@ -153,15 +171,25 @@ class Predictor:
                 if cfg.transform == "log1p" and output_space == "raw":
                     pred_np = np.expm1(pred_np)
 
+                # Apply confidence threshold
+                pred_np = np.where(regression_confidence >= confidence_threshold, pred_np, np.nan)
                 predictions[name] = pred_np
+                confidence[name] = regression_confidence
             else:
-                # Classification: return class indices
-                predictions[name] = pred.argmax(dim=-1).cpu().numpy()
+                # Classification: use max softmax probability as confidence
+                probs = torch.softmax(pred, dim=-1)
+                class_confidence = probs.max(dim=-1).values.cpu().numpy()
+                pred_np = pred.argmax(dim=-1).cpu().numpy().astype(np.float64)
+                # Apply confidence threshold
+                pred_np = np.where(class_confidence >= confidence_threshold, pred_np, np.nan)
+                predictions[name] = pred_np
+                confidence[name] = class_confidence
 
         return ResolvePredictions(
             predictions=predictions,
             plot_ids=dataset.plot_ids,
             latent=latent,
+            confidence=confidence,
         )
 
     def get_embeddings(self, dataset: ResolveDataset) -> np.ndarray:

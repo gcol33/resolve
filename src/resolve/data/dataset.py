@@ -14,7 +14,7 @@ from resolve.data.roles import RoleMapping, TargetConfig
 
 
 # Valid normalization modes for species abundance
-VALID_NORMALIZATIONS = ("raw", "relative", "log")
+VALID_NORMALIZATIONS = ("raw", "norm", "log1p")
 
 
 @dataclass
@@ -32,7 +32,7 @@ class ResolveSchema:
     targets: dict[str, TargetConfig]
     covariate_names: list[str]
     # Species encoding configuration
-    species_normalization: str = "relative"
+    species_normalization: str = "norm"
     track_unknown_fraction: bool = True
     track_unknown_count: bool = False
 
@@ -52,7 +52,7 @@ class ResolveDataset:
         species: pd.DataFrame,
         roles: RoleMapping,
         targets: dict[str, TargetConfig],
-        species_normalization: str = "relative",
+        species_normalization: str = "norm",
         track_unknown_fraction: bool = True,
         track_unknown_count: bool = False,
     ):
@@ -125,7 +125,7 @@ class ResolveDataset:
         species: str | Path,
         roles: dict[str, str | list[str]],
         targets: dict[str, dict],
-        species_normalization: str = "relative",
+        species_normalization: str = "norm",
         track_unknown_fraction: bool = True,
         track_unknown_count: bool = False,
     ) -> ResolveDataset:
@@ -139,8 +139,8 @@ class ResolveDataset:
             targets: Target configurations {name: {column, task, transform?, num_classes?}}
             species_normalization: Abundance normalization mode
                 - "raw": use abundance values directly
-                - "relative": normalize to sum to 1 per sample (default)
-                - "log": apply log1p transform
+                - "norm": normalize to sum to 1 per sample (default)
+                - "log1p": apply log(1 + x) transform
             track_unknown_fraction: Track fraction of abundance from unknown species (default True)
             track_unknown_count: Track count of unknown species (default False)
         """
