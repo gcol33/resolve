@@ -1,7 +1,7 @@
-"""Train Spacc model on ASAAS test subset."""
+"""Train RESOLVE model on ASAAS test subset."""
 import pandas as pd
 import torch
-from resolve import SpaccDataset, Trainer
+from resolve import ResolveDataset, ResolveModel, Trainer
 from resolve.data.roles import RoleMapping, TargetConfig
 
 # Load data
@@ -64,7 +64,7 @@ targets = {
 }
 
 # Create dataset
-dataset = SpaccDataset(
+dataset = ResolveDataset(
     header=header,
     species=species,
     roles=roles,
@@ -79,8 +79,7 @@ print(f"  n_families: {dataset.schema.n_families}")
 print(f"  targets: {list(dataset.schema.targets.keys())}")
 
 # Create model
-from resolve import SpaccModel
-model = SpaccModel(
+model = ResolveModel(
     schema=dataset.schema,
     targets=targets,
     hidden_dims=[256, 128, 64]

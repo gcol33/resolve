@@ -38,12 +38,12 @@ targets = {
 
 def main():
     print("=" * 60)
-    print("Testing Spacc with ASAAS data")
+    print("Testing RESOLVE with ASAAS data")
     print("=" * 60)
 
     # Load dataset
     print("\n1. Loading ASAAS subset...")
-    dataset = resolve.SpaccDataset.from_csv(
+    dataset = resolve.ResolveDataset.from_csv(
         header=DATA_DIR / "asaas_header_sample.csv",
         species=DATA_DIR / "asaas_species_sample.csv",
         roles=roles,
@@ -59,7 +59,7 @@ def main():
 
     # Build model
     print("\n2. Building model...")
-    model = resolve.SpaccModel(
+    model = resolve.ResolveModel(
         schema=schema,
         targets=dataset.targets,
         hash_dim=32,
