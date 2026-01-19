@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Test spacc with real ASAAS data subset."""
+"""Test resolve with real ASAAS data subset."""
 
-import spacc
+import resolve
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent.parent / "data" / "test"
 
-# Define roles mapping ASAAS columns to spacc roles
+# Define roles mapping ASAAS columns to resolve roles
 roles = {
     "plot_id": "PlotObservationID",
     "species_id": "WFO_TAXON",
@@ -43,7 +43,7 @@ def main():
 
     # Load dataset
     print("\n1. Loading ASAAS subset...")
-    dataset = spacc.SpaccDataset.from_csv(
+    dataset = resolve.SpaccDataset.from_csv(
         header=DATA_DIR / "asaas_header_sample.csv",
         species=DATA_DIR / "asaas_species_sample.csv",
         roles=roles,
@@ -59,7 +59,7 @@ def main():
 
     # Build model
     print("\n2. Building model...")
-    model = spacc.SpaccModel(
+    model = resolve.SpaccModel(
         schema=schema,
         targets=dataset.targets,
         hash_dim=32,
@@ -69,7 +69,7 @@ def main():
 
     # Train
     print("\n3. Training (CPU, 30 epochs max)...")
-    trainer = spacc.Trainer(
+    trainer = resolve.Trainer(
         model=model,
         dataset=dataset,
         batch_size=128,
@@ -97,7 +97,7 @@ def main():
 
     # Predict
     print("\n5. Testing prediction...")
-    predictor = spacc.Predictor.load(model_path, device="cpu")
+    predictor = resolve.Predictor.load(model_path, device="cpu")
     predictions = predictor.predict(dataset, return_latent=True)
 
     print(f"   Predictions: {len(predictions.plot_ids)} plots")

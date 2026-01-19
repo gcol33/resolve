@@ -1,4 +1,4 @@
-"""Test fixtures for spacc."""
+"""Test fixtures for RESOLVE."""
 
 import numpy as np
 import pandas as pd

@@ -3,16 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "spacc"
+name = "resolve"
 version = "0.1.0"
-description = "Species Presence and Abundance for Coordinate-linked Characteristics"
+description = "Representation Encoding of Species Outcomes via Linear Vector Embeddings"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
     { name = "Gilles Colling" }
 ]
-keywords = ["ecology", "species", "machine-learning", "torch", "vegetation"]
+keywords = ["ecology", "species", "machine-learning", "torch", "composition"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -34,10 +34,17 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-cov",
+    "ruff",
+    "mypy",
+]
+docs = [
+    "mkdocs",
+    "mkdocs-material",
+    "pymdown-extensions",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/spacc"]
+packages = ["src/resolve"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

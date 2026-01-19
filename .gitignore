@@ -83,3 +83,9 @@ venv.bak/
 # OS
 .DS_Store
 Thumbs.db
+
+# MkDocs
+site/
+
+# MyPy
+.mypy_cache/

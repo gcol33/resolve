@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Minimal example of Spacc usage.
+Minimal example of RESOLVE usage.
 
 This example generates synthetic data and demonstrates the full workflow:
 1. Create datasets
@@ -14,7 +14,7 @@ import pandas as pd
 import tempfile
 from pathlib import Path
 
-import spacc
+import resolve
 
 
 def generate_synthetic_data(n_plots: int = 500, seed: int = 42):
@@ -101,7 +101,7 @@ def generate_synthetic_data(n_plots: int = 500, seed: int = 42):
 
 def main():
     print("=" * 60)
-    print("Spacc Minimal Example")
+    print("RESOLVE Minimal Example")
     print("=" * 60)
 
     # Generate data
@@ -145,7 +145,7 @@ def main():
 
         # Load dataset
         print("\n2. Loading dataset...")
-        dataset = spacc.SpaccDataset.from_csv(
+        dataset = resolve.RESOLVEDataset.from_csv(
             header=header_path,
             species=species_path,
             roles=roles,
@@ -156,7 +156,7 @@ def main():
 
         # Build model
         print("\n3. Building model...")
-        model = spacc.SpaccModel(
+        model = resolve.RESOLVEModel(
             schema=dataset.schema,
             targets=dataset.targets,
             hash_dim=32,
@@ -167,7 +167,7 @@ def main():
 
         # Train
         print("\n4. Training...")
-        trainer = spacc.Trainer(
+        trainer = resolve.Trainer(
             model=model,
             dataset=dataset,
             batch_size=64,
@@ -195,7 +195,7 @@ def main():
 
         # Load and predict
         print("\n6. Loading model and predicting...")
-        predictor = spacc.Predictor.load(model_path, device="cpu")
+        predictor = resolve.Predictor.load(model_path, device="cpu")
         predictions = predictor.predict(dataset, return_latent=True)
 
         print(f"   Predictions shape: {len(predictions.plot_ids)} plots")
