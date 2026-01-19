@@ -475,7 +475,7 @@ class Trainer:
             "scalers": self._scalers,
             "vocab": self._species_encoder.vocab if self._species_encoder else None,
             "species_aggregation": self._species_encoder.aggregation if self._species_encoder else "abundance",
-            "species_normalization": self._species_encoder.normalization if self._species_encoder else "relative_plot",
+            "species_normalization": self._species_encoder.normalization if self._species_encoder else "relative",
             "track_unknown_fraction": self.track_unknown_fraction,
             "track_unknown_count": self._species_encoder.track_unknown_count if self._species_encoder else False,
             "species_vocab": self._species_encoder._species_vocab if self._species_encoder else set(),
@@ -517,7 +517,7 @@ class Trainer:
             hash_dim=state["hash_dim"],
             top_k=state["top_k"],
             aggregation=state.get("species_aggregation", "abundance"),
-            normalization=state.get("species_normalization", "relative_plot"),
+            normalization=state.get("species_normalization", "relative"),
             track_unknown_count=track_unknown_count,
         )
         if state["vocab"] is not None:

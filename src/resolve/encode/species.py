@@ -45,20 +45,20 @@ class SpeciesEncoder:
         aggregation: How to select top-k taxonomy ("abundance" or "count")
         normalization: How to weight species contributions:
             - "raw": Use abundance values directly
-            - "relative_plot": Normalize to sum to 1 per plot (default)
-            - "log_scaled": Apply log(1 + abundance) transformation
+            - "relative": Normalize to sum to 1 per sample (default)
+            - "log": Apply log(1 + abundance) transformation
 
     If taxonomy is absent, only produces hash embedding.
     """
 
-    VALID_NORMALIZATIONS = ("raw", "relative_plot", "log_scaled")
+    VALID_NORMALIZATIONS = ("raw", "relative", "log")
 
     def __init__(
         self,
         hash_dim: int = 32,
         top_k: int = 3,
         aggregation: str = "abundance",
-        normalization: str = "relative_plot",
+        normalization: str = "relative",
         track_unknown_count: bool = False,
     ):
         if aggregation not in ("abundance", "count"):
@@ -247,9 +247,9 @@ class SpeciesEncoder:
         """
         if self.normalization == "raw":
             return abundances.astype(np.float32)
-        elif self.normalization == "log_scaled":
+        elif self.normalization == "log":
             return np.log1p(abundances).astype(np.float32)
-        elif self.normalization == "relative_plot":
+        elif self.normalization == "relative":
             if plot_totals is None:
                 # Single-value case, return as-is (will be normalized at plot level)
                 return abundances.astype(np.float32)
@@ -283,7 +283,7 @@ class SpeciesEncoder:
 
         # Compute plot totals for relative normalization
         plot_totals = None
-        if self.normalization == "relative_plot":
+        if self.normalization == "relative":
             plot_totals = species_df.groupby(roles.species_plot_id)[abundance_col].sum()
 
         # Build weighted token dicts per plot
@@ -337,9 +337,9 @@ class SpeciesEncoder:
             abundance_col = "_count"
 
         # Apply normalization to weights (consistent with hash embedding)
-        if self.normalization == "log_scaled":
+        if self.normalization == "log":
             species_df["_weight"] = np.log1p(species_df[abundance_col].values)
-        elif self.normalization == "relative_plot":
+        elif self.normalization == "relative":
             plot_totals = species_df.groupby(roles.species_plot_id)[abundance_col].transform("sum")
             plot_totals = np.where(plot_totals > 0, plot_totals, 1.0)
             species_df["_weight"] = species_df[abundance_col] / plot_totals
