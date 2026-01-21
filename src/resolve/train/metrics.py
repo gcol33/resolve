@@ -72,8 +72,9 @@ def compute_metrics(
     if task == "regression":
         # Apply inverse transform for interpretable metrics
         if transform == "log1p":
-            pred_orig = np.expm1(pred)
-            target_orig = np.expm1(target)
+            # Clamp to prevent overflow in expm1 (safe range for float64: ~±709)
+            pred_orig = np.expm1(np.clip(pred, -700, 700))
+            target_orig = np.expm1(np.clip(target, -700, 700))
         else:
             pred_orig = pred
             target_orig = target
