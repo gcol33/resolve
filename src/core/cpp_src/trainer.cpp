@@ -394,7 +394,7 @@ void Trainer::save(const std::string& path) const {
     archive.save_to(path);
 }
 
-std::tuple<ResolveModel, SpeciesEncoder, Scalers> Trainer::load(
+std::tuple<ResolveModel, Scalers> Trainer::load(
     const std::string& path,
     torch::Device device
 ) {
@@ -462,9 +462,6 @@ std::tuple<ResolveModel, SpeciesEncoder, Scalers> Trainer::load(
         // Target scalers may not be present
     }
 
-    // Create encoder (would need to load vocab for full implementation)
-    SpeciesEncoder encoder(config.hash_dim, config.top_k);
-
     // Create placeholder model (would need full schema)
     ResolveSchema schema;
     ResolveModel model(schema, config);
@@ -473,7 +470,7 @@ std::tuple<ResolveModel, SpeciesEncoder, Scalers> Trainer::load(
     model->load(archive);
     model->to(device);
 
-    return {model, encoder, scalers};
+    return {model, scalers};
 }
 
 } // namespace resolve

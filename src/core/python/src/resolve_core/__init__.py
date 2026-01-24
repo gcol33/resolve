@@ -1,5 +1,5 @@
 """
-Spacc Core - C++ backend for species-composition based prediction.
+Resolve Core - C++ backend for species-composition based prediction.
 
 This module provides Python bindings to the C++ core library.
 """
@@ -9,20 +9,25 @@ try:
         # Enums
         TaskType,
         TransformType,
+        SpeciesEncodingMode,
+        SelectionMode,
+        RepresentationMode,
+        NormalizationMode,
+        AggregationMode,
         # Config structs
         TargetConfig,
-        SpaccSchema,
+        ResolveSchema,
         ModelConfig,
         TrainConfig,
         TrainResult,
-        SpaccPredictions,
+        ResolvePredictions,
         Scalers,
         # Species encoding
         TaxonomyVocab,
+        SpeciesRecord,
         EncodedSpecies,
-        SpeciesEncoder,
         # Model
-        SpaccModel,
+        ResolveModel,
         # Training
         Trainer,
         # Inference
@@ -41,17 +46,22 @@ __version__ = "0.1.0"
 __all__ = [
     "TaskType",
     "TransformType",
+    "SpeciesEncodingMode",
+    "SelectionMode",
+    "RepresentationMode",
+    "NormalizationMode",
+    "AggregationMode",
     "TargetConfig",
-    "SpaccSchema",
+    "ResolveSchema",
     "ModelConfig",
     "TrainConfig",
     "TrainResult",
-    "SpaccPredictions",
+    "ResolvePredictions",
     "Scalers",
     "TaxonomyVocab",
+    "SpeciesRecord",
     "EncodedSpecies",
-    "SpeciesEncoder",
-    "SpaccModel",
+    "ResolveModel",
     "Trainer",
     "Predictor",
     "Metrics",

@@ -11,7 +11,6 @@ FetchContent_MakeAvailable(Catch2)
 
 # Test executable
 add_executable(resolve_tests
-    test_species_encoder.cpp
     test_model.cpp
 )
 
@@ -22,7 +21,7 @@ target_link_libraries(resolve_tests
         Catch2::Catch2WithMain
 )
 
-list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+# Register test without discovery (avoids needing to run the binary at build time)
+# Tests can be run manually with the test executable
 include(CTest)
-include(Catch)
-catch_discover_tests(resolve_tests)
+add_test(NAME resolve_tests COMMAND resolve_tests)

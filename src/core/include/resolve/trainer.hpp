@@ -2,7 +2,6 @@
 
 #include "resolve/types.hpp"
 #include "resolve/model.hpp"
-#include "resolve/species_encoder.hpp"
 #include "resolve/loss.hpp"
 #include <torch/torch.h>
 #include <chrono>
@@ -58,7 +57,7 @@ public:
     void save(const std::string& path) const;
 
     // Load model and state
-    static std::tuple<ResolveModel, SpeciesEncoder, Scalers> load(
+    static std::tuple<ResolveModel, Scalers> load(
         const std::string& path,
         torch::Device device = torch::kCPU
     );

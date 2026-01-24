@@ -1,18 +1,31 @@
+// RESOLVE R bindings using Rcpp
+// Links to libtorch for neural network operations
+
 #include <Rcpp.h>
 #include <torch/torch.h>
-#include "resolve/resolve.hpp"
+
+// Include resolve headers
+#include "resolve/types.hpp"
+#include "resolve/model.hpp"
+#include "resolve/trainer.hpp"
+#include "resolve/predictor.hpp"
+#include "resolve/loss.hpp"
 
 using namespace Rcpp;
 
-// Helper: Convert R numeric vector to torch tensor
-torch::Tensor r_to_tensor(NumericVector x) {
+// ============================================================================
+// Helper functions for R <-> Torch conversion
+// ============================================================================
+
+// Convert R numeric vector to torch tensor
+torch::Tensor r_to_tensor_1d(NumericVector x) {
     std::vector<float> data(x.begin(), x.end());
     return torch::from_blob(data.data(), {static_cast<int64_t>(data.size())},
                            torch::kFloat32).clone();
 }
 
-// Helper: Convert R numeric matrix to torch tensor
-torch::Tensor r_matrix_to_tensor(NumericMatrix x) {
+// Convert R numeric matrix to torch tensor
+torch::Tensor r_to_tensor_2d(NumericMatrix x) {
     int64_t rows = x.nrow();
     int64_t cols = x.ncol();
     std::vector<float> data(rows * cols);
@@ -26,8 +39,8 @@ torch::Tensor r_matrix_to_tensor(NumericMatrix x) {
     return torch::from_blob(data.data(), {rows, cols}, torch::kFloat32).clone();
 }
 
-// Helper: Convert R integer matrix to torch tensor
-torch::Tensor r_int_matrix_to_tensor(IntegerMatrix x) {
+// Convert R integer matrix to torch tensor (int64)
+torch::Tensor r_to_tensor_int64(IntegerMatrix x) {
     int64_t rows = x.nrow();
     int64_t cols = x.ncol();
     std::vector<int64_t> data(rows * cols);
@@ -41,10 +54,10 @@ torch::Tensor r_int_matrix_to_tensor(IntegerMatrix x) {
     return torch::from_blob(data.data(), {rows, cols}, torch::kInt64).clone();
 }
 
-// Helper: Convert torch tensor to R numeric vector
-NumericVector tensor_to_r(const torch::Tensor& t) {
-    auto t_cpu = t.to(torch::kCPU).contiguous();
-    auto t_flat = t_cpu.view({-1}).to(torch::kFloat32);
+// Convert torch tensor to R numeric vector
+NumericVector tensor_to_r_1d(const torch::Tensor& t) {
+    auto t_cpu = t.to(torch::kCPU).contiguous().to(torch::kFloat32);
+    auto t_flat = t_cpu.view({-1});
     auto accessor = t_flat.accessor<float, 1>();
 
     NumericVector result(t_flat.size(0));
@@ -54,8 +67,8 @@ NumericVector tensor_to_r(const torch::Tensor& t) {
     return result;
 }
 
-// Helper: Convert torch tensor to R numeric matrix
-NumericMatrix tensor_to_r_matrix(const torch::Tensor& t) {
+// Convert torch tensor to R numeric matrix
+NumericMatrix tensor_to_r_2d(const torch::Tensor& t) {
     auto t_cpu = t.to(torch::kCPU).contiguous().to(torch::kFloat32);
 
     int64_t rows = t_cpu.size(0);
@@ -73,170 +86,126 @@ NumericMatrix tensor_to_r_matrix(const torch::Tensor& t) {
 }
 
 // ============================================================================
-// TaxonomyVocab
+// Metrics (simple exported functions)
 // ============================================================================
 
+//' Compute band accuracy
+//' @param pred Numeric vector of predictions
+//' @param target Numeric vector of targets
+//' @param threshold Band threshold (default 0.25)
+//' @return Band accuracy as double
+//' @export
 // [[Rcpp::export]]
-SEXP cpp_taxonomy_vocab_new() {
-    auto* vocab = new resolve::TaxonomyVocab();
-    return XPtr<resolve::TaxonomyVocab>(vocab);
+double resolve_band_accuracy(NumericVector pred, NumericVector target,
+                             double threshold = 0.25) {
+    return resolve::Metrics::band_accuracy(r_to_tensor_1d(pred),
+                                           r_to_tensor_1d(target),
+                                           threshold);
 }
 
+//' Compute mean absolute error
+//' @param pred Numeric vector of predictions
+//' @param target Numeric vector of targets
+//' @return MAE as double
+//' @export
 // [[Rcpp::export]]
-void cpp_taxonomy_vocab_fit(SEXP vocab_ptr, CharacterVector genera, CharacterVector families) {
-    XPtr<resolve::TaxonomyVocab> vocab(vocab_ptr);
-
-    std::vector<std::string> genera_vec(genera.size());
-    std::vector<std::string> families_vec(families.size());
-
-    for (int i = 0; i < genera.size(); ++i) {
-        genera_vec[i] = as<std::string>(genera[i]);
-    }
-    for (int i = 0; i < families.size(); ++i) {
-        families_vec[i] = as<std::string>(families[i]);
-    }
-
-    vocab->fit(genera_vec, families_vec);
+double resolve_mae(NumericVector pred, NumericVector target) {
+    return resolve::Metrics::mae(r_to_tensor_1d(pred), r_to_tensor_1d(target));
 }
 
+//' Compute root mean squared error
+//' @param pred Numeric vector of predictions
+//' @param target Numeric vector of targets
+//' @return RMSE as double
+//' @export
 // [[Rcpp::export]]
-int cpp_taxonomy_vocab_encode_genus(SEXP vocab_ptr, std::string genus) {
-    XPtr<resolve::TaxonomyVocab> vocab(vocab_ptr);
-    return vocab->encode_genus(genus);
+double resolve_rmse(NumericVector pred, NumericVector target) {
+    return resolve::Metrics::rmse(r_to_tensor_1d(pred), r_to_tensor_1d(target));
 }
 
+//' Compute symmetric mean absolute percentage error
+//' @param pred Numeric vector of predictions
+//' @param target Numeric vector of targets
+//' @param eps Small value to avoid division by zero
+//' @return SMAPE as double
+//' @export
 // [[Rcpp::export]]
-int cpp_taxonomy_vocab_encode_family(SEXP vocab_ptr, std::string family) {
-    XPtr<resolve::TaxonomyVocab> vocab(vocab_ptr);
-    return vocab->encode_family(family);
-}
-
-// [[Rcpp::export]]
-int cpp_taxonomy_vocab_n_genera(SEXP vocab_ptr) {
-    XPtr<resolve::TaxonomyVocab> vocab(vocab_ptr);
-    return vocab->n_genera();
-}
-
-// [[Rcpp::export]]
-int cpp_taxonomy_vocab_n_families(SEXP vocab_ptr) {
-    XPtr<resolve::TaxonomyVocab> vocab(vocab_ptr);
-    return vocab->n_families();
-}
-
-// ============================================================================
-// SpeciesEncoder
-// ============================================================================
-
-// [[Rcpp::export]]
-SEXP cpp_species_encoder_new(int hash_dim = 32, int top_k = 3) {
-    auto* encoder = new resolve::SpeciesEncoder(hash_dim, top_k);
-    return XPtr<resolve::SpeciesEncoder>(encoder);
-}
-
-// [[Rcpp::export]]
-void cpp_species_encoder_fit(SEXP encoder_ptr, List species_data) {
-    XPtr<resolve::SpeciesEncoder> encoder(encoder_ptr);
-
-    // Convert R list to C++ format
-    // species_data is a list of data frames, each with columns: species, genus, family, abundance
-    std::vector<std::vector<std::tuple<std::string, std::string, std::string, float>>> data;
-
-    for (int plot = 0; plot < species_data.size(); ++plot) {
-        DataFrame plot_df = as<DataFrame>(species_data[plot]);
-        CharacterVector species = plot_df["species"];
-        CharacterVector genera = plot_df["genus"];
-        CharacterVector families = plot_df["family"];
-        NumericVector abundance = plot_df["abundance"];
-
-        std::vector<std::tuple<std::string, std::string, std::string, float>> plot_data;
-        for (int i = 0; i < species.size(); ++i) {
-            plot_data.emplace_back(
-                as<std::string>(species[i]),
-                as<std::string>(genera[i]),
-                as<std::string>(families[i]),
-                abundance[i]
-            );
-        }
-        data.push_back(plot_data);
-    }
-
-    encoder->fit(data);
-}
-
-// [[Rcpp::export]]
-List cpp_species_encoder_transform(SEXP encoder_ptr, List species_data) {
-    XPtr<resolve::SpeciesEncoder> encoder(encoder_ptr);
-
-    // Convert R list to C++ format
-    std::vector<std::vector<std::tuple<std::string, std::string, std::string, float>>> data;
-
-    for (int plot = 0; plot < species_data.size(); ++plot) {
-        DataFrame plot_df = as<DataFrame>(species_data[plot]);
-        CharacterVector species = plot_df["species"];
-        CharacterVector genera = plot_df["genus"];
-        CharacterVector families = plot_df["family"];
-        NumericVector abundance = plot_df["abundance"];
-
-        std::vector<std::tuple<std::string, std::string, std::string, float>> plot_data;
-        for (int i = 0; i < species.size(); ++i) {
-            plot_data.emplace_back(
-                as<std::string>(species[i]),
-                as<std::string>(genera[i]),
-                as<std::string>(families[i]),
-                abundance[i]
-            );
-        }
-        data.push_back(plot_data);
-    }
-
-    auto result = encoder->transform(data);
-
-    return List::create(
-        Named("hash_embedding") = tensor_to_r_matrix(result.hash_embedding),
-        Named("genus_ids") = tensor_to_r_matrix(result.genus_ids.to(torch::kFloat32)),
-        Named("family_ids") = tensor_to_r_matrix(result.family_ids.to(torch::kFloat32))
-    );
+double resolve_smape(NumericVector pred, NumericVector target,
+                     double eps = 1e-8) {
+    return resolve::Metrics::smape(r_to_tensor_1d(pred),
+                                   r_to_tensor_1d(target), eps);
 }
 
 // ============================================================================
-// SpaccModel
+// Model creation and inference (using XPtr for class instances)
 // ============================================================================
 
+//' Create a new ResolveModel
+//' @param schema_list List with schema parameters
+//' @param config_list List with model config parameters
+//' @return External pointer to model
+//' @export
 // [[Rcpp::export]]
-SEXP cpp_resolve_model_new(List schema_list, List config_list) {
+SEXP resolve_model_new(List schema_list, List config_list) {
     // Parse schema
-    resolve::SpaccSchema schema;
+    resolve::ResolveSchema schema;
     schema.n_plots = as<int64_t>(schema_list["n_plots"]);
     schema.n_species = as<int64_t>(schema_list["n_species"]);
-    schema.n_continuous = as<int64_t>(schema_list["n_continuous"]);
-    schema.has_abundance = as<bool>(schema_list["has_abundance"]);
-    schema.has_taxonomy = as<bool>(schema_list["has_taxonomy"]);
-    schema.n_genera = as<int64_t>(schema_list["n_genera"]);
-    schema.n_families = as<int64_t>(schema_list["n_families"]);
 
-    CharacterVector cov_names = schema_list["covariate_names"];
-    for (int i = 0; i < cov_names.size(); ++i) {
-        schema.covariate_names.push_back(as<std::string>(cov_names[i]));
+    if (schema_list.containsElementNamed("n_species_vocab")) {
+        schema.n_species_vocab = as<int64_t>(schema_list["n_species_vocab"]);
+    }
+    if (schema_list.containsElementNamed("has_coordinates")) {
+        schema.has_coordinates = as<bool>(schema_list["has_coordinates"]);
+    }
+    if (schema_list.containsElementNamed("has_abundance")) {
+        schema.has_abundance = as<bool>(schema_list["has_abundance"]);
+    }
+    if (schema_list.containsElementNamed("has_taxonomy")) {
+        schema.has_taxonomy = as<bool>(schema_list["has_taxonomy"]);
+    }
+    if (schema_list.containsElementNamed("n_genera")) {
+        schema.n_genera = as<int64_t>(schema_list["n_genera"]);
+    }
+    if (schema_list.containsElementNamed("n_families")) {
+        schema.n_families = as<int64_t>(schema_list["n_families"]);
+    }
+
+    if (schema_list.containsElementNamed("covariate_names")) {
+        CharacterVector cov_names = schema_list["covariate_names"];
+        for (int i = 0; i < cov_names.size(); ++i) {
+            schema.covariate_names.push_back(as<std::string>(cov_names[i]));
+        }
     }
 
     // Parse targets
-    List targets_list = schema_list["targets"];
-    for (int i = 0; i < targets_list.size(); ++i) {
-        List target = targets_list[i];
-        resolve::TargetConfig cfg;
-        cfg.name = as<std::string>(target["name"]);
-        cfg.task = as<std::string>(target["task"]) == "regression"
-            ? resolve::TaskType::Regression : resolve::TaskType::Classification;
-        cfg.transform = as<std::string>(target["transform"]) == "log1p"
-            ? resolve::TransformType::Log1p : resolve::TransformType::None;
-        cfg.num_classes = target.containsElementNamed("num_classes")
-            ? as<int>(target["num_classes"]) : 0;
-        cfg.weight = target.containsElementNamed("weight")
-            ? as<float>(target["weight"]) : 1.0f;
-        schema.targets.push_back(cfg);
+    if (schema_list.containsElementNamed("targets")) {
+        List targets_list = schema_list["targets"];
+        for (int i = 0; i < targets_list.size(); ++i) {
+            List target = targets_list[i];
+            resolve::TargetConfig cfg;
+            cfg.name = as<std::string>(target["name"]);
+            std::string task_str = as<std::string>(target["task"]);
+            cfg.task = (task_str == "regression")
+                ? resolve::TaskType::Regression
+                : resolve::TaskType::Classification;
+            if (target.containsElementNamed("transform")) {
+                std::string transform_str = as<std::string>(target["transform"]);
+                cfg.transform = (transform_str == "log1p")
+                    ? resolve::TransformType::Log1p
+                    : resolve::TransformType::None;
+            }
+            if (target.containsElementNamed("num_classes")) {
+                cfg.num_classes = as<int>(target["num_classes"]);
+            }
+            if (target.containsElementNamed("weight")) {
+                cfg.weight = as<float>(target["weight"]);
+            }
+            schema.targets.push_back(cfg);
+        }
     }
 
-    // Parse config
+    // Parse model config
     resolve::ModelConfig config;
     if (config_list.containsElementNamed("hash_dim")) {
         config.hash_dim = as<int>(config_list["hash_dim"]);
@@ -261,75 +230,369 @@ SEXP cpp_resolve_model_new(List schema_list, List config_list) {
         config.dropout = as<float>(config_list["dropout"]);
     }
 
-    auto* model = new resolve::SpaccModel(schema, config);
-    return XPtr<resolve::SpaccModel>(model);
+    // Create model
+    auto* model = new resolve::ResolveModel(schema, config);
+    return XPtr<resolve::ResolveModel>(model);
 }
 
+//' Forward pass through model
+//' @param model_ptr External pointer to model
+//' @param continuous Numeric matrix of continuous features
+//' @param genus_ids Integer matrix of genus IDs (optional)
+//' @param family_ids Integer matrix of family IDs (optional)
+//' @return List of predictions
+//' @export
 // [[Rcpp::export]]
-List cpp_resolve_model_forward(SEXP model_ptr, NumericMatrix continuous,
-                             Nullable<IntegerMatrix> genus_ids = R_NilValue,
-                             Nullable<IntegerMatrix> family_ids = R_NilValue) {
-    XPtr<resolve::SpaccModel> model(model_ptr);
+List resolve_model_forward(SEXP model_ptr, NumericMatrix continuous,
+                           Nullable<IntegerMatrix> genus_ids = R_NilValue,
+                           Nullable<IntegerMatrix> family_ids = R_NilValue) {
+    XPtr<resolve::ResolveModel> model(model_ptr);
 
-    auto continuous_t = r_matrix_to_tensor(continuous);
+    auto continuous_t = r_to_tensor_2d(continuous);
     torch::Tensor genus_ids_t, family_ids_t;
 
     if (genus_ids.isNotNull()) {
-        genus_ids_t = r_int_matrix_to_tensor(as<IntegerMatrix>(genus_ids));
+        genus_ids_t = r_to_tensor_int64(as<IntegerMatrix>(genus_ids));
     }
     if (family_ids.isNotNull()) {
-        family_ids_t = r_int_matrix_to_tensor(as<IntegerMatrix>(family_ids));
+        family_ids_t = r_to_tensor_int64(as<IntegerMatrix>(family_ids));
     }
 
-    auto outputs = (*model)->forward(continuous_t, genus_ids_t, family_ids_t);
+    auto outputs = (*model)->forward(continuous_t, genus_ids_t, family_ids_t,
+                                     torch::Tensor(), torch::Tensor());
 
     List result;
     for (const auto& [name, tensor] : outputs) {
-        result[name] = tensor_to_r(tensor);
+        result[name] = tensor_to_r_1d(tensor);
     }
     return result;
 }
 
+//' Get latent embeddings from model
+//' @param model_ptr External pointer to model
+//' @param continuous Numeric matrix of continuous features
+//' @param genus_ids Integer matrix of genus IDs (optional)
+//' @param family_ids Integer matrix of family IDs (optional)
+//' @return Numeric matrix of latent embeddings
+//' @export
 // [[Rcpp::export]]
-NumericMatrix cpp_resolve_model_get_latent(SEXP model_ptr, NumericMatrix continuous,
-                                         Nullable<IntegerMatrix> genus_ids = R_NilValue,
-                                         Nullable<IntegerMatrix> family_ids = R_NilValue) {
-    XPtr<resolve::SpaccModel> model(model_ptr);
+NumericMatrix resolve_model_get_latent(SEXP model_ptr, NumericMatrix continuous,
+                                       Nullable<IntegerMatrix> genus_ids = R_NilValue,
+                                       Nullable<IntegerMatrix> family_ids = R_NilValue) {
+    XPtr<resolve::ResolveModel> model(model_ptr);
 
-    auto continuous_t = r_matrix_to_tensor(continuous);
+    auto continuous_t = r_to_tensor_2d(continuous);
     torch::Tensor genus_ids_t, family_ids_t;
 
     if (genus_ids.isNotNull()) {
-        genus_ids_t = r_int_matrix_to_tensor(as<IntegerMatrix>(genus_ids));
+        genus_ids_t = r_to_tensor_int64(as<IntegerMatrix>(genus_ids));
     }
     if (family_ids.isNotNull()) {
-        family_ids_t = r_int_matrix_to_tensor(as<IntegerMatrix>(family_ids));
+        family_ids_t = r_to_tensor_int64(as<IntegerMatrix>(family_ids));
     }
 
-    auto latent = (*model)->get_latent(continuous_t, genus_ids_t, family_ids_t);
-    return tensor_to_r_matrix(latent);
+    auto latent = (*model)->get_latent(continuous_t, genus_ids_t, family_ids_t,
+                                       torch::Tensor(), torch::Tensor());
+    return tensor_to_r_2d(latent);
 }
 
 // ============================================================================
-// Metrics
+// Trainer
 // ============================================================================
 
+//' Create a new Trainer
+//' @param model_ptr External pointer to ResolveModel
+//' @param config_list List with training config parameters
+//' @return External pointer to Trainer
+//' @export
 // [[Rcpp::export]]
-double cpp_band_accuracy(NumericVector pred, NumericVector target, double threshold = 0.25) {
-    return resolve::Metrics::band_accuracy(r_to_tensor(pred), r_to_tensor(target), threshold);
+SEXP resolve_trainer_new(SEXP model_ptr, List config_list) {
+    XPtr<resolve::ResolveModel> model(model_ptr);
+
+    resolve::TrainConfig config;
+    if (config_list.containsElementNamed("batch_size")) {
+        config.batch_size = as<int>(config_list["batch_size"]);
+    }
+    if (config_list.containsElementNamed("max_epochs")) {
+        config.max_epochs = as<int>(config_list["max_epochs"]);
+    }
+    if (config_list.containsElementNamed("patience")) {
+        config.patience = as<int>(config_list["patience"]);
+    }
+    if (config_list.containsElementNamed("lr")) {
+        config.lr = as<float>(config_list["lr"]);
+    }
+    if (config_list.containsElementNamed("weight_decay")) {
+        config.weight_decay = as<float>(config_list["weight_decay"]);
+    }
+
+    auto* trainer = new resolve::Trainer(*model, config);
+    return XPtr<resolve::Trainer>(trainer);
 }
 
+//' Prepare training data
+//' @param trainer_ptr External pointer to Trainer
+//' @param continuous Numeric matrix of continuous features
+//' @param targets_list Named list of numeric vectors (targets)
+//' @param genus_ids Integer matrix of genus IDs (optional)
+//' @param family_ids Integer matrix of family IDs (optional)
+//' @param test_size Fraction for test set (default 0.2)
+//' @param seed Random seed
+//' @export
 // [[Rcpp::export]]
-double cpp_mae(NumericVector pred, NumericVector target) {
-    return resolve::Metrics::mae(r_to_tensor(pred), r_to_tensor(target));
+void resolve_trainer_prepare_data(
+    SEXP trainer_ptr,
+    NumericMatrix continuous,
+    List targets_list,
+    Nullable<IntegerMatrix> genus_ids = R_NilValue,
+    Nullable<IntegerMatrix> family_ids = R_NilValue,
+    double test_size = 0.2,
+    int seed = 42
+) {
+    XPtr<resolve::Trainer> trainer(trainer_ptr);
+
+    auto continuous_t = r_to_tensor_2d(continuous);
+
+    torch::Tensor genus_ids_t, family_ids_t;
+    if (genus_ids.isNotNull()) {
+        genus_ids_t = r_to_tensor_int64(as<IntegerMatrix>(genus_ids));
+    }
+    if (family_ids.isNotNull()) {
+        family_ids_t = r_to_tensor_int64(as<IntegerMatrix>(family_ids));
+    }
+
+    // Convert targets list to map
+    std::unordered_map<std::string, torch::Tensor> targets;
+    CharacterVector names = targets_list.names();
+    for (int i = 0; i < targets_list.size(); ++i) {
+        std::string name = as<std::string>(names[i]);
+        targets[name] = r_to_tensor_1d(as<NumericVector>(targets_list[i]));
+    }
+
+    trainer->prepare_data(
+        torch::Tensor(),        // coordinates (optional)
+        torch::Tensor(),        // covariates (optional)
+        continuous_t,           // hash_embedding
+        torch::Tensor(),        // species_ids
+        torch::Tensor(),        // species_vector
+        genus_ids_t,
+        family_ids_t,
+        torch::Tensor(),        // unknown_fraction
+        torch::Tensor(),        // unknown_count
+        targets,
+        static_cast<float>(test_size),
+        seed
+    );
 }
 
+//' Train the model
+//' @param trainer_ptr External pointer to Trainer
+//' @return List with training results
+//' @export
 // [[Rcpp::export]]
-double cpp_rmse(NumericVector pred, NumericVector target) {
-    return resolve::Metrics::rmse(r_to_tensor(pred), r_to_tensor(target));
+List resolve_trainer_fit(SEXP trainer_ptr) {
+    XPtr<resolve::Trainer> trainer(trainer_ptr);
+
+    auto result = trainer->fit();
+
+    // Convert metrics to R list
+    List final_metrics;
+    for (const auto& [target_name, target_metrics] : result.final_metrics) {
+        List metrics_list;
+        for (const auto& [metric_name, value] : target_metrics) {
+            metrics_list[metric_name] = value;
+        }
+        final_metrics[target_name] = metrics_list;
+    }
+
+    return List::create(
+        Named("best_epoch") = result.best_epoch,
+        Named("final_metrics") = final_metrics,
+        Named("train_loss_history") = wrap(result.train_loss_history),
+        Named("test_loss_history") = wrap(result.test_loss_history),
+        Named("train_time_seconds") = result.train_time_seconds
+    );
 }
 
+//' Save trainer checkpoint
+//' @param trainer_ptr External pointer to Trainer
+//' @param path File path to save
+//' @export
 // [[Rcpp::export]]
-double cpp_smape(NumericVector pred, NumericVector target, double eps = 1e-8) {
-    return resolve::Metrics::smape(r_to_tensor(pred), r_to_tensor(target), eps);
+void resolve_trainer_save(SEXP trainer_ptr, std::string path) {
+    XPtr<resolve::Trainer> trainer(trainer_ptr);
+    trainer->save(path);
+}
+
+//' Load trainer checkpoint
+//' @param path File path to load
+//' @return List with model_ptr and scalers
+//' @export
+// [[Rcpp::export]]
+List resolve_trainer_load(std::string path) {
+    auto [model, scalers] = resolve::Trainer::load(path);
+
+    auto* model_ptr = new resolve::ResolveModel(std::move(model));
+    auto* scalers_ptr = new resolve::Scalers(std::move(scalers));
+
+    return List::create(
+        Named("model") = XPtr<resolve::ResolveModel>(model_ptr),
+        Named("scalers") = XPtr<resolve::Scalers>(scalers_ptr)
+    );
+}
+
+// ============================================================================
+// Predictor
+// ============================================================================
+
+//' Create a new Predictor
+//' @param model_ptr External pointer to ResolveModel
+//' @param scalers_ptr External pointer to Scalers
+//' @return External pointer to Predictor
+//' @export
+// [[Rcpp::export]]
+SEXP resolve_predictor_new(SEXP model_ptr, SEXP scalers_ptr) {
+    XPtr<resolve::ResolveModel> model(model_ptr);
+    XPtr<resolve::Scalers> scalers(scalers_ptr);
+
+    auto* predictor = new resolve::Predictor(*model, *scalers);
+    return XPtr<resolve::Predictor>(predictor);
+}
+
+//' Load predictor from checkpoint
+//' @param path File path to load
+//' @return External pointer to Predictor
+//' @export
+// [[Rcpp::export]]
+SEXP resolve_predictor_load(std::string path) {
+    auto predictor = new resolve::Predictor(resolve::Predictor::load(path));
+    return XPtr<resolve::Predictor>(predictor);
+}
+
+//' Predict with Predictor
+//' @param predictor_ptr External pointer to Predictor
+//' @param continuous Numeric matrix of continuous features
+//' @param genus_ids Integer matrix of genus IDs (optional)
+//' @param family_ids Integer matrix of family IDs (optional)
+//' @param return_latent Whether to return latent embeddings
+//' @return List of predictions
+//' @export
+// [[Rcpp::export]]
+List resolve_predictor_predict(
+    SEXP predictor_ptr,
+    NumericMatrix continuous,
+    Nullable<IntegerMatrix> genus_ids = R_NilValue,
+    Nullable<IntegerMatrix> family_ids = R_NilValue,
+    bool return_latent = false
+) {
+    XPtr<resolve::Predictor> predictor(predictor_ptr);
+
+    auto continuous_t = r_to_tensor_2d(continuous);
+
+    torch::Tensor genus_ids_t, family_ids_t;
+    if (genus_ids.isNotNull()) {
+        genus_ids_t = r_to_tensor_int64(as<IntegerMatrix>(genus_ids));
+    }
+    if (family_ids.isNotNull()) {
+        family_ids_t = r_to_tensor_int64(as<IntegerMatrix>(family_ids));
+    }
+
+    auto result = predictor->predict(
+        torch::Tensor(),  // coordinates
+        torch::Tensor(),  // covariates
+        continuous_t,     // hash_embedding
+        genus_ids_t,
+        family_ids_t,
+        return_latent
+    );
+
+    // Convert predictions to R list
+    List predictions;
+    for (const auto& [name, tensor] : result.predictions) {
+        predictions[name] = tensor_to_r_1d(tensor);
+    }
+
+    List ret = List::create(Named("predictions") = predictions);
+    if (return_latent && result.latent.defined()) {
+        ret["latent"] = tensor_to_r_2d(result.latent);
+    }
+
+    return ret;
+}
+
+//' Get latent embeddings
+//' @param predictor_ptr External pointer to Predictor
+//' @param continuous Numeric matrix of continuous features
+//' @param genus_ids Integer matrix of genus IDs (optional)
+//' @param family_ids Integer matrix of family IDs (optional)
+//' @return Numeric matrix of latent embeddings
+//' @export
+// [[Rcpp::export]]
+NumericMatrix resolve_predictor_get_embeddings(
+    SEXP predictor_ptr,
+    NumericMatrix continuous,
+    Nullable<IntegerMatrix> genus_ids = R_NilValue,
+    Nullable<IntegerMatrix> family_ids = R_NilValue
+) {
+    XPtr<resolve::Predictor> predictor(predictor_ptr);
+
+    auto continuous_t = r_to_tensor_2d(continuous);
+
+    torch::Tensor genus_ids_t, family_ids_t;
+    if (genus_ids.isNotNull()) {
+        genus_ids_t = r_to_tensor_int64(as<IntegerMatrix>(genus_ids));
+    }
+    if (family_ids.isNotNull()) {
+        family_ids_t = r_to_tensor_int64(as<IntegerMatrix>(family_ids));
+    }
+
+    auto latent = predictor->get_embeddings(
+        torch::Tensor(),  // coordinates
+        torch::Tensor(),  // covariates
+        continuous_t,     // hash_embedding
+        genus_ids_t,
+        family_ids_t
+    );
+
+    return tensor_to_r_2d(latent);
+}
+
+//' Get learned genus embeddings
+//' @param predictor_ptr External pointer to Predictor
+//' @return Numeric matrix of genus embeddings
+//' @export
+// [[Rcpp::export]]
+NumericMatrix resolve_predictor_get_genus_embeddings(SEXP predictor_ptr) {
+    XPtr<resolve::Predictor> predictor(predictor_ptr);
+    return tensor_to_r_2d(predictor->get_genus_embeddings());
+}
+
+//' Get learned family embeddings
+//' @param predictor_ptr External pointer to Predictor
+//' @return Numeric matrix of family embeddings
+//' @export
+// [[Rcpp::export]]
+NumericMatrix resolve_predictor_get_family_embeddings(SEXP predictor_ptr) {
+    XPtr<resolve::Predictor> predictor(predictor_ptr);
+    return tensor_to_r_2d(predictor->get_family_embeddings());
+}
+
+// ============================================================================
+// Utilities
+// ============================================================================
+
+//' Check if CUDA is available
+//' @return TRUE if CUDA is available
+//' @export
+// [[Rcpp::export]]
+bool resolve_cuda_available() {
+    return torch::cuda::is_available();
+}
+
+//' Get CUDA device count
+//' @return Number of CUDA devices
+//' @export
+// [[Rcpp::export]]
+int resolve_cuda_device_count() {
+    return torch::cuda::device_count();
 }

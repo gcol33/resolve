@@ -186,35 +186,6 @@ PYBIND11_MODULE(_resolve_core, m) {
         .def_readonly("species_vector", &resolve::EncodedSpecies::species_vector)
         .def_readonly("plot_ids", &resolve::EncodedSpecies::plot_ids);
 
-    py::class_<resolve::SpeciesEncoder>(m, "SpeciesEncoder")
-        .def(py::init<int, int, resolve::AggregationMode, resolve::NormalizationMode,
-                      bool, resolve::SelectionMode, resolve::RepresentationMode, int>(),
-             py::arg("hash_dim") = 32,
-             py::arg("top_k") = 3,
-             py::arg("aggregation") = resolve::AggregationMode::Abundance,
-             py::arg("normalization") = resolve::NormalizationMode::Norm,
-             py::arg("track_unknown_count") = false,
-             py::arg("selection") = resolve::SelectionMode::Top,
-             py::arg("representation") = resolve::RepresentationMode::Abundance,
-             py::arg("min_species_frequency") = 1)
-        .def("fit", &resolve::SpeciesEncoder::fit)
-        .def("transform", &resolve::SpeciesEncoder::transform)
-        .def("is_fitted", &resolve::SpeciesEncoder::is_fitted)
-        .def("save", &resolve::SpeciesEncoder::save)
-        .def_static("load", &resolve::SpeciesEncoder::load)
-        .def_property_readonly("vocab", &resolve::SpeciesEncoder::vocab)
-        .def_property_readonly("n_genera", &resolve::SpeciesEncoder::n_genera)
-        .def_property_readonly("n_families", &resolve::SpeciesEncoder::n_families)
-        .def_property_readonly("hash_dim", &resolve::SpeciesEncoder::hash_dim)
-        .def_property_readonly("top_k", &resolve::SpeciesEncoder::top_k)
-        .def_property_readonly("selection", &resolve::SpeciesEncoder::selection)
-        .def_property_readonly("representation", &resolve::SpeciesEncoder::representation)
-        .def_property_readonly("normalization", &resolve::SpeciesEncoder::normalization)
-        .def_property_readonly("aggregation", &resolve::SpeciesEncoder::aggregation)
-        .def_property_readonly("n_taxonomy_slots", &resolve::SpeciesEncoder::n_taxonomy_slots)
-        .def_property_readonly("uses_explicit_vector", &resolve::SpeciesEncoder::uses_explicit_vector)
-        .def_property_readonly("n_species_vector", &resolve::SpeciesEncoder::n_species_vector)
-        .def_property_readonly("n_known_species", &resolve::SpeciesEncoder::n_known_species);
 
     // ==========================================================================
     // Model
@@ -324,8 +295,8 @@ PYBIND11_MODULE(_resolve_core, m) {
     // ==========================================================================
 
     py::class_<resolve::Predictor>(m, "Predictor")
-        .def(py::init<resolve::ResolveModel, resolve::SpeciesEncoder, resolve::Scalers, torch::Device>(),
-             py::arg("model"), py::arg("encoder"), py::arg("scalers"),
+        .def(py::init<resolve::ResolveModel, resolve::Scalers, torch::Device>(),
+             py::arg("model"), py::arg("scalers"),
              py::arg("device") = torch::kCPU)
         .def_static("load", &resolve::Predictor::load,
                     py::arg("path"), py::arg("device") = torch::kCPU)
@@ -345,7 +316,6 @@ PYBIND11_MODULE(_resolve_core, m) {
         .def("get_genus_embeddings", &resolve::Predictor::get_genus_embeddings)
         .def("get_family_embeddings", &resolve::Predictor::get_family_embeddings)
         .def_property_readonly("model", &resolve::Predictor::model)
-        .def_property_readonly("encoder", &resolve::Predictor::encoder)
         .def_property_readonly("scalers", &resolve::Predictor::scalers);
 
     // ==========================================================================

@@ -4,22 +4,21 @@
 namespace resolve {
 
 Predictor::Predictor(
-    SpaccModel model,
-    SpeciesEncoder encoder,
+    ResolveModel model,
     Scalers scalers,
     torch::Device device
-) : model_(model), encoder_(encoder), scalers_(scalers), device_(device)
+) : model_(model), scalers_(scalers), device_(device)
 {
     model_->to(device_);
     model_->eval();
 }
 
 Predictor Predictor::load(const std::string& path, torch::Device device) {
-    auto [model, encoder, scalers] = Trainer::load(path, device);
-    return Predictor(model, encoder, scalers, device);
+    auto [model, scalers] = Trainer::load(path, device);
+    return Predictor(model, scalers, device);
 }
 
-SpaccPredictions Predictor::predict(
+ResolvePredictions Predictor::predict(
     torch::Tensor coordinates,
     torch::Tensor covariates,
     torch::Tensor hash_embedding,
@@ -51,7 +50,7 @@ SpaccPredictions Predictor::predict(
     // Get predictions
     auto outputs = model_->forward(scaled_continuous, genus_ids, family_ids);
 
-    SpaccPredictions result;
+    ResolvePredictions result;
 
     // Process each output
     for (const auto& cfg : model_->schema().targets) {
@@ -85,8 +84,10 @@ SpaccPredictions Predictor::predict(
         result.latent = model_->get_latent(scaled_continuous, genus_ids, family_ids);
     }
 
-    // Create plot indices
-    result.plot_ids = torch::arange(coordinates.size(0), torch::kInt64);
+    // Create plot indices as strings
+    for (int64_t i = 0; i < coordinates.size(0); ++i) {
+        result.plot_ids.push_back(std::to_string(i));
+    }
 
     return result;
 }

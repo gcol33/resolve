@@ -1,11 +1,12 @@
-Package: spacc
+Package: resolve
 Title: Species Composition Based Prediction Using Neural Networks
 Version: 0.1.0
 Authors@R:
-    person("Gilles", "Colling", , email = "gilles.colling@example.com", role = c("aut", "cre"))
-Description: Predict plot-level attributes from species composition using
-    multi-task neural networks. Combines feature hashing for species names
-    with learned taxonomic embeddings. Built on a C++ core using libtorch.
+    person("Gilles", "Colling", , email = "gilles.colling051@gmail.com", role = c("aut", "cre"))
+Description: Predict plot-level environmental attributes from species composition
+    using multi-task neural networks. Combines feature hashing for species names
+    with learned taxonomic embeddings. Built on a C++ core using libtorch for
+    GPU-accelerated training and inference.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
@@ -17,4 +18,6 @@ Imports:
     methods
 LinkingTo:
     Rcpp
-SystemRequirements: C++17, libtorch
+SystemRequirements: C++17, libtorch (PyTorch C++ API)
+URL: https://github.com/gcol33/RESOLVE
+BugReports: https://github.com/gcol33/RESOLVE/issues

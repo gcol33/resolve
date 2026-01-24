@@ -2,7 +2,6 @@
 
 #include "resolve/types.hpp"
 #include "resolve/model.hpp"
-#include "resolve/species_encoder.hpp"
 #include "resolve/trainer.hpp"
 #include <torch/torch.h>
 
@@ -12,8 +11,7 @@ namespace resolve {
 class Predictor {
 public:
     Predictor(
-        SpaccModel model,
-        SpeciesEncoder encoder,
+        ResolveModel model,
         Scalers scalers,
         torch::Device device = torch::kCPU
     );
@@ -23,7 +21,7 @@ public:
 
     // Predict on new data
     // Returns predictions for all targets
-    SpaccPredictions predict(
+    ResolvePredictions predict(
         torch::Tensor coordinates,
         torch::Tensor covariates,
         torch::Tensor hash_embedding,
@@ -48,13 +46,11 @@ public:
     torch::Tensor get_family_embeddings() const;
 
     // Accessors
-    SpaccModel& model() { return model_; }
-    const SpeciesEncoder& encoder() const { return encoder_; }
+    ResolveModel& model() { return model_; }
     const Scalers& scalers() const { return scalers_; }
 
 private:
-    SpaccModel model_;
-    SpeciesEncoder encoder_;
+    ResolveModel model_;
     Scalers scalers_;
     torch::Device device_;
 };
