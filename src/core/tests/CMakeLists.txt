@@ -14,6 +14,15 @@ add_executable(resolve_tests
     test_model.cpp
 )
 
+# Add CUDA library directory if CUDA is available
+if(USE_CUDA AND CUDAToolkit_FOUND)
+    target_link_directories(resolve_tests PRIVATE ${CUDAToolkit_LIBRARY_DIR})
+elseif(USE_CUDA AND DEFINED CUDA_TOOLKIT_ROOT_DIR)
+    target_link_directories(resolve_tests PRIVATE ${CUDA_TOOLKIT_ROOT_DIR}/lib/x64)
+elseif(USE_CUDA AND DEFINED ENV{CUDA_PATH})
+    target_link_directories(resolve_tests PRIVATE $ENV{CUDA_PATH}/lib/x64)
+endif()
+
 target_link_libraries(resolve_tests
     PRIVATE
         resolve_core
