@@ -92,25 +92,23 @@ class PlotEncoder(nn.Module):
         Returns:
             latent: (batch, latent_dim)
         """
-        parts = [continuous]
-
         if self.has_taxonomy and genus_ids is not None and family_ids is not None:
-            # Embed each of the top-k genera
-            genus_embs = []
-            for k in range(self.top_k):
-                emb = self.genus_embeddings[k](genus_ids[:, k])
-                genus_embs.append(emb)
+            # Optimized: vectorized embedding lookups with stack + reshape
+            # Instead of loop + list + cat, we stack embeddings and flatten
+            genus_embs = torch.stack(
+                [emb(genus_ids[:, k]) for k, emb in enumerate(self.genus_embeddings)],
+                dim=1
+            ).flatten(start_dim=1)  # (batch, top_k * emb_dim)
 
-            # Embed each of the top-k families
-            family_embs = []
-            for k in range(self.top_k):
-                emb = self.family_embeddings[k](family_ids[:, k])
-                family_embs.append(emb)
+            family_embs = torch.stack(
+                [emb(family_ids[:, k]) for k, emb in enumerate(self.family_embeddings)],
+                dim=1
+            ).flatten(start_dim=1)  # (batch, top_k * emb_dim)
 
-            parts.extend(genus_embs)
-            parts.extend(family_embs)
+            x = torch.cat([continuous, genus_embs, family_embs], dim=1)
+        else:
+            x = continuous
 
-        x = torch.cat(parts, dim=1)
         latent = self.mlp(x)
         return latent
 
@@ -217,23 +215,28 @@ class PlotEncoderEmbed(nn.Module):
         Returns:
             latent: (batch, latent_dim)
         """
-        parts = [continuous]
-
-        # Embed species (one table per position)
-        for k in range(self.top_k_species):
-            emb = self.species_embeddings[k](species_ids[:, k])
-            parts.append(emb)
+        # Optimized: vectorized embedding lookups with stack + flatten
+        species_embs = torch.stack(
+            [emb(species_ids[:, k]) for k, emb in enumerate(self.species_embeddings)],
+            dim=1
+        ).flatten(start_dim=1)  # (batch, top_k_species * emb_dim)
 
         # Embed taxonomy if available
         if self.has_taxonomy and genus_ids is not None and family_ids is not None:
-            for k in range(self.top_k_taxonomy):
-                emb = self.genus_embeddings[k](genus_ids[:, k])
-                parts.append(emb)
-            for k in range(self.top_k_taxonomy):
-                emb = self.family_embeddings[k](family_ids[:, k])
-                parts.append(emb)
+            genus_embs = torch.stack(
+                [emb(genus_ids[:, k]) for k, emb in enumerate(self.genus_embeddings)],
+                dim=1
+            ).flatten(start_dim=1)
 
-        x = torch.cat(parts, dim=1)
+            family_embs = torch.stack(
+                [emb(family_ids[:, k]) for k, emb in enumerate(self.family_embeddings)],
+                dim=1
+            ).flatten(start_dim=1)
+
+            x = torch.cat([continuous, species_embs, genus_embs, family_embs], dim=1)
+        else:
+            x = torch.cat([continuous, species_embs], dim=1)
+
         latent = self.mlp(x)
         return latent
 
@@ -341,19 +344,21 @@ class PlotEncoderSparse(nn.Module):
         # Project species abundances to embedding space
         species_emb = self.species_projection(species_abundances)
 
-        parts = [continuous, species_emb]
-
         if self.has_taxonomy and genus_ids is not None and family_ids is not None:
-            # Embed each of the top-k genera
-            for k in range(self.top_k):
-                emb = self.genus_embeddings[k](genus_ids[:, k])
-                parts.append(emb)
+            # Optimized: vectorized embedding lookups with stack + flatten
+            genus_embs = torch.stack(
+                [emb(genus_ids[:, k]) for k, emb in enumerate(self.genus_embeddings)],
+                dim=1
+            ).flatten(start_dim=1)
 
-            # Embed each of the top-k families
-            for k in range(self.top_k):
-                emb = self.family_embeddings[k](family_ids[:, k])
-                parts.append(emb)
+            family_embs = torch.stack(
+                [emb(family_ids[:, k]) for k, emb in enumerate(self.family_embeddings)],
+                dim=1
+            ).flatten(start_dim=1)
 
-        x = torch.cat(parts, dim=1)
+            x = torch.cat([continuous, species_emb, genus_embs, family_embs], dim=1)
+        else:
+            x = torch.cat([continuous, species_emb], dim=1)
+
         latent = self.mlp(x)
         return latent

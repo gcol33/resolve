@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -16,6 +17,125 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import OneCycleLR
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import StandardScaler
+
+
+@dataclass
+class ProfileResult:
+    """Results from profiling a training run."""
+
+    total_time_ms: float
+    forward_time_ms: float
+    backward_time_ms: float
+    optimizer_time_ms: float
+    data_time_ms: float
+    n_batches: int
+    avg_batch_time_ms: float
+    samples_per_second: float
+    gpu_memory_peak_mb: float = 0.0
+    detailed_trace_path: Optional[str] = None
+
+    def __str__(self) -> str:
+        lines = [
+            "=== Training Profile ===",
+            f"Total time:      {self.total_time_ms:.1f} ms",
+            f"  Forward:       {self.forward_time_ms:.1f} ms ({100*self.forward_time_ms/self.total_time_ms:.1f}%)",
+            f"  Backward:      {self.backward_time_ms:.1f} ms ({100*self.backward_time_ms/self.total_time_ms:.1f}%)",
+            f"  Optimizer:     {self.optimizer_time_ms:.1f} ms ({100*self.optimizer_time_ms/self.total_time_ms:.1f}%)",
+            f"  Data loading:  {self.data_time_ms:.1f} ms ({100*self.data_time_ms/self.total_time_ms:.1f}%)",
+            f"Batches:         {self.n_batches}",
+            f"Avg batch time:  {self.avg_batch_time_ms:.2f} ms",
+            f"Throughput:      {self.samples_per_second:.0f} samples/sec",
+        ]
+        if self.gpu_memory_peak_mb > 0:
+            lines.append(f"GPU memory peak: {self.gpu_memory_peak_mb:.0f} MB")
+        if self.detailed_trace_path:
+            lines.append(f"Trace saved to:  {self.detailed_trace_path}")
+        return "\n".join(lines)
+
+
+class Timer:
+    """Simple timer for profiling code sections."""
+
+    def __init__(self):
+        self.times = {}
+        self._starts = {}
+
+    def start(self, name: str) -> None:
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self._starts[name] = time.perf_counter()
+
+    def stop(self, name: str) -> float:
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        elapsed = (time.perf_counter() - self._starts[name]) * 1000  # ms
+        if name not in self.times:
+            self.times[name] = 0.0
+        self.times[name] += elapsed
+        return elapsed
+
+    @contextmanager
+    def section(self, name: str):
+        """Context manager for timing a code section."""
+        self.start(name)
+        try:
+            yield
+        finally:
+            self.stop(name)
+
+    def get(self, name: str) -> float:
+        return self.times.get(name, 0.0)
+
+    def reset(self) -> None:
+        self.times.clear()
+        self._starts.clear()
+
+
+class CUDAPrefetcher:
+    """
+    Prefetches batches to GPU asynchronously.
+
+    Overlaps data transfer with computation by loading the next batch
+    while the current batch is being processed. Uses CUDA streams for
+    true async transfer.
+    """
+
+    def __init__(self, loader, device):
+        self.loader = loader
+        self.device = device
+        self.stream = torch.cuda.Stream() if device.type == "cuda" else None
+
+    def __iter__(self):
+        self._iter = iter(self.loader)
+        self._preload()
+        return self
+
+    def _preload(self):
+        try:
+            self._next_batch = next(self._iter)
+        except StopIteration:
+            self._next_batch = None
+            return
+
+        if self.stream is not None:
+            with torch.cuda.stream(self.stream):
+                self._next_batch = tuple(
+                    t.to(self.device, non_blocking=True) for t in self._next_batch
+                )
+
+    def __next__(self):
+        if self._next_batch is None:
+            raise StopIteration
+
+        if self.stream is not None:
+            torch.cuda.current_stream().wait_stream(self.stream)
+
+        batch = self._next_batch
+        self._preload()
+        return batch
+
+    def __len__(self):
+        return len(self.loader)
 
 from resolve.data.dataset import ResolveDataset, ResolveSchema
 from resolve.encode.species import SpeciesEncoder
@@ -100,6 +220,7 @@ class Trainer:
         device: str = "auto",
         use_amp: bool = True,
         compile_model: bool = False,
+        prefetch_data: Optional[bool] = None,
         species_aggregation: str = "abundance",
         species_selection: str = "top",
         species_representation: str = "abundance",
@@ -151,6 +272,12 @@ class Trainer:
             device: Compute device. "auto" selects CUDA if available, else CPU.
             use_amp: Use automatic mixed precision on CUDA (faster, less memory).
             compile_model: Use torch.compile() for potential speedup (experimental).
+            prefetch_data: Use async data prefetching on CUDA.
+                - None (default): Auto-enable for batch_size >= 16384
+                - True: Always enable
+                - False: Always disable
+                Only beneficial with very large batch sizes where GPU compute
+                time is long enough to hide the stream synchronization overhead.
 
             species_aggregation: How to aggregate species for top-k selection.
                 - "abundance": Weight by abundance (default)
@@ -260,6 +387,11 @@ class Trainer:
         self.species_representation = species_representation
         self.min_species_frequency = min_species_frequency
         self.compile_model = compile_model
+        # Auto-enable prefetch for large batch sizes (16K+)
+        if prefetch_data is None:
+            self.prefetch_data = batch_size >= 16384
+        else:
+            self.prefetch_data = prefetch_data
         self.max_grad_norm = 1.0  # Gradient clipping
         self.verbose = verbose
 
@@ -1194,6 +1326,381 @@ class Trainer:
             train_time=train_time,
         )
 
+    def profile(
+        self,
+        n_batches: int = 50,
+        warmup_batches: int = 5,
+        save_trace: bool = False,
+        trace_dir: Optional[str | Path] = None,
+    ) -> ProfileResult:
+        """
+        Profile training performance to identify bottlenecks.
+
+        Runs a small number of training batches with detailed timing,
+        breaking down time spent in forward pass, backward pass,
+        optimizer step, and data loading.
+
+        Args:
+            n_batches: Number of batches to profile (after warmup).
+            warmup_batches: Number of warmup batches to run first (not timed).
+            save_trace: If True, save detailed Chrome trace for analysis.
+            trace_dir: Directory to save trace files. Default: ./profiles/
+
+        Returns:
+            ProfileResult with timing breakdown.
+
+        Example:
+            >>> trainer = Trainer(dataset)
+            >>> # Prepare data first (or call fit() for a few epochs)
+            >>> result = trainer.profile(n_batches=100)
+            >>> print(result)
+            === Training Profile ===
+            Total time:      1234.5 ms
+              Forward:       456.7 ms (37.0%)
+              Backward:      567.8 ms (46.0%)
+              ...
+        """
+        # Ensure model and data are ready
+        if self.model is None or self._train_loader is None:
+            # Do data prep without full training
+            print("Preparing data for profiling...")
+            checkpoint = self.load_checkpoint()
+
+            t_prep_start = time.time()
+            data_cache = self._load_cache()
+
+            if data_cache is not None:
+                train_tensors, test_tensors = self._restore_from_cache(data_cache)
+            else:
+                if checkpoint is not None:
+                    self._restore_scalers_from_checkpoint(checkpoint)
+                train_ds, test_ds = self._prepare_data(fit_encoder=(checkpoint is None))
+
+                if self.model is None:
+                    uses_explicit_vector = (
+                        self.species_encoding == "hash" and
+                        self._species_encoder is not None and
+                        self._species_encoder.uses_explicit_vector
+                    )
+                    n_taxonomy_slots = (
+                        self._species_encoder.n_taxonomy_slots
+                        if self._species_encoder else self.top_k
+                    )
+                    self.model = ResolveModel(
+                        schema=self._schema,
+                        targets=self.dataset.targets,
+                        species_encoding=self.species_encoding,
+                        hash_dim=self.hash_dim,
+                        species_embed_dim=self.species_embed_dim,
+                        genus_emb_dim=self.genus_emb_dim,
+                        family_emb_dim=self.family_emb_dim,
+                        top_k=n_taxonomy_slots,
+                        top_k_species=self.top_k_species,
+                        hidden_dims=self.hidden_dims,
+                        dropout=self.dropout,
+                        uses_explicit_vector=uses_explicit_vector,
+                    )
+
+                train_tensors = self._build_tensors(train_ds, fit_scalers=(checkpoint is None))
+                test_tensors = self._build_tensors(test_ds, fit_scalers=False)
+
+            self._create_loaders(train_tensors, test_tensors)
+
+            if self.model is None:
+                uses_explicit_vector = (
+                    self.species_encoding == "hash" and
+                    self._species_encoder is not None and
+                    self._species_encoder.uses_explicit_vector
+                )
+                n_taxonomy_slots = (
+                    self._species_encoder.n_taxonomy_slots
+                    if self._species_encoder else self.top_k
+                )
+                self.model = ResolveModel(
+                    schema=self._schema,
+                    targets=self.dataset.targets,
+                    species_encoding=self.species_encoding,
+                    hash_dim=self.hash_dim,
+                    species_embed_dim=self.species_embed_dim,
+                    genus_emb_dim=self.genus_emb_dim,
+                    family_emb_dim=self.family_emb_dim,
+                    top_k=n_taxonomy_slots,
+                    top_k_species=self.top_k_species,
+                    hidden_dims=self.hidden_dims,
+                    dropout=self.dropout,
+                    uses_explicit_vector=uses_explicit_vector,
+                )
+
+            self.model.to(self._device)
+            print(f"  Data prepared in {time.time() - t_prep_start:.1f}s")
+
+        # Setup optimizer if not already
+        if self._optimizer is None:
+            self._optimizer = AdamW(
+                self.model.parameters(),
+                lr=self.lr,
+                weight_decay=self.weight_decay,
+            )
+
+        # Setup loss if not already
+        if self._loss_fn is None:
+            self._loss_fn = MultiTaskLoss(
+                self.model.target_configs,
+                phases=self.phases,
+                phase_boundaries=self.phase_boundaries,
+            )
+
+        # Setup AMP
+        if self.use_amp and self._grad_scaler is None:
+            self._grad_scaler = GradScaler()
+
+        # Track GPU memory
+        gpu_memory_peak = 0.0
+        if self._device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats(self._device)
+
+        self.model.train()
+        timer = Timer()
+        target_names = list(self.model.target_configs.keys())
+        has_taxonomy = self.model.schema.has_taxonomy
+
+        use_prefetch = self.prefetch_data and self._device.type == "cuda"
+        loader = CUDAPrefetcher(self._train_loader, self._device) if use_prefetch else self._train_loader
+
+        total_samples = 0
+        batch_count = 0
+
+        # Warmup (not timed)
+        print(f"Warming up ({warmup_batches} batches)...")
+        for batch_idx, batch in enumerate(loader):
+            if batch_idx >= warmup_batches:
+                break
+            idx = 0
+            continuous = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+            idx += 1
+
+            species_ids = None
+            species_vector = None
+            if self.species_encoding == "embed":
+                species_ids = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+                idx += 1
+            elif self.species_encoding == "hash" and self._species_encoder.uses_explicit_vector:
+                species_vector = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+                idx += 1
+
+            if has_taxonomy:
+                genus_ids = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+                idx += 1
+                family_ids = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+                idx += 1
+            else:
+                genus_ids = None
+                family_ids = None
+
+            targets = {}
+            for name in target_names:
+                targets[name] = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+                idx += 1
+
+            for name in target_names:
+                cfg = self.model.target_configs[name]
+                if cfg.task == "regression":
+                    targets[name] = targets[name].unsqueeze(-1)
+
+            self._optimizer.zero_grad(set_to_none=True)
+            if self.use_amp:
+                with autocast(device_type="cuda"):
+                    predictions = self.model(continuous, genus_ids, family_ids, species_ids, species_vector)
+                    loss, _ = self._loss_fn(predictions, targets, 0, self._target_scalers)
+                self._grad_scaler.scale(loss).backward()
+                self._grad_scaler.step(self._optimizer)
+                self._grad_scaler.update()
+            else:
+                predictions = self.model(continuous, genus_ids, family_ids, species_ids, species_vector)
+                loss, _ = self._loss_fn(predictions, targets, 0, self._target_scalers)
+                loss.backward()
+                self._optimizer.step()
+
+        # Profile batches
+        print(f"Profiling ({n_batches} batches)...")
+        loader = CUDAPrefetcher(self._train_loader, self._device) if use_prefetch else self._train_loader
+
+        timer.start("total")
+        for batch_idx, batch in enumerate(loader):
+            if batch_idx >= n_batches:
+                break
+
+            # Data loading timing
+            timer.start("data")
+            idx = 0
+            continuous = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+            idx += 1
+
+            species_ids = None
+            species_vector = None
+            if self.species_encoding == "embed":
+                species_ids = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+                idx += 1
+            elif self.species_encoding == "hash" and self._species_encoder.uses_explicit_vector:
+                species_vector = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+                idx += 1
+
+            if has_taxonomy:
+                genus_ids = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+                idx += 1
+                family_ids = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+                idx += 1
+            else:
+                genus_ids = None
+                family_ids = None
+
+            targets = {}
+            for name in target_names:
+                targets[name] = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+                idx += 1
+
+            for name in target_names:
+                cfg = self.model.target_configs[name]
+                if cfg.task == "regression":
+                    targets[name] = targets[name].unsqueeze(-1)
+            timer.stop("data")
+
+            # Forward pass
+            self._optimizer.zero_grad(set_to_none=True)
+            timer.start("forward")
+            if self.use_amp:
+                with autocast(device_type="cuda"):
+                    predictions = self.model(continuous, genus_ids, family_ids, species_ids, species_vector)
+                    loss, _ = self._loss_fn(predictions, targets, 0, self._target_scalers)
+            else:
+                predictions = self.model(continuous, genus_ids, family_ids, species_ids, species_vector)
+                loss, _ = self._loss_fn(predictions, targets, 0, self._target_scalers)
+            timer.stop("forward")
+
+            # Backward pass
+            timer.start("backward")
+            if self.use_amp:
+                self._grad_scaler.scale(loss).backward()
+            else:
+                loss.backward()
+            timer.stop("backward")
+
+            # Optimizer step
+            timer.start("optimizer")
+            if self.use_amp:
+                self._grad_scaler.unscale_(self._optimizer)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+                self._grad_scaler.step(self._optimizer)
+                self._grad_scaler.update()
+            else:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+                self._optimizer.step()
+            timer.stop("optimizer")
+
+            total_samples += continuous.size(0)
+            batch_count += 1
+
+        timer.stop("total")
+
+        # Get GPU memory stats
+        if self._device.type == "cuda":
+            gpu_memory_peak = torch.cuda.max_memory_allocated(self._device) / (1024 * 1024)  # MB
+
+        # Build result
+        total_time = timer.get("total")
+        result = ProfileResult(
+            total_time_ms=total_time,
+            forward_time_ms=timer.get("forward"),
+            backward_time_ms=timer.get("backward"),
+            optimizer_time_ms=timer.get("optimizer"),
+            data_time_ms=timer.get("data"),
+            n_batches=batch_count,
+            avg_batch_time_ms=total_time / batch_count if batch_count > 0 else 0,
+            samples_per_second=total_samples / (total_time / 1000) if total_time > 0 else 0,
+            gpu_memory_peak_mb=gpu_memory_peak,
+        )
+
+        # Optional: save torch.profiler trace
+        if save_trace:
+            trace_path = Path(trace_dir) if trace_dir else Path("./profiles")
+            trace_path.mkdir(parents=True, exist_ok=True)
+            trace_file = trace_path / f"profile_{time.strftime('%Y%m%d_%H%M%S')}.json"
+
+            try:
+                from torch.profiler import profile as torch_profile, ProfilerActivity
+
+                print(f"Saving detailed trace to {trace_file}...")
+                with torch_profile(
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                    record_shapes=True,
+                    profile_memory=True,
+                    with_stack=True,
+                ) as prof:
+                    # Run a few batches for trace
+                    loader = CUDAPrefetcher(self._train_loader, self._device) if use_prefetch else self._train_loader
+                    for batch_idx, batch in enumerate(loader):
+                        if batch_idx >= 10:
+                            break
+                        idx = 0
+                        continuous = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+                        idx += 1
+                        species_ids = None
+                        species_vector = None
+                        if self.species_encoding == "embed":
+                            species_ids = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+                            idx += 1
+                        elif self.species_encoding == "hash" and self._species_encoder.uses_explicit_vector:
+                            species_vector = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+                            idx += 1
+                        if has_taxonomy:
+                            genus_ids = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+                            idx += 1
+                            family_ids = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+                            idx += 1
+                        else:
+                            genus_ids = None
+                            family_ids = None
+                        targets = {}
+                        for name in target_names:
+                            targets[name] = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
+                            idx += 1
+                        for name in target_names:
+                            cfg = self.model.target_configs[name]
+                            if cfg.task == "regression":
+                                targets[name] = targets[name].unsqueeze(-1)
+
+                        self._optimizer.zero_grad(set_to_none=True)
+                        if self.use_amp:
+                            with autocast(device_type="cuda"):
+                                predictions = self.model(continuous, genus_ids, family_ids, species_ids, species_vector)
+                                loss, _ = self._loss_fn(predictions, targets, 0, self._target_scalers)
+                            self._grad_scaler.scale(loss).backward()
+                            self._grad_scaler.step(self._optimizer)
+                            self._grad_scaler.update()
+                        else:
+                            predictions = self.model(continuous, genus_ids, family_ids, species_ids, species_vector)
+                            loss, _ = self._loss_fn(predictions, targets, 0, self._target_scalers)
+                            loss.backward()
+                            self._optimizer.step()
+
+                prof.export_chrome_trace(str(trace_file))
+                result = ProfileResult(
+                    total_time_ms=result.total_time_ms,
+                    forward_time_ms=result.forward_time_ms,
+                    backward_time_ms=result.backward_time_ms,
+                    optimizer_time_ms=result.optimizer_time_ms,
+                    data_time_ms=result.data_time_ms,
+                    n_batches=result.n_batches,
+                    avg_batch_time_ms=result.avg_batch_time_ms,
+                    samples_per_second=result.samples_per_second,
+                    gpu_memory_peak_mb=result.gpu_memory_peak_mb,
+                    detailed_trace_path=str(trace_file),
+                )
+            except ImportError:
+                print("  Warning: torch.profiler not available, skipping trace")
+
+        return result
+
     def _train_epoch(
         self,
         epoch: int,
@@ -1210,10 +1717,14 @@ class Trainer:
         batch_losses = [] if self.verbose >= 2 else None
         grad_norms = [] if self.verbose >= 2 else None
 
-        for batch_idx, batch in enumerate(self._train_loader):
-            # Unpack batch - use non_blocking=True with pin_memory for async transfer
+        # Use prefetcher for async data transfer on CUDA
+        use_prefetch = self.prefetch_data and self._device.type == "cuda"
+        loader = CUDAPrefetcher(self._train_loader, self._device) if use_prefetch else self._train_loader
+
+        for batch_idx, batch in enumerate(loader):
+            # Unpack batch - prefetcher already transfers to device if enabled
             idx = 0
-            continuous = batch[idx].to(self._device, non_blocking=True)
+            continuous = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
             idx += 1
 
             # species_ids only present in embed mode
@@ -1221,16 +1732,16 @@ class Trainer:
             species_ids = None
             species_vector = None
             if self.species_encoding == "embed":
-                species_ids = batch[idx].to(self._device, non_blocking=True)
+                species_ids = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
                 idx += 1
             elif self.species_encoding == "hash" and self._species_encoder.uses_explicit_vector:
-                species_vector = batch[idx].to(self._device, non_blocking=True)
+                species_vector = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
                 idx += 1
 
             if has_taxonomy:
-                genus_ids = batch[idx].to(self._device, non_blocking=True)
+                genus_ids = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
                 idx += 1
-                family_ids = batch[idx].to(self._device, non_blocking=True)
+                family_ids = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
                 idx += 1
             else:
                 genus_ids = None
@@ -1238,7 +1749,7 @@ class Trainer:
 
             targets = {}
             for name in target_names:
-                targets[name] = batch[idx].to(self._device, non_blocking=True)
+                targets[name] = batch[idx] if use_prefetch else batch[idx].to(self._device, non_blocking=True)
                 idx += 1
 
             # Reshape targets for loss
