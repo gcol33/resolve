@@ -1,0 +1,38 @@
+Package: resolveR
+Type: Package
+Title: Relational Encoding via Structured Observation Learning with Vector Embeddings
+Version: 0.1.0
+Authors@R: c(
+    person("RESOLVE", "Authors", role = c("aut", "cre"),
+           email = "resolve@example.com")
+  )
+Description: R interface to the RESOLVE C++ core for learning from many-to-one
+    relational data (e.g., predicting soil properties from plant species
+    composition, customer LTV from purchase history). Uses deep learning with
+    feature hashing and learned embeddings. Provides a formula-based interface
+    with data/obs pattern familiar to R users.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Depends:
+    R (>= 4.0.0)
+Imports:
+    Rcpp (>= 1.0.0),
+    R6
+LinkingTo:
+    Rcpp,
+    RcppTorch
+SystemRequirements: C++17, LibTorch
+RoxygenNote: 7.3.0
+Collate:
+    'metrics.R'
+    'model.R'
+    'predictor.R'
+    'resolve.R'
+Suggests:
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr
+URL: https://github.com/resolve/resolveR
+BugReports: https://github.com/resolve/resolveR/issues

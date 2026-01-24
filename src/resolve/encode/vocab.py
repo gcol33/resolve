@@ -1,4 +1,4 @@
-"""Taxonomy vocabulary building for learned embeddings."""
+"""Vocabulary building for learned embeddings (species and taxonomy)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,75 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import pandas as pd
+
+
+@dataclass
+class SpeciesVocab:
+    """
+    Vocabulary mapping for species IDs.
+
+    Index 0 is reserved for unknown/padding.
+    Provides mapping from species ID strings to integer indices for nn.Embedding.
+    """
+
+    species_to_id: dict[str, int]
+
+    @property
+    def n_species(self) -> int:
+        """Number of species including unknown."""
+        return len(self.species_to_id) + 1
+
+    def encode(self, species_id: Optional[str]) -> int:
+        """Encode species ID to integer. Returns 0 for unknown."""
+        if species_id is None or pd.isna(species_id):
+            return 0
+        return self.species_to_id.get(str(species_id), 0)
+
+    def encode_batch(self, species_ids: pd.Series) -> np.ndarray:
+        """Encode a series of species IDs to integers (vectorized)."""
+        return species_ids.map(lambda x: self.species_to_id.get(str(x), 0) if pd.notna(x) else 0).values
+
+    @classmethod
+    def from_species_data(
+        cls,
+        species_df: pd.DataFrame,
+        species_col: str,
+        min_count: int = 1,
+    ) -> SpeciesVocab:
+        """
+        Build vocabulary from species data.
+
+        Args:
+            species_df: Species occurrence dataframe
+            species_col: Column name for species ID
+            min_count: Minimum occurrences to include in vocab (default 1 = all)
+        """
+        # Count occurrences
+        counts = species_df[species_col].dropna().value_counts()
+        if min_count > 1:
+            counts = counts[counts >= min_count]
+
+        # Sort alphabetically for deterministic ordering
+        species = sorted(str(s) for s in counts.index)
+        species_to_id = {s: i + 1 for i, s in enumerate(species)}
+
+        return cls(species_to_id)
+
+    def save(self, path: str | Path) -> None:
+        """Save vocabulary to JSON file."""
+        path = Path(path)
+        with open(path, "w") as f:
+            json.dump({"species_to_id": self.species_to_id}, f, indent=2)
+
+    @classmethod
+    def load(cls, path: str | Path) -> SpeciesVocab:
+        """Load vocabulary from JSON file."""
+        path = Path(path)
+        with open(path) as f:
+            data = json.load(f)
+        return cls(data["species_to_id"])
 
 
 @dataclass

@@ -1,31 +1,22 @@
-# Package initialization
+# Package initialization for resolve
+# Uses Rcpp modules to expose C++ classes
 
-.resolve <- NULL
+#' @import Rcpp
+#' @useDynLib resolve, .registration = TRUE
+NULL
+
+# Rcpp module reference
+.resolve_module <- NULL
 
 .onLoad <- function(libname, pkgname) {
-  .resolve <<- reticulate::import("resolve", delay_load = TRUE)
+  # Load the Rcpp module
+  .resolve_module <<- Rcpp::Module("resolve_module", PACKAGE = "resolve")
 }
 
-#' Install RESOLVE Python package
+#' Get RESOLVE version
 #'
-#' @param method Installation method (auto, virtualenv, conda)
-#' @param conda Path to conda executable
-#' @param envname Name of virtual environment
-#' @param pip Use pip for installation
-#' @param ... Additional arguments passed to py_install
-#'
+#' @return Version string from C++ core
 #' @export
-install_resolve <- function(method = "auto",
-                            conda = "auto",
-                            envname = NULL,
-                            pip = TRUE,
-                            ...) {
-  reticulate::py_install(
-    "resolve",
-    method = method,
-    conda = conda,
-    envname = envname,
-    pip = pip,
-    ...
-  )
+resolve_version <- function() {
+  .Call("_resolve_resolve_version", PACKAGE = "resolve")
 }

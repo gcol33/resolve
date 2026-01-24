@@ -1,0 +1,54 @@
+url: https://gillescolling.com/resolve
+destination: ../docs
+
+template:
+  bootstrap: 5
+  bootswatch: sandstone
+  light-switch: true
+  includes:
+    in_header: pkgdown/mathjax-config.html
+
+figures:
+  dev: svg
+  fig.ext: svg
+  bg: "#F5F6F8"
+
+home:
+  title: "RESOLVE: Species Composition Prediction via Linear Embeddings"
+  description: >
+    R interface to the RESOLVE Python package for predicting plot-level
+    attributes from species composition using linear compositional pooling.
+
+authors:
+  Gilles Colling:
+    href: https://github.com/gcol33
+
+navbar:
+  structure:
+    left:  [intro, reference, articles, news]
+    right: [search, lightswitch, github]
+  components:
+    intro:
+      text: Get Started
+      href: articles/quickstart.html
+    articles:
+      text: Articles
+      menu:
+        - text: "Quick Start"
+          href: articles/quickstart.html
+    github:
+      icon: fab fa-github
+      href: https://github.com/gcol33/resolve
+      aria-label: GitHub
+
+reference:
+  - title: "Core Functions"
+    desc: "Main interface to RESOLVE"
+    contents:
+      - resolve
+      - resolve-package
+
+footer:
+  structure:
+    left: developed_by
+    right: built_with

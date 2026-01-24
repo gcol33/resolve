@@ -5,6 +5,26 @@ All notable changes to RESOLVE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-01-24
+
+### Changed
+
+- **Simplified API**: `Trainer` now takes only `dataset` as required argument, builds model automatically
+- **Renamed normalization modes**: `relative_plot` → `relative`, `log_scaled` → `log`
+- **Loss presets**: New `loss_config` parameter with presets `"mae"`, `"combined"`, `"smape"`
+- **Confidence filtering**: `trainer.predict(dataset, confidence_threshold=0.8)` to filter uncertain predictions
+
+### Added
+
+- **Species encoding modes**: `species_encoding="hash"` (default) or `"embed"` for learned species embeddings
+- **Tensor caching**: `cache_dir` parameter for faster restarts with large datasets
+- **Gradient checkpointing**: Reduced memory usage for large models
+
+### Fixed
+
+- Fixed `expm1` overflow in metrics computation for extreme predictions
+- Improved R bindings with formula API support
+
 ## [0.1.0] - 2025-01-19
 
 ### Added

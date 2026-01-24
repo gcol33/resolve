@@ -3,21 +3,19 @@ Title: Species Composition Prediction via Linear Vector Embeddings
 Version: 0.1.0
 Authors@R:
     person("Gilles", "Colling", email = "gilles@example.com", role = c("aut", "cre"))
-Description: R interface to the RESOLVE Python package for predicting plot-level
-    attributes from species composition using linear compositional pooling and
-    learned representations.
+Description: Predict plot-level environmental attributes from species composition
+    using linear compositional pooling and learned representations. Built on a
+    high-performance C++ core with libtorch for GPU acceleration.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
+LinkingTo:
+    Rcpp
 Imports:
-    reticulate (>= 1.28)
+    Rcpp (>= 1.0.0),
+    jsonlite
 Suggests:
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
-Config/reticulate:
-  list(
-    packages = list(
-      list(package = "resolve", pip = TRUE)
-    )
-  )
+SystemRequirements: C++17, libtorch (>= 2.0)

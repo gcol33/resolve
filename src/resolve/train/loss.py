@@ -148,37 +148,59 @@ class PhasedLoss:
         config: PhaseConfig,
     ) -> torch.Tensor:
         """Compute weighted sum of loss components based on config."""
-        total_loss = torch.tensor(0.0, device=pred.device)
+        # Mask for valid (non-NaN, non-Inf) values
+        valid_mask = torch.isfinite(pred) & torch.isfinite(target)
+        if not valid_mask.any():
+            # Return zero loss that maintains gradient chain
+            return (pred * 0.0).sum()
+
+        pred_valid = pred[valid_mask]
+        target_valid = target[valid_mask]
+
+        # Collect loss components
+        components = []
 
         # MAE (scaled space)
         if config.mae > 0:
-            total_loss = total_loss + config.mae * self._mae(pred, target)
+            components.append(config.mae * self._mae(pred_valid, target_valid))
 
         # MSE (scaled space)
         if config.mse > 0:
-            total_loss = total_loss + config.mse * self._mse(pred, target)
+            components.append(config.mse * self._mse(pred_valid, target_valid))
 
         # Huber (scaled space)
         if config.huber > 0:
             huber = nn.HuberLoss(delta=config.huber_delta)
-            total_loss = total_loss + config.huber * huber(pred, target)
+            components.append(config.huber * huber(pred_valid, target_valid))
 
         # SMAPE (original scale)
         if config.smape > 0:
-            abs_diff = torch.abs(pred_raw - target_raw)
-            denominator = (torch.abs(pred_raw) + torch.abs(target_raw)) / 2 + self.eps
+            pred_raw_valid = pred_raw[valid_mask]
+            target_raw_valid = target_raw[valid_mask]
+            abs_diff = torch.abs(pred_raw_valid - target_raw_valid)
+            denominator = (torch.abs(pred_raw_valid) + torch.abs(target_raw_valid)) / 2 + self.eps
+            # Clamp denominator to avoid very small values
+            denominator = torch.clamp(denominator, min=self.eps * 10)
             smape = (abs_diff / denominator).mean()
-            total_loss = total_loss + config.smape * smape
+            components.append(config.smape * smape)
 
         # Band penalty (original scale)
         if config.band > 0:
-            abs_diff = torch.abs(pred_raw - target_raw)
-            rel_error = abs_diff / (torch.abs(target_raw) + self.eps)
+            pred_raw_valid = pred_raw[valid_mask]
+            target_raw_valid = target_raw[valid_mask]
+            abs_diff = torch.abs(pred_raw_valid - target_raw_valid)
+            # Clamp denominator to avoid division by zero
+            rel_error = abs_diff / torch.clamp(torch.abs(target_raw_valid), min=self.eps * 10)
             band_violation = torch.relu(rel_error - config.band_threshold)
             band_loss = band_violation.mean()
-            total_loss = total_loss + config.band * band_loss
+            components.append(config.band * band_loss)
 
-        return total_loss
+        # Sum all components (will maintain gradient)
+        if components:
+            return sum(components)
+        else:
+            # Fallback: return zero loss that maintains gradient chain
+            return (pred * 0.0).sum()
 
     def regression_loss(
         self,
@@ -240,6 +262,8 @@ class MultiTaskLoss:
 
     Applies appropriate loss function per task type
     and weights by target configuration.
+
+    Optimized for common single-target regression case.
     """
 
     def __init__(
@@ -250,6 +274,41 @@ class MultiTaskLoss:
     ):
         self.target_configs = target_configs
         self.phased_loss = PhasedLoss(phases=phases, phase_boundaries=phase_boundaries)
+
+        # Pre-compute target info for fast path
+        self._target_names = list(target_configs.keys())
+        self._target_cfgs = [target_configs[n] for n in self._target_names]
+        self._n_targets = len(self._target_names)
+
+        # Check if we can use fast path (single regression target, MAE-only, single phase)
+        self._use_fast_path = (
+            self._n_targets == 1
+            and self._target_cfgs[0].task == "regression"
+            and self.phased_loss.num_phases == 1
+            and self.phased_loss.phases[1].mae == 1.0
+            and self.phased_loss.phases[1].mse == 0.0
+            and self.phased_loss.phases[1].huber == 0.0
+            and self.phased_loss.phases[1].smape == 0.0
+            and self.phased_loss.phases[1].band == 0.0
+        )
+
+        # Cache loss function for fast path
+        self._mae = nn.L1Loss()
+        self._ce = nn.CrossEntropyLoss()
+
+        # Cache current epoch/phase to avoid repeated lookups
+        self._cached_epoch = -1
+        self._cached_phase = 1
+        self._cached_config = self.phased_loss.phases[1]
+
+    def _update_phase_cache(self, epoch: int) -> None:
+        """Update cached phase config if epoch changed."""
+        if epoch != self._cached_epoch:
+            self._cached_epoch = epoch
+            self._cached_phase = self.phased_loss.get_phase(epoch)
+            self._cached_config = self.phased_loss.phases.get(
+                self._cached_phase, self.phased_loss.phases[max(self.phased_loss.phases.keys())]
+            )
 
     def __call__(
         self,
@@ -270,15 +329,27 @@ class MultiTaskLoss:
         Returns:
             total_loss, {target_name: individual_loss}
         """
-        losses = {}
-        total = torch.tensor(0.0, device=next(iter(predictions.values())).device)
+        # Fast path: single regression target with MAE-only loss
+        if self._use_fast_path:
+            name = self._target_names[0]
+            pred = predictions[name]
+            target = targets[name]
+            loss = self._mae(pred, target)
+            return loss, {name: loss}
 
-        for name, cfg in self.target_configs.items():
+        # Standard path with phase handling
+        self._update_phase_cache(epoch)
+
+        losses = {}
+        total = None
+
+        for i, name in enumerate(self._target_names):
             if name not in predictions or name not in targets:
                 continue
 
             pred = predictions[name]
             target = targets[name]
+            cfg = self._target_cfgs[i]
 
             if cfg.task == "regression":
                 scaler_mean = None
@@ -290,9 +361,13 @@ class MultiTaskLoss:
                     pred, target, epoch, scaler_mean, scaler_scale, cfg.transform
                 )
             else:
-                loss = self.phased_loss.classification_loss(pred, target)
+                loss = self._ce(pred, target)
 
             losses[name] = loss
-            total = total + cfg.weight * loss
+            weighted = cfg.weight * loss
+            if total is None:
+                total = weighted
+            else:
+                total = total + weighted
 
-        return total, losses
+        return total if total is not None else pred.new_tensor(0.0), losses

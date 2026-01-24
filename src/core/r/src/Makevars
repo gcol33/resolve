@@ -1,0 +1,18 @@
+# Makevars for spacc R package
+# Requires LIBTORCH_PATH to be set
+
+CXX_STD = CXX17
+
+# Libtorch paths - set LIBTORCH_PATH environment variable
+LIBTORCH_PATH ?= $(HOME)/libtorch
+
+PKG_CXXFLAGS = -I$(LIBTORCH_PATH)/include \
+               -I$(LIBTORCH_PATH)/include/torch/csrc/api/include \
+               -I../../core/include \
+               -D_GLIBCXX_USE_CXX11_ABI=0
+
+PKG_LIBS = -L$(LIBTORCH_PATH)/lib \
+           -L../../core/build \
+           -lspacc_core \
+           -ltorch -ltorch_cpu -lc10 \
+           -Wl,-rpath,$(LIBTORCH_PATH)/lib

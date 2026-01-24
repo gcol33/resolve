@@ -35,6 +35,10 @@ class ResolveSchema:
     species_normalization: str = "norm"
     track_unknown_fraction: bool = True
     track_unknown_count: bool = False
+    # Vocabulary sizes for embed mode (populated when using EmbeddingEncoder)
+    n_species_vocab: int = 0  # Number of species in vocab (0 = use hash mode)
+    n_genera_vocab: int = 0
+    n_families_vocab: int = 0
 
 
 class ResolveDataset:
@@ -237,10 +241,14 @@ class ResolveDataset:
         )
 
     def get_coordinates(self) -> Optional[np.ndarray]:
-        """Get (lat, lon) array for all plots, or None if no coordinates."""
+        """Get (lat, lon) array for all plots, or None if no coordinates.
+
+        Missing coordinates are filled with 0 (becomes mean after standardization).
+        """
         if not self._roles.has_coordinates:
             return None
-        return self._header[[self._roles.coords_lat, self._roles.coords_lon]].values.astype(np.float32)
+        arr = self._header[[self._roles.coords_lat, self._roles.coords_lon]].values.astype(np.float32)
+        return np.nan_to_num(arr, nan=0.0)
 
     def get_covariates(self) -> Optional[np.ndarray]:
         """Get covariate array if any covariates defined."""

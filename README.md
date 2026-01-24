@@ -32,13 +32,13 @@ dataset = ResolveDataset.from_csv(
     targets={"y": {"column": "response", "task": "regression"}},
 )
 
-# Train
+# Train - Trainer builds model automatically from dataset
 trainer = Trainer(dataset)
 trainer.fit()
 
-# Predict
+# Predict with confidence filtering
 preds = trainer.predict(dataset)
-preds = trainer.predict(dataset, confidence_threshold=0.8)  # only confident predictions
+preds = trainer.predict(dataset, confidence_threshold=0.8)  # filter uncertain predictions
 ```
 
 For more complex use cases with taxonomy, coordinates, and multiple targets:
@@ -61,9 +61,17 @@ dataset = ResolveDataset.from_csv(
         "area": {"column": "Area", "task": "regression", "transform": "log1p"},
         "habitat": {"column": "Habitat", "task": "classification", "num_classes": 5},
     },
+    species_normalization="relative",  # normalize abundances within each plot
 )
 
-trainer = Trainer(dataset, hash_dim=64, top_k=10)
+# Customize training parameters
+trainer = Trainer(
+    dataset,
+    species_encoding="hash",  # "hash" (default) or "embed"
+    hash_dim=64,
+    top_k=10,
+    loss_config="mae",  # "mae", "combined", or "smape"
+)
 trainer.fit()
 trainer.save("model.pt")
 ```

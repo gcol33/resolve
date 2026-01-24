@@ -1,6 +1,6 @@
 # Trainer
 
-The `Trainer` class handles model training with phased optimization.
+The `Trainer` class handles model training with automatic model construction and phased optimization.
 
 ## Class Definition
 
@@ -9,42 +9,48 @@ class Trainer:
     """
     Training orchestrator for RESOLVE models.
 
-    Implements phased training, early stopping, and checkpoint management.
+    Automatically builds model from dataset schema, implements training
+    with early stopping, and provides prediction with confidence filtering.
     """
 ```
 
 ## Constructor
 
-### `Trainer(model, dataset, **kwargs)`
+### `Trainer(dataset, **kwargs)`
 
-Create a trainer instance.
+Create a trainer instance. The model is automatically constructed from the dataset schema.
 
 **Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `model` | `ResolveModel` | required | Model to train |
 | `dataset` | `ResolveDataset` | required | Training dataset |
-| `max_epochs` | `int` | `200` | Maximum training epochs |
-| `patience` | `int` | `30` | Early stopping patience |
-| `batch_size` | `int` | `256` | Batch size |
+| `species_encoding` | `str` | `"hash"` | Species encoding mode: `"hash"` or `"embed"` |
+| `hash_dim` | `int` | `32` | Dimension of feature hash (hash mode) |
+| `species_embed_dim` | `int` | `32` | Embedding dimension per species (embed mode) |
+| `top_k` | `int` | `5` | Number of top species for taxonomy embeddings |
+| `top_k_species` | `int` | `10` | Number of top species (embed mode) |
+| `hidden_dims` | `list[int]` | `[2048, 1024, 512, 256, 128, 64]` | Hidden layer dimensions |
+| `dropout` | `float` | `0.3` | Dropout rate |
+| `batch_size` | `int` | `32768` | Batch size |
+| `max_epochs` | `int` | `500` | Maximum training epochs |
+| `patience` | `int` | `50` | Early stopping patience |
 | `lr` | `float` | `1e-3` | Learning rate |
-| `val_fraction` | `float` | `0.2` | Validation set fraction |
-| `phase_boundaries` | `tuple` | `(50, 150)` | Epoch boundaries for phase transitions |
+| `loss_config` | `str` | `"mae"` | Loss preset: `"mae"`, `"combined"`, or `"smape"` |
+| `checkpoint_dir` | `str` | `None` | Directory for checkpoints |
 | `device` | `str` | `"auto"` | Device (`"auto"`, `"cpu"`, `"cuda"`) |
-| `species_normalization` | `str` | `"relative_plot"` | Abundance normalization mode |
-| `track_unknown_count` | `bool` | `False` | Track unknown species count |
 
 **Example:**
 
 ```python
 trainer = Trainer(
-    model=model,
-    dataset=dataset,
+    dataset,
+    species_encoding="hash",
+    hash_dim=64,
+    top_k=10,
     max_epochs=200,
     patience=30,
-    batch_size=256,
-    phase_boundaries=(50, 150),
+    loss_config="mae",
 )
 ```
 
@@ -84,6 +90,42 @@ Load model from checkpoint.
 ```python
 model, encoder, scalers = Trainer.load("model.pt")
 ```
+
+### `predict(dataset, output_space="raw", confidence_threshold=0.0)`
+
+Predict on a dataset.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `dataset` | `ResolveDataset` | required | Dataset to predict on |
+| `output_space` | `str` | `"raw"` | `"raw"` (original scale) or `"transformed"` |
+| `confidence_threshold` | `float` | `0.0` | Minimum confidence (0-1), predictions below set to NaN |
+
+**Returns:** `dict[str, np.ndarray]` mapping target names to predictions
+
+**Confidence semantics:**
+- **Regression**: confidence = 1 - unknown_fraction, where unknown_fraction is the proportion of species abundance not seen during training
+- **Classification**: confidence = max softmax probability across classes
+
+```python
+# Get all predictions
+preds = trainer.predict(dataset)
+
+# Filter to confident predictions only
+preds = trainer.predict(dataset, confidence_threshold=0.8)
+```
+
+## Loss Presets
+
+The `loss_config` parameter controls the loss function:
+
+| Preset | Description |
+|--------|-------------|
+| `"mae"` | Pure MAE loss (default, most stable) |
+| `"combined"` | 80% MAE + 15% SMAPE + 5% band accuracy |
+| `"smape"` | 50% MAE + 50% SMAPE |
 
 ## Training Phases
 

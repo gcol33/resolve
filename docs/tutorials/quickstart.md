@@ -47,6 +47,7 @@ dataset = resolve.ResolveDataset.from_csv(
     species="species.csv",
     roles=roles,
     targets=targets,
+    species_normalization="relative",  # normalize within each plot
 )
 
 # 4. Check schema
@@ -55,20 +56,15 @@ print(f"Species: {dataset.schema.n_species}")
 print(f"Genera: {dataset.schema.n_genera}")
 print(f"Families: {dataset.schema.n_families}")
 
-# 5. Build model
-model = resolve.ResolveModel(
-    schema=dataset.schema,
-    targets=targets,
-    hidden_dims=[256, 128, 64],
-)
-
-# 6. Train
+# 5. Train (model is built automatically from dataset)
 trainer = resolve.Trainer(
-    model=model,
-    dataset=dataset,
+    dataset,
+    species_encoding="hash",  # "hash" or "embed"
+    hash_dim=32,
+    top_k=5,
     max_epochs=200,
     patience=30,
-    batch_size=256,
+    loss_config="mae",  # "mae", "combined", or "smape"
 )
 result = trainer.fit()
 
@@ -76,13 +72,12 @@ print(f"Best epoch: {result.best_epoch}")
 for target, metrics in result.final_metrics.items():
     print(f"{target}: {metrics}")
 
-# 7. Save model
+# 6. Save model
 trainer.save("model.pt")
 
-# 8. Predict on new data
-predictor = resolve.Predictor.load("model.pt")
-predictions = predictor.predict(new_dataset)
-predictions.to_csv("predictions.csv")
+# 7. Predict on new data (with optional confidence filtering)
+predictions = trainer.predict(new_dataset)
+predictions = trainer.predict(new_dataset, confidence_threshold=0.8)
 ```
 
 ## Role Mapping

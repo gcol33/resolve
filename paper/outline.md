@@ -1,8 +1,8 @@
-# Spacc: Species Composition as Biotic Context for Multi-Task Plot Attribute Prediction
+# RESOLVE: Species Composition as Biotic Context for Multi-Task Plot Attribute Prediction
 
 ## Abstract
 
-Species composition data, routinely collected in vegetation surveys, encodes rich ecological information beyond species identities alone. We present Spacc, a multi-task neural network framework that learns a shared latent representation from species composition to simultaneously predict multiple plot-level attributes. Our approach demonstrates that diverse plot characteristics—including physical properties (plot area), environmental conditions (climate), and habitat classifications (EUNIS)—can be jointly predicted from a unified species-derived representation. This shared encoding supports the ecological intuition that species assemblages reflect integrated environmental and historical constraints. We provide cross-platform implementations in Python and R built on a portable C++ core, enabling broad adoption in ecological research.
+Species composition data, routinely collected in ecological surveys, encodes rich information beyond species identities alone. We present RESOLVE (Representation Encoding of Species Outcomes via Linear Vector Embeddings), a framework that learns shared representations from species composition to predict plot-level attributes. Our approach uses linear compositional pooling—aggregating species contributions additively before nonlinear transformation—which enforces interpretability and prevents overfitting to spurious co-occurrence patterns. RESOLVE tracks species not seen during training, using unknown species fraction as a confidence proxy that enables selective gap-filling: users set a threshold to accept only confident predictions. We demonstrate that diverse plot characteristics can be predicted from species assemblages, validating the ecological intuition that species presence reflects integrated environmental and historical filtering.
 
 ## 1. Introduction
 
@@ -149,19 +149,113 @@ Species composition data, routinely collected in vegetation surveys, encodes ric
 
 ## 6. Conclusion
 
-Species composition, when appropriately encoded, provides a rich biotic context that simultaneously informs multiple plot-level attributes. The Spacc framework demonstrates that a shared latent representation learned from species assemblages can predict physical, climatic, and categorical habitat properties. This validates the ecological intuition that species presence reflects integrated environmental and historical filtering. We provide open-source implementations to enable adoption in vegetation science and related fields.
+Species composition, when appropriately encoded, provides a rich biotic context that simultaneously informs multiple plot-level attributes. RESOLVE demonstrates that a shared latent representation learned from species assemblages can predict physical, climatic, and categorical habitat properties. The linear compositional pooling constraint provides interpretability while the unknown species tracking enables honest uncertainty quantification. We provide open-source implementations in Python and R to enable adoption in ecological research.
 
 ## Implementation
 
 ### Code availability
-- Python package: `pip install spacc`
-- R package: `install.packages("spacc")` (CRAN) or `devtools::install_github("gcol33/spacc")`
-- Source code: https://github.com/gcol33/spacc-core
+- Python package: `pip install resolve`
+- R package: `devtools::install_github("gcol33/resolve")`
+- Source code: https://github.com/gcol33/resolve
 
 ### System requirements
-- Python ≥3.9, R ≥4.0
-- PyTorch ≥2.0 (Python), torch for R
+- Python ≥3.10, R ≥4.0
+- PyTorch ≥2.0
 - CPU or CUDA GPU
+
+---
+
+## Publication Strategy
+
+### Option A: Methods Paper (Methods in Ecology and Evolution)
+
+**Pitch:** Introduce the inverse-SDM framing. Show that linear pooling + unknown tracking outperforms standard approaches.
+
+**Strengths:**
+- Novel framing (species → plot attributes vs environment → species)
+- Testable inductive bias (linear compositional pooling)
+- Practical confidence mechanism
+
+**Required:**
+- Benchmark on 2–3 datasets
+- Comparison with random forest, gradient boosting, MLP without linear constraint
+- Ablation: linear pooling vs. attention-based pooling
+
+### Option B: Software Paper (JOSS)
+
+**Pitch:** Practical tool for gap-filling ecological data. Clean API, handles unknown species.
+
+**Required:**
+- Documented use case
+- Installation and usage examples
+- Statement of need
+
+### Option C: Short Communication
+
+**Pitch:** Focus on unknown species tracking + confidence threshold mechanism.
+
+---
+
+## Key Methodological Claims to Test
+
+### 1. Linear Compositional Pooling
+
+Species contributions are aggregated linearly before nonlinear transformation:
+
+```
+z_species = Σ w_i · h(species_i)
+```
+
+**Hypothesis:** Linear pooling outperforms unconstrained aggregation on small-to-medium ecological datasets.
+
+**Test:** Compare RESOLVE vs. attention-based pooling vs. set transformers.
+
+### 2. Unknown Species as Confidence Proxy
+
+**Hypothesis:** Prediction error correlates with unknown_fraction.
+
+**Test:** Hold out species, compute correlation between unknown_fraction and error.
+
+### 3. Confidence Thresholding Works
+
+**Hypothesis:** Filtering by confidence_threshold > 0.8 removes the worst predictions.
+
+**Test:** Show error distribution for confident vs. uncertain predictions.
+
+---
+
+## Experiments to Run
+
+| Experiment | Question | Comparison |
+|------------|----------|------------|
+| Linear pooling ablation | Does linear constraint help? | RESOLVE vs. attention vs. set transformer |
+| Unknown calibration | Is unknown_fraction predictive of error? | Correlation plot |
+| Benchmark | How does RESOLVE compare to baselines? | RF, XGBoost, MLP |
+| Taxonomy value | Does genus/family help? | With vs. without taxonomy |
+| Gap-filling | Can we selectively impute? | Confident vs. uncertain predictions |
+
+---
+
+## Target Journals
+
+| Journal | Type | Fit |
+|---------|------|-----|
+| Methods in Ecology and Evolution | Methods | High |
+| JOSS | Software | High (low barrier) |
+| Ecological Informatics | Applied | Medium |
+| Ecography | Methods | Medium |
+
+---
+
+## Next Steps
+
+- [ ] Run ASAAS benchmark with current code
+- [ ] Implement attention pooling variant for ablation
+- [ ] Generate calibration plots (unknown_fraction vs. error)
+- [ ] Draft Introduction section
+- [ ] Request sPlot access for validation dataset
+
+---
 
 ## References
 

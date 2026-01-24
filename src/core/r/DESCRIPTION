@@ -1,0 +1,20 @@
+Package: spacc
+Title: Species Composition Based Prediction Using Neural Networks
+Version: 0.1.0
+Authors@R:
+    person("Gilles", "Colling", , email = "gilles.colling@example.com", role = c("aut", "cre"))
+Description: Predict plot-level attributes from species composition using
+    multi-task neural networks. Combines feature hashing for species names
+    with learned taxonomic embeddings. Built on a C++ core using libtorch.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.0
+Depends: R (>= 4.0.0)
+Imports:
+    Rcpp (>= 1.0.0),
+    R6,
+    methods
+LinkingTo:
+    Rcpp
+SystemRequirements: C++17, libtorch
