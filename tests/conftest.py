@@ -103,3 +103,152 @@ def sample_csv_files(sample_header_df, sample_species_df):
         sample_species_df.to_csv(species_path, index=False)
 
         yield header_path, species_path
+
+
+# === Edge Case Fixtures ===
+
+@pytest.fixture
+def empty_header_df():
+    """Create empty header dataframe (0 plots)."""
+    return pd.DataFrame({
+        "PlotID": [],
+        "Latitude": [],
+        "Longitude": [],
+        "Area": [],
+        "Elevation": [],
+        "Temperature": [],
+    })
+
+
+@pytest.fixture
+def empty_species_df():
+    """Create empty species dataframe (0 observations)."""
+    return pd.DataFrame({
+        "PlotID": [],
+        "Species": [],
+        "Genus": [],
+        "Family": [],
+        "Cover": [],
+    })
+
+
+@pytest.fixture
+def header_with_null_targets():
+    """Create header with all-null target values."""
+    np.random.seed(42)
+    n_plots = 20
+
+    return pd.DataFrame({
+        "PlotID": [f"P{i:04d}" for i in range(n_plots)],
+        "Latitude": np.random.uniform(45, 55, n_plots),
+        "Longitude": np.random.uniform(5, 15, n_plots),
+        "Area": [np.nan] * n_plots,  # All null
+        "Elevation": np.random.uniform(100, 2000, n_plots),
+        "Temperature": np.random.uniform(5, 15, n_plots),
+    })
+
+
+@pytest.fixture
+def header_with_partial_null_targets():
+    """Create header with partially null target values."""
+    np.random.seed(42)
+    n_plots = 20
+
+    area = np.random.exponential(100, n_plots)
+    area[:10] = np.nan  # First 10 are null
+
+    return pd.DataFrame({
+        "PlotID": [f"P{i:04d}" for i in range(n_plots)],
+        "Latitude": np.random.uniform(45, 55, n_plots),
+        "Longitude": np.random.uniform(5, 15, n_plots),
+        "Area": area,
+        "Elevation": np.random.uniform(100, 2000, n_plots),
+        "Temperature": np.random.uniform(5, 15, n_plots),
+    })
+
+
+@pytest.fixture
+def species_with_single_species_per_plot():
+    """Create species data with only 1 species per plot."""
+    np.random.seed(42)
+    n_plots = 20
+
+    rows = []
+    for i in range(n_plots):
+        rows.append({
+            "PlotID": f"P{i:04d}",
+            "Species": "Quercus_robur",
+            "Genus": "Quercus",
+            "Family": "Fagaceae",
+            "Cover": np.random.uniform(1, 50),
+        })
+
+    return pd.DataFrame(rows)
+
+
+@pytest.fixture
+def species_with_zero_abundance():
+    """Create species data with some zero abundance values."""
+    np.random.seed(42)
+    n_plots = 20
+
+    rows = []
+    for i in range(n_plots):
+        for j in range(5):
+            cover = 0.0 if j == 0 else np.random.uniform(1, 50)  # First species has 0 cover
+            rows.append({
+                "PlotID": f"P{i:04d}",
+                "Species": f"Species_{j}",
+                "Genus": "Quercus",
+                "Family": "Fagaceae",
+                "Cover": cover,
+            })
+
+    return pd.DataFrame(rows)
+
+
+@pytest.fixture
+def header_with_nan_coordinates():
+    """Create header with NaN coordinate values."""
+    np.random.seed(42)
+    n_plots = 20
+
+    lat = np.random.uniform(45, 55, n_plots)
+    lon = np.random.uniform(5, 15, n_plots)
+    lat[:5] = np.nan  # First 5 have NaN coordinates
+    lon[:5] = np.nan
+
+    return pd.DataFrame({
+        "PlotID": [f"P{i:04d}" for i in range(n_plots)],
+        "Latitude": lat,
+        "Longitude": lon,
+        "Area": np.random.exponential(100, n_plots),
+        "Elevation": np.random.uniform(100, 2000, n_plots),
+        "Temperature": np.random.uniform(5, 15, n_plots),
+    })
+
+
+@pytest.fixture
+def small_species_df():
+    """Create small species dataframe for 20 plots."""
+    np.random.seed(42)
+    n_plots = 20
+
+    genera = ["Quercus", "Fagus", "Pinus", "Abies"]
+    families = ["Fagaceae", "Pinaceae"]
+
+    rows = []
+    for i in range(n_plots):
+        n_species = np.random.randint(3, 8)
+        for j in range(n_species):
+            genus = np.random.choice(genera)
+            family = "Fagaceae" if genus in ["Quercus", "Fagus"] else "Pinaceae"
+            rows.append({
+                "PlotID": f"P{i:04d}",
+                "Species": f"{genus}_sp{j}",
+                "Genus": genus,
+                "Family": family,
+                "Cover": np.random.uniform(1, 50),
+            })
+
+    return pd.DataFrame(rows)

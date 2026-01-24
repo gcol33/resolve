@@ -67,19 +67,19 @@ class Trainer:
         self,
         dataset: ResolveDataset,
         # Species encoding mode
-        species_encoding: str = "hash",  # "hash" or "embed"
+        species_encoding: str = "hash",
         # Model architecture
         hash_dim: int = 32,
-        species_embed_dim: int = 32,  # Embedding dim per species (embed mode)
+        species_embed_dim: int = 32,
         top_k: int = 5,
-        top_k_species: int = 10,  # Number of top species for embed mode
+        top_k_species: int = 10,
         hidden_dims: Optional[list[int]] = None,
         genus_emb_dim: int = 8,
         family_emb_dim: int = 8,
         dropout: float = 0.3,
         # Training
-        batch_size: int = 32768,  # Larger batch for better GPU utilization
-        num_workers: int = 0,  # 0 is safest for TensorDataset on Windows
+        batch_size: int = 32768,
+        num_workers: int = 0,
         max_epochs: int = 500,
         patience: int = 50,
         lr: float = 1e-3,
@@ -88,23 +88,99 @@ class Trainer:
         checkpoint_dir: Optional[str | Path] = None,
         checkpoint_every: int = 50,
         resume: bool = True,
-        reset_patience: bool = False,  # Reset early stopping counter on resume
+        reset_patience: bool = False,
         # Caching
-        cache_dir: Optional[str | Path] = None,  # Cache preprocessed tensors for faster restarts
-        max_cache_files: int = 5,  # Max number of cache files to keep (oldest deleted first)
+        cache_dir: Optional[str | Path] = None,
+        max_cache_files: int = 5,
         # Loss configuration
-        loss_config: str = "mae",  # "mae", "combined", "smape" or custom PhaseConfig dict
+        loss_config: str = "mae",
         # Advanced (deprecated - use loss_config instead)
         phases: Optional[dict[int, PhaseConfig]] = None,
         phase_boundaries: Optional[list[int]] = None,
         device: str = "auto",
         use_amp: bool = True,
-        compile_model: bool = False,  # Use torch.compile() for potential speedup
+        compile_model: bool = False,
         species_aggregation: str = "abundance",
-        species_selection: str = "top",  # "top", "bottom", "top_bottom", or "all"
-        species_representation: str = "abundance",  # "abundance" or "presence_absence" (only for selection="all")
-        min_species_frequency: int = 1,  # For selection="all": minimum plot frequency
+        species_selection: str = "top",
+        species_representation: str = "abundance",
+        min_species_frequency: int = 1,
+        verbose: int = 1,
     ):
+        """
+        Initialize trainer for RESOLVE models.
+
+        The trainer automatically constructs the model from the dataset schema.
+        Call fit() to train and predict() to make predictions.
+
+        Args:
+            dataset: Training dataset containing plots and species data.
+
+            species_encoding: How to encode species composition.
+                - "hash": Feature hashing for fixed-dim embedding (default, faster)
+                - "embed": Learned embeddings per species (more expressive)
+
+            hash_dim: Dimension of hashed species embedding (hash mode only).
+            species_embed_dim: Embedding dimension per species (embed mode only).
+            top_k: Number of top genera/families to track for taxonomy embeddings.
+            top_k_species: Number of top species for embed mode.
+            hidden_dims: List of hidden layer dimensions. Default: [2048, 1024, 512, 256, 128, 64].
+            genus_emb_dim: Embedding dimension for genus (if taxonomy available).
+            family_emb_dim: Embedding dimension for family (if taxonomy available).
+            dropout: Dropout rate for regularization. Must be in [0, 1).
+
+            batch_size: Training batch size. Larger values improve GPU utilization.
+            num_workers: DataLoader workers. 0 is safest on Windows.
+            max_epochs: Maximum training epochs before stopping.
+            patience: Early stopping patience (epochs without improvement).
+            lr: Learning rate for AdamW optimizer.
+            weight_decay: L2 regularization weight.
+
+            checkpoint_dir: Directory to save training checkpoints. If None, no checkpoints.
+            checkpoint_every: Save checkpoint every N epochs.
+            resume: If True, resume from existing checkpoint in checkpoint_dir.
+            reset_patience: If True, reset early stopping counter when resuming.
+
+            cache_dir: Directory to cache preprocessed tensors. Speeds up restarts.
+            max_cache_files: Maximum cache files to keep (oldest deleted first).
+
+            loss_config: Loss function preset.
+                - "mae": Pure MAE loss (default, most stable)
+                - "combined": 80% MAE + 15% SMAPE + 5% band accuracy
+                - "smape": 50% MAE + 50% SMAPE
+
+            device: Compute device. "auto" selects CUDA if available, else CPU.
+            use_amp: Use automatic mixed precision on CUDA (faster, less memory).
+            compile_model: Use torch.compile() for potential speedup (experimental).
+
+            species_aggregation: How to aggregate species for top-k selection.
+                - "abundance": Weight by abundance (default)
+                - "count": Count occurrences
+
+            species_selection: Which species to include in encoding.
+                - "top": Top-K most abundant (default, uses hash embedding)
+                - "bottom": Bottom-K least abundant
+                - "top_bottom": Top-K + Bottom-K (2K total)
+                - "all": All species (explicit vector, see species_representation)
+
+            species_representation: How to represent species (only for selection="all").
+                - "abundance": Weighted by abundance (default)
+                - "presence_absence": Binary 0/1
+
+            min_species_frequency: For selection="all", only include species in N+ plots.
+
+            verbose: Verbosity level.
+                - 0: Silent (no output)
+                - 1: Normal progress (default)
+                - 2: Debug (batch-level statistics)
+
+        Raises:
+            ValueError: If any parameter is invalid.
+
+        Example:
+            >>> trainer = Trainer(dataset, loss_config="mae")
+            >>> result = trainer.fit()
+            >>> predictions = trainer.predict(test_dataset)
+        """
         self.dataset = dataset
 
         # === Parameter Validation ===
@@ -185,6 +261,7 @@ class Trainer:
         self.min_species_frequency = min_species_frequency
         self.compile_model = compile_model
         self.max_grad_norm = 1.0  # Gradient clipping
+        self.verbose = verbose
 
         # Checkpointing
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
@@ -626,6 +703,8 @@ class Trainer:
             return None
 
         try:
+            # Note: weights_only=False is required for sklearn scalers.
+            # Only load cache files from trusted sources.
             cache = torch.load(cache_path, map_location="cpu", weights_only=False)
 
             # Validate cache key matches
@@ -724,6 +803,11 @@ class Trainer:
                 "hidden_dims": self.hidden_dims,
                 "max_epochs": self.max_epochs,
                 "batch_size": self.batch_size,
+                "species_encoding": self.species_encoding,
+                "species_selection": self.species_selection,
+                "species_representation": self.species_representation,
+                "genus_emb_dim": self.genus_emb_dim,
+                "family_emb_dim": self.family_emb_dim,
             },
         }
 
@@ -758,15 +842,41 @@ class Trainer:
             return None
 
         print(f"Loading checkpoint from {checkpoint_path}")
+        # Note: weights_only=False is required for sklearn scalers and encoder state.
+        # Only load checkpoint files from trusted sources.
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
 
-        # Validate config matches
+        # Validate config matches - architecture parameters must match exactly
         saved_config = checkpoint.get("config", {})
+        config_mismatches = []
+
+        # Critical architecture parameters
         if saved_config.get("hash_dim") != self.hash_dim:
-            print(f"  Warning: hash_dim mismatch ({saved_config.get('hash_dim')} vs {self.hash_dim})")
-            return None
+            config_mismatches.append(
+                f"hash_dim: checkpoint={saved_config.get('hash_dim')}, current={self.hash_dim}"
+            )
         if saved_config.get("hidden_dims") != self.hidden_dims:
-            print(f"  Warning: hidden_dims mismatch, starting fresh")
+            config_mismatches.append(
+                f"hidden_dims: checkpoint={saved_config.get('hidden_dims')}, current={self.hidden_dims}"
+            )
+        if saved_config.get("top_k") != self.top_k:
+            config_mismatches.append(
+                f"top_k: checkpoint={saved_config.get('top_k')}, current={self.top_k}"
+            )
+        if saved_config.get("species_encoding") != self.species_encoding:
+            config_mismatches.append(
+                f"species_encoding: checkpoint={saved_config.get('species_encoding')}, current={self.species_encoding}"
+            )
+        if saved_config.get("species_selection") != self.species_selection:
+            config_mismatches.append(
+                f"species_selection: checkpoint={saved_config.get('species_selection')}, current={self.species_selection}"
+            )
+
+        if config_mismatches:
+            print("  Warning: Cannot resume - configuration mismatch:")
+            for mismatch in config_mismatches:
+                print(f"    - {mismatch}")
+            print("  Starting fresh training run.")
             return None
 
         return checkpoint
@@ -1096,7 +1206,11 @@ class Trainer:
         nan_batch_count = 0
         total_batches = len(self._train_loader)
 
-        for batch in self._train_loader:
+        # Debug: track batch statistics
+        batch_losses = [] if self.verbose >= 2 else None
+        grad_norms = [] if self.verbose >= 2 else None
+
+        for batch_idx, batch in enumerate(self._train_loader):
             # Unpack batch - use non_blocking=True with pin_memory for async transfer
             idx = 0
             continuous = batch[idx].to(self._device, non_blocking=True)
@@ -1165,21 +1279,41 @@ class Trainer:
             # Check for NaN loss
             if torch.isnan(loss):
                 nan_batch_count += 1
-                if nan_batch_count == 1:
+                if nan_batch_count == 1 and self.verbose >= 1:
                     print(f"  WARNING: NaN loss detected, skipping batch...")
                 continue
 
-            total_loss += loss.item() * continuous.size(0)
+            batch_loss = loss.item()
+            total_loss += batch_loss * continuous.size(0)
+
+            # Debug: collect batch statistics
+            if self.verbose >= 2:
+                batch_losses.append(batch_loss)
+                # Compute gradient norm
+                total_norm = 0.0
+                for p in self.model.parameters():
+                    if p.grad is not None:
+                        total_norm += p.grad.data.norm(2).item() ** 2
+                grad_norms.append(total_norm ** 0.5)
 
         # Report NaN statistics if any occurred
         if nan_batch_count > 0:
             nan_pct = 100 * nan_batch_count / total_batches
-            print(f"  WARNING: NaN loss in {nan_batch_count}/{total_batches} batches ({nan_pct:.1f}%)")
+            if self.verbose >= 1:
+                print(f"  WARNING: NaN loss in {nan_batch_count}/{total_batches} batches ({nan_pct:.1f}%)")
             if nan_pct > 50:
                 raise RuntimeError(
                     f"Training unstable: NaN loss in {nan_pct:.1f}% of batches. "
                     "Try reducing learning rate or checking data for invalid values."
                 )
+
+        # Debug: print batch-level diagnostics
+        if self.verbose >= 2 and batch_losses:
+            import statistics
+            print(f"    [Debug] Batch losses: min={min(batch_losses):.4f}, max={max(batch_losses):.4f}, "
+                  f"mean={statistics.mean(batch_losses):.4f}, std={statistics.stdev(batch_losses) if len(batch_losses) > 1 else 0:.4f}")
+            print(f"    [Debug] Grad norms: min={min(grad_norms):.4f}, max={max(grad_norms):.4f}, "
+                  f"mean={statistics.mean(grad_norms):.4f}")
 
         return total_loss / len(self._train_loader.dataset)
 
@@ -1434,7 +1568,13 @@ class Trainer:
 
         Returns:
             (model, species_encoder, scalers)
+
+        Security Note:
+            This method uses pickle deserialization (weights_only=False) to load
+            sklearn scalers and encoder state. Only load model files from trusted sources.
         """
+        # Note: weights_only=False is required for sklearn scalers and encoder state.
+        # Only load model files from trusted sources.
         state = torch.load(path, map_location="cpu", weights_only=False)
 
         track_unknown_count = state.get("track_unknown_count", False)

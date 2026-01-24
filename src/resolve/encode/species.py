@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -11,6 +11,9 @@ from sklearn.feature_extraction import FeatureHasher
 
 from resolve.data.dataset import ResolveDataset
 from resolve.encode.vocab import TaxonomyVocab
+
+if TYPE_CHECKING:
+    from resolve.data.roles import RoleMapping
 
 
 @dataclass
@@ -243,7 +246,7 @@ class SpeciesEncoder:
     def _compute_unknown_mass(
         self,
         species_df: pd.DataFrame,
-        roles,
+        roles: RoleMapping,
         plot_ids: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -327,7 +330,7 @@ class SpeciesEncoder:
     def _build_hash_embedding(
         self,
         species_df: pd.DataFrame,
-        roles,
+        roles: RoleMapping,
         plot_ids: np.ndarray,
     ) -> np.ndarray:
         """
@@ -380,7 +383,7 @@ class SpeciesEncoder:
     def _build_species_vector(
         self,
         species_df: pd.DataFrame,
-        roles,
+        roles: RoleMapping,
         plot_ids: np.ndarray,
     ) -> np.ndarray:
         """
@@ -396,7 +399,7 @@ class SpeciesEncoder:
     def _prepare_species_matrix_indices(
         self,
         species_df: pd.DataFrame,
-        roles,
+        roles: RoleMapping,
         plot_ids: np.ndarray,
     ) -> tuple[pd.DataFrame, int, int, dict]:
         """
@@ -429,7 +432,7 @@ class SpeciesEncoder:
     def _build_presence_absence_vector(
         self,
         species_df: pd.DataFrame,
-        roles,
+        roles: RoleMapping,
         plot_ids: np.ndarray,
     ) -> np.ndarray:
         """Build binary presence/absence matrix (n_plots, n_species)."""
@@ -453,7 +456,7 @@ class SpeciesEncoder:
     def _build_abundance_vector(
         self,
         species_df: pd.DataFrame,
-        roles,
+        roles: RoleMapping,
         plot_ids: np.ndarray,
     ) -> np.ndarray:
         """Build abundance-weighted species matrix (n_plots, n_species)."""
@@ -555,7 +558,7 @@ class SpeciesEncoder:
     def _build_taxonomy_ids(
         self,
         species_df: pd.DataFrame,
-        roles,
+        roles: RoleMapping,
         plot_ids: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
         """

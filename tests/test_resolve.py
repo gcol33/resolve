@@ -797,3 +797,317 @@ class TestPredictor:
 
             assert embeddings.shape[0] == 100
             assert embeddings.shape[1] == 16  # last hidden dim
+
+
+# === Edge Case Tests ===
+
+class TestEdgeCases:
+    """Tests for edge cases and error handling."""
+
+    def test_file_not_found(self, sample_roles, sample_targets):
+        """Test that missing files raise FileNotFoundError."""
+        with pytest.raises(FileNotFoundError, match="Header file not found"):
+            ResolveDataset.from_csv(
+                header="nonexistent_header.csv",
+                species="nonexistent_species.csv",
+                roles=sample_roles,
+                targets=sample_targets,
+            )
+
+    def test_empty_dataset(self, empty_header_df, empty_species_df, sample_roles, sample_targets):
+        """Test handling of empty datasets (0 plots)."""
+        # Empty datasets should be allowed to create but may fail on schema/training
+        dataset = ResolveDataset(
+            empty_header_df,
+            empty_species_df,
+            RoleMapping.from_dict(sample_roles),
+            {name: TargetConfig.from_dict(name, cfg) for name, cfg in sample_targets.items()},
+        )
+        assert dataset.n_plots == 0
+
+    def test_partial_null_targets_training(
+        self, header_with_partial_null_targets, small_species_df, sample_roles
+    ):
+        """Test training with partially null target values."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            header_path = Path(tmpdir) / "header.csv"
+            species_path = Path(tmpdir) / "species.csv"
+            header_with_partial_null_targets.to_csv(header_path, index=False)
+            small_species_df.to_csv(species_path, index=False)
+
+            # Only elevation target (area has NaN values)
+            targets = {
+                "elevation": {"column": "Elevation", "task": "regression"},
+            }
+
+            dataset = ResolveDataset.from_csv(
+                header=header_path,
+                species=species_path,
+                roles=sample_roles,
+                targets=targets,
+            )
+
+            trainer = Trainer(
+                dataset,
+                hash_dim=16,
+                hidden_dims=[32, 16],
+                batch_size=8,
+                max_epochs=2,
+                device="cpu",
+            )
+            result = trainer.fit()
+            assert result.best_epoch >= 0
+
+    def test_single_species_per_plot(
+        self, header_with_partial_null_targets, species_with_single_species_per_plot, sample_roles
+    ):
+        """Test training when each plot has only 1 species."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            header_path = Path(tmpdir) / "header.csv"
+            species_path = Path(tmpdir) / "species.csv"
+            header_with_partial_null_targets.to_csv(header_path, index=False)
+            species_with_single_species_per_plot.to_csv(species_path, index=False)
+
+            targets = {"elevation": {"column": "Elevation", "task": "regression"}}
+
+            dataset = ResolveDataset.from_csv(
+                header=header_path,
+                species=species_path,
+                roles=sample_roles,
+                targets=targets,
+            )
+
+            # With top_k=3 but only 1 species, should still work (padded)
+            trainer = Trainer(
+                dataset,
+                hash_dim=16,
+                top_k=3,
+                hidden_dims=[32, 16],
+                batch_size=8,
+                max_epochs=2,
+                device="cpu",
+            )
+            result = trainer.fit()
+            assert result.best_epoch >= 0
+
+    def test_zero_abundance_species(
+        self, header_with_partial_null_targets, species_with_zero_abundance, sample_roles
+    ):
+        """Test training with some zero abundance values."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            header_path = Path(tmpdir) / "header.csv"
+            species_path = Path(tmpdir) / "species.csv"
+            header_with_partial_null_targets.to_csv(header_path, index=False)
+            species_with_zero_abundance.to_csv(species_path, index=False)
+
+            targets = {"elevation": {"column": "Elevation", "task": "regression"}}
+
+            dataset = ResolveDataset.from_csv(
+                header=header_path,
+                species=species_path,
+                roles=sample_roles,
+                targets=targets,
+            )
+
+            trainer = Trainer(
+                dataset,
+                hash_dim=16,
+                hidden_dims=[32, 16],
+                batch_size=8,
+                max_epochs=2,
+                device="cpu",
+            )
+            result = trainer.fit()
+            assert result.best_epoch >= 0
+
+    def test_nan_coordinates(
+        self, header_with_nan_coordinates, small_species_df, sample_roles
+    ):
+        """Test training with NaN coordinate values."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            header_path = Path(tmpdir) / "header.csv"
+            species_path = Path(tmpdir) / "species.csv"
+            header_with_nan_coordinates.to_csv(header_path, index=False)
+            small_species_df.to_csv(species_path, index=False)
+
+            targets = {"elevation": {"column": "Elevation", "task": "regression"}}
+
+            dataset = ResolveDataset.from_csv(
+                header=header_path,
+                species=species_path,
+                roles=sample_roles,
+                targets=targets,
+            )
+
+            # NaN coordinates should be handled (filled with 0)
+            coords = dataset.get_coordinates()
+            assert not np.isnan(coords).any(), "Coordinates should not contain NaN"
+
+            trainer = Trainer(
+                dataset,
+                hash_dim=16,
+                hidden_dims=[32, 16],
+                batch_size=8,
+                max_epochs=2,
+                device="cpu",
+            )
+            result = trainer.fit()
+            assert result.best_epoch >= 0
+
+
+class TestInputValidation:
+    """Tests for input validation and error messages."""
+
+    def test_trainer_invalid_dropout(self, sample_csv_files, sample_roles, sample_targets):
+        """Test that invalid dropout raises ValueError."""
+        header_path, species_path = sample_csv_files
+        dataset = ResolveDataset.from_csv(
+            header=header_path,
+            species=species_path,
+            roles=sample_roles,
+            targets=sample_targets,
+        )
+
+        with pytest.raises(ValueError, match="dropout must be in"):
+            Trainer(dataset, dropout=1.5)
+
+        with pytest.raises(ValueError, match="dropout must be in"):
+            Trainer(dataset, dropout=-0.1)
+
+    def test_trainer_invalid_lr(self, sample_csv_files, sample_roles, sample_targets):
+        """Test that invalid learning rate raises ValueError."""
+        header_path, species_path = sample_csv_files
+        dataset = ResolveDataset.from_csv(
+            header=header_path,
+            species=species_path,
+            roles=sample_roles,
+            targets=sample_targets,
+        )
+
+        with pytest.raises(ValueError, match="lr must be > 0"):
+            Trainer(dataset, lr=0)
+
+        with pytest.raises(ValueError, match="lr must be > 0"):
+            Trainer(dataset, lr=-0.001)
+
+    def test_trainer_invalid_dimensions(self, sample_csv_files, sample_roles, sample_targets):
+        """Test that invalid dimensions raise ValueError."""
+        header_path, species_path = sample_csv_files
+        dataset = ResolveDataset.from_csv(
+            header=header_path,
+            species=species_path,
+            roles=sample_roles,
+            targets=sample_targets,
+        )
+
+        with pytest.raises(ValueError, match="hash_dim must be >= 1"):
+            Trainer(dataset, hash_dim=0)
+
+        with pytest.raises(ValueError, match="top_k must be >= 1"):
+            Trainer(dataset, top_k=0)
+
+        with pytest.raises(ValueError, match="batch_size must be >= 1"):
+            Trainer(dataset, batch_size=0)
+
+    def test_trainer_invalid_species_encoding(self, sample_csv_files, sample_roles, sample_targets):
+        """Test that invalid species_encoding raises ValueError."""
+        header_path, species_path = sample_csv_files
+        dataset = ResolveDataset.from_csv(
+            header=header_path,
+            species=species_path,
+            roles=sample_roles,
+            targets=sample_targets,
+        )
+
+        with pytest.raises(ValueError, match="species_encoding must be"):
+            Trainer(dataset, species_encoding="invalid")
+
+    def test_trainer_invalid_species_selection(self, sample_csv_files, sample_roles, sample_targets):
+        """Test that invalid species_selection raises ValueError."""
+        header_path, species_path = sample_csv_files
+        dataset = ResolveDataset.from_csv(
+            header=header_path,
+            species=species_path,
+            roles=sample_roles,
+            targets=sample_targets,
+        )
+
+        with pytest.raises(ValueError, match="species_selection must be one of"):
+            Trainer(dataset, species_selection="invalid")
+
+    def test_save_before_fit(self, sample_csv_files, sample_roles, sample_targets):
+        """Test that save before fit raises RuntimeError."""
+        header_path, species_path = sample_csv_files
+        dataset = ResolveDataset.from_csv(
+            header=header_path,
+            species=species_path,
+            roles=sample_roles,
+            targets=sample_targets,
+        )
+
+        trainer = Trainer(dataset)
+        with pytest.raises(RuntimeError, match="model has not been built"):
+            trainer.save("model.pt")
+
+    def test_predict_before_fit(self, sample_csv_files, sample_roles, sample_targets):
+        """Test that predict before fit raises RuntimeError."""
+        header_path, species_path = sample_csv_files
+        dataset = ResolveDataset.from_csv(
+            header=header_path,
+            species=species_path,
+            roles=sample_roles,
+            targets=sample_targets,
+        )
+
+        trainer = Trainer(dataset)
+        with pytest.raises(RuntimeError, match="trainer has not been fitted"):
+            trainer.predict(dataset)
+
+    def test_predict_invalid_confidence_threshold(self, sample_csv_files, sample_roles, sample_targets):
+        """Test that invalid confidence_threshold raises ValueError."""
+        header_path, species_path = sample_csv_files
+        dataset = ResolveDataset.from_csv(
+            header=header_path,
+            species=species_path,
+            roles=sample_roles,
+            targets=sample_targets,
+        )
+
+        trainer = Trainer(
+            dataset,
+            hash_dim=16,
+            hidden_dims=[32, 16],
+            batch_size=32,
+            max_epochs=2,
+            device="cpu",
+        )
+        trainer.fit()
+
+        with pytest.raises(ValueError, match="confidence_threshold must be in"):
+            trainer.predict(dataset, confidence_threshold=1.5)
+
+        with pytest.raises(ValueError, match="confidence_threshold must be in"):
+            trainer.predict(dataset, confidence_threshold=-0.1)
+
+    def test_predict_invalid_output_space(self, sample_csv_files, sample_roles, sample_targets):
+        """Test that invalid output_space raises ValueError."""
+        header_path, species_path = sample_csv_files
+        dataset = ResolveDataset.from_csv(
+            header=header_path,
+            species=species_path,
+            roles=sample_roles,
+            targets=sample_targets,
+        )
+
+        trainer = Trainer(
+            dataset,
+            hash_dim=16,
+            hidden_dims=[32, 16],
+            batch_size=32,
+            max_epochs=2,
+            device="cpu",
+        )
+        trainer.fit()
+
+        with pytest.raises(ValueError, match="output_space must be"):
+            trainer.predict(dataset, output_space="invalid")
