@@ -34,3 +34,23 @@ target_link_libraries(resolve_tests
 # Tests can be run manually with the test executable
 include(CTest)
 add_test(NAME resolve_tests COMMAND resolve_tests)
+
+# Benchmark executable (optional)
+add_executable(resolve_benchmark
+    benchmark_cuda.cpp
+)
+
+# Add CUDA library directory if CUDA is available
+if(USE_CUDA AND CUDAToolkit_FOUND)
+    target_link_directories(resolve_benchmark PRIVATE ${CUDAToolkit_LIBRARY_DIR})
+elseif(USE_CUDA AND DEFINED CUDA_TOOLKIT_ROOT_DIR)
+    target_link_directories(resolve_benchmark PRIVATE ${CUDA_TOOLKIT_ROOT_DIR}/lib/x64)
+elseif(USE_CUDA AND DEFINED ENV{CUDA_PATH})
+    target_link_directories(resolve_benchmark PRIVATE $ENV{CUDA_PATH}/lib/x64)
+endif()
+
+target_link_libraries(resolve_benchmark
+    PRIVATE
+        resolve_core
+        ${TORCH_LIBRARIES}
+)
