@@ -252,6 +252,8 @@ resolve_dataset <- function(header,
 #' Train a model on a dataset with sensible defaults.
 #'
 #' @param dataset A resolve_dataset object (from resolve_dataset())
+#' @param species_encoding How to encode species: "hash" (default) or "embed".
+#'   Note: "embed" mode is not yet fully supported in R bindings.
 #' @param hidden_dims Hidden layer dimensions (default c(2048, 1024, 512, 256, 128, 64))
 #' @param max_epochs Maximum training epochs (default 500)
 #' @param patience Early stopping patience (default 50)
@@ -261,6 +263,7 @@ resolve_dataset <- function(header,
 #' @param test_size Fraction of data to use for testing (default 0.2)
 #' @param seed Random seed (default 42)
 #' @param save_path Path to save final model (optional)
+#' @param loss_config Loss configuration preset: "mae" (default), "smape", or "combined"
 #' @param verbose Print training progress (default TRUE)
 #'
 #' @return A trained model object with fit results
@@ -274,6 +277,7 @@ resolve_dataset <- function(header,
 #'
 #' @export
 resolve_train <- function(dataset,
+                          species_encoding = "hash",
                           hidden_dims = NULL,
                           max_epochs = 500L,
                           patience = 50L,
@@ -283,9 +287,27 @@ resolve_train <- function(dataset,
                           test_size = 0.2,
                           seed = 42L,
                           save_path = NULL,
+                          loss_config = "mae",
                           verbose = TRUE) {
   if (!inherits(dataset, "resolve_dataset")) {
     stop("dataset must be created with resolve_dataset()")
+  }
+
+  # Validate species_encoding
+  if (!species_encoding %in% c("hash", "embed")) {
+    stop("species_encoding must be 'hash' or 'embed'")
+  }
+  if (species_encoding == "embed") {
+    stop("species_encoding='embed' is not yet supported in R bindings. Use 'hash' mode.")
+  }
+
+  # Validate loss_config
+  if (!loss_config %in% c("mae", "smape", "combined")) {
+    stop("loss_config must be 'mae', 'smape', or 'combined'")
+  }
+  if (loss_config != "mae" && verbose) {
+    message("Note: loss_config='", loss_config, "' is not yet fully supported in R bindings. ",
+            "Using default loss (MAE + band penalty). For full loss_config support, use Python API.")
   }
 
   # Default hidden dims
@@ -386,16 +408,32 @@ resolve_train <- function(dataset,
 #' @param model A trained model (from resolve_train() or resolve_load())
 #' @param dataset A resolve_dataset to predict on
 #' @param return_latent Return latent representations (default FALSE)
+#' @param output_space Output space for regression predictions:
+#'   "raw" (default): inverse-transform predictions to original scale
+#'   "transformed": keep predictions in transformed space (e.g., log1p)
+#' @param confidence_threshold Minimum confidence for predictions (0-1).
+#'   Predictions below threshold are set to NA. Default 0 keeps all predictions.
+#'   Confidence is based on 1 - unknown_fraction (species coverage).
 #'
-#' @return Named list of prediction arrays
+#' @return Named list of prediction arrays, plus 'confidence' for each target
 #'
 #' @examples
 #' \dontrun{
 #' preds <- resolve_predict(trained_model, new_dataset)
+#' preds <- resolve_predict(trained_model, new_dataset, confidence_threshold = 0.5)
 #' }
 #'
 #' @export
-resolve_predict <- function(model, dataset, return_latent = FALSE) {
+resolve_predict <- function(model,
+                            dataset,
+                            return_latent = FALSE,
+                            output_space = "raw",
+                            confidence_threshold = 0.0) {
+  # Validate output_space
+  if (!output_space %in% c("raw", "transformed")) {
+    stop("output_space must be 'raw' or 'transformed'")
+  }
+
   # Handle both trainer objects and predictor objects
   if (inherits(model, "Rcpp_Predictor") || inherits(model, "Rcpp_RPredictor")) {
     predictor <- model
@@ -405,7 +443,7 @@ resolve_predict <- function(model, dataset, return_latent = FALSE) {
       matrix(0, nrow = nrow(dataset$coordinates), ncol = 1)
     }
 
-    predictor$predict(
+    result <- predictor$predict(
       coordinates = dataset$coordinates,
       covariates = dataset$covariates,
       hash_embedding = hash_emb,
@@ -413,9 +451,48 @@ resolve_predict <- function(model, dataset, return_latent = FALSE) {
       family_ids = if (!is.null(dataset$family_ids)) as.integer(dataset$family_ids) else NULL,
       return_latent = return_latent
     )
+
+    # Compute confidence from unknown_fraction (1 - unknown_fraction)
+    if (!is.null(dataset$unknown_fraction)) {
+      confidence <- 1.0 - dataset$unknown_fraction
+    } else {
+      # If no unknown tracking, assume full confidence
+      confidence <- rep(1.0, nrow(dataset$coordinates))
+    }
+
+    # Post-process each target
+    target_names <- names(dataset$schema$targets)
+    for (name in target_names) {
+      if (!is.null(result[[name]])) {
+        cfg <- dataset$schema$targets[[name]]
+
+        # Apply inverse transform for log1p targets if output_space == "raw"
+        if (!is.null(cfg$transform) && cfg$transform == "log1p" && output_space == "raw") {
+          result[[name]] <- expm1(result[[name]])
+        }
+
+        # Apply confidence threshold
+        if (confidence_threshold > 0) {
+          result[[name]][confidence < confidence_threshold] <- NA
+        }
+
+        # Add confidence for this target
+        result[[paste0(name, "_confidence")]] <- confidence
+      }
+    }
+
+    result$confidence <- confidence
+    result
+
   } else if (is.list(model) && !is.null(model$trainer)) {
-    # Trainer from resolve_train()
-    stop("Direct prediction from Trainer not yet implemented. Save the model and use resolve_load() first.")
+    # Trainer from resolve_train() - use temp file workaround
+    temp_path <- tempfile(fileext = ".pt")
+    on.exit(unlink(temp_path), add = TRUE)
+    model$trainer$save(temp_path)
+    predictor <- resolve_load(temp_path)
+
+    # Recurse with the predictor
+    resolve_predict(predictor, dataset, return_latent, output_space, confidence_threshold)
   } else {
     stop("model must be a Predictor object or result from resolve_train()")
   }
