@@ -15,7 +15,45 @@
 // Extern "C" declarations for CUDA kernel launchers (defined in kernels.cu)
 extern "C" {
 
+// Basic kernel (global atomics)
 cudaError_t resolve_launch_hash_and_aggregate(
+    const int64_t* plot_indices,
+    const int64_t* species_ids,
+    const float* weights,
+    float* output,
+    int64_t n,
+    int64_t n_plots,
+    int32_t hash_dim,
+    void* stream
+);
+
+// Shared memory kernel (one block per plot)
+cudaError_t resolve_launch_hash_and_aggregate_shared(
+    const int64_t* plot_indices,
+    const int64_t* species_ids,
+    const float* weights,
+    float* output,
+    int64_t n,
+    int64_t n_plots,
+    int32_t hash_dim,
+    void* stream
+);
+
+// Chunked kernel (better for sorted data)
+cudaError_t resolve_launch_hash_and_aggregate_chunked(
+    const int64_t* plot_indices,
+    const int64_t* species_ids,
+    const float* weights,
+    float* output,
+    int64_t n,
+    int64_t n_plots,
+    int32_t hash_dim,
+    int64_t chunk_size,
+    void* stream
+);
+
+// Auto-select best kernel
+cudaError_t resolve_launch_hash_and_aggregate_auto(
     const int64_t* plot_indices,
     const int64_t* species_ids,
     const float* weights,

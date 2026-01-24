@@ -9,6 +9,8 @@
 
 #ifdef RESOLVE_HAS_CUDA
 #include "resolve/cuda/feature_hash.hpp"
+#include <ATen/cuda/CUDAContext.h>
+#include <cuda_runtime.h>
 #endif
 
 // Simple CPU implementation for comparison
@@ -72,6 +74,16 @@ double benchmark(Func&& fn, int warmup = 3, int iterations = 10) {
     return duration.count() / 1000.0 / iterations;  // ms per iteration
 }
 
+#ifdef RESOLVE_HAS_CUDA
+// Extern declarations for kernel launchers
+extern "C" {
+cudaError_t resolve_launch_hash_and_aggregate(const int64_t*, const int64_t*, const float*, float*, int64_t, int64_t, int32_t, void*);
+cudaError_t resolve_launch_hash_and_aggregate_shared(const int64_t*, const int64_t*, const float*, float*, int64_t, int64_t, int32_t, void*);
+cudaError_t resolve_launch_hash_and_aggregate_chunked(const int64_t*, const int64_t*, const float*, float*, int64_t, int64_t, int32_t, int64_t, void*);
+cudaError_t resolve_launch_hash_and_aggregate_auto(const int64_t*, const int64_t*, const float*, float*, int64_t, int64_t, int32_t, void*);
+}
+#endif
+
 void run_hash_embedding_benchmark(int64_t n_rows, int64_t n_plots, int32_t hash_dim) {
     std::cout << "\n=== Hash Embedding Benchmark ===" << std::endl;
     std::cout << "n_rows: " << n_rows << ", n_plots: " << n_plots << ", hash_dim: " << hash_dim << std::endl;
@@ -85,7 +97,7 @@ void run_hash_embedding_benchmark(int64_t n_rows, int64_t n_plots, int32_t hash_
     double cpu_time = benchmark([&]() {
         auto result = compute_hash_embedding_cpu(plot_indices, species_ids, weights, n_plots, hash_dim);
     });
-    std::cout << "CPU:  " << std::fixed << std::setprecision(3) << cpu_time << " ms" << std::endl;
+    std::cout << "CPU:        " << std::fixed << std::setprecision(3) << cpu_time << " ms" << std::endl;
 
 #ifdef RESOLVE_HAS_CUDA
     if (torch::cuda::is_available()) {
@@ -94,20 +106,71 @@ void run_hash_embedding_benchmark(int64_t n_rows, int64_t n_plots, int32_t hash_
         auto species_ids_cuda = species_ids.to(torch::kCUDA);
         auto weights_cuda = weights.to(torch::kCUDA);
 
-        // GPU benchmark
-        double gpu_time = benchmark([&]() {
-            auto result = resolve::cuda::compute_hash_embedding_cuda(
-                plot_indices_cuda, species_ids_cuda, weights_cuda, n_plots, hash_dim);
-        });
-        std::cout << "GPU:  " << std::fixed << std::setprecision(3) << gpu_time << " ms" << std::endl;
-        std::cout << "Speedup: " << std::fixed << std::setprecision(1) << (cpu_time / gpu_time) << "x" << std::endl;
+        cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-        // Verify results match
+        // Benchmark all kernel variants
+        auto options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
+
+        // Basic kernel
+        double gpu_basic_time = benchmark([&]() {
+            auto output = torch::zeros({n_plots, hash_dim}, options);
+            resolve_launch_hash_and_aggregate(
+                plot_indices_cuda.data_ptr<int64_t>(),
+                species_ids_cuda.data_ptr<int64_t>(),
+                weights_cuda.data_ptr<float>(),
+                output.data_ptr<float>(),
+                n_rows, n_plots, hash_dim, stream);
+        });
+        std::cout << "GPU basic:  " << std::fixed << std::setprecision(3) << gpu_basic_time << " ms"
+                  << " (" << std::setprecision(1) << (cpu_time / gpu_basic_time) << "x)" << std::endl;
+
+        // Shared memory kernel (only if n_plots <= 65535 for grid limit)
+        if (n_plots <= 65535) {
+            double gpu_shared_time = benchmark([&]() {
+                auto output = torch::zeros({n_plots, hash_dim}, options);
+                resolve_launch_hash_and_aggregate_shared(
+                    plot_indices_cuda.data_ptr<int64_t>(),
+                    species_ids_cuda.data_ptr<int64_t>(),
+                    weights_cuda.data_ptr<float>(),
+                    output.data_ptr<float>(),
+                    n_rows, n_plots, hash_dim, stream);
+            });
+            std::cout << "GPU shared: " << std::fixed << std::setprecision(3) << gpu_shared_time << " ms"
+                      << " (" << std::setprecision(1) << (cpu_time / gpu_shared_time) << "x)" << std::endl;
+        }
+
+        // Chunked kernel
+        double gpu_chunked_time = benchmark([&]() {
+            auto output = torch::zeros({n_plots, hash_dim}, options);
+            resolve_launch_hash_and_aggregate_chunked(
+                plot_indices_cuda.data_ptr<int64_t>(),
+                species_ids_cuda.data_ptr<int64_t>(),
+                weights_cuda.data_ptr<float>(),
+                output.data_ptr<float>(),
+                n_rows, n_plots, hash_dim, 4096, stream);
+        });
+        std::cout << "GPU chunked:" << std::fixed << std::setprecision(3) << gpu_chunked_time << " ms"
+                  << " (" << std::setprecision(1) << (cpu_time / gpu_chunked_time) << "x)" << std::endl;
+
+        // Auto-select kernel
+        double gpu_auto_time = benchmark([&]() {
+            auto output = torch::zeros({n_plots, hash_dim}, options);
+            resolve_launch_hash_and_aggregate_auto(
+                plot_indices_cuda.data_ptr<int64_t>(),
+                species_ids_cuda.data_ptr<int64_t>(),
+                weights_cuda.data_ptr<float>(),
+                output.data_ptr<float>(),
+                n_rows, n_plots, hash_dim, stream);
+        });
+        std::cout << "GPU auto:   " << std::fixed << std::setprecision(3) << gpu_auto_time << " ms"
+                  << " (" << std::setprecision(1) << (cpu_time / gpu_auto_time) << "x)" << std::endl;
+
+        // Verify results match (using basic kernel as reference)
         auto cpu_result = compute_hash_embedding_cpu(plot_indices, species_ids, weights, n_plots, hash_dim);
         auto gpu_result = resolve::cuda::compute_hash_embedding_cuda(
             plot_indices_cuda, species_ids_cuda, weights_cuda, n_plots, hash_dim);
         auto diff = (cpu_result - gpu_result.to(torch::kCPU)).abs().max().item<float>();
-        std::cout << "Max diff: " << diff << (diff < 1e-5 ? " (OK)" : " (MISMATCH!)") << std::endl;
+        std::cout << "Verify: " << (diff < 1e-5 ? "OK" : "MISMATCH!") << std::endl;
     } else {
         std::cout << "GPU:  N/A (CUDA not available)" << std::endl;
     }
