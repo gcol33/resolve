@@ -107,10 +107,49 @@ class Trainer:
     ):
         self.dataset = dataset
 
-        # Validate species_encoding
+        # === Parameter Validation ===
+        # Species encoding
         if species_encoding not in ("hash", "embed"):
             raise ValueError(f"species_encoding must be 'hash' or 'embed', got {species_encoding!r}")
         self.species_encoding = species_encoding
+
+        # Dimension parameters
+        if hash_dim < 1:
+            raise ValueError(f"hash_dim must be >= 1, got {hash_dim}")
+        if species_embed_dim < 1:
+            raise ValueError(f"species_embed_dim must be >= 1, got {species_embed_dim}")
+        if top_k < 1:
+            raise ValueError(f"top_k must be >= 1, got {top_k}")
+        if top_k_species < 1:
+            raise ValueError(f"top_k_species must be >= 1, got {top_k_species}")
+        if genus_emb_dim < 1:
+            raise ValueError(f"genus_emb_dim must be >= 1, got {genus_emb_dim}")
+        if family_emb_dim < 1:
+            raise ValueError(f"family_emb_dim must be >= 1, got {family_emb_dim}")
+
+        # Training parameters
+        if not 0 <= dropout < 1:
+            raise ValueError(f"dropout must be in [0, 1), got {dropout}")
+        if batch_size < 1:
+            raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+        if max_epochs < 1:
+            raise ValueError(f"max_epochs must be >= 1, got {max_epochs}")
+        if patience < 1:
+            raise ValueError(f"patience must be >= 1, got {patience}")
+        if lr <= 0:
+            raise ValueError(f"lr must be > 0, got {lr}")
+        if weight_decay < 0:
+            raise ValueError(f"weight_decay must be >= 0, got {weight_decay}")
+
+        # Species selection mode
+        valid_selections = ("top", "bottom", "top_bottom", "all")
+        if species_selection not in valid_selections:
+            raise ValueError(f"species_selection must be one of {valid_selections}, got {species_selection!r}")
+
+        # Species representation mode
+        valid_representations = ("abundance", "presence_absence")
+        if species_representation not in valid_representations:
+            raise ValueError(f"species_representation must be one of {valid_representations}, got {species_representation!r}")
 
         self.hash_dim = hash_dim
         self.species_embed_dim = species_embed_dim
@@ -1054,6 +1093,8 @@ class Trainer:
         """Run one training epoch."""
         self.model.train()
         total_loss = 0.0
+        nan_batch_count = 0
+        total_batches = len(self._train_loader)
 
         for batch in self._train_loader:
             # Unpack batch - use non_blocking=True with pin_memory for async transfer
@@ -1123,10 +1164,22 @@ class Trainer:
 
             # Check for NaN loss
             if torch.isnan(loss):
-                print(f"  WARNING: NaN loss detected at batch, skipping...")
+                nan_batch_count += 1
+                if nan_batch_count == 1:
+                    print(f"  WARNING: NaN loss detected, skipping batch...")
                 continue
 
             total_loss += loss.item() * continuous.size(0)
+
+        # Report NaN statistics if any occurred
+        if nan_batch_count > 0:
+            nan_pct = 100 * nan_batch_count / total_batches
+            print(f"  WARNING: NaN loss in {nan_batch_count}/{total_batches} batches ({nan_pct:.1f}%)")
+            if nan_pct > 50:
+                raise RuntimeError(
+                    f"Training unstable: NaN loss in {nan_pct:.1f}% of batches. "
+                    "Try reducing learning rate or checking data for invalid values."
+                )
 
         return total_loss / len(self._train_loader.dataset)
 
@@ -1228,7 +1281,23 @@ class Trainer:
         return avg_loss, metrics
 
     def save(self, path: str | Path) -> None:
-        """Save model, encoder, and scalers."""
+        """
+        Save model, encoder, and scalers to file.
+
+        Raises:
+            RuntimeError: If trainer has not been fitted yet.
+        """
+        if self.model is None:
+            raise RuntimeError(
+                "Cannot save: model has not been built yet. "
+                "Call trainer.fit() before trainer.save()."
+            )
+        if self._species_encoder is None:
+            raise RuntimeError(
+                "Cannot save: species encoder not initialized. "
+                "Call trainer.fit() before trainer.save()."
+            )
+
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1283,9 +1352,22 @@ class Trainer:
 
         Returns:
             Dict mapping target name to predictions array
+
+        Raises:
+            RuntimeError: If trainer has not been fitted yet.
+            ValueError: If output_space or confidence_threshold is invalid.
         """
-        if self._species_encoder is None:
-            raise RuntimeError("Trainer must be fit before predict")
+        if self._species_encoder is None or self.model is None:
+            raise RuntimeError(
+                "Cannot predict: trainer has not been fitted yet. "
+                "Call trainer.fit() before trainer.predict()."
+            )
+
+        if output_space not in ("raw", "transformed"):
+            raise ValueError(f"output_space must be 'raw' or 'transformed', got {output_space!r}")
+
+        if not 0 <= confidence_threshold <= 1:
+            raise ValueError(f"confidence_threshold must be in [0, 1], got {confidence_threshold}")
 
         self.model.eval()
 

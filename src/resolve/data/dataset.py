@@ -148,8 +148,22 @@ class ResolveDataset:
             track_unknown_fraction: Track fraction of abundance from unknown species (default True)
             track_unknown_count: Track count of unknown species (default False)
         """
-        header_df = pd.read_csv(header, low_memory=False)
-        species_df = pd.read_csv(species, low_memory=False)
+        # Validate file paths exist before loading
+        header_path = Path(header)
+        species_path = Path(species)
+
+        if not header_path.exists():
+            raise FileNotFoundError(f"Header file not found: {header_path}")
+        if not header_path.is_file():
+            raise ValueError(f"Header path is not a file: {header_path}")
+
+        if not species_path.exists():
+            raise FileNotFoundError(f"Species file not found: {species_path}")
+        if not species_path.is_file():
+            raise ValueError(f"Species path is not a file: {species_path}")
+
+        header_df = pd.read_csv(header_path, low_memory=False)
+        species_df = pd.read_csv(species_path, low_memory=False)
 
         role_mapping = RoleMapping.from_dict(roles)
         target_configs = {
