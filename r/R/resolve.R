@@ -71,6 +71,7 @@ resolve_species_encoder <- function(hash_dim = 32L,
 #' @param track_unknown_count Track count of unknown species (default FALSE)
 #' @param hash_dim Dimension of species hash embedding (default 32)
 #' @param top_k Number of top genera/families to track (default 5)
+#' @param top_k_species Number of top species to track for embed mode (default 10)
 #' @param selection Selection mode: "top", "bottom", "top_bottom", "all" (default "top")
 #' @param representation Representation mode: "abundance", "presence_absence" (default "abundance")
 #'
@@ -79,6 +80,7 @@ resolve_species_encoder <- function(hash_dim = 32L,
 #'   - coordinates: Matrix of plot coordinates
 #'   - covariates: Matrix of covariate values
 #'   - hash_embedding: Matrix of species hash embeddings
+#'   - species_ids: Matrix of top-k species IDs per plot (for embed mode)
 #'   - genus_ids: Matrix of genus IDs (if has_taxonomy)
 #'   - family_ids: Matrix of family IDs (if has_taxonomy)
 #'   - unknown_fraction: Vector of unknown fractions (if track_unknown_fraction)
@@ -112,6 +114,7 @@ resolve_dataset <- function(header,
                             track_unknown_count = FALSE,
                             hash_dim = 32L,
                             top_k = 5L,
+                            top_k_species = 10L,
                             selection = "top",
                             representation = "abundance") {
   # Read CSV files
@@ -196,11 +199,34 @@ resolve_dataset <- function(header,
     target_configs[[name]] <- cfg
   }
 
+  # Prepare species_ids for embed mode (top-k species per plot)
+  # Build species vocabulary
+  unique_species <- sort(unique(species_data$species_id))
+  species_to_idx <- setNames(seq_along(unique_species), unique_species)
+  n_species_vocab <- length(unique_species) + 1L  # +1 for padding/unknown (index 0)
+
+  # Compute top-k species per plot by abundance
+  species_ids_matrix <- matrix(0L, nrow = length(plot_ids), ncol = as.integer(top_k_species))
+  for (i in seq_along(plot_ids)) {
+    pid <- plot_ids[i]
+    plot_species <- species_data[species_data$plot_id == pid, , drop = FALSE]
+    if (nrow(plot_species) > 0) {
+      # Sort by abundance descending
+      plot_species <- plot_species[order(-plot_species$abundance), , drop = FALSE]
+      # Take top-k species
+      top_species <- head(plot_species$species_id, top_k_species)
+      # Map to indices (1-based, 0 is padding)
+      for (j in seq_along(top_species)) {
+        species_ids_matrix[i, j] <- species_to_idx[top_species[j]]
+      }
+    }
+  }
+
   # Build schema
   schema <- list(
     n_plots = length(plot_ids),
     n_species = encoder$n_known_species(),
-    n_species_vocab = if (encoder$uses_explicit_vector()) encoder$n_species_vector() else 0L,
+    n_species_vocab = n_species_vocab,
     has_coordinates = has_coordinates,
     has_abundance = TRUE,
     has_taxonomy = has_taxonomy,
@@ -209,7 +235,8 @@ resolve_dataset <- function(header,
     covariate_names = covariate_cols,
     targets = target_configs,
     track_unknown_fraction = track_unknown_fraction,
-    track_unknown_count = track_unknown_count
+    track_unknown_count = track_unknown_count,
+    top_k_species = as.integer(top_k_species)
   )
 
   # Return dataset components
@@ -241,6 +268,10 @@ resolve_dataset <- function(header,
   if (!is.null(encoded$species_vector)) {
     result$species_vector <- encoded$species_vector
   }
+
+  # Always add species_ids for embed mode support
+  result$species_ids <- species_ids_matrix
+  result$species_vocab <- unique_species
 
   class(result) <- "resolve_dataset"
   result
@@ -297,8 +328,10 @@ resolve_train <- function(dataset,
   if (!species_encoding %in% c("hash", "embed")) {
     stop("species_encoding must be 'hash' or 'embed'")
   }
-  if (species_encoding == "embed") {
-    stop("species_encoding='embed' is not yet supported in R bindings. Use 'hash' mode.")
+
+  # For embed mode, verify dataset has species_ids
+  if (species_encoding == "embed" && is.null(dataset$species_ids)) {
+    stop("species_encoding='embed' requires dataset with species_ids")
   }
 
   # Validate loss_config
@@ -319,8 +352,10 @@ resolve_train <- function(dataset,
 
   # Build model config
   model_config <- list(
+    species_encoding = species_encoding,
     hash_dim = dataset$encoder$hash_dim(),
     top_k = dataset$encoder$top_k(),
+    top_k_species = if (!is.null(dataset$schema$top_k_species)) dataset$schema$top_k_species else 10L,
     n_taxonomy_slots = dataset$encoder$n_taxonomy_slots(),
     hidden_dims = hidden_dims,
     dropout = 0.3

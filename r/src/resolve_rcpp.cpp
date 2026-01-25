@@ -121,6 +121,13 @@ resolve::TransformType parse_transform_type(const std::string& s) {
     stop("Invalid transform type: " + s);
 }
 
+resolve::SpeciesEncodingMode parse_species_encoding_mode(const std::string& s) {
+    if (s == "hash") return resolve::SpeciesEncodingMode::Hash;
+    if (s == "embed") return resolve::SpeciesEncodingMode::Embed;
+    if (s == "sparse") return resolve::SpeciesEncodingMode::Sparse;
+    stop("Invalid species encoding mode: " + s);
+}
+
 // =============================================================================
 // SpeciesEncoder class wrapper
 // =============================================================================
@@ -290,6 +297,10 @@ public:
         }
 
         resolve::ModelConfig config;
+        if (config_list.containsElementNamed("species_encoding")) {
+            config.species_encoding = parse_species_encoding_mode(
+                as<std::string>(config_list["species_encoding"]));
+        }
         if (config_list.containsElementNamed("hash_dim")) {
             config.hash_dim = config_list["hash_dim"];
         }
