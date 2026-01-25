@@ -5,15 +5,25 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-**Representation Encoding of Species Outcomes via Linear Vector Embeddings**
+**Representation Encoding of Set-based Outcomes via Linear Vector Embeddings**
 
-An opinionated torch-based package for predicting plot-level attributes from species composition, environment, and space.
+A torch-based package for predicting sample attributes from compositional data—sets of entities with optional abundances or weights.
 
 ## Overview
 
-RESOLVE treats species composition as *biotic context* — a rich, structured signal that encodes information about plot attributes. Rather than predicting species from environment (as in SDMs), RESOLVE predicts plot properties from species.
+RESOLVE treats compositional data as *contextual signal*—a rich, structured representation that encodes information about sample-level attributes. Given a set of entities (species in a plot, symptoms in a patient, products in a basket), RESOLVE learns to predict properties of the sample.
 
-**Core claim**: Species composition encodes a shared latent representation that simultaneously informs multiple plot attributes (area, elevation, climate, habitat class).
+**Core idea**: Compositional data encodes a shared latent representation that simultaneously informs multiple sample attributes.
+
+### Example Domains
+
+| Domain | Entities | Sample | Predictions |
+|--------|----------|--------|-------------|
+| **Ecology** | Plant species | Vegetation plot | Plot area, habitat type, elevation |
+| **Medicine** | Symptoms, conditions | Patient | Diagnosis, severity, treatment response |
+| **Retail** | Products | Shopping basket | Customer segment, churn risk |
+| **Genomics** | Genes, variants | Sample | Phenotype, disease risk |
+| **Text** | Words, n-grams | Document | Topic, sentiment, author |
 
 ## Quick Start
 
@@ -22,86 +32,100 @@ from resolve import ResolveDataset, Trainer
 
 # Load data
 dataset = ResolveDataset.from_csv(
-    header="plots.csv",
-    species="species.csv",
+    header="samples.csv",       # one row per sample
+    species="entities.csv",     # entity-sample associations
     roles={
-        "plot_id": "plot_id",
-        "species_id": "species",
-        "species_plot_id": "plot_id",
+        "plot_id": "sample_id",
+        "species_id": "entity_id",
+        "species_plot_id": "sample_id",
     },
     targets={"y": {"column": "response", "task": "regression"}},
 )
 
-# Train - Trainer builds model automatically from dataset
+# Train
 trainer = Trainer(dataset)
 trainer.fit()
 
 # Predict with confidence filtering
 preds = trainer.predict(dataset)
-preds = trainer.predict(dataset, confidence_threshold=0.8)  # filter uncertain predictions
+preds = trainer.predict(dataset, confidence_threshold=0.8)
 ```
 
-For more complex use cases with taxonomy, coordinates, and multiple targets:
+### Ecology Example
+
+Predict vegetation plot area and habitat from species composition:
+
+```python
+from resolve import ResolveDataset, Trainer, RoleMapping, TargetConfig, TrainerConfig
+
+dataset = ResolveDataset.from_csv(
+    header="plots.csv",
+    species="species_records.csv",
+    roles=RoleMapping(
+        plot_id="PlotID",
+        species_id="Species",
+        species_plot_id="PlotID",
+        abundance="Cover",
+        taxonomy_genus="Genus",
+        taxonomy_family="Family",
+        coords_lat="Latitude",
+        coords_lon="Longitude",
+    ),
+    targets={
+        "area": TargetConfig(column="Area", task="regression", transform="log1p"),
+        "habitat": TargetConfig(column="Habitat", task="classification", num_classes=5),
+    },
+)
+
+config = TrainerConfig(hash_dim=64, top_k=10, hidden_dims=[512, 256, 128])
+trainer = Trainer(**config.to_trainer_kwargs(dataset))
+trainer.fit()
+```
+
+### Medical Example
+
+Predict diagnosis from patient symptoms:
 
 ```python
 dataset = ResolveDataset.from_csv(
-    header="plots.csv",
-    species="species.csv",
-    roles={
-        "plot_id": "PlotID",
-        "species_id": "Species",
-        "species_plot_id": "PlotID",
-        "abundance": "Cover",
-        "taxonomy_genus": "Genus",
-        "taxonomy_family": "Family",
-        "coords_lat": "Latitude",
-        "coords_lon": "Longitude",
-    },
+    header="patients.csv",
+    species="symptoms.csv",
+    roles=RoleMapping(
+        plot_id="patient_id",
+        species_id="symptom_code",
+        species_plot_id="patient_id",
+        abundance="severity",  # optional: symptom intensity
+    ),
     targets={
-        "area": {"column": "Area", "task": "regression", "transform": "log1p"},
-        "habitat": {"column": "Habitat", "task": "classification", "num_classes": 5},
+        "diagnosis": TargetConfig(column="icd_code", task="classification", num_classes=50),
+        "severity": TargetConfig(column="severity_score", task="regression"),
     },
-    species_normalization="relative",  # normalize abundances within each plot
 )
-
-# Customize training parameters
-trainer = Trainer(
-    dataset,
-    species_encoding="hash",  # "hash" (default) or "embed"
-    hash_dim=64,
-    top_k=10,
-    loss_config="mae",  # "mae", "combined", or "smape"
-)
-trainer.fit()
-trainer.save("model.pt")
 ```
 
 ## Features
 
 | Feature | Description |
 |---------|-------------|
-| **Hybrid species encoding** | Feature hashing for full species lists + learned embeddings for dominant taxa |
+| **Hybrid entity encoding** | Feature hashing for full entity lists + learned embeddings for dominant entities |
 | **Multi-target prediction** | Single shared encoder, multiple task heads (regression & classification) |
 | **Phased training** | MAE → SMAPE → band accuracy optimization |
-| **Semantic role mapping** | Flexible column naming, strict structure |
-| **Unknown species tracking** | Detects and quantifies novel species at inference time |
+| **Semantic role mapping** | Flexible column naming via `RoleMapping` dataclass |
+| **Unknown entity tracking** | Detects and quantifies novel entities at inference time |
 | **Abundance normalization** | Raw, normalized (sum-to-one), or log1p modes |
 | **Confidence filtering** | Set threshold to filter uncertain predictions |
+| **Typed configuration** | `TrainerConfig` dataclass with presets (TINY_MODEL → MAX_MODEL) |
 | **CPU-first** | Works without GPU, scales with CUDA when available |
 
 ## Performance
 
-RESOLVE includes optimized CUDA kernels for GPU acceleration. Benchmarks on RTX 4090:
+Optimized CUDA kernels for GPU acceleration. Benchmarks on RTX 4090:
 
 | Operation | Dataset Size | CPU | GPU | Speedup |
 |-----------|-------------|-----|-----|---------|
-| Hash Embedding | 10K species records | 0.08 ms | 0.02 ms | 5x |
-| Hash Embedding | 100K species records | 1.3 ms | 0.04 ms | **35x** |
-| Hash Embedding | 1M species records | 32 ms | 0.08 ms | **400x** |
-| Matrix Multiply | 1024×1024 | 1.8 ms | 0.1 ms | 18x |
-| Forward Pass | batch=1024 | 1.9 ms | 0.2 ms | 8x |
-
-The custom CUDA hash embedding kernel provides massive speedups for large species datasets while producing identical results to the CPU implementation.
+| Hash Embedding | 10K records | 0.08 ms | 0.02 ms | 5x |
+| Hash Embedding | 100K records | 1.3 ms | 0.04 ms | **35x** |
+| Hash Embedding | 1M records | 32 ms | 0.08 ms | **400x** |
 
 ## Installation
 
@@ -120,15 +144,15 @@ pip install -e .
 ## Architecture
 
 ```
-Species data ─────┐
-                  ├──→ SpeciesEncoder ──→ hash embedding + taxonomy IDs
-Coordinates ──────┤                       + unknown mass features
-                  ├──→ PlotEncoder (shared) ──→ latent representation
+Entity data ──────┐
+                  ├──→ EntityEncoder ──→ hash embedding + hierarchy IDs
+Coordinates ──────┤                      + unknown mass features
+                  ├──→ SampleEncoder (shared) ──→ latent representation
 Covariates ───────┘
                                                       │
                                     ┌─────────────────┼─────────────────┐
                                     ↓                 ↓                 ↓
-                              TaskHead(area)   TaskHead(elev)   TaskHead(habitat)
+                              TaskHead(y1)     TaskHead(y2)     TaskHead(y3)
                                     │                 │                 │
                                     ↓                 ↓                 ↓
                               regression       regression       classification
@@ -136,11 +160,28 @@ Covariates ───────┘
 
 ### Linear Compositional Pooling
 
-Species effects are aggregated linearly (abundance-weighted sum) before nonlinear mixing in PlotEncoder. This preserves interpretability: each species contributes additively to the latent signal before the network learns complex interactions.
+Entity effects are aggregated linearly (abundance-weighted sum) before nonlinear mixing in the encoder. This preserves interpretability: each entity contributes additively to the latent signal before the network learns complex interactions.
 
-## What RESOLVE Assumes
+## Configuration
 
-RESOLVE models plot-level attributes as a function of species composition using linear aggregation of species representations. Individual species contributions are summed or weighted before any nonlinear transformation, meaning that species–species interactions are not modeled directly at the species level but may emerge at the plot level through the encoder. Taxonomic information (e.g. genus or family) is optional and, when provided, acts as a structured prior that can improve generalization, especially for rare or sparsely observed species. Species not seen during training are handled explicitly and reduce prediction confidence, reflecting extrapolation beyond the learned species space rather than model uncertainty in a statistical sense.
+Use `TrainerConfig` for clean, reusable training setups:
+
+```python
+from resolve import TrainerConfig
+
+# Custom config
+config = TrainerConfig(
+    hash_dim=128,
+    top_k=20,
+    hidden_dims=[1024, 512, 256],
+    max_epochs=500,
+    patience=30,
+)
+
+# Or use presets
+from resolve.config import LARGE_MODEL, MEDIUM_MODEL
+trainer = Trainer(**LARGE_MODEL.to_trainer_kwargs(dataset))
+```
 
 ## Documentation
 
@@ -156,12 +197,6 @@ RESOLVE models plot-level attributes as a function of species composition using 
 - pandas ≥ 2.0
 - scikit-learn ≥ 1.3
 
-## Support
-
-If you find RESOLVE useful for your research, consider supporting development:
-
-<a href="https://www.buymeacoffee.com/gillescolling" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 40px !important;width: 150px !important;" ></a>
-
 ## License
 
 MIT License - see [LICENSE.md](LICENSE.md) for details.
@@ -173,7 +208,7 @@ If you use RESOLVE in your research, please cite:
 ```bibtex
 @software{resolve,
   author = {Colling, Gilles},
-  title = {RESOLVE: Representation Encoding of Species Outcomes via Linear Vector Embeddings},
+  title = {RESOLVE: Representation Encoding of Set-based Outcomes via Linear Vector Embeddings},
   year = {2025},
   url = {https://github.com/gcol33/resolve}
 }
