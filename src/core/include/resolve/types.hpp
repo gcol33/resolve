@@ -130,6 +130,13 @@ struct TrainConfig {
     int lr_step_size = 100;      // For StepLR: decay every N epochs
     float lr_gamma = 0.1f;       // For StepLR: multiply LR by gamma
     float lr_min = 1e-6f;        // For CosineAnnealing: minimum LR
+
+    // Band accuracy thresholds for regression metrics
+    std::vector<float> band_thresholds = {0.1f, 0.25f, 0.5f};
+
+    // Checkpointing
+    std::string checkpoint_dir;   // Directory for checkpoints (empty = disabled)
+    int checkpoint_every = 0;     // Save checkpoint every N epochs (0 = only best)
 };
 
 // Batch of data for training/inference

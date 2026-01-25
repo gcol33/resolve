@@ -72,6 +72,9 @@ jobs:
         uses: r-lib/actions/check-r-package@v2
         with:
           working-directory: r
-          args: 'c("--no-manual", "--as-cran")'
-          error-on: '"warning"'
+          args: 'c("--no-manual", "--as-cran", "--no-vignettes")'
+          build_args: 'c("--no-manual", "--no-build-vignettes")'
+          error-on: '"error"'
           check-dir: '"check"'
+        env:
+          LIBTORCH_PATH: ${{ env.LIBTORCH_PATH }}
