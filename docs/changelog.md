@@ -5,6 +5,26 @@ All notable changes to RESOLVE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2025-01-25
+
+### Added
+
+- **R² metric**: Coefficient of determination for regression evaluation (computed on original scale)
+- **Class weights**: Support for imbalanced classification via `class_weights` in target config
+- **LR scheduling**: StepLR and CosineAnnealing scheduler options
+- **Comprehensive test suite**: Catch2 tests for C++, pytest for Python, testthat for R
+- **CI/CD workflows**: GitHub Actions for tests, PyPI release, R-CMD-check
+
+### Changed
+
+- **Package split**: C++ bindings now distributed as `resolve-core`, high-level Python wrapper as `resolve`
+- **R package version** synced to 0.4.0
+
+### Fixed
+
+- R² now computed on original scale (before inverse transform)
+- NAMESPACE exports for R metric functions
+
 ## [0.2.0] - 2025-01-24
 
 ### Changed

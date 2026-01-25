@@ -1,0 +1,247 @@
+---
+title: "Getting Started with RESOLVE"
+author: "Gilles Colling"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting Started with RESOLVE}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE
+)
+```
+
+## Introduction
+
+RESOLVE (**R**epresentation **E**ncoding of **S**pecies **O**utcomes via **L**inear **V**ector **E**mbeddings) predicts plot-level environmental attributes from species composition data. It treats species composition as *biotic context*—a rich, structured signal that encodes information about plot attributes.
+
+## Installation
+
+```{r install}
+# Install from GitHub
+remotes::install_github("gcol33/resolve", subdir = "r")
+```
+
+## Quick Start
+
+### Prepare Your Data
+
+RESOLVE requires two CSV files:
+
+1. **Header file**: One row per plot with plot ID, coordinates, covariates, and target variables
+2. **Species file**: One row per species-plot occurrence with species ID, plot ID, and abundance
+
+```{r data-structure}
+# Example header file structure
+header <- data.frame(
+  plot_id = c("P001", "P002", "P003"),
+  longitude = c(4.35, 4.36, 4.37),
+  latitude = c(50.85, 50.86, 50.87),
+  elevation = c(100, 120, 95),
+  biomass = c(45.2, 52.1, 38.7)
+)
+
+# Example species file structure
+species <- data.frame(
+  plot_id = c("P001", "P001", "P002", "P002", "P003"),
+  species = c("Quercus robur", "Fagus sylvatica", "Quercus robur",
+              "Pinus sylvestris", "Fagus sylvatica"),
+  cover = c(40, 25, 35, 45, 60),
+  genus = c("Quercus", "Fagus", "Quercus", "Pinus", "Fagus"),
+  family = c("Fagaceae", "Fagaceae", "Fagaceae", "Pinaceae", "Fagaceae")
+)
+```
+
+### Load and Configure Dataset
+
+```{r load-data}
+library(resolve)
+
+# Define column roles
+roles <- list(
+  plotId = "plot_id",
+  speciesId = "species",
+  speciesPlotId = "plot_id",
+  abundance = "cover",
+  genus = "genus",
+  family = "family",
+  x = "longitude",
+  y = "latitude"
+)
+
+# Define prediction targets
+targets <- list(
+  biomass = list(
+    column = "biomass",
+    task = "regression",
+    transform = "log1p"
+  )
+)
+
+# Create dataset
+dataset <- resolve.dataset(
+  header = "path/to/header.csv",
+  species = "path/to/species.csv",
+  roles = roles,
+  targets = targets,
+  hashDim = 32,
+  topK = 5
+)
+
+# Check dataset schema
+print(dataset$schema)
+```
+
+### Train a Model
+
+```{r train}
+# Train with default parameters
+result <- resolve.train(
+  dataset,
+  maxEpochs = 500,
+  patience = 50,
+  batchSize = 4096,
+  device = "cpu",  # Use "cuda" for GPU
+  verbose = TRUE
+)
+
+# View training results
+print(result$result$final_metrics)
+
+# Save the model
+resolve.save(result, "my_model.pt")
+```
+
+### Make Predictions
+
+```{r predict}
+# Load a saved model
+predictor <- resolve.load("my_model.pt")
+
+# Prepare new data
+new_dataset <- resolve.dataset(
+  header = "path/to/new_header.csv",
+  species = "path/to/new_species.csv",
+  roles = roles,
+  targets = targets
+)
+
+# Generate predictions
+predictions <- resolve.predict(
+  predictor,
+  new_dataset,
+  outputSpace = "raw"  # Inverse-transform to original scale
+)
+
+# View predictions
+head(predictions$biomass)
+```
+
+## Species Encoding Options
+
+RESOLVE supports two species encoding strategies:
+
+### Hash Encoding (Default)
+
+Feature hashing creates a fixed-dimension representation regardless of species vocabulary size. This is memory-efficient and handles unseen species gracefully.
+
+```{r hash-encoding}
+result <- resolve.train(
+  dataset,
+  speciesEncoding = "hash",
+  hashDim = 64  # Increase for larger vocabularies
+)
+```
+
+### Learned Embeddings
+
+For datasets with consistent species vocabularies, learned embeddings can capture species-specific patterns.
+
+```{r embed-encoding}
+result <- resolve.train(
+  dataset,
+  speciesEncoding = "embed"
+)
+```
+
+## Confidence-Based Predictions
+
+RESOLVE tracks the fraction of unknown species per plot. Use confidence thresholds to filter unreliable predictions:
+
+```{r confidence}
+# Only return predictions for plots with >50% known species
+predictions <- resolve.predict(
+  predictor,
+  new_dataset,
+  confidenceThreshold = 0.5
+)
+
+# Predictions below threshold are set to NA
+sum(is.na(predictions$biomass))
+```
+
+## Multi-Task Learning
+
+RESOLVE supports simultaneous prediction of multiple targets:
+
+```{r multi-task}
+targets <- list(
+  biomass = list(
+    column = "biomass",
+    task = "regression",
+    transform = "log1p"
+  ),
+  habitat = list(
+    column = "habitat_class",
+    task = "classification"
+  )
+)
+
+dataset <- resolve.dataset(
+  header = "header.csv",
+  species = "species.csv",
+  roles = roles,
+  targets = targets
+)
+
+result <- resolve.train(dataset)
+```
+
+## Loss Configuration
+
+Three loss configurations are available for regression tasks:
+
+```{r loss-config}
+# Pure MAE loss (default, stable training)
+result <- resolve.train(dataset, lossConfig = "mae")
+
+# SMAPE loss (scale-invariant)
+result <- resolve.train(dataset, lossConfig = "smape")
+
+# Phased training: MAE -> MAE+SMAPE -> MAE+SMAPE+band penalty
+result <- resolve.train(dataset, lossConfig = "combined")
+```
+
+## GPU Acceleration
+
+For large datasets, enable CUDA acceleration:
+
+```{r gpu}
+result <- resolve.train(
+  dataset,
+  device = "cuda",
+  batchSize = 8192  # Larger batches for GPU
+)
+```
+
+## Session Info
+
+```{r session-info, eval=TRUE}
+sessionInfo()
+```

@@ -135,6 +135,13 @@ resolve::LossConfigMode parse_loss_config_mode(const std::string& s) {
     stop("Invalid loss config mode: " + s);
 }
 
+resolve::LRSchedulerType parse_lr_scheduler_type(const std::string& s) {
+    if (s == "none") return resolve::LRSchedulerType::None;
+    if (s == "step") return resolve::LRSchedulerType::StepLR;
+    if (s == "cosine") return resolve::LRSchedulerType::CosineAnnealing;
+    stop("Invalid LR scheduler type: " + s);
+}
+
 // =============================================================================
 // SpeciesEncoder class wrapper
 // =============================================================================
@@ -448,6 +455,19 @@ public:
             config.loss_config = parse_loss_config_mode(
                 as<std::string>(config_list["loss_config"]));
         }
+        if (config_list.containsElementNamed("lr_scheduler")) {
+            config.lr_scheduler = parse_lr_scheduler_type(
+                as<std::string>(config_list["lr_scheduler"]));
+        }
+        if (config_list.containsElementNamed("lr_step_size")) {
+            config.lr_step_size = config_list["lr_step_size"];
+        }
+        if (config_list.containsElementNamed("lr_gamma")) {
+            config.lr_gamma = config_list["lr_gamma"];
+        }
+        if (config_list.containsElementNamed("lr_min")) {
+            config.lr_min = config_list["lr_min"];
+        }
 
         trainer_ = std::make_unique<resolve::Trainer>(*(model.model()), config);
     }
@@ -656,6 +676,13 @@ double resolve_accuracy(NumericVector pred, NumericVector target) {
     torch::Tensor pred_t = r_vec_to_tensor(pred);
     torch::Tensor target_t = r_vec_to_tensor(target);
     return resolve::Metrics::accuracy(pred_t, target_t);
+}
+
+// [[Rcpp::export]]
+double resolve_r_squared(NumericVector pred, NumericVector target) {
+    torch::Tensor pred_t = r_vec_to_tensor(pred);
+    torch::Tensor target_t = r_vec_to_tensor(target);
+    return resolve::Metrics::r_squared(pred_t, target_t);
 }
 
 // =============================================================================

@@ -34,6 +34,13 @@ enum class LossConfigMode {
     Combined   // Phased: MAE -> MAE+SMAPE -> MAE+SMAPE+band (default)
 };
 
+// Learning rate scheduler type
+enum class LRSchedulerType {
+    None,           // Constant learning rate
+    StepLR,         // Step decay every N epochs
+    CosineAnnealing // Cosine annealing to min_lr
+};
+
 // Species selection mode (which species to include)
 enum class SelectionMode {
     Top,        // Top-k by abundance
@@ -68,6 +75,7 @@ struct TargetConfig {
     TransformType transform = TransformType::None;
     int num_classes = 0;  // For classification
     float weight = 1.0f;  // Loss weight in multi-task
+    std::vector<float> class_weights;  // Optional class weights for imbalanced classification
 };
 
 // Schema information for a dataset
@@ -116,6 +124,12 @@ struct TrainConfig {
     std::pair<int, int> phase_boundaries = {100, 300};
     LossConfigMode loss_config = LossConfigMode::Combined;
     torch::Device device = torch::kCPU;
+
+    // Learning rate scheduling
+    LRSchedulerType lr_scheduler = LRSchedulerType::None;
+    int lr_step_size = 100;      // For StepLR: decay every N epochs
+    float lr_gamma = 0.1f;       // For StepLR: multiply LR by gamma
+    float lr_min = 1e-6f;        // For CosineAnnealing: minimum LR
 };
 
 // Batch of data for training/inference

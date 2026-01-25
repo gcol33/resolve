@@ -13,12 +13,13 @@ export(resolve.load)
 export(resolve.save)
 export(resolve.progress)
 
-# Metric functions
-export(resolve.bandAccuracy)
-export(resolve.mae)
-export(resolve.rmse)
-export(resolve.smape)
-export(resolve.accuracy)
+# Metric functions (Rcpp exports)
+export(resolve_band_accuracy)
+export(resolve_mae)
+export(resolve_rmse)
+export(resolve_smape)
+export(resolve_accuracy)
+export(resolve_r_squared)
 
 # Version
 export(resolve.version)

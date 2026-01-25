@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+title: "RESOLVE: Representation Encoding of Species Outcomes via Linear Vector Embeddings"
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - family-names: Colling
+    given-names: Gilles
+    email: gilles.colling@uliege.be
+    orcid: "https://orcid.org/0000-0000-0000-0000"
+    affiliation: University of Liège
+repository-code: "https://github.com/gcol33/resolve"
+url: "https://gillescolling.com/resolve"
+abstract: >-
+  RESOLVE is an opinionated torch-based package for predicting
+  plot-level attributes from species composition, environment,
+  and space. It treats species composition as biotic context —
+  a rich, structured signal that encodes information about
+  plot attributes.
+keywords:
+  - species composition
+  - machine learning
+  - ecology
+  - vegetation
+  - pytorch
+  - deep learning
+license: MIT
+version: 0.4.0
+date-released: "2025-01-25"

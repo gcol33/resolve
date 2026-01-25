@@ -246,3 +246,12 @@ class Trainer:
     def scalers(self) -> Scalers:
         """Access the data scalers."""
         return self._core.scalers
+
+    def n_parameters(self) -> int:
+        """Count total trainable parameters."""
+        return sum(p.numel() for p in self._model.parameters())
+
+    @property
+    def n_params(self) -> int:
+        """Alias for n_parameters() as a property."""
+        return self.n_parameters()

@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <iostream>
 #include <sstream>
+#include <filesystem>
+#include <cmath>
 
 namespace resolve {
 
@@ -302,12 +304,78 @@ Trainer::eval_epoch(int epoch) {
 
         if (pred_it != predictions.end() && target_it != test_targets.end()) {
             all_metrics[cfg.name] = Metrics::compute(
-                pred_it->second, target_it->second, cfg.task, cfg.transform
+                pred_it->second, target_it->second, cfg.task, cfg.transform,
+                config_.band_thresholds, cfg.num_classes
             );
         }
     }
 
     return {loss.item<float>(), all_metrics};
+}
+
+float Trainer::get_learning_rate(int epoch) const {
+    switch (config_.lr_scheduler) {
+        case LRSchedulerType::StepLR: {
+            // Step decay: multiply LR by gamma every lr_step_size epochs
+            int n_decays = epoch / config_.lr_step_size;
+            return config_.lr * std::pow(config_.lr_gamma, static_cast<float>(n_decays));
+        }
+        case LRSchedulerType::CosineAnnealing: {
+            // Cosine annealing from lr to lr_min
+            float progress = static_cast<float>(epoch) / config_.max_epochs;
+            float cosine = 0.5f * (1.0f + std::cos(M_PI * progress));
+            return config_.lr_min + (config_.lr - config_.lr_min) * cosine;
+        }
+        case LRSchedulerType::None:
+        default:
+            return config_.lr;
+    }
+}
+
+void Trainer::update_learning_rate(float lr) {
+    for (auto& group : optimizer_->param_groups()) {
+        static_cast<torch::optim::AdamWOptions&>(group.options()).lr(lr);
+    }
+}
+
+// Helper to write progress.json
+static void write_progress_file(
+    const std::string& checkpoint_dir,
+    int epoch,
+    int max_epochs,
+    int best_epoch,
+    float best_loss,
+    int epochs_without_improvement,
+    const std::unordered_map<std::string, std::unordered_map<std::string, float>>& metrics
+) {
+    namespace fs = std::filesystem;
+    fs::create_directories(checkpoint_dir);
+
+    std::string progress_path = checkpoint_dir + "/progress.json";
+    std::ofstream file(progress_path);
+    if (!file.is_open()) return;
+
+    file << "{\n";
+    file << "  \"epoch\": " << epoch << ",\n";
+    file << "  \"max_epochs\": " << max_epochs << ",\n";
+    file << "  \"best_epoch\": " << best_epoch << ",\n";
+    file << "  \"best_loss\": " << best_loss << ",\n";
+    file << "  \"epochs_without_improvement\": " << epochs_without_improvement << ",\n";
+    file << "  \"progress_pct\": " << (100.0f * epoch / max_epochs) << ",\n";
+
+    // Write best metric (first target's first band metric if available)
+    float best_metric = 0.0f;
+    for (const auto& [target_name, target_metrics] : metrics) {
+        for (const auto& [metric_name, value] : target_metrics) {
+            if (metric_name.find("band_") == 0) {
+                best_metric = value;
+                break;
+            }
+        }
+        break;
+    }
+    file << "  \"best_metric\": " << best_metric << "\n";
+    file << "}\n";
 }
 
 TrainResult Trainer::fit() {
@@ -316,6 +384,12 @@ TrainResult Trainer::fit() {
     }
 
     auto start_time = std::chrono::high_resolution_clock::now();
+
+    // Create checkpoint directory if specified
+    bool use_checkpoints = !config_.checkpoint_dir.empty();
+    if (use_checkpoints) {
+        std::filesystem::create_directories(config_.checkpoint_dir);
+    }
 
     // Create optimizer
     optimizer_ = std::make_unique<torch::optim::AdamW>(
@@ -328,6 +402,10 @@ TrainResult Trainer::fit() {
     int patience_counter = 0;
 
     for (int epoch = 0; epoch < config_.max_epochs; ++epoch) {
+        // Update learning rate based on scheduler
+        float current_lr = get_learning_rate(epoch);
+        update_learning_rate(current_lr);
+
         float train_loss = train_epoch(epoch);
         auto [test_loss, metrics] = eval_epoch(epoch);
 
@@ -348,6 +426,11 @@ TrainResult Trainer::fit() {
             archive.save_to(oss);
             auto str = oss.str();
             best_model_state_.assign(str.begin(), str.end());
+
+            // Save best checkpoint
+            if (use_checkpoints) {
+                save(config_.checkpoint_dir + "/best.pt");
+            }
         } else {
             patience_counter++;
             if (patience_counter >= config_.patience) {
@@ -356,10 +439,27 @@ TrainResult Trainer::fit() {
             }
         }
 
+        // Periodic checkpoint saving
+        if (use_checkpoints && config_.checkpoint_every > 0 && (epoch + 1) % config_.checkpoint_every == 0) {
+            save(config_.checkpoint_dir + "/checkpoint_" + std::to_string(epoch + 1) + ".pt");
+        }
+
+        // Write progress file
+        if (use_checkpoints) {
+            write_progress_file(
+                config_.checkpoint_dir, epoch, config_.max_epochs,
+                result.best_epoch, best_loss, patience_counter, result.final_metrics
+            );
+        }
+
         // Print progress
         if (epoch % 10 == 0) {
             std::cout << "Epoch " << epoch << " - Train: " << train_loss
-                      << " Test: " << test_loss << std::endl;
+                      << " Test: " << test_loss;
+            if (config_.lr_scheduler != LRSchedulerType::None) {
+                std::cout << " LR: " << current_lr;
+            }
+            std::cout << std::endl;
         }
     }
 
@@ -369,6 +469,11 @@ TrainResult Trainer::fit() {
         torch::serialize::InputArchive archive;
         archive.load_from(iss);
         model_->load(archive);
+    }
+
+    // Save final checkpoint
+    if (use_checkpoints) {
+        save(config_.checkpoint_dir + "/checkpoint.pt");
     }
 
     auto end_time = std::chrono::high_resolution_clock::now();

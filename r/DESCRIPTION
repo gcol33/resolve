@@ -1,12 +1,15 @@
 Package: resolve
 Title: Species Composition Prediction via Linear Vector Embeddings
-Version: 0.1.0
+Version: 0.4.0
 Authors@R:
-    person("Gilles", "Colling", email = "gilles@example.com", role = c("aut", "cre"))
+    person("Gilles", "Colling", email = "gilles.colling@uliege.be", role = c("aut", "cre"),
+           comment = c(ORCID = "YOUR-ORCID-ID"))
 Description: Predict plot-level environmental attributes from species composition
     using linear compositional pooling and learned representations. Built on a
     high-performance C++ core with libtorch for GPU acceleration.
 License: MIT + file LICENSE
+URL: https://github.com/gcol33/resolve
+BugReports: https://github.com/gcol33/resolve/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
@@ -16,6 +19,9 @@ Imports:
     Rcpp (>= 1.0.0),
     jsonlite
 Suggests:
-    testthat (>= 3.0.0)
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr
 Config/testthat/edition: 3
 SystemRequirements: C++17, libtorch (>= 2.0)

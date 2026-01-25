@@ -2,6 +2,21 @@
 
 This guide walks through a complete RESOLVE workflow: loading data, training a model, and making predictions.
 
+## Installation
+
+=== "Python"
+
+    ```bash
+    pip install resolve
+    ```
+
+=== "R"
+
+    ```r
+    # Install from GitHub (CRAN submission pending)
+    remotes::install_github("gcol33/resolve", subdir = "r")
+    ```
+
 ## Data Requirements
 
 RESOLVE expects two data sources:
@@ -11,74 +26,118 @@ RESOLVE expects two data sources:
 
 ## Example Workflow
 
-```python
-import resolve
+=== "Python"
 
-# 1. Define semantic roles (map your column names)
-roles = {
-    "plot_id": "PlotObservationID",
-    "species_id": "Species",
-    "species_plot_id": "PlotObservationID",
-    "coords_lat": "Latitude",
-    "coords_lon": "Longitude",
-    "abundance": "Cover",           # optional
-    "taxonomy_genus": "Genus",      # optional
-    "taxonomy_family": "Family",    # optional
-    "covariates": ["Temperature"],  # optional
-}
+    ```python
+    import resolve
 
-# 2. Define targets
-targets = {
-    "area": {
-        "column": "Area",
-        "task": "regression",
-        "transform": "log1p",
-    },
-    "habitat": {
-        "column": "Habitat",
-        "task": "classification",
-        "num_classes": 5,
-    },
-}
+    # 1. Define semantic roles (map your column names)
+    roles = {
+        "plot_id": "PlotObservationID",
+        "species_id": "Species",
+        "species_plot_id": "PlotObservationID",
+        "coords_lat": "Latitude",
+        "coords_lon": "Longitude",
+        "abundance": "Cover",           # optional
+        "taxonomy_genus": "Genus",      # optional
+        "taxonomy_family": "Family",    # optional
+    }
 
-# 3. Load data
-dataset = resolve.ResolveDataset.from_csv(
-    header="plots.csv",
-    species="species.csv",
-    roles=roles,
-    targets=targets,
-    species_normalization="relative",  # normalize within each plot
-)
+    # 2. Define targets
+    targets = {
+        "area": {
+            "column": "Area",
+            "task": "regression",
+            "transform": "log1p",
+        },
+        "habitat": {
+            "column": "Habitat",
+            "task": "classification",
+            "num_classes": 5,
+        },
+    }
 
-# 4. Check schema
-print(f"Plots: {dataset.schema.n_plots}")
-print(f"Species: {dataset.schema.n_species}")
-print(f"Genera: {dataset.schema.n_genera}")
-print(f"Families: {dataset.schema.n_families}")
+    # 3. Load data
+    dataset = resolve.ResolveDataset.from_csv(
+        header="plots.csv",
+        species="species.csv",
+        roles=roles,
+        targets=targets,
+        species_normalization="relative",
+    )
 
-# 5. Train (model is built automatically from dataset)
-trainer = resolve.Trainer(
-    dataset,
-    species_encoding="hash",  # "hash" or "embed"
-    hash_dim=32,
-    top_k=5,
-    max_epochs=200,
-    patience=30,
-    loss_config="mae",  # "mae", "combined", or "smape"
-)
-result = trainer.fit()
+    # 4. Check schema
+    print(f"Plots: {dataset.schema.n_plots}")
+    print(f"Species: {dataset.schema.n_species}")
 
-print(f"Best epoch: {result.best_epoch}")
-for target, metrics in result.final_metrics.items():
-    print(f"{target}: {metrics}")
+    # 5. Train (model built automatically from dataset)
+    trainer = resolve.Trainer(
+        dataset,
+        species_encoding="hash",
+        hash_dim=32,
+        max_epochs=200,
+        patience=30,
+    )
+    result = trainer.fit()
 
-# 6. Save model
-trainer.save("model.pt")
+    # 6. Save model
+    trainer.save("model.pt")
 
-# 7. Predict on new data (with optional confidence filtering)
-predictions = trainer.predict(new_dataset)
-predictions = trainer.predict(new_dataset, confidence_threshold=0.8)
-```
+    # 7. Predict with confidence filtering
+    predictions = trainer.predict(new_dataset, confidence_threshold=0.8)
+    ```
+
+=== "R"
+
+    ```r
+    library(resolve)
+
+    # 1. Load and prepare data
+    header <- read.csv("plots.csv")
+    species <- read.csv("species.csv")
+
+    # 2. Create encoder and fit on species data
+    encoder <- resolve.encoder(hashDim = 32L, topK = 5L)
+    encoder$fit(species)
+
+    # 3. Define schema
+    schema <- list(
+      nPlots = nrow(header),
+      nSpecies = encoder$n_species(),
+      hasCoordinates = TRUE,
+      hasTaxonomy = TRUE,
+      targets = list(
+        list(name = "area", task = "regression", transform = "log1p"),
+        list(name = "habitat", task = "classification", numClasses = 5L)
+      )
+    )
+
+    # 4. Create model and trainer
+    model_config <- list(
+      speciesEncoding = "hash",
+      hashDim = 32L,
+      hiddenDims = c(128L, 64L)
+    )
+
+    train_config <- list(
+      batchSize = 64L,
+      maxEpochs = 200L,
+      patience = 30L,
+      lr = 0.001
+    )
+
+    model <- new(.resolve_module$ResolveModel, schema, model_config)
+    trainer <- new(.resolve_module$Trainer, model, train_config)
+
+    # 5. Train
+    # trainer$fit(train_data)
+
+    # 6. Save model
+    resolve.save(trainer, "model.pt")
+
+    # 7. Predict
+    # predictions <- resolve.predict(trainer, new_data)
+    ```
 
 ## Role Mapping
 

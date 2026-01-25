@@ -39,59 +39,75 @@ Covariates ───────┘
 
 ## Quick Start
 
-```python
-import resolve
+=== "Python"
 
-# Define semantic roles (map your column names)
-roles = {
-    "plot_id": "PlotObservationID",
-    "species_id": "Species",
-    "species_plot_id": "PlotObservationID",
-    "coords_lat": "Latitude",
-    "coords_lon": "Longitude",
-    "abundance": "Cover",
-    "taxonomy_genus": "Genus",
-    "taxonomy_family": "Family",
-}
+    ```python
+    import resolve
 
-# Define targets
-targets = {
-    "area": {"column": "Area", "task": "regression", "transform": "log1p"},
-    "habitat": {"column": "Habitat", "task": "classification", "num_classes": 5},
-}
+    # Load data with semantic role mapping
+    dataset = resolve.ResolveDataset.from_csv(
+        header="plots.csv",
+        species="species.csv",
+        roles={
+            "plot_id": "PlotObservationID",
+            "species_id": "Species",
+            "species_plot_id": "PlotObservationID",
+        },
+        targets={
+            "area": {"column": "Area", "task": "regression", "transform": "log1p"},
+            "habitat": {"column": "Habitat", "task": "classification", "num_classes": 5},
+        },
+    )
 
-# Load data
-dataset = resolve.ResolveDataset.from_csv(
-    header="plots.csv",
-    species="species.csv",
-    roles=roles,
-    targets=targets,
-)
+    # Train (model built automatically)
+    trainer = resolve.Trainer(dataset)
+    trainer.fit()
+    trainer.save("model.pt")
 
-# Build and train model
-model = resolve.ResolveModel(schema=dataset.schema, targets=targets)
-trainer = resolve.Trainer(model, dataset)
-result = trainer.fit()
-trainer.save("model.pt")
+    # Predict with confidence filtering
+    predictions = trainer.predict(new_dataset, confidence_threshold=0.8)
+    ```
 
-# Predict
-predictor = resolve.Predictor.load("model.pt")
-predictions = predictor.predict(new_dataset)
-```
+=== "R"
+
+    ```r
+    library(resolve)
+
+    # Create and fit encoder
+    encoder <- resolve.encoder(hashDim = 32L)
+    encoder$fit(species_data)
+
+    # Configure and train
+    schema <- list(nPlots = 100, nSpecies = 50, ...)
+    model <- new(.resolve_module$ResolveModel, schema, model_config)
+    trainer <- new(.resolve_module$Trainer, model, train_config)
+
+    # Save and predict
+    resolve.save(trainer, "model.pt")
+    ```
 
 ## Installation
 
-```bash
-pip install resolve
-```
+=== "Python"
 
-Or from source:
+    ```bash
+    pip install resolve
+    ```
 
-```bash
-git clone https://github.com/gcol33/resolve.git
-cd resolve
-pip install -e .
-```
+    Or from source:
+
+    ```bash
+    git clone https://github.com/gcol33/resolve.git
+    cd resolve
+    pip install -e .
+    ```
+
+=== "R"
+
+    ```r
+    # Install from GitHub (CRAN submission pending)
+    remotes::install_github("gcol33/resolve", subdir = "r")
+    ```
 
 ## License
 

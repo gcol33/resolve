@@ -89,6 +89,12 @@ private:
     // Create data loaders
     void create_loaders();
 
+    // Compute learning rate for given epoch based on scheduler config
+    float get_learning_rate(int epoch) const;
+
+    // Update optimizer learning rate
+    void update_learning_rate(float lr);
+
     ResolveModel model_;
     TrainConfig config_;
     Scalers scalers_;
