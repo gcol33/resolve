@@ -17,6 +17,6 @@ NULL
 #'
 #' @return Version string from C++ core
 #' @export
-resolve_version <- function() {
+resolve.version <- function() {
   .Call("_resolve_resolve_version", PACKAGE = "resolve")
 }

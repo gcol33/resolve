@@ -5,20 +5,20 @@ importFrom(Rcpp, evalCpp, loadModule, Module)
 importFrom(jsonlite, fromJSON)
 
 # Main API functions
-export(resolve_species_encoder)
-export(resolve_dataset)
-export(resolve_train)
-export(resolve_predict)
-export(resolve_load)
-export(resolve_save)
-export(resolve_progress)
+export(resolve.encoder)
+export(resolve.dataset)
+export(resolve.train)
+export(resolve.predict)
+export(resolve.load)
+export(resolve.save)
+export(resolve.progress)
 
 # Metric functions
-export(resolve_band_accuracy)
-export(resolve_mae)
-export(resolve_rmse)
-export(resolve_smape)
-export(resolve_accuracy)
+export(resolve.bandAccuracy)
+export(resolve.mae)
+export(resolve.rmse)
+export(resolve.smape)
+export(resolve.accuracy)
 
 # Version
-export(resolve_version)
+export(resolve.version)

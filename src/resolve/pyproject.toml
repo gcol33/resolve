@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "resolve"
+version = "0.1.0"
+description = "Species composition-based prediction"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "resolve-core",  # C++ bindings
+    "pandas>=2.0",
+    "torch>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["resolve*"]

@@ -1,4 +1,5 @@
 #include "resolve/trainer.hpp"
+#include "resolve/dataset.hpp"
 #include <fstream>
 #include <random>
 #include <algorithm>
@@ -10,9 +11,31 @@ namespace resolve {
 Trainer::Trainer(
     ResolveModel model,
     const TrainConfig& config
-) : model_(model), config_(config), loss_fn_(model->schema().targets, config.phase_boundaries)
+) : model_(model), config_(config), loss_fn_(model->schema().targets, config.phase_boundaries, config.loss_config)
 {
     model_->to(config_.device);
+}
+
+void Trainer::prepare_data(
+    const ResolveDataset& dataset,
+    float test_size,
+    int seed
+) {
+    // Delegate to the raw tensor API using data from the dataset
+    prepare_data(
+        dataset.coordinates(),
+        dataset.covariates(),
+        dataset.hash_embedding(),
+        dataset.species_ids(),
+        dataset.species_vector(),
+        dataset.genus_ids(),
+        dataset.family_ids(),
+        dataset.unknown_fraction(),
+        dataset.unknown_count(),
+        dataset.targets(),
+        test_size,
+        seed
+    );
 }
 
 void Trainer::prepare_data(

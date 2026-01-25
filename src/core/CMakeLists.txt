@@ -8,6 +8,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # Options
 option(BUILD_PYTHON "Build Python bindings" ON)
 option(BUILD_R "Build R bindings" OFF)
+option(BUILD_CLI "Build CLI application" ON)
 option(BUILD_TESTS "Build tests" ON)
 option(USE_CUDA "Enable CUDA support" ON)
 
@@ -36,6 +37,7 @@ set(RESOLVE_CORE_SOURCES
     cpp_src/trainer.cpp
     cpp_src/predictor.cpp
     cpp_src/loss.cpp
+    cpp_src/dataset.cpp
 )
 
 set(RESOLVE_CORE_HEADERS
@@ -46,6 +48,9 @@ set(RESOLVE_CORE_HEADERS
     include/resolve/trainer.hpp
     include/resolve/predictor.hpp
     include/resolve/loss.hpp
+    include/resolve/csv_reader.hpp
+    include/resolve/role_mapping.hpp
+    include/resolve/dataset.hpp
 )
 
 # CUDA sources - split for CUDA 13.x compatibility:
@@ -128,6 +133,11 @@ endif()
 # R bindings
 if(BUILD_R)
     add_subdirectory(r)
+endif()
+
+# CLI application
+if(BUILD_CLI)
+    add_subdirectory(cli)
 endif()
 
 # Tests

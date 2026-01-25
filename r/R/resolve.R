@@ -3,46 +3,46 @@
 #' Create a species encoder that transforms species composition data into
 #' fixed-dimension embeddings for model input.
 #'
-#' @param hash_dim Dimension of species hash embedding (default 32)
-#' @param top_k Number of top/bottom genera/families to track (default 3)
+#' @param hashDim Dimension of species hash embedding (default 32)
+#' @param topK Number of top/bottom genera/families to track (default 3)
 #' @param aggregation Aggregation mode: "abundance" or "count" (default "abundance")
 #' @param normalization Normalization mode: "raw", "norm", or "log1p" (default "norm")
-#' @param track_unknown_count Track count of unknown species (default FALSE)
+#' @param trackUnknownCount Track count of unknown species (default FALSE)
 #' @param selection Selection mode: "top", "bottom", "top_bottom", or "all" (default "top")
 #' @param representation Representation mode: "abundance" or "presence_absence" (default "abundance")
-#' @param min_species_frequency Minimum frequency for a species to be included (default 1)
+#' @param minSpeciesFrequency Minimum frequency for a species to be included (default 1)
 #'
 #' @return A SpeciesEncoder object
 #'
 #' @examples
 #' \dontrun{
-#' encoder <- resolve_species_encoder(
-#'   hash_dim = 32,
-#'   top_k = 5,
+#' encoder <- resolve.encoder(
+#'   hashDim = 32,
+#'   topK = 5,
 #'   selection = "top_bottom"
 #' )
-#' encoder$fit(species_data)
-#' encoded <- encoder$transform(species_data, plot_ids)
+#' encoder$fit(speciesData)
+#' encoded <- encoder$transform(speciesData, plotIds)
 #' }
 #'
 #' @export
-resolve_species_encoder <- function(hash_dim = 32L,
-                                    top_k = 3L,
-                                    aggregation = "abundance",
-                                    normalization = "norm",
-                                    track_unknown_count = FALSE,
-                                    selection = "top",
-                                    representation = "abundance",
-                                    min_species_frequency = 1L) {
+resolve.encoder <- function(hashDim = 32L,
+                            topK = 3L,
+                            aggregation = "abundance",
+                            normalization = "norm",
+                            trackUnknownCount = FALSE,
+                            selection = "top",
+                            representation = "abundance",
+                            minSpeciesFrequency = 1L) {
   new(.resolve_module$SpeciesEncoder,
-      as.integer(hash_dim),
-      as.integer(top_k),
+      as.integer(hashDim),
+      as.integer(topK),
       aggregation,
       normalization,
-      track_unknown_count,
+      trackUnknownCount,
       selection,
       representation,
-      as.integer(min_species_frequency))
+      as.integer(minSpeciesFrequency))
 }
 
 
@@ -54,9 +54,9 @@ resolve_species_encoder <- function(hash_dim = 32L,
 #' @param header Path to plot-level CSV (one row per plot)
 #' @param species Path to species CSV (one row per species-plot occurrence)
 #' @param roles Named list mapping semantic roles to column names:
-#'   - plot_id: Column with plot IDs in header file
-#'   - species_id: Column with species names in species file
-#'   - species_plot_id: Column with plot IDs in species file
+#'   - plotId: Column with plot IDs in header file
+#'   - speciesId: Column with species names in species file
+#'   - speciesPlotId: Column with plot IDs in species file
 #'   - abundance: Column with abundance values (optional)
 #'   - genus: Column with genus names (optional)
 #'   - family: Column with family names (optional)
@@ -66,12 +66,12 @@ resolve_species_encoder <- function(hash_dim = 32L,
 #'   - column: Column name in header file
 #'   - task: "regression" or "classification"
 #'   - transform: "none" or "log1p" (optional)
-#' @param species_normalization Normalization mode: "raw", "norm", or "log1p" (default "norm")
-#' @param track_unknown_fraction Track fraction of unknown species (default TRUE)
-#' @param track_unknown_count Track count of unknown species (default FALSE)
-#' @param hash_dim Dimension of species hash embedding (default 32)
-#' @param top_k Number of top genera/families to track (default 5)
-#' @param top_k_species Number of top species to track for embed mode (default 10)
+#' @param speciesNormalization Normalization mode: "raw", "norm", or "log1p" (default "norm")
+#' @param trackUnknownFraction Track fraction of unknown species (default TRUE)
+#' @param trackUnknownCount Track count of unknown species (default FALSE)
+#' @param hashDim Dimension of species hash embedding (default 32)
+#' @param topK Number of top genera/families to track (default 5)
+#' @param topKSpecies Number of top species to track for embed mode (default 10)
 #' @param selection Selection mode: "top", "bottom", "top_bottom", "all" (default "top")
 #' @param representation Representation mode: "abundance", "presence_absence" (default "abundance")
 #'
@@ -79,23 +79,23 @@ resolve_species_encoder <- function(hash_dim = 32L,
 #'   - encoder: Fitted SpeciesEncoder
 #'   - coordinates: Matrix of plot coordinates
 #'   - covariates: Matrix of covariate values
-#'   - hash_embedding: Matrix of species hash embeddings
-#'   - species_ids: Matrix of top-k species IDs per plot (for embed mode)
-#'   - genus_ids: Matrix of genus IDs (if has_taxonomy)
-#'   - family_ids: Matrix of family IDs (if has_taxonomy)
-#'   - unknown_fraction: Vector of unknown fractions (if track_unknown_fraction)
+#'   - hashEmbedding: Matrix of species hash embeddings
+#'   - speciesIds: Matrix of top-k species IDs per plot (for embed mode)
+#'   - genusIds: Matrix of genus IDs (if hasTaxonomy)
+#'   - familyIds: Matrix of family IDs (if hasTaxonomy)
+#'   - unknownFraction: Vector of unknown fractions (if trackUnknownFraction)
 #'   - targets: Named list of target vectors
 #'   - schema: Schema information
 #'
 #' @examples
 #' \dontrun{
-#' dataset <- resolve_dataset(
+#' dataset <- resolve.dataset(
 #'   header = "plots.csv",
 #'   species = "species.csv",
 #'   roles = list(
-#'     plot_id = "plot_id",
-#'     species_id = "species",
-#'     species_plot_id = "plot_id",
+#'     plotId = "plot_id",
+#'     speciesId = "species",
+#'     speciesPlotId = "plot_id",
 #'     abundance = "cover"
 #'   ),
 #'   targets = list(
@@ -105,138 +105,138 @@ resolve_species_encoder <- function(hash_dim = 32L,
 #' }
 #'
 #' @export
-resolve_dataset <- function(header,
+resolve.dataset <- function(header,
                             species,
                             roles,
                             targets,
-                            species_normalization = "norm",
-                            track_unknown_fraction = TRUE,
-                            track_unknown_count = FALSE,
-                            hash_dim = 32L,
-                            top_k = 5L,
-                            top_k_species = 10L,
+                            speciesNormalization = "norm",
+                            trackUnknownFraction = TRUE,
+                            trackUnknownCount = FALSE,
+                            hashDim = 32L,
+                            topK = 5L,
+                            topKSpecies = 10L,
                             selection = "top",
                             representation = "abundance") {
   # Read CSV files
-  header_df <- read.csv(header, stringsAsFactors = FALSE)
-  species_df <- read.csv(species, stringsAsFactors = FALSE)
+  headerDf <- read.csv(header, stringsAsFactors = FALSE)
+  speciesDf <- read.csv(species, stringsAsFactors = FALSE)
 
   # Extract plot IDs
-  plot_id_col <- roles$plot_id
-  plot_ids <- as.character(header_df[[plot_id_col]])
+  plotIdCol <- roles$plotId
+  plotIds <- as.character(headerDf[[plotIdCol]])
 
   # Prepare species data frame with required columns
-  species_data <- data.frame(
-    species_id = as.character(species_df[[roles$species_id]]),
-    plot_id = as.character(species_df[[roles$species_plot_id]]),
+  speciesData <- data.frame(
+    species_id = as.character(speciesDf[[roles$speciesId]]),
+    plot_id = as.character(speciesDf[[roles$speciesPlotId]]),
     stringsAsFactors = FALSE
   )
 
   # Add abundance (default to 1 if not provided)
-  if (!is.null(roles$abundance) && roles$abundance %in% names(species_df)) {
-    species_data$abundance <- as.numeric(species_df[[roles$abundance]])
+  if (!is.null(roles$abundance) && roles$abundance %in% names(speciesDf)) {
+    speciesData$abundance <- as.numeric(speciesDf[[roles$abundance]])
   } else {
-    species_data$abundance <- rep(1, nrow(species_df))
+    speciesData$abundance <- rep(1, nrow(speciesDf))
   }
 
   # Add taxonomy if available
-  has_taxonomy <- !is.null(roles$genus) && !is.null(roles$family)
-  if (has_taxonomy) {
-    species_data$genus <- as.character(species_df[[roles$genus]])
-    species_data$family <- as.character(species_df[[roles$family]])
+  hasTaxonomy <- !is.null(roles$genus) && !is.null(roles$family)
+  if (hasTaxonomy) {
+    speciesData$genus <- as.character(speciesDf[[roles$genus]])
+    speciesData$family <- as.character(speciesDf[[roles$family]])
   } else {
     # Fill with empty strings if no taxonomy
-    species_data$genus <- rep("", nrow(species_df))
-    species_data$family <- rep("", nrow(species_df))
+    speciesData$genus <- rep("", nrow(speciesDf))
+    speciesData$family <- rep("", nrow(speciesDf))
   }
 
   # Create and fit encoder
-  encoder <- resolve_species_encoder(
-    hash_dim = as.integer(hash_dim),
-    top_k = as.integer(top_k),
+  encoder <- resolve.encoder(
+    hashDim = as.integer(hashDim),
+    topK = as.integer(topK),
     aggregation = "abundance",
-    normalization = species_normalization,
-    track_unknown_count = track_unknown_count,
+    normalization = speciesNormalization,
+    trackUnknownCount = trackUnknownCount,
     selection = selection,
     representation = representation
   )
-  encoder$fit(species_data)
+  encoder$fit(speciesData)
 
   # Transform species data
-  encoded <- encoder$transform(species_data, plot_ids)
+  encoded <- encoder$transform(speciesData, plotIds)
 
   # Extract coordinates if available
-  has_coordinates <- !is.null(roles$x) && !is.null(roles$y)
-  if (has_coordinates) {
+  hasCoordinates <- !is.null(roles$x) && !is.null(roles$y)
+  if (hasCoordinates) {
     coordinates <- cbind(
-      as.numeric(header_df[[roles$x]]),
-      as.numeric(header_df[[roles$y]])
+      as.numeric(headerDf[[roles$x]]),
+      as.numeric(headerDf[[roles$y]])
     )
   } else {
-    coordinates <- matrix(0, nrow = length(plot_ids), ncol = 2)
+    coordinates <- matrix(0, nrow = length(plotIds), ncol = 2)
   }
 
   # Extract covariates (columns not used for other purposes)
-  used_cols <- c(
-    plot_id_col,
+  usedCols <- c(
+    plotIdCol,
     roles$x, roles$y,
     sapply(targets, function(t) t$column)
   )
-  covariate_cols <- setdiff(names(header_df), used_cols)
-  if (length(covariate_cols) > 0) {
-    covariates <- as.matrix(header_df[, covariate_cols, drop = FALSE])
+  covariateCols <- setdiff(names(headerDf), usedCols)
+  if (length(covariateCols) > 0) {
+    covariates <- as.matrix(headerDf[, covariateCols, drop = FALSE])
     storage.mode(covariates) <- "double"
   } else {
-    covariates <- matrix(0, nrow = length(plot_ids), ncol = 1)
+    covariates <- matrix(0, nrow = length(plotIds), ncol = 1)
   }
 
   # Extract target values
-  target_values <- list()
-  target_configs <- list()
+  targetValues <- list()
+  targetConfigs <- list()
   for (name in names(targets)) {
     cfg <- targets[[name]]
-    target_values[[name]] <- as.numeric(header_df[[cfg$column]])
-    target_configs[[name]] <- cfg
+    targetValues[[name]] <- as.numeric(headerDf[[cfg$column]])
+    targetConfigs[[name]] <- cfg
   }
 
-  # Prepare species_ids for embed mode (top-k species per plot)
+  # Prepare speciesIds for embed mode (top-k species per plot)
   # Build species vocabulary
-  unique_species <- sort(unique(species_data$species_id))
-  species_to_idx <- setNames(seq_along(unique_species), unique_species)
-  n_species_vocab <- length(unique_species) + 1L  # +1 for padding/unknown (index 0)
+  uniqueSpecies <- sort(unique(speciesData$species_id))
+  speciesToIdx <- setNames(seq_along(uniqueSpecies), uniqueSpecies)
+  nSpeciesVocab <- length(uniqueSpecies) + 1L  # +1 for padding/unknown (index 0)
 
   # Compute top-k species per plot by abundance
-  species_ids_matrix <- matrix(0L, nrow = length(plot_ids), ncol = as.integer(top_k_species))
-  for (i in seq_along(plot_ids)) {
-    pid <- plot_ids[i]
-    plot_species <- species_data[species_data$plot_id == pid, , drop = FALSE]
-    if (nrow(plot_species) > 0) {
+  speciesIdsMatrix <- matrix(0L, nrow = length(plotIds), ncol = as.integer(topKSpecies))
+  for (i in seq_along(plotIds)) {
+    pid <- plotIds[i]
+    plotSpecies <- speciesData[speciesData$plot_id == pid, , drop = FALSE]
+    if (nrow(plotSpecies) > 0) {
       # Sort by abundance descending
-      plot_species <- plot_species[order(-plot_species$abundance), , drop = FALSE]
+      plotSpecies <- plotSpecies[order(-plotSpecies$abundance), , drop = FALSE]
       # Take top-k species
-      top_species <- head(plot_species$species_id, top_k_species)
+      topSpecies <- head(plotSpecies$species_id, topKSpecies)
       # Map to indices (1-based, 0 is padding)
-      for (j in seq_along(top_species)) {
-        species_ids_matrix[i, j] <- species_to_idx[top_species[j]]
+      for (j in seq_along(topSpecies)) {
+        speciesIdsMatrix[i, j] <- speciesToIdx[topSpecies[j]]
       }
     }
   }
 
   # Build schema
   schema <- list(
-    n_plots = length(plot_ids),
-    n_species = encoder$n_known_species(),
-    n_species_vocab = n_species_vocab,
-    has_coordinates = has_coordinates,
-    has_abundance = TRUE,
-    has_taxonomy = has_taxonomy,
-    n_genera = encoder$n_genera(),
-    n_families = encoder$n_families(),
-    covariate_names = covariate_cols,
-    targets = target_configs,
-    track_unknown_fraction = track_unknown_fraction,
-    track_unknown_count = track_unknown_count,
-    top_k_species = as.integer(top_k_species)
+    nPlots = length(plotIds),
+    nSpecies = encoder$n_known_species(),
+    nSpeciesVocab = nSpeciesVocab,
+    hasCoordinates = hasCoordinates,
+    hasAbundance = TRUE,
+    hasTaxonomy = hasTaxonomy,
+    nGenera = encoder$n_genera(),
+    nFamilies = encoder$n_families(),
+    covariateNames = covariateCols,
+    targets = targetConfigs,
+    trackUnknownFraction = trackUnknownFraction,
+    trackUnknownCount = trackUnknownCount,
+    topKSpecies = as.integer(topKSpecies)
   )
 
   # Return dataset components
@@ -244,36 +244,36 @@ resolve_dataset <- function(header,
     encoder = encoder,
     coordinates = coordinates,
     covariates = covariates,
-    targets = target_values,
+    targets = targetValues,
     schema = schema,
-    plot_ids = plot_ids
+    plotIds = plotIds
   )
 
   # Add encoded species features
   if (!is.null(encoded$hash_embedding)) {
-    result$hash_embedding <- encoded$hash_embedding
+    result$hashEmbedding <- encoded$hash_embedding
   }
   if (!is.null(encoded$genus_ids)) {
-    result$genus_ids <- encoded$genus_ids
+    result$genusIds <- encoded$genus_ids
   }
   if (!is.null(encoded$family_ids)) {
-    result$family_ids <- encoded$family_ids
+    result$familyIds <- encoded$family_ids
   }
-  if (!is.null(encoded$unknown_fraction) && track_unknown_fraction) {
-    result$unknown_fraction <- encoded$unknown_fraction
+  if (!is.null(encoded$unknown_fraction) && trackUnknownFraction) {
+    result$unknownFraction <- encoded$unknown_fraction
   }
-  if (!is.null(encoded$unknown_count) && track_unknown_count) {
-    result$unknown_count <- encoded$unknown_count
+  if (!is.null(encoded$unknown_count) && trackUnknownCount) {
+    result$unknownCount <- encoded$unknown_count
   }
   if (!is.null(encoded$species_vector)) {
-    result$species_vector <- encoded$species_vector
+    result$speciesVector <- encoded$species_vector
   }
 
-  # Always add species_ids for embed mode support
-  result$species_ids <- species_ids_matrix
-  result$species_vocab <- unique_species
+  # Always add speciesIds for embed mode support
+  result$speciesIds <- speciesIdsMatrix
+  result$speciesVocab <- uniqueSpecies
 
-  class(result) <- "resolve_dataset"
+  class(result) <- "resolve.dataset"
   result
 }
 
@@ -282,103 +282,102 @@ resolve_dataset <- function(header,
 #'
 #' Train a model on a dataset with sensible defaults.
 #'
-#' @param dataset A resolve_dataset object (from resolve_dataset())
-#' @param species_encoding How to encode species: "hash" (default) or "embed".
-#'   Note: "embed" mode is not yet fully supported in R bindings.
-#' @param hidden_dims Hidden layer dimensions (default c(2048, 1024, 512, 256, 128, 64))
-#' @param max_epochs Maximum training epochs (default 500)
+#' @param dataset A resolve.dataset object (from resolve.dataset())
+#' @param speciesEncoding How to encode species: "hash" (default) or "embed".
+#' @param hiddenDims Hidden layer dimensions (default c(2048, 1024, 512, 256, 128, 64))
+#' @param maxEpochs Maximum training epochs (default 500)
 #' @param patience Early stopping patience (default 50)
 #' @param lr Learning rate (default 0.001)
-#' @param batch_size Batch size (default 4096)
+#' @param batchSize Batch size (default 4096)
 #' @param device Device: "cpu" or "cuda" (default "cpu")
-#' @param test_size Fraction of data to use for testing (default 0.2)
+#' @param testSize Fraction of data to use for testing (default 0.2)
 #' @param seed Random seed (default 42)
-#' @param save_path Path to save final model (optional)
-#' @param loss_config Loss configuration preset: "mae" (default), "smape", or "combined"
+#' @param savePath Path to save final model (optional)
+#' @param lossConfig Loss configuration preset: "mae" (default), "smape", or "combined".
+#'   - "mae": Pure MAE loss (no SMAPE, no band penalty)
+#'   - "smape": SMAPE as primary loss from start
+#'   - "combined": Phased training (MAE -> MAE+SMAPE -> MAE+SMAPE+band)
 #' @param verbose Print training progress (default TRUE)
 #'
 #' @return A trained model object with fit results
 #'
 #' @examples
 #' \dontrun{
-#' dataset <- resolve_dataset(...)
-#' result <- resolve_train(dataset)
+#' dataset <- resolve.dataset(...)
+#' result <- resolve.train(dataset)
 #' print(result$metrics)
 #' }
 #'
 #' @export
-resolve_train <- function(dataset,
-                          species_encoding = "hash",
-                          hidden_dims = NULL,
-                          max_epochs = 500L,
+resolve.train <- function(dataset,
+                          speciesEncoding = "hash",
+                          hiddenDims = NULL,
+                          maxEpochs = 500L,
                           patience = 50L,
                           lr = 1e-3,
-                          batch_size = 4096L,
+                          batchSize = 4096L,
                           device = "cpu",
-                          test_size = 0.2,
+                          testSize = 0.2,
                           seed = 42L,
-                          save_path = NULL,
-                          loss_config = "mae",
+                          savePath = NULL,
+                          lossConfig = "mae",
                           verbose = TRUE) {
-  if (!inherits(dataset, "resolve_dataset")) {
-    stop("dataset must be created with resolve_dataset()")
+  if (!inherits(dataset, "resolve.dataset")) {
+    stop("dataset must be created with resolve.dataset()")
   }
 
-  # Validate species_encoding
-  if (!species_encoding %in% c("hash", "embed")) {
-    stop("species_encoding must be 'hash' or 'embed'")
+  # Validate speciesEncoding
+  if (!speciesEncoding %in% c("hash", "embed")) {
+    stop("speciesEncoding must be 'hash' or 'embed'")
   }
 
-  # For embed mode, verify dataset has species_ids
-  if (species_encoding == "embed" && is.null(dataset$species_ids)) {
-    stop("species_encoding='embed' requires dataset with species_ids")
+  # For embed mode, verify dataset has speciesIds
+  if (speciesEncoding == "embed" && is.null(dataset$speciesIds)) {
+    stop("speciesEncoding='embed' requires dataset with speciesIds")
   }
 
-  # Validate loss_config
-  if (!loss_config %in% c("mae", "smape", "combined")) {
-    stop("loss_config must be 'mae', 'smape', or 'combined'")
-  }
-  if (loss_config != "mae" && verbose) {
-    message("Note: loss_config='", loss_config, "' is not yet fully supported in R bindings. ",
-            "Using default loss (MAE + band penalty). For full loss_config support, use Python API.")
+  # Validate lossConfig
+  if (!lossConfig %in% c("mae", "smape", "combined")) {
+    stop("lossConfig must be 'mae', 'smape', or 'combined'")
   }
 
   # Default hidden dims
-  if (is.null(hidden_dims)) {
-    hidden_dims <- c(2048L, 1024L, 512L, 256L, 128L, 64L)
+  if (is.null(hiddenDims)) {
+    hiddenDims <- c(2048L, 1024L, 512L, 256L, 128L, 64L)
   } else {
-    hidden_dims <- as.integer(hidden_dims)
+    hiddenDims <- as.integer(hiddenDims)
   }
 
   # Build model config
-  model_config <- list(
-    species_encoding = species_encoding,
+  modelConfig <- list(
+    species_encoding = speciesEncoding,
     hash_dim = dataset$encoder$hash_dim(),
     top_k = dataset$encoder$top_k(),
-    top_k_species = if (!is.null(dataset$schema$top_k_species)) dataset$schema$top_k_species else 10L,
+    top_k_species = if (!is.null(dataset$schema$topKSpecies)) dataset$schema$topKSpecies else 10L,
     n_taxonomy_slots = dataset$encoder$n_taxonomy_slots(),
-    hidden_dims = hidden_dims,
+    hidden_dims = hiddenDims,
     dropout = 0.3
   )
 
   # Create model
-  model <- new(.resolve_module$ResolveModel, dataset$schema, model_config)
+  model <- new(.resolve_module$ResolveModel, dataset$schema, modelConfig)
 
   # Build train config
-  train_config <- list(
-    batch_size = as.integer(batch_size),
-    max_epochs = as.integer(max_epochs),
+  trainConfig <- list(
+    batch_size = as.integer(batchSize),
+    max_epochs = as.integer(maxEpochs),
     patience = as.integer(patience),
     lr = lr,
-    device = device
+    device = device,
+    loss_config = lossConfig
   )
 
   # Create trainer
-  trainer <- new(.resolve_module$Trainer, model, train_config)
+  trainer <- new(.resolve_module$Trainer, model, trainConfig)
 
   # Prepare hash embedding (required for hash mode)
-  hash_emb <- if (!is.null(dataset$hash_embedding)) {
-    dataset$hash_embedding
+  hashEmb <- if (!is.null(dataset$hashEmbedding)) {
+    dataset$hashEmbedding
   } else {
     matrix(0, nrow = nrow(dataset$coordinates), ncol = 1)
   }
@@ -387,15 +386,15 @@ resolve_train <- function(dataset,
   trainer$prepare_data(
     coordinates = dataset$coordinates,
     covariates = dataset$covariates,
-    hash_embedding = hash_emb,
-    species_ids = if (!is.null(dataset$species_ids)) dataset$species_ids else NULL,
-    species_vector = if (!is.null(dataset$species_vector)) dataset$species_vector else NULL,
-    genus_ids = if (!is.null(dataset$genus_ids)) as.integer(dataset$genus_ids) else NULL,
-    family_ids = if (!is.null(dataset$family_ids)) as.integer(dataset$family_ids) else NULL,
-    unknown_fraction = dataset$unknown_fraction,
-    unknown_count = dataset$unknown_count,
+    hash_embedding = hashEmb,
+    species_ids = if (!is.null(dataset$speciesIds)) dataset$speciesIds else NULL,
+    species_vector = if (!is.null(dataset$speciesVector)) dataset$speciesVector else NULL,
+    genus_ids = if (!is.null(dataset$genusIds)) as.integer(dataset$genusIds) else NULL,
+    family_ids = if (!is.null(dataset$familyIds)) as.integer(dataset$familyIds) else NULL,
+    unknown_fraction = dataset$unknownFraction,
+    unknown_count = dataset$unknownCount,
     targets = dataset$targets,
-    test_size = test_size,
+    test_size = testSize,
     seed = as.integer(seed)
   )
 
@@ -409,21 +408,21 @@ resolve_train <- function(dataset,
   if (verbose) {
     cat(sprintf("Training complete. Best epoch: %d\n", result$best_epoch))
     cat(sprintf("Training time: %.1f seconds\n", result$train_time_seconds))
-    for (target_name in names(result$final_metrics)) {
-      metrics <- result$final_metrics[[target_name]]
-      cat(sprintf("  %s: ", target_name))
-      metric_strs <- sapply(names(metrics), function(m) {
+    for (targetName in names(result$final_metrics)) {
+      metrics <- result$final_metrics[[targetName]]
+      cat(sprintf("  %s: ", targetName))
+      metricStrs <- sapply(names(metrics), function(m) {
         sprintf("%s=%.4f", m, metrics[[m]])
       })
-      cat(paste(metric_strs, collapse = ", "), "\n")
+      cat(paste(metricStrs, collapse = ", "), "\n")
     }
   }
 
   # Save if requested
-  if (!is.null(save_path)) {
-    trainer$save(save_path)
+  if (!is.null(savePath)) {
+    trainer$save(savePath)
     if (verbose) {
-      cat(sprintf("Model saved to: %s\n", save_path))
+      cat(sprintf("Model saved to: %s\n", savePath))
     }
   }
 
@@ -440,40 +439,40 @@ resolve_train <- function(dataset,
 #'
 #' Make predictions on a dataset using a trained model.
 #'
-#' @param model A trained model (from resolve_train() or resolve_load())
-#' @param dataset A resolve_dataset to predict on
-#' @param return_latent Return latent representations (default FALSE)
-#' @param output_space Output space for regression predictions:
+#' @param model A trained model (from resolve.train() or resolve.load())
+#' @param dataset A resolve.dataset to predict on
+#' @param returnLatent Return latent representations (default FALSE)
+#' @param outputSpace Output space for regression predictions:
 #'   "raw" (default): inverse-transform predictions to original scale
 #'   "transformed": keep predictions in transformed space (e.g., log1p)
-#' @param confidence_threshold Minimum confidence for predictions (0-1).
+#' @param confidenceThreshold Minimum confidence for predictions (0-1).
 #'   Predictions below threshold are set to NA. Default 0 keeps all predictions.
-#'   Confidence is based on 1 - unknown_fraction (species coverage).
+#'   Confidence is based on 1 - unknownFraction (species coverage).
 #'
 #' @return Named list of prediction arrays, plus 'confidence' for each target
 #'
 #' @examples
 #' \dontrun{
-#' preds <- resolve_predict(trained_model, new_dataset)
-#' preds <- resolve_predict(trained_model, new_dataset, confidence_threshold = 0.5)
+#' preds <- resolve.predict(trainedModel, newDataset)
+#' preds <- resolve.predict(trainedModel, newDataset, confidenceThreshold = 0.5)
 #' }
 #'
 #' @export
-resolve_predict <- function(model,
+resolve.predict <- function(model,
                             dataset,
-                            return_latent = FALSE,
-                            output_space = "raw",
-                            confidence_threshold = 0.0) {
-  # Validate output_space
-  if (!output_space %in% c("raw", "transformed")) {
-    stop("output_space must be 'raw' or 'transformed'")
+                            returnLatent = FALSE,
+                            outputSpace = "raw",
+                            confidenceThreshold = 0.0) {
+  # Validate outputSpace
+  if (!outputSpace %in% c("raw", "transformed")) {
+    stop("outputSpace must be 'raw' or 'transformed'")
   }
 
   # Handle both trainer objects and predictor objects
   if (inherits(model, "Rcpp_Predictor") || inherits(model, "Rcpp_RPredictor")) {
     predictor <- model
-    hash_emb <- if (!is.null(dataset$hash_embedding)) {
-      dataset$hash_embedding
+    hashEmb <- if (!is.null(dataset$hashEmbedding)) {
+      dataset$hashEmbedding
     } else {
       matrix(0, nrow = nrow(dataset$coordinates), ncol = 1)
     }
@@ -481,34 +480,34 @@ resolve_predict <- function(model,
     result <- predictor$predict(
       coordinates = dataset$coordinates,
       covariates = dataset$covariates,
-      hash_embedding = hash_emb,
-      genus_ids = if (!is.null(dataset$genus_ids)) as.integer(dataset$genus_ids) else NULL,
-      family_ids = if (!is.null(dataset$family_ids)) as.integer(dataset$family_ids) else NULL,
-      return_latent = return_latent
+      hash_embedding = hashEmb,
+      genus_ids = if (!is.null(dataset$genusIds)) as.integer(dataset$genusIds) else NULL,
+      family_ids = if (!is.null(dataset$familyIds)) as.integer(dataset$familyIds) else NULL,
+      return_latent = returnLatent
     )
 
-    # Compute confidence from unknown_fraction (1 - unknown_fraction)
-    if (!is.null(dataset$unknown_fraction)) {
-      confidence <- 1.0 - dataset$unknown_fraction
+    # Compute confidence from unknownFraction (1 - unknownFraction)
+    if (!is.null(dataset$unknownFraction)) {
+      confidence <- 1.0 - dataset$unknownFraction
     } else {
       # If no unknown tracking, assume full confidence
       confidence <- rep(1.0, nrow(dataset$coordinates))
     }
 
     # Post-process each target
-    target_names <- names(dataset$schema$targets)
-    for (name in target_names) {
+    targetNames <- names(dataset$schema$targets)
+    for (name in targetNames) {
       if (!is.null(result[[name]])) {
         cfg <- dataset$schema$targets[[name]]
 
-        # Apply inverse transform for log1p targets if output_space == "raw"
-        if (!is.null(cfg$transform) && cfg$transform == "log1p" && output_space == "raw") {
+        # Apply inverse transform for log1p targets if outputSpace == "raw"
+        if (!is.null(cfg$transform) && cfg$transform == "log1p" && outputSpace == "raw") {
           result[[name]] <- expm1(result[[name]])
         }
 
         # Apply confidence threshold
-        if (confidence_threshold > 0) {
-          result[[name]][confidence < confidence_threshold] <- NA
+        if (confidenceThreshold > 0) {
+          result[[name]][confidence < confidenceThreshold] <- NA
         }
 
         # Add confidence for this target
@@ -520,16 +519,16 @@ resolve_predict <- function(model,
     result
 
   } else if (is.list(model) && !is.null(model$trainer)) {
-    # Trainer from resolve_train() - use temp file workaround
-    temp_path <- tempfile(fileext = ".pt")
-    on.exit(unlink(temp_path), add = TRUE)
-    model$trainer$save(temp_path)
-    predictor <- resolve_load(temp_path)
+    # Trainer from resolve.train() - use temp file workaround
+    tempPath <- tempfile(fileext = ".pt")
+    on.exit(unlink(tempPath), add = TRUE)
+    model$trainer$save(tempPath)
+    predictor <- resolve.load(tempPath)
 
     # Recurse with the predictor
-    resolve_predict(predictor, dataset, return_latent, output_space, confidence_threshold)
+    resolve.predict(predictor, dataset, returnLatent, outputSpace, confidenceThreshold)
   } else {
-    stop("model must be a Predictor object or result from resolve_train()")
+    stop("model must be a Predictor object or result from resolve.train()")
   }
 }
 
@@ -545,12 +544,12 @@ resolve_predict <- function(model,
 #'
 #' @examples
 #' \dontrun{
-#' predictor <- resolve_load("model.pt")
-#' preds <- resolve_predict(predictor, new_data)
+#' predictor <- resolve.load("model.pt")
+#' preds <- resolve.predict(predictor, newData)
 #' }
 #'
 #' @export
-resolve_load <- function(path, device = "cpu") {
+resolve.load <- function(path, device = "cpu") {
   .resolve_module$Predictor_load(path, device)
 }
 
@@ -559,17 +558,17 @@ resolve_load <- function(path, device = "cpu") {
 #'
 #' Save model checkpoint.
 #'
-#' @param trainer A trained Trainer object (from resolve_train())
+#' @param trainer A trained Trainer object (from resolve.train())
 #' @param path Path to save checkpoint
 #'
 #' @export
-resolve_save <- function(trainer, path) {
+resolve.save <- function(trainer, path) {
   if (is.list(trainer) && !is.null(trainer$trainer)) {
     trainer$trainer$save(path)
   } else if (inherits(trainer, "Rcpp_Trainer") || inherits(trainer, "Rcpp_RTrainer")) {
     trainer$save(path)
   } else {
-    stop("trainer must be a Trainer object or result from resolve_train()")
+    stop("trainer must be a Trainer object or result from resolve.train()")
   }
 }
 
@@ -578,25 +577,25 @@ resolve_save <- function(trainer, path) {
 #'
 #' Read progress from a checkpoint directory.
 #'
-#' @param checkpoint_dir Path to checkpoint directory
+#' @param checkpointDir Path to checkpoint directory
 #'
 #' @return A list with progress information, or NULL if no checkpoint exists
 #'
 #' @examples
 #' \dontrun{
-#' progress <- resolve_progress("checkpoints/my_model")
+#' progress <- resolve.progress("checkpoints/my_model")
 #' if (!is.null(progress)) {
 #'   cat(sprintf("Epoch %d/%d (%.1f%%)\n",
-#'     progress$epoch, progress$max_epochs,
-#'     progress$progress_pct))
+#'     progress$epoch, progress$maxEpochs,
+#'     progress$progressPct))
 #' }
 #' }
 #'
 #' @export
-resolve_progress <- function(checkpoint_dir) {
-  progress_file <- file.path(checkpoint_dir, "progress.json")
-  if (!file.exists(progress_file)) {
+resolve.progress <- function(checkpointDir) {
+  progressFile <- file.path(checkpointDir, "progress.json")
+  if (!file.exists(progressFile)) {
     return(NULL)
   }
-  jsonlite::fromJSON(progress_file)
+  jsonlite::fromJSON(progressFile)
 }

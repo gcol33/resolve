@@ -3,10 +3,14 @@
 #include "resolve/types.hpp"
 #include "resolve/model.hpp"
 #include "resolve/loss.hpp"
+#include "resolve/dataset.hpp"
 #include <torch/torch.h>
 #include <chrono>
 
 namespace resolve {
+
+// Forward declaration
+class ResolveDataset;
 
 // Data scalers (mean, scale) per feature/target
 struct Scalers {
@@ -24,7 +28,14 @@ public:
         const TrainConfig& config = TrainConfig{}
     );
 
-    // Prepare data for training
+    // Prepare data from a ResolveDataset (preferred API)
+    void prepare_data(
+        const ResolveDataset& dataset,
+        float test_size = 0.2f,
+        int seed = 42
+    );
+
+    // Prepare data for training (raw tensor API for backwards compatibility)
     // coordinates: (n_plots, 2) or empty if no coords
     // covariates: (n_plots, n_covariates) or empty
     // hash_embedding: (n_plots, hash_dim) for hash mode

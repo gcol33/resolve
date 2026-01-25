@@ -128,6 +128,13 @@ resolve::SpeciesEncodingMode parse_species_encoding_mode(const std::string& s) {
     stop("Invalid species encoding mode: " + s);
 }
 
+resolve::LossConfigMode parse_loss_config_mode(const std::string& s) {
+    if (s == "mae") return resolve::LossConfigMode::MAE;
+    if (s == "smape") return resolve::LossConfigMode::SMAPE;
+    if (s == "combined") return resolve::LossConfigMode::Combined;
+    stop("Invalid loss config mode: " + s);
+}
+
 // =============================================================================
 // SpeciesEncoder class wrapper
 // =============================================================================
@@ -436,6 +443,10 @@ public:
         if (config_list.containsElementNamed("device")) {
             std::string dev = as<std::string>(config_list["device"]);
             config.device = (dev == "cuda") ? torch::kCUDA : torch::kCPU;
+        }
+        if (config_list.containsElementNamed("loss_config")) {
+            config.loss_config = parse_loss_config_mode(
+                as<std::string>(config_list["loss_config"]));
         }
 
         trainer_ = std::make_unique<resolve::Trainer>(*(model.model()), config);

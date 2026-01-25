@@ -10,6 +10,8 @@
 #include "resolve/trainer.hpp"
 #include "resolve/predictor.hpp"
 #include "resolve/loss.hpp"
+#include "resolve/dataset.hpp"
+#include "resolve/role_mapping.hpp"
 
 using namespace Rcpp;
 
@@ -595,4 +597,270 @@ bool resolve_cuda_available() {
 // [[Rcpp::export]]
 int resolve_cuda_device_count() {
     return torch::cuda::device_count();
+}
+
+// ============================================================================
+// Dataset Loading (Phase 1 API)
+// ============================================================================
+
+//' Load dataset from CSV files
+//' @param header_path Path to header CSV file (plot-level data)
+//' @param species_path Path to species CSV file (species occurrences)
+//' @param roles_list Named list of role mappings
+//' @param targets_list List of target specifications
+//' @param config_list Dataset configuration
+//' @return External pointer to ResolveDataset
+//' @export
+// [[Rcpp::export]]
+SEXP resolve_dataset_from_csv(
+    std::string header_path,
+    std::string species_path,
+    List roles_list,
+    List targets_list,
+    List config_list
+) {
+    using namespace resolve;
+
+    // Parse role mapping
+    RoleMapping roles;
+    roles.plot_id = as<std::string>(roles_list["plot_id"]);
+    roles.species_id = as<std::string>(roles_list["species_id"]);
+
+    if (roles_list.containsElementNamed("abundance") && !Rf_isNull(roles_list["abundance"])) {
+        roles.abundance = as<std::string>(roles_list["abundance"]);
+    }
+    if (roles_list.containsElementNamed("longitude") && !Rf_isNull(roles_list["longitude"])) {
+        roles.longitude = as<std::string>(roles_list["longitude"]);
+    }
+    if (roles_list.containsElementNamed("latitude") && !Rf_isNull(roles_list["latitude"])) {
+        roles.latitude = as<std::string>(roles_list["latitude"]);
+    }
+    if (roles_list.containsElementNamed("genus") && !Rf_isNull(roles_list["genus"])) {
+        roles.genus = as<std::string>(roles_list["genus"]);
+    }
+    if (roles_list.containsElementNamed("family") && !Rf_isNull(roles_list["family"])) {
+        roles.family = as<std::string>(roles_list["family"]);
+    }
+
+    // Parse target specifications
+    std::vector<TargetSpec> targets;
+    for (int i = 0; i < targets_list.size(); ++i) {
+        List target = targets_list[i];
+        TargetSpec spec;
+        spec.column_name = as<std::string>(target["column"]);
+        spec.target_name = target.containsElementNamed("name")
+            ? as<std::string>(target["name"])
+            : spec.column_name;
+
+        std::string task_str = as<std::string>(target["task"]);
+        spec.task = (task_str == "regression")
+            ? TaskType::Regression
+            : TaskType::Classification;
+
+        if (target.containsElementNamed("transform")) {
+            std::string transform_str = as<std::string>(target["transform"]);
+            spec.transform = (transform_str == "log1p")
+                ? TransformType::Log1p
+                : TransformType::None;
+        }
+        if (target.containsElementNamed("num_classes")) {
+            spec.num_classes = as<int>(target["num_classes"]);
+        }
+
+        targets.push_back(spec);
+    }
+
+    // Parse dataset configuration
+    DatasetConfig config;
+    if (config_list.containsElementNamed("species_encoding")) {
+        std::string enc = as<std::string>(config_list["species_encoding"]);
+        if (enc == "embed") {
+            config.species_encoding = SpeciesEncodingMode::Embed;
+        } else if (enc == "sparse") {
+            config.species_encoding = SpeciesEncodingMode::Sparse;
+        } else {
+            config.species_encoding = SpeciesEncodingMode::Hash;
+        }
+    }
+    if (config_list.containsElementNamed("hash_dim")) {
+        config.hash_dim = as<int>(config_list["hash_dim"]);
+    }
+    if (config_list.containsElementNamed("top_k")) {
+        config.top_k = as<int>(config_list["top_k"]);
+    }
+    if (config_list.containsElementNamed("top_k_species")) {
+        config.top_k_species = as<int>(config_list["top_k_species"]);
+    }
+
+    // Load dataset
+    auto* dataset = new ResolveDataset(
+        header_path.empty()
+            ? ResolveDataset::from_species_csv(species_path, roles, targets, config)
+            : ResolveDataset::from_csv(header_path, species_path, roles, targets, config)
+    );
+
+    return XPtr<ResolveDataset>(dataset);
+}
+
+//' Load dataset from species CSV only
+//' @param species_path Path to species CSV file
+//' @param roles_list Named list of role mappings
+//' @param targets_list List of target specifications
+//' @param config_list Dataset configuration
+//' @return External pointer to ResolveDataset
+//' @export
+// [[Rcpp::export]]
+SEXP resolve_dataset_from_species_csv(
+    std::string species_path,
+    List roles_list,
+    List targets_list,
+    List config_list
+) {
+    return resolve_dataset_from_csv("", species_path, roles_list, targets_list, config_list);
+}
+
+//' Get dataset schema
+//' @param dataset_ptr External pointer to ResolveDataset
+//' @return List with schema information
+//' @export
+// [[Rcpp::export]]
+List resolve_dataset_schema(SEXP dataset_ptr) {
+    XPtr<resolve::ResolveDataset> dataset(dataset_ptr);
+    const auto& schema = dataset->schema();
+
+    List targets_list;
+    for (const auto& target : schema.targets) {
+        targets_list.push_back(List::create(
+            Named("name") = target.name,
+            Named("task") = (target.task == resolve::TaskType::Regression ? "regression" : "classification"),
+            Named("transform") = (target.transform == resolve::TransformType::Log1p ? "log1p" : "none"),
+            Named("num_classes") = target.num_classes,
+            Named("weight") = target.weight
+        ));
+    }
+
+    return List::create(
+        Named("n_plots") = schema.n_plots,
+        Named("n_species") = schema.n_species,
+        Named("n_species_vocab") = schema.n_species_vocab,
+        Named("has_coordinates") = schema.has_coordinates,
+        Named("has_abundance") = schema.has_abundance,
+        Named("has_taxonomy") = schema.has_taxonomy,
+        Named("n_genera") = schema.n_genera,
+        Named("n_families") = schema.n_families,
+        Named("covariate_names") = wrap(schema.covariate_names),
+        Named("targets") = targets_list
+    );
+}
+
+//' Get number of plots in dataset
+//' @param dataset_ptr External pointer to ResolveDataset
+//' @return Number of plots
+//' @export
+// [[Rcpp::export]]
+int64_t resolve_dataset_n_plots(SEXP dataset_ptr) {
+    XPtr<resolve::ResolveDataset> dataset(dataset_ptr);
+    return dataset->n_plots();
+}
+
+//' Get plot IDs from dataset
+//' @param dataset_ptr External pointer to ResolveDataset
+//' @return Character vector of plot IDs
+//' @export
+// [[Rcpp::export]]
+CharacterVector resolve_dataset_plot_ids(SEXP dataset_ptr) {
+    XPtr<resolve::ResolveDataset> dataset(dataset_ptr);
+    return wrap(dataset->plot_ids());
+}
+
+//' Train with dataset (new API)
+//' @param model_ptr External pointer to ResolveModel
+//' @param dataset_ptr External pointer to ResolveDataset
+//' @param config_list Training configuration
+//' @param test_size Test set fraction
+//' @param seed Random seed
+//' @return List with training results
+//' @export
+// [[Rcpp::export]]
+List resolve_train_with_dataset(
+    SEXP model_ptr,
+    SEXP dataset_ptr,
+    List config_list,
+    double test_size = 0.2,
+    int seed = 42
+) {
+    XPtr<resolve::ResolveModel> model(model_ptr);
+    XPtr<resolve::ResolveDataset> dataset(dataset_ptr);
+
+    resolve::TrainConfig config;
+    if (config_list.containsElementNamed("batch_size")) {
+        config.batch_size = as<int>(config_list["batch_size"]);
+    }
+    if (config_list.containsElementNamed("max_epochs")) {
+        config.max_epochs = as<int>(config_list["max_epochs"]);
+    }
+    if (config_list.containsElementNamed("patience")) {
+        config.patience = as<int>(config_list["patience"]);
+    }
+    if (config_list.containsElementNamed("lr")) {
+        config.lr = as<float>(config_list["lr"]);
+    }
+
+    resolve::Trainer trainer(*model, config);
+    trainer.prepare_data(*dataset, static_cast<float>(test_size), seed);
+
+    auto result = trainer.fit();
+
+    // Convert metrics to R list
+    List final_metrics;
+    for (const auto& [target_name, target_metrics] : result.final_metrics) {
+        List metrics_list;
+        for (const auto& [metric_name, value] : target_metrics) {
+            metrics_list[metric_name] = value;
+        }
+        final_metrics[target_name] = metrics_list;
+    }
+
+    return List::create(
+        Named("best_epoch") = result.best_epoch,
+        Named("final_metrics") = final_metrics,
+        Named("train_loss_history") = wrap(result.train_loss_history),
+        Named("test_loss_history") = wrap(result.test_loss_history),
+        Named("train_time_seconds") = result.train_time_seconds
+    );
+}
+
+//' Predict with dataset (new API)
+//' @param predictor_ptr External pointer to Predictor
+//' @param dataset_ptr External pointer to ResolveDataset
+//' @param return_latent Whether to return latent embeddings
+//' @return List of predictions
+//' @export
+// [[Rcpp::export]]
+List resolve_predict_with_dataset(
+    SEXP predictor_ptr,
+    SEXP dataset_ptr,
+    bool return_latent = false
+) {
+    XPtr<resolve::Predictor> predictor(predictor_ptr);
+    XPtr<resolve::ResolveDataset> dataset(dataset_ptr);
+
+    auto result = predictor->predict(*dataset, return_latent);
+
+    // Convert predictions to R list
+    List predictions;
+    for (const auto& [name, tensor] : result.predictions) {
+        predictions[name] = tensor_to_r_1d(tensor);
+    }
+
+    List ret = List::create(
+        Named("predictions") = predictions,
+        Named("plot_ids") = wrap(result.plot_ids)
+    );
+
+    if (return_latent && result.latent.defined()) {
+        ret["latent"] = tensor_to_r_2d(result.latent);
+    }
+
+    return ret;
 }

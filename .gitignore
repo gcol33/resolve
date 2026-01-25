@@ -89,3 +89,12 @@ site/
 
 # MyPy
 .mypy_cache/
+
+# Reference implementation (untracked)
+reference/
+
+# Build artifacts and logs
+*.bat
+*.ps1
+build_*.txt
+nul

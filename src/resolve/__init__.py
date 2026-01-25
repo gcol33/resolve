@@ -1,28 +1,30 @@
 """
-RESOLVE: Representation Encoding of Species Outcomes via Linear Vector Embeddings.
+RESOLVE - Species composition-based prediction.
 
-A framework for predicting plot-level ecological attributes from species composition
-using linear compositional pooling and learned representations.
+High-level Python API for training and inference.
+
+Example:
+    from resolve import ResolveDataset, Trainer
+
+    dataset = ResolveDataset.from_csv(
+        header="header.csv",
+        species="species.csv",
+        roles={"plot_id": "plot_id", "species_id": "species"},
+        targets={"area": {"column": "area", "task": "regression"}},
+    )
+
+    trainer = Trainer(dataset, hash_dim=64, hidden_dims=[256, 128])
+    results = trainer.fit()
 """
 
-from resolve.data.dataset import ResolveDataset, ResolveSchema
-from resolve.data.roles import RoleMapping, TargetConfig
-from resolve.model.resolve import ResolveModel
-from resolve.train.trainer import Trainer
-from resolve.train.loss import PhaseConfig
-from resolve.inference.predictor import Predictor, ResolvePredictions
-from resolve import backend
+from .dataset import ResolveDataset, RoleMapping, TargetConfig
+from .trainer import Trainer
 
 __version__ = "0.1.0"
+
 __all__ = [
     "ResolveDataset",
-    "ResolveSchema",
-    "ResolveModel",
     "Trainer",
-    "Predictor",
-    "ResolvePredictions",
     "RoleMapping",
     "TargetConfig",
-    "PhaseConfig",
-    "backend",
 ]

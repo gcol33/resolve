@@ -12,6 +12,7 @@ FetchContent_MakeAvailable(Catch2)
 # Test executable
 add_executable(resolve_tests
     test_model.cpp
+    test_dataset.cpp
 )
 
 # Add CUDA library directory if CUDA is available

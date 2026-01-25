@@ -3,9 +3,13 @@
 #include "resolve/types.hpp"
 #include "resolve/model.hpp"
 #include "resolve/trainer.hpp"
+#include "resolve/dataset.hpp"
 #include <torch/torch.h>
 
 namespace resolve {
+
+// Forward declaration
+class ResolveDataset;
 
 // Predictor for inference with trained models
 class Predictor {
@@ -19,12 +23,20 @@ public:
     // Load from saved checkpoint
     static Predictor load(const std::string& path, torch::Device device = torch::kCPU);
 
-    // Predict on new data
+    // Predict on a ResolveDataset (preferred API)
+    ResolvePredictions predict(
+        const ResolveDataset& dataset,
+        bool return_latent = false
+    );
+
+    // Predict on new data (raw tensor API)
     // Returns predictions for all targets
     ResolvePredictions predict(
         torch::Tensor coordinates,
         torch::Tensor covariates,
         torch::Tensor hash_embedding,
+        torch::Tensor species_ids,
+        torch::Tensor species_vector,
         torch::Tensor genus_ids,
         torch::Tensor family_ids,
         bool return_latent = false

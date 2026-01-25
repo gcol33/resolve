@@ -1,21 +1,23 @@
-# Python bindings using pybind11
-find_package(Python COMPONENTS Interpreter Development REQUIRED)
-find_package(pybind11 CONFIG)
+# Python bindings using nanobind
+find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 
-if(NOT pybind11_FOUND)
-    # Try to fetch pybind11 if not found
-    include(FetchContent)
-    FetchContent_Declare(
-        pybind11
-        GIT_REPOSITORY https://github.com/pybind/pybind11.git
-        GIT_TAG v2.11.1
-    )
-    FetchContent_MakeAvailable(pybind11)
-endif()
+# Fetch nanobind
+include(FetchContent)
+FetchContent_Declare(
+    nanobind
+    GIT_REPOSITORY https://github.com/wjakob/nanobind.git
+    GIT_TAG v2.4.0
+)
+FetchContent_MakeAvailable(nanobind)
 
-pybind11_add_module(_resolve_core src/bindings.cpp)
+# Build the extension module
+nanobind_add_module(_resolve_core src/bindings.cpp)
 
 target_link_libraries(_resolve_core PRIVATE resolve_core ${TORCH_LIBRARIES})
+
+target_include_directories(_resolve_core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
 
 # Set output directory for the built module
 set_target_properties(_resolve_core PROPERTIES
