@@ -1,5 +1,5 @@
 site_name: RESOLVE
-site_description: Representation Encoding of Species Outcomes via Linear Vector Embeddings
+site_description: Representation Encoding for Structured Observation Learning with Vector Embeddings
 site_url: https://gillescolling.com/resolve
 repo_url: https://github.com/gcol33/resolve
 repo_name: gcol33/resolve

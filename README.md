@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-**Representation Encoding of Set-based Outcomes via Linear Vector Embeddings**
+**Representation Encoding for Structured Observation Learning with Vector Embeddings**
 
 A torch-based package for predicting sample attributes from compositional data—sets of entities with optional abundances or weights.
 
@@ -208,7 +208,7 @@ If you use RESOLVE in your research, please cite:
 ```bibtex
 @software{resolve,
   author = {Colling, Gilles},
-  title = {RESOLVE: Representation Encoding of Set-based Outcomes via Linear Vector Embeddings},
+  title = {RESOLVE: Representation Encoding for Structured Observation Learning with Vector Embeddings},
   year = {2025},
   url = {https://github.com/gcol33/resolve}
 }

@@ -20,7 +20,7 @@
 
 ## v0.1.0 (2025-01-19)
 
-Initial release of RESOLVE (Representation Encoding of Species Outcomes via Linear Vector Embeddings).
+Initial release of RESOLVE (Representation Encoding for Structured Observation Learning with Vector Embeddings).
 
 ### Features
 

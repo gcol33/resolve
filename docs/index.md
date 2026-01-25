@@ -1,6 +1,6 @@
 # RESOLVE
 
-**Representation Encoding of Species Outcomes via Linear Vector Embeddings**
+**Representation Encoding for Structured Observation Learning with Vector Embeddings**
 
 An opinionated torch-based package for predicting plot-level attributes from species composition, environment, and space.
 

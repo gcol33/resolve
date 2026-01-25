@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-title: "RESOLVE: Representation Encoding of Species Outcomes via Linear Vector Embeddings"
+title: "RESOLVE: Representation Encoding for Structured Observation Learning with Vector Embeddings"
 message: "If you use this software, please cite it as below."
 type: software
 authors:

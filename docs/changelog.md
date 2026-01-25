@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Initial release of RESOLVE (Representation Encoding of Species Outcomes via Linear Vector Embeddings)
+- Initial release of RESOLVE (Representation Encoding for Structured Observation Learning with Vector Embeddings)
 - **Hybrid species encoding**: Feature hashing for full species lists + learned embeddings for dominant taxa
 - **Multi-target prediction**: Single shared encoder, multiple task heads (regression and classification)
 - **Phased training**: MAE -> SMAPE -> band accuracy optimization for regression targets
