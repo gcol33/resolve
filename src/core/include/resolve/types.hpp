@@ -5,8 +5,21 @@
 #include <vector>
 #include <unordered_map>
 #include <optional>
+#include <functional>
+#include <iostream>
 
 namespace resolve {
+
+// Logging callback for training progress
+using LogCallback = std::function<void(const std::string&)>;
+
+// Default logging to stdout
+inline void default_log(const std::string& msg) {
+    std::cout << msg << std::endl;
+}
+
+// Null logger (discards all messages)
+inline void null_log(const std::string&) {}
 
 // Task type for prediction heads
 enum class TaskType {
@@ -137,6 +150,9 @@ struct TrainConfig {
     // Checkpointing
     std::string checkpoint_dir;   // Directory for checkpoints (empty = disabled)
     int checkpoint_every = 0;     // Save checkpoint every N epochs (0 = only best)
+
+    // Logging callback (defaults to stdout, use null_log to disable)
+    LogCallback log = default_log;
 };
 
 // Batch of data for training/inference
@@ -250,31 +266,89 @@ public:
     int64_t n_genera() const { return static_cast<int64_t>(genus_to_idx_.size()); }
     int64_t n_families() const { return static_cast<int64_t>(family_to_idx_.size()); }
 
-    // Save vocabulary to archive
-    void save(torch::serialize::OutputArchive& archive) const {
-        // Save genus vocab
-        std::vector<std::string> genera;
-        genera.resize(genus_to_idx_.size());
+    // Accessors for serialization
+    const std::unordered_map<std::string, int64_t>& genus_map() const { return genus_to_idx_; }
+    const std::unordered_map<std::string, int64_t>& family_map() const { return family_to_idx_; }
+
+    // Set from loaded data
+    void set_genus_map(const std::unordered_map<std::string, int64_t>& m) { genus_to_idx_ = m; }
+    void set_family_map(const std::unordered_map<std::string, int64_t>& m) { family_to_idx_ = m; }
+
+    // Save vocabulary to archive (strings serialized as concatenated bytes with lengths)
+    void save(torch::serialize::OutputArchive& archive, const std::string& prefix = "taxonomy_") const {
+        // Build ordered lists from maps
+        std::vector<std::string> genera(genus_to_idx_.size());
         for (const auto& [name, idx] : genus_to_idx_) {
             genera[idx] = name;
         }
-
-        std::vector<std::string> families;
-        families.resize(family_to_idx_.size());
+        std::vector<std::string> families(family_to_idx_.size());
         for (const auto& [name, idx] : family_to_idx_) {
             families[idx] = name;
         }
 
-        archive.write("n_genera", torch::tensor(static_cast<int64_t>(genera.size())));
-        archive.write("n_families", torch::tensor(static_cast<int64_t>(families.size())));
+        // Serialize genus vocab: lengths tensor + concatenated bytes tensor
+        std::vector<int64_t> genus_lengths;
+        std::vector<uint8_t> genus_bytes;
+        for (const auto& s : genera) {
+            genus_lengths.push_back(static_cast<int64_t>(s.size()));
+            genus_bytes.insert(genus_bytes.end(), s.begin(), s.end());
+        }
+        archive.write(prefix + "genus_lengths", torch::tensor(genus_lengths));
+        if (!genus_bytes.empty()) {
+            archive.write(prefix + "genus_bytes", torch::from_blob(
+                genus_bytes.data(), {static_cast<int64_t>(genus_bytes.size())}, torch::kUInt8).clone());
+        } else {
+            archive.write(prefix + "genus_bytes", torch::empty({0}, torch::kUInt8));
+        }
 
-        // Note: In a real implementation, we'd need a better way to serialize strings
+        // Serialize family vocab
+        std::vector<int64_t> family_lengths;
+        std::vector<uint8_t> family_bytes;
+        for (const auto& s : families) {
+            family_lengths.push_back(static_cast<int64_t>(s.size()));
+            family_bytes.insert(family_bytes.end(), s.begin(), s.end());
+        }
+        archive.write(prefix + "family_lengths", torch::tensor(family_lengths));
+        if (!family_bytes.empty()) {
+            archive.write(prefix + "family_bytes", torch::from_blob(
+                family_bytes.data(), {static_cast<int64_t>(family_bytes.size())}, torch::kUInt8).clone());
+        } else {
+            archive.write(prefix + "family_bytes", torch::empty({0}, torch::kUInt8));
+        }
     }
 
     // Load vocabulary from archive
-    static TaxonomyVocab load(torch::serialize::InputArchive& archive) {
+    static TaxonomyVocab load(torch::serialize::InputArchive& archive, const std::string& prefix = "taxonomy_") {
         TaxonomyVocab vocab;
-        // Note: Would need proper string serialization
+
+        // Load genus vocab
+        torch::Tensor genus_lengths_t, genus_bytes_t;
+        archive.read(prefix + "genus_lengths", genus_lengths_t);
+        archive.read(prefix + "genus_bytes", genus_bytes_t);
+
+        auto genus_lengths = genus_lengths_t.accessor<int64_t, 1>();
+        auto genus_bytes_ptr = genus_bytes_t.data_ptr<uint8_t>();
+        int64_t offset = 0;
+        for (int64_t i = 0; i < genus_lengths_t.size(0); ++i) {
+            std::string name(reinterpret_cast<const char*>(genus_bytes_ptr + offset), genus_lengths[i]);
+            vocab.genus_to_idx_[name] = i;
+            offset += genus_lengths[i];
+        }
+
+        // Load family vocab
+        torch::Tensor family_lengths_t, family_bytes_t;
+        archive.read(prefix + "family_lengths", family_lengths_t);
+        archive.read(prefix + "family_bytes", family_bytes_t);
+
+        auto family_lengths = family_lengths_t.accessor<int64_t, 1>();
+        auto family_bytes_ptr = family_bytes_t.data_ptr<uint8_t>();
+        offset = 0;
+        for (int64_t i = 0; i < family_lengths_t.size(0); ++i) {
+            std::string name(reinterpret_cast<const char*>(family_bytes_ptr + offset), family_lengths[i]);
+            vocab.family_to_idx_[name] = i;
+            offset += family_lengths[i];
+        }
+
         return vocab;
     }
 

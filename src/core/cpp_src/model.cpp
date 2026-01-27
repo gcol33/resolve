@@ -89,7 +89,7 @@ ResolveModelImpl::ResolveModelImpl(
                 target.transform
             )
         );
-        heads_.emplace_back(target.name, head);
+        heads_.emplace(target.name, head);
     }
 }
 
@@ -158,8 +158,7 @@ torch::Tensor ResolveModelImpl::get_latent(
 }
 
 TaskHead& ResolveModelImpl::head(const std::string& name) {
-    auto it = std::find_if(heads_.begin(), heads_.end(),
-        [&name](const auto& p) { return p.first == name; });
+    auto it = heads_.find(name);
     if (it == heads_.end()) {
         throw std::runtime_error("Head not found: " + name);
     }

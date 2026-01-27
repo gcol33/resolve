@@ -2,8 +2,28 @@
 
 #include "resolve/types.hpp"
 #include <torch/torch.h>
+#include <utility>
 
 namespace resolve {
+
+// Helper function to build MLP layers - reduces duplication across encoder implementations
+inline std::pair<torch::nn::Sequential, int64_t> build_mlp(
+    int64_t input_dim,
+    const std::vector<int64_t>& hidden_dims,
+    float dropout
+) {
+    torch::nn::Sequential mlp;
+    int64_t prev_dim = input_dim;
+    for (size_t i = 0; i < hidden_dims.size(); ++i) {
+        mlp->push_back(torch::nn::Linear(prev_dim, hidden_dims[i]));
+        mlp->push_back(torch::nn::BatchNorm1d(hidden_dims[i]));
+        mlp->push_back(torch::nn::GELU());
+        mlp->push_back(torch::nn::Dropout(dropout));
+        prev_dim = hidden_dims[i];
+    }
+    int64_t latent_dim = hidden_dims.empty() ? input_dim : hidden_dims.back();
+    return {mlp, latent_dim};
+}
 
 // PlotEncoder: shared encoder for all tasks (hash mode)
 // Architecture: learned taxonomy embeddings + MLP

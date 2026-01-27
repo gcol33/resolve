@@ -79,7 +79,7 @@ private:
     PlotEncoderEmbed encoder_embed_{nullptr};
     PlotEncoderSparse encoder_sparse_{nullptr};
 
-    std::vector<std::pair<std::string, TaskHead>> heads_;
+    std::unordered_map<std::string, TaskHead> heads_;
 };
 
 TORCH_MODULE(ResolveModel);

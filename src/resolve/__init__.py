@@ -17,6 +17,9 @@ Example:
     results = trainer.fit()
 """
 
+import os
+os.add_dll_directory(os.path.join(os.environ.get("CUDA_PATH", r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1"), "bin"))
+import torch  # noqa: E402
 from .dataset import ResolveDataset, RoleMapping, TargetConfig
 from .trainer import Trainer
 from .config import TrainerConfig

@@ -39,19 +39,9 @@ PlotEncoderImpl::PlotEncoderImpl(
     }
 
     // Build MLP
-    torch::nn::Sequential mlp;
-    int64_t prev_dim = input_dim;
-
-    for (size_t i = 0; i < hidden_dims.size(); ++i) {
-        mlp->push_back(torch::nn::Linear(prev_dim, hidden_dims[i]));
-        mlp->push_back(torch::nn::BatchNorm1d(hidden_dims[i]));
-        mlp->push_back(torch::nn::GELU());
-        mlp->push_back(torch::nn::Dropout(dropout));
-        prev_dim = hidden_dims[i];
-    }
-
+    auto [mlp, latent] = build_mlp(input_dim, hidden_dims, dropout);
     mlp_ = register_module("mlp", mlp);
-    latent_dim_ = hidden_dims.empty() ? input_dim : hidden_dims.back();
+    latent_dim_ = latent;
 }
 
 torch::Tensor PlotEncoderImpl::forward(
@@ -135,19 +125,9 @@ PlotEncoderEmbedImpl::PlotEncoderEmbedImpl(
     }
 
     // Build MLP
-    torch::nn::Sequential mlp;
-    int64_t prev_dim = input_dim;
-
-    for (size_t i = 0; i < hidden_dims.size(); ++i) {
-        mlp->push_back(torch::nn::Linear(prev_dim, hidden_dims[i]));
-        mlp->push_back(torch::nn::BatchNorm1d(hidden_dims[i]));
-        mlp->push_back(torch::nn::GELU());
-        mlp->push_back(torch::nn::Dropout(dropout));
-        prev_dim = hidden_dims[i];
-    }
-
+    auto [mlp, latent] = build_mlp(input_dim, hidden_dims, dropout);
     mlp_ = register_module("mlp", mlp);
-    latent_dim_ = hidden_dims.empty() ? input_dim : hidden_dims.back();
+    latent_dim_ = latent;
 }
 
 torch::Tensor PlotEncoderEmbedImpl::forward(
@@ -227,19 +207,9 @@ PlotEncoderSparseImpl::PlotEncoderSparseImpl(
     }
 
     // Build MLP
-    torch::nn::Sequential mlp;
-    int64_t prev_dim = input_dim;
-
-    for (size_t i = 0; i < hidden_dims.size(); ++i) {
-        mlp->push_back(torch::nn::Linear(prev_dim, hidden_dims[i]));
-        mlp->push_back(torch::nn::BatchNorm1d(hidden_dims[i]));
-        mlp->push_back(torch::nn::GELU());
-        mlp->push_back(torch::nn::Dropout(dropout));
-        prev_dim = hidden_dims[i];
-    }
-
+    auto [mlp, latent] = build_mlp(input_dim, hidden_dims, dropout);
     mlp_ = register_module("mlp", mlp);
-    latent_dim_ = hidden_dims.empty() ? input_dim : hidden_dims.back();
+    latent_dim_ = latent;
 }
 
 torch::Tensor PlotEncoderSparseImpl::forward(

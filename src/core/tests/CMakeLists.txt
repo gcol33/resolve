@@ -37,7 +37,7 @@ target_link_libraries(resolve_tests
 include(CTest)
 add_test(NAME resolve_tests COMMAND resolve_tests)
 
-# Benchmark executable (optional)
+# Benchmark executable (standalone, no Catch2)
 add_executable(resolve_benchmark
     benchmark_cuda.cpp
 )
@@ -55,4 +55,25 @@ target_link_libraries(resolve_benchmark
     PRIVATE
         resolve_core
         ${TORCH_LIBRARIES}
+)
+
+# Catch2 benchmarks (with statistical analysis)
+add_executable(resolve_benchmark_catch2
+    benchmark_catch2.cpp
+)
+
+# Add CUDA library directory if CUDA is available
+if(USE_CUDA AND CUDAToolkit_FOUND)
+    target_link_directories(resolve_benchmark_catch2 PRIVATE ${CUDAToolkit_LIBRARY_DIR})
+elseif(USE_CUDA AND DEFINED CUDA_TOOLKIT_ROOT_DIR)
+    target_link_directories(resolve_benchmark_catch2 PRIVATE ${CUDA_TOOLKIT_ROOT_DIR}/lib/x64)
+elseif(USE_CUDA AND DEFINED ENV{CUDA_PATH})
+    target_link_directories(resolve_benchmark_catch2 PRIVATE $ENV{CUDA_PATH}/lib/x64)
+endif()
+
+target_link_libraries(resolve_benchmark_catch2
+    PRIVATE
+        resolve_core
+        ${TORCH_LIBRARIES}
+        Catch2::Catch2WithMain
 )

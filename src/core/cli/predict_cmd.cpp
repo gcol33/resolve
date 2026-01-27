@@ -82,14 +82,14 @@ int predict_command(
 
     // Load dataset
     std::cout << "Loading data..." << std::endl;
-    ResolveDataset dataset;
+    std::optional<ResolveDataset> dataset_opt;
     try {
         if (header_path.empty()) {
-            dataset = ResolveDataset::from_species_csv(
+            dataset_opt = ResolveDataset::from_species_csv(
                 species_path, roles, targets, dataset_config
             );
         } else {
-            dataset = ResolveDataset::from_csv(
+            dataset_opt = ResolveDataset::from_csv(
                 header_path, species_path, roles, targets, dataset_config
             );
         }
@@ -97,6 +97,7 @@ int predict_command(
         std::cerr << "Error loading data: " << e.what() << std::endl;
         return 1;
     }
+    auto& dataset = *dataset_opt;
 
     std::cout << "Loaded " << dataset.n_plots() << " plots" << std::endl;
 

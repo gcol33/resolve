@@ -12,6 +12,23 @@
 
 namespace resolve {
 
+// Forward declaration
+class CSVReader;
+
+// Column indices resolved from RoleMapping - reduces repeated column_index() calls
+struct ColumnIndices {
+    int plot = -1;
+    int species = -1;
+    int abundance = -1;
+    int longitude = -1;
+    int latitude = -1;
+    int genus = -1;
+    int family = -1;
+
+    // Factory method to resolve all indices from a CSVReader and RoleMapping
+    static ColumnIndices from_reader(const CSVReader& reader, const RoleMapping& roles);
+};
+
 // Configuration for dataset loading
 struct DatasetConfig {
     // Species encoding configuration
@@ -83,9 +100,10 @@ public:
     // Dataset configuration
     const DatasetConfig& config() const { return config_; }
 
-private:
+    // Default constructor creates an empty dataset
     ResolveDataset() = default;
 
+private:
     // Load header CSV data
     void load_header_data(
         const std::string& header_path,

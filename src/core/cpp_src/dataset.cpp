@@ -102,6 +102,20 @@ int safe_stoi(const std::string& s, int default_val = 0) {
 } // anonymous namespace
 
 
+// ColumnIndices implementation
+ColumnIndices ColumnIndices::from_reader(const CSVReader& reader, const RoleMapping& roles) {
+    ColumnIndices idx;
+    idx.plot = reader.column_index(roles.plot_id);
+    idx.species = reader.column_index(roles.species_id);
+    idx.abundance = roles.abundance ? reader.column_index(*roles.abundance) : -1;
+    idx.longitude = roles.longitude ? reader.column_index(*roles.longitude) : -1;
+    idx.latitude = roles.latitude ? reader.column_index(*roles.latitude) : -1;
+    idx.genus = roles.genus ? reader.column_index(*roles.genus) : -1;
+    idx.family = roles.family ? reader.column_index(*roles.family) : -1;
+    return idx;
+}
+
+
 ResolveDataset ResolveDataset::from_csv(
     const std::string& header_path,
     const std::string& species_path,
@@ -134,18 +148,10 @@ ResolveDataset ResolveDataset::from_species_csv(
     CSVReader reader(species_path);
 
     // Find column indices
-    int plot_col = reader.column_index(roles.plot_id);
-    int species_col = reader.column_index(roles.species_id);
-
-    if (plot_col < 0 || species_col < 0) {
+    auto cols = ColumnIndices::from_reader(reader, roles);
+    if (cols.plot < 0 || cols.species < 0) {
         throw std::runtime_error("Required columns not found: plot_id or species_id");
     }
-
-    int abundance_col = roles.abundance ? reader.column_index(*roles.abundance) : -1;
-    int lon_col = roles.longitude ? reader.column_index(*roles.longitude) : -1;
-    int lat_col = roles.latitude ? reader.column_index(*roles.latitude) : -1;
-    int genus_col = roles.genus ? reader.column_index(*roles.genus) : -1;
-    int family_col = roles.family ? reader.column_index(*roles.family) : -1;
 
     // Find target columns
     std::vector<int> target_cols;
@@ -161,24 +167,24 @@ ResolveDataset ResolveDataset::from_species_csv(
     std::unordered_set<std::string> seen_plots;
 
     reader.read_rows([&](size_t, const std::vector<std::string>& row) {
-        if (row.size() <= static_cast<size_t>(std::max({plot_col, species_col}))) {
+        if (row.size() <= static_cast<size_t>(std::max({cols.plot, cols.species}))) {
             return;  // Skip malformed rows
         }
 
-        std::string plot_id = row[plot_col];
-        std::string species_id = row[species_col];
+        std::string plot_id = row[cols.plot];
+        std::string species_id = row[cols.species];
 
         SpeciesRecord record;
         record.plot_id = plot_id;
         record.species_id = species_id;
-        record.abundance = abundance_col >= 0 && row.size() > static_cast<size_t>(abundance_col)
-            ? safe_stof(row[abundance_col], 1.0f) : 1.0f;
+        record.abundance = cols.abundance >= 0 && row.size() > static_cast<size_t>(cols.abundance)
+            ? safe_stof(row[cols.abundance], 1.0f) : 1.0f;
 
-        if (genus_col >= 0 && row.size() > static_cast<size_t>(genus_col)) {
-            record.genus = row[genus_col];
+        if (cols.genus >= 0 && row.size() > static_cast<size_t>(cols.genus)) {
+            record.genus = row[cols.genus];
         }
-        if (family_col >= 0 && row.size() > static_cast<size_t>(family_col)) {
-            record.family = row[family_col];
+        if (cols.family >= 0 && row.size() > static_cast<size_t>(cols.family)) {
+            record.family = row[cols.family];
         }
 
         plot_records[plot_id].push_back(record);
@@ -189,11 +195,11 @@ ResolveDataset ResolveDataset::from_species_csv(
             dataset.plot_ids_.push_back(plot_id);
 
             // Coordinates
-            if (lon_col >= 0 && lat_col >= 0 &&
-                row.size() > static_cast<size_t>(std::max(lon_col, lat_col))) {
+            if (cols.longitude >= 0 && cols.latitude >= 0 &&
+                row.size() > static_cast<size_t>(std::max(cols.longitude, cols.latitude))) {
                 plot_coords[plot_id] = {
-                    safe_stof(row[lon_col]),
-                    safe_stof(row[lat_col])
+                    safe_stof(row[cols.longitude]),
+                    safe_stof(row[cols.latitude])
                 };
             }
 
@@ -345,8 +351,9 @@ void ResolveDataset::load_header_data(
     schema_.targets = target_configs_;
 
     // Read data
-    auto coords_acc = coordinates_.defined() ? coordinates_.accessor<float, 2>() : torch::TensorAccessor<float, 2>(nullptr, nullptr, nullptr);
-    auto cov_acc = covariates_.defined() ? covariates_.accessor<float, 2>() : torch::TensorAccessor<float, 2>(nullptr, nullptr, nullptr);
+    float* coords_data = coordinates_.defined() ? coordinates_.data_ptr<float>() : nullptr;
+    float* cov_data = covariates_.defined() ? covariates_.data_ptr<float>() : nullptr;
+    int64_t cov_cols = covariates_.defined() ? covariates_.size(1) : 0;
 
     int64_t row_idx = 0;
     reader.read_rows([&](size_t, const std::vector<std::string>& row) {
@@ -357,17 +364,17 @@ void ResolveDataset::load_header_data(
         plot_ids_.push_back(row[plot_col]);
 
         // Coordinates
-        if (coordinates_.defined() && lon_col >= 0 && lat_col >= 0) {
-            coords_acc[row_idx][0] = safe_stof(row[lon_col]);
-            coords_acc[row_idx][1] = safe_stof(row[lat_col]);
+        if (coords_data && lon_col >= 0 && lat_col >= 0) {
+            coords_data[row_idx * 2 + 0] = safe_stof(row[lon_col]);
+            coords_data[row_idx * 2 + 1] = safe_stof(row[lat_col]);
         }
 
         // Covariates
-        if (covariates_.defined()) {
+        if (cov_data) {
             for (size_t i = 0; i < covariate_cols.size(); ++i) {
                 int col = covariate_cols[i];
                 if (row.size() > static_cast<size_t>(col)) {
-                    cov_acc[row_idx][i] = safe_stof(row[col]);
+                    cov_data[row_idx * cov_cols + static_cast<int64_t>(i)] = safe_stof(row[col]);
                 }
             }
         }
@@ -398,39 +405,33 @@ void ResolveDataset::load_species_data(
     CSVReader reader(species_path);
 
     // Find column indices
-    int plot_col = reader.column_index(roles.plot_id);
-    int species_col = reader.column_index(roles.species_id);
-
-    if (plot_col < 0 || species_col < 0) {
+    auto cols = ColumnIndices::from_reader(reader, roles);
+    if (cols.plot < 0 || cols.species < 0) {
         throw std::runtime_error("Required columns not found: plot_id or species_id");
     }
-
-    int abundance_col = roles.abundance ? reader.column_index(*roles.abundance) : -1;
-    int genus_col = roles.genus ? reader.column_index(*roles.genus) : -1;
-    int family_col = roles.family ? reader.column_index(*roles.family) : -1;
 
     // Collect species records by plot
     std::unordered_map<std::string, std::vector<SpeciesRecord>> plot_records;
 
     reader.read_rows([&](size_t, const std::vector<std::string>& row) {
-        if (row.size() <= static_cast<size_t>(std::max(plot_col, species_col))) {
+        if (row.size() <= static_cast<size_t>(std::max(cols.plot, cols.species))) {
             return;
         }
 
-        std::string plot_id = row[plot_col];
-        std::string species_id = row[species_col];
+        std::string plot_id = row[cols.plot];
+        std::string species_id = row[cols.species];
 
         SpeciesRecord record;
         record.plot_id = plot_id;
         record.species_id = species_id;
-        record.abundance = abundance_col >= 0 && row.size() > static_cast<size_t>(abundance_col)
-            ? safe_stof(row[abundance_col], 1.0f) : 1.0f;
+        record.abundance = cols.abundance >= 0 && row.size() > static_cast<size_t>(cols.abundance)
+            ? safe_stof(row[cols.abundance], 1.0f) : 1.0f;
 
-        if (genus_col >= 0 && row.size() > static_cast<size_t>(genus_col)) {
-            record.genus = row[genus_col];
+        if (cols.genus >= 0 && row.size() > static_cast<size_t>(cols.genus)) {
+            record.genus = row[cols.genus];
         }
-        if (family_col >= 0 && row.size() > static_cast<size_t>(family_col)) {
-            record.family = row[family_col];
+        if (cols.family >= 0 && row.size() > static_cast<size_t>(cols.family)) {
+            record.family = row[cols.family];
         }
 
         plot_records[plot_id].push_back(record);

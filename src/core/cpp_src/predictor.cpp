@@ -1,5 +1,6 @@
 #include "resolve/predictor.hpp"
 #include "resolve/dataset.hpp"
+#include "resolve/utils.hpp"
 #include <fstream>
 
 namespace resolve {
@@ -54,19 +55,13 @@ ResolvePredictions Predictor::predict(
 
     // Build continuous features based on encoding mode
     std::vector<torch::Tensor> continuous_parts;
-
-    if (coordinates.defined() && coordinates.numel() > 0) {
-        continuous_parts.push_back(coordinates);
-    }
-    if (covariates.defined() && covariates.numel() > 0) {
-        continuous_parts.push_back(covariates);
-    }
+    push_if_defined(continuous_parts, coordinates);
+    push_if_defined(continuous_parts, covariates);
 
     // For hash mode, include hash embedding in continuous
     if (model_->species_encoding() == SpeciesEncodingMode::Hash &&
-        !model_->uses_explicit_vector() &&
-        hash_embedding.defined() && hash_embedding.numel() > 0) {
-        continuous_parts.push_back(hash_embedding);
+        !model_->uses_explicit_vector()) {
+        push_if_defined(continuous_parts, hash_embedding);
     }
 
     torch::Tensor continuous;
@@ -90,18 +85,10 @@ ResolvePredictions Predictor::predict(
     scaled_continuous = scaled_continuous.to(device_);
 
     // Move tensors to device
-    if (genus_ids.defined()) {
-        genus_ids = genus_ids.to(device_);
-    }
-    if (family_ids.defined()) {
-        family_ids = family_ids.to(device_);
-    }
-    if (species_ids.defined()) {
-        species_ids = species_ids.to(device_);
-    }
-    if (species_vector.defined()) {
-        species_vector = species_vector.to(device_);
-    }
+    genus_ids = to_device_if_defined(genus_ids, device_);
+    family_ids = to_device_if_defined(family_ids, device_);
+    species_ids = to_device_if_defined(species_ids, device_);
+    species_vector = to_device_if_defined(species_vector, device_);
 
     // Get predictions using appropriate encoding mode
     auto outputs = model_->forward(scaled_continuous, genus_ids, family_ids, species_ids, species_vector);
@@ -170,24 +157,19 @@ torch::Tensor Predictor::get_embeddings(
     auto scaled_continuous = (continuous - scalers_.continuous_mean) / scalers_.continuous_scale;
     scaled_continuous = scaled_continuous.to(device_);
 
-    if (genus_ids.defined()) {
-        genus_ids = genus_ids.to(device_);
-    }
-    if (family_ids.defined()) {
-        family_ids = family_ids.to(device_);
-    }
+    genus_ids = to_device_if_defined(genus_ids, device_);
+    family_ids = to_device_if_defined(family_ids, device_);
 
     return model_->get_latent(scaled_continuous, genus_ids, family_ids);
 }
 
 torch::Tensor Predictor::get_genus_embeddings() const {
-    // Placeholder - requires exposing embedding weights from PlotEncoder
-    // TODO: Add accessor method to PlotEncoder for embedding weights
+    // TODO: Implement proper embedding weight extraction from encoder
     return torch::Tensor();
 }
 
 torch::Tensor Predictor::get_family_embeddings() const {
-    // Placeholder - requires exposing embedding weights from PlotEncoder
+    // TODO: Implement proper embedding weight extraction from encoder
     return torch::Tensor();
 }
 

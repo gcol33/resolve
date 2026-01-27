@@ -1,5 +1,16 @@
+// Define _USE_MATH_DEFINES before cmath for M_PI on Windows
+#ifndef _USE_MATH_DEFINES
+#define _USE_MATH_DEFINES
+#endif
+
+// Fallback definition of M_PI if still not defined
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 #include "resolve/trainer.hpp"
 #include "resolve/dataset.hpp"
+#include "resolve/utils.hpp"
 #include <fstream>
 #include <random>
 #include <algorithm>
@@ -83,28 +94,17 @@ void Trainer::prepare_data(
 
     // Build continuous features based on encoding mode
     std::vector<torch::Tensor> continuous_parts;
-
-    if (coordinates.defined() && coordinates.numel() > 0) {
-        continuous_parts.push_back(coordinates);
-    }
-
-    if (covariates.defined() && covariates.numel() > 0) {
-        continuous_parts.push_back(covariates);
-    }
-
-    if (unknown_fraction.defined() && unknown_fraction.numel() > 0) {
-        continuous_parts.push_back(unknown_fraction.unsqueeze(1));
-    }
-
+    push_if_defined(continuous_parts, coordinates);
+    push_if_defined(continuous_parts, covariates);
+    push_if_defined(continuous_parts, unknown_fraction, 1);
     if (unknown_count.defined() && unknown_count.numel() > 0) {
         continuous_parts.push_back(unknown_count.to(torch::kFloat32).unsqueeze(1));
     }
 
     // For hash mode, include hash embedding in continuous
     if (model_->species_encoding() == SpeciesEncodingMode::Hash &&
-        !model_->uses_explicit_vector() &&
-        hash_embedding.defined() && hash_embedding.numel() > 0) {
-        continuous_parts.push_back(hash_embedding);
+        !model_->uses_explicit_vector()) {
+        push_if_defined(continuous_parts, hash_embedding);
     }
 
     torch::Tensor continuous;
@@ -198,20 +198,10 @@ float Trainer::train_epoch(int epoch) {
 
         // Get batch data
         auto batch_continuous = train_continuous_.index_select(0, batch_idx).to(config_.device);
-        torch::Tensor batch_genus_ids, batch_family_ids, batch_species_ids, batch_species_vector;
-
-        if (train_genus_ids_.defined()) {
-            batch_genus_ids = train_genus_ids_.index_select(0, batch_idx).to(config_.device);
-        }
-        if (train_family_ids_.defined()) {
-            batch_family_ids = train_family_ids_.index_select(0, batch_idx).to(config_.device);
-        }
-        if (train_species_ids_.defined()) {
-            batch_species_ids = train_species_ids_.index_select(0, batch_idx).to(config_.device);
-        }
-        if (train_species_vector_.defined()) {
-            batch_species_vector = train_species_vector_.index_select(0, batch_idx).to(config_.device);
-        }
+        auto batch_genus_ids = select_batch(train_genus_ids_, batch_idx, config_.device);
+        auto batch_family_ids = select_batch(train_family_ids_, batch_idx, config_.device);
+        auto batch_species_ids = select_batch(train_species_ids_, batch_idx, config_.device);
+        auto batch_species_vector = select_batch(train_species_vector_, batch_idx, config_.device);
 
         std::unordered_map<std::string, torch::Tensor> batch_targets;
         for (const auto& [name, tensor] : train_targets_) {
@@ -258,20 +248,10 @@ Trainer::eval_epoch(int epoch) {
 
     // Get all test data
     auto test_continuous = test_continuous_.to(config_.device);
-    torch::Tensor test_genus_ids, test_family_ids, test_species_ids, test_species_vector;
-
-    if (test_genus_ids_.defined()) {
-        test_genus_ids = test_genus_ids_.to(config_.device);
-    }
-    if (test_family_ids_.defined()) {
-        test_family_ids = test_family_ids_.to(config_.device);
-    }
-    if (test_species_ids_.defined()) {
-        test_species_ids = test_species_ids_.to(config_.device);
-    }
-    if (test_species_vector_.defined()) {
-        test_species_vector = test_species_vector_.to(config_.device);
-    }
+    auto test_genus_ids = to_device_if_defined(test_genus_ids_, config_.device);
+    auto test_family_ids = to_device_if_defined(test_family_ids_, config_.device);
+    auto test_species_ids = to_device_if_defined(test_species_ids_, config_.device);
+    auto test_species_vector = to_device_if_defined(test_species_vector_, config_.device);
 
     std::unordered_map<std::string, torch::Tensor> test_targets;
     for (const auto& [name, tensor] : test_targets_) {
@@ -434,7 +414,7 @@ TrainResult Trainer::fit() {
         } else {
             patience_counter++;
             if (patience_counter >= config_.patience) {
-                std::cout << "Early stopping at epoch " << epoch << std::endl;
+                config_.log("Early stopping at epoch " + std::to_string(epoch));
                 break;
             }
         }
@@ -453,13 +433,14 @@ TrainResult Trainer::fit() {
         }
 
         // Print progress
+        // Print progress using log callback
         if (epoch % 10 == 0) {
-            std::cout << "Epoch " << epoch << " - Train: " << train_loss
-                      << " Test: " << test_loss;
+            std::ostringstream msg;
+            msg << "Epoch " << epoch << " - Train: " << train_loss << " Test: " << test_loss;
             if (config_.lr_scheduler != LRSchedulerType::None) {
-                std::cout << " LR: " << current_lr;
+                msg << " LR: " << current_lr;
             }
-            std::cout << std::endl;
+            config_.log(msg.str());
         }
     }
 

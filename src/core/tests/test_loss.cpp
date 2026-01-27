@@ -107,7 +107,7 @@ TEST_CASE("Metrics::accuracy", "[metrics][classification]") {
         {0.7f, 0.2f, 0.1f},    // pred: 0 (wrong)
         {0.1f, 0.7f, 0.2f}     // pred: 1
     });
-    auto target = torch::tensor({0L, 1L, 2L, 1L, 1L});
+    auto target = torch::tensor(std::vector<int64_t>{0, 1, 2, 1, 1});
 
     float acc = Metrics::accuracy(pred, target);
 
@@ -122,7 +122,7 @@ TEST_CASE("Metrics::confusion_matrix", "[metrics][classification]") {
         {0.6f, 0.4f},  // pred: 0
         {0.3f, 0.7f}   // pred: 1
     });
-    auto target = torch::tensor({0L, 1L, 1L, 0L});  // true: 0, 1, 1, 0
+    auto target = torch::tensor(std::vector<int64_t>{0, 1, 1, 0});  // true: 0, 1, 1, 0
 
     auto cm = Metrics::confusion_matrix(pred, target, 2);
 
@@ -145,7 +145,7 @@ TEST_CASE("Metrics::classification_metrics", "[metrics][classification]") {
         {0.9f, 0.1f},  // pred: 0, true: 1 ✗
         {0.9f, 0.1f}   // pred: 0, true: 1 ✗
     });
-    auto target = torch::tensor({0L, 0L, 1L, 1L});
+    auto target = torch::tensor(std::vector<int64_t>{0, 0, 1, 1});
 
     auto metrics = Metrics::classification_metrics(pred, target, 2);
 
@@ -192,7 +192,7 @@ TEST_CASE("Metrics::accuracy_at_threshold", "[metrics][confidence]") {
         {0.3f, 0.7f},  // pred: 1, correct
         {0.5f, 0.5f}   // pred: 0, wrong (true: 1)
     });
-    auto target = torch::tensor({0L, 1L, 1L, 1L});
+    auto target = torch::tensor(std::vector<int64_t>{0, 1, 1, 1});
     auto confidence = torch::tensor({0.9f, 0.6f, 0.7f, 0.5f});
 
     SECTION("threshold 0.0 includes all") {
@@ -222,7 +222,7 @@ TEST_CASE("Metrics::accuracy_coverage_curve", "[metrics][confidence]") {
         {0.6f, 0.4f},
         {0.3f, 0.7f}
     });
-    auto target = torch::tensor({0L, 0L, 1L});
+    auto target = torch::tensor(std::vector<int64_t>{0, 0, 1});
     auto confidence = torch::tensor({0.9f, 0.6f, 0.7f});
 
     std::vector<float> thresholds = {0.0f, 0.5f, 0.8f, 1.0f};
@@ -295,7 +295,7 @@ TEST_CASE("PhasedLoss classification_loss", "[loss]") {
         {2.0f, 0.5f, 0.1f},
         {0.1f, 2.0f, 0.5f}
     });
-    auto target = torch::tensor({0L, 1L});
+    auto target = torch::tensor(std::vector<int64_t>{0, 1});
 
     SECTION("without class weights") {
         auto l = loss.classification_loss(pred, target);
@@ -334,7 +334,7 @@ TEST_CASE("Metrics::compute classification", "[metrics][integration]") {
         {0.1f, 0.8f, 0.1f},
         {0.0f, 0.1f, 0.9f}
     });
-    auto target = torch::tensor({0L, 1L, 2L});
+    auto target = torch::tensor(std::vector<int64_t>{0, 1, 2});
 
     auto metrics = Metrics::compute(pred, target, TaskType::Classification,
                                     TransformType::None, {}, 3);

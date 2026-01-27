@@ -306,10 +306,10 @@ NB_MODULE(_resolve_core, m) {
                           torch::Tensor species_vector) {
             return tensor_map_to_dict(self->forward(continuous, genus_ids, family_ids, species_ids, species_vector));
         }, nb::arg("continuous"),
-           nb::arg("genus_ids") = torch::Tensor(),
-           nb::arg("family_ids") = torch::Tensor(),
-           nb::arg("species_ids") = torch::Tensor(),
-           nb::arg("species_vector") = torch::Tensor())
+           nb::arg("genus_ids"),
+           nb::arg("family_ids"),
+           nb::arg("species_ids"),
+           nb::arg("species_vector"))
         .def("get_latent", [](resolve::ResolveModel& self,
                               torch::Tensor continuous,
                               torch::Tensor genus_ids,
@@ -318,10 +318,10 @@ NB_MODULE(_resolve_core, m) {
                               torch::Tensor species_vector) {
             return self->get_latent(continuous, genus_ids, family_ids, species_ids, species_vector);
         }, nb::arg("continuous"),
-           nb::arg("genus_ids") = torch::Tensor(),
-           nb::arg("family_ids") = torch::Tensor(),
-           nb::arg("species_ids") = torch::Tensor(),
-           nb::arg("species_vector") = torch::Tensor())
+           nb::arg("genus_ids"),
+           nb::arg("family_ids"),
+           nb::arg("species_ids"),
+           nb::arg("species_vector"))
         .def("train", [](resolve::ResolveModel& self, bool mode) { self->train(mode); }, nb::arg("mode") = true)
         .def("eval", [](resolve::ResolveModel& self) { self->eval(); })
         .def("to", [](resolve::ResolveModel& self, const std::string& device) {
@@ -345,7 +345,7 @@ NB_MODULE(_resolve_core, m) {
 
     nb::class_<resolve::Trainer>(m, "Trainer")
         .def(nb::init<resolve::ResolveModel, const resolve::TrainConfig&>(),
-             nb::arg("model"), nb::arg("config") = resolve::TrainConfig{})
+             nb::arg("model"), nb::arg("config"))
         .def("prepare_data", [](resolve::Trainer& self,
                                const resolve::ResolveDataset& dataset,
                                float test_size,
@@ -387,8 +387,10 @@ NB_MODULE(_resolve_core, m) {
            "Prepare data from raw tensors (backwards compatible API)")
         .def("fit", &resolve::Trainer::fit)
         .def("save", &resolve::Trainer::save)
-        .def_static("load", &resolve::Trainer::load,
-                    nb::arg("path"), nb::arg("device") = torch::kCPU)
+        .def_static("load", [](const std::string& path, const std::string& device) {
+            torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
+            return resolve::Trainer::load(path, dev);
+        }, nb::arg("path"), nb::arg("device") = "cpu")
         .def_prop_ro("model", &resolve::Trainer::model)
         .def_prop_ro("scalers", &resolve::Trainer::scalers)
         .def_prop_ro("config", &resolve::Trainer::config);
@@ -398,17 +400,30 @@ NB_MODULE(_resolve_core, m) {
     // ==========================================================================
 
     nb::class_<resolve::Predictor>(m, "Predictor")
-        .def(nb::init<resolve::ResolveModel, resolve::Scalers, torch::Device>(),
-             nb::arg("model"), nb::arg("scalers"),
-             nb::arg("device") = torch::kCPU)
-        .def_static("load", &resolve::Predictor::load,
-                    nb::arg("path"), nb::arg("device") = torch::kCPU)
-        .def("predict", &resolve::Predictor::predict,
+        .def("__init__", [](resolve::Predictor* self, resolve::ResolveModel model, resolve::Scalers scalers, const std::string& device) {
+            torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
+            new (self) resolve::Predictor(model, scalers, dev);
+        }, nb::arg("model"), nb::arg("scalers"), nb::arg("device") = "cpu")
+        .def_static("load", [](const std::string& path, const std::string& device) {
+            torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
+            return resolve::Predictor::load(path, dev);
+        }, nb::arg("path"), nb::arg("device") = "cpu")
+        .def("predict", 
+             static_cast<resolve::ResolvePredictions (resolve::Predictor::*)(
+                 torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, 
+                 torch::Tensor, torch::Tensor, torch::Tensor, bool)>(&resolve::Predictor::predict),
              nb::arg("coordinates"),
              nb::arg("covariates"),
              nb::arg("hash_embedding"),
+             nb::arg("species_ids"),
+             nb::arg("species_vector"),
              nb::arg("genus_ids"),
              nb::arg("family_ids"),
+             nb::arg("return_latent") = false)
+        .def("predict_dataset",
+             static_cast<resolve::ResolvePredictions (resolve::Predictor::*)(
+                 const resolve::ResolveDataset&, bool)>(&resolve::Predictor::predict),
+             nb::arg("dataset"),
              nb::arg("return_latent") = false)
         .def("get_embeddings", &resolve::Predictor::get_embeddings,
              nb::arg("coordinates"),
