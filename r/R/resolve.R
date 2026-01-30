@@ -599,3 +599,249 @@ resolve.progress <- function(checkpointDir) {
   }
   jsonlite::fromJSON(progressFile)
 }
+
+
+#' Load Dataset from CSV Files (C++ Implementation)
+#'
+#' Load a dataset directly using the C++ ResolveDataset class.
+#' This mirrors the Python `ResolveDataset.from_csv()` API exactly.
+#'
+#' @param header Path to header CSV file (one row per plot with targets)
+#' @param species Path to species CSV file (one row per species-plot occurrence)
+#' @param roles Named list mapping column roles:
+#'   - plot_id: Column name for plot ID (default "plot_id")
+#'   - species_id: Column name for species ID (default "species_id")
+#'   - abundance: Column name for abundance (optional)
+#'   - longitude: Column name for longitude (optional)
+#'   - latitude: Column name for latitude (optional)
+#'   - genus: Column name for genus (optional)
+#'   - family: Column name for family (optional)
+#'   - covariates: Vector of covariate column names (optional)
+#' @param targets Named list of target configurations. Each target should have:
+#'   - column: Column name in header file
+#'   - task: "regression" or "classification"
+#'   - transform: "none" or "log1p" (optional, default "none")
+#'   - num_classes: Number of classes for classification (required for classification)
+#'   - weight: Loss weight (optional, default 1.0)
+#' @param config Named list of dataset configuration options:
+#'   - species_encoding: "hash" (default), "embed", or "sparse"
+#'   - hash_dim: Hash dimension (default 32)
+#'   - top_k: Top-k genera/families (default 5)
+#'   - top_k_species: Top-k species for embed mode (default 10)
+#'   - selection: "top", "bottom", "top_bottom", or "all" (default "top")
+#'   - representation: "abundance" or "presence_absence" (default "abundance")
+#'   - normalization: "raw", "norm", or "log1p" (default "norm")
+#'   - track_unknown_fraction: Track unknown species fraction (default TRUE)
+#'   - track_unknown_count: Track unknown species count (default FALSE)
+#'   - use_taxonomy: Use taxonomy embeddings (default TRUE if genus/family provided)
+#'
+#' @return A ResolveDataset object (C++ class) with methods:
+#'   - coordinates(): Get coordinate matrix
+#'   - covariates(): Get covariate matrix
+#'   - hash_embedding(): Get hash embedding matrix
+#'   - genus_ids(), family_ids(): Get taxonomy ID matrices
+#'   - targets(): Get target values as named list
+#'   - schema(): Get dataset schema
+#'   - plot_ids(): Get plot IDs
+#'   - n_plots(): Get number of plots
+#'
+#' @examples
+#' \dontrun{
+#' # Load dataset using C++ implementation
+#' dataset <- resolve.dataset.csv(
+#'   header = "plots.csv",
+#'   species = "species.csv",
+#'   roles = list(
+#'     plot_id = "plot_id",
+#'     species_id = "species",
+#'     abundance = "cover",
+#'     longitude = "lon",
+#'     latitude = "lat"
+#'   ),
+#'   targets = list(
+#'     area = list(column = "area", task = "regression", transform = "log1p"),
+#'     habitat = list(column = "habitat", task = "classification", num_classes = 9)
+#'   ),
+#'   config = list(
+#'     species_encoding = "hash",
+#'     hash_dim = 64,
+#'     top_k = 5
+#'   )
+#' )
+#'
+#' # Access data
+#' print(dataset$schema())
+#' print(dataset$n_plots())
+#' }
+#'
+#' @export
+resolve.dataset.csv <- function(header,
+                                species,
+                                roles = list(),
+                                targets = list(),
+                                config = list()) {
+  # Set default roles
+  if (is.null(roles$plot_id)) roles$plot_id <- "plot_id"
+  if (is.null(roles$species_id)) roles$species_id <- "species_id"
+
+  # Call C++ implementation
+  .resolve_module$ResolveDataset_from_csv(
+    header_path = header,
+    species_path = species,
+    roles_list = roles,
+    targets_list = targets,
+    config_list = config
+  )
+}
+
+
+#' Train with Dataset (C++ API)
+#'
+#' Train a model using a ResolveDataset object loaded via resolve.dataset.csv().
+#' This provides the cleanest API matching Python exactly.
+#'
+#' @param dataset A ResolveDataset object from resolve.dataset.csv()
+#' @param hiddenDims Hidden layer dimensions (default c(2048, 1024, 512, 256, 128, 64))
+#' @param maxEpochs Maximum training epochs (default 500)
+#' @param patience Early stopping patience (default 50)
+#' @param lr Learning rate (default 0.001)
+#' @param batchSize Batch size (default 4096)
+#' @param device Device: "cpu" or "cuda" (default "cpu")
+#' @param testSize Fraction of data for testing (default 0.2)
+#' @param seed Random seed (default 42)
+#' @param savePath Path to save model checkpoint (optional)
+#' @param lossConfig Loss configuration: "mae", "smape", or "combined" (default "mae")
+#' @param verbose Print training progress (default TRUE)
+#'
+#' @return A list with trainer, result, and dataset
+#'
+#' @examples
+#' \dontrun{
+#' dataset <- resolve.dataset.csv(...)
+#' result <- resolve.train.dataset(dataset, maxEpochs = 100)
+#' }
+#'
+#' @export
+resolve.train.dataset <- function(dataset,
+                                  hiddenDims = NULL,
+                                  maxEpochs = 500L,
+                                  patience = 50L,
+                                  lr = 1e-3,
+                                  batchSize = 4096L,
+                                  device = "cpu",
+                                  testSize = 0.2,
+                                  seed = 42L,
+                                  savePath = NULL,
+                                  lossConfig = "mae",
+                                  verbose = TRUE) {
+  # Check dataset is C++ ResolveDataset
+  if (!inherits(dataset, "Rcpp_ResolveDataset")) {
+    stop("dataset must be created with resolve.dataset.csv()")
+  }
+
+  # Get schema from dataset
+  schema <- dataset$schema()
+
+  # Default hidden dims
+  if (is.null(hiddenDims)) {
+    hiddenDims <- c(2048L, 1024L, 512L, 256L, 128L, 64L)
+  } else {
+    hiddenDims <- as.integer(hiddenDims)
+  }
+
+  # Get config from dataset
+  datasetConfig <- dataset$config()
+
+  # Build model config from dataset
+  modelConfig <- list(
+    species_encoding = datasetConfig$species_encoding,
+    hash_dim = datasetConfig$hash_dim,
+    top_k = datasetConfig$top_k,
+    top_k_species = datasetConfig$top_k_species,
+    hidden_dims = hiddenDims,
+    dropout = 0.3
+  )
+
+  # Create model
+  model <- new(.resolve_module$ResolveModel, schema, modelConfig)
+
+  # Build train config
+  trainConfig <- list(
+    batch_size = as.integer(batchSize),
+    max_epochs = as.integer(maxEpochs),
+    patience = as.integer(patience),
+    lr = lr,
+    device = device,
+    loss_config = lossConfig
+  )
+
+  # Create trainer
+  trainer <- new(.resolve_module$Trainer, model, trainConfig)
+
+  # Prepare data from dataset (C++ API)
+  trainer$prepare_data_from_dataset(dataset, testSize, as.integer(seed))
+
+  # Train
+  if (verbose) {
+    cat("Training RESOLVE model...\n")
+  }
+
+  result <- trainer$fit()
+
+  if (verbose) {
+    cat(sprintf("Training complete. Best epoch: %d\n", result$best_epoch))
+    cat(sprintf("Training time: %.1f seconds\n", result$train_time_seconds))
+    for (targetName in names(result$final_metrics)) {
+      metrics <- result$final_metrics[[targetName]]
+      cat(sprintf("  %s: ", targetName))
+      metricStrs <- sapply(names(metrics), function(m) {
+        sprintf("%s=%.4f", m, metrics[[m]])
+      })
+      cat(paste(metricStrs, collapse = ", "), "\n")
+    }
+  }
+
+  # Save if requested
+  if (!is.null(savePath)) {
+    trainer$save(savePath)
+    if (verbose) {
+      cat(sprintf("Model saved to: %s\n", savePath))
+    }
+  }
+
+  list(
+    trainer = trainer,
+    result = result,
+    dataset = dataset
+  )
+}
+
+
+#' Predict with Dataset (C++ API)
+#'
+#' Make predictions on a ResolveDataset using a trained model.
+#'
+#' @param predictor A Predictor object from resolve.load()
+#' @param dataset A ResolveDataset object from resolve.dataset.csv()
+#' @param returnLatent Return latent representations (default FALSE)
+#'
+#' @return Named list of prediction arrays
+#'
+#' @examples
+#' \dontrun{
+#' predictor <- resolve.load("model.pt")
+#' dataset <- resolve.dataset.csv(...)
+#' preds <- resolve.predict.dataset(predictor, dataset)
+#' }
+#'
+#' @export
+resolve.predict.dataset <- function(predictor, dataset, returnLatent = FALSE) {
+  if (!inherits(predictor, "Rcpp_Predictor")) {
+    stop("predictor must be loaded with resolve.load()")
+  }
+  if (!inherits(dataset, "Rcpp_ResolveDataset")) {
+    stop("dataset must be created with resolve.dataset.csv()")
+  }
+
+  predictor$predict_dataset(dataset, returnLatent)
+}
