@@ -6,12 +6,31 @@
 
 namespace resolve {
 
+// =============================================================================
+// Constants
+// =============================================================================
+
+// Default MLP architecture
+constexpr int kDefaultDropout = 0.3f;
+inline const std::vector<int64_t> kDefaultHiddenDims = {2048, 1024, 512, 256, 128, 64};
+
+// Default embedding dimensions
+constexpr int kDefaultGenusEmbDim = 8;
+constexpr int kDefaultFamilyEmbDim = 8;
+constexpr int kDefaultSpeciesEmbDim = 32;
+constexpr int kDefaultTopK = 3;
+constexpr int kDefaultTopKSpecies = 10;
+
+// =============================================================================
+// Helper functions
+// =============================================================================
+
 // Helper function to build MLP layers - reduces duplication across encoder implementations
-inline std::pair<torch::nn::Sequential, int64_t> build_mlp(
+[[nodiscard]] inline std::pair<torch::nn::Sequential, int64_t> build_mlp(
     int64_t input_dim,
     const std::vector<int64_t>& hidden_dims,
     float dropout
-) {
+) noexcept(false) {
     torch::nn::Sequential mlp;
     int64_t prev_dim = input_dim;
     for (size_t i = 0; i < hidden_dims.size(); ++i) {
@@ -50,8 +69,8 @@ public:
         torch::Tensor family_ids = {}
     );
 
-    int64_t latent_dim() const { return latent_dim_; }
-    bool has_taxonomy() const { return has_taxonomy_; }
+    [[nodiscard]] int64_t latent_dim() const noexcept { return latent_dim_; }
+    [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
 
 private:
     bool has_taxonomy_;
@@ -99,8 +118,8 @@ public:
         torch::Tensor family_ids = {}
     );
 
-    int64_t latent_dim() const { return latent_dim_; }
-    bool has_taxonomy() const { return has_taxonomy_; }
+    [[nodiscard]] int64_t latent_dim() const noexcept { return latent_dim_; }
+    [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
 
 private:
     bool has_taxonomy_;
@@ -151,9 +170,9 @@ public:
         torch::Tensor family_ids = {}
     );
 
-    int64_t latent_dim() const { return latent_dim_; }
-    bool has_taxonomy() const { return has_taxonomy_; }
-    int64_t n_species() const { return n_species_; }
+    [[nodiscard]] int64_t latent_dim() const noexcept { return latent_dim_; }
+    [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
+    [[nodiscard]] int64_t n_species() const noexcept { return n_species_; }
 
 private:
     bool has_taxonomy_;
@@ -194,8 +213,8 @@ public:
     // Inverse transform for predictions
     torch::Tensor inverse_transform(torch::Tensor predictions);
 
-    TaskType task() const { return task_; }
-    TransformType transform() const { return transform_; }
+    [[nodiscard]] TaskType task() const noexcept { return task_; }
+    [[nodiscard]] TransformType transform() const noexcept { return transform_; }
 
 private:
     TaskType task_;

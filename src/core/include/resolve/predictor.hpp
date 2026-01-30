@@ -52,14 +52,16 @@ public:
     );
 
     // Get learned genus embeddings
-    torch::Tensor get_genus_embeddings() const;
+    [[nodiscard]] torch::Tensor get_genus_embeddings() const;
 
     // Get learned family embeddings
-    torch::Tensor get_family_embeddings() const;
+    [[nodiscard]] torch::Tensor get_family_embeddings() const;
 
     // Accessors
-    ResolveModel& model() { return model_; }
-    const Scalers& scalers() const { return scalers_; }
+    [[nodiscard]] ResolveModel& model() noexcept { return model_; }
+    [[nodiscard]] const ResolveModel& model() const noexcept { return model_; }
+    [[nodiscard]] const Scalers& scalers() const noexcept { return scalers_; }
+    [[nodiscard]] torch::Device device() const noexcept { return device_; }
 
 private:
     ResolveModel model_;

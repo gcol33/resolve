@@ -10,16 +10,48 @@
 
 namespace resolve {
 
+// =============================================================================
+// Version and constants
+// =============================================================================
+
+inline constexpr const char* VERSION = "0.1.0";
+
+// Training defaults
+constexpr int kDefaultBatchSize = 4096;
+constexpr int kDefaultMaxEpochs = 500;
+constexpr int kDefaultPatience = 50;
+constexpr float kDefaultLearningRate = 1e-3f;
+constexpr float kDefaultWeightDecay = 1e-4f;
+constexpr float kDefaultTestSize = 0.2f;
+constexpr int kDefaultSeed = 42;
+
+// Model architecture defaults
+constexpr int kDefaultHashDim = 32;
+constexpr float kDefaultDropout = 0.3f;
+
+// Numerical stability constants
+constexpr float kExpClampMin = -88.0f;
+constexpr float kExpClampMax = 88.0f;
+constexpr float kEpsilon = 1e-8f;
+
+// Phase boundaries for phased loss
+constexpr int kDefaultPhase1Epoch = 100;
+constexpr int kDefaultPhase2Epoch = 300;
+
+// =============================================================================
+// Logging
+// =============================================================================
+
 // Logging callback for training progress
 using LogCallback = std::function<void(const std::string&)>;
 
 // Default logging to stdout
-inline void default_log(const std::string& msg) {
+inline void default_log(const std::string& msg) noexcept {
     std::cout << msg << std::endl;
 }
 
 // Null logger (discards all messages)
-inline void null_log(const std::string&) {}
+inline void null_log(const std::string&) noexcept {}
 
 // Task type for prediction heads
 enum class TaskType {
@@ -116,7 +148,7 @@ using SpaccSchema = ResolveSchema;
 struct ModelConfig {
     SpeciesEncodingMode species_encoding = SpeciesEncodingMode::Hash;
     bool uses_explicit_vector = false;  // For hash mode with selection="all"
-    int hash_dim = 32;
+    int hash_dim = kDefaultHashDim;
     int species_embed_dim = 32;
     int genus_emb_dim = 8;
     int family_emb_dim = 8;
@@ -124,17 +156,17 @@ struct ModelConfig {
     int top_k_species = 10;  // For embed mode
     int n_taxonomy_slots = 3;  // May be 2*top_k for top_bottom mode
     std::vector<int64_t> hidden_dims = {2048, 1024, 512, 256, 128, 64};
-    float dropout = 0.3f;
+    float dropout = kDefaultDropout;
 };
 
 // Training configuration
 struct TrainConfig {
-    int batch_size = 4096;
-    int max_epochs = 500;
-    int patience = 50;
-    float lr = 1e-3f;
-    float weight_decay = 1e-4f;
-    std::pair<int, int> phase_boundaries = {100, 300};
+    int batch_size = kDefaultBatchSize;
+    int max_epochs = kDefaultMaxEpochs;
+    int patience = kDefaultPatience;
+    float lr = kDefaultLearningRate;
+    float weight_decay = kDefaultWeightDecay;
+    std::pair<int, int> phase_boundaries = {kDefaultPhase1Epoch, kDefaultPhase2Epoch};
     LossConfigMode loss_config = LossConfigMode::Combined;
     torch::Device device = torch::kCPU;
 
@@ -252,23 +284,23 @@ public:
     }
 
     // Encode genus name to ID
-    int64_t encode_genus(const std::string& genus) const {
+    [[nodiscard]] int64_t encode_genus(const std::string& genus) const noexcept {
         auto it = genus_to_idx_.find(genus);
         return it != genus_to_idx_.end() ? it->second : 0;
     }
 
     // Encode family name to ID
-    int64_t encode_family(const std::string& family) const {
+    [[nodiscard]] int64_t encode_family(const std::string& family) const noexcept {
         auto it = family_to_idx_.find(family);
         return it != family_to_idx_.end() ? it->second : 0;
     }
 
-    int64_t n_genera() const { return static_cast<int64_t>(genus_to_idx_.size()); }
-    int64_t n_families() const { return static_cast<int64_t>(family_to_idx_.size()); }
+    [[nodiscard]] int64_t n_genera() const noexcept { return static_cast<int64_t>(genus_to_idx_.size()); }
+    [[nodiscard]] int64_t n_families() const noexcept { return static_cast<int64_t>(family_to_idx_.size()); }
 
     // Accessors for serialization
-    const std::unordered_map<std::string, int64_t>& genus_map() const { return genus_to_idx_; }
-    const std::unordered_map<std::string, int64_t>& family_map() const { return family_to_idx_; }
+    [[nodiscard]] const std::unordered_map<std::string, int64_t>& genus_map() const noexcept { return genus_to_idx_; }
+    [[nodiscard]] const std::unordered_map<std::string, int64_t>& family_map() const noexcept { return family_to_idx_; }
 
     // Set from loaded data
     void set_genus_map(const std::unordered_map<std::string, int64_t>& m) { genus_to_idx_ = m; }

@@ -115,7 +115,7 @@ ResolvePredictions Predictor::predict(
             }
 
             if (cfg.transform == TransformType::Log1p) {
-                pred = torch::expm1(torch::clamp(pred, /*min=*/-88.0f, /*max=*/88.0f));
+                pred = torch::expm1(torch::clamp(pred, kExpClampMin, kExpClampMax));
             }
 
             result.predictions[cfg.name] = pred;

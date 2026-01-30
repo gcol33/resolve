@@ -3,14 +3,16 @@ High-level ResolveDataset class that wraps the C++ core.
 
 Provides a pandas-friendly API matching the paper's expected interface.
 """
+from __future__ import annotations
 
 import tempfile
 import os
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, Any
 from dataclasses import dataclass, field
 
 import pandas as pd
+import torch
 
 from resolve_core import (
     ResolveDataset as _CoreDataset,
@@ -21,6 +23,18 @@ from resolve_core import (
     TransformType,
     TaskType,
 )
+
+__all__ = [
+    "ResolveDataset",
+    "RoleMapping",
+    "TargetConfig",
+]
+
+# Valid encoding modes
+_VALID_ENCODINGS = {"hash", "embed", "sparse"}
+_VALID_SELECTIONS = {"top", "bottom", "top_bottom", "all"}
+_VALID_TASKS = {"regression", "classification"}
+_VALID_TRANSFORMS = {"none", "log1p"}
 
 
 @dataclass
@@ -54,16 +68,48 @@ class RoleMapping:
 
 @dataclass
 class TargetConfig:
-    """Configuration for a prediction target."""
+    """Configuration for a prediction target.
+
+    Attributes:
+        column: Column name in header CSV containing target values.
+        task: Task type - "regression" or "classification".
+        transform: Transform to apply - "none" or "log1p".
+        num_classes: Number of classes for classification (required if task="classification").
+        weight: Loss weight for multi-task training.
+    """
     column: str
-    task: str = "regression"  # "regression" or "classification"
-    transform: str = "none"   # "none" or "log1p"
+    task: str = "regression"
+    transform: str = "none"
     num_classes: int = 0
     weight: float = 1.0
 
+    def __post_init__(self) -> None:
+        """Validate configuration after initialization."""
+        if self.task not in _VALID_TASKS:
+            raise ValueError(f"task must be one of {_VALID_TASKS}, got '{self.task}'")
+        if self.transform not in _VALID_TRANSFORMS:
+            raise ValueError(f"transform must be one of {_VALID_TRANSFORMS}, got '{self.transform}'")
+        if self.task == "classification" and self.num_classes < 2:
+            raise ValueError(f"num_classes must be >= 2 for classification, got {self.num_classes}")
+        if self.weight <= 0:
+            raise ValueError(f"weight must be positive, got {self.weight}")
+
     @classmethod
-    def from_dict(cls, data: dict) -> "TargetConfig":
-        """Create TargetConfig from a dictionary."""
+    def from_dict(cls, data: dict[str, Any]) -> TargetConfig:
+        """Create TargetConfig from a dictionary.
+
+        Args:
+            data: Dictionary with target configuration. Must contain "column" key.
+
+        Returns:
+            TargetConfig instance.
+
+        Raises:
+            KeyError: If "column" key is missing.
+            ValueError: If configuration is invalid.
+        """
+        if "column" not in data:
+            raise KeyError("TargetConfig dict must contain 'column' key")
         return cls(
             column=data["column"],
             task=data.get("task", "regression"),
@@ -106,7 +152,7 @@ class ResolveDataset:
         top_k_species: int = 10,
         selection: str = "top",
         track_unknown_fraction: bool = True,
-    ):
+    ) -> None:
         """
         Create dataset from pandas DataFrames.
 
@@ -121,7 +167,29 @@ class ResolveDataset:
             top_k_species: Number of top species for embed mode
             selection: "top", "bottom", "top_bottom", or "all"
             track_unknown_fraction: Track fraction of unknown species
+
+        Raises:
+            ValueError: If any parameter is invalid.
+            TypeError: If header/species are not DataFrames.
         """
+        # Validate inputs
+        if not isinstance(header, pd.DataFrame):
+            raise TypeError(f"header must be a pandas DataFrame, got {type(header).__name__}")
+        if not isinstance(species, pd.DataFrame):
+            raise TypeError(f"species must be a pandas DataFrame, got {type(species).__name__}")
+        if species_encoding not in _VALID_ENCODINGS:
+            raise ValueError(f"species_encoding must be one of {_VALID_ENCODINGS}, got '{species_encoding}'")
+        if selection not in _VALID_SELECTIONS:
+            raise ValueError(f"selection must be one of {_VALID_SELECTIONS}, got '{selection}'")
+        if hash_dim < 1:
+            raise ValueError(f"hash_dim must be positive, got {hash_dim}")
+        if top_k < 1:
+            raise ValueError(f"top_k must be positive, got {top_k}")
+        if top_k_species < 1:
+            raise ValueError(f"top_k_species must be positive, got {top_k_species}")
+        if not targets:
+            raise ValueError("targets must not be empty")
+
         # Convert dict roles to RoleMapping if needed
         if isinstance(roles, dict):
             roles = RoleMapping.from_dict(roles)

@@ -3,9 +3,21 @@ Configuration dataclasses for RESOLVE.
 
 Provides typed, documented configuration objects for training.
 """
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Union
+
+__all__ = [
+    "TrainerConfig",
+    "TINY_MODEL",
+    "SMALL_MODEL",
+    "MEDIUM_MODEL",
+    "LARGE_MODEL",
+    "XL_MODEL",
+    "MAX_MODEL",
+]
 
 
 @dataclass

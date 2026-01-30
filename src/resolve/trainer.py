@@ -3,9 +3,10 @@ High-level Trainer class that wraps the C++ core.
 
 Provides a dataset-first API matching the paper's expected interface.
 """
+from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, Any
 
 import torch
 
@@ -21,6 +22,11 @@ from resolve_core import (
     LossConfigMode,
 )
 from .dataset import ResolveDataset
+
+__all__ = ["Trainer"]
+
+# Valid loss configuration modes
+_VALID_LOSS_CONFIGS = {"mae", "smape", "combined"}
 
 
 def _build_model_config(
@@ -152,6 +158,28 @@ class Trainer:
             resume: Whether to resume from checkpoint
             device: Device to train on ("cuda" or "cpu")
         """
+        # Validate inputs
+        if not isinstance(dataset, ResolveDataset):
+            raise TypeError(f"dataset must be a ResolveDataset, got {type(dataset).__name__}")
+        if hash_dim < 1:
+            raise ValueError(f"hash_dim must be positive, got {hash_dim}")
+        if top_k < 1:
+            raise ValueError(f"top_k must be positive, got {top_k}")
+        if max_epochs < 1:
+            raise ValueError(f"max_epochs must be positive, got {max_epochs}")
+        if patience < 1:
+            raise ValueError(f"patience must be positive, got {patience}")
+        if batch_size < 1:
+            raise ValueError(f"batch_size must be positive, got {batch_size}")
+        if lr <= 0:
+            raise ValueError(f"lr must be positive, got {lr}")
+        if not 0 < test_size < 1:
+            raise ValueError(f"test_size must be between 0 and 1, got {test_size}")
+        if loss_config.lower() not in _VALID_LOSS_CONFIGS:
+            raise ValueError(f"loss_config must be one of {_VALID_LOSS_CONFIGS}, got '{loss_config}'")
+        if device not in ("cuda", "cpu"):
+            raise ValueError(f"device must be 'cuda' or 'cpu', got '{device}'")
+
         self._dataset = dataset
         self._checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
         self._checkpoint_every = checkpoint_every

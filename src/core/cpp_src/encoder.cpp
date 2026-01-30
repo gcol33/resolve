@@ -272,7 +272,7 @@ torch::Tensor TaskHeadImpl::predict(torch::Tensor latent) {
 
 torch::Tensor TaskHeadImpl::inverse_transform(torch::Tensor predictions) {
     if (transform_ == TransformType::Log1p) {
-        return torch::expm1(torch::clamp(predictions, /*min=*/-88.0f, /*max=*/88.0f));
+        return torch::expm1(torch::clamp(predictions, kExpClampMin, kExpClampMax));
     }
     return predictions;
 }

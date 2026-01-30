@@ -52,14 +52,14 @@ public:
     );
 
     // Accessors
-    const ResolveSchema& schema() const { return schema_; }
-    const ModelConfig& config() const { return config_; }
-    int64_t latent_dim() const;
-    SpeciesEncodingMode species_encoding() const { return config_.species_encoding; }
-    bool uses_explicit_vector() const { return config_.uses_explicit_vector; }
+    [[nodiscard]] const ResolveSchema& schema() const noexcept { return schema_; }
+    [[nodiscard]] const ModelConfig& config() const noexcept { return config_; }
+    [[nodiscard]] int64_t latent_dim() const;
+    [[nodiscard]] SpeciesEncodingMode species_encoding() const noexcept { return config_.species_encoding; }
+    [[nodiscard]] bool uses_explicit_vector() const noexcept { return config_.uses_explicit_vector; }
 
     // Get task head by name
-    TaskHead& head(const std::string& name);
+    [[nodiscard]] TaskHead& head(const std::string& name);
 
 private:
     // Internal forward through encoder based on mode

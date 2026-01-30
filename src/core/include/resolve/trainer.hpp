@@ -74,9 +74,10 @@ public:
     );
 
     // Accessors
-    ResolveModel& model() { return model_; }
-    const Scalers& scalers() const { return scalers_; }
-    const TrainConfig& config() const { return config_; }
+    [[nodiscard]] ResolveModel& model() noexcept { return model_; }
+    [[nodiscard]] const ResolveModel& model() const noexcept { return model_; }
+    [[nodiscard]] const Scalers& scalers() const noexcept { return scalers_; }
+    [[nodiscard]] const TrainConfig& config() const noexcept { return config_; }
 
 private:
     // Train one epoch

@@ -34,6 +34,29 @@ resolve.encoder <- function(hashDim = 32L,
                             selection = "top",
                             representation = "abundance",
                             minSpeciesFrequency = 1L) {
+  # Input validation
+  if (!is.numeric(hashDim) || hashDim < 1) {
+    stop("hashDim must be a positive integer")
+  }
+  if (!is.numeric(topK) || topK < 1) {
+    stop("topK must be a positive integer")
+  }
+  if (!aggregation %in% c("abundance", "count")) {
+    stop("aggregation must be 'abundance' or 'count'")
+  }
+  if (!normalization %in% c("raw", "norm", "log1p")) {
+    stop("normalization must be 'raw', 'norm', or 'log1p'")
+  }
+  if (!selection %in% c("top", "bottom", "top_bottom", "all")) {
+    stop("selection must be 'top', 'bottom', 'top_bottom', or 'all'")
+  }
+  if (!representation %in% c("abundance", "presence_absence")) {
+    stop("representation must be 'abundance' or 'presence_absence'")
+  }
+  if (!is.numeric(minSpeciesFrequency) || minSpeciesFrequency < 1) {
+    stop("minSpeciesFrequency must be a positive integer")
+  }
+
   new(.resolve_module$SpeciesEncoder,
       as.integer(hashDim),
       as.integer(topK),
@@ -550,6 +573,17 @@ resolve.predict <- function(model,
 #'
 #' @export
 resolve.load <- function(path, device = "cpu") {
+  # Input validation
+  if (!is.character(path) || length(path) != 1) {
+    stop("path must be a single file path string")
+  }
+  if (!file.exists(path)) {
+    stop(sprintf("checkpoint file does not exist: %s", path))
+  }
+  if (!device %in% c("cpu", "cuda")) {
+    stop("device must be 'cpu' or 'cuda'")
+  }
+
   .resolve_module$Predictor_load(path, device)
 }
 
@@ -680,6 +714,43 @@ resolve.dataset.csv <- function(header,
                                 roles = list(),
                                 targets = list(),
                                 config = list()) {
+  # Input validation
+  if (!is.character(header) || length(header) != 1) {
+    stop("header must be a single file path string")
+  }
+  if (!file.exists(header)) {
+    stop(sprintf("header file does not exist: %s", header))
+  }
+  if (!is.character(species) || length(species) != 1) {
+    stop("species must be a single file path string")
+  }
+  if (!file.exists(species)) {
+    stop(sprintf("species file does not exist: %s", species))
+  }
+  if (!is.list(roles)) {
+    stop("roles must be a named list")
+  }
+  if (!is.list(targets)) {
+    stop("targets must be a named list")
+  }
+  if (length(targets) == 0) {
+    stop("targets must not be empty - at least one target is required")
+  }
+
+  # Validate target configurations
+  for (name in names(targets)) {
+    tgt <- targets[[name]]
+    if (!is.list(tgt)) {
+      stop(sprintf("target '%s' must be a list with 'column' and 'task'", name))
+    }
+    if (is.null(tgt$column)) {
+      stop(sprintf("target '%s' must have 'column' specified", name))
+    }
+    if (!is.null(tgt$task) && !tgt$task %in% c("regression", "classification")) {
+      stop(sprintf("target '%s' task must be 'regression' or 'classification'", name))
+    }
+  }
+
   # Set default roles
   if (is.null(roles$plot_id)) roles$plot_id <- "plot_id"
   if (is.null(roles$species_id)) roles$species_id <- "species_id"
@@ -734,9 +805,30 @@ resolve.train.dataset <- function(dataset,
                                   savePath = NULL,
                                   lossConfig = "mae",
                                   verbose = TRUE) {
-  # Check dataset is C++ ResolveDataset
+  # Input validation
   if (!inherits(dataset, "Rcpp_ResolveDataset")) {
     stop("dataset must be created with resolve.dataset.csv()")
+  }
+  if (!is.numeric(maxEpochs) || maxEpochs < 1) {
+    stop("maxEpochs must be a positive integer")
+  }
+  if (!is.numeric(patience) || patience < 1) {
+    stop("patience must be a positive integer")
+  }
+  if (!is.numeric(lr) || lr <= 0) {
+    stop("lr must be a positive number")
+  }
+  if (!is.numeric(batchSize) || batchSize < 1) {
+    stop("batchSize must be a positive integer")
+  }
+  if (!device %in% c("cpu", "cuda")) {
+    stop("device must be 'cpu' or 'cuda'")
+  }
+  if (!is.numeric(testSize) || testSize <= 0 || testSize >= 1) {
+    stop("testSize must be between 0 and 1 (exclusive)")
+  }
+  if (!lossConfig %in% c("mae", "smape", "combined")) {
+    stop("lossConfig must be 'mae', 'smape', or 'combined'")
   }
 
   # Get schema from dataset
