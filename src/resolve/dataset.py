@@ -36,6 +36,21 @@ class RoleMapping:
     taxonomy_family: Optional[str] = None
     covariates: list[str] = field(default_factory=list)
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "RoleMapping":
+        """Create RoleMapping from a dictionary."""
+        return cls(
+            plot_id=data.get("plot_id", "plot_id"),
+            species_id=data.get("species_id", "species_id"),
+            species_plot_id=data.get("species_plot_id", data.get("plot_id", "plot_id")),
+            abundance=data.get("abundance"),
+            coords_lat=data.get("coords_lat"),
+            coords_lon=data.get("coords_lon"),
+            taxonomy_genus=data.get("taxonomy_genus"),
+            taxonomy_family=data.get("taxonomy_family"),
+            covariates=data.get("covariates", []),
+        )
+
 
 @dataclass
 class TargetConfig:
@@ -45,6 +60,28 @@ class TargetConfig:
     transform: str = "none"   # "none" or "log1p"
     num_classes: int = 0
     weight: float = 1.0
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "TargetConfig":
+        """Create TargetConfig from a dictionary."""
+        return cls(
+            column=data["column"],
+            task=data.get("task", "regression"),
+            transform=data.get("transform", "none"),
+            num_classes=data.get("num_classes", 0),
+            weight=data.get("weight", 1.0),
+        )
+
+
+def _convert_targets(targets: dict) -> dict[str, TargetConfig]:
+    """Convert dict targets to TargetConfig instances."""
+    result = {}
+    for name, cfg in targets.items():
+        if isinstance(cfg, dict):
+            result[name] = TargetConfig.from_dict(cfg)
+        else:
+            result[name] = cfg
+    return result
 
 
 class ResolveDataset:
@@ -87,31 +124,10 @@ class ResolveDataset:
         """
         # Convert dict roles to RoleMapping if needed
         if isinstance(roles, dict):
-            roles = RoleMapping(
-                plot_id=roles.get("plot_id", "plot_id"),
-                species_id=roles.get("species_id", "species_id"),
-                species_plot_id=roles.get("species_plot_id", roles.get("plot_id", "plot_id")),
-                abundance=roles.get("abundance"),
-                coords_lat=roles.get("coords_lat"),
-                coords_lon=roles.get("coords_lon"),
-                taxonomy_genus=roles.get("taxonomy_genus"),
-                taxonomy_family=roles.get("taxonomy_family"),
-                covariates=roles.get("covariates", []),
-            )
+            roles = RoleMapping.from_dict(roles)
 
         # Convert dict targets to TargetConfig
-        target_configs = {}
-        for name, cfg in targets.items():
-            if isinstance(cfg, dict):
-                target_configs[name] = TargetConfig(
-                    column=cfg["column"],
-                    task=cfg.get("task", "regression"),
-                    transform=cfg.get("transform", "none"),
-                    num_classes=cfg.get("num_classes", 0),
-                    weight=cfg.get("weight", 1.0),
-                )
-            else:
-                target_configs[name] = cfg
+        target_configs = _convert_targets(targets)
 
         self._roles = roles
         self._target_configs = target_configs
@@ -162,31 +178,10 @@ class ResolveDataset:
         """
         # Convert dict roles to RoleMapping if needed
         if isinstance(roles, dict):
-            roles = RoleMapping(
-                plot_id=roles.get("plot_id", "plot_id"),
-                species_id=roles.get("species_id", "species_id"),
-                species_plot_id=roles.get("species_plot_id", roles.get("plot_id", "plot_id")),
-                abundance=roles.get("abundance"),
-                coords_lat=roles.get("coords_lat"),
-                coords_lon=roles.get("coords_lon"),
-                taxonomy_genus=roles.get("taxonomy_genus"),
-                taxonomy_family=roles.get("taxonomy_family"),
-                covariates=roles.get("covariates", []),
-            )
+            roles = RoleMapping.from_dict(roles)
 
         # Convert dict targets to TargetConfig
-        target_configs = {}
-        for name, cfg in targets.items():
-            if isinstance(cfg, dict):
-                target_configs[name] = TargetConfig(
-                    column=cfg["column"],
-                    task=cfg.get("task", "regression"),
-                    transform=cfg.get("transform", "none"),
-                    num_classes=cfg.get("num_classes", 0),
-                    weight=cfg.get("weight", 1.0),
-                )
-            else:
-                target_configs[name] = cfg
+        target_configs = _convert_targets(targets)
 
         instance = cls.__new__(cls)
         instance._roles = roles

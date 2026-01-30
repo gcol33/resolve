@@ -23,6 +23,60 @@ from resolve_core import (
 from .dataset import ResolveDataset
 
 
+def _build_model_config(
+    dataset: ResolveDataset,
+    hash_dim: int,
+    top_k: int,
+    top_k_species: int,
+    species_embed_dim: int,
+    genus_emb_dim: int,
+    family_emb_dim: int,
+    hidden_dims: list[int],
+    dropout: float,
+) -> _CoreModelConfig:
+    """Build ModelConfig from training parameters."""
+    config = _CoreModelConfig()
+    config.species_encoding = dataset._core.config.species_encoding
+    config.hash_dim = hash_dim
+    config.species_embed_dim = species_embed_dim
+    config.genus_emb_dim = genus_emb_dim
+    config.family_emb_dim = family_emb_dim
+    config.top_k = top_k
+    config.top_k_species = top_k_species
+    config.hidden_dims = hidden_dims
+    config.dropout = dropout
+    return config
+
+
+def _build_train_config(
+    batch_size: int,
+    max_epochs: int,
+    patience: int,
+    lr: float,
+    weight_decay: float,
+    phase_boundaries: Optional[list[int]],
+    loss_config: str,
+) -> _CoreTrainConfig:
+    """Build TrainConfig from training parameters."""
+    config = _CoreTrainConfig()
+    config.batch_size = batch_size
+    config.max_epochs = max_epochs
+    config.patience = patience
+    config.lr = lr
+    config.weight_decay = weight_decay
+    if phase_boundaries:
+        config.phase_boundaries = phase_boundaries
+
+    # Map loss config string to enum
+    loss_map = {
+        "mae": LossConfigMode.MAE,
+        "smape": LossConfigMode.SMAPE,
+        "combined": LossConfigMode.Combined,
+    }
+    config.loss_config = loss_map.get(loss_config.lower(), LossConfigMode.Combined)
+    return config
+
+
 class Trainer:
     """
     High-level trainer for RESOLVE models.
@@ -109,35 +163,16 @@ class Trainer:
         if hidden_dims is None:
             hidden_dims = [256, 128, 64]
 
-        # Build model config
-        model_config = _CoreModelConfig()
-        model_config.species_encoding = dataset._core.config.species_encoding
-        model_config.hash_dim = hash_dim
-        model_config.species_embed_dim = species_embed_dim
-        model_config.genus_emb_dim = genus_emb_dim
-        model_config.family_emb_dim = family_emb_dim
-        model_config.top_k = top_k
-        model_config.top_k_species = top_k_species
-        model_config.hidden_dims = hidden_dims
-        model_config.dropout = dropout
-
-        # Build train config
-        train_config = _CoreTrainConfig()
-        train_config.batch_size = batch_size
-        train_config.max_epochs = max_epochs
-        train_config.patience = patience
-        train_config.lr = lr
-        train_config.weight_decay = weight_decay
-        if phase_boundaries:
-            train_config.phase_boundaries = phase_boundaries
-
-        # Map loss config string to enum
-        loss_map = {
-            "mae": LossConfigMode.MAE,
-            "smape": LossConfigMode.SMAPE,
-            "combined": LossConfigMode.Combined,
-        }
-        train_config.loss_config = loss_map.get(loss_config.lower(), LossConfigMode.Combined)
+        # Build configs using factory functions
+        model_config = _build_model_config(
+            dataset, hash_dim, top_k, top_k_species,
+            species_embed_dim, genus_emb_dim, family_emb_dim,
+            hidden_dims, dropout
+        )
+        train_config = _build_train_config(
+            batch_size, max_epochs, patience, lr, weight_decay,
+            phase_boundaries, loss_config
+        )
 
         self._model_config = model_config
         self._train_config = train_config
@@ -179,6 +214,24 @@ class Trainer:
 
         return result
 
+    def create_predictor(self, device: Optional[str] = None) -> _CorePredictor:
+        """
+        Create a predictor from the trained model.
+
+        Args:
+            device: Device to run prediction on (default: trainer's device)
+
+        Returns:
+            Predictor instance for running inference
+        """
+        if device is None:
+            device = self._device
+        return _CorePredictor(
+            self._core.model,
+            self._core.scalers,
+            torch.device(device),
+        )
+
     def predict(
         self,
         dataset: Optional[ResolveDataset] = None,
@@ -194,24 +247,12 @@ class Trainer:
         Returns:
             ResolvePredictions with predictions and optional latent vectors
         """
-        device = torch.device(self._device)
-        predictor = _CorePredictor(
-            self._core.model,
-            self._core.scalers,
-            device,
-        )
+        predictor = self.create_predictor()
 
         if dataset is None:
             dataset = self._dataset
 
-        return predictor.predict(
-            dataset._core.coordinates,
-            dataset._core.covariates,
-            dataset._core.hash_embedding,
-            dataset._core.genus_ids,
-            dataset._core.family_ids,
-            return_latent,
-        )
+        return predictor.predict_dataset(dataset._core, return_latent)
 
     def save(self, path: Union[str, Path]):
         """Save trainer state to file."""

@@ -40,6 +40,9 @@ set(RESOLVE_CORE_SOURCES
     cpp_src/predictor.cpp
     cpp_src/loss.cpp
     cpp_src/dataset.cpp
+    cpp_src/species_encoding.cpp
+    cpp_src/checkpoint.cpp
+    cpp_src/data_prep.cpp
 )
 
 set(RESOLVE_CORE_HEADERS
@@ -51,8 +54,12 @@ set(RESOLVE_CORE_HEADERS
     include/resolve/predictor.hpp
     include/resolve/loss.hpp
     include/resolve/csv_reader.hpp
+    include/resolve/csv_utils.hpp
     include/resolve/role_mapping.hpp
     include/resolve/dataset.hpp
+    include/resolve/species_encoding.hpp
+    include/resolve/checkpoint.hpp
+    include/resolve/data_prep.hpp
 )
 
 # CUDA sources - split for CUDA 13.x compatibility:

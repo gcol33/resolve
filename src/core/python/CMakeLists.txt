@@ -11,7 +11,17 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(nanobind)
 
 # Build the extension module
-nanobind_add_module(_resolve_core src/bindings.cpp)
+# Split into multiple source files for maintainability
+set(BINDING_SOURCES
+    src/bindings.cpp
+    src/bindings_enums.cpp
+    src/bindings_types.cpp
+    src/bindings_dataset.cpp
+    src/bindings_model.cpp
+    src/bindings_trainer.cpp
+    src/bindings_metrics.cpp
+)
+nanobind_add_module(_resolve_core ${BINDING_SOURCES})
 
 target_link_libraries(_resolve_core PRIVATE resolve_core ${TORCH_LIBRARIES})
 

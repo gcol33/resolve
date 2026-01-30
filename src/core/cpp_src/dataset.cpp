@@ -1,5 +1,7 @@
 #include "resolve/dataset.hpp"
 #include "resolve/csv_reader.hpp"
+#include "resolve/csv_utils.hpp"
+#include "resolve/species_encoding.hpp"
 #include <algorithm>
 #include <numeric>
 #include <cmath>
@@ -7,99 +9,6 @@
 #include <functional>
 
 namespace resolve {
-
-namespace {
-
-// MurmurHash3 finalizer for feature hashing
-uint32_t murmur_hash(const std::string& key, uint32_t seed = 0) {
-    uint32_t h = seed;
-    for (char c : key) {
-        h ^= static_cast<uint32_t>(c);
-        h *= 0x5bd1e995;
-        h ^= h >> 15;
-    }
-    return h;
-}
-
-// Feature hashing for species
-void hash_species(
-    const std::vector<std::pair<std::string, float>>& species_abundances,
-    float* embedding,
-    int hash_dim
-) {
-    std::fill(embedding, embedding + hash_dim, 0.0f);
-
-    for (const auto& [species, abundance] : species_abundances) {
-        uint32_t h1 = murmur_hash(species, 0);
-        uint32_t h2 = murmur_hash(species, 1);
-
-        int idx = h1 % hash_dim;
-        float sign = (h2 % 2 == 0) ? 1.0f : -1.0f;
-        embedding[idx] += sign * abundance;
-    }
-}
-
-// Select top-k species by abundance
-std::vector<std::pair<std::string, float>> select_top_k(
-    std::vector<std::pair<std::string, float>> species,
-    int k
-) {
-    if (static_cast<int>(species.size()) <= k) {
-        return species;
-    }
-
-    std::partial_sort(
-        species.begin(),
-        species.begin() + k,
-        species.end(),
-        [](const auto& a, const auto& b) { return a.second > b.second; }
-    );
-
-    species.resize(k);
-    return species;
-}
-
-// Select bottom-k species by abundance
-std::vector<std::pair<std::string, float>> select_bottom_k(
-    std::vector<std::pair<std::string, float>> species,
-    int k
-) {
-    if (static_cast<int>(species.size()) <= k) {
-        return species;
-    }
-
-    std::partial_sort(
-        species.begin(),
-        species.begin() + k,
-        species.end(),
-        [](const auto& a, const auto& b) { return a.second < b.second; }
-    );
-
-    species.resize(k);
-    return species;
-}
-
-// Parse float safely
-float safe_stof(const std::string& s, float default_val = 0.0f) {
-    if (s.empty()) return default_val;
-    try {
-        return std::stof(s);
-    } catch (...) {
-        return default_val;
-    }
-}
-
-// Parse int safely
-int safe_stoi(const std::string& s, int default_val = 0) {
-    if (s.empty()) return default_val;
-    try {
-        return std::stoi(s);
-    } catch (...) {
-        return default_val;
-    }
-}
-
-} // anonymous namespace
 
 
 // ColumnIndices implementation
@@ -540,36 +449,9 @@ void ResolveDataset::encode_species(
                 species.push_back({rec.species_id, rec.abundance});
             }
 
-            // Apply selection
-            std::vector<std::pair<std::string, float>> selected;
-            if (config_.selection == SelectionMode::Top) {
-                selected = select_top_k(species, config_.top_k);
-            } else if (config_.selection == SelectionMode::Bottom) {
-                selected = select_bottom_k(species, config_.top_k);
-            } else if (config_.selection == SelectionMode::TopBottom) {
-                auto top = select_top_k(species, config_.top_k);
-                auto bottom = select_bottom_k(species, config_.top_k);
-                selected = top;
-                for (const auto& s : bottom) {
-                    if (std::find_if(selected.begin(), selected.end(),
-                            [&s](const auto& x) { return x.first == s.first; }) == selected.end()) {
-                        selected.push_back(s);
-                    }
-                }
-            } else {
-                selected = species;
-            }
-
-            // Apply normalization
-            if (config_.normalization == NormalizationMode::Norm) {
-                float total = 0.0f;
-                for (const auto& [sp, ab] : selected) total += ab;
-                if (total > 0) {
-                    for (auto& [sp, ab] : selected) ab /= total;
-                }
-            } else if (config_.normalization == NormalizationMode::Log1p) {
-                for (auto& [sp, ab] : selected) ab = std::log1p(ab);
-            }
+            // Apply selection and normalization
+            auto selected = apply_selection(std::move(species), config_.selection, config_.top_k);
+            apply_normalization(selected, config_.normalization);
 
             // Hash
             hash_species(selected, &hash_acc[i][0], config_.hash_dim);
