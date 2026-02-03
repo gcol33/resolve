@@ -39,6 +39,8 @@ public:
         torch::Tensor species_vector,
         torch::Tensor genus_ids,
         torch::Tensor family_ids,
+        torch::Tensor unknown_fraction,
+        torch::Tensor unknown_count,
         bool return_latent = false
     );
 

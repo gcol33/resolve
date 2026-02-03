@@ -51,4 +51,67 @@ void register_enums(nb::module_& m) {
         .value("StepLR", resolve::LRSchedulerType::StepLR)
         .value("CosineAnnealing", resolve::LRSchedulerType::CosineAnnealing)
         .export_values();
+
+    nb::enum_<resolve::MoERoutingType>(m, "MoERoutingType")
+        .value("None_", resolve::MoERoutingType::None)
+        .value("Soft", resolve::MoERoutingType::Soft)
+        .value("TopK", resolve::MoERoutingType::TopK)
+        .export_values();
+
+    nb::enum_<resolve::ActivationType>(m, "ActivationType")
+        .value("ReLU", resolve::ActivationType::ReLU)
+        .value("LeakyReLU", resolve::ActivationType::LeakyReLU)
+        .value("GELU", resolve::ActivationType::GELU)
+        .value("SiLU", resolve::ActivationType::SiLU)
+        .value("Tanh", resolve::ActivationType::Tanh)
+        .value("Mish", resolve::ActivationType::Mish)
+        .value("ELU", resolve::ActivationType::ELU)
+        .value("SELU", resolve::ActivationType::SELU)
+        .value("Softplus", resolve::ActivationType::Softplus)
+        .value("PReLU", resolve::ActivationType::PReLU)
+        .export_values();
+
+    nb::enum_<resolve::NormLayerType>(m, "NormLayerType")
+        .value("BatchNorm", resolve::NormLayerType::BatchNorm)
+        .value("LayerNorm", resolve::NormLayerType::LayerNorm)
+        .value("GroupNorm", resolve::NormLayerType::GroupNorm)
+        .value("RMSNorm", resolve::NormLayerType::RMSNorm)
+        .value("None_", resolve::NormLayerType::None)
+        .export_values();
+
+    // Architecture enums
+    nb::enum_<resolve::EncoderArchitecture>(m, "EncoderArchitecture")
+        .value("MLP", resolve::EncoderArchitecture::MLP)
+        .value("FTTransformer", resolve::EncoderArchitecture::FTTransformer)
+        .value("TabNet", resolve::EncoderArchitecture::TabNet)
+        .value("SAINT", resolve::EncoderArchitecture::SAINT)
+        .value("TraitNet", resolve::EncoderArchitecture::TraitNet)
+        .value("GNN", resolve::EncoderArchitecture::GNN)
+        .export_values();
+
+    nb::enum_<resolve::GNNType>(m, "GNNType")
+        .value("GCN", resolve::GNNType::GCN)
+        .value("GAT", resolve::GNNType::GAT)
+        .value("GraphSAGE", resolve::GNNType::GraphSAGE)
+        .export_values();
+
+    nb::enum_<resolve::GraphConstructionMode>(m, "GraphConstructionMode")
+        .value("Spatial", resolve::GraphConstructionMode::Spatial)
+        .value("Taxonomic", resolve::GraphConstructionMode::Taxonomic)
+        .value("CoOccurrence", resolve::GraphConstructionMode::CoOccurrence)
+        .export_values();
+
+    nb::enum_<resolve::TraitInteractionMode>(m, "TraitInteractionMode")
+        .value("Bilinear", resolve::TraitInteractionMode::Bilinear)
+        .value("MLP", resolve::TraitInteractionMode::MLP)
+        .value("Attention", resolve::TraitInteractionMode::Attention)
+        .export_values();
+
+    nb::enum_<resolve::ParallelAggregation>(m, "ParallelAggregation")
+        .value("Concat", resolve::ParallelAggregation::Concat)
+        .value("Sum", resolve::ParallelAggregation::Sum)
+        .value("Mean", resolve::ParallelAggregation::Mean)
+        .value("Attention", resolve::ParallelAggregation::Attention)
+        .value("Gated", resolve::ParallelAggregation::Gated)
+        .export_values();
 }

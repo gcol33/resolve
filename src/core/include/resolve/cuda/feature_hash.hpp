@@ -46,6 +46,29 @@ std::tuple<torch::Tensor, torch::Tensor> compute_hash_indices_cuda(
 );
 
 /**
+ * Compute hash embedding for a batch of plots using CSR-format raw species data.
+ *
+ * This function extracts species records for the specified batch of plots
+ * from CSR-format data and computes hash embeddings on GPU.
+ *
+ * @param batch_indices (batch_size,) int64 tensor of plot indices in the batch
+ * @param raw_plot_indices (n_total_records,) int64 tensor - global plot indices for all records
+ * @param raw_species_ids (n_total_records,) int64 tensor - pre-hashed species IDs
+ * @param raw_weights (n_total_records,) float tensor - species weights/abundances
+ * @param plot_offsets (n_plots+1,) int64 tensor - CSR offsets for each plot
+ * @param hash_dim Dimension of hash embedding
+ * @return (batch_size, hash_dim) float tensor of hash embeddings
+ */
+torch::Tensor compute_batch_hash_embedding_cuda(
+    torch::Tensor batch_indices,
+    torch::Tensor raw_plot_indices,
+    torch::Tensor raw_species_ids,
+    torch::Tensor raw_weights,
+    torch::Tensor plot_offsets,
+    int32_t hash_dim
+);
+
+/**
  * Check if CUDA is available for hash operations.
  */
 inline bool cuda_available() {

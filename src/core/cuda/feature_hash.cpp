@@ -73,6 +73,18 @@ cudaError_t resolve_launch_compute_hash(
     void* stream
 );
 
+// CSR-based batch hash kernel - most efficient for training batches
+cudaError_t resolve_launch_hash_batch_csr(
+    const int64_t* batch_indices,
+    const int64_t* plot_offsets,
+    const int64_t* species_ids,
+    const float* weights,
+    float* output,
+    int64_t batch_size,
+    int32_t hash_dim,
+    void* stream
+);
+
 } // extern "C"
 
 namespace resolve {
@@ -170,6 +182,73 @@ std::tuple<torch::Tensor, torch::Tensor> compute_hash_indices_cuda(
     TORCH_CHECK(err == cudaSuccess, "CUDA kernel failed: ", cudaGetErrorString(err));
 
     return {hash_indices, signs};
+}
+
+/**
+ * Compute hash embedding for a batch of plots using CSR-format raw species data.
+ *
+ * OPTIMIZED VERSION: Uses a dedicated CUDA kernel that reads CSR offsets directly
+ * on the GPU, eliminating all CPU work per batch.
+ */
+torch::Tensor compute_batch_hash_embedding_cuda(
+    torch::Tensor batch_indices,
+    torch::Tensor raw_plot_indices,  // Unused in optimized version
+    torch::Tensor raw_species_ids,
+    torch::Tensor raw_weights,
+    torch::Tensor plot_offsets,
+    int32_t hash_dim
+) {
+    int64_t batch_size = batch_indices.size(0);
+
+    // Determine device from first defined tensor
+    torch::Device device = torch::kCUDA;
+    if (batch_indices.defined() && batch_indices.numel() > 0) {
+        device = batch_indices.device();
+    }
+
+    // Ensure all inputs are on CUDA and contiguous
+    if (!batch_indices.is_cuda()) {
+        batch_indices = batch_indices.to(device);
+    }
+    if (!raw_species_ids.is_cuda()) {
+        raw_species_ids = raw_species_ids.to(device);
+    }
+    if (!raw_weights.is_cuda()) {
+        raw_weights = raw_weights.to(device);
+    }
+    if (!plot_offsets.is_cuda()) {
+        plot_offsets = plot_offsets.to(device);
+    }
+
+    batch_indices = batch_indices.contiguous();
+    raw_species_ids = raw_species_ids.contiguous();
+    raw_weights = raw_weights.contiguous();
+    plot_offsets = plot_offsets.contiguous();
+
+    // Create output tensor (zero-initialized)
+    auto options = torch::TensorOptions()
+        .dtype(torch::kFloat32)
+        .device(device);
+    torch::Tensor output = torch::zeros({batch_size, hash_dim}, options);
+
+    // Get CUDA stream from PyTorch
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+    // Launch optimized CSR kernel - no CPU work needed!
+    cudaError_t err = resolve_launch_hash_batch_csr(
+        batch_indices.data_ptr<int64_t>(),
+        plot_offsets.data_ptr<int64_t>(),
+        raw_species_ids.data_ptr<int64_t>(),
+        raw_weights.data_ptr<float>(),
+        output.data_ptr<float>(),
+        batch_size,
+        hash_dim,
+        static_cast<void*>(stream)
+    );
+
+    TORCH_CHECK(err == cudaSuccess, "CUDA kernel failed: ", cudaGetErrorString(err));
+
+    return output;
 }
 
 } // namespace cuda

@@ -408,6 +408,10 @@ void ResolveDataset::encode_species(
     schema_.has_taxonomy = (has_genus || has_family) && config_.use_taxonomy;
     schema_.has_abundance = true;  // We always have abundance (even if defaulted to 1.0)
 
+    // Copy tracking flags from config to schema
+    schema_.track_unknown_fraction = config_.track_unknown_fraction;
+    schema_.track_unknown_count = config_.track_unknown_count;
+
     // Fit taxonomy vocabulary
     if (schema_.has_taxonomy) {
         taxonomy_vocab_.fit(all_records);
@@ -434,27 +438,105 @@ void ResolveDataset::encode_species(
 
     // Encode based on mode
     if (config_.species_encoding == SpeciesEncodingMode::Hash) {
-        // Feature hashing mode
-        hash_embedding_ = torch::zeros({n_plots, config_.hash_dim}, torch::kFloat32);
-        auto hash_acc = hash_embedding_.accessor<float, 2>();
+        if (config_.use_cuda_hash) {
+            // CUDA hash mode: store raw species data in COO format for GPU computation
+            // This enables on-the-fly hash embedding computation per batch on GPU
 
-        for (int64_t i = 0; i < n_plots; ++i) {
-            const auto& plot_id = plot_ids_[i];
-            auto it = plot_records.find(plot_id);
-            if (it == plot_records.end()) continue;
-
-            // Convert to species-abundance pairs
-            std::vector<std::pair<std::string, float>> species;
-            for (const auto& rec : it->second) {
-                species.push_back({rec.species_id, rec.abundance});
+            // First pass: count total records and build plot index mapping
+            std::unordered_map<std::string, int64_t> plot_id_to_idx;
+            for (int64_t i = 0; i < n_plots; ++i) {
+                plot_id_to_idx[plot_ids_[i]] = i;
             }
 
-            // Apply selection and normalization
-            auto selected = apply_selection(std::move(species), config_.selection, config_.top_k);
-            apply_normalization(selected, config_.normalization);
+            // Count records per plot after selection
+            std::vector<int64_t> records_per_plot(n_plots, 0);
+            int64_t total_records = 0;
 
-            // Hash
-            hash_species(selected, &hash_acc[i][0], config_.hash_dim);
+            for (int64_t i = 0; i < n_plots; ++i) {
+                const auto& plot_id = plot_ids_[i];
+                auto it = plot_records.find(plot_id);
+                if (it == plot_records.end()) continue;
+
+                // Convert to species-abundance pairs
+                std::vector<std::pair<std::string, float>> species;
+                for (const auto& rec : it->second) {
+                    species.push_back({rec.species_id, rec.abundance});
+                }
+
+                // Apply selection (but not normalization yet - done at batch time)
+                auto selected = apply_selection(std::move(species), config_.selection, config_.top_k);
+                records_per_plot[i] = static_cast<int64_t>(selected.size());
+                total_records += static_cast<int64_t>(selected.size());
+            }
+
+            // Build CSR-style offsets
+            plot_offsets_ = torch::zeros({n_plots + 1}, torch::kLong);
+            auto offset_acc = plot_offsets_.accessor<int64_t, 1>();
+            offset_acc[0] = 0;
+            for (int64_t i = 0; i < n_plots; ++i) {
+                offset_acc[i + 1] = offset_acc[i] + records_per_plot[i];
+            }
+
+            // Allocate COO tensors
+            raw_plot_indices_ = torch::zeros({total_records}, torch::kLong);
+            raw_species_ids_ = torch::zeros({total_records}, torch::kLong);
+            raw_weights_ = torch::zeros({total_records}, torch::kFloat32);
+
+            auto plot_idx_acc = raw_plot_indices_.accessor<int64_t, 1>();
+            auto species_id_acc = raw_species_ids_.accessor<int64_t, 1>();
+            auto weight_acc = raw_weights_.accessor<float, 1>();
+
+            // Second pass: fill COO data
+            int64_t record_idx = 0;
+            for (int64_t i = 0; i < n_plots; ++i) {
+                const auto& plot_id = plot_ids_[i];
+                auto it = plot_records.find(plot_id);
+                if (it == plot_records.end()) continue;
+
+                std::vector<std::pair<std::string, float>> species;
+                for (const auto& rec : it->second) {
+                    species.push_back({rec.species_id, rec.abundance});
+                }
+
+                auto selected = apply_selection(std::move(species), config_.selection, config_.top_k);
+                apply_normalization(selected, config_.normalization);
+
+                for (const auto& [sp_name, weight] : selected) {
+                    plot_idx_acc[record_idx] = i;
+                    // Hash species name to int64 using MurmurHash
+                    species_id_acc[record_idx] = static_cast<int64_t>(murmur_hash(sp_name));
+                    weight_acc[record_idx] = weight;
+                    record_idx++;
+                }
+            }
+
+            // Still create empty hash_embedding tensor to indicate hash mode (but it won't be used)
+            // The actual hash embedding is computed on-the-fly during training
+            hash_embedding_ = torch::Tensor();
+
+        } else {
+            // Standard CPU hash mode: pre-compute hash embeddings
+            hash_embedding_ = torch::zeros({n_plots, config_.hash_dim}, torch::kFloat32);
+            auto hash_acc = hash_embedding_.accessor<float, 2>();
+
+            for (int64_t i = 0; i < n_plots; ++i) {
+                const auto& plot_id = plot_ids_[i];
+                auto it = plot_records.find(plot_id);
+                if (it == plot_records.end()) continue;
+
+                // Convert to species-abundance pairs
+                std::vector<std::pair<std::string, float>> species;
+                for (const auto& rec : it->second) {
+                    species.push_back({rec.species_id, rec.abundance});
+                }
+
+                // Apply selection and normalization
+                auto selected = apply_selection(std::move(species), config_.selection, config_.top_k);
+                apply_normalization(selected, config_.normalization);
+
+                // Hash
+                hash_species(selected, &hash_acc[i][0], config_.hash_dim);
+            }
         }
 
     } else if (config_.species_encoding == SpeciesEncodingMode::Embed) {

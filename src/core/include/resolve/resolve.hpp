@@ -13,8 +13,4 @@
 #include "resolve/predictor.hpp"
 #include "resolve/loss.hpp"
 
-namespace resolve {
-
-constexpr const char* VERSION = "0.1.0";
-
-} // namespace resolve
+// VERSION is defined in types.hpp

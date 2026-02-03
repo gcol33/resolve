@@ -31,7 +31,12 @@ void register_dataset(nb::module_& m) {
         .def_prop_ro("plot_ids", &resolve::ResolveDataset::plot_ids)
         .def_prop_ro("species_vocab", &resolve::ResolveDataset::species_vocab)
         .def_prop_ro("n_plots", &resolve::ResolveDataset::n_plots)
-        .def_prop_ro("config", &resolve::ResolveDataset::config);
+        .def_prop_ro("config", &resolve::ResolveDataset::config)
+        // CUDA hash accessors
+        .def("has_raw_species_data", &resolve::ResolveDataset::has_raw_species_data)
+        .def_prop_ro("raw_species_ids", &resolve::ResolveDataset::raw_species_ids)
+        .def_prop_ro("raw_weights", &resolve::ResolveDataset::raw_weights)
+        .def_prop_ro("plot_offsets", &resolve::ResolveDataset::plot_offsets);
 
     // Species Encoding helpers
     nb::class_<resolve::TaxonomyVocab>(m, "TaxonomyVocab")

@@ -33,6 +33,7 @@ cmake -S "%SRC_DIR%" -B "%BUILD_DIR%" ^
     -DBUILD_CLI=ON ^
     -DBUILD_TESTS=ON ^
     -DUSE_CUDA=ON ^
+    -DSKIP_CUDA_KERNELS=OFF ^
     -DTorch_DIR="%TORCH_DIR%" ^
     -DPython_EXECUTABLE="%PYTHON_EXE%"
 

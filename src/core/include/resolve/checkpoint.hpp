@@ -2,6 +2,7 @@
 
 #include "resolve/types.hpp"
 #include "resolve/model.hpp"
+#include "resolve/trainer.hpp"
 #include <torch/torch.h>
 #include <string>
 #include <unordered_map>
@@ -30,6 +31,37 @@ ModelConfig load_model_config(
     torch::serialize::InputArchive& archive
 );
 
+// Save training config to archive
+void save_train_config(
+    torch::serialize::OutputArchive& archive,
+    const TrainConfig& config
+);
+
+// Load training config from archive
+TrainConfig load_train_config(
+    torch::serialize::InputArchive& archive
+);
+
+// Save run metadata to archive
+void save_run_metadata(
+    torch::serialize::OutputArchive& archive,
+    const RunMetadata& metadata
+);
+
+// Load run metadata from archive
+RunMetadata load_run_metadata(
+    torch::serialize::InputArchive& archive
+);
+
+// Write run metadata as JSON file alongside checkpoint
+void write_metadata_json(
+    const std::string& checkpoint_path,
+    const ModelConfig& model_config,
+    const TrainConfig& train_config,
+    const RunMetadata& metadata,
+    const ResolveSchema& schema
+);
+
 // Save scalers to archive
 void save_scalers(
     torch::serialize::OutputArchive& archive,
@@ -40,5 +72,19 @@ void save_scalers(
 Scalers load_scalers(
     torch::serialize::InputArchive& archive
 );
+
+// Save schema to archive
+void save_schema(
+    torch::serialize::OutputArchive& archive,
+    const ResolveSchema& schema
+);
+
+// Load schema from archive
+ResolveSchema load_schema(
+    torch::serialize::InputArchive& archive
+);
+
+// Get current timestamp as ISO 8601 string
+std::string get_iso_timestamp();
 
 } // namespace resolve

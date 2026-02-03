@@ -148,3 +148,145 @@ The research paper using RESOLVE is located at:
 5. CLI (Phase 3) - standalone tool
 6. R bindings (Phase 4) - parity
 7. Testing (Phase 5) - validation
+
+---
+
+## Performance Optimization Plan
+
+### Current Bottleneck Analysis (Feb 2026)
+
+**Observed Performance:**
+- 1.5M plots, batch_size=32768, 17M params
+- ~49 seconds per epoch
+- GPU utilization: 1-3% (RTX 5080)
+- Memory: 4GB / 16GB VRAM
+
+**Root Cause:** Kernel launch overhead from many small operations:
+1. **60+ embedding lookups per forward pass**: Separate `nn.Embedding.forward()` for each position
+   - 20 species positions × 1 lookup each
+   - 3 genus positions × 1 lookup each
+   - 3 family positions × 1 lookup each
+   - Each is a tiny CUDA kernel with ~5μs launch overhead
+2. **Small matrix multiplications**: MLP layers finish in microseconds, GPU is idle waiting for next kernel
+3. **Per-batch index_select**: Creates synchronization points
+
+### Optimization Phases
+
+#### Phase A: Fused Embedding Lookups (Expected 2-3x speedup)
+
+**Goal:** Replace 60+ individual embedding lookups with 1-3 batched operations.
+
+**Current code (`encoder.cpp:534-548`):**
+```cpp
+// SLOW: 20 separate kernel launches
+for (int k = 0; k < top_k_species_; ++k) {
+    auto sp_emb = species_embeddings_[k](species_ids.select(1, k));
+    parts.push_back(sp_emb);
+}
+```
+
+**Optimized approach:**
+```cpp
+// FAST: Single embedding lookup with offset indexing
+// Flatten species_ids: (batch, top_k) -> (batch * top_k,)
+// Add position offsets: id + k * vocab_size
+// Single embedding lookup: (batch * top_k, embed_dim)
+// Reshape: (batch, top_k * embed_dim)
+auto flat_ids = species_ids.flatten() + position_offsets;
+auto all_emb = unified_species_embedding_(flat_ids);
+auto reshaped = all_emb.view({batch_size, top_k_species_ * embed_dim});
+```
+
+**Files to modify:**
+- `include/resolve/encoder.hpp`: Add `FusedEmbeddingTable` class
+- `cpp_src/encoder.cpp`: Implement fused forward pass
+- Keep backward-compatible: old per-position embeddings still loadable
+
+**Checkpoint compatibility:**
+- Migration function to convert old per-position tables to unified table
+- Version flag in checkpoint format
+
+#### Phase B: CUDA Custom Kernels (Expected 1.5-2x additional speedup)
+
+**Goal:** Write custom CUDA kernels for the embedding + concat + first linear layer.
+
+**Approach:**
+1. Fused embedding lookup + concatenation kernel
+2. Fused linear + activation kernel (for small hidden dims)
+3. Use shared memory for intermediate results
+
+**Files to create:**
+- `cuda/fused_embed.cu`: Custom embedding kernel
+- `cuda/fused_linear.cu`: Fused linear + activation
+
+**When to do this:** Only if Phase A is insufficient for paper experiments.
+
+#### Phase C: torch.compile / TorchScript (Expected 1.5x speedup)
+
+**Goal:** Let PyTorch optimize the computation graph automatically.
+
+**Approach (libtorch 2.x):**
+```cpp
+// Enable torch.compile equivalent for C++
+auto optimized_model = torch::jit::optimize_for_inference(model_);
+```
+
+**Alternative: Export to TorchScript:**
+```cpp
+auto traced = torch::jit::trace(model_, example_input);
+traced.save("optimized_model.pt");
+```
+
+**When to do this:** After Phase A, if more speedup needed.
+
+#### Phase D: Async Data Pipeline (Expected 1.2x speedup)
+
+**Goal:** Overlap CPU work with GPU compute.
+
+**Current:** Synchronous batch preparation
+**Optimized:** Double-buffered prefetching
+
+```cpp
+// Prepare next batch on CPU while GPU processes current batch
+std::thread prefetch_thread;
+torch::Tensor next_batch;
+
+for (batch_idx = 0; batch_idx < n_batches; batch_idx++) {
+    // Start prefetching next batch
+    if (batch_idx + 1 < n_batches) {
+        prefetch_thread = std::thread([&]{
+            next_batch = prepare_batch(batch_idx + 1);
+        });
+    }
+
+    // Process current batch on GPU
+    train_step(current_batch);
+
+    // Wait for prefetch and swap
+    if (prefetch_thread.joinable()) prefetch_thread.join();
+    current_batch = std::move(next_batch);
+}
+```
+
+### Implementation Priority
+
+| Phase | Speedup | Effort | Priority |
+|-------|---------|--------|----------|
+| A: Fused Embeddings | 2-3x | Medium | **HIGH** |
+| B: CUDA Kernels | 1.5-2x | High | Low (only if needed) |
+| C: torch.compile | 1.5x | Low | Medium |
+| D: Async Pipeline | 1.2x | Medium | Low |
+
+### Target Performance
+
+- **Current:** 49 sec/epoch, 1-3% GPU
+- **After Phase A:** ~20 sec/epoch, 10-20% GPU
+- **After Phase A+C:** ~15 sec/epoch, 20-30% GPU
+- **Theoretical max:** ~5 sec/epoch (compute-bound)
+
+### Backward Compatibility
+
+All optimizations must:
+1. Load existing checkpoints without modification
+2. Produce identical outputs (within floating-point tolerance)
+3. Be optional via config flag for debugging

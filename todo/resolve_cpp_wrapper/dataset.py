@@ -215,7 +215,7 @@ class ResolveDataset:
             self._core = self._load_from_csv(
                 header_path, species_path, roles, target_configs,
                 species_encoding, hash_dim, top_k, top_k_species,
-                selection, track_unknown_fraction
+                selection, track_unknown_fraction, use_cuda_hash=False
             )
 
     @classmethod
@@ -231,6 +231,7 @@ class ResolveDataset:
         top_k_species: int = 10,
         selection: str = "top",
         track_unknown_fraction: bool = True,
+        use_cuda_hash: bool = False,
     ) -> "ResolveDataset":
         """
         Load dataset from CSV files.
@@ -262,7 +263,7 @@ class ResolveDataset:
         instance._core = cls._load_from_csv(
             str(header), str(species), roles, target_configs,
             species_encoding, hash_dim, top_k, top_k_species,
-            selection, track_unknown_fraction
+            selection, track_unknown_fraction, use_cuda_hash
         )
 
         return instance
@@ -279,6 +280,7 @@ class ResolveDataset:
         top_k_species: int,
         selection: str,
         track_unknown_fraction: bool,
+        use_cuda_hash: bool,
     ) -> _CoreDataset:
         """Load via C++ core."""
         # Build core RoleMapping
@@ -321,6 +323,7 @@ class ResolveDataset:
         config.top_k = top_k
         config.top_k_species = top_k_species
         config.track_unknown_fraction = track_unknown_fraction
+        config.use_cuda_hash = use_cuda_hash
 
         return _CoreDataset.from_csv(header_path, species_path, core_roles, target_specs, config)
 

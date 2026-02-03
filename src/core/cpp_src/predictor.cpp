@@ -32,11 +32,17 @@ ResolvePredictions Predictor::predict(
         dataset.species_vector(),
         dataset.genus_ids(),
         dataset.family_ids(),
+        dataset.unknown_fraction(),
+        dataset.unknown_count(),
         return_latent
     );
 
     // Use actual plot IDs from dataset
     result.plot_ids = dataset.plot_ids();
+
+    // Copy targets from dataset for residual analysis
+    result.targets = dataset.targets();
+
     return result;
 }
 
@@ -48,15 +54,21 @@ ResolvePredictions Predictor::predict(
     torch::Tensor species_vector,
     torch::Tensor genus_ids,
     torch::Tensor family_ids,
+    torch::Tensor unknown_fraction,
+    torch::Tensor unknown_count,
     bool return_latent
 ) {
     torch::NoGradGuard no_grad;
     model_->eval();
 
-    // Build continuous features based on encoding mode
+    // Build continuous features based on encoding mode (must match trainer.cpp)
     std::vector<torch::Tensor> continuous_parts;
     push_if_defined(continuous_parts, coordinates);
     push_if_defined(continuous_parts, covariates);
+    push_if_defined(continuous_parts, unknown_fraction, 1);
+    if (unknown_count.defined() && unknown_count.numel() > 0) {
+        continuous_parts.push_back(unknown_count.to(torch::kFloat32).unsqueeze(1));
+    }
 
     // For hash mode, include hash embedding in continuous
     if (model_->species_encoding() == SpeciesEncodingMode::Hash &&

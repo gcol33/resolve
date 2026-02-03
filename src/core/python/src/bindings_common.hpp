@@ -7,6 +7,7 @@
 #include <nanobind/stl/unordered_map.h>
 #include <nanobind/stl/optional.h>
 #include <torch/torch.h>
+#include <torch/csrc/autograd/python_variable.h>  // For THPVariable_Wrap/Unpack
 
 #include "resolve/resolve.hpp"
 #include "resolve/role_mapping.hpp"
@@ -18,18 +19,28 @@ namespace nb = nanobind;
 inline std::unordered_map<std::string, torch::Tensor> dict_to_tensor_map(const nb::dict& d) {
     std::unordered_map<std::string, torch::Tensor> result;
     for (auto item : d) {
-        result[nb::cast<std::string>(item.first)] = nb::cast<torch::Tensor>(item.second);
+        // Use THPVariable_Unpack to convert Python tensor to C++ tensor
+        PyObject* py_tensor = item.second.ptr();
+        if (THPVariable_Check(py_tensor)) {
+            result[nb::cast<std::string>(item.first)] = THPVariable_Unpack(py_tensor);
+        }
     }
     return result;
 }
 
 // Helper to convert unordered_map of tensors to Python dict
-inline nb::dict tensor_map_to_dict(const std::unordered_map<std::string, torch::Tensor>& m) {
-    nb::dict result;
+inline nb::object tensor_map_to_dict(const std::unordered_map<std::string, torch::Tensor>& m) {
+    PyObject* py_dict = PyDict_New();
     for (const auto& [key, value] : m) {
-        result[nb::str(key.c_str())] = value;
+        if (value.defined()) {
+            // Move tensor to CPU and make contiguous for Python interop
+            auto cpu_tensor = value.detach().cpu().contiguous();
+            PyObject* py_tensor = THPVariable_Wrap(cpu_tensor);
+            PyDict_SetItemString(py_dict, key.c_str(), py_tensor);
+            Py_DECREF(py_tensor);  // PyDict_SetItemString increments refcount
+        }
     }
-    return result;
+    return nb::steal(py_dict);
 }
 
 // Forward declarations for binding registration functions

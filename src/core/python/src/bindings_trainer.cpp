@@ -43,15 +43,29 @@ void register_trainer(nb::module_& m) {
            nb::arg("test_size") = 0.2f,
            nb::arg("seed") = 42,
            "Prepare data from raw tensors (backwards compatible API)")
-        .def("fit", &resolve::Trainer::fit)
+        .def("fit", &resolve::Trainer::fit, nb::call_guard<nb::gil_scoped_release>())
         .def("save", &resolve::Trainer::save)
         .def_static("load", [](const std::string& path, const std::string& device) {
             torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
             return resolve::Trainer::load(path, dev);
         }, nb::arg("path"), nb::arg("device") = "cpu")
-        .def_prop_ro("model", &resolve::Trainer::model)
-        .def_prop_ro("scalers", &resolve::Trainer::scalers)
-        .def_prop_ro("config", &resolve::Trainer::config);
+        .def_prop_ro("model", [](resolve::Trainer& self) -> resolve::ResolveModel { return self.model(); })
+        .def_prop_ro("scalers", [](resolve::Trainer& self) -> const resolve::Scalers& { return self.scalers(); })
+        .def_prop_ro("config", &resolve::Trainer::config)
+        .def("compute_diagnostics", &resolve::Trainer::compute_diagnostics,
+             "Compute network health diagnostics (dead neurons, saturation, etc.)")
+        .def("compute_calibration", &resolve::Trainer::compute_calibration,
+             nb::arg("target_name"),
+             nb::arg("n_bins") = 10,
+             "Compute calibration curve for a classification target")
+        .def("compute_residuals", &resolve::Trainer::compute_residuals,
+             nb::arg("target_name"),
+             "Compute residual analysis for a regression target")
+        .def("cross_validate", &resolve::Trainer::cross_validate,
+             nb::arg("n_folds") = 5,
+             nb::arg("seed") = 42,
+             nb::call_guard<nb::gil_scoped_release>(),
+             "Perform k-fold cross-validation");
 
     nb::class_<resolve::Predictor>(m, "Predictor")
         .def("__init__", [](resolve::Predictor* self, resolve::ResolveModel model, resolve::Scalers scalers, const std::string& device) {
@@ -65,7 +79,8 @@ void register_trainer(nb::module_& m) {
         .def("predict",
              static_cast<resolve::ResolvePredictions (resolve::Predictor::*)(
                  torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
-                 torch::Tensor, torch::Tensor, torch::Tensor, bool)>(&resolve::Predictor::predict),
+                 torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
+                 torch::Tensor, bool)>(&resolve::Predictor::predict),
              nb::arg("coordinates"),
              nb::arg("covariates"),
              nb::arg("hash_embedding"),
@@ -73,6 +88,8 @@ void register_trainer(nb::module_& m) {
              nb::arg("species_vector"),
              nb::arg("genus_ids"),
              nb::arg("family_ids"),
+             nb::arg("unknown_fraction"),
+             nb::arg("unknown_count"),
              nb::arg("return_latent") = false)
         .def("predict_dataset",
              static_cast<resolve::ResolvePredictions (resolve::Predictor::*)(
@@ -87,6 +104,6 @@ void register_trainer(nb::module_& m) {
              nb::arg("family_ids"))
         .def("get_genus_embeddings", &resolve::Predictor::get_genus_embeddings)
         .def("get_family_embeddings", &resolve::Predictor::get_family_embeddings)
-        .def_prop_ro("model", &resolve::Predictor::model)
-        .def_prop_ro("scalers", &resolve::Predictor::scalers);
+        .def_prop_ro("model", [](resolve::Predictor& self) -> resolve::ResolveModel { return self.model(); })
+        .def_prop_ro("scalers", [](resolve::Predictor& self) -> const resolve::Scalers& { return self.scalers(); });
 }

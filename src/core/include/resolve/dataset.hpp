@@ -47,6 +47,11 @@ struct DatasetConfig {
 
     // Taxonomy
     bool use_taxonomy = true;  // If available in data
+
+    // CUDA hash computation (for hash mode)
+    // When true, stores raw species data in COO format for on-the-fly GPU hash computation
+    // This avoids pre-computing hash embeddings and allows dynamic batch processing
+    bool use_cuda_hash = false;
 };
 
 // Loaded dataset ready for training
@@ -80,6 +85,13 @@ public:
     const torch::Tensor& unknown_fraction() const { return unknown_fraction_; }
     const torch::Tensor& unknown_count() const { return unknown_count_; }
     const std::unordered_map<std::string, torch::Tensor>& targets() const { return targets_; }
+
+    // Accessors for raw species data (CUDA hash computation)
+    const torch::Tensor& raw_plot_indices() const { return raw_plot_indices_; }
+    const torch::Tensor& raw_species_ids() const { return raw_species_ids_; }
+    const torch::Tensor& raw_weights() const { return raw_weights_; }
+    const torch::Tensor& plot_offsets() const { return plot_offsets_; }
+    bool has_raw_species_data() const { return raw_plot_indices_.defined() && raw_plot_indices_.numel() > 0; }
 
     // Schema information
     const ResolveSchema& schema() const { return schema_; }
@@ -138,6 +150,13 @@ private:
     torch::Tensor unknown_fraction_; // (n_plots,)
     torch::Tensor unknown_count_;    // (n_plots,)
     std::unordered_map<std::string, torch::Tensor> targets_;
+
+    // Raw species data in COO format for CUDA hash computation
+    // Stored when use_cuda_hash=true in config, enables on-the-fly GPU hash computation
+    torch::Tensor raw_plot_indices_;   // (n_records,) int64 - which plot each record belongs to
+    torch::Tensor raw_species_ids_;    // (n_records,) int64 - hashed species IDs (MurmurHash of string)
+    torch::Tensor raw_weights_;        // (n_records,) float32 - abundance/weight values
+    torch::Tensor plot_offsets_;       // (n_plots+1,) int64 - CSR-style offsets for fast batch slicing
 
     // Metadata
     ResolveSchema schema_;

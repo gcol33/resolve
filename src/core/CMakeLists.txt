@@ -35,6 +35,7 @@ find_package(Torch REQUIRED)
 # Core library sources
 set(RESOLVE_CORE_SOURCES
     cpp_src/encoder.cpp
+    cpp_src/attention.cpp
     cpp_src/model.cpp
     cpp_src/trainer.cpp
     cpp_src/predictor.cpp
@@ -49,6 +50,7 @@ set(RESOLVE_CORE_HEADERS
     include/resolve/resolve.hpp
     include/resolve/types.hpp
     include/resolve/encoder.hpp
+    include/resolve/attention.hpp
     include/resolve/model.hpp
     include/resolve/trainer.hpp
     include/resolve/predictor.hpp

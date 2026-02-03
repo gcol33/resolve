@@ -64,8 +64,8 @@ public:
     // Train the model
     TrainResult fit();
 
-    // Save model and state
-    void save(const std::string& path) const;
+    // Save model and state (optionally with run metadata for final checkpoint)
+    void save(const std::string& path, const RunMetadata* metadata = nullptr) const;
 
     // Load model and state
     static std::tuple<ResolveModel, Scalers> load(
@@ -78,6 +78,29 @@ public:
     [[nodiscard]] const ResolveModel& model() const noexcept { return model_; }
     [[nodiscard]] const Scalers& scalers() const noexcept { return scalers_; }
     [[nodiscard]] const TrainConfig& config() const noexcept { return config_; }
+
+    [[nodiscard]] NetworkDiagnostics compute_diagnostics();
+
+    // Advanced evaluation methods
+
+    // Compute calibration for a classification target
+    // n_bins: number of probability bins (default 10)
+    [[nodiscard]] CalibrationResult compute_calibration(
+        const std::string& target_name,
+        int n_bins = 10
+    );
+
+    // Compute residual analysis for a regression target
+    [[nodiscard]] ResidualAnalysis compute_residuals(
+        const std::string& target_name
+    );
+
+    // Perform k-fold cross-validation
+    // Returns aggregated metrics across all folds
+    [[nodiscard]] CrossValidationResult cross_validate(
+        int n_folds = 5,
+        int seed = 42
+    );
 
 private:
     // Train one epoch
@@ -95,6 +118,9 @@ private:
 
     // Update optimizer learning rate
     void update_learning_rate(float lr);
+
+    // Pre-load all data to GPU for faster training
+    void cache_data_to_gpu();
 
     ResolveModel model_;
     TrainConfig config_;
@@ -123,6 +149,68 @@ private:
     std::unique_ptr<torch::optim::AdamW> optimizer_;
 
     bool data_prepared_ = false;
+
+    // Timestamp when training started (for run metadata)
+    std::string created_at_;
+
+    // GPU-cached training data (for fast epochs after first)
+    bool gpu_data_cached_ = false;
+    torch::Tensor gpu_continuous_;
+    torch::Tensor gpu_genus_ids_;
+    torch::Tensor gpu_family_ids_;
+    torch::Tensor gpu_species_ids_;
+    torch::Tensor gpu_species_vector_;
+    std::unordered_map<std::string, torch::Tensor> gpu_targets_;
+    std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>> gpu_scalers_;
+
+    // GPU-cached test data (avoid repeated CPU->GPU transfer in eval)
+    torch::Tensor gpu_test_continuous_;
+    torch::Tensor gpu_test_genus_ids_;
+    torch::Tensor gpu_test_family_ids_;
+    torch::Tensor gpu_test_species_ids_;
+    torch::Tensor gpu_test_species_vector_;
+    std::unordered_map<std::string, torch::Tensor> gpu_test_targets_;
+
+    // Shuffled training data (cached, reshuffled every N epochs)
+    torch::Tensor shuffled_continuous_;
+    torch::Tensor shuffled_genus_ids_;
+    torch::Tensor shuffled_family_ids_;
+    torch::Tensor shuffled_species_ids_;
+    torch::Tensor shuffled_species_vector_;
+    std::unordered_map<std::string, torch::Tensor> shuffled_targets_;
+
+    // AMP (Automatic Mixed Precision) state
+    bool amp_enabled_ = false;         // Whether AMP is actually enabled (CUDA only)
+    float amp_scale_ = 65536.0f;       // Current gradient scale
+    int amp_growth_tracker_ = 0;       // Steps since last overflow
+
+    // CUDA hash computation: raw species data for on-the-fly batch hashing
+    bool use_cuda_hash_ = false;       // Whether to use CUDA hash computation
+    int32_t hash_dim_ = 0;             // Hash embedding dimension
+    torch::Tensor raw_species_ids_;    // (n_records,) int64 - pre-hashed species IDs
+    torch::Tensor raw_weights_;        // (n_records,) float32 - species weights
+    torch::Tensor plot_offsets_;       // (n_plots+1,) int64 - CSR offsets for each plot
+    torch::Tensor train_plot_offsets_; // Remapped offsets for training set
+    torch::Tensor test_plot_offsets_;  // Remapped offsets for test set
+    torch::Tensor train_raw_species_ids_;  // Species IDs for training plots
+    torch::Tensor train_raw_weights_;      // Weights for training plots
+    torch::Tensor test_raw_species_ids_;   // Species IDs for test plots
+    torch::Tensor test_raw_weights_;       // Weights for test plots
+    torch::Tensor gpu_train_raw_species_ids_;  // GPU-cached training species IDs
+    torch::Tensor gpu_train_raw_weights_;      // GPU-cached training weights
+    torch::Tensor gpu_train_plot_offsets_;     // GPU-cached training offsets
+
+    // Original plot indices for train/test (needed for CUDA hash with CSR offsets)
+    torch::Tensor train_indices_;             // Global plot indices for training set
+    torch::Tensor test_indices_;              // Global plot indices for test set
+    torch::Tensor gpu_test_indices_;          // GPU-cached test indices
+
+    // Async prefetching for CUDA hash computation
+    // Double-buffered hash embeddings: compute next batch while training on current
+    torch::Tensor prefetch_hash_[2];          // Double-buffered hash embeddings
+    torch::Tensor prefetch_batch_idx_;        // Batch indices for prefetched data
+    int prefetch_buffer_idx_ = 0;             // Which buffer has prefetched data ready
+    bool prefetch_valid_ = false;             // Whether prefetched data is valid
 };
 
 } // namespace resolve

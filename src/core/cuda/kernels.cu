@@ -180,6 +180,66 @@ __global__ void hash_and_aggregate_chunked_kernel(
     }
 }
 
+/**
+ * CSR-based kernel for batch hash computation.
+ *
+ * This kernel takes a batch of plot indices and computes hash embeddings directly
+ * from CSR-format species data. One block per plot in the batch.
+ *
+ * @param batch_indices Array of global plot indices in this batch (batch_size,)
+ * @param plot_offsets CSR offsets array (n_total_plots + 1,)
+ * @param species_ids All species IDs (n_total_records,)
+ * @param weights All species weights (n_total_records,)
+ * @param output Output hash embeddings (batch_size, hash_dim) - must be pre-zeroed
+ * @param batch_size Number of plots in this batch
+ * @param hash_dim Dimension of hash embedding
+ */
+__global__ void hash_batch_csr_kernel(
+    const int64_t* batch_indices,
+    const int64_t* plot_offsets,
+    const int64_t* species_ids,
+    const float* weights,
+    float* output,
+    int64_t batch_size,
+    int32_t hash_dim
+) {
+    // Each block processes one plot from the batch
+    int64_t batch_idx = blockIdx.x;
+    if (batch_idx >= batch_size) return;
+
+    // Get the global plot index for this batch element
+    int64_t plot_idx = batch_indices[batch_idx];
+
+    // Get species range from CSR offsets
+    int64_t start = plot_offsets[plot_idx];
+    int64_t end = plot_offsets[plot_idx + 1];
+    int64_t n_species = end - start;
+
+    // Use shared memory for local accumulation
+    extern __shared__ float shared_hash[];
+
+    // Initialize shared memory
+    for (int i = threadIdx.x; i < hash_dim; i += blockDim.x) {
+        shared_hash[i] = 0.0f;
+    }
+    __syncthreads();
+
+    // Process all species for this plot
+    for (int64_t i = start + threadIdx.x; i < end; i += blockDim.x) {
+        int32_t h = murmur_hash32(species_ids[i]);
+        int32_t hash_idx = (h < 0 ? -h : h) % hash_dim;
+        float sign = (h >= 0) ? 1.0f : -1.0f;
+        atomicAdd(&shared_hash[hash_idx], sign * weights[i]);
+    }
+    __syncthreads();
+
+    // Write results to output (this batch row)
+    float* out_row = output + batch_idx * hash_dim;
+    for (int i = threadIdx.x; i < hash_dim; i += blockDim.x) {
+        out_row[i] = shared_hash[i];
+    }
+}
+
 // Extern "C" launcher functions - callable from C++ without nvcc
 
 extern "C" {
@@ -300,6 +360,28 @@ cudaError_t resolve_launch_compute_hash(
 
     compute_hash_kernel<<<blocks, threads, 0, static_cast<cudaStream_t>(stream)>>>(
         species_ids, hash_indices, signs, n, hash_dim
+    );
+
+    return cudaGetLastError();
+}
+
+// CSR-based batch hash kernel - most efficient for training batches
+cudaError_t resolve_launch_hash_batch_csr(
+    const int64_t* batch_indices,
+    const int64_t* plot_offsets,
+    const int64_t* species_ids,
+    const float* weights,
+    float* output,
+    int64_t batch_size,
+    int32_t hash_dim,
+    void* stream
+) {
+    const int threads = 256;
+    const int blocks = batch_size;  // One block per batch plot
+    const size_t shared_mem = hash_dim * sizeof(float);
+
+    hash_batch_csr_kernel<<<blocks, threads, shared_mem, static_cast<cudaStream_t>(stream)>>>(
+        batch_indices, plot_offsets, species_ids, weights, output, batch_size, hash_dim
     );
 
     return cudaGetLastError();
