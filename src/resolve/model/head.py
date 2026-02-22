@@ -24,6 +24,7 @@ class TaskHead(nn.Module):
         task: Literal["regression", "classification"],
         num_classes: Optional[int] = None,
         transform: Optional[Literal["log1p"]] = None,
+        head_hidden_dims: Optional[list[int]] = None,
     ):
         super().__init__()
 
@@ -36,7 +37,20 @@ class TaskHead(nn.Module):
         else:
             if num_classes is None:
                 raise ValueError("num_classes required for classification")
-            self.head = nn.Linear(latent_dim, num_classes)
+            if head_hidden_dims:
+                # Multi-layer classification head:
+                # LayerNorm -> [Linear -> GELU -> Dropout] x N -> Linear(num_classes)
+                layers: list[nn.Module] = [nn.LayerNorm(latent_dim)]
+                in_dim = latent_dim
+                for h_dim in head_hidden_dims:
+                    layers.append(nn.Linear(in_dim, h_dim))
+                    layers.append(nn.GELU())
+                    layers.append(nn.Dropout(0.1))
+                    in_dim = h_dim
+                layers.append(nn.Linear(in_dim, num_classes))
+                self.head = nn.Sequential(*layers)
+            else:
+                self.head = nn.Linear(latent_dim, num_classes)
 
     def forward(self, latent: torch.Tensor) -> torch.Tensor:
         """

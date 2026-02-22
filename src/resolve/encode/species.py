@@ -6,10 +6,11 @@ from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
 
 import numpy as np
-import pandas as pd
+import polars as pl
 from sklearn.feature_extraction import FeatureHasher
 
 from resolve.data.dataset import ResolveDataset
+from resolve.encode.normalize import TaxonomyNormalizer
 from resolve.encode.vocab import TaxonomyVocab
 
 if TYPE_CHECKING:
@@ -78,6 +79,7 @@ class SpeciesEncoder:
         selection: str = "top",
         representation: str = "abundance",
         min_species_frequency: int = 1,
+        normalizer: Optional[TaxonomyNormalizer] = None,
     ):
         if aggregation not in ("abundance", "count"):
             raise ValueError(f"aggregation must be 'abundance' or 'count', got {aggregation!r}")
@@ -108,6 +110,7 @@ class SpeciesEncoder:
         self._species_vocab: set[str] = set()  # Known species IDs from training
         self._species_to_idx: dict[str, int] = {}  # For selection="all" mode
         # FeatureHasher with dict input allows explicit weighting
+        self.normalizer = normalizer
         self._hasher = FeatureHasher(
             n_features=hash_dim,
             input_type="dict",
@@ -163,21 +166,30 @@ class SpeciesEncoder:
             - Species IDs seen during training (for unknown mass calculation)
             - Taxonomy vocabulary if taxonomy columns are present
             - For all/presence_absence: species-to-index mapping filtered by frequency
+
+        If a normalizer is set, species names are normalized before building vocab.
         """
         roles = dataset.roles
 
-        # Track all species IDs seen during training
+        # Track all species IDs seen during training (after normalization)
         species_col = dataset.species[roles.species_id]
-        self._species_vocab = set(species_col.dropna().unique())
+        if self.normalizer is not None:
+            species_col = self.normalizer.normalize_series(species_col)
+        self._species_vocab = set(species_col.drop_nulls().unique().to_list())
 
         # For all/presence_absence modes, build filtered species vocabulary
         if self.uses_explicit_vector:
             # Count species occurrences across plots
-            species_plot = dataset.species[[roles.species_plot_id, roles.species_id]].drop_duplicates()
-            species_counts = species_plot[roles.species_id].value_counts()
+            species_plot = dataset.species.select(roles.species_plot_id, roles.species_id).unique()
+            species_counts = species_plot.group_by(roles.species_id).len()
 
             # Filter by minimum frequency
-            valid_species = species_counts[species_counts >= self.min_species_frequency].index
+            valid_species = (
+                species_counts
+                .filter(pl.col("len") >= self.min_species_frequency)
+                [roles.species_id]
+                .to_list()
+            )
             self._species_to_idx = {sp: idx for idx, sp in enumerate(sorted(valid_species))}
 
         if roles.has_taxonomy:
@@ -189,6 +201,13 @@ class SpeciesEncoder:
 
         self._fitted = True
         return self
+
+    def _normalize_species_df(self, species_df: pl.DataFrame, roles) -> pl.DataFrame:
+        """Apply taxonomy normalization to species names if normalizer is set."""
+        if self.normalizer is None:
+            return species_df
+        normalized = self.normalizer.normalize_series(species_df[roles.species_id])
+        return species_df.with_columns(normalized.alias(roles.species_id))
 
     def transform(self, dataset: ResolveDataset) -> EncodedSpecies:
         """
@@ -206,7 +225,7 @@ class SpeciesEncoder:
             raise RuntimeError("SpeciesEncoder must be fit before transform")
 
         roles = dataset.roles
-        species_df = dataset.species
+        species_df = self._normalize_species_df(dataset.species, roles)
         plot_ids = dataset.plot_ids
 
         # Build species representation based on selection mode
@@ -245,7 +264,7 @@ class SpeciesEncoder:
 
     def _compute_unknown_mass(
         self,
-        species_df: pd.DataFrame,
+        species_df: pl.DataFrame,
         roles: RoleMapping,
         plot_ids: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
@@ -256,45 +275,44 @@ class SpeciesEncoder:
             unknown_fraction: (n_plots,) fraction of abundance from unknown species
             unknown_count: (n_plots,) count of unknown species per plot
         """
-        # Work with a copy
-        df = species_df.copy()
-
         # Determine abundance column
         if roles.has_abundance:
             abundance_col = roles.abundance
+            df = species_df
         else:
-            df["_abundance"] = 1
+            df = species_df.with_columns(pl.lit(1).alias("_abundance"))
             abundance_col = "_abundance"
 
-        # Drop rows with NA species
-        df = df.dropna(subset=[roles.species_id])
-        df[abundance_col] = df[abundance_col].fillna(0)
+        # Drop rows with null species, fill null abundance
+        df = df.filter(pl.col(roles.species_id).is_not_null())
+        df = df.with_columns(pl.col(abundance_col).fill_null(0).cast(pl.Float64))
 
-        # Mark unknown species (VECTORIZED)
-        df["_is_unknown"] = ~df[roles.species_id].isin(self._species_vocab)
+        # Mark unknown species + compute unknown abundance (vectorized)
+        known_species = list(self._species_vocab)
+        df = df.with_columns(
+            pl.col(roles.species_id).is_in(known_species).not_().alias("_is_unknown"),
+        )
+        df = df.with_columns(
+            (pl.col(abundance_col) * pl.col("_is_unknown").cast(pl.Float64)).alias("_unknown_abundance"),
+        )
 
-        # Compute unknown abundance (0 for known species)
-        df["_unknown_abundance"] = df[abundance_col] * df["_is_unknown"].astype(float)
+        # Aggregate per plot
+        plot_stats = df.group_by(roles.species_plot_id).agg(
+            pl.col(abundance_col).sum().alias("total_abundance"),
+            pl.col("_unknown_abundance").sum().alias("unknown_abundance"),
+            pl.col("_is_unknown").sum().alias("unknown_count"),
+        )
 
-        # Compute per-plot aggregates (VECTORIZED groupby)
-        plot_stats = df.groupby(roles.species_plot_id).agg({
-            abundance_col: "sum",
-            "_unknown_abundance": "sum",
-            "_is_unknown": "sum",
-        }).rename(columns={
-            abundance_col: "total_abundance",
-            "_unknown_abundance": "unknown_abundance",
-            "_is_unknown": "unknown_count",
-        })
+        # Left join to plot_ids to ensure correct ordering + fill missing
+        plot_ids_df = pl.DataFrame({"_pid": plot_ids, "_order": np.arange(len(plot_ids))})
+        result = plot_ids_df.join(
+            plot_stats, left_on="_pid", right_on=roles.species_plot_id, how="left"
+        ).sort("_order").fill_null(0)
 
-        # Reindex to plot_ids order and fill missing with 0
-        plot_stats = plot_stats.reindex(plot_ids, fill_value=0)
-
-        # Compute fraction (avoid division by zero)
-        total = plot_stats["total_abundance"].values
-        unknown = plot_stats["unknown_abundance"].values
+        total = result["total_abundance"].to_numpy().astype(np.float64)
+        unknown = result["unknown_abundance"].to_numpy().astype(np.float64)
         unknown_fraction = np.divide(unknown, total, out=np.zeros_like(unknown), where=total > 0).astype(np.float32)
-        unknown_count = plot_stats["unknown_count"].values.astype(np.int32)
+        unknown_count = result["unknown_count"].to_numpy().astype(np.int32)
 
         return unknown_fraction, unknown_count
 
@@ -329,7 +347,7 @@ class SpeciesEncoder:
 
     def _build_hash_embedding(
         self,
-        species_df: pd.DataFrame,
+        species_df: pl.DataFrame,
         roles: RoleMapping,
         plot_ids: np.ndarray,
     ) -> np.ndarray:
@@ -340,40 +358,60 @@ class SpeciesEncoder:
         the normalization setting. This implements linear aggregation:
         z_species = Σ w_i * h(species_i)
         """
-        # Work with a copy to avoid modifying original
-        df = species_df.copy()
-
         # Determine abundance column
         if roles.has_abundance:
             abundance_col = roles.abundance
+            df = species_df
         else:
-            df["_abundance"] = 1
+            df = species_df.with_columns(pl.lit(1).alias("_abundance"))
             abundance_col = "_abundance"
 
-        # Drop rows with NA species
-        df = df.dropna(subset=[roles.species_id])
+        # Drop rows with null species
+        df = df.filter(pl.col(roles.species_id).is_not_null())
 
-        # Compute weights based on normalization (VECTORIZED)
+        # Compute weights based on normalization
         if self.normalization == "raw":
-            df["_weight"] = df[abundance_col].fillna(0).astype(np.float32)
+            df = df.with_columns(
+                pl.col(abundance_col).fill_null(0).cast(pl.Float32).alias("_weight")
+            )
         elif self.normalization == "log1p":
-            df["_weight"] = np.log1p(df[abundance_col].fillna(0)).astype(np.float32)
+            df = df.with_columns(
+                pl.col(abundance_col).fill_null(0).cast(pl.Float64).log1p().cast(pl.Float32).alias("_weight")
+            )
         elif self.normalization == "norm":
-            plot_totals = df.groupby(roles.species_plot_id)[abundance_col].transform("sum")
-            plot_totals = np.where(plot_totals > 0, plot_totals, 1.0)
-            df["_weight"] = (df[abundance_col].fillna(0) / plot_totals).astype(np.float32)
+            df = df.with_columns(
+                pl.col(abundance_col).fill_null(0).cast(pl.Float64).alias("_abd_clean")
+            )
+            df = df.with_columns(
+                pl.col("_abd_clean").sum().over(roles.species_plot_id).alias("_plot_total")
+            )
+            df = df.with_columns(
+                pl.when(pl.col("_plot_total") > 0)
+                .then(pl.col("_abd_clean") / pl.col("_plot_total"))
+                .otherwise(pl.col("_abd_clean"))
+                .cast(pl.Float32)
+                .alias("_weight")
+            )
 
-        # Create token strings (VECTORIZED)
-        df["_token"] = "sp=" + df[roles.species_id].astype(str)
+        # Create token strings
+        df = df.with_columns(
+            (pl.lit("sp=") + pl.col(roles.species_id).cast(pl.Utf8)).alias("_token")
+        )
 
-        # Group by plot and aggregate into dicts (VECTORIZED groupby)
-        def make_weight_dict(group):
-            return dict(zip(group["_token"], group["_weight"]))
+        # Group by plot, collect token-weight pairs as lists
+        grouped = df.group_by(roles.species_plot_id).agg(
+            pl.col("_token"), pl.col("_weight")
+        )
 
-        plot_dicts = df.groupby(roles.species_plot_id)[["_token", "_weight"]].apply(make_weight_dict)
+        # Build dict mapping plot_id → {token: weight}
+        plot_dict_map = {}
+        pids = grouped[roles.species_plot_id].to_list()
+        tokens_lists = grouped["_token"].to_list()
+        weight_lists = grouped["_weight"].to_list()
+        for pid, tokens, weights in zip(pids, tokens_lists, weight_lists):
+            plot_dict_map[pid] = dict(zip(tokens, weights))
 
         # Build list aligned to plot_ids order
-        plot_dict_map = plot_dicts.to_dict()
         weighted_tokens_list = [plot_dict_map.get(pid, {}) for pid in plot_ids]
 
         # Hash to fixed dimension (linear aggregation via weighted sum)
@@ -382,7 +420,7 @@ class SpeciesEncoder:
 
     def _build_species_vector(
         self,
-        species_df: pd.DataFrame,
+        species_df: pl.DataFrame,
         roles: RoleMapping,
         plot_ids: np.ndarray,
     ) -> np.ndarray:
@@ -398,10 +436,10 @@ class SpeciesEncoder:
 
     def _prepare_species_matrix_indices(
         self,
-        species_df: pd.DataFrame,
+        species_df: pl.DataFrame,
         roles: RoleMapping,
         plot_ids: np.ndarray,
-    ) -> tuple[pd.DataFrame, int, int, dict]:
+    ) -> tuple[pl.DataFrame, int, int, dict]:
         """
         Prepare DataFrame with row/col indices for sparse matrix construction.
 
@@ -411,27 +449,32 @@ class SpeciesEncoder:
         n_plots = len(plot_ids)
         n_species = len(self._species_to_idx)
 
-        df = species_df.copy()
-        df = df.dropna(subset=[roles.species_id])
+        df = species_df.filter(pl.col(roles.species_id).is_not_null())
 
         # Map species to column indices (unknown species get -1)
-        df["_col_idx"] = df[roles.species_id].map(
-            lambda x: self._species_to_idx.get(x, -1)
+        sp_map = self._species_to_idx
+        df = df.with_columns(
+            pl.col(roles.species_id).map_elements(
+                lambda x: sp_map.get(x, -1), return_dtype=pl.Int64
+            ).alias("_col_idx")
         )
-        df = df[df["_col_idx"] >= 0]
+        df = df.filter(pl.col("_col_idx") >= 0)
 
         # Map plots to row indices
         plot_id_to_idx = {pid: i for i, pid in enumerate(plot_ids)}
-        df["_row_idx"] = df[roles.species_plot_id].map(
-            lambda x: plot_id_to_idx.get(x, -1)
+        pid_map = plot_id_to_idx
+        df = df.with_columns(
+            pl.col(roles.species_plot_id).map_elements(
+                lambda x: pid_map.get(x, -1), return_dtype=pl.Int64
+            ).alias("_row_idx")
         )
-        df = df[df["_row_idx"] >= 0]
+        df = df.filter(pl.col("_row_idx") >= 0)
 
         return df, n_plots, n_species, plot_id_to_idx
 
     def _build_presence_absence_vector(
         self,
-        species_df: pd.DataFrame,
+        species_df: pl.DataFrame,
         roles: RoleMapping,
         plot_ids: np.ndarray,
     ) -> np.ndarray:
@@ -447,7 +490,7 @@ class SpeciesEncoder:
 
         data = np.ones(len(df), dtype=np.float32)
         matrix = sparse.coo_matrix(
-            (data, (df["_row_idx"].values, df["_col_idx"].values)),
+            (data, (df["_row_idx"].to_numpy(), df["_col_idx"].to_numpy())),
             shape=(n_plots, n_species),
             dtype=np.float32,
         )
@@ -455,7 +498,7 @@ class SpeciesEncoder:
 
     def _build_abundance_vector(
         self,
-        species_df: pd.DataFrame,
+        species_df: pl.DataFrame,
         roles: RoleMapping,
         plot_ids: np.ndarray,
     ) -> np.ndarray:
@@ -463,13 +506,13 @@ class SpeciesEncoder:
         from scipy import sparse
 
         # Get abundance column
-        df = species_df.copy()
         if roles.has_abundance:
             abundance_col = roles.abundance
+            df = species_df
         else:
-            df["_abundance"] = 1.0
+            df = species_df.with_columns(pl.lit(1.0).alias("_abundance"))
             abundance_col = "_abundance"
-        df[abundance_col] = df[abundance_col].fillna(0).astype(np.float32)
+        df = df.with_columns(pl.col(abundance_col).fill_null(0).cast(pl.Float32))
 
         df, n_plots, n_species, _ = self._prepare_species_matrix_indices(
             df, roles, plot_ids
@@ -479,7 +522,7 @@ class SpeciesEncoder:
             return np.zeros((n_plots, n_species), dtype=np.float32)
 
         matrix = sparse.coo_matrix(
-            (df[abundance_col].values, (df["_row_idx"].values, df["_col_idx"].values)),
+            (df[abundance_col].to_numpy(), (df["_row_idx"].to_numpy(), df["_col_idx"].to_numpy())),
             shape=(n_plots, n_species),
             dtype=np.float32,
         ).toarray()
@@ -496,11 +539,11 @@ class SpeciesEncoder:
 
     def _select_by_mode(
         self,
-        agg_df: pd.DataFrame,
+        agg_df: pl.DataFrame,
         plot_id_col: str,
         k: int,
         mode: str = None,
-    ) -> pd.DataFrame:
+    ) -> pl.DataFrame:
         """
         Select k items per plot based on selection mode.
 
@@ -518,46 +561,58 @@ class SpeciesEncoder:
             # For all/presence_absence, default taxonomy selection to "top"
             mode = self.selection if self.selection in ("top", "bottom", "top_bottom") else "top"
 
+        # Get the taxonomy column name (second column, after plot_id_col)
+        tax_col = [c for c in agg_df.columns if c not in (plot_id_col, "_total")][0]
+
         if mode == "top":
-            # Top-k: highest weights first
-            agg_df = agg_df.sort_values([plot_id_col, "_total"], ascending=[True, False])
-            agg_df["_rank"] = agg_df.groupby(plot_id_col).cumcount()
-            return agg_df[agg_df["_rank"] < k]
+            ranked = (
+                agg_df.sort([plot_id_col, "_total"], descending=[False, True])
+                .with_columns(
+                    pl.col("_total").cum_count().over(plot_id_col).alias("_rank") - 1
+                )
+            )
+            return ranked.filter(pl.col("_rank") < k)
 
         elif mode == "bottom":
-            # Bottom-k: lowest weights first (rarest species)
-            agg_df = agg_df.sort_values([plot_id_col, "_total"], ascending=[True, True])
-            agg_df["_rank"] = agg_df.groupby(plot_id_col).cumcount()
-            return agg_df[agg_df["_rank"] < k]
+            ranked = (
+                agg_df.sort([plot_id_col, "_total"], descending=[False, False])
+                .with_columns(
+                    pl.col("_total").cum_count().over(plot_id_col).alias("_rank") - 1
+                )
+            )
+            return ranked.filter(pl.col("_rank") < k)
 
         else:  # top_bottom
-            # Get K top items + K bottom items (total 2K)
-            # Get top items
-            agg_top = agg_df.sort_values([plot_id_col, "_total"], ascending=[True, False])
-            agg_top["_rank"] = agg_top.groupby(plot_id_col).cumcount()
-            top_selected = agg_top[agg_top["_rank"] < k].copy()
+            # Top-k
+            top_ranked = (
+                agg_df.sort([plot_id_col, "_total"], descending=[False, True])
+                .with_columns(
+                    pl.col("_total").cum_count().over(plot_id_col).alias("_rank") - 1
+                )
+            )
+            top_selected = top_ranked.filter(pl.col("_rank") < k)
 
-            # Get bottom items (excluding already selected)
-            # Mark items already in top selection
-            top_keys = set(zip(top_selected[plot_id_col], top_selected.iloc[:, 1]))
-            agg_bottom = agg_df.copy()
-            agg_bottom["_in_top"] = list(zip(agg_bottom[plot_id_col], agg_bottom.iloc[:, 1]))
-            agg_bottom["_in_top"] = agg_bottom["_in_top"].isin(top_keys)
-            agg_bottom = agg_bottom[~agg_bottom["_in_top"]].drop(columns=["_in_top"])
+            # Exclude top items from bottom selection via anti-join
+            bottom_pool = agg_df.join(
+                top_selected.select(plot_id_col, tax_col),
+                on=[plot_id_col, tax_col],
+                how="anti",
+            )
+            bottom_ranked = (
+                bottom_pool.sort([plot_id_col, "_total"], descending=[False, False])
+                .with_columns(
+                    pl.col("_total").cum_count().over(plot_id_col).alias("_rank") - 1
+                )
+            )
+            bottom_selected = bottom_ranked.filter(pl.col("_rank") < k).with_columns(
+                (pl.col("_rank") + k).alias("_rank")
+            )
 
-            # Sort ascending (rarest first)
-            agg_bottom = agg_bottom.sort_values([plot_id_col, "_total"], ascending=[True, True])
-            agg_bottom["_rank"] = agg_bottom.groupby(plot_id_col).cumcount()
-            bottom_selected = agg_bottom[agg_bottom["_rank"] < k].copy()
-            # Offset rank to place after top items
-            bottom_selected["_rank"] = bottom_selected["_rank"] + k
-
-            # Combine
-            return pd.concat([top_selected, bottom_selected], ignore_index=True)
+            return pl.concat([top_selected, bottom_selected])
 
     def _build_taxonomy_ids(
         self,
-        species_df: pd.DataFrame,
+        species_df: pl.DataFrame,
         roles: RoleMapping,
         plot_ids: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
@@ -572,64 +627,73 @@ class SpeciesEncoder:
         Normalization is applied consistently with hash embedding to ensure
         the same species weighting logic across both pathways.
         """
-        species_df = species_df.copy()
-
         # Determine base abundance column
         if self.aggregation == "abundance" and roles.has_abundance:
             abundance_col = roles.abundance
+            df = species_df
         else:
-            species_df["_count"] = 1
+            df = species_df.with_columns(pl.lit(1).alias("_count"))
             abundance_col = "_count"
 
         # Apply normalization to weights (consistent with hash embedding)
         if self.normalization == "log1p":
-            species_df["_weight"] = np.log1p(species_df[abundance_col].values)
+            df = df.with_columns(
+                pl.col(abundance_col).cast(pl.Float64).log1p().alias("_weight")
+            )
         elif self.normalization == "norm":
-            plot_totals = species_df.groupby(roles.species_plot_id)[abundance_col].transform("sum")
-            plot_totals = np.where(plot_totals > 0, plot_totals, 1.0)
-            species_df["_weight"] = species_df[abundance_col] / plot_totals
+            df = df.with_columns(
+                pl.col(abundance_col).cast(pl.Float64).alias("_abd")
+            )
+            df = df.with_columns(
+                pl.col("_abd").sum().over(roles.species_plot_id).alias("_plot_total")
+            )
+            df = df.with_columns(
+                pl.when(pl.col("_plot_total") > 0)
+                .then(pl.col("_abd") / pl.col("_plot_total"))
+                .otherwise(pl.col("_abd"))
+                .alias("_weight")
+            )
         else:  # raw
-            species_df["_weight"] = species_df[abundance_col]
-
-        weight_col = "_weight"
+            df = df.with_columns(
+                pl.col(abundance_col).cast(pl.Float64).alias("_weight")
+            )
 
         # Aggregate genera by weight
         genus_agg = (
-            species_df.groupby([roles.species_plot_id, roles.taxonomy_genus])[weight_col]
-            .sum()
-            .reset_index(name="_total")
+            df.group_by([roles.species_plot_id, roles.taxonomy_genus])
+            .agg(pl.col("_weight").sum().alias("_total"))
         )
         genus_selected = self._select_by_mode(genus_agg, roles.species_plot_id, self.top_k)
 
         # Aggregate families by weight
         family_agg = (
-            species_df.groupby([roles.species_plot_id, roles.taxonomy_family])[weight_col]
-            .sum()
-            .reset_index(name="_total")
+            df.group_by([roles.species_plot_id, roles.taxonomy_family])
+            .agg(pl.col("_weight").sum().alias("_total"))
         )
         family_selected = self._select_by_mode(family_agg, roles.species_plot_id, self.top_k)
 
-        # Build ID arrays aligned to plot_ids
-        # Uses n_taxonomy_slots which is 2*top_k for top_bottom, else top_k
+        # Build ID arrays aligned to plot_ids (vectorized scatter)
         n_plots = len(plot_ids)
         genus_ids = np.zeros((n_plots, self.n_taxonomy_slots), dtype=np.int64)
         family_ids = np.zeros((n_plots, self.n_taxonomy_slots), dtype=np.int64)
 
         plot_id_to_idx = {pid: i for i, pid in enumerate(plot_ids)}
 
-        for _, row in genus_selected.iterrows():
-            pid = row[roles.species_plot_id]
+        # Vectorized: encode + scatter for genus
+        g_pids = genus_selected[roles.species_plot_id].to_list()
+        g_taxa = genus_selected[roles.taxonomy_genus].to_list()
+        g_ranks = genus_selected["_rank"].to_numpy()
+        for i, (pid, taxon) in enumerate(zip(g_pids, g_taxa)):
             if pid in plot_id_to_idx:
-                idx = plot_id_to_idx[pid]
-                rank = int(row["_rank"])
-                genus_ids[idx, rank] = self._vocab.encode_genus(row[roles.taxonomy_genus])
+                genus_ids[plot_id_to_idx[pid], g_ranks[i]] = self._vocab.encode_genus(taxon)
 
-        for _, row in family_selected.iterrows():
-            pid = row[roles.species_plot_id]
+        # Vectorized: encode + scatter for family
+        f_pids = family_selected[roles.species_plot_id].to_list()
+        f_taxa = family_selected[roles.taxonomy_family].to_list()
+        f_ranks = family_selected["_rank"].to_numpy()
+        for i, (pid, taxon) in enumerate(zip(f_pids, f_taxa)):
             if pid in plot_id_to_idx:
-                idx = plot_id_to_idx[pid]
-                rank = int(row["_rank"])
-                family_ids[idx, rank] = self._vocab.encode_family(row[roles.taxonomy_family])
+                family_ids[plot_id_to_idx[pid], f_ranks[i]] = self._vocab.encode_family(taxon)
 
         return genus_ids, family_ids
 

@@ -89,6 +89,8 @@ class PhasedLoss:
         phases: Optional[dict[int, PhaseConfig]] = None,
         phase_boundaries: Optional[list[int]] = None,
         eps: float = 1e-8,
+        label_smoothing: float = 0.0,
+        class_weights: Optional[torch.Tensor] = None,
     ):
         """
         Args:
@@ -99,6 +101,8 @@ class PhasedLoss:
                               Example: [100, 300] for 3 phases.
                               If None and phases has 1 entry, no boundaries needed.
             eps: Small constant for numerical stability
+            label_smoothing: Label smoothing factor for CrossEntropyLoss (0.0 = off).
+            class_weights: Optional per-class weight tensor for CrossEntropyLoss.
         """
         # Default: single phase with MAE only
         if phases is None:
@@ -128,10 +132,16 @@ class PhasedLoss:
             )
 
         self.eps = eps
+        self.label_smoothing = label_smoothing
+        self.class_weights = class_weights
         self._mae = nn.L1Loss()
         self._mse = nn.MSELoss()
         # ignore_index=-1 skips samples with missing labels (marked as -1)
-        self._ce = nn.CrossEntropyLoss(ignore_index=-1)
+        self._ce = nn.CrossEntropyLoss(
+            ignore_index=-1,
+            label_smoothing=self.label_smoothing,
+            weight=self.class_weights,
+        )
 
     def get_phase(self, epoch: int) -> int:
         """Get current training phase (1-indexed)."""
@@ -272,9 +282,16 @@ class MultiTaskLoss:
         target_configs: dict,
         phases: Optional[dict[int, PhaseConfig]] = None,
         phase_boundaries: Optional[list[int]] = None,
+        label_smoothing: float = 0.0,
+        class_weights: Optional[torch.Tensor] = None,
     ):
         self.target_configs = target_configs
-        self.phased_loss = PhasedLoss(phases=phases, phase_boundaries=phase_boundaries)
+        self.phased_loss = PhasedLoss(
+            phases=phases,
+            phase_boundaries=phase_boundaries,
+            label_smoothing=label_smoothing,
+            class_weights=class_weights,
+        )
 
         # Pre-compute target info for fast path
         self._target_names = list(target_configs.keys())
@@ -296,7 +313,11 @@ class MultiTaskLoss:
         # Cache loss function for fast path
         self._mae = nn.L1Loss()
         # ignore_index=-1 skips samples with missing labels (marked as -1)
-        self._ce = nn.CrossEntropyLoss(ignore_index=-1)
+        self._ce = nn.CrossEntropyLoss(
+            ignore_index=-1,
+            label_smoothing=label_smoothing,
+            weight=class_weights,
+        )
 
         # Cache current epoch/phase to avoid repeated lookups
         self._cached_epoch = -1

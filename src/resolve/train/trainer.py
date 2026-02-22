@@ -5,8 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -18,218 +17,19 @@ from torch.optim.lr_scheduler import OneCycleLR
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import StandardScaler
 
-
-@dataclass
-class ProfileResult:
-    """Results from profiling a training run."""
-
-    total_time_ms: float
-    forward_time_ms: float
-    backward_time_ms: float
-    optimizer_time_ms: float
-    data_time_ms: float
-    n_batches: int
-    avg_batch_time_ms: float
-    samples_per_second: float
-    gpu_memory_peak_mb: float = 0.0
-    detailed_trace_path: Optional[str] = None
-
-    def __str__(self) -> str:
-        lines = [
-            "=== Training Profile ===",
-            f"Total time:      {self.total_time_ms:.1f} ms",
-            f"  Forward:       {self.forward_time_ms:.1f} ms ({100*self.forward_time_ms/self.total_time_ms:.1f}%)",
-            f"  Backward:      {self.backward_time_ms:.1f} ms ({100*self.backward_time_ms/self.total_time_ms:.1f}%)",
-            f"  Optimizer:     {self.optimizer_time_ms:.1f} ms ({100*self.optimizer_time_ms/self.total_time_ms:.1f}%)",
-            f"  Data loading:  {self.data_time_ms:.1f} ms ({100*self.data_time_ms/self.total_time_ms:.1f}%)",
-            f"Batches:         {self.n_batches}",
-            f"Avg batch time:  {self.avg_batch_time_ms:.2f} ms",
-            f"Throughput:      {self.samples_per_second:.0f} samples/sec",
-        ]
-        if self.gpu_memory_peak_mb > 0:
-            lines.append(f"GPU memory peak: {self.gpu_memory_peak_mb:.0f} MB")
-        if self.detailed_trace_path:
-            lines.append(f"Trace saved to:  {self.detailed_trace_path}")
-        return "\n".join(lines)
-
-
-class Timer:
-    """Simple timer for profiling code sections."""
-
-    def __init__(self):
-        self.times = {}
-        self._starts = {}
-
-    def start(self, name: str) -> None:
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        self._starts[name] = time.perf_counter()
-
-    def stop(self, name: str) -> float:
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        elapsed = (time.perf_counter() - self._starts[name]) * 1000  # ms
-        if name not in self.times:
-            self.times[name] = 0.0
-        self.times[name] += elapsed
-        return elapsed
-
-    @contextmanager
-    def section(self, name: str):
-        """Context manager for timing a code section."""
-        self.start(name)
-        try:
-            yield
-        finally:
-            self.stop(name)
-
-    def get(self, name: str) -> float:
-        return self.times.get(name, 0.0)
-
-    def reset(self) -> None:
-        self.times.clear()
-        self._starts.clear()
-
-
-class CUDAPrefetcher:
-    """
-    Prefetches batches to GPU asynchronously.
-
-    Overlaps data transfer with computation by loading the next batch
-    while the current batch is being processed. Uses CUDA streams for
-    true async transfer.
-    """
-
-    def __init__(self, loader, device):
-        self.loader = loader
-        self.device = device
-        self.stream = torch.cuda.Stream() if device.type == "cuda" else None
-
-    def __iter__(self):
-        self._iter = iter(self.loader)
-        self._preload()
-        return self
-
-    def _preload(self):
-        try:
-            self._next_batch = next(self._iter)
-        except StopIteration:
-            self._next_batch = None
-            return
-
-        if self.stream is not None:
-            with torch.cuda.stream(self.stream):
-                self._next_batch = tuple(
-                    t.to(self.device, non_blocking=True) for t in self._next_batch
-                )
-
-    def __next__(self):
-        if self._next_batch is None:
-            raise StopIteration
-
-        if self.stream is not None:
-            torch.cuda.current_stream().wait_stream(self.stream)
-
-        batch = self._next_batch
-        self._preload()
-        return batch
-
-    def __len__(self):
-        return len(self.loader)
-
-
-class GPUTensorLoader:
-    """
-    GPU-resident tensor loader for maximum training throughput.
-
-    Stores all training tensors on GPU and performs fast GPU-based indexing
-    for batch sampling. This eliminates the CPU→GPU transfer bottleneck
-    that dominates training time with large datasets.
-
-    With shuffle=True, generates random permutation indices on GPU each epoch.
-    Batch extraction uses fast GPU tensor indexing (~0.1ms vs ~400ms for CPU).
-    """
-
-    def __init__(
-        self,
-        tensors: tuple[torch.Tensor, ...],
-        batch_size: int,
-        shuffle: bool = True,
-        drop_last: bool = True,
-        device: torch.device = None,
-    ):
-        """
-        Args:
-            tensors: Tuple of tensors (all must have same first dimension).
-            batch_size: Number of samples per batch.
-            shuffle: If True, shuffle indices at start of each epoch.
-            drop_last: If True, drop last incomplete batch.
-            device: GPU device to store tensors on.
-        """
-        if device is None:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        # Move all tensors to GPU
-        self.tensors = tuple(t.to(device) for t in tensors)
-        self.n_samples = self.tensors[0].shape[0]
-        self.batch_size = batch_size
-        self.shuffle = shuffle
-        self.drop_last = drop_last
-        self.device = device
-
-        # Calculate number of batches
-        if drop_last:
-            self.n_batches = self.n_samples // batch_size
-        else:
-            self.n_batches = (self.n_samples + batch_size - 1) // batch_size
-
-        # Pre-allocate index tensor for shuffling (stays on GPU)
-        self._indices = torch.arange(self.n_samples, device=device)
-
-    def __iter__(self):
-        # Shuffle indices on GPU (very fast)
-        if self.shuffle:
-            self._indices = torch.randperm(self.n_samples, device=self.device)
-        else:
-            self._indices = torch.arange(self.n_samples, device=self.device)
-
-        self._batch_idx = 0
-        return self
-
-    def __next__(self):
-        if self._batch_idx >= self.n_batches:
-            raise StopIteration
-
-        start = self._batch_idx * self.batch_size
-        end = min(start + self.batch_size, self.n_samples)
-        indices = self._indices[start:end]
-
-        # Fast GPU indexing - all tensors already on GPU
-        batch = tuple(t[indices] for t in self.tensors)
-
-        self._batch_idx += 1
-        return batch
-
-    def __len__(self):
-        return self.n_batches
-
-    @property
-    def dataset(self):
-        """Return a wrapper for compatibility with DataLoader interface (for len(loader.dataset))."""
-        # Return a simple object that has __len__ returning n_samples (not n_batches)
-        class _DatasetWrapper:
-            def __init__(wrapper_self, n_samples):
-                wrapper_self._n_samples = n_samples
-            def __len__(wrapper_self):
-                return wrapper_self._n_samples
-        return _DatasetWrapper(self.n_samples)
-
-
 from resolve.data.dataset import ResolveDataset, ResolveSchema
 from resolve.encode.species import SpeciesEncoder
 from resolve.encode.embedding import EmbeddingEncoder
 from resolve.model.resolve import ResolveModel
 from resolve.train.loss import MultiTaskLoss, PhaseConfig
+from resolve.train._loaders import (
+    CUDAPrefetcher,
+    GPUTensorLoader,
+    RankPoolBatchDataset,
+    _RankPoolPreparedData,
+    _rank_pool_collate_fn,
+)
+from resolve.train._types import ProfileResult, Timer, TrainResult
 
 # Preset loss configurations
 LOSS_PRESETS = {
@@ -241,17 +41,6 @@ from resolve.train.metrics import compute_metrics
 
 # Cache version - increment when cache format changes
 _CACHE_VERSION = 1
-
-
-@dataclass
-class TrainResult:
-    """Results from training."""
-
-    best_epoch: int
-    final_metrics: dict[str, dict[str, float]]
-    history: dict[str, list[float]] = field(default_factory=dict)
-    resumed_from_epoch: Optional[int] = None
-    train_time: float = 0.0  # Total training time in seconds
 
 
 class Trainer:
@@ -314,6 +103,21 @@ class Trainer:
         species_selection: str = "top",
         species_representation: str = "abundance",
         min_species_frequency: int = 1,
+        cover_dropout: float = 0.0,
+        # Transformer-specific (species_encoding="transformer")
+        n_attention_layers: int = 0,
+        n_heads: int = 4,
+        transformer_ff_dim: int = 256,
+        transformer_pooling: str = "attention",
+        transformer_dropout: float = 0.1,
+        pretrain_epochs: int = 0,
+        pretrain_mask_prob: float = 0.15,
+        pretrain_lr: float = 1e-4,
+        # v7: label smoothing, class weights, EMA, deeper head
+        label_smoothing: float = 0.0,
+        class_weights: Optional[torch.Tensor] = None,
+        ema_decay: float = 0.0,
+        head_hidden_dims: Optional[list[int]] = None,
         verbose: int = 1,
     ):
         """
@@ -408,8 +212,8 @@ class Trainer:
 
         # === Parameter Validation ===
         # Species encoding
-        if species_encoding not in ("hash", "embed"):
-            raise ValueError(f"species_encoding must be 'hash' or 'embed', got {species_encoding!r}")
+        if species_encoding not in ("hash", "embed", "rank_pool", "transformer"):
+            raise ValueError(f"species_encoding must be 'hash', 'embed', 'rank_pool', or 'transformer', got {species_encoding!r}")
         self.species_encoding = species_encoding
 
         # Dimension parameters
@@ -482,6 +286,19 @@ class Trainer:
         self.species_selection = species_selection
         self.species_representation = species_representation
         self.min_species_frequency = min_species_frequency
+        self.cover_dropout = cover_dropout
+        self.n_attention_layers = n_attention_layers
+        self.n_heads = n_heads
+        self.transformer_ff_dim = transformer_ff_dim
+        self.transformer_pooling = transformer_pooling
+        self.transformer_dropout = transformer_dropout
+        self.pretrain_epochs = pretrain_epochs
+        self.pretrain_mask_prob = pretrain_mask_prob
+        self.pretrain_lr = pretrain_lr
+        self.label_smoothing = label_smoothing
+        self.class_weights = class_weights
+        self.ema_decay = ema_decay
+        self.head_hidden_dims = head_hidden_dims
         self.compile_model = compile_model
         # Auto-enable prefetch for large batch sizes (16K+)
         if prefetch_data is None:
@@ -540,6 +357,7 @@ class Trainer:
         # Components to be initialized in fit()
         self._species_encoder: Optional[SpeciesEncoder] = None
         self._embedding_encoder: Optional[EmbeddingEncoder] = None
+        self._rank_pool_encoder = None  # Optional[RankPoolEncoder]
         self._scalers: dict[str, StandardScaler] = {}
         self._target_scalers: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
         self._train_loader: Optional[DataLoader] = None
@@ -564,9 +382,25 @@ class Trainer:
         if self.model is not None:
             return sum(p.numel() for p in self.model.parameters())
 
-        # Build temporary model to count params
-        uses_explicit_vector = self.species_selection in ("all", "presence_absence")
-        temp_model = ResolveModel(
+        temp_model = self._build_model()
+        return sum(p.numel() for p in temp_model.parameters())
+
+    def _build_model(self) -> ResolveModel:
+        """Build ResolveModel from current trainer config.
+
+        Computes uses_explicit_vector and n_taxonomy_slots from encoder state.
+        All model construction sites should use this to stay DRY.
+        """
+        uses_explicit_vector = (
+            self.species_encoding == "hash"
+            and self._species_encoder is not None
+            and self._species_encoder.uses_explicit_vector
+        )
+        n_taxonomy_slots = (
+            self._species_encoder.n_taxonomy_slots
+            if self._species_encoder else self.top_k
+        )
+        return ResolveModel(
             schema=self._schema,
             targets=self.dataset.targets,
             species_encoding=self.species_encoding,
@@ -574,13 +408,77 @@ class Trainer:
             species_embed_dim=self.species_embed_dim,
             genus_emb_dim=self.genus_emb_dim,
             family_emb_dim=self.family_emb_dim,
-            top_k=self.top_k,
+            top_k=n_taxonomy_slots,
             top_k_species=self.top_k_species,
             hidden_dims=self.hidden_dims,
             dropout=self.dropout,
             uses_explicit_vector=uses_explicit_vector,
+            cover_dropout=self.cover_dropout,
+            n_attention_layers=self.n_attention_layers,
+            n_heads=self.n_heads,
+            transformer_ff_dim=self.transformer_ff_dim,
+            transformer_pooling=self.transformer_pooling,
+            transformer_dropout=self.transformer_dropout,
+            head_hidden_dims=self.head_hidden_dims,
         )
-        return sum(p.numel() for p in temp_model.parameters())
+
+    def _unpack_batch(
+        self,
+        batch: tuple,
+        target_names: list[str],
+        has_taxonomy: bool,
+        data_on_device: bool,
+    ) -> tuple:
+        """Unpack a batch tuple into model inputs and targets dict.
+
+        Returns:
+            (continuous, genus_ids, family_ids, species_ids, species_vector,
+             pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+             targets)
+        """
+        def _get(i: int) -> torch.Tensor:
+            return batch[i] if data_on_device else batch[i].to(self._device, non_blocking=True)
+
+        idx = 0
+        continuous = _get(idx); idx += 1
+
+        species_ids = None
+        species_vector = None
+        pool_genus_ids = None
+        pool_family_ids = None
+        pool_weights = None
+        pool_mask = None
+        pool_has_cover = None
+
+        if self.species_encoding == "embed":
+            species_ids = _get(idx); idx += 1
+        elif self.species_encoding in ("rank_pool", "transformer"):
+            species_ids = _get(idx); idx += 1
+            if has_taxonomy:
+                pool_genus_ids = _get(idx); idx += 1
+                pool_family_ids = _get(idx); idx += 1
+            pool_weights = _get(idx); idx += 1
+            pool_mask = _get(idx); idx += 1
+            pool_has_cover = _get(idx); idx += 1
+        elif self.species_encoding == "hash" and self._species_encoder.uses_explicit_vector:
+            species_vector = _get(idx); idx += 1
+
+        if has_taxonomy and self.species_encoding not in ("rank_pool", "transformer"):
+            genus_ids = _get(idx); idx += 1
+            family_ids = _get(idx); idx += 1
+        else:
+            genus_ids = None
+            family_ids = None
+
+        targets = {}
+        for name in target_names:
+            targets[name] = _get(idx); idx += 1
+
+        return (
+            continuous, genus_ids, family_ids, species_ids, species_vector,
+            pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+            targets,
+        )
 
     def _prepare_data(self, fit_encoder: bool = True) -> tuple[ResolveDataset, ResolveDataset]:
         """Split and encode data."""
@@ -621,7 +519,7 @@ class Trainer:
                         n_genera_vocab=0,
                         n_families_vocab=0,
                     )
-        else:  # embed mode
+        elif self.species_encoding == "embed":
             # Embed mode: use EmbeddingEncoder
             if fit_encoder or self._embedding_encoder is None or not self._embedding_encoder._fitted:
                 self._embedding_encoder = EmbeddingEncoder(
@@ -651,6 +549,34 @@ class Trainer:
                     n_genera_vocab=self._embedding_encoder.n_genera,
                     n_families_vocab=self._embedding_encoder.n_families,
                 )
+        else:  # rank_pool or transformer mode (both use same data pipeline)
+            from resolve.encode.rank_pool import RankPoolEncoder
+            if fit_encoder or self._rank_pool_encoder is None or not self._rank_pool_encoder._fitted:
+                self._rank_pool_encoder = RankPoolEncoder(
+                    weighting=self.species_normalization,
+                    min_species_frequency=self.min_species_frequency,
+                )
+                self._rank_pool_encoder.fit(train_ds)
+
+                # Update schema with vocab sizes
+                self._schema = ResolveSchema(
+                    n_plots=self._schema.n_plots,
+                    n_species=self._schema.n_species,
+                    n_continuous=self._schema.n_continuous,
+                    has_coordinates=self._schema.has_coordinates,
+                    has_abundance=self._schema.has_abundance,
+                    has_taxonomy=self._schema.has_taxonomy,
+                    n_genera=self._schema.n_genera,
+                    n_families=self._schema.n_families,
+                    targets=self._schema.targets,
+                    covariate_names=self._schema.covariate_names,
+                    species_normalization=self._schema.species_normalization,
+                    track_unknown_fraction=self._schema.track_unknown_fraction,
+                    track_unknown_count=self._schema.track_unknown_count,
+                    n_species_vocab=self._rank_pool_encoder.n_species,
+                    n_genera_vocab=self._rank_pool_encoder.n_genera,
+                    n_families_vocab=self._rank_pool_encoder.n_families,
+                )
 
         return train_ds, test_ds
 
@@ -658,8 +584,8 @@ class Trainer:
         self,
         dataset: ResolveDataset,
         fit_scalers: bool = False,
-    ) -> tuple[torch.Tensor, ...]:
-        """Convert dataset to tensors."""
+    ) -> tuple[torch.Tensor, ...] | _RankPoolPreparedData:
+        """Convert dataset to tensors (or _RankPoolPreparedData for rank_pool mode)."""
         # Get continuous features
         coords = dataset.get_coordinates()
         covariates = dataset.get_covariates()
@@ -702,7 +628,7 @@ class Trainer:
             genus_ids = encoded.genus_ids
             family_ids = encoded.family_ids
             unknown_fraction = encoded.unknown_fraction
-        else:  # embed mode
+        elif self.species_encoding == "embed":
             # Embed mode: use EmbeddingEncoder
             embedded = self._embedding_encoder.transform(dataset)
 
@@ -720,6 +646,20 @@ class Trainer:
             genus_ids = embedded.genus_ids
             family_ids = embedded.family_ids
             unknown_fraction = embedded.unknown_fraction
+        else:  # rank_pool or transformer mode
+            pool_encoded = self._rank_pool_encoder.transform(dataset)
+
+            parts = []
+            if coords is not None:
+                parts.append(coords)
+            if covariates is not None:
+                parts.append(covariates)
+            if self.track_unknown_fraction:
+                parts.append(pool_encoded.unknown_fraction.reshape(-1, 1))
+
+            genus_ids = None
+            family_ids = None
+            unknown_fraction = pool_encoded.unknown_fraction
 
         continuous = np.hstack(parts) if parts else np.zeros((len(dataset.plot_ids), 0), dtype=np.float32)
 
@@ -794,7 +734,24 @@ class Trainer:
                 target_int = np.where(mask, target_vals, -1).astype(np.int64)
                 targets[name] = target_int
 
-        # Build tensor dataset
+        # Rank-pool/transformer mode: return _RankPoolPreparedData with ragged arrays (per-batch padding)
+        if self.species_encoding in ("rank_pool", "transformer"):
+            has_tax = self._schema.has_taxonomy
+            return _RankPoolPreparedData(
+                continuous=torch.from_numpy(continuous),
+                target_tensors=[
+                    torch.from_numpy(targets[n]) for n in self.model.target_configs
+                ],
+                species_ids=pool_encoded.species_ids,
+                genus_ids=pool_encoded.genus_ids if has_tax else None,
+                family_ids=pool_encoded.family_ids if has_tax else None,
+                weights=pool_encoded.weights,
+                has_cover=pool_encoded.has_cover,
+                has_taxonomy=has_tax,
+                n_samples=len(pool_encoded.plot_ids),
+            )
+
+        # Build tensor dataset (hash/embed modes)
         tensors = [torch.from_numpy(continuous)]
 
         # Add species_ids for embed mode (must come before genus/family for consistent unpacking)
@@ -815,12 +772,48 @@ class Trainer:
 
         return tuple(tensors)
 
-    def _create_loaders(
-        self,
-        train_tensors: tuple[torch.Tensor, ...],
-        test_tensors: tuple[torch.Tensor, ...],
-    ) -> None:
-        """Create data loaders."""
+    def _create_loaders(self, train_data, test_data) -> None:
+        """Create data loaders.
+
+        Accepts either a tuple of tensors (hash/embed modes) or
+        _RankPoolPreparedData (rank_pool mode with per-batch padding).
+        """
+        # Rank-pool mode: per-batch padding via custom Dataset + collate
+        # num_workers=0 on Windows: spawn-based multiprocessing adds overhead
+        # and can fail serializing ragged numpy arrays. Main-thread collation
+        # is equally fast (~4s/ep) since the numpy collate is lightweight.
+        if isinstance(train_data, _RankPoolPreparedData):
+            n_workers = self.num_workers  # default 0, user can override
+            print(f"  Rank-pool mode: per-batch padding, num_workers={n_workers}")
+            print(f"  Train: {train_data.n_samples:,} samples (ragged, per-batch padding)")
+            print(f"  Test: {test_data.n_samples:,} samples (ragged, per-batch padding)")
+
+            self._train_loader = DataLoader(
+                RankPoolBatchDataset(train_data),
+                batch_size=self.batch_size,
+                shuffle=True,
+                num_workers=n_workers,
+                collate_fn=_rank_pool_collate_fn,
+                pin_memory=self._device.type == "cuda" and n_workers > 0,
+                persistent_workers=n_workers > 0,
+                drop_last=True,
+            )
+            self._test_loader = DataLoader(
+                RankPoolBatchDataset(test_data),
+                batch_size=self.batch_size,
+                shuffle=False,
+                num_workers=n_workers,
+                collate_fn=_rank_pool_collate_fn,
+                pin_memory=self._device.type == "cuda" and n_workers > 0,
+                persistent_workers=n_workers > 0,
+            )
+            self._using_gpu_loader = False
+            return
+
+        # Hash/embed modes: standard tensor-based loaders
+        train_tensors = train_data
+        test_tensors = test_data
+
         # Debug: verify all tensors have same first dimension
         train_sizes = [t.shape[0] for t in train_tensors]
         test_sizes = [t.shape[0] for t in test_tensors]
@@ -889,8 +882,8 @@ class Trainer:
     def _compute_cache_key(self) -> str:
         """Compute a hash key for caching based on dataset and config."""
         # Include dataset fingerprint (convert to strings to handle mixed types)
-        plot_ids = sorted(str(x) for x in self.dataset._header[self.dataset._roles.plot_id].unique())
-        species_ids = sorted(str(x) for x in self.dataset._species[self.dataset._roles.species_id].dropna().unique())
+        plot_ids = sorted(str(x) for x in self.dataset._header[self.dataset._roles.plot_id].unique().to_list())
+        species_ids = sorted(str(x) for x in self.dataset._species[self.dataset._roles.species_id].drop_nulls().unique().to_list())
 
         # Build config dict
         config = {
@@ -1090,6 +1083,11 @@ class Trainer:
                 "species_representation": self.species_representation,
                 "genus_emb_dim": self.genus_emb_dim,
                 "family_emb_dim": self.family_emb_dim,
+                "n_attention_layers": self.n_attention_layers,
+                "n_heads": self.n_heads,
+                "transformer_ff_dim": self.transformer_ff_dim,
+                "transformer_pooling": self.transformer_pooling,
+                "transformer_dropout": self.transformer_dropout,
             },
         }
 
@@ -1174,8 +1172,8 @@ class Trainer:
                 for k, v in checkpoint["target_scalers"].items()
             }
 
-        # Restore species encoder state
-        if checkpoint.get("species_encoder"):
+        # Restore species encoder state (hash mode only; rank_pool/embed use different encoders)
+        if checkpoint.get("species_encoder") and self.species_encoding == "hash":
             enc_state = checkpoint["species_encoder"]
             # Create encoder if not exists
             if self._species_encoder is None:
@@ -1221,6 +1219,191 @@ class Trainer:
 
         return epoch, best_epoch, best_metric, epochs_without_improvement, history
 
+    def pretrain(self) -> None:
+        """Run masked species pretraining (v6) on the transformer encoder.
+
+        Trains the encoder with BERT-style masked language modelling over species
+        tokens. Uses a separate MaskedSpeciesHead (discarded after pretraining).
+
+        Must be called BEFORE fit(). Requires species_encoding="transformer" and
+        pretrain_epochs > 0.
+
+        The method:
+          1. Prepares data (same pipeline as rank_pool)
+          2. Builds model if not already built
+          3. Runs MLM pretraining loop
+          4. Discards the MaskedSpeciesHead, keeps encoder weights
+        """
+        if self.species_encoding != "transformer":
+            raise ValueError("pretrain() requires species_encoding='transformer'")
+        if self.pretrain_epochs < 1:
+            raise ValueError("pretrain() requires pretrain_epochs >= 1")
+
+        from resolve.model.pretrain import MaskedSpeciesHead, MaskedSpeciesCollateWrapper
+
+        print("\n=== Masked Species Pretraining (v6) ===")
+        print(f"  Epochs: {self.pretrain_epochs}")
+        print(f"  Mask prob: {self.pretrain_mask_prob}")
+        print(f"  LR: {self.pretrain_lr}")
+
+        # Prepare data (same as fit, but only need train split)
+        train_ds, _ = self._prepare_data(fit_encoder=True)
+
+        # Build model if not done yet
+        if self.model is None:
+            self.model = self._build_model()
+
+        self.model.to(self._device)
+
+        # Build tensors and data loader with MLM masking
+        train_tensors = self._build_tensors(train_ds, fit_scalers=True)
+        has_taxonomy = self._schema.has_taxonomy
+
+        # Create masking collate wrapper
+        from resolve.train.trainer import _rank_pool_collate_fn, RankPoolBatchDataset
+        mlm_collate = MaskedSpeciesCollateWrapper(
+            base_collate_fn=_rank_pool_collate_fn,
+            n_species=self._schema.n_species_vocab,
+            mask_prob=self.pretrain_mask_prob,
+            has_taxonomy=has_taxonomy,
+        )
+
+        pretrain_loader = DataLoader(
+            RankPoolBatchDataset(train_tensors),
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=0,
+            collate_fn=mlm_collate,
+            drop_last=True,
+        )
+
+        # Build MLM head (will be discarded after pretraining)
+        encoder = self.model.encoder
+        mlm_head = MaskedSpeciesHead(encoder.d_model, self._schema.n_species_vocab)
+        mlm_head.to(self._device)
+
+        # Optimizer for encoder + MLM head only (not task heads)
+        pretrain_params = list(encoder.parameters()) + list(mlm_head.parameters())
+        optimizer = AdamW(pretrain_params, lr=self.pretrain_lr, weight_decay=self.weight_decay)
+
+        # AMP scaler
+        grad_scaler = GradScaler() if self.use_amp else None
+
+        loss_fn = torch.nn.CrossEntropyLoss(ignore_index=0)
+
+        for epoch in range(1, self.pretrain_epochs + 1):
+            encoder.train()
+            mlm_head.train()
+            total_loss = 0.0
+            n_batches = 0
+
+            for batch in pretrain_loader:
+                # Unpack batch: (continuous, masked_sp, [g, f,] w, mask, has_cover, *targets, mlm_mask, mlm_targets)
+                idx = 0
+                continuous = batch[idx].to(self._device, non_blocking=True); idx += 1
+                species_ids = batch[idx].to(self._device, non_blocking=True); idx += 1
+                if has_taxonomy:
+                    pool_genus_ids = batch[idx].to(self._device, non_blocking=True); idx += 1
+                    pool_family_ids = batch[idx].to(self._device, non_blocking=True); idx += 1
+                else:
+                    pool_genus_ids = None
+                    pool_family_ids = None
+                pool_weights = batch[idx].to(self._device, non_blocking=True); idx += 1
+                pool_mask = batch[idx].to(self._device, non_blocking=True); idx += 1
+                pool_has_cover = batch[idx].to(self._device, non_blocking=True); idx += 1
+
+                # Skip targets (we don't need them for pretraining)
+                n_targets = len(self.model.target_configs)
+                idx += n_targets
+
+                mlm_mask = batch[idx].to(self._device, non_blocking=True); idx += 1
+                mlm_targets = batch[idx].to(self._device, non_blocking=True); idx += 1
+
+                # Forward through encoder to get token-level representations
+                # We need the pre-pooling token embeddings, not the pooled output
+                # Re-run embedding + transformer without pooling
+                optimizer.zero_grad(set_to_none=True)
+
+                if self.use_amp:
+                    with autocast(device_type="cuda"):
+                        token_embs = self._get_pretrain_tokens(
+                            encoder, continuous, species_ids, pool_genus_ids,
+                            pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+                            mlm_mask,
+                        )
+                        # Extract masked positions and predict
+                        masked_embs = token_embs[mlm_mask]  # (N_masked, d_model)
+                        logits = mlm_head(masked_embs)  # (N_masked, n_species)
+                        targets = mlm_targets[mlm_mask]  # (N_masked,)
+                        loss = loss_fn(logits, targets)
+
+                    grad_scaler.scale(loss).backward()
+                    grad_scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(pretrain_params, 1.0)
+                    grad_scaler.step(optimizer)
+                    grad_scaler.update()
+                else:
+                    token_embs = self._get_pretrain_tokens(
+                        encoder, continuous, species_ids, pool_genus_ids,
+                        pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+                        mlm_mask,
+                    )
+                    masked_embs = token_embs[mlm_mask]
+                    logits = mlm_head(masked_embs)
+                    targets = mlm_targets[mlm_mask]
+                    loss = loss_fn(logits, targets)
+
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(pretrain_params, 1.0)
+                    optimizer.step()
+
+                total_loss += loss.item()
+                n_batches += 1
+
+            avg_loss = total_loss / max(n_batches, 1)
+            if self.verbose >= 1:
+                print(f"  Pretrain epoch {epoch}/{self.pretrain_epochs}: MLM loss = {avg_loss:.4f}")
+
+        # Discard MLM head, keep encoder weights
+        del mlm_head
+        print("  Pretraining complete. MLM head discarded, encoder weights retained.")
+
+    @staticmethod
+    def _get_pretrain_tokens(
+        encoder, continuous, species_ids, genus_ids, family_ids,
+        weights, mask, has_cover, mlm_mask,
+    ) -> torch.Tensor:
+        """Get token-level embeddings from PlotEncoderTransformer (pre-pooling).
+
+        Runs the embedding + self-attention layers but skips pooling and MLP,
+        returning per-token representations for MLM prediction.
+        """
+        batch_size = continuous.shape[0]
+
+        if has_cover is None:
+            has_cover = torch.ones(batch_size, device=continuous.device)
+
+        if mask is None:
+            mask = species_ids != 0
+
+        # Additive token embeddings
+        tokens = encoder.species_embedding(species_ids)
+        if encoder.has_taxonomy and genus_ids is not None and family_ids is not None:
+            tokens = tokens + encoder.genus_embedding(genus_ids) + encoder.family_embedding(family_ids)
+        if weights is not None:
+            tokens = tokens + encoder.weight_proj(weights.unsqueeze(-1))
+
+        # Apply mask embedding at MLM positions
+        tokens = tokens.clone()
+        tokens[mlm_mask] = encoder.mask_embedding
+
+        # Self-attention
+        padding_mask = ~mask
+        if encoder.transformer_encoder is not None:
+            tokens = encoder.transformer_encoder(tokens, src_key_padding_mask=padding_mask)
+
+        return tokens
+
     def fit(self) -> TrainResult:
         """
         Train the model.
@@ -1261,37 +1444,14 @@ class Trainer:
 
             # Build model now that schema (with vocab sizes for embed mode) is ready
             if self.model is None:
-                uses_explicit_vector = (
-                    self.species_encoding == "hash" and
-                    self._species_encoder is not None and
-                    self._species_encoder.uses_explicit_vector
-                )
-                # Get actual taxonomy slot count (2*top_k for top_bottom mode)
-                n_taxonomy_slots = (
-                    self._species_encoder.n_taxonomy_slots
-                    if self._species_encoder else self.top_k
-                )
-                self.model = ResolveModel(
-                    schema=self._schema,
-                    targets=self.dataset.targets,
-                    species_encoding=self.species_encoding,
-                    hash_dim=self.hash_dim,
-                    species_embed_dim=self.species_embed_dim,
-                    genus_emb_dim=self.genus_emb_dim,
-                    family_emb_dim=self.family_emb_dim,
-                    top_k=n_taxonomy_slots,
-                    top_k_species=self.top_k_species,
-                    hidden_dims=self.hidden_dims,
-                    dropout=self.dropout,
-                    uses_explicit_vector=uses_explicit_vector,
-                )
+                self.model = self._build_model()
 
             train_tensors = self._build_tensors(train_ds, fit_scalers=(checkpoint is None))
             test_tensors = self._build_tensors(test_ds, fit_scalers=False)
             print(f"  Data prepared in {time.time() - t_prep_start:.1f}s")
 
-            # Save to cache for next time
-            if self.cache_dir:
+            # Save to cache for next time (skip rank_pool mode - ragged data isn't cacheable)
+            if self.cache_dir and not isinstance(train_tensors, _RankPoolPreparedData):
                 self._save_cache(
                     train_tensors,
                     test_tensors,
@@ -1303,30 +1463,7 @@ class Trainer:
 
         # Build model now that schema (with vocab sizes for embed mode) is ready
         if self.model is None:
-            uses_explicit_vector = (
-                self.species_encoding == "hash" and
-                self._species_encoder is not None and
-                self._species_encoder.uses_explicit_vector
-            )
-            # Get actual taxonomy slot count (2*top_k for top_bottom mode)
-            n_taxonomy_slots = (
-                self._species_encoder.n_taxonomy_slots
-                if self._species_encoder else self.top_k
-            )
-            self.model = ResolveModel(
-                schema=self._schema,
-                targets=self.dataset.targets,
-                species_encoding=self.species_encoding,
-                hash_dim=self.hash_dim,
-                species_embed_dim=self.species_embed_dim,
-                genus_emb_dim=self.genus_emb_dim,
-                family_emb_dim=self.family_emb_dim,
-                top_k=n_taxonomy_slots,
-                top_k_species=self.top_k_species,
-                hidden_dims=self.hidden_dims,
-                dropout=self.dropout,
-                uses_explicit_vector=uses_explicit_vector,
-            )
+            self.model = self._build_model()
 
         # Move model to device
         self.model.to(self._device)
@@ -1374,7 +1511,14 @@ class Trainer:
             self.model.target_configs,
             phases=self.phases,
             phase_boundaries=self.phase_boundaries,
+            label_smoothing=self.label_smoothing,
+            class_weights=self.class_weights,
         )
+
+        # Initialize EMA state (exponential moving average of model weights)
+        self._ema_state = None
+        if self.ema_decay > 0:
+            self._ema_state = {k: v.clone() for k, v in self.model.state_dict().items()}
 
         # Initialize training state
         start_epoch = 0
@@ -1425,7 +1569,11 @@ class Trainer:
             train_loss = self._train_epoch(epoch, target_names, has_taxonomy)
             history["train_loss"].append(train_loss)
 
-            # Evaluate
+            # Evaluate (swap to EMA weights if active, swap back after)
+            if self._ema_state is not None:
+                _train_state = {k: v.clone() for k, v in self.model.state_dict().items()}
+                self.model.load_state_dict(self._ema_state)
+
             test_loss, metrics = self._eval_epoch(epoch, target_names, has_taxonomy)
             history["test_loss"].append(test_loss)
 
@@ -1441,9 +1589,14 @@ class Trainer:
                 best_metric = current_metric
                 best_epoch = epoch
                 epochs_without_improvement = 0
+                # Save EMA state as best when EMA is active, otherwise save current model
                 self._best_state = {k: v.cpu().clone() for k, v in self.model.state_dict().items()}
             else:
                 epochs_without_improvement += 1
+
+            # Swap back to training weights after eval
+            if self._ema_state is not None:
+                self.model.load_state_dict(_train_state)
 
             # Track epoch time and compute ETA
             epoch_time = time.time() - epoch_start
@@ -1554,29 +1707,7 @@ class Trainer:
                 train_ds, test_ds = self._prepare_data(fit_encoder=(checkpoint is None))
 
                 if self.model is None:
-                    uses_explicit_vector = (
-                        self.species_encoding == "hash" and
-                        self._species_encoder is not None and
-                        self._species_encoder.uses_explicit_vector
-                    )
-                    n_taxonomy_slots = (
-                        self._species_encoder.n_taxonomy_slots
-                        if self._species_encoder else self.top_k
-                    )
-                    self.model = ResolveModel(
-                        schema=self._schema,
-                        targets=self.dataset.targets,
-                        species_encoding=self.species_encoding,
-                        hash_dim=self.hash_dim,
-                        species_embed_dim=self.species_embed_dim,
-                        genus_emb_dim=self.genus_emb_dim,
-                        family_emb_dim=self.family_emb_dim,
-                        top_k=n_taxonomy_slots,
-                        top_k_species=self.top_k_species,
-                        hidden_dims=self.hidden_dims,
-                        dropout=self.dropout,
-                        uses_explicit_vector=uses_explicit_vector,
-                    )
+                    self.model = self._build_model()
 
                 train_tensors = self._build_tensors(train_ds, fit_scalers=(checkpoint is None))
                 test_tensors = self._build_tensors(test_ds, fit_scalers=False)
@@ -1584,29 +1715,7 @@ class Trainer:
             self._create_loaders(train_tensors, test_tensors)
 
             if self.model is None:
-                uses_explicit_vector = (
-                    self.species_encoding == "hash" and
-                    self._species_encoder is not None and
-                    self._species_encoder.uses_explicit_vector
-                )
-                n_taxonomy_slots = (
-                    self._species_encoder.n_taxonomy_slots
-                    if self._species_encoder else self.top_k
-                )
-                self.model = ResolveModel(
-                    schema=self._schema,
-                    targets=self.dataset.targets,
-                    species_encoding=self.species_encoding,
-                    hash_dim=self.hash_dim,
-                    species_embed_dim=self.species_embed_dim,
-                    genus_emb_dim=self.genus_emb_dim,
-                    family_emb_dim=self.family_emb_dim,
-                    top_k=n_taxonomy_slots,
-                    top_k_species=self.top_k_species,
-                    hidden_dims=self.hidden_dims,
-                    dropout=self.dropout,
-                    uses_explicit_vector=uses_explicit_vector,
-                )
+                self.model = self._build_model()
 
             self.model.to(self._device)
             print(f"  Data prepared in {time.time() - t_prep_start:.1f}s")
@@ -1625,6 +1734,8 @@ class Trainer:
                 self.model.target_configs,
                 phases=self.phases,
                 phase_boundaries=self.phase_boundaries,
+                label_smoothing=self.label_smoothing,
+                class_weights=self.class_weights,
             )
 
         # Setup AMP
@@ -1918,35 +2029,9 @@ class Trainer:
             loader = self._train_loader
 
         for batch_idx, batch in enumerate(loader):
-            # Unpack batch - data already on device if using GPU loader or prefetcher
-            idx = 0
-            continuous = batch[idx] if data_on_device else batch[idx].to(self._device, non_blocking=True)
-            idx += 1
-
-            # species_ids only present in embed mode
-            # species_vector for hash mode with all/presence_absence selection
-            species_ids = None
-            species_vector = None
-            if self.species_encoding == "embed":
-                species_ids = batch[idx] if data_on_device else batch[idx].to(self._device, non_blocking=True)
-                idx += 1
-            elif self.species_encoding == "hash" and self._species_encoder.uses_explicit_vector:
-                species_vector = batch[idx] if data_on_device else batch[idx].to(self._device, non_blocking=True)
-                idx += 1
-
-            if has_taxonomy:
-                genus_ids = batch[idx] if data_on_device else batch[idx].to(self._device, non_blocking=True)
-                idx += 1
-                family_ids = batch[idx] if data_on_device else batch[idx].to(self._device, non_blocking=True)
-                idx += 1
-            else:
-                genus_ids = None
-                family_ids = None
-
-            targets = {}
-            for name in target_names:
-                targets[name] = batch[idx] if data_on_device else batch[idx].to(self._device, non_blocking=True)
-                idx += 1
+            (continuous, genus_ids, family_ids, species_ids, species_vector,
+             pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+             targets) = self._unpack_batch(batch, target_names, has_taxonomy, data_on_device)
 
             # Reshape targets for loss
             for name in target_names:
@@ -1959,7 +2044,12 @@ class Trainer:
 
             if self.use_amp:
                 with autocast(device_type="cuda"):
-                    predictions = self.model(continuous, genus_ids, family_ids, species_ids, species_vector)
+                    predictions = self.model(
+                        continuous, genus_ids, family_ids, species_ids, species_vector,
+                        pool_genus_ids=pool_genus_ids, pool_family_ids=pool_family_ids,
+                        pool_weights=pool_weights, pool_mask=pool_mask,
+                        pool_has_cover=pool_has_cover,
+                    )
                     loss, _ = self._loss_fn(
                         predictions, targets, epoch, self._target_scalers
                     )
@@ -1971,7 +2061,12 @@ class Trainer:
                 self._grad_scaler.step(self._optimizer)
                 self._grad_scaler.update()
             else:
-                predictions = self.model(continuous, genus_ids, family_ids, species_ids, species_vector)
+                predictions = self.model(
+                    continuous, genus_ids, family_ids, species_ids, species_vector,
+                    pool_genus_ids=pool_genus_ids, pool_family_ids=pool_family_ids,
+                    pool_weights=pool_weights, pool_mask=pool_mask,
+                    pool_has_cover=pool_has_cover,
+                )
                 loss, _ = self._loss_fn(
                     predictions, targets, epoch, self._target_scalers
                 )
@@ -1982,6 +2077,12 @@ class Trainer:
 
             # Step scheduler after optimizer (fixes PyTorch warning)
             self._scheduler.step()
+
+            # EMA update: exponential moving average of model weights
+            if self._ema_state is not None:
+                with torch.no_grad():
+                    for k, v in self.model.state_dict().items():
+                        self._ema_state[k].lerp_(v, 1.0 - self.ema_decay)
 
             # Check for NaN loss
             if torch.isnan(loss):
@@ -2042,41 +2143,26 @@ class Trainer:
         data_on_device = getattr(self, "_using_gpu_loader", False)
 
         for batch in self._test_loader:
-            idx = 0
-            continuous = batch[idx] if data_on_device else batch[idx].to(self._device, non_blocking=True)
-            idx += 1
-
-            # species_ids only present in embed mode
-            # species_vector for hash mode with all/presence_absence selection
-            species_ids = None
-            species_vector = None
-            if self.species_encoding == "embed":
-                species_ids = batch[idx] if data_on_device else batch[idx].to(self._device, non_blocking=True)
-                idx += 1
-            elif self.species_encoding == "hash" and self._species_encoder.uses_explicit_vector:
-                species_vector = batch[idx] if data_on_device else batch[idx].to(self._device, non_blocking=True)
-                idx += 1
-
-            if has_taxonomy:
-                genus_ids = batch[idx] if data_on_device else batch[idx].to(self._device, non_blocking=True)
-                idx += 1
-                family_ids = batch[idx] if data_on_device else batch[idx].to(self._device, non_blocking=True)
-                idx += 1
-            else:
-                genus_ids = None
-                family_ids = None
-
-            targets = {}
-            for name in target_names:
-                targets[name] = batch[idx] if data_on_device else batch[idx].to(self._device, non_blocking=True)
-                idx += 1
+            (continuous, genus_ids, family_ids, species_ids, species_vector,
+             pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+             targets) = self._unpack_batch(batch, target_names, has_taxonomy, data_on_device)
 
             # Use AMP for faster eval inference
             if self.use_amp:
                 with autocast(device_type="cuda"):
-                    predictions = self.model(continuous, genus_ids, family_ids, species_ids, species_vector)
+                    predictions = self.model(
+                        continuous, genus_ids, family_ids, species_ids, species_vector,
+                        pool_genus_ids=pool_genus_ids, pool_family_ids=pool_family_ids,
+                        pool_weights=pool_weights, pool_mask=pool_mask,
+                        pool_has_cover=pool_has_cover,
+                    )
             else:
-                predictions = self.model(continuous, genus_ids, family_ids, species_ids, species_vector)
+                predictions = self.model(
+                    continuous, genus_ids, family_ids, species_ids, species_vector,
+                    pool_genus_ids=pool_genus_ids, pool_family_ids=pool_family_ids,
+                    pool_weights=pool_weights, pool_mask=pool_mask,
+                    pool_has_cover=pool_has_cover,
+                )
 
             # Reshape for loss
             targets_for_loss = {}
@@ -2147,6 +2233,11 @@ class Trainer:
                 "Cannot save: embedding encoder not initialized. "
                 "Call trainer.fit() before trainer.save()."
             )
+        if self.species_encoding in ("rank_pool", "transformer") and self._rank_pool_encoder is None:
+            raise RuntimeError(
+                "Cannot save: rank_pool encoder not initialized. "
+                "Call trainer.fit() before trainer.save()."
+            )
 
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -2165,6 +2256,7 @@ class Trainer:
             "scalers": self._scalers,
             "track_unknown_fraction": self.track_unknown_fraction,
             "uses_explicit_vector": self.model.uses_explicit_vector,
+            "head_hidden_dims": self.head_hidden_dims,
         }
 
         # Save encoder-specific state
@@ -2176,6 +2268,10 @@ class Trainer:
             state["species_normalization"] = self._species_encoder.normalization
             state["track_unknown_count"] = self._species_encoder.track_unknown_count
             state["species_vocab"] = self._species_encoder._species_vocab
+            state["species_to_idx"] = self._species_encoder._species_to_idx
+            # Save normalizer if present
+            if self._species_encoder.normalizer is not None:
+                state["normalizer"] = self._species_encoder.normalizer
         elif self.species_encoding == "embed" and self._embedding_encoder:
             state["species_vocab_obj"] = self._embedding_encoder._species_vocab
             state["taxonomy_vocab_obj"] = self._embedding_encoder._taxonomy_vocab
@@ -2183,6 +2279,24 @@ class Trainer:
             state["species_selection"] = self._embedding_encoder.selection
             state["top_k_species"] = self._embedding_encoder.top_k_species
             state["top_k_taxonomy"] = self._embedding_encoder.top_k_taxonomy
+            if self._embedding_encoder.normalizer is not None:
+                state["normalizer"] = self._embedding_encoder.normalizer
+        elif self.species_encoding in ("rank_pool", "transformer") and self._rank_pool_encoder:
+            state["species_vocab_obj"] = self._rank_pool_encoder._species_vocab
+            state["taxonomy_vocab_obj"] = self._rank_pool_encoder._taxonomy_vocab
+            state["species_to_genus"] = self._rank_pool_encoder._species_to_genus
+            state["species_to_family"] = self._rank_pool_encoder._species_to_family
+            state["species_normalization"] = self._rank_pool_encoder.weighting
+            state["min_species_frequency"] = self._rank_pool_encoder.min_species_frequency
+            if self._rank_pool_encoder.normalizer is not None:
+                state["normalizer"] = self._rank_pool_encoder.normalizer
+            # Save transformer-specific params
+            if self.species_encoding == "transformer":
+                state["n_attention_layers"] = self.n_attention_layers
+                state["n_heads"] = self.n_heads
+                state["transformer_ff_dim"] = self.transformer_ff_dim
+                state["transformer_pooling"] = self.transformer_pooling
+                state["transformer_dropout"] = self.transformer_dropout
 
         torch.save(state, path)
 
@@ -2219,7 +2333,12 @@ class Trainer:
             RuntimeError: If trainer has not been fitted yet.
             ValueError: If output_space or confidence_threshold is invalid.
         """
-        if self._species_encoder is None or self.model is None:
+        encoder_ready = (
+            (self.species_encoding == "hash" and self._species_encoder is not None) or
+            (self.species_encoding == "embed" and self._embedding_encoder is not None) or
+            (self.species_encoding in ("rank_pool", "transformer") and self._rank_pool_encoder is not None)
+        )
+        if not encoder_ready or self.model is None:
             raise RuntimeError(
                 "Cannot predict: trainer has not been fitted yet. "
                 "Call trainer.fit() before trainer.predict()."
@@ -2233,37 +2352,122 @@ class Trainer:
 
         self.model.eval()
 
-        # Encode and scale
-        encoded = self._species_encoder.transform(dataset)
+        # Encode species based on mode
         coords = dataset.get_coordinates()
         covariates = dataset.get_covariates()
 
-        parts = []
-        if coords is not None:
-            parts.append(coords)
-        if covariates is not None:
-            parts.append(covariates)
-        parts.append(encoded.hash_embedding)
-        if self.track_unknown_fraction:
-            parts.append(encoded.unknown_fraction.reshape(-1, 1))
-        if self.track_unknown_count and encoded.unknown_count is not None:
-            parts.append(encoded.unknown_count.reshape(-1, 1).astype(np.float32))
-        continuous = np.hstack(parts)
+        species_ids_t = None
+        species_vector_t = None
+        genus_t = None
+        family_t = None
+        # Rank-pool mode tensors
+        pool_genus_ids_t = None
+        pool_family_ids_t = None
+        pool_weights_t = None
+        pool_mask_t = None
+        pool_has_cover_t = None
+
+        if self.species_encoding == "embed":
+            embedded = self._embedding_encoder.transform(dataset)
+            parts = []
+            if coords is not None:
+                parts.append(coords)
+            if covariates is not None:
+                parts.append(covariates)
+            if self.track_unknown_fraction:
+                parts.append(embedded.unknown_fraction.reshape(-1, 1))
+            unknown_fraction = embedded.unknown_fraction
+
+            species_ids_t = torch.from_numpy(embedded.species_ids).to(self._device)
+            if embedded.genus_ids is not None:
+                genus_t = torch.from_numpy(embedded.genus_ids).to(self._device)
+                family_t = torch.from_numpy(embedded.family_ids).to(self._device)
+
+        elif self.species_encoding in ("rank_pool", "transformer"):
+            pool_encoded = self._rank_pool_encoder.transform(dataset)
+            parts = []
+            if coords is not None:
+                parts.append(coords)
+            if covariates is not None:
+                parts.append(covariates)
+            if self.track_unknown_fraction:
+                parts.append(pool_encoded.unknown_fraction.reshape(-1, 1))
+            unknown_fraction = pool_encoded.unknown_fraction
+
+            # Pad rank-pool data for batched forward (global padding OK for one-shot inference)
+            from resolve.encode.rank_pool import pad_rank_pool_encoded
+            padded = pad_rank_pool_encoded(pool_encoded)
+            species_ids_t = torch.from_numpy(padded["species_ids"]).long().to(self._device)
+            if self.model.schema.has_taxonomy:
+                pool_genus_ids_t = torch.from_numpy(padded["genus_ids"]).long().to(self._device)
+                pool_family_ids_t = torch.from_numpy(padded["family_ids"]).long().to(self._device)
+            pool_weights_t = torch.from_numpy(padded["weights"]).to(self._device)
+            pool_mask_t = torch.from_numpy(padded["mask"]).to(self._device)
+            pool_has_cover_t = torch.from_numpy(padded["has_cover"]).to(self._device)
+
+        else:
+            # Hash mode
+            encoded = self._species_encoder.transform(dataset)
+            parts = []
+            if coords is not None:
+                parts.append(coords)
+            if covariates is not None:
+                parts.append(covariates)
+            if self._species_encoder.uses_explicit_vector:
+                species_vector_t = torch.from_numpy(encoded.species_vector).to(self._device)
+            else:
+                parts.append(encoded.hash_embedding)
+            if self.track_unknown_fraction:
+                parts.append(encoded.unknown_fraction.reshape(-1, 1))
+            if self.track_unknown_count and encoded.unknown_count is not None:
+                parts.append(encoded.unknown_count.reshape(-1, 1).astype(np.float32))
+            unknown_fraction = encoded.unknown_fraction
+
+            if encoded.genus_ids is not None:
+                genus_t = torch.from_numpy(encoded.genus_ids).to(self._device)
+                family_t = torch.from_numpy(encoded.family_ids).to(self._device)
+
+        continuous = np.hstack(parts) if parts else np.zeros((len(dataset.plot_ids), 0), dtype=np.float32)
         continuous = self._scalers["continuous"].transform(continuous).astype(np.float32)
 
         # To tensors
         continuous_t = torch.from_numpy(continuous).to(self._device)
-        genus_t = None
-        family_t = None
-        if encoded.genus_ids is not None:
-            genus_t = torch.from_numpy(encoded.genus_ids).to(self._device)
-            family_t = torch.from_numpy(encoded.family_ids).to(self._device)
 
-        # Forward
-        preds_raw = self.model(continuous_t, genus_t, family_t)
+        # Forward pass (dispatch based on encoding mode)
+        if self.species_encoding == "transformer":
+            # Batched forward to avoid OOM from O(n^2) attention over full dataset
+            n = continuous_t.shape[0]
+            pred_chunks = {name: [] for name in self.model.target_configs}
+            for start in range(0, n, self.batch_size):
+                end = min(start + self.batch_size, n)
+                chunk_preds = self.model(
+                    continuous_t[start:end], genus_ids=None, family_ids=None,
+                    species_ids=species_ids_t[start:end], species_vector=None,
+                    pool_genus_ids=pool_genus_ids_t[start:end] if pool_genus_ids_t is not None else None,
+                    pool_family_ids=pool_family_ids_t[start:end] if pool_family_ids_t is not None else None,
+                    pool_weights=pool_weights_t[start:end],
+                    pool_mask=pool_mask_t[start:end],
+                    pool_has_cover=pool_has_cover_t[start:end],
+                )
+                for name, pred in chunk_preds.items():
+                    pred_chunks[name].append(pred)
+            preds_raw = {name: torch.cat(chunks) for name, chunks in pred_chunks.items()}
+        elif self.species_encoding == "rank_pool":
+            preds_raw = self.model(
+                continuous_t, genus_ids=None, family_ids=None,
+                species_ids=species_ids_t, species_vector=None,
+                pool_genus_ids=pool_genus_ids_t, pool_family_ids=pool_family_ids_t,
+                pool_weights=pool_weights_t, pool_mask=pool_mask_t,
+                pool_has_cover=pool_has_cover_t,
+            )
+        else:
+            preds_raw = self.model(
+                continuous_t, genus_t, family_t,
+                species_ids=species_ids_t, species_vector=species_vector_t,
+            )
 
         # Compute confidence per sample (1 - unknown_fraction for regression)
-        confidence = 1.0 - encoded.unknown_fraction
+        confidence = 1.0 - unknown_fraction
 
         # Post-process
         predictions = {}
@@ -2290,9 +2494,14 @@ class Trainer:
         return predictions
 
     @classmethod
-    def load(cls, path: str | Path, device: str = "auto") -> tuple[ResolveModel, SpeciesEncoder, dict]:
+    def load(cls, path: str | Path, device: str = "auto") -> tuple[ResolveModel, SpeciesEncoder | EmbeddingEncoder, dict]:
         """
         Load model from checkpoint.
+
+        Dispatches encoder creation based on species_encoding saved in checkpoint:
+        - "hash": creates SpeciesEncoder
+        - "embed": creates EmbeddingEncoder with restored vocabs
+        - "rank_pool": creates RankPoolEncoder with restored vocabs
 
         Returns:
             (model, species_encoder, scalers)
@@ -2305,20 +2514,29 @@ class Trainer:
         # Only load model files from trusted sources.
         state = torch.load(path, map_location="cpu", weights_only=False)
 
+        species_encoding = state.get("species_encoding", "hash")
         track_unknown_count = state.get("track_unknown_count", False)
         uses_explicit_vector = state.get("uses_explicit_vector", False)
 
         model = ResolveModel(
             schema=state["schema"],
             targets=state["target_configs"],
+            species_encoding=species_encoding,
             hash_dim=state["hash_dim"],
             top_k=state["top_k"],
+            top_k_species=state.get("top_k_species", 10),
             hidden_dims=state.get("hidden_dims"),
             genus_emb_dim=state.get("genus_emb_dim", 8),
             family_emb_dim=state.get("family_emb_dim", 8),
             dropout=state.get("dropout", 0.3),
             track_unknown_count=track_unknown_count,
             uses_explicit_vector=uses_explicit_vector,
+            n_attention_layers=state.get("n_attention_layers", 0),
+            n_heads=state.get("n_heads", 4),
+            transformer_ff_dim=state.get("transformer_ff_dim", 256),
+            transformer_pooling=state.get("transformer_pooling", "attention"),
+            transformer_dropout=state.get("transformer_dropout", 0.1),
+            head_hidden_dims=state.get("head_hidden_dims"),
         )
         model.load_state_dict(state["model_state_dict"])
 
@@ -2328,19 +2546,48 @@ class Trainer:
             dev = torch.device(device)
         model.to(dev)
 
-        encoder = SpeciesEncoder(
-            hash_dim=state["hash_dim"],
-            top_k=state["top_k"],
-            aggregation=state.get("species_aggregation", "abundance"),
-            normalization=state.get("species_normalization", "norm"),
-            track_unknown_count=track_unknown_count,
-            selection=state.get("species_selection", "top"),
-            representation=state.get("species_representation", "abundance"),
-        )
-        if state["vocab"] is not None:
-            encoder._vocab = state["vocab"]
-        # Restore species vocabulary for unknown mass calculation
-        encoder._species_vocab = state.get("species_vocab", set())
-        encoder._fitted = True
+        # Dispatch encoder creation based on species_encoding
+        if species_encoding == "embed":
+            encoder = EmbeddingEncoder(
+                top_k_species=state.get("top_k_species", 10),
+                top_k_taxonomy=state.get("top_k_taxonomy", 3),
+                aggregation=state.get("species_aggregation", "abundance"),
+                selection=state.get("species_selection", "top"),
+            )
+            encoder._species_vocab = state.get("species_vocab_obj")
+            encoder._taxonomy_vocab = state.get("taxonomy_vocab_obj")
+            encoder._fitted = True
+        elif species_encoding in ("rank_pool", "transformer"):
+            from resolve.encode.rank_pool import RankPoolEncoder
+            encoder = RankPoolEncoder(
+                weighting=state.get("species_normalization", "log1p"),
+                min_species_frequency=state.get("min_species_frequency", 1),
+            )
+            encoder._species_vocab = state.get("species_vocab_obj")
+            encoder._taxonomy_vocab = state.get("taxonomy_vocab_obj")
+            encoder._species_to_genus = state.get("species_to_genus", {})
+            encoder._species_to_family = state.get("species_to_family", {})
+            encoder._fitted = True
+        else:
+            # Hash mode (default)
+            encoder = SpeciesEncoder(
+                hash_dim=state["hash_dim"],
+                top_k=state["top_k"],
+                aggregation=state.get("species_aggregation", "abundance"),
+                normalization=state.get("species_normalization", "norm"),
+                track_unknown_count=track_unknown_count,
+                selection=state.get("species_selection", "top"),
+                representation=state.get("species_representation", "abundance"),
+            )
+            if state.get("vocab") is not None:
+                encoder._vocab = state["vocab"]
+            encoder._species_vocab = state.get("species_vocab", set())
+            encoder._species_to_idx = state.get("species_to_idx", {})
+            encoder._fitted = True
+
+        # Restore normalizer for all modes (if saved in checkpoint)
+        normalizer = state.get("normalizer")
+        if normalizer is not None:
+            encoder.normalizer = normalizer
 
         return model, encoder, state["scalers"]

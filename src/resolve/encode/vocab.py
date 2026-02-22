@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
 
 @dataclass
@@ -29,18 +29,22 @@ class SpeciesVocab:
 
     def encode(self, species_id: Optional[str]) -> int:
         """Encode species ID to integer. Returns 0 for unknown."""
-        if species_id is None or pd.isna(species_id):
+        if species_id is None:
             return 0
         return self.species_to_id.get(str(species_id), 0)
 
-    def encode_batch(self, species_ids: pd.Series) -> np.ndarray:
+    def encode_batch(self, species_ids: pl.Series) -> np.ndarray:
         """Encode a series of species IDs to integers (vectorized)."""
-        return species_ids.map(lambda x: self.species_to_id.get(str(x), 0) if pd.notna(x) else 0).values
+        mapping = self.species_to_id
+        return species_ids.map_elements(
+            lambda x: mapping.get(str(x), 0) if x is not None else 0,
+            return_dtype=pl.Int64,
+        ).to_numpy()
 
     @classmethod
     def from_species_data(
         cls,
-        species_df: pd.DataFrame,
+        species_df: pl.DataFrame,
         species_col: str,
         min_count: int = 1,
     ) -> SpeciesVocab:
@@ -48,17 +52,23 @@ class SpeciesVocab:
         Build vocabulary from species data.
 
         Args:
-            species_df: Species occurrence dataframe
+            species_df: Species occurrence dataframe (polars)
             species_col: Column name for species ID
             min_count: Minimum occurrences to include in vocab (default 1 = all)
         """
         # Count occurrences
-        counts = species_df[species_col].dropna().value_counts()
+        counts = (
+            species_df
+            .select(pl.col(species_col))
+            .drop_nulls()
+            .group_by(species_col)
+            .len()
+        )
         if min_count > 1:
-            counts = counts[counts >= min_count]
+            counts = counts.filter(pl.col("len") >= min_count)
 
         # Sort alphabetically for deterministic ordering
-        species = sorted(str(s) for s in counts.index)
+        species = sorted(str(s) for s in counts[species_col].to_list())
         species_to_id = {s: i + 1 for i, s in enumerate(species)}
 
         return cls(species_to_id)
@@ -101,20 +111,20 @@ class TaxonomyVocab:
 
     def encode_genus(self, genus: Optional[str]) -> int:
         """Encode genus name to integer ID. Returns 0 for unknown."""
-        if genus is None or pd.isna(genus):
+        if genus is None:
             return 0
         return self.genus_to_id.get(genus, 0)
 
     def encode_family(self, family: Optional[str]) -> int:
         """Encode family name to integer ID. Returns 0 for unknown."""
-        if family is None or pd.isna(family):
+        if family is None:
             return 0
         return self.family_to_id.get(family, 0)
 
     @classmethod
     def from_species_data(
         cls,
-        species_df: pd.DataFrame,
+        species_df: pl.DataFrame,
         genus_col: str,
         family_col: str,
     ) -> TaxonomyVocab:
@@ -122,12 +132,12 @@ class TaxonomyVocab:
         Build vocabulary from species data.
 
         Args:
-            species_df: Species occurrence dataframe
+            species_df: Species occurrence dataframe (polars)
             genus_col: Column name for genus
             family_col: Column name for family
         """
-        genera = sorted(species_df[genus_col].dropna().unique())
-        families = sorted(species_df[family_col].dropna().unique())
+        genera = sorted(species_df[genus_col].drop_nulls().unique().to_list())
+        families = sorted(species_df[family_col].drop_nulls().unique().to_list())
 
         genus_to_id = {g: i + 1 for i, g in enumerate(genera)}
         family_to_id = {f: i + 1 for i, f in enumerate(families)}

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import torch
 from sklearn.model_selection import train_test_split
 
@@ -24,41 +24,19 @@ def _read_csv_with_progress(
     path: Path,
     desc: str = "Loading",
     verbose: bool = True,
-) -> pd.DataFrame:
-    """
-    Read CSV with progress indicator.
-
-    Uses pyarrow for fast reading if available, falls back to pandas.
-    Shows file size and elapsed time.
-    """
+) -> pl.DataFrame:
+    """Read CSV with progress indicator using polars (multithreaded)."""
     file_size_mb = path.stat().st_size / (1024 * 1024)
 
     if not verbose:
-        # Try pyarrow first (much faster)
-        try:
-            import pyarrow.csv as pa_csv
-            return pa_csv.read_csv(path).to_pandas()
-        except ImportError:
-            return pd.read_csv(path, low_memory=False)
+        return pl.read_csv(path, infer_schema_length=10000, null_values=["NA", ""])
 
     start = time.time()
     print(f"  {desc}: {path.name} ({file_size_mb:.1f} MB)...", end=" ", flush=True)
 
-    # Try pyarrow first (5-10x faster than pandas)
-    try:
-        import pyarrow.csv as pa_csv
-        table = pa_csv.read_csv(path)
-        df = table.to_pandas()
-        elapsed = time.time() - start
-        print(f"done ({len(df):,} rows, {elapsed:.1f}s) [pyarrow]")
-        return df
-    except ImportError:
-        pass
-
-    # Fall back to pandas
-    df = pd.read_csv(path, low_memory=False)
+    df = pl.read_csv(path, infer_schema_length=10000, null_values=["NA", ""])
     elapsed = time.time() - start
-    print(f"done ({len(df):,} rows, {elapsed:.1f}s)")
+    print(f"done ({len(df):,} rows, {elapsed:.1f}s) [polars]")
     return df
 
 
@@ -97,8 +75,8 @@ class ResolveDataset:
 
     def __init__(
         self,
-        header: pd.DataFrame,
-        species: pd.DataFrame,
+        header: pl.DataFrame,
+        species: pl.DataFrame,
         roles: RoleMapping,
         targets: dict[str, TargetConfig],
         species_normalization: str = "norm",
@@ -112,8 +90,8 @@ class ResolveDataset:
                 f"got {species_normalization!r}"
             )
 
-        self._header = header.copy()
-        self._species = species.copy()
+        self._header = header
+        self._species = species
         self._roles = roles
         self._targets = targets
         self._species_normalization = species_normalization
@@ -160,8 +138,8 @@ class ResolveDataset:
             raise ValueError(f"Missing columns in species: {missing_species}")
 
         # Check foreign key relationship
-        header_ids = set(self._header[self._roles.plot_id])
-        species_ids = set(self._species[self._roles.species_plot_id])
+        header_ids = set(self._header[self._roles.plot_id].to_list())
+        species_ids = set(self._species[self._roles.species_plot_id].to_list())
         orphan_species = species_ids - header_ids
         if orphan_species:
             n_orphan = len(orphan_species)
@@ -220,7 +198,7 @@ class ResolveDataset:
         }
 
         return cls(
-            header_df,
+            header_df,  # already pl.DataFrame from _read_csv_with_progress
             species_df,
             role_mapping,
             target_configs,
@@ -308,31 +286,37 @@ class ResolveDataset:
             if col in header_data:
                 header_dict[col] = header_data[col].numpy()
 
-        header_df = pd.DataFrame(header_dict)
+        header_df = pl.DataFrame(header_dict)
 
         # Filter out rows where target values are NaN
-        # This matches the behavior of the pandas-based from_csv method
         original_count = len(header_df)
-        valid_mask = pd.Series(True, index=header_df.index)
+        filter_exprs = []
         target_cols_filtered = []
         for name, cfg in targets.items():
             col = cfg["column"]
             if col in header_df.columns:
-                col_mask = header_df[col].notna()
-                if not col_mask.all():
+                n_null = header_df[col].null_count()
+                if n_null > 0:
                     target_cols_filtered.append(col)
-                valid_mask &= col_mask
+                filter_exprs.append(pl.col(col).is_not_null())
 
         # Track which rows were filtered for later species filtering
         valid_indices = None
-        if not valid_mask.all():
-            valid_indices = valid_mask.values  # Boolean mask of original indices
-            header_df = header_df[valid_mask].reset_index(drop=True)
-            filtered_count = original_count - len(header_df)
-            pct_remaining = 100 * len(header_df) / original_count
-            if verbose:
-                cols_str = ", ".join(target_cols_filtered) if target_cols_filtered else "targets"
-                print(f"  Filtered: {filtered_count:,} rows with NA in {cols_str} ({len(header_df):,} remaining, {pct_remaining:.1f}%)")
+        if filter_exprs:
+            combined_mask = filter_exprs[0]
+            for expr in filter_exprs[1:]:
+                combined_mask = combined_mask & expr
+            valid_mask_series = header_df.select(combined_mask.alias("_valid"))["_valid"]
+            if valid_mask_series.all():
+                pass  # No filtering needed
+            else:
+                valid_indices = valid_mask_series.to_numpy()
+                header_df = header_df.filter(combined_mask)
+                filtered_count = original_count - len(header_df)
+                pct_remaining = 100 * len(header_df) / original_count
+                if verbose:
+                    cols_str = ", ".join(target_cols_filtered) if target_cols_filtered else "targets"
+                    print(f"  Filtered: {filtered_count:,} rows with NA in {cols_str} ({len(header_df):,} remaining, {pct_remaining:.1f}%)")
 
         # Collect columns needed from species file
         # Numeric columns: abundance
@@ -428,18 +412,18 @@ class ResolveDataset:
                     print(f"  Filtered {n_filtered_records:,} species records for invalid plots")
 
         # Create a minimal species DataFrame with required columns
-        species_df = pd.DataFrame({
+        species_dict = {
             role_mapping.species_plot_id: species_tensors["plot_indices"].numpy(),
             role_mapping.species_id: species_tensors["species_ids"].numpy(),
-        })
+        }
         if role_mapping.abundance:
-            species_df[role_mapping.abundance] = species_tensors["weights"].numpy()
-        # Add taxonomy columns if present (hashed values for schema computation)
+            species_dict[role_mapping.abundance] = species_tensors["weights"].numpy()
         if role_mapping.has_taxonomy:
             if "genus_ids" in species_tensors:
-                species_df[role_mapping.taxonomy_genus] = species_tensors["genus_ids"].numpy()
+                species_dict[role_mapping.taxonomy_genus] = species_tensors["genus_ids"].numpy()
             if "family_ids" in species_tensors:
-                species_df[role_mapping.taxonomy_family] = species_tensors["family_ids"].numpy()
+                species_dict[role_mapping.taxonomy_family] = species_tensors["family_ids"].numpy()
+        species_df = pl.DataFrame(species_dict)
 
         # Build target configs
         target_configs = {
@@ -448,7 +432,7 @@ class ResolveDataset:
 
         # Create dataset instance
         instance = cls.__new__(cls)
-        instance._header = header_df.copy()
+        instance._header = header_df
         instance._species = species_df
         instance._roles = role_mapping
         instance._targets = target_configs
@@ -500,12 +484,12 @@ class ResolveDataset:
         return getattr(self, '_fast_species_tensors', None)
 
     @property
-    def header(self) -> pd.DataFrame:
+    def header(self) -> pl.DataFrame:
         """Plot-level data."""
         return self._header
 
     @property
-    def species(self) -> pd.DataFrame:
+    def species(self) -> pl.DataFrame:
         """Species occurrence data."""
         return self._species
 
@@ -537,7 +521,7 @@ class ResolveDataset:
     @property
     def plot_ids(self) -> np.ndarray:
         """Array of plot IDs."""
-        return self._header[self._roles.plot_id].values
+        return self._header[self._roles.plot_id].to_numpy()
 
     @property
     def n_plots(self) -> int:
@@ -550,8 +534,8 @@ class ResolveDataset:
         n_genera = 0
         n_families = 0
         if self._roles.has_taxonomy:
-            n_genera = self._species[self._roles.taxonomy_genus].nunique()
-            n_families = self._species[self._roles.taxonomy_family].nunique()
+            n_genera = self._species[self._roles.taxonomy_genus].n_unique()
+            n_families = self._species[self._roles.taxonomy_family].n_unique()
 
         # n_continuous: coordinates (if present) + covariates
         n_coords = 2 if self._roles.has_coordinates else 0
@@ -559,7 +543,7 @@ class ResolveDataset:
 
         return ResolveSchema(
             n_plots=self.n_plots,
-            n_species=self._species[self._roles.species_id].nunique(),
+            n_species=self._species[self._roles.species_id].n_unique(),
             n_continuous=n_continuous,
             has_coordinates=self._roles.has_coordinates,
             has_abundance=self._roles.has_abundance,
@@ -580,37 +564,49 @@ class ResolveDataset:
         """
         if not self._roles.has_coordinates:
             return None
-        arr = self._header[[self._roles.coords_lat, self._roles.coords_lon]].values.astype(np.float32)
-        return np.nan_to_num(arr, nan=0.0)
+        arr = (
+            self._header
+            .select(self._roles.coords_lat, self._roles.coords_lon)
+            .fill_null(0.0)
+            .to_numpy()
+            .astype(np.float32)
+        )
+        return arr
 
     def get_covariates(self) -> Optional[np.ndarray]:
         """Get covariate array if any covariates defined."""
         if not self._roles.covariates:
             return None
-        arr = self._header[self._roles.covariates].values.astype(np.float32)
-        return np.nan_to_num(arr, nan=0.0)
+        arr = (
+            self._header
+            .select(self._roles.covariates)
+            .fill_null(0.0)
+            .to_numpy()
+            .astype(np.float32)
+        )
+        return arr
 
     def get_target(self, name: str) -> np.ndarray:
         """Get target array by name."""
         if name not in self._targets:
             raise KeyError(f"Unknown target: {name}")
         cfg = self._targets[name]
-        values = self._header[cfg.column].values
+        col = self._header[cfg.column]
 
         if cfg.task == "regression":
-            values = values.astype(np.float32)
+            values = col.cast(pl.Float32, strict=False).to_numpy()
             if cfg.transform == "log1p":
                 values = np.log1p(values)
         else:
-            # Classification: encode as integers
-            values = pd.Categorical(values).codes.astype(np.int64)
+            # Classification: cast to int directly (column should already be integer-encoded)
+            values = col.cast(pl.Int64).to_numpy()
 
         return values
 
     def get_target_mask(self, name: str) -> np.ndarray:
         """Get boolean mask for non-null target values."""
         cfg = self._targets[name]
-        return ~self._header[cfg.column].isna().values
+        return self._header[cfg.column].is_not_null().to_numpy()
 
     def split(
         self,
@@ -622,23 +618,22 @@ class ResolveDataset:
 
         Splits by plot ID, keeping species rows with their plots.
         """
-        plot_ids = self._header[self._roles.plot_id].values
+        plot_ids = self._header[self._roles.plot_id].to_numpy()
         train_ids, test_ids = train_test_split(
             plot_ids, test_size=test_size, random_state=seed
         )
 
-        train_ids_set = set(train_ids)
-        test_ids_set = set(test_ids)
+        train_ids_list = train_ids.tolist()
+        test_ids_list = test_ids.tolist()
 
-        train_header = self._header[self._header[self._roles.plot_id].isin(train_ids_set)]
-        test_header = self._header[self._header[self._roles.plot_id].isin(test_ids_set)]
+        pid = self._roles.plot_id
+        spid = self._roles.species_plot_id
 
-        train_species = self._species[
-            self._species[self._roles.species_plot_id].isin(train_ids_set)
-        ]
-        test_species = self._species[
-            self._species[self._roles.species_plot_id].isin(test_ids_set)
-        ]
+        train_header = self._header.filter(pl.col(pid).is_in(train_ids_list))
+        test_header = self._header.filter(pl.col(pid).is_in(test_ids_list))
+
+        train_species = self._species.filter(pl.col(spid).is_in(train_ids_list))
+        test_species = self._species.filter(pl.col(spid).is_in(test_ids_list))
 
         train_ds = ResolveDataset(
             train_header, train_species, self._roles, self._targets,
@@ -657,12 +652,12 @@ class ResolveDataset:
 
     def filter_by_target(self, name: str) -> ResolveDataset:
         """Return dataset filtered to rows with non-null target values."""
-        mask = self.get_target_mask(name)
-        filtered_header = self._header[mask].copy()
-        plot_ids = set(filtered_header[self._roles.plot_id])
-        filtered_species = self._species[
-            self._species[self._roles.species_plot_id].isin(plot_ids)
-        ].copy()
+        cfg = self._targets[name]
+        filtered_header = self._header.filter(pl.col(cfg.column).is_not_null())
+        plot_ids_list = filtered_header[self._roles.plot_id].to_list()
+        filtered_species = self._species.filter(
+            pl.col(self._roles.species_plot_id).is_in(plot_ids_list)
+        )
         return ResolveDataset(
             filtered_header, filtered_species, self._roles, self._targets,
             species_normalization=self._species_normalization,

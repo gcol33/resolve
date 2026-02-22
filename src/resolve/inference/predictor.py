@@ -7,11 +7,12 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import torch
 
 from resolve.data.dataset import ResolveDataset
 from resolve.encode.species import SpeciesEncoder
+from resolve.encode.embedding import EmbeddingEncoder
 from resolve.model.resolve import ResolveModel
 from resolve.train.trainer import Trainer
 
@@ -29,16 +30,15 @@ class ResolvePredictions:
         """Get predictions for a target."""
         return self.predictions[target]
 
-    def to_dataframe(self) -> pd.DataFrame:
-        """Convert predictions to DataFrame."""
-        df = pd.DataFrame({"plot_id": self.plot_ids})
-        for name, pred in self.predictions.items():
-            df[name] = pred
-        return df
+    def to_polars(self) -> pl.DataFrame:
+        """Convert predictions to polars DataFrame."""
+        data = {"plot_id": self.plot_ids}
+        data.update(self.predictions)
+        return pl.DataFrame(data)
 
     def to_csv(self, path: str | Path) -> None:
         """Save predictions to CSV."""
-        self.to_dataframe().to_csv(path, index=False)
+        self.to_polars().write_csv(path)
 
 
 class Predictor:
@@ -51,7 +51,7 @@ class Predictor:
     def __init__(
         self,
         model: ResolveModel,
-        species_encoder: SpeciesEncoder,
+        species_encoder: SpeciesEncoder | EmbeddingEncoder,
         scalers: dict,
         device: str = "auto",
     ):
@@ -108,27 +108,84 @@ class Predictor:
         """
         if output_space not in ("raw", "transformed"):
             raise ValueError(f"output_space must be 'raw' or 'transformed', got {output_space!r}")
-        # Encode species
-        encoded = self.species_encoder.transform(dataset)
 
         # Get continuous features
         coords = dataset.get_coordinates()
         covariates = dataset.get_covariates()
-
-        # Combine available continuous features + hash_embedding + unknown_mass
-        parts = []
-        if coords is not None:
-            parts.append(coords)
-        if covariates is not None:
-            parts.append(covariates)
-        parts.append(encoded.hash_embedding)
-        # Include unknown tracking features based on schema settings
         schema = self.model.schema
-        if schema.track_unknown_fraction:
-            parts.append(encoded.unknown_fraction.reshape(-1, 1))
-        if schema.track_unknown_count and encoded.unknown_count is not None:
-            parts.append(encoded.unknown_count.reshape(-1, 1).astype(np.float32))
-        continuous = np.hstack(parts)
+
+        species_ids_t = None
+        species_vector_t = None
+        genus_t = None
+        family_t = None
+        # Rank-pool mode tensors
+        pool_genus_ids_t = None
+        pool_family_ids_t = None
+        pool_weights_t = None
+        pool_mask_t = None
+        pool_has_cover_t = None
+
+        encoding = self.model.species_encoding
+
+        if encoding == "embed":
+            embedded = self.species_encoder.transform(dataset)
+            parts = []
+            if coords is not None:
+                parts.append(coords)
+            if covariates is not None:
+                parts.append(covariates)
+            if schema.track_unknown_fraction:
+                parts.append(embedded.unknown_fraction.reshape(-1, 1))
+            unknown_fraction = embedded.unknown_fraction
+
+            species_ids_t = torch.from_numpy(embedded.species_ids).to(self._device)
+            if embedded.genus_ids is not None:
+                genus_t = torch.from_numpy(embedded.genus_ids).to(self._device)
+                family_t = torch.from_numpy(embedded.family_ids).to(self._device)
+
+        elif encoding == "rank_pool":
+            pool_encoded = self.species_encoder.transform(dataset)
+            parts = []
+            if coords is not None:
+                parts.append(coords)
+            if covariates is not None:
+                parts.append(covariates)
+            if schema.track_unknown_fraction:
+                parts.append(pool_encoded.unknown_fraction.reshape(-1, 1))
+            unknown_fraction = pool_encoded.unknown_fraction
+
+            from resolve.encode.rank_pool import pad_rank_pool_encoded
+            padded = pad_rank_pool_encoded(pool_encoded)
+            species_ids_t = torch.from_numpy(padded["species_ids"]).long().to(self._device)
+            pool_genus_ids_t = torch.from_numpy(padded["genus_ids"]).long().to(self._device)
+            pool_family_ids_t = torch.from_numpy(padded["family_ids"]).long().to(self._device)
+            pool_weights_t = torch.from_numpy(padded["weights"]).to(self._device)
+            pool_mask_t = torch.from_numpy(padded["mask"]).to(self._device)
+            pool_has_cover_t = torch.from_numpy(padded["has_cover"]).to(self._device)
+
+        else:
+            # Hash mode
+            encoded = self.species_encoder.transform(dataset)
+            parts = []
+            if coords is not None:
+                parts.append(coords)
+            if covariates is not None:
+                parts.append(covariates)
+            if self.model.uses_explicit_vector:
+                species_vector_t = torch.from_numpy(encoded.species_vector).to(self._device)
+            else:
+                parts.append(encoded.hash_embedding)
+            if schema.track_unknown_fraction:
+                parts.append(encoded.unknown_fraction.reshape(-1, 1))
+            if schema.track_unknown_count and encoded.unknown_count is not None:
+                parts.append(encoded.unknown_count.reshape(-1, 1).astype(np.float32))
+            unknown_fraction = encoded.unknown_fraction
+
+            if encoded.genus_ids is not None:
+                genus_t = torch.from_numpy(encoded.genus_ids).to(self._device)
+                family_t = torch.from_numpy(encoded.family_ids).to(self._device)
+
+        continuous = np.hstack(parts) if parts else np.zeros((len(dataset.plot_ids), 0), dtype=np.float32)
 
         # Scale
         continuous = self.scalers["continuous"].transform(continuous).astype(np.float32)
@@ -136,24 +193,41 @@ class Predictor:
         # Convert to tensors
         continuous_t = torch.from_numpy(continuous).to(self._device)
 
-        if encoded.genus_ids is not None:
-            genus_t = torch.from_numpy(encoded.genus_ids).to(self._device)
-            family_t = torch.from_numpy(encoded.family_ids).to(self._device)
+        # Forward pass (dispatch based on encoding mode)
+        if encoding == "rank_pool":
+            predictions_raw = self.model(
+                continuous_t, genus_ids=None, family_ids=None,
+                species_ids=species_ids_t, species_vector=None,
+                pool_genus_ids=pool_genus_ids_t, pool_family_ids=pool_family_ids_t,
+                pool_weights=pool_weights_t, pool_mask=pool_mask_t,
+                pool_has_cover=pool_has_cover_t,
+            )
         else:
-            genus_t = None
-            family_t = None
-
-        # Forward pass
-        predictions_raw = self.model(continuous_t, genus_t, family_t)
+            predictions_raw = self.model(
+                continuous_t, genus_t, family_t,
+                species_ids=species_ids_t, species_vector=species_vector_t,
+            )
 
         # Get latent if requested
         latent = None
         if return_latent:
-            latent = self.model.get_latent(continuous_t, genus_t, family_t)
+            if encoding == "rank_pool":
+                latent = self.model.get_latent(
+                    continuous_t, genus_ids=None, family_ids=None,
+                    species_ids=species_ids_t, species_vector=None,
+                    pool_genus_ids=pool_genus_ids_t, pool_family_ids=pool_family_ids_t,
+                    pool_weights=pool_weights_t, pool_mask=pool_mask_t,
+                    pool_has_cover=pool_has_cover_t,
+                )
+            else:
+                latent = self.model.get_latent(
+                    continuous_t, genus_t, family_t,
+                    species_ids=species_ids_t, species_vector=species_vector_t,
+                )
             latent = latent.cpu().numpy()
 
         # Compute confidence (1 - unknown_fraction for regression)
-        regression_confidence = 1.0 - encoded.unknown_fraction
+        regression_confidence = 1.0 - unknown_fraction
 
         # Post-process predictions
         predictions = {}
