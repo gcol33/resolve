@@ -142,6 +142,7 @@ class PhasedLoss:
             label_smoothing=self.label_smoothing,
             weight=self.class_weights,
         )
+        self._ce_device_synced = False
 
     def get_phase(self, epoch: int) -> int:
         """Get current training phase (1-indexed)."""
@@ -264,6 +265,11 @@ class PhasedLoss:
             pred: (batch, num_classes) logits
             target: (batch,) integer labels
         """
+        # Sync class_weights device/dtype with predictions (AMP may change dtype)
+        if self._ce.weight is not None:
+            w = self._ce.weight
+            if w.device != pred.device or w.dtype != pred.dtype:
+                self._ce.weight = w.to(device=pred.device, dtype=pred.dtype)
         return self._ce(pred, target)
 
 
@@ -318,6 +324,7 @@ class MultiTaskLoss:
             label_smoothing=label_smoothing,
             weight=class_weights,
         )
+        self._ce_device_synced = False
 
         # Cache current epoch/phase to avoid repeated lookups
         self._cached_epoch = -1
@@ -384,6 +391,10 @@ class MultiTaskLoss:
                     pred, target, epoch, scaler_mean, scaler_scale, cfg.transform
                 )
             else:
+                if self._ce.weight is not None:
+                    w = self._ce.weight
+                    if w.device != pred.device or w.dtype != pred.dtype:
+                        self._ce.weight = w.to(device=pred.device, dtype=pred.dtype)
                 loss = self._ce(pred, target)
 
             losses[name] = loss
