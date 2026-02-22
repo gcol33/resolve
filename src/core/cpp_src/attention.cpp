@@ -1,4 +1,5 @@
 #include "resolve/attention.hpp"
+#include "resolve/types.hpp"
 #include <algorithm>
 
 namespace resolve {
@@ -1059,6 +1060,196 @@ torch::Tensor GNNEncoderImpl::forward(torch::Tensor x, torch::Tensor adj) {
 }
 
 // =============================================================================
+// Typed Message Passing Layer Implementation
+// =============================================================================
+
+TypedMessagePassingLayerImpl::TypedMessagePassingLayerImpl(
+    int64_t in_features,
+    int64_t out_features,
+    int64_t n_edge_types,
+    int64_t n_heads,
+    float dropout
+) : n_edge_types_(n_edge_types),
+    in_features_(in_features),
+    out_features_(out_features)
+{
+    // Per-edge-type message function: concat(src, tgt) -> message
+    torch::nn::ModuleList msg_fns;
+    for (int64_t t = 0; t < n_edge_types; ++t) {
+        auto seq = torch::nn::Sequential();
+        seq->push_back(torch::nn::Linear(2 * in_features, out_features));
+        seq->push_back(torch::nn::GELU());
+        seq->push_back(torch::nn::Linear(out_features, out_features));
+        msg_fns->push_back(seq);
+    }
+    message_fns_ = register_module("message_fns", msg_fns);
+
+    // Attention mechanism for aggregating incoming messages
+    attn_query_ = register_module("attn_q",
+        torch::nn::Linear(in_features, out_features));
+    attn_key_ = register_module("attn_k",
+        torch::nn::Linear(out_features, out_features));
+
+    // Output projection + norm
+    output_ = register_module("output",
+        torch::nn::Linear(out_features, out_features));
+    norm_ = register_module("norm",
+        torch::nn::LayerNorm(torch::nn::LayerNormOptions({out_features})));
+    dropout_ = register_module("dropout", torch::nn::Dropout(dropout));
+}
+
+torch::Tensor TypedMessagePassingLayerImpl::forward(
+    torch::Tensor node_features,
+    torch::Tensor edge_index,
+    torch::Tensor edge_type
+) {
+    int64_t n_nodes = node_features.size(0);
+    int64_t n_edges = edge_index.size(1);
+
+    if (n_edges == 0) {
+        // No edges: return projected features (or zeros if dim mismatch)
+        if (in_features_ == out_features_) {
+            return norm_->forward(node_features);
+        }
+        return norm_->forward(output_->forward(
+            torch::zeros({n_nodes, out_features_}, node_features.options())));
+    }
+
+    // Gather source and target features
+    auto src_idx = edge_index[0];  // (n_edges,)
+    auto tgt_idx = edge_index[1];  // (n_edges,)
+
+    auto src_feats = node_features.index_select(0, src_idx);  // (n_edges, in_features)
+    auto tgt_feats = node_features.index_select(0, tgt_idx);  // (n_edges, in_features)
+
+    // Compute messages per edge type
+    auto messages = torch::zeros({n_edges, out_features_}, node_features.options());
+    auto edge_input = torch::cat({src_feats, tgt_feats}, /*dim=*/1);  // (n_edges, 2*in_features)
+
+    for (int64_t t = 0; t < n_edge_types_; ++t) {
+        auto mask = (edge_type == t);  // (n_edges,)
+        if (!mask.any().item<bool>()) continue;
+
+        auto type_input = edge_input.index({mask});
+        auto type_msgs = message_fns_[t]->as<torch::nn::Sequential>()->forward(type_input);
+        messages.index_put_({mask}, type_msgs);
+    }
+
+    // Attention-weighted aggregation of messages to target nodes
+    auto query = attn_query_->forward(node_features);  // (n_nodes, out_features)
+    auto key = attn_key_->forward(messages);            // (n_edges, out_features)
+
+    // Gather query for each edge's target node
+    auto tgt_query = query.index_select(0, tgt_idx);  // (n_edges, out_features)
+
+    // Attention scores: dot product / sqrt(d)
+    auto attn_scores = (tgt_query * key).sum(-1) /
+        std::sqrt(static_cast<float>(out_features_));  // (n_edges,)
+
+    // Scatter softmax: exp + scatter_add + normalize
+    auto attn_exp = attn_scores.exp();  // (n_edges,)
+    auto attn_sum = torch::zeros({n_nodes}, node_features.options());
+    attn_sum.scatter_add_(0, tgt_idx, attn_exp);
+    auto attn_weights = attn_exp /
+        (attn_sum.index_select(0, tgt_idx) + kEpsilon);  // (n_edges,)
+
+    // Weight messages and scatter to target nodes
+    auto weighted_msgs = messages * attn_weights.unsqueeze(1);  // (n_edges, out_features)
+    auto aggregated = torch::zeros({n_nodes, out_features_}, node_features.options());
+    aggregated.scatter_add_(0,
+        tgt_idx.unsqueeze(1).expand_as(weighted_msgs),
+        weighted_msgs);
+
+    // Output projection + dropout
+    auto out = output_->forward(aggregated);
+    out = dropout_->forward(out);
+
+    // Residual connection (if dimensions match)
+    if (in_features_ == out_features_) {
+        out = out + node_features;
+    }
+    out = norm_->forward(out);
+
+    return out;
+}
+
+// =============================================================================
+// Heterogeneous GNN Encoder Implementation
+// =============================================================================
+
+HeterogeneousGNNEncoderImpl::HeterogeneousGNNEncoderImpl(
+    int64_t n_species,
+    int64_t hidden_dim,
+    int64_t output_dim,
+    int64_t n_layers,
+    int64_t n_edge_types,
+    int64_t n_heads,
+    float dropout
+) : n_species_(n_species),
+    output_dim_(output_dim)
+{
+    // Learnable species node embeddings
+    species_embeddings_ = register_parameter("species_embeddings",
+        torch::randn({n_species, hidden_dim}) * 0.02f);
+
+    // Input projection (identity if hidden_dim matches)
+    input_proj_ = register_module("input_proj",
+        torch::nn::Linear(hidden_dim, hidden_dim));
+
+    // Stack of typed message passing layers
+    layers_ = register_module("layers", torch::nn::ModuleList());
+    for (int64_t i = 0; i < n_layers; ++i) {
+        layers_->push_back(
+            register_module("mp_" + std::to_string(i),
+                TypedMessagePassingLayer(
+                    hidden_dim, hidden_dim, n_edge_types, n_heads, dropout)));
+    }
+
+    // Final projection to output dimension
+    output_proj_ = register_module("output_proj",
+        torch::nn::Linear(hidden_dim, output_dim));
+    final_norm_ = register_module("final_norm",
+        torch::nn::LayerNorm(torch::nn::LayerNormOptions({output_dim})));
+}
+
+torch::Tensor HeterogeneousGNNEncoderImpl::forward(
+    torch::Tensor edge_index,
+    torch::Tensor edge_type
+) {
+    // Start with learnable species embeddings
+    auto x = input_proj_->forward(species_embeddings_);
+
+    // Apply message passing layers
+    for (auto& layer : *layers_) {
+        x = layer->as<TypedMessagePassingLayerImpl>()->forward(
+            x, edge_index, edge_type);
+    }
+
+    // Project to output dimension
+    x = output_proj_->forward(x);
+    x = final_norm_->forward(x);
+
+    return x;  // (n_species, output_dim)
+}
+
+torch::Tensor HeterogeneousGNNEncoderImpl::aggregate_for_plots(
+    torch::Tensor species_embeddings,
+    torch::Tensor species_vector
+) {
+    // species_embeddings: (n_species, output_dim)
+    // species_vector: (batch, n_species)
+    //
+    // Weighted sum of species embeddings per plot:
+    // plot_feat = sum_s(abundance_s * embedding_s) / sum_s(abundance_s)
+
+    // Normalize species vector (so it sums to 1 per plot)
+    auto weights = species_vector / (species_vector.sum(/*dim=*/1, /*keepdim=*/true) + kEpsilon);
+
+    // Weighted sum: (batch, n_species) @ (n_species, output_dim) = (batch, output_dim)
+    return torch::matmul(weights, species_embeddings);
+}
+
+// =============================================================================
 // Utility: k-NN Adjacency Construction
 // =============================================================================
 
@@ -1090,6 +1281,109 @@ torch::Tensor build_knn_adjacency(torch::Tensor coords, int64_t k) {
     adj = d_inv_sqrt.unsqueeze(1) * adj * d_inv_sqrt.unsqueeze(0);
 
     return adj;
+}
+
+// =============================================================================
+// ExcelFormer Encoder
+// =============================================================================
+
+ExcelFormerEncoderImpl::ExcelFormerEncoderImpl(
+    int64_t n_numerical,
+    std::vector<int64_t> cat_cardinalities,
+    int64_t d_model,
+    int64_t n_heads,
+    int64_t n_layers,
+    int64_t d_ff,
+    float dropout,
+    float importance_threshold,
+    bool use_cls_token
+) : d_model_(d_model),
+    importance_threshold_(importance_threshold),
+    use_cls_token_(use_cls_token)
+{
+    // Create feature tokenizer
+    tokenizer_ = register_module("tokenizer",
+        FeatureTokenizer(n_numerical, cat_cardinalities, d_model, use_cls_token));
+
+    n_tokens_ = tokenizer_->n_tokens();
+
+    // Learnable feature importance scores (one per token)
+    importance_logits_ = register_parameter("importance_logits",
+        torch::zeros({n_tokens_}));
+
+    // Transformer layers
+    if (d_ff == 0) d_ff = 4 * d_model;
+    layers_ = register_module("layers", torch::nn::ModuleList());
+    for (int64_t i = 0; i < n_layers; ++i) {
+        layers_->push_back(
+            register_module("block_" + std::to_string(i),
+                TransformerBlock(d_model, n_heads, d_ff, dropout, /*pre_norm=*/true)));
+    }
+
+    final_norm_ = register_module("final_norm",
+        torch::nn::LayerNorm(torch::nn::LayerNormOptions({d_model})));
+}
+
+torch::Tensor ExcelFormerEncoderImpl::build_attention_mask() const {
+    // Feature importance via sigmoid
+    auto importance = torch::sigmoid(importance_logits_);  // (n_tokens,)
+
+    // Sort features by importance (descending)
+    auto [sorted_imp, sorted_idx] = importance.sort(/*dim=*/0, /*descending=*/true);
+
+    // Build permeable attention mask:
+    // Feature i can attend to feature j if:
+    //   - importance(j) >= importance_threshold (j is informative, visible to all)
+    //   - OR importance(j) >= importance(i) (j is more important than i)
+    auto imp_row = importance.unsqueeze(1);  // (n_tokens, 1)
+    auto imp_col = importance.unsqueeze(0);  // (1, n_tokens)
+
+    // informative features are visible to everyone
+    auto is_informative = (imp_col >= importance_threshold_);  // (1, n_tokens)
+
+    // feature j is at least as important as feature i
+    auto is_more_important = (imp_col >= imp_row);  // (n_tokens, n_tokens)
+
+    // Combine: can attend if target is informative OR more important
+    auto can_attend = is_informative | is_more_important;  // (n_tokens, n_tokens)
+
+    // Convert to boolean-style mask compatible with MultiHeadAttention:
+    // 1 = can attend, 0 = blocked. MHA uses masked_fill(mask == 0, -1e9).
+    // Shape (1, n_tokens, n_tokens) so MHA treats as (batch, seq_q, seq_k)
+    // and the leading 1 broadcasts across the batch dimension.
+    auto mask = can_attend.to(torch::kFloat).unsqueeze(0);
+
+    return mask;  // (1, n_tokens, n_tokens)
+}
+
+torch::Tensor ExcelFormerEncoderImpl::forward(
+    torch::Tensor numerical,
+    std::vector<torch::Tensor> categoricals
+) {
+    // Tokenize features
+    auto tokens = tokenizer_->forward(numerical, categoricals);  // (batch, n_tokens, d_model)
+
+    // Build semi-permeable attention mask
+    auto attn_mask = build_attention_mask();  // (n_tokens, n_tokens)
+
+    // Pass through transformer layers with attention mask
+    auto x = tokens;
+    for (const auto& layer : *layers_) {
+        x = layer->as<TransformerBlockImpl>()->forward(x, attn_mask);
+    }
+
+    x = final_norm_->forward(x);
+
+    // Extract CLS token or mean pool
+    if (use_cls_token_) {
+        return x.select(1, 0);  // (batch, d_model) - CLS token
+    } else {
+        return x.mean(1);  // (batch, d_model) - mean pool
+    }
+}
+
+torch::Tensor ExcelFormerEncoderImpl::feature_importance() const {
+    return torch::sigmoid(importance_logits_).detach();
 }
 
 }  // namespace resolve

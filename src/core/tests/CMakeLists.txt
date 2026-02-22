@@ -14,6 +14,7 @@ add_executable(resolve_tests
     test_model.cpp
     test_dataset.cpp
     test_loss.cpp
+    test_new_modules.cpp
 )
 
 # Add CUDA library directory if CUDA is available

@@ -1,8 +1,8 @@
 """
 CUDA kernels for RESOLVE.
 
-Provides GPU-accelerated hash embedding computation.
-Uses Triton kernels (PyTorch 2.4+) or pure PyTorch scatter_add as fallback.
+Provides GPU-accelerated hash embedding computation and fused linear+CE loss.
+Uses Triton kernels (PyTorch 2.4+) or pure PyTorch fallback.
 """
 
 from .hash_ops import (
@@ -12,6 +12,7 @@ from .hash_ops import (
     hash_aggregate_pure_torch,
     hash_batch_csr_pure_torch,
 )
+from .fused_linear_ce import fused_linear_cross_entropy
 
 __all__ = [
     "hash_aggregate",
@@ -19,6 +20,7 @@ __all__ = [
     "is_triton_available",
     "hash_aggregate_pure_torch",
     "hash_batch_csr_pure_torch",
+    "fused_linear_cross_entropy",
 ]
 
 

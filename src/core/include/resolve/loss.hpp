@@ -75,6 +75,45 @@ private:
     PhasedLoss phased_loss_;
 };
 
+// NCA (Neighborhood Component Analysis) loss for classification
+// Instead of cross-entropy, predictions are based on softmax similarity
+// to training examples in embedding space. Encourages well-separated
+// latent clusters.
+class NCALossImpl : public torch::nn::Module {
+public:
+    NCALossImpl(
+        int64_t latent_dim,
+        int64_t n_classes,
+        float temperature = 0.1f,
+        int n_neighbors = 32  // Stochastic: subsample neighbors for efficiency
+    );
+
+    // Compute NCA loss from latent representations and targets
+    // latent: (batch, latent_dim) - encoder output
+    // targets: (batch,) - class labels
+    [[nodiscard]] torch::Tensor forward(
+        torch::Tensor latent,
+        torch::Tensor targets
+    );
+
+    // Get predicted class probabilities via NCA (for inference)
+    [[nodiscard]] torch::Tensor predict(torch::Tensor latent);
+
+    // Update reference set from training batch
+    void update_references(torch::Tensor latent, torch::Tensor targets);
+
+private:
+    int64_t n_classes_;
+    float temperature_;
+    int n_neighbors_;
+
+    // Reference embeddings and labels (maintained from training batches)
+    torch::Tensor ref_embeddings_;  // (n_ref, latent_dim)
+    torch::Tensor ref_labels_;      // (n_ref,)
+};
+
+TORCH_MODULE(NCALoss);
+
 // Classification metrics result
 struct ClassificationMetrics {
     float accuracy;

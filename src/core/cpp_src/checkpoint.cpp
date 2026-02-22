@@ -103,6 +103,20 @@ void save_model_config(
     archive.write("head_hidden_dims", torch::tensor(head_dims_vec));
     archive.write("head_activation", torch::tensor(static_cast<int>(config.head_activation)));
     archive.write("head_dropout", torch::tensor(config.head_dropout));
+
+    // Save encoder architecture
+    archive.write("encoder_architecture", torch::tensor(static_cast<int>(config.encoder_architecture)));
+
+    // Save TabM configuration
+    archive.write("tabm_enabled", torch::tensor(static_cast<int>(config.tabm.enabled)));
+    archive.write("tabm_n_ensembles", torch::tensor(config.tabm.n_ensembles));
+    // Save aggregation as bytes
+    std::vector<uint8_t> tabm_agg_bytes(config.tabm.aggregation.begin(), config.tabm.aggregation.end());
+    archive.write("tabm_aggregation_len", torch::tensor(static_cast<int64_t>(tabm_agg_bytes.size())));
+    if (!tabm_agg_bytes.empty()) {
+        archive.write("tabm_aggregation", torch::from_blob(
+            tabm_agg_bytes.data(), {static_cast<int64_t>(tabm_agg_bytes.size())}, torch::kUInt8).clone());
+    }
 }
 
 ModelConfig load_model_config(
@@ -222,6 +236,38 @@ ModelConfig load_model_config(
         config.head_hidden_dims = {};
         config.head_activation = ActivationType::GELU;
         config.head_dropout = 0.0f;
+    }
+
+    // Load encoder architecture (with backward compatibility)
+    try {
+        torch::Tensor encoder_arch_t;
+        archive.read("encoder_architecture", encoder_arch_t);
+        config.encoder_architecture = static_cast<EncoderArchitecture>(encoder_arch_t.item<int>());
+    } catch (...) {
+        config.encoder_architecture = EncoderArchitecture::MLP;  // Default for older checkpoints
+    }
+
+    // Load TabM configuration (with backward compatibility)
+    try {
+        torch::Tensor tabm_enabled_t, tabm_n_ensembles_t, tabm_agg_len_t;
+
+        archive.read("tabm_enabled", tabm_enabled_t);
+        config.tabm.enabled = tabm_enabled_t.item<int>() != 0;
+
+        archive.read("tabm_n_ensembles", tabm_n_ensembles_t);
+        config.tabm.n_ensembles = tabm_n_ensembles_t.item<int>();
+
+        archive.read("tabm_aggregation_len", tabm_agg_len_t);
+        int64_t agg_len = tabm_agg_len_t.item<int64_t>();
+        if (agg_len > 0) {
+            torch::Tensor tabm_agg_t;
+            archive.read("tabm_aggregation", tabm_agg_t);
+            auto ptr = tabm_agg_t.data_ptr<uint8_t>();
+            config.tabm.aggregation = std::string(reinterpret_cast<const char*>(ptr), agg_len);
+        }
+    } catch (...) {
+        // TabM config not present in older checkpoints - disabled by default
+        config.tabm = TabMConfig{};
     }
 
     return config;

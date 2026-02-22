@@ -567,6 +567,170 @@ private:
 
 TORCH_MODULE(GNNEncoder);
 
+// =============================================================================
+// ExcelFormer Encoder (Semi-Permeable Attention)
+// =============================================================================
+
+// ExcelFormer: FT-Transformer variant where informative features attend to all
+// features, while non-informative features only attend to more-informative ones.
+// Feature importance is learned via gradient signal during training.
+// Chen et al., "ExcelFormer: A Neural Network Surpassing GBDTs on Tabular Data"
+class ExcelFormerEncoderImpl : public torch::nn::Module {
+public:
+    ExcelFormerEncoderImpl(
+        int64_t n_numerical,
+        std::vector<int64_t> cat_cardinalities,
+        int64_t d_model = 192,
+        int64_t n_heads = 8,
+        int64_t n_layers = 3,
+        int64_t d_ff = 0,  // Default: 4 * d_model
+        float dropout = 0.1f,
+        float importance_threshold = 0.5f,  // Features above this are "informative"
+        bool use_cls_token = true
+    );
+
+    // Forward pass
+    torch::Tensor forward(
+        torch::Tensor numerical,
+        std::vector<torch::Tensor> categoricals = {}
+    );
+
+    // Get feature importance scores (for interpretability)
+    [[nodiscard]] torch::Tensor feature_importance() const;
+
+    [[nodiscard]] int64_t output_dim() const { return d_model_; }
+
+private:
+    int64_t d_model_;
+    int64_t n_tokens_;
+    float importance_threshold_;
+    bool use_cls_token_;
+
+    FeatureTokenizer tokenizer_{nullptr};
+
+    // Learnable feature importance scores
+    torch::Tensor importance_logits_;  // (n_tokens,) before sigmoid
+
+    // Transformer layers (custom forward with semi-permeable mask)
+    torch::nn::ModuleList layers_{nullptr};  // TransformerBlocks
+    torch::nn::LayerNorm final_norm_{nullptr};
+
+    // Build semi-permeable attention mask from importance scores
+    // Returns: (n_tokens, n_tokens) mask where -inf blocks attention
+    [[nodiscard]] torch::Tensor build_attention_mask() const;
+};
+
+TORCH_MODULE(ExcelFormerEncoder);
+
+// =============================================================================
+// Typed Message Passing Layer (for Heterogeneous GNN)
+// =============================================================================
+
+// Each edge type has its own message function (MLP).
+// Messages are aggregated via attention-weighted scatter to target nodes.
+class TypedMessagePassingLayerImpl : public torch::nn::Module {
+public:
+    TypedMessagePassingLayerImpl(
+        int64_t in_features,
+        int64_t out_features,
+        int64_t n_edge_types,
+        int64_t n_heads = 4,
+        float dropout = 0.1f
+    );
+
+    // node_features: (n_nodes, in_features)
+    // edge_index: (2, n_edges) - [source, target] node indices
+    // edge_type: (n_edges,) - type ID for each edge
+    // Returns: (n_nodes, out_features)
+    torch::Tensor forward(
+        torch::Tensor node_features,
+        torch::Tensor edge_index,
+        torch::Tensor edge_type
+    );
+
+private:
+    int64_t n_edge_types_;
+    int64_t in_features_;
+    int64_t out_features_;
+
+    // Per-edge-type message MLPs: (src_feat || tgt_feat) -> message
+    torch::nn::ModuleList message_fns_{nullptr};
+
+    // Attention for weighting incoming messages
+    torch::nn::Linear attn_query_{nullptr};
+    torch::nn::Linear attn_key_{nullptr};
+
+    // Output with residual + norm
+    torch::nn::Linear output_{nullptr};
+    torch::nn::LayerNorm norm_{nullptr};
+    torch::nn::Dropout dropout_{nullptr};
+};
+
+TORCH_MODULE(TypedMessagePassingLayer);
+
+// =============================================================================
+// Heterogeneous GNN Encoder
+// =============================================================================
+
+// Learns species embeddings from a heterogeneous graph with typed edges
+// (co-occurrence, same-genus, same-family). The embeddings are aggregated
+// per-plot using species abundance vectors.
+//
+// Node types: species (each species is a node)
+// Edge types: co-occurrence, same-genus, same-family
+class HeterogeneousGNNEncoderImpl : public torch::nn::Module {
+public:
+    HeterogeneousGNNEncoderImpl(
+        int64_t n_species,            // Number of species nodes
+        int64_t hidden_dim = 128,
+        int64_t output_dim = 64,
+        int64_t n_layers = 3,
+        int64_t n_edge_types = 3,
+        int64_t n_heads = 4,
+        float dropout = 0.1f
+    );
+
+    // Run message passing on the species graph
+    // edge_index: (2, n_edges) - edge endpoints
+    // edge_type: (n_edges,) - type of each edge
+    // Returns: (n_species, output_dim) species embeddings
+    torch::Tensor forward(
+        torch::Tensor edge_index,
+        torch::Tensor edge_type
+    );
+
+    // Aggregate species embeddings into per-plot features
+    // species_embeddings: (n_species, output_dim) from forward()
+    // species_vector: (batch, n_species) abundance/presence vector
+    // Returns: (batch, output_dim) plot-level features
+    [[nodiscard]] static torch::Tensor aggregate_for_plots(
+        torch::Tensor species_embeddings,
+        torch::Tensor species_vector
+    );
+
+    [[nodiscard]] int64_t output_dim() const noexcept { return output_dim_; }
+    [[nodiscard]] int64_t n_species() const noexcept { return n_species_; }
+
+private:
+    int64_t n_species_;
+    int64_t output_dim_;
+
+    // Learnable species embeddings (initial node features)
+    torch::Tensor species_embeddings_;  // (n_species, hidden_dim)
+
+    // Input projection from hidden_dim
+    torch::nn::Linear input_proj_{nullptr};
+
+    // Message passing layers
+    torch::nn::ModuleList layers_{nullptr};
+
+    // Final projection to output_dim
+    torch::nn::Linear output_proj_{nullptr};
+    torch::nn::LayerNorm final_norm_{nullptr};
+};
+
+TORCH_MODULE(HeterogeneousGNNEncoder);
+
 // Utility: Build k-NN adjacency from coordinates
 // coords: (n_nodes, 2) - spatial coordinates
 // k: number of neighbors

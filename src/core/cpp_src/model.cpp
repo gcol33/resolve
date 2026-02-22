@@ -19,14 +19,26 @@ ResolveModelImpl::ResolveModelImpl(
 
     int64_t n_continuous_base = n_coords + schema.covariate_names.size() + n_unknown_features;
 
+    // Check if using advanced architecture (non-MLP)
+    bool use_adapter = (config.encoder_architecture != EncoderArchitecture::MLP &&
+                        config.encoder_architecture != EncoderArchitecture::TraitNet);
+
+    if (use_adapter) {
+        // Use TabularAdapter for FT-Transformer, TabNet, SAINT, GNN
+        adapter_ = register_module("adapter", TabularAdapter(schema, config));
+    }
+
     // Check if MoE is enabled
     bool use_moe = (config.moe_routing != MoERoutingType::None);
 
     // Create MLP block config from model config
     MLPBlockConfig mlp_config = MLPBlockConfig::from_model_config(config);
 
-    // Create appropriate encoder based on mode and MoE setting
-    if (config.species_encoding == SpeciesEncodingMode::Hash && !config.uses_explicit_vector) {
+    // Create appropriate encoder based on mode and MoE setting (only for MLP mode)
+    if (use_adapter) {
+        // Adapter handles encoding internally, no separate encoder needed
+    }
+    else if (config.species_encoding == SpeciesEncodingMode::Hash && !config.uses_explicit_vector) {
         // Hash mode: continuous includes hash_dim
         int64_t n_continuous = n_continuous_base + config.hash_dim;
 
@@ -48,7 +60,7 @@ ResolveModelImpl::ResolveModelImpl(
                 config.moe_noise_std
             ));
         } else {
-            // Standard encoder with configurable architecture
+            // Standard encoder with configurable architecture (+ optional TabM)
             encoder_hash_ = register_module("encoder", PlotEncoder(
                 n_continuous,
                 schema.has_taxonomy ? schema.n_genera + 1 : 0,
@@ -57,7 +69,8 @@ ResolveModelImpl::ResolveModelImpl(
                 config.family_emb_dim,
                 config.n_taxonomy_slots,
                 config.hidden_dims,
-                mlp_config
+                mlp_config,
+                config.tabm
             ));
         }
     }
@@ -86,7 +99,8 @@ ResolveModelImpl::ResolveModelImpl(
             config.top_k_species,
             config.n_taxonomy_slots,
             config.hidden_dims,
-            mlp_config
+            mlp_config,
+            config.tabm
         ));
     }
     else {
@@ -113,7 +127,8 @@ ResolveModelImpl::ResolveModelImpl(
             config.family_emb_dim,
             config.n_taxonomy_slots,
             config.hidden_dims,
-            mlp_config
+            mlp_config,
+            config.tabm
         ));
     }
 
@@ -151,7 +166,9 @@ ResolveModelImpl::ResolveModelImpl(
 }
 
 int64_t ResolveModelImpl::latent_dim() const {
-    if (encoder_moe_) {
+    if (adapter_) {
+        return adapter_->latent_dim();
+    } else if (encoder_moe_) {
         return encoder_moe_->latent_dim();
     } else if (encoder_hash_) {
         return encoder_hash_->latent_dim();
@@ -169,7 +186,9 @@ torch::Tensor ResolveModelImpl::encode(
     torch::Tensor species_ids,
     torch::Tensor species_vector
 ) {
-    if (encoder_moe_) {
+    if (adapter_) {
+        return adapter_->forward(continuous, genus_ids, family_ids, species_ids, species_vector);
+    } else if (encoder_moe_) {
         // MoE encoder - use forward_simple for inference/latent extraction
         return encoder_moe_->forward_simple(continuous, genus_ids, family_ids);
     } else if (encoder_hash_) {
@@ -188,7 +207,11 @@ std::pair<torch::Tensor, torch::Tensor> ResolveModelImpl::encode_with_aux(
     torch::Tensor species_ids,
     torch::Tensor species_vector
 ) {
-    if (encoder_moe_) {
+    if (adapter_) {
+        // Adapter doesn't have aux loss
+        auto latent = adapter_->forward(continuous, genus_ids, family_ids, species_ids, species_vector);
+        return {latent, torch::Tensor()};
+    } else if (encoder_moe_) {
         // MoE encoder returns (latent, aux_loss)
         return encoder_moe_->forward(continuous, genus_ids, family_ids);
     } else {

@@ -398,4 +398,99 @@ std::unordered_map<std::string, float> Metrics::compute(
     return metrics;
 }
 
+// =============================================================================
+// NCA Loss implementation
+// =============================================================================
+
+NCALossImpl::NCALossImpl(
+    int64_t latent_dim,
+    int64_t n_classes,
+    float temperature,
+    int n_neighbors
+) : n_classes_(n_classes),
+    temperature_(temperature),
+    n_neighbors_(n_neighbors)
+{
+    // Initialize reference set as empty
+    ref_embeddings_ = register_buffer("ref_embeddings",
+        torch::empty({0, latent_dim}));
+    ref_labels_ = register_buffer("ref_labels",
+        torch::empty({0}, torch::kLong));
+}
+
+torch::Tensor NCALossImpl::forward(
+    torch::Tensor latent,
+    torch::Tensor targets
+) {
+    int64_t batch_size = latent.size(0);
+
+    // Normalize embeddings for cosine similarity
+    auto latent_norm = torch::nn::functional::normalize(latent,
+        torch::nn::functional::NormalizeFuncOptions().dim(1));
+
+    // Use within-batch NCA: each sample uses other samples in the batch as references
+    // Similarity matrix: (batch, batch)
+    auto sim = torch::mm(latent_norm, latent_norm.t()) / temperature_;
+
+    // Remove self-similarity (set diagonal to -inf)
+    auto mask = torch::eye(batch_size, sim.options()).to(torch::kBool);
+    sim.masked_fill_(mask, -1e9f);
+
+    // For each sample, compute probability of picking each other sample
+    auto log_probs = torch::log_softmax(sim, /*dim=*/1);  // (batch, batch)
+
+    // Create label match mask: 1 if same class, 0 otherwise
+    auto targets_row = targets.unsqueeze(1);  // (batch, 1)
+    auto targets_col = targets.unsqueeze(0);  // (1, batch)
+    auto same_class = (targets_row == targets_col).to(torch::kFloat32);  // (batch, batch)
+
+    // Zero out self-comparisons
+    same_class.masked_fill_(mask, 0.0f);
+
+    // NCA loss: negative log probability of picking a same-class neighbor
+    // For each sample, sum probabilities of all same-class samples
+    // log P(correct class) = log sum_j[same_class(i,j) * softmax(sim_ij)]
+    // Use log-sum-exp trick for numerical stability
+    auto masked_log_probs = log_probs + torch::log(same_class + 1e-10f);
+    auto log_prob_correct = torch::logsumexp(masked_log_probs, /*dim=*/1);  // (batch,)
+
+    // Samples with no same-class neighbors get a default loss
+    auto has_neighbor = same_class.sum(1) > 0;
+    auto nca_loss = -log_prob_correct * has_neighbor.to(torch::kFloat32);
+
+    return nca_loss.mean();
+}
+
+torch::Tensor NCALossImpl::predict(torch::Tensor latent) {
+    if (ref_embeddings_.size(0) == 0) {
+        throw std::runtime_error(
+            "NCALoss::predict requires reference set. Call update_references() first.");
+    }
+
+    // Normalize
+    auto latent_norm = torch::nn::functional::normalize(latent,
+        torch::nn::functional::NormalizeFuncOptions().dim(1));
+    auto ref_norm = torch::nn::functional::normalize(ref_embeddings_,
+        torch::nn::functional::NormalizeFuncOptions().dim(1));
+
+    // Similarity to reference set: (n_query, n_ref)
+    auto sim = torch::mm(latent_norm, ref_norm.t()) / temperature_;
+    auto probs = torch::softmax(sim, /*dim=*/1);  // (n_query, n_ref)
+
+    // Aggregate probabilities by class
+    auto class_probs = torch::zeros({latent.size(0), n_classes_}, latent.options());
+    for (int64_t c = 0; c < n_classes_; ++c) {
+        auto class_mask = (ref_labels_ == c).to(torch::kFloat32);  // (n_ref,)
+        class_probs.select(1, c) = torch::mv(probs, class_mask);
+    }
+
+    return class_probs;  // (n_query, n_classes)
+}
+
+void NCALossImpl::update_references(torch::Tensor latent, torch::Tensor targets) {
+    torch::NoGradGuard no_grad;
+    ref_embeddings_ = latent.detach().clone();
+    ref_labels_ = targets.detach().clone();
+}
+
 } // namespace resolve

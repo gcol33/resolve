@@ -336,10 +336,11 @@ PlotEncoderImpl::PlotEncoderImpl(
     int family_emb_dim,
     int top_k,
     const std::vector<int64_t>& hidden_dims,
-    const MLPBlockConfig& mlp_config
+    const MLPBlockConfig& mlp_config,
+    const TabMConfig& tabm_config
 ) {
     init(n_continuous, n_genera, n_families, genus_emb_dim, family_emb_dim,
-         top_k, hidden_dims, mlp_config);
+         top_k, hidden_dims, mlp_config, tabm_config);
 }
 
 // Legacy constructor (backward compatibility)
@@ -367,7 +368,8 @@ void PlotEncoderImpl::init(
     int family_emb_dim,
     int top_k,
     const std::vector<int64_t>& hidden_dims,
-    const MLPBlockConfig& config
+    const MLPBlockConfig& config,
+    const TabMConfig& tabm_config
 ) {
     has_taxonomy_ = (n_genera > 0 && n_families > 0);
     top_k_ = top_k;
@@ -395,11 +397,19 @@ void PlotEncoderImpl::init(
         input_dim += top_k_ * (genus_emb_dim + family_emb_dim);
     }
 
-    // Build MLP with configurable architecture
-    auto result = build_mlp_configurable(input_dim, hidden_dims, config);
-    mlp_ = register_module("mlp", result.mlp);
-    latent_dim_ = result.output_dim;
-    activation_indices_ = result.activation_indices;
+    // Build MLP backbone (standard or TabM)
+    use_tabm_ = tabm_config.enabled;
+    if (use_tabm_) {
+        tabm_encoder_ = register_module("tabm", TabMEncoder(
+            input_dim, hidden_dims, tabm_config.n_ensembles,
+            config.dropout, tabm_config.aggregation));
+        latent_dim_ = tabm_encoder_->output_dim();
+    } else {
+        auto result = build_mlp_configurable(input_dim, hidden_dims, config);
+        mlp_ = register_module("mlp", result.mlp);
+        latent_dim_ = result.output_dim;
+        activation_indices_ = result.activation_indices;
+    }
 }
 
 torch::Tensor PlotEncoderImpl::forward(
@@ -423,6 +433,9 @@ torch::Tensor PlotEncoderImpl::forward(
     }
 
     auto x = torch::cat(parts, /*dim=*/1);
+    if (use_tabm_) {
+        return tabm_encoder_->forward(x);
+    }
     return mlp_->forward(x);
 }
 
@@ -487,11 +500,12 @@ PlotEncoderEmbedImpl::PlotEncoderEmbedImpl(
     int top_k_species,
     int top_k_taxonomy,
     const std::vector<int64_t>& hidden_dims,
-    const MLPBlockConfig& mlp_config
+    const MLPBlockConfig& mlp_config,
+    const TabMConfig& tabm_config
 ) {
     init(n_continuous, n_species, n_genera, n_families, species_embed_dim,
          genus_emb_dim, family_emb_dim, top_k_species, top_k_taxonomy,
-         hidden_dims, mlp_config);
+         hidden_dims, mlp_config, tabm_config);
 }
 
 // Legacy constructor (backward compatibility)
@@ -526,7 +540,8 @@ void PlotEncoderEmbedImpl::init(
     int top_k_species,
     int top_k_taxonomy,
     const std::vector<int64_t>& hidden_dims,
-    const MLPBlockConfig& config
+    const MLPBlockConfig& config,
+    const TabMConfig& tabm_config
 ) {
     has_taxonomy_ = (n_genera > 0 && n_families > 0);
     top_k_species_ = top_k_species;
@@ -557,10 +572,18 @@ void PlotEncoderEmbedImpl::init(
         input_dim += fused_genus_->total_output_dim() + fused_family_->total_output_dim();
     }
 
-    // Build MLP with configurable architecture
-    auto result = build_mlp_configurable(input_dim, hidden_dims, config);
-    mlp_ = register_module("mlp", result.mlp);
-    latent_dim_ = result.output_dim;
+    // Build MLP backbone (standard or TabM)
+    use_tabm_ = tabm_config.enabled;
+    if (use_tabm_) {
+        tabm_encoder_ = register_module("tabm", TabMEncoder(
+            input_dim, hidden_dims, tabm_config.n_ensembles,
+            config.dropout, tabm_config.aggregation));
+        latent_dim_ = tabm_encoder_->output_dim();
+    } else {
+        auto result = build_mlp_configurable(input_dim, hidden_dims, config);
+        mlp_ = register_module("mlp", result.mlp);
+        latent_dim_ = result.output_dim;
+    }
 }
 
 torch::Tensor PlotEncoderEmbedImpl::forward(
@@ -583,6 +606,9 @@ torch::Tensor PlotEncoderEmbedImpl::forward(
     }
 
     auto x = torch::cat(parts, /*dim=*/1);
+    if (use_tabm_) {
+        return tabm_encoder_->forward(x);
+    }
     return mlp_->forward(x);
 }
 
@@ -600,10 +626,11 @@ PlotEncoderSparseImpl::PlotEncoderSparseImpl(
     int family_emb_dim,
     int top_k,
     const std::vector<int64_t>& hidden_dims,
-    const MLPBlockConfig& mlp_config
+    const MLPBlockConfig& mlp_config,
+    const TabMConfig& tabm_config
 ) {
     init(n_continuous, n_species, species_embed_dim, n_genera, n_families,
-         genus_emb_dim, family_emb_dim, top_k, hidden_dims, mlp_config);
+         genus_emb_dim, family_emb_dim, top_k, hidden_dims, mlp_config, tabm_config);
 }
 
 // Legacy constructor (backward compatibility)
@@ -635,7 +662,8 @@ void PlotEncoderSparseImpl::init(
     int family_emb_dim,
     int top_k,
     const std::vector<int64_t>& hidden_dims,
-    const MLPBlockConfig& config
+    const MLPBlockConfig& config,
+    const TabMConfig& tabm_config
 ) {
     has_taxonomy_ = (n_genera > 0 && n_families > 0);
     n_species_ = n_species;
@@ -669,10 +697,18 @@ void PlotEncoderSparseImpl::init(
         input_dim += top_k_ * (genus_emb_dim + family_emb_dim);
     }
 
-    // Build MLP with configurable architecture
-    auto result = build_mlp_configurable(input_dim, hidden_dims, config);
-    mlp_ = register_module("mlp", result.mlp);
-    latent_dim_ = result.output_dim;
+    // Build MLP backbone (standard or TabM)
+    use_tabm_ = tabm_config.enabled;
+    if (use_tabm_) {
+        tabm_encoder_ = register_module("tabm", TabMEncoder(
+            input_dim, hidden_dims, tabm_config.n_ensembles,
+            config.dropout, tabm_config.aggregation));
+        latent_dim_ = tabm_encoder_->output_dim();
+    } else {
+        auto result = build_mlp_configurable(input_dim, hidden_dims, config);
+        mlp_ = register_module("mlp", result.mlp);
+        latent_dim_ = result.output_dim;
+    }
 }
 
 torch::Tensor PlotEncoderSparseImpl::forward(
@@ -701,6 +737,9 @@ torch::Tensor PlotEncoderSparseImpl::forward(
     }
 
     auto x = torch::cat(parts, /*dim=*/1);
+    if (use_tabm_) {
+        return tabm_encoder_->forward(x);
+    }
     return mlp_->forward(x);
 }
 

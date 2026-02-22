@@ -28,6 +28,9 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # Build the core library from parent directory
     set(RESOLVE_CORE_SOURCES
         ../cpp_src/encoder.cpp
+        ../cpp_src/attention.cpp
+        ../cpp_src/tabm.cpp
+        ../cpp_src/adapter.cpp
         ../cpp_src/model.cpp
         ../cpp_src/trainer.cpp
         ../cpp_src/predictor.cpp
@@ -36,6 +39,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         ../cpp_src/species_encoding.cpp
         ../cpp_src/checkpoint.cpp
         ../cpp_src/data_prep.cpp
+        ../cpp_src/pretraining.cpp
+        ../cpp_src/vae.cpp
     )
 
     add_library(resolve_core STATIC ${RESOLVE_CORE_SOURCES})
@@ -67,6 +72,7 @@ set(BINDING_SOURCES
     src/bindings_model.cpp
     src/bindings_trainer.cpp
     src/bindings_metrics.cpp
+    src/bindings_pretraining.cpp
 )
 nanobind_add_module(_resolve_core ${BINDING_SOURCES})
 

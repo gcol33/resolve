@@ -2,6 +2,7 @@
 
 #include "resolve/types.hpp"
 #include "resolve/experts.hpp"
+#include "resolve/tabm.hpp"
 #include <torch/torch.h>
 #include <utility>
 
@@ -318,7 +319,8 @@ public:
         int family_emb_dim,
         int top_k,
         const std::vector<int64_t>& hidden_dims,
-        const MLPBlockConfig& mlp_config
+        const MLPBlockConfig& mlp_config,
+        const TabMConfig& tabm_config = TabMConfig{}
     );
 
     // Legacy constructor (backward compatibility)
@@ -367,13 +369,16 @@ private:
     std::vector<torch::nn::Embedding> genus_embeddings_;
     std::vector<torch::nn::Embedding> family_embeddings_;
 
-    // MLP layers
+    // MLP layers (standard or TabM)
     torch::nn::Sequential mlp_{nullptr};
+    TabMEncoder tabm_encoder_{nullptr};
+    bool use_tabm_ = false;
 
     // Helper for constructor implementation
     void init(int64_t n_continuous, int64_t n_genera, int64_t n_families,
               int genus_emb_dim, int family_emb_dim, int top_k,
-              const std::vector<int64_t>& hidden_dims, const MLPBlockConfig& config);
+              const std::vector<int64_t>& hidden_dims, const MLPBlockConfig& config,
+              const TabMConfig& tabm_config = TabMConfig{});
 };
 
 TORCH_MODULE(PlotEncoder);
@@ -395,7 +400,8 @@ public:
         int top_k_species,
         int top_k_taxonomy,
         const std::vector<int64_t>& hidden_dims,
-        const MLPBlockConfig& mlp_config
+        const MLPBlockConfig& mlp_config,
+        const TabMConfig& tabm_config = TabMConfig{}
     );
 
     // Legacy constructor (backward compatibility)
@@ -440,14 +446,17 @@ private:
     FusedPositionalEmbedding fused_genus_{nullptr};
     FusedPositionalEmbedding fused_family_{nullptr};
 
-    // MLP layers
+    // MLP layers (standard or TabM)
     torch::nn::Sequential mlp_{nullptr};
+    TabMEncoder tabm_encoder_{nullptr};
+    bool use_tabm_ = false;
 
     // Helper for constructor implementation
     void init(int64_t n_continuous, int64_t n_species, int64_t n_genera, int64_t n_families,
               int species_embed_dim, int genus_emb_dim, int family_emb_dim,
               int top_k_species, int top_k_taxonomy,
-              const std::vector<int64_t>& hidden_dims, const MLPBlockConfig& config);
+              const std::vector<int64_t>& hidden_dims, const MLPBlockConfig& config,
+              const TabMConfig& tabm_config = TabMConfig{});
 };
 
 TORCH_MODULE(PlotEncoderEmbed);
@@ -468,7 +477,8 @@ public:
         int family_emb_dim,
         int top_k,
         const std::vector<int64_t>& hidden_dims,
-        const MLPBlockConfig& mlp_config
+        const MLPBlockConfig& mlp_config,
+        const TabMConfig& tabm_config = TabMConfig{}
     );
 
     // Legacy constructor (backward compatibility)
@@ -515,13 +525,16 @@ private:
     std::vector<torch::nn::Embedding> genus_embeddings_;
     std::vector<torch::nn::Embedding> family_embeddings_;
 
-    // MLP layers
+    // MLP layers (standard or TabM)
     torch::nn::Sequential mlp_{nullptr};
+    TabMEncoder tabm_encoder_{nullptr};
+    bool use_tabm_ = false;
 
     // Helper for constructor implementation
     void init(int64_t n_continuous, int64_t n_species, int species_embed_dim,
               int64_t n_genera, int64_t n_families, int genus_emb_dim, int family_emb_dim,
-              int top_k, const std::vector<int64_t>& hidden_dims, const MLPBlockConfig& config);
+              int top_k, const std::vector<int64_t>& hidden_dims, const MLPBlockConfig& config,
+              const TabMConfig& tabm_config = TabMConfig{});
 };
 
 TORCH_MODULE(PlotEncoderSparse);

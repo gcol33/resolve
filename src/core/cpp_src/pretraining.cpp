@@ -1,0 +1,505 @@
+// Define _USE_MATH_DEFINES before cmath for M_PI on Windows
+#ifndef _USE_MATH_DEFINES
+#define _USE_MATH_DEFINES
+#endif
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+#include "resolve/pretraining.hpp"
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <sstream>
+#include <random>
+
+namespace resolve {
+
+// =============================================================================
+// FeatureMasker
+// =============================================================================
+
+FeatureMaskerImpl::FeatureMaskerImpl(
+    int64_t n_features,
+    float mask_ratio,
+    MaskStrategy strategy
+) : n_features_(n_features),
+    mask_ratio_(mask_ratio),
+    strategy_(strategy)
+{
+    // Learnable mask token: one value per feature dimension
+    mask_token_ = register_parameter("mask_token",
+        torch::zeros({1, n_features}));
+    torch::nn::init::normal_(mask_token_, 0.0, 0.02);
+}
+
+torch::Tensor FeatureMaskerImpl::create_mask(int64_t batch_size) const {
+    // Generate random mask: 1 = keep, 0 = mask
+    auto mask = torch::rand({batch_size, n_features_}, mask_token_.options());
+
+    switch (strategy_) {
+        case MaskStrategy::Random:
+            // Simple random masking
+            mask = (mask > mask_ratio_).to(torch::kFloat32);
+            break;
+
+        case MaskStrategy::Block: {
+            // Block masking: mask contiguous blocks of features
+            // Determine block size from mask_ratio
+            int64_t block_size = std::max(static_cast<int64_t>(1),
+                static_cast<int64_t>(n_features_ * mask_ratio_));
+            mask = torch::ones({batch_size, n_features_}, mask_token_.options());
+
+            // Random start position for each sample
+            auto starts = torch::randint(0, n_features_ - block_size + 1, {batch_size},
+                torch::TensorOptions().dtype(torch::kLong).device(mask_token_.device()));
+            for (int64_t i = 0; i < batch_size; ++i) {
+                int64_t start = starts[i].item<int64_t>();
+                mask[i].slice(0, start, start + block_size).fill_(0.0f);
+            }
+            break;
+        }
+
+        case MaskStrategy::Structured:
+            // Structured masking: same as random for now, can be extended with taxonomy info
+            mask = (mask > mask_ratio_).to(torch::kFloat32);
+            break;
+    }
+
+    return mask;
+}
+
+torch::Tensor FeatureMaskerImpl::apply_mask(torch::Tensor features, torch::Tensor mask) const {
+    // Replace masked positions with learnable mask token
+    // mask: 1 = keep original, 0 = replace with mask_token
+    auto expanded_token = mask_token_.expand_as(features);
+    return features * mask + expanded_token * (1.0f - mask);
+}
+
+// =============================================================================
+// JEPAPredictor
+// =============================================================================
+
+JEPAPredictorImpl::JEPAPredictorImpl(
+    int64_t latent_dim,
+    int hidden_dim,
+    int n_layers,
+    float dropout
+) {
+    torch::nn::Sequential layers;
+
+    int64_t in_dim = latent_dim;
+    for (int i = 0; i < n_layers; ++i) {
+        layers->push_back(torch::nn::Linear(in_dim, hidden_dim));
+        layers->push_back(torch::nn::LayerNorm(
+            torch::nn::LayerNormOptions({hidden_dim})));
+        layers->push_back(torch::nn::GELU());
+        if (dropout > 0.0f) {
+            layers->push_back(torch::nn::Dropout(dropout));
+        }
+        in_dim = hidden_dim;
+    }
+
+    // Final projection back to latent_dim
+    layers->push_back(torch::nn::Linear(hidden_dim, latent_dim));
+
+    mlp_ = register_module("mlp", layers);
+}
+
+torch::Tensor JEPAPredictorImpl::forward(torch::Tensor context_repr) {
+    return mlp_->forward(context_repr);
+}
+
+// =============================================================================
+// SCARFCorruptor
+// =============================================================================
+
+SCARFCorruptorImpl::SCARFCorruptorImpl(
+    int64_t n_features,
+    float corruption_rate
+) : n_features_(n_features),
+    corruption_rate_(corruption_rate)
+{
+}
+
+torch::Tensor SCARFCorruptorImpl::corrupt(torch::Tensor features) const {
+    auto batch_size = features.size(0);
+
+    // Create corruption mask: 1 = corrupt, 0 = keep
+    auto corruption_mask = (torch::rand({batch_size, n_features_}, features.options()) < corruption_rate_)
+        .to(torch::kFloat32);
+
+    // Generate replacement values by shuffling within each feature column
+    // For each feature, draw values from other samples in the batch
+    auto shuffled = torch::empty_like(features);
+    for (int64_t j = 0; j < n_features_; ++j) {
+        auto perm = torch::randperm(batch_size,
+            torch::TensorOptions().dtype(torch::kLong).device(features.device()));
+        shuffled.select(1, j) = features.select(1, j).index_select(0, perm);
+    }
+
+    // Apply corruption: replace selected positions with shuffled values
+    return features * (1.0f - corruption_mask) + shuffled * corruption_mask;
+}
+
+// =============================================================================
+// ProjectionHead
+// =============================================================================
+
+ProjectionHeadImpl::ProjectionHeadImpl(
+    int64_t input_dim,
+    int64_t projection_dim
+) {
+    torch::nn::Sequential layers;
+    layers->push_back(torch::nn::Linear(input_dim, input_dim));
+    layers->push_back(torch::nn::LayerNorm(
+        torch::nn::LayerNormOptions({input_dim})));
+    layers->push_back(torch::nn::GELU());
+    layers->push_back(torch::nn::Linear(input_dim, projection_dim));
+
+    mlp_ = register_module("mlp", layers);
+}
+
+torch::Tensor ProjectionHeadImpl::forward(torch::Tensor x) {
+    return mlp_->forward(x);
+}
+
+// =============================================================================
+// JEPAPretrainer
+// =============================================================================
+
+JEPAPretrainer::JEPAPretrainer(
+    ResolveModel model,
+    const PretrainConfig& config
+) : context_encoder_(model),
+    config_(config)
+{
+    int64_t latent = context_encoder_->latent_dim();
+
+    // Create predictor
+    predictor_ = JEPAPredictor(
+        latent,
+        config.predictor_hidden_dim,
+        config.predictor_n_layers,
+        config.predictor_dropout
+    );
+
+    // Determine feature dimension for masker from the model's expected continuous input
+    // This will be set during pretrain() when we know the actual feature dimension
+    masker_ = FeatureMasker(1, config.mask_ratio, config.mask_strategy);  // placeholder
+
+    // Create target encoder as a deep copy (EMA copy)
+    // We copy weights from context encoder after the first forward pass
+    target_encoder_ = ResolveModel(context_encoder_->schema(), context_encoder_->config());
+
+    // Copy weights from context to target
+    {
+        torch::NoGradGuard no_grad;
+        auto context_params = context_encoder_->named_parameters();
+        auto target_params = target_encoder_->named_parameters();
+        for (const auto& pair : context_params) {
+            for (const auto& t_pair : target_params) {
+                if (pair.key() == t_pair.key()) {
+                    t_pair.value().copy_(pair.value());
+                    break;
+                }
+            }
+        }
+        auto context_bufs = context_encoder_->named_buffers();
+        auto target_bufs = target_encoder_->named_buffers();
+        for (const auto& pair : context_bufs) {
+            for (const auto& t_pair : target_bufs) {
+                if (pair.key() == t_pair.key()) {
+                    t_pair.value().copy_(pair.value());
+                    break;
+                }
+            }
+        }
+    }
+
+    // Target encoder does not require gradients
+    for (auto& p : target_encoder_->parameters()) {
+        p.set_requires_grad(false);
+    }
+}
+
+void JEPAPretrainer::update_target_encoder(float decay) {
+    torch::NoGradGuard no_grad;
+    auto context_params = context_encoder_->named_parameters();
+    auto target_params = target_encoder_->named_parameters();
+
+    for (const auto& pair : context_params) {
+        for (const auto& t_pair : target_params) {
+            if (pair.key() == t_pair.key()) {
+                t_pair.value().mul_(decay).add_(pair.value(), 1.0f - decay);
+                break;
+            }
+        }
+    }
+}
+
+float JEPAPretrainer::get_ema_decay(int step, int total_steps) const {
+    // Cosine schedule from ema_decay to ema_decay_end
+    float progress = static_cast<float>(step) / std::max(1, total_steps);
+    float cosine = 0.5f * (1.0f + std::cos(M_PI * progress));
+    return config_.ema_decay_end - (config_.ema_decay_end - config_.ema_decay) * cosine;
+}
+
+PretrainResult JEPAPretrainer::pretrain(
+    torch::Tensor continuous,
+    torch::Tensor genus_ids,
+    torch::Tensor family_ids,
+    torch::Tensor species_ids,
+    torch::Tensor species_vector
+) {
+    auto start_time = std::chrono::high_resolution_clock::now();
+    PretrainResult result;
+
+    int64_t n_samples = continuous.size(0);
+    int64_t n_features = continuous.size(1);
+
+    // Recreate masker with correct feature dimension
+    masker_ = FeatureMasker(n_features, config_.mask_ratio, config_.mask_strategy);
+
+    // Move everything to device
+    context_encoder_->to(config_.device);
+    target_encoder_->to(config_.device);
+    predictor_->to(config_.device);
+    masker_->to(config_.device);
+
+    continuous = continuous.to(config_.device);
+    if (genus_ids.defined()) genus_ids = genus_ids.to(config_.device);
+    if (family_ids.defined()) family_ids = family_ids.to(config_.device);
+    if (species_ids.defined()) species_ids = species_ids.to(config_.device);
+    if (species_vector.defined()) species_vector = species_vector.to(config_.device);
+
+    // Optimizer for context encoder + predictor + masker parameters
+    std::vector<torch::Tensor> params;
+    for (auto& p : context_encoder_->parameters()) params.push_back(p);
+    for (auto& p : predictor_->parameters()) params.push_back(p);
+    for (auto& p : masker_->parameters()) params.push_back(p);
+
+    auto optimizer = torch::optim::AdamW(
+        params,
+        torch::optim::AdamWOptions(config_.pretrain_lr)
+            .weight_decay(config_.pretrain_weight_decay)
+    );
+
+    int total_steps = config_.pretrain_epochs *
+        ((n_samples + config_.batch_size - 1) / config_.batch_size);
+    int global_step = 0;
+
+    for (int epoch = 0; epoch < config_.pretrain_epochs; ++epoch) {
+        context_encoder_->train();
+        float epoch_loss = 0.0f;
+        int n_batches = 0;
+
+        auto perm = torch::randperm(n_samples,
+            torch::TensorOptions().dtype(torch::kLong).device(config_.device));
+
+        for (int64_t start = 0; start < n_samples; start += config_.batch_size) {
+            int64_t end = std::min(start + static_cast<int64_t>(config_.batch_size), n_samples);
+            auto idx = perm.slice(0, start, end);
+            int64_t batch_size = end - start;
+
+            auto batch_cont = continuous.index_select(0, idx);
+            auto batch_genus = genus_ids.defined() ? genus_ids.index_select(0, idx) : torch::Tensor();
+            auto batch_family = family_ids.defined() ? family_ids.index_select(0, idx) : torch::Tensor();
+            auto batch_species = species_ids.defined() ? species_ids.index_select(0, idx) : torch::Tensor();
+            auto batch_vector = species_vector.defined() ? species_vector.index_select(0, idx) : torch::Tensor();
+
+            // Create mask for this batch
+            auto mask = masker_->create_mask(batch_size);
+
+            // Masked view -> context encoder
+            auto masked_cont = masker_->apply_mask(batch_cont, mask);
+            auto context_repr = context_encoder_->get_latent(
+                masked_cont, batch_genus, batch_family, batch_species, batch_vector);
+
+            // Predict target representation from context
+            auto predicted_repr = predictor_->forward(context_repr);
+
+            // Target representation (unmasked) -> target encoder (no grad)
+            torch::Tensor target_repr;
+            {
+                torch::NoGradGuard no_grad;
+                target_encoder_->eval();
+                target_repr = target_encoder_->get_latent(
+                    batch_cont, batch_genus, batch_family, batch_species, batch_vector);
+            }
+
+            // L2 loss between predicted and target representations
+            // Normalize representations before computing loss (cosine similarity variant)
+            auto pred_norm = torch::nn::functional::normalize(predicted_repr,
+                torch::nn::functional::NormalizeFuncOptions().dim(1));
+            auto target_norm = torch::nn::functional::normalize(target_repr,
+                torch::nn::functional::NormalizeFuncOptions().dim(1));
+
+            auto loss = torch::mse_loss(pred_norm, target_norm);
+
+            optimizer.zero_grad();
+            loss.backward();
+            torch::nn::utils::clip_grad_norm_(params, 1.0);
+            optimizer.step();
+
+            // Update target encoder via EMA
+            float decay = get_ema_decay(global_step, total_steps);
+            update_target_encoder(decay);
+
+            epoch_loss += loss.item<float>();
+            n_batches++;
+            global_step++;
+        }
+
+        float avg_loss = epoch_loss / n_batches;
+        result.loss_history.push_back(avg_loss);
+
+        if (epoch % 10 == 0) {
+            std::ostringstream msg;
+            msg << "Pretrain epoch " << epoch << " - JEPA loss: " << avg_loss;
+            config_.log(msg.str());
+        }
+    }
+
+    result.epochs_completed = config_.pretrain_epochs;
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    result.total_time_seconds = std::chrono::duration<float>(end_time - start_time).count();
+
+    return result;
+}
+
+// =============================================================================
+// SCARFPretrainer
+// =============================================================================
+
+SCARFPretrainer::SCARFPretrainer(
+    ResolveModel model,
+    const PretrainConfig& config
+) : model_(model),
+    config_(config)
+{
+    int64_t latent = model_->latent_dim();
+
+    // Corruptor will be recreated with correct n_features in pretrain()
+    corruptor_ = SCARFCorruptor(1, config.corruption_rate);
+
+    // Projection head: maps latent -> contrastive space
+    projection_head_ = ProjectionHead(latent, config.projection_dim);
+}
+
+PretrainResult SCARFPretrainer::pretrain(
+    torch::Tensor continuous,
+    torch::Tensor genus_ids,
+    torch::Tensor family_ids,
+    torch::Tensor species_ids,
+    torch::Tensor species_vector
+) {
+    auto start_time = std::chrono::high_resolution_clock::now();
+    PretrainResult result;
+
+    int64_t n_samples = continuous.size(0);
+    int64_t n_features = continuous.size(1);
+
+    // Recreate corruptor with correct feature dimension
+    corruptor_ = SCARFCorruptor(n_features, config_.corruption_rate);
+
+    // Move to device
+    model_->to(config_.device);
+    projection_head_->to(config_.device);
+
+    continuous = continuous.to(config_.device);
+    if (genus_ids.defined()) genus_ids = genus_ids.to(config_.device);
+    if (family_ids.defined()) family_ids = family_ids.to(config_.device);
+    if (species_ids.defined()) species_ids = species_ids.to(config_.device);
+    if (species_vector.defined()) species_vector = species_vector.to(config_.device);
+
+    // Optimizer for model + projection head
+    std::vector<torch::Tensor> params;
+    for (auto& p : model_->parameters()) params.push_back(p);
+    for (auto& p : projection_head_->parameters()) params.push_back(p);
+
+    auto optimizer = torch::optim::AdamW(
+        params,
+        torch::optim::AdamWOptions(config_.pretrain_lr)
+            .weight_decay(config_.pretrain_weight_decay)
+    );
+
+    for (int epoch = 0; epoch < config_.pretrain_epochs; ++epoch) {
+        model_->train();
+        float epoch_loss = 0.0f;
+        int n_batches = 0;
+
+        auto perm = torch::randperm(n_samples,
+            torch::TensorOptions().dtype(torch::kLong).device(config_.device));
+
+        for (int64_t start = 0; start < n_samples; start += config_.batch_size) {
+            int64_t end = std::min(start + static_cast<int64_t>(config_.batch_size), n_samples);
+            auto idx = perm.slice(0, start, end);
+            int64_t batch_size = end - start;
+
+            auto batch_cont = continuous.index_select(0, idx);
+            auto batch_genus = genus_ids.defined() ? genus_ids.index_select(0, idx) : torch::Tensor();
+            auto batch_family = family_ids.defined() ? family_ids.index_select(0, idx) : torch::Tensor();
+            auto batch_species = species_ids.defined() ? species_ids.index_select(0, idx) : torch::Tensor();
+            auto batch_vector = species_vector.defined() ? species_vector.index_select(0, idx) : torch::Tensor();
+
+            // View 1: original features -> encoder -> projection
+            auto repr_1 = model_->get_latent(
+                batch_cont, batch_genus, batch_family, batch_species, batch_vector);
+            auto z_1 = projection_head_->forward(repr_1);
+
+            // View 2: corrupted features -> encoder -> projection
+            auto corrupted_cont = corruptor_->corrupt(batch_cont);
+            auto repr_2 = model_->get_latent(
+                corrupted_cont, batch_genus, batch_family, batch_species, batch_vector);
+            auto z_2 = projection_head_->forward(repr_2);
+
+            // Normalize projections
+            z_1 = torch::nn::functional::normalize(z_1,
+                torch::nn::functional::NormalizeFuncOptions().dim(1));
+            z_2 = torch::nn::functional::normalize(z_2,
+                torch::nn::functional::NormalizeFuncOptions().dim(1));
+
+            // InfoNCE loss
+            // Similarity matrix: (batch, batch)
+            auto sim = torch::mm(z_1, z_2.t()) / config_.temperature;
+
+            // Labels: diagonal (positive pairs)
+            auto labels = torch::arange(batch_size,
+                torch::TensorOptions().dtype(torch::kLong).device(config_.device));
+
+            // Symmetric loss: both directions
+            auto loss_12 = torch::nn::functional::cross_entropy(sim, labels);
+            auto loss_21 = torch::nn::functional::cross_entropy(sim.t(), labels);
+            auto loss = (loss_12 + loss_21) * 0.5f;
+
+            optimizer.zero_grad();
+            loss.backward();
+            torch::nn::utils::clip_grad_norm_(params, 1.0);
+            optimizer.step();
+
+            epoch_loss += loss.item<float>();
+            n_batches++;
+        }
+
+        float avg_loss = epoch_loss / n_batches;
+        result.loss_history.push_back(avg_loss);
+
+        if (epoch % 10 == 0) {
+            std::ostringstream msg;
+            msg << "Pretrain epoch " << epoch << " - SCARF loss: " << avg_loss;
+            config_.log(msg.str());
+        }
+    }
+
+    result.epochs_completed = config_.pretrain_epochs;
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    result.total_time_seconds = std::chrono::duration<float>(end_time - start_time).count();
+
+    return result;
+}
+
+} // namespace resolve

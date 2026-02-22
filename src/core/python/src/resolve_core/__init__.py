@@ -47,6 +47,8 @@ try:
         SAINTConfig,
         GNNConfig,
         TraitNetConfig,
+        ExcelFormerConfig,
+        HeterogeneousGNNConfig,
         ParallelBranchConfig,
         ParallelLayersConfig,
         # Calibration and residual analysis
@@ -71,6 +73,16 @@ try:
         TargetSpec,
         # Dataset
         ResolveDataset,
+        # Pretraining (v3.0)
+        MaskStrategy,
+        PretrainConfig,
+        PretrainResult,
+        JEPAPretrainer,
+        SCARFPretrainer,
+        # VAE (v3.0)
+        VAEConfig,
+        VAEPretrainResult,
+        VAEPretrainer,
     )
 except ImportError as e:
     raise ImportError(
@@ -118,6 +130,8 @@ __all__ = [
     "SAINTConfig",
     "GNNConfig",
     "TraitNetConfig",
+    "ExcelFormerConfig",
+    "HeterogeneousGNNConfig",
     "ParallelBranchConfig",
     "ParallelLayersConfig",
     # Calibration and residual analysis
@@ -142,4 +156,14 @@ __all__ = [
     "TargetSpec",
     # Dataset
     "ResolveDataset",
+    # Pretraining (v3.0)
+    "MaskStrategy",
+    "PretrainConfig",
+    "PretrainResult",
+    "JEPAPretrainer",
+    "SCARFPretrainer",
+    # VAE (v3.0)
+    "VAEConfig",
+    "VAEPretrainResult",
+    "VAEPretrainer",
 ]

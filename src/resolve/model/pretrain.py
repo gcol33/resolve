@@ -27,7 +27,7 @@ class MaskedSpeciesHead(nn.Module):
 
     def __init__(self, d_model: int, n_species: int):
         super().__init__()
-        self.proj = nn.Linear(d_model, n_species)
+        self.proj = nn.Linear(d_model, n_species, bias=False)
 
     def forward(self, token_embeddings: torch.Tensor) -> torch.Tensor:
         """Project token embeddings to species logits.

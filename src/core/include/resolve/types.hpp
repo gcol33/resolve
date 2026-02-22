@@ -79,7 +79,8 @@ enum class SpeciesEncodingMode {
 enum class LossConfigMode {
     MAE,       // Pure MAE loss (no SMAPE, no band penalty)
     SMAPE,     // SMAPE as primary loss
-    Combined   // Phased: MAE -> MAE+SMAPE -> MAE+SMAPE+band (default)
+    Combined,  // Phased: MAE -> MAE+SMAPE -> MAE+SMAPE+band (default)
+    NCA        // Neighborhood Component Analysis loss (classification only)
 };
 
 // Learning rate scheduler type
@@ -188,7 +189,9 @@ enum class EncoderArchitecture {
     TabNet,         // Sequential attention with feature selection
     SAINT,          // Self-Attention + Inter-sample Attention
     TraitNet,       // Trait-based multi-species network
-    GNN             // Graph Neural Network
+    GNN,            // Graph Neural Network
+    ExcelFormer,    // Semi-permeable attention (FT-Transformer variant)
+    HeterogeneousGNN // Heterogeneous GNN with typed message passing
 };
 
 // GNN type for graph-based encoder
@@ -266,6 +269,38 @@ struct TraitNetConfig {
     bool shared_trait_encoder = true;
 };
 
+// ExcelFormer configuration
+struct ExcelFormerConfig {
+    int d_model = 192;
+    int n_heads = 8;
+    int n_layers = 3;
+    float attention_dropout = 0.2f;
+    int ffn_multiplier = 4;
+    float importance_threshold = 0.5f;    // Features above this attend to all
+    bool pre_norm = true;
+};
+
+// Heterogeneous GNN configuration
+struct HeterogeneousGNNConfig {
+    int hidden_dim = 128;               // Hidden dimension for message passing
+    int output_dim = 64;                // Output species embedding dimension
+    int n_layers = 3;                   // Number of message passing layers
+    int n_edge_types = 3;               // co-occurrence, same-genus, same-family
+    int n_heads = 4;                    // Attention heads for message aggregation
+    float dropout = 0.1f;
+    int k_cooccurrence = 20;            // Top-k co-occurring species per species
+    float cooccurrence_threshold = 0.01f; // Min co-occurrence frequency for edges
+    bool use_taxonomic_edges = true;    // Add same-genus/same-family edges
+    bool use_cooccurrence_edges = true; // Add co-occurrence edges
+};
+
+// TabM (BatchEnsemble) configuration
+struct TabMConfig {
+    bool enabled = false;                    // Whether to use TabM instead of standard MLP
+    int n_ensembles = 16;                    // Number of implicit ensemble members
+    std::string aggregation = "mean";        // "mean" or "median" aggregation
+};
+
 // Parallel layer aggregation mode
 enum class ParallelAggregation {
     Concat,     // Concatenate outputs (increases dim)
@@ -337,9 +372,14 @@ struct ModelConfig {
     SAINTConfig saint;
     GNNConfig gnn;
     TraitNetConfig trait_net;
+    ExcelFormerConfig excelformer;
+    HeterogeneousGNNConfig heterogeneous_gnn;
 
     // Parallel layers configuration
     ParallelLayersConfig parallel_layers;
+
+    // TabM (BatchEnsemble) configuration
+    TabMConfig tabm;
 };
 
 // Training configuration

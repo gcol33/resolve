@@ -2,6 +2,7 @@
 
 #include "resolve/types.hpp"
 #include "resolve/encoder.hpp"
+#include "resolve/adapter.hpp"
 #include <torch/torch.h>
 #include <variant>
 
@@ -123,6 +124,9 @@ private:
 
     // MoE encoder (used when moe_routing != None)
     PlotEncoderMoE encoder_moe_{nullptr};
+
+    // Tabular adapter (used when encoder_architecture != MLP)
+    TabularAdapter adapter_{nullptr};
 
     std::unordered_map<std::string, TaskHead> heads_;
 };

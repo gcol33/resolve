@@ -12,5 +12,7 @@
 #include "resolve/trainer.hpp"
 #include "resolve/predictor.hpp"
 #include "resolve/loss.hpp"
+#include "resolve/pretraining.hpp"
+#include "resolve/vae.hpp"
 
 // VERSION is defined in types.hpp

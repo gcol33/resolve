@@ -21,6 +21,7 @@ void register_enums(nb::module_& m) {
         .value("MAE", resolve::LossConfigMode::MAE)
         .value("SMAPE", resolve::LossConfigMode::SMAPE)
         .value("Combined", resolve::LossConfigMode::Combined)
+        .value("NCA", resolve::LossConfigMode::NCA)
         .export_values();
 
     nb::enum_<resolve::SelectionMode>(m, "SelectionMode")
@@ -87,6 +88,8 @@ void register_enums(nb::module_& m) {
         .value("SAINT", resolve::EncoderArchitecture::SAINT)
         .value("TraitNet", resolve::EncoderArchitecture::TraitNet)
         .value("GNN", resolve::EncoderArchitecture::GNN)
+        .value("ExcelFormer", resolve::EncoderArchitecture::ExcelFormer)
+        .value("HeterogeneousGNN", resolve::EncoderArchitecture::HeterogeneousGNN)
         .export_values();
 
     nb::enum_<resolve::GNNType>(m, "GNNType")

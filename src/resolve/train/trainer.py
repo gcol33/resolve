@@ -1289,7 +1289,7 @@ class Trainer:
         # AMP scaler
         grad_scaler = GradScaler() if self.use_amp else None
 
-        loss_fn = torch.nn.CrossEntropyLoss(ignore_index=0)
+        from resolve.csrc.fused_linear_ce import fused_linear_cross_entropy
 
         for epoch in range(1, self.pretrain_epochs + 1):
             encoder.train()
@@ -1331,11 +1331,13 @@ class Trainer:
                             pool_family_ids, pool_weights, pool_mask, pool_has_cover,
                             mlm_mask,
                         )
-                        # Extract masked positions and predict
+                        # Fused linear + cross-entropy: avoids materializing (N, V) logits
                         masked_embs = token_embs[mlm_mask]  # (N_masked, d_model)
-                        logits = mlm_head(masked_embs)  # (N_masked, n_species)
                         targets = mlm_targets[mlm_mask]  # (N_masked,)
-                        loss = loss_fn(logits, targets)
+                        loss = fused_linear_cross_entropy(
+                            masked_embs, mlm_head.proj.weight, targets,
+                            ignore_index=0, label_smoothing=self.label_smoothing,
+                        )
 
                     grad_scaler.scale(loss).backward()
                     grad_scaler.unscale_(optimizer)
@@ -1349,9 +1351,11 @@ class Trainer:
                         mlm_mask,
                     )
                     masked_embs = token_embs[mlm_mask]
-                    logits = mlm_head(masked_embs)
                     targets = mlm_targets[mlm_mask]
-                    loss = loss_fn(logits, targets)
+                    loss = fused_linear_cross_entropy(
+                        masked_embs, mlm_head.proj.weight, targets,
+                        ignore_index=0, label_smoothing=self.label_smoothing,
+                    )
 
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(pretrain_params, 1.0)

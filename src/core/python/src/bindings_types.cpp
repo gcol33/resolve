@@ -125,6 +125,38 @@ void register_types(nb::module_& m) {
         .def_rw("interaction", &resolve::TraitNetConfig::interaction)
         .def_rw("shared_trait_encoder", &resolve::TraitNetConfig::shared_trait_encoder);
 
+    // ExcelFormer configuration
+    nb::class_<resolve::ExcelFormerConfig>(m, "ExcelFormerConfig")
+        .def(nb::init<>())
+        .def_rw("d_model", &resolve::ExcelFormerConfig::d_model)
+        .def_rw("n_heads", &resolve::ExcelFormerConfig::n_heads)
+        .def_rw("n_layers", &resolve::ExcelFormerConfig::n_layers)
+        .def_rw("attention_dropout", &resolve::ExcelFormerConfig::attention_dropout)
+        .def_rw("ffn_multiplier", &resolve::ExcelFormerConfig::ffn_multiplier)
+        .def_rw("importance_threshold", &resolve::ExcelFormerConfig::importance_threshold)
+        .def_rw("pre_norm", &resolve::ExcelFormerConfig::pre_norm);
+
+    // Heterogeneous GNN configuration
+    nb::class_<resolve::HeterogeneousGNNConfig>(m, "HeterogeneousGNNConfig")
+        .def(nb::init<>())
+        .def_rw("hidden_dim", &resolve::HeterogeneousGNNConfig::hidden_dim)
+        .def_rw("output_dim", &resolve::HeterogeneousGNNConfig::output_dim)
+        .def_rw("n_layers", &resolve::HeterogeneousGNNConfig::n_layers)
+        .def_rw("n_edge_types", &resolve::HeterogeneousGNNConfig::n_edge_types)
+        .def_rw("n_heads", &resolve::HeterogeneousGNNConfig::n_heads)
+        .def_rw("dropout", &resolve::HeterogeneousGNNConfig::dropout)
+        .def_rw("k_cooccurrence", &resolve::HeterogeneousGNNConfig::k_cooccurrence)
+        .def_rw("cooccurrence_threshold", &resolve::HeterogeneousGNNConfig::cooccurrence_threshold)
+        .def_rw("use_taxonomic_edges", &resolve::HeterogeneousGNNConfig::use_taxonomic_edges)
+        .def_rw("use_cooccurrence_edges", &resolve::HeterogeneousGNNConfig::use_cooccurrence_edges);
+
+    // TabM configuration
+    nb::class_<resolve::TabMConfig>(m, "TabMConfig")
+        .def(nb::init<>())
+        .def_rw("enabled", &resolve::TabMConfig::enabled)
+        .def_rw("n_ensembles", &resolve::TabMConfig::n_ensembles)
+        .def_rw("aggregation", &resolve::TabMConfig::aggregation);
+
     // Parallel layers configuration
     nb::class_<resolve::ParallelBranchConfig>(m, "ParallelBranchConfig")
         .def(nb::init<>())
@@ -180,8 +212,12 @@ void register_types(nb::module_& m) {
         .def_rw("saint", &resolve::ModelConfig::saint)
         .def_rw("gnn", &resolve::ModelConfig::gnn)
         .def_rw("trait_net", &resolve::ModelConfig::trait_net)
+        .def_rw("excelformer", &resolve::ModelConfig::excelformer)
+        .def_rw("heterogeneous_gnn", &resolve::ModelConfig::heterogeneous_gnn)
         // Parallel layers
-        .def_rw("parallel_layers", &resolve::ModelConfig::parallel_layers);
+        .def_rw("parallel_layers", &resolve::ModelConfig::parallel_layers)
+        // TabM configuration
+        .def_rw("tabm", &resolve::ModelConfig::tabm);
 
     nb::class_<resolve::TrainConfig>(m, "TrainConfig")
         .def(nb::init<>())

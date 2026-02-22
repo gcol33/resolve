@@ -50,3 +50,4 @@ void register_dataset(nb::module_& m);
 void register_model(nb::module_& m);
 void register_trainer(nb::module_& m);
 void register_metrics(nb::module_& m);
+void register_pretraining(nb::module_& m);

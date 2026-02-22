@@ -36,6 +36,8 @@ find_package(Torch REQUIRED)
 set(RESOLVE_CORE_SOURCES
     cpp_src/encoder.cpp
     cpp_src/attention.cpp
+    cpp_src/tabm.cpp
+    cpp_src/adapter.cpp
     cpp_src/model.cpp
     cpp_src/trainer.cpp
     cpp_src/predictor.cpp
@@ -44,6 +46,8 @@ set(RESOLVE_CORE_SOURCES
     cpp_src/species_encoding.cpp
     cpp_src/checkpoint.cpp
     cpp_src/data_prep.cpp
+    cpp_src/pretraining.cpp
+    cpp_src/vae.cpp
 )
 
 set(RESOLVE_CORE_HEADERS
@@ -62,6 +66,9 @@ set(RESOLVE_CORE_HEADERS
     include/resolve/species_encoding.hpp
     include/resolve/checkpoint.hpp
     include/resolve/data_prep.hpp
+    include/resolve/tabm.hpp
+    include/resolve/pretraining.hpp
+    include/resolve/vae.hpp
 )
 
 # CUDA sources - split for CUDA 13.x compatibility:
