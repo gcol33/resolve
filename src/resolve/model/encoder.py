@@ -11,6 +11,97 @@ from torch import nn
 SPECIES_ENCODING_MODES = ("hash", "embed", "rank_pool", "transformer")
 
 
+def _build_mlp(
+    input_dim: int,
+    hidden_dims: list[int],
+    dropout: float,
+) -> tuple[nn.Sequential, int]:
+    """Build MLP with BatchNorm, GELU, Dropout. Returns (mlp, latent_dim)."""
+    dims = [input_dim] + hidden_dims
+    layers = []
+    for i in range(len(dims) - 1):
+        layers.append(nn.Linear(dims[i], dims[i + 1]))
+        layers.append(nn.BatchNorm1d(dims[i + 1]))
+        layers.append(nn.GELU())
+        layers.append(nn.Dropout(dropout))
+    return nn.Sequential(*layers), hidden_dims[-1]
+
+
+def _build_taxonomy_modulelists(
+    n_genera: int,
+    n_families: int,
+    genus_emb_dim: int,
+    family_emb_dim: int,
+    top_k: int,
+    padding_idx: int | None = None,
+) -> tuple[bool, nn.ModuleList | None, nn.ModuleList | None, int]:
+    """Build per-position taxonomy embedding tables.
+
+    Returns (has_taxonomy, genus_embeddings, family_embeddings, taxonomy_dim).
+    """
+    has_taxonomy = n_genera > 0 and n_families > 0
+    if has_taxonomy:
+        genus_embeddings = nn.ModuleList([
+            nn.Embedding(n_genera, genus_emb_dim, padding_idx=padding_idx)
+            for _ in range(top_k)
+        ])
+        family_embeddings = nn.ModuleList([
+            nn.Embedding(n_families, family_emb_dim, padding_idx=padding_idx)
+            for _ in range(top_k)
+        ])
+        taxonomy_dim = top_k * genus_emb_dim + top_k * family_emb_dim
+    else:
+        genus_embeddings = None
+        family_embeddings = None
+        taxonomy_dim = 0
+    return has_taxonomy, genus_embeddings, family_embeddings, taxonomy_dim
+
+
+def _embed_taxonomy_modulelists(
+    genus_embeddings: nn.ModuleList | None,
+    family_embeddings: nn.ModuleList | None,
+    genus_ids: torch.Tensor | None,
+    family_ids: torch.Tensor | None,
+    has_taxonomy: bool,
+) -> torch.Tensor | None:
+    """Compute taxonomy embeddings via stack+flatten. Returns (batch, taxonomy_dim) or None."""
+    if not has_taxonomy or genus_ids is None or family_ids is None:
+        return None
+    genus_embs = torch.stack(
+        [emb(genus_ids[:, k]) for k, emb in enumerate(genus_embeddings)],
+        dim=1,
+    ).flatten(start_dim=1)
+    family_embs = torch.stack(
+        [emb(family_ids[:, k]) for k, emb in enumerate(family_embeddings)],
+        dim=1,
+    ).flatten(start_dim=1)
+    return torch.cat([genus_embs, family_embs], dim=1)
+
+
+def _apply_cover_dropout(
+    training: bool,
+    cover_dropout: float,
+    batch_size: int,
+    device: torch.device,
+    weights: torch.Tensor | None,
+    mask: torch.Tensor | None,
+    species_ids: torch.Tensor,
+    has_cover: torch.Tensor,
+) -> tuple[torch.Tensor | None, torch.Tensor]:
+    """Apply cover dropout during training. Returns (weights, has_cover)."""
+    if training and cover_dropout > 0 and weights is not None:
+        drop_mask = torch.rand(batch_size, device=device) < cover_dropout
+        if drop_mask.any():
+            weights = weights.clone()
+            has_cover = has_cover.clone()
+            if mask is not None:
+                weights[drop_mask] = mask[drop_mask].float()
+            else:
+                weights[drop_mask] = (species_ids[drop_mask] != 0).float()
+            has_cover[drop_mask] = 0.0
+    return weights, has_cover
+
+
 class PlotEncoder(nn.Module):
     """
     Encodes plot features into a shared latent representation.
@@ -46,35 +137,10 @@ class PlotEncoder(nn.Module):
             hidden_dims = [2048, 1024, 512, 256, 128, 64]
 
         self.top_k = top_k
-        self.has_taxonomy = n_genera > 0 and n_families > 0
-
-        # Taxonomic embeddings (if available)
-        if self.has_taxonomy:
-            self.genus_embeddings = nn.ModuleList([
-                nn.Embedding(n_genera, genus_emb_dim) for _ in range(top_k)
-            ])
-            self.family_embeddings = nn.ModuleList([
-                nn.Embedding(n_families, family_emb_dim) for _ in range(top_k)
-            ])
-            taxonomy_dim = top_k * genus_emb_dim + top_k * family_emb_dim
-        else:
-            self.genus_embeddings = None
-            self.family_embeddings = None
-            taxonomy_dim = 0
-
-        # MLP
-        input_dim = n_continuous + taxonomy_dim
-        dims = [input_dim] + hidden_dims
-
-        layers = []
-        for i in range(len(dims) - 1):
-            layers.append(nn.Linear(dims[i], dims[i + 1]))
-            layers.append(nn.BatchNorm1d(dims[i + 1]))
-            layers.append(nn.GELU())
-            layers.append(nn.Dropout(dropout))
-
-        self.mlp = nn.Sequential(*layers)
-        self.latent_dim = hidden_dims[-1]
+        self.has_taxonomy, self.genus_embeddings, self.family_embeddings, taxonomy_dim = (
+            _build_taxonomy_modulelists(n_genera, n_families, genus_emb_dim, family_emb_dim, top_k)
+        )
+        self.mlp, self.latent_dim = _build_mlp(n_continuous + taxonomy_dim, hidden_dims, dropout)
 
     def forward(
         self,
@@ -93,25 +159,12 @@ class PlotEncoder(nn.Module):
         Returns:
             latent: (batch, latent_dim)
         """
-        if self.has_taxonomy and genus_ids is not None and family_ids is not None:
-            # Optimized: vectorized embedding lookups with stack + reshape
-            # Instead of loop + list + cat, we stack embeddings and flatten
-            genus_embs = torch.stack(
-                [emb(genus_ids[:, k]) for k, emb in enumerate(self.genus_embeddings)],
-                dim=1
-            ).flatten(start_dim=1)  # (batch, top_k * emb_dim)
-
-            family_embs = torch.stack(
-                [emb(family_ids[:, k]) for k, emb in enumerate(self.family_embeddings)],
-                dim=1
-            ).flatten(start_dim=1)  # (batch, top_k * emb_dim)
-
-            x = torch.cat([continuous, genus_embs, family_embs], dim=1)
-        else:
-            x = continuous
-
-        latent = self.mlp(x)
-        return latent
+        taxonomy_emb = _embed_taxonomy_modulelists(
+            self.genus_embeddings, self.family_embeddings,
+            genus_ids, family_ids, self.has_taxonomy,
+        )
+        x = torch.cat([continuous, taxonomy_emb], dim=1) if taxonomy_emb is not None else continuous
+        return self.mlp(x)
 
 
 class PlotEncoderEmbed(nn.Module):
@@ -158,7 +211,6 @@ class PlotEncoderEmbed(nn.Module):
 
         self.top_k_species = top_k_species
         self.top_k_taxonomy = top_k_taxonomy
-        self.has_taxonomy = n_genera > 0 and n_families > 0
 
         # Species embeddings (one table per position)
         self.species_embeddings = nn.ModuleList([
@@ -167,35 +219,14 @@ class PlotEncoderEmbed(nn.Module):
         ])
         species_dim = top_k_species * species_embed_dim
 
-        # Taxonomic embeddings (if available)
-        if self.has_taxonomy:
-            self.genus_embeddings = nn.ModuleList([
-                nn.Embedding(n_genera, genus_emb_dim, padding_idx=0)
-                for _ in range(top_k_taxonomy)
-            ])
-            self.family_embeddings = nn.ModuleList([
-                nn.Embedding(n_families, family_emb_dim, padding_idx=0)
-                for _ in range(top_k_taxonomy)
-            ])
-            taxonomy_dim = top_k_taxonomy * genus_emb_dim + top_k_taxonomy * family_emb_dim
-        else:
-            self.genus_embeddings = None
-            self.family_embeddings = None
-            taxonomy_dim = 0
-
-        # MLP
-        input_dim = n_continuous + species_dim + taxonomy_dim
-        dims = [input_dim] + hidden_dims
-
-        layers = []
-        for i in range(len(dims) - 1):
-            layers.append(nn.Linear(dims[i], dims[i + 1]))
-            layers.append(nn.BatchNorm1d(dims[i + 1]))
-            layers.append(nn.GELU())
-            layers.append(nn.Dropout(dropout))
-
-        self.mlp = nn.Sequential(*layers)
-        self.latent_dim = hidden_dims[-1]
+        self.has_taxonomy, self.genus_embeddings, self.family_embeddings, taxonomy_dim = (
+            _build_taxonomy_modulelists(
+                n_genera, n_families, genus_emb_dim, family_emb_dim, top_k_taxonomy, padding_idx=0,
+            )
+        )
+        self.mlp, self.latent_dim = _build_mlp(
+            n_continuous + species_dim + taxonomy_dim, hidden_dims, dropout,
+        )
 
     def forward(
         self,
@@ -222,24 +253,14 @@ class PlotEncoderEmbed(nn.Module):
             dim=1
         ).flatten(start_dim=1)  # (batch, top_k_species * emb_dim)
 
-        # Embed taxonomy if available
-        if self.has_taxonomy and genus_ids is not None and family_ids is not None:
-            genus_embs = torch.stack(
-                [emb(genus_ids[:, k]) for k, emb in enumerate(self.genus_embeddings)],
-                dim=1
-            ).flatten(start_dim=1)
-
-            family_embs = torch.stack(
-                [emb(family_ids[:, k]) for k, emb in enumerate(self.family_embeddings)],
-                dim=1
-            ).flatten(start_dim=1)
-
-            x = torch.cat([continuous, species_embs, genus_embs, family_embs], dim=1)
-        else:
-            x = torch.cat([continuous, species_embs], dim=1)
-
-        latent = self.mlp(x)
-        return latent
+        taxonomy_emb = _embed_taxonomy_modulelists(
+            self.genus_embeddings, self.family_embeddings,
+            genus_ids, family_ids, self.has_taxonomy,
+        )
+        parts = [continuous, species_embs]
+        if taxonomy_emb is not None:
+            parts.append(taxonomy_emb)
+        return self.mlp(torch.cat(parts, dim=1))
 
 
 class PlotEncoderSparse(nn.Module):
@@ -289,39 +310,16 @@ class PlotEncoderSparse(nn.Module):
 
         self.n_species = n_species
         self.top_k = top_k
-        self.has_taxonomy = n_genera > 0 and n_families > 0
 
         # Linear projection from species abundances to embedding space
-        # This learns species-specific weights
         self.species_projection = nn.Linear(n_species, species_embed_dim)
 
-        # Taxonomic embeddings (if available)
-        if self.has_taxonomy:
-            self.genus_embeddings = nn.ModuleList([
-                nn.Embedding(n_genera, genus_emb_dim) for _ in range(top_k)
-            ])
-            self.family_embeddings = nn.ModuleList([
-                nn.Embedding(n_families, family_emb_dim) for _ in range(top_k)
-            ])
-            taxonomy_dim = top_k * genus_emb_dim + top_k * family_emb_dim
-        else:
-            self.genus_embeddings = None
-            self.family_embeddings = None
-            taxonomy_dim = 0
-
-        # MLP
-        input_dim = n_continuous + species_embed_dim + taxonomy_dim
-        dims = [input_dim] + hidden_dims
-
-        layers = []
-        for i in range(len(dims) - 1):
-            layers.append(nn.Linear(dims[i], dims[i + 1]))
-            layers.append(nn.BatchNorm1d(dims[i + 1]))
-            layers.append(nn.GELU())
-            layers.append(nn.Dropout(dropout))
-
-        self.mlp = nn.Sequential(*layers)
-        self.latent_dim = hidden_dims[-1]
+        self.has_taxonomy, self.genus_embeddings, self.family_embeddings, taxonomy_dim = (
+            _build_taxonomy_modulelists(n_genera, n_families, genus_emb_dim, family_emb_dim, top_k)
+        )
+        self.mlp, self.latent_dim = _build_mlp(
+            n_continuous + species_embed_dim + taxonomy_dim, hidden_dims, dropout,
+        )
 
     def forward(
         self,
@@ -345,24 +343,14 @@ class PlotEncoderSparse(nn.Module):
         # Project species abundances to embedding space
         species_emb = self.species_projection(species_abundances)
 
-        if self.has_taxonomy and genus_ids is not None and family_ids is not None:
-            # Optimized: vectorized embedding lookups with stack + flatten
-            genus_embs = torch.stack(
-                [emb(genus_ids[:, k]) for k, emb in enumerate(self.genus_embeddings)],
-                dim=1
-            ).flatten(start_dim=1)
-
-            family_embs = torch.stack(
-                [emb(family_ids[:, k]) for k, emb in enumerate(self.family_embeddings)],
-                dim=1
-            ).flatten(start_dim=1)
-
-            x = torch.cat([continuous, species_emb, genus_embs, family_embs], dim=1)
-        else:
-            x = torch.cat([continuous, species_emb], dim=1)
-
-        latent = self.mlp(x)
-        return latent
+        taxonomy_emb = _embed_taxonomy_modulelists(
+            self.genus_embeddings, self.family_embeddings,
+            genus_ids, family_ids, self.has_taxonomy,
+        )
+        parts = [continuous, species_emb]
+        if taxonomy_emb is not None:
+            parts.append(taxonomy_emb)
+        return self.mlp(torch.cat(parts, dim=1))
 
 
 class PlotEncoderRankPool(nn.Module):
@@ -426,19 +414,8 @@ class PlotEncoderRankPool(nn.Module):
             self.family_embedding = None
             embed_dim = species_embed_dim
 
-        # MLP body: +1 for has_cover flag
-        input_dim = n_continuous + embed_dim + 1
-        dims = [input_dim] + hidden_dims
-
-        layers = []
-        for i in range(len(dims) - 1):
-            layers.append(nn.Linear(dims[i], dims[i + 1]))
-            layers.append(nn.BatchNorm1d(dims[i + 1]))
-            layers.append(nn.GELU())
-            layers.append(nn.Dropout(dropout))
-
-        self.mlp = nn.Sequential(*layers)
-        self.latent_dim = hidden_dims[-1]
+        # +1 for has_cover flag
+        self.mlp, self.latent_dim = _build_mlp(n_continuous + embed_dim + 1, hidden_dims, dropout)
 
     def forward(
         self,
@@ -471,20 +448,10 @@ class PlotEncoderRankPool(nn.Module):
         if has_cover is None:
             has_cover = torch.ones(batch_size, device=continuous.device)
 
-        # Cover dropout: during training, randomly replace weights with uniform
-        # and set has_cover=0 for a fraction of the batch
-        if self.training and self.cover_dropout > 0 and weights is not None:
-            drop_mask = torch.rand(batch_size, device=continuous.device) < self.cover_dropout
-            if drop_mask.any():
-                # Clone to avoid modifying the original tensors
-                weights = weights.clone()
-                has_cover = has_cover.clone()
-                # For dropped samples: set weights to 1.0 (uniform/binary)
-                if mask is not None:
-                    weights[drop_mask] = mask[drop_mask].float()
-                else:
-                    weights[drop_mask] = (species_ids[drop_mask] != 0).float()
-                has_cover[drop_mask] = 0.0
+        weights, has_cover = _apply_cover_dropout(
+            self.training, self.cover_dropout, batch_size, continuous.device,
+            weights, mask, species_ids, has_cover,
+        )
 
         # Species embeddings: (batch, max_sp, d_sp)
         sp_emb = self.species_embedding(species_ids)
@@ -624,19 +591,8 @@ class PlotEncoderTransformer(nn.Module):
         else:  # cls
             self.cls_token = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
 
-        # --- MLP after pooling: cat([continuous, pooled_emb, has_cover]) -> latent ---
-        input_dim = n_continuous + d_model + 1  # +1 for has_cover flag
-        dims = [input_dim] + hidden_dims
-
-        layers = []
-        for i in range(len(dims) - 1):
-            layers.append(nn.Linear(dims[i], dims[i + 1]))
-            layers.append(nn.BatchNorm1d(dims[i + 1]))
-            layers.append(nn.GELU())
-            layers.append(nn.Dropout(dropout))
-
-        self.mlp = nn.Sequential(*layers)
-        self.latent_dim = hidden_dims[-1]
+        # MLP after pooling: +1 for has_cover flag
+        self.mlp, self.latent_dim = _build_mlp(n_continuous + d_model + 1, hidden_dims, dropout)
 
     def _init_embeddings(self) -> None:
         """Initialize all embeddings with std=0.02 (BERT convention)."""
@@ -688,17 +644,10 @@ class PlotEncoderTransformer(nn.Module):
         if has_cover is None:
             has_cover = torch.ones(batch_size, device=continuous.device)
 
-        # Cover dropout (same as RankPool)
-        if self.training and self.cover_dropout > 0 and weights is not None:
-            drop_mask = torch.rand(batch_size, device=continuous.device) < self.cover_dropout
-            if drop_mask.any():
-                weights = weights.clone()
-                has_cover = has_cover.clone()
-                if mask is not None:
-                    weights[drop_mask] = mask[drop_mask].float()
-                else:
-                    weights[drop_mask] = (species_ids[drop_mask] != 0).float()
-                has_cover[drop_mask] = 0.0
+        weights, has_cover = _apply_cover_dropout(
+            self.training, self.cover_dropout, batch_size, continuous.device,
+            weights, mask, species_ids, has_cover,
+        )
 
         # Build mask if not provided
         if mask is None:
