@@ -8,6 +8,7 @@ into GPU-ready batches for training.
 from __future__ import annotations
 
 import warnings
+from dataclasses import replace
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
@@ -116,20 +117,8 @@ class DataMixin:
 
                 # For all/presence_absence modes, update schema with species vocab size
                 if self._species_encoder.uses_explicit_vector:
-                    self._schema = ResolveSchema(
-                        n_plots=self._schema.n_plots,
-                        n_species=self._schema.n_species,
-                        n_continuous=self._schema.n_continuous,
-                        has_coordinates=self._schema.has_coordinates,
-                        has_abundance=self._schema.has_abundance,
-                        has_taxonomy=self._schema.has_taxonomy,
-                        n_genera=self._schema.n_genera,
-                        n_families=self._schema.n_families,
-                        targets=self._schema.targets,
-                        covariate_names=self._schema.covariate_names,
-                        species_normalization=self._schema.species_normalization,
-                        track_unknown_fraction=self._schema.track_unknown_fraction,
-                        track_unknown_count=self._schema.track_unknown_count,
+                    self._schema = replace(
+                        self._schema,
                         n_species_vocab=self._species_encoder.n_species_vector,
                         n_genera_vocab=0,
                         n_families_vocab=0,
@@ -146,20 +135,8 @@ class DataMixin:
                 self._embedding_encoder.fit(train_ds)
 
                 # Update schema with vocab sizes for model construction
-                self._schema = ResolveSchema(
-                    n_plots=self._schema.n_plots,
-                    n_species=self._schema.n_species,
-                    n_continuous=self._schema.n_continuous,
-                    has_coordinates=self._schema.has_coordinates,
-                    has_abundance=self._schema.has_abundance,
-                    has_taxonomy=self._schema.has_taxonomy,
-                    n_genera=self._schema.n_genera,
-                    n_families=self._schema.n_families,
-                    targets=self._schema.targets,
-                    covariate_names=self._schema.covariate_names,
-                    species_normalization=self._schema.species_normalization,
-                    track_unknown_fraction=self._schema.track_unknown_fraction,
-                    track_unknown_count=self._schema.track_unknown_count,
+                self._schema = replace(
+                    self._schema,
                     n_species_vocab=self._embedding_encoder.n_species,
                     n_genera_vocab=self._embedding_encoder.n_genera,
                     n_families_vocab=self._embedding_encoder.n_families,
@@ -174,20 +151,8 @@ class DataMixin:
                 self._rank_pool_encoder.fit(train_ds)
 
                 # Update schema with vocab sizes
-                self._schema = ResolveSchema(
-                    n_plots=self._schema.n_plots,
-                    n_species=self._schema.n_species,
-                    n_continuous=self._schema.n_continuous,
-                    has_coordinates=self._schema.has_coordinates,
-                    has_abundance=self._schema.has_abundance,
-                    has_taxonomy=self._schema.has_taxonomy,
-                    n_genera=self._schema.n_genera,
-                    n_families=self._schema.n_families,
-                    targets=self._schema.targets,
-                    covariate_names=self._schema.covariate_names,
-                    species_normalization=self._schema.species_normalization,
-                    track_unknown_fraction=self._schema.track_unknown_fraction,
-                    track_unknown_count=self._schema.track_unknown_count,
+                self._schema = replace(
+                    self._schema,
                     n_species_vocab=self._rank_pool_encoder.n_species,
                     n_genera_vocab=self._rank_pool_encoder.n_genera,
                     n_families_vocab=self._rank_pool_encoder.n_families,

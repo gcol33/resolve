@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import warnings
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Optional
 
@@ -367,7 +368,7 @@ class Trainer(
         self._optimizer: Optional[AdamW] = None
         self._scheduler: Optional[OneCycleLR] = None
         self._loss_fn: Optional[MultiTaskLoss] = None
-        self._grad_scaler: Optional[GradScaler] = None
+        self._grad_scaler: GradScaler | None = None
 
     @property
     def device(self) -> torch.device:
@@ -521,9 +522,8 @@ class Trainer(
         )
         self._steps_per_epoch = steps_per_epoch  # Store for resume logic
 
-        # Setup AMP gradient scaler
-        if self.use_amp:
-            self._grad_scaler = GradScaler()
+        # GradScaler with enabled=False is a no-op passthrough (no AMP branch needed)
+        self._grad_scaler = GradScaler(enabled=self.use_amp)
 
         # Setup loss
         self._loss_fn = MultiTaskLoss(
@@ -716,25 +716,8 @@ class Trainer(
             # Forward + backward with optional AMP
             self._optimizer.zero_grad(set_to_none=True)  # Faster than zero_grad()
 
-            if self.use_amp:
-                with autocast(device_type="cuda"):
-                    predictions = self.model(
-                        continuous, genus_ids, family_ids, species_ids, species_vector,
-                        pool_genus_ids=pool_genus_ids, pool_family_ids=pool_family_ids,
-                        pool_weights=pool_weights, pool_mask=pool_mask,
-                        pool_has_cover=pool_has_cover,
-                    )
-                    loss, _ = self._loss_fn(
-                        predictions, targets, epoch, self._target_scalers
-                    )
-                self._grad_scaler.scale(loss).backward()
-                # Unscale before gradient clipping
-                self._grad_scaler.unscale_(self._optimizer)
-                # Gradient clipping
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
-                self._grad_scaler.step(self._optimizer)
-                self._grad_scaler.update()
-            else:
+            ctx = autocast(device_type="cuda") if self.use_amp else nullcontext()
+            with ctx:
                 predictions = self.model(
                     continuous, genus_ids, family_ids, species_ids, species_vector,
                     pool_genus_ids=pool_genus_ids, pool_family_ids=pool_family_ids,
@@ -744,10 +727,12 @@ class Trainer(
                 loss, _ = self._loss_fn(
                     predictions, targets, epoch, self._target_scalers
                 )
-                loss.backward()
-                # Gradient clipping
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
-                self._optimizer.step()
+
+            self._grad_scaler.scale(loss).backward()
+            self._grad_scaler.unscale_(self._optimizer)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+            self._grad_scaler.step(self._optimizer)
+            self._grad_scaler.update()
 
             # Step scheduler after optimizer (fixes PyTorch warning)
             self._scheduler.step()
@@ -824,16 +809,10 @@ class Trainer(
              pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
              targets) = self._unpack_batch(batch, target_names, has_taxonomy, data_on_device)
 
-            # Use AMP for faster eval inference
-            if self.use_amp:
-                with autocast(device_type="cuda"):
-                    predictions = self.model(
-                        continuous, genus_ids, family_ids, species_ids, species_vector,
-                        pool_genus_ids=pool_genus_ids, pool_family_ids=pool_family_ids,
-                        pool_weights=pool_weights, pool_mask=pool_mask,
-                        pool_has_cover=pool_has_cover,
-                    )
-            else:
+            # AMP autocast wraps forward + loss to avoid float16 overflow
+            # in log-softmax for classification targets
+            ctx = autocast(device_type="cuda") if self.use_amp else nullcontext()
+            with ctx:
                 predictions = self.model(
                     continuous, genus_ids, family_ids, species_ids, species_vector,
                     pool_genus_ids=pool_genus_ids, pool_family_ids=pool_family_ids,
@@ -841,18 +820,18 @@ class Trainer(
                     pool_has_cover=pool_has_cover,
                 )
 
-            # Reshape for loss
-            targets_for_loss = {}
-            for name in target_names:
-                cfg = self.model.target_configs[name]
-                if cfg.task == "regression":
-                    targets_for_loss[name] = targets[name].unsqueeze(-1)
-                else:
-                    targets_for_loss[name] = targets[name]
+                # Reshape for loss
+                targets_for_loss = {}
+                for name in target_names:
+                    cfg = self.model.target_configs[name]
+                    if cfg.task == "regression":
+                        targets_for_loss[name] = targets[name].unsqueeze(-1)
+                    else:
+                        targets_for_loss[name] = targets[name]
 
-            loss, _ = self._loss_fn(
-                predictions, targets_for_loss, epoch, self._target_scalers
-            )
+                loss, _ = self._loss_fn(
+                    predictions, targets_for_loss, epoch, self._target_scalers
+                )
             total_loss += loss.item() * continuous.size(0)
 
             # Collect predictions
