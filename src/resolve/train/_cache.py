@@ -115,8 +115,8 @@ class CacheMixin:
             try:
                 f.unlink()
                 print(f"  [Removed old cache: {f.name}]")
-            except OSError:
-                pass  # Ignore if file can't be deleted
+            except OSError as e:
+                print(f"  Warning: could not delete cache file {f.name}: {e}")
 
     def _load_cache(self: Trainer) -> Optional[dict]:
         """Load preprocessed data from cache if valid."""

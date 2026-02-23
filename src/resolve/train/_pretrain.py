@@ -56,7 +56,7 @@ class PretrainMixin:
         if self.pretrain_all_data:
             # Fit encoder on full Trainer dataset (no train/test split)
             # No label leakage: pretraining is unsupervised (MLM)
-            from dataclasses import replace as dc_replace
+            from dataclasses import replace
             from resolve.encode.rank_pool import RankPoolEncoder
 
             self._rank_pool_encoder = RankPoolEncoder(
@@ -66,7 +66,7 @@ class PretrainMixin:
             self._rank_pool_encoder.fit(self.dataset)
 
             # Update schema with vocab sizes
-            self._schema = dc_replace(
+            self._schema = replace(
                 self._schema,
                 n_species_vocab=self._rank_pool_encoder.n_species,
                 n_genera_vocab=self._rank_pool_encoder.n_genera,

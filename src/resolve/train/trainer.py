@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import statistics
 import time
 import warnings
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import torch
@@ -37,6 +37,12 @@ LOSS_PRESETS = {
     "combined": {1: PhaseConfig(mae=0.80, smape=0.15, band=0.05)},
     "smape": {1: PhaseConfig(mae=0.5, smape=0.5)},
 }
+
+# Training constants
+_PREFETCH_BATCH_THRESHOLD = 16384  # Auto-enable prefetch above this batch size
+_SCHEDULER_PCT_START = 0.1  # OneCycleLR warmup fraction
+_ETA_WINDOW = 10  # Rolling average window for ETA estimation
+_NAN_THRESHOLD_PCT = 50  # NaN batch % above which training is aborted
 
 
 class Trainer(
@@ -73,7 +79,7 @@ class Trainer(
         species_embed_dim: int = 32,
         top_k: int = 5,
         top_k_species: int = 10,
-        hidden_dims: Optional[list[int]] = None,
+        hidden_dims: list[int] | None = None,
         genus_emb_dim: int = 8,
         family_emb_dim: int = 8,
         dropout: float = 0.3,
@@ -85,23 +91,23 @@ class Trainer(
         lr: float = 1e-3,
         weight_decay: float = 1e-4,
         # Checkpointing
-        checkpoint_dir: Optional[str | Path] = None,
+        checkpoint_dir: str | Path | None = None,
         checkpoint_every: int = 50,
         resume: bool = True,
         reset_patience: bool = False,
         # Caching
-        cache_dir: Optional[str | Path] = None,
+        cache_dir: str | Path | None = None,
         max_cache_files: int = 5,
         # Loss configuration
         loss_config: str = "mae",
         # Advanced (deprecated - use loss_config instead)
-        phases: Optional[dict[int, PhaseConfig]] = None,
-        phase_boundaries: Optional[list[int]] = None,
+        phases: dict[int, PhaseConfig] | None = None,
+        phase_boundaries: list[int] | None = None,
         device: str = "auto",
         use_amp: bool = True,
         compile_model: bool = False,
-        prefetch_data: Optional[bool] = None,
-        gpu_data: Optional[bool] = None,
+        prefetch_data: bool | None = None,
+        gpu_data: bool | None = None,
         species_aggregation: str = "abundance",
         species_selection: str = "top",
         species_representation: str = "abundance",
@@ -119,9 +125,9 @@ class Trainer(
         pretrain_all_data: bool = False,
         # v7: label smoothing, class weights, EMA, deeper head
         label_smoothing: float = 0.0,
-        class_weights: Optional[torch.Tensor] = None,
+        class_weights: torch.Tensor | None = None,
         ema_decay: float = 0.0,
-        head_hidden_dims: Optional[list[int]] = None,
+        head_hidden_dims: list[int] | None = None,
         verbose: int = 1,
     ):
         """
@@ -307,7 +313,7 @@ class Trainer(
         self.compile_model = compile_model
         # Auto-enable prefetch for large batch sizes (16K+)
         if prefetch_data is None:
-            self.prefetch_data = batch_size >= 16384
+            self.prefetch_data = batch_size >= _PREFETCH_BATCH_THRESHOLD
         else:
             self.prefetch_data = prefetch_data
         # GPU data will be resolved after device is known (below)
@@ -357,20 +363,20 @@ class Trainer(
         self._schema = dataset.schema
 
         # Model will be built in fit() after vocab is ready
-        self.model: Optional[ResolveModel] = None
+        self.model: ResolveModel | None = None
 
         # Components to be initialized in fit()
-        self._species_encoder: Optional[SpeciesEncoder] = None
-        self._embedding_encoder: Optional[EmbeddingEncoder] = None
-        self._rank_pool_encoder = None  # Optional[RankPoolEncoder]
+        self._species_encoder: SpeciesEncoder | None = None
+        self._embedding_encoder: EmbeddingEncoder | None = None
+        self._rank_pool_encoder = None  # RankPoolEncoder | None
         self._pretrain_fitted_encoder = False
         self._scalers: dict[str, object] = {}
         self._target_scalers: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
         self._train_loader = None
         self._test_loader = None
-        self._optimizer: Optional[AdamW] = None
-        self._scheduler: Optional[OneCycleLR] = None
-        self._loss_fn: Optional[MultiTaskLoss] = None
+        self._optimizer: AdamW | None = None
+        self._scheduler: OneCycleLR | None = None
+        self._loss_fn: MultiTaskLoss | None = None
         self._grad_scaler: GradScaler | None = None
 
     @property
@@ -497,7 +503,7 @@ class Trainer(
             try:
                 self.model = torch.compile(self.model, mode="reduce-overhead")
                 compiled = True
-            except Exception as e:
+            except RuntimeError as e:
                 print(f"  Warning: torch.compile failed ({e}), using eager mode")
         if compiled:
             print(f"Training on: {self._device} (AMP: {self.use_amp}, batch_size: {self.batch_size}, compiled: True)")
@@ -520,7 +526,7 @@ class Trainer(
             self._optimizer,
             max_lr=self.lr,
             total_steps=total_steps,
-            pct_start=0.1,
+            pct_start=_SCHEDULER_PCT_START,
             anneal_strategy="cos",
         )
         self._steps_per_epoch = steps_per_epoch  # Store for resume logic
@@ -575,7 +581,7 @@ class Trainer(
                     self._optimizer,
                     max_lr=self.lr,
                     total_steps=remaining_steps,
-                    pct_start=0.1,
+                    pct_start=_SCHEDULER_PCT_START,
                     anneal_strategy="cos",
                 )
                 print(f"  Scheduler recreated for {remaining_epochs} remaining epochs ({remaining_steps} steps)")
@@ -623,7 +629,8 @@ class Trainer(
             # Track epoch time and compute ETA
             epoch_time = time.time() - epoch_start
             epoch_times.append(epoch_time)
-            avg_epoch_time = sum(epoch_times[-10:]) / len(epoch_times[-10:])  # Rolling avg of last 10
+            recent = epoch_times[-_ETA_WINDOW:]
+            avg_epoch_time = sum(recent) / len(recent)
             remaining_epochs = self.max_epochs - epoch - 1
             eta_seconds = remaining_epochs * avg_epoch_time
 
@@ -774,7 +781,7 @@ class Trainer(
             nan_pct = 100 * nan_batch_count / total_batches
             if self.verbose >= 1:
                 print(f"  WARNING: NaN loss in {nan_batch_count}/{total_batches} batches ({nan_pct:.1f}%)")
-            if nan_pct > 50:
+            if nan_pct > _NAN_THRESHOLD_PCT:
                 raise RuntimeError(
                     f"Training unstable: NaN loss in {nan_pct:.1f}% of batches. "
                     "Try reducing learning rate or checking data for invalid values."
@@ -782,7 +789,6 @@ class Trainer(
 
         # Debug: print batch-level diagnostics
         if self.verbose >= 2 and batch_losses:
-            import statistics
             print(f"    [Debug] Batch losses: min={min(batch_losses):.4f}, max={max(batch_losses):.4f}, "
                   f"mean={statistics.mean(batch_losses):.4f}, std={statistics.stdev(batch_losses) if len(batch_losses) > 1 else 0:.4f}")
             print(f"    [Debug] Grad norms: min={min(grad_norms):.4f}, max={max(grad_norms):.4f}, "

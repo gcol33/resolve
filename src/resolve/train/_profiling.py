@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import torch
 from torch.amp import GradScaler, autocast
@@ -33,7 +33,7 @@ class ProfilingMixin:
         n_batches: int = 50,
         warmup_batches: int = 5,
         save_trace: bool = False,
-        trace_dir: Optional[str | Path] = None,
+        trace_dir: str | Path | None = None,
     ) -> ProfileResult:
         """Profile training performance to identify bottlenecks.
 
@@ -254,15 +254,15 @@ class ProfilingMixin:
     def _profile_step(
         self: Trainer,
         continuous: torch.Tensor,
-        genus_ids: Optional[torch.Tensor],
-        family_ids: Optional[torch.Tensor],
-        species_ids: Optional[torch.Tensor],
-        species_vector: Optional[torch.Tensor],
-        pool_genus_ids: Optional[torch.Tensor],
-        pool_family_ids: Optional[torch.Tensor],
-        pool_weights: Optional[torch.Tensor],
-        pool_mask: Optional[torch.Tensor],
-        pool_has_cover: Optional[torch.Tensor],
+        genus_ids: torch.Tensor | None,
+        family_ids: torch.Tensor | None,
+        species_ids: torch.Tensor | None,
+        species_vector: torch.Tensor | None,
+        pool_genus_ids: torch.Tensor | None,
+        pool_family_ids: torch.Tensor | None,
+        pool_weights: torch.Tensor | None,
+        pool_mask: torch.Tensor | None,
+        pool_has_cover: torch.Tensor | None,
         targets: dict[str, torch.Tensor],
     ) -> None:
         """Run a single forward+backward+optimizer step (used by warmup and trace)."""
@@ -293,7 +293,7 @@ class ProfilingMixin:
     def _save_profile_trace(
         self: Trainer,
         result: ProfileResult,
-        trace_dir: Optional[str | Path],
+        trace_dir: str | Path | None,
         target_names: list[str],
         has_taxonomy: bool,
         use_prefetch: bool,
