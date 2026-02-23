@@ -103,10 +103,88 @@ The research paper using RESOLVE is located at:
 | Phase | Status | Description |
 |-------|--------|-------------|
 | A: Fused Embeddings | **DONE** | `FusedPositionalEmbedding` in C++ encoder — single lookup with offset indexing |
-| B: CUDA Kernels | Partial | Hash embedding kernel in `cuda/kernels.cu`; fused embed+linear not yet done |
-| C: torch.compile | Not started | TorchScript/JIT optimization for C++ inference |
-| D: Async Pipeline | **DONE** | Double-buffered GPU prefetch in Trainer (`prefetch_hash_[2]`) |
+| B: CUDA Kernels | **Partial** | Hash kernels done (5 variants + auto-select in `cuda/kernels.cu`); Triton fused linear+CE done (`csrc/fused_linear_ce.py`); fused embed+concat+linear not yet done |
+| C: JIT Inference | Not started | `torch::jit::optimize_for_inference()` for C++ inference path |
+| D: Async Pipeline | **DONE** | Double-buffered GPU prefetch in Trainer via `CUDAPrefetcher`; auto-enables at batch_size >= 16384 |
 
-Remaining performance work (if needed for paper experiments):
-- Phase B: Fused embedding + concat + linear CUDA kernel
-- Phase C: `torch::jit::optimize_for_inference()` for C++ inference path
+### Additional done optimizations
+
+- **Numba parallel kernels**: `@njit(parallel=True)` hash aggregation + taxonomy top-k (`encode/species_fast.py`)
+- **torch.compile()**: Integrated in Trainer (`compile_model=True`, mode `reduce-overhead`)
+- **GPU-resident data**: Full dataset on GPU via `GPUTensorLoader` (auto-enabled on CUDA)
+
+---
+
+## Remaining Work
+
+### Phase B (continued): Fused embed + concat + linear CUDA kernel
+
+**Goal**: Single kernel that combines species embedding lookup, concatenation with continuous features, and the first linear projection — eliminating intermediate tensor materialization.
+
+**Where it applies**: Encoder forward pass in all modes. Currently each step allocates a separate tensor:
+1. Embedding lookup → tensor A
+2. Concat with continuous → tensor B
+3. Linear(B) → tensor C
+
+A fused kernel would go directly from inputs → tensor C.
+
+**Files to modify**:
+- New kernel: `src/core/cuda/fused_embed_linear.cu`
+- PyTorch dispatcher: `src/core/cuda/fused_embed_linear.cpp`
+- Python integration: `src/resolve/model/resolve.py` (conditional dispatch)
+
+**Expected impact**: ~10-15% training speedup if memory-bandwidth-bound (likely at large batch sizes).
+
+### Phase C: JIT inference optimization
+
+**Goal**: Apply `torch::jit::optimize_for_inference()` to the C++ inference path for operator fusion and memory planning.
+
+**Files to modify**:
+- `src/core/cpp_src/predictor.cpp` — JIT-trace the model, apply optimization passes
+- `src/core/cli/predict.cpp` — Use optimized model for CLI predict command
+
+**Expected impact**: ~5-10% inference speedup with better memory access patterns.
+
+### MoE for embed and sparse encoding modes
+
+**Goal**: Extend Mixture of Experts routing (currently hash-only) to embed and sparse modes.
+
+**Current limitation** (`src/core/cpp_src/model.cpp:79,108`):
+```cpp
+if (use_moe) {
+    throw std::runtime_error("MoE is currently only supported for Hash encoding mode");
+}
+```
+
+**What exists**: `PlotEncoderMoE` with gating network and expert routing for hash mode.
+
+**What's needed**:
+- Adapter layers for embed mode (input = concatenated embedding IDs → expert input)
+- Adapter layers for sparse mode (input = explicit species vector → expert input)
+- Update model construction in both C++ and Python backends
+
+**Files to modify**:
+- `src/core/cpp_src/model.cpp` — Remove restriction, add embed/sparse MoE paths
+- `src/core/include/resolve/model.hpp` — New MoE encoder variants
+- `src/resolve/model/resolve.py` — Python fallback MoE for embed/sparse
+
+### Embedding weight extraction API
+
+**Goal**: Extract learned genus/family embedding weights for downstream analysis and export.
+
+**Current state** (`src/core/cpp_src/predictor.cpp:178-186`): Two stubs returning empty tensors:
+```cpp
+torch::Tensor Predictor::get_genus_embeddings() const { return torch::Tensor(); }
+torch::Tensor Predictor::get_family_embeddings() const { return torch::Tensor(); }
+```
+
+**What's needed**:
+- Access embedding tables from the encoder (varies by type: `PlotEncoder`, `PlotEncoderEmbed`, etc.)
+- Clone and return weight tensors
+- Handle encoder types that don't have taxonomy embeddings (return empty tensor)
+- Expose via nanobind/Rcpp bindings
+
+**Files to modify**:
+- `src/core/cpp_src/predictor.cpp` — Implement extraction logic
+- `src/core/python/bindings.cpp` — Expose to Python
+- `r/src/resolve_bindings.cpp` — Expose to R
