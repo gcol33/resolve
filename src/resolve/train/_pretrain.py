@@ -51,18 +51,52 @@ class PretrainMixin:
         print(f"  Epochs: {self.pretrain_epochs}")
         print(f"  Mask prob: {self.pretrain_mask_prob}")
         print(f"  LR: {self.pretrain_lr}")
+        print(f"  All data: {self.pretrain_all_data}")
 
-        # Prepare data (same as fit, but only need train split)
-        train_ds, _ = self._prepare_data(fit_encoder=True)
+        if self.pretrain_all_data:
+            # Fit encoder on full Trainer dataset (no train/test split)
+            # No label leakage: pretraining is unsupervised (MLM)
+            from dataclasses import replace as dc_replace
+            from resolve.encode.rank_pool import RankPoolEncoder
 
-        # Build model if not done yet
-        if self.model is None:
-            self.model = self._build_model()
+            self._rank_pool_encoder = RankPoolEncoder(
+                weighting=self.species_normalization,
+                min_species_frequency=self.min_species_frequency,
+            )
+            self._rank_pool_encoder.fit(self.dataset)
 
-        self.model.to(self._device)
+            # Update schema with vocab sizes
+            self._schema = dc_replace(
+                self._schema,
+                n_species_vocab=self._rank_pool_encoder.n_species,
+                n_genera_vocab=self._rank_pool_encoder.n_genera,
+                n_families_vocab=self._rank_pool_encoder.n_families,
+            )
+            self._pretrain_fitted_encoder = True
 
-        # Build tensors and data loader with MLM masking
-        train_tensors = self._build_tensors(train_ds, fit_scalers=True)
+            print(f"  Encoder fitted on full dataset: {len(self.dataset.plot_ids):,} plots")
+            print(f"  Vocab: {self._rank_pool_encoder.n_species:,} species, "
+                  f"{self._rank_pool_encoder.n_genera:,} genera, "
+                  f"{self._rank_pool_encoder.n_families:,} families")
+
+            # Build model with updated schema
+            if self.model is None:
+                self.model = self._build_model()
+            self.model.to(self._device)
+
+            # Build tensors from full dataset
+            train_tensors = self._build_tensors(self.dataset, fit_scalers=True)
+        else:
+            # Standard: fit encoder on train split only
+            train_ds, _ = self._prepare_data(fit_encoder=True)
+
+            # Build model if not done yet
+            if self.model is None:
+                self.model = self._build_model()
+            self.model.to(self._device)
+
+            # Build tensors from train split
+            train_tensors = self._build_tensors(train_ds, fit_scalers=True)
         has_taxonomy = self._schema.has_taxonomy
 
         # Create masking collate wrapper

@@ -116,6 +116,7 @@ class Trainer(
         pretrain_epochs: int = 0,
         pretrain_mask_prob: float = 0.15,
         pretrain_lr: float = 1e-4,
+        pretrain_all_data: bool = False,
         # v7: label smoothing, class weights, EMA, deeper head
         label_smoothing: float = 0.0,
         class_weights: Optional[torch.Tensor] = None,
@@ -298,6 +299,7 @@ class Trainer(
         self.pretrain_epochs = pretrain_epochs
         self.pretrain_mask_prob = pretrain_mask_prob
         self.pretrain_lr = pretrain_lr
+        self.pretrain_all_data = pretrain_all_data
         self.label_smoothing = label_smoothing
         self.class_weights = class_weights
         self.ema_decay = ema_decay
@@ -361,6 +363,7 @@ class Trainer(
         self._species_encoder: Optional[SpeciesEncoder] = None
         self._embedding_encoder: Optional[EmbeddingEncoder] = None
         self._rank_pool_encoder = None  # Optional[RankPoolEncoder]
+        self._pretrain_fitted_encoder = False
         self._scalers: dict[str, object] = {}
         self._target_scalers: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
         self._train_loader = None

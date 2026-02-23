@@ -143,7 +143,13 @@ class DataMixin:
                 )
         else:  # rank_pool or transformer mode (both use same data pipeline)
             from resolve.encode.rank_pool import RankPoolEncoder
-            if fit_encoder or self._rank_pool_encoder is None or not self._rank_pool_encoder._fitted:
+            # Skip re-fitting if encoder was already fitted on full data during pretraining
+            should_fit = (
+                (fit_encoder and not getattr(self, '_pretrain_fitted_encoder', False))
+                or self._rank_pool_encoder is None
+                or not self._rank_pool_encoder._fitted
+            )
+            if should_fit:
                 self._rank_pool_encoder = RankPoolEncoder(
                     weighting=self.species_normalization,
                     min_species_frequency=self.min_species_frequency,
