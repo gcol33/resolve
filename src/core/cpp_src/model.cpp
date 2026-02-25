@@ -76,12 +76,6 @@ ResolveModelImpl::ResolveModelImpl(
     }
     else if (config.species_encoding == SpeciesEncodingMode::Embed) {
         // Embed mode: learnable species embeddings
-        // Note: MoE not yet implemented for embed mode
-        if (use_moe) {
-            throw std::runtime_error(
-                "MoE is currently only supported for Hash encoding mode"
-            );
-        }
         if (schema.n_species_vocab == 0) {
             throw std::runtime_error(
                 "species_encoding=Embed requires n_species_vocab > 0 in schema"
@@ -105,12 +99,6 @@ ResolveModelImpl::ResolveModelImpl(
     }
     else {
         // Sparse mode (uses_explicit_vector=true): explicit species vector
-        // Note: MoE not yet implemented for sparse mode
-        if (use_moe) {
-            throw std::runtime_error(
-                "MoE is currently only supported for Hash encoding mode"
-            );
-        }
         if (schema.n_species_vocab == 0) {
             throw std::runtime_error(
                 "uses_explicit_vector=true requires n_species_vocab > 0 in schema"
@@ -129,6 +117,22 @@ ResolveModelImpl::ResolveModelImpl(
             config.hidden_dims,
             mlp_config,
             config.tabm
+        ));
+    }
+
+    // Create model-level MoE for embed/sparse modes (hash mode uses encoder_moe_ instead)
+    if (use_moe && !encoder_moe_ && !use_adapter) {
+        // Embed or sparse encoder + post-encoder MoE layer
+        int64_t encoder_out = latent_dim();
+        post_moe_ = register_module("post_moe", MixtureOfExperts(
+            encoder_out,
+            config.expert_hidden_dims,
+            encoder_out,  // Preserve latent dimension
+            config.n_experts,
+            config.moe_routing,
+            config.moe_top_k,
+            config.moe_noise_std,
+            mlp_config.dropout
         ));
     }
 
@@ -186,18 +190,25 @@ torch::Tensor ResolveModelImpl::encode(
     torch::Tensor species_ids,
     torch::Tensor species_vector
 ) {
+    torch::Tensor latent;
     if (adapter_) {
-        return adapter_->forward(continuous, genus_ids, family_ids, species_ids, species_vector);
+        latent = adapter_->forward(continuous, genus_ids, family_ids, species_ids, species_vector);
     } else if (encoder_moe_) {
-        // MoE encoder - use forward_simple for inference/latent extraction
-        return encoder_moe_->forward_simple(continuous, genus_ids, family_ids);
+        // Hash MoE encoder - use forward_simple for inference/latent extraction
+        latent = encoder_moe_->forward_simple(continuous, genus_ids, family_ids);
     } else if (encoder_hash_) {
-        return encoder_hash_->forward(continuous, genus_ids, family_ids);
+        latent = encoder_hash_->forward(continuous, genus_ids, family_ids);
     } else if (encoder_embed_) {
-        return encoder_embed_->forward(continuous, species_ids, genus_ids, family_ids);
+        latent = encoder_embed_->forward(continuous, species_ids, genus_ids, family_ids);
     } else {
-        return encoder_sparse_->forward(continuous, species_vector, genus_ids, family_ids);
+        latent = encoder_sparse_->forward(continuous, species_vector, genus_ids, family_ids);
     }
+
+    // Apply model-level MoE for embed/sparse modes
+    if (post_moe_) {
+        latent = post_moe_->forward_simple(latent);
+    }
+    return latent;
 }
 
 std::pair<torch::Tensor, torch::Tensor> ResolveModelImpl::encode_with_aux(
@@ -208,15 +219,29 @@ std::pair<torch::Tensor, torch::Tensor> ResolveModelImpl::encode_with_aux(
     torch::Tensor species_vector
 ) {
     if (adapter_) {
-        // Adapter doesn't have aux loss
         auto latent = adapter_->forward(continuous, genus_ids, family_ids, species_ids, species_vector);
+        if (post_moe_) {
+            auto moe_result = post_moe_->forward(latent);
+            return {moe_result.output, moe_result.aux_loss};
+        }
         return {latent, torch::Tensor()};
     } else if (encoder_moe_) {
-        // MoE encoder returns (latent, aux_loss)
+        // Hash MoE encoder returns (latent, aux_loss)
         return encoder_moe_->forward(continuous, genus_ids, family_ids);
     } else {
-        // Non-MoE encoders don't have aux loss
-        auto latent = encode(continuous, genus_ids, family_ids, species_ids, species_vector);
+        // Standard encoder + optional post_moe_
+        torch::Tensor latent;
+        if (encoder_hash_) {
+            latent = encoder_hash_->forward(continuous, genus_ids, family_ids);
+        } else if (encoder_embed_) {
+            latent = encoder_embed_->forward(continuous, species_ids, genus_ids, family_ids);
+        } else {
+            latent = encoder_sparse_->forward(continuous, species_vector, genus_ids, family_ids);
+        }
+        if (post_moe_) {
+            auto moe_result = post_moe_->forward(latent);
+            return {moe_result.output, moe_result.aux_loss};
+        }
         return {latent, torch::Tensor()};
     }
 }
@@ -297,6 +322,28 @@ std::pair<torch::Tensor, std::vector<torch::Tensor>> ResolveModelImpl::encode_wi
     // to signal that diagnostics aren't available. We don't call encode() here
     // because it would require species_ids/species_vector which aren't passed.
     return {torch::Tensor(), {}};
+}
+
+torch::Tensor ResolveModelImpl::get_genus_weights() const {
+    if (encoder_moe_) return encoder_moe_->get_genus_weights();
+    if (encoder_hash_) return encoder_hash_->get_genus_weights();
+    if (encoder_embed_) return encoder_embed_->get_genus_weights();
+    if (encoder_sparse_) return encoder_sparse_->get_genus_weights();
+    return torch::Tensor();
+}
+
+torch::Tensor ResolveModelImpl::get_family_weights() const {
+    if (encoder_moe_) return encoder_moe_->get_family_weights();
+    if (encoder_hash_) return encoder_hash_->get_family_weights();
+    if (encoder_embed_) return encoder_embed_->get_family_weights();
+    if (encoder_sparse_) return encoder_sparse_->get_family_weights();
+    return torch::Tensor();
+}
+
+torch::Tensor ResolveModelImpl::get_species_weights() const {
+    // Only embed mode has species embeddings
+    if (encoder_embed_) return encoder_embed_->get_species_weights();
+    return torch::Tensor();
 }
 
 torch::Tensor ResolveModelImpl::get_gate_probs(

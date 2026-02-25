@@ -1001,6 +1001,85 @@ torch::Tensor PlotEncoderMoEImpl::get_gate_probs(
 }
 
 // =============================================================================
+// Embedding Weight Extraction (per-position → averaged)
+// =============================================================================
+
+// Helper: stack per-position embedding weights and average
+static torch::Tensor average_embedding_weights(
+    const std::vector<torch::nn::Embedding>& embeddings
+) {
+    if (embeddings.empty()) return torch::Tensor();
+    std::vector<torch::Tensor> weights;
+    weights.reserve(embeddings.size());
+    for (const auto& emb : embeddings) {
+        weights.push_back(emb->weight);
+    }
+    // (top_k, vocab_size, emb_dim) → mean(0) → (vocab_size, emb_dim)
+    return torch::stack(weights, 0).mean(0);
+}
+
+// Helper: extract from FusedPositionalEmbedding and average across positions
+static torch::Tensor average_fused_weights(
+    const FusedPositionalEmbedding& fused
+) {
+    if (!fused) return torch::Tensor();
+    auto weight = fused->embedding().weight;  // (vocab_size * n_positions, embed_dim)
+    auto n_pos = fused->n_positions();
+    auto vocab = fused->vocab_size();
+    auto dim = fused->embed_dim();
+    // (n_positions, vocab_size, embed_dim) → mean(0)
+    return weight.view({n_pos, vocab, dim}).mean(0);
+}
+
+// PlotEncoder (hash mode, per-position)
+torch::Tensor PlotEncoderImpl::get_genus_weights() const {
+    if (!has_taxonomy_) return torch::Tensor();
+    return average_embedding_weights(genus_embeddings_);
+}
+
+torch::Tensor PlotEncoderImpl::get_family_weights() const {
+    if (!has_taxonomy_) return torch::Tensor();
+    return average_embedding_weights(family_embeddings_);
+}
+
+// PlotEncoderEmbed (embed mode, fused)
+torch::Tensor PlotEncoderEmbedImpl::get_species_weights() const {
+    return average_fused_weights(fused_species_);
+}
+
+torch::Tensor PlotEncoderEmbedImpl::get_genus_weights() const {
+    if (!has_taxonomy_) return torch::Tensor();
+    return average_fused_weights(fused_genus_);
+}
+
+torch::Tensor PlotEncoderEmbedImpl::get_family_weights() const {
+    if (!has_taxonomy_) return torch::Tensor();
+    return average_fused_weights(fused_family_);
+}
+
+// PlotEncoderSparse (sparse mode, per-position)
+torch::Tensor PlotEncoderSparseImpl::get_genus_weights() const {
+    if (!has_taxonomy_) return torch::Tensor();
+    return average_embedding_weights(genus_embeddings_);
+}
+
+torch::Tensor PlotEncoderSparseImpl::get_family_weights() const {
+    if (!has_taxonomy_) return torch::Tensor();
+    return average_embedding_weights(family_embeddings_);
+}
+
+// PlotEncoderMoE (MoE mode, per-position)
+torch::Tensor PlotEncoderMoEImpl::get_genus_weights() const {
+    if (!has_taxonomy_) return torch::Tensor();
+    return average_embedding_weights(genus_embeddings_);
+}
+
+torch::Tensor PlotEncoderMoEImpl::get_family_weights() const {
+    if (!has_taxonomy_) return torch::Tensor();
+    return average_embedding_weights(family_embeddings_);
+}
+
+// =============================================================================
 // Parallel Branch Implementation
 // =============================================================================
 

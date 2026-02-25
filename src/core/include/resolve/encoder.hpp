@@ -357,6 +357,10 @@ public:
     [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
     [[nodiscard]] const std::vector<int64_t>& hidden_dims() const noexcept { return hidden_dims_; }
 
+    // Embedding weight extraction (averaged across positions)
+    [[nodiscard]] torch::Tensor get_genus_weights() const;
+    [[nodiscard]] torch::Tensor get_family_weights() const;
+
 private:
     bool has_taxonomy_;
     int top_k_;
@@ -434,6 +438,11 @@ public:
     [[nodiscard]] int64_t latent_dim() const noexcept { return latent_dim_; }
     [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
 
+    // Embedding weight extraction (averaged across positions from fused tables)
+    [[nodiscard]] torch::Tensor get_species_weights() const;
+    [[nodiscard]] torch::Tensor get_genus_weights() const;
+    [[nodiscard]] torch::Tensor get_family_weights() const;
+
 private:
     bool has_taxonomy_;
     int top_k_species_;
@@ -510,6 +519,10 @@ public:
     [[nodiscard]] int64_t latent_dim() const noexcept { return latent_dim_; }
     [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
     [[nodiscard]] int64_t n_species() const noexcept { return n_species_; }
+
+    // Embedding weight extraction (averaged across positions)
+    [[nodiscard]] torch::Tensor get_genus_weights() const;
+    [[nodiscard]] torch::Tensor get_family_weights() const;
 
 private:
     bool has_taxonomy_;
@@ -658,6 +671,10 @@ public:
     [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
     [[nodiscard]] int n_experts() const noexcept { return n_experts_; }
     [[nodiscard]] MoERoutingType routing_type() const noexcept { return moe_routing_; }
+
+    // Embedding weight extraction (averaged across positions)
+    [[nodiscard]] torch::Tensor get_genus_weights() const;
+    [[nodiscard]] torch::Tensor get_family_weights() const;
 
 private:
     torch::Tensor encode_input(

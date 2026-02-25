@@ -53,11 +53,13 @@ public:
         torch::Tensor family_ids
     );
 
-    // Get learned genus embeddings
+    // Get learned embedding weights (averaged across positions)
     [[nodiscard]] torch::Tensor get_genus_embeddings() const;
-
-    // Get learned family embeddings
     [[nodiscard]] torch::Tensor get_family_embeddings() const;
+    [[nodiscard]] torch::Tensor get_species_embeddings() const;
+
+    // Optimize model for inference (fuses BatchNorm into Linear layers)
+    void optimize_for_inference();
 
     // Accessors
     [[nodiscard]] ResolveModel& model() noexcept { return model_; }

@@ -92,6 +92,11 @@ public:
     [[nodiscard]] bool uses_moe() const noexcept { return config_.moe_routing != MoERoutingType::None; }
     [[nodiscard]] int n_experts() const noexcept { return uses_moe() ? config_.n_experts : 0; }
 
+    // Embedding weight extraction (delegates to active encoder)
+    [[nodiscard]] torch::Tensor get_genus_weights() const;
+    [[nodiscard]] torch::Tensor get_family_weights() const;
+    [[nodiscard]] torch::Tensor get_species_weights() const;
+
     // Get task head by name
     [[nodiscard]] TaskHead& head(const std::string& name);
 
@@ -122,8 +127,11 @@ private:
     PlotEncoderEmbed encoder_embed_{nullptr};
     PlotEncoderSparse encoder_sparse_{nullptr};
 
-    // MoE encoder (used when moe_routing != None)
+    // MoE encoder (used when moe_routing != None AND hash encoding)
     PlotEncoderMoE encoder_moe_{nullptr};
+
+    // Model-level MoE layer (used when moe_routing != None AND embed/sparse encoding)
+    MixtureOfExperts post_moe_{nullptr};
 
     // Tabular adapter (used when encoder_architecture != MLP)
     TabularAdapter adapter_{nullptr};

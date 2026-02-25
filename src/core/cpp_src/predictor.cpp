@@ -175,14 +175,46 @@ torch::Tensor Predictor::get_embeddings(
     return model_->get_latent(scaled_continuous, genus_ids, family_ids);
 }
 
+void Predictor::optimize_for_inference() {
+    model_->eval();
+    torch::NoGradGuard no_grad;
+
+    // Fuse Linear+BatchNorm1d pairs in all Sequential modules
+    for (auto& module : model_->modules(/*include_self=*/false)) {
+        auto seq = std::dynamic_pointer_cast<torch::nn::SequentialImpl>(module);
+        if (!seq) continue;
+
+        for (size_t i = 0; i + 1 < seq->size(); ++i) {
+            auto linear = std::dynamic_pointer_cast<torch::nn::LinearImpl>((*seq)[i]);
+            auto bn = std::dynamic_pointer_cast<torch::nn::BatchNorm1dImpl>((*seq)[i + 1]);
+            if (!linear || !bn) continue;
+
+            // Fuse: W_new = bn.weight / sqrt(var + eps) * W_linear
+            //        b_new = bn.weight / sqrt(var + eps) * b_linear + bn.bias - bn.weight * mean / sqrt(var + eps)
+            auto std_val = torch::sqrt(bn->running_var + bn->options.eps());
+            auto scale = bn->weight / std_val;
+
+            linear->weight.mul_(scale.unsqueeze(1));
+            if (linear->bias.defined()) {
+                linear->bias.mul_(scale).add_(bn->bias - scale * bn->running_mean);
+            }
+
+            // Replace BN with Identity (identity module in Sequential)
+            seq->replace_module(std::to_string(i + 1), torch::nn::Identity());
+        }
+    }
+}
+
 torch::Tensor Predictor::get_genus_embeddings() const {
-    // TODO: Implement proper embedding weight extraction from encoder
-    return torch::Tensor();
+    return model_->get_genus_weights();
 }
 
 torch::Tensor Predictor::get_family_embeddings() const {
-    // TODO: Implement proper embedding weight extraction from encoder
-    return torch::Tensor();
+    return model_->get_family_weights();
+}
+
+torch::Tensor Predictor::get_species_embeddings() const {
+    return model_->get_species_weights();
 }
 
 } // namespace resolve

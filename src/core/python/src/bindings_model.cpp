@@ -227,7 +227,23 @@ void register_model(nb::module_& m) {
             for (auto& p : self->parameters()) {
                 p.set_requires_grad(requires_grad);
             }
-        }, nb::arg("requires_grad") = true);
+        }, nb::arg("requires_grad") = true)
+        // Embedding weight extraction
+        .def("get_genus_weights", [](resolve::ResolveModel& self) {
+            auto t = self->get_genus_weights();
+            if (!t.defined()) return nb::steal(nb::none().release().ptr());
+            return nb::steal(THPVariable_Wrap(t));
+        })
+        .def("get_family_weights", [](resolve::ResolveModel& self) {
+            auto t = self->get_family_weights();
+            if (!t.defined()) return nb::steal(nb::none().release().ptr());
+            return nb::steal(THPVariable_Wrap(t));
+        })
+        .def("get_species_weights", [](resolve::ResolveModel& self) {
+            auto t = self->get_species_weights();
+            if (!t.defined()) return nb::steal(nb::none().release().ptr());
+            return nb::steal(THPVariable_Wrap(t));
+        });
 
     m.attr("SpaccModel") = m.attr("ResolveModel");
 }
