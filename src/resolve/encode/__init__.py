@@ -3,8 +3,6 @@ from resolve.encode.vocab import SpeciesVocab, TaxonomyVocab
 from resolve.encode.embedding import EmbeddingEncoder, SpeciesEmbeddingModule
 from resolve.encode.normalize import TaxonomyNormalizer
 from resolve.encode.rank_pool import RankPoolEncoder, RankPoolEncodedSpecies
-from resolve.encode.wfo import WFOBackbone, prepare_name, prepare_names
-
 __all__ = [
     "SpeciesEncoder",
     "SpeciesVocab",
@@ -14,7 +12,4 @@ __all__ = [
     "TaxonomyNormalizer",
     "RankPoolEncoder",
     "RankPoolEncodedSpecies",
-    "WFOBackbone",
-    "prepare_name",
-    "prepare_names",
 ]

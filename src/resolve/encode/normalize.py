@@ -125,7 +125,7 @@ class TaxonomyNormalizer:
         Returns:
             TaxonomyNormalizer with {original_name: accepted_name} mapping.
         """
-        from resolve.encode.wfo import WFOBackbone
+        from resolve.ext.wfo import WFOBackbone
 
         backbone = WFOBackbone(backbone_path)
         return backbone.to_normalizer(species_names, fuzzy=fuzzy, verbose=verbose)
