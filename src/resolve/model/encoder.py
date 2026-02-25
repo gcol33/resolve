@@ -6,6 +6,8 @@ from typing import Literal, Optional
 import torch
 from torch import nn
 
+from resolve.csrc.fused_embed_linear import fused_embed_concat_linear
+
 
 # Valid species encoding modes
 SPECIES_ENCODING_MODES = ("hash", "embed", "rank_pool", "transformer")
@@ -159,12 +161,28 @@ class PlotEncoder(nn.Module):
         Returns:
             latent: (batch, latent_dim)
         """
-        taxonomy_emb = _embed_taxonomy_modulelists(
-            self.genus_embeddings, self.family_embeddings,
-            genus_ids, family_ids, self.has_taxonomy,
-        )
-        x = torch.cat([continuous, taxonomy_emb], dim=1) if taxonomy_emb is not None else continuous
-        return self.mlp(x)
+        if self.has_taxonomy and genus_ids is not None and family_ids is not None:
+            # Fused embed + concat + first linear: avoids materializing
+            # the intermediate (batch, D_cont + K*G + K*F) tensor
+            first_linear_out = fused_embed_concat_linear(
+                continuous, genus_ids, family_ids,
+                list(self.genus_embeddings), list(self.family_embeddings),
+                self.mlp[0],  # first nn.Linear in the Sequential
+            )
+            return self.mlp[1:](first_linear_out)
+        return self.mlp(continuous)
+
+    def get_genus_weights(self) -> torch.Tensor | None:
+        """Get genus embedding weights averaged across positions."""
+        if not self.has_taxonomy:
+            return None
+        return torch.stack([emb.weight for emb in self.genus_embeddings], dim=0).mean(0)
+
+    def get_family_weights(self) -> torch.Tensor | None:
+        """Get family embedding weights averaged across positions."""
+        if not self.has_taxonomy:
+            return None
+        return torch.stack([emb.weight for emb in self.family_embeddings], dim=0).mean(0)
 
 
 class PlotEncoderEmbed(nn.Module):
@@ -262,6 +280,22 @@ class PlotEncoderEmbed(nn.Module):
             parts.append(taxonomy_emb)
         return self.mlp(torch.cat(parts, dim=1))
 
+    def get_species_weights(self) -> torch.Tensor:
+        """Get species embedding weights averaged across positions."""
+        return torch.stack([emb.weight for emb in self.species_embeddings], dim=0).mean(0)
+
+    def get_genus_weights(self) -> torch.Tensor | None:
+        """Get genus embedding weights averaged across positions."""
+        if not self.has_taxonomy:
+            return None
+        return torch.stack([emb.weight for emb in self.genus_embeddings], dim=0).mean(0)
+
+    def get_family_weights(self) -> torch.Tensor | None:
+        """Get family embedding weights averaged across positions."""
+        if not self.has_taxonomy:
+            return None
+        return torch.stack([emb.weight for emb in self.family_embeddings], dim=0).mean(0)
+
 
 class PlotEncoderSparse(nn.Module):
     """
@@ -351,6 +385,18 @@ class PlotEncoderSparse(nn.Module):
         if taxonomy_emb is not None:
             parts.append(taxonomy_emb)
         return self.mlp(torch.cat(parts, dim=1))
+
+    def get_genus_weights(self) -> torch.Tensor | None:
+        """Get genus embedding weights averaged across positions."""
+        if not self.has_taxonomy:
+            return None
+        return torch.stack([emb.weight for emb in self.genus_embeddings], dim=0).mean(0)
+
+    def get_family_weights(self) -> torch.Tensor | None:
+        """Get family embedding weights averaged across positions."""
+        if not self.has_taxonomy:
+            return None
+        return torch.stack([emb.weight for emb in self.family_embeddings], dim=0).mean(0)
 
 
 class PlotEncoderRankPool(nn.Module):
@@ -486,6 +532,22 @@ class PlotEncoderRankPool(nn.Module):
         has_cover_col = has_cover.unsqueeze(-1)  # (batch, 1)
         x = torch.cat([continuous, pooled, has_cover_col], dim=1)
         return self.mlp(x)
+
+    def get_species_weights(self) -> torch.Tensor:
+        """Get species embedding weights."""
+        return self.species_embedding.weight
+
+    def get_genus_weights(self) -> torch.Tensor | None:
+        """Get genus embedding weights."""
+        if not self.has_taxonomy:
+            return None
+        return self.genus_embedding.weight
+
+    def get_family_weights(self) -> torch.Tensor | None:
+        """Get family embedding weights."""
+        if not self.has_taxonomy:
+            return None
+        return self.family_embedding.weight
 
 
 class PlotEncoderTransformer(nn.Module):
@@ -704,3 +766,19 @@ class PlotEncoderTransformer(nn.Module):
         has_cover_col = has_cover.unsqueeze(-1)  # (batch, 1)
         x = torch.cat([continuous, pooled, has_cover_col], dim=1)
         return self.mlp(x)
+
+    def get_species_weights(self) -> torch.Tensor:
+        """Get species embedding weights."""
+        return self.species_embedding.weight
+
+    def get_genus_weights(self) -> torch.Tensor | None:
+        """Get genus embedding weights."""
+        if not self.has_taxonomy:
+            return None
+        return self.genus_embedding.weight
+
+    def get_family_weights(self) -> torch.Tensor | None:
+        """Get family embedding weights."""
+        if not self.has_taxonomy:
+            return None
+        return self.family_embedding.weight
