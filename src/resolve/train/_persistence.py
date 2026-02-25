@@ -72,6 +72,8 @@ class PersistenceMixin:
             "track_unknown_fraction": self.track_unknown_fraction,
             "uses_explicit_vector": self.model.uses_explicit_vector,
             "head_hidden_dims": self.head_hidden_dims,
+            "categorical_vocabs": self._categorical_vocabs if hasattr(self, "_categorical_vocabs") else {},
+            "categorical_embed_dim": self.categorical_embed_dim if hasattr(self, "categorical_embed_dim") else 8,
         }
 
         # Save encoder-specific state
@@ -120,7 +122,7 @@ class PersistenceMixin:
         cls,
         path: Union[str, Path],
         device: str = "auto",
-    ) -> tuple[ResolveModel, Union[SpeciesEncoder, EmbeddingEncoder], dict]:
+    ) -> tuple[ResolveModel, Union[SpeciesEncoder, EmbeddingEncoder], dict, dict]:
         """Load model from checkpoint.
 
         Dispatches encoder creation based on species_encoding saved in checkpoint:
@@ -129,7 +131,7 @@ class PersistenceMixin:
         - "rank_pool"/"transformer": creates RankPoolEncoder with restored vocabs
 
         Returns:
-            (model, species_encoder, scalers)
+            (model, species_encoder, scalers, categorical_vocabs)
 
         Security Note:
             This method uses pickle deserialization (weights_only=False) to load
@@ -143,8 +145,22 @@ class PersistenceMixin:
         track_unknown_count = state.get("track_unknown_count", False)
         uses_explicit_vector = state.get("uses_explicit_vector", False)
 
+        # Restore categorical vocab sizes into schema if vocabs were saved
+        schema = state["schema"]
+        categorical_vocabs = state.get("categorical_vocabs", {})
+        if categorical_vocabs:
+            from dataclasses import replace as _replace
+            categorical_embed_dim = state.get("categorical_embed_dim", 8)
+            vocab_sizes = {name: v.n_categories for name, v in categorical_vocabs.items()}
+            schema = _replace(
+                schema,
+                categorical_names=list(categorical_vocabs.keys()),
+                categorical_vocab_sizes=vocab_sizes,
+                categorical_embed_dim=categorical_embed_dim,
+            )
+
         model = ResolveModel(
-            schema=state["schema"],
+            schema=schema,
             targets=state["target_configs"],
             species_encoding=species_encoding,
             hash_dim=state["hash_dim"],
@@ -215,4 +231,4 @@ class PersistenceMixin:
         if normalizer is not None:
             encoder.normalizer = normalizer
 
-        return model, encoder, state["scalers"]
+        return model, encoder, state["scalers"], categorical_vocabs

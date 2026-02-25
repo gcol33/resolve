@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 # Cache version — increment when cache format changes
-_CACHE_VERSION = 1
+_CACHE_VERSION = 2
 
 
 class CacheMixin:
@@ -50,6 +50,7 @@ class CacheMixin:
             "track_unknown_fraction": self.track_unknown_fraction,
             "track_unknown_count": self.track_unknown_count,
             "targets": sorted(self.dataset.targets.keys()),
+            "categoricals": sorted(self.dataset._roles.categoricals),
         }
 
         config_str = json.dumps(config, sort_keys=True)
@@ -86,6 +87,7 @@ class CacheMixin:
                 "vocab": self._species_encoder._vocab if self._species_encoder else None,
                 "species_vocab": self._species_encoder._species_vocab if self._species_encoder else set(),
             },
+            "categorical_vocabs": self._categorical_vocabs,
             "cache_key": self._compute_cache_key(),
         }
 
@@ -168,5 +170,8 @@ class CacheMixin:
         if enc_state.get("species_vocab"):
             self._species_encoder._species_vocab = enc_state["species_vocab"]
         self._species_encoder._fitted = True
+
+        # Restore categorical vocabs
+        self._categorical_vocabs = cache.get("categorical_vocabs", {})
 
         return cache["train_tensors"], cache["test_tensors"]

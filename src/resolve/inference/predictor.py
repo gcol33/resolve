@@ -54,10 +54,12 @@ class Predictor:
         species_encoder: SpeciesEncoder | EmbeddingEncoder,
         scalers: dict,
         device: str = "auto",
+        categorical_vocabs: dict | None = None,
     ):
         self.model = model
         self.species_encoder = species_encoder
         self.scalers = scalers
+        self.categorical_vocabs = categorical_vocabs or {}
 
         if device == "auto":
             self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -70,8 +72,8 @@ class Predictor:
     @classmethod
     def load(cls, path: str | Path, device: str = "auto") -> Predictor:
         """Load predictor from saved checkpoint."""
-        model, encoder, scalers = Trainer.load(path, device)
-        return cls(model, encoder, scalers, device)
+        model, encoder, scalers, categorical_vocabs = Trainer.load(path, device)
+        return cls(model, encoder, scalers, device, categorical_vocabs=categorical_vocabs)
 
     @torch.no_grad()
     def predict(
@@ -193,6 +195,19 @@ class Predictor:
         # Convert to tensors
         continuous_t = torch.from_numpy(continuous).to(self._device)
 
+        # Build categorical IDs for prediction
+        categorical_ids_t = None
+        if self.categorical_vocabs and schema.has_categoricals:
+            cat_data = dataset.get_categoricals()
+            if cat_data is not None:
+                cat_arrays = []
+                for cat_name in schema.categorical_names:
+                    vocab = self.categorical_vocabs[cat_name]
+                    cat_arrays.append(vocab.encode_array(cat_data[cat_name]))
+                categorical_ids_t = torch.from_numpy(
+                    np.stack(cat_arrays, axis=1)
+                ).to(self._device)
+
         # Forward pass (dispatch based on encoding mode)
         if encoding == "rank_pool":
             predictions_raw = self.model(
@@ -201,11 +216,13 @@ class Predictor:
                 pool_genus_ids=pool_genus_ids_t, pool_family_ids=pool_family_ids_t,
                 pool_weights=pool_weights_t, pool_mask=pool_mask_t,
                 pool_has_cover=pool_has_cover_t,
+                categorical_ids=categorical_ids_t,
             )
         else:
             predictions_raw = self.model(
                 continuous_t, genus_t, family_t,
                 species_ids=species_ids_t, species_vector=species_vector_t,
+                categorical_ids=categorical_ids_t,
             )
 
         # Get latent if requested
@@ -218,11 +235,13 @@ class Predictor:
                     pool_genus_ids=pool_genus_ids_t, pool_family_ids=pool_family_ids_t,
                     pool_weights=pool_weights_t, pool_mask=pool_mask_t,
                     pool_has_cover=pool_has_cover_t,
+                    categorical_ids=categorical_ids_t,
                 )
             else:
                 latent = self.model.get_latent(
                     continuous_t, genus_t, family_t,
                     species_ids=species_ids_t, species_vector=species_vector_t,
+                    categorical_ids=categorical_ids_t,
                 )
             latent = latent.cpu().numpy()
 

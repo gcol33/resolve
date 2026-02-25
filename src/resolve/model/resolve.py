@@ -10,6 +10,7 @@ from torch import nn
 from resolve.data.dataset import ResolveSchema
 from resolve.data.roles import TargetConfig
 from resolve.model.encoder import PlotEncoder, PlotEncoderEmbed, PlotEncoderSparse, PlotEncoderRankPool, PlotEncoderTransformer
+from resolve.model.experts import MixtureOfExperts
 from resolve.model.head import TaskHead
 
 
@@ -62,6 +63,12 @@ class ResolveModel(nn.Module):
         transformer_dropout: float = 0.1,
         # Classification head
         head_hidden_dims: Optional[list[int]] = None,
+        # MoE configuration
+        n_experts: int = 0,
+        expert_hidden_dims: Optional[list[int]] = None,
+        moe_routing: str = "soft",
+        moe_top_k: int = 2,
+        moe_noise_std: float = 0.1,
     ):
         super().__init__()
 
@@ -73,6 +80,7 @@ class ResolveModel(nn.Module):
         self.species_encoding = species_encoding
         self.uses_explicit_vector = uses_explicit_vector
         self.hash_dim = hash_dim
+        self.uses_moe = n_experts > 0
         self.species_embed_dim = species_embed_dim
         self.top_k = top_k
         self.top_k_species = top_k_species
@@ -80,6 +88,18 @@ class ResolveModel(nn.Module):
         self.genus_emb_dim = genus_emb_dim
         self.family_emb_dim = family_emb_dim
         self.dropout = dropout
+
+        # Build categorical embedding tables (plot-level features like ecoregion, country)
+        self.categorical_embeddings = nn.ModuleDict()
+        self.categorical_embed_dim = schema.categorical_embed_dim
+        self._categorical_names = list(schema.categorical_names)
+        n_categorical_embed = 0
+        for cat_name in self._categorical_names:
+            vocab_size = schema.categorical_vocab_sizes[cat_name]
+            self.categorical_embeddings[cat_name] = nn.Embedding(
+                vocab_size, schema.categorical_embed_dim, padding_idx=0,
+            )
+            n_categorical_embed += schema.categorical_embed_dim
 
         # Number of base continuous features (coords + covariates)
         n_coords = 2 if schema.has_coordinates else 0
@@ -91,7 +111,7 @@ class ResolveModel(nn.Module):
 
         if species_encoding == "hash" and not uses_explicit_vector:
             # Hash mode: continuous includes hash_dim
-            n_continuous = n_coords + len(schema.covariate_names) + hash_dim + n_unknown_features
+            n_continuous = n_coords + len(schema.covariate_names) + hash_dim + n_unknown_features + n_categorical_embed
 
             # Build hash-based encoder
             self.encoder = PlotEncoder(
@@ -106,7 +126,7 @@ class ResolveModel(nn.Module):
             )
         elif species_encoding == "hash" and uses_explicit_vector:
             # Explicit vector mode (all/presence_absence): continuous does NOT include species info
-            n_continuous = n_coords + len(schema.covariate_names) + n_unknown_features
+            n_continuous = n_coords + len(schema.covariate_names) + n_unknown_features + n_categorical_embed
 
             # Validate vocab sizes are present
             if schema.n_species_vocab == 0:
@@ -130,7 +150,7 @@ class ResolveModel(nn.Module):
             )
         elif species_encoding == "embed":
             # Embed mode: continuous does NOT include hash embedding
-            n_continuous = n_coords + len(schema.covariate_names) + n_unknown_features
+            n_continuous = n_coords + len(schema.covariate_names) + n_unknown_features + n_categorical_embed
 
             # Validate vocab sizes are present
             if schema.n_species_vocab == 0:
@@ -154,7 +174,7 @@ class ResolveModel(nn.Module):
                 dropout=dropout,
             )
         elif species_encoding == "transformer":
-            n_continuous = n_coords + len(schema.covariate_names) + n_unknown_features
+            n_continuous = n_coords + len(schema.covariate_names) + n_unknown_features + n_categorical_embed
 
             if schema.n_species_vocab == 0:
                 raise ValueError(
@@ -178,7 +198,7 @@ class ResolveModel(nn.Module):
                 cover_dropout=cover_dropout,
             )
         else:  # rank_pool mode
-            n_continuous = n_coords + len(schema.covariate_names) + n_unknown_features
+            n_continuous = n_coords + len(schema.covariate_names) + n_unknown_features + n_categorical_embed
 
             if schema.n_species_vocab == 0:
                 raise ValueError(
@@ -199,12 +219,33 @@ class ResolveModel(nn.Module):
                 cover_dropout=cover_dropout,
             )
 
+        # Optional MoE layer after encoder
+        if self.uses_moe:
+            if expert_hidden_dims is None:
+                expert_hidden_dims = [256, 128]
+            encoder_latent = self.encoder.latent_dim
+            moe_output_dim = encoder_latent  # Preserve dimension
+            self.moe_layer = MixtureOfExperts(
+                input_dim=encoder_latent,
+                expert_hidden_dims=expert_hidden_dims,
+                output_dim=moe_output_dim,
+                n_experts=n_experts,
+                routing=moe_routing,
+                top_k=moe_top_k,
+                noise_std=moe_noise_std,
+                dropout=dropout,
+            )
+            effective_latent_dim = moe_output_dim
+        else:
+            self.moe_layer = None
+            effective_latent_dim = self.encoder.latent_dim
+
         # Build task heads
         self.head_hidden_dims = head_hidden_dims
         self.heads = nn.ModuleDict()
         for name, cfg in targets.items():
             self.heads[name] = TaskHead(
-                latent_dim=self.encoder.latent_dim,
+                latent_dim=effective_latent_dim,
                 task=cfg.task,
                 num_classes=cfg.num_classes,
                 transform=cfg.transform,
@@ -221,6 +262,8 @@ class ResolveModel(nn.Module):
 
     @property
     def latent_dim(self) -> int:
+        if self.moe_layer is not None:
+            return self.moe_layer.output_dim
         return self.encoder.latent_dim
 
     def _get_latent(
@@ -235,21 +278,39 @@ class ResolveModel(nn.Module):
         pool_weights: Optional[torch.Tensor] = None,
         pool_mask: Optional[torch.Tensor] = None,
         pool_has_cover: Optional[torch.Tensor] = None,
+        categorical_ids: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Internal: compute latent representation for any encoding mode."""
+        # Embed categorical features and concatenate to continuous
+        if len(self.categorical_embeddings) > 0:
+            if categorical_ids is not None:
+                cat_embeds = []
+                for i, cat_name in enumerate(self._categorical_names):
+                    cat_embeds.append(self.categorical_embeddings[cat_name](categorical_ids[:, i]))
+                continuous = torch.cat([continuous] + cat_embeds, dim=-1)
+            else:
+                # No categorical IDs provided: pad with zeros to match expected input dim
+                n_cat_dims = len(self._categorical_names) * self.categorical_embed_dim
+                zeros = torch.zeros(continuous.shape[0], n_cat_dims, device=continuous.device)
+                continuous = torch.cat([continuous, zeros], dim=-1)
+
         if self.species_encoding in ("rank_pool", "transformer"):
-            return self.encoder(
+            latent = self.encoder(
                 continuous, species_ids,
                 genus_ids=pool_genus_ids, family_ids=pool_family_ids,
                 weights=pool_weights, mask=pool_mask,
                 has_cover=pool_has_cover,
             )
         elif self.species_encoding == "embed":
-            return self.encoder(continuous, species_ids, genus_ids, family_ids)
+            latent = self.encoder(continuous, species_ids, genus_ids, family_ids)
         elif self.uses_explicit_vector:
-            return self.encoder(continuous, species_vector, genus_ids, family_ids)
+            latent = self.encoder(continuous, species_vector, genus_ids, family_ids)
         else:  # hash
-            return self.encoder(continuous, genus_ids, family_ids)
+            latent = self.encoder(continuous, genus_ids, family_ids)
+
+        if self.moe_layer is not None:
+            latent = self.moe_layer.forward_simple(latent)
+        return latent
 
     def forward(
         self,
@@ -263,6 +324,7 @@ class ResolveModel(nn.Module):
         pool_weights: Optional[torch.Tensor] = None,
         pool_mask: Optional[torch.Tensor] = None,
         pool_has_cover: Optional[torch.Tensor] = None,
+        categorical_ids: Optional[torch.Tensor] = None,
     ) -> dict[str, torch.Tensor]:
         """
         Forward pass for all targets.
@@ -278,6 +340,7 @@ class ResolveModel(nn.Module):
             pool_weights: (batch, max_species) optional, for rank_pool mode
             pool_mask: (batch, max_species) optional, for rank_pool mode
             pool_has_cover: (batch,) optional, for rank_pool mode
+            categorical_ids: (batch, n_categoricals) optional, integer IDs for categorical features
 
         Returns:
             Dict mapping target name to predictions
@@ -285,6 +348,7 @@ class ResolveModel(nn.Module):
         latent = self._get_latent(
             continuous, genus_ids, family_ids, species_ids, species_vector,
             pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+            categorical_ids=categorical_ids,
         )
         return {name: head(latent) for name, head in self.heads.items()}
 
@@ -301,11 +365,13 @@ class ResolveModel(nn.Module):
         pool_weights: Optional[torch.Tensor] = None,
         pool_mask: Optional[torch.Tensor] = None,
         pool_has_cover: Optional[torch.Tensor] = None,
+        categorical_ids: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Forward pass for a single target."""
         latent = self._get_latent(
             continuous, genus_ids, family_ids, species_ids, species_vector,
             pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+            categorical_ids=categorical_ids,
         )
         return self.heads[target](latent)
 
@@ -321,9 +387,75 @@ class ResolveModel(nn.Module):
         pool_weights: Optional[torch.Tensor] = None,
         pool_mask: Optional[torch.Tensor] = None,
         pool_has_cover: Optional[torch.Tensor] = None,
+        categorical_ids: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Get latent representation without task heads."""
         return self._get_latent(
             continuous, genus_ids, family_ids, species_ids, species_vector,
             pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+            categorical_ids=categorical_ids,
         )
+
+    def get_genus_weights(self) -> torch.Tensor | None:
+        """Get genus embedding weights averaged across positions."""
+        if hasattr(self.encoder, 'get_genus_weights'):
+            return self.encoder.get_genus_weights()
+        return None
+
+    def get_family_weights(self) -> torch.Tensor | None:
+        """Get family embedding weights averaged across positions."""
+        if hasattr(self.encoder, 'get_family_weights'):
+            return self.encoder.get_family_weights()
+        return None
+
+    def get_species_weights(self) -> torch.Tensor | None:
+        """Get species embedding weights averaged across positions (embed mode only)."""
+        if hasattr(self.encoder, 'get_species_weights'):
+            return self.encoder.get_species_weights()
+        return None
+
+    def optimize_for_inference(self) -> None:
+        """Optimize model for inference using torch.compile and BN fusion.
+
+        Applies:
+            1. Batch norm folding (fuses Linear+BN into single Linear)
+            2. torch.compile() for kernel fusion (if available)
+
+        Call this after loading a trained model and before predict().
+        """
+        self.eval()
+        self._fuse_batch_norms()
+        try:
+            self.encoder = torch.compile(self.encoder)
+        except RuntimeError:
+            pass  # torch.compile not available or fails
+
+    @torch.no_grad()
+    def _fuse_batch_norms(self) -> None:
+        """Fuse Linear+BatchNorm1d pairs into single Linear layers."""
+        for module in self.modules():
+            if not isinstance(module, nn.Sequential):
+                continue
+            # Find Linear+BN pairs
+            fuse_pairs: list[tuple[int, int]] = []
+            for i in range(len(module) - 1):
+                if isinstance(module[i], nn.Linear) and isinstance(module[i + 1], nn.BatchNorm1d):
+                    fuse_pairs.append((i, i + 1))
+
+            # Fuse in reverse order to preserve indices
+            for lin_idx, bn_idx in reversed(fuse_pairs):
+                linear = module[lin_idx]
+                bn = module[bn_idx]
+                # Compute fused parameters
+                # BN: y = (x - running_mean) / sqrt(running_var + eps) * weight + bias
+                # Fused: y = x * (bn.weight / sqrt(var + eps)) + (bn.bias - bn.running_mean * bn.weight / sqrt(var + eps))
+                std = torch.sqrt(bn.running_var + bn.eps)
+                scale = bn.weight / std
+                # Fuse into linear: W_new = scale * W, b_new = scale * b + bn.bias - scale * bn.running_mean
+                linear.weight.mul_(scale.unsqueeze(1))
+                if linear.bias is not None:
+                    linear.bias.mul_(scale).add_(bn.bias - scale * bn.running_mean)
+                else:
+                    linear.bias = nn.Parameter(bn.bias - scale * bn.running_mean)
+                # Replace BN with identity
+                module[bn_idx] = nn.Identity()

@@ -62,6 +62,20 @@ class ResolveSchema:
     n_species_vocab: int = 0  # Number of species in vocab (0 = use hash mode)
     n_genera_vocab: int = 0
     n_families_vocab: int = 0
+    # Categorical feature configuration
+    categorical_names: list[str] = None  # type: ignore[assignment]
+    categorical_vocab_sizes: dict[str, int] = None  # type: ignore[assignment]
+    categorical_embed_dim: int = 8
+
+    def __post_init__(self):
+        if self.categorical_names is None:
+            self.categorical_names = []
+        if self.categorical_vocab_sizes is None:
+            self.categorical_vocab_sizes = {}
+
+    @property
+    def has_categoricals(self) -> bool:
+        return len(self.categorical_names) > 0
 
 
 class ResolveDataset:
@@ -122,6 +136,11 @@ class ResolveDataset:
         for cov in self._roles.covariates:
             if cov not in header_cols:
                 raise ValueError(f"Covariate '{cov}' not in header")
+
+        # Check categorical columns
+        for cat in self._roles.categoricals:
+            if cat not in header_cols:
+                raise ValueError(f"Categorical '{cat}' not in header")
 
         # Check required columns in species
         species_cols = set(self._species.columns)
@@ -255,8 +274,9 @@ class ResolveDataset:
         role_mapping = RoleMapping.from_dict(roles)
 
         # Collect all columns needed from header
-        # String columns: plot_id
+        # String columns: plot_id + categoricals
         header_string_cols = [role_mapping.plot_id]
+        header_string_cols.extend(role_mapping.categoricals)
 
         # Numeric columns: targets, coords, covariates
         header_numeric_cols = []
@@ -473,6 +493,11 @@ class ResolveDataset:
             if cov not in header_cols:
                 raise ValueError(f"Covariate '{cov}' not in header")
 
+        # Check categorical columns
+        for cat in self._roles.categoricals:
+            if cat not in header_cols:
+                raise ValueError(f"Categorical '{cat}' not in header")
+
     @property
     def has_fast_species_tensors(self) -> bool:
         """Check if dataset has pre-loaded species tensors from C++ loader."""
@@ -541,6 +566,12 @@ class ResolveDataset:
         n_coords = 2 if self._roles.has_coordinates else 0
         n_continuous = n_coords + len(self._roles.covariates)
 
+        # Categorical feature vocab sizes
+        categorical_names = list(self._roles.categoricals)
+        categorical_vocab_sizes = {}
+        for cat in categorical_names:
+            categorical_vocab_sizes[cat] = self._header[cat].drop_nulls().n_unique() + 1  # +1 for unknown
+
         return ResolveSchema(
             n_plots=self.n_plots,
             n_species=self._species[self._roles.species_id].n_unique(),
@@ -555,6 +586,8 @@ class ResolveDataset:
             species_normalization=self._species_normalization,
             track_unknown_fraction=self._track_unknown_fraction,
             track_unknown_count=self._track_unknown_count,
+            categorical_names=categorical_names,
+            categorical_vocab_sizes=categorical_vocab_sizes,
         )
 
     def get_coordinates(self) -> Optional[np.ndarray]:
@@ -585,6 +618,15 @@ class ResolveDataset:
             .astype(np.float32)
         )
         return arr
+
+    def get_categoricals(self) -> dict[str, pl.Series] | None:
+        """Get categorical feature columns as polars Series, or None if none defined."""
+        if not self._roles.categoricals:
+            return None
+        return {
+            col: self._header[col]
+            for col in self._roles.categoricals
+        }
 
     def get_target(self, name: str) -> np.ndarray:
         """Get target array by name."""

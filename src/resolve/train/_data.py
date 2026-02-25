@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from resolve.data.dataset import ResolveDataset, ResolveSchema
 from resolve.encode.embedding import EmbeddingEncoder
 from resolve.encode.species import SpeciesEncoder
+from resolve.encode.vocab import CategoricalVocab
 from resolve.train._loaders import (
     GPUTensorLoader,
     RankPoolBatchDataset,
@@ -47,7 +48,7 @@ class DataMixin:
         Returns:
             (continuous, genus_ids, family_ids, species_ids, species_vector,
              pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-             targets)
+             categorical_ids, targets)
         """
         def _get(i: int) -> torch.Tensor:
             return batch[i] if data_on_device else batch[i].to(self._device, non_blocking=True)
@@ -83,6 +84,11 @@ class DataMixin:
             genus_ids = None
             family_ids = None
 
+        # Unpack categorical IDs if present
+        categorical_ids = None
+        if self._schema.has_categoricals:
+            categorical_ids = _get(idx); idx += 1
+
         targets = {}
         for name in target_names:
             targets[name] = _get(idx); idx += 1
@@ -90,7 +96,7 @@ class DataMixin:
         return (
             continuous, genus_ids, family_ids, species_ids, species_vector,
             pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-            targets,
+            categorical_ids, targets,
         )
 
     def _prepare_data(
@@ -317,6 +323,22 @@ class DataMixin:
                 target_int = np.where(mask, target_vals, -1).astype(np.int64)
                 targets[name] = target_int
 
+        # Build categorical ID tensor (bypasses StandardScaler, concatenated after scaling)
+        categorical_ids_t = None
+        if self._schema.has_categoricals:
+            cat_data = dataset.get_categoricals()
+            if cat_data is not None:
+                cat_arrays = []
+                for cat_name in self._schema.categorical_names:
+                    series = cat_data[cat_name]
+                    if fit_scalers:
+                        vocab = CategoricalVocab.from_series(cat_name, series)
+                        self._categorical_vocabs[cat_name] = vocab
+                    else:
+                        vocab = self._categorical_vocabs[cat_name]
+                    cat_arrays.append(vocab.encode_array(series))
+                categorical_ids_t = torch.from_numpy(np.stack(cat_arrays, axis=1))
+
         # Rank-pool/transformer mode: return _RankPoolPreparedData with ragged arrays (per-batch padding)
         if self.species_encoding in ("rank_pool", "transformer"):
             has_tax = self._schema.has_taxonomy
@@ -332,6 +354,7 @@ class DataMixin:
                 has_cover=pool_encoded.has_cover,
                 has_taxonomy=has_tax,
                 n_samples=len(pool_encoded.plot_ids),
+                categorical_ids=categorical_ids_t,
             )
 
         # Build tensor dataset (hash/embed modes)
@@ -349,6 +372,10 @@ class DataMixin:
             tensors.append(torch.from_numpy(genus_ids))
         if family_ids is not None:
             tensors.append(torch.from_numpy(family_ids))
+
+        # Add categorical IDs (before targets, after taxonomy)
+        if categorical_ids_t is not None:
+            tensors.append(categorical_ids_t)
 
         for name in self.model.target_configs.keys():
             tensors.append(torch.from_numpy(targets[name]))

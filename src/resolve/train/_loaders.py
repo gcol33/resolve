@@ -154,6 +154,7 @@ class _RankPoolPreparedData:
     has_cover: np.ndarray               # (N,) float32, 1.0 if cover info present
     has_taxonomy: bool
     n_samples: int
+    categorical_ids: torch.Tensor | None = None  # (N, n_cat) int64, None if no categoricals
 
 
 class RankPoolBatchDataset(Dataset):
@@ -176,6 +177,8 @@ class RankPoolBatchDataset(Dataset):
         if self._data.has_taxonomy:
             result["genus_ids"] = self._data.genus_ids[idx]
             result["family_ids"] = self._data.family_ids[idx]
+        if self._data.categorical_ids is not None:
+            result["categorical_ids"] = self._data.categorical_ids[idx]
         return result
 
 
@@ -192,6 +195,7 @@ def _rank_pool_collate_fn(samples: list[dict]) -> tuple:
     """
     n = len(samples)
     has_taxonomy = "genus_ids" in samples[0]
+    has_categoricals = "categorical_ids" in samples[0]
 
     # Stack continuous (already a tensor from __getitem__)
     continuous = torch.stack([s["continuous"] for s in samples])
@@ -232,10 +236,20 @@ def _rank_pool_collate_fn(samples: list[dict]) -> tuple:
     n_targets = len(samples[0]["targets"])
     targets = [torch.stack([s["targets"][t] for s in samples]) for t in range(n_targets)]
 
+    # Stack categorical_ids if present (already tensors from __getitem__)
+    cat_ids = None
+    if has_categoricals:
+        cat_ids = torch.stack([s["categorical_ids"] for s in samples])
+
     # Build batch tuple
     if has_taxonomy:
         g_ids = torch.from_numpy(g_np)
         f_ids = torch.from_numpy(f_np)
-        return (continuous, sp_ids, g_ids, f_ids, w, mask, has_cover, *targets)
+        batch = (continuous, sp_ids, g_ids, f_ids, w, mask, has_cover)
     else:
-        return (continuous, sp_ids, w, mask, has_cover, *targets)
+        batch = (continuous, sp_ids, w, mask, has_cover)
+
+    if cat_ids is not None:
+        batch = batch + (cat_ids,)
+
+    return batch + tuple(targets)

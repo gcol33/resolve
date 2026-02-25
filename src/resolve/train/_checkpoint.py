@@ -71,6 +71,14 @@ class CheckpointMixin:
                 "vocab": self._species_encoder._vocab if self._species_encoder else None,
                 "species_vocab": self._species_encoder._species_vocab if self._species_encoder else set(),
             },
+            # Categorical vocab state
+            "categorical_vocabs": self._categorical_vocabs if hasattr(self, "_categorical_vocabs") else {},
+            # EMA state (exponential moving average of model weights)
+            "ema_state": (
+                {k: v.cpu().clone() for k, v in self._ema_state.items()}
+                if hasattr(self, "_ema_state") and self._ema_state is not None
+                else None
+            ),
             # Config (for validation on resume)
             "config": {
                 "hash_dim": self.hash_dim,
@@ -172,6 +180,10 @@ class CheckpointMixin:
                 for k, v in checkpoint["target_scalers"].items()
             }
 
+        # Restore categorical vocabs
+        if checkpoint.get("categorical_vocabs"):
+            self._categorical_vocabs = checkpoint["categorical_vocabs"]
+
         # Restore species encoder state (hash mode only; rank_pool/embed use different encoders)
         if checkpoint.get("species_encoder") and self.species_encoding == "hash":
             enc_state = checkpoint["species_encoder"]
@@ -209,6 +221,12 @@ class CheckpointMixin:
         # We'll recreate the scheduler for remaining epochs after this method returns.
         if checkpoint.get("grad_scaler_state_dict") and self._grad_scaler:
             self._grad_scaler.load_state_dict(checkpoint["grad_scaler_state_dict"])
+
+        # Restore EMA state if available
+        if checkpoint.get("ema_state") is not None:
+            self._ema_state = {
+                k: v.to(self._device) for k, v in checkpoint["ema_state"].items()
+            }
 
         # Note: Scalers already restored by _restore_scalers_from_checkpoint (called earlier)
 

@@ -123,6 +123,8 @@ class Trainer(
         pretrain_mask_prob: float = 0.15,
         pretrain_lr: float = 1e-4,
         pretrain_all_data: bool = False,
+        # Categorical features
+        categorical_embed_dim: int = 8,
         # v7: label smoothing, class weights, EMA, deeper head
         label_smoothing: float = 0.0,
         class_weights: torch.Tensor | None = None,
@@ -297,6 +299,7 @@ class Trainer(
         self.species_representation = species_representation
         self.min_species_frequency = min_species_frequency
         self.cover_dropout = cover_dropout
+        self.categorical_embed_dim = categorical_embed_dim
         self.n_attention_layers = n_attention_layers
         self.n_heads = n_heads
         self.transformer_ff_dim = transformer_ff_dim
@@ -372,6 +375,7 @@ class Trainer(
         self._pretrain_fitted_encoder = False
         self._scalers: dict[str, object] = {}
         self._target_scalers: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
+        self._categorical_vocabs: dict[str, object] = {}
         self._train_loader = None
         self._test_loader = None
         self._optimizer: AdamW | None = None
@@ -403,6 +407,8 @@ class Trainer(
         Computes uses_explicit_vector and n_taxonomy_slots from encoder state.
         All model construction sites should use this to stay DRY.
         """
+        from dataclasses import replace as _replace
+
         uses_explicit_vector = (
             self.species_encoding == "hash"
             and self._species_encoder is not None
@@ -412,8 +418,20 @@ class Trainer(
             self._species_encoder.n_taxonomy_slots
             if self._species_encoder else self.top_k
         )
+
+        # Update schema with categorical embed dim and vocab sizes from built vocabs
+        schema = self._schema
+        if schema.has_categoricals:
+            updates = {"categorical_embed_dim": self.categorical_embed_dim}
+            if self._categorical_vocabs:
+                updates["categorical_vocab_sizes"] = {
+                    name: vocab.n_categories
+                    for name, vocab in self._categorical_vocabs.items()
+                }
+            schema = _replace(schema, **updates)
+
         return ResolveModel(
-            schema=self._schema,
+            schema=schema,
             targets=self.dataset.targets,
             species_encoding=self.species_encoding,
             hash_dim=self.hash_dim,
@@ -543,11 +561,6 @@ class Trainer(
             class_weights=self.class_weights,
         )
 
-        # Initialize EMA state (exponential moving average of model weights)
-        self._ema_state = None
-        if self.ema_decay > 0:
-            self._ema_state = {k: v.clone() for k, v in self.model.state_dict().items()}
-
         # Initialize training state
         start_epoch = 0
         best_metric = -float("inf")
@@ -586,11 +599,19 @@ class Trainer(
                 )
                 print(f"  Scheduler recreated for {remaining_epochs} remaining epochs ({remaining_steps} steps)")
 
+        # Initialize EMA state (exponential moving average of model weights)
+        # If restored from checkpoint, _ema_state is already set; otherwise init from model
+        if not hasattr(self, "_ema_state") or self._ema_state is None:
+            self._ema_state = None
+            if self.ema_decay > 0:
+                self._ema_state = {k: v.clone() for k, v in self.model.state_dict().items()}
+
         target_names = list(self.model.target_configs.keys())
         has_taxonomy = self.model.schema.has_taxonomy
 
         train_start_time = time.time()
         epoch_times = []  # Track epoch durations for ETA
+        print(f"Starting training loop: epochs {start_epoch} to {self.max_epochs - 1}", flush=True)
         for epoch in range(start_epoch, self.max_epochs):
             epoch_start = time.time()
             # Train
@@ -651,7 +672,8 @@ class Trainer(
             print(
                 f"Epoch {epoch:3d} [P{phase}] | "
                 f"train={train_loss:.4f} test={test_loss:.4f} | {metric_str} | "
-                f"{epoch_time:.1f}s/ep, ETA {eta_str}"
+                f"{epoch_time:.1f}s/ep, ETA {eta_str}",
+                flush=True,
             )
 
             # Save checkpoint periodically (always after epoch 1, then every checkpoint_every)
@@ -715,7 +737,7 @@ class Trainer(
         for batch_idx, batch in enumerate(loader):
             (continuous, genus_ids, family_ids, species_ids, species_vector,
              pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-             targets) = self._unpack_batch(batch, target_names, has_taxonomy, data_on_device)
+             categorical_ids, targets) = self._unpack_batch(batch, target_names, has_taxonomy, data_on_device)
 
             # Reshape targets for loss
             for name in target_names:
@@ -733,6 +755,7 @@ class Trainer(
                     pool_genus_ids=pool_genus_ids, pool_family_ids=pool_family_ids,
                     pool_weights=pool_weights, pool_mask=pool_mask,
                     pool_has_cover=pool_has_cover,
+                    categorical_ids=categorical_ids,
                 )
                 loss, _ = self._loss_fn(
                     predictions, targets, epoch, self._target_scalers
@@ -816,7 +839,7 @@ class Trainer(
         for batch in self._test_loader:
             (continuous, genus_ids, family_ids, species_ids, species_vector,
              pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-             targets) = self._unpack_batch(batch, target_names, has_taxonomy, data_on_device)
+             categorical_ids, targets) = self._unpack_batch(batch, target_names, has_taxonomy, data_on_device)
 
             # AMP autocast wraps forward + loss to avoid float16 overflow
             # in log-softmax for classification targets
@@ -827,6 +850,7 @@ class Trainer(
                     pool_genus_ids=pool_genus_ids, pool_family_ids=pool_family_ids,
                     pool_weights=pool_weights, pool_mask=pool_mask,
                     pool_has_cover=pool_has_cover,
+                    categorical_ids=categorical_ids,
                 )
 
                 # Reshape for loss
@@ -1008,6 +1032,19 @@ class Trainer(
         # To tensors
         continuous_t = torch.from_numpy(continuous).to(self._device)
 
+        # Build categorical IDs for prediction
+        categorical_ids_t = None
+        if self._schema.has_categoricals and self._categorical_vocabs:
+            cat_data = dataset.get_categoricals()
+            if cat_data is not None:
+                cat_arrays = []
+                for cat_name in self._schema.categorical_names:
+                    vocab = self._categorical_vocabs[cat_name]
+                    cat_arrays.append(vocab.encode_array(cat_data[cat_name]))
+                categorical_ids_t = torch.from_numpy(
+                    np.stack(cat_arrays, axis=1)
+                ).to(self._device)
+
         # Forward pass (dispatch based on encoding mode)
         if self.species_encoding == "transformer":
             # Batched forward to avoid OOM from O(n^2) attention over full dataset
@@ -1023,6 +1060,7 @@ class Trainer(
                     pool_weights=pool_weights_t[start:end],
                     pool_mask=pool_mask_t[start:end],
                     pool_has_cover=pool_has_cover_t[start:end],
+                    categorical_ids=categorical_ids_t[start:end] if categorical_ids_t is not None else None,
                 )
                 for name, pred in chunk_preds.items():
                     pred_chunks[name].append(pred)
@@ -1034,11 +1072,13 @@ class Trainer(
                 pool_genus_ids=pool_genus_ids_t, pool_family_ids=pool_family_ids_t,
                 pool_weights=pool_weights_t, pool_mask=pool_mask_t,
                 pool_has_cover=pool_has_cover_t,
+                categorical_ids=categorical_ids_t,
             )
         else:
             preds_raw = self.model(
                 continuous_t, genus_t, family_t,
                 species_ids=species_ids_t, species_vector=species_vector_t,
+                categorical_ids=categorical_ids_t,
             )
 
         # Compute confidence per sample (1 - unknown_fraction for regression)

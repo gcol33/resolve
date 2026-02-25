@@ -21,6 +21,7 @@ class RoleMapping:
         taxonomy_genus: Genus name for learned embeddings
         taxonomy_family: Family name for learned embeddings
         covariates: List of additional continuous feature columns
+        categoricals: List of categorical feature columns (e.g. ecoregion, country)
     """
 
     # Required
@@ -35,6 +36,7 @@ class RoleMapping:
     taxonomy_genus: Optional[str] = None
     taxonomy_family: Optional[str] = None
     covariates: list[str] = field(default_factory=list)
+    categoricals: list[str] = field(default_factory=list)
 
     def validate(self) -> None:
         """Check that required roles are specified."""
@@ -58,6 +60,10 @@ class RoleMapping:
     def has_taxonomy(self) -> bool:
         return self.taxonomy_genus is not None and self.taxonomy_family is not None
 
+    @property
+    def has_categoricals(self) -> bool:
+        return len(self.categoricals) > 0
+
     @classmethod
     def from_dict(cls, mapping: dict[str, str | list[str]]) -> "RoleMapping":
         """Create RoleMapping from a dictionary."""
@@ -71,6 +77,7 @@ class RoleMapping:
             taxonomy_genus=mapping.get("taxonomy_genus"),
             taxonomy_family=mapping.get("taxonomy_family"),
             covariates=mapping.get("covariates", []),
+            categoricals=mapping.get("categoricals", []),
         )
 
 
