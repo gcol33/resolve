@@ -139,7 +139,7 @@ class ProfilingMixin:
 
             (continuous, genus_ids, family_ids, species_ids, species_vector,
              pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-             targets) = self._unpack_batch(batch, target_names, has_taxonomy, data_on_device)
+             categorical_ids, targets) = self._unpack_batch(batch, target_names, has_taxonomy, data_on_device)
 
             for name in target_names:
                 cfg = self.model.target_configs[name]
@@ -149,7 +149,7 @@ class ProfilingMixin:
             self._profile_step(
                 continuous, genus_ids, family_ids, species_ids, species_vector,
                 pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                targets,
+                categorical_ids, targets,
             )
 
         # Profile batches
@@ -169,7 +169,7 @@ class ProfilingMixin:
             timer.start("data")
             (continuous, genus_ids, family_ids, species_ids, species_vector,
              pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-             targets) = self._unpack_batch(batch, target_names, has_taxonomy, data_on_device)
+             categorical_ids, targets) = self._unpack_batch(batch, target_names, has_taxonomy, data_on_device)
 
             for name in target_names:
                 cfg = self.model.target_configs[name]
@@ -187,6 +187,7 @@ class ProfilingMixin:
                         pool_genus_ids=pool_genus_ids, pool_family_ids=pool_family_ids,
                         pool_weights=pool_weights, pool_mask=pool_mask,
                         pool_has_cover=pool_has_cover,
+                        categorical_ids=categorical_ids,
                     )
                     loss, _ = self._loss_fn(predictions, targets, 0, self._target_scalers)
             else:
@@ -195,6 +196,7 @@ class ProfilingMixin:
                     pool_genus_ids=pool_genus_ids, pool_family_ids=pool_family_ids,
                     pool_weights=pool_weights, pool_mask=pool_mask,
                     pool_has_cover=pool_has_cover,
+                    categorical_ids=categorical_ids,
                 )
                 loss, _ = self._loss_fn(predictions, targets, 0, self._target_scalers)
             timer.stop("forward")
@@ -263,6 +265,7 @@ class ProfilingMixin:
         pool_weights: torch.Tensor | None,
         pool_mask: torch.Tensor | None,
         pool_has_cover: torch.Tensor | None,
+        categorical_ids: torch.Tensor | None,
         targets: dict[str, torch.Tensor],
     ) -> None:
         """Run a single forward+backward+optimizer step (used by warmup and trace)."""
@@ -274,6 +277,7 @@ class ProfilingMixin:
                     pool_genus_ids=pool_genus_ids, pool_family_ids=pool_family_ids,
                     pool_weights=pool_weights, pool_mask=pool_mask,
                     pool_has_cover=pool_has_cover,
+                    categorical_ids=categorical_ids,
                 )
                 loss, _ = self._loss_fn(predictions, targets, 0, self._target_scalers)
             self._grad_scaler.scale(loss).backward()
@@ -285,6 +289,7 @@ class ProfilingMixin:
                 pool_genus_ids=pool_genus_ids, pool_family_ids=pool_family_ids,
                 pool_weights=pool_weights, pool_mask=pool_mask,
                 pool_has_cover=pool_has_cover,
+                categorical_ids=categorical_ids,
             )
             loss, _ = self._loss_fn(predictions, targets, 0, self._target_scalers)
             loss.backward()
@@ -322,7 +327,7 @@ class ProfilingMixin:
 
                     (continuous, genus_ids, family_ids, species_ids, species_vector,
                      pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                     targets) = self._unpack_batch(batch, target_names, has_taxonomy, data_on_device)
+                     categorical_ids, targets) = self._unpack_batch(batch, target_names, has_taxonomy, data_on_device)
 
                     for name in target_names:
                         cfg = self.model.target_configs[name]
@@ -332,7 +337,7 @@ class ProfilingMixin:
                     self._profile_step(
                         continuous, genus_ids, family_ids, species_ids, species_vector,
                         pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                        targets,
+                        categorical_ids, targets,
                     )
 
             prof.export_chrome_trace(str(trace_file))

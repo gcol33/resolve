@@ -7,6 +7,9 @@ before supervised fine-tuning.
 
 from __future__ import annotations
 
+import sys
+import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
@@ -25,6 +28,44 @@ __all__: list[str] = []
 class PretrainMixin:
     """Mixin providing masked species pretraining for Trainer."""
 
+    def _pretrain_checkpoint_path(self: Trainer) -> Path | None:
+        """Get path to pretrain checkpoint file."""
+        if self.checkpoint_dir is None:
+            return None
+        return self.checkpoint_dir / "pretrain_checkpoint.pt"
+
+    def _save_pretrain_checkpoint(
+        self: Trainer,
+        epoch: int,
+        encoder_state: dict,
+        mlm_head_state: dict,
+        optimizer_state: dict,
+        grad_scaler_state: dict | None,
+        best_loss: float,
+    ) -> None:
+        """Save pretrain checkpoint for resume."""
+        path = self._pretrain_checkpoint_path()
+        if path is None:
+            return
+        torch.save({
+            "epoch": epoch,
+            "encoder_state_dict": encoder_state,
+            "mlm_head_state_dict": mlm_head_state,
+            "optimizer_state_dict": optimizer_state,
+            "grad_scaler_state_dict": grad_scaler_state,
+            "best_loss": best_loss,
+            "pretrain_epochs": self.pretrain_epochs,
+        }, path)
+
+    def _load_pretrain_checkpoint(self: Trainer) -> dict | None:
+        """Load pretrain checkpoint if it exists."""
+        path = self._pretrain_checkpoint_path()
+        if path is None or not path.exists():
+            return None
+        if not self.resume:
+            return None
+        return torch.load(path, map_location="cpu", weights_only=False)
+
     def pretrain(self: Trainer) -> None:
         """Run masked species pretraining (v6) on the transformer encoder.
 
@@ -37,7 +78,7 @@ class PretrainMixin:
         The method:
           1. Prepares data (same pipeline as rank_pool)
           2. Builds model if not already built
-          3. Runs MLM pretraining loop
+          3. Runs MLM pretraining loop (with checkpointing)
           4. Discards the MaskedSpeciesHead, keeps encoder weights
         """
         if self.species_encoding != "transformer":
@@ -52,6 +93,7 @@ class PretrainMixin:
         print(f"  Mask prob: {self.pretrain_mask_prob}")
         print(f"  LR: {self.pretrain_lr}")
         print(f"  All data: {self.pretrain_all_data}")
+        sys.stdout.flush()
 
         if self.pretrain_all_data:
             # Fit encoder on full Trainer dataset (no train/test split)
@@ -128,9 +170,36 @@ class PretrainMixin:
         # AMP scaler
         grad_scaler = GradScaler() if self.use_amp else None
 
+        # Try to resume from pretrain checkpoint
+        start_epoch = 1
+        best_loss = float("inf")
+        pt_ckpt = self._load_pretrain_checkpoint()
+        if pt_ckpt is not None:
+            start_epoch = pt_ckpt["epoch"] + 1
+            best_loss = pt_ckpt.get("best_loss", float("inf"))
+            encoder.load_state_dict(pt_ckpt["encoder_state_dict"])
+            mlm_head.load_state_dict(pt_ckpt["mlm_head_state_dict"])
+            optimizer.load_state_dict(pt_ckpt["optimizer_state_dict"])
+            if grad_scaler is not None and pt_ckpt.get("grad_scaler_state_dict"):
+                grad_scaler.load_state_dict(pt_ckpt["grad_scaler_state_dict"])
+            print(f"  Resumed pretrain from epoch {pt_ckpt['epoch']} "
+                  f"(best loss={best_loss:.4f})")
+            sys.stdout.flush()
+
+            if start_epoch > self.pretrain_epochs:
+                print("  Pretraining already complete, skipping.")
+                del mlm_head
+                sys.stdout.flush()
+                return
+
         from resolve.csrc.fused_linear_ce import fused_linear_cross_entropy
 
-        for epoch in range(1, self.pretrain_epochs + 1):
+        total_batches = len(pretrain_loader)
+        print(f"  Starting from epoch {start_epoch} ({total_batches} batches/epoch)")
+        sys.stdout.flush()
+
+        for epoch in range(start_epoch, self.pretrain_epochs + 1):
+            epoch_start = time.time()
             encoder.train()
             mlm_head.train()
             total_loss = 0.0
@@ -159,8 +228,6 @@ class PretrainMixin:
                 mlm_targets = batch[idx].to(self._device, non_blocking=True); idx += 1
 
                 # Forward through encoder to get token-level representations
-                # We need the pre-pooling token embeddings, not the pooled output
-                # Re-run embedding + transformer without pooling
                 optimizer.zero_grad(set_to_none=True)
 
                 if self.use_amp:
@@ -203,13 +270,59 @@ class PretrainMixin:
                 total_loss += loss.item()
                 n_batches += 1
 
+                # Batch progress (every 10 batches or first batch)
+                if self.verbose >= 1 and (n_batches == 1 or n_batches % 10 == 0):
+                    elapsed = time.time() - epoch_start
+                    batch_avg = elapsed / n_batches
+                    remaining = (total_batches - n_batches) * batch_avg
+                    print(f"    batch {n_batches}/{total_batches} "
+                          f"loss={loss.item():.4f} "
+                          f"({batch_avg:.1f}s/batch, ~{remaining:.0f}s left)")
+                    sys.stdout.flush()
+
             avg_loss = total_loss / max(n_batches, 1)
+            epoch_time = time.time() - epoch_start
+            best_loss = min(best_loss, avg_loss)
+
             if self.verbose >= 1:
-                print(f"  Pretrain epoch {epoch}/{self.pretrain_epochs}: MLM loss = {avg_loss:.4f}")
+                remaining = self.pretrain_epochs - epoch
+                eta = remaining * epoch_time
+                if eta < 60:
+                    eta_str = f"{eta:.0f}s"
+                elif eta < 3600:
+                    eta_str = f"{eta/60:.1f}m"
+                else:
+                    eta_str = f"{eta/3600:.1f}h"
+                print(f"  Pretrain {epoch}/{self.pretrain_epochs}: "
+                      f"MLM loss = {avg_loss:.4f} | {epoch_time:.1f}s/ep, ETA {eta_str}")
+                sys.stdout.flush()
+
+            # Save pretrain checkpoint every 5 epochs
+            if self.checkpoint_dir and epoch % 5 == 0:
+                self._save_pretrain_checkpoint(
+                    epoch=epoch,
+                    encoder_state=encoder.state_dict(),
+                    mlm_head_state=mlm_head.state_dict(),
+                    optimizer_state=optimizer.state_dict(),
+                    grad_scaler_state=grad_scaler.state_dict() if grad_scaler else None,
+                    best_loss=best_loss,
+                )
+
+        # Final checkpoint
+        if self.checkpoint_dir:
+            self._save_pretrain_checkpoint(
+                epoch=self.pretrain_epochs,
+                encoder_state=encoder.state_dict(),
+                mlm_head_state=mlm_head.state_dict(),
+                optimizer_state=optimizer.state_dict(),
+                grad_scaler_state=grad_scaler.state_dict() if grad_scaler else None,
+                best_loss=best_loss,
+            )
 
         # Discard MLM head, keep encoder weights
         del mlm_head
         print("  Pretraining complete. MLM head discarded, encoder weights retained.")
+        sys.stdout.flush()
 
     @staticmethod
     def _get_pretrain_tokens(

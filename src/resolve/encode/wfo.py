@@ -185,11 +185,14 @@ class WFOBackbone:
 
     @staticmethod
     def _load_backbone(path: Path) -> pl.DataFrame:
-        """Load classification.txt efficiently (only needed columns)."""
-        df = pl.read_csv(
-            path,
+        """Load classification.txt efficiently (only needed columns).
+
+        Handles encoding issues: WFO backbone files may contain non-UTF8
+        characters (Latin-1 author names). Tries UTF8 first, then falls back
+        to a pre-converted _utf8.txt variant, then to lossy Latin-1 reading.
+        """
+        read_kwargs = dict(
             separator="\t",
-            encoding="utf8",
             columns=_USED_COLUMNS,
             schema_overrides={
                 "taxonID": pl.Utf8,
@@ -201,13 +204,38 @@ class WFOBackbone:
                 "genus": pl.Utf8,
                 "specificEpithet": pl.Utf8,
             },
-            infer_schema_length=0,  # treat all as string
+            infer_schema_length=0,
         )
+        # Try UTF8 first
+        try:
+            df = pl.read_csv(path, encoding="utf8", **read_kwargs)
+        except pl.exceptions.ComputeError:
+            # Try _utf8.txt variant (pre-converted)
+            utf8_path = path.with_name(path.stem + "_utf8" + path.suffix)
+            if utf8_path.exists():
+                df = pl.read_csv(utf8_path, encoding="utf8", **read_kwargs)
+            else:
+                # Lossy read: decode as latin-1, re-encode as utf8
+                raw = path.read_bytes().decode("latin-1")
+                df = pl.read_csv(
+                    io.StringIO(raw), encoding="utf8", **read_kwargs
+                )
+
         # Normalize whitespace
         strip_cols = [c for c in ("scientificName", "family", "genus", "specificEpithet") if c in df.columns]
         if strip_cols:
             df = df.with_columns(
                 [pl.col(c).str.strip_chars().alias(c) for c in strip_cols]
+            )
+        # Normalize taxonomicStatus to uppercase (WFO versions vary: "Accepted" vs "ACCEPTED")
+        if "taxonomicStatus" in df.columns:
+            df = df.with_columns(
+                pl.col("taxonomicStatus").str.to_uppercase().alias("taxonomicStatus")
+            )
+        # Normalize taxonRank to uppercase
+        if "taxonRank" in df.columns:
+            df = df.with_columns(
+                pl.col("taxonRank").str.to_uppercase().alias("taxonRank")
             )
         return df
 
