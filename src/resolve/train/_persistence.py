@@ -74,6 +74,7 @@ class PersistenceMixin:
             "head_hidden_dims": self.head_hidden_dims,
             "categorical_vocabs": self._categorical_vocabs if hasattr(self, "_categorical_vocabs") else {},
             "categorical_embed_dim": self.categorical_embed_dim if hasattr(self, "categorical_embed_dim") else 8,
+            "species_embed_dim": self.model.species_embed_dim,
         }
 
         # Save encoder-specific state
@@ -145,24 +146,42 @@ class PersistenceMixin:
         track_unknown_count = state.get("track_unknown_count", False)
         uses_explicit_vector = state.get("uses_explicit_vector", False)
 
-        # Restore categorical vocab sizes into schema if vocabs were saved
+        # Restore categorical info into schema from saved state.
+        # Use vocab sizes from the saved schema (which matches model weights)
+        # rather than recomputing from vocab.n_categories, because the vocab
+        # is built from the training split only and may have fewer categories
+        # than the full dataset used to create the model.
         schema = state["schema"]
         categorical_vocabs = state.get("categorical_vocabs", {})
         if categorical_vocabs:
             from dataclasses import replace as _replace
             categorical_embed_dim = state.get("categorical_embed_dim", 8)
-            vocab_sizes = {name: v.n_categories for name, v in categorical_vocabs.items()}
-            schema = _replace(
-                schema,
-                categorical_names=list(categorical_vocabs.keys()),
-                categorical_vocab_sizes=vocab_sizes,
-                categorical_embed_dim=categorical_embed_dim,
-            )
+            updates = {
+                "categorical_names": list(categorical_vocabs.keys()),
+                "categorical_embed_dim": categorical_embed_dim,
+            }
+            # Only set vocab sizes if the schema doesn't already have them
+            if not schema.categorical_vocab_sizes:
+                updates["categorical_vocab_sizes"] = {
+                    name: v.n_categories for name, v in categorical_vocabs.items()
+                }
+            schema = _replace(schema, **updates)
+
+        # Infer species_embed_dim from saved weights if not stored explicitly
+        species_embed_dim = state.get("species_embed_dim", 32)
+        if species_embed_dim == 32:
+            # Check if saved weights indicate a different embed dim
+            sd = state["model_state_dict"]
+            for key in ("encoder.species_embedding.weight",):
+                if key in sd:
+                    species_embed_dim = sd[key].shape[1]
+                    break
 
         model = ResolveModel(
             schema=schema,
             targets=state["target_configs"],
             species_encoding=species_encoding,
+            species_embed_dim=species_embed_dim,
             hash_dim=state["hash_dim"],
             top_k=state["top_k"],
             top_k_species=state.get("top_k_species", 10),
