@@ -29,9 +29,13 @@ class CVMixin:
     def cross_validate(
         self: Trainer,
         n_splits: int = 10,
-        block_size: float = 0.1,
         seed: int = 42,
+        *,
+        block_deg: float | tuple[float, float] | None = None,
+        block_km: float | tuple[float, float] | None = None,
+        block_ids: np.ndarray | None = None,
         spatial: bool = True,
+        block_size: float | None = None,
     ) -> CVResult:
         """Run spatial block cross-validation.
 
@@ -42,36 +46,65 @@ class CVMixin:
         ----------
         n_splits : int
             Number of CV folds. Default 10.
-        block_size : float
-            Spatial block size in coordinate units (degrees). Default 0.1.
         seed : int
             Random seed for block shuffling. Default 42.
+        block_deg : float or tuple[float, float] or None
+            Block size in degrees (scalar for square, tuple for rectangular).
+        block_km : float or tuple[float, float] or None
+            Block size in kilometres (converted using mean latitude).
+        block_ids : np.ndarray or None
+            Pre-assigned 1-D integer block labels (one per plot).
         spatial : bool
             If True (default), use spatial block splitting. If False, use
             random splitting (plots shuffled, no spatial structure).
+        block_size : float or None
+            **Deprecated.** Use *block_deg* instead.
 
         Returns
         -------
         CVResult
             Per-fold and aggregated metrics.
         """
+        # Validate block_ids length if provided
+        if block_ids is not None and len(block_ids) != self.dataset.n_plots:
+            raise ValueError(
+                f"block_ids length ({len(block_ids)}) must match "
+                f"dataset.n_plots ({self.dataset.n_plots})"
+            )
+
         coords = self.dataset.get_coordinates()
-        if spatial and coords is None:
+        if spatial and block_ids is None and coords is None:
             raise ValueError(
                 "Spatial CV requires coordinates. Dataset has no coordinate "
                 "columns, or set spatial=False for random CV."
             )
 
+        # Build header string
         print(f"\n=== {n_splits}-Fold {'Spatial Block' if spatial else 'Random'} Cross-Validation ===")
         if spatial:
-            print(f"  Block size: {block_size}°")
+            if block_ids is not None:
+                n_unique = len(np.unique(block_ids))
+                print(f"  Block mode: block_ids ({n_unique} unique blocks)")
+            elif block_km is not None:
+                print(f"  Block mode: block_km = {block_km} km")
+            elif block_size is not None:
+                print(f"  Block mode: block_size = {block_size}° (deprecated)")
+            elif block_deg is not None:
+                print(f"  Block mode: block_deg = {block_deg}°")
+            else:
+                print(f"  Block mode: block_deg = 0.1° (default)")
         print(f"  Seed: {seed}")
         sys.stdout.flush()
 
         # Generate fold indices
         if spatial:
             splitter = SpatialBlockSplitter(
-                block_size=block_size, n_splits=n_splits, seed=seed,
+                block_size=block_size,
+                n_splits=n_splits,
+                seed=seed,
+                block_deg=block_deg,
+                block_km=block_km,
+                block_ids=block_ids,
             )
             folds = splitter.split(coords)
         else:
