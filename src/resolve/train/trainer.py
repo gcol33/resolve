@@ -26,6 +26,7 @@ from resolve.train.metrics import compute_metrics
 # Mixin imports
 from resolve.train._cache import CacheMixin
 from resolve.train._checkpoint import CheckpointMixin
+from resolve.train._cv import CVMixin
 from resolve.train._data import DataMixin
 from resolve.train._persistence import PersistenceMixin
 from resolve.train._pretrain import PretrainMixin
@@ -49,6 +50,7 @@ class Trainer(
     DataMixin,
     CacheMixin,
     CheckpointMixin,
+    CVMixin,
     PretrainMixin,
     ProfilingMixin,
     PersistenceMixin,

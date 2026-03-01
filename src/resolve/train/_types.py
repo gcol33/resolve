@@ -91,3 +91,23 @@ class TrainResult:
     history: dict[str, list[float]] = field(default_factory=dict)
     resumed_from_epoch: Optional[int] = None
     train_time: float = 0.0  # Total training time in seconds
+
+
+@dataclass
+class CVResult:
+    """Results from cross-validation."""
+
+    fold_results: list[TrainResult]
+    fold_metrics: list[dict[str, dict[str, float]]]
+    mean_metrics: dict[str, dict[str, float]]
+    std_metrics: dict[str, dict[str, float]]
+    n_folds: int
+
+    def __str__(self) -> str:
+        lines = [f"=== {self.n_folds}-Fold CV Results ==="]
+        for target, metrics in self.mean_metrics.items():
+            lines.append(f"  {target}:")
+            for metric, value in metrics.items():
+                std = self.std_metrics[target].get(metric, 0.0)
+                lines.append(f"    {metric}: {value:.4f} +/- {std:.4f}")
+        return "\n".join(lines)

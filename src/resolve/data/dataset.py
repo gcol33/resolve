@@ -75,7 +75,7 @@ class ResolveSchema:
 
     @property
     def has_categoricals(self) -> bool:
-        return len(self.categorical_names) > 0
+        return bool(self.categorical_names)
 
 
 class ResolveDataset:
@@ -667,6 +667,52 @@ class ResolveDataset:
 
         train_ids_list = train_ids.tolist()
         test_ids_list = test_ids.tolist()
+
+        pid = self._roles.plot_id
+        spid = self._roles.species_plot_id
+
+        train_header = self._header.filter(pl.col(pid).is_in(train_ids_list))
+        test_header = self._header.filter(pl.col(pid).is_in(test_ids_list))
+
+        train_species = self._species.filter(pl.col(spid).is_in(train_ids_list))
+        test_species = self._species.filter(pl.col(spid).is_in(test_ids_list))
+
+        train_ds = ResolveDataset(
+            train_header, train_species, self._roles, self._targets,
+            species_normalization=self._species_normalization,
+            track_unknown_fraction=self._track_unknown_fraction,
+            track_unknown_count=self._track_unknown_count,
+        )
+        test_ds = ResolveDataset(
+            test_header, test_species, self._roles, self._targets,
+            species_normalization=self._species_normalization,
+            track_unknown_fraction=self._track_unknown_fraction,
+            track_unknown_count=self._track_unknown_count,
+        )
+
+        return train_ds, test_ds
+
+    def split_by_indices(
+        self,
+        train_indices: np.ndarray,
+        test_indices: np.ndarray,
+    ) -> tuple[ResolveDataset, ResolveDataset]:
+        """Split by pre-computed row indices (for spatial CV).
+
+        Parameters
+        ----------
+        train_indices : np.ndarray
+            Integer indices into the header rows for training.
+        test_indices : np.ndarray
+            Integer indices into the header rows for testing.
+
+        Returns
+        -------
+        (train_dataset, test_dataset)
+        """
+        plot_ids = self._header[self._roles.plot_id].to_numpy()
+        train_ids_list = plot_ids[train_indices].tolist()
+        test_ids_list = plot_ids[test_indices].tolist()
 
         pid = self._roles.plot_id
         spid = self._roles.species_plot_id
