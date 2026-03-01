@@ -92,7 +92,7 @@ class ResolveModel(nn.Module):
         # Build categorical embedding tables (plot-level features like ecoregion, country)
         self.categorical_embeddings = nn.ModuleDict()
         self.categorical_embed_dim = schema.categorical_embed_dim
-        self._categorical_names = list(schema.categorical_names)
+        self._categorical_names = list(schema.categorical_names or [])
         n_categorical_embed = 0
         for cat_name in self._categorical_names:
             vocab_size = schema.categorical_vocab_sizes[cat_name]
