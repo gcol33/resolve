@@ -12,7 +12,11 @@ import numpy as np
 import torch
 from torch.amp import GradScaler, autocast
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import OneCycleLR
+from torch.optim.lr_scheduler import (
+    CosineAnnealingLR,
+    OneCycleLR,
+    ReduceLROnPlateau,
+)
 
 from resolve.data.dataset import ResolveDataset, ResolveSchema
 from resolve.encode.embedding import EmbeddingEncoder
@@ -92,6 +96,9 @@ class Trainer(
         patience: int = 50,
         lr: float = 1e-3,
         weight_decay: float = 1e-4,
+        lr_scheduler: str = "onecycle",
+        lr_factor: float = 0.1,
+        lr_patience: int = 5,
         # Checkpointing
         checkpoint_dir: str | Path | None = None,
         checkpoint_every: int = 50,
@@ -162,6 +169,13 @@ class Trainer(
             patience: Early stopping patience (epochs without improvement).
             lr: Learning rate for AdamW optimizer.
             weight_decay: L2 regularization weight.
+            lr_scheduler: Learning rate scheduler type.
+                - "onecycle": OneCycleLR with cosine annealing (default). Steps per batch.
+                - "plateau": ReduceLROnPlateau. Reduces LR when validation loss plateaus.
+                - "cosine": CosineAnnealingLR. Anneals LR to 0 over max_epochs.
+                - "none": Constant learning rate.
+            lr_factor: Factor to reduce LR by for plateau scheduler (default 0.1).
+            lr_patience: Epochs to wait before reducing LR for plateau scheduler (default 5).
 
             checkpoint_dir: Directory to save training checkpoints. If None, no checkpoints.
             checkpoint_every: Save checkpoint every N epochs.
@@ -258,6 +272,15 @@ class Trainer(
         if weight_decay < 0:
             raise ValueError(f"weight_decay must be >= 0, got {weight_decay}")
 
+        # Scheduler parameters
+        valid_schedulers = ("onecycle", "plateau", "cosine", "none")
+        if lr_scheduler not in valid_schedulers:
+            raise ValueError(f"lr_scheduler must be one of {valid_schedulers}, got {lr_scheduler!r}")
+        if lr_factor <= 0 or lr_factor >= 1:
+            raise ValueError(f"lr_factor must be in (0, 1), got {lr_factor}")
+        if lr_patience < 1:
+            raise ValueError(f"lr_patience must be >= 1, got {lr_patience}")
+
         # Species selection mode
         valid_selections = ("top", "bottom", "top_bottom", "all")
         if species_selection not in valid_selections:
@@ -283,6 +306,9 @@ class Trainer(
         self.patience = patience
         self.lr = lr
         self.weight_decay = weight_decay
+        self.lr_scheduler = lr_scheduler
+        self.lr_factor = lr_factor
+        self.lr_patience = lr_patience
 
         # Resolve loss configuration
         if phases is not None:
@@ -381,7 +407,7 @@ class Trainer(
         self._train_loader = None
         self._test_loader = None
         self._optimizer: AdamW | None = None
-        self._scheduler: OneCycleLR | None = None
+        self._scheduler: OneCycleLR | ReduceLROnPlateau | CosineAnnealingLR | None = None
         self._loss_fn: MultiTaskLoss | None = None
         self._grad_scaler: GradScaler | None = None
 
@@ -537,19 +563,10 @@ class Trainer(
             weight_decay=self.weight_decay,
         )
 
-        # Calculate total steps for scheduler
-        # If resuming, we'll recreate the scheduler for remaining epochs
-        # Ensure at least 1 step per epoch (handles batch_size > dataset_size)
+        # Setup learning rate scheduler
         steps_per_epoch = max(1, len(self._train_loader))
-        total_steps = self.max_epochs * steps_per_epoch
-        self._scheduler = OneCycleLR(
-            self._optimizer,
-            max_lr=self.lr,
-            total_steps=total_steps,
-            pct_start=_SCHEDULER_PCT_START,
-            anneal_strategy="cos",
-        )
-        self._steps_per_epoch = steps_per_epoch  # Store for resume logic
+        self._steps_per_epoch = steps_per_epoch
+        self._scheduler = self._create_scheduler(self.max_epochs, steps_per_epoch)
 
         # GradScaler with enabled=False is a no-op passthrough (no AMP branch needed)
         self._grad_scaler = GradScaler(enabled=self.use_amp)
@@ -588,18 +605,21 @@ class Trainer(
                 print(f"  max_epochs increased: {saved_max} -> {self.max_epochs}")
 
             # Recreate scheduler for remaining epochs
-            # OneCycleLR doesn't support extending total_steps, so we create a fresh one
             remaining_epochs = self.max_epochs - start_epoch
             if remaining_epochs > 0:
-                remaining_steps = remaining_epochs * self._steps_per_epoch
-                self._scheduler = OneCycleLR(
-                    self._optimizer,
-                    max_lr=self.lr,
-                    total_steps=remaining_steps,
-                    pct_start=_SCHEDULER_PCT_START,
-                    anneal_strategy="cos",
-                )
-                print(f"  Scheduler recreated for {remaining_epochs} remaining epochs ({remaining_steps} steps)")
+                if self.lr_scheduler == "onecycle":
+                    # OneCycleLR doesn't support extending total_steps — recreate
+                    self._scheduler = self._create_scheduler(remaining_epochs, self._steps_per_epoch)
+                    print(f"  Scheduler recreated for {remaining_epochs} remaining epochs")
+                elif self.lr_scheduler == "plateau":
+                    # ReduceLROnPlateau is stateless w.r.t. total epochs — restore state
+                    sched_state = checkpoint.get("scheduler_state_dict")
+                    if sched_state and self._scheduler is not None:
+                        self._scheduler.load_state_dict(sched_state)
+                        print(f"  Scheduler restored (plateau, lr={self._optimizer.param_groups[0]['lr']:.2e})")
+                elif self.lr_scheduler == "cosine":
+                    self._scheduler = self._create_scheduler(remaining_epochs, self._steps_per_epoch)
+                    print(f"  Scheduler recreated for {remaining_epochs} remaining epochs")
 
         # Initialize EMA state (exponential moving average of model weights)
         # If restored from checkpoint, _ema_state is already set; otherwise init from model
@@ -627,6 +647,13 @@ class Trainer(
 
             test_loss, metrics = self._eval_epoch(epoch, target_names, has_taxonomy)
             history["test_loss"].append(test_loss)
+
+            # Step per-epoch schedulers
+            if self._scheduler is not None:
+                if self.lr_scheduler == "plateau":
+                    self._scheduler.step(test_loss)
+                elif self.lr_scheduler == "cosine":
+                    self._scheduler.step()
 
             # Track best by first regression target's band_25 or classification accuracy
             first_target = target_names[0]
@@ -671,10 +698,15 @@ class Trainer(
                 f"{name}: {metrics[name].get('band_25', metrics[name].get('accuracy', 0)):.2%}"
                 for name in target_names
             )
+            # Include LR in log for non-constant schedulers
+            lr_str = ""
+            if self.lr_scheduler != "none" and self._optimizer is not None:
+                current_lr = self._optimizer.param_groups[0]["lr"]
+                lr_str = f" lr={current_lr:.2e}"
             print(
                 f"Epoch {epoch:3d} [P{phase}] | "
                 f"train={train_loss:.4f} test={test_loss:.4f} | {metric_str} | "
-                f"{epoch_time:.1f}s/ep, ETA {eta_str}",
+                f"{epoch_time:.1f}s/ep, ETA {eta_str}{lr_str}",
                 flush=True,
             )
 
@@ -708,6 +740,31 @@ class Trainer(
             resumed_from_epoch=resumed_from_epoch,
             train_time=train_time,
         )
+
+    def _create_scheduler(
+        self, n_epochs: int, steps_per_epoch: int
+    ) -> OneCycleLR | ReduceLROnPlateau | CosineAnnealingLR | None:
+        """Create LR scheduler based on self.lr_scheduler config."""
+        if self.lr_scheduler == "onecycle":
+            total_steps = n_epochs * steps_per_epoch
+            return OneCycleLR(
+                self._optimizer,
+                max_lr=self.lr,
+                total_steps=total_steps,
+                pct_start=_SCHEDULER_PCT_START,
+                anneal_strategy="cos",
+            )
+        elif self.lr_scheduler == "plateau":
+            return ReduceLROnPlateau(
+                self._optimizer,
+                mode="min",
+                factor=self.lr_factor,
+                patience=self.lr_patience,
+            )
+        elif self.lr_scheduler == "cosine":
+            return CosineAnnealingLR(self._optimizer, T_max=n_epochs)
+        else:  # "none"
+            return None
 
     def _train_epoch(
         self,
@@ -769,8 +826,9 @@ class Trainer(
             self._grad_scaler.step(self._optimizer)
             self._grad_scaler.update()
 
-            # Step scheduler after optimizer (fixes PyTorch warning)
-            self._scheduler.step()
+            # Step per-batch schedulers (OneCycleLR)
+            if self._scheduler is not None and self.lr_scheduler == "onecycle":
+                self._scheduler.step()
 
             # EMA update: exponential moving average of model weights
             if self._ema_state is not None:
