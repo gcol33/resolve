@@ -180,3 +180,19 @@ class TaxonomyNormalizer:
             f"n_original={self.n_original:,}, n_canonical={self.n_canonical:,}, "
             f"n_collapsed={self.n_collapsed:,})"
         )
+
+
+def normalize_species_df(
+    normalizer: Optional[TaxonomyNormalizer],
+    species_df: pl.DataFrame,
+    roles,
+) -> pl.DataFrame:
+    """Apply taxonomy normalization to species names if normalizer is set.
+
+    Shared helper used by BagOfSpeciesEncoder, EmbeddingEncoder,
+    RankPoolEncoder, and SpeciesEncoder.
+    """
+    if normalizer is None:
+        return species_df
+    normalized = normalizer.normalize_series(species_df[roles.species_id])
+    return species_df.with_columns(normalized.alias(roles.species_id))

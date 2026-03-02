@@ -11,7 +11,8 @@ import torch
 from torch import nn
 
 from resolve.data.dataset import ResolveDataset
-from resolve.encode.normalize import TaxonomyNormalizer
+from resolve.encode.mixins import TaxonomyEncoderMixin
+from resolve.encode.normalize import TaxonomyNormalizer, normalize_species_df
 from resolve.encode.vocab import SpeciesVocab, TaxonomyVocab
 
 
@@ -26,7 +27,7 @@ class EmbeddedSpecies:
     unknown_fraction: np.ndarray  # (n_plots,) fraction from unknown species
 
 
-class EmbeddingEncoder:
+class EmbeddingEncoder(TaxonomyEncoderMixin):
     """
     Encodes species composition using learnable embeddings.
 
@@ -82,28 +83,6 @@ class EmbeddingEncoder:
     def taxonomy_vocab(self) -> Optional[TaxonomyVocab]:
         return self._taxonomy_vocab
 
-    @property
-    def n_species(self) -> int:
-        """Number of species in vocabulary (including unknown)."""
-        return self._species_vocab.n_species if self._species_vocab else 0
-
-    @property
-    def n_genera(self) -> int:
-        """Number of genera in vocabulary (including unknown)."""
-        return self._taxonomy_vocab.n_genera if self._taxonomy_vocab else 0
-
-    @property
-    def n_families(self) -> int:
-        """Number of families in vocabulary (including unknown)."""
-        return self._taxonomy_vocab.n_families if self._taxonomy_vocab else 0
-
-    def _normalize_species_df(self, species_df: pl.DataFrame, roles) -> pl.DataFrame:
-        """Apply taxonomy normalization to species names if normalizer is set."""
-        if self.normalizer is None:
-            return species_df
-        normalized = self.normalizer.normalize_series(species_df[roles.species_id])
-        return species_df.with_columns(normalized.alias(roles.species_id))
-
     def fit(self, dataset: ResolveDataset) -> EmbeddingEncoder:
         """
         Build vocabularies from training data.
@@ -112,7 +91,7 @@ class EmbeddingEncoder:
         If a normalizer is set, species names are normalized first.
         """
         roles = dataset.roles
-        species_df = self._normalize_species_df(dataset.species, roles)
+        species_df = normalize_species_df(self.normalizer, dataset.species, roles)
 
         # Build species vocabulary
         self._species_vocab = SpeciesVocab.from_species_data(
@@ -142,7 +121,7 @@ class EmbeddingEncoder:
             raise RuntimeError("EmbeddingEncoder must be fit before transform")
 
         roles = dataset.roles
-        species_df = self._normalize_species_df(dataset.species, roles)
+        species_df = normalize_species_df(self.normalizer, dataset.species, roles)
         plot_ids = dataset.plot_ids
 
         # Extract top-k species IDs

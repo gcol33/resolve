@@ -10,7 +10,7 @@ import polars as pl
 from sklearn.feature_extraction import FeatureHasher
 
 from resolve.data.dataset import ResolveDataset
-from resolve.encode.normalize import TaxonomyNormalizer
+from resolve.encode.normalize import TaxonomyNormalizer, normalize_species_df
 from resolve.encode.vocab import TaxonomyVocab
 
 if TYPE_CHECKING:
@@ -202,13 +202,6 @@ class SpeciesEncoder:
         self._fitted = True
         return self
 
-    def _normalize_species_df(self, species_df: pl.DataFrame, roles) -> pl.DataFrame:
-        """Apply taxonomy normalization to species names if normalizer is set."""
-        if self.normalizer is None:
-            return species_df
-        normalized = self.normalizer.normalize_series(species_df[roles.species_id])
-        return species_df.with_columns(normalized.alias(roles.species_id))
-
     def transform(self, dataset: ResolveDataset) -> EncodedSpecies:
         """
         Encode species composition for all plots.
@@ -225,7 +218,7 @@ class SpeciesEncoder:
             raise RuntimeError("SpeciesEncoder must be fit before transform")
 
         roles = dataset.roles
-        species_df = self._normalize_species_df(dataset.species, roles)
+        species_df = normalize_species_df(self.normalizer, dataset.species, roles)
         plot_ids = dataset.plot_ids
 
         # Build species representation based on selection mode

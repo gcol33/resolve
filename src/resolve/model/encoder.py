@@ -104,6 +104,20 @@ def _apply_cover_dropout(
     return weights, has_cover
 
 
+def _get_modulelist_weights(
+    embeddings: nn.ModuleList | None,
+    has_taxonomy: bool,
+) -> torch.Tensor | None:
+    """Average embedding weights across position slots in a ModuleList.
+
+    Used by PlotEncoder, PlotEncoderEmbed, PlotEncoderSparse for
+    get_genus_weights() and get_family_weights().
+    """
+    if not has_taxonomy or embeddings is None:
+        return None
+    return torch.stack([emb.weight for emb in embeddings], dim=0).mean(0)
+
+
 class PlotEncoder(nn.Module):
     """
     Encodes plot features into a shared latent representation.
@@ -174,15 +188,11 @@ class PlotEncoder(nn.Module):
 
     def get_genus_weights(self) -> torch.Tensor | None:
         """Get genus embedding weights averaged across positions."""
-        if not self.has_taxonomy:
-            return None
-        return torch.stack([emb.weight for emb in self.genus_embeddings], dim=0).mean(0)
+        return _get_modulelist_weights(self.genus_embeddings, self.has_taxonomy)
 
     def get_family_weights(self) -> torch.Tensor | None:
         """Get family embedding weights averaged across positions."""
-        if not self.has_taxonomy:
-            return None
-        return torch.stack([emb.weight for emb in self.family_embeddings], dim=0).mean(0)
+        return _get_modulelist_weights(self.family_embeddings, self.has_taxonomy)
 
 
 class PlotEncoderEmbed(nn.Module):
@@ -286,15 +296,11 @@ class PlotEncoderEmbed(nn.Module):
 
     def get_genus_weights(self) -> torch.Tensor | None:
         """Get genus embedding weights averaged across positions."""
-        if not self.has_taxonomy:
-            return None
-        return torch.stack([emb.weight for emb in self.genus_embeddings], dim=0).mean(0)
+        return _get_modulelist_weights(self.genus_embeddings, self.has_taxonomy)
 
     def get_family_weights(self) -> torch.Tensor | None:
         """Get family embedding weights averaged across positions."""
-        if not self.has_taxonomy:
-            return None
-        return torch.stack([emb.weight for emb in self.family_embeddings], dim=0).mean(0)
+        return _get_modulelist_weights(self.family_embeddings, self.has_taxonomy)
 
 
 class PlotEncoderSparse(nn.Module):
@@ -388,15 +394,11 @@ class PlotEncoderSparse(nn.Module):
 
     def get_genus_weights(self) -> torch.Tensor | None:
         """Get genus embedding weights averaged across positions."""
-        if not self.has_taxonomy:
-            return None
-        return torch.stack([emb.weight for emb in self.genus_embeddings], dim=0).mean(0)
+        return _get_modulelist_weights(self.genus_embeddings, self.has_taxonomy)
 
     def get_family_weights(self) -> torch.Tensor | None:
         """Get family embedding weights averaged across positions."""
-        if not self.has_taxonomy:
-            return None
-        return torch.stack([emb.weight for emb in self.family_embeddings], dim=0).mean(0)
+        return _get_modulelist_weights(self.family_embeddings, self.has_taxonomy)
 
 
 class PlotEncoderRankPool(nn.Module):

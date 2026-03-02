@@ -9,7 +9,8 @@ import numpy as np
 import polars as pl
 
 from resolve.data.dataset import ResolveDataset
-from resolve.encode.normalize import TaxonomyNormalizer
+from resolve.encode.mixins import TaxonomyEncoderMixin
+from resolve.encode.normalize import TaxonomyNormalizer, normalize_species_df
 from resolve.encode.vocab import SpeciesVocab, TaxonomyVocab
 
 
@@ -82,7 +83,7 @@ def pad_rank_pool_encoded(encoded: RankPoolEncodedSpecies) -> dict[str, np.ndarr
     }
 
 
-class RankPoolEncoder:
+class RankPoolEncoder(TaxonomyEncoderMixin):
     """Encodes all species in a plot using shared embedding tables.
 
     Unlike SpeciesEncoder (hash, fixed-dim) or EmbeddingEncoder (per-position, top-k),
@@ -125,32 +126,10 @@ class RankPoolEncoder:
         self._known_species: set[str] = set()
         self._fitted = False
 
-    @property
-    def n_species(self) -> int:
-        """Number of species in vocab (including unknown at index 0)."""
-        return self._species_vocab.n_species if self._species_vocab else 0
-
-    @property
-    def n_genera(self) -> int:
-        """Number of genera in vocab (including unknown at index 0)."""
-        return self._taxonomy_vocab.n_genera if self._taxonomy_vocab else 0
-
-    @property
-    def n_families(self) -> int:
-        """Number of families in vocab (including unknown at index 0)."""
-        return self._taxonomy_vocab.n_families if self._taxonomy_vocab else 0
-
-    def _normalize_species_df(self, species_df: pl.DataFrame, roles) -> pl.DataFrame:
-        """Apply taxonomy normalization to species names if normalizer is set."""
-        if self.normalizer is None:
-            return species_df
-        normalized = self.normalizer.normalize_series(species_df[roles.species_id])
-        return species_df.with_columns(normalized.alias(roles.species_id))
-
     def fit(self, dataset: ResolveDataset) -> RankPoolEncoder:
         """Build species + taxonomy vocabularies from training data."""
         roles = dataset.roles
-        species_df = self._normalize_species_df(dataset.species, roles)
+        species_df = normalize_species_df(self.normalizer, dataset.species, roles)
 
         # Build species vocabulary (filtered by frequency)
         self._species_vocab = SpeciesVocab.from_species_data(
@@ -192,7 +171,7 @@ class RankPoolEncoder:
             raise RuntimeError("RankPoolEncoder must be fit before transform")
 
         roles = dataset.roles
-        species_df = self._normalize_species_df(dataset.species, roles)
+        species_df = normalize_species_df(self.normalizer, dataset.species, roles)
         plot_ids = dataset.plot_ids
 
         has_taxonomy = roles.has_taxonomy and self._taxonomy_vocab is not None
