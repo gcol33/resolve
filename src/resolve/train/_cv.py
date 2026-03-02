@@ -34,6 +34,7 @@ class CVMixin:
         block_deg: float | tuple[float, float] | None = None,
         block_km: float | tuple[float, float] | None = None,
         block_ids: np.ndarray | None = None,
+        balance: bool = False,
         spatial: bool = True,
         block_size: float | None = None,
     ) -> CVResult:
@@ -54,6 +55,9 @@ class CVMixin:
             Block size in kilometres (converted using mean latitude).
         block_ids : np.ndarray or None
             Pre-assigned 1-D integer block labels (one per plot).
+        balance : bool
+            If True, use greedy bin-packing to equalise fold sizes.
+            If False (default), round-robin block assignment.
         spatial : bool
             If True (default), use spatial block splitting. If False, use
             random splitting (plots shuffled, no spatial structure).
@@ -93,6 +97,8 @@ class CVMixin:
                 print(f"  Block mode: block_deg = {block_deg}°")
             else:
                 print(f"  Block mode: block_deg = 0.1° (default)")
+        if balance:
+            print(f"  Balance: greedy bin-packing")
         print(f"  Seed: {seed}")
         sys.stdout.flush()
 
@@ -105,6 +111,7 @@ class CVMixin:
                 block_deg=block_deg,
                 block_km=block_km,
                 block_ids=block_ids,
+                balance=balance,
             )
             folds = splitter.split(coords)
         else:

@@ -46,6 +46,11 @@ class SpatialBlockSplitter:
         Block size in kilometres.
     block_ids : np.ndarray or None
         Pre-assigned 1-D integer block labels.
+    balance : bool
+        If True, use greedy bin-packing to equalise plot counts across
+        folds (assign each block to the fold with fewest plots so far).
+        If False (default), assign blocks round-robin after shuffling.
+        Matches Verde's ``BlockKFold(balance=True)`` behaviour.
     """
 
     def __init__(
@@ -57,6 +62,7 @@ class SpatialBlockSplitter:
         block_deg: float | tuple[float, float] | None = None,
         block_km: float | tuple[float, float] | None = None,
         block_ids: np.ndarray | None = None,
+        balance: bool = False,
     ):
         if n_splits < 2:
             raise ValueError(f"n_splits must be >= 2, got {n_splits}")
@@ -98,6 +104,7 @@ class SpatialBlockSplitter:
         # --- store mode + values ---------------------------------------------
         self.n_splits = n_splits
         self.seed = seed
+        self.balance = balance
 
         if block_ids is not None:
             block_ids = np.asarray(block_ids)
@@ -207,14 +214,31 @@ class SpatialBlockSplitter:
         )
         n_blocks = len(unique_blocks)
 
+        # Count plots per block
+        block_sizes = np.bincount(plot_block_idx, minlength=n_blocks)
+
         # Shuffle blocks
         rng = np.random.default_rng(self.seed)
         block_order = rng.permutation(n_blocks)
 
-        # Assign blocks to folds round-robin
         block_to_fold = np.empty(n_blocks, dtype=np.int32)
-        for i, block_pos in enumerate(block_order):
-            block_to_fold[block_pos] = i % self.n_splits
+
+        if self.balance:
+            # Greedy bin-packing: sort blocks largest-first, assign each
+            # to the fold with fewest plots so far. Matches Verde's
+            # BlockKFold(balance=True) behaviour.
+            sorted_order = sorted(
+                block_order, key=lambda b: block_sizes[b], reverse=True,
+            )
+            fold_totals = np.zeros(self.n_splits, dtype=np.int64)
+            for block_pos in sorted_order:
+                target_fold = int(np.argmin(fold_totals))
+                block_to_fold[block_pos] = target_fold
+                fold_totals[target_fold] += block_sizes[block_pos]
+        else:
+            # Round-robin assignment
+            for i, block_pos in enumerate(block_order):
+                block_to_fold[block_pos] = i % self.n_splits
 
         # Map plot-level fold assignment
         plot_folds = block_to_fold[plot_block_idx]

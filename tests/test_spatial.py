@@ -449,3 +449,98 @@ class TestDefaults:
         splitter = SpatialBlockSplitter(block_deg=1.0)
         with pytest.raises(ValueError, match="coords is required"):
             splitter.split()
+
+
+class TestBalance:
+    """Tests for the balance parameter (greedy bin-packing)."""
+
+    def test_balance_more_equal_folds(self):
+        """balance=True produces more equally-sized folds than round-robin."""
+        # Create blocks of very unequal sizes
+        block_ids = np.array(
+            [0] * 100 + [1] * 10 + [2] * 10 + [3] * 80 +
+            [4] * 5 + [5] * 5 + [6] * 50 + [7] * 40
+        )
+        n_splits = 3
+
+        folds_rr = SpatialBlockSplitter(
+            block_ids=block_ids, n_splits=n_splits, seed=42,
+        ).split()
+        folds_bal = SpatialBlockSplitter(
+            block_ids=block_ids, n_splits=n_splits, seed=42, balance=True,
+        ).split()
+
+        sizes_rr = [len(test) for _, test in folds_rr]
+        sizes_bal = [len(test) for _, test in folds_bal]
+
+        # Balanced folds should have smaller range (max - min)
+        range_rr = max(sizes_rr) - min(sizes_rr)
+        range_bal = max(sizes_bal) - min(sizes_bal)
+        assert range_bal <= range_rr, (
+            f"Balanced range ({range_bal}) should be <= round-robin ({range_rr})"
+        )
+
+    def test_balance_all_plots_covered(self):
+        """balance=True still covers all plots exactly once."""
+        rng = np.random.default_rng(0)
+        coords = rng.uniform(-10, 10, size=(200, 2))
+        splitter = SpatialBlockSplitter(
+            block_deg=1.0, n_splits=5, seed=42, balance=True,
+        )
+        folds = splitter.split(coords)
+
+        assert len(folds) == 5
+        all_test = np.concatenate([test for _, test in folds])
+        assert len(all_test) == 200
+        assert len(np.unique(all_test)) == 200
+
+    def test_balance_blocks_stay_together(self):
+        """Plots in same block are never split across folds with balance=True."""
+        block_ids = np.array([0, 0, 0, 1, 1, 2, 2, 2, 2, 3])
+        splitter = SpatialBlockSplitter(
+            block_ids=block_ids, n_splits=3, seed=0, balance=True,
+        )
+        folds = splitter.split()
+
+        groups = [{0, 1, 2}, {3, 4}, {5, 6, 7, 8}, {9}]
+        for _, (train_idx, test_idx) in enumerate(folds):
+            train_set = set(train_idx.tolist())
+            test_set = set(test_idx.tolist())
+            for group in groups:
+                assert not (group & train_set and group & test_set)
+
+    def test_balance_reproducible(self):
+        """Same seed + balance=True produces identical splits."""
+        rng = np.random.default_rng(0)
+        coords = rng.uniform(0, 10, size=(100, 2))
+
+        folds_a = SpatialBlockSplitter(
+            block_deg=0.5, n_splits=5, seed=42, balance=True,
+        ).split(coords)
+        folds_b = SpatialBlockSplitter(
+            block_deg=0.5, n_splits=5, seed=42, balance=True,
+        ).split(coords)
+
+        for k in range(5):
+            np.testing.assert_array_equal(folds_a[k][0], folds_b[k][0])
+            np.testing.assert_array_equal(folds_a[k][1], folds_b[k][1])
+
+    def test_balance_default_false(self):
+        """Default balance=False matches old round-robin behavior."""
+        rng = np.random.default_rng(0)
+        coords = rng.uniform(-10, 10, size=(200, 2))
+
+        folds_default = SpatialBlockSplitter(
+            block_deg=1.0, n_splits=5, seed=42,
+        ).split(coords)
+        folds_explicit = SpatialBlockSplitter(
+            block_deg=1.0, n_splits=5, seed=42, balance=False,
+        ).split(coords)
+
+        for k in range(5):
+            np.testing.assert_array_equal(
+                folds_default[k][0], folds_explicit[k][0],
+            )
+            np.testing.assert_array_equal(
+                folds_default[k][1], folds_explicit[k][1],
+            )
