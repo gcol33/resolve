@@ -214,11 +214,9 @@ class CheckpointMixin:
         if checkpoint.get("best_state"):
             self._best_state = checkpoint["best_state"]
 
-        # Restore optimizer (but NOT scheduler - we'll recreate it for remaining epochs)
+        # Restore optimizer (scheduler state is restored separately in fit())
         if checkpoint.get("optimizer_state_dict") and self._optimizer:
             self._optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        # NOTE: Scheduler state NOT restored here.
-        # OneCycleLR/Cosine are recreated for remaining epochs; Plateau is restored in fit().
         if checkpoint.get("grad_scaler_state_dict") and self._grad_scaler:
             self._grad_scaler.load_state_dict(checkpoint["grad_scaler_state_dict"])
 

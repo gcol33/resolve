@@ -308,17 +308,23 @@ class ResolveDataset:
 
         header_df = pl.DataFrame(header_dict)
 
-        # Filter out rows where target values are NaN
+        # Filter out rows where target values are null or NaN
         original_count = len(header_df)
         filter_exprs = []
         target_cols_filtered = []
         for name, cfg in targets.items():
             col = cfg["column"]
             if col in header_df.columns:
-                n_null = header_df[col].null_count()
-                if n_null > 0:
+                series = header_df[col]
+                n_missing = series.null_count()
+                if series.dtype in (pl.Float32, pl.Float64):
+                    n_missing += series.is_nan().sum()
+                if n_missing > 0:
                     target_cols_filtered.append(col)
-                filter_exprs.append(pl.col(col).is_not_null())
+                expr = pl.col(col).is_not_null()
+                if series.dtype in (pl.Float32, pl.Float64):
+                    expr = expr & pl.col(col).is_not_nan()
+                filter_exprs.append(expr)
 
         # Track which rows were filtered for later species filtering
         valid_indices = None
@@ -432,8 +438,11 @@ class ResolveDataset:
                     print(f"  Filtered {n_filtered_records:,} species records for invalid plots")
 
         # Create a minimal species DataFrame with required columns
+        # Map row indices back to actual plot IDs so split()/is_in work correctly
+        plot_id_array = header_df[role_mapping.plot_id].to_numpy()
+        species_plot_ids = plot_id_array[species_tensors["plot_indices"].numpy()]
         species_dict = {
-            role_mapping.species_plot_id: species_tensors["plot_indices"].numpy(),
+            role_mapping.species_plot_id: species_plot_ids,
             role_mapping.species_id: species_tensors["species_ids"].numpy(),
         }
         if role_mapping.abundance:
@@ -600,7 +609,7 @@ class ResolveDataset:
         arr = (
             self._header
             .select(self._roles.coords_lat, self._roles.coords_lon)
-            .fill_null(0.0)
+            .fill_nan(0.0).fill_null(0.0)
             .to_numpy()
             .astype(np.float32)
         )
@@ -613,7 +622,7 @@ class ResolveDataset:
         arr = (
             self._header
             .select(self._roles.covariates)
-            .fill_null(0.0)
+            .fill_nan(0.0).fill_null(0.0)
             .to_numpy()
             .astype(np.float32)
         )
@@ -646,9 +655,13 @@ class ResolveDataset:
         return values
 
     def get_target_mask(self, name: str) -> np.ndarray:
-        """Get boolean mask for non-null target values."""
+        """Get boolean mask for non-null/non-NaN target values."""
         cfg = self._targets[name]
-        return self._header[cfg.column].is_not_null().to_numpy()
+        col = self._header[cfg.column]
+        mask = col.is_not_null()
+        if col.dtype in (pl.Float32, pl.Float64):
+            mask = mask & col.is_not_nan()
+        return mask.to_numpy()
 
     def split(
         self,
