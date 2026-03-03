@@ -50,8 +50,17 @@ def compute_unknown_stats(
     df = df.filter(pl.col(roles.species_id).is_not_null())
     df = df.with_columns(pl.col(abundance_col).fill_null(0).cast(pl.Float64))
 
+    # Match types: known_species may be str (polars path) or int (C++ fast loader)
+    col_dtype = df[roles.species_id].dtype
+    if col_dtype in (pl.Utf8, pl.String):
+        known = [str(s) for s in known_species]
+        is_in_expr = pl.col(roles.species_id).is_in(known)
+    else:
+        known = known_species
+        is_in_expr = pl.col(roles.species_id).is_in(known)
+
     df = df.with_columns(
-        pl.col(roles.species_id).cast(pl.Utf8).is_in(known_species).not_().alias("_is_unknown"),
+        is_in_expr.not_().alias("_is_unknown"),
     )
     df = df.with_columns(
         (pl.col(abundance_col) * pl.col("_is_unknown").cast(pl.Float64)).alias("_unknown_abundance"),
