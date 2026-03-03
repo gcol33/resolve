@@ -83,64 +83,87 @@ inline NumericMatrix tensor_to_r_mat(const torch::Tensor& t) {
 // Enum conversions
 // =============================================================================
 
+// Generic string-to-enum parser. Avoids duplicating the same if/stop pattern
+// for every enum type. Entries is an initializer_list of {string, EnumValue}.
+template <typename EnumT>
+inline EnumT parse_enum(
+    const std::string& s,
+    std::initializer_list<std::pair<const char*, EnumT>> entries,
+    const char* type_name
+) {
+    for (const auto& [key, val] : entries) {
+        if (s == key) return val;
+    }
+    stop("Invalid " + std::string(type_name) + ": " + s);
+}
+
 inline resolve::SelectionMode parse_selection_mode(const std::string& s) {
-    if (s == "top") return resolve::SelectionMode::Top;
-    if (s == "bottom") return resolve::SelectionMode::Bottom;
-    if (s == "top_bottom") return resolve::SelectionMode::TopBottom;
-    if (s == "all") return resolve::SelectionMode::All;
-    stop("Invalid selection mode: " + s);
+    return parse_enum<resolve::SelectionMode>(s, {
+        {"top", resolve::SelectionMode::Top},
+        {"bottom", resolve::SelectionMode::Bottom},
+        {"top_bottom", resolve::SelectionMode::TopBottom},
+        {"all", resolve::SelectionMode::All},
+    }, "selection mode");
 }
 
 inline resolve::RepresentationMode parse_representation_mode(const std::string& s) {
-    if (s == "abundance") return resolve::RepresentationMode::Abundance;
-    if (s == "presence_absence") return resolve::RepresentationMode::PresenceAbsence;
-    stop("Invalid representation mode: " + s);
+    return parse_enum<resolve::RepresentationMode>(s, {
+        {"abundance", resolve::RepresentationMode::Abundance},
+        {"presence_absence", resolve::RepresentationMode::PresenceAbsence},
+    }, "representation mode");
 }
 
 inline resolve::NormalizationMode parse_normalization_mode(const std::string& s) {
-    if (s == "raw") return resolve::NormalizationMode::Raw;
-    if (s == "norm") return resolve::NormalizationMode::Norm;
-    if (s == "log1p") return resolve::NormalizationMode::Log1p;
-    stop("Invalid normalization mode: " + s);
+    return parse_enum<resolve::NormalizationMode>(s, {
+        {"raw", resolve::NormalizationMode::Raw},
+        {"norm", resolve::NormalizationMode::Norm},
+        {"log1p", resolve::NormalizationMode::Log1p},
+    }, "normalization mode");
 }
 
 inline resolve::AggregationMode parse_aggregation_mode(const std::string& s) {
-    if (s == "abundance") return resolve::AggregationMode::Abundance;
-    if (s == "count") return resolve::AggregationMode::Count;
-    stop("Invalid aggregation mode: " + s);
+    return parse_enum<resolve::AggregationMode>(s, {
+        {"abundance", resolve::AggregationMode::Abundance},
+        {"count", resolve::AggregationMode::Count},
+    }, "aggregation mode");
 }
 
 inline resolve::TaskType parse_task_type(const std::string& s) {
-    if (s == "regression") return resolve::TaskType::Regression;
-    if (s == "classification") return resolve::TaskType::Classification;
-    stop("Invalid task type: " + s);
+    return parse_enum<resolve::TaskType>(s, {
+        {"regression", resolve::TaskType::Regression},
+        {"classification", resolve::TaskType::Classification},
+    }, "task type");
 }
 
 inline resolve::TransformType parse_transform_type(const std::string& s) {
-    if (s == "none") return resolve::TransformType::None;
-    if (s == "log1p") return resolve::TransformType::Log1p;
-    stop("Invalid transform type: " + s);
+    return parse_enum<resolve::TransformType>(s, {
+        {"none", resolve::TransformType::None},
+        {"log1p", resolve::TransformType::Log1p},
+    }, "transform type");
 }
 
 inline resolve::SpeciesEncodingMode parse_species_encoding_mode(const std::string& s) {
-    if (s == "hash") return resolve::SpeciesEncodingMode::Hash;
-    if (s == "embed") return resolve::SpeciesEncodingMode::Embed;
-    if (s == "sparse") return resolve::SpeciesEncodingMode::Sparse;
-    stop("Invalid species encoding mode: " + s);
+    return parse_enum<resolve::SpeciesEncodingMode>(s, {
+        {"hash", resolve::SpeciesEncodingMode::Hash},
+        {"embed", resolve::SpeciesEncodingMode::Embed},
+        {"sparse", resolve::SpeciesEncodingMode::Sparse},
+    }, "species encoding mode");
 }
 
 inline resolve::LossConfigMode parse_loss_config_mode(const std::string& s) {
-    if (s == "mae") return resolve::LossConfigMode::MAE;
-    if (s == "smape") return resolve::LossConfigMode::SMAPE;
-    if (s == "combined") return resolve::LossConfigMode::Combined;
-    stop("Invalid loss config mode: " + s);
+    return parse_enum<resolve::LossConfigMode>(s, {
+        {"mae", resolve::LossConfigMode::MAE},
+        {"smape", resolve::LossConfigMode::SMAPE},
+        {"combined", resolve::LossConfigMode::Combined},
+    }, "loss config mode");
 }
 
 inline resolve::LRSchedulerType parse_lr_scheduler_type(const std::string& s) {
-    if (s == "none") return resolve::LRSchedulerType::None;
-    if (s == "step") return resolve::LRSchedulerType::StepLR;
-    if (s == "cosine") return resolve::LRSchedulerType::CosineAnnealing;
-    stop("Invalid LR scheduler type: " + s);
+    return parse_enum<resolve::LRSchedulerType>(s, {
+        {"none", resolve::LRSchedulerType::None},
+        {"step", resolve::LRSchedulerType::StepLR},
+        {"cosine", resolve::LRSchedulerType::CosineAnnealing},
+    }, "LR scheduler type");
 }
 
 #endif // RCPP_COMMON_HPP

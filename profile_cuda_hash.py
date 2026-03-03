@@ -1,29 +1,12 @@
 """Profile where time is spent in CUDA hash mode."""
-import sys
-sys.path.insert(0, 'src/core/python/src')
-sys.path.insert(0, 'src')
-
 import time
 import torch
+from bench_utils import create_role_mapping, HEADER_PATH, SPECIES_PATH
 from resolve_core import (
-    ResolveDataset, DatasetConfig, RoleMapping, TargetSpec,
+    ResolveDataset, DatasetConfig, TargetSpec,
     ResolveModel, ModelConfig, Trainer, TrainConfig,
     SpeciesEncodingMode
 )
-
-HEADER_PATH = "J:/Phd Local/Gilles_paper_resolve/data/iter_bench_header.csv"
-SPECIES_PATH = "J:/Phd Local/Gilles_paper_resolve/data/iter_bench_species.csv"
-
-def create_role_mapping():
-    roles = RoleMapping()
-    roles.plot_id = "PlotObservationID"
-    roles.species_id = "WFO_TAXON"
-    roles.abundance = "Cover %"
-    roles.longitude = "Longitude"
-    roles.latitude = "Latitude"
-    roles.genus = "WFO_GENUS"
-    roles.family = "WFO_FAMILY"
-    return roles
 
 # Load with CUDA hash
 config = DatasetConfig()

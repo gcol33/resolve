@@ -31,9 +31,10 @@ void hash_species(
     }
 }
 
-std::vector<std::pair<std::string, float>> select_top_k(
+static std::vector<std::pair<std::string, float>> select_k(
     std::vector<std::pair<std::string, float>> species,
-    int k
+    int k,
+    bool descending
 ) {
     if (static_cast<int>(species.size()) <= k) {
         return species;
@@ -43,30 +44,27 @@ std::vector<std::pair<std::string, float>> select_top_k(
         species.begin(),
         species.begin() + k,
         species.end(),
-        [](const auto& a, const auto& b) { return a.second > b.second; }
+        [descending](const auto& a, const auto& b) {
+            return descending ? a.second > b.second : a.second < b.second;
+        }
     );
 
     species.resize(k);
     return species;
 }
 
+std::vector<std::pair<std::string, float>> select_top_k(
+    std::vector<std::pair<std::string, float>> species,
+    int k
+) {
+    return select_k(std::move(species), k, /*descending=*/true);
+}
+
 std::vector<std::pair<std::string, float>> select_bottom_k(
     std::vector<std::pair<std::string, float>> species,
     int k
 ) {
-    if (static_cast<int>(species.size()) <= k) {
-        return species;
-    }
-
-    std::partial_sort(
-        species.begin(),
-        species.begin() + k,
-        species.end(),
-        [](const auto& a, const auto& b) { return a.second < b.second; }
-    );
-
-    species.resize(k);
-    return species;
+    return select_k(std::move(species), k, /*descending=*/false);
 }
 
 std::vector<std::pair<std::string, float>> apply_selection(
