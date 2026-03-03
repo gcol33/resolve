@@ -599,6 +599,16 @@ class ResolveDataset:
             categorical_vocab_sizes=categorical_vocab_sizes,
         )
 
+    def _select_float_columns(self, cols: str | list[str]) -> np.ndarray:
+        """Select columns from header, fill NaN/null with 0, return as float32."""
+        return (
+            self._header
+            .select(cols)
+            .fill_nan(0.0).fill_null(0.0)
+            .to_numpy()
+            .astype(np.float32)
+        )
+
     def get_coordinates(self) -> Optional[np.ndarray]:
         """Get (lat, lon) array for all plots, or None if no coordinates.
 
@@ -606,27 +616,13 @@ class ResolveDataset:
         """
         if not self._roles.has_coordinates:
             return None
-        arr = (
-            self._header
-            .select(self._roles.coords_lat, self._roles.coords_lon)
-            .fill_nan(0.0).fill_null(0.0)
-            .to_numpy()
-            .astype(np.float32)
-        )
-        return arr
+        return self._select_float_columns([self._roles.coords_lat, self._roles.coords_lon])
 
     def get_covariates(self) -> Optional[np.ndarray]:
         """Get covariate array if any covariates defined."""
         if not self._roles.covariates:
             return None
-        arr = (
-            self._header
-            .select(self._roles.covariates)
-            .fill_nan(0.0).fill_null(0.0)
-            .to_numpy()
-            .astype(np.float32)
-        )
-        return arr
+        return self._select_float_columns(self._roles.covariates)
 
     def get_categoricals(self) -> dict[str, pl.Series] | None:
         """Get categorical feature columns as polars Series, or None if none defined."""
@@ -663,6 +659,25 @@ class ResolveDataset:
             mask = mask & col.is_not_nan()
         return mask.to_numpy()
 
+    def _subset_by_ids(self, plot_ids_list: list) -> ResolveDataset:
+        """Create a subset dataset containing only the given plot IDs."""
+        pid = self._roles.plot_id
+        spid = self._roles.species_plot_id
+        return ResolveDataset(
+            self._header.filter(pl.col(pid).is_in(plot_ids_list)),
+            self._species.filter(pl.col(spid).is_in(plot_ids_list)),
+            self._roles, self._targets,
+            species_normalization=self._species_normalization,
+            track_unknown_fraction=self._track_unknown_fraction,
+            track_unknown_count=self._track_unknown_count,
+        )
+
+    def _split_by_ids(
+        self, train_ids_list: list, test_ids_list: list,
+    ) -> tuple[ResolveDataset, ResolveDataset]:
+        """Split into train/test by pre-computed plot ID lists."""
+        return self._subset_by_ids(train_ids_list), self._subset_by_ids(test_ids_list)
+
     def split(
         self,
         test_size: float = 0.2,
@@ -677,33 +692,7 @@ class ResolveDataset:
         train_ids, test_ids = train_test_split(
             plot_ids, test_size=test_size, random_state=seed
         )
-
-        train_ids_list = train_ids.tolist()
-        test_ids_list = test_ids.tolist()
-
-        pid = self._roles.plot_id
-        spid = self._roles.species_plot_id
-
-        train_header = self._header.filter(pl.col(pid).is_in(train_ids_list))
-        test_header = self._header.filter(pl.col(pid).is_in(test_ids_list))
-
-        train_species = self._species.filter(pl.col(spid).is_in(train_ids_list))
-        test_species = self._species.filter(pl.col(spid).is_in(test_ids_list))
-
-        train_ds = ResolveDataset(
-            train_header, train_species, self._roles, self._targets,
-            species_normalization=self._species_normalization,
-            track_unknown_fraction=self._track_unknown_fraction,
-            track_unknown_count=self._track_unknown_count,
-        )
-        test_ds = ResolveDataset(
-            test_header, test_species, self._roles, self._targets,
-            species_normalization=self._species_normalization,
-            track_unknown_fraction=self._track_unknown_fraction,
-            track_unknown_count=self._track_unknown_count,
-        )
-
-        return train_ds, test_ds
+        return self._split_by_ids(train_ids.tolist(), test_ids.tolist())
 
     def split_by_indices(
         self,
@@ -724,44 +713,14 @@ class ResolveDataset:
         (train_dataset, test_dataset)
         """
         plot_ids = self._header[self._roles.plot_id].to_numpy()
-        train_ids_list = plot_ids[train_indices].tolist()
-        test_ids_list = plot_ids[test_indices].tolist()
-
-        pid = self._roles.plot_id
-        spid = self._roles.species_plot_id
-
-        train_header = self._header.filter(pl.col(pid).is_in(train_ids_list))
-        test_header = self._header.filter(pl.col(pid).is_in(test_ids_list))
-
-        train_species = self._species.filter(pl.col(spid).is_in(train_ids_list))
-        test_species = self._species.filter(pl.col(spid).is_in(test_ids_list))
-
-        train_ds = ResolveDataset(
-            train_header, train_species, self._roles, self._targets,
-            species_normalization=self._species_normalization,
-            track_unknown_fraction=self._track_unknown_fraction,
-            track_unknown_count=self._track_unknown_count,
+        return self._split_by_ids(
+            plot_ids[train_indices].tolist(),
+            plot_ids[test_indices].tolist(),
         )
-        test_ds = ResolveDataset(
-            test_header, test_species, self._roles, self._targets,
-            species_normalization=self._species_normalization,
-            track_unknown_fraction=self._track_unknown_fraction,
-            track_unknown_count=self._track_unknown_count,
-        )
-
-        return train_ds, test_ds
 
     def filter_by_target(self, name: str) -> ResolveDataset:
         """Return dataset filtered to rows with non-null target values."""
         cfg = self._targets[name]
         filtered_header = self._header.filter(pl.col(cfg.column).is_not_null())
         plot_ids_list = filtered_header[self._roles.plot_id].to_list()
-        filtered_species = self._species.filter(
-            pl.col(self._roles.species_plot_id).is_in(plot_ids_list)
-        )
-        return ResolveDataset(
-            filtered_header, filtered_species, self._roles, self._targets,
-            species_normalization=self._species_normalization,
-            track_unknown_fraction=self._track_unknown_fraction,
-            track_unknown_count=self._track_unknown_count,
-        )
+        return self._subset_by_ids(plot_ids_list)

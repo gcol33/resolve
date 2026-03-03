@@ -10,7 +10,7 @@ import polars as pl
 from sklearn.feature_extraction import FeatureHasher
 
 from resolve.data.dataset import ResolveDataset
-from resolve.encode.base import BaseSpeciesEncoder
+from resolve.encode.base import BaseSpeciesEncoder, compute_unknown_stats
 from resolve.encode.normalize import TaxonomyNormalizer, normalize_species_df
 from resolve.encode.vocab import TaxonomyVocab
 
@@ -262,53 +262,11 @@ class SpeciesEncoder(BaseSpeciesEncoder):
         roles: RoleMapping,
         plot_ids: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Compute unknown species mass per plot (VECTORIZED).
-
-        Returns:
-            unknown_fraction: (n_plots,) fraction of abundance from unknown species
-            unknown_count: (n_plots,) count of unknown species per plot
-        """
-        # Determine abundance column
-        if roles.has_abundance:
-            abundance_col = roles.abundance
-            df = species_df
-        else:
-            df = species_df.with_columns(pl.lit(1).alias("_abundance"))
-            abundance_col = "_abundance"
-
-        # Drop rows with null species, fill null abundance
-        df = df.filter(pl.col(roles.species_id).is_not_null())
-        df = df.with_columns(pl.col(abundance_col).fill_null(0).cast(pl.Float64))
-
-        # Mark unknown species + compute unknown abundance (vectorized)
+        """Compute unknown species fraction and count per plot."""
         known_species = list(self._species_vocab)
-        df = df.with_columns(
-            pl.col(roles.species_id).is_in(known_species).not_().alias("_is_unknown"),
+        return compute_unknown_stats(
+            species_df, roles, plot_ids, known_species, include_count=True
         )
-        df = df.with_columns(
-            (pl.col(abundance_col) * pl.col("_is_unknown").cast(pl.Float64)).alias("_unknown_abundance"),
-        )
-
-        # Aggregate per plot
-        plot_stats = df.group_by(roles.species_plot_id).agg(
-            pl.col(abundance_col).sum().alias("total_abundance"),
-            pl.col("_unknown_abundance").sum().alias("unknown_abundance"),
-            pl.col("_is_unknown").sum().alias("unknown_count"),
-        )
-
-        # Left join to plot_ids to ensure correct ordering + fill missing
-        plot_ids_df = pl.DataFrame({"_pid": plot_ids, "_order": np.arange(len(plot_ids))})
-        result = plot_ids_df.join(
-            plot_stats, left_on="_pid", right_on=roles.species_plot_id, how="left"
-        ).sort("_order").fill_null(0)
-
-        total = result["total_abundance"].to_numpy().astype(np.float64)
-        unknown = result["unknown_abundance"].to_numpy().astype(np.float64)
-        unknown_fraction = np.divide(unknown, total, out=np.zeros_like(unknown), where=total > 0).astype(np.float32)
-        unknown_count = result["unknown_count"].to_numpy().astype(np.int32)
-
-        return unknown_fraction, unknown_count
 
     def _normalize_weights(
         self,

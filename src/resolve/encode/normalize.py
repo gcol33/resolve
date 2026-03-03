@@ -92,17 +92,21 @@ class TaxonomyNormalizer:
         return cls(mapping, backbone="gbif")
 
     @classmethod
+    def _from_simple_json_map(cls, path: str | Path, backbone: str) -> TaxonomyNormalizer:
+        """Load from {original: canonical} JSON mapping with given backbone label."""
+        path = Path(path)
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        mapping = {k: v if v else k for k, v in data.items()}
+        return cls(mapping, backbone=backbone)
+
+    @classmethod
     def from_wfo_cache(cls, path: str | Path) -> TaxonomyNormalizer:
         """Load from WFO normalization cache.
 
         Expected format: {original_name: canonical_name} JSON.
         """
-        path = Path(path)
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-
-        mapping = {k: v if v else k for k, v in data.items()}
-        return cls(mapping, backbone="wfo")
+        return cls._from_simple_json_map(path, backbone="wfo")
 
     @classmethod
     def from_wfo_backbone(
@@ -133,12 +137,7 @@ class TaxonomyNormalizer:
     @classmethod
     def from_json(cls, path: str | Path) -> TaxonomyNormalizer:
         """Load from simple {original: canonical} JSON mapping."""
-        path = Path(path)
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-
-        mapping = {k: v if v else k for k, v in data.items()}
-        return cls(mapping, backbone="custom")
+        return cls._from_simple_json_map(path, backbone="custom")
 
     def save(self, path: str | Path) -> None:
         """Save mapping + backbone metadata to JSON."""

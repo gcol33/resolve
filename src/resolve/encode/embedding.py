@@ -11,7 +11,7 @@ import torch
 from torch import nn
 
 from resolve.data.dataset import ResolveDataset
-from resolve.encode.base import BaseSpeciesEncoder
+from resolve.encode.base import BaseSpeciesEncoder, compute_unknown_stats
 from resolve.encode.mixins import TaxonomyEncoderMixin
 from resolve.encode.normalize import TaxonomyNormalizer, normalize_species_df
 from resolve.encode.vocab import SpeciesVocab, TaxonomyVocab
@@ -281,41 +281,8 @@ class EmbeddingEncoder(BaseSpeciesEncoder, TaxonomyEncoderMixin):
         plot_ids: np.ndarray,
     ) -> np.ndarray:
         """Compute fraction of abundance from unknown species."""
-        if roles.has_abundance:
-            weight_col = roles.abundance
-            df = species_df
-        else:
-            df = species_df.with_columns(pl.lit(1).alias("_weight"))
-            weight_col = "_weight"
-
-        df = df.filter(pl.col(roles.species_id).is_not_null())
-        df = df.with_columns(pl.col(weight_col).fill_null(0).cast(pl.Float64))
-
-        # Mark unknown species
         known_species = list(self._species_vocab.species_to_id.keys())
-        df = df.with_columns(
-            pl.col(roles.species_id).cast(pl.Utf8).is_in(known_species).not_().alias("_is_unknown")
-        )
-        df = df.with_columns(
-            (pl.col(weight_col) * pl.col("_is_unknown").cast(pl.Float64)).alias("_unknown_abundance")
-        )
-
-        # Aggregate per plot
-        stats = df.group_by(roles.species_plot_id).agg(
-            pl.col(weight_col).sum().alias("total"),
-            pl.col("_unknown_abundance").sum().alias("unknown"),
-        )
-
-        # Left join to plot_ids for correct ordering
-        plot_ids_df = pl.DataFrame({"_pid": plot_ids, "_order": np.arange(len(plot_ids))})
-        result = plot_ids_df.join(
-            stats, left_on="_pid", right_on=roles.species_plot_id, how="left"
-        ).sort("_order").fill_null(0)
-
-        total = result["total"].to_numpy().astype(np.float64)
-        unknown = result["unknown"].to_numpy().astype(np.float64)
-
-        return np.divide(unknown, total, out=np.zeros_like(unknown), where=total > 0).astype(np.float32)
+        return compute_unknown_stats(species_df, roles, plot_ids, known_species)
 
     def state_dict(self) -> dict[str, Any]:
         """Serialize encoder state for saving/checkpointing."""
