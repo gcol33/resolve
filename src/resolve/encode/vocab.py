@@ -144,15 +144,20 @@ class TaxonomyVocab:
 
         return cls(genus_to_id, family_to_id)
 
+    def state_dict(self) -> dict[str, dict[str, int]]:
+        """Serialize vocabulary state."""
+        return {"genus_to_id": self.genus_to_id, "family_to_id": self.family_to_id}
+
+    @classmethod
+    def from_state_dict(cls, state: dict[str, dict[str, int]]) -> TaxonomyVocab:
+        """Restore vocabulary from state dict."""
+        return cls(state["genus_to_id"], state["family_to_id"])
+
     def save(self, path: str | Path) -> None:
         """Save vocabulary to JSON file."""
         path = Path(path)
-        data = {
-            "genus_to_id": self.genus_to_id,
-            "family_to_id": self.family_to_id,
-        }
         with open(path, "w") as f:
-            json.dump(data, f, indent=2)
+            json.dump(self.state_dict(), f, indent=2)
 
     @classmethod
     def load(cls, path: str | Path) -> TaxonomyVocab:
@@ -160,7 +165,7 @@ class TaxonomyVocab:
         path = Path(path)
         with open(path) as f:
             data = json.load(f)
-        return cls(data["genus_to_id"], data["family_to_id"])
+        return cls.from_state_dict(data)
 
 
 @dataclass

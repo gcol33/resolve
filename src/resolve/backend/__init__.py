@@ -4,7 +4,10 @@ Automatically uses C++ backend if resolve_core is available,
 otherwise falls back to pure Python/PyTorch implementation.
 """
 
+import logging
 import warnings
+
+_log = logging.getLogger("resolve.backend")
 
 # Try to import C++ backend
 _BACKEND = "python"
@@ -14,8 +17,9 @@ try:
     import resolve_core
     _cpp_available = True
     _BACKEND = "cpp"
+    _log.info("C++ backend (resolve_core) loaded — using cpp backend")
 except ImportError:
-    pass
+    _log.info("C++ backend not available — using pure Python backend")
 
 
 def get_backend() -> str:
@@ -45,6 +49,7 @@ def use_backend(backend: str) -> None:
         )
 
     _BACKEND = backend
+    _log.info("Backend switched to '%s'", backend)
 
 
 def cpp_available() -> bool:

@@ -122,8 +122,7 @@ class PretrainMixin:
                   f"{self._rank_pool_encoder.n_families:,} families")
 
             # Build model with updated schema
-            if self.model is None:
-                self.model = self._build_model()
+            self._ensure_model()
             self.model.to(self._device)
 
             # Build tensors from full dataset
@@ -133,8 +132,7 @@ class PretrainMixin:
             train_ds, _ = self._prepare_data(fit_encoder=True)
 
             # Build model if not done yet
-            if self.model is None:
-                self.model = self._build_model()
+            self._ensure_model()
             self.model.to(self._device)
 
             # Build tensors from train split

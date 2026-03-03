@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import polars as pl
 
 from resolve.data.dataset import ResolveDataset
+from resolve.encode.base import BaseSpeciesEncoder
 from resolve.encode.mixins import TaxonomyEncoderMixin
 from resolve.encode.normalize import TaxonomyNormalizer, normalize_species_df
 from resolve.encode.vocab import SpeciesVocab, TaxonomyVocab
 
 
-class BasePoolEncoder(TaxonomyEncoderMixin):
+class BasePoolEncoder(BaseSpeciesEncoder, TaxonomyEncoderMixin):
     """Base class for pool-style species encoders (bag, rank-pool).
 
     Subclasses must define:
@@ -80,6 +81,30 @@ class BasePoolEncoder(TaxonomyEncoderMixin):
 
         self._fitted = True
         return self
+
+    def state_dict(self) -> dict[str, Any]:
+        """Serialize encoder state for saving/checkpointing."""
+        return {
+            "weighting": self.weighting,
+            "min_species_frequency": self.min_species_frequency,
+            "species_vocab": self._species_vocab.species_to_id if self._species_vocab else None,
+            "taxonomy_vocab": self._taxonomy_vocab.state_dict() if self._taxonomy_vocab else None,
+            "species_to_genus": self._species_to_genus,
+            "species_to_family": self._species_to_family,
+            "known_species": sorted(self._known_species),
+            "fitted": self._fitted,
+        }
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        """Restore encoder state from a saved state dict."""
+        if state.get("species_vocab") is not None:
+            self._species_vocab = SpeciesVocab(state["species_vocab"])
+        if state.get("taxonomy_vocab") is not None:
+            self._taxonomy_vocab = TaxonomyVocab.from_state_dict(state["taxonomy_vocab"])
+        self._species_to_genus = state.get("species_to_genus", {})
+        self._species_to_family = state.get("species_to_family", {})
+        self._known_species = set(state.get("known_species", []))
+        self._fitted = state.get("fitted", True)
 
     def _encode_species_df(self, dataset: ResolveDataset) -> tuple[pl.DataFrame, str, np.ndarray]:
         """Shared species encoding: ID mapping, taxonomy, weights, unknown fractions.

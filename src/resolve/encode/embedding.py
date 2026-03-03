@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import polars as pl
@@ -11,6 +11,7 @@ import torch
 from torch import nn
 
 from resolve.data.dataset import ResolveDataset
+from resolve.encode.base import BaseSpeciesEncoder
 from resolve.encode.mixins import TaxonomyEncoderMixin
 from resolve.encode.normalize import TaxonomyNormalizer, normalize_species_df
 from resolve.encode.vocab import SpeciesVocab, TaxonomyVocab
@@ -27,7 +28,7 @@ class EmbeddedSpecies:
     unknown_fraction: np.ndarray  # (n_plots,) fraction from unknown species
 
 
-class EmbeddingEncoder(TaxonomyEncoderMixin):
+class EmbeddingEncoder(BaseSpeciesEncoder, TaxonomyEncoderMixin):
     """
     Encodes species composition using learnable embeddings.
 
@@ -315,6 +316,26 @@ class EmbeddingEncoder(TaxonomyEncoderMixin):
         unknown = result["unknown"].to_numpy().astype(np.float64)
 
         return np.divide(unknown, total, out=np.zeros_like(unknown), where=total > 0).astype(np.float32)
+
+    def state_dict(self) -> dict[str, Any]:
+        """Serialize encoder state for saving/checkpointing."""
+        return {
+            "top_k_species": self.top_k_species,
+            "top_k_taxonomy": self.top_k_taxonomy,
+            "aggregation": self.aggregation,
+            "selection": self.selection,
+            "species_vocab": self._species_vocab.species_to_id if self._species_vocab else None,
+            "taxonomy_vocab": self._taxonomy_vocab.state_dict() if self._taxonomy_vocab else None,
+            "fitted": self._fitted,
+        }
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        """Restore encoder state from a saved state dict."""
+        if state.get("species_vocab") is not None:
+            self._species_vocab = SpeciesVocab(state["species_vocab"])
+        if state.get("taxonomy_vocab") is not None:
+            self._taxonomy_vocab = TaxonomyVocab.from_state_dict(state["taxonomy_vocab"])
+        self._fitted = state.get("fitted", True)
 
 
 class SpeciesEmbeddingModule(nn.Module):

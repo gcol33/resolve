@@ -6,6 +6,7 @@ from typing import Literal, Optional
 import torch
 from torch import nn
 
+from resolve.constants import DEFAULT_HIDDEN_DIMS
 from resolve.csrc.fused_embed_linear import fused_embed_concat_linear
 
 
@@ -118,6 +119,20 @@ def _get_modulelist_weights(
     return torch.stack([emb.weight for emb in embeddings], dim=0).mean(0)
 
 
+def _get_single_embedding_weights(
+    embedding: nn.Embedding | None,
+    has_taxonomy: bool,
+) -> torch.Tensor | None:
+    """Get weight matrix from a single embedding table.
+
+    Used by PlotEncoderRankPool and PlotEncoderTransformer for
+    get_genus_weights() and get_family_weights().
+    """
+    if not has_taxonomy or embedding is None:
+        return None
+    return embedding.weight
+
+
 class PlotEncoder(nn.Module):
     """
     Encodes plot features into a shared latent representation.
@@ -150,7 +165,7 @@ class PlotEncoder(nn.Module):
         super().__init__()
 
         if hidden_dims is None:
-            hidden_dims = [2048, 1024, 512, 256, 128, 64]
+            hidden_dims = list(DEFAULT_HIDDEN_DIMS)
 
         self.top_k = top_k
         self.has_taxonomy, self.genus_embeddings, self.family_embeddings, taxonomy_dim = (
@@ -235,7 +250,7 @@ class PlotEncoderEmbed(nn.Module):
         super().__init__()
 
         if hidden_dims is None:
-            hidden_dims = [2048, 1024, 512, 256, 128, 64]
+            hidden_dims = list(DEFAULT_HIDDEN_DIMS)
 
         self.top_k_species = top_k_species
         self.top_k_taxonomy = top_k_taxonomy
@@ -346,7 +361,7 @@ class PlotEncoderSparse(nn.Module):
         super().__init__()
 
         if hidden_dims is None:
-            hidden_dims = [2048, 1024, 512, 256, 128, 64]
+            hidden_dims = list(DEFAULT_HIDDEN_DIMS)
 
         self.n_species = n_species
         self.top_k = top_k
@@ -445,7 +460,7 @@ class PlotEncoderRankPool(nn.Module):
         super().__init__()
 
         if hidden_dims is None:
-            hidden_dims = [2048, 1024, 512, 256, 128, 64]
+            hidden_dims = list(DEFAULT_HIDDEN_DIMS)
 
         self.has_taxonomy = n_genera > 0 and n_families > 0
         self.cover_dropout = cover_dropout
@@ -541,15 +556,11 @@ class PlotEncoderRankPool(nn.Module):
 
     def get_genus_weights(self) -> torch.Tensor | None:
         """Get genus embedding weights."""
-        if not self.has_taxonomy:
-            return None
-        return self.genus_embedding.weight
+        return _get_single_embedding_weights(self.genus_embedding, self.has_taxonomy)
 
     def get_family_weights(self) -> torch.Tensor | None:
         """Get family embedding weights."""
-        if not self.has_taxonomy:
-            return None
-        return self.family_embedding.weight
+        return _get_single_embedding_weights(self.family_embedding, self.has_taxonomy)
 
 
 class PlotEncoderTransformer(nn.Module):
@@ -775,12 +786,8 @@ class PlotEncoderTransformer(nn.Module):
 
     def get_genus_weights(self) -> torch.Tensor | None:
         """Get genus embedding weights."""
-        if not self.has_taxonomy:
-            return None
-        return self.genus_embedding.weight
+        return _get_single_embedding_weights(self.genus_embedding, self.has_taxonomy)
 
     def get_family_weights(self) -> torch.Tensor | None:
         """Get family embedding weights."""
-        if not self.has_taxonomy:
-            return None
-        return self.family_embedding.weight
+        return _get_single_embedding_weights(self.family_embedding, self.has_taxonomy)

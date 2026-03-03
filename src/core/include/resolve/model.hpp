@@ -99,6 +99,7 @@ public:
 
     // Get task head by name
     [[nodiscard]] TaskHead& head(const std::string& name);
+    [[nodiscard]] const TaskHead& head(const std::string& name) const;
 
 private:
     // Internal forward through encoder based on mode (returns latent only)

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import numpy as np
 import polars as pl
 from sklearn.feature_extraction import FeatureHasher
 
 from resolve.data.dataset import ResolveDataset
+from resolve.encode.base import BaseSpeciesEncoder
 from resolve.encode.normalize import TaxonomyNormalizer, normalize_species_df
 from resolve.encode.vocab import TaxonomyVocab
 
@@ -30,7 +31,7 @@ class EncodedSpecies:
     species_vector: Optional[np.ndarray] = None  # (n_plots, n_species) for all/presence_absence modes
 
 
-class SpeciesEncoder:
+class SpeciesEncoder(BaseSpeciesEncoder):
     """
     Encodes species composition per plot.
 
@@ -689,6 +690,30 @@ class SpeciesEncoder:
                 family_ids[plot_id_to_idx[pid], f_ranks[i]] = self._vocab.encode_family(taxon)
 
         return genus_ids, family_ids
+
+    def state_dict(self) -> dict[str, Any]:
+        """Serialize encoder state for saving/checkpointing."""
+        return {
+            "hash_dim": self.hash_dim,
+            "top_k": self.top_k,
+            "aggregation": self.aggregation,
+            "normalization": self.normalization,
+            "selection": self.selection,
+            "representation": self.representation,
+            "min_species_frequency": self.min_species_frequency,
+            "species_vocab": sorted(self._species_vocab) if self._species_vocab else [],
+            "species_to_idx": self._species_to_idx,
+            "vocab": self._vocab.state_dict() if self._vocab else None,
+            "fitted": self._fitted,
+        }
+
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        """Restore encoder state from a saved state dict."""
+        self._species_vocab = set(state["species_vocab"])
+        self._species_to_idx = state.get("species_to_idx", {})
+        if state.get("vocab") is not None:
+            self._vocab = TaxonomyVocab.from_state_dict(state["vocab"])
+        self._fitted = state.get("fitted", True)
 
     def save(self, path: str) -> None:
         """Save encoder state (vocabulary)."""

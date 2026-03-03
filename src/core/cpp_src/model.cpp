@@ -97,6 +97,18 @@ ResolveModelImpl::ResolveModelImpl(
             config.tabm
         ));
     }
+    else if (config.species_encoding == SpeciesEncodingMode::RankPool) {
+        throw std::runtime_error(
+            "species_encoding=RankPool is not yet implemented in the C++ backend. "
+            "Use the Python backend (resolve.model) for rank-pool encoding."
+        );
+    }
+    else if (config.species_encoding == SpeciesEncodingMode::Transformer) {
+        throw std::runtime_error(
+            "species_encoding=Transformer is not yet implemented in the C++ backend. "
+            "Use the Python backend (resolve.model) for transformer encoding."
+        );
+    }
     else {
         // Sparse mode (uses_explicit_vector=true): explicit species vector
         if (schema.n_species_vocab == 0) {
@@ -302,6 +314,14 @@ torch::Tensor ResolveModelImpl::get_latent(
 }
 
 TaskHead& ResolveModelImpl::head(const std::string& name) {
+    auto it = heads_.find(name);
+    if (it == heads_.end()) {
+        throw std::runtime_error("Head not found: " + name);
+    }
+    return it->second;
+}
+
+const TaskHead& ResolveModelImpl::head(const std::string& name) const {
     auto it = heads_.find(name);
     if (it == heads_.end()) {
         throw std::runtime_error("Head not found: " + name);

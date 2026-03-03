@@ -546,6 +546,132 @@ TEST_CASE("TabularAdapter ExcelFormer forward", "[adapter]") {
     REQUIRE(out.size(1) > 0);
 }
 
+TEST_CASE("TabularAdapter TabNet forward", "[adapter]") {
+    ResolveSchema schema;
+    schema.n_plots = 100;
+    schema.n_species = 50;
+    schema.has_coordinates = true;
+    schema.has_abundance = true;
+    schema.has_taxonomy = true;
+    schema.n_genera = 20;
+    schema.n_families = 10;
+
+    ModelConfig config;
+    config.hash_dim = 32;
+    config.n_taxonomy_slots = 3;
+    config.genus_emb_dim = 4;
+    config.family_emb_dim = 4;
+    config.encoder_architecture = EncoderArchitecture::TabNet;
+    config.tabnet.n_steps = 3;
+    config.tabnet.n_d = 16;
+    config.tabnet.n_a = 16;
+
+    TabularAdapter adapter(schema, config);
+
+    auto continuous = torch::randn({8, 35});
+    auto genus_ids = torch::randint(0, 21, {8, 3});
+    auto family_ids = torch::randint(0, 11, {8, 3});
+
+    auto out = adapter->forward(continuous, genus_ids, family_ids);
+
+    REQUIRE(out.size(0) == 8);
+    REQUIRE(out.size(1) > 0);
+}
+
+TEST_CASE("TabularAdapter SAINT forward", "[adapter]") {
+    ResolveSchema schema;
+    schema.n_plots = 100;
+    schema.n_species = 50;
+    schema.has_coordinates = true;
+    schema.has_abundance = true;
+    schema.has_taxonomy = true;
+    schema.n_genera = 20;
+    schema.n_families = 10;
+
+    ModelConfig config;
+    config.hash_dim = 32;
+    config.n_taxonomy_slots = 3;
+    config.genus_emb_dim = 4;
+    config.family_emb_dim = 4;
+    config.encoder_architecture = EncoderArchitecture::SAINT;
+    config.saint.d_model = 64;
+    config.saint.n_heads = 4;
+    config.saint.n_layers = 2;
+
+    TabularAdapter adapter(schema, config);
+
+    auto continuous = torch::randn({8, 35});
+    auto genus_ids = torch::randint(0, 21, {8, 3});
+    auto family_ids = torch::randint(0, 11, {8, 3});
+
+    auto out = adapter->forward(continuous, genus_ids, family_ids);
+
+    REQUIRE(out.size(0) == 8);
+    REQUIRE(out.size(1) > 0);
+}
+
+TEST_CASE("TabularAdapter GNN forward", "[adapter]") {
+    ResolveSchema schema;
+    schema.n_plots = 100;
+    schema.n_species = 50;
+    schema.has_coordinates = true;
+    schema.has_abundance = true;
+    schema.has_taxonomy = true;
+    schema.n_genera = 20;
+    schema.n_families = 10;
+
+    ModelConfig config;
+    config.hash_dim = 32;
+    config.n_taxonomy_slots = 3;
+    config.genus_emb_dim = 4;
+    config.family_emb_dim = 4;
+    config.encoder_architecture = EncoderArchitecture::GNN;
+    config.gnn.d_model = 64;
+    config.gnn.n_layers = 2;
+
+    TabularAdapter adapter(schema, config);
+
+    auto continuous = torch::randn({8, 35});
+    auto genus_ids = torch::randint(0, 21, {8, 3});
+    auto family_ids = torch::randint(0, 11, {8, 3});
+
+    auto out = adapter->forward(continuous, genus_ids, family_ids);
+
+    REQUIRE(out.size(0) == 8);
+    REQUIRE(out.size(1) > 0);
+}
+
+TEST_CASE("TabularAdapter HeterogeneousGNN forward", "[adapter]") {
+    ResolveSchema schema;
+    schema.n_plots = 100;
+    schema.n_species = 50;
+    schema.has_coordinates = true;
+    schema.has_abundance = true;
+    schema.has_taxonomy = true;
+    schema.n_genera = 20;
+    schema.n_families = 10;
+
+    ModelConfig config;
+    config.hash_dim = 32;
+    config.n_taxonomy_slots = 3;
+    config.genus_emb_dim = 4;
+    config.family_emb_dim = 4;
+    config.encoder_architecture = EncoderArchitecture::HeterogeneousGNN;
+    config.heterogeneous_gnn.d_model = 64;
+    config.heterogeneous_gnn.n_layers = 2;
+
+    TabularAdapter adapter(schema, config);
+
+    auto continuous = torch::randn({8, 35});
+    auto genus_ids = torch::randint(0, 21, {8, 3});
+    auto family_ids = torch::randint(0, 11, {8, 3});
+
+    auto out = adapter->forward(continuous, genus_ids, family_ids);
+
+    REQUIRE(out.size(0) == 8);
+    REQUIRE(out.size(1) > 0);
+}
+
 // ============================================================================
 // Standalone attention encoder tests
 // ============================================================================

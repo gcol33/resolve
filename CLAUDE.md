@@ -115,9 +115,21 @@ The research paper using RESOLVE is located at:
 
 ---
 
-## Remaining Work
+## Architecture Improvements (completed)
 
-All major optimization phases (A-D) and architecture features are complete.
+- **Unified encoder interface**: `BaseSpeciesEncoder(ABC)` in `src/resolve/encode/base.py` — all species encoders (hash, embedding, bag, rank-pool) implement `fit()`, `transform()`, `state_dict()`, `load_state_dict()`, `is_fitted`
+- **Centralized constants**: `src/resolve/constants.py` — `DEFAULT_HIDDEN_DIMS`, `PREFETCH_BATCH_THRESHOLD`, `SCHEDULER_PCT_START`, `ETA_WINDOW`, `NAN_THRESHOLD_PCT`, `MAX_GRAD_NORM`
+- **Config dataclasses**: `ModelConfig`, `TrainingConfig`, `DataConfig`, `CheckpointConfig` in `src/resolve/train/_types.py` — grouped alternative to Trainer's 64 individual kwargs (fully backwards compatible)
+- **Batch prediction API**: `Predictor.predict_batched(dataset, batch_size)` and `Predictor.predict_generator(dataset, batch_size)` in `src/resolve/inference/predictor.py`
+- **Model input validation**: `ResolveModel._get_latent()` validates tensor shapes, batch size consistency, and required inputs per encoding mode
+- **Encoder deduplication**: `_get_single_embedding_weights()` helper in `src/resolve/model/encoder.py` shared by PlotEncoderRankPool and PlotEncoderTransformer
+- **Full encoder exports**: `src/resolve/model/__init__.py` exports all 5 encoder classes + `MixtureOfExperts`
+- **Backend logging**: `logging.getLogger("resolve.backend")` reports backend selection at import time
+- **C++ feature parity prep**: `SpeciesEncodingMode::RankPool` and `Transformer` enums, `pool_*` fields in `ResolveBatch`, informative error messages for unimplemented modes
+- **C++ adapter tests**: Catch2 tests for TabNet, SAINT, GNN, HeterogeneousGNN adapters
+- **C++ const-correctness**: const overload for `ResolveModelImpl::head()`
+
+## Remaining Work
 
 ### Benchmark note: Fused embed+concat+linear Triton kernel
 
@@ -127,42 +139,31 @@ The Triton kernel in `csrc/fused_embed_linear.py` is **correct** but ~90x slower
 
 **Goal**: Extend Mixture of Experts routing (currently hash-only) to embed and sparse modes.
 
-**Current limitation** (`src/core/cpp_src/model.cpp:79,108`):
-```cpp
-if (use_moe) {
-    throw std::runtime_error("MoE is currently only supported for Hash encoding mode");
-}
-```
-
 **What exists**: `PlotEncoderMoE` with gating network and expert routing for hash mode.
 
 **What's needed**:
-- Adapter layers for embed mode (input = concatenated embedding IDs → expert input)
-- Adapter layers for sparse mode (input = explicit species vector → expert input)
+- Adapter layers for embed mode (input = concatenated embedding IDs -> expert input)
+- Adapter layers for sparse mode (input = explicit species vector -> expert input)
 - Update model construction in both C++ and Python backends
-
-**Files to modify**:
-- `src/core/cpp_src/model.cpp` — Remove restriction, add embed/sparse MoE paths
-- `src/core/include/resolve/model.hpp` — New MoE encoder variants
-- `src/resolve/model/resolve.py` — Python fallback MoE for embed/sparse
 
 ### Embedding weight extraction API
 
 **Goal**: Extract learned genus/family embedding weights for downstream analysis and export.
 
-**Current state** (`src/core/cpp_src/predictor.cpp:178-186`): Two stubs returning empty tensors:
-```cpp
-torch::Tensor Predictor::get_genus_embeddings() const { return torch::Tensor(); }
-torch::Tensor Predictor::get_family_embeddings() const { return torch::Tensor(); }
-```
+**Current state** (`src/core/cpp_src/predictor.cpp`): Two stubs returning empty tensors.
 
 **What's needed**:
-- Access embedding tables from the encoder (varies by type: `PlotEncoder`, `PlotEncoderEmbed`, etc.)
+- Access embedding tables from the encoder (varies by type)
 - Clone and return weight tensors
-- Handle encoder types that don't have taxonomy embeddings (return empty tensor)
 - Expose via nanobind/Rcpp bindings
 
-**Files to modify**:
-- `src/core/cpp_src/predictor.cpp` — Implement extraction logic
-- `src/core/python/bindings.cpp` — Expose to Python
-- `r/src/resolve_bindings.cpp` — Expose to R
+### C++ rank_pool/transformer implementation
+
+**Goal**: Full C++ implementation of rank_pool and transformer encoding modes.
+
+**Current state**: Enum values added to `SpeciesEncodingMode`, `pool_*` fields added to `ResolveBatch`, informative error messages in `model.cpp`. Multi-day effort deferred.
+
+**What's needed**:
+- C++ `PlotEncoderRankPool` and `PlotEncoderTransformer` modules
+- Integration in `ResolveModelImpl` constructor and forward path
+- Bindings in nanobind and Rcpp

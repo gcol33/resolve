@@ -70,9 +70,11 @@ enum class TransformType {
 
 // Species encoding mode
 enum class SpeciesEncodingMode {
-    Hash,   // Feature hashing (default)
-    Embed,  // Learnable embeddings for top-k species
-    Sparse  // Explicit species abundance/presence vector
+    Hash,        // Feature hashing (default)
+    Embed,       // Learnable embeddings for top-k species
+    Sparse,      // Explicit species abundance/presence vector
+    RankPool,    // Rank-pooled species embeddings (Python-only, stub in C++)
+    Transformer  // Transformer species encoder (Python-only, stub in C++)
 };
 
 // Loss configuration presets
@@ -429,6 +431,12 @@ struct ResolveBatch {
     torch::Tensor family_ids;      // (batch, n_taxonomy_slots) or empty
     torch::Tensor species_ids;     // (batch, top_k_species) for embed mode
     torch::Tensor species_vector;  // (batch, n_species) for sparse mode
+    // Pool-style encoder fields (rank_pool / transformer modes)
+    torch::Tensor pool_genus_ids;  // (batch, max_species) or empty
+    torch::Tensor pool_family_ids; // (batch, max_species) or empty
+    torch::Tensor pool_weights;    // (batch, max_species) or empty
+    torch::Tensor pool_mask;       // (batch, max_species) or empty
+    torch::Tensor pool_has_cover;  // (batch,) or empty
     std::unordered_map<std::string, torch::Tensor> targets;  // target_name -> tensor
 
     ResolveBatch to(torch::Device device) const {
@@ -445,6 +453,21 @@ struct ResolveBatch {
         }
         if (species_vector.defined()) {
             batch.species_vector = species_vector.to(device);
+        }
+        if (pool_genus_ids.defined()) {
+            batch.pool_genus_ids = pool_genus_ids.to(device);
+        }
+        if (pool_family_ids.defined()) {
+            batch.pool_family_ids = pool_family_ids.to(device);
+        }
+        if (pool_weights.defined()) {
+            batch.pool_weights = pool_weights.to(device);
+        }
+        if (pool_mask.defined()) {
+            batch.pool_mask = pool_mask.to(device);
+        }
+        if (pool_has_cover.defined()) {
+            batch.pool_has_cover = pool_has_cover.to(device);
         }
         for (const auto& [name, tensor] : targets) {
             batch.targets[name] = tensor.to(device);

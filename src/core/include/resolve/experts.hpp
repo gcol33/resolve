@@ -12,8 +12,11 @@ struct MoEResult {
     torch::Tensor gate_probs;
 };
 
-// Mixture of Experts module - stub for compilation
-// Full implementation needed when MoE routing is enabled
+// Mixture of Experts module — STUB implementation.
+// Currently uses a single linear projection (no expert routing).
+// The full batched MoE with top-k gating exists in the Python backend
+// (resolve.model.experts.MixtureOfExperts). C++ implementation is deferred
+// until MoE is validated and benchmarked via the Python path.
 class MixtureOfExpertsImpl : public torch::nn::Module {
 public:
     MixtureOfExpertsImpl(

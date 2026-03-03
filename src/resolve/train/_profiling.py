@@ -71,17 +71,14 @@ class ProfilingMixin:
                     self._restore_scalers_from_checkpoint(checkpoint)
                 train_ds, test_ds = self._prepare_data(fit_encoder=(checkpoint is None))
 
-                if self.model is None:
-                    self.model = self._build_model()
+                self._ensure_model()
 
                 train_tensors = self._build_tensors(train_ds, fit_scalers=(checkpoint is None))
                 test_tensors = self._build_tensors(test_ds, fit_scalers=False)
 
             self._create_loaders(train_tensors, test_tensors)
 
-            if self.model is None:
-                self.model = self._build_model()
-
+            self._ensure_model()
             self.model.to(self._device)
             print(f"  Data prepared in {time.time() - t_prep_start:.1f}s")
 

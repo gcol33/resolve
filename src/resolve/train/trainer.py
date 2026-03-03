@@ -18,12 +18,26 @@ from torch.optim.lr_scheduler import (
     ReduceLROnPlateau,
 )
 
+from resolve.constants import (
+    DEFAULT_HIDDEN_DIMS,
+    ETA_WINDOW,
+    MAX_GRAD_NORM,
+    NAN_THRESHOLD_PCT,
+    PREFETCH_BATCH_THRESHOLD,
+    SCHEDULER_PCT_START,
+)
 from resolve.data.dataset import ResolveDataset, ResolveSchema
 from resolve.encode.embedding import EmbeddingEncoder
 from resolve.encode.species import SpeciesEncoder
 from resolve.model.resolve import ResolveModel
 from resolve.train._loaders import CUDAPrefetcher, _RankPoolPreparedData
-from resolve.train._types import TrainResult
+from resolve.train._types import (
+    CheckpointConfig,
+    DataConfig,
+    ModelConfig,
+    TrainResult,
+    TrainingConfig,
+)
 from resolve.train.loss import MultiTaskLoss, PhaseConfig
 from resolve.train.metrics import compute_metrics
 
@@ -43,11 +57,6 @@ LOSS_PRESETS = {
     "smape": {1: PhaseConfig(mae=0.5, smape=0.5)},
 }
 
-# Training constants
-_PREFETCH_BATCH_THRESHOLD = 16384  # Auto-enable prefetch above this batch size
-_SCHEDULER_PCT_START = 0.1  # OneCycleLR warmup fraction
-_ETA_WINDOW = 10  # Rolling average window for ETA estimation
-_NAN_THRESHOLD_PCT = 50  # NaN batch % above which training is aborted
 
 
 class Trainer(
@@ -140,6 +149,11 @@ class Trainer(
         ema_decay: float = 0.0,
         head_hidden_dims: list[int] | None = None,
         verbose: int = 1,
+        # Grouped config objects (alternative to individual kwargs)
+        model_config: ModelConfig | None = None,
+        training_config: TrainingConfig | None = None,
+        data_config: DataConfig | None = None,
+        checkpoint_config: CheckpointConfig | None = None,
     ):
         """
         Initialize trainer for RESOLVE models.
@@ -238,6 +252,71 @@ class Trainer(
         """
         self.dataset = dataset
 
+        # === Merge grouped config objects ===
+        # Config dataclass values serve as defaults; explicit kwargs always win.
+        # We detect "not explicitly passed" via matching the function-signature default.
+        if model_config is not None:
+            _mc = model_config
+            if species_encoding == "hash": species_encoding = _mc.species_encoding
+            if hash_dim == 32: hash_dim = _mc.hash_dim
+            if species_embed_dim == 32: species_embed_dim = _mc.species_embed_dim
+            if top_k == 5: top_k = _mc.top_k
+            if top_k_species == 10: top_k_species = _mc.top_k_species
+            if hidden_dims is None: hidden_dims = _mc.hidden_dims
+            if genus_emb_dim == 8: genus_emb_dim = _mc.genus_emb_dim
+            if family_emb_dim == 8: family_emb_dim = _mc.family_emb_dim
+            if dropout == 0.3: dropout = _mc.dropout
+            if head_hidden_dims is None: head_hidden_dims = _mc.head_hidden_dims
+            if n_attention_layers == 0: n_attention_layers = _mc.n_attention_layers
+            if n_heads == 4: n_heads = _mc.n_heads
+            if transformer_ff_dim == 256: transformer_ff_dim = _mc.transformer_ff_dim
+            if transformer_pooling == "attention": transformer_pooling = _mc.transformer_pooling
+            if transformer_dropout == 0.1: transformer_dropout = _mc.transformer_dropout
+
+        if training_config is not None:
+            _tc = training_config
+            if batch_size == 32768: batch_size = _tc.batch_size
+            if num_workers == 0: num_workers = _tc.num_workers
+            if max_epochs == 500: max_epochs = _tc.max_epochs
+            if patience == 50: patience = _tc.patience
+            if lr == 1e-3: lr = _tc.lr
+            if weight_decay == 1e-4: weight_decay = _tc.weight_decay
+            if lr_scheduler == "onecycle": lr_scheduler = _tc.lr_scheduler
+            if lr_factor == 0.1: lr_factor = _tc.lr_factor
+            if lr_patience == 5: lr_patience = _tc.lr_patience
+            if loss_config == "mae": loss_config = _tc.loss_config
+            if device == "auto": device = _tc.device
+            if use_amp is True: use_amp = _tc.use_amp
+            if compile_model is False: compile_model = _tc.compile_model
+            if prefetch_data is None: prefetch_data = _tc.prefetch_data
+            if gpu_data is None: gpu_data = _tc.gpu_data
+            if label_smoothing == 0.0: label_smoothing = _tc.label_smoothing
+            if class_weights is None: class_weights = _tc.class_weights
+            if ema_decay == 0.0: ema_decay = _tc.ema_decay
+            if verbose == 1: verbose = _tc.verbose
+
+        if data_config is not None:
+            _dc = data_config
+            if species_aggregation == "abundance": species_aggregation = _dc.species_aggregation
+            if species_selection == "top": species_selection = _dc.species_selection
+            if species_representation == "abundance": species_representation = _dc.species_representation
+            if min_species_frequency == 1: min_species_frequency = _dc.min_species_frequency
+            if cover_dropout == 0.0: cover_dropout = _dc.cover_dropout
+            if categorical_embed_dim == 8: categorical_embed_dim = _dc.categorical_embed_dim
+            if pretrain_epochs == 0: pretrain_epochs = _dc.pretrain_epochs
+            if pretrain_mask_prob == 0.15: pretrain_mask_prob = _dc.pretrain_mask_prob
+            if pretrain_lr == 1e-4: pretrain_lr = _dc.pretrain_lr
+            if pretrain_all_data is False: pretrain_all_data = _dc.pretrain_all_data
+
+        if checkpoint_config is not None:
+            _cc = checkpoint_config
+            if checkpoint_dir is None: checkpoint_dir = _cc.checkpoint_dir
+            if checkpoint_every == 50: checkpoint_every = _cc.checkpoint_every
+            if resume is True: resume = _cc.resume
+            if reset_patience is False: reset_patience = _cc.reset_patience
+            if cache_dir is None: cache_dir = _cc.cache_dir
+            if max_cache_files == 5: max_cache_files = _cc.max_cache_files
+
         # === Parameter Validation ===
         # Species encoding
         if species_encoding not in ("hash", "embed", "rank_pool", "transformer"):
@@ -295,7 +374,7 @@ class Trainer(
         self.species_embed_dim = species_embed_dim
         self.top_k = top_k
         self.top_k_species = top_k_species
-        self.hidden_dims = hidden_dims if hidden_dims is not None else [2048, 1024, 512, 256, 128, 64]
+        self.hidden_dims = hidden_dims if hidden_dims is not None else list(DEFAULT_HIDDEN_DIMS)
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.genus_emb_dim = genus_emb_dim
@@ -344,12 +423,12 @@ class Trainer(
         self.compile_model = compile_model
         # Auto-enable prefetch for large batch sizes (16K+)
         if prefetch_data is None:
-            self.prefetch_data = batch_size >= _PREFETCH_BATCH_THRESHOLD
+            self.prefetch_data = batch_size >= PREFETCH_BATCH_THRESHOLD
         else:
             self.prefetch_data = prefetch_data
         # GPU data will be resolved after device is known (below)
         self._gpu_data_setting = gpu_data
-        self.max_grad_norm = 1.0  # Gradient clipping
+        self.max_grad_norm = MAX_GRAD_NORM
         self.verbose = verbose
 
         # Checkpointing
@@ -480,6 +559,12 @@ class Trainer(
             head_hidden_dims=self.head_hidden_dims,
         )
 
+    def _ensure_model(self) -> ResolveModel:
+        """Build model if not already built, and return it."""
+        if self.model is None:
+            self.model = self._build_model()
+        return self.model
+
     def fit(self) -> TrainResult:
         """
         Train the model.
@@ -518,8 +603,7 @@ class Trainer(
             train_ds, test_ds = self._prepare_data(fit_encoder=(checkpoint is None))
 
             # Build model now that schema (with vocab sizes for embed mode) is ready
-            if self.model is None:
-                self.model = self._build_model()
+            self._ensure_model()
 
             train_tensors = self._build_tensors(train_ds, fit_scalers=(checkpoint is None))
             test_tensors = self._build_tensors(test_ds, fit_scalers=False)
@@ -537,8 +621,7 @@ class Trainer(
         self._create_loaders(train_tensors, test_tensors)
 
         # Build model now that schema (with vocab sizes for embed mode) is ready
-        if self.model is None:
-            self.model = self._build_model()
+        self._ensure_model()
 
         # Move model to device
         self.model.to(self._device)
@@ -604,22 +687,26 @@ class Trainer(
             if self.max_epochs > saved_max:
                 print(f"  max_epochs increased: {saved_max} -> {self.max_epochs}")
 
-            # Recreate scheduler for remaining epochs
+            # Restore or recreate scheduler
             remaining_epochs = self.max_epochs - start_epoch
             if remaining_epochs > 0:
-                if self.lr_scheduler == "onecycle":
-                    # OneCycleLR doesn't support extending total_steps — recreate
-                    self._scheduler = self._create_scheduler(remaining_epochs, self._steps_per_epoch)
-                    print(f"  Scheduler recreated for {remaining_epochs} remaining epochs")
+                sched_state = checkpoint.get("scheduler_state_dict")
+                saved_max = checkpoint.get("config", {}).get("max_epochs", self.max_epochs)
+
+                if self.lr_scheduler in ("onecycle", "cosine"):
+                    if sched_state and saved_max == self.max_epochs:
+                        # Same total epochs — restore state dict for exact LR continuation
+                        self._scheduler.load_state_dict(sched_state)
+                        lr_now = self._optimizer.param_groups[0]["lr"]
+                        print(f"  Scheduler restored from checkpoint (lr={lr_now:.2e})")
+                    else:
+                        # max_epochs changed — recreate for remaining epochs
+                        self._scheduler = self._create_scheduler(remaining_epochs, self._steps_per_epoch)
+                        print(f"  Scheduler recreated for {remaining_epochs} remaining epochs")
                 elif self.lr_scheduler == "plateau":
-                    # ReduceLROnPlateau is stateless w.r.t. total epochs — restore state
-                    sched_state = checkpoint.get("scheduler_state_dict")
                     if sched_state and self._scheduler is not None:
                         self._scheduler.load_state_dict(sched_state)
                         print(f"  Scheduler restored (plateau, lr={self._optimizer.param_groups[0]['lr']:.2e})")
-                elif self.lr_scheduler == "cosine":
-                    self._scheduler = self._create_scheduler(remaining_epochs, self._steps_per_epoch)
-                    print(f"  Scheduler recreated for {remaining_epochs} remaining epochs")
 
         # Initialize EMA state (exponential moving average of model weights)
         # If restored from checkpoint, _ema_state is already set; otherwise init from model
@@ -679,7 +766,7 @@ class Trainer(
             # Track epoch time and compute ETA
             epoch_time = time.time() - epoch_start
             epoch_times.append(epoch_time)
-            recent = epoch_times[-_ETA_WINDOW:]
+            recent = epoch_times[-ETA_WINDOW:]
             avg_epoch_time = sum(recent) / len(recent)
             remaining_epochs = self.max_epochs - epoch - 1
             eta_seconds = remaining_epochs * avg_epoch_time
@@ -751,7 +838,7 @@ class Trainer(
                 self._optimizer,
                 max_lr=self.lr,
                 total_steps=total_steps,
-                pct_start=_SCHEDULER_PCT_START,
+                pct_start=SCHEDULER_PCT_START,
                 anneal_strategy="cos",
             )
         elif self.lr_scheduler == "plateau":
@@ -864,7 +951,7 @@ class Trainer(
             nan_pct = 100 * nan_batch_count / total_batches
             if self.verbose >= 1:
                 print(f"  WARNING: NaN loss in {nan_batch_count}/{total_batches} batches ({nan_pct:.1f}%)")
-            if nan_pct > _NAN_THRESHOLD_PCT:
+            if nan_pct > NAN_THRESHOLD_PCT:
                 raise RuntimeError(
                     f"Training unstable: NaN loss in {nan_pct:.1f}% of batches. "
                     "Try reducing learning rate or checking data for invalid values."

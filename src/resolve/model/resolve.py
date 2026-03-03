@@ -281,6 +281,40 @@ class ResolveModel(nn.Module):
         categorical_ids: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Internal: compute latent representation for any encoding mode."""
+        # --- Input validation ---
+        if continuous.dim() != 2:
+            raise ValueError(
+                f"continuous must be 2D (batch, features), got {continuous.dim()}D"
+            )
+        batch_size = continuous.shape[0]
+
+        def _check_batch(name: str, tensor: torch.Tensor | None) -> None:
+            if tensor is not None and tensor.shape[0] != batch_size:
+                raise ValueError(
+                    f"{name} batch size {tensor.shape[0]} != continuous batch size {batch_size}"
+                )
+
+        _check_batch("genus_ids", genus_ids)
+        _check_batch("family_ids", family_ids)
+        _check_batch("species_ids", species_ids)
+        _check_batch("species_vector", species_vector)
+        _check_batch("pool_genus_ids", pool_genus_ids)
+        _check_batch("pool_family_ids", pool_family_ids)
+        _check_batch("pool_weights", pool_weights)
+        _check_batch("pool_mask", pool_mask)
+        _check_batch("categorical_ids", categorical_ids)
+
+        if self.species_encoding in ("rank_pool", "transformer") and species_ids is None:
+            raise ValueError(
+                f"species_ids is required for species_encoding='{self.species_encoding}'"
+            )
+
+        if pool_mask is not None and species_ids is not None:
+            if pool_mask.shape != species_ids.shape:
+                raise ValueError(
+                    f"pool_mask shape {pool_mask.shape} must match species_ids shape {species_ids.shape}"
+                )
+
         # Embed categorical features and concatenate to continuous
         if len(self.categorical_embeddings) > 0:
             if categorical_ids is not None:

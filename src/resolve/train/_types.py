@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 import torch
@@ -111,3 +112,102 @@ class CVResult:
                 std = self.std_metrics[target].get(metric, 0.0)
                 lines.append(f"    {metric}: {value:.4f} +/- {std:.4f}")
         return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Grouped configuration dataclasses
+# ---------------------------------------------------------------------------
+
+_SENTINEL = object()
+
+
+@dataclass
+class ModelConfig:
+    """Model architecture configuration.
+
+    Pass to Trainer as ``model_config=ModelConfig(...)`` to group
+    architecture params. Individual kwargs still work and take priority.
+    """
+
+    species_encoding: str = "hash"
+    hash_dim: int = 32
+    species_embed_dim: int = 32
+    top_k: int = 5
+    top_k_species: int = 10
+    hidden_dims: list[int] | None = None
+    genus_emb_dim: int = 8
+    family_emb_dim: int = 8
+    dropout: float = 0.3
+    head_hidden_dims: list[int] | None = None
+    # Transformer-specific
+    n_attention_layers: int = 0
+    n_heads: int = 4
+    transformer_ff_dim: int = 256
+    transformer_pooling: str = "attention"
+    transformer_dropout: float = 0.1
+
+
+@dataclass
+class TrainingConfig:
+    """Training loop configuration.
+
+    Pass to Trainer as ``training_config=TrainingConfig(...)`` to group
+    training params. Individual kwargs still work and take priority.
+    """
+
+    batch_size: int = 32768
+    num_workers: int = 0
+    max_epochs: int = 500
+    patience: int = 50
+    lr: float = 1e-3
+    weight_decay: float = 1e-4
+    lr_scheduler: str = "onecycle"
+    lr_factor: float = 0.1
+    lr_patience: int = 5
+    loss_config: str = "mae"
+    device: str = "auto"
+    use_amp: bool = True
+    compile_model: bool = False
+    prefetch_data: bool | None = None
+    gpu_data: bool | None = None
+    label_smoothing: float = 0.0
+    class_weights: torch.Tensor | None = None
+    ema_decay: float = 0.0
+    verbose: int = 1
+
+
+@dataclass
+class DataConfig:
+    """Data preprocessing configuration.
+
+    Pass to Trainer as ``data_config=DataConfig(...)`` to group
+    data-related params. Individual kwargs still work and take priority.
+    """
+
+    species_aggregation: str = "abundance"
+    species_selection: str = "top"
+    species_representation: str = "abundance"
+    min_species_frequency: int = 1
+    cover_dropout: float = 0.0
+    categorical_embed_dim: int = 8
+    # Pretraining
+    pretrain_epochs: int = 0
+    pretrain_mask_prob: float = 0.15
+    pretrain_lr: float = 1e-4
+    pretrain_all_data: bool = False
+
+
+@dataclass
+class CheckpointConfig:
+    """Checkpointing and caching configuration.
+
+    Pass to Trainer as ``checkpoint_config=CheckpointConfig(...)`` to group
+    checkpoint params. Individual kwargs still work and take priority.
+    """
+
+    checkpoint_dir: str | Path | None = None
+    checkpoint_every: int = 50
+    resume: bool = True
+    reset_patience: bool = False
+    cache_dir: str | Path | None = None
+    max_cache_files: int = 5
