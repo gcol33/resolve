@@ -104,10 +104,10 @@ public:
 private:
     // Dispatch taxonomy weight extraction to the active encoder
     torch::Tensor get_taxonomy_weights_(
-        torch::Tensor (PlotEncoderMoE::*moe_fn)() const,
-        torch::Tensor (PlotEncoder::*hash_fn)() const,
-        torch::Tensor (PlotEncoderEmbed::*embed_fn)() const,
-        torch::Tensor (PlotEncoderSparse::*sparse_fn)() const
+        torch::Tensor (PlotEncoderMoEImpl::*moe_fn)() const,
+        torch::Tensor (PlotEncoderImpl::*hash_fn)() const,
+        torch::Tensor (PlotEncoderEmbedImpl::*embed_fn)() const,
+        torch::Tensor (PlotEncoderSparseImpl::*sparse_fn)() const
     ) const;
 
     // Internal forward through encoder based on mode (returns latent only)

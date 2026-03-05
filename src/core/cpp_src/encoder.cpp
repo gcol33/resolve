@@ -1023,7 +1023,7 @@ static torch::Tensor average_fused_weights(
     const FusedPositionalEmbedding& fused
 ) {
     if (!fused) return torch::Tensor();
-    auto weight = fused->embedding().weight;  // (vocab_size * n_positions, embed_dim)
+    auto weight = fused->embedding()->weight;  // (vocab_size * n_positions, embed_dim)
     auto n_pos = fused->n_positions();
     auto vocab = fused->vocab_size();
     auto dim = fused->embed_dim();

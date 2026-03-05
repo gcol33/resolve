@@ -4,6 +4,6 @@
 CXX_STD = CXX17
 
 PKG_CXXFLAGS = -I"$(LIBTORCH_PATH)/include" -I"$(LIBTORCH_PATH)/include/torch/csrc/api/include" \
-               -I../../src/core/include -DNOMINMAX -D_USE_MATH_DEFINES
+               -I. -I../../src/core/include -DNOMINMAX -D_USE_MATH_DEFINES
 
 PKG_LIBS = -L"$(LIBTORCH_PATH)/lib" -ltorch -ltorch_cpu -lc10

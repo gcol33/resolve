@@ -112,3 +112,6 @@ src/core/build_cpu/
 
 # CMake test files
 *.cmd
+
+# Copied C++ headers in R package (CI only)
+r/src/resolve/

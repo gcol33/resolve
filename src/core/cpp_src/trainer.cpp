@@ -335,7 +335,7 @@ float Trainer::train_epoch(int epoch) {
 
         // Enable autocast for forward pass if AMP is enabled
         if (amp_enabled_) {
-            at::autocast::set_autocast_enabled(at::kCUDA, true);
+            at::autocast::set_enabled(true);
             at::autocast::increment_nesting();
         }
 
@@ -378,7 +378,7 @@ float Trainer::train_epoch(int epoch) {
         // Disable autocast before backward pass
         if (amp_enabled_) {
             at::autocast::decrement_nesting();
-            at::autocast::set_autocast_enabled(at::kCUDA, false);
+            at::autocast::set_enabled(false);
         }
 
         // Backward pass with gradient scaling for AMP
@@ -656,7 +656,7 @@ TrainResult Trainer::fit() {
         amp_scale_ = config_.amp_init_scale;
         amp_growth_tracker_ = 0;
         // Set autocast dtype to float16 for CUDA
-        at::autocast::set_autocast_dtype(at::kCUDA, at::kHalf);
+        at::autocast::set_autocast_gpu_dtype(at::kHalf);
     }
 
     auto start_time = std::chrono::high_resolution_clock::now();

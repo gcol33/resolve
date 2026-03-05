@@ -345,10 +345,10 @@ std::pair<torch::Tensor, std::vector<torch::Tensor>> ResolveModelImpl::encode_wi
 }
 
 torch::Tensor ResolveModelImpl::get_taxonomy_weights_(
-    torch::Tensor (PlotEncoderMoE::*moe_fn)() const,
-    torch::Tensor (PlotEncoder::*hash_fn)() const,
-    torch::Tensor (PlotEncoderEmbed::*embed_fn)() const,
-    torch::Tensor (PlotEncoderSparse::*sparse_fn)() const
+    torch::Tensor (PlotEncoderMoEImpl::*moe_fn)() const,
+    torch::Tensor (PlotEncoderImpl::*hash_fn)() const,
+    torch::Tensor (PlotEncoderEmbedImpl::*embed_fn)() const,
+    torch::Tensor (PlotEncoderSparseImpl::*sparse_fn)() const
 ) const {
     if (encoder_moe_) return ((*encoder_moe_).*moe_fn)();
     if (encoder_hash_) return ((*encoder_hash_).*hash_fn)();
@@ -359,19 +359,19 @@ torch::Tensor ResolveModelImpl::get_taxonomy_weights_(
 
 torch::Tensor ResolveModelImpl::get_genus_weights() const {
     return get_taxonomy_weights_(
-        &PlotEncoderMoE::get_genus_weights,
-        &PlotEncoder::get_genus_weights,
-        &PlotEncoderEmbed::get_genus_weights,
-        &PlotEncoderSparse::get_genus_weights
+        &PlotEncoderMoEImpl::get_genus_weights,
+        &PlotEncoderImpl::get_genus_weights,
+        &PlotEncoderEmbedImpl::get_genus_weights,
+        &PlotEncoderSparseImpl::get_genus_weights
     );
 }
 
 torch::Tensor ResolveModelImpl::get_family_weights() const {
     return get_taxonomy_weights_(
-        &PlotEncoderMoE::get_family_weights,
-        &PlotEncoder::get_family_weights,
-        &PlotEncoderEmbed::get_family_weights,
-        &PlotEncoderSparse::get_family_weights
+        &PlotEncoderMoEImpl::get_family_weights,
+        &PlotEncoderImpl::get_family_weights,
+        &PlotEncoderEmbedImpl::get_family_weights,
+        &PlotEncoderSparseImpl::get_family_weights
     );
 }
 

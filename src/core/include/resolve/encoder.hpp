@@ -271,6 +271,7 @@ public:
 
     // Get the underlying embedding table (for checkpoint migration)
     [[nodiscard]] torch::nn::Embedding& embedding() { return embedding_; }
+    [[nodiscard]] const torch::nn::Embedding& embedding() const { return embedding_; }
 
 private:
     int64_t vocab_size_;
