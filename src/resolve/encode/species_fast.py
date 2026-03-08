@@ -66,7 +66,8 @@ def _aggregate_hash_embedding(
 def _compute_hash_index_and_sign(species_hash: np.int64, hash_dim: int) -> tuple:
     """Compute hash index and sign from species hash."""
     # Use lower bits for index, higher bit for sign (like sklearn FeatureHasher)
-    idx = np.abs(species_hash) % hash_dim
+    # Mask sign bit to avoid overflow when species_hash == INT64_MIN
+    idx = (np.abs(species_hash) & np.int64(0x7FFFFFFFFFFFFFFF)) % hash_dim
     sign = 1 if species_hash >= 0 else -1
     return idx, sign
 
@@ -86,7 +87,7 @@ def _hash_species_batch(species_ids: np.ndarray, hash_dim: int) -> tuple:
     for i, sp_id in enumerate(species_ids):
         # MurmurHash3 for fast, uniform hashing
         h = mmh3.hash(f"sp={sp_id}")
-        hash_indices[i] = abs(h) % hash_dim
+        hash_indices[i] = (abs(h) & 0x7FFFFFFF) % hash_dim
         signs[i] = 1 if h >= 0 else -1
 
     return hash_indices, signs
@@ -320,7 +321,7 @@ class FastSpeciesEncoder:
 
         # Use pre-computed species hashes to compute hash index and sign
         # The C++ loader uses the same MurmurHash pattern
-        hash_indices = (np.abs(species_hashes) % self.hash_dim).astype(np.int64)
+        hash_indices = ((np.abs(species_hashes) & np.int64(0x7FFFFFFFFFFFFFFF)) % self.hash_dim).astype(np.int64)
         signs = np.where(species_hashes >= 0, 1, -1).astype(np.float32)
 
         # Aggregate hash embedding (Numba-accelerated)

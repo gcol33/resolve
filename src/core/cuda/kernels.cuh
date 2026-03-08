@@ -51,7 +51,7 @@ __global__ void compute_hash_kernel(
     if (idx >= n) return;
 
     int32_t h = murmur_hash32(species_ids[idx]);
-    hash_indices[idx] = (h < 0 ? -h : h) % hash_dim;
+    hash_indices[idx] = static_cast<int32_t>(static_cast<uint32_t>(h < 0 ? -h : h) % static_cast<uint32_t>(hash_dim));
     signs[idx] = (h >= 0) ? 1 : -1;
 }
 
@@ -75,7 +75,7 @@ __global__ void hash_and_aggregate_kernel(
     if (plot_idx < 0 || plot_idx >= n_plots) return;
 
     int32_t h = murmur_hash32(species_ids[idx]);
-    int32_t hash_idx = (h < 0 ? -h : h) % hash_dim;
+    int32_t hash_idx = static_cast<int32_t>(static_cast<uint32_t>(h < 0 ? -h : h) % static_cast<uint32_t>(hash_dim));
     float sign = (h >= 0) ? 1.0f : -1.0f;
 
     atomicAdd(&output[plot_idx * hash_dim + hash_idx], sign * weights[idx]);

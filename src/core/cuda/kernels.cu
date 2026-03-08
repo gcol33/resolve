@@ -83,7 +83,8 @@ __global__ void compute_hash_kernel(
     if (idx >= n) return;
 
     int32_t h = murmur_hash32(species_ids[idx]);
-    hash_indices[idx] = (h < 0 ? -h : h) % hash_dim;
+    // Use unsigned cast to avoid UB when h == INT32_MIN (-h overflows)
+    hash_indices[idx] = static_cast<int32_t>(static_cast<uint32_t>(h < 0 ? -h : h) % static_cast<uint32_t>(hash_dim));
     signs[idx] = (h >= 0) ? 1 : -1;
 }
 
@@ -110,7 +111,7 @@ __global__ void hash_and_aggregate_kernel(
     }
 
     int32_t h = murmur_hash32(species_ids[idx]);
-    int32_t hash_idx = (h < 0 ? -h : h) % hash_dim;
+    int32_t hash_idx = static_cast<int32_t>(static_cast<uint32_t>(h < 0 ? -h : h) % static_cast<uint32_t>(hash_dim));
     float sign = (h >= 0) ? 1.0f : -1.0f;
 
     atomicAdd(&output[plot_idx * hash_dim + hash_idx], sign * weights[idx]);
@@ -148,7 +149,7 @@ __global__ void hash_and_aggregate_shared_kernel(
     for (int64_t i = threadIdx.x; i < n; i += blockDim.x) {
         if (plot_indices[i] == plot_idx) {
             int32_t h = murmur_hash32(species_ids[i]);
-            int32_t hash_idx = (h < 0 ? -h : h) % hash_dim;
+            int32_t hash_idx = static_cast<int32_t>(static_cast<uint32_t>(h < 0 ? -h : h) % static_cast<uint32_t>(hash_dim));
             float sign = (h >= 0) ? 1.0f : -1.0f;
             atomicAdd(&shared_hash[hash_idx], sign * weights[i]);
         }
@@ -208,7 +209,7 @@ __global__ void hash_and_aggregate_chunked_kernel(
         }
 
         int32_t h = murmur_hash32(species_ids[i]);
-        int32_t hash_idx = (h < 0 ? -h : h) % hash_dim;
+        int32_t hash_idx = static_cast<int32_t>(static_cast<uint32_t>(h < 0 ? -h : h) % static_cast<uint32_t>(hash_dim));
         float sign = (h >= 0) ? 1.0f : -1.0f;
         float contribution = sign * weights[i];
 
@@ -280,7 +281,7 @@ __global__ void hash_batch_csr_kernel(
     // Process all species for this plot
     for (int64_t i = start + threadIdx.x; i < end; i += blockDim.x) {
         int32_t h = murmur_hash32(species_ids[i]);
-        int32_t hash_idx = (h < 0 ? -h : h) % hash_dim;
+        int32_t hash_idx = static_cast<int32_t>(static_cast<uint32_t>(h < 0 ? -h : h) % static_cast<uint32_t>(hash_dim));
         float sign = (h >= 0) ? 1.0f : -1.0f;
         atomicAdd(&shared_hash[hash_idx], sign * weights[i]);
     }

@@ -64,7 +64,8 @@ if TRITON_AVAILABLE:
         # Hash species ID
         h = _murmur_hash(species_id)
         # Get positive modulo
-        hash_idx = tl.abs(h) % hash_dim
+        # Mask to unsigned range before modulo to avoid negative result if h == INT64_MIN
+        hash_idx = (tl.abs(h).to(tl.uint64) % hash_dim).to(tl.int64)
         # Sign from hash
         sign = tl.where(h >= 0, 1.0, -1.0)
         contribution = sign * weight
@@ -160,7 +161,8 @@ def hash_aggregate_pure_torch(
     h = _murmur_hash_torch(species_ids)
 
     # Get bucket (use abs for positive modulo) and sign
-    hash_idx = torch.abs(h) % hash_dim
+    # Use bitwise AND to get unsigned abs, avoiding overflow when h == INT64_MIN
+    hash_idx = (h.abs().to(torch.int64) & 0x7FFFFFFFFFFFFFFF) % hash_dim
     sign = torch.where(h >= 0, torch.ones_like(weights), -torch.ones_like(weights))
 
     # Compute linear indices for scatter
@@ -216,7 +218,8 @@ def hash_batch_csr_pure_torch(
 
             # Hash using same function as aggregate
             h = _murmur_hash_torch(sp_ids)
-            hash_idx = torch.abs(h) % hash_dim
+            # Use bitwise AND to get unsigned abs, avoiding overflow when h == INT64_MIN
+            hash_idx = (h.abs().to(torch.int64) & 0x7FFFFFFFFFFFFFFF) % hash_dim
             sign = torch.where(h >= 0, torch.ones_like(wts), -torch.ones_like(wts))
 
             # Scatter into this batch row
