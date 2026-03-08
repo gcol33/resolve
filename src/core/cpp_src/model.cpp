@@ -265,13 +265,8 @@ std::unordered_map<std::string, torch::Tensor> ResolveModelImpl::forward(
     torch::Tensor species_ids,
     torch::Tensor species_vector
 ) {
-    auto latent = encode(continuous, genus_ids, family_ids, species_ids, species_vector);
-
-    std::unordered_map<std::string, torch::Tensor> outputs;
-    for (auto& [name, head] : heads_) {
-        outputs[name] = head->forward(latent);
-    }
-    return outputs;
+    // Delegate to forward_with_aux and discard auxiliary loss
+    return forward_with_aux(continuous, genus_ids, family_ids, species_ids, species_vector).outputs;
 }
 
 ModelForwardResult ResolveModelImpl::forward_with_aux(

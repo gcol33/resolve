@@ -11,7 +11,7 @@ import torch
 from torch import nn
 
 from resolve.data.dataset import ResolveDataset
-from resolve.encode.base import BaseSpeciesEncoder, compute_unknown_stats
+from resolve.encode.base import BaseSpeciesEncoder, compute_unknown_stats, select_top_k_by_mode
 from resolve.encode.mixins import TaxonomyEncoderMixin
 from resolve.encode.normalize import TaxonomyNormalizer, normalize_species_df
 from resolve.encode.vocab import SpeciesVocab, TaxonomyVocab
@@ -169,65 +169,8 @@ class EmbeddingEncoder(BaseSpeciesEncoder, TaxonomyEncoderMixin):
         plot_id_col: str,
         k: int,
     ) -> pl.DataFrame:
-        """
-        Select k items per plot based on selection mode.
-
-        Args:
-            agg_df: DataFrame with plot_id_col and "_total" weight column
-            plot_id_col: Name of the plot ID column
-            k: Number of items to select per plot
-
-        Returns:
-            DataFrame with selected items and "_rank" column (0 to k-1)
-        """
-        # Get the taxonomy/species column name
-        tax_col = [c for c in agg_df.columns if c not in (plot_id_col, "_total")][0]
-
-        if self.selection == "top":
-            ranked = (
-                agg_df.sort([plot_id_col, "_total"], descending=[False, True])
-                .with_columns(
-                    pl.col("_total").cum_count().over(plot_id_col).alias("_rank") - 1
-                )
-            )
-            return ranked.filter(pl.col("_rank") < k)
-
-        elif self.selection == "bottom":
-            ranked = (
-                agg_df.sort([plot_id_col, "_total"], descending=[False, False])
-                .with_columns(
-                    pl.col("_total").cum_count().over(plot_id_col).alias("_rank") - 1
-                )
-            )
-            return ranked.filter(pl.col("_rank") < k)
-
-        else:  # top_bottom
-            # Top-k
-            top_ranked = (
-                agg_df.sort([plot_id_col, "_total"], descending=[False, True])
-                .with_columns(
-                    pl.col("_total").cum_count().over(plot_id_col).alias("_rank") - 1
-                )
-            )
-            top_selected = top_ranked.filter(pl.col("_rank") < k)
-
-            # Exclude top items from bottom selection
-            bottom_pool = agg_df.join(
-                top_selected.select(plot_id_col, tax_col),
-                on=[plot_id_col, tax_col],
-                how="anti",
-            )
-            bottom_ranked = (
-                bottom_pool.sort([plot_id_col, "_total"], descending=[False, False])
-                .with_columns(
-                    pl.col("_total").cum_count().over(plot_id_col).alias("_rank") - 1
-                )
-            )
-            bottom_selected = bottom_ranked.filter(pl.col("_rank") < k).with_columns(
-                (pl.col("_rank") + k).alias("_rank")
-            )
-
-            return pl.concat([top_selected, bottom_selected])
+        """Select k items per plot based on selection mode."""
+        return select_top_k_by_mode(agg_df, plot_id_col, k, self.selection)
 
     def _extract_top_k(
         self,

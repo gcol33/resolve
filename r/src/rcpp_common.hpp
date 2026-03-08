@@ -23,17 +23,23 @@ inline torch::Tensor r_vec_to_tensor(NumericVector x) {
     return t;
 }
 
-inline torch::Tensor r_mat_to_tensor(NumericMatrix x) {
-    auto options = torch::TensorOptions().dtype(torch::kFloat32);
+// Generic matrix-to-tensor: works for NumericMatrix (float) and IntegerMatrix (int64)
+template <typename MatT, typename ScalarT, torch::ScalarType DType>
+inline torch::Tensor r_mat_to_tensor_impl(MatT x) {
+    auto options = torch::TensorOptions().dtype(DType);
     int nrow = x.nrow();
     int ncol = x.ncol();
-    std::vector<float> data(nrow * ncol);
+    std::vector<ScalarT> data(nrow * ncol);
     for (int i = 0; i < nrow; ++i) {
         for (int j = 0; j < ncol; ++j) {
-            data[i * ncol + j] = static_cast<float>(x(i, j));
+            data[i * ncol + j] = static_cast<ScalarT>(x(i, j));
         }
     }
     return torch::from_blob(data.data(), {nrow, ncol}, options).clone();
+}
+
+inline torch::Tensor r_mat_to_tensor(NumericMatrix x) {
+    return r_mat_to_tensor_impl<NumericMatrix, float, torch::kFloat32>(x);
 }
 
 inline torch::Tensor r_int_vec_to_tensor(IntegerVector x) {
@@ -43,16 +49,7 @@ inline torch::Tensor r_int_vec_to_tensor(IntegerVector x) {
 }
 
 inline torch::Tensor r_int_mat_to_tensor(IntegerMatrix x) {
-    auto options = torch::TensorOptions().dtype(torch::kInt64);
-    int nrow = x.nrow();
-    int ncol = x.ncol();
-    std::vector<int64_t> data(nrow * ncol);
-    for (int i = 0; i < nrow; ++i) {
-        for (int j = 0; j < ncol; ++j) {
-            data[i * ncol + j] = static_cast<int64_t>(x(i, j));
-        }
-    }
-    return torch::from_blob(data.data(), {nrow, ncol}, options).clone();
+    return r_mat_to_tensor_impl<IntegerMatrix, int64_t, torch::kInt64>(x);
 }
 
 // =============================================================================

@@ -10,7 +10,7 @@ import polars as pl
 from sklearn.feature_extraction import FeatureHasher
 
 from resolve.data.dataset import ResolveDataset
-from resolve.encode.base import BaseSpeciesEncoder, compute_unknown_stats
+from resolve.encode.base import BaseSpeciesEncoder, compute_unknown_stats, select_top_k_by_mode
 from resolve.encode.normalize import TaxonomyNormalizer, normalize_species_df
 from resolve.encode.vocab import TaxonomyVocab
 
@@ -496,71 +496,11 @@ class SpeciesEncoder(BaseSpeciesEncoder):
         k: int,
         mode: str = None,
     ) -> pl.DataFrame:
-        """
-        Select k items per plot based on selection mode.
-
-        Args:
-            agg_df: DataFrame with plot_id_col and "_total" weight column
-            plot_id_col: Name of the plot ID column
-            k: Number of items to select per plot
-            mode: Selection mode override (defaults to self.selection for
-                  top/bottom/top_bottom, or "top" for all/presence_absence)
-
-        Returns:
-            DataFrame with selected items and "_rank" column (0 to k-1, or 0 to 2k-1 for top_bottom)
-        """
+        """Select k items per plot based on selection mode."""
         if mode is None:
             # For all/presence_absence, default taxonomy selection to "top"
             mode = self.selection if self.selection in ("top", "bottom", "top_bottom") else "top"
-
-        # Get the taxonomy column name (second column, after plot_id_col)
-        tax_col = [c for c in agg_df.columns if c not in (plot_id_col, "_total")][0]
-
-        if mode == "top":
-            ranked = (
-                agg_df.sort([plot_id_col, "_total"], descending=[False, True])
-                .with_columns(
-                    pl.col("_total").cum_count().over(plot_id_col).alias("_rank") - 1
-                )
-            )
-            return ranked.filter(pl.col("_rank") < k)
-
-        elif mode == "bottom":
-            ranked = (
-                agg_df.sort([plot_id_col, "_total"], descending=[False, False])
-                .with_columns(
-                    pl.col("_total").cum_count().over(plot_id_col).alias("_rank") - 1
-                )
-            )
-            return ranked.filter(pl.col("_rank") < k)
-
-        else:  # top_bottom
-            # Top-k
-            top_ranked = (
-                agg_df.sort([plot_id_col, "_total"], descending=[False, True])
-                .with_columns(
-                    pl.col("_total").cum_count().over(plot_id_col).alias("_rank") - 1
-                )
-            )
-            top_selected = top_ranked.filter(pl.col("_rank") < k)
-
-            # Exclude top items from bottom selection via anti-join
-            bottom_pool = agg_df.join(
-                top_selected.select(plot_id_col, tax_col),
-                on=[plot_id_col, tax_col],
-                how="anti",
-            )
-            bottom_ranked = (
-                bottom_pool.sort([plot_id_col, "_total"], descending=[False, False])
-                .with_columns(
-                    pl.col("_total").cum_count().over(plot_id_col).alias("_rank") - 1
-                )
-            )
-            bottom_selected = bottom_ranked.filter(pl.col("_rank") < k).with_columns(
-                (pl.col("_rank") + k).alias("_rank")
-            )
-
-            return pl.concat([top_selected, bottom_selected])
+        return select_top_k_by_mode(agg_df, plot_id_col, k, mode)
 
     def _build_taxonomy_ids(
         self,

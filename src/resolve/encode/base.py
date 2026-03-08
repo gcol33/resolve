@@ -91,6 +91,65 @@ def compute_unknown_stats(
     return unknown_fraction
 
 
+def select_top_k_by_mode(
+    agg_df: pl.DataFrame,
+    plot_id_col: str,
+    k: int,
+    mode: str,
+) -> pl.DataFrame:
+    """Select k items per plot based on selection mode.
+
+    Shared helper used by SpeciesEncoder and EmbeddingEncoder for
+    taxonomy/species top-k selection.
+
+    Parameters
+    ----------
+    agg_df : pl.DataFrame
+        DataFrame with plot_id_col, a taxonomy/species column, and "_total" weight column.
+    plot_id_col : str
+        Name of the plot ID column.
+    k : int
+        Number of items to select per plot.
+    mode : str
+        One of "top", "bottom", "top_bottom".
+
+    Returns
+    -------
+    pl.DataFrame with selected items and "_rank" column (0 to k-1, or 0 to 2k-1 for top_bottom).
+    """
+    tax_col = [c for c in agg_df.columns if c not in (plot_id_col, "_total")][0]
+
+    def _rank_by(df: pl.DataFrame, descending: bool) -> pl.DataFrame:
+        return (
+            df.sort([plot_id_col, "_total"], descending=[False, descending])
+            .with_columns(
+                pl.col("_total").cum_count().over(plot_id_col).alias("_rank") - 1
+            )
+        )
+
+    if mode == "top":
+        return _rank_by(agg_df, descending=True).filter(pl.col("_rank") < k)
+
+    elif mode == "bottom":
+        return _rank_by(agg_df, descending=False).filter(pl.col("_rank") < k)
+
+    else:  # top_bottom
+        top_selected = _rank_by(agg_df, descending=True).filter(pl.col("_rank") < k)
+
+        bottom_pool = agg_df.join(
+            top_selected.select(plot_id_col, tax_col),
+            on=[plot_id_col, tax_col],
+            how="anti",
+        )
+        bottom_selected = (
+            _rank_by(bottom_pool, descending=False)
+            .filter(pl.col("_rank") < k)
+            .with_columns((pl.col("_rank") + k).alias("_rank"))
+        )
+
+        return pl.concat([top_selected, bottom_selected])
+
+
 class BaseSpeciesEncoder(ABC):
     """Unified interface for species encoding strategies.
 
