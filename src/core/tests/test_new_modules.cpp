@@ -626,7 +626,7 @@ TEST_CASE("TabularAdapter GNN forward", "[adapter]") {
     config.genus_emb_dim = 4;
     config.family_emb_dim = 4;
     config.encoder_architecture = EncoderArchitecture::GNN;
-    config.gnn.d_model = 64;
+    config.gnn.hidden_dim = 64;
     config.gnn.n_layers = 2;
 
     TabularAdapter adapter(schema, config);
@@ -657,7 +657,7 @@ TEST_CASE("TabularAdapter HeterogeneousGNN forward", "[adapter]") {
     config.genus_emb_dim = 4;
     config.family_emb_dim = 4;
     config.encoder_architecture = EncoderArchitecture::HeterogeneousGNN;
-    config.heterogeneous_gnn.d_model = 64;
+    config.heterogeneous_gnn.hidden_dim = 64;
     config.heterogeneous_gnn.n_layers = 2;
 
     TabularAdapter adapter(schema, config);
