@@ -18,6 +18,7 @@ from torch.optim.lr_scheduler import (
     ReduceLROnPlateau,
 )
 
+from resolve._predict_utils import postprocess_predictions
 from resolve.constants import (
     DEFAULT_HIDDEN_DIMS,
     ETA_WINDOW,
@@ -1228,29 +1229,10 @@ class Trainer(
                 categorical_ids=categorical_ids_t,
             )
 
-        # Compute confidence per sample (1 - unknown_fraction for regression)
-        confidence = 1.0 - unknown_fraction
-
         # Post-process
-        predictions = {}
-        for name, pred in preds_raw.items():
-            cfg = self.model.target_configs[name]
-            if cfg.task == "regression":
-                pred_np = pred.cpu().numpy()
-                scaler = self._scalers[f"target_{name}"]
-                pred_np = scaler.inverse_transform(pred_np).flatten()
-                if cfg.transform == "log1p" and output_space == "raw":
-                    pred_np = np.expm1(pred_np)
-                # Apply confidence threshold
-                pred_np = np.where(confidence >= confidence_threshold, pred_np, np.nan)
-                predictions[name] = pred_np
-            else:
-                # Classification: use max softmax probability as confidence
-                probs = torch.softmax(pred, dim=-1)
-                class_confidence = probs.max(dim=-1).values.cpu().numpy()
-                pred_np = pred.argmax(dim=-1).cpu().numpy().astype(np.float64)
-                # Apply confidence threshold
-                pred_np = np.where(class_confidence >= confidence_threshold, pred_np, np.nan)
-                predictions[name] = pred_np
+        predictions, _ = postprocess_predictions(
+            preds_raw, self.model.target_configs, self._scalers,
+            unknown_fraction, output_space, confidence_threshold,
+        )
 
         return predictions

@@ -13,6 +13,12 @@
 NB_MODULE(_resolve_core, m) {
     m.doc() = "RESOLVE C++ core library for species-composition based prediction";
 
+    // libtorch holds global state (type registrations, dispatch keys) via shared_ptr
+    // that outlives nanobind's module cleanup at interpreter shutdown. This causes
+    // false-positive "leaked N types / N functions" warnings. Instance leaks are
+    // fixed by returning config objects by value (not reference) in property bindings.
+    nb::set_leak_warnings(false);
+
     // Register all bindings from split modules
     register_enums(m);
     register_types(m);

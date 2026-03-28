@@ -68,14 +68,20 @@ jobs:
             any::rcmdcheck
             any::testthat
 
-      - name: Bundle C++ core headers into R package
+      - name: Bundle C++ core into R package
         if: runner.os != 'Windows'
-        run: cp -r src/core/include/resolve r/src/resolve
+        run: |
+          cp -r src/core/include/resolve r/src/resolve
+          for f in src/core/cpp_src/*.cpp; do
+            cp "$f" "r/src/$(basename "$f")"
+          done
 
-      - name: Bundle C++ core headers into R package (Windows)
+      - name: Bundle C++ core into R package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Copy-Item -Recurse src/core/include/resolve r/src/resolve
+        run: |
+          Copy-Item -Recurse src/core/include/resolve r/src/resolve
+          Get-ChildItem src/core/cpp_src/*.cpp | ForEach-Object { Copy-Item $_.FullName r/src/ }
 
       - name: Check R package
         uses: r-lib/actions/check-r-package@v2

@@ -19,8 +19,43 @@ struct Scalers {
     std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>> target_scalers;
 };
 
+// =============================================================================
+// Spatial Block Splitter for cross-validation
+// =============================================================================
+
+struct SpatialBlockConfig {
+    float lat_size = 1.0f;     // Block size in degrees (latitude)
+    float lon_size = 1.0f;     // Block size in degrees (longitude)
+    bool balance = false;       // Greedy bin-packing (true) vs round-robin (false)
+};
+
+class SpatialBlockSplitter {
+public:
+    SpatialBlockSplitter(
+        float lat_size = 1.0f,
+        float lon_size = 1.0f,
+        int n_splits = 5,
+        int seed = 42,
+        bool balance = false
+    );
+
+    // Split coordinates into spatial CV folds.
+    // coords: (n_plots, 2) tensor [lat, lon]
+    // Returns: vector of (train_indices, test_indices) pairs
+    [[nodiscard]] std::vector<std::pair<std::vector<int64_t>, std::vector<int64_t>>>
+    split(torch::Tensor coords) const;
+
+private:
+    float lat_size_;
+    float lon_size_;
+    int n_splits_;
+    int seed_;
+    bool balance_;
+};
+
+
 // Trainer for ResolveModel
-// Supports all three encoding modes (hash, embed, sparse)
+// Supports all encoding modes (hash, embed, sparse, rank_pool, transformer)
 class Trainer {
 public:
     Trainer(
@@ -45,6 +80,11 @@ public:
     // family_ids: (n_plots, n_taxonomy_slots) or empty
     // unknown_fraction: (n_plots,) optional
     // unknown_count: (n_plots,) optional
+    // pool_genus_ids: (n_plots, max_species_per_plot) for rank_pool/transformer
+    // pool_family_ids: (n_plots, max_species_per_plot) for rank_pool/transformer
+    // pool_weights: (n_plots, max_species_per_plot) for rank_pool/transformer
+    // pool_mask: (n_plots, max_species_per_plot) for rank_pool/transformer
+    // pool_has_cover: (n_plots,) for rank_pool/transformer
     // targets: map of target_name -> (n_plots,) tensor
     void prepare_data(
         torch::Tensor coordinates,
@@ -57,6 +97,11 @@ public:
         torch::Tensor unknown_fraction,
         torch::Tensor unknown_count,
         const std::unordered_map<std::string, torch::Tensor>& targets,
+        torch::Tensor pool_genus_ids = {},
+        torch::Tensor pool_family_ids = {},
+        torch::Tensor pool_weights = {},
+        torch::Tensor pool_mask = {},
+        torch::Tensor pool_has_cover = {},
         float test_size = 0.2f,
         int seed = 42
     );
@@ -102,6 +147,27 @@ public:
         int seed = 42
     );
 
+    // Spatial block cross-validation using coordinate-based splitting
+    [[nodiscard]] CrossValidationResult cross_validate_spatial(
+        const SpatialBlockConfig& spatial_config,
+        int n_folds = 5,
+        int seed = 42
+    );
+
+    // Predict on data (runs model in eval mode)
+    [[nodiscard]] std::unordered_map<std::string, torch::Tensor> predict(
+        torch::Tensor continuous,
+        torch::Tensor genus_ids = {},
+        torch::Tensor family_ids = {},
+        torch::Tensor species_ids = {},
+        torch::Tensor species_vector = {},
+        torch::Tensor pool_genus_ids = {},
+        torch::Tensor pool_family_ids = {},
+        torch::Tensor pool_weights = {},
+        torch::Tensor pool_mask = {},
+        torch::Tensor pool_has_cover = {}
+    );
+
 private:
     // Train one epoch
     float train_epoch(int epoch);
@@ -122,10 +188,20 @@ private:
     // Pre-load all data to GPU for faster training
     void cache_data_to_gpu();
 
+    // Helper: bundle of pool tensors to avoid repeating 5-line blocks
+    struct PoolTensors {
+        torch::Tensor genus_ids, family_ids, weights, mask, has_cover;
+    };
+    [[nodiscard]] PoolTensors get_test_pool_tensors() const;
+    [[nodiscard]] PoolTensors get_train_pool_tensors() const;
+
     ResolveModel model_;
     TrainConfig config_;
     Scalers scalers_;
     MultiTaskLoss loss_fn_;
+
+    // Raw coordinates stored for spatial CV (before scaling/concatenation)
+    torch::Tensor coordinates_;
 
     // Training data
     torch::Tensor train_continuous_;
@@ -135,12 +211,25 @@ private:
     torch::Tensor train_species_vector_;  // For sparse mode
     std::unordered_map<std::string, torch::Tensor> train_targets_;
 
+    // Pool-style fields (rank_pool / transformer modes)
+    torch::Tensor train_pool_genus_ids_;
+    torch::Tensor train_pool_family_ids_;
+    torch::Tensor train_pool_weights_;
+    torch::Tensor train_pool_mask_;
+    torch::Tensor train_pool_has_cover_;
+
     torch::Tensor test_continuous_;
     torch::Tensor test_genus_ids_;
     torch::Tensor test_family_ids_;
     torch::Tensor test_species_ids_;
     torch::Tensor test_species_vector_;
     std::unordered_map<std::string, torch::Tensor> test_targets_;
+
+    torch::Tensor test_pool_genus_ids_;
+    torch::Tensor test_pool_family_ids_;
+    torch::Tensor test_pool_weights_;
+    torch::Tensor test_pool_mask_;
+    torch::Tensor test_pool_has_cover_;
 
     // Best model state for restoring
     std::vector<char> best_model_state_;
@@ -163,6 +252,13 @@ private:
     std::unordered_map<std::string, torch::Tensor> gpu_targets_;
     std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>> gpu_scalers_;
 
+    // GPU-cached pool fields (training)
+    torch::Tensor gpu_pool_genus_ids_;
+    torch::Tensor gpu_pool_family_ids_;
+    torch::Tensor gpu_pool_weights_;
+    torch::Tensor gpu_pool_mask_;
+    torch::Tensor gpu_pool_has_cover_;
+
     // GPU-cached test data (avoid repeated CPU->GPU transfer in eval)
     torch::Tensor gpu_test_continuous_;
     torch::Tensor gpu_test_genus_ids_;
@@ -170,6 +266,13 @@ private:
     torch::Tensor gpu_test_species_ids_;
     torch::Tensor gpu_test_species_vector_;
     std::unordered_map<std::string, torch::Tensor> gpu_test_targets_;
+
+    // GPU-cached pool fields (test)
+    torch::Tensor gpu_test_pool_genus_ids_;
+    torch::Tensor gpu_test_pool_family_ids_;
+    torch::Tensor gpu_test_pool_weights_;
+    torch::Tensor gpu_test_pool_mask_;
+    torch::Tensor gpu_test_pool_has_cover_;
 
     // Shuffled training data (cached, reshuffled every N epochs)
     torch::Tensor shuffled_continuous_;

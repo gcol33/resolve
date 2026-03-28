@@ -144,6 +144,8 @@ inline resolve::SpeciesEncodingMode parse_species_encoding_mode(const std::strin
         {"hash", resolve::SpeciesEncodingMode::Hash},
         {"embed", resolve::SpeciesEncodingMode::Embed},
         {"sparse", resolve::SpeciesEncodingMode::Sparse},
+        {"rank_pool", resolve::SpeciesEncodingMode::RankPool},
+        {"transformer", resolve::SpeciesEncodingMode::Transformer},
     }, "species encoding mode");
 }
 

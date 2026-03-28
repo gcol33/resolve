@@ -628,6 +628,7 @@ TEST_CASE("TabularAdapter GNN forward", "[adapter]") {
     config.encoder_architecture = EncoderArchitecture::GNN;
     config.gnn.hidden_dim = 64;
     config.gnn.n_layers = 2;
+    config.gnn.k_neighbors = 4;  // Must be < batch_size
 
     TabularAdapter adapter(schema, config);
 
@@ -645,6 +646,7 @@ TEST_CASE("TabularAdapter HeterogeneousGNN forward", "[adapter]") {
     ResolveSchema schema;
     schema.n_plots = 100;
     schema.n_species = 50;
+    schema.n_species_vocab = 50;
     schema.has_coordinates = true;
     schema.has_abundance = true;
     schema.has_taxonomy = true;
@@ -652,7 +654,9 @@ TEST_CASE("TabularAdapter HeterogeneousGNN forward", "[adapter]") {
     schema.n_families = 10;
 
     ModelConfig config;
-    config.hash_dim = 32;
+    config.species_encoding = SpeciesEncodingMode::Sparse;
+    config.uses_explicit_vector = true;
+    config.species_embed_dim = 16;
     config.n_taxonomy_slots = 3;
     config.genus_emb_dim = 4;
     config.family_emb_dim = 4;
@@ -662,11 +666,18 @@ TEST_CASE("TabularAdapter HeterogeneousGNN forward", "[adapter]") {
 
     TabularAdapter adapter(schema, config);
 
-    auto continuous = torch::randn({8, 35});
+    // Build a simple species graph: 50 species, some co-occurrence edges
+    auto edge_index = torch::tensor({{0, 1, 2, 3, 4, 5}, {1, 2, 3, 4, 5, 0}}, torch::kInt64);
+    auto edge_type = torch::zeros({6}, torch::kInt64);  // All type 0
+    adapter->set_species_graph(edge_index, edge_type);
+
+    // n_continuous = 2 (coords) + 1 (unknown_fraction) = 3
+    auto continuous = torch::randn({8, 3});
     auto genus_ids = torch::randint(0, 21, {8, 3});
     auto family_ids = torch::randint(0, 11, {8, 3});
+    auto species_vector = torch::rand({8, 50});  // Required for HeterogeneousGNN
 
-    auto out = adapter->forward(continuous, genus_ids, family_ids);
+    auto out = adapter->forward(continuous, genus_ids, family_ids, {}, species_vector);
 
     REQUIRE(out.size(0) == 8);
     REQUIRE(out.size(1) > 0);

@@ -7,7 +7,7 @@ autocorrelation leakage between train and test sets.
 
 from __future__ import annotations
 
-import warnings
+
 
 import numpy as np
 
@@ -17,8 +17,8 @@ __all__ = ["SpatialBlockSplitter"]
 class SpatialBlockSplitter:
     """Grid-based spatial block splitter for cross-validation.
 
-    Assigns each plot to a grid cell based on ``floor(coord / block_size)``,
-    then distributes entire grid cells across folds via round-robin.
+    Assigns each plot to a grid cell based on ``floor(coord / block_deg)``,
+    then distributes entire grid cells across folds.
     Plots within the same grid cell always stay together.
 
     Three mutually exclusive block-specification modes:
@@ -34,8 +34,6 @@ class SpatialBlockSplitter:
 
     Parameters
     ----------
-    block_size : float or None
-        **Deprecated.** Maps to *block_deg*. Kept for backward compatibility.
     n_splits : int
         Number of CV folds. Default 10.
     seed : int
@@ -55,7 +53,6 @@ class SpatialBlockSplitter:
 
     def __init__(
         self,
-        block_size: float | None = None,
         n_splits: int = 10,
         seed: int = 42,
         *,
@@ -69,8 +66,6 @@ class SpatialBlockSplitter:
 
         # --- resolve mutually exclusive modes --------------------------------
         specified = []
-        if block_size is not None:
-            specified.append("block_size")
         if block_deg is not None:
             specified.append("block_deg")
         if block_km is not None:
@@ -83,19 +78,6 @@ class SpatialBlockSplitter:
                 f"Only one block mode may be specified, got: "
                 f"{', '.join(specified)}"
             )
-
-        # Deprecation: block_size -> block_deg
-        if block_size is not None:
-            if block_size <= 0:
-                raise ValueError(
-                    f"block_size must be > 0, got {block_size}"
-                )
-            warnings.warn(
-                "block_size is deprecated, use block_deg instead",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            block_deg = block_size
 
         # Default when nothing specified
         if not specified:
@@ -147,8 +129,6 @@ class SpatialBlockSplitter:
             self._lat_size = lat_deg
             self._lon_size = lon_deg
 
-        # Backward-compat: expose block_size as read-only property
-        self.block_size = self._lat_size if self._lat_size is not None else 0.0
 
     def split(
         self, coords: np.ndarray | None = None,

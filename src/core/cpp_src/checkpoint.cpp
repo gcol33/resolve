@@ -1,25 +1,8 @@
 #include "resolve/checkpoint.hpp"
 #include <fstream>
 #include <filesystem>
-#include <chrono>
-#include <iomanip>
-#include <sstream>
 
 namespace resolve {
-
-std::string get_iso_timestamp() {
-    auto now = std::chrono::system_clock::now();
-    auto time_t = std::chrono::system_clock::to_time_t(now);
-    std::tm tm_buf;
-#ifdef _WIN32
-    localtime_s(&tm_buf, &time_t);
-#else
-    localtime_r(&time_t, &tm_buf);
-#endif
-    std::ostringstream oss;
-    oss << std::put_time(&tm_buf, "%Y-%m-%dT%H:%M:%S");
-    return oss.str();
-}
 
 void write_progress_file(
     const std::string& checkpoint_dir,
@@ -421,50 +404,6 @@ void save_train_config(
     archive.write("train_band_thresholds", torch::tensor(thresholds));
 }
 
-TrainConfig load_train_config(
-    torch::serialize::InputArchive& archive
-) {
-    TrainConfig config;
-    torch::Tensor t;
-
-    try {
-        archive.read("train_batch_size", t);
-        config.batch_size = t.item<int>();
-        archive.read("train_max_epochs", t);
-        config.max_epochs = t.item<int>();
-        archive.read("train_patience", t);
-        config.patience = t.item<int>();
-        archive.read("train_lr", t);
-        config.lr = t.item<float>();
-        archive.read("train_weight_decay", t);
-        config.weight_decay = t.item<float>();
-        archive.read("train_phase_boundary_1", t);
-        config.phase_boundaries.first = t.item<int>();
-        archive.read("train_phase_boundary_2", t);
-        config.phase_boundaries.second = t.item<int>();
-        archive.read("train_loss_config", t);
-        config.loss_config = static_cast<LossConfigMode>(t.item<int>());
-        archive.read("train_lr_scheduler", t);
-        config.lr_scheduler = static_cast<LRSchedulerType>(t.item<int>());
-        archive.read("train_lr_step_size", t);
-        config.lr_step_size = t.item<int>();
-        archive.read("train_lr_gamma", t);
-        config.lr_gamma = t.item<float>();
-        archive.read("train_lr_min", t);
-        config.lr_min = t.item<float>();
-
-        archive.read("train_band_thresholds", t);
-        config.band_thresholds.clear();
-        for (int i = 0; i < t.size(0); ++i) {
-            config.band_thresholds.push_back(t[i].item<float>());
-        }
-    } catch (...) {
-        // TrainConfig may not be present in older checkpoints
-    }
-
-    return config;
-}
-
 void save_run_metadata(
     torch::serialize::OutputArchive& archive,
     const RunMetadata& metadata
@@ -534,95 +473,6 @@ void save_run_metadata(
         }
         target_idx++;
     }
-}
-
-RunMetadata load_run_metadata(
-    torch::serialize::InputArchive& archive
-) {
-    RunMetadata metadata;
-    torch::Tensor t;
-
-    try {
-        // Load version
-        archive.read("meta_version_len", t);
-        int64_t version_len = t.item<int64_t>();
-        if (version_len > 0) {
-            archive.read("meta_version", t);
-            auto ptr = t.data_ptr<uint8_t>();
-            metadata.resolve_version = std::string(reinterpret_cast<const char*>(ptr), version_len);
-        }
-
-        // Load timestamps
-        archive.read("meta_created_len", t);
-        int64_t created_len = t.item<int64_t>();
-        if (created_len > 0) {
-            archive.read("meta_created", t);
-            auto ptr = t.data_ptr<uint8_t>();
-            metadata.created_at = std::string(reinterpret_cast<const char*>(ptr), created_len);
-        }
-
-        archive.read("meta_completed_len", t);
-        int64_t completed_len = t.item<int64_t>();
-        if (completed_len > 0) {
-            archive.read("meta_completed", t);
-            auto ptr = t.data_ptr<uint8_t>();
-            metadata.completed_at = std::string(reinterpret_cast<const char*>(ptr), completed_len);
-        }
-
-        // Load numeric fields
-        archive.read("meta_train_time", t);
-        metadata.train_time_seconds = t.item<float>();
-        archive.read("meta_n_plots_train", t);
-        metadata.n_plots_train = t.item<int64_t>();
-        archive.read("meta_n_plots_test", t);
-        metadata.n_plots_test = t.item<int64_t>();
-        archive.read("meta_best_epoch", t);
-        metadata.best_epoch = t.item<int>();
-        archive.read("meta_total_epochs", t);
-        metadata.total_epochs = t.item<int>();
-
-        // Load final metrics
-        archive.read("meta_n_targets", t);
-        int64_t n_targets = t.item<int64_t>();
-
-        for (int64_t i = 0; i < n_targets; ++i) {
-            std::string prefix = "meta_target_" + std::to_string(i) + "_";
-
-            // Load target name
-            archive.read(prefix + "name_len", t);
-            int64_t name_len = t.item<int64_t>();
-            std::string target_name;
-            if (name_len > 0) {
-                archive.read(prefix + "name", t);
-                auto ptr = t.data_ptr<uint8_t>();
-                target_name = std::string(reinterpret_cast<const char*>(ptr), name_len);
-            }
-
-            // Load metrics
-            archive.read(prefix + "n_metrics", t);
-            int64_t n_metrics = t.item<int64_t>();
-
-            for (int64_t j = 0; j < n_metrics; ++j) {
-                std::string m_prefix = prefix + "metric_" + std::to_string(j) + "_";
-
-                archive.read(m_prefix + "name_len", t);
-                int64_t m_name_len = t.item<int64_t>();
-                std::string metric_name;
-                if (m_name_len > 0) {
-                    archive.read(m_prefix + "name", t);
-                    auto ptr = t.data_ptr<uint8_t>();
-                    metric_name = std::string(reinterpret_cast<const char*>(ptr), m_name_len);
-                }
-
-                archive.read(m_prefix + "value", t);
-                metadata.final_metrics[target_name][metric_name] = t.item<float>();
-            }
-        }
-    } catch (...) {
-        // Metadata may not be present in older checkpoints
-    }
-
-    return metadata;
 }
 
 void write_metadata_json(

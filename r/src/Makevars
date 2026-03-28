@@ -1,11 +1,13 @@
 # Makevars for resolve R package
 # Compile with libtorch and link to C++ core
 
+CXX_STD = CXX17
+
 # Use LIBTORCH_PATH if set, otherwise try pkg-config
 ifdef LIBTORCH_PATH
-PKG_CXXFLAGS = -I"$(LIBTORCH_PATH)/include" -I"$(LIBTORCH_PATH)/include/torch/csrc/api/include" -I. -I../../src/core/include -std=c++17
+PKG_CXXFLAGS = -I"$(LIBTORCH_PATH)/include" -I"$(LIBTORCH_PATH)/include/torch/csrc/api/include" -I. -I../../src/core/include
 PKG_LIBS = -L"$(LIBTORCH_PATH)/lib" -ltorch -ltorch_cpu -lc10
 else
-PKG_CXXFLAGS = $(shell pkg-config --cflags torch 2>/dev/null || echo "-I/usr/local/include") -I. -I../../src/core/include -std=c++17
+PKG_CXXFLAGS = $(shell pkg-config --cflags torch 2>/dev/null || echo "-I/usr/local/include") -I. -I../../src/core/include
 PKG_LIBS = $(shell pkg-config --libs torch 2>/dev/null || echo "-ltorch -ltorch_cpu -lc10")
 endif

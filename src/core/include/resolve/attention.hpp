@@ -558,6 +558,8 @@ public:
     [[nodiscard]] int64_t output_dim() const { return out_features_; }
 
 private:
+    torch::Tensor forward_single_graph(torch::Tensor x, torch::Tensor adj);
+
     int64_t out_features_;
     GNNType gnn_type_;
 

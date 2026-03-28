@@ -1,6 +1,8 @@
 #include "resolve/species_encoding.hpp"
 #include <algorithm>
 #include <cmath>
+#include <numeric>
+#include <set>
 
 namespace resolve {
 
@@ -108,6 +110,372 @@ void apply_normalization(
     } else if (mode == NormalizationMode::Log1p) {
         for (auto& [sp, ab] : species) ab = std::log1p(ab);
     }
+}
+
+// =============================================================================
+// SpeciesVocab
+// =============================================================================
+
+SpeciesVocab SpeciesVocab::from_records(
+    const std::vector<SpeciesRecord>& records, int min_count
+) {
+    // Count species occurrences
+    std::unordered_map<std::string, int> counts;
+    for (const auto& r : records) {
+        counts[r.species_id]++;
+    }
+
+    // Filter by min_count and sort alphabetically for deterministic IDs
+    std::vector<std::string> species;
+    species.reserve(counts.size());
+    for (const auto& [name, count] : counts) {
+        if (count >= min_count) {
+            species.push_back(name);
+        }
+    }
+    std::sort(species.begin(), species.end());
+
+    // Build 1-indexed mapping (0 = unknown)
+    SpeciesVocab vocab;
+    for (size_t i = 0; i < species.size(); ++i) {
+        vocab.species_to_id_[species[i]] = static_cast<int64_t>(i + 1);
+    }
+    return vocab;
+}
+
+int64_t SpeciesVocab::encode(const std::string& species) const {
+    auto it = species_to_id_.find(species);
+    return it != species_to_id_.end() ? it->second : 0;
+}
+
+// =============================================================================
+// Shared helper: build taxonomy vocab and species-to-genus/family maps
+// =============================================================================
+
+static void build_taxonomy_maps(
+    const std::vector<SpeciesRecord>& records,
+    TaxonomyVocab& taxonomy_vocab,
+    std::unordered_map<std::string, std::string>& species_to_genus,
+    std::unordered_map<std::string, std::string>& species_to_family
+) {
+    // TaxonomyVocab::fit() builds genus/family maps from records directly
+    taxonomy_vocab = TaxonomyVocab();
+    taxonomy_vocab.fit(records);
+
+    // Build species -> genus/family lookup (first occurrence wins)
+    species_to_genus.clear();
+    species_to_family.clear();
+    for (const auto& r : records) {
+        if (!r.genus.empty()) {
+            species_to_genus.emplace(r.species_id, r.genus);
+        }
+        if (!r.family.empty()) {
+            species_to_family.emplace(r.species_id, r.family);
+        }
+    }
+}
+
+// =============================================================================
+// RankPoolEncoder
+// =============================================================================
+
+RankPoolEncoder::RankPoolEncoder(PoolWeighting weighting, int min_frequency)
+    : weighting_(weighting), min_frequency_(min_frequency) {}
+
+void RankPoolEncoder::fit(const std::vector<SpeciesRecord>& records) {
+    species_vocab_ = SpeciesVocab::from_records(records, min_frequency_);
+    build_taxonomy_maps(records, taxonomy_vocab_, species_to_genus_, species_to_family_);
+    fitted_ = true;
+}
+
+// Helper: compute a single weight for one species entry
+static float compute_pool_weight(
+    PoolWeighting weighting,
+    float abundance,
+    float total_abundance
+) {
+    switch (weighting) {
+        case PoolWeighting::Binary:
+            return 1.0f;
+        case PoolWeighting::Abundance:
+            return abundance;
+        case PoolWeighting::Log1p:
+            return std::log1p(abundance);
+        case PoolWeighting::Norm:
+            return (total_abundance > 0.0f) ? abundance / total_abundance : 1.0f;
+        case PoolWeighting::Rank:
+            // Rank weighting requires the full species list — handled externally
+            return 0.0f;
+    }
+    return 1.0f;
+}
+
+// Helper: assign rank-based weights (1/rank, dense ranking by descending abundance)
+static void assign_rank_weights(
+    const std::vector<float>& abundances,
+    std::vector<float>& weights
+) {
+    const auto n = abundances.size();
+    std::vector<size_t> order(n);
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        return abundances[a] > abundances[b];
+    });
+
+    // Dense ranking: ties share the same rank
+    std::vector<int> ranks(n);
+    int rank = 1;
+    for (size_t j = 0; j < n; ++j) {
+        if (j > 0 && abundances[order[j]] < abundances[order[j - 1]]) {
+            rank = static_cast<int>(j + 1);
+        }
+        ranks[order[j]] = rank;
+    }
+
+    weights.resize(n);
+    for (size_t i = 0; i < n; ++i) {
+        weights[i] = 1.0f / static_cast<float>(ranks[i]);
+    }
+}
+
+RankPoolEncodedData RankPoolEncoder::transform(
+    const std::vector<SpeciesRecord>& records,
+    const std::vector<std::string>& plot_ids
+) const {
+    if (!fitted_) {
+        throw std::runtime_error("RankPoolEncoder must be fit before transform");
+    }
+
+    const int64_t n_plots = static_cast<int64_t>(plot_ids.size());
+    const bool has_taxonomy = taxonomy_vocab_.n_genera() > 1;  // >1 because index 0 is <UNK>
+
+    // Group record indices by plot_id
+    std::unordered_map<std::string, std::vector<size_t>> plot_to_indices;
+    for (size_t i = 0; i < records.size(); ++i) {
+        plot_to_indices[records[i].plot_id].push_back(i);
+    }
+
+    // Per-plot intermediate data
+    struct PlotData {
+        std::vector<int64_t> sp_ids, g_ids, f_ids;
+        std::vector<float> weights;
+        float unknown_abd = 0.0f;
+        float total_abd = 0.0f;
+        bool has_abundance = false;
+    };
+
+    std::vector<PlotData> plot_data(n_plots);
+    int64_t max_species = 0;
+
+    for (int64_t pi = 0; pi < n_plots; ++pi) {
+        const auto& pid = plot_ids[pi];
+        auto it = plot_to_indices.find(pid);
+        if (it == plot_to_indices.end()) continue;
+
+        auto& pd = plot_data[pi];
+        const auto& indices = it->second;
+
+        // Collect raw entries for this plot
+        std::vector<float> abundances;
+        abundances.reserve(indices.size());
+
+        for (size_t idx : indices) {
+            const auto& r = records[idx];
+            int64_t sp_id = species_vocab_.encode(r.species_id);
+
+            auto git = species_to_genus_.find(r.species_id);
+            int64_t g_id = (git != species_to_genus_.end() && has_taxonomy)
+                           ? taxonomy_vocab_.encode_genus(git->second) : 0;
+            auto fit_it = species_to_family_.find(r.species_id);
+            int64_t f_id = (fit_it != species_to_family_.end() && has_taxonomy)
+                           ? taxonomy_vocab_.encode_family(fit_it->second) : 0;
+
+            pd.sp_ids.push_back(sp_id);
+            pd.g_ids.push_back(g_id);
+            pd.f_ids.push_back(f_id);
+            abundances.push_back(r.abundance);
+
+            if (r.abundance != 1.0f) pd.has_abundance = true;
+            pd.total_abd += r.abundance;
+            if (sp_id == 0) pd.unknown_abd += r.abundance;
+        }
+
+        // Compute weights
+        if (weighting_ == PoolWeighting::Rank) {
+            assign_rank_weights(abundances, pd.weights);
+        } else {
+            pd.weights.reserve(abundances.size());
+            for (float abd : abundances) {
+                pd.weights.push_back(compute_pool_weight(weighting_, abd, pd.total_abd));
+            }
+        }
+
+        max_species = std::max(max_species, static_cast<int64_t>(pd.sp_ids.size()));
+    }
+
+    if (max_species == 0) max_species = 1;  // Avoid 0-width tensors
+
+    // Build padded tensors
+    auto sp_ids = torch::zeros({n_plots, max_species}, torch::kInt64);
+    auto g_ids  = torch::zeros({n_plots, max_species}, torch::kInt64);
+    auto f_ids  = torch::zeros({n_plots, max_species}, torch::kInt64);
+    auto wts    = torch::zeros({n_plots, max_species}, torch::kFloat32);
+    auto msk    = torch::zeros({n_plots, max_species}, torch::kBool);
+    auto has_cov  = torch::zeros({n_plots}, torch::kFloat32);
+    auto unk_frac = torch::zeros({n_plots}, torch::kFloat32);
+
+    auto sp_a  = sp_ids.accessor<int64_t, 2>();
+    auto g_a   = g_ids.accessor<int64_t, 2>();
+    auto f_a   = f_ids.accessor<int64_t, 2>();
+    auto w_a   = wts.accessor<float, 2>();
+    auto m_a   = msk.accessor<bool, 2>();
+    auto hc_a  = has_cov.accessor<float, 1>();
+    auto uf_a  = unk_frac.accessor<float, 1>();
+
+    for (int64_t pi = 0; pi < n_plots; ++pi) {
+        const auto& pd = plot_data[pi];
+        const int64_t n_sp = static_cast<int64_t>(pd.sp_ids.size());
+        for (int64_t j = 0; j < n_sp; ++j) {
+            sp_a[pi][j] = pd.sp_ids[j];
+            g_a[pi][j]  = pd.g_ids[j];
+            f_a[pi][j]  = pd.f_ids[j];
+            w_a[pi][j]  = pd.weights[j];
+            m_a[pi][j]  = true;
+        }
+        hc_a[pi] = pd.has_abundance ? 1.0f : 0.0f;
+        uf_a[pi] = (pd.total_abd > 0.0f) ? pd.unknown_abd / pd.total_abd : 0.0f;
+    }
+
+    RankPoolEncodedData result;
+    result.species_ids      = sp_ids;
+    result.genus_ids        = g_ids;
+    result.family_ids       = f_ids;
+    result.weights          = wts;
+    result.mask             = msk;
+    result.has_cover        = has_cov;
+    result.unknown_fraction = unk_frac;
+    result.n_species_vocab  = species_vocab_.size();
+    result.n_genera_vocab   = taxonomy_vocab_.n_genera();
+    result.n_families_vocab = taxonomy_vocab_.n_families();
+    return result;
+}
+
+// =============================================================================
+// EmbeddingEncoder
+// =============================================================================
+
+EmbeddingEncoder::EmbeddingEncoder(int top_k_species, int top_k_taxonomy, SelectionMode selection)
+    : top_k_species_(top_k_species), top_k_taxonomy_(top_k_taxonomy), selection_(selection) {}
+
+void EmbeddingEncoder::fit(const std::vector<SpeciesRecord>& records) {
+    species_vocab_ = SpeciesVocab::from_records(records, /*min_count=*/1);
+    build_taxonomy_maps(records, taxonomy_vocab_, species_to_genus_, species_to_family_);
+    fitted_ = true;
+}
+
+EmbeddingEncodedData EmbeddingEncoder::transform(
+    const std::vector<SpeciesRecord>& records,
+    const std::vector<std::string>& plot_ids
+) const {
+    if (!fitted_) {
+        throw std::runtime_error("EmbeddingEncoder must be fit before transform");
+    }
+
+    const int64_t n_plots = static_cast<int64_t>(plot_ids.size());
+    const bool has_taxonomy = taxonomy_vocab_.n_genera() > 1;
+
+    // Group record indices by plot_id
+    std::unordered_map<std::string, std::vector<size_t>> plot_to_indices;
+    for (size_t i = 0; i < records.size(); ++i) {
+        plot_to_indices[records[i].plot_id].push_back(i);
+    }
+
+    // Allocate output tensors (fixed size per plot)
+    auto sp_ids   = torch::zeros({n_plots, static_cast<int64_t>(top_k_species_)}, torch::kInt64);
+    auto g_ids    = torch::zeros({n_plots, static_cast<int64_t>(top_k_taxonomy_)}, torch::kInt64);
+    auto f_ids    = torch::zeros({n_plots, static_cast<int64_t>(top_k_taxonomy_)}, torch::kInt64);
+    auto unk_frac = torch::zeros({n_plots}, torch::kFloat32);
+
+    auto sp_a = sp_ids.accessor<int64_t, 2>();
+    auto g_a  = g_ids.accessor<int64_t, 2>();
+    auto f_a  = f_ids.accessor<int64_t, 2>();
+    auto uf_a = unk_frac.accessor<float, 1>();
+
+    for (int64_t pi = 0; pi < n_plots; ++pi) {
+        const auto& pid = plot_ids[pi];
+        auto it = plot_to_indices.find(pid);
+        if (it == plot_to_indices.end()) continue;
+
+        const auto& indices = it->second;
+
+        // Build species abundance pairs for selection
+        std::vector<std::pair<std::string, float>> species_abd;
+        species_abd.reserve(indices.size());
+        float total_abd = 0.0f;
+        float unknown_abd = 0.0f;
+
+        for (size_t idx : indices) {
+            const auto& r = records[idx];
+            species_abd.emplace_back(r.species_id, r.abundance);
+            total_abd += r.abundance;
+            if (species_vocab_.encode(r.species_id) == 0) {
+                unknown_abd += r.abundance;
+            }
+        }
+
+        uf_a[pi] = (total_abd > 0.0f) ? unknown_abd / total_abd : 0.0f;
+
+        // Select top-k species using the existing apply_selection helper
+        auto selected_species = apply_selection(species_abd, selection_, top_k_species_);
+
+        // Encode selected species IDs (pad with 0 if fewer than top_k)
+        for (int j = 0; j < top_k_species_ && j < static_cast<int>(selected_species.size()); ++j) {
+            sp_a[pi][j] = species_vocab_.encode(selected_species[j].first);
+        }
+
+        // Build genus/family aggregation for taxonomy top-k
+        // Aggregate abundance per genus and family, then select top-k
+        if (has_taxonomy) {
+            std::unordered_map<std::string, float> genus_abd, family_abd;
+            for (size_t idx : indices) {
+                const auto& r = records[idx];
+                auto git = species_to_genus_.find(r.species_id);
+                if (git != species_to_genus_.end()) {
+                    genus_abd[git->second] += r.abundance;
+                }
+                auto fit_it = species_to_family_.find(r.species_id);
+                if (fit_it != species_to_family_.end()) {
+                    family_abd[fit_it->second] += r.abundance;
+                }
+            }
+
+            // Sort genera by abundance descending and take top-k
+            std::vector<std::pair<std::string, float>> genus_list(genus_abd.begin(), genus_abd.end());
+            std::sort(genus_list.begin(), genus_list.end(),
+                      [](const auto& a, const auto& b) { return a.second > b.second; });
+            for (int j = 0; j < top_k_taxonomy_ && j < static_cast<int>(genus_list.size()); ++j) {
+                g_a[pi][j] = taxonomy_vocab_.encode_genus(genus_list[j].first);
+            }
+
+            // Sort families by abundance descending and take top-k
+            std::vector<std::pair<std::string, float>> family_list(family_abd.begin(), family_abd.end());
+            std::sort(family_list.begin(), family_list.end(),
+                      [](const auto& a, const auto& b) { return a.second > b.second; });
+            for (int j = 0; j < top_k_taxonomy_ && j < static_cast<int>(family_list.size()); ++j) {
+                f_a[pi][j] = taxonomy_vocab_.encode_family(family_list[j].first);
+            }
+        }
+    }
+
+    EmbeddingEncodedData result;
+    result.species_ids      = sp_ids;
+    result.genus_ids        = g_ids;
+    result.family_ids       = f_ids;
+    result.unknown_fraction = unk_frac;
+    result.n_species_vocab  = species_vocab_.size();
+    result.n_genera_vocab   = taxonomy_vocab_.n_genera();
+    result.n_families_vocab = taxonomy_vocab_.n_families();
+    return result;
 }
 
 } // namespace resolve

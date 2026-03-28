@@ -41,6 +41,12 @@ public:
         torch::Tensor family_ids,
         torch::Tensor unknown_fraction,
         torch::Tensor unknown_count,
+        // Pool-style fields (rank_pool / transformer)
+        torch::Tensor pool_genus_ids = {},
+        torch::Tensor pool_family_ids = {},
+        torch::Tensor pool_weights = {},
+        torch::Tensor pool_mask = {},
+        torch::Tensor pool_has_cover = {},
         bool return_latent = false
     );
 

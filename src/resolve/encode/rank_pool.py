@@ -9,6 +9,7 @@ import numpy as np
 import polars as pl
 
 from resolve.data.dataset import ResolveDataset
+from resolve.data.roles import RoleMapping
 from resolve.encode._pool_base import BasePoolEncoder, extract_ragged_arrays, pad_ragged_encoded
 from resolve.encode.normalize import TaxonomyNormalizer
 
@@ -73,7 +74,7 @@ class RankPoolEncoder(BasePoolEncoder):
         return self
 
     def _compute_weights(
-        self, df: pl.DataFrame, abundance_col: str, roles: object
+        self, df: pl.DataFrame, abundance_col: str, roles: RoleMapping
     ) -> pl.DataFrame:
         """Compute per-species weights, including rank weighting."""
         if self.weighting == "rank":

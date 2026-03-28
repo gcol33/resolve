@@ -502,4 +502,166 @@ PretrainResult SCARFPretrainer::pretrain(
     return result;
 }
 
+// =============================================================================
+// Masked Species Pretraining (BERT-style MLM)
+// =============================================================================
+
+MaskedSpeciesHeadImpl::MaskedSpeciesHeadImpl(int64_t d_model, int64_t n_species) {
+    proj_ = register_module("proj",
+        torch::nn::Linear(torch::nn::LinearOptions(d_model, n_species).bias(false)));
+}
+
+torch::Tensor MaskedSpeciesHeadImpl::forward(torch::Tensor token_embeddings) {
+    return proj_->forward(token_embeddings);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+mask_species_batch(
+    torch::Tensor species_ids,
+    torch::Tensor valid_mask,
+    int64_t n_species,
+    float mask_prob
+) {
+    auto device = species_ids.device();
+    auto masked_ids = species_ids.clone();
+
+    // Select positions to mask: valid positions with probability mask_prob
+    auto rand_vals = torch::rand_like(valid_mask.to(torch::kFloat32));
+    auto mlm_mask = valid_mask & (rand_vals < mask_prob);
+
+    // Save targets before masking
+    auto mlm_targets = species_ids.index({mlm_mask}).clone();
+
+    // BERT-style 80/10/10 split
+    auto n_masked = mlm_mask.sum().item<int64_t>();
+    if (n_masked > 0) {
+        auto action_rand = torch::rand({n_masked}, torch::TensorOptions().device(device));
+
+        // 80% → replace with 0 (mask token — encoder applies mask_embedding)
+        auto mask_replace = action_rand < 0.8f;
+        // 10% → random species ID (1 to n_species-1)
+        auto mask_random = (action_rand >= 0.8f) & (action_rand < 0.9f);
+        // 10% → keep original (no action needed)
+
+        // Apply masking
+        auto masked_positions_flat = mlm_mask.nonzero();
+        for (int64_t i = 0; i < n_masked; ++i) {
+            if (mask_replace[i].item<bool>()) {
+                masked_ids.index_put_(
+                    {masked_positions_flat[i][0], masked_positions_flat[i][1]}, 0);
+            } else if (mask_random[i].item<bool>()) {
+                auto random_id = torch::randint(1, n_species, {1},
+                    torch::TensorOptions().dtype(torch::kInt64).device(device));
+                masked_ids.index_put_(
+                    {masked_positions_flat[i][0], masked_positions_flat[i][1]}, random_id.item<int64_t>());
+            }
+        }
+    }
+
+    return {masked_ids, mlm_mask, mlm_targets};
+}
+
+MaskedSpeciesPretrainer::MaskedSpeciesPretrainer(
+    PlotEncoderTransformer encoder,
+    int64_t n_species,
+    const MLMPretrainConfig& config
+) : encoder_(std::move(encoder)),
+    n_species_(n_species),
+    config_(config)
+{
+    mlm_head_ = MaskedSpeciesHead(encoder_->d_model(), n_species);
+}
+
+std::vector<float> MaskedSpeciesPretrainer::pretrain(
+    torch::Tensor species_ids,
+    torch::Tensor genus_ids,
+    torch::Tensor family_ids,
+    torch::Tensor weights,
+    torch::Tensor valid_mask
+) {
+    auto device = config_.device;
+    species_ids = species_ids.to(device);
+    if (genus_ids.defined()) genus_ids = genus_ids.to(device);
+    if (family_ids.defined()) family_ids = family_ids.to(device);
+    if (weights.defined()) weights = weights.to(device);
+    valid_mask = valid_mask.to(device);
+
+    encoder_->to(device);
+    mlm_head_->to(device);
+    encoder_->train();
+    mlm_head_->train();
+
+    // Collect all trainable parameters
+    std::vector<torch::Tensor> all_params;
+    for (auto& p : encoder_->parameters()) all_params.push_back(p);
+    for (auto& p : mlm_head_->parameters()) all_params.push_back(p);
+
+    auto optimizer = torch::optim::AdamW(
+        all_params,
+        torch::optim::AdamWOptions(config_.pretrain_lr)
+            .weight_decay(config_.pretrain_weight_decay));
+
+    int64_t n_samples = species_ids.size(0);
+    std::vector<float> loss_history;
+
+    for (int epoch = 0; epoch < config_.pretrain_epochs; ++epoch) {
+        float epoch_loss = 0.0f;
+        int n_batches = 0;
+
+        // Shuffle
+        auto perm = torch::randperm(n_samples, torch::TensorOptions().dtype(torch::kInt64));
+
+        for (int64_t start = 0; start < n_samples; start += config_.batch_size) {
+            int64_t end = std::min(start + static_cast<int64_t>(config_.batch_size), n_samples);
+            auto idx = perm.slice(0, start, end).to(device);
+
+            auto batch_sp = species_ids.index_select(0, idx);
+            auto batch_mask = valid_mask.index_select(0, idx);
+            auto batch_g = (genus_ids.defined() && genus_ids.numel() > 0)
+                ? genus_ids.index_select(0, idx) : torch::Tensor();
+            auto batch_f = (family_ids.defined() && family_ids.numel() > 0)
+                ? family_ids.index_select(0, idx) : torch::Tensor();
+            auto batch_w = (weights.defined() && weights.numel() > 0)
+                ? weights.index_select(0, idx) : torch::Tensor();
+
+            // Apply BERT masking
+            auto [masked_ids, mlm_mask, mlm_targets] =
+                mask_species_batch(batch_sp, batch_mask, n_species_, config_.mask_prob);
+
+            if (mlm_targets.numel() == 0) continue;
+
+            // Get pre-pooling token embeddings
+            auto tokens = encoder_->forward_tokens(
+                masked_ids, batch_g, batch_f, batch_w, batch_mask, mlm_mask);
+
+            // Extract masked positions and project to species logits
+            auto masked_tokens = tokens.index({mlm_mask});  // (N_masked, d_model)
+            auto logits = mlm_head_->forward(masked_tokens);  // (N_masked, n_species)
+
+            // Cross-entropy loss (ignore padding index 0)
+            auto loss = torch::nn::functional::cross_entropy(
+                logits, mlm_targets,
+                torch::nn::functional::CrossEntropyFuncOptions().ignore_index(0));
+
+            optimizer.zero_grad();
+            loss.backward();
+            optimizer.step();
+
+            epoch_loss += loss.item<float>();
+            n_batches++;
+        }
+
+        float avg_loss = (n_batches > 0) ? epoch_loss / n_batches : 0.0f;
+        loss_history.push_back(avg_loss);
+
+        if (config_.log) {
+            config_.log("MLM pretrain epoch " + std::to_string(epoch + 1) +
+                       "/" + std::to_string(config_.pretrain_epochs) +
+                       " loss=" + std::to_string(avg_loss));
+        }
+    }
+
+    return loss_history;
+}
+
 } // namespace resolve

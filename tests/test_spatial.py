@@ -1,7 +1,5 @@
 """Tests for SpatialBlockSplitter."""
 
-import warnings
-
 import numpy as np
 import pytest
 
@@ -15,7 +13,7 @@ class TestSpatialBlockSplitter:
         """All plots appear in exactly one test fold."""
         rng = np.random.default_rng(0)
         coords = rng.uniform(-10, 10, size=(200, 2)).astype(np.float32)
-        splitter = SpatialBlockSplitter(block_size=1.0, n_splits=5, seed=42)
+        splitter = SpatialBlockSplitter(block_deg=1.0, n_splits=5, seed=42)
         folds = splitter.split(coords)
 
         assert len(folds) == 5
@@ -29,7 +27,7 @@ class TestSpatialBlockSplitter:
         """No plot appears in both train and test within a fold."""
         rng = np.random.default_rng(1)
         coords = rng.uniform(0, 5, size=(100, 2)).astype(np.float32)
-        splitter = SpatialBlockSplitter(block_size=0.5, n_splits=5, seed=7)
+        splitter = SpatialBlockSplitter(block_deg=0.5, n_splits=5, seed=7)
         folds = splitter.split(coords)
 
         for k, (train_idx, test_idx) in enumerate(folds):
@@ -41,7 +39,7 @@ class TestSpatialBlockSplitter:
         n = 150
         rng = np.random.default_rng(2)
         coords = rng.uniform(-5, 5, size=(n, 2)).astype(np.float32)
-        splitter = SpatialBlockSplitter(block_size=0.5, n_splits=3, seed=0)
+        splitter = SpatialBlockSplitter(block_deg=0.5, n_splits=3, seed=0)
         folds = splitter.split(coords)
 
         all_indices = set(range(n))
@@ -69,7 +67,7 @@ class TestSpatialBlockSplitter:
             [10.5, 10.6],
         ], dtype=np.float32)
 
-        splitter = SpatialBlockSplitter(block_size=1.0, n_splits=3, seed=42)
+        splitter = SpatialBlockSplitter(block_deg=1.0, n_splits=3, seed=42)
         folds = splitter.split(coords)
 
         # Within each fold, check that cluster members are always on the same side
@@ -97,8 +95,8 @@ class TestSpatialBlockSplitter:
         rng = np.random.default_rng(3)
         coords = rng.uniform(0, 10, size=(80, 2)).astype(np.float32)
 
-        folds_a = SpatialBlockSplitter(block_size=0.5, n_splits=4, seed=99).split(coords)
-        folds_b = SpatialBlockSplitter(block_size=0.5, n_splits=4, seed=99).split(coords)
+        folds_a = SpatialBlockSplitter(block_deg=0.5, n_splits=4, seed=99).split(coords)
+        folds_b = SpatialBlockSplitter(block_deg=0.5, n_splits=4, seed=99).split(coords)
 
         for k in range(4):
             np.testing.assert_array_equal(folds_a[k][0], folds_b[k][0])
@@ -109,8 +107,8 @@ class TestSpatialBlockSplitter:
         rng = np.random.default_rng(4)
         coords = rng.uniform(0, 10, size=(100, 2)).astype(np.float32)
 
-        folds_a = SpatialBlockSplitter(block_size=0.5, n_splits=5, seed=1).split(coords)
-        folds_b = SpatialBlockSplitter(block_size=0.5, n_splits=5, seed=2).split(coords)
+        folds_a = SpatialBlockSplitter(block_deg=0.5, n_splits=5, seed=1).split(coords)
+        folds_b = SpatialBlockSplitter(block_deg=0.5, n_splits=5, seed=2).split(coords)
 
         # At least one fold should differ
         any_different = False
@@ -130,10 +128,10 @@ class TestSpatialBlockSplitter:
 
     def test_invalid_params(self):
         """Raises on invalid constructor params."""
-        with pytest.raises(ValueError, match="block_size"):
-            SpatialBlockSplitter(block_size=0)
-        with pytest.raises(ValueError, match="block_size"):
-            SpatialBlockSplitter(block_size=-1)
+        with pytest.raises(ValueError, match="block_deg"):
+            SpatialBlockSplitter(block_deg=0)
+        with pytest.raises(ValueError, match="block_deg"):
+            SpatialBlockSplitter(block_deg=-1)
         with pytest.raises(ValueError, match="n_splits"):
             SpatialBlockSplitter(n_splits=1)
 
@@ -146,7 +144,7 @@ class TestSpatialBlockSplitter:
             [30.55, 120.35],   # Same block
         ], dtype=np.float32)
 
-        splitter = SpatialBlockSplitter(block_size=0.1, n_splits=2, seed=0)
+        splitter = SpatialBlockSplitter(block_deg=0.1, n_splits=2, seed=0)
         folds = splitter.split(coords)
 
         # Both southern plots should be in same fold
@@ -166,7 +164,7 @@ class TestSpatialBlockSplitter:
             [0.03, 0.03],
         ], dtype=np.float32)
 
-        splitter = SpatialBlockSplitter(block_size=1.0, n_splits=3, seed=0)
+        splitter = SpatialBlockSplitter(block_deg=1.0, n_splits=3, seed=0)
         folds = splitter.split(coords)
 
         # Only one fold should have test data (single block)
@@ -180,24 +178,17 @@ class TestBlockDeg:
     """Tests for the block_deg mode."""
 
     def test_block_deg_scalar(self):
-        """Scalar block_deg produces valid folds identical to old block_size."""
+        """Scalar block_deg produces valid folds."""
         rng = np.random.default_rng(0)
         coords = rng.uniform(-10, 10, size=(200, 2)).astype(np.float32)
 
-        folds_deg = SpatialBlockSplitter(
+        folds = SpatialBlockSplitter(
             block_deg=1.0, n_splits=5, seed=42,
         ).split(coords)
 
-        # Same result as deprecated block_size
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            folds_old = SpatialBlockSplitter(
-                block_size=1.0, n_splits=5, seed=42,
-            ).split(coords)
-
-        for k in range(5):
-            np.testing.assert_array_equal(folds_deg[k][0], folds_old[k][0])
-            np.testing.assert_array_equal(folds_deg[k][1], folds_old[k][1])
+        assert len(folds) == 5
+        all_test = np.concatenate([test for _, test in folds])
+        assert len(np.unique(all_test)) == 200
 
     def test_block_deg_tuple(self):
         """Tuple block_deg creates rectangular blocks."""
@@ -377,59 +368,12 @@ class TestMutualExclusivity:
                 block_deg=1.0, block_ids=np.array([0, 1, 2]),
             )
 
-    def test_block_size_combined_with_new_raises(self):
-        """Mixing deprecated block_size with new params raises."""
-        with pytest.raises(ValueError, match="Only one"):
-            SpatialBlockSplitter(block_size=1.0, block_deg=0.5)
-
-        with pytest.raises(ValueError, match="Only one"):
-            SpatialBlockSplitter(block_size=1.0, block_km=100.0)
-
-
-class TestDeprecation:
-    """Tests for backward compatibility with block_size."""
-
-    def test_block_size_emits_warning(self):
-        """block_size emits DeprecationWarning."""
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            SpatialBlockSplitter(block_size=1.0)
-            assert len(w) == 1
-            assert issubclass(w[0].category, DeprecationWarning)
-            assert "block_size" in str(w[0].message)
-
-    def test_block_size_matches_block_deg(self):
-        """block_size=X produces identical results to block_deg=X."""
-        rng = np.random.default_rng(0)
-        coords = rng.uniform(0, 10, size=(100, 2)).astype(np.float32)
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            folds_old = SpatialBlockSplitter(
-                block_size=0.5, n_splits=5, seed=42,
-            ).split(coords)
-
-        folds_new = SpatialBlockSplitter(
-            block_deg=0.5, n_splits=5, seed=42,
-        ).split(coords)
-
-        for k in range(5):
-            np.testing.assert_array_equal(folds_old[k][0], folds_new[k][0])
-            np.testing.assert_array_equal(folds_old[k][1], folds_new[k][1])
-
-
 class TestDefaults:
     """Tests for default behavior."""
 
     def test_default_no_args(self):
-        """SpatialBlockSplitter() defaults to block_deg=0.1, no warning."""
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            splitter = SpatialBlockSplitter()
-            # No DeprecationWarning
-            dep_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
-            assert len(dep_warnings) == 0
-
+        """SpatialBlockSplitter() defaults to block_deg=0.1."""
+        splitter = SpatialBlockSplitter()
         assert splitter._mode == "block_deg"
         assert splitter._lat_size == 0.1
         assert splitter._lon_size == 0.1

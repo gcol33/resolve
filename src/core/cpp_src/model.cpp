@@ -19,6 +19,12 @@ ResolveModelImpl::ResolveModelImpl(
 
     int64_t n_continuous_base = n_coords + schema.covariate_names.size() + n_unknown_features;
 
+    // Pre-compute vocab sizes for taxonomy (avoids repeating nested ternaries)
+    auto genus_vocab_size = schema.has_taxonomy
+        ? (schema.n_genera_vocab > 0 ? schema.n_genera_vocab : schema.n_genera + 1) : 0;
+    auto family_vocab_size = schema.has_taxonomy
+        ? (schema.n_families_vocab > 0 ? schema.n_families_vocab : schema.n_families + 1) : 0;
+
     // Check if using advanced architecture (non-MLP)
     bool use_adapter = (config.encoder_architecture != EncoderArchitecture::MLP &&
                         config.encoder_architecture != EncoderArchitecture::TraitNet);
@@ -85,8 +91,8 @@ ResolveModelImpl::ResolveModelImpl(
         encoder_embed_ = register_module("encoder", PlotEncoderEmbed(
             n_continuous_base,
             schema.n_species_vocab,
-            schema.has_taxonomy ? (schema.n_genera_vocab > 0 ? schema.n_genera_vocab : schema.n_genera + 1) : 0,
-            schema.has_taxonomy ? (schema.n_families_vocab > 0 ? schema.n_families_vocab : schema.n_families + 1) : 0,
+            genus_vocab_size,
+            family_vocab_size,
             config.species_embed_dim,
             config.genus_emb_dim,
             config.family_emb_dim,
@@ -98,16 +104,47 @@ ResolveModelImpl::ResolveModelImpl(
         ));
     }
     else if (config.species_encoding == SpeciesEncodingMode::RankPool) {
-        throw std::runtime_error(
-            "species_encoding=RankPool is not yet implemented in the C++ backend. "
-            "Use the Python backend (resolve.model) for rank-pool encoding."
-        );
+        if (schema.n_species_vocab == 0) {
+            throw std::runtime_error(
+                "species_encoding=RankPool requires n_species_vocab > 0 in schema"
+            );
+        }
+        encoder_rank_pool_ = register_module("encoder", PlotEncoderRankPool(
+            n_continuous_base,
+            schema.n_species_vocab,
+            genus_vocab_size,
+            family_vocab_size,
+            config.species_embed_dim,
+            config.genus_emb_dim,
+            config.family_emb_dim,
+            config.hidden_dims,
+            mlp_config,
+            config.cover_dropout,
+            config.tabm
+        ));
     }
     else if (config.species_encoding == SpeciesEncodingMode::Transformer) {
-        throw std::runtime_error(
-            "species_encoding=Transformer is not yet implemented in the C++ backend. "
-            "Use the Python backend (resolve.model) for transformer encoding."
-        );
+        if (schema.n_species_vocab == 0) {
+            throw std::runtime_error(
+                "species_encoding=Transformer requires n_species_vocab > 0 in schema"
+            );
+        }
+        encoder_transformer_ = register_module("encoder", PlotEncoderTransformer(
+            n_continuous_base,
+            schema.n_species_vocab,
+            genus_vocab_size,
+            family_vocab_size,
+            config.d_model,
+            config.n_heads,
+            config.n_attention_layers,
+            config.transformer_ff_dim,
+            config.transformer_pooling,
+            config.transformer_dropout,
+            config.hidden_dims,
+            mlp_config,
+            config.cover_dropout,
+            config.tabm
+        ));
     }
     else {
         // Sparse mode (uses_explicit_vector=true): explicit species vector
@@ -186,6 +223,10 @@ int64_t ResolveModelImpl::latent_dim() const {
         return adapter_->latent_dim();
     } else if (encoder_moe_) {
         return encoder_moe_->latent_dim();
+    } else if (encoder_rank_pool_) {
+        return encoder_rank_pool_->latent_dim();
+    } else if (encoder_transformer_) {
+        return encoder_transformer_->latent_dim();
     } else if (encoder_hash_) {
         return encoder_hash_->latent_dim();
     } else if (encoder_embed_) {
@@ -200,14 +241,26 @@ torch::Tensor ResolveModelImpl::encode(
     torch::Tensor genus_ids,
     torch::Tensor family_ids,
     torch::Tensor species_ids,
-    torch::Tensor species_vector
+    torch::Tensor species_vector,
+    torch::Tensor pool_genus_ids,
+    torch::Tensor pool_family_ids,
+    torch::Tensor pool_weights,
+    torch::Tensor pool_mask,
+    torch::Tensor pool_has_cover
 ) {
     torch::Tensor latent;
     if (adapter_) {
         latent = adapter_->forward(continuous, genus_ids, family_ids, species_ids, species_vector);
     } else if (encoder_moe_) {
-        // Hash MoE encoder - use forward_simple for inference/latent extraction
         latent = encoder_moe_->forward_simple(continuous, genus_ids, family_ids);
+    } else if (encoder_rank_pool_) {
+        latent = encoder_rank_pool_->forward(
+            continuous, species_ids, pool_genus_ids, pool_family_ids,
+            pool_weights, pool_mask, pool_has_cover);
+    } else if (encoder_transformer_) {
+        latent = encoder_transformer_->forward(
+            continuous, species_ids, pool_genus_ids, pool_family_ids,
+            pool_weights, pool_mask, pool_has_cover);
     } else if (encoder_hash_) {
         latent = encoder_hash_->forward(continuous, genus_ids, family_ids);
     } else if (encoder_embed_) {
@@ -216,7 +269,6 @@ torch::Tensor ResolveModelImpl::encode(
         latent = encoder_sparse_->forward(continuous, species_vector, genus_ids, family_ids);
     }
 
-    // Apply model-level MoE for embed/sparse modes
     if (post_moe_) {
         latent = post_moe_->forward_simple(latent);
     }
@@ -228,7 +280,12 @@ std::pair<torch::Tensor, torch::Tensor> ResolveModelImpl::encode_with_aux(
     torch::Tensor genus_ids,
     torch::Tensor family_ids,
     torch::Tensor species_ids,
-    torch::Tensor species_vector
+    torch::Tensor species_vector,
+    torch::Tensor pool_genus_ids,
+    torch::Tensor pool_family_ids,
+    torch::Tensor pool_weights,
+    torch::Tensor pool_mask,
+    torch::Tensor pool_has_cover
 ) {
     if (adapter_) {
         auto latent = adapter_->forward(continuous, genus_ids, family_ids, species_ids, species_vector);
@@ -238,12 +295,18 @@ std::pair<torch::Tensor, torch::Tensor> ResolveModelImpl::encode_with_aux(
         }
         return {latent, torch::Tensor()};
     } else if (encoder_moe_) {
-        // Hash MoE encoder returns (latent, aux_loss)
         return encoder_moe_->forward(continuous, genus_ids, family_ids);
     } else {
-        // Standard encoder + optional post_moe_
         torch::Tensor latent;
-        if (encoder_hash_) {
+        if (encoder_rank_pool_) {
+            latent = encoder_rank_pool_->forward(
+                continuous, species_ids, pool_genus_ids, pool_family_ids,
+                pool_weights, pool_mask, pool_has_cover);
+        } else if (encoder_transformer_) {
+            latent = encoder_transformer_->forward(
+                continuous, species_ids, pool_genus_ids, pool_family_ids,
+                pool_weights, pool_mask, pool_has_cover);
+        } else if (encoder_hash_) {
             latent = encoder_hash_->forward(continuous, genus_ids, family_ids);
         } else if (encoder_embed_) {
             latent = encoder_embed_->forward(continuous, species_ids, genus_ids, family_ids);
@@ -263,10 +326,15 @@ std::unordered_map<std::string, torch::Tensor> ResolveModelImpl::forward(
     torch::Tensor genus_ids,
     torch::Tensor family_ids,
     torch::Tensor species_ids,
-    torch::Tensor species_vector
+    torch::Tensor species_vector,
+    torch::Tensor pool_genus_ids,
+    torch::Tensor pool_family_ids,
+    torch::Tensor pool_weights,
+    torch::Tensor pool_mask,
+    torch::Tensor pool_has_cover
 ) {
-    // Delegate to forward_with_aux and discard auxiliary loss
-    return forward_with_aux(continuous, genus_ids, family_ids, species_ids, species_vector).outputs;
+    return forward_with_aux(continuous, genus_ids, family_ids, species_ids, species_vector,
+                            pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover).outputs;
 }
 
 ModelForwardResult ResolveModelImpl::forward_with_aux(
@@ -274,9 +342,15 @@ ModelForwardResult ResolveModelImpl::forward_with_aux(
     torch::Tensor genus_ids,
     torch::Tensor family_ids,
     torch::Tensor species_ids,
-    torch::Tensor species_vector
+    torch::Tensor species_vector,
+    torch::Tensor pool_genus_ids,
+    torch::Tensor pool_family_ids,
+    torch::Tensor pool_weights,
+    torch::Tensor pool_mask,
+    torch::Tensor pool_has_cover
 ) {
-    auto [latent, aux_loss] = encode_with_aux(continuous, genus_ids, family_ids, species_ids, species_vector);
+    auto [latent, aux_loss] = encode_with_aux(continuous, genus_ids, family_ids, species_ids, species_vector,
+                                               pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
 
     std::unordered_map<std::string, torch::Tensor> outputs;
     for (auto& [name, head] : heads_) {
@@ -303,9 +377,15 @@ torch::Tensor ResolveModelImpl::get_latent(
     torch::Tensor genus_ids,
     torch::Tensor family_ids,
     torch::Tensor species_ids,
-    torch::Tensor species_vector
+    torch::Tensor species_vector,
+    torch::Tensor pool_genus_ids,
+    torch::Tensor pool_family_ids,
+    torch::Tensor pool_weights,
+    torch::Tensor pool_mask,
+    torch::Tensor pool_has_cover
 ) {
-    return encode(continuous, genus_ids, family_ids, species_ids, species_vector);
+    return encode(continuous, genus_ids, family_ids, species_ids, species_vector,
+                  pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
 }
 
 TaskHead& ResolveModelImpl::head(const std::string& name) {
@@ -353,6 +433,8 @@ torch::Tensor ResolveModelImpl::get_taxonomy_weights_(
 }
 
 torch::Tensor ResolveModelImpl::get_genus_weights() const {
+    if (encoder_rank_pool_) return encoder_rank_pool_->get_genus_weights();
+    if (encoder_transformer_) return encoder_transformer_->get_genus_weights();
     return get_taxonomy_weights_(
         &PlotEncoderMoEImpl::get_genus_weights,
         &PlotEncoderImpl::get_genus_weights,
@@ -362,6 +444,8 @@ torch::Tensor ResolveModelImpl::get_genus_weights() const {
 }
 
 torch::Tensor ResolveModelImpl::get_family_weights() const {
+    if (encoder_rank_pool_) return encoder_rank_pool_->get_family_weights();
+    if (encoder_transformer_) return encoder_transformer_->get_family_weights();
     return get_taxonomy_weights_(
         &PlotEncoderMoEImpl::get_family_weights,
         &PlotEncoderImpl::get_family_weights,
@@ -371,7 +455,8 @@ torch::Tensor ResolveModelImpl::get_family_weights() const {
 }
 
 torch::Tensor ResolveModelImpl::get_species_weights() const {
-    // Only embed mode has species embeddings
+    if (encoder_rank_pool_) return encoder_rank_pool_->get_species_weights();
+    if (encoder_transformer_) return encoder_transformer_->get_species_weights();
     if (encoder_embed_) return encoder_embed_->get_species_weights();
     return torch::Tensor();
 }

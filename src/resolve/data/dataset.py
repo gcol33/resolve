@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -63,15 +63,9 @@ class ResolveSchema:
     n_genera_vocab: int = 0
     n_families_vocab: int = 0
     # Categorical feature configuration
-    categorical_names: list[str] = None  # type: ignore[assignment]
-    categorical_vocab_sizes: dict[str, int] = None  # type: ignore[assignment]
+    categorical_names: list[str] = field(default_factory=list)
+    categorical_vocab_sizes: dict[str, int] = field(default_factory=dict)
     categorical_embed_dim: int = 8
-
-    def __post_init__(self):
-        if self.categorical_names is None:
-            self.categorical_names = []
-        if self.categorical_vocab_sizes is None:
-            self.categorical_vocab_sizes = {}
 
     @property
     def has_categoricals(self) -> bool:

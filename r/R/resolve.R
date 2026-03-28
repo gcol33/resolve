@@ -350,8 +350,8 @@ resolve.train <- function(dataset,
   }
 
   # Validate speciesEncoding
-  if (!speciesEncoding %in% c("hash", "embed")) {
-    stop("speciesEncoding must be 'hash' or 'embed'")
+  if (!speciesEncoding %in% c("hash", "embed", "sparse", "rank_pool", "transformer")) {
+    stop("speciesEncoding must be one of 'hash', 'embed', 'sparse', 'rank_pool', 'transformer'")
   }
 
   # For embed mode, verify dataset has speciesIds
@@ -804,6 +804,14 @@ resolve.train.dataset <- function(dataset,
                                   seed = 42L,
                                   savePath = NULL,
                                   lossConfig = "mae",
+                                  # RankPool / Transformer options
+                                  coverDropout = 0.0,
+                                  dModel = 128L,
+                                  nHeads = 4L,
+                                  nAttentionLayers = 0L,
+                                  transformerFfDim = 256L,
+                                  transformerPooling = "attention",
+                                  transformerDropout = 0.1,
                                   verbose = TRUE) {
   # Input validation
   if (!inherits(dataset, "Rcpp_ResolveDataset")) {
@@ -851,7 +859,14 @@ resolve.train.dataset <- function(dataset,
     top_k = datasetConfig$top_k,
     top_k_species = datasetConfig$top_k_species,
     hidden_dims = hiddenDims,
-    dropout = 0.3
+    dropout = 0.3,
+    cover_dropout = coverDropout,
+    d_model = as.integer(dModel),
+    n_heads = as.integer(nHeads),
+    n_attention_layers = as.integer(nAttentionLayers),
+    transformer_ff_dim = as.integer(transformerFfDim),
+    transformer_pooling = transformerPooling,
+    transformer_dropout = transformerDropout
   )
 
   # Create model

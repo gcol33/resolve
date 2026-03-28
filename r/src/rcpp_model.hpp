@@ -83,33 +83,78 @@ public:
             config.dropout = config_list["dropout"];
         }
 
+        // RankPool / Transformer fields
+        if (config_list.containsElementNamed("cover_dropout")) {
+            config.cover_dropout = as<float>(config_list["cover_dropout"]);
+        }
+        if (config_list.containsElementNamed("d_model")) {
+            config.d_model = config_list["d_model"];
+        }
+        if (config_list.containsElementNamed("n_heads")) {
+            config.n_heads = config_list["n_heads"];
+        }
+        if (config_list.containsElementNamed("n_attention_layers")) {
+            config.n_attention_layers = config_list["n_attention_layers"];
+        }
+        if (config_list.containsElementNamed("transformer_ff_dim")) {
+            config.transformer_ff_dim = config_list["transformer_ff_dim"];
+        }
+        if (config_list.containsElementNamed("transformer_pooling")) {
+            config.transformer_pooling = as<std::string>(config_list["transformer_pooling"]);
+        }
+        if (config_list.containsElementNamed("transformer_dropout")) {
+            config.transformer_dropout = as<float>(config_list["transformer_dropout"]);
+        }
+
         model_ = std::make_shared<resolve::ResolveModel>(schema, config);
+    }
+
+    // Helper to unpack optional pool fields from R Nullable types
+    struct PoolFields {
+        torch::Tensor genus_ids, family_ids, weights, mask, has_cover;
+    };
+
+    static PoolFields unpack_pool(
+        Nullable<IntegerMatrix> pool_genus_ids,
+        Nullable<IntegerMatrix> pool_family_ids,
+        Nullable<NumericMatrix> pool_weights,
+        Nullable<IntegerMatrix> pool_mask,
+        Nullable<NumericVector> pool_has_cover
+    ) {
+        PoolFields p;
+        if (pool_genus_ids.isNotNull()) p.genus_ids = r_int_mat_to_tensor(as<IntegerMatrix>(pool_genus_ids));
+        if (pool_family_ids.isNotNull()) p.family_ids = r_int_mat_to_tensor(as<IntegerMatrix>(pool_family_ids));
+        if (pool_weights.isNotNull()) p.weights = r_mat_to_tensor(as<NumericMatrix>(pool_weights));
+        if (pool_mask.isNotNull()) p.mask = r_int_mat_to_tensor(as<IntegerMatrix>(pool_mask)).to(torch::kBool);
+        if (pool_has_cover.isNotNull()) p.has_cover = r_vec_to_tensor(as<NumericVector>(pool_has_cover));
+        return p;
     }
 
     List forward(
         NumericMatrix continuous,
-        Nullable<NumericMatrix> genus_ids = R_NilValue,
-        Nullable<NumericMatrix> family_ids = R_NilValue,
-        Nullable<NumericMatrix> species_ids = R_NilValue,
-        Nullable<NumericMatrix> species_vector = R_NilValue
+        Nullable<IntegerMatrix> genus_ids = R_NilValue,
+        Nullable<IntegerMatrix> family_ids = R_NilValue,
+        Nullable<IntegerMatrix> species_ids = R_NilValue,
+        Nullable<NumericMatrix> species_vector = R_NilValue,
+        Nullable<IntegerMatrix> pool_genus_ids = R_NilValue,
+        Nullable<IntegerMatrix> pool_family_ids = R_NilValue,
+        Nullable<NumericMatrix> pool_weights = R_NilValue,
+        Nullable<IntegerMatrix> pool_mask = R_NilValue,
+        Nullable<NumericVector> pool_has_cover = R_NilValue
     ) {
         torch::Tensor cont_t = r_mat_to_tensor(continuous);
         torch::Tensor genus_t, family_t, species_id_t, species_vec_t;
 
-        if (genus_ids.isNotNull()) {
-            genus_t = r_int_mat_to_tensor(as<IntegerMatrix>(genus_ids));
-        }
-        if (family_ids.isNotNull()) {
-            family_t = r_int_mat_to_tensor(as<IntegerMatrix>(family_ids));
-        }
-        if (species_ids.isNotNull()) {
-            species_id_t = r_int_mat_to_tensor(as<IntegerMatrix>(species_ids));
-        }
-        if (species_vector.isNotNull()) {
-            species_vec_t = r_mat_to_tensor(as<NumericMatrix>(species_vector));
-        }
+        if (genus_ids.isNotNull()) genus_t = r_int_mat_to_tensor(as<IntegerMatrix>(genus_ids));
+        if (family_ids.isNotNull()) family_t = r_int_mat_to_tensor(as<IntegerMatrix>(family_ids));
+        if (species_ids.isNotNull()) species_id_t = r_int_mat_to_tensor(as<IntegerMatrix>(species_ids));
+        if (species_vector.isNotNull()) species_vec_t = r_mat_to_tensor(as<NumericMatrix>(species_vector));
 
-        auto outputs = (*model_)->forward(cont_t, genus_t, family_t, species_id_t, species_vec_t);
+        auto pool = unpack_pool(pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
+
+        auto outputs = (*model_)->forward(
+            cont_t, genus_t, family_t, species_id_t, species_vec_t,
+            pool.genus_ids, pool.family_ids, pool.weights, pool.mask, pool.has_cover);
 
         List result;
         for (const auto& [name, tensor] : outputs) {
@@ -120,28 +165,29 @@ public:
 
     NumericVector get_latent(
         NumericMatrix continuous,
-        Nullable<NumericMatrix> genus_ids = R_NilValue,
-        Nullable<NumericMatrix> family_ids = R_NilValue,
-        Nullable<NumericMatrix> species_ids = R_NilValue,
-        Nullable<NumericMatrix> species_vector = R_NilValue
+        Nullable<IntegerMatrix> genus_ids = R_NilValue,
+        Nullable<IntegerMatrix> family_ids = R_NilValue,
+        Nullable<IntegerMatrix> species_ids = R_NilValue,
+        Nullable<NumericMatrix> species_vector = R_NilValue,
+        Nullable<IntegerMatrix> pool_genus_ids = R_NilValue,
+        Nullable<IntegerMatrix> pool_family_ids = R_NilValue,
+        Nullable<NumericMatrix> pool_weights = R_NilValue,
+        Nullable<IntegerMatrix> pool_mask = R_NilValue,
+        Nullable<NumericVector> pool_has_cover = R_NilValue
     ) {
         torch::Tensor cont_t = r_mat_to_tensor(continuous);
         torch::Tensor genus_t, family_t, species_id_t, species_vec_t;
 
-        if (genus_ids.isNotNull()) {
-            genus_t = r_int_mat_to_tensor(as<IntegerMatrix>(genus_ids));
-        }
-        if (family_ids.isNotNull()) {
-            family_t = r_int_mat_to_tensor(as<IntegerMatrix>(family_ids));
-        }
-        if (species_ids.isNotNull()) {
-            species_id_t = r_int_mat_to_tensor(as<IntegerMatrix>(species_ids));
-        }
-        if (species_vector.isNotNull()) {
-            species_vec_t = r_mat_to_tensor(as<NumericMatrix>(species_vector));
-        }
+        if (genus_ids.isNotNull()) genus_t = r_int_mat_to_tensor(as<IntegerMatrix>(genus_ids));
+        if (family_ids.isNotNull()) family_t = r_int_mat_to_tensor(as<IntegerMatrix>(family_ids));
+        if (species_ids.isNotNull()) species_id_t = r_int_mat_to_tensor(as<IntegerMatrix>(species_ids));
+        if (species_vector.isNotNull()) species_vec_t = r_mat_to_tensor(as<NumericMatrix>(species_vector));
 
-        torch::Tensor latent = (*model_)->get_latent(cont_t, genus_t, family_t, species_id_t, species_vec_t);
+        auto pool = unpack_pool(pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
+
+        torch::Tensor latent = (*model_)->get_latent(
+            cont_t, genus_t, family_t, species_id_t, species_vec_t,
+            pool.genus_ids, pool.family_ids, pool.weights, pool.mask, pool.has_cover);
         return tensor_to_r_vec(latent);
     }
 

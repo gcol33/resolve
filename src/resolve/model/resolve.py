@@ -393,7 +393,7 @@ class ResolveModel(nn.Module):
         family_ids: Optional[torch.Tensor] = None,
         species_ids: Optional[torch.Tensor] = None,
         species_vector: Optional[torch.Tensor] = None,
-        target: str = None,
+        target: Optional[str] = None,
         pool_genus_ids: Optional[torch.Tensor] = None,
         pool_family_ids: Optional[torch.Tensor] = None,
         pool_weights: Optional[torch.Tensor] = None,
@@ -402,6 +402,14 @@ class ResolveModel(nn.Module):
         categorical_ids: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Forward pass for a single target."""
+        if target is None:
+            if len(self.heads) == 1:
+                target = next(iter(self.heads))
+            else:
+                raise ValueError(
+                    f"target must be specified when model has multiple heads: "
+                    f"{list(self.heads.keys())}"
+                )
         latent = self._get_latent(
             continuous, genus_ids, family_ids, species_ids, species_vector,
             pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
@@ -462,7 +470,10 @@ class ResolveModel(nn.Module):
         try:
             self.encoder = torch.compile(self.encoder)
         except RuntimeError:
-            pass  # torch.compile not available or fails
+            import logging
+            logging.getLogger("resolve.model").warning(
+                "torch.compile unavailable, skipping kernel fusion"
+            )
 
     @torch.no_grad()
     def _fuse_batch_norms(self) -> None:

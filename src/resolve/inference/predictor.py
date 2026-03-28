@@ -10,6 +10,7 @@ import numpy as np
 import polars as pl
 import torch
 
+from resolve._predict_utils import postprocess_predictions
 from resolve.data.dataset import ResolveDataset
 from resolve.encode.species import SpeciesEncoder
 from resolve.encode.embedding import EmbeddingEncoder
@@ -245,38 +246,11 @@ class Predictor:
                 )
             latent = latent.cpu().numpy()
 
-        # Compute confidence (1 - unknown_fraction for regression)
-        regression_confidence = 1.0 - unknown_fraction
-
         # Post-process predictions
-        predictions = {}
-        confidence = {}
-        for name, pred in predictions_raw.items():
-            cfg = self.model.target_configs[name]
-
-            if cfg.task == "regression":
-                # Inverse scale
-                pred_np = pred.cpu().numpy()
-                scaler = self.scalers[f"target_{name}"]
-                pred_np = scaler.inverse_transform(pred_np).flatten()
-
-                # Inverse transform (e.g., expm1 for log1p) unless user wants transformed space
-                if cfg.transform == "log1p" and output_space == "raw":
-                    pred_np = np.expm1(pred_np)
-
-                # Apply confidence threshold
-                pred_np = np.where(regression_confidence >= confidence_threshold, pred_np, np.nan)
-                predictions[name] = pred_np
-                confidence[name] = regression_confidence
-            else:
-                # Classification: use max softmax probability as confidence
-                probs = torch.softmax(pred, dim=-1)
-                class_confidence = probs.max(dim=-1).values.cpu().numpy()
-                pred_np = pred.argmax(dim=-1).cpu().numpy().astype(np.float64)
-                # Apply confidence threshold
-                pred_np = np.where(class_confidence >= confidence_threshold, pred_np, np.nan)
-                predictions[name] = pred_np
-                confidence[name] = class_confidence
+        predictions, confidence = postprocess_predictions(
+            predictions_raw, self.model.target_configs, self.scalers,
+            unknown_fraction, output_space, confidence_threshold,
+        )
 
         return ResolvePredictions(
             predictions=predictions,
@@ -299,25 +273,26 @@ class Predictor:
         Get learned genus embedding weights.
 
         Returns:
-            (n_genera, genus_emb_dim) array
+            (n_genera, genus_emb_dim) array. Averaged across positions for
+            per-rank encoders (hash, sparse).
         """
-        if not self.model.encoder.has_taxonomy:
-            raise ValueError("Model has no taxonomy embeddings")
-
-        # Get first genus embedding layer weights
-        return self.model.encoder.genus_embeddings[0].weight.detach().cpu().numpy()
+        weights = self.model.get_genus_weights()
+        if weights is None:
+            raise ValueError("Model has no genus embeddings")
+        return weights.detach().cpu().numpy()
 
     def get_family_embeddings(self) -> np.ndarray:
         """
         Get learned family embedding weights.
 
         Returns:
-            (n_families, family_emb_dim) array
+            (n_families, family_emb_dim) array. Averaged across positions for
+            per-rank encoders (hash, sparse).
         """
-        if not self.model.encoder.has_taxonomy:
-            raise ValueError("Model has no taxonomy embeddings")
-
-        return self.model.encoder.family_embeddings[0].weight.detach().cpu().numpy()
+        weights = self.model.get_family_weights()
+        if weights is None:
+            raise ValueError("Model has no family embeddings")
+        return weights.detach().cpu().numpy()
 
     @torch.no_grad()
     def predict_batched(
@@ -507,30 +482,12 @@ class Predictor:
                     categorical_ids=cat_ids_t,
                 )
 
-            # Post-process
+            # Post-process using shared helper
             batch_unk = unknown_fraction[sl]
-            regression_conf = 1.0 - batch_unk
-            predictions = {}
-            confidence = {}
-
-            for name, pred in preds_raw.items():
-                cfg = self.model.target_configs[name]
-                if cfg.task == "regression":
-                    pred_np = pred.cpu().numpy()
-                    scaler = self.scalers[f"target_{name}"]
-                    pred_np = scaler.inverse_transform(pred_np).flatten()
-                    if cfg.transform == "log1p" and output_space == "raw":
-                        pred_np = np.expm1(pred_np)
-                    pred_np = np.where(regression_conf >= confidence_threshold, pred_np, np.nan)
-                    predictions[name] = pred_np
-                    confidence[name] = regression_conf
-                else:
-                    probs = torch.softmax(pred, dim=-1)
-                    class_conf = probs.max(dim=-1).values.cpu().numpy()
-                    pred_np = pred.argmax(dim=-1).cpu().numpy().astype(np.float64)
-                    pred_np = np.where(class_conf >= confidence_threshold, pred_np, np.nan)
-                    predictions[name] = pred_np
-                    confidence[name] = class_conf
+            predictions, confidence = postprocess_predictions(
+                preds_raw, self.model.target_configs, self.scalers,
+                batch_unk, output_space, confidence_threshold,
+            )
 
             yield ResolvePredictions(
                 predictions=predictions,

@@ -27,11 +27,11 @@ void register_dataset(nb::module_& m) {
         .def_prop_ro("targets", [](const resolve::ResolveDataset& d) {
             return tensor_map_to_dict(d.targets());
         })
-        .def_prop_ro("schema", &resolve::ResolveDataset::schema)
+        .def_prop_ro("schema", [](const resolve::ResolveDataset& self) -> resolve::ResolveSchema { return self.schema(); })
         .def_prop_ro("plot_ids", &resolve::ResolveDataset::plot_ids)
         .def_prop_ro("species_vocab", &resolve::ResolveDataset::species_vocab)
         .def_prop_ro("n_plots", &resolve::ResolveDataset::n_plots)
-        .def_prop_ro("config", &resolve::ResolveDataset::config)
+        .def_prop_ro("config", [](const resolve::ResolveDataset& self) -> resolve::DatasetConfig { return self.config(); })
         // CUDA hash accessors
         .def("has_raw_species_data", &resolve::ResolveDataset::has_raw_species_data)
         .def_prop_ro("raw_species_ids", &resolve::ResolveDataset::raw_species_ids)

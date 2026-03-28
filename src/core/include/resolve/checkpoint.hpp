@@ -37,20 +37,10 @@ void save_train_config(
     const TrainConfig& config
 );
 
-// Load training config from archive
-TrainConfig load_train_config(
-    torch::serialize::InputArchive& archive
-);
-
 // Save run metadata to archive
 void save_run_metadata(
     torch::serialize::OutputArchive& archive,
     const RunMetadata& metadata
-);
-
-// Load run metadata from archive
-RunMetadata load_run_metadata(
-    torch::serialize::InputArchive& archive
 );
 
 // Write run metadata as JSON file alongside checkpoint
@@ -83,8 +73,5 @@ void save_schema(
 ResolveSchema load_schema(
     torch::serialize::InputArchive& archive
 );
-
-// Get current timestamp as ISO 8601 string
-std::string get_iso_timestamp();
 
 } // namespace resolve

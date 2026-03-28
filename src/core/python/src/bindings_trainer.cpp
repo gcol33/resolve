@@ -29,7 +29,10 @@ void register_trainer(nb::module_& m) {
             self.prepare_data(coordinates, covariates, hash_embedding,
                             species_ids, species_vector, genus_ids, family_ids,
                             unknown_fraction, unknown_count,
-                            dict_to_tensor_map(targets), test_size, seed);
+                            dict_to_tensor_map(targets),
+                            /*pool_genus_ids=*/{}, /*pool_family_ids=*/{},
+                            /*pool_weights=*/{}, /*pool_mask=*/{}, /*pool_has_cover=*/{},
+                            test_size, seed);
         }, nb::arg("coordinates"),
            nb::arg("covariates"),
            nb::arg("hash_embedding"),
@@ -50,8 +53,8 @@ void register_trainer(nb::module_& m) {
             return resolve::Trainer::load(path, dev);
         }, nb::arg("path"), nb::arg("device") = "cpu")
         .def_prop_ro("model", [](resolve::Trainer& self) -> resolve::ResolveModel { return self.model(); })
-        .def_prop_ro("scalers", [](resolve::Trainer& self) -> const resolve::Scalers& { return self.scalers(); })
-        .def_prop_ro("config", &resolve::Trainer::config)
+        .def_prop_ro("scalers", [](const resolve::Trainer& self) { return resolve::Scalers(self.scalers()); })
+        .def_prop_ro("config", [](const resolve::Trainer& self) { return resolve::TrainConfig(self.config()); })
         .def("compute_diagnostics", &resolve::Trainer::compute_diagnostics,
              "Compute network health diagnostics (dead neurons, saturation, etc.)")
         .def("compute_calibration", &resolve::Trainer::compute_calibration,
@@ -65,7 +68,25 @@ void register_trainer(nb::module_& m) {
              nb::arg("n_folds") = 5,
              nb::arg("seed") = 42,
              nb::call_guard<nb::gil_scoped_release>(),
-             "Perform k-fold cross-validation");
+             "Perform k-fold cross-validation")
+        .def("cross_validate_spatial", &resolve::Trainer::cross_validate_spatial,
+             nb::arg("spatial_config"),
+             nb::arg("n_folds") = 5,
+             nb::arg("seed") = 42,
+             nb::call_guard<nb::gil_scoped_release>(),
+             "Perform spatial block cross-validation")
+        .def("predict", &resolve::Trainer::predict,
+             nb::arg("continuous"),
+             nb::arg("genus_ids") = torch::Tensor(),
+             nb::arg("family_ids") = torch::Tensor(),
+             nb::arg("species_ids") = torch::Tensor(),
+             nb::arg("species_vector") = torch::Tensor(),
+             nb::arg("pool_genus_ids") = torch::Tensor(),
+             nb::arg("pool_family_ids") = torch::Tensor(),
+             nb::arg("pool_weights") = torch::Tensor(),
+             nb::arg("pool_mask") = torch::Tensor(),
+             nb::arg("pool_has_cover") = torch::Tensor(),
+             "Predict on data (runs model in eval mode)");
 
     nb::class_<resolve::Predictor>(m, "Predictor")
         .def("__init__", [](resolve::Predictor* self, resolve::ResolveModel model, resolve::Scalers scalers, const std::string& device) {
@@ -80,7 +101,9 @@ void register_trainer(nb::module_& m) {
              static_cast<resolve::ResolvePredictions (resolve::Predictor::*)(
                  torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
                  torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
-                 torch::Tensor, bool)>(&resolve::Predictor::predict),
+                 torch::Tensor,
+                 torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
+                 bool)>(&resolve::Predictor::predict),
              nb::arg("coordinates"),
              nb::arg("covariates"),
              nb::arg("hash_embedding"),
@@ -90,6 +113,11 @@ void register_trainer(nb::module_& m) {
              nb::arg("family_ids"),
              nb::arg("unknown_fraction"),
              nb::arg("unknown_count"),
+             nb::arg("pool_genus_ids") = torch::Tensor(),
+             nb::arg("pool_family_ids") = torch::Tensor(),
+             nb::arg("pool_weights") = torch::Tensor(),
+             nb::arg("pool_mask") = torch::Tensor(),
+             nb::arg("pool_has_cover") = torch::Tensor(),
              nb::arg("return_latent") = false)
         .def("predict_dataset",
              static_cast<resolve::ResolvePredictions (resolve::Predictor::*)(

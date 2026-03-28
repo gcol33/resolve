@@ -15,6 +15,11 @@ add_executable(resolve_tests
     test_dataset.cpp
     test_loss.cpp
     test_new_modules.cpp
+    test_rank_pool_encoder.cpp
+    test_transformer_encoder.cpp
+    test_mlm_pretrain.cpp
+    test_spatial_cv.cpp
+    test_species_encoders.cpp
 )
 
 # Add CUDA library directory if CUDA is available

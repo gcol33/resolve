@@ -70,6 +70,7 @@ RCPP_MODULE(resolve_module) {
     class_<RTrainer>("Trainer")
         .constructor<RResolveModel&, List>("Create a Trainer")
         .method("prepare_data", &RTrainer::prepare_data, "Prepare training data from tensors")
+        .method("prepare_data_pool", &RTrainer::prepare_data_pool, "Prepare training data for rank_pool/transformer modes")
         .method("prepare_data_from_dataset", &RTrainer::prepare_data_from_dataset, "Prepare training data from ResolveDataset")
         .method("fit", &RTrainer::fit, "Train the model")
         .method("save", &RTrainer::save, "Save model checkpoint")

@@ -96,16 +96,10 @@ TabularAdapterImpl::TabularAdapterImpl(
 
         case EncoderArchitecture::TabNet: {
             const auto& cfg = config.tabnet;
-            // TabNet takes flat input (numerical + embedded categoricals)
-            // We concatenate all features as numerical for TabNet
-            int64_t total_input = n_numerical_;
-            // For categoricals, we'd need to embed them first (use genus/family emb dims)
-            if (schema.has_taxonomy) {
-                total_input += config.n_taxonomy_slots * (config.genus_emb_dim + config.family_emb_dim);
-            }
+            // TabNet takes numerical features only (categoricals not embedded)
             tabnet_ = register_module("tabnet",
                 TabNetEncoder(
-                    total_input,
+                    n_numerical_,
                     cfg.n_steps,
                     cfg.n_d,
                     cfg.n_a,

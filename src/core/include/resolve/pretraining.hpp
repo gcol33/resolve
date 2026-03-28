@@ -226,4 +226,72 @@ private:
     PretrainConfig config_;
 };
 
+// =============================================================================
+// Masked Species Pretraining (BERT-style MLM for Transformer encoder)
+// =============================================================================
+
+// Configuration for MLM pretraining
+struct MLMPretrainConfig {
+    float mask_prob = 0.15f;
+    int pretrain_epochs = 50;
+    float pretrain_lr = 1e-4f;
+    float pretrain_weight_decay = 1e-4f;
+    int batch_size = 4096;
+    torch::Device device = torch::kCPU;
+    LogCallback log = default_log;
+};
+
+// Linear head projecting token embeddings to species logits
+class MaskedSpeciesHeadImpl : public torch::nn::Module {
+public:
+    MaskedSpeciesHeadImpl(int64_t d_model, int64_t n_species);
+
+    // (N_masked, d_model) → (N_masked, n_species)
+    torch::Tensor forward(torch::Tensor token_embeddings);
+
+private:
+    torch::nn::Linear proj_{nullptr};
+};
+
+TORCH_MODULE(MaskedSpeciesHead);
+
+// Apply BERT-style masking: 15% of valid positions; of those 80% mask, 10% random, 10% keep.
+// Returns: (masked_ids, mlm_mask [bool], mlm_targets [original IDs at masked positions])
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+mask_species_batch(
+    torch::Tensor species_ids,
+    torch::Tensor valid_mask,
+    int64_t n_species,
+    float mask_prob = 0.15f
+);
+
+// MLM pretrainer: trains a PlotEncoderTransformer via masked species prediction.
+// After pretraining, the MLM head is discarded; encoder weights are retained.
+class MaskedSpeciesPretrainer {
+public:
+    MaskedSpeciesPretrainer(
+        PlotEncoderTransformer encoder,
+        int64_t n_species,
+        const MLMPretrainConfig& config = MLMPretrainConfig{}
+    );
+
+    // Run MLM pretraining. Returns per-epoch loss history.
+    std::vector<float> pretrain(
+        torch::Tensor species_ids,
+        torch::Tensor genus_ids,
+        torch::Tensor family_ids,
+        torch::Tensor weights,
+        torch::Tensor valid_mask
+    );
+
+    // Access encoder after pretraining
+    PlotEncoderTransformer& encoder() { return encoder_; }
+
+private:
+    PlotEncoderTransformer encoder_{nullptr};
+    MaskedSpeciesHead mlm_head_{nullptr};
+    MLMPretrainConfig config_;
+    int64_t n_species_;
+};
+
 } // namespace resolve

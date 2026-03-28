@@ -32,12 +32,19 @@ public:
     // - Hash: continuous (includes hash embedding), genus_ids, family_ids
     // - Embed: continuous, species_ids, genus_ids, family_ids
     // - Sparse: continuous, species_vector, genus_ids, family_ids
+    // - RankPool/Transformer: continuous, species_ids, pool_* fields
     std::unordered_map<std::string, torch::Tensor> forward(
         torch::Tensor continuous,
         torch::Tensor genus_ids = {},
         torch::Tensor family_ids = {},
         torch::Tensor species_ids = {},
-        torch::Tensor species_vector = {}
+        torch::Tensor species_vector = {},
+        // Pool-style encoder fields (rank_pool / transformer)
+        torch::Tensor pool_genus_ids = {},
+        torch::Tensor pool_family_ids = {},
+        torch::Tensor pool_weights = {},
+        torch::Tensor pool_mask = {},
+        torch::Tensor pool_has_cover = {}
     );
 
     // Forward pass returning outputs + MoE auxiliary loss (for training with MoE)
@@ -46,7 +53,12 @@ public:
         torch::Tensor genus_ids = {},
         torch::Tensor family_ids = {},
         torch::Tensor species_ids = {},
-        torch::Tensor species_vector = {}
+        torch::Tensor species_vector = {},
+        torch::Tensor pool_genus_ids = {},
+        torch::Tensor pool_family_ids = {},
+        torch::Tensor pool_weights = {},
+        torch::Tensor pool_mask = {},
+        torch::Tensor pool_has_cover = {}
     );
 
     // Forward pass for single target
@@ -65,7 +77,12 @@ public:
         torch::Tensor genus_ids = {},
         torch::Tensor family_ids = {},
         torch::Tensor species_ids = {},
-        torch::Tensor species_vector = {}
+        torch::Tensor species_vector = {},
+        torch::Tensor pool_genus_ids = {},
+        torch::Tensor pool_family_ids = {},
+        torch::Tensor pool_weights = {},
+        torch::Tensor pool_mask = {},
+        torch::Tensor pool_has_cover = {}
     );
 
     // Forward pass that returns intermediate activations (for diagnostics)
@@ -116,7 +133,12 @@ private:
         torch::Tensor genus_ids,
         torch::Tensor family_ids,
         torch::Tensor species_ids,
-        torch::Tensor species_vector
+        torch::Tensor species_vector,
+        torch::Tensor pool_genus_ids = {},
+        torch::Tensor pool_family_ids = {},
+        torch::Tensor pool_weights = {},
+        torch::Tensor pool_mask = {},
+        torch::Tensor pool_has_cover = {}
     );
 
     // Internal forward with aux loss (for MoE)
@@ -125,7 +147,12 @@ private:
         torch::Tensor genus_ids,
         torch::Tensor family_ids,
         torch::Tensor species_ids,
-        torch::Tensor species_vector
+        torch::Tensor species_vector,
+        torch::Tensor pool_genus_ids = {},
+        torch::Tensor pool_family_ids = {},
+        torch::Tensor pool_weights = {},
+        torch::Tensor pool_mask = {},
+        torch::Tensor pool_has_cover = {}
     );
 
     ResolveSchema schema_;
@@ -135,6 +162,8 @@ private:
     PlotEncoder encoder_hash_{nullptr};
     PlotEncoderEmbed encoder_embed_{nullptr};
     PlotEncoderSparse encoder_sparse_{nullptr};
+    PlotEncoderRankPool encoder_rank_pool_{nullptr};
+    PlotEncoderTransformer encoder_transformer_{nullptr};
 
     // MoE encoder (used when moe_routing != None AND hash encoding)
     PlotEncoderMoE encoder_moe_{nullptr};

@@ -284,28 +284,47 @@ private:
 TORCH_MODULE(FusedPositionalEmbedding);
 
 // =============================================================================
-// Legacy Helper (backward compatibility)
+// Shared Encoder Helpers (reduce duplication across encoder types)
 // =============================================================================
 
-// Helper function to build MLP layers - reduces duplication across encoder implementations
-// DEPRECATED: Use build_mlp_configurable for new code
-[[nodiscard]] inline std::pair<torch::nn::Sequential, int64_t> build_mlp(
+// Register per-rank taxonomy embeddings on a module.
+// Populates genus_embeddings and family_embeddings vectors.
+// Returns the input dimension contribution (top_k * (genus_emb_dim + family_emb_dim)).
+int64_t register_per_rank_embeddings(
+    torch::nn::Module& module,
+    std::vector<torch::nn::Embedding>& genus_embeddings,
+    std::vector<torch::nn::Embedding>& family_embeddings,
+    int64_t n_genera, int64_t n_families,
+    int genus_emb_dim, int family_emb_dim, int top_k
+);
+
+// Collect per-rank embedding lookups into parts vector.
+// Appends top_k genus embeddings then top_k family embeddings.
+void embed_per_rank_taxonomy(
+    std::vector<torch::Tensor>& parts,
+    std::vector<torch::nn::Embedding>& genus_embeddings,
+    std::vector<torch::nn::Embedding>& family_embeddings,
+    torch::Tensor genus_ids, torch::Tensor family_ids,
+    int top_k, bool has_taxonomy
+);
+
+// Build and register MLP or TabM backbone on a module.
+// Returns (latent_dim, activation_indices).
+struct BackboneSetupResult {
+    int64_t latent_dim;
+    std::vector<size_t> activation_indices;
+    bool use_tabm;
+};
+
+BackboneSetupResult build_and_register_backbone(
+    torch::nn::Module& module,
+    torch::nn::Sequential& mlp,
+    TabMEncoder& tabm_encoder,
     int64_t input_dim,
     const std::vector<int64_t>& hidden_dims,
-    float dropout
-) noexcept(false) {
-    torch::nn::Sequential mlp;
-    int64_t prev_dim = input_dim;
-    for (size_t i = 0; i < hidden_dims.size(); ++i) {
-        mlp->push_back(torch::nn::Linear(prev_dim, hidden_dims[i]));
-        mlp->push_back(torch::nn::BatchNorm1d(hidden_dims[i]));
-        mlp->push_back(torch::nn::GELU());
-        mlp->push_back(torch::nn::Dropout(dropout));
-        prev_dim = hidden_dims[i];
-    }
-    int64_t latent_dim = hidden_dims.empty() ? input_dim : hidden_dims.back();
-    return {mlp, latent_dim};
-}
+    const MLPBlockConfig& config,
+    const TabMConfig& tabm_config
+);
 
 // PlotEncoder: shared encoder for all tasks (hash mode)
 // Architecture: learned taxonomy embeddings + MLP
@@ -552,6 +571,188 @@ private:
 };
 
 TORCH_MODULE(PlotEncoderSparse);
+
+
+// =============================================================================
+// Cover Dropout Helper (shared by RankPool and Transformer encoders)
+// =============================================================================
+
+// Apply cover dropout: randomly zero out weights and has_cover for a fraction
+// of training samples. Tensors are cloned before modification.
+void apply_cover_dropout(
+    bool training,
+    float cover_dropout,
+    int64_t batch_size,
+    torch::Device device,
+    torch::Tensor& weights,
+    const torch::Tensor& mask,
+    torch::Tensor& has_cover
+);
+
+
+// =============================================================================
+// PlotEncoderRankPool: weighted mean pooling over variable-length species
+// =============================================================================
+
+// Used when species_encoding="rank_pool". Single shared embedding tables,
+// weighted mean pooling, cover dropout for robustness.
+class PlotEncoderRankPoolImpl : public torch::nn::Module {
+public:
+    PlotEncoderRankPoolImpl(
+        int64_t n_continuous,
+        int64_t n_species,
+        int64_t n_genera = 0,
+        int64_t n_families = 0,
+        int species_embed_dim = 64,
+        int genus_embed_dim = 16,
+        int family_embed_dim = 16,
+        const std::vector<int64_t>& hidden_dims = {2048, 1024, 512, 256, 128, 64},
+        const MLPBlockConfig& mlp_config = MLPBlockConfig{},
+        float cover_dropout = 0.0f,
+        const TabMConfig& tabm_config = TabMConfig{}
+    );
+
+    // Forward pass with weighted mean pooling
+    // continuous: (batch, n_continuous)
+    // species_ids: (batch, max_species) int64, padded with 0
+    // genus_ids, family_ids: (batch, max_species) int64, optional
+    // weights: (batch, max_species) float, optional
+    // mask: (batch, max_species) bool, optional (True=valid)
+    // has_cover: (batch,) float, optional (defaults to 1.0)
+    torch::Tensor forward(
+        torch::Tensor continuous,
+        torch::Tensor species_ids,
+        torch::Tensor genus_ids = {},
+        torch::Tensor family_ids = {},
+        torch::Tensor weights = {},
+        torch::Tensor mask = {},
+        torch::Tensor has_cover = {}
+    );
+
+    [[nodiscard]] int64_t latent_dim() const noexcept { return latent_dim_; }
+    [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
+
+    [[nodiscard]] torch::Tensor get_species_weights() const;
+    [[nodiscard]] torch::Tensor get_genus_weights() const;
+    [[nodiscard]] torch::Tensor get_family_weights() const;
+
+private:
+    bool has_taxonomy_;
+    float cover_dropout_;
+    int64_t latent_dim_;
+
+    // Single shared embedding tables (NOT per-rank)
+    torch::nn::Embedding species_embedding_{nullptr};
+    torch::nn::Embedding genus_embedding_{nullptr};
+    torch::nn::Embedding family_embedding_{nullptr};
+
+    // MLP backbone
+    torch::nn::Sequential mlp_{nullptr};
+    TabMEncoder tabm_encoder_{nullptr};
+    bool use_tabm_ = false;
+};
+
+TORCH_MODULE(PlotEncoderRankPool);
+
+
+// =============================================================================
+// PlotEncoderTransformer: self-attention over species tokens
+// =============================================================================
+
+// Used when species_encoding="transformer". Additive embeddings in d_model space,
+// optional self-attention, attention or CLS pooling, cover dropout.
+class PlotEncoderTransformerImpl : public torch::nn::Module {
+public:
+    PlotEncoderTransformerImpl(
+        int64_t n_continuous,
+        int64_t n_species,
+        int64_t n_genera = 0,
+        int64_t n_families = 0,
+        int d_model = 128,
+        int n_heads = 4,
+        int n_attention_layers = 0,
+        int transformer_ff_dim = 256,
+        const std::string& transformer_pooling = "attention",
+        float transformer_dropout = 0.1f,
+        const std::vector<int64_t>& hidden_dims = {1024, 512},
+        const MLPBlockConfig& mlp_config = MLPBlockConfig{},
+        float cover_dropout = 0.0f,
+        const TabMConfig& tabm_config = TabMConfig{}
+    );
+
+    // Forward pass: species tokens → self-attention → pooling → MLP → latent
+    torch::Tensor forward(
+        torch::Tensor continuous,
+        torch::Tensor species_ids,
+        torch::Tensor genus_ids = {},
+        torch::Tensor family_ids = {},
+        torch::Tensor weights = {},
+        torch::Tensor mask = {},
+        torch::Tensor has_cover = {},
+        torch::Tensor masked_positions = {}
+    );
+
+    // Get pre-pooling token embeddings for MLM pretraining
+    // Returns (batch, max_species, d_model) after self-attention
+    torch::Tensor forward_tokens(
+        torch::Tensor species_ids,
+        torch::Tensor genus_ids,
+        torch::Tensor family_ids,
+        torch::Tensor weights,
+        torch::Tensor mask,
+        torch::Tensor masked_positions = {}
+    );
+
+    [[nodiscard]] int64_t latent_dim() const noexcept { return latent_dim_; }
+    [[nodiscard]] int d_model() const noexcept { return d_model_; }
+    [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
+
+    [[nodiscard]] torch::Tensor get_species_weights() const;
+    [[nodiscard]] torch::Tensor get_genus_weights() const;
+    [[nodiscard]] torch::Tensor get_family_weights() const;
+
+private:
+    // Build additive token embeddings from species/genus/family/weights
+    torch::Tensor build_tokens(
+        torch::Tensor species_ids,
+        torch::Tensor genus_ids,
+        torch::Tensor family_ids,
+        torch::Tensor weights,
+        torch::Tensor masked_positions
+    );
+
+    int d_model_;
+    int n_attention_layers_;
+    std::string transformer_pooling_;
+    bool has_taxonomy_;
+    float cover_dropout_;
+    int64_t latent_dim_;
+
+    // Embeddings (all d_model-dimensional, additive)
+    torch::nn::Embedding species_embedding_{nullptr};
+    torch::nn::Embedding genus_embedding_{nullptr};
+    torch::nn::Embedding family_embedding_{nullptr};
+    torch::nn::Linear weight_proj_{nullptr};
+    torch::Tensor mask_embedding_;
+
+    // Self-attention
+    torch::nn::TransformerEncoder transformer_encoder_{nullptr};
+
+    // Attention pooling
+    torch::Tensor pool_query_;
+    torch::nn::MultiheadAttention pool_attn_{nullptr};
+    torch::nn::LayerNorm pool_norm_{nullptr};
+
+    // CLS pooling
+    torch::Tensor cls_token_;
+
+    // MLP backbone
+    torch::nn::Sequential mlp_{nullptr};
+    TabMEncoder tabm_encoder_{nullptr};
+    bool use_tabm_ = false;
+};
+
+TORCH_MODULE(PlotEncoderTransformer);
 
 
 // Task head: prediction head for a single target

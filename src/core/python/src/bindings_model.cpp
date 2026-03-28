@@ -93,8 +93,8 @@ void register_model(nb::module_& m) {
                 self->to(torch::kCPU);
             }
         })
-        .def_prop_ro("schema", [](resolve::ResolveModel& self) { return self->schema(); })
-        .def_prop_ro("config", [](resolve::ResolveModel& self) { return self->config(); })
+        .def_prop_ro("schema", [](const resolve::ResolveModel& self) -> resolve::ResolveSchema { return self->schema(); })
+        .def_prop_ro("config", [](const resolve::ResolveModel& self) -> resolve::ModelConfig { return self->config(); })
         .def_prop_ro("latent_dim", [](resolve::ResolveModel& self) { return self->latent_dim(); })
         .def_prop_ro("species_encoding", [](resolve::ResolveModel& self) { return self->species_encoding(); })
         .def_prop_ro("uses_explicit_vector", [](resolve::ResolveModel& self) { return self->uses_explicit_vector(); })

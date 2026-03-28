@@ -500,6 +500,7 @@ TEST_CASE("End-to-End Training Benchmark Production", "[benchmark][training-prod
                 unknown_fraction,
                 torch::Tensor(),
                 targets,
+                {}, {}, {}, {}, {},  // pool_* (not used in hash mode)
                 0.2f,
                 42
             );
@@ -535,6 +536,7 @@ TEST_CASE("End-to-End Training Benchmark Production", "[benchmark][training-prod
                     unknown_fraction,
                     torch::Tensor(),
                     targets,
+                    {}, {}, {}, {}, {},
                     0.2f,
                     42
                 );
@@ -623,6 +625,7 @@ TEST_CASE("End-to-End Training Benchmark Large", "[benchmark][training-large]") 
                 unknown_fraction,
                 torch::Tensor(),  // no unknown_count
                 targets,
+                {}, {}, {}, {}, {},  // pool_* (not used in hash mode)
                 0.2f,
                 42
             );
@@ -658,6 +661,7 @@ TEST_CASE("End-to-End Training Benchmark Large", "[benchmark][training-large]") 
                     unknown_fraction,
                     torch::Tensor(),
                     targets,
+                    {}, {}, {}, {}, {},
                     0.2f,
                     42
                 );
@@ -746,6 +750,7 @@ TEST_CASE("End-to-End Training Benchmark", "[benchmark][training]") {
                 unknown_fraction,
                 torch::Tensor(),  // no unknown_count
                 targets,
+                {}, {}, {}, {}, {},  // pool_* (not used in hash mode)
                 0.2f,
                 42
             );
@@ -781,6 +786,7 @@ TEST_CASE("End-to-End Training Benchmark", "[benchmark][training]") {
                     unknown_fraction,
                     torch::Tensor(),
                     targets,
+                    {}, {}, {}, {}, {},
                     0.2f,
                     42
                 );

@@ -1,5 +1,7 @@
 """PlotEncoder: shared encoder for plot features."""
 
+from __future__ import annotations
+
 import math
 from typing import Literal, Optional
 
@@ -650,7 +652,8 @@ class PlotEncoderTransformer(nn.Module):
                 dropout=transformer_dropout,
             )
             self.transformer_encoder = nn.TransformerEncoder(
-                encoder_layer, num_layers=n_attention_layers
+                encoder_layer, num_layers=n_attention_layers,
+                enable_nested_tensor=False,
             )
         else:
             self.transformer_encoder = None

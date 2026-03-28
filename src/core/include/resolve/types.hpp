@@ -37,6 +37,11 @@ constexpr float kExpClampMin = -88.0f;
 constexpr float kExpClampMax = 88.0f;
 constexpr float kEpsilon = 1e-8f;
 
+// Initialization constants
+constexpr float kBertInitStd = 0.02f;
+constexpr float kAttentionMaskFill = -1e9f;
+constexpr float kGATInitStd = 0.01f;
+
 // Phase boundaries for phased loss
 constexpr int kDefaultPhase1Epoch = 100;
 constexpr int kDefaultPhase2Epoch = 300;
@@ -382,6 +387,17 @@ struct ModelConfig {
 
     // TabM (BatchEnsemble) configuration
     TabMConfig tabm;
+
+    // RankPool / Transformer shared
+    float cover_dropout = 0.0f;
+
+    // Transformer-specific
+    int d_model = 128;
+    int n_heads = 4;
+    int n_attention_layers = 0;
+    int transformer_ff_dim = 256;
+    std::string transformer_pooling = "attention";
+    float transformer_dropout = 0.1f;
 };
 
 // Training configuration

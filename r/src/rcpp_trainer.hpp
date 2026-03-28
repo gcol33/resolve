@@ -104,7 +104,53 @@ public:
         trainer_->prepare_data(
             coords_t, covs_t, hash_t, species_id_t, species_vec_t,
             genus_t, family_t, unk_frac_t, unk_cnt_t,
-            target_map, static_cast<float>(test_size), seed
+            target_map,
+            /*pool_genus_ids=*/{}, /*pool_family_ids=*/{},
+            /*pool_weights=*/{}, /*pool_mask=*/{}, /*pool_has_cover=*/{},
+            static_cast<float>(test_size), seed
+        );
+    }
+
+    // Prepare data with pool fields (for rank_pool / transformer modes)
+    void prepare_data_pool(
+        NumericMatrix continuous,
+        IntegerMatrix species_ids,
+        Nullable<IntegerMatrix> pool_genus_ids,
+        Nullable<IntegerMatrix> pool_family_ids,
+        NumericMatrix pool_weights,
+        IntegerMatrix pool_mask,
+        NumericVector pool_has_cover,
+        Nullable<NumericVector> unknown_fraction,
+        List targets,
+        double test_size = 0.2,
+        int seed = 42
+    ) {
+        torch::Tensor cont_t = r_mat_to_tensor(continuous);
+        torch::Tensor sp_ids_t = r_int_mat_to_tensor(species_ids);
+        torch::Tensor p_weights_t = r_mat_to_tensor(pool_weights);
+        torch::Tensor p_mask_t = r_int_mat_to_tensor(pool_mask).to(torch::kBool);
+        torch::Tensor p_cover_t = r_vec_to_tensor(pool_has_cover);
+        torch::Tensor p_genus_t, p_family_t, unk_frac_t;
+
+        if (pool_genus_ids.isNotNull()) p_genus_t = r_int_mat_to_tensor(as<IntegerMatrix>(pool_genus_ids));
+        if (pool_family_ids.isNotNull()) p_family_t = r_int_mat_to_tensor(as<IntegerMatrix>(pool_family_ids));
+        if (unknown_fraction.isNotNull()) unk_frac_t = r_vec_to_tensor(as<NumericVector>(unknown_fraction));
+
+        std::unordered_map<std::string, torch::Tensor> target_map;
+        CharacterVector target_names = targets.names();
+        for (int i = 0; i < targets.size(); ++i) {
+            target_map[as<std::string>(target_names[i])] = r_vec_to_tensor(as<NumericVector>(targets[i]));
+        }
+
+        trainer_->prepare_data(
+            cont_t,
+            /*covariates=*/{}, /*hash_embedding=*/{},
+            sp_ids_t, /*species_vector=*/{},
+            /*genus_ids=*/{}, /*family_ids=*/{},
+            unk_frac_t, /*unknown_count=*/{},
+            target_map,
+            p_genus_t, p_family_t, p_weights_t, p_mask_t, p_cover_t,
+            static_cast<float>(test_size), seed
         );
     }
 

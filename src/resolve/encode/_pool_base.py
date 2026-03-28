@@ -10,6 +10,7 @@ import polars as pl
 from resolve.data.dataset import ResolveDataset
 from resolve.encode.base import BaseSpeciesEncoder
 from resolve.encode.mixins import TaxonomyEncoderMixin
+from resolve.data.roles import RoleMapping
 from resolve.encode.normalize import TaxonomyNormalizer, normalize_species_df
 from resolve.encode.vocab import SpeciesVocab, TaxonomyVocab
 
@@ -198,7 +199,7 @@ class BasePoolEncoder(BaseSpeciesEncoder, TaxonomyEncoderMixin):
         return result, abundance_col, plot_ids
 
     def _compute_weights(
-        self, df: pl.DataFrame, abundance_col: str, roles: object
+        self, df: pl.DataFrame, abundance_col: str, roles: RoleMapping
     ) -> pl.DataFrame:
         """Compute per-species weights. Override to add weighting modes."""
         if self.weighting == "binary":

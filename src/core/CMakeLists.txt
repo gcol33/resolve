@@ -34,8 +34,12 @@ find_package(Torch REQUIRED)
 
 # Core library sources
 set(RESOLVE_CORE_SOURCES
-    cpp_src/encoder.cpp
+    cpp_src/encoder_common.cpp
+    cpp_src/encoder_topk.cpp
+    cpp_src/encoder_pool.cpp
+    cpp_src/task_head.cpp
     cpp_src/attention.cpp
+    cpp_src/gnn.cpp
     cpp_src/tabm.cpp
     cpp_src/adapter.cpp
     cpp_src/model.cpp
@@ -45,7 +49,7 @@ set(RESOLVE_CORE_SOURCES
     cpp_src/dataset.cpp
     cpp_src/species_encoding.cpp
     cpp_src/checkpoint.cpp
-    cpp_src/data_prep.cpp
+
     cpp_src/pretraining.cpp
     cpp_src/vae.cpp
 )
@@ -65,7 +69,7 @@ set(RESOLVE_CORE_HEADERS
     include/resolve/dataset.hpp
     include/resolve/species_encoding.hpp
     include/resolve/checkpoint.hpp
-    include/resolve/data_prep.hpp
+
     include/resolve/tabm.hpp
     include/resolve/pretraining.hpp
     include/resolve/vae.hpp

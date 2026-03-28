@@ -372,6 +372,13 @@ void register_types(nb::module_& m) {
         .def_ro("q75", &resolve::ResidualAnalysis::q75)
         .def_ro("q95", &resolve::ResidualAnalysis::q95);
 
+    // Spatial block configuration
+    nb::class_<resolve::SpatialBlockConfig>(m, "SpatialBlockConfig")
+        .def(nb::init<>())
+        .def_rw("lat_size", &resolve::SpatialBlockConfig::lat_size)
+        .def_rw("lon_size", &resolve::SpatialBlockConfig::lon_size)
+        .def_rw("balance", &resolve::SpatialBlockConfig::balance);
+
     // Cross-validation result
     nb::class_<resolve::CrossValidationResult>(m, "CrossValidationResult")
         .def(nb::init<>())

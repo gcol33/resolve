@@ -34,6 +34,8 @@ ResolvePredictions Predictor::predict(
         dataset.family_ids(),
         dataset.unknown_fraction(),
         dataset.unknown_count(),
+        /*pool_genus_ids=*/{}, /*pool_family_ids=*/{},
+        /*pool_weights=*/{}, /*pool_mask=*/{}, /*pool_has_cover=*/{},
         return_latent
     );
 
@@ -56,6 +58,11 @@ ResolvePredictions Predictor::predict(
     torch::Tensor family_ids,
     torch::Tensor unknown_fraction,
     torch::Tensor unknown_count,
+    torch::Tensor pool_genus_ids,
+    torch::Tensor pool_family_ids,
+    torch::Tensor pool_weights,
+    torch::Tensor pool_mask,
+    torch::Tensor pool_has_cover,
     bool return_latent
 ) {
     torch::NoGradGuard no_grad;
@@ -101,9 +108,15 @@ ResolvePredictions Predictor::predict(
     family_ids = to_device_if_defined(family_ids, device_);
     species_ids = to_device_if_defined(species_ids, device_);
     species_vector = to_device_if_defined(species_vector, device_);
+    pool_genus_ids = to_device_if_defined(pool_genus_ids, device_);
+    pool_family_ids = to_device_if_defined(pool_family_ids, device_);
+    pool_weights = to_device_if_defined(pool_weights, device_);
+    pool_mask = to_device_if_defined(pool_mask, device_);
+    pool_has_cover = to_device_if_defined(pool_has_cover, device_);
 
     // Get predictions using appropriate encoding mode
-    auto outputs = model_->forward(scaled_continuous, genus_ids, family_ids, species_ids, species_vector);
+    auto outputs = model_->forward(scaled_continuous, genus_ids, family_ids, species_ids, species_vector,
+                                    pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
 
     ResolvePredictions result;
 
@@ -136,7 +149,8 @@ ResolvePredictions Predictor::predict(
 
     // Optionally return latent
     if (return_latent) {
-        result.latent = model_->get_latent(scaled_continuous, genus_ids, family_ids, species_ids, species_vector);
+        result.latent = model_->get_latent(scaled_continuous, genus_ids, family_ids, species_ids, species_vector,
+                                           pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
     }
 
     // Create plot indices as strings
