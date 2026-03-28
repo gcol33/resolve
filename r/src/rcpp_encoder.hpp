@@ -95,6 +95,9 @@ public:
         if (encoded.species_vector.defined()) {
             result["species_vector"] = tensor_to_r_mat(encoded.species_vector);
         }
+        if (encoded.species_ids.defined() && encoded.species_ids.numel() > 0) {
+            result["species_ids"] = tensor_to_r_mat(encoded.species_ids.to(torch::kFloat32));
+        }
         result["plot_ids"] = wrap(encoded.plot_ids);
 
         return result;

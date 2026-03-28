@@ -50,6 +50,47 @@ public:
         if (config_list.containsElementNamed("lr_min")) {
             config.lr_min = config_list["lr_min"];
         }
+        // Phase boundaries
+        if (config_list.containsElementNamed("phase_boundaries")) {
+            IntegerVector pb = config_list["phase_boundaries"];
+            if (pb.size() >= 2) {
+                config.phase_boundaries = {pb[0], pb[1]};
+            }
+        }
+        // Band thresholds
+        if (config_list.containsElementNamed("band_thresholds")) {
+            config.band_thresholds = as<std::vector<float>>(config_list["band_thresholds"]);
+        }
+        // Checkpointing
+        if (config_list.containsElementNamed("checkpoint_dir")) {
+            config.checkpoint_dir = as<std::string>(config_list["checkpoint_dir"]);
+        }
+        if (config_list.containsElementNamed("checkpoint_every")) {
+            config.checkpoint_every = config_list["checkpoint_every"];
+        }
+        // AMP
+        if (config_list.containsElementNamed("use_amp")) {
+            config.use_amp = config_list["use_amp"];
+        }
+        if (config_list.containsElementNamed("amp_init_scale")) {
+            config.amp_init_scale = as<float>(config_list["amp_init_scale"]);
+        }
+        if (config_list.containsElementNamed("amp_growth_factor")) {
+            config.amp_growth_factor = as<float>(config_list["amp_growth_factor"]);
+        }
+        if (config_list.containsElementNamed("amp_backoff_factor")) {
+            config.amp_backoff_factor = as<float>(config_list["amp_backoff_factor"]);
+        }
+        if (config_list.containsElementNamed("amp_growth_interval")) {
+            config.amp_growth_interval = config_list["amp_growth_interval"];
+        }
+        // CUDA opts
+        if (config_list.containsElementNamed("cudnn_benchmark")) {
+            config.cudnn_benchmark = config_list["cudnn_benchmark"];
+        }
+        if (config_list.containsElementNamed("allow_tf32")) {
+            config.allow_tf32 = config_list["allow_tf32"];
+        }
 
         trainer_ = std::make_unique<resolve::Trainer>(*(model.model()), config);
     }
@@ -164,28 +205,96 @@ public:
     }
 
     List fit() {
-        resolve::TrainResult result = trainer_->fit();
+        auto result = trainer_->fit();
+        return train_result_to_list(result);
+    }
 
-        List metrics;
-        for (const auto& [target_name, target_metrics] : result.final_metrics) {
-            List target_list;
-            for (const auto& [metric_name, value] : target_metrics) {
-                target_list[metric_name] = value;
-            }
-            metrics[target_name] = target_list;
+    void save(std::string path, Nullable<List> metadata = R_NilValue) {
+        if (metadata.isNotNull()) {
+            auto rm = parse_run_metadata(as<List>(metadata));
+            trainer_->save(path, &rm);
+        } else {
+            trainer_->save(path);
         }
+    }
 
+    // Accessors
+    List get_scalers() const {
+        return scalers_to_list(trainer_->scalers());
+    }
+
+    List get_config() const {
+        const auto& c = trainer_->config();
         return List::create(
-            Named("best_epoch") = result.best_epoch,
-            Named("final_metrics") = metrics,
-            Named("train_loss") = wrap(result.train_loss_history),
-            Named("test_loss") = wrap(result.test_loss_history),
-            Named("train_time_seconds") = result.train_time_seconds,
-            Named("resumed_from_epoch") = result.resumed_from_epoch
+            Named("batch_size") = c.batch_size,
+            Named("max_epochs") = c.max_epochs,
+            Named("patience") = c.patience,
+            Named("lr") = c.lr,
+            Named("weight_decay") = c.weight_decay,
+            Named("device") = c.device.is_cuda() ? "cuda" : "cpu"
         );
     }
 
-    void save(std::string path) { trainer_->save(path); }
+    // Diagnostic / evaluation methods
+    List compute_diagnostics() {
+        auto diag = trainer_->compute_diagnostics();
+        return network_diagnostics_to_list(diag);
+    }
+
+    List compute_calibration(std::string target_name, int n_bins = 10) {
+        auto result = trainer_->compute_calibration(target_name, n_bins);
+        return calibration_result_to_list(result);
+    }
+
+    List compute_residuals(std::string target_name) {
+        auto result = trainer_->compute_residuals(target_name);
+        return residual_analysis_to_list(result);
+    }
+
+    List cross_validate(int n_folds = 5, int seed = 42) {
+        auto result = trainer_->cross_validate(n_folds, seed);
+        return cross_validation_result_to_list(result);
+    }
+
+    List cross_validate_spatial(List spatial_config_list, int n_folds = 5, int seed = 42) {
+        auto config = parse_spatial_block_config(spatial_config_list);
+        auto result = trainer_->cross_validate_spatial(config, n_folds, seed);
+        return cross_validation_result_to_list(result);
+    }
+
+    List predict_from_trainer(
+        NumericMatrix continuous,
+        Nullable<IntegerMatrix> genus_ids = R_NilValue,
+        Nullable<IntegerMatrix> family_ids = R_NilValue,
+        Nullable<IntegerMatrix> species_ids = R_NilValue,
+        Nullable<NumericMatrix> species_vector = R_NilValue,
+        Nullable<IntegerMatrix> pool_genus_ids = R_NilValue,
+        Nullable<IntegerMatrix> pool_family_ids = R_NilValue,
+        Nullable<NumericMatrix> pool_weights = R_NilValue,
+        Nullable<IntegerMatrix> pool_mask = R_NilValue,
+        Nullable<NumericVector> pool_has_cover = R_NilValue
+    ) {
+        torch::Tensor cont_t = r_mat_to_tensor(continuous);
+        torch::Tensor genus_t, family_t, species_id_t, species_vec_t;
+        torch::Tensor pg, pf, pw, pm, ph;
+        if (genus_ids.isNotNull()) genus_t = r_int_mat_to_tensor(as<IntegerMatrix>(genus_ids));
+        if (family_ids.isNotNull()) family_t = r_int_mat_to_tensor(as<IntegerMatrix>(family_ids));
+        if (species_ids.isNotNull()) species_id_t = r_int_mat_to_tensor(as<IntegerMatrix>(species_ids));
+        if (species_vector.isNotNull()) species_vec_t = r_mat_to_tensor(as<NumericMatrix>(species_vector));
+        if (pool_genus_ids.isNotNull()) pg = r_int_mat_to_tensor(as<IntegerMatrix>(pool_genus_ids));
+        if (pool_family_ids.isNotNull()) pf = r_int_mat_to_tensor(as<IntegerMatrix>(pool_family_ids));
+        if (pool_weights.isNotNull()) pw = r_mat_to_tensor(as<NumericMatrix>(pool_weights));
+        if (pool_mask.isNotNull()) pm = r_int_mat_to_tensor(as<IntegerMatrix>(pool_mask)).to(torch::kBool);
+        if (pool_has_cover.isNotNull()) ph = r_vec_to_tensor(as<NumericVector>(pool_has_cover));
+
+        auto result = trainer_->predict(cont_t, genus_t, family_t, species_id_t, species_vec_t,
+                                        pg, pf, pw, pm, ph);
+        List outputs;
+        for (const auto& [name, tensor] : result) {
+            outputs[name] = tensor_to_r_vec(tensor);
+        }
+        return outputs;
+    }
 
     resolve::Trainer& trainer() { return *trainer_; }
 

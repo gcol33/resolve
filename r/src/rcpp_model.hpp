@@ -46,6 +46,9 @@ public:
                 if (target_cfg.containsElementNamed("weight")) {
                     tc.weight = target_cfg["weight"];
                 }
+                if (target_cfg.containsElementNamed("class_weights")) {
+                    tc.class_weights = as<std::vector<float>>(target_cfg["class_weights"]);
+                }
                 schema.targets.push_back(tc);
             }
         }
@@ -104,6 +107,96 @@ public:
         }
         if (config_list.containsElementNamed("transformer_dropout")) {
             config.transformer_dropout = as<float>(config_list["transformer_dropout"]);
+        }
+
+        // uses_explicit_vector
+        if (config_list.containsElementNamed("uses_explicit_vector")) {
+            config.uses_explicit_vector = config_list["uses_explicit_vector"];
+        }
+
+        // MoE configuration
+        if (config_list.containsElementNamed("moe_routing")) {
+            config.moe_routing = parse_moe_routing_type(as<std::string>(config_list["moe_routing"]));
+        }
+        if (config_list.containsElementNamed("n_experts")) {
+            config.n_experts = config_list["n_experts"];
+        }
+        if (config_list.containsElementNamed("expert_hidden_dims")) {
+            config.expert_hidden_dims = as<std::vector<int64_t>>(config_list["expert_hidden_dims"]);
+        }
+        if (config_list.containsElementNamed("moe_top_k")) {
+            config.moe_top_k = config_list["moe_top_k"];
+        }
+        if (config_list.containsElementNamed("moe_noise_std")) {
+            config.moe_noise_std = as<float>(config_list["moe_noise_std"]);
+        }
+        if (config_list.containsElementNamed("moe_aux_loss_weight")) {
+            config.moe_aux_loss_weight = as<float>(config_list["moe_aux_loss_weight"]);
+        }
+
+        // Configurable architecture
+        if (config_list.containsElementNamed("activation")) {
+            config.activation = parse_activation_type(as<std::string>(config_list["activation"]));
+        }
+        if (config_list.containsElementNamed("normalization")) {
+            config.normalization = parse_norm_layer_type(as<std::string>(config_list["normalization"]));
+        }
+        if (config_list.containsElementNamed("norm_groups")) {
+            config.norm_groups = config_list["norm_groups"];
+        }
+        if (config_list.containsElementNamed("use_residual")) {
+            config.use_residual = config_list["use_residual"];
+        }
+        if (config_list.containsElementNamed("leaky_relu_slope")) {
+            config.leaky_relu_slope = as<float>(config_list["leaky_relu_slope"]);
+        }
+        if (config_list.containsElementNamed("elu_alpha")) {
+            config.elu_alpha = as<float>(config_list["elu_alpha"]);
+        }
+
+        // Multi-layer prediction heads
+        if (config_list.containsElementNamed("head_hidden_dims")) {
+            config.head_hidden_dims = as<std::vector<int64_t>>(config_list["head_hidden_dims"]);
+        }
+        if (config_list.containsElementNamed("head_activation")) {
+            config.head_activation = parse_activation_type(as<std::string>(config_list["head_activation"]));
+        }
+        if (config_list.containsElementNamed("head_dropout")) {
+            config.head_dropout = as<float>(config_list["head_dropout"]);
+        }
+
+        // Advanced architecture
+        if (config_list.containsElementNamed("encoder_architecture")) {
+            config.encoder_architecture = parse_encoder_architecture(as<std::string>(config_list["encoder_architecture"]));
+        }
+
+        // Architecture-specific sub-configs
+        if (config_list.containsElementNamed("ft_transformer")) {
+            config.ft_transformer = parse_ft_transformer_config(as<List>(config_list["ft_transformer"]));
+        }
+        if (config_list.containsElementNamed("tabnet")) {
+            config.tabnet = parse_tabnet_config(as<List>(config_list["tabnet"]));
+        }
+        if (config_list.containsElementNamed("saint")) {
+            config.saint = parse_saint_config(as<List>(config_list["saint"]));
+        }
+        if (config_list.containsElementNamed("gnn")) {
+            config.gnn = parse_gnn_config(as<List>(config_list["gnn"]));
+        }
+        if (config_list.containsElementNamed("trait_net")) {
+            config.trait_net = parse_trait_net_config(as<List>(config_list["trait_net"]));
+        }
+        if (config_list.containsElementNamed("excelformer")) {
+            config.excelformer = parse_excelformer_config(as<List>(config_list["excelformer"]));
+        }
+        if (config_list.containsElementNamed("heterogeneous_gnn")) {
+            config.heterogeneous_gnn = parse_heterogeneous_gnn_config(as<List>(config_list["heterogeneous_gnn"]));
+        }
+        if (config_list.containsElementNamed("parallel_layers")) {
+            config.parallel_layers = parse_parallel_layers_config(as<List>(config_list["parallel_layers"]));
+        }
+        if (config_list.containsElementNamed("tabm")) {
+            config.tabm = parse_tabm_config(as<List>(config_list["tabm"]));
         }
 
         model_ = std::make_shared<resolve::ResolveModel>(schema, config);
@@ -206,7 +299,139 @@ public:
 
     std::shared_ptr<resolve::ResolveModel>& model() { return model_; }
 
+    // Forward with MoE auxiliary loss
+    List forward_with_aux(
+        NumericMatrix continuous,
+        Nullable<IntegerMatrix> genus_ids = R_NilValue,
+        Nullable<IntegerMatrix> family_ids = R_NilValue,
+        Nullable<IntegerMatrix> species_ids = R_NilValue,
+        Nullable<NumericMatrix> species_vector = R_NilValue,
+        Nullable<IntegerMatrix> pool_genus_ids = R_NilValue,
+        Nullable<IntegerMatrix> pool_family_ids = R_NilValue,
+        Nullable<NumericMatrix> pool_weights = R_NilValue,
+        Nullable<IntegerMatrix> pool_mask = R_NilValue,
+        Nullable<NumericVector> pool_has_cover = R_NilValue
+    ) {
+        torch::Tensor cont_t = r_mat_to_tensor(continuous);
+        torch::Tensor genus_t, family_t, species_id_t, species_vec_t;
+        if (genus_ids.isNotNull()) genus_t = r_int_mat_to_tensor(as<IntegerMatrix>(genus_ids));
+        if (family_ids.isNotNull()) family_t = r_int_mat_to_tensor(as<IntegerMatrix>(family_ids));
+        if (species_ids.isNotNull()) species_id_t = r_int_mat_to_tensor(as<IntegerMatrix>(species_ids));
+        if (species_vector.isNotNull()) species_vec_t = r_mat_to_tensor(as<NumericMatrix>(species_vector));
+        auto p = unpack_pool(pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
+
+        auto result = (*model_)->forward_with_aux(
+            cont_t, genus_t, family_t, species_id_t, species_vec_t,
+            p.genus_ids, p.family_ids, p.weights, p.mask, p.has_cover);
+
+        List outputs;
+        for (const auto& [name, tensor] : result.outputs) {
+            outputs[name] = tensor_to_r_vec(tensor);
+        }
+        List ret;
+        ret["outputs"] = outputs;
+        if (result.moe_aux_loss.defined()) {
+            ret["moe_aux_loss"] = tensor_to_r_vec(result.moe_aux_loss);
+        }
+        return ret;
+    }
+
+    // Forward for single target
+    NumericVector forward_single(
+        const std::string& target,
+        NumericMatrix continuous,
+        Nullable<IntegerMatrix> genus_ids = R_NilValue,
+        Nullable<IntegerMatrix> family_ids = R_NilValue,
+        Nullable<IntegerMatrix> species_ids = R_NilValue,
+        Nullable<NumericMatrix> species_vector = R_NilValue
+    ) {
+        torch::Tensor cont_t = r_mat_to_tensor(continuous);
+        torch::Tensor genus_t, family_t, species_id_t, species_vec_t;
+        if (genus_ids.isNotNull()) genus_t = r_int_mat_to_tensor(as<IntegerMatrix>(genus_ids));
+        if (family_ids.isNotNull()) family_t = r_int_mat_to_tensor(as<IntegerMatrix>(family_ids));
+        if (species_ids.isNotNull()) species_id_t = r_int_mat_to_tensor(as<IntegerMatrix>(species_ids));
+        if (species_vector.isNotNull()) species_vec_t = r_mat_to_tensor(as<NumericMatrix>(species_vector));
+
+        auto result = (*model_)->forward_single(target, cont_t, genus_t, family_t, species_id_t, species_vec_t);
+        return tensor_to_r_vec(result);
+    }
+
+    // Encode with intermediate activations (diagnostics)
+    List encode_with_activations(
+        NumericMatrix continuous,
+        Nullable<IntegerMatrix> genus_ids = R_NilValue,
+        Nullable<IntegerMatrix> family_ids = R_NilValue
+    ) {
+        torch::Tensor cont_t = r_mat_to_tensor(continuous);
+        torch::Tensor genus_t, family_t;
+        if (genus_ids.isNotNull()) genus_t = r_int_mat_to_tensor(as<IntegerMatrix>(genus_ids));
+        if (family_ids.isNotNull()) family_t = r_int_mat_to_tensor(as<IntegerMatrix>(family_ids));
+
+        auto [latent, activations] = (*model_)->encode_with_activations(cont_t, genus_t, family_t);
+        List act_list;
+        for (const auto& a : activations) {
+            act_list.push_back(tensor_to_r_mat(a));
+        }
+        return List::create(Named("latent") = tensor_to_r_mat(latent), Named("activations") = act_list);
+    }
+
+    // MoE gate probabilities
+    NumericMatrix get_gate_probs(
+        NumericMatrix continuous,
+        Nullable<IntegerMatrix> genus_ids = R_NilValue,
+        Nullable<IntegerMatrix> family_ids = R_NilValue
+    ) {
+        torch::Tensor cont_t = r_mat_to_tensor(continuous);
+        torch::Tensor genus_t, family_t;
+        if (genus_ids.isNotNull()) genus_t = r_int_mat_to_tensor(as<IntegerMatrix>(genus_ids));
+        if (family_ids.isNotNull()) family_t = r_int_mat_to_tensor(as<IntegerMatrix>(family_ids));
+
+        auto result = (*model_)->get_gate_probs(cont_t, genus_t, family_t);
+        return tensor_to_r_mat(result);
+    }
+
+    // Accessors
+    std::string species_encoding() const {
+        auto mode = (*model_)->species_encoding();
+        switch (mode) {
+            case resolve::SpeciesEncodingMode::Hash: return "hash";
+            case resolve::SpeciesEncodingMode::Embed: return "embed";
+            case resolve::SpeciesEncodingMode::Sparse: return "sparse";
+            case resolve::SpeciesEncodingMode::RankPool: return "rank_pool";
+            case resolve::SpeciesEncodingMode::Transformer: return "transformer";
+            default: return "unknown";
+        }
+    }
+
+    bool uses_explicit_vector() const { return (*model_)->uses_explicit_vector(); }
+    bool uses_moe() const { return (*model_)->uses_moe(); }
+    int n_experts() const { return (*model_)->n_experts(); }
+
+    // Embedding weight extraction
+    Nullable<NumericMatrix> get_genus_weights() {
+        auto t = (*model_)->get_genus_weights();
+        if (!t.defined()) return R_NilValue;
+        return tensor_to_r_mat(t);
+    }
+
+    Nullable<NumericMatrix> get_family_weights() {
+        auto t = (*model_)->get_family_weights();
+        if (!t.defined()) return R_NilValue;
+        return tensor_to_r_mat(t);
+    }
+
+    Nullable<NumericMatrix> get_species_weights() {
+        auto t = (*model_)->get_species_weights();
+        if (!t.defined()) return R_NilValue;
+        return tensor_to_r_mat(t);
+    }
+
 private:
+    // Private constructor for wrapping an existing model (used by load paths)
+    RResolveModel(std::shared_ptr<resolve::ResolveModel> model) : model_(model) {}
+    friend class RTrainer;
+    friend class RPredictor;
+
     std::shared_ptr<resolve::ResolveModel> model_;
 };
 

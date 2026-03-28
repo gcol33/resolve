@@ -217,7 +217,15 @@ void register_types(nb::module_& m) {
         // Parallel layers
         .def_rw("parallel_layers", &resolve::ModelConfig::parallel_layers)
         // TabM configuration
-        .def_rw("tabm", &resolve::ModelConfig::tabm);
+        .def_rw("tabm", &resolve::ModelConfig::tabm)
+        // RankPool / Transformer encoder fields
+        .def_rw("cover_dropout", &resolve::ModelConfig::cover_dropout)
+        .def_rw("d_model", &resolve::ModelConfig::d_model)
+        .def_rw("n_heads", &resolve::ModelConfig::n_heads)
+        .def_rw("n_attention_layers", &resolve::ModelConfig::n_attention_layers)
+        .def_rw("transformer_ff_dim", &resolve::ModelConfig::transformer_ff_dim)
+        .def_rw("transformer_pooling", &resolve::ModelConfig::transformer_pooling)
+        .def_rw("transformer_dropout", &resolve::ModelConfig::transformer_dropout);
 
     nb::class_<resolve::TrainConfig>(m, "TrainConfig")
         .def(nb::init<>())
@@ -387,4 +395,29 @@ void register_types(nb::module_& m) {
         .def_ro("std_metrics", &resolve::CrossValidationResult::std_metrics)
         .def_ro("fold_results", &resolve::CrossValidationResult::fold_results)
         .def_ro("total_time_seconds", &resolve::CrossValidationResult::total_time_seconds);
+
+    nb::class_<resolve::RunMetadata>(m, "RunMetadata")
+        .def(nb::init<>())
+        .def_rw("resolve_version", &resolve::RunMetadata::resolve_version)
+        .def_rw("created_at", &resolve::RunMetadata::created_at)
+        .def_rw("completed_at", &resolve::RunMetadata::completed_at)
+        .def_rw("train_time_seconds", &resolve::RunMetadata::train_time_seconds)
+        .def_rw("n_plots_train", &resolve::RunMetadata::n_plots_train)
+        .def_rw("n_plots_test", &resolve::RunMetadata::n_plots_test)
+        .def_rw("best_epoch", &resolve::RunMetadata::best_epoch)
+        .def_rw("total_epochs", &resolve::RunMetadata::total_epochs)
+        .def_rw("final_metrics", &resolve::RunMetadata::final_metrics);
+
+    nb::class_<resolve::ModelForwardResult>(m, "ModelForwardResult")
+        .def(nb::init<>())
+        .def_prop_ro("outputs", [](const resolve::ModelForwardResult& r) {
+            return tensor_map_to_dict(r.outputs);
+        })
+        .def_prop_ro("moe_aux_loss", [](const resolve::ModelForwardResult& r) {
+            if (r.moe_aux_loss.defined()) {
+                auto cpu_tensor = r.moe_aux_loss.detach().cpu().contiguous();
+                return nb::steal(THPVariable_Wrap(cpu_tensor));
+            }
+            return nb::steal(Py_None);
+        });
 }

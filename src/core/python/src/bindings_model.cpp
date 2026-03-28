@@ -12,15 +12,26 @@ void register_model(nb::module_& m) {
                           nb::object genus_ids_obj,
                           nb::object family_ids_obj,
                           nb::object species_ids_obj,
-                          nb::object species_vector_obj) {
+                          nb::object species_vector_obj,
+                          nb::object pool_genus_ids_obj,
+                          nb::object pool_family_ids_obj,
+                          nb::object pool_weights_obj,
+                          nb::object pool_mask_obj,
+                          nb::object pool_has_cover_obj) {
             // Convert Python tensors to C++ tensors using THPVariable_Unpack
             const at::Tensor& continuous = THPVariable_Unpack(continuous_obj.ptr());
             const at::Tensor& genus_ids = THPVariable_Unpack(genus_ids_obj.ptr());
             const at::Tensor& family_ids = THPVariable_Unpack(family_ids_obj.ptr());
             const at::Tensor& species_ids = THPVariable_Unpack(species_ids_obj.ptr());
             const at::Tensor& species_vector = THPVariable_Unpack(species_vector_obj.ptr());
+            at::Tensor pool_genus_ids = pool_genus_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_genus_ids_obj.ptr());
+            at::Tensor pool_family_ids = pool_family_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_family_ids_obj.ptr());
+            at::Tensor pool_weights = pool_weights_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_weights_obj.ptr());
+            at::Tensor pool_mask = pool_mask_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_mask_obj.ptr());
+            at::Tensor pool_has_cover = pool_has_cover_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_has_cover_obj.ptr());
 
-            auto result = self->forward(continuous, genus_ids, family_ids, species_ids, species_vector);
+            auto result = self->forward(continuous, genus_ids, family_ids, species_ids, species_vector,
+                                         pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
 
             // Convert output tensors to Python using THPVariable_Wrap
             PyObject* py_dict = PyDict_New();
@@ -34,22 +45,38 @@ void register_model(nb::module_& m) {
            nb::arg("genus_ids"),
            nb::arg("family_ids"),
            nb::arg("species_ids"),
-           nb::arg("species_vector"))
+           nb::arg("species_vector"),
+           nb::arg("pool_genus_ids") = nb::none(),
+           nb::arg("pool_family_ids") = nb::none(),
+           nb::arg("pool_weights") = nb::none(),
+           nb::arg("pool_mask") = nb::none(),
+           nb::arg("pool_has_cover") = nb::none())
         // __call__ makes model(inputs) work like PyTorch
         .def("__call__", [](resolve::ResolveModel& self,
                            nb::object continuous_obj,
                            nb::object genus_ids_obj,
                            nb::object family_ids_obj,
                            nb::object species_ids_obj,
-                           nb::object species_vector_obj) {
+                           nb::object species_vector_obj,
+                           nb::object pool_genus_ids_obj,
+                           nb::object pool_family_ids_obj,
+                           nb::object pool_weights_obj,
+                           nb::object pool_mask_obj,
+                           nb::object pool_has_cover_obj) {
             // Convert Python tensors to C++ tensors using THPVariable_Unpack
             const at::Tensor& continuous = THPVariable_Unpack(continuous_obj.ptr());
             const at::Tensor& genus_ids = THPVariable_Unpack(genus_ids_obj.ptr());
             const at::Tensor& family_ids = THPVariable_Unpack(family_ids_obj.ptr());
             const at::Tensor& species_ids = THPVariable_Unpack(species_ids_obj.ptr());
             const at::Tensor& species_vector = THPVariable_Unpack(species_vector_obj.ptr());
+            at::Tensor pool_genus_ids = pool_genus_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_genus_ids_obj.ptr());
+            at::Tensor pool_family_ids = pool_family_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_family_ids_obj.ptr());
+            at::Tensor pool_weights = pool_weights_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_weights_obj.ptr());
+            at::Tensor pool_mask = pool_mask_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_mask_obj.ptr());
+            at::Tensor pool_has_cover = pool_has_cover_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_has_cover_obj.ptr());
 
-            auto result = self->forward(continuous, genus_ids, family_ids, species_ids, species_vector);
+            auto result = self->forward(continuous, genus_ids, family_ids, species_ids, species_vector,
+                                         pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
 
             // Convert output tensors to Python using THPVariable_Wrap
             PyObject* py_dict = PyDict_New();
@@ -63,27 +90,48 @@ void register_model(nb::module_& m) {
            nb::arg("genus_ids"),
            nb::arg("family_ids"),
            nb::arg("species_ids"),
-           nb::arg("species_vector"))
+           nb::arg("species_vector"),
+           nb::arg("pool_genus_ids") = nb::none(),
+           nb::arg("pool_family_ids") = nb::none(),
+           nb::arg("pool_weights") = nb::none(),
+           nb::arg("pool_mask") = nb::none(),
+           nb::arg("pool_has_cover") = nb::none())
         .def("get_latent", [](resolve::ResolveModel& self,
                               nb::object continuous_obj,
                               nb::object genus_ids_obj,
                               nb::object family_ids_obj,
                               nb::object species_ids_obj,
-                              nb::object species_vector_obj) {
+                              nb::object species_vector_obj,
+                              nb::object pool_genus_ids_obj,
+                              nb::object pool_family_ids_obj,
+                              nb::object pool_weights_obj,
+                              nb::object pool_mask_obj,
+                              nb::object pool_has_cover_obj) {
             // Convert Python tensors to C++ tensors
             const at::Tensor& continuous = THPVariable_Unpack(continuous_obj.ptr());
             const at::Tensor& genus_ids = THPVariable_Unpack(genus_ids_obj.ptr());
             const at::Tensor& family_ids = THPVariable_Unpack(family_ids_obj.ptr());
             const at::Tensor& species_ids = THPVariable_Unpack(species_ids_obj.ptr());
             const at::Tensor& species_vector = THPVariable_Unpack(species_vector_obj.ptr());
+            at::Tensor pool_genus_ids = pool_genus_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_genus_ids_obj.ptr());
+            at::Tensor pool_family_ids = pool_family_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_family_ids_obj.ptr());
+            at::Tensor pool_weights = pool_weights_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_weights_obj.ptr());
+            at::Tensor pool_mask = pool_mask_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_mask_obj.ptr());
+            at::Tensor pool_has_cover = pool_has_cover_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_has_cover_obj.ptr());
 
-            at::Tensor result = self->get_latent(continuous, genus_ids, family_ids, species_ids, species_vector);
+            at::Tensor result = self->get_latent(continuous, genus_ids, family_ids, species_ids, species_vector,
+                                                  pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
             return nb::steal(THPVariable_Wrap(result));
         }, nb::arg("continuous"),
            nb::arg("genus_ids"),
            nb::arg("family_ids"),
            nb::arg("species_ids"),
-           nb::arg("species_vector"))
+           nb::arg("species_vector"),
+           nb::arg("pool_genus_ids") = nb::none(),
+           nb::arg("pool_family_ids") = nb::none(),
+           nb::arg("pool_weights") = nb::none(),
+           nb::arg("pool_mask") = nb::none(),
+           nb::arg("pool_has_cover") = nb::none())
         .def("train", [](resolve::ResolveModel& self, bool mode) { self->train(mode); }, nb::arg("mode") = true)
         .def("eval", [](resolve::ResolveModel& self) { self->eval(); })
         .def("to", [](resolve::ResolveModel& self, const std::string& device) {
@@ -243,7 +291,79 @@ void register_model(nb::module_& m) {
             auto t = self->get_species_weights();
             if (!t.defined()) return nb::steal(nb::none().release().ptr());
             return nb::steal(THPVariable_Wrap(t));
-        });
+        })
+        .def("forward_with_aux", [](resolve::ResolveModel& self,
+                                    nb::object continuous_obj,
+                                    nb::object genus_ids_obj,
+                                    nb::object family_ids_obj,
+                                    nb::object species_ids_obj,
+                                    nb::object species_vector_obj,
+                                    nb::object pool_genus_ids_obj,
+                                    nb::object pool_family_ids_obj,
+                                    nb::object pool_weights_obj,
+                                    nb::object pool_mask_obj,
+                                    nb::object pool_has_cover_obj) {
+            const at::Tensor& continuous = THPVariable_Unpack(continuous_obj.ptr());
+            const at::Tensor& genus_ids = THPVariable_Unpack(genus_ids_obj.ptr());
+            const at::Tensor& family_ids = THPVariable_Unpack(family_ids_obj.ptr());
+            const at::Tensor& species_ids = THPVariable_Unpack(species_ids_obj.ptr());
+            const at::Tensor& species_vector = THPVariable_Unpack(species_vector_obj.ptr());
+            at::Tensor pool_genus_ids = pool_genus_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_genus_ids_obj.ptr());
+            at::Tensor pool_family_ids = pool_family_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_family_ids_obj.ptr());
+            at::Tensor pool_weights = pool_weights_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_weights_obj.ptr());
+            at::Tensor pool_mask = pool_mask_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_mask_obj.ptr());
+            at::Tensor pool_has_cover = pool_has_cover_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_has_cover_obj.ptr());
+
+            auto result = self->forward_with_aux(continuous, genus_ids, family_ids, species_ids, species_vector,
+                                                  pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
+            return result;  // ModelForwardResult is already bound
+        }, nb::arg("continuous"), nb::arg("genus_ids"), nb::arg("family_ids"),
+           nb::arg("species_ids"), nb::arg("species_vector"),
+           nb::arg("pool_genus_ids") = nb::none(), nb::arg("pool_family_ids") = nb::none(),
+           nb::arg("pool_weights") = nb::none(), nb::arg("pool_mask") = nb::none(),
+           nb::arg("pool_has_cover") = nb::none())
+        .def("forward_single", [](resolve::ResolveModel& self,
+                                   const std::string& target,
+                                   nb::object continuous_obj,
+                                   nb::object genus_ids_obj,
+                                   nb::object family_ids_obj,
+                                   nb::object species_ids_obj,
+                                   nb::object species_vector_obj) {
+            const at::Tensor& continuous = THPVariable_Unpack(continuous_obj.ptr());
+            const at::Tensor& genus_ids = THPVariable_Unpack(genus_ids_obj.ptr());
+            const at::Tensor& family_ids = THPVariable_Unpack(family_ids_obj.ptr());
+            const at::Tensor& species_ids = THPVariable_Unpack(species_ids_obj.ptr());
+            const at::Tensor& species_vector = THPVariable_Unpack(species_vector_obj.ptr());
+            auto result = self->forward_single(target, continuous, genus_ids, family_ids, species_ids, species_vector);
+            return nb::steal(THPVariable_Wrap(result));
+        }, nb::arg("target"), nb::arg("continuous"), nb::arg("genus_ids"),
+           nb::arg("family_ids"), nb::arg("species_ids"), nb::arg("species_vector"))
+        .def("encode_with_activations", [](resolve::ResolveModel& self,
+                                            nb::object continuous_obj,
+                                            nb::object genus_ids_obj,
+                                            nb::object family_ids_obj) {
+            const at::Tensor& continuous = THPVariable_Unpack(continuous_obj.ptr());
+            const at::Tensor& genus_ids = THPVariable_Unpack(genus_ids_obj.ptr());
+            const at::Tensor& family_ids = THPVariable_Unpack(family_ids_obj.ptr());
+            auto [latent, activations] = self->encode_with_activations(continuous, genus_ids, family_ids);
+            nb::list act_list;
+            for (const auto& a : activations) {
+                act_list.append(nb::steal(THPVariable_Wrap(a)));
+            }
+            return std::make_pair(nb::steal(THPVariable_Wrap(latent)), act_list);
+        }, nb::arg("continuous"), nb::arg("genus_ids"), nb::arg("family_ids"))
+        .def("get_gate_probs", [](resolve::ResolveModel& self,
+                                   nb::object continuous_obj,
+                                   nb::object genus_ids_obj,
+                                   nb::object family_ids_obj) {
+            const at::Tensor& continuous = THPVariable_Unpack(continuous_obj.ptr());
+            const at::Tensor& genus_ids = THPVariable_Unpack(genus_ids_obj.ptr());
+            const at::Tensor& family_ids = THPVariable_Unpack(family_ids_obj.ptr());
+            auto result = self->get_gate_probs(continuous, genus_ids, family_ids);
+            return nb::steal(THPVariable_Wrap(result));
+        }, nb::arg("continuous"), nb::arg("genus_ids"), nb::arg("family_ids"))
+        .def_prop_ro("uses_moe", [](resolve::ResolveModel& self) { return self->uses_moe(); })
+        .def_prop_ro("n_experts", [](resolve::ResolveModel& self) { return self->n_experts(); });
 
     m.attr("SpaccModel") = m.attr("ResolveModel");
 }

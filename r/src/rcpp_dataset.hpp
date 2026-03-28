@@ -113,6 +113,70 @@ public:
         return wrapper;
     }
 
+    // Load from species CSV only (matches Python ResolveDataset.from_species_csv)
+    static RResolveDataset from_species_csv(
+        std::string species_path,
+        List roles_list,
+        List targets_list,
+        List config_list = List()
+    ) {
+        // Build RoleMapping
+        resolve::RoleMapping roles;
+        roles.plot_id = as<std::string>(roles_list["plot_id"]);
+        roles.species_id = as<std::string>(roles_list["species_id"]);
+        if (roles_list.containsElementNamed("abundance")) {
+            roles.abundance = as<std::string>(roles_list["abundance"]);
+        }
+        if (roles_list.containsElementNamed("longitude")) {
+            roles.longitude = as<std::string>(roles_list["longitude"]);
+        }
+        if (roles_list.containsElementNamed("latitude")) {
+            roles.latitude = as<std::string>(roles_list["latitude"]);
+        }
+        if (roles_list.containsElementNamed("genus")) {
+            roles.genus = as<std::string>(roles_list["genus"]);
+        }
+        if (roles_list.containsElementNamed("family")) {
+            roles.family = as<std::string>(roles_list["family"]);
+        }
+        if (roles_list.containsElementNamed("covariates")) {
+            roles.covariates = as<std::vector<std::string>>(roles_list["covariates"]);
+        }
+
+        // Build TargetSpecs
+        std::vector<resolve::TargetSpec> targets;
+        CharacterVector target_names = targets_list.names();
+        for (int i = 0; i < targets_list.size(); ++i) {
+            List spec = targets_list[i];
+            resolve::TargetSpec ts;
+            ts.column_name = as<std::string>(target_names[i]);
+            ts.target_name = as<std::string>(target_names[i]);
+            ts.task = parse_task_type(as<std::string>(spec["task"]));
+            if (spec.containsElementNamed("transform")) {
+                ts.transform = parse_transform_type(as<std::string>(spec["transform"]));
+            }
+            if (spec.containsElementNamed("num_classes")) {
+                ts.num_classes = spec["num_classes"];
+            }
+            targets.push_back(ts);
+        }
+
+        // Build DatasetConfig
+        resolve::DatasetConfig config;
+        if (config_list.containsElementNamed("species_encoding")) {
+            config.species_encoding = parse_species_encoding_mode(
+                as<std::string>(config_list["species_encoding"]));
+        }
+        if (config_list.containsElementNamed("hash_dim")) config.hash_dim = config_list["hash_dim"];
+        if (config_list.containsElementNamed("top_k")) config.top_k = config_list["top_k"];
+        if (config_list.containsElementNamed("top_k_species")) config.top_k_species = config_list["top_k_species"];
+
+        RResolveDataset wrapper;
+        wrapper.dataset_ = std::make_shared<resolve::ResolveDataset>(
+            resolve::ResolveDataset::from_species_csv(species_path, roles, targets, config));
+        return wrapper;
+    }
+
     // Accessors (return R types)
     NumericMatrix coordinates() const {
         return tensor_to_r_mat(dataset_->coordinates());
@@ -186,7 +250,8 @@ public:
                 Named("task") = task_str,
                 Named("transform") = transform_str,
                 Named("num_classes") = tc.num_classes,
-                Named("weight") = tc.weight
+                Named("weight") = tc.weight,
+                Named("class_weights") = wrap(tc.class_weights)
             );
         }
 
@@ -227,6 +292,8 @@ public:
             case resolve::SpeciesEncodingMode::Hash: encoding_str = "hash"; break;
             case resolve::SpeciesEncodingMode::Embed: encoding_str = "embed"; break;
             case resolve::SpeciesEncodingMode::Sparse: encoding_str = "sparse"; break;
+            case resolve::SpeciesEncodingMode::RankPool: encoding_str = "rank_pool"; break;
+            case resolve::SpeciesEncodingMode::Transformer: encoding_str = "transformer"; break;
         }
         return List::create(
             Named("species_encoding") = encoding_str,
@@ -237,6 +304,39 @@ public:
             Named("track_unknown_count") = c.track_unknown_count,
             Named("use_taxonomy") = c.use_taxonomy
         );
+    }
+
+    bool has_raw_species_data() const { return dataset_->has_raw_species_data(); }
+
+    Nullable<NumericVector> raw_species_ids() const {
+        const auto& t = dataset_->raw_species_ids();
+        if (!t.defined()) return R_NilValue;
+        torch::Tensor cpu = t.cpu().contiguous().to(torch::kFloat32);
+        float* data = cpu.data_ptr<float>();
+        return NumericVector(data, data + cpu.numel());
+    }
+
+    Nullable<NumericVector> raw_weights() const {
+        const auto& t = dataset_->raw_weights();
+        if (!t.defined()) return R_NilValue;
+        return tensor_to_r_vec(t);
+    }
+
+    Nullable<NumericVector> plot_offsets() const {
+        const auto& t = dataset_->plot_offsets();
+        if (!t.defined()) return R_NilValue;
+        torch::Tensor cpu = t.cpu().contiguous().to(torch::kFloat32);
+        float* data = cpu.data_ptr<float>();
+        return NumericVector(data, data + cpu.numel());
+    }
+
+    List taxonomy_vocab() const {
+        const auto& tv = dataset_->taxonomy_vocab();
+        // Convert genus and family maps
+        List result;
+        result["n_genera"] = (int)tv.n_genera();
+        result["n_families"] = (int)tv.n_families();
+        return result;
     }
 
     // Access internal dataset for C++ functions

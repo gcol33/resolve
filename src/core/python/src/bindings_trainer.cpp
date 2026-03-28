@@ -47,7 +47,14 @@ void register_trainer(nb::module_& m) {
            nb::arg("seed") = 42,
            "Prepare data from raw tensors (backwards compatible API)")
         .def("fit", &resolve::Trainer::fit, nb::call_guard<nb::gil_scoped_release>())
-        .def("save", &resolve::Trainer::save)
+        .def("save", [](const resolve::Trainer& self, const std::string& path, nb::object metadata_obj) {
+            if (metadata_obj.is_none()) {
+                self.save(path);
+            } else {
+                auto metadata = nb::cast<resolve::RunMetadata>(metadata_obj);
+                self.save(path, &metadata);
+            }
+        }, nb::arg("path"), nb::arg("metadata") = nb::none())
         .def_static("load", [](const std::string& path, const std::string& device) {
             torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
             return resolve::Trainer::load(path, dev);
@@ -132,6 +139,11 @@ void register_trainer(nb::module_& m) {
              nb::arg("family_ids"))
         .def("get_genus_embeddings", &resolve::Predictor::get_genus_embeddings)
         .def("get_family_embeddings", &resolve::Predictor::get_family_embeddings)
+        .def("get_species_embeddings", &resolve::Predictor::get_species_embeddings)
+        .def("optimize_for_inference", &resolve::Predictor::optimize_for_inference)
+        .def_prop_ro("device", [](const resolve::Predictor& self) {
+            return self.device().is_cuda() ? std::string("cuda") : std::string("cpu");
+        })
         .def_prop_ro("model", [](resolve::Predictor& self) -> resolve::ResolveModel { return self.model(); })
         .def_prop_ro("scalers", [](resolve::Predictor& self) -> const resolve::Scalers& { return self.scalers(); });
 }

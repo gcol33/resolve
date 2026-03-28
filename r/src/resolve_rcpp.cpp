@@ -51,9 +51,15 @@ RCPP_MODULE(resolve_module) {
         .method("species_vocab", &RResolveDataset::species_vocab, "Get species vocabulary")
         .method("n_plots", &RResolveDataset::n_plots, "Get number of plots")
         .method("config", &RResolveDataset::config, "Get dataset config")
+        .method("has_raw_species_data", &RResolveDataset::has_raw_species_data, "Check if raw species data is available")
+        .method("raw_species_ids", &RResolveDataset::raw_species_ids, "Get raw species IDs")
+        .method("raw_weights", &RResolveDataset::raw_weights, "Get raw species weights")
+        .method("plot_offsets", &RResolveDataset::plot_offsets, "Get plot offsets for raw data")
+        .method("taxonomy_vocab", &RResolveDataset::taxonomy_vocab, "Get taxonomy vocabulary info")
         ;
 
     function("ResolveDataset_from_csv", &RResolveDataset::from_csv, "Load dataset from CSV files");
+    function("ResolveDataset_from_species_csv", &RResolveDataset::from_species_csv, "Load dataset from single species CSV");
 
     // ResolveModel
     class_<RResolveModel>("ResolveModel")
@@ -64,6 +70,17 @@ RCPP_MODULE(resolve_module) {
         .method("eval", &RResolveModel::eval, "Set evaluation mode")
         .method("to_device", &RResolveModel::to_device, "Move model to device")
         .method("latent_dim", &RResolveModel::latent_dim, "Get latent dimension")
+        .method("forward_with_aux", &RResolveModel::forward_with_aux, "Forward pass with MoE auxiliary loss")
+        .method("forward_single", &RResolveModel::forward_single, "Forward pass for single target")
+        .method("encode_with_activations", &RResolveModel::encode_with_activations, "Encode with intermediate activations")
+        .method("get_gate_probs", &RResolveModel::get_gate_probs, "Get MoE gating probabilities")
+        .method("species_encoding", &RResolveModel::species_encoding, "Get species encoding mode")
+        .method("uses_explicit_vector", &RResolveModel::uses_explicit_vector, "Check if using explicit vector")
+        .method("uses_moe", &RResolveModel::uses_moe, "Check if using Mixture of Experts")
+        .method("n_experts", &RResolveModel::n_experts, "Get number of experts")
+        .method("get_genus_weights", &RResolveModel::get_genus_weights, "Get genus embedding weights")
+        .method("get_family_weights", &RResolveModel::get_family_weights, "Get family embedding weights")
+        .method("get_species_weights", &RResolveModel::get_species_weights, "Get species embedding weights")
         ;
 
     // Trainer
@@ -74,6 +91,14 @@ RCPP_MODULE(resolve_module) {
         .method("prepare_data_from_dataset", &RTrainer::prepare_data_from_dataset, "Prepare training data from ResolveDataset")
         .method("fit", &RTrainer::fit, "Train the model")
         .method("save", &RTrainer::save, "Save model checkpoint")
+        .method("get_scalers", &RTrainer::get_scalers, "Get fitted scalers")
+        .method("get_config", &RTrainer::get_config, "Get training configuration")
+        .method("compute_diagnostics", &RTrainer::compute_diagnostics, "Compute network diagnostics")
+        .method("compute_calibration", &RTrainer::compute_calibration, "Compute calibration for a target")
+        .method("compute_residuals", &RTrainer::compute_residuals, "Compute residual analysis for a target")
+        .method("cross_validate", &RTrainer::cross_validate, "Run k-fold cross-validation")
+        .method("cross_validate_spatial", &RTrainer::cross_validate_spatial, "Run spatial block cross-validation")
+        .method("predict_from_trainer", &RTrainer::predict_from_trainer, "Make predictions using trainer's model")
         ;
 
     // Predictor
@@ -83,6 +108,10 @@ RCPP_MODULE(resolve_module) {
         .method("get_embeddings", &RPredictor::get_embeddings, "Get latent embeddings")
         .method("get_genus_embeddings", &RPredictor::get_genus_embeddings, "Get genus embeddings")
         .method("get_family_embeddings", &RPredictor::get_family_embeddings, "Get family embeddings")
+        .method("get_species_embeddings", &RPredictor::get_species_embeddings, "Get species embeddings")
+        .method("optimize_for_inference", &RPredictor::optimize_for_inference, "Fuse BatchNorm for faster inference")
+        .method("device", &RPredictor::device, "Get current device")
+        .method("get_scalers", &RPredictor::get_scalers, "Get fitted scalers")
         ;
 
     function("Predictor_load", &RPredictor::load, "Load predictor from checkpoint");

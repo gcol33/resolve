@@ -1,4 +1,5 @@
 #include "bindings_common.hpp"
+#include "resolve/species_encoding.hpp"
 
 void register_enums(nb::module_& m) {
     nb::enum_<resolve::TaskType>(m, "TaskType")
@@ -15,6 +16,8 @@ void register_enums(nb::module_& m) {
         .value("Hash", resolve::SpeciesEncodingMode::Hash)
         .value("Embed", resolve::SpeciesEncodingMode::Embed)
         .value("Sparse", resolve::SpeciesEncodingMode::Sparse)
+        .value("RankPool", resolve::SpeciesEncodingMode::RankPool)
+        .value("Transformer", resolve::SpeciesEncodingMode::Transformer)
         .export_values();
 
     nb::enum_<resolve::LossConfigMode>(m, "LossConfigMode")
@@ -116,5 +119,13 @@ void register_enums(nb::module_& m) {
         .value("Mean", resolve::ParallelAggregation::Mean)
         .value("Attention", resolve::ParallelAggregation::Attention)
         .value("Gated", resolve::ParallelAggregation::Gated)
+        .export_values();
+
+    nb::enum_<resolve::PoolWeighting>(m, "PoolWeighting")
+        .value("Binary", resolve::PoolWeighting::Binary)
+        .value("Abundance", resolve::PoolWeighting::Abundance)
+        .value("Log1p", resolve::PoolWeighting::Log1p)
+        .value("Norm", resolve::PoolWeighting::Norm)
+        .value("Rank", resolve::PoolWeighting::Rank)
         .export_values();
 }
