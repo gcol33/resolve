@@ -753,6 +753,14 @@ class PlotEncoderTransformer(nn.Module):
         # PyTorch TransformerEncoder: src_key_padding_mask True = IGNORE
         padding_mask = ~mask  # invert: True=padding (ignore)
 
+        # Guard against fully-masked rows (no valid species): set at least one
+        # position to valid to prevent NaN from softmax over all -inf.
+        # The output for these rows is zeroed out after pooling.
+        empty_rows = padding_mask.all(dim=1)  # (batch,) — True if row has no species
+        if empty_rows.any():
+            padding_mask = padding_mask.clone()
+            padding_mask[empty_rows, 0] = False  # unblock position 0 to avoid NaN
+
         if self.transformer_pooling == "attention":
             # Self-attention first, then cross-attention pooling
             if self.transformer_encoder is not None:
@@ -777,6 +785,11 @@ class PlotEncoderTransformer(nn.Module):
                     tokens, src_key_padding_mask=padding_mask
                 )
             pooled = tokens[:, 0, :]  # (B, d_model)
+
+        # Zero out pooled representation for plots with no valid species
+        if empty_rows.any():
+            pooled = pooled.clone()
+            pooled[empty_rows] = 0.0
 
         # --- MLP: cat([continuous, pooled, has_cover]) -> latent ---
         has_cover_col = has_cover.unsqueeze(-1)  # (batch, 1)
