@@ -115,3 +115,4 @@ src/core/build_cpu/
 
 # Copied C++ headers in R package (CI only)
 r/src/resolve/
+benchmarks/results_*.json
