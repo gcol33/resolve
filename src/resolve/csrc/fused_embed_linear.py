@@ -26,19 +26,29 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 
-try:
-    import triton
-    import triton.language as tl
-    TRITON_AVAILABLE = True
-except ImportError:
-    TRITON_AVAILABLE = False
+TRITON_AVAILABLE = False
+_triton_kernel_compiled = False
 
 
-# ---------------------------------------------------------------------------
-# Triton kernel
-# ---------------------------------------------------------------------------
+def _ensure_triton():
+    """Lazy-load Triton and compile kernel on first use."""
+    global TRITON_AVAILABLE, _triton_kernel_compiled
+    if _triton_kernel_compiled:
+        return TRITON_AVAILABLE
+    try:
+        import triton
+        import triton.language as tl
+        TRITON_AVAILABLE = True
+        _compile_triton_kernel(triton, tl)
+    except ImportError:
+        TRITON_AVAILABLE = False
+    _triton_kernel_compiled = True
+    return TRITON_AVAILABLE
 
-if TRITON_AVAILABLE:
+
+def _compile_triton_kernel(triton, tl):
+    """Compile the Triton kernel (called once on first use)."""
+    global _fused_embed_concat_linear_kernel
 
     @triton.jit
     def _fused_embed_concat_linear_kernel(
@@ -297,7 +307,7 @@ def fused_embed_concat_linear(
     Returns:
         (B, D_out) output of fused operation.
     """
-    if force_triton and TRITON_AVAILABLE and continuous.is_cuda:
+    if force_triton and _ensure_triton() and continuous.is_cuda:
         emb_weights = [emb.weight for emb in genus_embeddings] + [emb.weight for emb in family_embeddings]
         return _FusedEmbedConcatLinear.apply(
             continuous, genus_ids, family_ids,
@@ -311,5 +321,5 @@ def fused_embed_concat_linear(
 
 
 def is_triton_available() -> bool:
-    """Check if Triton kernels are available."""
-    return TRITON_AVAILABLE
+    """Check if Triton kernels are available (lazy-loads Triton on first call)."""
+    return _ensure_triton()

@@ -61,6 +61,7 @@ Usage:
   resolve train [options]     Train a new model
   resolve predict [options]   Make predictions with a trained model
   resolve info [options]      Display model information
+  resolve version             Print version
 
 Train Options:
   --header PATH          Path to header CSV file (plot-level data)
@@ -75,7 +76,8 @@ Train Options:
   --family COL           Column name for family (optional)
   --target COL:TYPE      Target column and type (regression/classification:N)
                          Can be specified multiple times
-  --encoding MODE        Species encoding: hash, embed, sparse (default: hash)
+  --encoding MODE        Species encoding: hash, embed, sparse, rank_pool, transformer
+                         (default: hash)
   --hash-dim N           Hash dimension (default: 32)
   --top-k N              Top-k species for encoding (default: 3)
   --batch-size N         Batch size (default: 4096)
@@ -230,6 +232,10 @@ int main(int argc, char* argv[]) {
     }
     else if (cmd == "info") {
         return info_command(args.get("--model"));
+    }
+    else if (cmd == "version" || cmd == "--version") {
+        std::cout << "resolve " << resolve::VERSION << std::endl;
+        return 0;
     }
     else if (cmd == "help" || cmd == "--help" || cmd == "-h") {
         print_usage();

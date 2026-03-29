@@ -294,6 +294,185 @@ class Predictor:
             raise ValueError("Model has no family embeddings")
         return weights.detach().cpu().numpy()
 
+    # ------------------------------------------------------------------
+    # Model export (encoder-only)
+    # ------------------------------------------------------------------
+    #
+    # These methods export only the encoder (latent extraction), not the
+    # full multi-head model.  The encoder maps raw features to a fixed-
+    # length latent vector; task heads can be trivially re-attached in
+    # the target runtime.  This sidesteps TorchScript/ONNX limitations
+    # with dict-returning forward methods.
+    #
+    # Supported encoding modes: hash (default), hash+explicit_vector,
+    # embed.  rank_pool and transformer modes have variable-length
+    # optional inputs that cannot be cleanly traced; use
+    # torch.jit.script or export the full Python model instead.
+    # ------------------------------------------------------------------
+
+    def _compute_n_continuous(self) -> int:
+        """Derive n_continuous as seen by the encoder from the model schema.
+
+        This mirrors the computation in ``ResolveModel.__init__`` so that
+        example inputs have the correct feature dimension.
+        """
+        schema = self.model.schema
+        encoding = self.model.species_encoding
+        n_coords = 2 if schema.has_coordinates else 0
+        n_unknown = 0
+        if schema.track_unknown_fraction:
+            n_unknown += 1
+        if schema.track_unknown_count:
+            n_unknown += 1
+        n_cat_embed = len(self.model._categorical_names) * self.model.categorical_embed_dim
+
+        if encoding == "hash" and not self.model.uses_explicit_vector:
+            return n_coords + len(schema.covariate_names) + self.model.hash_dim + n_unknown + n_cat_embed
+        else:
+            # embed, rank_pool, transformer, hash+explicit_vector
+            return n_coords + len(schema.covariate_names) + n_unknown + n_cat_embed
+
+    def _make_example_input(self, batch_size: int = 2) -> tuple[torch.Tensor, ...]:
+        """Create dummy tensors matching the encoder's expected input signature.
+
+        Args:
+            batch_size: Number of example rows.
+
+        Returns:
+            Tuple of tensors suitable for ``torch.jit.trace`` or
+            ``torch.onnx.export`` of ``self.model.encoder``.
+
+        Raises:
+            ValueError: If the model's encoding mode cannot be traced.
+        """
+        schema = self.model.schema
+        encoding = self.model.species_encoding
+        device = self._device
+
+        if encoding in ("rank_pool", "transformer"):
+            raise ValueError(
+                f"Export is not supported for species_encoding={encoding!r}. "
+                "rank_pool and transformer encoders have variable-length optional "
+                "inputs that cannot be cleanly traced. Use torch.jit.script or "
+                "export the full Python model instead."
+            )
+
+        n_continuous = self._compute_n_continuous()
+
+        if encoding == "hash" and not self.model.uses_explicit_vector:
+            # PlotEncoder.forward(continuous, genus_ids, family_ids)
+            continuous = torch.randn(batch_size, n_continuous, device=device)
+            if self.model.encoder.has_taxonomy:
+                genus_ids = torch.zeros(batch_size, self.model.top_k, dtype=torch.long, device=device)
+                family_ids = torch.zeros(batch_size, self.model.top_k, dtype=torch.long, device=device)
+                return (continuous, genus_ids, family_ids)
+            return (continuous,)
+
+        elif encoding == "hash" and self.model.uses_explicit_vector:
+            # PlotEncoderSparse.forward(continuous, species_abundances, genus_ids, family_ids)
+            n_species = schema.n_species_vocab
+            continuous = torch.randn(batch_size, n_continuous, device=device)
+            species_vector = torch.zeros(batch_size, n_species, device=device)
+            if self.model.encoder.has_taxonomy:
+                genus_ids = torch.zeros(batch_size, self.model.top_k, dtype=torch.long, device=device)
+                family_ids = torch.zeros(batch_size, self.model.top_k, dtype=torch.long, device=device)
+                return (continuous, species_vector, genus_ids, family_ids)
+            return (continuous, species_vector)
+
+        elif encoding == "embed":
+            # PlotEncoderEmbed.forward(continuous, species_ids, genus_ids, family_ids)
+            continuous = torch.randn(batch_size, n_continuous, device=device)
+            species_ids = torch.zeros(batch_size, self.model.top_k_species, dtype=torch.long, device=device)
+            if self.model.encoder.has_taxonomy:
+                genus_ids = torch.zeros(batch_size, self.model.top_k, dtype=torch.long, device=device)
+                family_ids = torch.zeros(batch_size, self.model.top_k, dtype=torch.long, device=device)
+                return (continuous, species_ids, genus_ids, family_ids)
+            return (continuous, species_ids)
+
+        raise ValueError(f"Unknown species_encoding: {encoding!r}")
+
+    def _get_export_names(self) -> tuple[list[str], list[str], dict[str, dict[int, str]]]:
+        """Return (input_names, output_names, dynamic_axes) for ONNX export.
+
+        Adapts to the model's encoding mode and taxonomy availability.
+        """
+        encoding = self.model.species_encoding
+        has_taxonomy = self.model.encoder.has_taxonomy
+
+        input_names: list[str] = ["continuous"]
+        dynamic_axes: dict[str, dict[int, str]] = {"continuous": {0: "batch"}}
+
+        if encoding == "hash" and self.model.uses_explicit_vector:
+            input_names.append("species_vector")
+            dynamic_axes["species_vector"] = {0: "batch"}
+        elif encoding == "embed":
+            input_names.append("species_ids")
+            dynamic_axes["species_ids"] = {0: "batch"}
+
+        if has_taxonomy:
+            input_names.extend(["genus_ids", "family_ids"])
+            dynamic_axes["genus_ids"] = {0: "batch"}
+            dynamic_axes["family_ids"] = {0: "batch"}
+
+        output_names = ["latent"]
+        dynamic_axes["latent"] = {0: "batch"}
+
+        return input_names, output_names, dynamic_axes
+
+    @torch.no_grad()
+    def export_torchscript(self, path: str | Path) -> None:
+        """Export the encoder as TorchScript for portable deployment.
+
+        Traces the encoder (latent extraction) only, not the full multi-head
+        model.  The traced module maps raw features to the latent vector;
+        task heads are simple linear layers that can be re-attached in the
+        target runtime.
+
+        Args:
+            path: Output file path (e.g. ``"encoder.pt"``).
+
+        Raises:
+            ValueError: If the encoding mode cannot be traced
+                (rank_pool, transformer).
+        """
+        self.model.eval()
+        example = self._make_example_input()
+        traced = torch.jit.trace(self.model.encoder, example)
+        torch.jit.save(traced, str(path))
+
+    @torch.no_grad()
+    def export_onnx(self, path: str | Path, opset_version: int = 14) -> None:
+        """Export the encoder as ONNX for cross-platform deployment.
+
+        Exports the encoder (latent extraction) only, not the full multi-head
+        model.  Dynamic batch axes are configured so the exported model
+        accepts variable batch sizes at inference time.
+
+        Args:
+            path: Output file path (e.g. ``"encoder.onnx"``).
+            opset_version: ONNX opset version (default 14).
+
+        Raises:
+            ValueError: If the encoding mode cannot be traced
+                (rank_pool, transformer).
+        """
+        if opset_version < 11:
+            raise ValueError(f"opset_version must be >= 11, got {opset_version}")
+
+        self.model.eval()
+        example = self._make_example_input()
+        input_names, output_names, dynamic_axes = self._get_export_names()
+
+        torch.onnx.export(
+            self.model.encoder,
+            example,
+            str(path),
+            opset_version=opset_version,
+            input_names=input_names,
+            output_names=output_names,
+            dynamic_axes=dynamic_axes,
+        )
+
     @torch.no_grad()
     def predict_batched(
         self,

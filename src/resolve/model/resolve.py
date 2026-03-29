@@ -69,11 +69,41 @@ class ResolveModel(nn.Module):
         moe_routing: str = "soft",
         moe_top_k: int = 2,
         moe_noise_std: float = 0.1,
+        # Advanced architecture (requires C++ backend for non-MLP)
+        encoder_architecture: str = "mlp",
+        # Architecture sub-configs (dicts passed to C++ backend)
+        ft_transformer_config: Optional[dict] = None,
+        tabnet_config: Optional[dict] = None,
+        saint_config: Optional[dict] = None,
+        gnn_config: Optional[dict] = None,
+        excelformer_config: Optional[dict] = None,
     ):
         super().__init__()
 
         if species_encoding not in ("hash", "embed", "rank_pool", "transformer"):
             raise ValueError(f"species_encoding must be 'hash', 'embed', 'rank_pool', or 'transformer', got {species_encoding!r}")
+
+        valid_architectures = ("mlp", "ft_transformer", "tabnet", "saint", "gnn", "excelformer")
+        if encoder_architecture not in valid_architectures:
+            raise ValueError(f"encoder_architecture must be one of {valid_architectures}, got '{encoder_architecture}'")
+
+        if encoder_architecture != "mlp":
+            try:
+                import _resolve_core  # noqa: F401
+            except ImportError:
+                raise RuntimeError(
+                    f"encoder_architecture='{encoder_architecture}' requires the C++ backend "
+                    f"(_resolve_core). Install resolve-core or use encoder_architecture='mlp'."
+                )
+            # TODO: delegate to C++ backend model construction
+            # For now, the C++ backend is used automatically when available
+
+        self.encoder_architecture = encoder_architecture
+        self.ft_transformer_config = ft_transformer_config
+        self.tabnet_config = tabnet_config
+        self.saint_config = saint_config
+        self.gnn_config = gnn_config
+        self.excelformer_config = excelformer_config
 
         self._schema = schema
         self._targets = targets

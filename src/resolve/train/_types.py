@@ -145,6 +145,21 @@ class ModelConfig:
     transformer_ff_dim: int = 256
     transformer_pooling: str = "attention"
     transformer_dropout: float = 0.1
+    # Advanced architecture (requires C++ backend for non-MLP)
+    encoder_architecture: str = "mlp"
+    # MoE configuration
+    moe_routing: str = "none"  # "none", "soft", "topk"
+    n_experts: int = 4
+    expert_hidden_dims: list[int] | None = None
+    moe_top_k: int = 2
+    moe_noise_std: float = 0.1
+    moe_aux_loss_weight: float = 0.01
+    # Architecture sub-configs (dicts passed to C++ backend)
+    ft_transformer_config: dict | None = None
+    tabnet_config: dict | None = None
+    saint_config: dict | None = None
+    gnn_config: dict | None = None
+    excelformer_config: dict | None = None
 
 
 @dataclass

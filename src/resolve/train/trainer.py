@@ -149,6 +149,21 @@ class Trainer(
         class_weights: torch.Tensor | None = None,
         ema_decay: float = 0.0,
         head_hidden_dims: list[int] | None = None,
+        # Advanced architecture (C++ backend only for non-MLP)
+        encoder_architecture: str = "mlp",
+        # MoE
+        moe_routing: str = "none",
+        n_experts: int = 4,
+        expert_hidden_dims: list[int] | None = None,
+        moe_top_k: int = 2,
+        moe_noise_std: float = 0.1,
+        moe_aux_loss_weight: float = 0.01,
+        # Architecture sub-configs
+        ft_transformer_config: dict | None = None,
+        tabnet_config: dict | None = None,
+        saint_config: dict | None = None,
+        gnn_config: dict | None = None,
+        excelformer_config: dict | None = None,
         verbose: int = 1,
         # Grouped config objects (alternative to individual kwargs)
         model_config: ModelConfig | None = None,
@@ -275,6 +290,18 @@ class Trainer(
             if transformer_ff_dim == 256: transformer_ff_dim = _mc.transformer_ff_dim
             if transformer_pooling == "attention": transformer_pooling = _mc.transformer_pooling
             if transformer_dropout == 0.1: transformer_dropout = _mc.transformer_dropout
+            if encoder_architecture == "mlp": encoder_architecture = _mc.encoder_architecture
+            if moe_routing == "none": moe_routing = _mc.moe_routing
+            if n_experts == 4: n_experts = _mc.n_experts
+            if expert_hidden_dims is None: expert_hidden_dims = _mc.expert_hidden_dims
+            if moe_top_k == 2: moe_top_k = _mc.moe_top_k
+            if moe_noise_std == 0.1: moe_noise_std = _mc.moe_noise_std
+            if moe_aux_loss_weight == 0.01: moe_aux_loss_weight = _mc.moe_aux_loss_weight
+            if ft_transformer_config is None: ft_transformer_config = _mc.ft_transformer_config
+            if tabnet_config is None: tabnet_config = _mc.tabnet_config
+            if saint_config is None: saint_config = _mc.saint_config
+            if gnn_config is None: gnn_config = _mc.gnn_config
+            if excelformer_config is None: excelformer_config = _mc.excelformer_config
 
         if training_config is not None:
             _tc = training_config
@@ -325,6 +352,30 @@ class Trainer(
         if species_encoding not in ("hash", "embed", "rank_pool", "transformer"):
             raise ValueError(f"species_encoding must be 'hash', 'embed', 'rank_pool', or 'transformer', got {species_encoding!r}")
         self.species_encoding = species_encoding
+
+        # Encoder architecture
+        valid_architectures = ("mlp", "ft_transformer", "tabnet", "saint", "gnn", "excelformer")
+        if encoder_architecture not in valid_architectures:
+            raise ValueError(f"encoder_architecture must be one of {valid_architectures}, got '{encoder_architecture}'")
+        self.encoder_architecture = encoder_architecture
+
+        # MoE routing
+        valid_moe_routing = ("none", "soft", "topk")
+        if moe_routing not in valid_moe_routing:
+            raise ValueError(f"moe_routing must be one of {valid_moe_routing}, got '{moe_routing}'")
+        self.moe_routing = moe_routing
+        self.n_experts = n_experts
+        self.expert_hidden_dims = expert_hidden_dims
+        self.moe_top_k = moe_top_k
+        self.moe_noise_std = moe_noise_std
+        self.moe_aux_loss_weight = moe_aux_loss_weight
+
+        # Architecture sub-configs
+        self.ft_transformer_config = ft_transformer_config
+        self.tabnet_config = tabnet_config
+        self.saint_config = saint_config
+        self.gnn_config = gnn_config
+        self.excelformer_config = excelformer_config
 
         # Dimension parameters
         if hash_dim < 1:
@@ -560,6 +611,17 @@ class Trainer(
             transformer_pooling=self.transformer_pooling,
             transformer_dropout=self.transformer_dropout,
             head_hidden_dims=self.head_hidden_dims,
+            n_experts=self.n_experts if self.moe_routing != "none" else 0,
+            expert_hidden_dims=self.expert_hidden_dims or [256, 128],
+            moe_routing=self.moe_routing,
+            moe_top_k=self.moe_top_k,
+            moe_noise_std=self.moe_noise_std,
+            encoder_architecture=self.encoder_architecture,
+            ft_transformer_config=self.ft_transformer_config,
+            tabnet_config=self.tabnet_config,
+            saint_config=self.saint_config,
+            gnn_config=self.gnn_config,
+            excelformer_config=self.excelformer_config,
         )
 
     def _ensure_model(self) -> ResolveModel:
