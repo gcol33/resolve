@@ -25,7 +25,7 @@ Create a trainer instance. The model is automatically constructed from the datas
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `dataset` | `ResolveDataset` | required | Training dataset |
-| `species_encoding` | `str` | `"hash"` | Species encoding mode: `"hash"` or `"embed"` |
+| `species_encoding` | `str` | `"hash"` | Species encoding mode: `"hash"`, `"embed"`, `"rank_pool"`, or `"transformer"` |
 | `hash_dim` | `int` | `32` | Dimension of feature hash (hash mode) |
 | `species_embed_dim` | `int` | `32` | Embedding dimension per species (embed mode) |
 | `top_k` | `int` | `5` | Number of top species for taxonomy embeddings |
@@ -38,6 +38,11 @@ Create a trainer instance. The model is automatically constructed from the datas
 | `lr` | `float` | `1e-3` | Learning rate |
 | `loss_config` | `str` | `"mae"` | Loss preset: `"mae"`, `"combined"`, or `"smape"` |
 | `checkpoint_dir` | `str` | `None` | Directory for checkpoints |
+| `n_heads` | `int` | `4` | Number of attention heads (transformer mode) |
+| `transformer_ff_dim` | `int` | `256` | Feed-forward dimension (transformer mode) |
+| `transformer_pooling` | `str` | `"attention"` | Pooling strategy: `"attention"` or `"mean"` (transformer mode) |
+| `transformer_dropout` | `float` | `0.1` | Dropout rate in transformer layers (transformer mode) |
+| `n_attention_layers` | `int` | `0` | Number of transformer encoder layers |
 | `device` | `str` | `"auto"` | Device (`"auto"`, `"cpu"`, `"cuda"`) |
 
 **Example:**
@@ -51,6 +56,48 @@ trainer = Trainer(
     max_epochs=200,
     patience=30,
     loss_config="mae",
+)
+```
+
+## Encoding Modes
+
+The `species_encoding` parameter controls how species composition is represented as model input.
+
+| Mode | Description | Best for |
+|------|-------------|----------|
+| `"hash"` | Feature hashing into a fixed-dimension vector. Fast and memory-efficient. | Default choice, large species pools |
+| `"embed"` | Learned embeddings per species. More expressive but requires a fixed vocabulary. | Moderate species pools with enough training data |
+| `"rank_pool"` | Variable-length species lists with weighted pooling. Handles plots with widely varying species counts without padding waste. | Datasets where species richness varies widely across plots |
+| `"transformer"` | Transformer-based species encoder with attention pooling. Captures inter-species interactions via self-attention. | Large datasets where species co-occurrence patterns matter |
+
+### Hash mode
+
+```python
+trainer = Trainer(dataset, species_encoding="hash", hash_dim=64)
+```
+
+### Embed mode
+
+```python
+trainer = Trainer(dataset, species_encoding="embed", species_embed_dim=32, top_k_species=10)
+```
+
+### Rank-pool mode
+
+```python
+trainer = Trainer(dataset, species_encoding="rank_pool", max_epochs=100)
+```
+
+### Transformer mode
+
+```python
+trainer = Trainer(
+    dataset,
+    species_encoding="transformer",
+    n_heads=4,
+    transformer_ff_dim=256,
+    n_attention_layers=2,
+    transformer_pooling="attention",
 )
 ```
 

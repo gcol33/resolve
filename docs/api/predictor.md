@@ -125,14 +125,14 @@ Get predictions for a specific target.
 area_preds = predictions["area"]
 ```
 
-### `to_dataframe()`
+### `to_polars()`
 
-Convert predictions to pandas DataFrame.
+Convert predictions to Polars DataFrame.
 
-**Returns:** `pd.DataFrame`
+**Returns:** `pl.DataFrame`
 
 ```python
-df = predictions.to_dataframe()
+df = predictions.to_polars()
 ```
 
 ### `to_csv(path)`

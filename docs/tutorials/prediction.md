@@ -34,7 +34,7 @@ for target in predictions.predictions:
 ### DataFrame Export
 
 ```python
-df = predictions.to_dataframe()
+df = predictions.to_polars()
 print(df.head())
 ```
 

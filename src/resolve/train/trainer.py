@@ -168,6 +168,8 @@ class Trainer(
             species_encoding: How to encode species composition.
                 - "hash": Feature hashing for fixed-dim embedding (default, faster)
                 - "embed": Learned embeddings per species (more expressive)
+                - "rank_pool": Variable-length species lists with weighted pooling
+                - "transformer": Transformer-based encoder with attention pooling
 
             hash_dim: Dimension of hashed species embedding (hash mode only).
             species_embed_dim: Embedding dimension per species (embed mode only).

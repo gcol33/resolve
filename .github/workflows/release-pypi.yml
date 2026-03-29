@@ -28,22 +28,22 @@ jobs:
       - name: Download libtorch (Linux)
         if: runner.os == 'Linux'
         run: |
-          wget -q https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.1.0%2Bcpu.zip
-          unzip -q libtorch-cxx11-abi-shared-with-deps-2.1.0+cpu.zip
+          wget -q https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.6.0%2Bcpu.zip
+          unzip -q libtorch-cxx11-abi-shared-with-deps-2.6.0+cpu.zip
           echo "Torch_DIR=${{ github.workspace }}/libtorch/share/cmake/Torch" >> $GITHUB_ENV
 
       - name: Download libtorch (macOS)
         if: runner.os == 'macOS'
         run: |
-          wget -q https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.1.0.zip
-          unzip -q libtorch-macos-arm64-2.1.0.zip
+          wget -q https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.6.0.zip
+          unzip -q libtorch-macos-arm64-2.6.0.zip
           echo "Torch_DIR=${{ github.workspace }}/libtorch/share/cmake/Torch" >> $GITHUB_ENV
 
       - name: Download libtorch (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.1.0%2Bcpu.zip" -OutFile libtorch.zip
+          Invoke-WebRequest -Uri "https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.6.0%2Bcpu.zip" -OutFile libtorch.zip
           Expand-Archive -Path libtorch.zip -DestinationPath .
           echo "Torch_DIR=${{ github.workspace }}/libtorch/share/cmake/Torch" >> $env:GITHUB_ENV
 

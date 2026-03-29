@@ -105,10 +105,9 @@ class CVMixin:
         # Generate fold indices
         if spatial:
             splitter = SpatialBlockSplitter(
-                block_size=block_size,
                 n_splits=n_splits,
                 seed=seed,
-                block_deg=block_deg,
+                block_deg=block_size if block_size is not None else block_deg,
                 block_km=block_km,
                 block_ids=block_ids,
                 balance=balance,

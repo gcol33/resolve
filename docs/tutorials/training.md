@@ -82,12 +82,65 @@ model = resolve.ResolveModel(
 
 ## Species Encoding Options
 
+RESOLVE supports four encoding modes via the `species_encoding` parameter.
+
+### Hash encoding (default)
+
+Feature hashing maps the full species list into a fixed-dimension vector. Fast and works with any species pool size.
+
+```python
+trainer = resolve.Trainer(
+    dataset,
+    species_encoding="hash",
+    hash_dim=64,
+)
+```
+
+### Embed encoding
+
+Learned per-species embeddings. More expressive but limited to the top-k species seen during training.
+
+```python
+trainer = resolve.Trainer(
+    dataset,
+    species_encoding="embed",
+    species_embed_dim=32,
+    top_k_species=10,
+)
+```
+
+### Rank-pool encoding
+
+Variable-length species lists with weighted pooling. Avoids padding waste when species richness varies widely across plots.
+
+```python
+trainer = resolve.Trainer(
+    dataset,
+    species_encoding="rank_pool",
+    max_epochs=100,
+)
+```
+
+### Transformer encoding
+
+Transformer-based encoder with self-attention over species. Captures co-occurrence patterns but requires more data and compute.
+
+```python
+trainer = resolve.Trainer(
+    dataset,
+    species_encoding="transformer",
+    n_heads=4,
+    n_attention_layers=2,
+    transformer_ff_dim=256,
+    transformer_pooling="attention",  # or "mean"
+)
+```
+
 ### Abundance Normalization
 
 ```python
 trainer = resolve.Trainer(
-    model=model,
-    dataset=dataset,
+    dataset,
     species_normalization="relative_plot",  # Default
 )
 ```
@@ -103,8 +156,7 @@ Enable detailed tracking of novel species:
 
 ```python
 trainer = resolve.Trainer(
-    model=model,
-    dataset=dataset,
+    dataset,
     track_unknown_count=True,  # Include count of unknown species
 )
 ```

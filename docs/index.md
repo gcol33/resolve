@@ -12,7 +12,7 @@ RESOLVE treats species composition as *biotic context* — a rich, structured si
 
 ## Key Features
 
-- **Hybrid species encoding**: Feature hashing for full species lists + learned embeddings for dominant taxa
+- **Multiple species encodings**: Feature hashing, learned embeddings, rank-pooling for variable-length lists, and transformer-based attention over species
 - **Multi-target prediction**: Single shared encoder, multiple task heads
 - **Phased training**: MAE → SMAPE → band accuracy optimization
 - **Semantic role mapping**: Flexible column naming, strict structure

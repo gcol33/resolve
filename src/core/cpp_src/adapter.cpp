@@ -209,10 +209,13 @@ TabularAdapterImpl::TabularAdapterImpl(
         }
 
         case EncoderArchitecture::TraitNet:
+            throw std::runtime_error(
+                "TraitNet requires a trait-environment architecture that is not compatible "
+                "with TabularAdapter. TraitNet support is planned for a future release.");
         case EncoderArchitecture::MLP:
         default:
             throw std::runtime_error(
-                "TabularAdapter does not handle EncoderArchitecture::MLP or TraitNet. "
+                "TabularAdapter does not handle EncoderArchitecture::MLP. "
                 "Use the standard PlotEncoder for MLP mode.");
     }
 }
