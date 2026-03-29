@@ -54,7 +54,6 @@ void Trainer::prepare_data(
     }
 
     // Delegate to the raw tensor API using data from the dataset
-    // Pool fields are not yet available in ResolveDataset; pass empty tensors
     prepare_data(
         dataset.coordinates(),
         dataset.covariates(),
@@ -66,8 +65,11 @@ void Trainer::prepare_data(
         dataset.unknown_fraction(),
         dataset.unknown_count(),
         dataset.targets(),
-        /*pool_genus_ids=*/{}, /*pool_family_ids=*/{},
-        /*pool_weights=*/{}, /*pool_mask=*/{}, /*pool_has_cover=*/{},
+        dataset.pool_genus_ids(),
+        dataset.pool_family_ids(),
+        dataset.pool_weights(),
+        dataset.pool_mask(),
+        dataset.pool_has_cover(),
         test_size,
         seed
     );

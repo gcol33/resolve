@@ -89,14 +89,21 @@ class ResolveModel(nn.Module):
 
         if encoder_architecture != "mlp":
             try:
-                import _resolve_core  # noqa: F401
+                import resolve_core  # noqa: F401
             except ImportError:
                 raise RuntimeError(
                     f"encoder_architecture='{encoder_architecture}' requires the C++ backend "
-                    f"(_resolve_core). Install resolve-core or use encoder_architecture='mlp'."
+                    f"(resolve_core). Install resolve-core or use encoder_architecture='mlp'."
                 )
-            # TODO: delegate to C++ backend model construction
-            # For now, the C++ backend is used automatically when available
+            # Advanced architectures (ft_transformer, tabnet, saint, gnn, excelformer)
+            # are implemented only in the C++ backend. This Python ResolveModel still
+            # builds a standard MLP encoder as a structural placeholder so that the
+            # nn.Module graph is valid, but the actual architecture is applied when
+            # the C++ Trainer constructs its own ResolveModel from ModelConfig with
+            # encoder_architecture set to the requested value. The Python Trainer
+            # reads self.encoder_architecture and the sub-config dicts to populate
+            # the resolve_core.ModelConfig before handing off to the C++ training
+            # loop. See resolve_core.EncoderArchitecture for the C++ enum mapping.
 
         self.encoder_architecture = encoder_architecture
         self.ft_transformer_config = ft_transformer_config

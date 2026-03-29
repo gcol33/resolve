@@ -61,10 +61,27 @@ torch::Tensor FeatureMaskerImpl::create_mask(int64_t batch_size) const {
             break;
         }
 
-        case MaskStrategy::Structured:
-            // Structured masking: same as random for now, can be extended with taxonomy info
-            mask = (mask > mask_ratio_).to(torch::kFloat32);
+        case MaskStrategy::Structured: {
+            // Structured masking: mask contiguous feature groups as whole blocks.
+            // Groups approximate RESOLVE's feature layout: coords (2), species embedding,
+            // covariates. Each sample randomly selects groups to mask.
+            mask.fill_(1.0f);  // start with all visible
+            constexpr int64_t min_group_size = 2;
+            int64_t n_groups = std::max(int64_t(1), n_features_ / std::max(min_group_size, int64_t(4)));
+            int64_t group_size = n_features_ / n_groups;
+            int64_t n_mask = std::max(int64_t(1), static_cast<int64_t>(n_groups * mask_ratio_));
+            for (int64_t i = 0; i < batch_size; ++i) {
+                // Random permutation of group indices, mask first n_mask groups
+                auto perm = torch::randperm(n_groups, torch::kLong);
+                for (int64_t g = 0; g < n_mask; ++g) {
+                    int64_t gid = perm[g].item<int64_t>();
+                    int64_t start = gid * group_size;
+                    int64_t end = (gid == n_groups - 1) ? n_features_ : start + group_size;
+                    mask[i].slice(0, start, end).fill_(0.0f);
+                }
+            }
             break;
+        }
     }
 
     return mask;
@@ -185,9 +202,12 @@ JEPAPretrainer::JEPAPretrainer(
         config.predictor_dropout
     );
 
-    // Determine feature dimension for masker from the model's expected continuous input
-    // This will be set during pretrain() when we know the actual feature dimension
-    masker_ = FeatureMasker(1, config.mask_ratio, config.mask_strategy);  // placeholder
+    // Derive feature dimension from model schema (coordinates + hash/embed + covariates)
+    const auto& schema = context_encoder_->schema();
+    int64_t n_features = (schema.has_coordinates ? 2 : 0)
+                       + schema.n_species
+                       + static_cast<int64_t>(schema.covariate_names.size());
+    masker_ = FeatureMasker(n_features, config.mask_ratio, config.mask_strategy);
 
     // Create target encoder as a deep copy (EMA copy)
     // We copy weights from context encoder after the first forward pass

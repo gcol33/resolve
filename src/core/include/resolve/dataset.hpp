@@ -86,6 +86,14 @@ public:
     const torch::Tensor& unknown_count() const { return unknown_count_; }
     const std::unordered_map<std::string, torch::Tensor>& targets() const { return targets_; }
 
+    // Accessors for pool-style encoder fields (rank_pool / transformer modes)
+    const torch::Tensor& pool_genus_ids() const { return pool_genus_ids_; }
+    const torch::Tensor& pool_family_ids() const { return pool_family_ids_; }
+    const torch::Tensor& pool_weights() const { return pool_weights_; }
+    const torch::Tensor& pool_mask() const { return pool_mask_; }
+    const torch::Tensor& pool_has_cover() const { return pool_has_cover_; }
+    bool has_pool_data() const { return pool_mask_.defined() && pool_mask_.numel() > 0; }
+
     // Accessors for raw species data (CUDA hash computation)
     const torch::Tensor& raw_plot_indices() const { return raw_plot_indices_; }
     const torch::Tensor& raw_species_ids() const { return raw_species_ids_; }
@@ -150,6 +158,14 @@ private:
     torch::Tensor unknown_fraction_; // (n_plots,)
     torch::Tensor unknown_count_;    // (n_plots,)
     std::unordered_map<std::string, torch::Tensor> targets_;
+
+    // Pool-style encoder fields for rank_pool / transformer modes
+    // Each species in a plot gets its own slot (padded to max_species across all plots)
+    torch::Tensor pool_genus_ids_;   // (n_plots, max_species) int64
+    torch::Tensor pool_family_ids_;  // (n_plots, max_species) int64
+    torch::Tensor pool_weights_;     // (n_plots, max_species) float32 - abundance/weight per species
+    torch::Tensor pool_mask_;        // (n_plots, max_species) bool - true where species exists
+    torch::Tensor pool_has_cover_;   // (n_plots,) bool - true if plot has abundance data
 
     // Raw species data in COO format for CUDA hash computation
     // Stored when use_cuda_hash=true in config, enables on-the-fly GPU hash computation

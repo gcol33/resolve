@@ -151,19 +151,22 @@ def _cmd_train(args: argparse.Namespace) -> None:
     if args.header is not None and not args.header.exists():
         print(f"Error: header file not found: {args.header}", file=sys.stderr)
         sys.exit(1)
-    if args.header is None:
-        print("Error: --header is required (single-table mode not yet supported in CLI)",
-              file=sys.stderr)
-        sys.exit(1)
-
     # --- load dataset ---
-    print(f"Loading dataset from {args.header} + {args.species} ...")
-    dataset = ResolveDataset.from_csv(
-        header=str(args.header),
-        species=str(args.species),
-        roles=roles,
-        targets=targets,
-    )
+    if args.header is not None:
+        print(f"Loading dataset from {args.header} + {args.species} ...")
+        dataset = ResolveDataset.from_csv(
+            header=str(args.header),
+            species=str(args.species),
+            roles=roles,
+            targets=targets,
+        )
+    else:
+        print(f"Loading dataset from {args.species} (single-table mode) ...")
+        dataset = ResolveDataset.from_species_csv(
+            species=str(args.species),
+            roles=roles,
+            targets=targets,
+        )
 
     # --- build trainer ---
     trainer = Trainer(
@@ -219,26 +222,27 @@ def _cmd_predict(args: argparse.Namespace) -> None:
     if args.header is not None and not args.header.exists():
         print(f"Error: header file not found: {args.header}", file=sys.stderr)
         sys.exit(1)
-    if args.header is None:
-        print("Error: --header is required (single-table mode not yet supported in CLI)",
-              file=sys.stderr)
-        sys.exit(1)
-
     # --- load model ---
     print(f"Loading model from {args.model} ...")
     predictor = Predictor.load(str(args.model), device=args.device)
 
     # --- load dataset ---
-    # For prediction we still need role mapping but targets come from the checkpoint.
-    # Pass empty targets dict -- the dataset only needs the species/header structure.
     roles = _build_roles_dict(args)
-    print(f"Loading dataset from {args.header} + {args.species} ...")
-    dataset = ResolveDataset.from_csv(
-        header=str(args.header),
-        species=str(args.species),
-        roles=roles,
-        targets={},
-    )
+    if args.header is not None:
+        print(f"Loading dataset from {args.header} + {args.species} ...")
+        dataset = ResolveDataset.from_csv(
+            header=str(args.header),
+            species=str(args.species),
+            roles=roles,
+            targets={},
+        )
+    else:
+        print(f"Loading dataset from {args.species} (single-table mode) ...")
+        dataset = ResolveDataset.from_species_csv(
+            species=str(args.species),
+            roles=roles,
+            targets={},
+        )
 
     # --- predict ---
     print("Predicting ...")

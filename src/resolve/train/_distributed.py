@@ -123,11 +123,74 @@ def train_distributed(
         trainer = Trainer(dataset, device="cuda", **trainer_kwargs)
         return trainer.fit()
 
-    # For multi-GPU, the caller should use torchrun directly.
-    # This function provides guidance.
-    raise NotImplementedError(
-        f"Multi-GPU training with {n_gpus} GPUs requires launching via torchrun:\n"
-        f"  torchrun --nproc_per_node={n_gpus} your_script.py\n\n"
-        f"In your script, call setup_ddp() before creating the Trainer, "
-        f"and the Trainer will automatically detect the distributed context."
+    # Spawn workers via torchrun subprocess
+    import json
+    import tempfile
+
+    # Serialize dataset and trainer kwargs to a temp file for workers
+    config = {
+        "dataset_path": getattr(dataset, "_source_path", None),
+        "trainer_kwargs": {
+            k: v for k, v in trainer_kwargs.items()
+            if isinstance(v, (int, float, str, bool, list, type(None)))
+        },
+    }
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, prefix="resolve_ddp_"
+    ) as f:
+        json.dump(config, f)
+        config_path = f.name
+
+    # Build the worker script inline
+    worker_script = f'''
+import json, sys, os
+from resolve.train._distributed import setup_ddp, cleanup_ddp, is_main_process
+setup_ddp()
+with open("{config_path}") as f:
+    cfg = json.load(f)
+from resolve import ResolveDataset, Trainer
+# Re-load dataset from source path or error
+src = cfg.get("dataset_path")
+if src is None:
+    print("Error: dataset must have been loaded from a file path for DDP", file=sys.stderr)
+    sys.exit(1)
+dataset = ResolveDataset.from_csv(src)
+trainer = Trainer(dataset, device="cuda", **cfg["trainer_kwargs"])
+result = trainer.fit()
+if is_main_process():
+    import json as j
+    print("DDP_RESULT:" + j.dumps({{"best_epoch": result.best_epoch, "time": result.train_time_seconds}}))
+cleanup_ddp()
+'''
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".py", delete=False, prefix="resolve_worker_"
+    ) as f:
+        f.write(worker_script)
+        worker_path = f.name
+
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "torch.distributed.run",
+            f"--nproc_per_node={n_gpus}",
+            worker_path,
+        ],
+        capture_output=True,
+        text=True,
     )
+
+    # Clean up temp files
+    os.unlink(config_path)
+    os.unlink(worker_path)
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Distributed training failed (exit {result.returncode}):\n{result.stderr}"
+        )
+
+    # Parse result from stdout
+    for line in result.stdout.splitlines():
+        if line.startswith("DDP_RESULT:"):
+            import json as _json
+            return _json.loads(line[len("DDP_RESULT:"):])
+
+    return {"status": "completed", "stdout": result.stdout}

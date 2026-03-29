@@ -562,6 +562,73 @@ void ResolveDataset::encode_species(
             }
         }
 
+    } else if (config_.species_encoding == SpeciesEncodingMode::RankPool ||
+               config_.species_encoding == SpeciesEncodingMode::Transformer) {
+        // Pool-style encoding: per-species taxonomy IDs, weights, and masks
+        // Each plot stores all its species in padded slots up to max_species
+
+        // First pass: determine max species count across all plots
+        int64_t max_species = 0;
+        for (int64_t i = 0; i < n_plots; ++i) {
+            const auto& plot_id = plot_ids_[i];
+            auto it = plot_records.find(plot_id);
+            if (it != plot_records.end()) {
+                max_species = std::max(max_species, static_cast<int64_t>(it->second.size()));
+            }
+        }
+
+        // Allocate pool tensors
+        pool_genus_ids_ = torch::zeros({n_plots, max_species}, torch::kLong);
+        pool_family_ids_ = torch::zeros({n_plots, max_species}, torch::kLong);
+        pool_weights_ = torch::zeros({n_plots, max_species}, torch::kFloat32);
+        pool_mask_ = torch::zeros({n_plots, max_species}, torch::kBool);
+        pool_has_cover_ = torch::zeros({n_plots}, torch::kBool);
+
+        auto pg_acc = pool_genus_ids_.accessor<int64_t, 2>();
+        auto pf_acc = pool_family_ids_.accessor<int64_t, 2>();
+        auto pw_acc = pool_weights_.accessor<float, 2>();
+        auto pm_acc = pool_mask_.accessor<bool, 2>();
+        auto phc_acc = pool_has_cover_.accessor<bool, 1>();
+
+        for (int64_t i = 0; i < n_plots; ++i) {
+            const auto& plot_id = plot_ids_[i];
+            auto it = plot_records.find(plot_id);
+            if (it == plot_records.end()) continue;
+
+            // Sort by abundance (descending) for rank-based pooling
+            auto records = it->second;
+            std::sort(records.begin(), records.end(),
+                [](const auto& a, const auto& b) { return a.abundance > b.abundance; }
+            );
+
+            // Check if plot has real cover/abundance data (not all 1.0 defaults)
+            bool has_cover = false;
+            for (const auto& rec : records) {
+                if (rec.abundance != 1.0f) {
+                    has_cover = true;
+                    break;
+                }
+            }
+            phc_acc[i] = has_cover;
+
+            // Apply normalization to weights
+            std::vector<std::pair<std::string, float>> species_pairs;
+            for (const auto& rec : records) {
+                species_pairs.push_back({rec.species_id, rec.abundance});
+            }
+            apply_normalization(species_pairs, config_.normalization);
+
+            // Fill pool slots
+            for (int64_t j = 0; j < static_cast<int64_t>(records.size()) && j < max_species; ++j) {
+                if (schema_.has_taxonomy) {
+                    pg_acc[i][j] = taxonomy_vocab_.encode_genus(records[j].genus);
+                    pf_acc[i][j] = taxonomy_vocab_.encode_family(records[j].family);
+                }
+                pw_acc[i][j] = species_pairs[j].second;
+                pm_acc[i][j] = true;
+            }
+        }
+
     } else {
         // Sparse/explicit vector mode
         species_vector_ = torch::zeros({n_plots, schema_.n_species_vocab}, torch::kFloat32);
