@@ -188,6 +188,7 @@ class TrainingConfig:
     label_smoothing: float = 0.0
     class_weights: torch.Tensor | None = None
     ema_decay: float = 0.0
+    species_dropout: float = 0.0
     verbose: int = 1
 
 
@@ -205,6 +206,7 @@ class DataConfig:
     min_species_frequency: int = 1
     cover_dropout: float = 0.0
     categorical_embed_dim: int = 8
+    stratified_split: bool = False
     # Pretraining
     pretrain_epochs: int = 0
     pretrain_mask_prob: float = 0.15

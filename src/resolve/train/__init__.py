@@ -1,6 +1,11 @@
 from resolve.train.trainer import Trainer
 from resolve.train.loss import PhasedLoss
-from resolve.train.metrics import compute_metrics
+from resolve.train.metrics import (
+    compute_metrics,
+    confusion_matrix,
+    per_class_metrics,
+    r_squared,
+)
 from resolve.train._types import (
     CVResult,
     CheckpointConfig,
@@ -15,6 +20,9 @@ __all__ = [
     "Trainer",
     "PhasedLoss",
     "compute_metrics",
+    "confusion_matrix",
+    "per_class_metrics",
+    "r_squared",
     "TrainResult",
     "ProfileResult",
     "CVResult",

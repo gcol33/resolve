@@ -350,12 +350,20 @@ class Predictor:
         device = self._device
 
         if encoding in ("rank_pool", "transformer"):
-            raise ValueError(
-                f"Export is not supported for species_encoding={encoding!r}. "
-                "rank_pool and transformer encoders have variable-length optional "
-                "inputs that cannot be cleanly traced. Use torch.jit.script or "
-                "export the full Python model instead."
-            )
+            # Trace with fixed max_species padding (default 100)
+            max_species = getattr(self, '_export_max_species', 100)
+            n_continuous = self._compute_n_continuous()
+            n_species = schema.n_species_vocab or 100
+            n_genera = schema.n_genera_vocab or 20
+            n_families = schema.n_families_vocab or 10
+            continuous = torch.randn(batch_size, n_continuous, device=device)
+            species_ids = torch.randint(0, n_species, (batch_size, max_species), device=device)
+            genus_ids = torch.randint(0, n_genera, (batch_size, max_species), device=device)
+            family_ids = torch.randint(0, n_families, (batch_size, max_species), device=device)
+            weights = torch.rand(batch_size, max_species, device=device)
+            mask = torch.ones(batch_size, max_species, dtype=torch.bool, device=device)
+            has_cover = torch.ones(batch_size, device=device)
+            return (continuous, species_ids, genus_ids, family_ids, weights, mask, has_cover)
 
         n_continuous = self._compute_n_continuous()
 
@@ -402,14 +410,18 @@ class Predictor:
         input_names: list[str] = ["continuous"]
         dynamic_axes: dict[str, dict[int, str]] = {"continuous": {0: "batch"}}
 
-        if encoding == "hash" and self.model.uses_explicit_vector:
+        if encoding in ("rank_pool", "transformer"):
+            for name in ["species_ids", "genus_ids", "family_ids", "weights", "mask", "has_cover"]:
+                input_names.append(name)
+                dynamic_axes[name] = {0: "batch"}
+        elif encoding == "hash" and self.model.uses_explicit_vector:
             input_names.append("species_vector")
             dynamic_axes["species_vector"] = {0: "batch"}
         elif encoding == "embed":
             input_names.append("species_ids")
             dynamic_axes["species_ids"] = {0: "batch"}
 
-        if has_taxonomy:
+        if encoding not in ("rank_pool", "transformer") and has_taxonomy:
             input_names.extend(["genus_ids", "family_ids"])
             dynamic_axes["genus_ids"] = {0: "batch"}
             dynamic_axes["family_ids"] = {0: "batch"}
@@ -674,3 +686,380 @@ class Predictor:
                 latent=None,
                 confidence=confidence,
             )
+
+    # ------------------------------------------------------------------
+    # Feature importance
+    # ------------------------------------------------------------------
+
+    def _prepare_forward_tensors(
+        self,
+        dataset: ResolveDataset,
+        n_samples: int | None = None,
+    ) -> tuple[
+        torch.Tensor,                       # continuous_t
+        torch.Tensor | None,                # genus_t
+        torch.Tensor | None,                # family_t
+        torch.Tensor | None,                # species_ids_t
+        torch.Tensor | None,                # species_vector_t
+        torch.Tensor | None,                # pool_genus_ids_t
+        torch.Tensor | None,                # pool_family_ids_t
+        torch.Tensor | None,                # pool_weights_t
+        torch.Tensor | None,                # pool_mask_t
+        torch.Tensor | None,                # pool_has_cover_t
+        torch.Tensor | None,                # categorical_ids_t
+        list[str],                           # feature_names for the continuous block
+    ]:
+        """Prepare tensors for a forward pass, optionally subsampled.
+
+        Returns all tensors needed by the model's forward method plus a list
+        of human-readable feature names for each column of the continuous
+        tensor (used by feature-importance methods).
+        """
+        n_total = len(dataset.plot_ids)
+        if n_samples is not None and n_samples < n_total:
+            rng = np.random.default_rng(42)
+            indices = rng.choice(n_total, size=n_samples, replace=False)
+            indices.sort()
+        else:
+            indices = np.arange(n_total)
+
+        coords = dataset.get_coordinates()
+        covariates = dataset.get_covariates()
+        schema = self.model.schema
+        encoding = self.model.species_encoding
+
+        # Build feature name list in the same order as columns are stacked
+        feature_names: list[str] = []
+
+        species_ids_t = None
+        species_vector_t = None
+        genus_t = None
+        family_t = None
+        pool_genus_ids_t = None
+        pool_family_ids_t = None
+        pool_weights_t = None
+        pool_mask_t = None
+        pool_has_cover_t = None
+
+        if encoding == "embed":
+            embedded = self.species_encoder.transform(dataset)
+            parts: list[np.ndarray] = []
+            if coords is not None:
+                parts.append(coords[indices])
+                feature_names.extend(["lat", "lon"])
+            if covariates is not None:
+                parts.append(covariates[indices])
+                feature_names.extend(schema.covariate_names)
+            if schema.track_unknown_fraction:
+                parts.append(embedded.unknown_fraction[indices].reshape(-1, 1))
+                feature_names.append("unknown_fraction")
+            species_ids_t = torch.from_numpy(embedded.species_ids[indices]).to(self._device)
+            if embedded.genus_ids is not None:
+                genus_t = torch.from_numpy(embedded.genus_ids[indices]).to(self._device)
+                family_t = torch.from_numpy(embedded.family_ids[indices]).to(self._device)
+
+        elif encoding == "rank_pool":
+            pool_encoded = self.species_encoder.transform(dataset)
+            parts = []
+            if coords is not None:
+                parts.append(coords[indices])
+                feature_names.extend(["lat", "lon"])
+            if covariates is not None:
+                parts.append(covariates[indices])
+                feature_names.extend(schema.covariate_names)
+            if schema.track_unknown_fraction:
+                parts.append(pool_encoded.unknown_fraction[indices].reshape(-1, 1))
+                feature_names.append("unknown_fraction")
+            from resolve.encode.rank_pool import pad_rank_pool_encoded
+            padded = pad_rank_pool_encoded(pool_encoded)
+            species_ids_t = torch.from_numpy(padded["species_ids"][indices]).long().to(self._device)
+            pool_genus_ids_t = torch.from_numpy(padded["genus_ids"][indices]).long().to(self._device)
+            pool_family_ids_t = torch.from_numpy(padded["family_ids"][indices]).long().to(self._device)
+            pool_weights_t = torch.from_numpy(padded["weights"][indices]).to(self._device)
+            pool_mask_t = torch.from_numpy(padded["mask"][indices]).to(self._device)
+            pool_has_cover_t = torch.from_numpy(padded["has_cover"][indices]).to(self._device)
+
+        else:
+            encoded = self.species_encoder.transform(dataset)
+            parts = []
+            if coords is not None:
+                parts.append(coords[indices])
+                feature_names.extend(["lat", "lon"])
+            if covariates is not None:
+                parts.append(covariates[indices])
+                feature_names.extend(schema.covariate_names)
+            if self.model.uses_explicit_vector:
+                species_vector_t = torch.from_numpy(encoded.species_vector[indices]).to(self._device)
+            else:
+                parts.append(encoded.hash_embedding[indices])
+                feature_names.extend([f"hash_{i}" for i in range(encoded.hash_embedding.shape[1])])
+            if schema.track_unknown_fraction:
+                parts.append(encoded.unknown_fraction[indices].reshape(-1, 1))
+                feature_names.append("unknown_fraction")
+            if schema.track_unknown_count and encoded.unknown_count is not None:
+                parts.append(encoded.unknown_count[indices].reshape(-1, 1).astype(np.float32))
+                feature_names.append("unknown_count")
+            if encoded.genus_ids is not None:
+                genus_t = torch.from_numpy(encoded.genus_ids[indices]).to(self._device)
+                family_t = torch.from_numpy(encoded.family_ids[indices]).to(self._device)
+
+        continuous = np.hstack(parts) if parts else np.zeros((len(indices), 0), dtype=np.float32)
+        continuous = self.scalers["continuous"].transform(continuous).astype(np.float32)
+        continuous_t = torch.from_numpy(continuous).to(self._device)
+
+        # Categorical IDs
+        categorical_ids_t = None
+        if self.categorical_vocabs and schema.has_categoricals:
+            cat_data = dataset.get_categoricals()
+            if cat_data is not None:
+                cat_arrays = []
+                for cat_name in schema.categorical_names:
+                    vocab = self.categorical_vocabs[cat_name]
+                    arr = vocab.encode_array(cat_data[cat_name])
+                    cat_arrays.append(arr[indices])
+                categorical_ids_t = torch.from_numpy(
+                    np.stack(cat_arrays, axis=1)
+                ).to(self._device)
+
+        return (
+            continuous_t, genus_t, family_t, species_ids_t, species_vector_t,
+            pool_genus_ids_t, pool_family_ids_t, pool_weights_t, pool_mask_t,
+            pool_has_cover_t, categorical_ids_t, feature_names,
+        )
+
+    def _forward_for_target(
+        self,
+        target: str,
+        continuous_t: torch.Tensor,
+        genus_t: torch.Tensor | None,
+        family_t: torch.Tensor | None,
+        species_ids_t: torch.Tensor | None,
+        species_vector_t: torch.Tensor | None,
+        pool_genus_ids_t: torch.Tensor | None,
+        pool_family_ids_t: torch.Tensor | None,
+        pool_weights_t: torch.Tensor | None,
+        pool_mask_t: torch.Tensor | None,
+        pool_has_cover_t: torch.Tensor | None,
+        categorical_ids_t: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Run forward pass and return the raw output for a single target."""
+        encoding = self.model.species_encoding
+        if encoding == "rank_pool":
+            preds = self.model(
+                continuous_t, genus_ids=None, family_ids=None,
+                species_ids=species_ids_t, species_vector=None,
+                pool_genus_ids=pool_genus_ids_t, pool_family_ids=pool_family_ids_t,
+                pool_weights=pool_weights_t, pool_mask=pool_mask_t,
+                pool_has_cover=pool_has_cover_t,
+                categorical_ids=categorical_ids_t,
+            )
+        else:
+            preds = self.model(
+                continuous_t, genus_t, family_t,
+                species_ids=species_ids_t, species_vector=species_vector_t,
+                categorical_ids=categorical_ids_t,
+            )
+        return preds[target]
+
+    def compute_feature_importance(
+        self,
+        dataset: ResolveDataset,
+        target: str,
+        n_samples: int = 1000,
+        method: str = "gradient",
+    ) -> dict[str, float]:
+        """Compute feature importance for continuous input features.
+
+        Two methods are available:
+
+        * ``"gradient"``: mean absolute gradient of the target loss w.r.t.
+          each continuous input feature.  Fast (single forward + backward),
+          but only captures first-order sensitivity.
+        * ``"permutation"``: drop in metric when each feature column is
+          randomly shuffled.  Model-agnostic and captures non-linear effects,
+          but requires one forward pass per feature.
+
+        Feature importance is computed over the *continuous* input block
+        (coordinates, covariates, hash embedding, unknown fraction, etc.).
+        Discrete inputs (genus/family IDs, species IDs, categorical IDs) are
+        held fixed and not attributed.
+
+        Args:
+            dataset: ResolveDataset to draw samples from.
+            target: Name of the target head to attribute.
+            n_samples: Number of samples to use (randomly sub-sampled if
+                the dataset is larger).
+            method: ``"gradient"`` or ``"permutation"``.
+
+        Returns:
+            Dictionary mapping feature name to importance score (always
+            non-negative; higher means more important).
+
+        Raises:
+            ValueError: If *target* is not a valid target name, or *method*
+                is not one of the supported methods.
+        """
+        if target not in self.model.target_configs:
+            valid = list(self.model.target_configs.keys())
+            raise ValueError(f"Unknown target {target!r}, must be one of {valid}")
+        if method not in ("gradient", "permutation"):
+            raise ValueError(f"method must be 'gradient' or 'permutation', got {method!r}")
+
+        (
+            continuous_t, genus_t, family_t, species_ids_t, species_vector_t,
+            pool_genus_ids_t, pool_family_ids_t, pool_weights_t, pool_mask_t,
+            pool_has_cover_t, categorical_ids_t, feature_names,
+        ) = self._prepare_forward_tensors(dataset, n_samples)
+
+        if continuous_t.shape[1] == 0:
+            return {}
+
+        if method == "gradient":
+            return self._gradient_importance(
+                target, continuous_t, genus_t, family_t, species_ids_t,
+                species_vector_t, pool_genus_ids_t, pool_family_ids_t,
+                pool_weights_t, pool_mask_t, pool_has_cover_t,
+                categorical_ids_t, feature_names,
+            )
+        else:
+            return self._permutation_importance(
+                target, continuous_t, genus_t, family_t, species_ids_t,
+                species_vector_t, pool_genus_ids_t, pool_family_ids_t,
+                pool_weights_t, pool_mask_t, pool_has_cover_t,
+                categorical_ids_t, feature_names,
+            )
+
+    def _gradient_importance(
+        self,
+        target: str,
+        continuous_t: torch.Tensor,
+        genus_t: torch.Tensor | None,
+        family_t: torch.Tensor | None,
+        species_ids_t: torch.Tensor | None,
+        species_vector_t: torch.Tensor | None,
+        pool_genus_ids_t: torch.Tensor | None,
+        pool_family_ids_t: torch.Tensor | None,
+        pool_weights_t: torch.Tensor | None,
+        pool_mask_t: torch.Tensor | None,
+        pool_has_cover_t: torch.Tensor | None,
+        categorical_ids_t: torch.Tensor | None,
+        feature_names: list[str],
+    ) -> dict[str, float]:
+        """Gradient-based feature importance.
+
+        Enables gradients on the continuous input, runs a forward pass,
+        computes a scalar loss (MSE for regression, cross-entropy surrogate
+        for classification), then backpropagates.  Importance per feature is
+        the mean absolute gradient across samples.
+        """
+        cfg = self.model.target_configs[target]
+
+        # Detach + clone continuous so we can enable gradients
+        cont = continuous_t.detach().clone().requires_grad_(True)
+
+        # Forward pass (model must be in eval mode but we need gradients)
+        self.model.eval()
+        output = self._forward_for_target(
+            target, cont, genus_t, family_t, species_ids_t, species_vector_t,
+            pool_genus_ids_t, pool_family_ids_t, pool_weights_t, pool_mask_t,
+            pool_has_cover_t, categorical_ids_t,
+        )
+
+        # Compute a scalar loss to backpropagate
+        if cfg.task == "regression":
+            # Use sum of squared outputs as a proxy (no targets needed --
+            # we want sensitivity of the output to each input).
+            loss = (output ** 2).sum()
+        else:
+            # For classification, use the log-sum-exp (total logit magnitude)
+            # as a differentiable scalar that captures sensitivity.
+            loss = output.logsumexp(dim=-1).sum()
+
+        loss.backward()
+
+        # Importance = mean |grad| per feature across samples
+        grad = cont.grad  # (n_samples, n_features)
+        importance = grad.abs().mean(dim=0).cpu().numpy()
+
+        result = {}
+        for i, name in enumerate(feature_names):
+            result[name] = float(importance[i])
+        return result
+
+    def _permutation_importance(
+        self,
+        target: str,
+        continuous_t: torch.Tensor,
+        genus_t: torch.Tensor | None,
+        family_t: torch.Tensor | None,
+        species_ids_t: torch.Tensor | None,
+        species_vector_t: torch.Tensor | None,
+        pool_genus_ids_t: torch.Tensor | None,
+        pool_family_ids_t: torch.Tensor | None,
+        pool_weights_t: torch.Tensor | None,
+        pool_mask_t: torch.Tensor | None,
+        pool_has_cover_t: torch.Tensor | None,
+        categorical_ids_t: torch.Tensor | None,
+        feature_names: list[str],
+    ) -> dict[str, float]:
+        """Permutation-based feature importance.
+
+        Computes a baseline metric on the unperturbed data, then for each
+        feature shuffles that column and measures the metric drop.
+
+        Uses MAE for regression targets and accuracy for classification.
+        Importance is ``baseline_metric - shuffled_metric`` (positive means
+        shuffling hurt performance).
+        """
+        cfg = self.model.target_configs[target]
+        n_features = continuous_t.shape[1]
+
+        # We need ground-truth targets -- but the user hasn't provided them.
+        # Use the model's own predictions as a pseudo-baseline: importance
+        # then measures self-consistency degradation under permutation.
+        # This is the standard "prediction-stability" variant of permutation
+        # importance (used when ground truth is unavailable at inference time).
+        with torch.no_grad():
+            baseline_output = self._forward_for_target(
+                target, continuous_t, genus_t, family_t, species_ids_t,
+                species_vector_t, pool_genus_ids_t, pool_family_ids_t,
+                pool_weights_t, pool_mask_t, pool_has_cover_t,
+                categorical_ids_t,
+            )
+            if cfg.task == "regression":
+                baseline_pred = baseline_output.cpu().numpy().flatten()
+            else:
+                baseline_pred = baseline_output.argmax(dim=-1).cpu().numpy()
+
+        rng = np.random.default_rng(42)
+        result: dict[str, float] = {}
+
+        for col_idx in range(n_features):
+            # Shuffle one column
+            shuffled = continuous_t.clone()
+            perm = torch.from_numpy(
+                rng.permutation(shuffled.shape[0])
+            ).to(self._device)
+            shuffled[:, col_idx] = shuffled[perm, col_idx]
+
+            with torch.no_grad():
+                shuffled_output = self._forward_for_target(
+                    target, shuffled, genus_t, family_t, species_ids_t,
+                    species_vector_t, pool_genus_ids_t, pool_family_ids_t,
+                    pool_weights_t, pool_mask_t, pool_has_cover_t,
+                    categorical_ids_t,
+                )
+
+            if cfg.task == "regression":
+                shuffled_pred = shuffled_output.cpu().numpy().flatten()
+                # Importance = mean absolute deviation from baseline prediction
+                importance = float(np.abs(baseline_pred - shuffled_pred).mean())
+            else:
+                shuffled_pred = shuffled_output.argmax(dim=-1).cpu().numpy()
+                # Importance = fraction of predictions that changed
+                importance = float((baseline_pred != shuffled_pred).mean())
+
+            name = feature_names[col_idx] if col_idx < len(feature_names) else f"feature_{col_idx}"
+            result[name] = importance
+
+        return result

@@ -364,6 +364,17 @@ class MultiTaskLoss:
             name = self._target_names[0]
             pred = predictions[name]
             target = targets[name]
+            # Mask NaN/Inf targets to prevent NaN loss propagation
+            valid = torch.isfinite(target)
+            if not valid.all():
+                # Collapse to per-sample mask (handles both (B,) and (B,1) shapes)
+                if valid.dim() > 1:
+                    valid = valid.all(dim=-1)
+                pred = pred[valid]
+                target = target[valid]
+                if pred.numel() == 0:
+                    zero = predictions[name].new_zeros((), requires_grad=True)
+                    return zero, {name: zero}
             loss = self._mae(pred, target)
             return loss, {name: loss}
 

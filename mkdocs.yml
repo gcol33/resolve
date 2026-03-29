@@ -69,6 +69,8 @@ nav:
   - Tutorials:
     - Data Preparation: tutorials/data-preparation.md
     - Training Models: tutorials/training.md
+    - Encoding Modes: tutorials/encoding-modes.md
+    - Performance Tuning: tutorials/performance-tuning.md
     - Making Predictions: tutorials/prediction.md
     - Understanding Embeddings: tutorials/embeddings.md
   - API Reference:

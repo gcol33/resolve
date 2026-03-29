@@ -297,7 +297,9 @@ class CVMixin:
             label_smoothing=self.label_smoothing,
             class_weights=self.class_weights,
             ema_decay=self.ema_decay,
+            species_dropout=self.species_dropout,
             head_hidden_dims=self.head_hidden_dims,
+            stratified_split=self.stratified_split,
             verbose=self.verbose,
         )
 

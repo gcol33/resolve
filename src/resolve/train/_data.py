@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -31,6 +32,52 @@ if TYPE_CHECKING:
     from resolve.train.trainer import Trainer
 
 __all__: list[str] = []
+
+
+def _stratified_split(
+    dataset: ResolveDataset,
+    test_size: float = 0.2,
+    seed: int = 42,
+) -> tuple[ResolveDataset, ResolveDataset]:
+    """Split dataset with stratification on the first classification target.
+
+    Falls back to a plain random split when no classification target exists
+    or when a class has fewer than 2 members (which prevents stratification).
+    """
+    # Find the first classification target for stratification
+    cls_target_name = None
+    for name, cfg in dataset.targets.items():
+        if cfg.task == "classification":
+            cls_target_name = name
+            break
+
+    if cls_target_name is None:
+        # No classification target -- fall back to plain split
+        return dataset.split(test_size=test_size, seed=seed)
+
+    # Get per-plot classification labels for stratification
+    labels = dataset.get_target(cls_target_name)
+    mask = dataset.get_target_mask(cls_target_name)
+    # Replace invalid labels with a sentinel so every plot has a stratum
+    stratify_labels = np.where(mask, labels, -1).astype(np.int64)
+
+    plot_ids = dataset._header[dataset._roles.plot_id].to_numpy()
+
+    # Check that every class has >= 2 members (sklearn requirement)
+    _, counts = np.unique(stratify_labels, return_counts=True)
+    if (counts < 2).any():
+        warnings.warn(
+            "Some classes have fewer than 2 samples; falling back to "
+            "non-stratified split.",
+            RuntimeWarning,
+        )
+        return dataset.split(test_size=test_size, seed=seed)
+
+    train_ids, test_ids = train_test_split(
+        plot_ids, test_size=test_size, random_state=seed,
+        stratify=stratify_labels,
+    )
+    return dataset._split_by_ids(train_ids.tolist(), test_ids.tolist())
 
 
 class DataMixin:
@@ -104,7 +151,10 @@ class DataMixin:
         fit_encoder: bool = True,
     ) -> tuple[ResolveDataset, ResolveDataset]:
         """Split and encode data."""
-        train_ds, test_ds = self.dataset.split(test_size=0.2)
+        if self.stratified_split:
+            train_ds, test_ds = _stratified_split(self.dataset)
+        else:
+            train_ds, test_ds = self.dataset.split(test_size=0.2)
 
         if self.species_encoding == "hash":
             # Hash mode: use SpeciesEncoder

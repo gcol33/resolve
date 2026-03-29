@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import statistics
 import time
-import warnings
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -58,6 +57,52 @@ LOSS_PRESETS = {
     "smape": {1: PhaseConfig(mae=0.5, smape=0.5)},
 }
 
+
+def _apply_species_dropout(
+    dropout_prob: float,
+    species_encoding: str,
+    schema: ResolveSchema,
+    continuous: torch.Tensor,
+    species_vector: torch.Tensor | None,
+    pool_mask: torch.Tensor | None,
+) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+    """Apply species dropout augmentation during training.
+
+    Randomly zeros out species positions with probability ``dropout_prob``.
+    For hash mode, zeros columns of the hash embedding within the continuous
+    tensor.  For explicit-vector hash mode, zeros positions in
+    ``species_vector``.  For rank_pool/transformer, sets random mask
+    positions to False so that those species are ignored by pooling.
+
+    Returns the (possibly modified) continuous, species_vector, and pool_mask.
+    """
+    if species_encoding == "hash":
+        if species_vector is not None:
+            # Explicit vector mode: dropout individual species positions
+            mask = torch.rand(species_vector.shape[1], device=species_vector.device) > dropout_prob
+            species_vector = species_vector * mask.unsqueeze(0)
+        else:
+            # Standard hash mode: dropout hash embedding columns in continuous tensor
+            # Hash embedding starts after coords + covariates (= schema.n_continuous)
+            n_base = schema.n_continuous
+            n_total = continuous.shape[1]
+            if n_total > n_base:
+                # Determine hash embedding end: it occupies a contiguous block
+                # after the base features. We mask per-sample (row-wise) to
+                # avoid zeroing the same columns for every sample.
+                hash_cols = n_total - n_base  # includes hash_dim + unknown features
+                col_mask = torch.rand(
+                    continuous.shape[0], hash_cols, device=continuous.device
+                ) > dropout_prob
+                continuous = continuous.clone()
+                continuous[:, n_base:] = continuous[:, n_base:] * col_mask
+    elif species_encoding in ("rank_pool", "transformer"):
+        if pool_mask is not None:
+            # Zero out random species by setting mask positions to False
+            drop = torch.rand_like(pool_mask.float()) < dropout_prob
+            pool_mask = pool_mask & ~drop
+
+    return continuous, species_vector, pool_mask
 
 
 class Trainer(
@@ -132,6 +177,7 @@ class Trainer(
         species_representation: str = "abundance",
         min_species_frequency: int = 1,
         cover_dropout: float = 0.0,
+        stratified_split: bool = False,
         # Transformer-specific (species_encoding="transformer")
         n_attention_layers: int = 0,
         n_heads: int = 4,
@@ -148,6 +194,7 @@ class Trainer(
         label_smoothing: float = 0.0,
         class_weights: torch.Tensor | None = None,
         ema_decay: float = 0.0,
+        species_dropout: float = 0.0,
         head_hidden_dims: list[int] | None = None,
         # Advanced architecture (C++ backend only for non-MLP)
         encoder_architecture: str = "mlp",
@@ -323,6 +370,7 @@ class Trainer(
             if label_smoothing == 0.0: label_smoothing = _tc.label_smoothing
             if class_weights is None: class_weights = _tc.class_weights
             if ema_decay == 0.0: ema_decay = _tc.ema_decay
+            if species_dropout == 0.0: species_dropout = _tc.species_dropout
             if verbose == 1: verbose = _tc.verbose
 
         if data_config is not None:
@@ -332,6 +380,7 @@ class Trainer(
             if species_representation == "abundance": species_representation = _dc.species_representation
             if min_species_frequency == 1: min_species_frequency = _dc.min_species_frequency
             if cover_dropout == 0.0: cover_dropout = _dc.cover_dropout
+            if stratified_split is False: stratified_split = _dc.stratified_split
             if categorical_embed_dim == 8: categorical_embed_dim = _dc.categorical_embed_dim
             if pretrain_epochs == 0: pretrain_epochs = _dc.pretrain_epochs
             if pretrain_mask_prob == 0.15: pretrain_mask_prob = _dc.pretrain_mask_prob
@@ -460,6 +509,7 @@ class Trainer(
         self.species_representation = species_representation
         self.min_species_frequency = min_species_frequency
         self.cover_dropout = cover_dropout
+        self.stratified_split = stratified_split
         self.categorical_embed_dim = categorical_embed_dim
         self.n_attention_layers = n_attention_layers
         self.n_heads = n_heads
@@ -473,6 +523,10 @@ class Trainer(
         self.label_smoothing = label_smoothing
         self.class_weights = class_weights
         self.ema_decay = ema_decay
+        # Species dropout: randomly zero out species positions during training
+        if not 0 <= species_dropout < 1:
+            raise ValueError(f"species_dropout must be in [0, 1), got {species_dropout}")
+        self.species_dropout = species_dropout
         self.head_hidden_dims = head_hidden_dims
         self.compile_model = compile_model
         # Auto-enable prefetch for large batch sizes (16K+)
@@ -640,12 +694,9 @@ class Trainer(
         Returns:
             TrainResult with metrics and history
         """
-        # Suppress harmless PyTorch warning about scheduler step order on first batch
-        warnings.filterwarnings(
-            "ignore",
-            message=".*lr_scheduler.step\\(\\) before optimizer.step\\(\\).*",
-            category=UserWarning,
-        )
+        # Note: we no longer suppress the PyTorch scheduler ordering warning.
+        # Instead, scheduler.step() is only called when optimizer.step()
+        # actually executed (i.e., GradScaler did not skip due to inf grads).
 
         # Check for existing checkpoint before data prep
         checkpoint = self.load_checkpoint()
@@ -918,6 +969,276 @@ class Trainer(
         else:  # "none"
             return None
 
+    # ------------------------------------------------------------------
+    # Learning rate range test (Smith 2017)
+    # ------------------------------------------------------------------
+
+    def lr_range_test(
+        self,
+        start_lr: float = 1e-7,
+        end_lr: float = 10.0,
+        n_steps: int = 100,
+        smooth_factor: float = 0.05,
+    ) -> dict:
+        """Run learning rate range test (Smith 2017).
+
+        Trains for *n_steps* mini-batches with an exponentially increasing
+        learning rate from *start_lr* to *end_lr*.  Returns a dict with
+        ``lrs``, ``losses`` (smoothed), and ``suggested_lr``.
+
+        The suggested LR is one decade below the LR at which the minimum
+        smoothed loss was observed — a conservative rule that keeps you
+        on the descending side of the loss curve.
+
+        Usage::
+
+            result = trainer.lr_range_test()
+            suggested_lr = result['suggested_lr']
+            # Plot: plt.plot(result['lrs'], result['losses']); plt.xscale('log')
+
+        Parameters
+        ----------
+        start_lr : float
+            Starting learning rate (default 1e-7).
+        end_lr : float
+            Final learning rate (default 10.0).
+        n_steps : int
+            Number of training steps (default 100).
+        smooth_factor : float
+            Exponential smoothing factor for the loss (default 0.05).
+            Lower = smoother.
+
+        Returns
+        -------
+        dict
+            ``lrs`` — list of learning rates at each step.
+            ``losses`` — list of smoothed losses at each step.
+            ``suggested_lr`` — recommended learning rate.
+        """
+        if start_lr <= 0:
+            raise ValueError(f"start_lr must be > 0, got {start_lr}")
+        if end_lr <= start_lr:
+            raise ValueError(f"end_lr must be > start_lr, got end_lr={end_lr}, start_lr={start_lr}")
+        if n_steps < 2:
+            raise ValueError(f"n_steps must be >= 2, got {n_steps}")
+        if not 0 < smooth_factor < 1:
+            raise ValueError(f"smooth_factor must be in (0, 1), got {smooth_factor}")
+
+        # Ensure data and model are ready
+        if self._train_loader is None:
+            train_ds, test_ds = self._prepare_data()
+            self._ensure_model()
+            train_tensors = self._build_tensors(train_ds, fit_scalers=True)
+            test_tensors = self._build_tensors(test_ds, fit_scalers=False)
+            self._create_loaders(train_tensors, test_tensors)
+        self._ensure_model()
+        self.model.to(self._device)
+
+        # Save model state so we can restore after the test
+        model_state = {k: v.cpu().clone() for k, v in self.model.state_dict().items()}
+
+        # Temporary optimizer at start_lr
+        tmp_optimizer = AdamW(
+            self.model.parameters(), lr=start_lr, weight_decay=self.weight_decay
+        )
+        tmp_scaler = GradScaler(enabled=self.use_amp)
+
+        # Temporary loss function (use epoch 0 phase)
+        target_names = list(self.dataset.targets.keys())
+        has_taxonomy = self._schema.has_taxonomy
+        if self._loss_fn is None:
+            self._loss_fn = MultiTaskLoss(
+                self.model.target_configs,
+                phases=self.phases,
+                phase_boundaries=self.phase_boundaries,
+            )
+
+        lrs: list[float] = []
+        losses: list[float] = []
+        smoothed_loss = 0.0
+        best_loss = float("inf")
+        self.model.train()
+
+        # Build an infinite batch iterator
+        batch_iter = iter(self._train_loader)
+        use_gpu_loader = getattr(self, "_using_gpu_loader", False)
+        data_on_device = use_gpu_loader
+
+        for step in range(n_steps):
+            # Compute LR for this step (exponential schedule)
+            lr = start_lr * (end_lr / start_lr) ** (step / n_steps)
+            for pg in tmp_optimizer.param_groups:
+                pg["lr"] = lr
+
+            # Get next batch (wrap around if loader is exhausted)
+            try:
+                batch = next(batch_iter)
+            except StopIteration:
+                batch_iter = iter(self._train_loader)
+                batch = next(batch_iter)
+
+            (continuous, genus_ids, family_ids, species_ids, species_vector,
+             pool_genus_ids, pool_family_ids, pool_weights, pool_mask,
+             pool_has_cover, categorical_ids, targets) = self._unpack_batch(
+                batch, target_names, has_taxonomy, data_on_device
+            )
+            for name in target_names:
+                cfg = self.model.target_configs[name]
+                if cfg.task == "regression":
+                    targets[name] = targets[name].unsqueeze(-1)
+
+            # Forward + backward
+            tmp_optimizer.zero_grad(set_to_none=True)
+            ctx = autocast(device_type="cuda") if self.use_amp else nullcontext()
+            with ctx:
+                predictions = self.model(
+                    continuous, genus_ids, family_ids, species_ids, species_vector,
+                    pool_genus_ids=pool_genus_ids, pool_family_ids=pool_family_ids,
+                    pool_weights=pool_weights, pool_mask=pool_mask,
+                    pool_has_cover=pool_has_cover,
+                    categorical_ids=categorical_ids,
+                )
+                loss, _ = self._loss_fn(predictions, targets, 0, self._target_scalers)
+
+            tmp_scaler.scale(loss).backward()
+            tmp_scaler.unscale_(tmp_optimizer)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+            tmp_scaler.step(tmp_optimizer)
+            tmp_scaler.update()
+
+            # Smooth loss
+            raw_loss = loss.item()
+            if step == 0:
+                smoothed_loss = raw_loss
+            else:
+                smoothed_loss = smooth_factor * raw_loss + (1 - smooth_factor) * smoothed_loss
+
+            lrs.append(lr)
+            losses.append(smoothed_loss)
+
+            if smoothed_loss < best_loss:
+                best_loss = smoothed_loss
+
+            # Divergence guard: stop if loss exceeds 4x minimum
+            if smoothed_loss > 4 * best_loss:
+                break
+
+        # Restore original model state
+        self.model.load_state_dict(model_state)
+
+        # Suggested LR: 1/10 of the LR at minimum loss (stay on descending slope)
+        if losses:
+            min_idx = int(np.argmin(losses))
+            suggested_lr = lrs[min_idx] / 10.0
+        else:
+            suggested_lr = start_lr
+
+        if self.verbose >= 1:
+            print(
+                f"LR range test: {len(lrs)} steps, "
+                f"min loss {best_loss:.4f} at lr={lrs[int(np.argmin(losses))]:.2e}, "
+                f"suggested lr={suggested_lr:.2e}"
+            )
+
+        return {"lrs": lrs, "losses": losses, "suggested_lr": suggested_lr}
+
+    # ------------------------------------------------------------------
+    # Grid search
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def grid_search(
+        dataset: ResolveDataset,
+        param_grid: dict[str, list],
+        n_cv_folds: int = 3,
+        **fixed_params,
+    ) -> list[dict]:
+        """Run grid search over hyperparameter combinations.
+
+        Iterates over every combination of values in *param_grid*, creates
+        a ``Trainer`` for each, runs ``cross_validate(n_splits=n_cv_folds)``,
+        and collects results.  Combinations are sorted by the primary
+        metric (band_25 for regression, accuracy for classification),
+        best first.
+
+        Parameters
+        ----------
+        dataset : ResolveDataset
+            Training dataset.
+        param_grid : dict[str, list]
+            Mapping from ``Trainer`` parameter names to lists of values.
+            Example: ``{"lr": [1e-3, 1e-4], "hidden_dims": [[256, 128], [512, 256]]}``
+        n_cv_folds : int
+            Number of CV folds per combination (default 3).
+        **fixed_params
+            Fixed parameters forwarded to every ``Trainer``.
+
+        Returns
+        -------
+        list[dict]
+            One entry per combination, sorted best-first. Each dict has:
+            ``params`` — the hyperparameter dict for this run,
+            ``mean_metrics`` — mean across folds,
+            ``std_metrics`` — std across folds,
+            ``cv_result`` — the full ``CVResult`` object.
+        """
+        import itertools
+
+        # Validate param_grid
+        if not param_grid:
+            raise ValueError("param_grid must be a non-empty dict")
+        for key, values in param_grid.items():
+            if not isinstance(values, list) or len(values) == 0:
+                raise ValueError(
+                    f"param_grid['{key}'] must be a non-empty list, "
+                    f"got {type(values).__name__}"
+                )
+
+        keys = list(param_grid.keys())
+        value_lists = [param_grid[k] for k in keys]
+        combos = list(itertools.product(*value_lists))
+        n_combos = len(combos)
+        print(f"\n=== Grid Search: {n_combos} combinations x {n_cv_folds} folds ===")
+
+        results: list[dict] = []
+
+        for i, values in enumerate(combos):
+            combo = dict(zip(keys, values))
+            params = {**fixed_params, **combo}
+            print(f"\n--- Combination {i + 1}/{n_combos}: {combo} ---")
+
+            trainer = Trainer(dataset=dataset, **params)
+            cv_result = trainer.cross_validate(n_splits=n_cv_folds)
+
+            results.append({
+                "params": combo,
+                "mean_metrics": cv_result.mean_metrics,
+                "std_metrics": cv_result.std_metrics,
+                "cv_result": cv_result,
+            })
+
+        # Sort by primary metric (first target's band_25 or accuracy), descending
+        def _sort_key(entry: dict) -> float:
+            mean = entry["mean_metrics"]
+            first_target = next(iter(mean))
+            m = mean[first_target]
+            return m.get("band_25", m.get("accuracy", 0.0))
+
+        results.sort(key=_sort_key, reverse=True)
+
+        # Print summary
+        print(f"\n=== Grid Search Results (best first) ===")
+        for rank, entry in enumerate(results, 1):
+            mean = entry["mean_metrics"]
+            first_target = next(iter(mean))
+            m = mean[first_target]
+            primary = m.get("band_25", m.get("accuracy", 0.0))
+            std = entry["std_metrics"][first_target]
+            primary_std = std.get("band_25", std.get("accuracy", 0.0))
+            print(f"  {rank}. {entry['params']} -> {primary:.4f} +/- {primary_std:.4f}")
+
+        return results
+
     def _train_epoch(
         self,
         epoch: int,
@@ -950,6 +1271,13 @@ class Trainer(
              pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
              categorical_ids, targets) = self._unpack_batch(batch, target_names, has_taxonomy, data_on_device)
 
+            # Species dropout augmentation: randomly zero out species positions
+            if self.species_dropout > 0:
+                continuous, species_vector, pool_mask = _apply_species_dropout(
+                    self.species_dropout, self.species_encoding, self._schema,
+                    continuous, species_vector, pool_mask,
+                )
+
             # Reshape targets for loss
             for name in target_names:
                 cfg = self.model.target_configs[name]
@@ -975,11 +1303,17 @@ class Trainer(
             self._grad_scaler.scale(loss).backward()
             self._grad_scaler.unscale_(self._optimizer)
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+
+            # Track whether optimizer.step() actually executes.
+            # GradScaler skips the step when it finds inf/NaN gradients;
+            # in that case we must NOT advance the LR scheduler.
+            scale_before = self._grad_scaler.get_scale()
             self._grad_scaler.step(self._optimizer)
             self._grad_scaler.update()
+            optimizer_stepped = self._grad_scaler.get_scale() >= scale_before
 
-            # Step per-batch schedulers (OneCycleLR)
-            if self._scheduler is not None and self.lr_scheduler == "onecycle":
+            # Step per-batch schedulers (OneCycleLR) only after a real optimizer step
+            if self._scheduler is not None and self.lr_scheduler == "onecycle" and optimizer_stepped:
                 self._scheduler.step()
 
             # EMA update: exponential moving average of model weights
@@ -1107,7 +1441,9 @@ class Trainer(
             cfg = self.model.target_configs[name]
             pred = np.concatenate(all_preds[name])
             target = np.concatenate(all_targets[name])
-            metrics[name] = compute_metrics(pred, target, cfg.task, cfg.transform)
+            metrics[name] = compute_metrics(
+                pred, target, cfg.task, cfg.transform, num_classes=cfg.num_classes,
+            )
 
         return avg_loss, metrics
 
