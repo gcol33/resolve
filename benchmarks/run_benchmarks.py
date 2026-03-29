@@ -99,6 +99,8 @@ class BenchmarkConfig:
     # MoE
     moe_routing: str = "none"
     n_experts: int = 4
+    # AMP (disable for attention-based models that overflow in fp16)
+    use_amp: bool = True
     # Tags for filtering
     group: str = "encodings"
 
@@ -147,6 +149,8 @@ _register(
         name="transformer_v4",
         species_encoding="transformer",
         n_attention_layers=0,
+        lr=3e-4,
+        use_amp=False,
         group="encodings",
     ),
     BenchmarkConfig(
@@ -154,6 +158,8 @@ _register(
         species_encoding="transformer",
         n_attention_layers=2,
         n_heads=4,
+        lr=3e-4,
+        use_amp=False,
         group="encodings",
     ),
     # --- MoE variants ---
@@ -343,9 +349,37 @@ def load_real_dataset(data_size: str) -> ResolveDataset:
             "num_classes": n_classes,
         }
 
+    # Filter to plots with non-null targets and coordinates
+    print("  Filtering plots with missing targets/coordinates...")
+    header = pl.read_csv(header_path)
+    plot_id_col = ROLE_MAPPING["plot_id"]
+
+    # Keep plots where all target columns and coords are non-null
+    filter_cols = ["Relevé area (m²)", "Latitude", "Longitude"]
+    if eunis_col is not None:
+        filter_cols.append(eunis_col)
+    mask = pl.lit(True)
+    for col in filter_cols:
+        if col in header.columns:
+            mask = mask & header[col].is_not_null()
+    header_clean = header.filter(mask)
+    valid_ids = set(header_clean[plot_id_col].to_list())
+
+    # Write filtered CSVs to temp files
+    import tempfile
+    species = pl.read_csv(species_path)
+    species_clean = species.filter(pl.col(plot_id_col).is_in(list(valid_ids)))
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="resolve_bench_"))
+    h_path = tmpdir / "header.csv"
+    s_path = tmpdir / "species.csv"
+    header_clean.write_csv(h_path)
+    species_clean.write_csv(s_path)
+    print(f"  Kept {header_clean.shape[0]}/{header.shape[0]} plots after null filtering")
+
     dataset = ResolveDataset.from_csv(
-        header=str(header_path),
-        species=str(species_path),
+        header=str(h_path),
+        species=str(s_path),
         roles=ROLE_MAPPING,
         targets=targets_dict,
     )
@@ -438,6 +472,7 @@ def run_single_benchmark(
             transformer_ff_dim=cfg.transformer_ff_dim,
             moe_routing=cfg.moe_routing,
             n_experts=cfg.n_experts,
+            use_amp=cfg.use_amp,
             device=device,
             verbose=1,
         )
