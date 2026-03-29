@@ -390,6 +390,12 @@ public:
         return tensor_to_r_mat(result);
     }
 
+    // Set species trait matrix (for TraitNet architecture)
+    void set_traits(NumericMatrix traits) {
+        torch::Tensor t = r_mat_to_tensor(traits);
+        (*model_)->set_traits(t);
+    }
+
     // Accessors
     std::string species_encoding() const {
         auto mode = (*model_)->species_encoding();

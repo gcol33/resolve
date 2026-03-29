@@ -363,7 +363,11 @@ void register_model(nb::module_& m) {
             return nb::steal(THPVariable_Wrap(result));
         }, nb::arg("continuous"), nb::arg("genus_ids"), nb::arg("family_ids"))
         .def_prop_ro("uses_moe", [](resolve::ResolveModel& self) { return self->uses_moe(); })
-        .def_prop_ro("n_experts", [](resolve::ResolveModel& self) { return self->n_experts(); });
+        .def_prop_ro("n_experts", [](resolve::ResolveModel& self) { return self->n_experts(); })
+        .def("set_traits", [](resolve::ResolveModel& self, nb::object traits_obj) {
+            const at::Tensor& traits = THPVariable_Unpack(traits_obj.ptr());
+            self->set_traits(traits);
+        }, nb::arg("traits"));
 
     m.attr("SpaccModel") = m.attr("ResolveModel");
 }

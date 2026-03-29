@@ -44,6 +44,20 @@ ResolveModelImpl::ResolveModelImpl(
     if (use_adapter) {
         // Adapter handles encoding internally, no separate encoder needed
     }
+    else if (config.encoder_architecture == EncoderArchitecture::TraitNet) {
+        // TraitNet: direct path, bypasses both adapter and species-encoding encoders.
+        // env_dim = continuous base features (coords + covariates + unknown features).
+        // TraitNet does NOT use hash embeddings or species IDs — it uses a trait matrix.
+        const auto& tc = config.trait_net;
+        trait_net_encoder_ = register_module("trait_net_encoder", TraitNetEncoder(
+            /*env_dim=*/n_continuous_base,
+            /*trait_dim=*/tc.trait_dim,
+            /*n_species=*/schema.n_species_vocab > 0 ? schema.n_species_vocab : schema.n_species,
+            /*hidden_dim=*/tc.env_dim,
+            /*n_layers=*/2,
+            /*dropout=*/config.dropout
+        ));
+    }
     else if (config.species_encoding == SpeciesEncodingMode::Hash && !config.uses_explicit_vector) {
         // Hash mode: continuous includes hash_dim
         int64_t n_continuous = n_continuous_base + config.hash_dim;
@@ -219,7 +233,9 @@ ResolveModelImpl::ResolveModelImpl(
 }
 
 int64_t ResolveModelImpl::latent_dim() const {
-    if (adapter_) {
+    if (trait_net_encoder_) {
+        return trait_net_encoder_->output_dim();
+    } else if (adapter_) {
         return adapter_->latent_dim();
     } else if (encoder_moe_) {
         return encoder_moe_->latent_dim();
@@ -249,7 +265,11 @@ torch::Tensor ResolveModelImpl::encode(
     torch::Tensor pool_has_cover
 ) {
     torch::Tensor latent;
-    if (adapter_) {
+    if (trait_net_encoder_) {
+        // TraitNet uses only env features (continuous without hash embedding).
+        // Traits are pre-set via set_traits().
+        latent = trait_net_encoder_->forward(continuous);
+    } else if (adapter_) {
         latent = adapter_->forward(continuous, genus_ids, family_ids, species_ids, species_vector);
     } else if (encoder_moe_) {
         latent = encoder_moe_->forward_simple(continuous, genus_ids, family_ids);
@@ -287,7 +307,10 @@ std::pair<torch::Tensor, torch::Tensor> ResolveModelImpl::encode_with_aux(
     torch::Tensor pool_mask,
     torch::Tensor pool_has_cover
 ) {
-    if (adapter_) {
+    if (trait_net_encoder_) {
+        auto latent = trait_net_encoder_->forward(continuous);
+        return {latent, torch::Tensor()};
+    } else if (adapter_) {
         auto latent = adapter_->forward(continuous, genus_ids, family_ids, species_ids, species_vector);
         if (post_moe_) {
             auto moe_result = post_moe_->forward(latent);
@@ -471,6 +494,14 @@ torch::Tensor ResolveModelImpl::get_gate_probs(
     }
     // Return empty tensor if MoE not enabled
     return torch::Tensor();
+}
+
+void ResolveModelImpl::set_traits(torch::Tensor traits) {
+    if (!trait_net_encoder_) {
+        throw std::runtime_error(
+            "set_traits() is only valid when encoder_architecture is TraitNet");
+    }
+    trait_net_encoder_->set_traits(std::move(traits));
 }
 
 } // namespace resolve

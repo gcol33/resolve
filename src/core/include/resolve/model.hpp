@@ -3,6 +3,7 @@
 #include "resolve/types.hpp"
 #include "resolve/encoder.hpp"
 #include "resolve/adapter.hpp"
+#include "resolve/attention.hpp"
 #include <torch/torch.h>
 #include <variant>
 
@@ -114,6 +115,9 @@ public:
     [[nodiscard]] torch::Tensor get_family_weights() const;
     [[nodiscard]] torch::Tensor get_species_weights() const;
 
+    // Set species trait matrix (for TraitNet architecture)
+    void set_traits(torch::Tensor traits);
+
     // Get task head by name
     [[nodiscard]] TaskHead& head(const std::string& name);
     [[nodiscard]] const TaskHead& head(const std::string& name) const;
@@ -164,6 +168,9 @@ private:
     PlotEncoderSparse encoder_sparse_{nullptr};
     PlotEncoderRankPool encoder_rank_pool_{nullptr};
     PlotEncoderTransformer encoder_transformer_{nullptr};
+
+    // TraitNet encoder (used when encoder_architecture == TraitNet)
+    TraitNetEncoder trait_net_encoder_{nullptr};
 
     // MoE encoder (used when moe_routing != None AND hash encoding)
     PlotEncoderMoE encoder_moe_{nullptr};

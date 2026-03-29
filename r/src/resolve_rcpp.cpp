@@ -74,6 +74,7 @@ RCPP_MODULE(resolve_module) {
         .method("forward_single", &RResolveModel::forward_single, "Forward pass for single target")
         .method("encode_with_activations", &RResolveModel::encode_with_activations, "Encode with intermediate activations")
         .method("get_gate_probs", &RResolveModel::get_gate_probs, "Get MoE gating probabilities")
+        .method("set_traits", &RResolveModel::set_traits, "Set species trait matrix for TraitNet")
         .method("species_encoding", &RResolveModel::species_encoding, "Get species encoding mode")
         .method("uses_explicit_vector", &RResolveModel::uses_explicit_vector, "Check if using explicit vector")
         .method("uses_moe", &RResolveModel::uses_moe, "Check if using Mixture of Experts")
