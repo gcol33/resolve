@@ -124,7 +124,7 @@ class DataMixin:
         elif self.species_encoding == "hash" and self._species_encoder.uses_explicit_vector:
             species_vector = _get(idx); idx += 1
 
-        if has_taxonomy and self.species_encoding not in ("rank_pool", "transformer"):
+        if has_taxonomy and self.species_encoding not in ("rank_pool", "transformer", "trait_net"):
             genus_ids = _get(idx); idx += 1
             family_ids = _get(idx); idx += 1
         else:
@@ -197,6 +197,9 @@ class DataMixin:
                     n_genera_vocab=self._embedding_encoder.n_genera,
                     n_families_vocab=self._embedding_encoder.n_families,
                 )
+        elif self.species_encoding == "trait_net":
+            # TraitNet doesn't use a species encoder — traits are provided directly
+            pass
         else:  # rank_pool or transformer mode (both use same data pipeline)
             from resolve.encode.rank_pool import RankPoolEncoder
             # Skip re-fitting if encoder was already fitted on full data during pretraining
@@ -288,6 +291,21 @@ class DataMixin:
             genus_ids = embedded.genus_ids
             family_ids = embedded.family_ids
             unknown_fraction = embedded.unknown_fraction
+        elif self.species_encoding == "trait_net":
+            # TraitNet: only environmental features (coords + covariates), no species encoding
+            parts = []
+            if coords is not None:
+                parts.append(coords)
+            if covariates is not None:
+                parts.append(covariates)
+            if self.track_unknown_fraction:
+                # Still track unknown fraction if configured
+                uf = np.zeros(len(dataset.plot_ids), dtype=np.float32)
+                parts.append(uf.reshape(-1, 1))
+
+            genus_ids = None
+            family_ids = None
+            unknown_fraction = np.zeros(len(dataset.plot_ids), dtype=np.float32)
         else:  # rank_pool or transformer mode
             pool_encoded = self._rank_pool_encoder.transform(dataset)
 

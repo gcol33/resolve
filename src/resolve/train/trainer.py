@@ -211,6 +211,9 @@ class Trainer(
         saint_config: dict | None = None,
         gnn_config: dict | None = None,
         excelformer_config: dict | None = None,
+        # TraitNet configuration
+        trait_net_config: dict | None = None,
+        traits: torch.Tensor | None = None,
         verbose: int = 1,
         # Grouped config objects (alternative to individual kwargs)
         model_config: ModelConfig | None = None,
@@ -398,8 +401,8 @@ class Trainer(
 
         # === Parameter Validation ===
         # Species encoding
-        if species_encoding not in ("hash", "embed", "rank_pool", "transformer"):
-            raise ValueError(f"species_encoding must be 'hash', 'embed', 'rank_pool', or 'transformer', got {species_encoding!r}")
+        if species_encoding not in ("hash", "embed", "rank_pool", "transformer", "trait_net"):
+            raise ValueError(f"species_encoding must be 'hash', 'embed', 'rank_pool', 'transformer', or 'trait_net', got {species_encoding!r}")
         self.species_encoding = species_encoding
 
         # Encoder architecture
@@ -425,6 +428,8 @@ class Trainer(
         self.saint_config = saint_config
         self.gnn_config = gnn_config
         self.excelformer_config = excelformer_config
+        self.trait_net_config = trait_net_config
+        self.traits = traits
 
         # Dimension parameters
         if hash_dim < 1:
@@ -676,6 +681,8 @@ class Trainer(
             saint_config=self.saint_config,
             gnn_config=self.gnn_config,
             excelformer_config=self.excelformer_config,
+            trait_net_config=self.trait_net_config,
+            traits=self.traits,
         )
 
     def _ensure_model(self) -> ResolveModel:

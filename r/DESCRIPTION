@@ -3,10 +3,10 @@ Title: Species Composition Prediction via Linear Vector Embeddings
 Version: 0.4.0
 Authors@R:
     person("Gilles", "Colling", email = "gilles.colling@uliege.be", role = c("aut", "cre"))
-Description: Predict plot-level environmental attributes from species composition
-    using linear compositional pooling and learned representations. The package
-    provides a C++ core engine with libtorch for optional GPU acceleration, with
-    both hash-based and transformer-based species encoding modes.
+Description: Predict sample-level outcomes from compositional data (species lists,
+    item sets, or any variable-length categorical inputs) using learned
+    representations. Supports hash, embedding, rank-pool, and transformer
+    encoding modes with a C++ core engine and optional GPU acceleration.
 License: MIT + file LICENSE
 URL: https://github.com/gcol33/resolve
 BugReports: https://github.com/gcol33/resolve/issues

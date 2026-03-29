@@ -11,6 +11,8 @@ Usage::
         --header data/header.csv --plot-id plot_id --species-id species_id \\
         --output predictions.csv
 
+    resolve serve --model model.pt --port 8000
+
     resolve version
 
     resolve ext install <name>
@@ -265,6 +267,16 @@ def _cmd_version(_args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# serve command
+# ---------------------------------------------------------------------------
+
+def _cmd_serve(args: argparse.Namespace) -> None:
+    from resolve.serve import serve
+    print(f"Starting RESOLVE prediction server on {args.host}:{args.port}...")
+    serve(str(args.model), host=args.host, port=args.port, device=args.device)
+
+
+# ---------------------------------------------------------------------------
 # ext commands
 # ---------------------------------------------------------------------------
 
@@ -371,6 +383,14 @@ def main(argv: list[str] | None = None) -> None:
     # --- version subcommand ---
     version_parser = sub.add_parser("version", help="Print version and exit")
     version_parser.set_defaults(func=_cmd_version)
+
+    # --- serve subcommand ---
+    serve_parser = sub.add_parser("serve", help="Start prediction REST API server")
+    serve_parser.add_argument("--model", type=Path, required=True, help="Path to model checkpoint")
+    serve_parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
+    serve_parser.add_argument("--port", type=int, default=8000, help="Bind port (default: 8000)")
+    serve_parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
+    serve_parser.set_defaults(func=_cmd_serve)
 
     # --- ext subcommand ---
     ext_parser = sub.add_parser("ext", help="Manage extensions")

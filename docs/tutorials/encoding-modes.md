@@ -173,7 +173,7 @@ trainer = resolve.Trainer(
 **When to use:**
 
 - Maximum accuracy is the priority and compute budget allows it
-- Species interactions are ecologically meaningful for the target
+- Species interactions are meaningful for the target variable
 - Large datasets (>50k plots) where the model has enough data to learn attention patterns
 - Final production runs after simpler modes have been benchmarked
 
@@ -206,7 +206,7 @@ Default starting point:
 
 ## Benchmark Comparison (ASAAS 10k subset)
 
-Results from the ASAAS dataset (10,000 vegetation plots), 3-fold cross-validation, 50 epochs with patience=10. All runs on a single GPU with `hidden_dims=[512, 256, 128]`.
+Results from the ASAAS dataset (10,000 sample plots), 3-fold spatial block cross-validation, 50 epochs with patience=10. All runs on a single GPU with `hidden_dims=[512, 256, 128]`.
 
 | Encoding | Area MAE | Area Band-10% | EUNIS Accuracy | EUNIS F1 (macro) | Time/epoch |
 |----------|----------|---------------|----------------|-------------------|------------|

@@ -12,6 +12,7 @@ from resolve.data.roles import TargetConfig
 from resolve.model.encoder import PlotEncoder, PlotEncoderEmbed, PlotEncoderSparse, PlotEncoderRankPool, PlotEncoderTransformer
 from resolve.model.experts import MixtureOfExperts
 from resolve.model.head import TaskHead
+from resolve.model.trait_net import PlotEncoderTraitNet
 
 
 class ResolveModel(nn.Module):
@@ -33,6 +34,9 @@ class ResolveModel(nn.Module):
         - "transformer": Transformer encoder over species tokens with attention pooling.
                          Reuses rank_pool data pipeline. Supports v4 (attention pool only),
                          v5 (self-attention + attention pool), v6 (masked pretraining).
+        - "trait_net": Trait-environment interaction network. Uses bilinear interaction
+                       between environmental features and a static species-trait matrix.
+                       Does not use species occurrence data directly.
 
     When uses_explicit_vector=True with hash encoding, species are passed as an explicit
     (n_plots, n_species) vector instead of being hashed. This enables "all" and
@@ -43,7 +47,7 @@ class ResolveModel(nn.Module):
         self,
         schema: ResolveSchema,
         targets: dict[str, TargetConfig],
-        species_encoding: Literal["hash", "embed", "rank_pool", "transformer"] = "hash",
+        species_encoding: Literal["hash", "embed", "rank_pool", "transformer", "trait_net"] = "hash",
         hash_dim: int = 32,
         species_embed_dim: int = 32,
         genus_emb_dim: int = 8,
@@ -77,11 +81,14 @@ class ResolveModel(nn.Module):
         saint_config: Optional[dict] = None,
         gnn_config: Optional[dict] = None,
         excelformer_config: Optional[dict] = None,
+        # TraitNet configuration
+        trait_net_config: Optional[dict] = None,
+        traits: Optional[torch.Tensor] = None,
     ):
         super().__init__()
 
-        if species_encoding not in ("hash", "embed", "rank_pool", "transformer"):
-            raise ValueError(f"species_encoding must be 'hash', 'embed', 'rank_pool', or 'transformer', got {species_encoding!r}")
+        if species_encoding not in ("hash", "embed", "rank_pool", "transformer", "trait_net"):
+            raise ValueError(f"species_encoding must be 'hash', 'embed', 'rank_pool', 'transformer', or 'trait_net', got {species_encoding!r}")
 
         valid_architectures = ("mlp", "ft_transformer", "tabnet", "saint", "gnn", "excelformer")
         if encoder_architecture not in valid_architectures:
@@ -111,6 +118,8 @@ class ResolveModel(nn.Module):
         self.saint_config = saint_config
         self.gnn_config = gnn_config
         self.excelformer_config = excelformer_config
+        self.trait_net_config = trait_net_config
+        self.traits = traits
 
         self._schema = schema
         self._targets = targets
@@ -233,6 +242,26 @@ class ResolveModel(nn.Module):
                 hidden_dims=hidden_dims,
                 dropout=dropout,
                 cover_dropout=cover_dropout,
+            )
+        elif species_encoding == "trait_net":
+            if traits is None:
+                raise ValueError(
+                    "species_encoding='trait_net' requires a traits tensor. "
+                    "Pass traits=(n_species, n_traits) to ResolveModel."
+                )
+            n_continuous = n_coords + len(schema.covariate_names) + n_unknown_features + n_categorical_embed
+            cfg = trait_net_config or {}
+            self.encoder = PlotEncoderTraitNet(
+                n_env_features=n_continuous,
+                n_trait_features=traits.shape[1],
+                n_species=schema.n_species_vocab or traits.shape[0],
+                env_hidden_dim=cfg.get("env_dim", 128),
+                trait_hidden_dim=cfg.get("trait_dim", 64),
+                interaction_dim=cfg.get("interaction_dim", 256),
+                n_layers=cfg.get("n_layers", 2),
+                dropout=dropout,
+                hidden_dims=hidden_dims,
+                traits=traits,
             )
         else:  # rank_pool mode
             n_continuous = n_coords + len(schema.covariate_names) + n_unknown_features + n_categorical_embed
@@ -365,7 +394,9 @@ class ResolveModel(nn.Module):
                 zeros = torch.zeros(continuous.shape[0], n_cat_dims, device=continuous.device)
                 continuous = torch.cat([continuous, zeros], dim=-1)
 
-        if self.species_encoding in ("rank_pool", "transformer"):
+        if self.species_encoding == "trait_net":
+            latent = self.encoder(continuous)
+        elif self.species_encoding in ("rank_pool", "transformer"):
             latent = self.encoder(
                 continuous, species_ids,
                 genus_ids=pool_genus_ids, family_ids=pool_family_ids,

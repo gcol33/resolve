@@ -221,6 +221,9 @@ class CVMixin:
                 n_genera_vocab=self._embedding_encoder.n_genera,
                 n_families_vocab=self._embedding_encoder.n_families,
             )
+        elif self.species_encoding == "trait_net":
+            # TraitNet doesn't need a species encoder — traits are provided directly
+            pass
         else:  # rank_pool or transformer
             from resolve.encode.rank_pool import RankPoolEncoder
             self._rank_pool_encoder = RankPoolEncoder(
@@ -300,6 +303,8 @@ class CVMixin:
             species_dropout=self.species_dropout,
             head_hidden_dims=self.head_hidden_dims,
             stratified_split=self.stratified_split,
+            trait_net_config=self.trait_net_config,
+            traits=self.traits,
             verbose=self.verbose,
         )
 
