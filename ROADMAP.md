@@ -112,7 +112,7 @@ trainer = Trainer(
 
 ### Architecture 6: TabPFN Integration
 
-**Priority: LOW** | **Status: IMPLEMENTED**
+**Priority: LOW** | **Status: PLANNED**
 
 Integration with TabPFN v2 foundation model for zero-shot or few-shot predictions.
 
@@ -136,7 +136,7 @@ trainer = Trainer(
 - [x] SAINT encoder (row + column attention)
 - [x] Trait-based network
 - [x] GNN encoder (GCN, GAT, GraphSAGE)
-- [x] TabPFN Python wrapper
+- [ ] TabPFN Python wrapper
 - [x] Python bindings for all configs
 - [ ] Benchmarks vs MLP baseline
 - [ ] Integration with Trainer (architecture selection)

@@ -304,8 +304,8 @@ torch::Tensor TabularAdapterImpl::forward(
             }
             auto flat = torch::cat(all_feats, /*dim=*/1);
             auto gnn_out = gnn_->forward(flat, adj);
-            // Mean pool over nodes (for batch of nodes -> single vector)
-            output = gnn_out.mean(/*dim=*/0).unsqueeze(0).expand({continuous.size(0), -1});
+            // GNN returns per-node (per-sample) features already
+            output = gnn_out;
             break;
         }
 

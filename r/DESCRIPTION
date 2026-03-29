@@ -3,7 +3,7 @@ Title: Species Composition Prediction via Linear Vector Embeddings
 Version: 0.4.0
 Authors@R:
     person("Gilles", "Colling", email = "gilles.colling@uliege.be", role = c("aut", "cre"),
-           comment = c(ORCID = "YOUR-ORCID-ID"))
+           comment = c(ORCID = "0000-0002-3200-1723"))
 Description: Predict plot-level environmental attributes from species composition
     using linear compositional pooling and learned representations. Built on a
     high-performance C++ core with libtorch for GPU acceleration.
