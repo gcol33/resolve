@@ -43,6 +43,6 @@ test_that("SpeciesEncoder fit and transform work", {
   # Transform
   result <- encoder$transform(species_data, unique(species_data$plot_id))
 
-  expect_equal(nrow(result$hashEmbedding), 3)  # 3 plots
-  expect_equal(ncol(result$hashEmbedding), 16)  # hash_dim
+  expect_equal(nrow(result$hash_embedding), 3)  # 3 plots
+  expect_equal(ncol(result$hash_embedding), 16)  # hash_dim
 })

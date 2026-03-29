@@ -6,3 +6,4 @@
 ^pkgdown$
 ^build_site\.R$
 ^\.github$
+^tools$

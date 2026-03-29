@@ -1,7 +1,7 @@
 # Package initialization for resolve
 # Uses Rcpp modules to expose C++ classes
 
-#' @import Rcpp
+#' @importFrom Rcpp evalCpp
 #' @useDynLib resolve, .registration = TRUE
 NULL
 

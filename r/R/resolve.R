@@ -15,7 +15,7 @@
 #' @return A SpeciesEncoder object
 #'
 #' @examples
-#' \dontrun{
+#' \donttest{
 #' encoder <- resolve.encoder(
 #'   hashDim = 32,
 #'   topK = 5,
@@ -111,7 +111,7 @@ resolve.encoder <- function(hashDim = 32L,
 #'   - schema: Schema information
 #'
 #' @examples
-#' \dontrun{
+#' \donttest{
 #' dataset <- resolve.dataset(
 #'   header = "plots.csv",
 #'   species = "species.csv",
@@ -325,7 +325,7 @@ resolve.dataset <- function(header,
 #' @return A trained model object with fit results
 #'
 #' @examples
-#' \dontrun{
+#' \donttest{
 #' dataset <- resolve.dataset(...)
 #' result <- resolve.train(dataset)
 #' print(result$metrics)
@@ -475,7 +475,7 @@ resolve.train <- function(dataset,
 #' @return Named list of prediction arrays, plus 'confidence' for each target
 #'
 #' @examples
-#' \dontrun{
+#' \donttest{
 #' preds <- resolve.predict(trainedModel, newDataset)
 #' preds <- resolve.predict(trainedModel, newDataset, confidenceThreshold = 0.5)
 #' }
@@ -566,7 +566,7 @@ resolve.predict <- function(model,
 #' @return A Predictor object
 #'
 #' @examples
-#' \dontrun{
+#' \donttest{
 #' predictor <- resolve.load("model.pt")
 #' preds <- resolve.predict(predictor, newData)
 #' }
@@ -595,6 +595,12 @@ resolve.load <- function(path, device = "cpu") {
 #' @param trainer A trained Trainer object (from resolve.train())
 #' @param path Path to save checkpoint
 #'
+#' @examples
+#' \donttest{
+#' result <- resolve.train(dataset)
+#' resolve.save(result, "model_checkpoint.pt")
+#' }
+#'
 #' @export
 resolve.save <- function(trainer, path) {
   if (is.list(trainer) && !is.null(trainer$trainer)) {
@@ -616,7 +622,7 @@ resolve.save <- function(trainer, path) {
 #' @return A list with progress information, or NULL if no checkpoint exists
 #'
 #' @examples
-#' \dontrun{
+#' \donttest{
 #' progress <- resolve.progress("checkpoints/my_model")
 #' if (!is.null(progress)) {
 #'   cat(sprintf("Epoch %d/%d (%.1f%%)\n",
@@ -680,7 +686,7 @@ resolve.progress <- function(checkpointDir) {
 #'   - n_plots(): Get number of plots
 #'
 #' @examples
-#' \dontrun{
+#' \donttest{
 #' # Load dataset using C++ implementation
 #' dataset <- resolve.dataset.csv(
 #'   header = "plots.csv",
@@ -787,7 +793,7 @@ resolve.dataset.csv <- function(header,
 #' @return A list with trainer, result, and dataset
 #'
 #' @examples
-#' \dontrun{
+#' \donttest{
 #' dataset <- resolve.dataset.csv(...)
 #' result <- resolve.train.dataset(dataset, maxEpochs = 100)
 #' }
@@ -935,7 +941,7 @@ resolve.train.dataset <- function(dataset,
 #' @return Named list of prediction arrays
 #'
 #' @examples
-#' \dontrun{
+#' \donttest{
 #' predictor <- resolve.load("model.pt")
 #' dataset <- resolve.dataset.csv(...)
 #' preds <- resolve.predict.dataset(predictor, dataset)

@@ -2,7 +2,6 @@
 #ifndef RCPP_COMMON_HPP
 #define RCPP_COMMON_HPP
 
-// [[Rcpp::plugins(cpp17)]]
 #include <Rcpp.h>
 #include <torch/torch.h>
 #include "resolve/resolve.hpp"

@@ -1,9 +1,6 @@
-# Makevars.win for resolve R package on Windows
-# Requires LIBTORCH_PATH environment variable pointing to libtorch installation
-
 CXX_STD = CXX17
 
 PKG_CXXFLAGS = -I"$(LIBTORCH_PATH)/include" -I"$(LIBTORCH_PATH)/include/torch/csrc/api/include" \
-               -I. -I../../src/core/include -DNOMINMAX -D_USE_MATH_DEFINES
+               -I. -DNOMINMAX -D_USE_MATH_DEFINES
 
 PKG_LIBS = -L"$(LIBTORCH_PATH)/lib" -ltorch -ltorch_cpu -lc10
