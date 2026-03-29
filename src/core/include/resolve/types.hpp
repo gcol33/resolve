@@ -14,7 +14,7 @@ namespace resolve {
 // Version and constants
 // =============================================================================
 
-inline constexpr const char* VERSION = "0.1.0";
+inline constexpr const char* VERSION = "0.4.0";
 
 // Training defaults
 constexpr int kDefaultBatchSize = 4096;
@@ -78,8 +78,8 @@ enum class SpeciesEncodingMode {
     Hash,        // Feature hashing (default)
     Embed,       // Learnable embeddings for top-k species
     Sparse,      // Explicit species abundance/presence vector
-    RankPool,    // Rank-pooled species embeddings (Python-only, stub in C++)
-    Transformer  // Transformer species encoder (Python-only, stub in C++)
+    RankPool,    // Rank-pooled species embeddings with weighted pooling
+    Transformer  // Transformer species encoder with attention pooling
 };
 
 // Loss configuration presets

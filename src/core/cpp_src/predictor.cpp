@@ -172,10 +172,19 @@ torch::Tensor Predictor::get_embeddings(
     torch::NoGradGuard no_grad;
     model_->eval();
 
-    // Concatenate continuous features
-    std::vector<torch::Tensor> continuous_parts = {coordinates, hash_embedding};
+    // Concatenate continuous features (hash_embedding may be empty for non-hash modes)
+    std::vector<torch::Tensor> continuous_parts;
+    if (coordinates.defined() && coordinates.numel() > 0) {
+        continuous_parts.push_back(coordinates);
+    }
+    if (hash_embedding.defined() && hash_embedding.numel() > 0) {
+        continuous_parts.push_back(hash_embedding);
+    }
     if (covariates.defined() && covariates.size(1) > 0) {
         continuous_parts.push_back(covariates);
+    }
+    if (continuous_parts.empty()) {
+        throw std::runtime_error("get_embeddings requires at least one non-empty input tensor");
     }
     auto continuous = torch::cat(continuous_parts, /*dim=*/1);
 

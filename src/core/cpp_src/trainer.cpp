@@ -1670,28 +1670,56 @@ CrossValidationResult Trainer::cross_validate_spatial(
                 "block_size=" + std::to_string(spatial_config.lat_size) + "x"
                 + std::to_string(spatial_config.lon_size) + " deg");
 
-    // Run the same CV loop as cross_validate but with spatial fold indices
-    // Save model state
-    auto model_state = model_->parameters();
-    std::vector<torch::Tensor> initial_params;
-    for (const auto& p : model_state) {
-        initial_params.push_back(p.clone());
+    // Concatenate all data for fold splitting
+    auto all_continuous = torch::cat({train_continuous_, test_continuous_}, 0);
+    auto cat_if_both = [](const torch::Tensor& a, const torch::Tensor& b) -> torch::Tensor {
+        if (a.defined() && b.defined()) return torch::cat({a, b}, 0);
+        return {};
+    };
+    auto all_genus_ids = cat_if_both(train_genus_ids_, test_genus_ids_);
+    auto all_family_ids = cat_if_both(train_family_ids_, test_family_ids_);
+    auto all_species_ids = cat_if_both(train_species_ids_, test_species_ids_);
+    auto all_species_vector = cat_if_both(train_species_vector_, test_species_vector_);
+    auto all_pool_genus_ids = cat_if_both(train_pool_genus_ids_, test_pool_genus_ids_);
+    auto all_pool_family_ids = cat_if_both(train_pool_family_ids_, test_pool_family_ids_);
+    auto all_pool_weights = cat_if_both(train_pool_weights_, test_pool_weights_);
+    auto all_pool_mask = cat_if_both(train_pool_mask_, test_pool_mask_);
+    auto all_pool_has_cover = cat_if_both(train_pool_has_cover_, test_pool_has_cover_);
+
+    std::unordered_map<std::string, torch::Tensor> all_targets;
+    for (const auto& [name, train_tensor] : train_targets_) {
+        auto test_it = test_targets_.find(name);
+        if (test_it != test_targets_.end()) {
+            all_targets[name] = torch::cat({train_tensor, test_it->second}, 0);
+        }
     }
+
+    // Save original model state for restoration after each fold
+    std::ostringstream original_state_stream;
+    {
+        torch::serialize::OutputArchive archive;
+        model_->save(archive);
+        archive.save_to(original_state_stream);
+    }
+    std::string original_state = original_state_stream.str();
+    Scalers original_scalers = scalers_;
 
     CrossValidationResult cv_result;
     cv_result.n_folds = n_folds;
 
     auto cv_start = std::chrono::high_resolution_clock::now();
 
-    std::vector<std::unordered_map<std::string, std::unordered_map<std::string, float>>> all_metrics;
+    std::unordered_map<std::string, std::unordered_map<std::string, std::vector<float>>> all_metrics_values;
 
     for (int fold = 0; fold < n_folds; ++fold) {
         config_.log("\n--- Fold " + std::to_string(fold + 1) + "/" + std::to_string(n_folds) + " ---");
 
         // Restore model to initial state
-        auto current_params = model_->parameters();
-        for (size_t i = 0; i < current_params.size(); ++i) {
-            current_params[i].data().copy_(initial_params[i]);
+        {
+            std::istringstream iss(original_state);
+            torch::serialize::InputArchive archive;
+            archive.load_from(iss);
+            model_->load(archive);
         }
 
         auto& [train_idx, test_idx] = folds[fold];
@@ -1701,14 +1729,90 @@ CrossValidationResult Trainer::cross_validate_spatial(
         config_.log("  Train: " + std::to_string(train_idx.size()) +
                     " plots, Test: " + std::to_string(test_idx.size()) + " plots");
 
-        // This fold uses the splitter-provided indices
-        // The actual training integration would need to subset the prepared data
-        // For now, delegate to the standard cross_validate which handles the training loop
-        // TODO: Full integration with spatial fold indices in the training loop
+        // Split data for this fold
+        train_continuous_ = all_continuous.index_select(0, train_tensor);
+        test_continuous_ = all_continuous.index_select(0, test_tensor);
+
+        auto split_if_defined = [&](const torch::Tensor& all, torch::Tensor& train_dst, torch::Tensor& test_dst) {
+            if (all.defined()) {
+                train_dst = all.index_select(0, train_tensor);
+                test_dst = all.index_select(0, test_tensor);
+            }
+        };
+        split_if_defined(all_genus_ids, train_genus_ids_, test_genus_ids_);
+        split_if_defined(all_family_ids, train_family_ids_, test_family_ids_);
+        split_if_defined(all_species_ids, train_species_ids_, test_species_ids_);
+        split_if_defined(all_species_vector, train_species_vector_, test_species_vector_);
+        split_if_defined(all_pool_genus_ids, train_pool_genus_ids_, test_pool_genus_ids_);
+        split_if_defined(all_pool_family_ids, train_pool_family_ids_, test_pool_family_ids_);
+        split_if_defined(all_pool_weights, train_pool_weights_, test_pool_weights_);
+        split_if_defined(all_pool_mask, train_pool_mask_, test_pool_mask_);
+        split_if_defined(all_pool_has_cover, train_pool_has_cover_, test_pool_has_cover_);
+
+        for (const auto& [name, tensor] : all_targets) {
+            train_targets_[name] = tensor.index_select(0, train_tensor);
+            test_targets_[name] = tensor.index_select(0, test_tensor);
+        }
+
+        // Recompute scalers for this fold's training data
+        if (train_continuous_.size(1) > 0) {
+            scalers_.continuous_mean = train_continuous_.mean(0);
+            scalers_.continuous_scale = train_continuous_.std(0) + 1e-8f;
+            train_continuous_ = (train_continuous_ - scalers_.continuous_mean) / scalers_.continuous_scale;
+            test_continuous_ = (test_continuous_ - scalers_.continuous_mean) / scalers_.continuous_scale;
+        }
+
+        for (const auto& cfg : model_->schema().targets) {
+            if (cfg.task != TaskType::Regression) continue;
+            auto train_it = train_targets_.find(cfg.name);
+            if (train_it == train_targets_.end()) continue;
+            auto target_mean = train_it->second.mean();
+            auto target_scale = train_it->second.std() + 1e-8f;
+            scalers_.target_scalers[cfg.name] = {target_mean, target_scale};
+            train_targets_[cfg.name] = (train_targets_[cfg.name] - target_mean) / target_scale;
+            test_targets_[cfg.name] = (test_targets_[cfg.name] - target_mean) / target_scale;
+        }
+
+        // Train this fold
+        TrainResult fold_result = fit();
+        cv_result.fold_results.push_back(fold_result);
+
+        for (const auto& [target, metrics] : fold_result.final_metrics) {
+            for (const auto& [metric_name, value] : metrics) {
+                all_metrics_values[target][metric_name].push_back(value);
+            }
+        }
     }
+
+    // Compute mean and std of metrics across folds
+    for (const auto& [target, metrics] : all_metrics_values) {
+        for (const auto& [metric_name, values] : metrics) {
+            float sum = 0.0f;
+            for (float v : values) sum += v;
+            float mean = sum / values.size();
+            cv_result.mean_metrics[target][metric_name] = mean;
+
+            float sq_sum = 0.0f;
+            for (float v : values) sq_sum += (v - mean) * (v - mean);
+            float std_val = std::sqrt(sq_sum / values.size());
+            cv_result.std_metrics[target][metric_name] = std_val;
+        }
+    }
+
+    // Restore original state
+    {
+        std::istringstream iss(original_state);
+        torch::serialize::InputArchive archive;
+        archive.load_from(iss);
+        model_->load(archive);
+    }
+    scalers_ = original_scalers;
 
     auto cv_end = std::chrono::high_resolution_clock::now();
     cv_result.total_time_seconds = std::chrono::duration<float>(cv_end - cv_start).count();
+
+    config_.log("Spatial CV complete (" + std::to_string(n_folds) + " folds, "
+                + std::to_string(cv_result.total_time_seconds) + "s)");
 
     return cv_result;
 }
