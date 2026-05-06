@@ -12,34 +12,144 @@ from typing import Dict, List, Optional, Tuple
 
 # Lazy-load the C++ extension
 _fast_csv = None
+_msvc_env_initialized = False
+
+
+def _find_vs_install_via_vswhere():
+    """Return the latest VS install path with VC.Tools workload, or None."""
+    import subprocess
+
+    vswhere = r"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+    if not os.path.exists(vswhere):
+        return None
+    try:
+        result = subprocess.run(
+            [
+                vswhere,
+                "-latest",
+                "-products", "*",
+                "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                "-property", "installationPath",
+            ],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        path = result.stdout.strip()
+        return path or None
+    except Exception:
+        return None
+
+
+def _initialize_msvc_environment():
+    """Source vcvars64.bat into os.environ so torch's `where cl` and ninja work.
+
+    Idempotent: only runs once per process. Skips if INCLUDE+LIB already set
+    (caller is in a Developer Command Prompt or has set them manually).
+    """
+    global _msvc_env_initialized
+    if _msvc_env_initialized:
+        return
+    if os.environ.get("INCLUDE") and os.environ.get("LIB"):
+        _msvc_env_initialized = True
+        return
+
+    import platform
+    if platform.system() != "Windows":
+        _msvc_env_initialized = True
+        return
+
+    import subprocess
+
+    # Try vswhere first (most reliable across editions, including pre-release)
+    install_path = _find_vs_install_via_vswhere()
+
+    # Fallback: scan known install locations
+    if not install_path:
+        candidates = [
+            r"C:\Program Files\Microsoft Visual Studio\18\Community",
+            r"C:\Program Files\Microsoft Visual Studio\18\Professional",
+            r"C:\Program Files\Microsoft Visual Studio\18\Enterprise",
+            r"C:\Program Files\Microsoft Visual Studio\2022\BuildTools",
+            r"C:\Program Files\Microsoft Visual Studio\2022\Community",
+            r"C:\Program Files\Microsoft Visual Studio\2022\Professional",
+            r"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools",
+            r"C:\Program Files (x86)\Microsoft Visual Studio\2022\Community",
+            r"C:\Program Files (x86)\Microsoft Visual Studio\2022\Professional",
+        ]
+        for c in candidates:
+            if os.path.exists(os.path.join(c, "VC", "Auxiliary", "Build", "vcvars64.bat")):
+                install_path = c
+                break
+
+    if not install_path:
+        return  # No MSVC found; let torch produce its own error
+
+    vcvars = os.path.join(install_path, "VC", "Auxiliary", "Build", "vcvars64.bat")
+    if not os.path.exists(vcvars):
+        return
+
+    # Run vcvars64 in a subshell, then `set` to dump the resulting environment.
+    try:
+        result = subprocess.run(
+            f'"{vcvars}" >NUL 2>&1 && set',
+            shell=True, capture_output=True, timeout=30, check=True,
+        )
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        return
+
+    # Decode with cp1252 (Windows default) — output may contain non-UTF8 chars
+    raw = result.stdout.decode("cp1252", errors="replace")
+    for line in raw.splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            # Only update keys we actually need; preserve existing PATH semantics
+            if key.upper() in {"PATH", "INCLUDE", "LIB", "LIBPATH", "WINDOWSSDKDIR",
+                                "VCTOOLSINSTALLDIR", "VSINSTALLDIR", "WINDOWSSDKVERSION"}:
+                os.environ[key] = value
+
+    _msvc_env_initialized = True
+
 
 def _find_msvc_paths():
-    """Find MSVC and Windows SDK include and library paths on Windows."""
+    """Find MSVC and Windows SDK include and library paths on Windows.
+
+    Returns (include_paths, library_paths). Used as a fallback when the
+    process has not initialized the MSVC environment via vcvars64; the
+    paths are passed to torch's load() as compile flags.
+    """
     import glob
 
     include_paths = []
     library_paths = []
 
-    # Find VS BuildTools or full VS installation
-    vs_paths = [
-        r"C:\Program Files\Microsoft Visual Studio\2022\BuildTools",
-        r"C:\Program Files\Microsoft Visual Studio\2022\Professional",
-        r"C:\Program Files\Microsoft Visual Studio\2022\Community",
-        r"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools",
-        r"C:\Program Files (x86)\Microsoft Visual Studio\2022\Professional",
-        r"C:\Program Files (x86)\Microsoft Visual Studio\2022\Community",
-    ]
-
+    install_path = _find_vs_install_via_vswhere()
     msvc_root = None
-    for vs_path in vs_paths:
-        # Find MSVC version directory
-        msvc_pattern = os.path.join(vs_path, "VC", "Tools", "MSVC", "*")
-        msvc_dirs = glob.glob(msvc_pattern)
+    if install_path:
+        msvc_dirs = glob.glob(os.path.join(install_path, "VC", "Tools", "MSVC", "*"))
         if msvc_dirs:
-            msvc_root = sorted(msvc_dirs)[-1]  # Latest version
-            include_paths.append(os.path.join(msvc_root, "include"))
-            library_paths.append(os.path.join(msvc_root, "lib", "x64"))
-            break
+            msvc_root = sorted(msvc_dirs)[-1]
+
+    if msvc_root is None:
+        # Fallback to scanning known VS install paths
+        vs_paths = [
+            r"C:\Program Files\Microsoft Visual Studio\18\Community",
+            r"C:\Program Files\Microsoft Visual Studio\18\Professional",
+            r"C:\Program Files\Microsoft Visual Studio\18\Enterprise",
+            r"C:\Program Files\Microsoft Visual Studio\2022\BuildTools",
+            r"C:\Program Files\Microsoft Visual Studio\2022\Professional",
+            r"C:\Program Files\Microsoft Visual Studio\2022\Community",
+            r"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools",
+            r"C:\Program Files (x86)\Microsoft Visual Studio\2022\Professional",
+            r"C:\Program Files (x86)\Microsoft Visual Studio\2022\Community",
+        ]
+        for vs_path in vs_paths:
+            msvc_dirs = glob.glob(os.path.join(vs_path, "VC", "Tools", "MSVC", "*"))
+            if msvc_dirs:
+                msvc_root = sorted(msvc_dirs)[-1]
+                break
+
+    if msvc_root:
+        include_paths.append(os.path.join(msvc_root, "include"))
+        library_paths.append(os.path.join(msvc_root, "lib", "x64"))
 
     # Find Windows SDK
     sdk_paths = [
@@ -52,18 +162,13 @@ def _find_msvc_paths():
         sdk_lib = os.path.join(sdk_base, "Lib")
 
         if os.path.exists(sdk_include):
-            # Get latest SDK version
             versions = [d for d in os.listdir(sdk_include) if d.startswith("10.")]
             if versions:
                 latest = sorted(versions)[-1]
-
-                # Add include directories
                 for subdir in ["ucrt", "shared", "um", "winrt"]:
                     subpath = os.path.join(sdk_include, latest, subdir)
                     if os.path.exists(subpath):
                         include_paths.append(subpath)
-
-                # Add library directories
                 for subdir in ["ucrt", "um"]:
                     libpath = os.path.join(sdk_lib, latest, subdir, "x64")
                     if os.path.exists(libpath):
@@ -101,8 +206,14 @@ def _get_extension():
     extra_ldflags = []
 
     if platform.system() == "Windows":
-        extra_cflags = ["/O2", "/std:c++17"]
-        # Find MSVC include and library paths if not in environment
+        # Use /std:c++20 to match torch's own header requirements (newer torch
+        # versions use C++20 features like default initializers for bit-fields).
+        extra_cflags = ["/O2", "/std:c++20"]
+        # Source vcvars64.bat into os.environ so torch's `where cl` / ninja can
+        # resolve the toolchain. Idempotent and a no-op if INCLUDE+LIB already set.
+        _initialize_msvc_environment()
+        # If sourcing failed (no VS install found), fall back to passing paths
+        # explicitly as compile flags.
         if not os.environ.get("INCLUDE") or not os.environ.get("LIB"):
             include_paths, library_paths = _find_msvc_paths()
             if include_paths:

@@ -1,5 +1,21 @@
 # RESOLVE Changelog
 
+## Unreleased
+
+### New Features
+
+- **Auto-categorical encoding in `from_fast_csv`**: Classification target columns
+  whose values are non-numeric (e.g. EUNIS letters `M..V`) are now loaded as
+  strings and automatically encoded to nullable `Int64` codes. Integer-string
+  values (e.g. `"0".."8"`) are preserved verbatim; non-numeric values are
+  factorized in sorted order. `num_classes` is auto-filled from the resulting
+  mapping size, so it can be omitted from the target config.
+- **`categorical_covariates` kwarg on `from_fast_csv`**: Pass a `{column: mapping}`
+  dict to encode covariates with non-numeric values (e.g. `{"ReSurvey (Y/N)":
+  {"Y": 1, "N": 0}}`). Use `None` for the mapping to auto-encode by sorted unique
+  value. The encoded mappings are accessible via the new `dataset.categorical_mappings`
+  property.
+
 ## v0.4.0 (2025-01-25)
 
 ### New Features

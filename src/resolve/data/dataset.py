@@ -20,6 +20,58 @@ from resolve.data.roles import RoleMapping, TargetConfig
 VALID_NORMALIZATIONS = ("raw", "norm", "log1p")
 
 
+# Strings treated as missing values when auto-encoding categorical columns.
+# Mirrors the NA-detection used by the C++ fast loader.
+_NA_STRINGS = frozenset({
+    "", "NA", "na", "N/A", "n/a", "NaN", "nan",
+    "NULL", "null", "None", "none", ".", "-",
+})
+
+
+def _is_na_string(s: str) -> bool:
+    return s in _NA_STRINGS
+
+
+def _encode_categorical(
+    raw: list[str],
+    mapping: Optional[dict[str, int]] = None,
+) -> tuple[list[Optional[int]], dict[str, int]]:
+    """Encode a list of strings to integer codes with NA handling.
+
+    Auto behavior (mapping=None):
+      - If every unique non-NA value is integer-parseable, the parsed integers
+        are used directly. This keeps existing integer-encoded columns
+        (e.g. "0".."8") byte-stable and avoids surprising re-ordering.
+      - Otherwise, sorted-unique non-NA values are factorized to 0..K-1.
+
+    Explicit mapping: values not present in the mapping become None
+    (rendered as null in the resulting polars Int64 column).
+
+    NA-like strings ("", "NA", "NaN", ".", "-", ...) always become None.
+    """
+    if mapping is not None:
+        codes: list[Optional[int]] = [
+            None if _is_na_string(v) else mapping.get(v)
+            for v in raw
+        ]
+        return codes, dict(mapping)
+
+    uniques = sorted({v for v in raw if not _is_na_string(v)})
+
+    parsed_ints: dict[str, int] = {}
+    all_int = bool(uniques)
+    for v in uniques:
+        try:
+            parsed_ints[v] = int(v)
+        except ValueError:
+            all_int = False
+            break
+
+    built: dict[str, int] = parsed_ints if all_int else {v: i for i, v in enumerate(uniques)}
+    codes = [None if _is_na_string(v) else built.get(v) for v in raw]
+    return codes, built
+
+
 def _read_csv_with_progress(
     path: Path,
     desc: str = "Loading",
@@ -105,6 +157,7 @@ class ResolveDataset:
         self._species_normalization = species_normalization
         self._track_unknown_fraction = track_unknown_fraction
         self._track_unknown_count = track_unknown_count
+        self._categorical_mappings: dict[str, dict[str, int]] = {}
         self._validate()
 
     def _validate(self) -> None:
@@ -231,6 +284,7 @@ class ResolveDataset:
         track_unknown_fraction: bool = True,
         track_unknown_count: bool = False,
         verbose: bool = True,
+        categorical_covariates: Optional[dict[str, Optional[dict[str, int]]]] = None,
     ) -> ResolveDataset:
         """
         Load dataset using C++ fast loader for both header and species data.
@@ -239,6 +293,12 @@ class ResolveDataset:
 
         The C++ loader produces pre-hashed species IDs and COO/CSR format data,
         which is stored directly and used by FastSpeciesEncoder.
+
+        Classification target columns and categorical covariates are loaded as
+        strings and automatically encoded to nullable Int64 codes. Integer-like
+        values are preserved verbatim (e.g. "0".."8" stay as 0..8); non-numeric
+        values are factorized in sorted order. Pass an explicit mapping in
+        ``categorical_covariates`` to control the encoding (e.g. ``{"Y": 1, "N": 0}``).
 
         Args:
             header: Path to plot-level CSV (one row per plot)
@@ -249,6 +309,10 @@ class ResolveDataset:
             track_unknown_fraction: Track fraction of abundance from unknown species
             track_unknown_count: Track count of unknown species
             verbose: Show progress during loading
+            categorical_covariates: Optional ``{column_name: mapping_or_None}``.
+                Each listed column must also appear in ``roles["covariates"]``.
+                ``None`` means auto-encode; an explicit ``{value: int}`` dict is
+                applied verbatim with unmapped values becoming null.
         """
         from resolve.csrc.fast_loader import load_grouped_csv, load_header_csv_full
 
@@ -267,20 +331,50 @@ class ResolveDataset:
         # Parse roles to get column names
         role_mapping = RoleMapping.from_dict(roles)
 
-        # Collect all columns needed from header
-        # String columns: plot_id + categoricals
+        # Identify columns that need string-then-encode handling.
+        # 1) Classification target columns (auto-encode; explicit mapping supported
+        #    via cfg["mapping"] — rows with unmapped values become null and are
+        #    dropped by the existing target-NA filter).
+        # 2) User-specified categorical covariates (auto or with explicit mapping).
+        classification_target_cols: dict[str, str] = {
+            name: cfg["column"]
+            for name, cfg in targets.items()
+            if cfg.get("task") == "classification"
+        }
+        target_mappings: dict[str, dict[str, int]] = {
+            cfg["column"]: cfg["mapping"]
+            for cfg in targets.values()
+            if cfg.get("task") == "classification" and cfg.get("mapping") is not None
+        }
+
+        cat_cov_input = categorical_covariates or {}
+        for col in cat_cov_input:
+            if col not in role_mapping.covariates:
+                raise ValueError(
+                    f"categorical_covariates[{col!r}] must also be listed in "
+                    "roles['covariates']"
+                )
+
+        encoded_cols: set[str] = set(classification_target_cols.values()) | set(cat_cov_input.keys())
+
+        # Collect all columns needed from header.
+        # String columns: plot_id + roles.categoricals + classification targets + categorical covariates
         header_string_cols = [role_mapping.plot_id]
         header_string_cols.extend(role_mapping.categoricals)
+        header_string_cols.extend(classification_target_cols.values())
+        header_string_cols.extend(cat_cov_input.keys())
+        header_string_cols = list(dict.fromkeys(header_string_cols))
 
-        # Numeric columns: targets, coords, covariates
-        header_numeric_cols = []
+        # Numeric columns: regression targets, coords, non-categorical covariates
+        header_numeric_cols: list[str] = []
         for name, cfg in targets.items():
-            header_numeric_cols.append(cfg["column"])
+            if cfg.get("task") != "classification":
+                header_numeric_cols.append(cfg["column"])
         if role_mapping.has_coordinates:
             header_numeric_cols.extend([role_mapping.coords_lat, role_mapping.coords_lon])
-        header_numeric_cols.extend(role_mapping.covariates)
-
-        # Remove duplicates while preserving order
+        header_numeric_cols.extend(
+            c for c in role_mapping.covariates if c not in encoded_cols
+        )
         header_numeric_cols = list(dict.fromkeys(header_numeric_cols))
 
         # Load header with C++ fast loader
@@ -291,11 +385,28 @@ class ResolveDataset:
             verbose=verbose,
         )
 
-        # Build DataFrame from C++ results
-        header_dict = {}
+        # Build DataFrame from C++ results, encoding categorical columns to Int64.
+        categorical_mappings: dict[str, dict[str, int]] = {}
+        header_dict: dict[str, Any] = {}
         for col in header_string_cols:
-            if col in header_data:
-                header_dict[col] = header_data[col]
+            if col not in header_data:
+                continue
+            raw = header_data[col]
+            if col in encoded_cols:
+                explicit = cat_cov_input.get(col, target_mappings.get(col))
+                codes, mapping = _encode_categorical(raw, explicit)
+                categorical_mappings[col] = mapping
+                header_dict[col] = pl.Series(name=col, values=codes, dtype=pl.Int64)
+                if verbose:
+                    n_classes = len(mapping)
+                    n_null = sum(1 for c in codes if c is None)
+                    src = "explicit" if explicit is not None else "auto"
+                    print(
+                        f"  Encoded {col!r} as Int64 ({src}, {n_classes} classes, "
+                        f"{n_null:,} null)"
+                    )
+            else:
+                header_dict[col] = raw
         for col in header_numeric_cols:
             if col in header_data:
                 header_dict[col] = header_data[col].numpy()
@@ -448,10 +559,16 @@ class ResolveDataset:
                 species_dict[role_mapping.taxonomy_family] = species_tensors["family_ids"].numpy()
         species_df = pl.DataFrame(species_dict)
 
-        # Build target configs
-        target_configs = {
-            name: TargetConfig.from_dict(name, cfg) for name, cfg in targets.items()
-        }
+        # Build target configs. Auto-fill num_classes for classification targets
+        # whose column was encoded above (so the user can omit num_classes).
+        target_configs: dict[str, TargetConfig] = {}
+        for name, cfg in targets.items():
+            cfg_resolved = dict(cfg)
+            if cfg_resolved.get("task") == "classification":
+                col = cfg_resolved["column"]
+                if cfg_resolved.get("num_classes") is None and col in categorical_mappings:
+                    cfg_resolved["num_classes"] = len(categorical_mappings[col])
+            target_configs[name] = TargetConfig.from_dict(name, cfg_resolved)
 
         # Create dataset instance
         instance = cls.__new__(cls)
@@ -462,6 +579,7 @@ class ResolveDataset:
         instance._species_normalization = species_normalization
         instance._track_unknown_fraction = track_unknown_fraction
         instance._track_unknown_count = track_unknown_count
+        instance._categorical_mappings = categorical_mappings
 
         # Store the fast-loaded tensors for direct use by FastSpeciesEncoder
         instance._fast_species_tensors = species_tensors
@@ -510,6 +628,16 @@ class ResolveDataset:
     def fast_species_tensors(self) -> Optional[Dict[str, torch.Tensor]]:
         """Get pre-loaded species tensors if available."""
         return getattr(self, '_fast_species_tensors', None)
+
+    @property
+    def categorical_mappings(self) -> dict[str, dict[str, int]]:
+        """String→int code mappings built (or supplied) for auto-encoded columns.
+
+        Empty for datasets that did not use auto-categorical encoding. Populated
+        by ``from_fast_csv`` for classification target columns and any columns
+        passed via ``categorical_covariates``.
+        """
+        return getattr(self, "_categorical_mappings", {})
 
     @property
     def header(self) -> pl.DataFrame:
@@ -657,7 +785,7 @@ class ResolveDataset:
         """Create a subset dataset containing only the given plot IDs."""
         pid = self._roles.plot_id
         spid = self._roles.species_plot_id
-        return ResolveDataset(
+        subset = ResolveDataset(
             self._header.filter(pl.col(pid).is_in(plot_ids_list)),
             self._species.filter(pl.col(spid).is_in(plot_ids_list)),
             self._roles, self._targets,
@@ -665,6 +793,8 @@ class ResolveDataset:
             track_unknown_fraction=self._track_unknown_fraction,
             track_unknown_count=self._track_unknown_count,
         )
+        subset._categorical_mappings = dict(self.categorical_mappings)
+        return subset
 
     def _split_by_ids(
         self, train_ids_list: list, test_ids_list: list,
