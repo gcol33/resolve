@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -23,7 +24,8 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 # Cache version — increment when cache format changes
-_CACHE_VERSION = 2
+# v3: rank_pool now stores pre-padded dense tensors instead of ragged _RankPoolPreparedData
+_CACHE_VERSION = 3
 
 
 class CacheMixin:
@@ -74,6 +76,7 @@ class CacheMixin:
         if self.cache_dir is None:
             return
 
+        rp_enc = getattr(self, "_rank_pool_encoder", None)
         cache = {
             "train_tensors": train_tensors,
             "test_tensors": test_tensors,
@@ -87,6 +90,11 @@ class CacheMixin:
                 "vocab": self._species_encoder._vocab if self._species_encoder else None,
                 "species_vocab": self._species_encoder._species_vocab if self._species_encoder else set(),
             },
+            "rank_pool_vocab_sizes": {
+                "n_species": rp_enc.n_species,
+                "n_genera": rp_enc.n_genera,
+                "n_families": rp_enc.n_families,
+            } if rp_enc is not None else None,
             "categorical_vocabs": self._categorical_vocabs,
             "cache_key": self._compute_cache_key(),
         }
@@ -154,22 +162,33 @@ class CacheMixin:
             for k, v in cache["target_scalers"].items()
         }
 
-        # Restore species encoder
-        self._species_encoder = SpeciesEncoder(
-            hash_dim=self.hash_dim,
-            top_k=self.top_k,
-            aggregation=self.species_aggregation,
-            normalization=self.species_normalization,
-            track_unknown_count=self.track_unknown_count,
-            selection=self.species_selection,
-            representation=self.species_representation,
-        )
-        enc_state = cache["species_encoder"]
-        if enc_state.get("vocab"):
-            self._species_encoder._vocab = enc_state["vocab"]
-        if enc_state.get("species_vocab"):
-            self._species_encoder._species_vocab = enc_state["species_vocab"]
-        self._species_encoder._fitted = True
+        # Restore species encoder (only for hash/embed modes; rank_pool/transformer use a different encoder)
+        if self.species_encoding not in ("rank_pool", "transformer"):
+            self._species_encoder = SpeciesEncoder(
+                hash_dim=self.hash_dim,
+                top_k=self.top_k,
+                aggregation=self.species_aggregation,
+                normalization=self.species_normalization,
+                track_unknown_count=self.track_unknown_count,
+                selection=self.species_selection,
+                representation=self.species_representation,
+            )
+            enc_state = cache["species_encoder"]
+            if enc_state.get("vocab"):
+                self._species_encoder._vocab = enc_state["vocab"]
+            if enc_state.get("species_vocab"):
+                self._species_encoder._species_vocab = enc_state["species_vocab"]
+            self._species_encoder._fitted = True
+
+        # Restore rank_pool vocab sizes into schema (needed for model construction)
+        rp_vocab = cache.get("rank_pool_vocab_sizes")
+        if rp_vocab is not None and self.species_encoding in ("rank_pool", "transformer"):
+            self._schema = replace(
+                self._schema,
+                n_species_vocab=rp_vocab["n_species"],
+                n_genera_vocab=rp_vocab["n_genera"],
+                n_families_vocab=rp_vocab["n_families"],
+            )
 
         # Restore categorical vocabs
         self._categorical_vocabs = cache.get("categorical_vocabs", {})

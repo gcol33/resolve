@@ -215,6 +215,10 @@ class Trainer(
         trait_net_config: dict | None = None,
         traits: torch.Tensor | None = None,
         verbose: int = 1,
+        # rank_pool species cap: max species per plot kept per plot before padding.
+        # None (default) = auto-compute p99 of species counts across all plots.
+        # Set to a positive int to override. 0 or negative = no cap (use actual max).
+        rank_pool_species_cap: int | None = None,
         # Grouped config objects (alternative to individual kwargs)
         model_config: ModelConfig | None = None,
         training_config: TrainingConfig | None = None,
@@ -532,6 +536,7 @@ class Trainer(
         if not 0 <= species_dropout < 1:
             raise ValueError(f"species_dropout must be in [0, 1), got {species_dropout}")
         self.species_dropout = species_dropout
+        self.rank_pool_species_cap = rank_pool_species_cap
         self.head_hidden_dims = head_hidden_dims
         self.compile_model = compile_model
         # Auto-enable prefetch for large batch sizes (16K+)
@@ -732,7 +737,7 @@ class Trainer(
             test_tensors = self._build_tensors(test_ds, fit_scalers=False)
             print(f"  Data prepared in {time.time() - t_prep_start:.1f}s")
 
-            # Save to cache for next time (skip rank_pool mode - ragged data isn't cacheable)
+            # Save to cache for next time (rank_pool now returns pre-padded dense tensors, also cacheable)
             if self.cache_dir and not isinstance(train_tensors, _RankPoolPreparedData):
                 self._save_cache(
                     train_tensors,

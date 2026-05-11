@@ -21,6 +21,7 @@ from resolve.data.dataset import ResolveDataset, ResolveSchema
 from resolve.encode.embedding import EmbeddingEncoder
 from resolve.encode.species import SpeciesEncoder
 from resolve.encode.vocab import CategoricalVocab
+from resolve.encode._pool_base import pad_ragged_encoded
 from resolve.train._loaders import (
     GPUTensorLoader,
     RankPoolBatchDataset,
@@ -407,23 +408,46 @@ class DataMixin:
                     cat_arrays.append(vocab.encode_array(series))
                 categorical_ids_t = torch.from_numpy(np.stack(cat_arrays, axis=1))
 
-        # Rank-pool/transformer mode: return _RankPoolPreparedData with ragged arrays (per-batch padding)
+        # Rank-pool/transformer mode: pre-pad ragged species arrays once at startup.
+        # This converts variable-length per-plot species lists to dense (N, max_k) tensors,
+        # enabling fast DataLoader (pin_memory + workers) instead of per-batch collation.
+        # Apply species cap to avoid padding to the global max (which can be a single outlier).
         if self.species_encoding in ("rank_pool", "transformer"):
             has_tax = self._schema.has_taxonomy
-            return _RankPoolPreparedData(
-                continuous=torch.from_numpy(continuous),
-                target_tensors=[
-                    torch.from_numpy(targets[n]) for n in self.model.target_configs
-                ],
-                species_ids=pool_encoded.species_ids,
-                genus_ids=pool_encoded.genus_ids if has_tax else None,
-                family_ids=pool_encoded.family_ids if has_tax else None,
-                weights=pool_encoded.weights,
-                has_cover=pool_encoded.has_cover,
-                has_taxonomy=has_tax,
-                n_samples=len(pool_encoded.plot_ids),
-                categorical_ids=categorical_ids_t,
-            )
+            cap = getattr(self, "rank_pool_species_cap", None)
+            lengths = np.array([len(s) for s in pool_encoded.species_ids], dtype=np.int32)
+            actual_max = int(lengths.max()) if len(lengths) > 0 else 1
+            if cap is None:
+                # Auto: p99 of species counts — covers 99% of plots, avoids extreme outliers
+                cap = int(np.percentile(lengths, 99))
+                cap = max(cap, 1)
+            elif cap <= 0:
+                cap = actual_max  # no cap
+            if cap < actual_max:
+                print(f"  rank_pool: capping species at p99={cap} (max={actual_max}, saves {1 - cap/actual_max:.0%} padding)")
+                sp_ids_in  = [a[:cap] for a in pool_encoded.species_ids]
+                g_ids_in   = [a[:cap] for a in pool_encoded.genus_ids]
+                f_ids_in   = [a[:cap] for a in pool_encoded.family_ids]
+                weights_in = [a[:cap] for a in pool_encoded.weights]
+            else:
+                sp_ids_in  = pool_encoded.species_ids
+                g_ids_in   = pool_encoded.genus_ids
+                f_ids_in   = pool_encoded.family_ids
+                weights_in = pool_encoded.weights
+            padded = pad_ragged_encoded(sp_ids_in, g_ids_in, f_ids_in, weights_in)
+            tensors = [torch.from_numpy(continuous)]
+            tensors.append(torch.from_numpy(padded["species_ids"]).long())
+            if has_tax:
+                tensors.append(torch.from_numpy(padded["genus_ids"]).long())
+                tensors.append(torch.from_numpy(padded["family_ids"]).long())
+            tensors.append(torch.from_numpy(padded["weights"]))
+            tensors.append(torch.from_numpy(padded["mask"]))
+            tensors.append(torch.from_numpy(pool_encoded.has_cover))
+            if categorical_ids_t is not None:
+                tensors.append(categorical_ids_t)
+            for name in self.model.target_configs.keys():
+                tensors.append(torch.from_numpy(targets[name]))
+            return tuple(tensors)
 
         # Build tensor dataset (hash/embed modes)
         tensors = [torch.from_numpy(continuous)]
@@ -456,37 +480,12 @@ class DataMixin:
         Accepts either a tuple of tensors (hash/embed modes) or
         _RankPoolPreparedData (rank_pool mode with per-batch padding).
         """
-        # Rank-pool mode: per-batch padding via custom Dataset + collate
-        # num_workers=0 on Windows: spawn-based multiprocessing adds overhead
-        # and can fail serializing ragged numpy arrays. Main-thread collation
-        # is equally fast (~4s/ep) since the numpy collate is lightweight.
+        # Legacy slow path (ragged per-batch padding) — should not be reached with current code.
         if isinstance(train_data, _RankPoolPreparedData):
-            n_workers = self.num_workers  # default 0, user can override
-            print(f"  Rank-pool mode: per-batch padding, num_workers={n_workers}")
-            print(f"  Train: {train_data.n_samples:,} samples (ragged, per-batch padding)")
-            print(f"  Test: {test_data.n_samples:,} samples (ragged, per-batch padding)")
-
-            self._train_loader = DataLoader(
-                RankPoolBatchDataset(train_data),
-                batch_size=self.batch_size,
-                shuffle=True,
-                num_workers=n_workers,
-                collate_fn=_rank_pool_collate_fn,
-                pin_memory=self._device.type == "cuda" and n_workers > 0,
-                persistent_workers=n_workers > 0,
-                drop_last=True,
+            raise RuntimeError(
+                "rank_pool returned _RankPoolPreparedData instead of pre-padded tensors. "
+                "This path is no longer supported — check _build_tensors."
             )
-            self._test_loader = DataLoader(
-                RankPoolBatchDataset(test_data),
-                batch_size=self.batch_size,
-                shuffle=False,
-                num_workers=n_workers,
-                collate_fn=_rank_pool_collate_fn,
-                pin_memory=self._device.type == "cuda" and n_workers > 0,
-                persistent_workers=n_workers > 0,
-            )
-            self._using_gpu_loader = False
-            return
 
         # Hash/embed modes: standard tensor-based loaders
         train_tensors = train_data
@@ -508,11 +507,28 @@ class DataMixin:
         print(f"  Train tensors: {train_sizes[0]:,} samples, {len(train_tensors)} tensors")
         print(f"  Test tensors: {test_sizes[0]:,} samples, {len(test_tensors)} tensors")
 
-        if self.gpu_data:
+        # Decide whether to put data on GPU. rank_pool/transformer pre-padded tensors can
+        # be several GB but typically still fit; GPU-resident indexing is ~400× faster than
+        # CPU DataLoader. Fall back to CPU loader only when tensors would consume more than
+        # half of CUDA free memory (model + optimizer + activations need headroom too).
+        is_rank_pool = self.species_encoding in ("rank_pool", "transformer")
+        total_size_mb = sum(t.numel() * t.element_size() for t in train_tensors) / 1e6
+        total_size_mb += sum(t.numel() * t.element_size() for t in test_tensors) / 1e6
+
+        use_gpu_data = self.gpu_data
+        if use_gpu_data and self._device.type == "cuda":
+            free_bytes, _ = torch.cuda.mem_get_info(self._device)
+            free_mb = free_bytes / 1e6
+            if total_size_mb > free_mb * 0.5:
+                print(
+                    f"  Data size ({total_size_mb:.0f} MB) exceeds 50% of CUDA free memory "
+                    f"({free_mb:.0f} MB); using CPU DataLoader instead."
+                )
+                use_gpu_data = False
+
+        if use_gpu_data:
             # Use GPU-resident tensors for maximum throughput
             # This eliminates the DataLoader CPU→GPU bottleneck (~400ms → ~1ms per batch)
-            total_size_mb = sum(t.numel() * t.element_size() for t in train_tensors) / 1e6
-            total_size_mb += sum(t.numel() * t.element_size() for t in test_tensors) / 1e6
             print(f"  GPU data mode: moving {total_size_mb:.1f} MB to GPU")
 
             self._train_loader = GPUTensorLoader(
@@ -532,7 +548,10 @@ class DataMixin:
             # Mark that we're using GPU loaders (data already on device)
             self._using_gpu_loader = True
         else:
-            # Standard CPU DataLoader with pin_memory for async transfer
+            # Standard CPU DataLoader with pin_memory for async transfer.
+            # For rank_pool: use 2 workers (safe now that data is dense, not ragged)
+            # to overlap H2D transfer with GPU computation.
+            n_workers = 2 if is_rank_pool else self.num_workers
             train_ds = TensorDataset(*train_tensors)
             test_ds = TensorDataset(*test_tensors)
 
@@ -540,17 +559,17 @@ class DataMixin:
                 train_ds,
                 batch_size=self.batch_size,
                 shuffle=True,
-                num_workers=self.num_workers,
+                num_workers=n_workers,
                 pin_memory=self._device.type == "cuda",
-                persistent_workers=self.num_workers > 0,
+                persistent_workers=n_workers > 0,
                 drop_last=True,  # Avoid small final batch overhead
             )
             self._test_loader = DataLoader(
                 test_ds,
                 batch_size=self.batch_size,
                 shuffle=False,
-                num_workers=self.num_workers,
+                num_workers=n_workers,
                 pin_memory=self._device.type == "cuda",
-                persistent_workers=self.num_workers > 0,
+                persistent_workers=n_workers > 0,
             )
             self._using_gpu_loader = False
