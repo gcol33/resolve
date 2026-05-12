@@ -102,7 +102,7 @@ class PretrainMixin:
             from resolve.encode.rank_pool import RankPoolEncoder
 
             self._rank_pool_encoder = RankPoolEncoder(
-                weighting=self.species_normalization,
+                weighting=self._resolve_rank_pool_weighting(),
                 min_species_frequency=self.min_species_frequency,
             )
             self._rank_pool_encoder.fit(self.dataset)

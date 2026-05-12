@@ -175,6 +175,7 @@ class Trainer(
         species_aggregation: str = "abundance",
         species_selection: str = "top",
         species_representation: str = "abundance",
+        rank_pool_weighting: str | None = None,
         min_species_frequency: int = 1,
         cover_dropout: float = 0.0,
         stratified_split: bool = False,
@@ -307,6 +308,16 @@ class Trainer(
                 - "abundance": Weighted by abundance (default)
                 - "presence_absence": Binary 0/1
 
+            rank_pool_weighting: Per-species weighting for the rank-pool / transformer
+                encoder. Only used when species_encoding is "rank_pool" or "transformer".
+                - None (default): falls back to ``species_aggregation`` for back-compat;
+                  if that is not a valid weighting, the encoder default ("log1p") is used.
+                - "binary": w_i = 1 for all species
+                - "abundance": w_i = raw abundance
+                - "log1p": w_i = log(1 + abundance)
+                - "norm": w_i = abundance / sum(abundances)
+                - "rank": w_i = 1/rank based on abundance ordering
+
             min_species_frequency: For selection="all", only include species in N+ plots.
 
             verbose: Verbosity level.
@@ -385,6 +396,7 @@ class Trainer(
             if species_aggregation == "abundance": species_aggregation = _dc.species_aggregation
             if species_selection == "top": species_selection = _dc.species_selection
             if species_representation == "abundance": species_representation = _dc.species_representation
+            if rank_pool_weighting is None: rank_pool_weighting = _dc.rank_pool_weighting
             if min_species_frequency == 1: min_species_frequency = _dc.min_species_frequency
             if cover_dropout == 0.0: cover_dropout = _dc.cover_dropout
             if stratified_split is False: stratified_split = _dc.stratified_split
@@ -482,6 +494,14 @@ class Trainer(
         if species_representation not in valid_representations:
             raise ValueError(f"species_representation must be one of {valid_representations}, got {species_representation!r}")
 
+        # Rank-pool weighting (only used when species_encoding in {"rank_pool", "transformer"})
+        valid_rank_pool_weightings = ("binary", "abundance", "log1p", "norm", "rank")
+        if rank_pool_weighting is not None and rank_pool_weighting not in valid_rank_pool_weightings:
+            raise ValueError(
+                f"rank_pool_weighting must be one of {valid_rank_pool_weightings} or None, "
+                f"got {rank_pool_weighting!r}"
+            )
+
         self.hash_dim = hash_dim
         self.species_embed_dim = species_embed_dim
         self.top_k = top_k
@@ -516,6 +536,7 @@ class Trainer(
         self.species_aggregation = species_aggregation
         self.species_selection = species_selection
         self.species_representation = species_representation
+        self.rank_pool_weighting = rank_pool_weighting
         self.min_species_frequency = min_species_frequency
         self.cover_dropout = cover_dropout
         self.stratified_split = stratified_split

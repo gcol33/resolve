@@ -203,6 +203,7 @@ class DataConfig:
     species_aggregation: str = "abundance"
     species_selection: str = "top"
     species_representation: str = "abundance"
+    rank_pool_weighting: str | None = None
     min_species_frequency: int = 1
     cover_dropout: float = 0.0
     categorical_embed_dim: int = 8

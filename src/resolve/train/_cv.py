@@ -227,7 +227,7 @@ class CVMixin:
         else:  # rank_pool or transformer
             from resolve.encode.rank_pool import RankPoolEncoder
             self._rank_pool_encoder = RankPoolEncoder(
-                weighting=self.species_normalization,
+                weighting=self._resolve_rank_pool_weighting(),
                 min_species_frequency=self.min_species_frequency,
             )
             self._rank_pool_encoder.fit(self.dataset)
@@ -285,6 +285,7 @@ class CVMixin:
             species_aggregation=self.species_aggregation,
             species_selection=self.species_selection,
             species_representation=self.species_representation,
+            rank_pool_weighting=self.rank_pool_weighting,
             min_species_frequency=self.min_species_frequency,
             cover_dropout=self.cover_dropout,
             n_attention_layers=self.n_attention_layers,

@@ -84,6 +84,21 @@ def _stratified_split(
 class DataMixin:
     """Mixin providing data preparation methods for Trainer."""
 
+    def _resolve_rank_pool_weighting(self: Trainer) -> str:
+        """Resolve the rank-pool encoder weighting from Trainer config.
+
+        Priority: explicit ``rank_pool_weighting`` > ``species_aggregation`` (if it
+        names a valid rank-pool weighting, for back-compat with v6/v7 scripts) >
+        encoder default "log1p".
+        """
+        from resolve.encode.rank_pool import RankPoolEncoder
+
+        if self.rank_pool_weighting is not None:
+            return self.rank_pool_weighting
+        if self.species_aggregation in RankPoolEncoder.VALID_WEIGHTINGS:
+            return self.species_aggregation
+        return "log1p"
+
     def _unpack_batch(
         self: Trainer,
         batch: tuple,
@@ -211,7 +226,7 @@ class DataMixin:
             )
             if should_fit:
                 self._rank_pool_encoder = RankPoolEncoder(
-                    weighting=self.species_normalization,
+                    weighting=self._resolve_rank_pool_weighting(),
                     min_species_frequency=self.min_species_frequency,
                 )
                 self._rank_pool_encoder.fit(train_ds)

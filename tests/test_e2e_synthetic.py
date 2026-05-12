@@ -167,6 +167,52 @@ class TestRankPoolMode:
         assert len(preds["area"]) == dataset.n_plots
 
 
+class TestRankPoolWeighting:
+    """Regression tests for the rank_pool_weighting kwarg.
+
+    Prior bug: the rank-pool branch wired weighting=self.species_normalization
+    (a dataset-level knob defaulting to "norm") so the user's species_aggregation
+    setting was silently ignored on rank_pool/transformer encoders.
+    """
+
+    def _make_trainer(self, dataset, **kwargs):
+        return Trainer(
+            dataset,
+            species_encoding="rank_pool",
+            species_embed_dim=8,
+            genus_emb_dim=4,
+            family_emb_dim=4,
+            hidden_dims=[16],
+            max_epochs=1,
+            patience=1,
+            batch_size=64,
+            verbose=0,
+            **kwargs,
+        )
+
+    def test_explicit_kwarg_overrides_default(self, dataset):
+        trainer = self._make_trainer(dataset, rank_pool_weighting="rank")
+        trainer.fit()
+        assert trainer._rank_pool_encoder.weighting == "rank"
+
+    def test_back_compat_via_species_aggregation(self, dataset):
+        # No rank_pool_weighting kwarg, but species_aggregation is a valid weighting.
+        trainer = self._make_trainer(dataset, species_aggregation="log1p")
+        trainer.fit()
+        assert trainer._rank_pool_encoder.weighting == "log1p"
+
+    def test_default_uses_species_aggregation_default(self, dataset):
+        # Neither kwarg set. species_aggregation defaults to "abundance",
+        # which is a valid rank-pool weighting.
+        trainer = self._make_trainer(dataset)
+        trainer.fit()
+        assert trainer._rank_pool_encoder.weighting == "abundance"
+
+    def test_invalid_kwarg_raises(self, dataset):
+        with pytest.raises(ValueError, match="rank_pool_weighting"):
+            self._make_trainer(dataset, rank_pool_weighting="not_a_mode")
+
+
 class TestTransformerMode:
     def test_train_and_predict(self, dataset):
         trainer = Trainer(

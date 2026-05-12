@@ -104,7 +104,7 @@ class PersistenceMixin:
             state["taxonomy_vocab_obj"] = self._rank_pool_encoder._taxonomy_vocab
             state["species_to_genus"] = self._rank_pool_encoder._species_to_genus
             state["species_to_family"] = self._rank_pool_encoder._species_to_family
-            state["species_normalization"] = self._rank_pool_encoder.weighting
+            state["rank_pool_weighting"] = self._rank_pool_encoder.weighting
             state["min_species_frequency"] = self._rank_pool_encoder.min_species_frequency
             if self._rank_pool_encoder.normalizer is not None:
                 state["normalizer"] = self._rank_pool_encoder.normalizer
@@ -219,8 +219,14 @@ class PersistenceMixin:
             encoder._fitted = True
         elif species_encoding in ("rank_pool", "transformer"):
             from resolve.encode.rank_pool import RankPoolEncoder
+            # Back-compat: old checkpoints stored rank-pool weighting under
+            # the "species_normalization" key (semantically wrong — that key
+            # was reused). Prefer the new key, fall back to the legacy one.
+            rp_weighting = state.get("rank_pool_weighting")
+            if rp_weighting is None:
+                rp_weighting = state.get("species_normalization", "log1p")
             encoder = RankPoolEncoder(
-                weighting=state.get("species_normalization", "log1p"),
+                weighting=rp_weighting,
                 min_species_frequency=state.get("min_species_frequency", 1),
             )
             encoder._species_vocab = state.get("species_vocab_obj")

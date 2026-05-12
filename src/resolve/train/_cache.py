@@ -25,7 +25,7 @@ __all__: list[str] = []
 
 # Cache version — increment when cache format changes
 # v3: rank_pool now stores pre-padded dense tensors instead of ragged _RankPoolPreparedData
-_CACHE_VERSION = 3
+_CACHE_VERSION = 4
 
 
 class CacheMixin:
@@ -49,6 +49,7 @@ class CacheMixin:
             "species_aggregation": self.species_aggregation,
             "species_selection": self.species_selection,
             "species_normalization": self.species_normalization,
+            "rank_pool_weighting": self.rank_pool_weighting,
             "track_unknown_fraction": self.track_unknown_fraction,
             "track_unknown_count": self.track_unknown_count,
             "targets": sorted(self.dataset.targets.keys()),
