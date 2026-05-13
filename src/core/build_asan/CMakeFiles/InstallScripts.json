@@ -1,0 +1,10 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/cmake_install.cmake",
+		"C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/tests/cmake_install.cmake",
+		"C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/_deps/catch2-build/cmake_install.cmake",
+		"C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/_deps/catch2-build/src/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

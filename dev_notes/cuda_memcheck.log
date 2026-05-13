@@ -1,0 +1,5 @@
+========= COMPUTE-SANITIZER
+========= Error: GPU debugging features are disabled. Please consult the list of supported CUDA devices for more details.
+========= 
+========= LEAK SUMMARY: 0 bytes leaked in 0 allocations
+========= ERROR SUMMARY: 1 error

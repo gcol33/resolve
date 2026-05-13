@@ -1,0 +1,2457 @@
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineSystem.cmake:212 (message)"
+      - "CMakeLists.txt:15 (project)"
+    message: |
+      The system is: Windows - 10.0.26200 - AMD64
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompiler.cmake:63 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:69 (_cmake_find_compiler)"
+      - "CMakeLists.txt:15 (project)"
+    mode: "program"
+    variable: "CMAKE_CXX_COMPILER"
+    description: "CXX compiler"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: false
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "c++"
+      - "g++"
+      - "cl"
+      - "bcc"
+      - "icx"
+      - "clang++"
+    candidate_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+    searched_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/c++.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/c++.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/c++"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/g++.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/g++.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/g++"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.com"
+    found: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:468 (find_file)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:506 (CMAKE_DETERMINE_COMPILER_ID_WRITE)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:8 (CMAKE_DETERMINE_COMPILER_ID_BUILD)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:15 (project)"
+    mode: "file"
+    variable: "src_in"
+    description: "Path to a file."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "CMakeCXXCompilerId.cpp.in"
+    candidate_directories:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/"
+    found: "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeCXXCompilerId.cpp.in"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+      ENV{INCLUDE}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\include"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\shared"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\um"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\winrt"
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:15 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      Microsoft (R) C/C++ Optimizing Compiler Version 19.50.35729 for x64
+      Copyright (C) Microsoft Corporation.  All rights reserved.
+      
+      CMakeCXXCompilerId.cpp
+      Microsoft (R) Incremental Linker Version 14.50.35729.0
+      Copyright (C) Microsoft Corporation.  All rights reserved.
+      
+      /out:CMakeCXXCompilerId.exe 
+      CMakeCXXCompilerId.obj 
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.exe"
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CMakeCXXCompilerId.obj"
+      
+      The CXX compiler identification is MSVC, found in:
+        C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/4.3.2/CompilerIdCXX/CMakeCXXCompilerId.exe
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:1347 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:250 (CMAKE_DETERMINE_MSVC_SHOWINCLUDES_PREFIX)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:15 (project)"
+    message: |
+      Detecting CXX compiler /showIncludes prefix:
+        main.c
+        Note: including file: C:\\Users\\Gilles Colling\\Documents\\dev\\RESOLVE\\src\\core\\build_asan\\CMakeFiles\\ShowIncludes\\foo.h
+        
+      Found prefix "Note: including file: "
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:37 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:65 (__resolve_tool_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:103 (__resolve_linker_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:15 (project)"
+    mode: "program"
+    variable: "_CMAKE_TOOL_WITH_PATH"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "link"
+    candidate_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+    searched_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/link.com"
+    found: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/link.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:37 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:65 (__resolve_tool_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:104 (__resolve_linker_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:15 (project)"
+    mode: "program"
+    variable: "_CMAKE_TOOL_WITH_PATH"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "lld-link"
+    candidate_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+    searched_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/lld-link.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/lld-link.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/lld-link"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/lld-link.com"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/lld-link.exe"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/lld-link"
+      - "C:/Program Files/CMake/bin/lld-link.com"
+      - "C:/Program Files/CMake/bin/lld-link.exe"
+      - "C:/Program Files/CMake/bin/lld-link"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/lld-link.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/lld-link.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/lld-link"
+      - "C:/Windows/System32/lld-link.com"
+      - "C:/Windows/System32/lld-link.exe"
+      - "C:/Windows/System32/lld-link"
+      - "C:/Windows/lld-link.com"
+      - "C:/Windows/lld-link.exe"
+      - "C:/Windows/lld-link"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:15 (project)"
+    mode: "program"
+    variable: "CMAKE_LINKER"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "link"
+    candidate_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+    searched_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/link.com"
+    found: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/link.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:15 (project)"
+    mode: "program"
+    variable: "CMAKE_MT"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "mt"
+    candidate_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+    searched_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/mt.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/mt.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/mt"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/mt.com"
+    found: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/mt.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:15 (project)"
+    mode: "program"
+    variable: "CMAKE_AR"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "lib"
+    candidate_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+    searched_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/lib.com"
+    found: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/lib.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineRCCompiler.cmake:40 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Windows-MSVC.cmake:592 (enable_language)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Windows-MSVC.cmake:565 (__windows_compiler_msvc_enable_rc)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Windows-MSVC-CXX.cmake:6 (__windows_compiler_msvc)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeCXXInformation.cmake:48 (include)"
+      - "CMakeLists.txt:15 (project)"
+    mode: "program"
+    variable: "CMAKE_RC_COMPILER"
+    description: "RC compiler"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "rc"
+    candidate_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Program Files/bin/"
+      - "C:/Program Files/sbin/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/bin/"
+      - "C:/Program Files (x86)/sbin/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/CMake/sbin/"
+      - "C:/Program Files/CMake/"
+      - "C:/Program Files (x86)/resolve/bin/"
+      - "C:/Program Files (x86)/resolve/sbin/"
+      - "C:/Program Files (x86)/resolve/"
+    searched_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/rc.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/rc.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/rc"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/rc.com"
+    found: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/rc.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/resolve"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/resolve"
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerABI.cmake:83 (try_compile)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:15 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/CMakeScratch/TryCompile-f0hxe1"
+      binary: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/CMakeScratch/TryCompile-f0hxe1"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: "/DWIN32 /D_WINDOWS /GR /EHsc"
+      CMAKE_CXX_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_CXX_STDLIB_MODULES_JSON: ""
+      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: 'C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/CMakeScratch/TryCompile-f0hxe1'
+        
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe" -v cmTC_4b93a
+        [1/2] C:\\PROGRA~1\\MIB055~1\\18\\COMMUN~1\\VC\\Tools\\MSVC\\1450~1.357\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -D_MBCS  /DWIN32 /D_WINDOWS /GR /EHsc  /Zi /Ob0 /Od /RTC1 -MDd /showIncludes /FoCMakeFiles\\cmTC_4b93a.dir\\CMakeCXXCompilerABI.cpp.obj /FdCMakeFiles\\cmTC_4b93a.dir\\ /FS -c "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCXXCompilerABI.cpp"
+        [2/2] C:\\WINDOWS\\system32\\cmd.exe /C "cd . && "C:\\Program Files\\CMake\\bin\\cmake.exe" -E vs_link_exe --msvc-ver=1950 --intdir=CMakeFiles\\cmTC_4b93a.dir --rc=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100261~1.0\\x64\\rc.exe --mt=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100261~1.0\\x64\\mt.exe --manifests  -- C:\\PROGRA~1\\MIB055~1\\18\\COMMUN~1\\VC\\Tools\\MSVC\\1450~1.357\\bin\\Hostx64\\x64\\link.exe /nologo CMakeFiles\\cmTC_4b93a.dir\\CMakeCXXCompilerABI.cpp.obj  /out:cmTC_4b93a.exe /implib:cmTC_4b93a.lib /pdb:cmTC_4b93a.pdb /version:0.0 /machine:x64  /debug /INCREMENTAL /subsystem:console  kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib && cd ."
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerABI.cmake:253 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:15 (project)"
+    message: |
+      Parsed CXX implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|link\\.exe|lld-link(\\.exe)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|"|[0-9]+>[ 	-]*Build:[ 	0-9]+ ms[ 	]*)?[ 	]*(([^"]*[/\\])?(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|link\\.exe|lld-link(\\.exe)?))("|,| |$)]
+        linker tool for 'CXX': C:/PROGRA~1/MIB055~1/18/COMMUN~1/VC/Tools/MSVC/1450~1.357/bin/Hostx64/x64/link.exe
+        implicit libs: []
+        implicit objs: []
+        implicit dirs: []
+        implicit fwks: []
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/Internal/CMakeDetermineLinkerId.cmake:38 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerABI.cmake:299 (cmake_determine_linker_id)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:15 (project)"
+    message: |
+      Running the CXX compiler's linker: "C:/PROGRA~1/MIB055~1/18/COMMUN~1/VC/Tools/MSVC/1450~1.357/bin/Hostx64/x64/link.exe" "-v"
+      Microsoft (R) Incremental Linker Version 14.50.35729.0
+      Copyright (C) Microsoft Corporation.  All rights reserved.
+  -
+    kind: "find_package-v1"
+    backtrace:
+      - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/share/cmake/Caffe2/public/mkl.cmake:1 (find_package)"
+      - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/share/cmake/Caffe2/Caffe2Config.cmake:113 (include)"
+      - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/share/cmake/Torch/TorchConfig.cmake:62 (find_package)"
+      - "CMakeLists.txt:33 (find_package)"
+    name: "MKL"
+    configs:
+      -
+        filename: "MKL.cps"
+        kind: "cps"
+      -
+        filename: "mkl.cps"
+        kind: "cps"
+      -
+        filename: "MKLConfig.cmake"
+        kind: "cmake"
+      -
+        filename: "mkl-config.cmake"
+        kind: "cmake"
+    version_request:
+      exact: false
+    settings:
+      required: "optional"
+      quiet: true
+      global: false
+      policy_scope: true
+      bypass_provider: false
+      names:
+        - "MKL"
+      path_suffixes:
+        - ""
+      paths:
+        CMAKE_FIND_USE_CMAKE_PATH: true
+        CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+        CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+        CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+        CMAKE_FIND_USE_INSTALL_PREFIX: true
+        CMAKE_FIND_USE_PACKAGE_ROOT_PATH: true
+        CMAKE_FIND_USE_CMAKE_PACKAGE_REGISTRY: true
+        CMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY: true
+        CMAKE_FIND_ROOT_PATH_MODE: "BOTH"
+    candidates:
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/MKLConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/mkl-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/lib/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/lib/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/share/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/share/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/MKLConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/mkl-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/lib/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/lib/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/share/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/share/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/MKLConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/mkl-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/lib/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/lib/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/share/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/share/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/MKLConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/mkl-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/lib/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/lib/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/share/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/share/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/MKLConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/mkl-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/lib/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/lib/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/share/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/share/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/MKLConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/mkl-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/lib/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/lib/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/share/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/share/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/MKLConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/mkl-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/lib/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/lib/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/share/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/share/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/MKLConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/mkl-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/MKLConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/mkl-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/lib/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/lib/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/share/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/share/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/MKLConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/mkl-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/lib/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/lib/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/share/cps/MKL.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/share/cps/mkl.cps"
+        mode: "cps"
+        reason: "no_exist"
+    found: null
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/resolve"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/resolve"
+  -
+    kind: "find_package-v1"
+    backtrace:
+      - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/share/cmake/Caffe2/public/mkldnn.cmake:7 (find_package)"
+      - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/share/cmake/Caffe2/Caffe2Config.cmake:117 (include)"
+      - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/share/cmake/Torch/TorchConfig.cmake:62 (find_package)"
+      - "CMakeLists.txt:33 (find_package)"
+    name: "MKLDNN"
+    configs:
+      -
+        filename: "MKLDNN.cps"
+        kind: "cps"
+      -
+        filename: "mkldnn.cps"
+        kind: "cps"
+      -
+        filename: "MKLDNNConfig.cmake"
+        kind: "cmake"
+      -
+        filename: "mkldnn-config.cmake"
+        kind: "cmake"
+    version_request:
+      exact: false
+    settings:
+      required: "optional"
+      quiet: true
+      global: false
+      policy_scope: true
+      bypass_provider: false
+      names:
+        - "MKLDNN"
+      path_suffixes:
+        - ""
+      paths:
+        CMAKE_FIND_USE_CMAKE_PATH: true
+        CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+        CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+        CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+        CMAKE_FIND_USE_INSTALL_PREFIX: true
+        CMAKE_FIND_USE_PACKAGE_ROOT_PATH: true
+        CMAKE_FIND_USE_CMAKE_PACKAGE_REGISTRY: true
+        CMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY: true
+        CMAKE_FIND_ROOT_PATH_MODE: "BOTH"
+    candidates:
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/MKLDNNConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/mkldnn-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/lib/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/lib/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/share/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/share/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/MKLDNNConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/mkldnn-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/lib/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/lib/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/share/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/share/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/MKLDNNConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/mkldnn-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/lib/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/lib/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/share/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/share/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/MKLDNNConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/mkldnn-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/lib/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/lib/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/share/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/share/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/MKLDNNConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/mkldnn-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/lib/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/lib/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/share/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/share/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/MKLDNNConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/mkldnn-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/lib/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/lib/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/share/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/share/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/MKLDNNConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/mkldnn-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/lib/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/lib/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/share/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/share/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/MKLDNNConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/mkldnn-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/MKLDNNConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/mkldnn-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/lib/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/lib/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/share/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/share/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/MKLDNNConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/mkldnn-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/lib/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/lib/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/share/cps/MKLDNN.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/share/cps/mkldnn.cps"
+        mode: "cps"
+        reason: "no_exist"
+    found: null
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/resolve"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/resolve"
+  -
+    kind: "find_package-v1"
+    backtrace:
+      - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/share/cmake/Torch/TorchConfig.cmake:62 (find_package)"
+      - "CMakeLists.txt:33 (find_package)"
+    name: "Caffe2"
+    configs:
+      -
+        filename: "Caffe2.cps"
+        kind: "cps"
+      -
+        filename: "caffe2.cps"
+        kind: "cps"
+      -
+        filename: "Caffe2Config.cmake"
+        kind: "cmake"
+      -
+        filename: "caffe2-config.cmake"
+        kind: "cmake"
+    version_request:
+      exact: false
+    settings:
+      required: "required_explicit"
+      quiet: false
+      global: false
+      policy_scope: true
+      bypass_provider: false
+      names:
+        - "Caffe2"
+      search_paths:
+        - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/share/cmake/Torch/../Caffe2"
+      path_suffixes:
+        - ""
+      paths:
+        CMAKE_FIND_USE_CMAKE_PATH: true
+        CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+        CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+        CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+        CMAKE_FIND_USE_INSTALL_PREFIX: true
+        CMAKE_FIND_USE_PACKAGE_ROOT_PATH: true
+        CMAKE_FIND_USE_CMAKE_PACKAGE_REGISTRY: true
+        CMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY: true
+        CMAKE_FIND_ROOT_PATH_MODE: "BOTH"
+    candidates:
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/Caffe2Config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/caffe2-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/lib/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/lib/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/share/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/CMakeFiles/pkgRedirects/share/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/Caffe2Config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/caffe2-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/lib/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/lib/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/share/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/share/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/Caffe2Config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/caffe2-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/lib/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/lib/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/share/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/share/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/Caffe2Config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/caffe2-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/lib/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/lib/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/share/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/share/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/Caffe2Config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/caffe2-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/lib/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/lib/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/share/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/share/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/Caffe2Config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/caffe2-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/lib/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/lib/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/share/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/share/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/Caffe2Config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/caffe2-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/lib/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/lib/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/share/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/share/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Caffe2Config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/caffe2-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/Caffe2Config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/caffe2-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/lib/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/lib/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/share/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/share/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Caffe2Config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/caffe2-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/lib/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/lib/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/share/cps/Caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/share/cps/caffe2.cps"
+        mode: "cps"
+        reason: "no_exist"
+    found:
+      path: "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/share/cmake/Caffe2/Caffe2Config.cmake"
+      mode: "config"
+      version: ""
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/resolve"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/resolve"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/share/cmake/Torch/TorchConfig.cmake:18 (find_library)"
+      - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/share/cmake/Torch/TorchConfig.cmake:64 (append_torchlib_if_found)"
+      - "CMakeLists.txt:33 (find_package)"
+    mode: "library"
+    variable: "c10_LIBRARY"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "c10"
+    candidate_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/lib/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Program Files/lib/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/lib/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files/CMake/lib/"
+      - "C:/Program Files/CMake/"
+      - "C:/Program Files (x86)/resolve/lib/"
+      - "C:/Program Files (x86)/resolve/"
+      - "C:/Program Files (x86)/resolve/bin/"
+      - "/bin/"
+      - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/lib/"
+    searched_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/lib/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Program Files/lib/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/lib/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files/CMake/lib/"
+      - "C:/Program Files/CMake/"
+      - "C:/Program Files (x86)/resolve/lib/"
+      - "C:/Program Files (x86)/resolve/"
+      - "C:/Program Files (x86)/resolve/bin/"
+      - "/bin/"
+    found: "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/lib/c10.lib"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/resolve"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/resolve"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "C:/Program Files (x86)/resolve/bin"
+        - "C:/Program Files/CMake/bin"
+        - "/bin"
+      ENV{LIB}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\lib\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\ucrt\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/share/cmake/Torch/TorchConfig.cmake:18 (find_library)"
+      - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/share/cmake/Torch/TorchConfig.cmake:119 (append_torchlib_if_found)"
+      - "CMakeLists.txt:33 (find_package)"
+    mode: "library"
+    variable: "kineto_LIBRARY"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "kineto"
+    candidate_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/lib/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Program Files/lib/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/lib/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files/CMake/lib/"
+      - "C:/Program Files/CMake/"
+      - "C:/Program Files (x86)/resolve/lib/"
+      - "C:/Program Files (x86)/resolve/"
+      - "C:/Program Files (x86)/resolve/bin/"
+      - "/bin/"
+      - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/lib/"
+    searched_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/lib/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Program Files/lib/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/lib/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files/CMake/lib/"
+      - "C:/Program Files/CMake/"
+      - "C:/Program Files (x86)/resolve/lib/"
+      - "C:/Program Files (x86)/resolve/"
+      - "C:/Program Files (x86)/resolve/bin/"
+      - "/bin/"
+      - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/lib/"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/resolve"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/resolve"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "C:/Program Files (x86)/resolve/bin"
+        - "C:/Program Files/CMake/bin"
+        - "/bin"
+      ENV{LIB}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\lib\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\ucrt\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/share/cmake/Torch/TorchConfig.cmake:144 (find_library)"
+      - "CMakeLists.txt:33 (find_package)"
+    mode: "library"
+    variable: "TORCH_LIBRARY"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "torch"
+    candidate_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/lib/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Program Files/lib/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/lib/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files/CMake/lib/"
+      - "C:/Program Files/CMake/"
+      - "C:/Program Files (x86)/resolve/lib/"
+      - "C:/Program Files (x86)/resolve/"
+      - "C:/Program Files (x86)/resolve/bin/"
+      - "/bin/"
+      - "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/lib/"
+    searched_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/lib/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Program Files/lib/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/lib/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files/CMake/lib/"
+      - "C:/Program Files/CMake/"
+      - "C:/Program Files (x86)/resolve/lib/"
+      - "C:/Program Files (x86)/resolve/"
+      - "C:/Program Files (x86)/resolve/bin/"
+      - "/bin/"
+    found: "C:/Users/Gilles Colling/.pyenv/pyenv-win/versions/3.14.4/Lib/site-packages/torch/lib/torch.lib"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/resolve"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/resolve"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "C:/Program Files (x86)/resolve/bin"
+        - "C:/Program Files/CMake/bin"
+        - "/bin"
+      ENV{LIB}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\lib\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\ucrt\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FindGit.cmake:111 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:1887 (find_package)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:1622 (__FetchContent_populateSubbuild)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:2158:EVAL:2 (__FetchContent_doPopulation)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:2158 (cmake_language)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:2399 (__FetchContent_Populate)"
+      - "tests/CMakeLists.txt:10 (FetchContent_MakeAvailable)"
+    mode: "program"
+    variable: "GIT_EXECUTABLE"
+    description: "Git command line client"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "git.cmd"
+      - "git"
+    candidate_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Program Files/bin/"
+      - "C:/Program Files/sbin/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/bin/"
+      - "C:/Program Files (x86)/sbin/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/CMake/sbin/"
+      - "C:/Program Files/CMake/"
+      - "C:/Program Files (x86)/resolve/bin/"
+      - "C:/Program Files (x86)/resolve/sbin/"
+      - "C:/Program Files (x86)/resolve/"
+      - "C:/Users/Gilles Colling/AppData/Local/Atlassian/SourceTree/git_local/bin/"
+    searched_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/git.cmd.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/git.cmd.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/git.cmd"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/git.cmd.com"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/git.cmd.exe"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/git.cmd"
+      - "C:/Program Files/CMake/bin/git.cmd.com"
+      - "C:/Program Files/CMake/bin/git.cmd.exe"
+      - "C:/Program Files/CMake/bin/git.cmd"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/git.cmd.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/git.cmd.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/git.cmd"
+      - "C:/Windows/System32/git.cmd.com"
+      - "C:/Windows/System32/git.cmd.exe"
+      - "C:/Windows/System32/git.cmd"
+      - "C:/Windows/git.cmd.com"
+      - "C:/Windows/git.cmd.exe"
+      - "C:/Windows/git.cmd"
+      - "C:/Program Files/bin/git.cmd.com"
+      - "C:/Program Files/bin/git.cmd.exe"
+      - "C:/Program Files/bin/git.cmd"
+      - "C:/Program Files/sbin/git.cmd.com"
+      - "C:/Program Files/sbin/git.cmd.exe"
+      - "C:/Program Files/sbin/git.cmd"
+      - "C:/Program Files/git.cmd.com"
+      - "C:/Program Files/git.cmd.exe"
+      - "C:/Program Files/git.cmd"
+      - "C:/Program Files (x86)/bin/git.cmd.com"
+      - "C:/Program Files (x86)/bin/git.cmd.exe"
+      - "C:/Program Files (x86)/bin/git.cmd"
+      - "C:/Program Files (x86)/sbin/git.cmd.com"
+      - "C:/Program Files (x86)/sbin/git.cmd.exe"
+      - "C:/Program Files (x86)/sbin/git.cmd"
+      - "C:/Program Files (x86)/git.cmd.com"
+      - "C:/Program Files (x86)/git.cmd.exe"
+      - "C:/Program Files (x86)/git.cmd"
+      - "C:/Program Files/CMake/bin/git.cmd.com"
+      - "C:/Program Files/CMake/bin/git.cmd.exe"
+      - "C:/Program Files/CMake/bin/git.cmd"
+      - "C:/Program Files/CMake/sbin/git.cmd.com"
+      - "C:/Program Files/CMake/sbin/git.cmd.exe"
+      - "C:/Program Files/CMake/sbin/git.cmd"
+      - "C:/Program Files/CMake/git.cmd.com"
+      - "C:/Program Files/CMake/git.cmd.exe"
+      - "C:/Program Files/CMake/git.cmd"
+      - "C:/Program Files (x86)/resolve/bin/git.cmd.com"
+      - "C:/Program Files (x86)/resolve/bin/git.cmd.exe"
+      - "C:/Program Files (x86)/resolve/bin/git.cmd"
+      - "C:/Program Files (x86)/resolve/sbin/git.cmd.com"
+      - "C:/Program Files (x86)/resolve/sbin/git.cmd.exe"
+      - "C:/Program Files (x86)/resolve/sbin/git.cmd"
+      - "C:/Program Files (x86)/resolve/git.cmd.com"
+      - "C:/Program Files (x86)/resolve/git.cmd.exe"
+      - "C:/Program Files (x86)/resolve/git.cmd"
+      - "C:/Users/Gilles Colling/AppData/Local/Atlassian/SourceTree/git_local/bin/git.cmd.com"
+      - "C:/Users/Gilles Colling/AppData/Local/Atlassian/SourceTree/git_local/bin/git.cmd.exe"
+      - "C:/Users/Gilles Colling/AppData/Local/Atlassian/SourceTree/git_local/bin/git.cmd"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/git.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/git.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/git"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/git.com"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/git.exe"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/git"
+      - "C:/Program Files/CMake/bin/git.com"
+      - "C:/Program Files/CMake/bin/git.exe"
+      - "C:/Program Files/CMake/bin/git"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/git.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/git.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/git"
+      - "C:/Windows/System32/git.com"
+      - "C:/Windows/System32/git.exe"
+      - "C:/Windows/System32/git"
+      - "C:/Windows/git.com"
+      - "C:/Windows/git.exe"
+      - "C:/Windows/git"
+      - "C:/Program Files/bin/git.com"
+      - "C:/Program Files/bin/git.exe"
+      - "C:/Program Files/bin/git"
+      - "C:/Program Files/sbin/git.com"
+      - "C:/Program Files/sbin/git.exe"
+      - "C:/Program Files/sbin/git"
+      - "C:/Program Files/git.com"
+      - "C:/Program Files/git.exe"
+      - "C:/Program Files/git"
+      - "C:/Program Files (x86)/bin/git.com"
+      - "C:/Program Files (x86)/bin/git.exe"
+      - "C:/Program Files (x86)/bin/git"
+      - "C:/Program Files (x86)/sbin/git.com"
+      - "C:/Program Files (x86)/sbin/git.exe"
+      - "C:/Program Files (x86)/sbin/git"
+      - "C:/Program Files (x86)/git.com"
+      - "C:/Program Files (x86)/git.exe"
+      - "C:/Program Files (x86)/git"
+      - "C:/Program Files/CMake/bin/git.com"
+      - "C:/Program Files/CMake/bin/git.exe"
+      - "C:/Program Files/CMake/bin/git"
+      - "C:/Program Files/CMake/sbin/git.com"
+      - "C:/Program Files/CMake/sbin/git.exe"
+      - "C:/Program Files/CMake/sbin/git"
+      - "C:/Program Files/CMake/git.com"
+      - "C:/Program Files/CMake/git.exe"
+      - "C:/Program Files/CMake/git"
+      - "C:/Program Files (x86)/resolve/bin/git.com"
+      - "C:/Program Files (x86)/resolve/bin/git.exe"
+      - "C:/Program Files (x86)/resolve/bin/git"
+      - "C:/Program Files (x86)/resolve/sbin/git.com"
+      - "C:/Program Files (x86)/resolve/sbin/git.exe"
+      - "C:/Program Files (x86)/resolve/sbin/git"
+      - "C:/Program Files (x86)/resolve/git.com"
+      - "C:/Program Files (x86)/resolve/git.exe"
+      - "C:/Program Files (x86)/resolve/git"
+      - "C:/Users/Gilles Colling/AppData/Local/Atlassian/SourceTree/git_local/bin/git.com"
+      - "C:/Users/Gilles Colling/AppData/Local/Atlassian/SourceTree/git_local/bin/git.exe"
+      - "C:/Users/Gilles Colling/AppData/Local/Atlassian/SourceTree/git_local/bin/git"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/resolve"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/resolve"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FindGit.cmake:122 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:1887 (find_package)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:1622 (__FetchContent_populateSubbuild)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:2158:EVAL:2 (__FetchContent_doPopulation)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:2158 (cmake_language)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:2399 (__FetchContent_Populate)"
+      - "tests/CMakeLists.txt:10 (FetchContent_MakeAvailable)"
+    mode: "program"
+    variable: "GIT_EXECUTABLE"
+    description: "Git command line client"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "git.cmd"
+      - "git"
+    candidate_directories:
+      - "C:/Program Files/bin/Git/cmd/"
+      - "C:/Program Files/bin/Git/bin/"
+      - "C:/Program Files/bin/"
+      - "C:/Program Files/sbin/Git/cmd/"
+      - "C:/Program Files/sbin/Git/bin/"
+      - "C:/Program Files/sbin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Program Files/Git/bin/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/bin/Git/cmd/"
+      - "C:/Program Files (x86)/bin/Git/bin/"
+      - "C:/Program Files (x86)/bin/"
+      - "C:/Program Files (x86)/sbin/Git/cmd/"
+      - "C:/Program Files (x86)/sbin/Git/bin/"
+      - "C:/Program Files (x86)/sbin/"
+      - "C:/Program Files (x86)/Git/cmd/"
+      - "C:/Program Files (x86)/Git/bin/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files/CMake/bin/Git/cmd/"
+      - "C:/Program Files/CMake/bin/Git/bin/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/CMake/sbin/Git/cmd/"
+      - "C:/Program Files/CMake/sbin/Git/bin/"
+      - "C:/Program Files/CMake/sbin/"
+      - "C:/Program Files/CMake/Git/cmd/"
+      - "C:/Program Files/CMake/Git/bin/"
+      - "C:/Program Files/CMake/"
+      - "C:/Program Files (x86)/resolve/bin/Git/cmd/"
+      - "C:/Program Files (x86)/resolve/bin/Git/bin/"
+      - "C:/Program Files (x86)/resolve/bin/"
+      - "C:/Program Files (x86)/resolve/sbin/Git/cmd/"
+      - "C:/Program Files (x86)/resolve/sbin/Git/bin/"
+      - "C:/Program Files (x86)/resolve/sbin/"
+      - "C:/Program Files (x86)/resolve/Git/cmd/"
+      - "C:/Program Files (x86)/resolve/Git/bin/"
+      - "C:/Program Files (x86)/resolve/"
+    searched_directories:
+      - "C:/Program Files/bin/Git/cmd/git.cmd.com"
+      - "C:/Program Files/bin/Git/cmd/git.cmd.exe"
+      - "C:/Program Files/bin/Git/cmd/git.cmd"
+      - "C:/Program Files/bin/Git/bin/git.cmd.com"
+      - "C:/Program Files/bin/Git/bin/git.cmd.exe"
+      - "C:/Program Files/bin/Git/bin/git.cmd"
+      - "C:/Program Files/bin/git.cmd.com"
+      - "C:/Program Files/bin/git.cmd.exe"
+      - "C:/Program Files/bin/git.cmd"
+      - "C:/Program Files/sbin/Git/cmd/git.cmd.com"
+      - "C:/Program Files/sbin/Git/cmd/git.cmd.exe"
+      - "C:/Program Files/sbin/Git/cmd/git.cmd"
+      - "C:/Program Files/sbin/Git/bin/git.cmd.com"
+      - "C:/Program Files/sbin/Git/bin/git.cmd.exe"
+      - "C:/Program Files/sbin/Git/bin/git.cmd"
+      - "C:/Program Files/sbin/git.cmd.com"
+      - "C:/Program Files/sbin/git.cmd.exe"
+      - "C:/Program Files/sbin/git.cmd"
+      - "C:/Program Files/Git/cmd/git.cmd.com"
+      - "C:/Program Files/Git/cmd/git.cmd.exe"
+      - "C:/Program Files/Git/cmd/git.cmd"
+      - "C:/Program Files/Git/bin/git.cmd.com"
+      - "C:/Program Files/Git/bin/git.cmd.exe"
+      - "C:/Program Files/Git/bin/git.cmd"
+      - "C:/Program Files/git.cmd.com"
+      - "C:/Program Files/git.cmd.exe"
+      - "C:/Program Files/git.cmd"
+      - "C:/Program Files (x86)/bin/Git/cmd/git.cmd.com"
+      - "C:/Program Files (x86)/bin/Git/cmd/git.cmd.exe"
+      - "C:/Program Files (x86)/bin/Git/cmd/git.cmd"
+      - "C:/Program Files (x86)/bin/Git/bin/git.cmd.com"
+      - "C:/Program Files (x86)/bin/Git/bin/git.cmd.exe"
+      - "C:/Program Files (x86)/bin/Git/bin/git.cmd"
+      - "C:/Program Files (x86)/bin/git.cmd.com"
+      - "C:/Program Files (x86)/bin/git.cmd.exe"
+      - "C:/Program Files (x86)/bin/git.cmd"
+      - "C:/Program Files (x86)/sbin/Git/cmd/git.cmd.com"
+      - "C:/Program Files (x86)/sbin/Git/cmd/git.cmd.exe"
+      - "C:/Program Files (x86)/sbin/Git/cmd/git.cmd"
+      - "C:/Program Files (x86)/sbin/Git/bin/git.cmd.com"
+      - "C:/Program Files (x86)/sbin/Git/bin/git.cmd.exe"
+      - "C:/Program Files (x86)/sbin/Git/bin/git.cmd"
+      - "C:/Program Files (x86)/sbin/git.cmd.com"
+      - "C:/Program Files (x86)/sbin/git.cmd.exe"
+      - "C:/Program Files (x86)/sbin/git.cmd"
+      - "C:/Program Files (x86)/Git/cmd/git.cmd.com"
+      - "C:/Program Files (x86)/Git/cmd/git.cmd.exe"
+      - "C:/Program Files (x86)/Git/cmd/git.cmd"
+      - "C:/Program Files (x86)/Git/bin/git.cmd.com"
+      - "C:/Program Files (x86)/Git/bin/git.cmd.exe"
+      - "C:/Program Files (x86)/Git/bin/git.cmd"
+      - "C:/Program Files (x86)/git.cmd.com"
+      - "C:/Program Files (x86)/git.cmd.exe"
+      - "C:/Program Files (x86)/git.cmd"
+      - "C:/Program Files/CMake/bin/Git/cmd/git.cmd.com"
+      - "C:/Program Files/CMake/bin/Git/cmd/git.cmd.exe"
+      - "C:/Program Files/CMake/bin/Git/cmd/git.cmd"
+      - "C:/Program Files/CMake/bin/Git/bin/git.cmd.com"
+      - "C:/Program Files/CMake/bin/Git/bin/git.cmd.exe"
+      - "C:/Program Files/CMake/bin/Git/bin/git.cmd"
+      - "C:/Program Files/CMake/bin/git.cmd.com"
+      - "C:/Program Files/CMake/bin/git.cmd.exe"
+      - "C:/Program Files/CMake/bin/git.cmd"
+      - "C:/Program Files/CMake/sbin/Git/cmd/git.cmd.com"
+      - "C:/Program Files/CMake/sbin/Git/cmd/git.cmd.exe"
+      - "C:/Program Files/CMake/sbin/Git/cmd/git.cmd"
+      - "C:/Program Files/CMake/sbin/Git/bin/git.cmd.com"
+      - "C:/Program Files/CMake/sbin/Git/bin/git.cmd.exe"
+      - "C:/Program Files/CMake/sbin/Git/bin/git.cmd"
+      - "C:/Program Files/CMake/sbin/git.cmd.com"
+      - "C:/Program Files/CMake/sbin/git.cmd.exe"
+      - "C:/Program Files/CMake/sbin/git.cmd"
+      - "C:/Program Files/CMake/Git/cmd/git.cmd.com"
+      - "C:/Program Files/CMake/Git/cmd/git.cmd.exe"
+      - "C:/Program Files/CMake/Git/cmd/git.cmd"
+      - "C:/Program Files/CMake/Git/bin/git.cmd.com"
+      - "C:/Program Files/CMake/Git/bin/git.cmd.exe"
+      - "C:/Program Files/CMake/Git/bin/git.cmd"
+      - "C:/Program Files/CMake/git.cmd.com"
+      - "C:/Program Files/CMake/git.cmd.exe"
+      - "C:/Program Files/CMake/git.cmd"
+      - "C:/Program Files (x86)/resolve/bin/Git/cmd/git.cmd.com"
+      - "C:/Program Files (x86)/resolve/bin/Git/cmd/git.cmd.exe"
+      - "C:/Program Files (x86)/resolve/bin/Git/cmd/git.cmd"
+      - "C:/Program Files (x86)/resolve/bin/Git/bin/git.cmd.com"
+      - "C:/Program Files (x86)/resolve/bin/Git/bin/git.cmd.exe"
+      - "C:/Program Files (x86)/resolve/bin/Git/bin/git.cmd"
+      - "C:/Program Files (x86)/resolve/bin/git.cmd.com"
+      - "C:/Program Files (x86)/resolve/bin/git.cmd.exe"
+      - "C:/Program Files (x86)/resolve/bin/git.cmd"
+      - "C:/Program Files (x86)/resolve/sbin/Git/cmd/git.cmd.com"
+      - "C:/Program Files (x86)/resolve/sbin/Git/cmd/git.cmd.exe"
+      - "C:/Program Files (x86)/resolve/sbin/Git/cmd/git.cmd"
+      - "C:/Program Files (x86)/resolve/sbin/Git/bin/git.cmd.com"
+      - "C:/Program Files (x86)/resolve/sbin/Git/bin/git.cmd.exe"
+      - "C:/Program Files (x86)/resolve/sbin/Git/bin/git.cmd"
+      - "C:/Program Files (x86)/resolve/sbin/git.cmd.com"
+      - "C:/Program Files (x86)/resolve/sbin/git.cmd.exe"
+      - "C:/Program Files (x86)/resolve/sbin/git.cmd"
+      - "C:/Program Files (x86)/resolve/Git/cmd/git.cmd.com"
+      - "C:/Program Files (x86)/resolve/Git/cmd/git.cmd.exe"
+      - "C:/Program Files (x86)/resolve/Git/cmd/git.cmd"
+      - "C:/Program Files (x86)/resolve/Git/bin/git.cmd.com"
+      - "C:/Program Files (x86)/resolve/Git/bin/git.cmd.exe"
+      - "C:/Program Files (x86)/resolve/Git/bin/git.cmd"
+      - "C:/Program Files (x86)/resolve/git.cmd.com"
+      - "C:/Program Files (x86)/resolve/git.cmd.exe"
+      - "C:/Program Files (x86)/resolve/git.cmd"
+      - "C:/Program Files/bin/Git/cmd/git.com"
+      - "C:/Program Files/bin/Git/cmd/git.exe"
+      - "C:/Program Files/bin/Git/cmd/git"
+      - "C:/Program Files/bin/Git/bin/git.com"
+      - "C:/Program Files/bin/Git/bin/git.exe"
+      - "C:/Program Files/bin/Git/bin/git"
+      - "C:/Program Files/bin/git.com"
+      - "C:/Program Files/bin/git.exe"
+      - "C:/Program Files/bin/git"
+      - "C:/Program Files/sbin/Git/cmd/git.com"
+      - "C:/Program Files/sbin/Git/cmd/git.exe"
+      - "C:/Program Files/sbin/Git/cmd/git"
+      - "C:/Program Files/sbin/Git/bin/git.com"
+      - "C:/Program Files/sbin/Git/bin/git.exe"
+      - "C:/Program Files/sbin/Git/bin/git"
+      - "C:/Program Files/sbin/git.com"
+      - "C:/Program Files/sbin/git.exe"
+      - "C:/Program Files/sbin/git"
+      - "C:/Program Files/Git/cmd/git.com"
+    found: "C:/Program Files/Git/cmd/git.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/resolve"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/resolve"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CTest.cmake:188 (find_program)"
+      - "tests/CMakeLists.txt:43 (include)"
+    mode: "program"
+    variable: "MEMORYCHECK_COMMAND"
+    description: "Path to the memory checking command, used for memory error detection."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "purify"
+      - "valgrind"
+      - "boundscheck"
+      - "drmemory"
+      - "cuda-memcheck"
+      - "compute-sanitizer"
+    candidate_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Program Files/bin/"
+      - "C:/Program Files/sbin/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/bin/"
+      - "C:/Program Files (x86)/sbin/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/CMake/sbin/"
+      - "C:/Program Files/CMake/"
+      - "C:/Program Files (x86)/resolve/bin/"
+      - "C:/Program Files (x86)/resolve/sbin/"
+      - "C:/Program Files (x86)/resolve/"
+      - "/REGISTRY-NOTFOUND/"
+    searched_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/purify.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/purify.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/purify"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/purify.com"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/purify.exe"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/purify"
+      - "C:/Program Files/CMake/bin/purify.com"
+      - "C:/Program Files/CMake/bin/purify.exe"
+      - "C:/Program Files/CMake/bin/purify"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/purify.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/purify.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/purify"
+      - "C:/Windows/System32/purify.com"
+      - "C:/Windows/System32/purify.exe"
+      - "C:/Windows/System32/purify"
+      - "C:/Windows/purify.com"
+      - "C:/Windows/purify.exe"
+      - "C:/Windows/purify"
+      - "C:/Program Files/bin/purify.com"
+      - "C:/Program Files/bin/purify.exe"
+      - "C:/Program Files/bin/purify"
+      - "C:/Program Files/sbin/purify.com"
+      - "C:/Program Files/sbin/purify.exe"
+      - "C:/Program Files/sbin/purify"
+      - "C:/Program Files/purify.com"
+      - "C:/Program Files/purify.exe"
+      - "C:/Program Files/purify"
+      - "C:/Program Files (x86)/bin/purify.com"
+      - "C:/Program Files (x86)/bin/purify.exe"
+      - "C:/Program Files (x86)/bin/purify"
+      - "C:/Program Files (x86)/sbin/purify.com"
+      - "C:/Program Files (x86)/sbin/purify.exe"
+      - "C:/Program Files (x86)/sbin/purify"
+      - "C:/Program Files (x86)/purify.com"
+      - "C:/Program Files (x86)/purify.exe"
+      - "C:/Program Files (x86)/purify"
+      - "C:/Program Files/CMake/bin/purify.com"
+      - "C:/Program Files/CMake/bin/purify.exe"
+      - "C:/Program Files/CMake/bin/purify"
+      - "C:/Program Files/CMake/sbin/purify.com"
+      - "C:/Program Files/CMake/sbin/purify.exe"
+      - "C:/Program Files/CMake/sbin/purify"
+      - "C:/Program Files/CMake/purify.com"
+      - "C:/Program Files/CMake/purify.exe"
+      - "C:/Program Files/CMake/purify"
+      - "C:/Program Files (x86)/resolve/bin/purify.com"
+      - "C:/Program Files (x86)/resolve/bin/purify.exe"
+      - "C:/Program Files (x86)/resolve/bin/purify"
+      - "C:/Program Files (x86)/resolve/sbin/purify.com"
+      - "C:/Program Files (x86)/resolve/sbin/purify.exe"
+      - "C:/Program Files (x86)/resolve/sbin/purify"
+      - "C:/Program Files (x86)/resolve/purify.com"
+      - "C:/Program Files (x86)/resolve/purify.exe"
+      - "C:/Program Files (x86)/resolve/purify"
+      - "/REGISTRY-NOTFOUND/purify.com"
+      - "/REGISTRY-NOTFOUND/purify.exe"
+      - "/REGISTRY-NOTFOUND/purify"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/valgrind.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/valgrind.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/valgrind"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/valgrind.com"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/valgrind.exe"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/valgrind"
+      - "C:/Program Files/CMake/bin/valgrind.com"
+      - "C:/Program Files/CMake/bin/valgrind.exe"
+      - "C:/Program Files/CMake/bin/valgrind"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/valgrind.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/valgrind.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/valgrind"
+      - "C:/Windows/System32/valgrind.com"
+      - "C:/Windows/System32/valgrind.exe"
+      - "C:/Windows/System32/valgrind"
+      - "C:/Windows/valgrind.com"
+      - "C:/Windows/valgrind.exe"
+      - "C:/Windows/valgrind"
+      - "C:/Program Files/bin/valgrind.com"
+      - "C:/Program Files/bin/valgrind.exe"
+      - "C:/Program Files/bin/valgrind"
+      - "C:/Program Files/sbin/valgrind.com"
+      - "C:/Program Files/sbin/valgrind.exe"
+      - "C:/Program Files/sbin/valgrind"
+      - "C:/Program Files/valgrind.com"
+      - "C:/Program Files/valgrind.exe"
+      - "C:/Program Files/valgrind"
+      - "C:/Program Files (x86)/bin/valgrind.com"
+      - "C:/Program Files (x86)/bin/valgrind.exe"
+      - "C:/Program Files (x86)/bin/valgrind"
+      - "C:/Program Files (x86)/sbin/valgrind.com"
+      - "C:/Program Files (x86)/sbin/valgrind.exe"
+      - "C:/Program Files (x86)/sbin/valgrind"
+      - "C:/Program Files (x86)/valgrind.com"
+      - "C:/Program Files (x86)/valgrind.exe"
+      - "C:/Program Files (x86)/valgrind"
+      - "C:/Program Files/CMake/bin/valgrind.com"
+      - "C:/Program Files/CMake/bin/valgrind.exe"
+      - "C:/Program Files/CMake/bin/valgrind"
+      - "C:/Program Files/CMake/sbin/valgrind.com"
+      - "C:/Program Files/CMake/sbin/valgrind.exe"
+      - "C:/Program Files/CMake/sbin/valgrind"
+      - "C:/Program Files/CMake/valgrind.com"
+      - "C:/Program Files/CMake/valgrind.exe"
+      - "C:/Program Files/CMake/valgrind"
+      - "C:/Program Files (x86)/resolve/bin/valgrind.com"
+      - "C:/Program Files (x86)/resolve/bin/valgrind.exe"
+      - "C:/Program Files (x86)/resolve/bin/valgrind"
+      - "C:/Program Files (x86)/resolve/sbin/valgrind.com"
+      - "C:/Program Files (x86)/resolve/sbin/valgrind.exe"
+      - "C:/Program Files (x86)/resolve/sbin/valgrind"
+      - "C:/Program Files (x86)/resolve/valgrind.com"
+      - "C:/Program Files (x86)/resolve/valgrind.exe"
+      - "C:/Program Files (x86)/resolve/valgrind"
+      - "/REGISTRY-NOTFOUND/valgrind.com"
+      - "/REGISTRY-NOTFOUND/valgrind.exe"
+      - "/REGISTRY-NOTFOUND/valgrind"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/boundscheck.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/boundscheck.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/boundscheck"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/boundscheck.com"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/boundscheck.exe"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/boundscheck"
+      - "C:/Program Files/CMake/bin/boundscheck.com"
+      - "C:/Program Files/CMake/bin/boundscheck.exe"
+      - "C:/Program Files/CMake/bin/boundscheck"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/boundscheck.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/boundscheck.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/boundscheck"
+      - "C:/Windows/System32/boundscheck.com"
+      - "C:/Windows/System32/boundscheck.exe"
+      - "C:/Windows/System32/boundscheck"
+      - "C:/Windows/boundscheck.com"
+      - "C:/Windows/boundscheck.exe"
+      - "C:/Windows/boundscheck"
+      - "C:/Program Files/bin/boundscheck.com"
+      - "C:/Program Files/bin/boundscheck.exe"
+      - "C:/Program Files/bin/boundscheck"
+      - "C:/Program Files/sbin/boundscheck.com"
+      - "C:/Program Files/sbin/boundscheck.exe"
+      - "C:/Program Files/sbin/boundscheck"
+      - "C:/Program Files/boundscheck.com"
+      - "C:/Program Files/boundscheck.exe"
+      - "C:/Program Files/boundscheck"
+      - "C:/Program Files (x86)/bin/boundscheck.com"
+      - "C:/Program Files (x86)/bin/boundscheck.exe"
+      - "C:/Program Files (x86)/bin/boundscheck"
+      - "C:/Program Files (x86)/sbin/boundscheck.com"
+      - "C:/Program Files (x86)/sbin/boundscheck.exe"
+      - "C:/Program Files (x86)/sbin/boundscheck"
+      - "C:/Program Files (x86)/boundscheck.com"
+      - "C:/Program Files (x86)/boundscheck.exe"
+      - "C:/Program Files (x86)/boundscheck"
+      - "C:/Program Files/CMake/bin/boundscheck.com"
+      - "C:/Program Files/CMake/bin/boundscheck.exe"
+      - "C:/Program Files/CMake/bin/boundscheck"
+      - "C:/Program Files/CMake/sbin/boundscheck.com"
+      - "C:/Program Files/CMake/sbin/boundscheck.exe"
+      - "C:/Program Files/CMake/sbin/boundscheck"
+      - "C:/Program Files/CMake/boundscheck.com"
+      - "C:/Program Files/CMake/boundscheck.exe"
+      - "C:/Program Files/CMake/boundscheck"
+      - "C:/Program Files (x86)/resolve/bin/boundscheck.com"
+      - "C:/Program Files (x86)/resolve/bin/boundscheck.exe"
+      - "C:/Program Files (x86)/resolve/bin/boundscheck"
+      - "C:/Program Files (x86)/resolve/sbin/boundscheck.com"
+      - "C:/Program Files (x86)/resolve/sbin/boundscheck.exe"
+      - "C:/Program Files (x86)/resolve/sbin/boundscheck"
+      - "C:/Program Files (x86)/resolve/boundscheck.com"
+      - "C:/Program Files (x86)/resolve/boundscheck.exe"
+      - "C:/Program Files (x86)/resolve/boundscheck"
+      - "/REGISTRY-NOTFOUND/boundscheck.com"
+      - "/REGISTRY-NOTFOUND/boundscheck.exe"
+      - "/REGISTRY-NOTFOUND/boundscheck"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/drmemory.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/drmemory.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/drmemory"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/drmemory.com"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/drmemory.exe"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/drmemory"
+      - "C:/Program Files/CMake/bin/drmemory.com"
+      - "C:/Program Files/CMake/bin/drmemory.exe"
+      - "C:/Program Files/CMake/bin/drmemory"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/drmemory.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/drmemory.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/drmemory"
+      - "C:/Windows/System32/drmemory.com"
+      - "C:/Windows/System32/drmemory.exe"
+      - "C:/Windows/System32/drmemory"
+      - "C:/Windows/drmemory.com"
+      - "C:/Windows/drmemory.exe"
+      - "C:/Windows/drmemory"
+      - "C:/Program Files/bin/drmemory.com"
+      - "C:/Program Files/bin/drmemory.exe"
+      - "C:/Program Files/bin/drmemory"
+      - "C:/Program Files/sbin/drmemory.com"
+      - "C:/Program Files/sbin/drmemory.exe"
+      - "C:/Program Files/sbin/drmemory"
+      - "C:/Program Files/drmemory.com"
+      - "C:/Program Files/drmemory.exe"
+      - "C:/Program Files/drmemory"
+      - "C:/Program Files (x86)/bin/drmemory.com"
+      - "C:/Program Files (x86)/bin/drmemory.exe"
+      - "C:/Program Files (x86)/bin/drmemory"
+      - "C:/Program Files (x86)/sbin/drmemory.com"
+      - "C:/Program Files (x86)/sbin/drmemory.exe"
+      - "C:/Program Files (x86)/sbin/drmemory"
+      - "C:/Program Files (x86)/drmemory.com"
+      - "C:/Program Files (x86)/drmemory.exe"
+      - "C:/Program Files (x86)/drmemory"
+      - "C:/Program Files/CMake/bin/drmemory.com"
+      - "C:/Program Files/CMake/bin/drmemory.exe"
+      - "C:/Program Files/CMake/bin/drmemory"
+      - "C:/Program Files/CMake/sbin/drmemory.com"
+      - "C:/Program Files/CMake/sbin/drmemory.exe"
+      - "C:/Program Files/CMake/sbin/drmemory"
+      - "C:/Program Files/CMake/drmemory.com"
+      - "C:/Program Files/CMake/drmemory.exe"
+      - "C:/Program Files/CMake/drmemory"
+      - "C:/Program Files (x86)/resolve/bin/drmemory.com"
+      - "C:/Program Files (x86)/resolve/bin/drmemory.exe"
+      - "C:/Program Files (x86)/resolve/bin/drmemory"
+      - "C:/Program Files (x86)/resolve/sbin/drmemory.com"
+      - "C:/Program Files (x86)/resolve/sbin/drmemory.exe"
+      - "C:/Program Files (x86)/resolve/sbin/drmemory"
+      - "C:/Program Files (x86)/resolve/drmemory.com"
+      - "C:/Program Files (x86)/resolve/drmemory.exe"
+      - "C:/Program Files (x86)/resolve/drmemory"
+      - "/REGISTRY-NOTFOUND/drmemory.com"
+      - "/REGISTRY-NOTFOUND/drmemory.exe"
+      - "/REGISTRY-NOTFOUND/drmemory"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cuda-memcheck.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cuda-memcheck.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cuda-memcheck"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/cuda-memcheck.com"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/cuda-memcheck.exe"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/cuda-memcheck"
+      - "C:/Program Files/CMake/bin/cuda-memcheck.com"
+      - "C:/Program Files/CMake/bin/cuda-memcheck.exe"
+      - "C:/Program Files/CMake/bin/cuda-memcheck"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/cuda-memcheck.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/cuda-memcheck.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/cuda-memcheck"
+      - "C:/Windows/System32/cuda-memcheck.com"
+      - "C:/Windows/System32/cuda-memcheck.exe"
+      - "C:/Windows/System32/cuda-memcheck"
+      - "C:/Windows/cuda-memcheck.com"
+      - "C:/Windows/cuda-memcheck.exe"
+      - "C:/Windows/cuda-memcheck"
+      - "C:/Program Files/bin/cuda-memcheck.com"
+      - "C:/Program Files/bin/cuda-memcheck.exe"
+      - "C:/Program Files/bin/cuda-memcheck"
+      - "C:/Program Files/sbin/cuda-memcheck.com"
+      - "C:/Program Files/sbin/cuda-memcheck.exe"
+      - "C:/Program Files/sbin/cuda-memcheck"
+      - "C:/Program Files/cuda-memcheck.com"
+      - "C:/Program Files/cuda-memcheck.exe"
+      - "C:/Program Files/cuda-memcheck"
+      - "C:/Program Files (x86)/bin/cuda-memcheck.com"
+      - "C:/Program Files (x86)/bin/cuda-memcheck.exe"
+      - "C:/Program Files (x86)/bin/cuda-memcheck"
+      - "C:/Program Files (x86)/sbin/cuda-memcheck.com"
+      - "C:/Program Files (x86)/sbin/cuda-memcheck.exe"
+      - "C:/Program Files (x86)/sbin/cuda-memcheck"
+      - "C:/Program Files (x86)/cuda-memcheck.com"
+      - "C:/Program Files (x86)/cuda-memcheck.exe"
+      - "C:/Program Files (x86)/cuda-memcheck"
+      - "C:/Program Files/CMake/bin/cuda-memcheck.com"
+      - "C:/Program Files/CMake/bin/cuda-memcheck.exe"
+      - "C:/Program Files/CMake/bin/cuda-memcheck"
+      - "C:/Program Files/CMake/sbin/cuda-memcheck.com"
+      - "C:/Program Files/CMake/sbin/cuda-memcheck.exe"
+      - "C:/Program Files/CMake/sbin/cuda-memcheck"
+      - "C:/Program Files/CMake/cuda-memcheck.com"
+      - "C:/Program Files/CMake/cuda-memcheck.exe"
+      - "C:/Program Files/CMake/cuda-memcheck"
+      - "C:/Program Files (x86)/resolve/bin/cuda-memcheck.com"
+      - "C:/Program Files (x86)/resolve/bin/cuda-memcheck.exe"
+      - "C:/Program Files (x86)/resolve/bin/cuda-memcheck"
+      - "C:/Program Files (x86)/resolve/sbin/cuda-memcheck.com"
+      - "C:/Program Files (x86)/resolve/sbin/cuda-memcheck.exe"
+      - "C:/Program Files (x86)/resolve/sbin/cuda-memcheck"
+      - "C:/Program Files (x86)/resolve/cuda-memcheck.com"
+      - "C:/Program Files (x86)/resolve/cuda-memcheck.exe"
+      - "C:/Program Files (x86)/resolve/cuda-memcheck"
+      - "/REGISTRY-NOTFOUND/cuda-memcheck.com"
+      - "/REGISTRY-NOTFOUND/cuda-memcheck.exe"
+      - "/REGISTRY-NOTFOUND/cuda-memcheck"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/compute-sanitizer.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/compute-sanitizer.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/compute-sanitizer"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/compute-sanitizer.com"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/compute-sanitizer.exe"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/compute-sanitizer"
+      - "C:/Program Files/CMake/bin/compute-sanitizer.com"
+      - "C:/Program Files/CMake/bin/compute-sanitizer.exe"
+      - "C:/Program Files/CMake/bin/compute-sanitizer"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/compute-sanitizer.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/compute-sanitizer.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/compute-sanitizer"
+      - "C:/Windows/System32/compute-sanitizer.com"
+      - "C:/Windows/System32/compute-sanitizer.exe"
+      - "C:/Windows/System32/compute-sanitizer"
+      - "C:/Windows/compute-sanitizer.com"
+      - "C:/Windows/compute-sanitizer.exe"
+      - "C:/Windows/compute-sanitizer"
+      - "C:/Program Files/bin/compute-sanitizer.com"
+      - "C:/Program Files/bin/compute-sanitizer.exe"
+      - "C:/Program Files/bin/compute-sanitizer"
+      - "C:/Program Files/sbin/compute-sanitizer.com"
+      - "C:/Program Files/sbin/compute-sanitizer.exe"
+      - "C:/Program Files/sbin/compute-sanitizer"
+      - "C:/Program Files/compute-sanitizer.com"
+      - "C:/Program Files/compute-sanitizer.exe"
+      - "C:/Program Files/compute-sanitizer"
+      - "C:/Program Files (x86)/bin/compute-sanitizer.com"
+      - "C:/Program Files (x86)/bin/compute-sanitizer.exe"
+      - "C:/Program Files (x86)/bin/compute-sanitizer"
+      - "C:/Program Files (x86)/sbin/compute-sanitizer.com"
+      - "C:/Program Files (x86)/sbin/compute-sanitizer.exe"
+      - "C:/Program Files (x86)/sbin/compute-sanitizer"
+      - "C:/Program Files (x86)/compute-sanitizer.com"
+      - "C:/Program Files (x86)/compute-sanitizer.exe"
+      - "C:/Program Files (x86)/compute-sanitizer"
+      - "C:/Program Files/CMake/bin/compute-sanitizer.com"
+      - "C:/Program Files/CMake/bin/compute-sanitizer.exe"
+      - "C:/Program Files/CMake/bin/compute-sanitizer"
+      - "C:/Program Files/CMake/sbin/compute-sanitizer.com"
+      - "C:/Program Files/CMake/sbin/compute-sanitizer.exe"
+      - "C:/Program Files/CMake/sbin/compute-sanitizer"
+      - "C:/Program Files/CMake/compute-sanitizer.com"
+      - "C:/Program Files/CMake/compute-sanitizer.exe"
+      - "C:/Program Files/CMake/compute-sanitizer"
+      - "C:/Program Files (x86)/resolve/bin/compute-sanitizer.com"
+      - "C:/Program Files (x86)/resolve/bin/compute-sanitizer.exe"
+      - "C:/Program Files (x86)/resolve/bin/compute-sanitizer"
+      - "C:/Program Files (x86)/resolve/sbin/compute-sanitizer.com"
+      - "C:/Program Files (x86)/resolve/sbin/compute-sanitizer.exe"
+      - "C:/Program Files (x86)/resolve/sbin/compute-sanitizer"
+      - "C:/Program Files (x86)/resolve/compute-sanitizer.com"
+      - "C:/Program Files (x86)/resolve/compute-sanitizer.exe"
+      - "C:/Program Files (x86)/resolve/compute-sanitizer"
+      - "/REGISTRY-NOTFOUND/compute-sanitizer.com"
+      - "/REGISTRY-NOTFOUND/compute-sanitizer.exe"
+      - "/REGISTRY-NOTFOUND/compute-sanitizer"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/resolve"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/resolve"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CTest.cmake:196 (find_program)"
+      - "tests/CMakeLists.txt:43 (include)"
+    mode: "program"
+    variable: "COVERAGE_COMMAND"
+    description: "Path to the coverage program that CTest uses for performing coverage inspection"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "gcov"
+    candidate_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Program Files/bin/"
+      - "C:/Program Files/sbin/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/bin/"
+      - "C:/Program Files (x86)/sbin/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/CMake/sbin/"
+      - "C:/Program Files/CMake/"
+      - "C:/Program Files (x86)/resolve/bin/"
+      - "C:/Program Files (x86)/resolve/sbin/"
+      - "C:/Program Files (x86)/resolve/"
+    searched_directories:
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/gcov.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/gcov.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/gcov"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/gcov.com"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/gcov.exe"
+      - "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/gcov"
+      - "C:/Program Files/CMake/bin/gcov.com"
+      - "C:/Program Files/CMake/bin/gcov.exe"
+      - "C:/Program Files/CMake/bin/gcov"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/gcov.com"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/gcov.exe"
+      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/gcov"
+      - "C:/Windows/System32/gcov.com"
+      - "C:/Windows/System32/gcov.exe"
+      - "C:/Windows/System32/gcov"
+      - "C:/Windows/gcov.com"
+      - "C:/Windows/gcov.exe"
+      - "C:/Windows/gcov"
+      - "C:/Program Files/bin/gcov.com"
+      - "C:/Program Files/bin/gcov.exe"
+      - "C:/Program Files/bin/gcov"
+      - "C:/Program Files/sbin/gcov.com"
+      - "C:/Program Files/sbin/gcov.exe"
+      - "C:/Program Files/sbin/gcov"
+      - "C:/Program Files/gcov.com"
+      - "C:/Program Files/gcov.exe"
+      - "C:/Program Files/gcov"
+      - "C:/Program Files (x86)/bin/gcov.com"
+      - "C:/Program Files (x86)/bin/gcov.exe"
+      - "C:/Program Files (x86)/bin/gcov"
+      - "C:/Program Files (x86)/sbin/gcov.com"
+      - "C:/Program Files (x86)/sbin/gcov.exe"
+      - "C:/Program Files (x86)/sbin/gcov"
+      - "C:/Program Files (x86)/gcov.com"
+      - "C:/Program Files (x86)/gcov.exe"
+      - "C:/Program Files (x86)/gcov"
+      - "C:/Program Files/CMake/bin/gcov.com"
+      - "C:/Program Files/CMake/bin/gcov.exe"
+      - "C:/Program Files/CMake/bin/gcov"
+      - "C:/Program Files/CMake/sbin/gcov.com"
+      - "C:/Program Files/CMake/sbin/gcov.exe"
+      - "C:/Program Files/CMake/sbin/gcov"
+      - "C:/Program Files/CMake/gcov.com"
+      - "C:/Program Files/CMake/gcov.exe"
+      - "C:/Program Files/CMake/gcov"
+      - "C:/Program Files (x86)/resolve/bin/gcov.com"
+      - "C:/Program Files (x86)/resolve/bin/gcov.exe"
+      - "C:/Program Files (x86)/resolve/bin/gcov"
+      - "C:/Program Files (x86)/resolve/sbin/gcov.com"
+      - "C:/Program Files (x86)/resolve/sbin/gcov.exe"
+      - "C:/Program Files (x86)/resolve/sbin/gcov"
+      - "C:/Program Files (x86)/resolve/gcov.com"
+      - "C:/Program Files (x86)/resolve/gcov.exe"
+      - "C:/Program Files (x86)/resolve/gcov"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
+        - "C:\\Windows\\System32"
+        - "C:\\Windows"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/resolve"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/resolve"
+...

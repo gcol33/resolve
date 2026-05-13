@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/Users/Gilles Colling/Documents/dev/RESOLVE/src/core/build_asan/_deps/catch2-subbuild/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

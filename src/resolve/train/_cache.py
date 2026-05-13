@@ -16,8 +16,6 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 import torch
 
-from resolve.encode.species import SpeciesEncoder
-
 if TYPE_CHECKING:
     from resolve.train.trainer import Trainer
 
@@ -25,7 +23,8 @@ __all__: list[str] = []
 
 # Cache version — increment when cache format changes
 # v3: rank_pool now stores pre-padded dense tensors instead of ragged _RankPoolPreparedData
-_CACHE_VERSION = 4
+# v5: store full encoder objects (fixes save() after resume-from-cache for rank_pool/embed)
+_CACHE_VERSION = 5
 
 
 class CacheMixin:
@@ -78,6 +77,7 @@ class CacheMixin:
             return
 
         rp_enc = getattr(self, "_rank_pool_encoder", None)
+        emb_enc = getattr(self, "_embedding_encoder", None)
         cache = {
             "train_tensors": train_tensors,
             "test_tensors": test_tensors,
@@ -87,10 +87,11 @@ class CacheMixin:
             "target_scalers": {
                 k: (v[0].cpu(), v[1].cpu()) for k, v in self._target_scalers.items()
             },
-            "species_encoder": {
-                "vocab": self._species_encoder._vocab if self._species_encoder else None,
-                "species_vocab": self._species_encoder._species_vocab if self._species_encoder else set(),
-            },
+            # Persist the full encoder objects so save() works after a
+            # resume-from-cache run skips _prepare_data entirely.
+            "species_encoder_obj": self._species_encoder,
+            "embedding_encoder_obj": emb_enc,
+            "rank_pool_encoder_obj": rp_enc,
             "rank_pool_vocab_sizes": {
                 "n_species": rp_enc.n_species,
                 "n_genera": rp_enc.n_genera,
@@ -163,23 +164,18 @@ class CacheMixin:
             for k, v in cache["target_scalers"].items()
         }
 
-        # Restore species encoder (only for hash/embed modes; rank_pool/transformer use a different encoder)
-        if self.species_encoding not in ("rank_pool", "transformer"):
-            self._species_encoder = SpeciesEncoder(
-                hash_dim=self.hash_dim,
-                top_k=self.top_k,
-                aggregation=self.species_aggregation,
-                normalization=self.species_normalization,
-                track_unknown_count=self.track_unknown_count,
-                selection=self.species_selection,
-                representation=self.species_representation,
-            )
-            enc_state = cache["species_encoder"]
-            if enc_state.get("vocab"):
-                self._species_encoder._vocab = enc_state["vocab"]
-            if enc_state.get("species_vocab"):
-                self._species_encoder._species_vocab = enc_state["species_vocab"]
-            self._species_encoder._fitted = True
+        # Restore the actual encoder object for the active mode. Cache format v5+
+        # stores the full encoder; without it, save() fails after resume because
+        # _prepare_data() is never called on the cache-hit path.
+        se = cache.get("species_encoder_obj")
+        if se is not None and self.species_encoding == "hash":
+            self._species_encoder = se
+        ee = cache.get("embedding_encoder_obj")
+        if ee is not None and self.species_encoding == "embed":
+            self._embedding_encoder = ee
+        rpe = cache.get("rank_pool_encoder_obj")
+        if rpe is not None and self.species_encoding in ("rank_pool", "transformer"):
+            self._rank_pool_encoder = rpe
 
         # Restore rank_pool vocab sizes into schema (needed for model construction)
         rp_vocab = cache.get("rank_pool_vocab_sizes")

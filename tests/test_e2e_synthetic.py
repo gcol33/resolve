@@ -213,6 +213,62 @@ class TestRankPoolWeighting:
             self._make_trainer(dataset, rank_pool_weighting="not_a_mode")
 
 
+class TestCacheRestoreSave:
+    """Regression test for the resume-from-cache + save() failure.
+
+    Prior bug: on cache hit, _prepare_data() was skipped entirely, so the
+    encoder object (_rank_pool_encoder / _embedding_encoder) was never built.
+    Training worked off the cached tensors, but trainer.save() then raised
+    RuntimeError("encoder not initialized").
+    """
+
+    def _make_trainer(self, dataset, cache_dir, **kwargs):
+        return Trainer(
+            dataset,
+            species_embed_dim=8,
+            genus_emb_dim=4,
+            family_emb_dim=4,
+            hidden_dims=[16],
+            max_epochs=1,
+            patience=1,
+            batch_size=64,
+            cache_dir=str(cache_dir),
+            verbose=0,
+            **kwargs,
+        )
+
+    def _round_trip(self, dataset, tmp_path, **kwargs):
+        cache_dir = tmp_path / "cache"
+        # Fit #1 — cache miss, builds encoder and writes cache
+        t1 = self._make_trainer(dataset, cache_dir, **kwargs)
+        t1.fit()
+        t1.save(str(tmp_path / "first.pt"))
+        # Fit #2 — cache hit, encoder must be restored from cache
+        t2 = self._make_trainer(dataset, cache_dir, **kwargs)
+        t2.fit()
+        t2.save(str(tmp_path / "second.pt"))
+        return t2
+
+    def test_rank_pool_save_after_cache_hit(self, dataset, tmp_path):
+        t = self._round_trip(
+            dataset, tmp_path,
+            species_encoding="rank_pool",
+            rank_pool_weighting="log1p",
+        )
+        assert t._rank_pool_encoder is not None
+        assert t._rank_pool_encoder._fitted
+        assert (tmp_path / "second.pt").exists()
+
+    def test_hash_save_after_cache_hit(self, dataset, tmp_path):
+        t = self._round_trip(
+            dataset, tmp_path,
+            species_encoding="hash",
+            hash_dim=16,
+        )
+        assert t._species_encoder is not None
+        assert (tmp_path / "second.pt").exists()
+
+
 class TestTransformerMode:
     def test_train_and_predict(self, dataset):
         trainer = Trainer(

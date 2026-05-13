@@ -20,7 +20,9 @@ endif()
 set(CAFFE2_USE_CUDNN OFF)
 set(USE_CUDNN OFF)
 
-set(CMAKE_CXX_STANDARD 17)
+# libtorch 2.13+ uses C++20 features (bit-field default initializers in
+# c10/core/AutogradState.h). Older libtorch still compiles with C++20.
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
@@ -105,6 +107,9 @@ if(USE_CUDA AND CMAKE_CUDA_COMPILER AND NOT SKIP_CUDA_KERNELS)
     )
     if(NVCC_RESULT EQUAL 0)
         enable_language(CUDA)
+        # CUDAToolkit gives us CUDA::cudart (provides cuda_runtime_api.h include path
+        # for C++ files that pull in libtorch's ATen/cuda/* headers).
+        find_package(CUDAToolkit REQUIRED)
 
         # Pure CUDA kernel library - NO PyTorch headers
         add_library(resolve_cuda_kernels STATIC ${RESOLVE_CUDA_KERNEL_SOURCES})
@@ -122,7 +127,8 @@ if(USE_CUDA AND CMAKE_CUDA_COMPILER AND NOT SKIP_CUDA_KERNELS)
             $<INSTALL_INTERFACE:include>)
         target_link_libraries(resolve_cuda_wrapper PUBLIC
             ${TORCH_LIBRARIES}
-            resolve_cuda_kernels)
+            resolve_cuda_kernels
+            CUDA::cudart)
 
         target_link_libraries(resolve_core PUBLIC resolve_cuda_wrapper)
         target_compile_definitions(resolve_core PUBLIC RESOLVE_HAS_CUDA)
@@ -142,8 +148,8 @@ target_include_directories(resolve_core
 
 target_link_libraries(resolve_core PUBLIC ${TORCH_LIBRARIES})
 
-# Ensure ABI compatibility
-set_property(TARGET resolve_core PROPERTY CXX_STANDARD 17)
+# Ensure ABI compatibility (matches CMAKE_CXX_STANDARD above)
+set_property(TARGET resolve_core PROPERTY CXX_STANDARD 20)
 
 # Export for bindings
 install(TARGETS resolve_core
