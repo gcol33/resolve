@@ -32,6 +32,117 @@ def _is_na_string(s: str) -> bool:
     return s in _NA_STRINGS
 
 
+def _to_polars(df: Any) -> pl.DataFrame:
+    """Accept polars or pandas DataFrame; return a polars DataFrame.
+
+    Pandas inputs are converted via ``pl.from_pandas``. Polars inputs are
+    returned unchanged. Anything else falls through to ``pl.DataFrame(df)``
+    which raises if the input is unsupported.
+    """
+    if isinstance(df, pl.DataFrame):
+        return df
+    try:
+        import pandas as pd  # type: ignore
+        if isinstance(df, pd.DataFrame):
+            return pl.from_pandas(df)
+    except ImportError:
+        pass
+    return pl.DataFrame(df)
+
+
+def _apply_categorical_encoding(
+    header: pl.DataFrame,
+    *,
+    role_mapping: RoleMapping,
+    targets: dict[str, dict],
+    categorical_covariates: Optional[dict[str, Optional[dict[str, int]]]],
+    verbose: bool = False,
+) -> tuple[pl.DataFrame, dict[str, dict[str, int]]]:
+    """Encode classification target columns and categorical covariates to Int64.
+
+    Shared by :meth:`ResolveDataset.__init__` and
+    :meth:`ResolveDataset.from_fast_csv`. The two callers differ only in how
+    they produced the input column data:
+
+    * ``from_fast_csv`` reads them as ``list[str]`` from the C++ fast loader.
+    * ``__init__`` may receive them as a polars Utf8 column (raw strings) or
+      as an already-encoded integer column (the typical path when called
+      internally by ``from_fast_csv`` itself, or by ``split``/``_subset``
+      helpers operating on pre-encoded data).
+
+    Behavior:
+
+    * Columns named in ``categorical_covariates`` are validated against
+      ``role_mapping.covariates``.
+    * Columns referenced by ``task == "classification"`` targets are also
+      encoded (auto, or with ``cfg["mapping"]`` if provided).
+    * Already-integer-typed columns are passed through unchanged — this keeps
+      the in-memory constructor a no-op for callers that have already encoded.
+    * Returns ``(new_header, mappings)`` where ``mappings`` maps column name
+      to the ``{string: int}`` dictionary that was applied.
+    """
+    cat_cov_input = categorical_covariates or {}
+    for col in cat_cov_input:
+        if col not in role_mapping.covariates:
+            raise ValueError(
+                f"categorical_covariates[{col!r}] must also be listed in "
+                "roles['covariates']"
+            )
+
+    classification_target_cols: dict[str, str] = {
+        name: cfg["column"]
+        for name, cfg in targets.items()
+        if cfg.get("task") == "classification"
+    }
+    target_mappings: dict[str, dict[str, int]] = {
+        cfg["column"]: cfg["mapping"]
+        for cfg in targets.values()
+        if cfg.get("task") == "classification" and cfg.get("mapping") is not None
+    }
+    encoded_cols: set[str] = set(classification_target_cols.values()) | set(cat_cov_input.keys())
+
+    if not encoded_cols:
+        return header, {}
+
+    mappings: dict[str, dict[str, int]] = {}
+    replacements: dict[str, pl.Series] = {}
+
+    for col in encoded_cols:
+        if col not in header.columns:
+            # Missing columns are caught downstream by validation; nothing to
+            # encode here.
+            continue
+
+        series = header[col]
+        # Already-encoded integer columns: leave alone. This makes the helper
+        # a no-op when from_fast_csv has done the encoding before constructing.
+        if series.dtype.is_integer():
+            continue
+
+        # Only string columns get encoded; anything else (float/bool/...) is
+        # left untouched and will be caught downstream if it's not usable.
+        if series.dtype not in (pl.Utf8, pl.String):
+            continue
+
+        raw = [v if v is not None else "" for v in series.to_list()]
+        explicit = cat_cov_input.get(col, target_mappings.get(col))
+        codes, mapping = _encode_categorical(raw, explicit)
+        mappings[col] = mapping
+        replacements[col] = pl.Series(name=col, values=codes, dtype=pl.Int64)
+        if verbose:
+            n_classes = len(mapping)
+            n_null = sum(1 for c in codes if c is None)
+            src = "explicit" if explicit is not None else "auto"
+            print(
+                f"  Encoded {col!r} as Int64 ({src}, {n_classes} classes, "
+                f"{n_null:,} null)"
+            )
+
+    if not replacements:
+        return header, mappings
+    return header.with_columns(list(replacements.values())), mappings
+
+
 def _encode_categorical(
     raw: list[str],
     mapping: Optional[dict[str, int]] = None,
@@ -135,13 +246,15 @@ class ResolveDataset:
 
     def __init__(
         self,
-        header: pl.DataFrame,
-        species: pl.DataFrame,
+        header,
+        species,
         roles: RoleMapping,
         targets: dict[str, TargetConfig],
         species_normalization: str = "norm",
         track_unknown_fraction: bool = True,
         track_unknown_count: bool = False,
+        categorical_covariates: Optional[dict[str, Optional[dict[str, int]]]] = None,
+        verbose: bool = False,
     ):
         # Validate normalization mode
         if species_normalization not in VALID_NORMALIZATIONS:
@@ -150,6 +263,55 @@ class ResolveDataset:
                 f"got {species_normalization!r}"
             )
 
+        # Accept pandas or polars input transparently.
+        header = _to_polars(header)
+        species = _to_polars(species)
+
+        # Normalize roles: accept either RoleMapping or plain dict.
+        if not isinstance(roles, RoleMapping):
+            roles = RoleMapping.from_dict(roles)
+
+        # Normalize targets to plain dicts for the encoding step. Accept either
+        # TargetConfig objects or plain dicts on input. We defer building
+        # TargetConfig until AFTER encoding so num_classes can be auto-filled
+        # from the resulting mapping (matches from_fast_csv ordering).
+        targets_as_dict: dict[str, dict] = {}
+        for name, cfg in targets.items():
+            if isinstance(cfg, TargetConfig):
+                targets_as_dict[name] = {
+                    "column": cfg.column,
+                    "task": cfg.task,
+                    "transform": cfg.transform,
+                    "num_classes": cfg.num_classes,
+                    "weight": cfg.weight,
+                }
+            else:
+                targets_as_dict[name] = dict(cfg)
+
+        # Apply categorical/classification-target encoding. This is a no-op when:
+        #   - categorical_covariates is None AND no classification targets exist
+        #   - the relevant columns are already integer-typed (the from_fast_csv path)
+        # When columns are raw strings (typical in-memory pandas path), they are
+        # encoded to nullable Int64 using the same logic from_fast_csv applies.
+        header, categorical_mappings = _apply_categorical_encoding(
+            header,
+            role_mapping=roles,
+            targets=targets_as_dict,
+            categorical_covariates=categorical_covariates,
+            verbose=verbose,
+        )
+
+        # Build TargetConfig objects. Auto-fill num_classes for classification
+        # targets whose column was encoded above (so callers can omit num_classes
+        # when passing string target columns).
+        targets = {}
+        for name, cfg in targets_as_dict.items():
+            if cfg.get("task") == "classification":
+                col = cfg["column"]
+                if cfg.get("num_classes") is None and col in categorical_mappings:
+                    cfg["num_classes"] = len(categorical_mappings[col])
+            targets[name] = TargetConfig.from_dict(name, cfg)
+
         self._header = header
         self._species = species
         self._roles = roles
@@ -157,7 +319,7 @@ class ResolveDataset:
         self._species_normalization = species_normalization
         self._track_unknown_fraction = track_unknown_fraction
         self._track_unknown_count = track_unknown_count
-        self._categorical_mappings: dict[str, dict[str, int]] = {}
+        self._categorical_mappings: dict[str, dict[str, int]] = categorical_mappings
         self._validate()
 
     def _validate(self) -> None:
@@ -341,13 +503,11 @@ class ResolveDataset:
             for name, cfg in targets.items()
             if cfg.get("task") == "classification"
         }
-        target_mappings: dict[str, dict[str, int]] = {
-            cfg["column"]: cfg["mapping"]
-            for cfg in targets.values()
-            if cfg.get("task") == "classification" and cfg.get("mapping") is not None
-        }
 
         cat_cov_input = categorical_covariates or {}
+        # Validation of cat_cov ∩ roles.covariates is also performed inside
+        # _apply_categorical_encoding; we run it here too so the error fires
+        # before the C++ loader is invoked.
         for col in cat_cov_input:
             if col not in role_mapping.covariates:
                 raise ValueError(
@@ -385,33 +545,26 @@ class ResolveDataset:
             verbose=verbose,
         )
 
-        # Build DataFrame from C++ results, encoding categorical columns to Int64.
-        categorical_mappings: dict[str, dict[str, int]] = {}
+        # Assemble the raw-string DataFrame; the shared helper handles encoding.
         header_dict: dict[str, Any] = {}
         for col in header_string_cols:
             if col not in header_data:
                 continue
-            raw = header_data[col]
-            if col in encoded_cols:
-                explicit = cat_cov_input.get(col, target_mappings.get(col))
-                codes, mapping = _encode_categorical(raw, explicit)
-                categorical_mappings[col] = mapping
-                header_dict[col] = pl.Series(name=col, values=codes, dtype=pl.Int64)
-                if verbose:
-                    n_classes = len(mapping)
-                    n_null = sum(1 for c in codes if c is None)
-                    src = "explicit" if explicit is not None else "auto"
-                    print(
-                        f"  Encoded {col!r} as Int64 ({src}, {n_classes} classes, "
-                        f"{n_null:,} null)"
-                    )
-            else:
-                header_dict[col] = raw
+            header_dict[col] = header_data[col]
         for col in header_numeric_cols:
             if col in header_data:
                 header_dict[col] = header_data[col].numpy()
 
         header_df = pl.DataFrame(header_dict)
+
+        # Single source of truth for categorical encoding — shared with __init__.
+        header_df, categorical_mappings = _apply_categorical_encoding(
+            header_df,
+            role_mapping=role_mapping,
+            targets=targets,
+            categorical_covariates=cat_cov_input,
+            verbose=verbose,
+        )
 
         # Filter out rows where target values are null or NaN
         original_count = len(header_df)
