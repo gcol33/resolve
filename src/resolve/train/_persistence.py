@@ -72,8 +72,8 @@ class PersistenceMixin:
             "track_unknown_fraction": self.track_unknown_fraction,
             "uses_explicit_vector": self.model.uses_explicit_vector,
             "head_hidden_dims": self.head_hidden_dims,
-            "categorical_vocabs": self._categorical_vocabs if hasattr(self, "_categorical_vocabs") else {},
-            "categorical_embed_dim": self.categorical_embed_dim if hasattr(self, "categorical_embed_dim") else 8,
+            "categorical_vocabs": self._categorical_vocabs,
+            "categorical_embed_dim": self.categorical_embed_dim,
             "species_embed_dim": self.model.species_embed_dim,
         }
 
@@ -189,7 +189,6 @@ class PersistenceMixin:
             genus_emb_dim=state.get("genus_emb_dim", 8),
             family_emb_dim=state.get("family_emb_dim", 8),
             dropout=state.get("dropout", 0.3),
-            track_unknown_count=track_unknown_count,
             uses_explicit_vector=uses_explicit_vector,
             n_attention_layers=state.get("n_attention_layers", 0),
             n_heads=state.get("n_heads", 4),

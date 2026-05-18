@@ -22,12 +22,7 @@ from resolve.encode.embedding import EmbeddingEncoder
 from resolve.encode.species import SpeciesEncoder
 from resolve.encode.vocab import CategoricalVocab
 from resolve.encode._pool_base import pad_ragged_encoded
-from resolve.train._loaders import (
-    GPUTensorLoader,
-    RankPoolBatchDataset,
-    _RankPoolPreparedData,
-    _rank_pool_collate_fn,
-)
+from resolve.train._loaders import GPUTensorLoader
 
 if TYPE_CHECKING:
     from resolve.train.trainer import Trainer
@@ -245,8 +240,8 @@ class DataMixin:
         self: Trainer,
         dataset: ResolveDataset,
         fit_scalers: bool = False,
-    ) -> tuple[torch.Tensor, ...] | _RankPoolPreparedData:
-        """Convert dataset to tensors (or _RankPoolPreparedData for rank_pool mode)."""
+    ) -> tuple[torch.Tensor, ...]:
+        """Convert dataset to a tuple of pre-padded tensors (all encoding modes)."""
         # Get continuous features
         coords = dataset.get_coordinates()
         covariates = dataset.get_covariates()
@@ -490,19 +485,7 @@ class DataMixin:
         return tuple(tensors)
 
     def _create_loaders(self: Trainer, train_data, test_data) -> None:
-        """Create data loaders.
-
-        Accepts either a tuple of tensors (hash/embed modes) or
-        _RankPoolPreparedData (rank_pool mode with per-batch padding).
-        """
-        # Legacy slow path (ragged per-batch padding) — should not be reached with current code.
-        if isinstance(train_data, _RankPoolPreparedData):
-            raise RuntimeError(
-                "rank_pool returned _RankPoolPreparedData instead of pre-padded tensors. "
-                "This path is no longer supported — check _build_tensors."
-            )
-
-        # Hash/embed modes: standard tensor-based loaders
+        """Create data loaders from pre-padded tensor tuples (all encoding modes)."""
         train_tensors = train_data
         test_tensors = test_data
 

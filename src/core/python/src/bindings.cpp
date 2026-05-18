@@ -27,6 +27,7 @@ NB_MODULE(_resolve_core, m) {
     register_trainer(m);
     register_metrics(m);
     register_pretraining(m);
+    register_fuzzy(m);
 
     // Version
     m.attr("__version__") = resolve::VERSION;

@@ -56,7 +56,6 @@ class ResolveModel(nn.Module):
         top_k_species: int = 10,
         hidden_dims: Optional[list[int]] = None,
         dropout: float = 0.3,
-        track_unknown_count: bool = None,  # Deprecated: read from schema
         uses_explicit_vector: bool = False,  # For hash mode with all/presence_absence selection
         cover_dropout: float = 0.0,  # For rank_pool/transformer mode: randomly drop cover info
         # Transformer-specific params

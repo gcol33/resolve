@@ -42,8 +42,15 @@ class CheckpointMixin:
         best_metric: float,
         epochs_without_improvement: int,
         history: dict,
+        *,
+        completed: bool = False,
     ) -> None:
-        """Save training checkpoint for resume."""
+        """Save training checkpoint for resume.
+
+        ``completed=True`` marks the checkpoint as a final post-training save,
+        so that a subsequent ``fit()`` call recognizes the job as done and
+        fast-returns instead of re-entering the training loop.
+        """
         if self.checkpoint_dir is None:
             return
 
@@ -54,9 +61,10 @@ class CheckpointMixin:
             "best_metric": best_metric,
             "epochs_without_improvement": epochs_without_improvement,
             "history": history,
+            "completed": completed,
             # Model state
             "model_state_dict": self.model.state_dict(),
-            "best_state": self._best_state if hasattr(self, "_best_state") else None,
+            "best_state": self._best_state,
             # Optimizer state
             "optimizer_state_dict": self._optimizer.state_dict() if self._optimizer else None,
             "scheduler_state_dict": self._scheduler.state_dict() if self._scheduler else None,
@@ -72,11 +80,11 @@ class CheckpointMixin:
                 "species_vocab": self._species_encoder._species_vocab if self._species_encoder else set(),
             },
             # Categorical vocab state
-            "categorical_vocabs": self._categorical_vocabs if hasattr(self, "_categorical_vocabs") else {},
+            "categorical_vocabs": self._categorical_vocabs,
             # EMA state (exponential moving average of model weights)
             "ema_state": (
                 {k: v.cpu().clone() for k, v in self._ema_state.items()}
-                if hasattr(self, "_ema_state") and self._ema_state is not None
+                if self._ema_state is not None
                 else None
             ),
             # Config (for validation on resume)

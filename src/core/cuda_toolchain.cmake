@@ -6,7 +6,7 @@
 # correct values regardless of the parent process (PowerShell, bash, etc.).
 
 # MSVC and Windows SDK paths
-set(MSVC_ROOT "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207")
+set(MSVC_ROOT "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.44.35207")
 set(WINSDK_ROOT "C:/Program Files (x86)/Windows Kits/10")
 set(WINSDK_VERSION "10.0.26100.0")
 

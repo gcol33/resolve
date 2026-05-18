@@ -45,6 +45,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
         ../cpp_src/pretraining.cpp
         ../cpp_src/vae.cpp
+
+        ../cpp_src/fuzzy_index.cpp
+        ../cpp_src/fuzzy_search.cpp
+        ../cpp_src/fuzzy_automaton.cpp
     )
 
     add_library(resolve_core STATIC ${RESOLVE_CORE_SOURCES})
@@ -52,6 +56,16 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
     )
     target_link_libraries(resolve_core PUBLIC ${TORCH_LIBRARIES})
+
+    # OpenMP for fuzzy::query_batch (optional).
+    find_package(OpenMP QUIET)
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(resolve_core PUBLIC OpenMP::OpenMP_CXX)
+        message(STATUS "OpenMP enabled for resolve_core (standalone Python build)")
+    else()
+        message(STATUS "OpenMP not found; fuzzy::query_batch will run serially")
+    endif()
+
     set_property(TARGET resolve_core PROPERTY CXX_STANDARD 17)
 endif()
 
@@ -77,6 +91,7 @@ set(BINDING_SOURCES
     src/bindings_trainer.cpp
     src/bindings_metrics.cpp
     src/bindings_pretraining.cpp
+    src/bindings_fuzzy.cpp
 )
 nanobind_add_module(_resolve_core ${BINDING_SOURCES})
 

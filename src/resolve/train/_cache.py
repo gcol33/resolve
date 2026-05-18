@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 # Cache version — increment when cache format changes
-# v3: rank_pool now stores pre-padded dense tensors instead of ragged _RankPoolPreparedData
+# v3: rank_pool now stores pre-padded dense tensors
 # v5: store full encoder objects (fixes save() after resume-from-cache for rank_pool/embed)
 _CACHE_VERSION = 5
 

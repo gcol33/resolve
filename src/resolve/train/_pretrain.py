@@ -15,9 +15,7 @@ from typing import TYPE_CHECKING
 import torch
 from torch.amp import GradScaler, autocast
 from torch.optim import AdamW
-from torch.utils.data import DataLoader
-
-from resolve.train._loaders import RankPoolBatchDataset, _rank_pool_collate_fn
+from torch.utils.data import DataLoader, TensorDataset
 
 if TYPE_CHECKING:
     from resolve.train.trainer import Trainer
@@ -138,17 +136,18 @@ class PretrainMixin:
             # Build tensors from train split
             train_tensors = self._build_tensors(train_ds, fit_scalers=True)
         has_taxonomy = self._schema.has_taxonomy
+        has_categoricals = self._schema.has_categoricals
 
-        # Create masking collate wrapper
+        # Pre-padded tensors -> default_collate stacks them; wrapper applies MLM mask.
         mlm_collate = MaskedSpeciesCollateWrapper(
-            base_collate_fn=_rank_pool_collate_fn,
             n_species=self._schema.n_species_vocab,
             mask_prob=self.pretrain_mask_prob,
             has_taxonomy=has_taxonomy,
+            has_categoricals=has_categoricals,
         )
 
         pretrain_loader = DataLoader(
-            RankPoolBatchDataset(train_tensors),
+            TensorDataset(*train_tensors),
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=0,
@@ -204,7 +203,7 @@ class PretrainMixin:
             n_batches = 0
 
             for batch in pretrain_loader:
-                # Unpack batch: (continuous, masked_sp, [g, f,] w, mask, has_cover, *targets, mlm_mask, mlm_targets)
+                # Layout: (continuous, masked_sp, [g, f,] w, mask, has_cover, [cat_ids,] *targets, mlm_mask, mlm_targets)
                 idx = 0
                 continuous = batch[idx].to(self._device, non_blocking=True); idx += 1
                 species_ids = batch[idx].to(self._device, non_blocking=True); idx += 1
@@ -218,9 +217,10 @@ class PretrainMixin:
                 pool_mask = batch[idx].to(self._device, non_blocking=True); idx += 1
                 pool_has_cover = batch[idx].to(self._device, non_blocking=True); idx += 1
 
-                # Skip targets (we don't need them for pretraining)
-                n_targets = len(self.model.target_configs)
-                idx += n_targets
+                # Skip categoricals and targets; pretraining is unsupervised over species tokens.
+                if has_categoricals:
+                    idx += 1
+                idx += len(self.model.target_configs)
 
                 mlm_mask = batch[idx].to(self._device, non_blocking=True); idx += 1
                 mlm_targets = batch[idx].to(self._device, non_blocking=True); idx += 1

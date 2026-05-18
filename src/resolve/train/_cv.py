@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 import time
+import warnings
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -69,6 +70,15 @@ class CVMixin:
         CVResult
             Per-fold and aggregated metrics.
         """
+        if block_size is not None:
+            warnings.warn(
+                "block_size is deprecated; use block_deg instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if block_deg is None:
+                block_deg = block_size
+
         # Validate block_ids length if provided
         if block_ids is not None and len(block_ids) != self.dataset.n_plots:
             raise ValueError(
@@ -91,8 +101,6 @@ class CVMixin:
                 print(f"  Block mode: block_ids ({n_unique} unique blocks)")
             elif block_km is not None:
                 print(f"  Block mode: block_km = {block_km} km")
-            elif block_size is not None:
-                print(f"  Block mode: block_size = {block_size}° (deprecated)")
             elif block_deg is not None:
                 print(f"  Block mode: block_deg = {block_deg}°")
             else:
@@ -107,7 +115,7 @@ class CVMixin:
             splitter = SpatialBlockSplitter(
                 n_splits=n_splits,
                 seed=seed,
-                block_deg=block_size if block_size is not None else block_deg,
+                block_deg=block_deg,
                 block_km=block_km,
                 block_ids=block_ids,
                 balance=balance,

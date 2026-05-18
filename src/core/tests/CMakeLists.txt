@@ -20,6 +20,7 @@ add_executable(resolve_tests
     test_mlm_pretrain.cpp
     test_spatial_cv.cpp
     test_species_encoders.cpp
+    test_fuzzy.cpp
 )
 
 # Add CUDA library directory if CUDA is available

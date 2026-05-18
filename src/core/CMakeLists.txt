@@ -54,6 +54,10 @@ set(RESOLVE_CORE_SOURCES
 
     cpp_src/pretraining.cpp
     cpp_src/vae.cpp
+
+    cpp_src/fuzzy_index.cpp
+    cpp_src/fuzzy_search.cpp
+    cpp_src/fuzzy_automaton.cpp
 )
 
 set(RESOLVE_CORE_HEADERS
@@ -75,6 +79,8 @@ set(RESOLVE_CORE_HEADERS
     include/resolve/tabm.hpp
     include/resolve/pretraining.hpp
     include/resolve/vae.hpp
+
+    include/resolve/fuzzy.hpp
 )
 
 # CUDA sources - split for CUDA 13.x compatibility:
@@ -147,6 +153,15 @@ target_include_directories(resolve_core
 )
 
 target_link_libraries(resolve_core PUBLIC ${TORCH_LIBRARIES})
+
+# OpenMP for fuzzy::FuzzyIndex::query_batch. Optional: serial fallback if missing.
+find_package(OpenMP QUIET)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(resolve_core PUBLIC OpenMP::OpenMP_CXX)
+    message(STATUS "OpenMP enabled for resolve_core")
+else()
+    message(STATUS "OpenMP not found; fuzzy::query_batch will run serially")
+endif()
 
 # Ensure ABI compatibility (matches CMAKE_CXX_STANDARD above)
 set_property(TARGET resolve_core PROPERTY CXX_STANDARD 20)

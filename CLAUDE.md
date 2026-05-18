@@ -128,6 +128,7 @@ The research paper using RESOLVE is located at:
 - **C++ feature parity prep**: `SpeciesEncodingMode::RankPool` and `Transformer` enums, `pool_*` fields in `ResolveBatch`, informative error messages for unimplemented modes
 - **C++ adapter tests**: Catch2 tests for TabNet, SAINT, GNN, HeterogeneousGNN adapters
 - **C++ const-correctness**: const overload for `ResolveModelImpl::head()`
+- **Native fuzzy-string index**: `_resolve_core.fuzzy.FuzzyIndex` — generic Damerau-Levenshtein top-N matcher (trie + DP-row Levenshtein automaton, UTF-8 codepoint level, optional bucket hint, OpenMP `query_batch`). Wired into `WFOBackbone._match_fuzzy` with automatic difflib fallback when `_resolve_core` is unavailable. Header: `src/core/include/resolve/fuzzy.hpp`; sources: `cpp_src/fuzzy_{index,search,automaton}.cpp`.
 
 ## Remaining Work
 

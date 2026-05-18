@@ -25,15 +25,27 @@ Usage:
 from __future__ import annotations
 
 import io
+import logging
 import re
 import zipfile
-from difflib import get_close_matches
+from difflib import SequenceMatcher, get_close_matches
 from pathlib import Path
 from typing import Optional
 from urllib.request import urlretrieve
 
 import numpy as np
 import polars as pl
+
+_log = logging.getLogger("resolve.wfo")
+
+
+def _genus_bucket(name: str) -> str:
+    """Bucket key for the fuzzy index: lowercase genus (first whitespace-separated token)."""
+    if not name:
+        return ""
+    sp = name.find(" ")
+    head = name if sp < 0 else name[:sp]
+    return head.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +194,36 @@ class WFOBackbone:
         self._name_index: dict[str, list[int]] = {}
         self._id_index: dict[str, int] = {}
         self._build_indices()
+        self._fuzzy = None
+        self._fuzzy_native = False
+        self._build_fuzzy_index()
+
+    def _build_fuzzy_index(self) -> None:
+        """Build a native FuzzyIndex over scientificName when _resolve_core is present.
+
+        Falls back silently to the stdlib difflib path when the C++ extension
+        is not available (same dual-backend pattern as the rest of RESOLVE).
+        """
+        try:
+            from resolve_core._resolve_core import fuzzy as _fz  # type: ignore[import-not-found]
+        except ImportError:
+            _log.debug("fuzzy: native _resolve_core.fuzzy unavailable, using difflib")
+            return
+
+        try:
+            self._fuzzy = _fz.FuzzyIndex.build(
+                list(self._name_index.keys()),
+                max_edit_distance=4,
+                bucket_fn=_genus_bucket,
+                case_insensitive=True,
+                damerau=True,
+            )
+            self._fuzzy_native = True
+            _log.info("fuzzy: native FuzzyIndex built over %d entries", len(self._fuzzy))
+        except Exception as e:
+            self._fuzzy = None
+            self._fuzzy_native = False
+            _log.warning("fuzzy: native build failed (%s); falling back to difflib", e)
 
     @staticmethod
     def _load_backbone(path: Path) -> pl.DataFrame:
@@ -492,56 +534,54 @@ class WFOBackbone:
         n: int,
         original_input: Optional[str] = None,
     ) -> Optional[dict]:
-        """Fuzzy match using edit distance.
+        """Fuzzy match. Routes to the native FuzzyIndex when available, else difflib.
 
-        Uses rapidfuzz if available, falls back to difflib.
+        `cutoff` is interpreted as a fraction of needle length and converted to
+        an absolute Damerau-Levenshtein edit distance for the native path.
+        `fuzzy_dist` semantics differ between paths:
+          - native: integer Damerau-Levenshtein distance.
+          - difflib: 1.0 - SequenceMatcher ratio (kept for backwards compat).
         """
         input_label = original_input or name
 
-        # Try rapidfuzz first (much faster for large vocabularies)
-        try:
-            from rapidfuzz import process, fuzz
-            matches = process.extract(
+        if self._fuzzy_native and self._fuzzy is not None:
+            max_k = max(1, int(round(len(name) * cutoff)))
+            max_supp = getattr(self._fuzzy, "max_supported_distance", None) or max_k
+            if max_k > max_supp:
+                max_k = max_supp
+            hint = _genus_bucket(name) if " " in name else None
+            matches = self._fuzzy.query(
                 name,
-                self._name_index.keys(),
-                scorer=fuzz.ratio,
-                limit=n,
+                max_edit_distance=max_k,
+                top_n=n,
+                bucket_hint=hint,
             )
-            # rapidfuzz scores are 0-100, convert cutoff
-            min_score = (1.0 - cutoff) * 100
-            matches = [(m, score, key) for m, score, key in matches if score >= min_score]
-            if matches:
-                best_name = matches[0][0]
-                best_score = matches[0][1]
-                best_idx = self._pick_best(self._name_index[best_name])
-                result = self._resolve_accepted(best_idx)
-                result["input"] = input_label
-                result["match_method"] = "fuzzy"
-                result["fuzzy_dist"] = round(1.0 - best_score / 100, 3)
-                return result
-            return None
-        except ImportError:
-            pass
-
-        # Fallback: difflib.get_close_matches (slower but stdlib)
-        close = get_close_matches(name, self._name_index.keys(), n=n, cutoff=1.0 - cutoff)
-        if close:
-            best_name = close[0]
-            best_idx = self._pick_best(self._name_index[best_name])
+            if not matches:
+                return None
+            best = matches[0]
+            best_idx = self._pick_best(self._name_index[best.entry])
             result = self._resolve_accepted(best_idx)
             result["input"] = input_label
             result["match_method"] = "fuzzy"
-            # Compute approximate edit distance ratio
-            max_len = max(len(name), len(best_name))
-            if max_len > 0:
-                from difflib import SequenceMatcher
-                ratio = SequenceMatcher(None, name, best_name).ratio()
-                result["fuzzy_dist"] = round(1.0 - ratio, 3)
-            else:
-                result["fuzzy_dist"] = 0
+            result["fuzzy_dist"] = int(best.distance)
             return result
 
-        return None
+        close = get_close_matches(name, self._name_index.keys(), n=n, cutoff=1.0 - cutoff)
+        if not close:
+            return None
+
+        best_name = close[0]
+        best_idx = self._pick_best(self._name_index[best_name])
+        result = self._resolve_accepted(best_idx)
+        result["input"] = input_label
+        result["match_method"] = "fuzzy"
+        max_len = max(len(name), len(best_name))
+        if max_len > 0:
+            ratio = SequenceMatcher(None, name, best_name).ratio()
+            result["fuzzy_dist"] = round(1.0 - ratio, 3)
+        else:
+            result["fuzzy_dist"] = 0
+        return result
 
     def match_batch(
         self,

@@ -1,5 +1,16 @@
 #include "bindings_common.hpp"
 
+namespace {
+
+// Convert an nb::object that may be a Python tensor or None into an at::Tensor.
+// None / undefined → empty at::Tensor (matches the C++ default {} semantics).
+inline at::Tensor unpack_or_empty(const nb::object& obj) {
+    if (!obj.is_valid() || obj.is_none()) return at::Tensor();
+    return THPVariable_Unpack(obj.ptr());
+}
+
+}  // namespace
+
 void register_trainer(nb::module_& m) {
     nb::class_<resolve::Trainer>(m, "Trainer")
         .def(nb::init<resolve::ResolveModel, const resolve::TrainConfig&>(),
@@ -14,21 +25,27 @@ void register_trainer(nb::module_& m) {
            nb::arg("seed") = 42,
            "Prepare data from a ResolveDataset (preferred API)")
         .def("prepare_data_raw", [](resolve::Trainer& self,
-                               torch::Tensor coordinates,
-                               torch::Tensor covariates,
-                               torch::Tensor hash_embedding,
-                               torch::Tensor species_ids,
-                               torch::Tensor species_vector,
-                               torch::Tensor genus_ids,
-                               torch::Tensor family_ids,
-                               torch::Tensor unknown_fraction,
-                               torch::Tensor unknown_count,
+                               nb::object coordinates_obj,
+                               nb::object covariates_obj,
+                               nb::object hash_embedding_obj,
+                               nb::object species_ids_obj,
+                               nb::object species_vector_obj,
+                               nb::object genus_ids_obj,
+                               nb::object family_ids_obj,
+                               nb::object unknown_fraction_obj,
+                               nb::object unknown_count_obj,
                                const nb::dict& targets,
                                float test_size,
                                int seed) {
-            self.prepare_data(coordinates, covariates, hash_embedding,
-                            species_ids, species_vector, genus_ids, family_ids,
-                            unknown_fraction, unknown_count,
+            self.prepare_data(unpack_or_empty(coordinates_obj),
+                            unpack_or_empty(covariates_obj),
+                            unpack_or_empty(hash_embedding_obj),
+                            unpack_or_empty(species_ids_obj),
+                            unpack_or_empty(species_vector_obj),
+                            unpack_or_empty(genus_ids_obj),
+                            unpack_or_empty(family_ids_obj),
+                            unpack_or_empty(unknown_fraction_obj),
+                            unpack_or_empty(unknown_count_obj),
                             dict_to_tensor_map(targets),
                             /*pool_genus_ids=*/{}, /*pool_family_ids=*/{},
                             /*pool_weights=*/{}, /*pool_mask=*/{}, /*pool_has_cover=*/{},
@@ -82,18 +99,39 @@ void register_trainer(nb::module_& m) {
              nb::arg("seed") = 42,
              nb::call_guard<nb::gil_scoped_release>(),
              "Perform spatial block cross-validation")
-        .def("predict", &resolve::Trainer::predict,
-             nb::arg("continuous"),
-             nb::arg("genus_ids") = torch::Tensor(),
-             nb::arg("family_ids") = torch::Tensor(),
-             nb::arg("species_ids") = torch::Tensor(),
-             nb::arg("species_vector") = torch::Tensor(),
-             nb::arg("pool_genus_ids") = torch::Tensor(),
-             nb::arg("pool_family_ids") = torch::Tensor(),
-             nb::arg("pool_weights") = torch::Tensor(),
-             nb::arg("pool_mask") = torch::Tensor(),
-             nb::arg("pool_has_cover") = torch::Tensor(),
-             "Predict on data (runs model in eval mode)");
+        .def("predict", [](resolve::Trainer& self,
+                          nb::object continuous_obj,
+                          nb::object genus_ids_obj,
+                          nb::object family_ids_obj,
+                          nb::object species_ids_obj,
+                          nb::object species_vector_obj,
+                          nb::object pool_genus_ids_obj,
+                          nb::object pool_family_ids_obj,
+                          nb::object pool_weights_obj,
+                          nb::object pool_mask_obj,
+                          nb::object pool_has_cover_obj) {
+            auto result = self.predict(unpack_or_empty(continuous_obj),
+                                       unpack_or_empty(genus_ids_obj),
+                                       unpack_or_empty(family_ids_obj),
+                                       unpack_or_empty(species_ids_obj),
+                                       unpack_or_empty(species_vector_obj),
+                                       unpack_or_empty(pool_genus_ids_obj),
+                                       unpack_or_empty(pool_family_ids_obj),
+                                       unpack_or_empty(pool_weights_obj),
+                                       unpack_or_empty(pool_mask_obj),
+                                       unpack_or_empty(pool_has_cover_obj));
+            return tensor_map_to_dict(result);
+        }, nb::arg("continuous"),
+           nb::arg("genus_ids") = nb::none(),
+           nb::arg("family_ids") = nb::none(),
+           nb::arg("species_ids") = nb::none(),
+           nb::arg("species_vector") = nb::none(),
+           nb::arg("pool_genus_ids") = nb::none(),
+           nb::arg("pool_family_ids") = nb::none(),
+           nb::arg("pool_weights") = nb::none(),
+           nb::arg("pool_mask") = nb::none(),
+           nb::arg("pool_has_cover") = nb::none(),
+           "Predict on data (runs model in eval mode)");
 
     nb::class_<resolve::Predictor>(m, "Predictor")
         .def("__init__", [](resolve::Predictor* self, resolve::ResolveModel model, resolve::Scalers scalers, const std::string& device) {
@@ -104,42 +142,83 @@ void register_trainer(nb::module_& m) {
             torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
             return resolve::Predictor::load(path, dev);
         }, nb::arg("path"), nb::arg("device") = "cpu")
-        .def("predict",
-             static_cast<resolve::ResolvePredictions (resolve::Predictor::*)(
-                 torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
-                 torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
-                 torch::Tensor,
-                 torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
-                 bool)>(&resolve::Predictor::predict),
-             nb::arg("coordinates"),
-             nb::arg("covariates"),
-             nb::arg("hash_embedding"),
-             nb::arg("species_ids"),
-             nb::arg("species_vector"),
-             nb::arg("genus_ids"),
-             nb::arg("family_ids"),
-             nb::arg("unknown_fraction"),
-             nb::arg("unknown_count"),
-             nb::arg("pool_genus_ids") = torch::Tensor(),
-             nb::arg("pool_family_ids") = torch::Tensor(),
-             nb::arg("pool_weights") = torch::Tensor(),
-             nb::arg("pool_mask") = torch::Tensor(),
-             nb::arg("pool_has_cover") = torch::Tensor(),
-             nb::arg("return_latent") = false)
-        .def("predict_dataset",
-             static_cast<resolve::ResolvePredictions (resolve::Predictor::*)(
-                 const resolve::ResolveDataset&, bool)>(&resolve::Predictor::predict),
-             nb::arg("dataset"),
-             nb::arg("return_latent") = false)
-        .def("get_embeddings", &resolve::Predictor::get_embeddings,
-             nb::arg("coordinates"),
-             nb::arg("covariates"),
-             nb::arg("hash_embedding"),
-             nb::arg("genus_ids"),
-             nb::arg("family_ids"))
-        .def("get_genus_embeddings", &resolve::Predictor::get_genus_embeddings)
-        .def("get_family_embeddings", &resolve::Predictor::get_family_embeddings)
-        .def("get_species_embeddings", &resolve::Predictor::get_species_embeddings)
+        .def("predict", [](resolve::Predictor& self,
+                          nb::object coordinates_obj,
+                          nb::object covariates_obj,
+                          nb::object hash_embedding_obj,
+                          nb::object species_ids_obj,
+                          nb::object species_vector_obj,
+                          nb::object genus_ids_obj,
+                          nb::object family_ids_obj,
+                          nb::object unknown_fraction_obj,
+                          nb::object unknown_count_obj,
+                          nb::object pool_genus_ids_obj,
+                          nb::object pool_family_ids_obj,
+                          nb::object pool_weights_obj,
+                          nb::object pool_mask_obj,
+                          nb::object pool_has_cover_obj,
+                          bool return_latent) {
+            return self.predict(unpack_or_empty(coordinates_obj),
+                                unpack_or_empty(covariates_obj),
+                                unpack_or_empty(hash_embedding_obj),
+                                unpack_or_empty(species_ids_obj),
+                                unpack_or_empty(species_vector_obj),
+                                unpack_or_empty(genus_ids_obj),
+                                unpack_or_empty(family_ids_obj),
+                                unpack_or_empty(unknown_fraction_obj),
+                                unpack_or_empty(unknown_count_obj),
+                                unpack_or_empty(pool_genus_ids_obj),
+                                unpack_or_empty(pool_family_ids_obj),
+                                unpack_or_empty(pool_weights_obj),
+                                unpack_or_empty(pool_mask_obj),
+                                unpack_or_empty(pool_has_cover_obj),
+                                return_latent);
+        }, nb::arg("coordinates"),
+           nb::arg("covariates"),
+           nb::arg("hash_embedding"),
+           nb::arg("species_ids"),
+           nb::arg("species_vector"),
+           nb::arg("genus_ids"),
+           nb::arg("family_ids"),
+           nb::arg("unknown_fraction"),
+           nb::arg("unknown_count"),
+           nb::arg("pool_genus_ids") = nb::none(),
+           nb::arg("pool_family_ids") = nb::none(),
+           nb::arg("pool_weights") = nb::none(),
+           nb::arg("pool_mask") = nb::none(),
+           nb::arg("pool_has_cover") = nb::none(),
+           nb::arg("return_latent") = false)
+        .def("predict_dataset", [](resolve::Predictor& self,
+                                   const resolve::ResolveDataset& dataset,
+                                   bool return_latent) {
+            return self.predict(dataset, return_latent);
+        }, nb::arg("dataset"), nb::arg("return_latent") = false)
+        .def("get_embeddings", [](resolve::Predictor& self,
+                                  nb::object coordinates_obj,
+                                  nb::object covariates_obj,
+                                  nb::object hash_embedding_obj,
+                                  nb::object genus_ids_obj,
+                                  nb::object family_ids_obj) {
+            auto out = self.get_embeddings(unpack_or_empty(coordinates_obj),
+                                           unpack_or_empty(covariates_obj),
+                                           unpack_or_empty(hash_embedding_obj),
+                                           unpack_or_empty(genus_ids_obj),
+                                           unpack_or_empty(family_ids_obj));
+            return nb::steal(THPVariable_Wrap(out));
+        }, nb::arg("coordinates"),
+           nb::arg("covariates"),
+           nb::arg("hash_embedding"),
+           nb::arg("genus_ids"),
+           nb::arg("family_ids"))
+        .def("get_genus_embeddings", [](resolve::Predictor& self) {
+            return nb::steal(THPVariable_Wrap(self.get_genus_embeddings()));
+        })
+        .def("get_family_embeddings", [](resolve::Predictor& self) {
+            return nb::steal(THPVariable_Wrap(self.get_family_embeddings()));
+        })
+        .def("get_species_embeddings", [](resolve::Predictor& self) {
+            return nb::steal(THPVariable_Wrap(self.get_species_embeddings()));
+        })
         .def("optimize_for_inference", &resolve::Predictor::optimize_for_inference)
         .def_prop_ro("device", [](const resolve::Predictor& self) {
             return self.device().is_cuda() ? std::string("cuda") : std::string("cpu");

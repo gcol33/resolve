@@ -30,7 +30,7 @@ from resolve.data.dataset import ResolveDataset, ResolveSchema
 from resolve.encode.embedding import EmbeddingEncoder
 from resolve.encode.species import SpeciesEncoder
 from resolve.model.resolve import ResolveModel
-from resolve.train._loaders import CUDAPrefetcher, _RankPoolPreparedData
+from resolve.train._loaders import CUDAPrefetcher
 from resolve.train._types import (
     CheckpointConfig,
     DataConfig,
@@ -164,7 +164,8 @@ class Trainer(
         max_cache_files: int = 5,
         # Loss configuration
         loss_config: str = "mae",
-        # Advanced (deprecated - use loss_config instead)
+        # Advanced override: passing phases/phase_boundaries directly bypasses loss_config
+        # (used internally by LOSS_PRESETS; most callers should set loss_config instead).
         phases: dict[int, PhaseConfig] | None = None,
         phase_boundaries: list[int] | None = None,
         device: str = "auto",
@@ -628,6 +629,9 @@ class Trainer(
         self._scheduler: OneCycleLR | ReduceLROnPlateau | CosineAnnealingLR | None = None
         self._loss_fn: MultiTaskLoss | None = None
         self._grad_scaler: GradScaler | None = None
+        self._best_state: dict | None = None
+        self._ema_state: dict | None = None
+        self._using_gpu_loader: bool = False
 
     @property
     def device(self) -> torch.device:
@@ -758,8 +762,8 @@ class Trainer(
             test_tensors = self._build_tensors(test_ds, fit_scalers=False)
             print(f"  Data prepared in {time.time() - t_prep_start:.1f}s")
 
-            # Save to cache for next time (rank_pool now returns pre-padded dense tensors, also cacheable)
-            if self.cache_dir and not isinstance(train_tensors, _RankPoolPreparedData):
+            # Save to cache for next time.
+            if self.cache_dir:
                 self._save_cache(
                     train_tensors,
                     test_tensors,
@@ -859,13 +863,35 @@ class Trainer(
 
         # Initialize EMA state (exponential moving average of model weights)
         # If restored from checkpoint, _ema_state is already set; otherwise init from model
-        if not hasattr(self, "_ema_state") or self._ema_state is None:
-            self._ema_state = None
-            if self.ema_decay > 0:
-                self._ema_state = {k: v.clone() for k, v in self.model.state_dict().items()}
+        if self._ema_state is None and self.ema_decay > 0:
+            self._ema_state = {k: v.clone() for k, v in self.model.state_dict().items()}
 
         target_names = list(self.model.target_configs.keys())
         has_taxonomy = self.model.schema.has_taxonomy
+
+        # Fast-return if the checkpoint marks training as complete and max_epochs hasn't
+        # been increased. Two signals count as complete:
+        #   1. Explicit ``completed=True`` (post-training save from this codebase)
+        #   2. ``start_epoch >= max_epochs`` (legacy checkpoints from before the flag existed)
+        if checkpoint is not None:
+            saved_max = checkpoint.get("config", {}).get("max_epochs", self.max_epochs)
+            is_complete = checkpoint.get("completed", False) or start_epoch >= self.max_epochs
+            if is_complete and self.max_epochs <= saved_max:
+                print(
+                    f"Checkpoint already complete (trained to epoch {checkpoint['epoch']}, "
+                    f"best={best_metric:.2%} at epoch {best_epoch}); skipping training loop.",
+                    flush=True,
+                )
+                if self._best_state is not None:
+                    self.model.load_state_dict(self._best_state)
+                _, final_metrics = self._eval_epoch(best_epoch, target_names, has_taxonomy)
+                return TrainResult(
+                    best_epoch=best_epoch,
+                    final_metrics=final_metrics,
+                    history=history,
+                    resumed_from_epoch=resumed_from_epoch,
+                    train_time=0.0,
+                )
 
         train_start_time = time.time()
         epoch_times = []  # Track epoch durations for ETA
@@ -950,12 +976,9 @@ class Trainer(
             if self.checkpoint_dir and (epoch == 0 or (epoch + 1) % self.checkpoint_every == 0):
                 self.save_checkpoint(epoch, best_epoch, best_metric, epochs_without_improvement, history)
 
-            # Early stopping
+            # Early stopping (post-loop save below marks the checkpoint complete)
             if epochs_without_improvement >= self.patience:
                 print(f"Early stopping at epoch {epoch}")
-                # Save final checkpoint
-                if self.checkpoint_dir:
-                    self.save_checkpoint(epoch, best_epoch, best_metric, epochs_without_improvement, history)
                 break
 
         # Restore best model
@@ -965,9 +988,12 @@ class Trainer(
         # Final evaluation
         _, final_metrics = self._eval_epoch(best_epoch, target_names, has_taxonomy)
 
-        # Save final checkpoint
+        # Save final checkpoint with completion marker so resumes fast-return.
         if self.checkpoint_dir:
-            self.save_checkpoint(epoch, best_epoch, best_metric, epochs_without_improvement, history)
+            self.save_checkpoint(
+                epoch, best_epoch, best_metric, epochs_without_improvement, history,
+                completed=True,
+            )
 
         return TrainResult(
             best_epoch=best_epoch,
@@ -1094,7 +1120,7 @@ class Trainer(
 
         # Build an infinite batch iterator
         batch_iter = iter(self._train_loader)
-        use_gpu_loader = getattr(self, "_using_gpu_loader", False)
+        use_gpu_loader = self._using_gpu_loader
         data_on_device = use_gpu_loader
 
         for step in range(n_steps):
@@ -1289,7 +1315,7 @@ class Trainer(
         grad_norms = [] if self.verbose >= 2 else None
 
         # Determine if data is already on GPU (from GPUTensorLoader or CUDAPrefetcher)
-        use_gpu_loader = getattr(self, "_using_gpu_loader", False)
+        use_gpu_loader = self._using_gpu_loader
         use_prefetch = self.prefetch_data and self._device.type == "cuda" and not use_gpu_loader
         data_on_device = use_gpu_loader or use_prefetch
 
@@ -1413,7 +1439,7 @@ class Trainer(
         all_targets = {name: [] for name in target_names}
 
         # Check if data is already on GPU (from GPUTensorLoader)
-        data_on_device = getattr(self, "_using_gpu_loader", False)
+        data_on_device = self._using_gpu_loader
 
         for batch in self._test_loader:
             (continuous, genus_ids, family_ids, species_ids, species_vector,

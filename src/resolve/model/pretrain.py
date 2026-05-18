@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import torch
 from torch import nn
+from torch.utils.data import default_collate
 
 
 class MaskedSpeciesHead(nn.Module):
@@ -92,47 +93,47 @@ def mask_species_batch(
 
 
 class MaskedSpeciesCollateWrapper:
-    """Wraps rank_pool collate_fn to add MLM masking to each batch.
+    """Apply MLM masking to a pre-padded rank_pool/transformer batch.
 
-    The wrapper intercepts collated batches and applies mask_species_batch
-    to the species_ids tensor. The mlm_mask and mlm_targets are appended
-    to the batch tuple.
+    Consumes batches produced by `torch.utils.data.default_collate` over a
+    `TensorDataset` built from the pre-padded tuple returned by
+    `Trainer._build_tensors` (rank_pool/transformer branch). Replaces
+    `species_ids` with a masked copy and appends `(mlm_mask, mlm_targets)`.
 
-    Batch layout (with taxonomy):
-        (continuous, species_ids, genus_ids, family_ids, weights, mask, has_cover,
-         *targets, mlm_mask, mlm_targets)
+    Batch tuple positions (from `_build_tensors`):
+        [0]              continuous
+        [1]              species_ids
+        [2:2+2*has_tax]  genus_ids, family_ids   (only if taxonomy present)
+        next             weights
+        next             mask
+        next             has_cover
+        next             categorical_ids         (only if has_categoricals)
+        rest             *targets
 
-    Batch layout (no taxonomy):
-        (continuous, species_ids, weights, mask, has_cover,
-         *targets, mlm_mask, mlm_targets)
+    Output layout: `(*batch, mlm_mask, mlm_targets)`.
     """
 
-    def __init__(self, base_collate_fn, n_species: int, mask_prob: float = 0.15,
-                 has_taxonomy: bool = True):
-        self.base_collate_fn = base_collate_fn
+    def __init__(self, n_species: int, mask_prob: float = 0.15,
+                 has_taxonomy: bool = True, has_categoricals: bool = False):
         self.n_species = n_species
         self.mask_prob = mask_prob
         self.has_taxonomy = has_taxonomy
+        self.has_categoricals = has_categoricals
+        # mask sits after [continuous, species_ids, (g, f,) weights]
+        self._mask_index = 2 + (2 if has_taxonomy else 0) + 1
 
     def __call__(self, samples):
-        batch = self.base_collate_fn(samples)
+        batch = default_collate(samples)
 
-        # Extract species_ids and mask from batch tuple
-        # Layout: (continuous, species_ids, [genus, family,] weights, mask, has_cover, *targets)
-        species_ids = batch[1]  # always at index 1
-        if self.has_taxonomy:
-            valid_mask = batch[5]  # continuous, sp, g, f, w, mask
-        else:
-            valid_mask = batch[3]  # continuous, sp, w, mask
+        species_ids = batch[1]
+        valid_mask = batch[self._mask_index]
 
         masked_ids, mlm_mask, mlm_targets = mask_species_batch(
             species_ids, valid_mask.bool(), self.n_species, self.mask_prob
         )
 
-        # Replace species_ids with masked version, append mlm tensors
         batch_list = list(batch)
         batch_list[1] = masked_ids
         batch_list.append(mlm_mask)
         batch_list.append(mlm_targets)
-
         return tuple(batch_list)

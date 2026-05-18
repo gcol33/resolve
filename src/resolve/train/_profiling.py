@@ -115,7 +115,7 @@ class ProfilingMixin:
         has_taxonomy = self.model.schema.has_taxonomy
 
         # Determine if data is already on GPU (from GPUTensorLoader or CUDAPrefetcher)
-        use_gpu_loader = getattr(self, "_using_gpu_loader", False)
+        use_gpu_loader = self._using_gpu_loader
         use_prefetch = self.prefetch_data and self._device.type == "cuda" and not use_gpu_loader
         data_on_device = use_gpu_loader or use_prefetch
 

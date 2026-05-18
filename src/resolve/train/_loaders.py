@@ -1,15 +1,11 @@
 """Data loading utilities for RESOLVE training.
 
-Provides GPU-optimized data loading and rank-pool batch handling.
+Provides GPU-optimized data loading for pre-padded tensor batches.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-import numpy as np
 import torch
-from torch.utils.data import Dataset
 
 
 class CUDAPrefetcher:
@@ -137,119 +133,3 @@ class GPUTensorLoader:
         return _DatasetWrapper(self.n_samples)
 
 
-@dataclass
-class _RankPoolPreparedData:
-    """Holds ragged rank-pool arrays + pre-scaled continuous/target tensors.
-
-    Used instead of a flat tensor tuple for rank_pool mode, enabling per-batch
-    padding in the DataLoader collate function.
-    """
-
-    continuous: torch.Tensor            # (N, d) pre-scaled float32
-    target_tensors: list[torch.Tensor]  # one per target
-    species_ids: list[np.ndarray]       # ragged per-plot (int32)
-    genus_ids: list[np.ndarray] | None  # ragged, None if no taxonomy
-    family_ids: list[np.ndarray] | None
-    weights: list[np.ndarray]           # ragged per-plot (float32)
-    has_cover: np.ndarray               # (N,) float32, 1.0 if cover info present
-    has_taxonomy: bool
-    n_samples: int
-    categorical_ids: torch.Tensor | None = None  # (N, n_cat) int64, None if no categoricals
-
-
-class RankPoolBatchDataset(Dataset):
-    """PyTorch Dataset wrapping ragged rank-pool data for per-batch padding."""
-
-    def __init__(self, data: _RankPoolPreparedData):
-        self._data = data
-
-    def __len__(self):
-        return self._data.n_samples
-
-    def __getitem__(self, idx):
-        result = {
-            "continuous": self._data.continuous[idx],
-            "species_ids": self._data.species_ids[idx],
-            "weights": self._data.weights[idx],
-            "has_cover": self._data.has_cover[idx],
-            "targets": [t[idx] for t in self._data.target_tensors],
-        }
-        if self._data.has_taxonomy:
-            result["genus_ids"] = self._data.genus_ids[idx]
-            result["family_ids"] = self._data.family_ids[idx]
-        if self._data.categorical_ids is not None:
-            result["categorical_ids"] = self._data.categorical_ids[idx]
-        return result
-
-
-def _rank_pool_collate_fn(samples: list[dict]) -> tuple:
-    """Collate ragged rank-pool samples into a padded batch.
-
-    Pads species_ids/genus_ids/family_ids/weights to the batch-level max
-    species count (not the global max). Uses numpy for bulk padding, then
-    converts to torch tensors once (avoids per-sample torch.from_numpy).
-
-    Returns a tuple matching the existing batch layout:
-      has_taxonomy=True:  (continuous, species_ids, genus_ids, family_ids, weights, mask, has_cover, *targets)
-      has_taxonomy=False: (continuous, species_ids, weights, mask, has_cover, *targets)
-    """
-    n = len(samples)
-    has_taxonomy = "genus_ids" in samples[0]
-    has_categoricals = "categorical_ids" in samples[0]
-
-    # Stack continuous (already a tensor from __getitem__)
-    continuous = torch.stack([s["continuous"] for s in samples])
-
-    # Find batch-level max species count
-    sp_arrays = [s["species_ids"] for s in samples]
-    lengths = [len(a) for a in sp_arrays]
-    max_sp = max(max(lengths), 1)
-
-    # Build padded numpy arrays (single allocation, numpy slice assignment)
-    sp_np = np.zeros((n, max_sp), dtype=np.int64)
-    w_np = np.zeros((n, max_sp), dtype=np.float32)
-    mask_np = np.zeros((n, max_sp), dtype=np.bool_)
-
-    if has_taxonomy:
-        g_np = np.zeros((n, max_sp), dtype=np.int64)
-        f_np = np.zeros((n, max_sp), dtype=np.int64)
-
-    for i in range(n):
-        k = lengths[i]
-        if k > 0:
-            sp_np[i, :k] = sp_arrays[i]
-            w_np[i, :k] = samples[i]["weights"]
-            mask_np[i, :k] = True
-            if has_taxonomy:
-                g_np[i, :k] = samples[i]["genus_ids"]
-                f_np[i, :k] = samples[i]["family_ids"]
-
-    # Single torch.from_numpy per array (zero-copy)
-    sp_ids = torch.from_numpy(sp_np)
-    w = torch.from_numpy(w_np)
-    mask = torch.from_numpy(mask_np)
-
-    # has_cover scalar per sample
-    has_cover = torch.tensor([s["has_cover"] for s in samples], dtype=torch.float32)
-
-    # Stack targets
-    n_targets = len(samples[0]["targets"])
-    targets = [torch.stack([s["targets"][t] for s in samples]) for t in range(n_targets)]
-
-    # Stack categorical_ids if present (already tensors from __getitem__)
-    cat_ids = None
-    if has_categoricals:
-        cat_ids = torch.stack([s["categorical_ids"] for s in samples])
-
-    # Build batch tuple
-    if has_taxonomy:
-        g_ids = torch.from_numpy(g_np)
-        f_ids = torch.from_numpy(f_np)
-        batch = (continuous, sp_ids, g_ids, f_ids, w, mask, has_cover)
-    else:
-        batch = (continuous, sp_ids, w, mask, has_cover)
-
-    if cat_ids is not None:
-        batch = batch + (cat_ids,)
-
-    return batch + tuple(targets)
