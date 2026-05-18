@@ -8,6 +8,14 @@ Low-level usage:
     from resolve_core import ResolveModel, Trainer, Predictor, ...
 """
 
+# Why: _resolve_core.pyd uses THPVariable_Wrap from torch_python.dll to wrap
+# C++ at::Tensor results as Python torch.Tensor objects. THPVariable_Wrap
+# requires torch's Python tensor class to be registered first, which only
+# happens when the torch package's __init__ has run. Importing torch here
+# guarantees that ordering. Without it, any binding that returns a tensor
+# segfaults inside THPVariable_Wrap.
+import torch  # noqa: F401
+
 try:
     from ._resolve_core import (
         # Enums

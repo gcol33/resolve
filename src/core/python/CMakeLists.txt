@@ -3,11 +3,13 @@ cmake_minimum_required(VERSION 3.18)
 # Check if we're being included as a subdirectory or built standalone
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # Standalone build - define project and build resolve_core
-    project(resolve_python VERSION 0.4.0 LANGUAGES CXX)
+    project(resolve_python VERSION 0.5.0 LANGUAGES CXX)
 
     option(USE_CUDA "Enable CUDA support" ON)
 
-    set(CMAKE_CXX_STANDARD 17)
+    # libtorch 2.13+ requires C++20 (bit-field default initializers in
+    # c10/core/AutogradState.h). Match the parent src/core/CMakeLists.txt.
+    set(CMAKE_CXX_STANDARD 20)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
@@ -66,7 +68,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         message(STATUS "OpenMP not found; fuzzy::query_batch will run serially")
     endif()
 
-    set_property(TARGET resolve_core PROPERTY CXX_STANDARD 17)
+    set_property(TARGET resolve_core PROPERTY CXX_STANDARD 20)
 endif()
 
 # Python bindings using nanobind

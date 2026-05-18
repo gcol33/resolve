@@ -256,21 +256,50 @@ ModelConfig load_model_config(
     return config;
 }
 
+// Why: libtorch's archive API stores tensors, not strings. We need a
+// length-prefixed UInt8 tensor pattern to round-trip a std::string (same
+// approach save_run_metadata uses for resolve_version/timestamps).
+static void write_string_to_archive(
+    torch::serialize::OutputArchive& archive,
+    const std::string& prefix,
+    const std::string& value
+) {
+    archive.write(prefix + "_len", torch::tensor(static_cast<int64_t>(value.size())));
+    if (!value.empty()) {
+        std::vector<uint8_t> bytes(value.begin(), value.end());
+        archive.write(prefix, torch::from_blob(
+            bytes.data(), {static_cast<int64_t>(bytes.size())}, torch::kUInt8).clone());
+    }
+}
+
 void save_scalers(
     torch::serialize::OutputArchive& archive,
     const Scalers& scalers
 ) {
-    if (scalers.continuous_mean.defined()) {
+    // Why: load_scalers previously ate exceptions silently. If the
+    // "continuous_mean" archive.read failed for any reason, scalers came
+    // back with undefined tensors and downstream predict crashed in
+    // (continuous - undefined_tensor). Make presence explicit with a
+    // boolean flag so the load path has a clean signal.
+    int has_continuous = scalers.continuous_mean.defined() ? 1 : 0;
+    archive.write("scalers_has_continuous", torch::tensor(has_continuous));
+    if (has_continuous) {
         archive.write("continuous_mean", scalers.continuous_mean);
         archive.write("continuous_scale", scalers.continuous_scale);
     }
 
-    // Save target scalers
+    // Save target scalers. Why: the previous format wrote only mean/scale
+    // and dropped the target name, so load_scalers couldn't rebuild the
+    // {name -> (mean, scale)} map and the loaded Predictor produced
+    // predictions in scaled (mean=0, std=1) space instead of the original
+    // target scale. Write name alongside each entry.
     archive.write("n_target_scalers", torch::tensor(static_cast<int64_t>(scalers.target_scalers.size())));
     int idx = 0;
     for (const auto& [name, scaler] : scalers.target_scalers) {
-        archive.write("target_scaler_mean_" + std::to_string(idx), scaler.first);
-        archive.write("target_scaler_scale_" + std::to_string(idx), scaler.second);
+        std::string prefix = "target_scaler_" + std::to_string(idx) + "_";
+        write_string_to_archive(archive, prefix + "name", name);
+        archive.write(prefix + "mean", scaler.first);
+        archive.write(prefix + "scale", scaler.second);
         idx++;
     }
 }
@@ -280,26 +309,56 @@ Scalers load_scalers(
 ) {
     Scalers scalers;
 
-    try {
-        archive.read("continuous_mean", scalers.continuous_mean);
-        archive.read("continuous_scale", scalers.continuous_scale);
-    } catch (...) {
-        // Scalers may not be present
+    // Continuous scalers. Prefer the explicit presence flag from the new
+    // save format; fall back to try_read on bare keys for older checkpoints.
+    torch::Tensor has_t;
+    bool has_continuous = false;
+    if (archive.try_read("scalers_has_continuous", has_t)) {
+        has_continuous = (has_t.item<int>() != 0);
+    } else {
+        // Legacy checkpoint: just attempt the bare reads.
+        has_continuous = true;
+    }
+    if (has_continuous) {
+        // try_read avoids the silent-catch-everything anti-pattern below.
+        archive.try_read("continuous_mean", scalers.continuous_mean);
+        archive.try_read("continuous_scale", scalers.continuous_scale);
     }
 
-    // Load target scalers
+    auto read_string_pair = [&](const std::string& prefix) -> std::string {
+        torch::Tensor len_t;
+        if (!archive.try_read(prefix + "_len", len_t)) return std::string();
+        int64_t len = len_t.item<int64_t>();
+        if (len <= 0) return std::string();
+        torch::Tensor t;
+        if (!archive.try_read(prefix, t)) return std::string();
+        auto ptr = t.data_ptr<uint8_t>();
+        return std::string(reinterpret_cast<const char*>(ptr), len);
+    };
+
+    // Target scalers: restore the {name -> (mean, scale)} map. Try the
+    // new naming first; fall back to legacy keys so older checkpoints
+    // still partially load (without names, target_scalers stays empty
+    // and predictions come back in scaled space — better than crashing).
     torch::Tensor n_target_scalers_t;
-    try {
-        archive.read("n_target_scalers", n_target_scalers_t);
+    if (archive.try_read("n_target_scalers", n_target_scalers_t)) {
         int64_t n_scalers = n_target_scalers_t.item<int64_t>();
         for (int64_t i = 0; i < n_scalers; ++i) {
+            std::string idx_s = std::to_string(i);
+            std::string prefix = "target_scaler_" + idx_s + "_";
+            std::string name = read_string_pair(prefix + "name");
+
             torch::Tensor mean, scale;
-            archive.read("target_scaler_mean_" + std::to_string(i), mean);
-            archive.read("target_scaler_scale_" + std::to_string(i), scale);
-            // Note: target name is lost - would need to save names too for full implementation
+            if (!archive.try_read(prefix + "mean", mean)) {
+                archive.try_read("target_scaler_mean_" + idx_s, mean);
+            }
+            if (!archive.try_read(prefix + "scale", scale)) {
+                archive.try_read("target_scaler_scale_" + idx_s, scale);
+            }
+            if (!name.empty() && mean.defined() && scale.defined()) {
+                scalers.target_scalers[name] = {mean, scale};
+            }
         }
-    } catch (...) {
-        // Target scalers may not be present
     }
 
     return scalers;
@@ -322,10 +381,15 @@ void save_schema(
     archive.write("schema_track_unknown_fraction", torch::tensor(static_cast<int>(schema.track_unknown_fraction)));
     archive.write("schema_track_unknown_count", torch::tensor(static_cast<int>(schema.track_unknown_count)));
     archive.write("schema_n_covariates", torch::tensor(static_cast<int64_t>(schema.covariate_names.size())));
+    for (size_t i = 0; i < schema.covariate_names.size(); ++i) {
+        write_string_to_archive(archive, "schema_covariate_" + std::to_string(i),
+                                schema.covariate_names[i]);
+    }
     archive.write("schema_n_targets", torch::tensor(static_cast<int64_t>(schema.targets.size())));
     for (size_t i = 0; i < schema.targets.size(); ++i) {
         const auto& target = schema.targets[i];
         std::string prefix = "schema_target_" + std::to_string(i) + "_";
+        write_string_to_archive(archive, prefix + "name", target.name);
         archive.write(prefix + "task", torch::tensor(static_cast<int>(target.task)));
         archive.write(prefix + "transform", torch::tensor(static_cast<int>(target.transform)));
         archive.write(prefix + "num_classes", torch::tensor(target.num_classes));
@@ -336,48 +400,89 @@ void save_schema(
 ResolveSchema load_schema(
     torch::serialize::InputArchive& archive
 ) {
+    // Why: each archive.read(key, t) reuses the destination tensor's
+    // storage rather than allocating fresh. Reading heterogeneous dtypes
+    // (int64 / int32 / float32) into the same tensor then triggers a
+    // storage-size mismatch at libtorch's set_storage_offset (storage of
+    // size 4 used to satisfy itemsize 8, or vice versa).
+    // How to apply: every read uses a fresh local tensor.
+    auto read_i64 = [&](const std::string& key) {
+        torch::Tensor t;
+        archive.read(key, t);
+        return t.item<int64_t>();
+    };
+    auto read_i32 = [&](const std::string& key) {
+        torch::Tensor t;
+        archive.read(key, t);
+        return t.item<int>();
+    };
+    auto read_bool = [&](const std::string& key) -> bool {
+        return read_i32(key) != 0;
+    };
+    auto read_f32 = [&](const std::string& key) {
+        torch::Tensor t;
+        archive.read(key, t);
+        return t.item<float>();
+    };
+    auto read_string = [&](const std::string& prefix) -> std::string {
+        int64_t len = read_i64(prefix + "_len");
+        if (len <= 0) return std::string();
+        torch::Tensor t;
+        archive.read(prefix, t);
+        auto ptr = t.data_ptr<uint8_t>();
+        return std::string(reinterpret_cast<const char*>(ptr), len);
+    };
+
     ResolveSchema schema;
-    torch::Tensor t;
-    archive.read("schema_n_plots", t);
-    schema.n_plots = t.item<int64_t>();
-    archive.read("schema_n_species", t);
-    schema.n_species = t.item<int64_t>();
-    archive.read("schema_n_species_vocab", t);
-    schema.n_species_vocab = t.item<int64_t>();
-    archive.read("schema_has_coordinates", t);
-    schema.has_coordinates = t.item<int>() != 0;
-    archive.read("schema_has_abundance", t);
-    schema.has_abundance = t.item<int>() != 0;
-    archive.read("schema_has_taxonomy", t);
-    schema.has_taxonomy = t.item<int>() != 0;
-    archive.read("schema_n_genera", t);
-    schema.n_genera = t.item<int64_t>();
-    archive.read("schema_n_families", t);
-    schema.n_families = t.item<int64_t>();
-    archive.read("schema_n_genera_vocab", t);
-    schema.n_genera_vocab = t.item<int64_t>();
-    archive.read("schema_n_families_vocab", t);
-    schema.n_families_vocab = t.item<int64_t>();
-    archive.read("schema_track_unknown_fraction", t);
-    schema.track_unknown_fraction = t.item<int>() != 0;
-    archive.read("schema_track_unknown_count", t);
-    schema.track_unknown_count = t.item<int>() != 0;
-    archive.read("schema_n_covariates", t);
-    int64_t n_covariates = t.item<int64_t>();
+    schema.n_plots = read_i64("schema_n_plots");
+    schema.n_species = read_i64("schema_n_species");
+    schema.n_species_vocab = read_i64("schema_n_species_vocab");
+    schema.has_coordinates = read_bool("schema_has_coordinates");
+    schema.has_abundance = read_bool("schema_has_abundance");
+    schema.has_taxonomy = read_bool("schema_has_taxonomy");
+    schema.n_genera = read_i64("schema_n_genera");
+    schema.n_families = read_i64("schema_n_families");
+    schema.n_genera_vocab = read_i64("schema_n_genera_vocab");
+    schema.n_families_vocab = read_i64("schema_n_families_vocab");
+    schema.track_unknown_fraction = read_bool("schema_track_unknown_fraction");
+    schema.track_unknown_count = read_bool("schema_track_unknown_count");
+    int64_t n_covariates = read_i64("schema_n_covariates");
     schema.covariate_names.resize(n_covariates);
-    archive.read("schema_n_targets", t);
-    int64_t n_targets = t.item<int64_t>();
+    for (int64_t i = 0; i < n_covariates; ++i) {
+        // Back-compat: older checkpoints didn't save covariate names.
+        // try_read returns false silently when the key is absent, leaving
+        // the existing empty string in place. Names aren't load-bearing
+        // for model construction (model indexes by count, not name), so
+        // empty-string fallback is safe.
+        torch::Tensor len_t;
+        if (archive.try_read("schema_covariate_" + std::to_string(i) + "_len", len_t)) {
+            int64_t len = len_t.item<int64_t>();
+            if (len > 0) {
+                torch::Tensor name_t;
+                archive.read("schema_covariate_" + std::to_string(i), name_t);
+                auto ptr = name_t.data_ptr<uint8_t>();
+                schema.covariate_names[i] = std::string(reinterpret_cast<const char*>(ptr), len);
+            }
+        }
+    }
+    int64_t n_targets = read_i64("schema_n_targets");
     schema.targets.resize(n_targets);
     for (int64_t i = 0; i < n_targets; ++i) {
         std::string prefix = "schema_target_" + std::to_string(i) + "_";
-        archive.read(prefix + "task", t);
-        schema.targets[i].task = static_cast<TaskType>(t.item<int>());
-        archive.read(prefix + "transform", t);
-        schema.targets[i].transform = static_cast<TransformType>(t.item<int>());
-        archive.read(prefix + "num_classes", t);
-        schema.targets[i].num_classes = t.item<int>();
-        archive.read(prefix + "weight", t);
-        schema.targets[i].weight = t.item<float>();
+        // Back-compat: older checkpoints didn't save target names. Missing
+        // names would collide on register_module("head_") for all targets,
+        // so synthesize a fallback name when absent.
+        torch::Tensor name_len_t;
+        if (archive.try_read(prefix + "name_len", name_len_t)) {
+            schema.targets[i].name = read_string(prefix + "name");
+        }
+        if (schema.targets[i].name.empty()) {
+            schema.targets[i].name = "target_" + std::to_string(i);
+        }
+        schema.targets[i].task = static_cast<TaskType>(read_i32(prefix + "task"));
+        schema.targets[i].transform = static_cast<TransformType>(read_i32(prefix + "transform"));
+        schema.targets[i].num_classes = read_i32(prefix + "num_classes");
+        schema.targets[i].weight = read_f32(prefix + "weight");
     }
     return schema;
 }

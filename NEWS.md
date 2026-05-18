@@ -1,9 +1,16 @@
 # RESOLVE Changelog
 
-## Unreleased
+## v0.5.0 (2026-05-18)
 
 ### New Features
 
+- **Native FuzzyIndex backbone for `WFOBackbone`**: When `resolve_core` is
+  installed, `WFOBackbone` now builds a C++ `FuzzyIndex` (Damerau-Levenshtein,
+  genus-bucketed, case-insensitive) over the WFO names at construction time
+  and routes `_match_fuzzy` through it. The stdlib `difflib` path remains the
+  silent fallback when the native backend is unavailable. Reported
+  `fuzzy_dist` is an integer edit distance on the native path; the legacy
+  `1 - SequenceMatcher.ratio()` semantic is preserved on the difflib path.
 - **Auto-categorical encoding in `from_fast_csv`**: Classification target columns
   whose values are non-numeric (e.g. EUNIS letters `M..V`) are now loaded as
   strings and automatically encoded to nullable `Int64` codes. Integer-string
@@ -15,6 +22,24 @@
   {"Y": 1, "N": 0}}`). Use `None` for the mapping to auto-encode by sorted unique
   value. The encoded mappings are accessible via the new `dataset.categorical_mappings`
   property.
+
+### Internal
+
+- `Trainer.predict()` now batches the forward pass via `_batched_forward`,
+  removing the OOM on large held-out sets for rank-pool / hash / embed modes.
+- "Training complete" is a first-class checkpoint state: `save_checkpoint`
+  takes a `completed: bool` kwarg; resumes that find a completed checkpoint
+  fast-return instead of raising `UnboundLocalError` on an empty epoch range.
+- `_pretrain.py` rebuilt for the pre-padded tuple layout produced by
+  `_build_tensors` (the v3 cache refactor). Adds `MaskedSpeciesCollateWrapper`
+  for pre-padded batches and fixes a latent categoricals slot off-by-one.
+- Dead code removed: `_RankPoolPreparedData` / `RankPoolBatchDataset` /
+  `_rank_pool_collate_fn`, deprecated `track_unknown_count` kwarg, the
+  `ext/wfo.py` rapidfuzz fallback (single algorithm: native FuzzyIndex when
+  available, else difflib).
+- `Trainer._best_state`, `_ema_state`, `_using_gpu_loader` initialized in
+  `__init__`; defensive `hasattr`/`getattr` at the seven call sites removed.
+- `_cv.py` block_size deprecation now uses `warnings.warn(DeprecationWarning)`.
 
 ## v0.4.0 (2025-01-25)
 

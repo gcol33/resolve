@@ -139,9 +139,25 @@ void Trainer::prepare_data(
         continuous_parts.push_back(unknown_count.to(torch::kFloat32).unsqueeze(1));
     }
 
-    // For hash mode, include hash embedding in continuous
+    // For hash mode, include hash embedding in continuous.
+    // Why: DatasetConfig.hash_dim and ModelConfig.hash_dim are independent.
+    // If they disagree, the model's first linear layer is sized for one
+    // value while the trainer concatenates a hash embedding of the other
+    // width, and fit() blows up later with an opaque matmul shape error.
+    // Validate at prepare_data so the failure points at the actual mismatch.
     if (model_->species_encoding() == SpeciesEncodingMode::Hash &&
         !model_->uses_explicit_vector()) {
+        if (hash_embedding.defined() && hash_embedding.numel() > 0) {
+            int64_t data_hash_dim = hash_embedding.size(1);
+            int64_t model_hash_dim = model_->config().hash_dim;
+            if (data_hash_dim != model_hash_dim) {
+                throw std::runtime_error(
+                    "hash_dim mismatch: ModelConfig.hash_dim=" + std::to_string(model_hash_dim) +
+                    " but dataset hash_embedding has " + std::to_string(data_hash_dim) +
+                    " columns. Set DatasetConfig.hash_dim and ModelConfig.hash_dim to the same value."
+                );
+            }
+        }
         push_if_defined(continuous_parts, hash_embedding);
     }
 
@@ -991,17 +1007,25 @@ std::tuple<ResolveModel, Scalers> Trainer::load(
     // Create model with loaded schema
     ResolveModel model(schema, config);
 
-    // Load model weights manually (matching the prefixed save format)
-    for (const auto& pair : model->named_parameters()) {
-        torch::Tensor t;
-        if (archive.try_read("param_" + pair.key(), t)) {
-            pair.value().copy_(t);
+    // Load model weights manually (matching the prefixed save format).
+    // Why: freshly-constructed model parameters are leaf tensors with
+    // requires_grad=true. Calling .copy_() on them directly trips
+    // autograd's check_inplace ("a leaf Variable that requires grad is
+    // being used in an in-place operation"). Mirror PyTorch's pattern of
+    // copying inside torch.no_grad().
+    {
+        torch::NoGradGuard no_grad;
+        for (const auto& pair : model->named_parameters()) {
+            torch::Tensor t;
+            if (archive.try_read("param_" + pair.key(), t)) {
+                pair.value().copy_(t);
+            }
         }
-    }
-    for (const auto& pair : model->named_buffers()) {
-        torch::Tensor t;
-        if (archive.try_read("buffer_" + pair.key(), t)) {
-            pair.value().copy_(t);
+        for (const auto& pair : model->named_buffers()) {
+            torch::Tensor t;
+            if (archive.try_read("buffer_" + pair.key(), t)) {
+                pair.value().copy_(t);
+            }
         }
     }
 

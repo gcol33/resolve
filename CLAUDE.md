@@ -1,8 +1,34 @@
 # RESOLVE - Claude Code Context
 
+## Never skip work on RESOLVE (CRITICAL)
+
+**Do every piece of RESOLVE work fully and properly. Never take shortcuts, never defer "to keep things simple", never drop features to make calling code easier.** When a feature is needed in C++, port it end-to-end (header, cpp impl, CSV loader integration, schema, encoder forward path, checkpoint save/load, nanobind bindings, R bindings, Catch2 tests, smoke verify, docs update) — not "as a follow-up." The more work the better; the longer it takes the better; S+++ modular code quality is the bar.
+
+**Forbidden moves on RESOLVE work:**
+- Dropping a feature from the calling script "for now" so the C++ side doesn't need it (e.g. "C++ has no categoricals so I'll drop the categorical column"). The user explicitly called this out 2026-05-18 as cheating.
+- Stubbing a C++ enum without an implementation behind it (`RankPool`, `Transformer` are existing examples of this anti-pattern; resolve them, don't replicate them).
+- Marking a port as "multi-day, deferred" without an explicit user sign-off on the deferral.
+- Mirroring Python with copy-paste rather than extracting shared C++ helpers.
+- Skipping nanobind/Rcpp bindings, tests, or docs because "the core works."
+
+**Required for every C++ port:** header + cpp impl + CSV/loader integration (if data-side) + Schema/Config updates + encoder forward integration (if model-side) + checkpoint save/load (if stateful) + nanobind bindings + Rcpp bindings + Catch2 unit tests + a smoke-run that exercises the new path end-to-end + update both RESOLVE `CLAUDE.md` "Remaining Work" and paper repo `CLAUDE.md` if the gap was tracked there.
+
+**Why:** 2026-05-18 — proposed dropping the `Dataset` categorical column from the C++ parity run because C++ `RoleMapping` has no `categoricals` field. User: "THEN IMPLEMENT IT TO MAKE THE PYTHON EASIER YOU CHEATER, ALSO MAKE SURE RESOLVE STAYS TOP QUALITY MODULAR S+++ code quality / never ever skip any work on resolve, the more work the better, the longer it takes, the better".
+
+**How to apply:** before any "we could just do X simpler" framing on RESOLVE work, stop. The answer is the full implementation. Surface the actual cost ("this is ~1-2 days of careful C++ work across 9 files"), and proceed.
+
+## Status: C++ engine is THE engine. Python in `src/resolve/{encode,model,train,inference,data}/` is a POC.
+
+> **Read this first before touching anything.** The Python implementation under `src/resolve/{encode,model,train,inference,data}/` was an early proof-of-concept and is *not* a maintained parallel backend. The C++ engine in `src/core/cpp_src/` (Python bindings: `resolve_core`, R bindings: `r/`) is the production engine and the codebase the paper, R package, and CLI all depend on going forward.
+>
+> - **Default to C++ (`resolve_core`) for all new work, paper experiments, benchmarks, and downstream packages.** Do not extend the Python POC; do not add features to it; do not "keep both backends in sync."
+> - The legacy Python pieces remain in-tree only as reference for any C++ feature still being ported (currently: `rank_pool` and `transformer` encoding modes — see "Remaining Work" below). Once those are ported, the Python POC will be removed.
+> - The `src/resolve/backend/` dispatch shim is therefore *also* legacy. The end state is direct use of `resolve_core` from Python and `resolve` (Rcpp) from R, with no Python-side encoder/model/trainer classes.
+> - If a user asks for "the Python API," explain this status and steer them to `resolve_core` unless they have a specific reason to use the POC (e.g., comparing against an in-progress C++ port).
+
 ## Architecture
 
-RESOLVE has a **dual-backend architecture**: a primary standalone C++ engine (libtorch) with thin nanobind/Rcpp language bindings, plus a complete fallback pure-Python/PyTorch implementation. The backend is automatically selected at runtime via `src/resolve/backend/`: C++ if `_resolve_core` is installed, otherwise Python.
+RESOLVE is a **standalone C++ engine** (libtorch) with thin nanobind/Rcpp language bindings. The Python `src/resolve/` package is a legacy POC kept in-tree only for reference during C++ feature ports.
 
 ```
 +------------------------------------------------------------------+
@@ -46,7 +72,7 @@ RESOLVE has a **dual-backend architecture**: a primary standalone C++ engine (li
 1. **Standalone C++ engine** - Complete functionality without any language runtime
 2. **CLI tool** - Train and predict from command line
 3. **Thin bindings** - R/Python wrappers around C++ are just API translations, no logic
-4. **Python fallback** - Full Python/PyTorch implementation for development and environments without C++ build
+4. **Single source of truth** - The C++ engine is the only maintained implementation. Python POC under `src/resolve/` is legacy and will be removed once C++ has feature parity.
 
 ## Paper Project
 
@@ -84,9 +110,9 @@ The research paper using RESOLVE is located at:
 ## Development Philosophy
 
 - Prefer newest tools over safest — use modern, actively developed libraries
-- C++ is the primary backend; Python is a development/fallback backend
-- Backend auto-selection at runtime (no user configuration needed)
+- C++ is the only maintained engine. Python `src/resolve/` is a POC kept only as porting reference.
 - All data processing available in C++ for standalone use (CLI, R, Python bindings)
+- New features go in C++ first. Do not add features to the Python POC.
 
 ## Completed Infrastructure (all phases done)
 

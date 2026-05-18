@@ -1,6 +1,6 @@
 Package: resolve
 Title: Species Composition Prediction via Linear Vector Embeddings
-Version: 0.4.0
+Version: 0.5.0
 Authors@R:
     person("Gilles", "Colling", email = "gilles.colling@uliege.be", role = c("aut", "cre"))
 Description: Predict sample-level outcomes from compositional data (species lists,

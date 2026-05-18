@@ -49,7 +49,7 @@ def create_app(model_path: str, device: str = "cpu"):
     app = FastAPI(
         title="RESOLVE Prediction API",
         description="Compositional data prediction via learned representations",
-        version="0.4.0",
+        version="0.5.0",
     )
 
     class PredictionRequest(BaseModel):

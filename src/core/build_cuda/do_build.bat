@@ -10,8 +10,12 @@ echo VS 18 Community environment loaded
 
 set "SRC_DIR=C:\Users\Gilles Colling\Documents\dev\RESOLVE\src\core"
 set "BUILD_DIR=%SRC_DIR%\build_cuda"
-set "TORCH_DIR=C:\Users\Gilles Colling\.pyenv\pyenv-win\versions\3.12.10\Lib\site-packages\torch\share\cmake\Torch"
-set "PYTHON_EXE=C:\Users\Gilles Colling\.pyenv\pyenv-win\versions\3.12.10\python.exe"
+rem TORCH_DIR / PYTHON_EXE: caller may override before invoking this script.
+rem Mismatched torch versions between build time and runtime cause subtle
+rem ABI breakage (e.g. THPVariable_Wrap segfaults), so consumers using a
+rem project venv should set these to point at their venv's torch.
+if not defined TORCH_DIR set "TORCH_DIR=C:\Users\Gilles Colling\.pyenv\pyenv-win\versions\3.12.10\Lib\site-packages\torch\share\cmake\Torch"
+if not defined PYTHON_EXE set "PYTHON_EXE=C:\Users\Gilles Colling\.pyenv\pyenv-win\versions\3.12.10\python.exe"
 set "NINJA_BIN=C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja"
 set "NINJA=%NINJA_BIN%\ninja.exe"
 set "CMAKE=C:\Program Files\CMake\bin\cmake.exe"
