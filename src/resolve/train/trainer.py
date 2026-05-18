@@ -1481,6 +1481,26 @@ class Trainer(
         return avg_loss, metrics
 
     @torch.no_grad()
+    def _batched_forward(
+        self,
+        continuous_t: torch.Tensor,
+        kwargs: dict,
+    ) -> dict:
+        n = continuous_t.shape[0]
+        bs = max(int(self.batch_size), 1)
+        pred_chunks: dict = {name: [] for name in self.model.target_configs}
+        for start in range(0, n, bs):
+            end = min(start + bs, n)
+            sliced = {
+                k: (v[start:end] if isinstance(v, torch.Tensor) else v)
+                for k, v in kwargs.items()
+            }
+            chunk_preds = self.model(continuous_t[start:end], **sliced)
+            for name, pred in chunk_preds.items():
+                pred_chunks[name].append(pred)
+        return {name: torch.cat(chunks) for name, chunks in pred_chunks.items()}
+
+    @torch.no_grad()
     def predict(
         self,
         dataset: ResolveDataset,
@@ -1626,41 +1646,28 @@ class Trainer(
                     np.stack(cat_arrays, axis=1)
                 ).to(self._device)
 
-        # Forward pass (dispatch based on encoding mode)
-        if self.species_encoding == "transformer":
-            # Batched forward to avoid OOM from O(n^2) attention over full dataset
-            n = continuous_t.shape[0]
-            pred_chunks = {name: [] for name in self.model.target_configs}
-            for start in range(0, n, self.batch_size):
-                end = min(start + self.batch_size, n)
-                chunk_preds = self.model(
-                    continuous_t[start:end], genus_ids=None, family_ids=None,
-                    species_ids=species_ids_t[start:end], species_vector=None,
-                    pool_genus_ids=pool_genus_ids_t[start:end] if pool_genus_ids_t is not None else None,
-                    pool_family_ids=pool_family_ids_t[start:end] if pool_family_ids_t is not None else None,
-                    pool_weights=pool_weights_t[start:end],
-                    pool_mask=pool_mask_t[start:end],
-                    pool_has_cover=pool_has_cover_t[start:end],
-                    categorical_ids=categorical_ids_t[start:end] if categorical_ids_t is not None else None,
-                )
-                for name, pred in chunk_preds.items():
-                    pred_chunks[name].append(pred)
-            preds_raw = {name: torch.cat(chunks) for name, chunks in pred_chunks.items()}
-        elif self.species_encoding == "rank_pool":
-            preds_raw = self.model(
-                continuous_t, genus_ids=None, family_ids=None,
-                species_ids=species_ids_t, species_vector=None,
-                pool_genus_ids=pool_genus_ids_t, pool_family_ids=pool_family_ids_t,
-                pool_weights=pool_weights_t, pool_mask=pool_mask_t,
+        # Forward pass — always batched to avoid OOM on large test sets.
+        # rank_pool/transformer materialize [B, S, D] activations; hash/embed
+        # similarly scale linearly in B. One unified path for all modes.
+        if self.species_encoding in ("rank_pool", "transformer"):
+            forward_kwargs = dict(
+                genus_ids=None, family_ids=None, species_vector=None,
+                species_ids=species_ids_t,
+                pool_genus_ids=pool_genus_ids_t,
+                pool_family_ids=pool_family_ids_t,
+                pool_weights=pool_weights_t,
+                pool_mask=pool_mask_t,
                 pool_has_cover=pool_has_cover_t,
                 categorical_ids=categorical_ids_t,
             )
         else:
-            preds_raw = self.model(
-                continuous_t, genus_t, family_t,
+            forward_kwargs = dict(
+                genus_ids=genus_t, family_ids=family_t,
                 species_ids=species_ids_t, species_vector=species_vector_t,
                 categorical_ids=categorical_ids_t,
             )
+
+        preds_raw = self._batched_forward(continuous_t, forward_kwargs)
 
         # Post-process
         predictions, _ = postprocess_predictions(
