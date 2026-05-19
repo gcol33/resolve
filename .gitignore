@@ -103,7 +103,7 @@ nul
 build_cuda/
 build_cpu/
 build_asan/
-src/core/build_cuda/
+src/core/build_cuda/*
 src/core/build_cpu/
 src/core/build_asan/
 
@@ -118,3 +118,11 @@ src/core/build_asan/
 # Copied C++ headers in R package (CI only)
 r/src/resolve/
 benchmarks/results_*.json
+
+# Load-bearing tracked files inside otherwise-ignored locations.
+# do_build.bat: build script referenced from progress.md (MSVC fix history).
+# launch_build.ps1: documented build entry point in port.md and global CLAUDE.md.
+# fuzzy_index_plan.md: plan implemented by FuzzyIndex C++ + bindings_fuzzy.cpp.
+!src/core/build_cuda/do_build.bat
+!src/core/build_cuda/launch_build.ps1
+!dev_notes/fuzzy_index_plan.md
