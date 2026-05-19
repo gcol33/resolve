@@ -227,14 +227,6 @@ class TestCrossValidation:
             for value in target_metrics.values():
                 assert np.isfinite(value)
 
-    @pytest.mark.xfail(
-        reason=(
-            "Pre-existing bug: _cv.py passes deprecated block_size kwarg "
-            "to SpatialBlockSplitter which no longer accepts it"
-        ),
-        raises=TypeError,
-        strict=True,
-    )
     def test_spatial_cv_3fold(self, dataset: ResolveDataset) -> None:
         trainer = Trainer(
             dataset,
