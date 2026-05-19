@@ -56,6 +56,11 @@ public:
     static SpeciesVocab from_records(
         const std::vector<SpeciesRecord>& records, int min_count = 1);
 
+    // Build from a pre-fit string->id map (1-indexed; UNK at code 0 is
+    // implicit). Used when reusing a training-set vocab on a held-out test
+    // set (see RankPoolEncoder::set_vocabs and ResolveDataset::from_csv_with_schema).
+    static SpeciesVocab from_map(std::unordered_map<std::string, int64_t> species_to_id);
+
     [[nodiscard]] int64_t encode(const std::string& species) const;
     [[nodiscard]] int64_t size() const noexcept { return static_cast<int64_t>(species_to_id_.size()) + 1; }
     [[nodiscard]] bool empty() const noexcept { return species_to_id_.empty(); }
@@ -108,6 +113,17 @@ public:
     [[nodiscard]] int64_t n_families_vocab() const noexcept { return taxonomy_vocab_.n_families(); }
     [[nodiscard]] const SpeciesVocab& species_vocab() const noexcept { return species_vocab_; }
     [[nodiscard]] const TaxonomyVocab& taxonomy_vocab() const noexcept { return taxonomy_vocab_; }
+
+    // Replace the fitted species + taxonomy vocabs with externally-supplied
+    // ones. Requires fit() to have been called first (throws otherwise);
+    // leaves species_to_genus_/species_to_family_ as whatever fit() last set
+    // so transform() can still look up each species's genus/family string
+    // and resolve it through the supplied taxonomy_vocab. Used by
+    // ResolveDataset::from_csv_with_schema for cross-split evaluation.
+    // Does NOT toggle fitted_ — that flag tracks "fit() ran on real records"
+    // and must not be set by a vocab swap (an empty external vocab would
+    // otherwise leave the encoder silently fitted-with-nothing).
+    void set_vocabs(SpeciesVocab species_vocab, TaxonomyVocab taxonomy_vocab);
 
 private:
     SpeciesVocab species_vocab_;

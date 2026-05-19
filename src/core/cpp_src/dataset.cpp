@@ -171,6 +171,58 @@ ResolveDataset ResolveDataset::from_csv(
     return dataset;
 }
 
+ResolveDataset ResolveDataset::from_csv_with_schema(
+    const std::string& header_path,
+    const std::string& species_path,
+    const RoleMapping& roles,
+    const std::vector<TargetSpec>& targets,
+    const ResolveDataset& schema_source,
+    const DatasetConfig& config
+) {
+    ResolveDataset dataset;
+    dataset.config_ = config;
+    dataset.use_external_vocabs_ = true;
+
+    // Copy the source's fitted vocabularies into the new dataset. The
+    // load_*/encode_species paths see use_external_vocabs_=true and skip
+    // their own fit calls, falling back to these pre-populated members for
+    // encoding. Any value not in the source's vocab encodes as 0 (UNK) via
+    // the existing encode paths.
+    dataset.categorical_vocab_ = schema_source.categorical_vocab_;
+    dataset.taxonomy_vocab_ = schema_source.taxonomy_vocab_;
+    dataset.species_vocab_ = schema_source.species_vocab_;
+    dataset.species_to_idx_ = schema_source.species_to_idx_;
+
+    // Classification targets need their class mappings replayed from the
+    // source's class_names so the explicit-mapping branch in load_header_data
+    // is taken (instead of fit_classification_mapping). The caller is not
+    // required to populate TargetSpec.class_mapping; we do it here from
+    // schema_source's target configs.
+    std::vector<TargetSpec> targets_with_mappings = targets;
+    for (auto& spec : targets_with_mappings) {
+        if (spec.task != TaskType::Classification) continue;
+        if (!spec.class_mapping.empty()) continue;  // caller already set one
+        const std::string name = spec.target_name.empty()
+            ? spec.column_name
+            : spec.target_name;
+        for (const auto& src_cfg : schema_source.target_configs_) {
+            if (src_cfg.name != name) continue;
+            for (size_t i = 0; i < src_cfg.class_names.size(); ++i) {
+                if (!src_cfg.class_names[i].empty()) {
+                    spec.class_mapping[src_cfg.class_names[i]] = static_cast<int64_t>(i);
+                }
+            }
+            if (spec.num_classes == 0) spec.num_classes = src_cfg.num_classes;
+            break;
+        }
+    }
+
+    dataset.load_header_data(header_path, roles, targets_with_mappings);
+    dataset.load_species_data(species_path, roles);
+
+    return dataset;
+}
+
 ResolveDataset ResolveDataset::from_species_csv(
     const std::string& species_path,
     const RoleMapping& roles,
@@ -663,7 +715,9 @@ void ResolveDataset::load_header_data(
     // (n_plots, n_categoricals) int64 tensor stored on the dataset. The
     // vocab itself lives on the dataset for save/load.
     if (!categorical_names_resolved.empty()) {
-        categorical_vocab_.fit(categorical_names_resolved, categorical_raw);
+        if (!use_external_vocabs_) {
+            categorical_vocab_.fit(categorical_names_resolved, categorical_raw);
+        }
         categorical_ids_ = categorical_vocab_.encode_batch(
             categorical_names_resolved, categorical_raw);
         schema_.categorical_names = categorical_names_resolved;
@@ -781,7 +835,9 @@ void ResolveDataset::encode_species(
 
     // Fit taxonomy vocabulary
     if (schema_.has_taxonomy) {
-        taxonomy_vocab_.fit(all_records);
+        if (!use_external_vocabs_) {
+            taxonomy_vocab_.fit(all_records);
+        }
         schema_.n_genera = taxonomy_vocab_.n_genera();
         schema_.n_families = taxonomy_vocab_.n_families();
         schema_.n_genera_vocab = taxonomy_vocab_.n_genera();
@@ -795,7 +851,19 @@ void ResolveDataset::encode_species(
             plot_species[plot_id].push_back({rec.species_id, rec.abundance});
         }
     }
-    build_species_vocab(plot_species);
+    if (!use_external_vocabs_) {
+        build_species_vocab(plot_species);
+    } else {
+        // Vocab pre-populated by from_csv_with_schema; just publish sizes
+        // to the schema so downstream model construction reads the right
+        // values. n_species reports the count of fitted species (excluding
+        // the UNK slot at index 0), matching build_species_vocab() which
+        // assigns schema_.n_species = species_counts.size() (also excluding
+        // UNK). n_species_vocab includes UNK.
+        schema_.n_species = static_cast<int64_t>(species_vocab_.size()) - 1;
+        if (schema_.n_species < 0) schema_.n_species = 0;
+        schema_.n_species_vocab = static_cast<int64_t>(species_vocab_.size());
+    }
 
     // Determine n_taxonomy_slots
     int n_taxonomy_slots = config_.top_k;
@@ -969,6 +1037,29 @@ void ResolveDataset::encode_species(
 
         RankPoolEncoder rp_encoder(config_.pool_weighting, /*min_frequency=*/1);
         rp_encoder.fit(all_pool_records);
+        if (use_external_vocabs_) {
+            // from_csv_with_schema path: replace the encoder's freshly-fit
+            // species + taxonomy vocabs with the training-set vocabs that
+            // were copied onto this dataset before load. fit() above is
+            // still useful — it builds species_to_genus_/species_to_family_
+            // from the test records so transform() can look up each species's
+            // genus/family string. Test-only species map to UNK=0 via the
+            // reused species_vocab, which is the correct behaviour at
+            // inference time.
+            // Strip the dataset-level "<UNK>"=>0 sentinel before handing the
+            // map to SpeciesVocab: SpeciesVocab is the 1-indexed map with an
+            // implicit UNK at 0, so including a literal "<UNK>"=>0 entry would
+            // inflate n_species_vocab by one on the test split (encoder reports
+            // species_to_id_.size()+1) and desync it from the train split.
+            std::unordered_map<std::string, int64_t> sp_map;
+            sp_map.reserve(species_to_idx_.size());
+            for (const auto& [name, id] : species_to_idx_) {
+                if (name == "<UNK>" || id == 0) continue;
+                sp_map.emplace(name, id);
+            }
+            auto sv = SpeciesVocab::from_map(std::move(sp_map));
+            rp_encoder.set_vocabs(std::move(sv), taxonomy_vocab_);
+        }
         auto encoded = rp_encoder.transform(all_pool_records, plot_ids_,
                                             config_.pool_species_cap);
 

@@ -149,6 +149,12 @@ int64_t SpeciesVocab::encode(const std::string& species) const {
     return it != species_to_id_.end() ? it->second : 0;
 }
 
+SpeciesVocab SpeciesVocab::from_map(std::unordered_map<std::string, int64_t> species_to_id) {
+    SpeciesVocab vocab;
+    vocab.species_to_id_ = std::move(species_to_id);
+    return vocab;
+}
+
 // =============================================================================
 // Shared helper: build taxonomy vocab and species-to-genus/family maps
 // =============================================================================
@@ -187,6 +193,27 @@ void RankPoolEncoder::fit(const std::vector<SpeciesRecord>& records) {
     species_vocab_ = SpeciesVocab::from_records(records, min_frequency_);
     build_taxonomy_maps(records, taxonomy_vocab_, species_to_genus_, species_to_family_);
     fitted_ = true;
+}
+
+void RankPoolEncoder::set_vocabs(SpeciesVocab species_vocab, TaxonomyVocab taxonomy_vocab) {
+    // Why: only swap the vocabs in place — do NOT set fitted_=true here.
+    // The previous behaviour silently fitted the encoder against whatever
+    // (possibly empty) vocab the caller handed in, masking a missing fit()
+    // upstream. The current invariant is "fit() with real records is the
+    // only thing that flips fitted_". from_csv_with_schema follows that
+    // ordering: fit() runs first to populate species_to_genus_/_family_
+    // from the test records (transform() needs those for the genus/family
+    // string lookup), then set_vocabs swaps the species + taxonomy vocab to
+    // the training-set ones. A future caller that skips fit() will hit the
+    // "must be fit before transform" error in transform(), which is the
+    // correct failure mode for an unfit encoder.
+    if (!fitted_) {
+        throw std::runtime_error(
+            "RankPoolEncoder::set_vocabs called before fit(); call fit() first so "
+            "species_to_genus_/_family_ are populated before swapping vocabs");
+    }
+    species_vocab_ = std::move(species_vocab);
+    taxonomy_vocab_ = std::move(taxonomy_vocab);
 }
 
 // Helper: compute a single weight for one species entry

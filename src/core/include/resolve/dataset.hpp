@@ -96,6 +96,31 @@ public:
         const DatasetConfig& config = DatasetConfig{}
     );
 
+    // Load from two CSV files, reusing the vocabularies + classification class
+    // mappings from `schema_source` instead of fitting fresh ones. Any string
+    // value not seen during the source's fit is mapped to the reserved UNK
+    // slot (code 0) by the existing encode paths (CategoricalVocab::encode_batch,
+    // TaxonomyVocab::encode_genus/encode_family, species_to_idx_ fallback). The
+    // resulting dataset is therefore safe to feed to a Predictor that was
+    // trained on `schema_source` — its species_ids / categorical_ids / pool_*
+    // tensors live in the same vocab namespace as the training data.
+    //
+    // Required for cross-split workflows (leave-one-dataset-out, sample
+    // efficiency, transfer): the training set's vocab must be reused when
+    // building the held-out evaluation set, otherwise the model's lookup
+    // tables are indexed with the wrong namespace.
+    //
+    // Classification target class mappings come from `schema_source` too —
+    // the caller does not need to populate TargetSpec.class_mapping.
+    static ResolveDataset from_csv_with_schema(
+        const std::string& header_path,
+        const std::string& species_path,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const ResolveDataset& schema_source,
+        const DatasetConfig& config = DatasetConfig{}
+    );
+
     // Load from single CSV file with species data only (header data inferred)
     static ResolveDataset from_species_csv(
         const std::string& species_path,
@@ -222,6 +247,11 @@ private:
     std::vector<std::string> species_vocab_;
     std::unordered_map<std::string, int64_t> species_to_idx_;
     TaxonomyVocab taxonomy_vocab_;
+
+    // When true, the load_*/encode_species paths skip vocab fitting and use
+    // the pre-populated categorical_vocab_ / taxonomy_vocab_ / species_vocab_
+    // members. Set by from_csv_with_schema; never set by from_csv.
+    bool use_external_vocabs_ = false;
 
     // Target configurations
     std::vector<TargetConfig> target_configs_;

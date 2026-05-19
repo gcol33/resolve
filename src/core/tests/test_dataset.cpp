@@ -347,6 +347,276 @@ TEST_CASE("ResolveDataset sparse mode", "[dataset]") {
     }
 }
 
+// =============================================================================
+// ResolveDataset::from_csv_with_schema — cross-split vocab reuse
+// =============================================================================
+//
+// Recovery test for the cross-split factory. Builds a train CSV pair and a
+// test CSV pair where the test set shares some species/categorical/taxonomy/
+// class values with train and introduces some new ones. Loads the train set
+// with the regular factory, then loads the test set against the train's
+// fitted vocabularies via from_csv_with_schema. Asserts:
+//
+//   - Shared species: test species_ids match the train IDs for the same name
+//     (vocab namespace alignment — the whole point of the feature).
+//   - New (test-only) species: encoded as 0 (UNK).
+//   - Shared categorical values: same code as train.
+//   - New categorical values: encoded as 0 (UNK).
+//   - Test-set species with genus/family in the train vocab: nonzero
+//     genus_id / family_id matching train.
+//   - Test-set species with genus/family unseen in training: 0.
+//   - Inherited classification class mapping: a test row with a shared label
+//     gets the same class index; a test row with an unseen label is dropped
+//     (existing missing-target row-drop path; documented as the contract).
+//
+// Uses Embed mode + top_k_species=1 so species_ids[i][0] is the (only)
+// species encoded for plot i and we can compare it directly against the
+// train mapping by name.
+
+TEST_CASE("ResolveDataset::from_csv_with_schema reuses train vocab + class "
+          "mapping on a held-out set",
+          "[dataset][cross_split]") {
+    // Train fixture: 4 plots, each with exactly one species so species_ids
+    // is unambiguous. region in {north,south,east}. habitat in {forest,grass}.
+    TempFile train_header(
+        "plot_id,region,habitat\n"
+        "T0,north,forest\n"
+        "T1,south,grass\n"
+        "T2,east,forest\n"
+        "T3,north,grass\n"
+    );
+    TempFile train_species(
+        "plot_id,species,cover,genus,family\n"
+        "T0,sp_a,1.0,gen_x,fam_x\n"
+        "T1,sp_b,1.0,gen_y,fam_y\n"
+        "T2,sp_c,1.0,gen_x,fam_x\n"
+        "T3,sp_train_only,1.0,gen_y,fam_y\n"
+    );
+
+    // Test fixture: 5 plots.
+    //   E0: sp_a (shared)         region=north (shared)   habitat=forest (shared)
+    //   E1: sp_b (shared)         region=west  (new -> 0) habitat=grass  (shared)
+    //   E2: sp_test_only (new)    region=north (shared)   habitat=grass  (shared)
+    //                             species genus/family also test-only.
+    //   E3: sp_a (shared)         region=north            habitat=desert (unseen
+    //                             -> row dropped by missing-target filter)
+    //   E4: sp_c (shared, train genus/family) region=south (shared) habitat=forest
+    TempFile test_header(
+        "plot_id,region,habitat\n"
+        "E0,north,forest\n"
+        "E1,west,grass\n"
+        "E2,north,grass\n"
+        "E3,north,desert\n"
+        "E4,south,forest\n"
+    );
+    TempFile test_species(
+        "plot_id,species,cover,genus,family\n"
+        "E0,sp_a,1.0,gen_x,fam_x\n"
+        "E1,sp_b,1.0,gen_y,fam_y\n"
+        "E2,sp_test_only,1.0,gen_new,fam_new\n"
+        "E3,sp_a,1.0,gen_x,fam_x\n"
+        "E4,sp_c,1.0,gen_x,fam_x\n"
+    );
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id";
+    roles.species_id = "species";
+    roles.abundance = "cover";
+    roles.genus = "genus";
+    roles.family = "family";
+    roles.categoricals = {"region"};
+
+    std::vector<TargetSpec> targets = {
+        TargetSpec::classification("habitat", /*num_classes=*/0)
+    };
+
+    DatasetConfig config;
+    config.species_encoding = SpeciesEncodingMode::Embed;
+    config.top_k_species = 1;  // one species per plot -> species_ids[i][0] is it
+    config.top_k = 1;
+    config.use_taxonomy = true;
+    config.track_unknown_fraction = false;
+    config.track_unknown_count = false;
+
+    auto train_ds = ResolveDataset::from_csv(
+        train_header.path(), train_species.path(), roles, targets, config);
+
+    // Train sanity: 4 plots loaded.
+    REQUIRE(train_ds.n_plots() == 4);
+    REQUIRE(train_ds.schema().categorical_names.size() == 1);
+    REQUIRE(train_ds.schema().categorical_names[0] == "region");
+
+    // Extract train IDs by name so we can later compare against test IDs.
+    auto train_species_id = [&](const std::string& name) -> int64_t {
+        const auto& v = train_ds.species_vocab();
+        for (size_t i = 0; i < v.size(); ++i) {
+            if (v[i] == name) return static_cast<int64_t>(i);
+        }
+        return -1;  // sentinel: not found
+    };
+    const int64_t id_sp_a = train_species_id("sp_a");
+    const int64_t id_sp_b = train_species_id("sp_b");
+    const int64_t id_sp_c = train_species_id("sp_c");
+    REQUIRE(id_sp_a > 0);
+    REQUIRE(id_sp_b > 0);
+    REQUIRE(id_sp_c > 0);
+
+    const auto& train_cat_vocab = train_ds.categorical_vocab();
+    const int64_t code_north = train_cat_vocab.encode("region", "north");
+    const int64_t code_south = train_cat_vocab.encode("region", "south");
+    const int64_t code_east  = train_cat_vocab.encode("region", "east");
+    REQUIRE(code_north > 0);
+    REQUIRE(code_south > 0);
+    REQUIRE(code_east  > 0);
+
+    const int64_t gen_x = train_ds.taxonomy_vocab().encode_genus("gen_x");
+    const int64_t gen_y = train_ds.taxonomy_vocab().encode_genus("gen_y");
+    const int64_t fam_x = train_ds.taxonomy_vocab().encode_family("fam_x");
+    const int64_t fam_y = train_ds.taxonomy_vocab().encode_family("fam_y");
+    REQUIRE(gen_x > 0);
+    REQUIRE(gen_y > 0);
+    REQUIRE(fam_x > 0);
+    REQUIRE(fam_y > 0);
+
+    // Load test set against the train schema.
+    auto test_ds = ResolveDataset::from_csv_with_schema(
+        test_header.path(), test_species.path(), roles, targets,
+        train_ds, config);
+
+    // E3 (habitat=desert) is the only row with a label unseen in train. The
+    // explicit-mapping branch drops unmapped rows the same way it drops NA
+    // targets, so the test set keeps 4 of 5 plots.
+    SECTION("rows with unseen classification labels are dropped") {
+        REQUIRE(test_ds.n_plots() == 4);
+        const auto& pids = test_ds.plot_ids();
+        for (const auto& pid : pids) {
+            REQUIRE(pid != "E3");
+        }
+    }
+
+    // Map plot_id -> row index for direct lookups (header CSV order is the
+    // order of plot_ids_, but row-dropping may shift indices; build a map).
+    auto pid_to_row = [&]() {
+        std::unordered_map<std::string, int64_t> m;
+        const auto& pids = test_ds.plot_ids();
+        for (size_t i = 0; i < pids.size(); ++i) {
+            m[pids[i]] = static_cast<int64_t>(i);
+        }
+        return m;
+    }();
+
+    SECTION("shared species encode to the same IDs as in train") {
+        const auto& sp_ids = test_ds.species_ids();
+        REQUIRE(sp_ids.defined());
+        REQUIRE(sp_ids.size(0) == test_ds.n_plots());
+        REQUIRE(sp_ids.size(1) == 1);
+        auto acc = sp_ids.accessor<int64_t, 2>();
+
+        REQUIRE(acc[pid_to_row.at("E0")][0] == id_sp_a);
+        REQUIRE(acc[pid_to_row.at("E1")][0] == id_sp_b);
+        REQUIRE(acc[pid_to_row.at("E4")][0] == id_sp_c);
+    }
+
+    SECTION("test-only species encode to UNK=0") {
+        const auto& sp_ids = test_ds.species_ids();
+        auto acc = sp_ids.accessor<int64_t, 2>();
+        // E2 carries sp_test_only — never seen by the train fit.
+        REQUIRE(acc[pid_to_row.at("E2")][0] == 0);
+    }
+
+    SECTION("shared categorical values match train codes; new -> UNK=0") {
+        const auto& cat_ids = test_ds.categorical_ids();
+        REQUIRE(cat_ids.defined());
+        REQUIRE(cat_ids.size(0) == test_ds.n_plots());
+        REQUIRE(cat_ids.size(1) == 1);
+        auto acc = cat_ids.accessor<int64_t, 2>();
+
+        // E0 (north), E2 (north), E4 (south) share with train.
+        REQUIRE(acc[pid_to_row.at("E0")][0] == code_north);
+        REQUIRE(acc[pid_to_row.at("E2")][0] == code_north);
+        REQUIRE(acc[pid_to_row.at("E4")][0] == code_south);
+        // E1 (west) is unseen in train -> UNK.
+        REQUIRE(acc[pid_to_row.at("E1")][0] == 0);
+
+        // Vocab itself is unchanged on the test dataset (still the train fit).
+        REQUIRE(test_ds.categorical_vocab().vocab_size("region") ==
+                train_cat_vocab.vocab_size("region"));
+    }
+
+    SECTION("shared taxonomy resolves through the train vocab; new -> 0") {
+        const auto& g_ids = test_ds.genus_ids();
+        const auto& f_ids = test_ds.family_ids();
+        REQUIRE(g_ids.defined());
+        REQUIRE(f_ids.defined());
+        REQUIRE(g_ids.size(0) == test_ds.n_plots());
+        REQUIRE(g_ids.size(1) == 1);  // top_k = 1
+        auto ga = g_ids.accessor<int64_t, 2>();
+        auto fa = f_ids.accessor<int64_t, 2>();
+
+        // E0 sp_a -> gen_x/fam_x (shared with train)
+        REQUIRE(ga[pid_to_row.at("E0")][0] == gen_x);
+        REQUIRE(fa[pid_to_row.at("E0")][0] == fam_x);
+        // E1 sp_b -> gen_y/fam_y (shared)
+        REQUIRE(ga[pid_to_row.at("E1")][0] == gen_y);
+        REQUIRE(fa[pid_to_row.at("E1")][0] == fam_y);
+        // E4 sp_c -> gen_x/fam_x (shared via train sp_c row)
+        REQUIRE(ga[pid_to_row.at("E4")][0] == gen_x);
+        REQUIRE(fa[pid_to_row.at("E4")][0] == fam_x);
+        // E2 sp_test_only -> gen_new/fam_new (NOT in train vocab)
+        REQUIRE(ga[pid_to_row.at("E2")][0] == 0);
+        REQUIRE(fa[pid_to_row.at("E2")][0] == 0);
+    }
+
+    SECTION("inherited classification class mapping aligns with train") {
+        // Both train and test see "forest" and "grass". Class indices must be
+        // identical across the two datasets so the trained head's softmax is
+        // indexed correctly when predicting the test set.
+        const auto& train_tgt = train_ds.targets().at("habitat");
+        const auto& test_tgt  = test_ds.targets().at("habitat");
+        REQUIRE(train_tgt.dtype() == torch::kLong);
+        REQUIRE(test_tgt.dtype()  == torch::kLong);
+
+        // Pick a known "forest" plot in each split and verify same code.
+        // Train T0 = forest. Test E0 = forest.
+        auto train_acc = train_tgt.accessor<int64_t, 1>();
+        auto test_acc  = test_tgt.accessor<int64_t, 1>();
+
+        auto train_row_of = [&](const std::string& pid) -> int64_t {
+            const auto& pids = train_ds.plot_ids();
+            for (size_t i = 0; i < pids.size(); ++i) {
+                if (pids[i] == pid) return static_cast<int64_t>(i);
+            }
+            return -1;
+        };
+
+        const int64_t forest_code = train_acc[train_row_of("T0")];
+        const int64_t grass_code  = train_acc[train_row_of("T1")];
+        REQUIRE(forest_code != grass_code);
+
+        REQUIRE(test_acc[pid_to_row.at("E0")] == forest_code);  // forest
+        REQUIRE(test_acc[pid_to_row.at("E1")] == grass_code);   // grass
+        REQUIRE(test_acc[pid_to_row.at("E2")] == grass_code);   // grass
+        REQUIRE(test_acc[pid_to_row.at("E4")] == forest_code);  // forest
+
+        // The TargetConfig on the schema carries the train class_names so
+        // num_classes round-trips identically.
+        REQUIRE(test_ds.schema().targets.size() == 1);
+        REQUIRE(test_ds.schema().targets[0].num_classes ==
+                train_ds.schema().targets[0].num_classes);
+        REQUIRE(test_ds.schema().targets[0].class_names ==
+                train_ds.schema().targets[0].class_names);
+    }
+
+    SECTION("species vocab size unchanged — no test-only species added") {
+        // Reused vocab must report identical species counts on both splits.
+        // (Catches regressions where from_csv_with_schema accidentally extends
+        // the vocab with test-only species.)
+        REQUIRE(test_ds.schema().n_species == train_ds.schema().n_species);
+        REQUIRE(test_ds.schema().n_species_vocab ==
+                train_ds.schema().n_species_vocab);
+    }
+}
+
 TEST_CASE("ResolveDataset classification target", "[dataset]") {
     TempFile csv(
         "plot_id,species,habitat\n"

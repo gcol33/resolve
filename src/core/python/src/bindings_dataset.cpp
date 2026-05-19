@@ -32,6 +32,20 @@ void register_dataset(nb::module_& m) {
                     nb::arg("targets"),
                     nb::arg("config") = resolve::DatasetConfig{},
                     "Load dataset from header CSV and species CSV files")
+        .def_static("from_csv_with_schema",
+                    &resolve::ResolveDataset::from_csv_with_schema,
+                    nb::arg("header_path"),
+                    nb::arg("species_path"),
+                    nb::arg("roles"),
+                    nb::arg("targets"),
+                    nb::arg("schema_source"),
+                    nb::arg("config") = resolve::DatasetConfig{},
+                    "Load dataset reusing the categorical / taxonomy / species "
+                    "vocabularies and classification class mappings from "
+                    "`schema_source`. Use for cross-split workflows (leave-one-"
+                    "dataset-out, sample efficiency, transfer) where the test "
+                    "set must be encoded against the training set's vocab so "
+                    "model lookup tables are indexed correctly.")
         .def_static("from_species_csv", &resolve::ResolveDataset::from_species_csv,
                     nb::arg("species_path"),
                     nb::arg("roles"),
