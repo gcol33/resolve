@@ -30,8 +30,17 @@ public:
         torch::Device device = torch::kCPU
     );
 
-    // Load from saved checkpoint
-    static Predictor load(const std::string& path, torch::Device device = torch::kCPU);
+    // Load from saved checkpoint.
+    // vram_fraction caps the PyTorch CUDA caching allocator on the target
+    // device before model weights are uploaded; matches TrainConfig's default
+    // (0.80) so inference also leaves headroom for the desktop on Windows.
+    // Set to 1.0 on dedicated inference servers to use all VRAM. Ignored
+    // when device is CPU.
+    static Predictor load(
+        const std::string& path,
+        torch::Device device = torch::kCPU,
+        float vram_fraction = 0.80f
+    );
 
     // Predict on a ResolveDataset (preferred API)
     ResolvePredictions predict(

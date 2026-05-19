@@ -22,6 +22,7 @@ add_executable(resolve_tests
     test_species_encoders.cpp
     test_fuzzy.cpp
     test_categorical.cpp
+    test_gpu.cpp
 )
 
 # Add CUDA library directory if CUDA is available

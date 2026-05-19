@@ -471,6 +471,15 @@ struct TrainConfig {
     // CUDA performance optimizations
     bool cudnn_benchmark = true;        // Auto-tune cuDNN algorithms (best for fixed input sizes)
     bool allow_tf32 = true;             // Allow TF32 on Ampere+ GPUs (faster matmuls, ~0.1% precision loss)
+
+    // Fraction of GPU VRAM the PyTorch caching allocator may use on the
+    // training device. 0.80 (default) keeps ~20% headroom so the Windows
+    // desktop / GUI / other GPU apps stay responsive while RESOLVE trains.
+    // The Windows WDDM driver spills overflowing VRAM allocations into shared
+    // system memory, which hangs the whole desktop under load — capping
+    // PyTorch's allocator prevents that. Set to 1.0 on dedicated training
+    // servers to use all available VRAM. Applied in Trainer::fit().
+    float vram_fraction = 0.80f;
 };
 
 // Batch of data for training/inference

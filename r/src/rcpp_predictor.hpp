@@ -11,9 +11,14 @@
 
 class RPredictor {
 public:
-    static RPredictor load(std::string path, std::string device = "cpu") {
+    static RPredictor load(
+        std::string path,
+        std::string device = "cpu",
+        double vram_fraction = 0.80
+    ) {
         torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
-        return RPredictor(resolve::Predictor::load(path, dev));
+        return RPredictor(resolve::Predictor::load(
+            path, dev, static_cast<float>(vram_fraction)));
     }
 
     List predict(

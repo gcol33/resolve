@@ -29,7 +29,8 @@ int train_command(
     int patience,
     float lr,
     float test_size,
-    bool use_cuda
+    bool use_cuda,
+    float vram_fraction
 ) {
     using namespace resolve;
 
@@ -139,6 +140,7 @@ int train_command(
     train_config.max_epochs = max_epochs;
     train_config.patience = patience;
     train_config.lr = lr;
+    train_config.vram_fraction = vram_fraction;
 
     if (use_cuda && torch::cuda::is_available()) {
         train_config.device = torch::kCUDA;

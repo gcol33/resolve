@@ -94,6 +94,7 @@ try:
         VAEPretrainResult,
         VAEPretrainer,
     )
+    from ._resolve_core import set_vram_fraction
 except ImportError as e:
     raise ImportError(
         f"Failed to import resolve_core C++ extension: {e}\n"
@@ -177,4 +178,6 @@ __all__ = [
     "VAEConfig",
     "VAEPretrainResult",
     "VAEPretrainer",
+    # GPU memory management
+    "set_vram_fraction",
 ]

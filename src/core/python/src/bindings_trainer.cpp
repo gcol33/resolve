@@ -75,10 +75,10 @@ void register_trainer(nb::module_& m) {
                 self.save(path, &metadata);
             }
         }, nb::arg("path"), nb::arg("metadata") = nb::none())
-        .def_static("load", [](const std::string& path, const std::string& device) {
+        .def_static("load", [](const std::string& path, const std::string& device, float vram_fraction) {
             torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
-            return resolve::Trainer::load(path, dev);
-        }, nb::arg("path"), nb::arg("device") = "cpu")
+            return resolve::Trainer::load(path, dev, vram_fraction);
+        }, nb::arg("path"), nb::arg("device") = "cpu", nb::arg("vram_fraction") = 0.80f)
         .def_prop_ro("model", [](resolve::Trainer& self) -> resolve::ResolveModel { return self.model(); })
         .def_prop_ro("scalers", [](const resolve::Trainer& self) { return resolve::Scalers(self.scalers()); })
         .def_prop_ro("config", [](const resolve::Trainer& self) { return resolve::TrainConfig(self.config()); })
@@ -148,10 +148,10 @@ void register_trainer(nb::module_& m) {
             torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
             new (self) resolve::Predictor(model, scalers, dev);
         }, nb::arg("model"), nb::arg("scalers"), nb::arg("device") = "cpu")
-        .def_static("load", [](const std::string& path, const std::string& device) {
+        .def_static("load", [](const std::string& path, const std::string& device, float vram_fraction) {
             torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
-            return resolve::Predictor::load(path, dev);
-        }, nb::arg("path"), nb::arg("device") = "cpu")
+            return resolve::Predictor::load(path, dev, vram_fraction);
+        }, nb::arg("path"), nb::arg("device") = "cpu", nb::arg("vram_fraction") = 0.80f)
         .def("predict", [](resolve::Predictor& self,
                           nb::object coordinates_obj,
                           nb::object covariates_obj,

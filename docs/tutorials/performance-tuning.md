@@ -163,6 +163,46 @@ For smaller batch sizes, the transfer overhead is negligible and prefetching add
 
 For datasets that fit in GPU memory, RESOLVE can load the entire dataset onto the GPU once, eliminating all CPU-to-GPU transfers during training. This is handled automatically via `GPUTensorLoader` when CUDA is available and the dataset is small enough.
 
+### Limiting VRAM Usage
+
+RESOLVE caps the PyTorch CUDA caching allocator at **80% of device VRAM by
+default** via `TrainConfig.vram_fraction`. The cap exists because on Windows
+the WDDM driver spills allocations beyond physical VRAM into shared system
+memory, which freezes the desktop under load. Leaving headroom keeps the
+compositor, browser, and other GPU clients responsive while training runs.
+
+```python
+from resolve_core import TrainConfig
+
+cfg = TrainConfig()
+cfg.vram_fraction = 0.80  # default — workstation
+cfg.vram_fraction = 1.0   # uncapped — dedicated training server
+```
+
+The same cap is applied automatically when `Predictor.load` runs on a CUDA
+device, with the same default. CLI exposes `--vram-fraction FLOAT` for both
+`resolve train` and `resolve predict`.
+
+To apply the cap independently of either (e.g., before constructing any
+RESOLVE object):
+
+```python
+import resolve_core
+resolve_core.set_vram_fraction(0.80)
+```
+
+!!! note "When to relax the cap"
+    On a dedicated training server, set `vram_fraction = 1.0` so the
+    allocator can use all available VRAM. The default is tuned for
+    workstations where the desktop must stay responsive.
+
+!!! note "Compute saturation"
+    The cap addresses VRAM-exhaustion hangs only. If the desktop becomes
+    sluggish (rather than fully freezing) while RESOLVE trains, that's GPU
+    *compute* saturation, not memory. See
+    `dev_notes/compute_cap_plan.md` for the design path on a compute cap
+    (CUDA Green Contexts) — not currently implemented.
+
 ## Early Stopping
 
 Early stopping monitors validation loss and halts training when the model stops improving.

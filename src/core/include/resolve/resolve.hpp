@@ -15,5 +15,6 @@
 #include "resolve/loss.hpp"
 #include "resolve/pretraining.hpp"
 #include "resolve/vae.hpp"
+#include "resolve/gpu.hpp"
 
 // VERSION is defined in types.hpp

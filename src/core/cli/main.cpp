@@ -33,7 +33,8 @@ int train_command(
     int patience,
     float lr,
     float test_size,
-    bool use_cuda
+    bool use_cuda,
+    float vram_fraction
 );
 
 int predict_command(
@@ -48,7 +49,8 @@ int predict_command(
     const std::optional<std::string>& lat_col,
     const std::optional<std::string>& genus_col,
     const std::optional<std::string>& family_col,
-    bool use_cuda
+    bool use_cuda,
+    float vram_fraction
 );
 
 int info_command(const std::string& model_path);
@@ -86,6 +88,10 @@ Train Options:
   --lr FLOAT             Learning rate (default: 0.001)
   --test-size FLOAT      Test split ratio (default: 0.2)
   --cuda                 Use CUDA if available
+  --vram-fraction FLOAT  Fraction of GPU VRAM the PyTorch caching allocator may
+                         use (default: 0.80). Keeps the Windows desktop / GUI
+                         responsive on workstations by leaving ~20% headroom.
+                         Set to 1.0 on dedicated training servers.
 
 Predict Options:
   --model PATH           Path to trained model
@@ -100,6 +106,9 @@ Predict Options:
   --genus COL            Column name for genus (optional)
   --family COL           Column name for family (optional)
   --cuda                 Use CUDA if available
+  --vram-fraction FLOAT  Fraction of GPU VRAM the PyTorch caching allocator may
+                         use (default: 0.80). Set to 1.0 on dedicated inference
+                         servers.
 
 Info Options:
   --model PATH           Path to trained model
@@ -211,7 +220,8 @@ int main(int argc, char* argv[]) {
             std::stoi(args.get("--patience", "50")),
             std::stof(args.get("--lr", "0.001")),
             std::stof(args.get("--test-size", "0.2")),
-            args.has("--cuda")
+            args.has("--cuda"),
+            std::stof(args.get("--vram-fraction", "0.80"))
         );
     }
     else if (cmd == "predict") {
@@ -227,7 +237,8 @@ int main(int argc, char* argv[]) {
             args.get_optional("--lat"),
             args.get_optional("--genus"),
             args.get_optional("--family"),
-            args.has("--cuda")
+            args.has("--cuda"),
+            std::stof(args.get("--vram-fraction", "0.80"))
         );
     }
     else if (cmd == "info") {

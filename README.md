@@ -183,6 +183,49 @@ from resolve.config import LARGE_MODEL, MEDIUM_MODEL
 trainer = Trainer(**LARGE_MODEL.to_trainer_kwargs(dataset))
 ```
 
+## Limiting GPU VRAM usage
+
+RESOLVE caps the PyTorch CUDA caching allocator at **80% of device VRAM by
+default**. The cap exists because the Windows WDDM driver spills allocations
+beyond physical VRAM into shared system memory, which freezes the whole
+desktop under load — leaving 20% headroom keeps the compositor, browser, and
+other GPU clients responsive while training runs.
+
+```python
+from resolve_core import TrainConfig
+
+cfg = TrainConfig()
+cfg.vram_fraction = 0.80  # default
+
+# Dedicated training server: use all VRAM
+cfg.vram_fraction = 1.0
+```
+
+CLI:
+
+```bash
+resolve train --vram-fraction 1.0 ...    # uncapped (server)
+resolve predict --vram-fraction 0.80 ... # default
+```
+
+R:
+
+```r
+trainer <- Trainer$new(model, list(
+    batch_size = 4096L,
+    device = "cuda",
+    vram_fraction = 0.80  # default
+))
+```
+
+The cap applies to both `Trainer` and `Predictor::load`. To apply it
+independently of either (e.g., before loading any model):
+
+```python
+import resolve_core
+resolve_core.set_vram_fraction(0.80)  # affects current CUDA device
+```
+
 ## Documentation
 
 - **[Getting Started](https://gillescolling.com/resolve/tutorials/quickstart/)**: Complete workflow walkthrough

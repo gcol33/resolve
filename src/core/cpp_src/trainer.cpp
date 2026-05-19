@@ -12,6 +12,7 @@
 #include "resolve/dataset.hpp"
 #include "resolve/utils.hpp"
 #include "resolve/checkpoint.hpp"
+#include "resolve/gpu.hpp"
 
 #ifdef RESOLVE_HAS_CUDA
 #include "resolve/cuda/feature_hash.hpp"
@@ -798,11 +799,18 @@ TrainResult Trainer::fit() {
         throw std::runtime_error("Data must be prepared before training");
     }
 
-    // Pre-cache all data on GPU for faster training
-    cache_data_to_gpu();
-
-    // Apply CUDA performance optimizations
+    // Apply CUDA performance optimizations and the VRAM cap BEFORE
+    // cache_data_to_gpu(), so the allocator limit is in place before any
+    // large device allocation. On Windows + WDDM, allocations beyond the
+    // physical VRAM spill into shared system memory and hang the whole
+    // desktop; the cap prevents that.
     if (config_.device.is_cuda()) {
+        set_vram_fraction(
+            static_cast<double>(config_.vram_fraction),
+            config_.device.index(),
+            config_.log
+        );
+
         // cuDNN benchmark mode: auto-tunes algorithms for fixed input sizes
         // First batch is slower due to tuning, subsequent batches are faster
         at::globalContext().setBenchmarkCuDNN(config_.cudnn_benchmark);
@@ -813,6 +821,10 @@ TrainResult Trainer::fit() {
         at::globalContext().setAllowTF32CuBLAS(config_.allow_tf32);
         at::globalContext().setAllowTF32CuDNN(config_.allow_tf32);
     }
+
+    // Pre-cache all data on GPU for faster training (post-cap so it respects
+    // the allocator fraction).
+    cache_data_to_gpu();
 
     // Initialize AMP (only enabled on CUDA devices)
     amp_enabled_ = config_.use_amp && config_.device.is_cuda();
@@ -1068,8 +1080,19 @@ void Trainer::save(const std::string& path, const RunMetadata* metadata) const {
 
 std::tuple<ResolveModel, Scalers, CategoricalVocab> Trainer::load(
     const std::string& path,
-    torch::Device device
+    torch::Device device,
+    float vram_fraction
 ) {
+    // Apply VRAM cap BEFORE any device allocation so model weights and
+    // buffers respect the limit on first upload. Matches the cap applied
+    // in Trainer::fit; no-ops on CPU or fraction >= 1.0.
+    if (device.is_cuda()) {
+        set_vram_fraction(
+            static_cast<double>(vram_fraction),
+            device.index()
+        );
+    }
+
     torch::serialize::InputArchive archive;
     archive.load_from(path);
 

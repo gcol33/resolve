@@ -20,7 +20,8 @@ int predict_command(
     const std::optional<std::string>& lat_col,
     const std::optional<std::string>& genus_col,
     const std::optional<std::string>& family_col,
-    bool use_cuda
+    bool use_cuda,
+    float vram_fraction
 ) {
     using namespace resolve;
 
@@ -48,7 +49,7 @@ int predict_command(
         std::cout << "Using CPU" << std::endl;
     }
 
-    Predictor predictor = Predictor::load(model_path, device);
+    Predictor predictor = Predictor::load(model_path, device, vram_fraction);
     const auto& schema = predictor.model()->schema();
 
     // Set up role mapping

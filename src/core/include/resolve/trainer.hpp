@@ -120,9 +120,14 @@ public:
     // for checkpoints from datasets without categorical covariates (and for
     // older pre-categorical-port checkpoints, via back-compat in
     // CategoricalVocab::load).
+    // vram_fraction caps the PyTorch CUDA caching allocator on the target
+    // device before model weights are uploaded; matches TrainConfig's default
+    // (0.80) so reload also leaves headroom for the desktop on Windows.
+    // Ignored when device is CPU.
     static std::tuple<ResolveModel, Scalers, CategoricalVocab> load(
         const std::string& path,
-        torch::Device device = torch::kCPU
+        torch::Device device = torch::kCPU,
+        float vram_fraction = 0.80f
     );
 
     // Accessors

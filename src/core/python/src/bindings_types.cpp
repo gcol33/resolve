@@ -276,6 +276,7 @@ void register_types(nb::module_& m) {
         // CUDA performance optimizations
         .def_rw("cudnn_benchmark", &resolve::TrainConfig::cudnn_benchmark)
         .def_rw("allow_tf32", &resolve::TrainConfig::allow_tf32)
+        .def_rw("vram_fraction", &resolve::TrainConfig::vram_fraction)
         // Device property (string-based for Python convenience)
         .def_prop_rw("device",
             [](const resolve::TrainConfig& c) {

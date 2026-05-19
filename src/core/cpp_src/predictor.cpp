@@ -29,8 +29,12 @@ Predictor::Predictor(
     model_->eval();
 }
 
-Predictor Predictor::load(const std::string& path, torch::Device device) {
-    auto [model, scalers, vocab] = Trainer::load(path, device);
+Predictor Predictor::load(
+    const std::string& path,
+    torch::Device device,
+    float vram_fraction
+) {
+    auto [model, scalers, vocab] = Trainer::load(path, device, vram_fraction);
     return Predictor(std::move(model), std::move(scalers), std::move(vocab), device);
 }
 

@@ -29,6 +29,23 @@ NB_MODULE(_resolve_core, m) {
     register_pretraining(m);
     register_fuzzy(m);
 
+    // Top-level helper: cap the PyTorch CUDA caching allocator at a fraction
+    // of device VRAM. Standalone counterpart to TrainConfig.vram_fraction for
+    // users running Predictor-only workflows or wanting to apply the cap
+    // before constructing any RESOLVE object.
+    m.def(
+        "set_vram_fraction",
+        [](double fraction, int device_index) {
+            resolve::set_vram_fraction(fraction, device_index);
+        },
+        nb::arg("fraction"),
+        nb::arg("device_index") = -1,
+        "Cap the PyTorch CUDA caching allocator at `fraction` of device VRAM.\n"
+        "fraction must be in (0, 1]; 1.0 disables the cap. device_index = -1\n"
+        "uses the current CUDA device. No-op on CPU-only builds or when no\n"
+        "CUDA device is present."
+    );
+
     // Version
     m.attr("__version__") = resolve::VERSION;
 }

@@ -126,3 +126,12 @@ RCPP_MODULE(resolve_module) {
 std::string resolve_version() {
     return resolve::VERSION;
 }
+
+// Cap the PyTorch CUDA caching allocator at `fraction` of device VRAM.
+// fraction must be in (0, 1]; 1.0 disables the cap. device_index = -1L
+// uses the current CUDA device. No-op on CPU-only builds or when no
+// CUDA device is present.
+// [[Rcpp::export]]
+void resolve_set_vram_fraction(double fraction, int device_index = -1) {
+    resolve::set_vram_fraction(fraction, device_index);
+}

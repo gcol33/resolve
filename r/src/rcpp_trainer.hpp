@@ -91,6 +91,9 @@ public:
         if (config_list.containsElementNamed("allow_tf32")) {
             config.allow_tf32 = config_list["allow_tf32"];
         }
+        if (config_list.containsElementNamed("vram_fraction")) {
+            config.vram_fraction = as<float>(config_list["vram_fraction"]);
+        }
 
         trainer_ = std::make_unique<resolve::Trainer>(*(model.model()), config);
     }
@@ -231,7 +234,8 @@ public:
             Named("patience") = c.patience,
             Named("lr") = c.lr,
             Named("weight_decay") = c.weight_decay,
-            Named("device") = c.device.is_cuda() ? "cuda" : "cpu"
+            Named("device") = c.device.is_cuda() ? "cuda" : "cpu",
+            Named("vram_fraction") = c.vram_fraction
         );
     }
 

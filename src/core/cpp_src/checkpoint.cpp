@@ -635,6 +635,12 @@ void save_train_config(
     archive.write("train_lr_gamma", torch::tensor(config.lr_gamma));
     archive.write("train_lr_min", torch::tensor(config.lr_min));
 
+    // Save VRAM cap used during training (informational; the cap is applied
+    // at Trainer::fit / Predictor::load time, not reloaded from the
+    // checkpoint, but recording it lets `resolve info` show what the model
+    // was trained under).
+    archive.write("train_vram_fraction", torch::tensor(config.vram_fraction));
+
     // Save band thresholds
     std::vector<float> thresholds(config.band_thresholds);
     archive.write("train_band_thresholds", torch::tensor(thresholds));
