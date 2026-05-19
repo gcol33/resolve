@@ -10,16 +10,8 @@ from __future__ import annotations
 
 import inspect
 
-import pytest
-
 from resolve.train import _pretrain as pretrain_mod
 from resolve.train.trainer import Trainer
-from tests.test_e2e_synthetic import make_synthetic_data
-
-
-@pytest.fixture
-def dataset():
-    return make_synthetic_data()
 
 
 def _make_pretrain_trainer(dataset, **overrides) -> Trainer:
