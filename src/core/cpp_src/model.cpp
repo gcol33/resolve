@@ -10,14 +10,44 @@ ResolveModelImpl::ResolveModelImpl(
     const ModelConfig& config
 ) : schema_(schema), config_(config)
 {
-    // Calculate number of continuous features based on mode
+    // Synchronise the schema's categorical_embed_dim with the value the model
+    // is actually going to use. The dataset loader leaves it at the default;
+    // the ModelConfig is the source of truth at construction time. We record
+    // the chosen value back on the schema so that (a) `schema()` reports the
+    // truth, and (b) checkpoint save persists the right number for
+    // Predictor.load to reconstruct the embedder.
+    if (config.categorical_embed_dim <= 0) {
+        throw std::runtime_error(
+            "ResolveModel: ModelConfig.categorical_embed_dim must be > 0 "
+            "(got " + std::to_string(config.categorical_embed_dim) + ")");
+    }
+    schema_.categorical_embed_dim = config.categorical_embed_dim;
+
+    // Build the categorical embedder if the schema has any categorical
+    // columns. Each column gets its own nn::Embedding(vocab_size, embed_dim)
+    // table; CategoricalEmbedder concatenates the per-column lookups in
+    // forward(). When there are no categoricals, the embedder is left as
+    // nullptr and fuse_categoricals_() is a no-op.
+    int64_t n_categorical_embed = 0;
+    if (schema_.has_categoricals()) {
+        categorical_embedder_ = register_module(
+            "categorical_embedder",
+            CategoricalEmbedder(schema_.categorical_vocab_sizes,
+                                schema_.categorical_embed_dim));
+        n_categorical_embed = categorical_embedder_->output_dim();
+    }
+
+    // Calculate number of continuous features based on mode.
+    // The encoder is built to accept (base continuous) + (categorical embed
+    // dims) because fuse_categoricals_() will concatenate them in forward.
     int64_t n_coords = schema.has_coordinates ? 2 : 0;
     int64_t n_unknown_features = schema.track_unknown_fraction ? 1 : 0;
     if (schema.track_unknown_count) {
         n_unknown_features += 1;
     }
 
-    int64_t n_continuous_base = n_coords + schema.covariate_names.size() + n_unknown_features;
+    int64_t n_continuous_base = n_coords + schema.covariate_names.size()
+                              + n_unknown_features + n_categorical_embed;
 
     // Pre-compute vocab sizes for taxonomy (avoids repeating nested ternaries)
     auto genus_vocab_size = schema.has_taxonomy
@@ -232,6 +262,64 @@ ResolveModelImpl::ResolveModelImpl(
     }
 }
 
+torch::Tensor ResolveModelImpl::fuse_categoricals_(
+    torch::Tensor continuous, torch::Tensor categorical_ids
+) {
+    // No-op when the model has no categorical columns.
+    if (!categorical_embedder_) {
+        return continuous;
+    }
+    if (!continuous.defined() || continuous.dim() != 2) {
+        throw std::runtime_error(
+            "ResolveModel: fuse_categoricals_ requires a 2-D continuous "
+            "tensor (got " +
+            std::string(continuous.defined() ? "dim=" +
+                std::to_string(continuous.dim()) : "undefined") + ")");
+    }
+
+    const int64_t batch = continuous.size(0);
+    const int64_t expected_cols = categorical_embedder_->n_columns();
+    const int64_t cat_embed_dim = categorical_embedder_->output_dim();
+
+    torch::Tensor cat_part;
+    if (!categorical_ids.defined() || categorical_ids.numel() == 0) {
+        // Caller didn't supply categoricals but the model has them. Pad with
+        // zeros so the encoder shape is still valid. Mirrors the Python POC
+        // fallback path in src/resolve/model/resolve.py.
+        cat_part = torch::zeros({batch, cat_embed_dim},
+                                torch::TensorOptions().dtype(torch::kFloat32)
+                                    .device(continuous.device()));
+    } else {
+        if (categorical_ids.dim() != 2) {
+            throw std::runtime_error(
+                "ResolveModel: categorical_ids must be 2-D (got dim=" +
+                std::to_string(categorical_ids.dim()) + ")");
+        }
+        if (categorical_ids.size(0) != batch) {
+            throw std::runtime_error(
+                "ResolveModel: categorical_ids batch (" +
+                std::to_string(categorical_ids.size(0)) +
+                ") does not match continuous batch (" +
+                std::to_string(batch) + ")");
+        }
+        if (categorical_ids.size(1) != expected_cols) {
+            throw std::runtime_error(
+                "ResolveModel: categorical_ids has " +
+                std::to_string(categorical_ids.size(1)) +
+                " columns but model was built for " +
+                std::to_string(expected_cols) + " (schema mismatch)");
+        }
+        // Ensure tensor is on the same device as continuous before the
+        // embedding lookup. CategoricalEmbedder also coerces dtype to int64.
+        if (categorical_ids.device() != continuous.device()) {
+            categorical_ids = categorical_ids.to(continuous.device());
+        }
+        cat_part = categorical_embedder_->forward(categorical_ids);
+    }
+
+    return torch::cat({continuous, cat_part}, /*dim=*/1);
+}
+
 int64_t ResolveModelImpl::latent_dim() const {
     if (trait_net_encoder_) {
         return trait_net_encoder_->output_dim();
@@ -354,10 +442,12 @@ std::unordered_map<std::string, torch::Tensor> ResolveModelImpl::forward(
     torch::Tensor pool_family_ids,
     torch::Tensor pool_weights,
     torch::Tensor pool_mask,
-    torch::Tensor pool_has_cover
+    torch::Tensor pool_has_cover,
+    torch::Tensor categorical_ids
 ) {
     return forward_with_aux(continuous, genus_ids, family_ids, species_ids, species_vector,
-                            pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover).outputs;
+                            pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+                            categorical_ids).outputs;
 }
 
 ModelForwardResult ResolveModelImpl::forward_with_aux(
@@ -370,8 +460,14 @@ ModelForwardResult ResolveModelImpl::forward_with_aux(
     torch::Tensor pool_family_ids,
     torch::Tensor pool_weights,
     torch::Tensor pool_mask,
-    torch::Tensor pool_has_cover
+    torch::Tensor pool_has_cover,
+    torch::Tensor categorical_ids
 ) {
+    // Fuse categorical embeddings into `continuous` before any encoder runs.
+    // No-op when the model has no categorical columns.
+    continuous = fuse_categoricals_(std::move(continuous),
+                                    std::move(categorical_ids));
+
     auto [latent, aux_loss] = encode_with_aux(continuous, genus_ids, family_ids, species_ids, species_vector,
                                                pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
 
@@ -389,8 +485,11 @@ torch::Tensor ResolveModelImpl::forward_single(
     torch::Tensor genus_ids,
     torch::Tensor family_ids,
     torch::Tensor species_ids,
-    torch::Tensor species_vector
+    torch::Tensor species_vector,
+    torch::Tensor categorical_ids
 ) {
+    continuous = fuse_categoricals_(std::move(continuous),
+                                    std::move(categorical_ids));
     auto latent = encode(continuous, genus_ids, family_ids, species_ids, species_vector);
     return head(target)->forward(latent);
 }
@@ -405,8 +504,11 @@ torch::Tensor ResolveModelImpl::get_latent(
     torch::Tensor pool_family_ids,
     torch::Tensor pool_weights,
     torch::Tensor pool_mask,
-    torch::Tensor pool_has_cover
+    torch::Tensor pool_has_cover,
+    torch::Tensor categorical_ids
 ) {
+    continuous = fuse_categoricals_(std::move(continuous),
+                                    std::move(categorical_ids));
     return encode(continuous, genus_ids, family_ids, species_ids, species_vector,
                   pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
 }
@@ -430,8 +532,14 @@ const TaskHead& ResolveModelImpl::head(const std::string& name) const {
 std::pair<torch::Tensor, std::vector<torch::Tensor>> ResolveModelImpl::encode_with_activations(
     torch::Tensor continuous,
     torch::Tensor genus_ids,
-    torch::Tensor family_ids
+    torch::Tensor family_ids,
+    torch::Tensor categorical_ids
 ) {
+    // Fuse categorical embeddings into continuous so the encoder sees the
+    // same input shape it was constructed for. No-op for models without
+    // categoricals.
+    continuous = fuse_categoricals_(std::move(continuous),
+                                    std::move(categorical_ids));
     // Only implemented for hash encoder currently
     if (encoder_hash_) {
         return encoder_hash_->forward_with_activations(continuous, genus_ids, family_ids);

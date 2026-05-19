@@ -501,6 +501,7 @@ TEST_CASE("End-to-End Training Benchmark Production", "[benchmark][training-prod
                 torch::Tensor(),
                 targets,
                 {}, {}, {}, {}, {},  // pool_* (not used in hash mode)
+                {},                  // categorical_ids (none in benchmark fixture)
                 0.2f,
                 42
             );
@@ -536,7 +537,8 @@ TEST_CASE("End-to-End Training Benchmark Production", "[benchmark][training-prod
                     unknown_fraction,
                     torch::Tensor(),
                     targets,
-                    {}, {}, {}, {}, {},
+                    {}, {}, {}, {}, {},  // pool_*
+                    {},                  // categorical_ids
                     0.2f,
                     42
                 );
@@ -626,6 +628,7 @@ TEST_CASE("End-to-End Training Benchmark Large", "[benchmark][training-large]") 
                 torch::Tensor(),  // no unknown_count
                 targets,
                 {}, {}, {}, {}, {},  // pool_* (not used in hash mode)
+                {},                  // categorical_ids (none in benchmark fixture)
                 0.2f,
                 42
             );
@@ -661,7 +664,8 @@ TEST_CASE("End-to-End Training Benchmark Large", "[benchmark][training-large]") 
                     unknown_fraction,
                     torch::Tensor(),
                     targets,
-                    {}, {}, {}, {}, {},
+                    {}, {}, {}, {}, {},  // pool_*
+                    {},                  // categorical_ids
                     0.2f,
                     42
                 );
@@ -751,6 +755,7 @@ TEST_CASE("End-to-End Training Benchmark", "[benchmark][training]") {
                 torch::Tensor(),  // no unknown_count
                 targets,
                 {}, {}, {}, {}, {},  // pool_* (not used in hash mode)
+                {},                  // categorical_ids (none in benchmark fixture)
                 0.2f,
                 42
             );
@@ -786,7 +791,8 @@ TEST_CASE("End-to-End Training Benchmark", "[benchmark][training]") {
                     unknown_fraction,
                     torch::Tensor(),
                     targets,
-                    {}, {}, {}, {}, {},
+                    {}, {}, {}, {}, {},  // pool_*
+                    {},                  // categorical_ids
                     0.2f,
                     42
                 );

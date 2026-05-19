@@ -1,6 +1,7 @@
 #include "resolve/species_encoding.hpp"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <numeric>
 #include <set>
 
@@ -240,7 +241,8 @@ static void assign_rank_weights(
 
 RankPoolEncodedData RankPoolEncoder::transform(
     const std::vector<SpeciesRecord>& records,
-    const std::vector<std::string>& plot_ids
+    const std::vector<std::string>& plot_ids,
+    int species_cap
 ) const {
     if (!fitted_) {
         throw std::runtime_error("RankPoolEncoder must be fit before transform");
@@ -314,6 +316,60 @@ RankPoolEncodedData RankPoolEncoder::transform(
     }
 
     if (max_species == 0) max_species = 1;  // Avoid 0-width tensors
+
+    // Resolve species_cap (mirrors DatasetConfig::pool_species_cap):
+    //   0  -> no cap (use the global per-plot max we just computed).
+    //   -1 -> auto p99 over the per-plot species-count distribution.
+    //   >0 -> use the value as-is.
+    // Then, if the resolved cap is smaller than max_species, truncate each
+    // plot's per-species buffers to the first `cap` entries (matching the
+    // POC's `a[:cap]` slice in `_data.py`) and shrink max_species. Print a
+    // one-line summary so users see the drop in n_padding.
+    int64_t resolved_cap = max_species;  // default: no cap
+    if (species_cap == -1) {
+        // Build a sorted copy of per-plot lengths to compute the percentile.
+        // n_plots is in the millions for production datasets but this is a
+        // one-shot int64 sort per dataset load (not per epoch), so the cost
+        // is dwarfed by the row-scan that produced the data.
+        std::vector<int64_t> lengths;
+        lengths.reserve(static_cast<size_t>(n_plots));
+        for (const auto& pd : plot_data) {
+            lengths.push_back(static_cast<int64_t>(pd.sp_ids.size()));
+        }
+        if (!lengths.empty()) {
+            // p99 via nth_element on the 99th-percentile index. Matches
+            // numpy.percentile's "linear" default closely enough for the
+            // padding-cap use case (we round down to an integer either way).
+            size_t p99_idx = static_cast<size_t>(0.99 * (lengths.size() - 1));
+            std::nth_element(lengths.begin(),
+                             lengths.begin() + p99_idx,
+                             lengths.end());
+            resolved_cap = std::max<int64_t>(lengths[p99_idx], 1);
+        }
+    } else if (species_cap > 0) {
+        resolved_cap = species_cap;
+    }
+
+    if (resolved_cap < max_species) {
+        const int64_t old_max = max_species;
+        for (auto& pd : plot_data) {
+            if (static_cast<int64_t>(pd.sp_ids.size()) > resolved_cap) {
+                pd.sp_ids.resize(static_cast<size_t>(resolved_cap));
+                pd.g_ids.resize(static_cast<size_t>(resolved_cap));
+                pd.f_ids.resize(static_cast<size_t>(resolved_cap));
+                pd.weights.resize(static_cast<size_t>(resolved_cap));
+            }
+        }
+        max_species = resolved_cap;
+        const double saved = 1.0 - static_cast<double>(max_species) /
+                                   static_cast<double>(old_max);
+        std::cout << "  rank_pool: capping species at "
+                  << (species_cap == -1 ? "p99=" : "cap=")
+                  << resolved_cap
+                  << " (max=" << old_max
+                  << ", saves " << static_cast<int>(saved * 100.0 + 0.5)
+                  << "% padding)" << std::endl;
+    }
 
     // Build padded tensors
     auto sp_ids = torch::zeros({n_plots, max_species}, torch::kInt64);

@@ -53,6 +53,7 @@ void save_model_config(
     archive.write("species_embed_dim", torch::tensor(config.species_embed_dim));
     archive.write("genus_emb_dim", torch::tensor(config.genus_emb_dim));
     archive.write("family_emb_dim", torch::tensor(config.family_emb_dim));
+    archive.write("categorical_embed_dim", torch::tensor(config.categorical_embed_dim));
     archive.write("top_k", torch::tensor(config.top_k));
     archive.write("top_k_species", torch::tensor(config.top_k_species));
     archive.write("n_taxonomy_slots", torch::tensor(config.n_taxonomy_slots));
@@ -100,6 +101,29 @@ void save_model_config(
         archive.write("tabm_aggregation", torch::from_blob(
             tabm_agg_bytes.data(), {static_cast<int64_t>(tabm_agg_bytes.size())}, torch::kUInt8).clone());
     }
+
+    // RankPool / Transformer encoder fields. These shape the embedding
+    // tables and (for transformer) the attention stack, so the loaded
+    // ModelConfig must carry them through Predictor.load -- otherwise the
+    // reconstructed model is sized differently from the saved one and the
+    // first matmul blows up. Mirrors pitfall #7 in port.md
+    // (the same trap categorical_embed_dim hit during the cat port).
+    archive.write("cover_dropout", torch::tensor(config.cover_dropout));
+    archive.write("d_model", torch::tensor(config.d_model));
+    archive.write("n_heads", torch::tensor(config.n_heads));
+    archive.write("n_attention_layers", torch::tensor(config.n_attention_layers));
+    archive.write("transformer_ff_dim", torch::tensor(config.transformer_ff_dim));
+    archive.write("transformer_dropout", torch::tensor(config.transformer_dropout));
+    std::vector<uint8_t> tx_pool_bytes(
+        config.transformer_pooling.begin(), config.transformer_pooling.end());
+    archive.write("transformer_pooling_len",
+                  torch::tensor(static_cast<int64_t>(tx_pool_bytes.size())));
+    if (!tx_pool_bytes.empty()) {
+        archive.write("transformer_pooling", torch::from_blob(
+            tx_pool_bytes.data(),
+            {static_cast<int64_t>(tx_pool_bytes.size())},
+            torch::kUInt8).clone());
+    }
 }
 
 ModelConfig load_model_config(
@@ -130,6 +154,12 @@ ModelConfig load_model_config(
     config.species_embed_dim = species_embed_dim_t.item<int>();
     config.genus_emb_dim = genus_emb_dim_t.item<int>();
     config.family_emb_dim = family_emb_dim_t.item<int>();
+    // Back-compat: pre-categorical-port checkpoints didn't save this key,
+    // so try_read keeps the ModelConfig default (8) for older models.
+    torch::Tensor cat_embed_dim_t;
+    if (archive.try_read("categorical_embed_dim", cat_embed_dim_t)) {
+        config.categorical_embed_dim = cat_embed_dim_t.item<int>();
+    }
     config.top_k = top_k_t.item<int>();
     config.top_k_species = top_k_species_t.item<int>();
     config.n_taxonomy_slots = n_taxonomy_slots_t.item<int>();
@@ -251,6 +281,47 @@ ModelConfig load_model_config(
     } catch (...) {
         // TabM config not present in older checkpoints - disabled by default
         config.tabm = TabMConfig{};
+    }
+
+    // RankPool / Transformer encoder fields (back-compat: pre-rank-pool-port
+    // checkpoints didn't save these; try_read keeps the ModelConfig defaults
+    // for older models, which is fine because hash/embed/sparse models never
+    // read these fields).
+    torch::Tensor cover_dropout_t;
+    if (archive.try_read("cover_dropout", cover_dropout_t)) {
+        config.cover_dropout = cover_dropout_t.item<float>();
+    }
+    torch::Tensor d_model_t;
+    if (archive.try_read("d_model", d_model_t)) {
+        config.d_model = d_model_t.item<int>();
+    }
+    torch::Tensor n_heads_t;
+    if (archive.try_read("n_heads", n_heads_t)) {
+        config.n_heads = n_heads_t.item<int>();
+    }
+    torch::Tensor n_attn_t;
+    if (archive.try_read("n_attention_layers", n_attn_t)) {
+        config.n_attention_layers = n_attn_t.item<int>();
+    }
+    torch::Tensor tx_ff_t;
+    if (archive.try_read("transformer_ff_dim", tx_ff_t)) {
+        config.transformer_ff_dim = tx_ff_t.item<int>();
+    }
+    torch::Tensor tx_dropout_t;
+    if (archive.try_read("transformer_dropout", tx_dropout_t)) {
+        config.transformer_dropout = tx_dropout_t.item<float>();
+    }
+    torch::Tensor tx_pool_len_t;
+    if (archive.try_read("transformer_pooling_len", tx_pool_len_t)) {
+        int64_t pool_len = tx_pool_len_t.item<int64_t>();
+        if (pool_len > 0) {
+            torch::Tensor tx_pool_t;
+            if (archive.try_read("transformer_pooling", tx_pool_t)) {
+                auto ptr = tx_pool_t.data_ptr<uint8_t>();
+                config.transformer_pooling = std::string(
+                    reinterpret_cast<const char*>(ptr), pool_len);
+            }
+        }
     }
 
     return config;
@@ -394,6 +465,35 @@ void save_schema(
         archive.write(prefix + "transform", torch::tensor(static_cast<int>(target.transform)));
         archive.write(prefix + "num_classes", torch::tensor(target.num_classes));
         archive.write(prefix + "weight", torch::tensor(target.weight));
+
+        // Ordered class vocabulary for classification targets. Empty (count
+        // 0) for regression. Empty for already-integer-encoded
+        // classification targets that the loader didn't auto-factorize.
+        // Per-class strings are serialized via the same length-prefix +
+        // UInt8 bytes scheme used elsewhere. Back-compat: pre-classification
+        // checkpoints won't have this key; the load path treats absent ==
+        // empty (see schema load below).
+        archive.write(prefix + "n_class_names",
+                      torch::tensor(static_cast<int64_t>(target.class_names.size())));
+        for (size_t j = 0; j < target.class_names.size(); ++j) {
+            write_string_to_archive(archive,
+                prefix + "class_" + std::to_string(j),
+                target.class_names[j]);
+        }
+    }
+
+    // Categorical covariates: column count + per-column name + per-column
+    // vocab size + shared embed_dim. Vocab sizes include the reserved UNK
+    // slot at code 0 (so the column's embedding table is size K+1).
+    archive.write("schema_n_categoricals",
+                  torch::tensor(static_cast<int64_t>(schema.categorical_names.size())));
+    archive.write("schema_categorical_embed_dim",
+                  torch::tensor(schema.categorical_embed_dim));
+    for (size_t i = 0; i < schema.categorical_names.size(); ++i) {
+        const std::string prefix = "schema_categorical_" + std::to_string(i) + "_";
+        write_string_to_archive(archive, prefix + "name", schema.categorical_names[i]);
+        archive.write(prefix + "vocab_size",
+                      torch::tensor(schema.categorical_vocab_sizes[i]));
     }
 }
 
@@ -483,6 +583,37 @@ ResolveSchema load_schema(
         schema.targets[i].transform = static_cast<TransformType>(read_i32(prefix + "transform"));
         schema.targets[i].num_classes = read_i32(prefix + "num_classes");
         schema.targets[i].weight = read_f32(prefix + "weight");
+
+        // Class names (back-compat: pre-classification checkpoints omit
+        // these keys; treat absent as no class vocab, which matches the
+        // original behaviour where classification just used raw int codes).
+        torch::Tensor n_cn_t;
+        if (archive.try_read(prefix + "n_class_names", n_cn_t)) {
+            int64_t n_cn = n_cn_t.item<int64_t>();
+            schema.targets[i].class_names.resize(static_cast<size_t>(n_cn));
+            for (int64_t j = 0; j < n_cn; ++j) {
+                schema.targets[i].class_names[j] =
+                    read_string(prefix + "class_" + std::to_string(j));
+            }
+        }
+    }
+
+    // Categorical covariates (back-compat: pre-categorical-port checkpoints
+    // won't have any of these keys; treat as schema with zero categoricals).
+    torch::Tensor n_cat_t;
+    if (archive.try_read("schema_n_categoricals", n_cat_t)) {
+        int64_t n_cat = n_cat_t.item<int64_t>();
+        torch::Tensor embed_dim_t;
+        if (archive.try_read("schema_categorical_embed_dim", embed_dim_t)) {
+            schema.categorical_embed_dim = embed_dim_t.item<int64_t>();
+        }
+        schema.categorical_names.resize(n_cat);
+        schema.categorical_vocab_sizes.resize(n_cat);
+        for (int64_t i = 0; i < n_cat; ++i) {
+            const std::string prefix = "schema_categorical_" + std::to_string(i) + "_";
+            schema.categorical_names[i] = read_string(prefix + "name");
+            schema.categorical_vocab_sizes[i] = read_i64(prefix + "vocab_size");
+        }
     }
     return schema;
 }

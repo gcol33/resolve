@@ -12,10 +12,12 @@ void register_types(nb::module_& m) {
         .def_rw("genus", &resolve::RoleMapping::genus)
         .def_rw("family", &resolve::RoleMapping::family)
         .def_rw("covariates", &resolve::RoleMapping::covariates)
+        .def_rw("categoricals", &resolve::RoleMapping::categoricals)
         .def_rw("targets", &resolve::RoleMapping::targets)
         .def("has_coordinates", &resolve::RoleMapping::has_coordinates)
         .def("has_taxonomy", &resolve::RoleMapping::has_taxonomy)
-        .def("has_abundance", &resolve::RoleMapping::has_abundance);
+        .def("has_abundance", &resolve::RoleMapping::has_abundance)
+        .def("has_categoricals", &resolve::RoleMapping::has_categoricals);
 
     nb::class_<resolve::TargetSpec>(m, "TargetSpec")
         .def(nb::init<>())
@@ -25,10 +27,17 @@ void register_types(nb::module_& m) {
         .def_rw("transform", &resolve::TargetSpec::transform)
         .def_rw("num_classes", &resolve::TargetSpec::num_classes)
         .def_rw("weight", &resolve::TargetSpec::weight)
+        // Optional explicit string -> int mapping for classification target
+        // columns. When empty (default), the loader auto-fits the mapping
+        // from the data. Mirrors the POC's `cfg["mapping"]`.
+        .def_rw("class_mapping", &resolve::TargetSpec::class_mapping)
         .def_static("regression", &resolve::TargetSpec::regression,
                     nb::arg("column"), nb::arg("transform") = resolve::TransformType::None)
         .def_static("classification", &resolve::TargetSpec::classification,
-                    nb::arg("column"), nb::arg("num_classes"));
+                    nb::arg("column"), nb::arg("num_classes"))
+        .def_static("classification_with_mapping",
+                    &resolve::TargetSpec::classification_with_mapping,
+                    nb::arg("column"), nb::arg("mapping"));
 
     nb::class_<resolve::DatasetConfig>(m, "DatasetConfig")
         .def(nb::init<>())
@@ -43,7 +52,14 @@ void register_types(nb::module_& m) {
         .def_rw("track_unknown_fraction", &resolve::DatasetConfig::track_unknown_fraction)
         .def_rw("track_unknown_count", &resolve::DatasetConfig::track_unknown_count)
         .def_rw("use_taxonomy", &resolve::DatasetConfig::use_taxonomy)
-        .def_rw("use_cuda_hash", &resolve::DatasetConfig::use_cuda_hash);
+        .def_rw("use_cuda_hash", &resolve::DatasetConfig::use_cuda_hash)
+        // Per-species weight scheme for rank_pool / transformer encoders
+        // (binary, abundance, log1p, norm, rank). Ignored otherwise.
+        .def_rw("pool_weighting", &resolve::DatasetConfig::pool_weighting)
+        // Cap on species-per-plot for rank_pool / transformer encoders. See
+        // DatasetConfig::pool_species_cap doc for the sentinel meanings:
+        // 0 = no cap (default), -1 = auto p99, >0 = manual cap.
+        .def_rw("pool_species_cap", &resolve::DatasetConfig::pool_species_cap);
 
     // Configuration structs
     nb::class_<resolve::TargetConfig>(m, "TargetConfig")
@@ -53,7 +69,12 @@ void register_types(nb::module_& m) {
         .def_rw("transform", &resolve::TargetConfig::transform)
         .def_rw("num_classes", &resolve::TargetConfig::num_classes)
         .def_rw("weight", &resolve::TargetConfig::weight)
-        .def_rw("class_weights", &resolve::TargetConfig::class_weights);
+        .def_rw("class_weights", &resolve::TargetConfig::class_weights)
+        // Ordered class vocabulary (index == code). Populated by
+        // ResolveDataset.from_csv when the classification target column
+        // arrived as strings and the loader factorized it. Empty for
+        // regression or for already-integer-encoded classification columns.
+        .def_rw("class_names", &resolve::TargetConfig::class_names);
 
     nb::class_<resolve::ResolveSchema>(m, "ResolveSchema")
         .def(nb::init<>())
@@ -70,7 +91,12 @@ void register_types(nb::module_& m) {
         .def_rw("covariate_names", &resolve::ResolveSchema::covariate_names)
         .def_rw("targets", &resolve::ResolveSchema::targets)
         .def_rw("track_unknown_fraction", &resolve::ResolveSchema::track_unknown_fraction)
-        .def_rw("track_unknown_count", &resolve::ResolveSchema::track_unknown_count);
+        .def_rw("track_unknown_count", &resolve::ResolveSchema::track_unknown_count)
+        .def_rw("categorical_names", &resolve::ResolveSchema::categorical_names)
+        .def_rw("categorical_vocab_sizes", &resolve::ResolveSchema::categorical_vocab_sizes)
+        .def_rw("categorical_embed_dim", &resolve::ResolveSchema::categorical_embed_dim)
+        .def("has_categoricals", &resolve::ResolveSchema::has_categoricals)
+        .def("n_categoricals", &resolve::ResolveSchema::n_categoricals);
 
     // Alias for backwards compatibility
     m.attr("SpaccSchema") = m.attr("ResolveSchema");
@@ -182,6 +208,7 @@ void register_types(nb::module_& m) {
         .def_rw("species_embed_dim", &resolve::ModelConfig::species_embed_dim)
         .def_rw("genus_emb_dim", &resolve::ModelConfig::genus_emb_dim)
         .def_rw("family_emb_dim", &resolve::ModelConfig::family_emb_dim)
+        .def_rw("categorical_embed_dim", &resolve::ModelConfig::categorical_embed_dim)
         .def_rw("top_k", &resolve::ModelConfig::top_k)
         .def_rw("top_k_species", &resolve::ModelConfig::top_k_species)
         .def_rw("n_taxonomy_slots", &resolve::ModelConfig::n_taxonomy_slots)

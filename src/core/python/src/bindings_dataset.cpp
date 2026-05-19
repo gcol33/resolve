@@ -1,7 +1,29 @@
 #include "bindings_common.hpp"
 #include "resolve/species_encoding.hpp"
+#include "resolve/categorical.hpp"
 
 void register_dataset(nb::module_& m) {
+    // Categorical vocabulary — exposed so Predictor users can re-encode
+    // raw CSV strings into the training-time codes.
+    nb::class_<resolve::CategoricalVocab>(m, "CategoricalVocab")
+        .def(nb::init<>())
+        .def("fit_column", &resolve::CategoricalVocab::fit_column,
+             nb::arg("column_name"), nb::arg("raw_values"))
+        .def("encode",
+             [](const resolve::CategoricalVocab& self, const std::string& col,
+                const std::string& val) { return self.encode(col, val); },
+             nb::arg("column_name"), nb::arg("raw_value"))
+        .def("encode_batch", &resolve::CategoricalVocab::encode_batch,
+             nb::arg("column_names"), nb::arg("raw_values_per_column"))
+        .def("vocab_size", &resolve::CategoricalVocab::vocab_size,
+             nb::arg("column_name"))
+        .def("has_column", &resolve::CategoricalVocab::has_column,
+             nb::arg("column_name"))
+        .def_prop_ro("column_names", &resolve::CategoricalVocab::column_names)
+        .def_prop_ro("vocab_sizes", &resolve::CategoricalVocab::vocab_sizes)
+        .def("column_map", &resolve::CategoricalVocab::column_map,
+             nb::arg("column_name"));
+
     nb::class_<resolve::ResolveDataset>(m, "ResolveDataset")
         .def_static("from_csv", &resolve::ResolveDataset::from_csv,
                     nb::arg("header_path"),
@@ -16,15 +38,78 @@ void register_dataset(nb::module_& m) {
                     nb::arg("targets"),
                     nb::arg("config") = resolve::DatasetConfig{},
                     "Load dataset from a single species CSV file")
-        .def_prop_ro("coordinates", &resolve::ResolveDataset::coordinates)
-        .def_prop_ro("covariates", &resolve::ResolveDataset::covariates)
-        .def_prop_ro("hash_embedding", &resolve::ResolveDataset::hash_embedding)
-        .def_prop_ro("species_ids", &resolve::ResolveDataset::species_ids)
-        .def_prop_ro("species_vector", &resolve::ResolveDataset::species_vector)
-        .def_prop_ro("genus_ids", &resolve::ResolveDataset::genus_ids)
-        .def_prop_ro("family_ids", &resolve::ResolveDataset::family_ids)
-        .def_prop_ro("unknown_fraction", &resolve::ResolveDataset::unknown_fraction)
-        .def_prop_ro("unknown_count", &resolve::ResolveDataset::unknown_count)
+        // Tensor accessors must be wrapped via THPVariable_Wrap; nanobind
+        // has no built-in caster for at::Tensor (would produce
+        // "Unable to convert function return value to a Python type").
+        // Undefined tensors are surfaced as None.
+        .def_prop_ro("coordinates", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.coordinates();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("covariates", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.covariates();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("hash_embedding", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.hash_embedding();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("species_ids", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.species_ids();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("species_vector", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.species_vector();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("genus_ids", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.genus_ids();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("family_ids", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.family_ids();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("unknown_fraction", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.unknown_fraction();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("unknown_count", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.unknown_count();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("categorical_ids", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.categorical_ids();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        // Pool-style encoder tensors (rank_pool / transformer modes). Wrap
+        // via THPVariable_Wrap inside a lambda — see pitfall #6.1 in
+        // port.md (def_prop_ro(&accessor) fails for at::Tensor returns).
+        .def_prop_ro("pool_genus_ids", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.pool_genus_ids();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("pool_family_ids", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.pool_family_ids();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("pool_weights", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.pool_weights();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("pool_mask", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.pool_mask();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("pool_has_cover", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.pool_has_cover();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def("has_pool_data", &resolve::ResolveDataset::has_pool_data)
+        .def_prop_ro("categorical_vocab",
+                     [](const resolve::ResolveDataset& self) -> const resolve::CategoricalVocab& {
+                         return self.categorical_vocab();
+                     })
         .def_prop_ro("targets", [](const resolve::ResolveDataset& d) {
             return tensor_map_to_dict(d.targets());
         })
@@ -35,9 +120,18 @@ void register_dataset(nb::module_& m) {
         .def_prop_ro("config", [](const resolve::ResolveDataset& self) -> resolve::DatasetConfig { return self.config(); })
         // CUDA hash accessors
         .def("has_raw_species_data", &resolve::ResolveDataset::has_raw_species_data)
-        .def_prop_ro("raw_species_ids", &resolve::ResolveDataset::raw_species_ids)
-        .def_prop_ro("raw_weights", &resolve::ResolveDataset::raw_weights)
-        .def_prop_ro("plot_offsets", &resolve::ResolveDataset::plot_offsets)
+        .def_prop_ro("raw_species_ids", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.raw_species_ids();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("raw_weights", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.raw_weights();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("plot_offsets", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.plot_offsets();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
         .def_prop_ro("taxonomy_vocab", [](const resolve::ResolveDataset& self) -> const resolve::TaxonomyVocab& {
             return self.taxonomy_vocab();
         });
@@ -99,7 +193,9 @@ void register_dataset(nb::module_& m) {
              nb::arg("weighting") = resolve::PoolWeighting::Log1p,
              nb::arg("min_frequency") = 1)
         .def("fit", &resolve::RankPoolEncoder::fit)
-        .def("transform", &resolve::RankPoolEncoder::transform)
+        .def("transform", &resolve::RankPoolEncoder::transform,
+             nb::arg("records"), nb::arg("plot_ids"),
+             nb::arg("species_cap") = 0)
         .def("is_fitted", &resolve::RankPoolEncoder::is_fitted)
         .def("n_species_vocab", &resolve::RankPoolEncoder::n_species_vocab)
         .def("n_genera_vocab", &resolve::RankPoolEncoder::n_genera_vocab)

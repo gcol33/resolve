@@ -155,6 +155,13 @@ struct TargetConfig {
     int num_classes = 0;  // For classification
     float weight = 1.0f;  // Loss weight in multi-task
     std::vector<float> class_weights;  // Optional class weights for imbalanced classification
+    // Ordered class vocabulary for classification targets. class_names[i] is
+    // the original CSV string that encodes to int code i. Empty for
+    // regression. Populated by ResolveDataset::load_header_data when it
+    // factorizes a string-coded classification column (e.g. EUNIS "M","N",
+    // "P",...) into int64 codes. Persisted in the checkpoint so the
+    // Predictor can map predicted codes back to human-readable class names.
+    std::vector<std::string> class_names;
 };
 
 // Schema information for a dataset
@@ -173,6 +180,28 @@ struct ResolveSchema {
     std::vector<TargetConfig> targets;
     bool track_unknown_fraction = true;
     bool track_unknown_count = false;
+
+    // Categorical covariates. Parallel layout: categorical_names[i] is the
+    // CSV column name; categorical_vocab_sizes[i] is the size of that
+    // column's embedding table (= K + 1 where K is the number of distinct
+    // non-NA values, and the +1 is the reserved UNK slot at code 0).
+    // Empty when the dataset has no categorical covariates.
+    std::vector<std::string> categorical_names;
+    std::vector<int64_t> categorical_vocab_sizes;
+    // Embedding dimension shared across all categorical columns (matches the
+    // value carried on ModelConfig). Stored on the schema so the model can
+    // be reconstructed from a checkpoint without needing the original
+    // ModelConfig — important for Predictor.load.
+    int64_t categorical_embed_dim = 8;
+
+    // Helper: true if this schema has categorical covariates configured.
+    [[nodiscard]] bool has_categoricals() const noexcept {
+        return !categorical_names.empty();
+    }
+    // Helper: how many categorical columns.
+    [[nodiscard]] int64_t n_categoricals() const noexcept {
+        return static_cast<int64_t>(categorical_names.size());
+    }
 };
 
 // Alias for backwards compatibility
@@ -343,6 +372,10 @@ struct ModelConfig {
     int species_embed_dim = 32;
     int genus_emb_dim = 8;
     int family_emb_dim = 8;
+    // Embedding dimension for each categorical-covariate column. Shared
+    // across columns (one knob to tune). Must be > 0. Matches the value
+    // stored on ResolveSchema after dataset construction.
+    int categorical_embed_dim = 8;
     int top_k = 3;
     int top_k_species = 10;  // For embed mode
     int n_taxonomy_slots = 3;  // May be 2*top_k for top_bottom mode
@@ -447,6 +480,10 @@ struct ResolveBatch {
     torch::Tensor family_ids;      // (batch, n_taxonomy_slots) or empty
     torch::Tensor species_ids;     // (batch, top_k_species) for embed mode
     torch::Tensor species_vector;  // (batch, n_species) for sparse mode
+    // Categorical covariates: (batch, n_categoricals) int64 with codes
+    // produced by CategoricalVocab (0 = UNK). Empty when the schema
+    // declares no categorical columns.
+    torch::Tensor categorical_ids;
     // Pool-style encoder fields (rank_pool / transformer modes)
     torch::Tensor pool_genus_ids;  // (batch, max_species) or empty
     torch::Tensor pool_family_ids; // (batch, max_species) or empty
@@ -469,6 +506,9 @@ struct ResolveBatch {
         }
         if (species_vector.defined()) {
             batch.species_vector = species_vector.to(device);
+        }
+        if (categorical_ids.defined()) {
+            batch.categorical_ids = categorical_ids.to(device);
         }
         if (pool_genus_ids.defined()) {
             batch.pool_genus_ids = pool_genus_ids.to(device);

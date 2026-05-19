@@ -6,6 +6,7 @@
 #include "resolve/types.hpp"
 #include "resolve/csv_reader.hpp"
 #include "resolve/role_mapping.hpp"
+#include "resolve/categorical.hpp"
 #include "resolve/dataset.hpp"
 #include "resolve/encoder.hpp"
 #include "resolve/model.hpp"

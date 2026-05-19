@@ -4,6 +4,7 @@
 
 #include <Rcpp.h>
 #include <torch/torch.h>
+#include <limits>
 #include "resolve/resolve.hpp"
 
 using namespace Rcpp;
@@ -75,6 +76,28 @@ inline NumericMatrix tensor_to_r_mat(const torch::Tensor& t) {
     return out;
 }
 
+// Integer matrix conversion — for int64 tensors like categorical_ids.
+// R's IntegerMatrix is 32-bit; we narrow but warn if any value overflows.
+inline IntegerMatrix tensor_to_r_imat(const torch::Tensor& t) {
+    torch::Tensor cpu = t.cpu().contiguous().to(torch::kInt64);
+    int nrow = cpu.size(0);
+    int ncol = cpu.size(1);
+    IntegerMatrix out(nrow, ncol);
+    int64_t* data = cpu.data_ptr<int64_t>();
+    for (int i = 0; i < nrow; ++i) {
+        for (int j = 0; j < ncol; ++j) {
+            const int64_t v = data[i * ncol + j];
+            if (v > std::numeric_limits<int>::max() ||
+                v < std::numeric_limits<int>::min()) {
+                Rcpp::warning("tensor_to_r_imat: value out of int range, "
+                              "narrowed: %lld", static_cast<long long>(v));
+            }
+            out(i, j) = static_cast<int>(v);
+        }
+    }
+    return out;
+}
+
 // =============================================================================
 // Enum conversions
 // =============================================================================
@@ -122,6 +145,16 @@ inline resolve::AggregationMode parse_aggregation_mode(const std::string& s) {
         {"abundance", resolve::AggregationMode::Abundance},
         {"count", resolve::AggregationMode::Count},
     }, "aggregation mode");
+}
+
+inline resolve::PoolWeighting parse_pool_weighting(const std::string& s) {
+    return parse_enum<resolve::PoolWeighting>(s, {
+        {"binary", resolve::PoolWeighting::Binary},
+        {"abundance", resolve::PoolWeighting::Abundance},
+        {"log1p", resolve::PoolWeighting::Log1p},
+        {"norm", resolve::PoolWeighting::Norm},
+        {"rank", resolve::PoolWeighting::Rank},
+    }, "pool weighting");
 }
 
 inline resolve::TaskType parse_task_type(const std::string& s) {

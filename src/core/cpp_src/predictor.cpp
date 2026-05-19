@@ -15,15 +15,34 @@ Predictor::Predictor(
     model_->eval();
 }
 
+Predictor::Predictor(
+    ResolveModel model,
+    Scalers scalers,
+    CategoricalVocab categorical_vocab,
+    torch::Device device
+) : model_(model),
+    scalers_(scalers),
+    categorical_vocab_(std::move(categorical_vocab)),
+    device_(device)
+{
+    model_->to(device_);
+    model_->eval();
+}
+
 Predictor Predictor::load(const std::string& path, torch::Device device) {
-    auto [model, scalers] = Trainer::load(path, device);
-    return Predictor(model, scalers, device);
+    auto [model, scalers, vocab] = Trainer::load(path, device);
+    return Predictor(std::move(model), std::move(scalers), std::move(vocab), device);
 }
 
 ResolvePredictions Predictor::predict(
     const ResolveDataset& dataset,
     bool return_latent
 ) {
+    // Thread the pool-* tensors through. Previously these were hardcoded to
+    // empty, which crashed PlotEncoderRankPool / PlotEncoderTransformer
+    // forward at the species_embedding lookup because species_ids was the
+    // (n_plots, top_k_species) embed-mode tensor (or undefined) instead of
+    // the rank-pool (n_plots, max_species) tensor.
     auto result = predict(
         dataset.coordinates(),
         dataset.covariates(),
@@ -34,8 +53,12 @@ ResolvePredictions Predictor::predict(
         dataset.family_ids(),
         dataset.unknown_fraction(),
         dataset.unknown_count(),
-        /*pool_genus_ids=*/{}, /*pool_family_ids=*/{},
-        /*pool_weights=*/{}, /*pool_mask=*/{}, /*pool_has_cover=*/{},
+        dataset.pool_genus_ids(),
+        dataset.pool_family_ids(),
+        dataset.pool_weights(),
+        dataset.pool_mask(),
+        dataset.pool_has_cover(),
+        dataset.categorical_ids(),
         return_latent
     );
 
@@ -63,6 +86,7 @@ ResolvePredictions Predictor::predict(
     torch::Tensor pool_weights,
     torch::Tensor pool_mask,
     torch::Tensor pool_has_cover,
+    torch::Tensor categorical_ids,
     bool return_latent
 ) {
     torch::NoGradGuard no_grad;
@@ -113,10 +137,12 @@ ResolvePredictions Predictor::predict(
     pool_weights = to_device_if_defined(pool_weights, device_);
     pool_mask = to_device_if_defined(pool_mask, device_);
     pool_has_cover = to_device_if_defined(pool_has_cover, device_);
+    categorical_ids = to_device_if_defined(categorical_ids, device_);
 
     // Get predictions using appropriate encoding mode
     auto outputs = model_->forward(scaled_continuous, genus_ids, family_ids, species_ids, species_vector,
-                                    pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
+                                    pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+                                    categorical_ids);
 
     ResolvePredictions result;
 
@@ -150,7 +176,8 @@ ResolvePredictions Predictor::predict(
     // Optionally return latent
     if (return_latent) {
         result.latent = model_->get_latent(scaled_continuous, genus_ids, family_ids, species_ids, species_vector,
-                                           pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
+                                           pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+                                           categorical_ids);
     }
 
     // Create plot indices as strings

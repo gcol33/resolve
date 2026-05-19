@@ -44,6 +44,9 @@ public:
         if (roles_list.containsElementNamed("covariates")) {
             roles.covariates = as<std::vector<std::string>>(roles_list["covariates"]);
         }
+        if (roles_list.containsElementNamed("categoricals")) {
+            roles.categoricals = as<std::vector<std::string>>(roles_list["categoricals"]);
+        }
 
         // Build TargetSpecs
         std::vector<resolve::TargetSpec> targets;
@@ -104,6 +107,10 @@ public:
         if (config_list.containsElementNamed("use_taxonomy")) {
             config.use_taxonomy = config_list["use_taxonomy"];
         }
+        if (config_list.containsElementNamed("pool_weighting")) {
+            config.pool_weighting = parse_pool_weighting(
+                as<std::string>(config_list["pool_weighting"]));
+        }
 
         // Load dataset via C++ core
         RResolveDataset wrapper;
@@ -141,6 +148,9 @@ public:
         }
         if (roles_list.containsElementNamed("covariates")) {
             roles.covariates = as<std::vector<std::string>>(roles_list["covariates"]);
+        }
+        if (roles_list.containsElementNamed("categoricals")) {
+            roles.categoricals = as<std::vector<std::string>>(roles_list["categoricals"]);
         }
 
         // Build TargetSpecs
@@ -232,6 +242,40 @@ public:
         return R_NilValue;
     }
 
+    // (n_plots, n_categoricals) integer matrix of category codes
+    // (CategoricalVocab codes, 0 = UNK/NA). Returns NULL when the dataset
+    // has no categorical covariates.
+    Nullable<IntegerMatrix> categorical_ids() const {
+        const auto& t = dataset_->categorical_ids();
+        if (t.defined() && t.numel() > 0) {
+            return tensor_to_r_imat(t);
+        }
+        return R_NilValue;
+    }
+
+    // Per-column vocabulary as a named list of {column_name -> integer codes,
+    // with names() = the source strings}. Lets R callers re-encode raw CSVs
+    // at inference using the same codes the model was trained against.
+    List categorical_vocab() const {
+        const auto& vocab = dataset_->categorical_vocab();
+        List out;
+        for (const auto& col : vocab.column_names()) {
+            const auto& m = vocab.column_map(col);
+            std::vector<std::string> keys;
+            std::vector<int> values;
+            keys.reserve(m.size());
+            values.reserve(m.size());
+            for (const auto& [k, v] : m) {
+                keys.push_back(k);
+                values.push_back(static_cast<int>(v));
+            }
+            IntegerVector codes(values.begin(), values.end());
+            codes.attr("names") = wrap(keys);
+            out[col] = codes;
+        }
+        return out;
+    }
+
     List targets() const {
         List result;
         for (const auto& [name, tensor] : dataset_->targets()) {
@@ -269,7 +313,10 @@ public:
             Named("covariate_names") = wrap(s.covariate_names),
             Named("targets") = targets_list,
             Named("track_unknown_fraction") = s.track_unknown_fraction,
-            Named("track_unknown_count") = s.track_unknown_count
+            Named("track_unknown_count") = s.track_unknown_count,
+            Named("categorical_names") = wrap(s.categorical_names),
+            Named("categorical_vocab_sizes") = wrap(s.categorical_vocab_sizes),
+            Named("categorical_embed_dim") = static_cast<int>(s.categorical_embed_dim)
         );
     }
 

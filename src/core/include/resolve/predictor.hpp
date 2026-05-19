@@ -20,6 +20,16 @@ public:
         torch::Device device = torch::kCPU
     );
 
+    // Constructor that also carries the categorical vocabulary captured at
+    // training time. Used by `load()`; lets `predict(ResolveDataset)` decode
+    // new CSVs with the same codes the model was trained against.
+    Predictor(
+        ResolveModel model,
+        Scalers scalers,
+        CategoricalVocab categorical_vocab,
+        torch::Device device = torch::kCPU
+    );
+
     // Load from saved checkpoint
     static Predictor load(const std::string& path, torch::Device device = torch::kCPU);
 
@@ -30,7 +40,10 @@ public:
     );
 
     // Predict on new data (raw tensor API)
-    // Returns predictions for all targets
+    // Returns predictions for all targets.
+    // categorical_ids: (n_samples, n_categoricals) int64 codes produced by
+    // CategoricalVocab — undefined/empty when the model has no categoricals
+    // (the model layer pads with zeros in that case).
     ResolvePredictions predict(
         torch::Tensor coordinates,
         torch::Tensor covariates,
@@ -47,6 +60,7 @@ public:
         torch::Tensor pool_weights = {},
         torch::Tensor pool_mask = {},
         torch::Tensor pool_has_cover = {},
+        torch::Tensor categorical_ids = {},
         bool return_latent = false
     );
 
@@ -72,10 +86,18 @@ public:
     [[nodiscard]] const ResolveModel& model() const noexcept { return model_; }
     [[nodiscard]] const Scalers& scalers() const noexcept { return scalers_; }
     [[nodiscard]] torch::Device device() const noexcept { return device_; }
+    // Vocabulary the model was trained with. Empty for models without
+    // categorical covariates. Users wanting to score raw CSVs at inference
+    // should pass this through CategoricalVocab::encode_batch() to recover
+    // training-consistent integer codes.
+    [[nodiscard]] const CategoricalVocab& categorical_vocab() const noexcept {
+        return categorical_vocab_;
+    }
 
 private:
     ResolveModel model_;
     Scalers scalers_;
+    CategoricalVocab categorical_vocab_;
     torch::Device device_;
 };
 

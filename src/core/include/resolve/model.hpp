@@ -4,6 +4,7 @@
 #include "resolve/encoder.hpp"
 #include "resolve/adapter.hpp"
 #include "resolve/attention.hpp"
+#include "resolve/categorical.hpp"
 #include <torch/torch.h>
 #include <variant>
 
@@ -34,6 +35,11 @@ public:
     // - Embed: continuous, species_ids, genus_ids, family_ids
     // - Sparse: continuous, species_vector, genus_ids, family_ids
     // - RankPool/Transformer: continuous, species_ids, pool_* fields
+    //
+    // categorical_ids is (batch, n_categoricals) int64 with codes produced
+    // by CategoricalVocab (0 = UNK). It is embedded internally and
+    // concatenated to `continuous` before the encoder runs — schemas
+    // without categoricals pass an empty tensor and get the legacy behavior.
     std::unordered_map<std::string, torch::Tensor> forward(
         torch::Tensor continuous,
         torch::Tensor genus_ids = {},
@@ -45,7 +51,8 @@ public:
         torch::Tensor pool_family_ids = {},
         torch::Tensor pool_weights = {},
         torch::Tensor pool_mask = {},
-        torch::Tensor pool_has_cover = {}
+        torch::Tensor pool_has_cover = {},
+        torch::Tensor categorical_ids = {}
     );
 
     // Forward pass returning outputs + MoE auxiliary loss (for training with MoE)
@@ -59,7 +66,8 @@ public:
         torch::Tensor pool_family_ids = {},
         torch::Tensor pool_weights = {},
         torch::Tensor pool_mask = {},
-        torch::Tensor pool_has_cover = {}
+        torch::Tensor pool_has_cover = {},
+        torch::Tensor categorical_ids = {}
     );
 
     // Forward pass for single target
@@ -69,7 +77,8 @@ public:
         torch::Tensor genus_ids = {},
         torch::Tensor family_ids = {},
         torch::Tensor species_ids = {},
-        torch::Tensor species_vector = {}
+        torch::Tensor species_vector = {},
+        torch::Tensor categorical_ids = {}
     );
 
     // Get latent representation (without heads)
@@ -83,15 +92,19 @@ public:
         torch::Tensor pool_family_ids = {},
         torch::Tensor pool_weights = {},
         torch::Tensor pool_mask = {},
-        torch::Tensor pool_has_cover = {}
+        torch::Tensor pool_has_cover = {},
+        torch::Tensor categorical_ids = {}
     );
 
-    // Forward pass that returns intermediate activations (for diagnostics)
-    // Only works with hash encoder for now
+    // Forward pass that returns intermediate activations (for diagnostics).
+    // Only works with hash encoder for now. `categorical_ids` is fused into
+    // `continuous` via fuse_categoricals_() so the encoder receives the
+    // same input shape it was constructed for.
     std::pair<torch::Tensor, std::vector<torch::Tensor>> encode_with_activations(
         torch::Tensor continuous,
         torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {}
+        torch::Tensor family_ids = {},
+        torch::Tensor categorical_ids = {}
     );
 
     // Get MoE gating probabilities for analysis (only valid when MoE enabled)
@@ -131,7 +144,9 @@ private:
         torch::Tensor (PlotEncoderSparseImpl::*sparse_fn)() const
     ) const;
 
-    // Internal forward through encoder based on mode (returns latent only)
+    // Internal forward through encoder based on mode (returns latent only).
+    // `continuous` here is the value AFTER categorical embeddings have been
+    // concatenated; see fuse_categoricals_().
     torch::Tensor encode(
         torch::Tensor continuous,
         torch::Tensor genus_ids,
@@ -145,7 +160,8 @@ private:
         torch::Tensor pool_has_cover = {}
     );
 
-    // Internal forward with aux loss (for MoE)
+    // Internal forward with aux loss (for MoE). Same `continuous` convention
+    // as encode() — caller pre-concatenates categorical embeddings.
     std::pair<torch::Tensor, torch::Tensor> encode_with_aux(
         torch::Tensor continuous,
         torch::Tensor genus_ids,
@@ -158,6 +174,17 @@ private:
         torch::Tensor pool_mask = {},
         torch::Tensor pool_has_cover = {}
     );
+
+    // Single source of truth for categorical concat. Takes the user-supplied
+    // continuous tensor and (possibly empty) categorical_ids; returns the
+    // continuous tensor that matches the n_continuous the encoders were
+    // constructed with. Behavior matches the Python POC
+    // (src/resolve/model/resolve.py): if the model has no categoricals,
+    // returns continuous unchanged; if it has categoricals but the caller
+    // passed an empty/undefined cat_ids, pads with zeros to keep the encoder
+    // shape valid.
+    torch::Tensor fuse_categoricals_(torch::Tensor continuous,
+                                     torch::Tensor categorical_ids);
 
     ResolveSchema schema_;
     ModelConfig config_;
@@ -180,6 +207,10 @@ private:
 
     // Tabular adapter (used when encoder_architecture != MLP)
     TabularAdapter adapter_{nullptr};
+
+    // Categorical embedder (one nn::Embedding table per categorical column).
+    // Null when the schema has no categorical covariates.
+    CategoricalEmbedder categorical_embedder_{nullptr};
 
     std::unordered_map<std::string, TaskHead> heads_;
 };

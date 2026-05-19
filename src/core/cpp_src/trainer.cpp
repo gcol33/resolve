@@ -53,6 +53,11 @@ void Trainer::prepare_data(
         plot_offsets_ = dataset.plot_offsets();
     }
 
+    // Capture the dataset's categorical vocab. The trainer outlives the
+    // dataset (`save()` is called long after `prepare_data()`); without this
+    // copy the vocab would be a dangling reference at save time.
+    categorical_vocab_ = dataset.categorical_vocab();
+
     // Delegate to the raw tensor API using data from the dataset
     prepare_data(
         dataset.coordinates(),
@@ -70,6 +75,7 @@ void Trainer::prepare_data(
         dataset.pool_weights(),
         dataset.pool_mask(),
         dataset.pool_has_cover(),
+        dataset.categorical_ids(),
         test_size,
         seed
     );
@@ -91,6 +97,7 @@ void Trainer::prepare_data(
     torch::Tensor pool_weights,
     torch::Tensor pool_mask,
     torch::Tensor pool_has_cover,
+    torch::Tensor categorical_ids,
     float test_size,
     int seed
 ) {
@@ -212,6 +219,45 @@ void Trainer::prepare_data(
     split_pool(pool_mask, train_pool_mask_, test_pool_mask_);
     split_pool(pool_has_cover, train_pool_has_cover_, test_pool_has_cover_);
 
+    // ---- Categorical covariates ----
+    // Validate caller intent: if the model was constructed for K categorical
+    // columns, the caller must pass a (n_plots, K) tensor. If the model has
+    // no categorical columns, the caller must pass an empty tensor.
+    {
+        const int64_t model_cat_cols = model_->schema().n_categoricals();
+        if (categorical_ids.defined() && categorical_ids.numel() > 0) {
+            if (categorical_ids.dim() != 2) {
+                throw std::runtime_error(
+                    "Trainer::prepare_data: categorical_ids must be 2-D, got dim=" +
+                    std::to_string(categorical_ids.dim()));
+            }
+            if (categorical_ids.size(1) != model_cat_cols) {
+                throw std::runtime_error(
+                    "Trainer::prepare_data: categorical_ids has " +
+                    std::to_string(categorical_ids.size(1)) +
+                    " columns but the model expects " +
+                    std::to_string(model_cat_cols) +
+                    " (schema.categorical_names)");
+            }
+            if (categorical_ids.size(0) != n_plots) {
+                throw std::runtime_error(
+                    "Trainer::prepare_data: categorical_ids has " +
+                    std::to_string(categorical_ids.size(0)) +
+                    " rows but other inputs have " +
+                    std::to_string(n_plots) + " rows");
+            }
+            train_categorical_ids_ = categorical_ids.index_select(0, train_idx);
+            test_categorical_ids_ = categorical_ids.index_select(0, test_idx);
+        } else if (model_cat_cols > 0) {
+            throw std::runtime_error(
+                "Trainer::prepare_data: model was constructed for " +
+                std::to_string(model_cat_cols) +
+                " categorical columns but no categorical_ids tensor was "
+                "provided. Pass dataset.categorical_ids() or use the "
+                "ResolveDataset overload of prepare_data().");
+        }
+    }
+
     // Scale and split targets
     for (const auto& cfg : model_->schema().targets) {
         auto target_it = targets.find(cfg.name);
@@ -267,6 +313,10 @@ float Trainer::train_epoch(int epoch) {
     const auto& pool_mask_src = gpu_data_cached_ ? gpu_pool_mask_ : train_pool_mask_;
     const auto& pool_has_cover_src = gpu_data_cached_ ? gpu_pool_has_cover_ : train_pool_has_cover_;
 
+    // Categorical covariate source (per-plot int64 codes). Empty when the
+    // dataset has no categorical columns; the model handles that gracefully.
+    const auto& categorical_src = gpu_data_cached_ ? gpu_categorical_ids_ : train_categorical_ids_;
+
     int64_t n_train = continuous_src.size(0);
     int batch_size = config_.batch_size;
 
@@ -313,6 +363,11 @@ float Trainer::train_epoch(int epoch) {
         auto batch_pool_mask = pool_mask_src.defined() ? pool_mask_src.index_select(0, batch_idx) : torch::Tensor();
         auto batch_pool_has_cover = pool_has_cover_src.defined() ? pool_has_cover_src.index_select(0, batch_idx) : torch::Tensor();
 
+        // Categorical batch slicing
+        auto batch_categorical_ids = categorical_src.defined() && categorical_src.numel() > 0
+            ? categorical_src.index_select(0, batch_idx)
+            : torch::Tensor();
+
         // If not GPU cached, move to device
         if (!gpu_data_cached_) {
             batch_continuous = batch_continuous.to(config_.device);
@@ -325,6 +380,7 @@ float Trainer::train_epoch(int epoch) {
             if (batch_pool_weights.defined()) batch_pool_weights = batch_pool_weights.to(config_.device);
             if (batch_pool_mask.defined()) batch_pool_mask = batch_pool_mask.to(config_.device);
             if (batch_pool_has_cover.defined()) batch_pool_has_cover = batch_pool_has_cover.to(config_.device);
+            if (batch_categorical_ids.defined()) batch_categorical_ids = batch_categorical_ids.to(config_.device);
         }
 
         // CUDA hash computation with async prefetching
@@ -409,7 +465,8 @@ float Trainer::train_epoch(int epoch) {
                 batch_continuous, batch_genus_ids, batch_family_ids,
                 batch_species_ids, batch_species_vector,
                 batch_pool_genus, batch_pool_family,
-                batch_pool_weights, batch_pool_mask, batch_pool_has_cover
+                batch_pool_weights, batch_pool_mask, batch_pool_has_cover,
+                batch_categorical_ids
             );
             predictions = std::move(result.outputs);
             moe_aux_loss = result.moe_aux_loss;
@@ -418,7 +475,8 @@ float Trainer::train_epoch(int epoch) {
                 batch_continuous, batch_genus_ids, batch_family_ids,
                 batch_species_ids, batch_species_vector,
                 batch_pool_genus, batch_pool_family,
-                batch_pool_weights, batch_pool_mask, batch_pool_has_cover
+                batch_pool_weights, batch_pool_mask, batch_pool_has_cover,
+                batch_categorical_ids
             );
         }
 
@@ -522,6 +580,7 @@ Trainer::eval_epoch(int epoch) {
 
     // Use GPU-cached test data if available
     torch::Tensor test_continuous, test_genus_ids, test_family_ids, test_species_ids, test_species_vector;
+    torch::Tensor test_categorical_ids;
     PoolTensors test_pool;
     std::unordered_map<std::string, torch::Tensor> test_targets;
     std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>> batch_scalers;
@@ -534,6 +593,7 @@ Trainer::eval_epoch(int epoch) {
         test_species_vector = gpu_test_species_vector_;
         test_pool = {gpu_test_pool_genus_ids_, gpu_test_pool_family_ids_,
                      gpu_test_pool_weights_, gpu_test_pool_mask_, gpu_test_pool_has_cover_};
+        test_categorical_ids = gpu_test_categorical_ids_;
         test_targets = gpu_test_targets_;
         batch_scalers = gpu_scalers_;
     } else {
@@ -547,6 +607,7 @@ Trainer::eval_epoch(int epoch) {
                      to_device_if_defined(test_pool_weights_, config_.device),
                      to_device_if_defined(test_pool_mask_, config_.device),
                      to_device_if_defined(test_pool_has_cover_, config_.device)};
+        test_categorical_ids = to_device_if_defined(test_categorical_ids_, config_.device);
         for (const auto& [name, tensor] : test_targets_) {
             test_targets[name] = tensor.to(config_.device);
         }
@@ -587,7 +648,8 @@ Trainer::eval_epoch(int epoch) {
         test_continuous, test_genus_ids, test_family_ids,
         test_species_ids, test_species_vector,
         test_pool.genus_ids, test_pool.family_ids,
-        test_pool.weights, test_pool.mask, test_pool.has_cover
+        test_pool.weights, test_pool.mask, test_pool.has_cover,
+        test_categorical_ids
     );
 
     auto [loss, _] = loss_fn_.compute(predictions, test_targets, epoch, batch_scalers);
@@ -668,6 +730,9 @@ void Trainer::cache_data_to_gpu() {
     cache_if_defined(train_pool_mask_, gpu_pool_mask_);
     cache_if_defined(train_pool_has_cover_, gpu_pool_has_cover_);
 
+    // Cache categorical IDs on GPU (training)
+    cache_if_defined(train_categorical_ids_, gpu_categorical_ids_);
+
     for (const auto& [name, tensor] : train_targets_) {
         gpu_targets_[name] = tensor.to(config_.device);
     }
@@ -701,6 +766,9 @@ void Trainer::cache_data_to_gpu() {
     cache_if_defined(test_pool_weights_, gpu_test_pool_weights_);
     cache_if_defined(test_pool_mask_, gpu_test_pool_mask_);
     cache_if_defined(test_pool_has_cover_, gpu_test_pool_has_cover_);
+
+    // Cache categorical IDs on GPU (test)
+    cache_if_defined(test_categorical_ids_, gpu_test_categorical_ids_);
 
     for (const auto& [name, tensor] : test_targets_) {
         gpu_test_targets_[name] = tensor.to(config_.device);
@@ -864,6 +932,7 @@ TrainResult Trainer::fit() {
         auto test_family_gpu = to_device_if_defined(test_family_ids_, config_.device);
         auto test_species_gpu = to_device_if_defined(test_species_ids_, config_.device);
         auto test_vector_gpu = to_device_if_defined(test_species_vector_, config_.device);
+        auto test_cat_gpu = to_device_if_defined(test_categorical_ids_, config_.device);
         auto baseline_pool = get_test_pool_tensors();
 
         // CUDA hash computation: compute hash embedding for test set in baseline eval
@@ -887,7 +956,8 @@ TrainResult Trainer::fit() {
             test_cont_gpu, test_genus_gpu, test_family_gpu,
             test_species_gpu, test_vector_gpu,
             baseline_pool.genus_ids, baseline_pool.family_ids,
-            baseline_pool.weights, baseline_pool.mask, baseline_pool.has_cover
+            baseline_pool.weights, baseline_pool.mask, baseline_pool.has_cover,
+            test_cat_gpu
         );
 
         for (const auto& cfg : model_->schema().targets) {
@@ -976,6 +1046,11 @@ void Trainer::save(const std::string& path, const RunMetadata* metadata) const {
     save_schema(archive, model_->schema());
     save_scalers(archive, scalers_);
 
+    // Save categorical vocabulary (string -> code maps for each categorical
+    // column). Empty vocab writes a count of zero — load() handles that as
+    // a no-op for back-compat with pre-categorical-port checkpoints.
+    categorical_vocab_.save(archive, "trainer_categorical_");
+
     // Save training configuration for reproducibility
     save_train_config(archive, config_);
 
@@ -992,7 +1067,7 @@ void Trainer::save(const std::string& path, const RunMetadata* metadata) const {
     }
 }
 
-std::tuple<ResolveModel, Scalers> Trainer::load(
+std::tuple<ResolveModel, Scalers, CategoricalVocab> Trainer::load(
     const std::string& path,
     torch::Device device
 ) {
@@ -1003,6 +1078,10 @@ std::tuple<ResolveModel, Scalers> Trainer::load(
     ModelConfig config = load_model_config(archive);
     ResolveSchema schema = load_schema(archive);
     Scalers scalers = load_scalers(archive);
+
+    // Load the categorical vocabulary. Back-compat for pre-categorical-port
+    // checkpoints is handled inside CategoricalVocab::load (returns empty).
+    CategoricalVocab vocab = CategoricalVocab::load(archive, "trainer_categorical_");
 
     // Create model with loaded schema
     ResolveModel model(schema, config);
@@ -1031,7 +1110,7 @@ std::tuple<ResolveModel, Scalers> Trainer::load(
 
     model->to(device);
 
-    return {model, scalers};
+    return {model, scalers, vocab};
 }
 
 NetworkDiagnostics Trainer::compute_diagnostics() {
@@ -1051,6 +1130,13 @@ NetworkDiagnostics Trainer::compute_diagnostics() {
     auto sample_family = to_device_if_defined(
         test_family_ids_.defined() ? test_family_ids_.index_select(0, sample_indices) : torch::Tensor(),
         config_.device);
+    // Slice categorical_ids for the sampled subset so encode_with_activations
+    // can fuse them into the continuous tensor and match the encoder's
+    // constructed n_continuous.
+    auto sample_cat_ids = (test_categorical_ids_.defined()
+                           && test_categorical_ids_.numel() > 0)
+        ? test_categorical_ids_.index_select(0, sample_indices).to(config_.device)
+        : torch::Tensor();
 
     // CUDA hash computation: compute hash embedding for sampled test data
 #ifdef RESOLVE_HAS_CUDA
@@ -1071,7 +1157,7 @@ NetworkDiagnostics Trainer::compute_diagnostics() {
 
     // Use encode_with_activations to get intermediate layer outputs
     auto [latent, activations] = model_->encode_with_activations(
-        sample_continuous, sample_genus, sample_family
+        sample_continuous, sample_genus, sample_family, sample_cat_ids
     );
 
     // If no activations available (non-hash encoder), return empty diagnostics
@@ -1176,13 +1262,15 @@ CalibrationResult Trainer::compute_calibration(
     auto test_family_ids = to_device_if_defined(test_family_ids_, config_.device);
     auto test_species_ids = to_device_if_defined(test_species_ids_, config_.device);
     auto test_species_vector = to_device_if_defined(test_species_vector_, config_.device);
+    auto test_cat_ids = to_device_if_defined(test_categorical_ids_, config_.device);
     auto cal_pool = get_test_pool_tensors();
 
     auto predictions = model_->forward(
         test_continuous, test_genus_ids, test_family_ids,
         test_species_ids, test_species_vector,
         cal_pool.genus_ids, cal_pool.family_ids,
-        cal_pool.weights, cal_pool.mask, cal_pool.has_cover
+        cal_pool.weights, cal_pool.mask, cal_pool.has_cover,
+        test_cat_ids
     );
 
     auto pred_it = predictions.find(target_name);
@@ -1276,13 +1364,15 @@ ResidualAnalysis Trainer::compute_residuals(
     auto test_family_ids = to_device_if_defined(test_family_ids_, config_.device);
     auto test_species_ids = to_device_if_defined(test_species_ids_, config_.device);
     auto test_species_vector = to_device_if_defined(test_species_vector_, config_.device);
+    auto test_cat_ids = to_device_if_defined(test_categorical_ids_, config_.device);
     auto resid_pool = get_test_pool_tensors();
 
     auto predictions = model_->forward(
         test_continuous, test_genus_ids, test_family_ids,
         test_species_ids, test_species_vector,
         resid_pool.genus_ids, resid_pool.family_ids,
-        resid_pool.weights, resid_pool.mask, resid_pool.has_cover
+        resid_pool.weights, resid_pool.mask, resid_pool.has_cover,
+        test_cat_ids
     );
 
     auto pred_it = predictions.find(target_name);
@@ -1394,6 +1484,9 @@ CrossValidationResult Trainer::cross_validate(int n_folds, int seed) {
     auto all_pool_mask = cat_if_both_defined(train_pool_mask_, test_pool_mask_);
     auto all_pool_has_cover = cat_if_both_defined(train_pool_has_cover_, test_pool_has_cover_);
 
+    // Concatenate categorical IDs across train+test for per-fold re-splitting
+    auto all_categorical_ids = cat_if_both_defined(train_categorical_ids_, test_categorical_ids_);
+
     std::unordered_map<std::string, torch::Tensor> all_targets;
     for (const auto& [name, train_tensor] : train_targets_) {
         auto test_it = test_targets_.find(name);
@@ -1491,6 +1584,7 @@ CrossValidationResult Trainer::cross_validate(int n_folds, int seed) {
         split_pool_fold(all_pool_weights, train_pool_weights_, test_pool_weights_);
         split_pool_fold(all_pool_mask, train_pool_mask_, test_pool_mask_);
         split_pool_fold(all_pool_has_cover, train_pool_has_cover_, test_pool_has_cover_);
+        split_pool_fold(all_categorical_ids, train_categorical_ids_, test_categorical_ids_);
 
         for (const auto& [name, tensor] : all_targets) {
             train_targets_[name] = tensor.index_select(0, train_idx);
@@ -1711,6 +1805,7 @@ CrossValidationResult Trainer::cross_validate_spatial(
     auto all_pool_weights = cat_if_both(train_pool_weights_, test_pool_weights_);
     auto all_pool_mask = cat_if_both(train_pool_mask_, test_pool_mask_);
     auto all_pool_has_cover = cat_if_both(train_pool_has_cover_, test_pool_has_cover_);
+    auto all_categorical_ids = cat_if_both(train_categorical_ids_, test_categorical_ids_);
 
     std::unordered_map<std::string, torch::Tensor> all_targets;
     for (const auto& [name, train_tensor] : train_targets_) {
@@ -1774,6 +1869,7 @@ CrossValidationResult Trainer::cross_validate_spatial(
         split_if_defined(all_pool_weights, train_pool_weights_, test_pool_weights_);
         split_if_defined(all_pool_mask, train_pool_mask_, test_pool_mask_);
         split_if_defined(all_pool_has_cover, train_pool_has_cover_, test_pool_has_cover_);
+        split_if_defined(all_categorical_ids, train_categorical_ids_, test_categorical_ids_);
 
         for (const auto& [name, tensor] : all_targets) {
             train_targets_[name] = tensor.index_select(0, train_tensor);
@@ -1885,7 +1981,8 @@ std::unordered_map<std::string, torch::Tensor> Trainer::predict(
     torch::Tensor pool_family_ids,
     torch::Tensor pool_weights,
     torch::Tensor pool_mask,
-    torch::Tensor pool_has_cover
+    torch::Tensor pool_has_cover,
+    torch::Tensor categorical_ids
 ) {
     torch::NoGradGuard no_grad;
     model_->eval();
@@ -1899,7 +1996,8 @@ std::unordered_map<std::string, torch::Tensor> Trainer::predict(
         continuous, to_dev(genus_ids), to_dev(family_ids),
         to_dev(species_ids), to_dev(species_vector),
         to_dev(pool_genus_ids), to_dev(pool_family_ids),
-        to_dev(pool_weights), to_dev(pool_mask), to_dev(pool_has_cover)
+        to_dev(pool_weights), to_dev(pool_mask), to_dev(pool_has_cover),
+        to_dev(categorical_ids)
     );
 }
 

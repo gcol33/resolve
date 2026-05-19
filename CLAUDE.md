@@ -118,9 +118,11 @@ The research paper using RESOLVE is located at:
 
 - **CSV Loading & Role Mapping**: `ResolveDataset::from_csv()`, fast-cpp-csv-parser via FetchContent
 - **Dataset-First Trainer**: `Trainer(ResolveModel, TrainConfig)` with `prepare_data(ResolveDataset)`, cross-validation, calibration, residual analysis
+- **Categorical covariates**: `RoleMapping::categoricals` accepts string-typed covariate columns. CSV loader auto-factorizes via `CategoricalVocab` (sorted-unique non-NA → codes 1..K, reserved 0 = UNK/NA). `CategoricalEmbedder` (one `nn::Embedding` table per column) is held by `ResolveModelImpl` and concatenates its output into `continuous` before the encoder runs, matching the Python POC integration point. Vocab is captured on the Trainer at `prepare_data` time and serialized through `Trainer::save`; `Predictor::load` returns it via `Predictor::categorical_vocab()` for inference on raw CSVs. See `include/resolve/categorical.hpp` + `cpp_src/categorical.cpp`, schema fields `categorical_names`/`categorical_vocab_sizes`/`categorical_embed_dim`, and `tests/test_categorical.cpp` for the behavioral contract.
+- **Rank-pool / transformer species encoding**: `PlotEncoderRankPool` (single shared species/genus/family embedding tables + weighted-mean pool + cover dropout) and `PlotEncoderTransformer` (additive token embeddings in `d_model` space + optional self-attention + attention/CLS pooling) wired end-to-end through dataset → model → trainer → checkpoint → predictor. Pool tensors (`pool_genus_ids`, `pool_family_ids`, `pool_weights`, `pool_mask`, `pool_has_cover`) are populated at CSV load time via the standalone `RankPoolEncoder` (single source of truth for `PoolWeighting` semantics — `binary`/`abundance`/`log1p`/`norm`/`rank`) and threaded through every forward / get_latent / encode / predict path. `DatasetConfig.pool_weighting` selects the weighting scheme. `ModelConfig.cover_dropout` / `d_model` / `n_heads` / `n_attention_layers` / `transformer_ff_dim` / `transformer_pooling` / `transformer_dropout` round-trip through `save_model_config` / `load_model_config` for Predictor reconstruction. See `include/resolve/encoder.hpp` (encoder classes), `cpp_src/encoder_pool.cpp` (forward impl), `cpp_src/dataset.cpp` (pool tensor population via `RankPoolEncoder::transform`), `tests/test_rank_pool_encoder.cpp` + `tests/test_transformer_encoder.cpp` (behavior contract). End-to-end smoke at `J:\Phd Local\Gilles_paper_resolve\cpp_smoke_rank_pool.py`.
 - **CLI**: `resolve train/predict/info` commands via CLI11
-- **Bindings**: nanobind (`_resolve_core`) with dataset/model/trainer bindings; Rcpp with `resolve_load_dataset()`
-- **Testing**: Catch2 unit tests (dataset, loss, model, new modules) + CUDA benchmarks
+- **Bindings**: nanobind (`_resolve_core`) with dataset/model/trainer bindings (including `CategoricalVocab`, `roles.categoricals`, schema categorical fields); Rcpp with `resolve_load_dataset()` and matching categorical exposure.
+- **Testing**: Catch2 unit tests (dataset, loss, model, categorical, new modules) + CUDA benchmarks
 
 ---
 
@@ -184,13 +186,6 @@ The Triton kernel in `csrc/fused_embed_linear.py` is **correct** but ~90x slower
 - Clone and return weight tensors
 - Expose via nanobind/Rcpp bindings
 
-### C++ rank_pool/transformer implementation
-
-**Goal**: Full C++ implementation of rank_pool and transformer encoding modes.
-
-**Current state**: Enum values added to `SpeciesEncodingMode`, `pool_*` fields added to `ResolveBatch`, informative error messages in `model.cpp`. Multi-day effort deferred.
-
-**What's needed**:
-- C++ `PlotEncoderRankPool` and `PlotEncoderTransformer` modules
-- Integration in `ResolveModelImpl` constructor and forward path
-- Bindings in nanobind and Rcpp
+(C++ rank_pool/transformer implementation: **DONE** 2026-05-19 — see the
+"Rank-pool / transformer species encoding" bullet under "Completed
+Infrastructure" above.)

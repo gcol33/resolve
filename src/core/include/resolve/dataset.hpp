@@ -3,6 +3,8 @@
 #include "resolve/types.hpp"
 #include "resolve/role_mapping.hpp"
 #include "resolve/encoder.hpp"
+#include "resolve/categorical.hpp"
+#include "resolve/species_encoding.hpp"
 #include <torch/torch.h>
 #include <string>
 #include <vector>
@@ -52,6 +54,34 @@ struct DatasetConfig {
     // When true, stores raw species data in COO format for on-the-fly GPU hash computation
     // This avoids pre-computing hash embeddings and allows dynamic batch processing
     bool use_cuda_hash = false;
+
+    // Per-species weight scheme for the rank_pool / transformer encoders.
+    // Mirrors the Python POC's BasePoolEncoder weighting modes
+    // (binary, abundance, log1p, norm, rank). Defaults to Log1p which is the
+    // v7 paper headline (`rank_log1p_big`). Ignored for hash / embed / sparse
+    // encodings.
+    PoolWeighting pool_weighting = PoolWeighting::Log1p;
+
+    // Cap on species-per-plot for rank_pool / transformer encoders. Caps the
+    // padded `max_species` dimension to avoid one outlier plot inflating the
+    // padding for the whole dataset. Mirrors the Python POC's
+    // `rank_pool_species_cap` (auto p99 by default in the POC; opt-in here).
+    //
+    //   0 (default) : no cap. Pad to the global per-plot max. Matches the
+    //                 untrimmed behaviour; the longest plot in the dataset
+    //                 dictates the width of every row's pool tensors.
+    //  -1           : auto p99. Compute the 99th percentile of per-plot
+    //                 species counts and truncate longer plots to that
+    //                 length. Matches the POC's default behaviour and prints
+    //                 a one-line summary so users see the drop.
+    //  >0           : manual cap. Truncate longer plots to this many species
+    //                 (kept in original CSV row order, matching the POC's
+    //                 `a[:cap]` slice).
+    //
+    // Plots shorter than the cap are unaffected. Truncation is a hard slice
+    // (not top-k by abundance); the rank-pool weighting still applies to
+    // whatever survives the slice.
+    int pool_species_cap = 0;
 };
 
 // Loaded dataset ready for training
@@ -84,6 +114,15 @@ public:
     const torch::Tensor& family_ids() const { return family_ids_; }
     const torch::Tensor& unknown_fraction() const { return unknown_fraction_; }
     const torch::Tensor& unknown_count() const { return unknown_count_; }
+    // Categorical covariate codes. Shape (n_plots, n_categoricals) int64,
+    // values produced by CategoricalVocab (0 = UNK). Empty (undefined or 0
+    // columns) when the schema declares no categoricals.
+    const torch::Tensor& categorical_ids() const { return categorical_ids_; }
+    // The fitted vocabularies for each categorical column (string -> code).
+    // Saved/loaded as part of the checkpoint so inference on new data uses
+    // the same encoding as training.
+    const CategoricalVocab& categorical_vocab() const { return categorical_vocab_; }
+    CategoricalVocab& categorical_vocab() { return categorical_vocab_; }
     const std::unordered_map<std::string, torch::Tensor>& targets() const { return targets_; }
 
     // Accessors for pool-style encoder fields (rank_pool / transformer modes)
@@ -157,6 +196,8 @@ private:
     torch::Tensor family_ids_;       // (n_plots, n_taxonomy_slots)
     torch::Tensor unknown_fraction_; // (n_plots,)
     torch::Tensor unknown_count_;    // (n_plots,)
+    torch::Tensor categorical_ids_;  // (n_plots, n_categoricals) int64
+    CategoricalVocab categorical_vocab_;  // per-column string->code maps
     std::unordered_map<std::string, torch::Tensor> targets_;
 
     // Pool-style encoder fields for rank_pool / transformer modes
@@ -165,7 +206,7 @@ private:
     torch::Tensor pool_family_ids_;  // (n_plots, max_species) int64
     torch::Tensor pool_weights_;     // (n_plots, max_species) float32 - abundance/weight per species
     torch::Tensor pool_mask_;        // (n_plots, max_species) bool - true where species exists
-    torch::Tensor pool_has_cover_;   // (n_plots,) bool - true if plot has abundance data
+    torch::Tensor pool_has_cover_;   // (n_plots,) float32 - 1.0 if plot has abundance data, 0.0 otherwise
 
     // Raw species data in COO format for CUDA hash computation
     // Stored when use_cuda_hash=true in config, enables on-the-fly GPU hash computation

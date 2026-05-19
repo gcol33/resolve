@@ -18,8 +18,11 @@ int info_command(const std::string& model_path) {
     std::cout << "Model: " << model_path << std::endl;
 
     try {
-        // Load model
-        auto [model, scalers] = Trainer::load(model_path, torch::kCPU);
+        // Load model. Trainer::load now returns (model, scalers, vocab)
+        // post-categorical-port; we ignore the vocab here — `info` only
+        // reports schema/config/parameter counts.
+        auto [model, scalers, vocab] = Trainer::load(model_path, torch::kCPU);
+        (void)vocab;
         const auto& schema = model->schema();
         const auto& config = model->config();
 

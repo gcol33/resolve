@@ -31,6 +31,8 @@ try:
         LRSchedulerType,
         ActivationType,
         NormLayerType,
+        # Pool-style species encoder weighting (rank_pool / transformer modes)
+        PoolWeighting,
         # Architecture enums (v2.0)
         EncoderArchitecture,
         GNNType,
@@ -114,6 +116,7 @@ __all__ = [
     "LRSchedulerType",
     "ActivationType",
     "NormLayerType",
+    "PoolWeighting",
     # Architecture enums (v2.0)
     "EncoderArchitecture",
     "GNNType",

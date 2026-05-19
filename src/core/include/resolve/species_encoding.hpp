@@ -90,9 +90,17 @@ public:
 
     void fit(const std::vector<SpeciesRecord>& records);
 
+    // species_cap mirrors DatasetConfig::pool_species_cap exactly:
+    //   0  -> no cap (default; pad to global per-plot max).
+    //   -1 -> auto p99 (compute 99th percentile of per-plot species counts).
+    //   >0 -> manual cap; per-plot lists are truncated to the first `cap`
+    //         records in original CSV order (matching the POC's `a[:cap]`).
+    // When the cap kicks in we print a one-line summary so users see the
+    // drop ("rank_pool: capping species at p99=X (max=Y, saves Z% padding)").
     [[nodiscard]] RankPoolEncodedData transform(
         const std::vector<SpeciesRecord>& records,
-        const std::vector<std::string>& plot_ids) const;
+        const std::vector<std::string>& plot_ids,
+        int species_cap = 0) const;
 
     [[nodiscard]] bool is_fitted() const noexcept { return fitted_; }
     [[nodiscard]] int64_t n_species_vocab() const noexcept { return species_vocab_.size(); }

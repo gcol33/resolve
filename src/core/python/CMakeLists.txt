@@ -44,6 +44,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         ../cpp_src/dataset.cpp
         ../cpp_src/species_encoding.cpp
         ../cpp_src/checkpoint.cpp
+        ../cpp_src/categorical.cpp
 
         ../cpp_src/pretraining.cpp
         ../cpp_src/vae.cpp

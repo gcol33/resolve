@@ -102,6 +102,9 @@ public:
         torch::Tensor pool_weights = {},
         torch::Tensor pool_mask = {},
         torch::Tensor pool_has_cover = {},
+        // (n_plots, n_categoricals) int64 codes from CategoricalVocab.
+        // Empty when the dataset has no categorical covariates.
+        torch::Tensor categorical_ids = {},
         float test_size = 0.2f,
         int seed = 42
     );
@@ -112,8 +115,12 @@ public:
     // Save model and state (optionally with run metadata for final checkpoint)
     void save(const std::string& path, const RunMetadata* metadata = nullptr) const;
 
-    // Load model and state
-    static std::tuple<ResolveModel, Scalers> load(
+    // Load model and state. Returns model, scalers, and the categorical
+    // vocabulary that was captured at prepare_data time. The vocab is empty
+    // for checkpoints from datasets without categorical covariates (and for
+    // older pre-categorical-port checkpoints, via back-compat in
+    // CategoricalVocab::load).
+    static std::tuple<ResolveModel, Scalers, CategoricalVocab> load(
         const std::string& path,
         torch::Device device = torch::kCPU
     );
@@ -123,6 +130,13 @@ public:
     [[nodiscard]] const ResolveModel& model() const noexcept { return model_; }
     [[nodiscard]] const Scalers& scalers() const noexcept { return scalers_; }
     [[nodiscard]] const TrainConfig& config() const noexcept { return config_; }
+    // Categorical vocabulary captured at prepare_data time. Empty when the
+    // dataset had no categorical covariates. Used by save() to persist the
+    // string -> code maps so Predictor.load() can decode new CSVs with the
+    // same codes the model was trained against.
+    [[nodiscard]] const CategoricalVocab& categorical_vocab() const noexcept {
+        return categorical_vocab_;
+    }
 
     [[nodiscard]] NetworkDiagnostics compute_diagnostics();
 
@@ -165,7 +179,8 @@ public:
         torch::Tensor pool_family_ids = {},
         torch::Tensor pool_weights = {},
         torch::Tensor pool_mask = {},
-        torch::Tensor pool_has_cover = {}
+        torch::Tensor pool_has_cover = {},
+        torch::Tensor categorical_ids = {}
     );
 
 private:
@@ -200,6 +215,11 @@ private:
     Scalers scalers_;
     MultiTaskLoss loss_fn_;
 
+    // Copy of the categorical vocabulary captured at prepare_data time so
+    // it survives independently of the source ResolveDataset (which may go
+    // out of scope before save).
+    CategoricalVocab categorical_vocab_;
+
     // Raw coordinates stored for spatial CV (before scaling/concatenation)
     torch::Tensor coordinates_;
 
@@ -218,6 +238,11 @@ private:
     torch::Tensor train_pool_mask_;
     torch::Tensor train_pool_has_cover_;
 
+    // Categorical covariate codes for the training split. Undefined when
+    // the dataset has no categorical columns. Layout (n_train, n_categoricals)
+    // int64.
+    torch::Tensor train_categorical_ids_;
+
     torch::Tensor test_continuous_;
     torch::Tensor test_genus_ids_;
     torch::Tensor test_family_ids_;
@@ -230,6 +255,7 @@ private:
     torch::Tensor test_pool_weights_;
     torch::Tensor test_pool_mask_;
     torch::Tensor test_pool_has_cover_;
+    torch::Tensor test_categorical_ids_;
 
     // Best model state for restoring
     std::vector<char> best_model_state_;
@@ -258,6 +284,7 @@ private:
     torch::Tensor gpu_pool_weights_;
     torch::Tensor gpu_pool_mask_;
     torch::Tensor gpu_pool_has_cover_;
+    torch::Tensor gpu_categorical_ids_;
 
     // GPU-cached test data (avoid repeated CPU->GPU transfer in eval)
     torch::Tensor gpu_test_continuous_;
@@ -273,6 +300,7 @@ private:
     torch::Tensor gpu_test_pool_weights_;
     torch::Tensor gpu_test_pool_mask_;
     torch::Tensor gpu_test_pool_has_cover_;
+    torch::Tensor gpu_test_categorical_ids_;
 
     // Shuffled training data (cached, reshuffled every N epochs)
     torch::Tensor shuffled_continuous_;

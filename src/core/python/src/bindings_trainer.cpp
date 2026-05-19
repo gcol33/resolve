@@ -35,6 +35,7 @@ void register_trainer(nb::module_& m) {
                                nb::object unknown_fraction_obj,
                                nb::object unknown_count_obj,
                                const nb::dict& targets,
+                               nb::object categorical_ids_obj,
                                float test_size,
                                int seed) {
             self.prepare_data(unpack_or_empty(coordinates_obj),
@@ -49,6 +50,7 @@ void register_trainer(nb::module_& m) {
                             dict_to_tensor_map(targets),
                             /*pool_genus_ids=*/{}, /*pool_family_ids=*/{},
                             /*pool_weights=*/{}, /*pool_mask=*/{}, /*pool_has_cover=*/{},
+                            unpack_or_empty(categorical_ids_obj),
                             test_size, seed);
         }, nb::arg("coordinates"),
            nb::arg("covariates"),
@@ -60,6 +62,7 @@ void register_trainer(nb::module_& m) {
            nb::arg("unknown_fraction"),
            nb::arg("unknown_count"),
            nb::arg("targets"),
+           nb::arg("categorical_ids") = nb::none(),
            nb::arg("test_size") = 0.2f,
            nb::arg("seed") = 42,
            "Prepare data from raw tensors (backwards compatible API)")
@@ -79,6 +82,10 @@ void register_trainer(nb::module_& m) {
         .def_prop_ro("model", [](resolve::Trainer& self) -> resolve::ResolveModel { return self.model(); })
         .def_prop_ro("scalers", [](const resolve::Trainer& self) { return resolve::Scalers(self.scalers()); })
         .def_prop_ro("config", [](const resolve::Trainer& self) { return resolve::TrainConfig(self.config()); })
+        .def_prop_ro("categorical_vocab",
+                     [](const resolve::Trainer& self) -> const resolve::CategoricalVocab& {
+                         return self.categorical_vocab();
+                     })
         .def("compute_diagnostics", &resolve::Trainer::compute_diagnostics,
              "Compute network health diagnostics (dead neurons, saturation, etc.)")
         .def("compute_calibration", &resolve::Trainer::compute_calibration,
@@ -109,7 +116,8 @@ void register_trainer(nb::module_& m) {
                           nb::object pool_family_ids_obj,
                           nb::object pool_weights_obj,
                           nb::object pool_mask_obj,
-                          nb::object pool_has_cover_obj) {
+                          nb::object pool_has_cover_obj,
+                          nb::object categorical_ids_obj) {
             auto result = self.predict(unpack_or_empty(continuous_obj),
                                        unpack_or_empty(genus_ids_obj),
                                        unpack_or_empty(family_ids_obj),
@@ -119,7 +127,8 @@ void register_trainer(nb::module_& m) {
                                        unpack_or_empty(pool_family_ids_obj),
                                        unpack_or_empty(pool_weights_obj),
                                        unpack_or_empty(pool_mask_obj),
-                                       unpack_or_empty(pool_has_cover_obj));
+                                       unpack_or_empty(pool_has_cover_obj),
+                                       unpack_or_empty(categorical_ids_obj));
             return tensor_map_to_dict(result);
         }, nb::arg("continuous"),
            nb::arg("genus_ids") = nb::none(),
@@ -131,6 +140,7 @@ void register_trainer(nb::module_& m) {
            nb::arg("pool_weights") = nb::none(),
            nb::arg("pool_mask") = nb::none(),
            nb::arg("pool_has_cover") = nb::none(),
+           nb::arg("categorical_ids") = nb::none(),
            "Predict on data (runs model in eval mode)");
 
     nb::class_<resolve::Predictor>(m, "Predictor")
@@ -157,6 +167,7 @@ void register_trainer(nb::module_& m) {
                           nb::object pool_weights_obj,
                           nb::object pool_mask_obj,
                           nb::object pool_has_cover_obj,
+                          nb::object categorical_ids_obj,
                           bool return_latent) {
             return self.predict(unpack_or_empty(coordinates_obj),
                                 unpack_or_empty(covariates_obj),
@@ -172,6 +183,7 @@ void register_trainer(nb::module_& m) {
                                 unpack_or_empty(pool_weights_obj),
                                 unpack_or_empty(pool_mask_obj),
                                 unpack_or_empty(pool_has_cover_obj),
+                                unpack_or_empty(categorical_ids_obj),
                                 return_latent);
         }, nb::arg("coordinates"),
            nb::arg("covariates"),
@@ -187,6 +199,7 @@ void register_trainer(nb::module_& m) {
            nb::arg("pool_weights") = nb::none(),
            nb::arg("pool_mask") = nb::none(),
            nb::arg("pool_has_cover") = nb::none(),
+           nb::arg("categorical_ids") = nb::none(),
            nb::arg("return_latent") = false)
         .def("predict_dataset", [](resolve::Predictor& self,
                                    const resolve::ResolveDataset& dataset,
@@ -224,5 +237,9 @@ void register_trainer(nb::module_& m) {
             return self.device().is_cuda() ? std::string("cuda") : std::string("cpu");
         })
         .def_prop_ro("model", [](resolve::Predictor& self) -> resolve::ResolveModel { return self.model(); })
-        .def_prop_ro("scalers", [](resolve::Predictor& self) -> const resolve::Scalers& { return self.scalers(); });
+        .def_prop_ro("scalers", [](resolve::Predictor& self) -> const resolve::Scalers& { return self.scalers(); })
+        .def_prop_ro("categorical_vocab",
+                     [](const resolve::Predictor& self) -> const resolve::CategoricalVocab& {
+                         return self.categorical_vocab();
+                     });
 }

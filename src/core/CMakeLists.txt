@@ -51,6 +51,7 @@ set(RESOLVE_CORE_SOURCES
     cpp_src/dataset.cpp
     cpp_src/species_encoding.cpp
     cpp_src/checkpoint.cpp
+    cpp_src/categorical.cpp
 
     cpp_src/pretraining.cpp
     cpp_src/vae.cpp
@@ -75,6 +76,7 @@ set(RESOLVE_CORE_HEADERS
     include/resolve/dataset.hpp
     include/resolve/species_encoding.hpp
     include/resolve/checkpoint.hpp
+    include/resolve/categorical.hpp
 
     include/resolve/tabm.hpp
     include/resolve/pretraining.hpp
