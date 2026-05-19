@@ -455,7 +455,7 @@ float Trainer::train_epoch(int epoch) {
 
         // Enable autocast for forward pass if AMP is enabled
         if (amp_enabled_) {
-            at::autocast::set_enabled(true);
+            at::autocast::set_autocast_enabled(at::kCUDA, true);
             at::autocast::increment_nesting();
         }
 
@@ -504,7 +504,7 @@ float Trainer::train_epoch(int epoch) {
         // Disable autocast before backward pass
         if (amp_enabled_) {
             at::autocast::decrement_nesting();
-            at::autocast::set_enabled(false);
+            at::autocast::set_autocast_enabled(at::kCUDA, false);
         }
 
         // Backward pass with gradient scaling for AMP
@@ -513,18 +513,24 @@ float Trainer::train_epoch(int epoch) {
             auto scaled_loss = loss * amp_scale_;
             scaled_loss.backward();
 
-            // Check for inf/nan in gradients
-            bool found_inf = false;
-            for (const auto& param : model_->parameters()) {
+            // Collect defined gradients
+            std::vector<torch::Tensor> grads;
+            grads.reserve(model_->parameters().size());
+            for (auto& param : model_->parameters()) {
                 if (param.grad().defined()) {
-                    auto grad = param.grad();
-                    if (torch::any(torch::isinf(grad)).item<bool>() ||
-                        torch::any(torch::isnan(grad)).item<bool>()) {
-                        found_inf = true;
-                        break;
-                    }
+                    grads.push_back(param.grad());
                 }
             }
+
+            // Fused inf/nan check + unscale in a single CUDA kernel.
+            // Replaces a per-parameter isinf/isnan loop and a separate
+            // per-parameter div_ loop, both of which forced ~10-20 host syncs
+            // per batch via .item<bool>(). See gcol33/resolve#1.
+            auto opts = torch::TensorOptions().dtype(torch::kFloat32).device(config_.device);
+            auto found_inf_t = torch::zeros({1}, opts);
+            auto inv_scale_t = torch::full({1}, 1.0f / amp_scale_, opts);
+            at::_amp_foreach_non_finite_check_and_unscale_(grads, found_inf_t, inv_scale_t);
+            bool found_inf = found_inf_t.item<float>() != 0.0f;
 
             if (found_inf) {
                 // Skip this step, reduce scale
@@ -533,13 +539,6 @@ float Trainer::train_epoch(int epoch) {
                 // Zero gradients since we're skipping this step
                 optimizer_->zero_grad();
             } else {
-                // Unscale gradients
-                for (auto& param : model_->parameters()) {
-                    if (param.grad().defined()) {
-                        param.grad().div_(amp_scale_);
-                    }
-                }
-
                 // Gradient clipping (on unscaled gradients)
                 torch::nn::utils::clip_grad_norm_(model_->parameters(), 1.0);
 
@@ -821,7 +820,7 @@ TrainResult Trainer::fit() {
         amp_scale_ = config_.amp_init_scale;
         amp_growth_tracker_ = 0;
         // Set autocast dtype to float16 for CUDA
-        at::autocast::set_autocast_gpu_dtype(at::kHalf);
+        at::autocast::set_autocast_dtype(at::kCUDA, at::kHalf);
     }
 
     auto start_time = std::chrono::high_resolution_clock::now();
