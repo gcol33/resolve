@@ -21,5 +21,9 @@ if(NOT DEFINED USE_CUDA OR USE_CUDA)
     # Setting it causes 8.3 vs long path mismatch with --use-local-env
     set(CMAKE_CUDA_FLAGS "-allow-unsupported-compiler --use-local-env" CACHE STRING "" FORCE)
     set(CMAKE_CUDA_FLAGS_INIT "-allow-unsupported-compiler --use-local-env")
-    set(CMAKE_CUDA_ARCHITECTURES 89)
+    # Use TORCH_CUDA_ARCH_LIST instead of CMAKE_CUDA_ARCHITECTURES: torch's
+    # Caffe2 cmake ignores the latter and warns. "12.0" = Blackwell (RTX 5080).
+    # To build for a different GPU (e.g. 8.9 = Ada / RTX 4090, 9.0 = Hopper),
+    # change this list or pass -DTORCH_CUDA_ARCH_LIST="..." to cmake.
+    set(TORCH_CUDA_ARCH_LIST "12.0" CACHE STRING "" FORCE)
 endif()
