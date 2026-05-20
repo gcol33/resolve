@@ -94,12 +94,53 @@ try:
         VAEPretrainResult,
         VAEPretrainer,
     )
-    from ._resolve_core import set_vram_fraction
 except ImportError as e:
     raise ImportError(
         f"Failed to import resolve_core C++ extension: {e}\n"
         "Make sure the package was built with CMake and libtorch is available."
     ) from e
+
+# Optional symbols added in newer builds; tolerate older installed .pyd.
+try:
+    from ._resolve_core import set_vram_fraction
+except ImportError:
+    def set_vram_fraction(*_args, **_kwargs):
+        """Stub for older resolve_core builds that lack set_vram_fraction.
+
+        Rebuild resolve_core to enable GPU VRAM control via this function.
+        """
+        return None
+
+from ._io_retry import retry_io
+
+# Wrap checkpoint I/O entry points with retry_io so transient OSError on the
+# host filesystem (WinError 121 semaphore timeout, EINVAL on a hung handle,
+# etc.) doesn't kill a multi-hour training run. The C++ side passes filesystem
+# faults through as Python OSError; retry_io catches them, sleeps with
+# exponential backoff, and retries.
+_Trainer_save_orig = Trainer.save
+def _trainer_save(self, path, metadata=None):
+    return retry_io(
+        lambda: _Trainer_save_orig(self, path, metadata),
+        what=f"Trainer.save({path!r})",
+    )
+Trainer.save = _trainer_save
+
+_Trainer_load_orig = Trainer.load
+def _trainer_load(path, device="cpu", vram_fraction=0.80):
+    return retry_io(
+        lambda: _Trainer_load_orig(path, device, vram_fraction),
+        what=f"Trainer.load({path!r})",
+    )
+Trainer.load = staticmethod(_trainer_load)
+
+_Predictor_load_orig = Predictor.load
+def _predictor_load(path, device="cpu", vram_fraction=0.80):
+    return retry_io(
+        lambda: _Predictor_load_orig(path, device, vram_fraction),
+        what=f"Predictor.load({path!r})",
+    )
+Predictor.load = staticmethod(_predictor_load)
 
 __version__ = "0.1.0"
 
@@ -180,4 +221,6 @@ __all__ = [
     "VAEPretrainer",
     # GPU memory management
     "set_vram_fraction",
+    # I/O resilience helper (also auto-applied to Trainer.save/load and Predictor.load)
+    "retry_io",
 ]
