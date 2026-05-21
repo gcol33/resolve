@@ -7,7 +7,7 @@
 Implementation of `dev_notes/fuzzy_index_plan.md`:
 
 - `src/core/include/resolve/fuzzy.hpp` — public API (`FuzzyIndex`, `Match`, `BuildOptions`, `QueryOptions`).
-- `src/core/cpp_src/fuzzy_internal.hpp` — internal trie + automaton + `FuzzyIndex::Impl`.
+- `src/core/cpp_src/fuzzy_internal.h` — internal trie + automaton + `FuzzyIndex::Impl`.
 - `src/core/cpp_src/fuzzy_automaton.cpp` — UTF-8 decode, codepoint lowercase, Damerau–Levenshtein DP-row state machine.
 - `src/core/cpp_src/fuzzy_index.cpp` — packed-vector trie, per-bucket sub-tries, build pipeline.
 - `src/core/cpp_src/fuzzy_search.cpp` — iterative DFS over trie driven by the automaton, top-N heap with adaptive k tightening, OpenMP `query_batch`.
@@ -78,7 +78,7 @@ Added:
 - `src/core/include/resolve/fuzzy.hpp`
 - `src/core/cpp_src/fuzzy_automaton.cpp`
 - `src/core/cpp_src/fuzzy_index.cpp`
-- `src/core/cpp_src/fuzzy_internal.hpp`
+- `src/core/cpp_src/fuzzy_internal.h`
 - `src/core/cpp_src/fuzzy_search.cpp`
 - `src/core/python/src/bindings_fuzzy.cpp`
 - `src/core/tests/test_fuzzy.cpp`

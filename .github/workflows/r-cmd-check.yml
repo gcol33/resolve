@@ -74,11 +74,16 @@ jobs:
           # `#include "resolve/*.hpp"` from .cpp files resolves correctly.
           cp -r src/core/include/resolve r/src/resolve
           # Implementation sources from cpp_src/ are copied flat into r/src/.
-          # Both .cpp files and private headers (e.g. fuzzy_internal.hpp,
-          # which is shared by fuzzy_automaton.cpp / fuzzy_index.cpp /
+          # Both .cpp files and private headers (e.g. fuzzy_internal.h, which
+          # is shared by fuzzy_automaton.cpp / fuzzy_index.cpp /
           # fuzzy_search.cpp) must be included; otherwise the build fails
-          # with "fuzzy_internal.hpp: No such file or directory".
-          for f in src/core/cpp_src/*.cpp src/core/cpp_src/*.hpp; do
+          # with "fuzzy_internal.h: No such file or directory".
+          #
+          # Headers use the .h extension (not .hpp) because R CMD check
+          # --as-cran flags any .hpp file directly under src/ as an
+          # "unlikely file name for src files". The header is plain C++ —
+          # the extension is purely a CRAN-compatibility convention.
+          for f in src/core/cpp_src/*.cpp src/core/cpp_src/*.h; do
             [ -e "$f" ] || continue
             cp "$f" "r/src/$(basename "$f")"
           done

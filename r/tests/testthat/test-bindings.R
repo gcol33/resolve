@@ -3,10 +3,9 @@
 # These tests verify:
 #   1. Rcpp module registration (class and function names)
 #   2. Version string format
-#   3. R wrapper input validation (works WITHOUT libtorch)
+#   3. Modern R wrapper input validation (works WITHOUT libtorch)
 #   4. Factory function exports
-#   5. Wrapper function argument handling
-
+#   5. Removed legacy entry points raise clear errors
 
 # =============================================================================
 # 1. Module registration
@@ -17,8 +16,10 @@ test_that("resolve_module is loaded", {
   mod <- tryCatch(resolve:::.resolve_module, error = function(e) NULL)
   skip_if(is.null(mod), "resolve module not available (needs libtorch)")
 
-  # Verify core classes are registered
-  expect_true("SpeciesEncoder" %in% names(mod))
+  # Verify core classes are registered. SpeciesEncoder was removed when the
+  # unified resolve::SpeciesEncoder C++ class was split into RankPoolEncoder
+  # and EmbeddingEncoder — see ?resolve.encoder for the full rationale.
+  expect_false("SpeciesEncoder" %in% names(mod))
   expect_true("ResolveModel" %in% names(mod))
   expect_true("Trainer" %in% names(mod))
   expect_true("Predictor" %in% names(mod))
@@ -33,7 +34,8 @@ test_that("module factory functions are registered", {
   expect_true("ResolveDataset_from_csv" %in% names(mod))
   expect_true("ResolveDataset_from_species_csv" %in% names(mod))
   expect_true("Predictor_load" %in% names(mod))
-  expect_true("SpeciesEncoder_load" %in% names(mod))
+  # SpeciesEncoder_load was removed alongside SpeciesEncoder.
+  expect_false("SpeciesEncoder_load" %in% names(mod))
 })
 
 
@@ -53,147 +55,8 @@ test_that("resolve.version returns valid semver string", {
 
 
 # =============================================================================
-# 3. R wrapper input validation (no libtorch required)
+# 3. Modern R wrapper input validation (no libtorch required)
 # =============================================================================
-
-# --- resolve.encoder ---
-
-test_that("resolve.encoder rejects invalid hashDim", {
-  expect_error(resolve.encoder(hashDim = 0), "hashDim")
-  expect_error(resolve.encoder(hashDim = -5), "hashDim")
-  expect_error(resolve.encoder(hashDim = "abc"), "hashDim")
-})
-
-test_that("resolve.encoder rejects invalid topK", {
-  expect_error(resolve.encoder(topK = 0), "topK")
-  expect_error(resolve.encoder(topK = -1), "topK")
-})
-
-test_that("resolve.encoder rejects invalid aggregation", {
-  expect_error(resolve.encoder(aggregation = "bad"), "aggregation")
-})
-
-test_that("resolve.encoder rejects invalid normalization", {
-  expect_error(resolve.encoder(normalization = "bad"), "normalization")
-})
-
-test_that("resolve.encoder rejects invalid selection", {
-  expect_error(resolve.encoder(selection = "invalid"), "selection")
-})
-
-test_that("resolve.encoder rejects invalid representation", {
-  expect_error(resolve.encoder(representation = "bad"), "representation")
-})
-
-test_that("resolve.encoder rejects invalid minSpeciesFrequency", {
-  expect_error(resolve.encoder(minSpeciesFrequency = 0), "minSpeciesFrequency")
-  expect_error(resolve.encoder(minSpeciesFrequency = -1), "minSpeciesFrequency")
-})
-
-test_that("resolve.encoder accepts all valid parameter combinations", {
-  # These should only fail at the C++ level (module not loaded), not R validation
-  for (agg in c("abundance", "count")) {
-    for (norm in c("raw", "norm", "log1p")) {
-      for (sel in c("top", "bottom", "top_bottom", "all")) {
-        for (rep in c("abundance", "presence_absence")) {
-          err <- tryCatch(
-            resolve.encoder(
-              aggregation = agg,
-              normalization = norm,
-              selection = sel,
-              representation = rep
-            ),
-            error = function(e) e$message
-          )
-          # If it errors, the error must NOT be about R-level validation
-          if (is.character(err)) {
-            expect_false(grepl("aggregation|normalization|selection|representation", err),
-                         info = sprintf("agg=%s norm=%s sel=%s rep=%s", agg, norm, sel, rep))
-          }
-        }
-      }
-    }
-  }
-})
-
-
-# --- resolve.train ---
-
-test_that("resolve.train rejects non-resolve.dataset input", {
-  expect_error(
-    resolve.train(data.frame(x = 1)),
-    "resolve\\.dataset"
-  )
-  expect_error(
-    resolve.train(list(a = 1)),
-    "resolve\\.dataset"
-  )
-})
-
-test_that("resolve.train rejects invalid speciesEncoding", {
-  # Create a minimal resolve.dataset-like object to pass the class check
-  fake_ds <- structure(list(), class = "resolve.dataset")
-
-  expect_error(
-    resolve.train(fake_ds, speciesEncoding = "invalid"),
-    "speciesEncoding"
-  )
-  expect_error(
-    resolve.train(fake_ds, speciesEncoding = ""),
-    "speciesEncoding"
-  )
-  expect_error(
-    resolve.train(fake_ds, speciesEncoding = "hashing"),
-    "speciesEncoding"
-  )
-})
-
-test_that("resolve.train accepts all valid speciesEncoding values", {
-  fake_ds <- structure(list(speciesIds = matrix(1L)), class = "resolve.dataset")
-
-  for (enc in c("hash", "embed", "sparse", "rank_pool", "transformer")) {
-    err <- tryCatch(
-      resolve.train(fake_ds, speciesEncoding = enc),
-      error = function(e) e$message
-    )
-    # Should fail downstream (no encoder, no C++), but NOT on speciesEncoding
-    expect_false(grepl("speciesEncoding", err),
-                 info = paste("encoding:", enc))
-  }
-})
-
-test_that("resolve.train rejects invalid lossConfig", {
-  fake_ds <- structure(list(), class = "resolve.dataset")
-
-  expect_error(
-    resolve.train(fake_ds, lossConfig = "invalid"),
-    "lossConfig"
-  )
-})
-
-test_that("resolve.train accepts all valid lossConfig values", {
-  fake_ds <- structure(list(), class = "resolve.dataset")
-
-  for (loss in c("mae", "smape", "combined")) {
-    err <- tryCatch(
-      resolve.train(fake_ds, lossConfig = loss),
-      error = function(e) e$message
-    )
-    # Should fail downstream, but NOT on lossConfig
-    expect_false(grepl("lossConfig", err),
-                 info = paste("loss:", loss))
-  }
-})
-
-test_that("resolve.train requires speciesIds for embed mode", {
-  fake_ds <- structure(list(speciesIds = NULL), class = "resolve.dataset")
-
-  expect_error(
-    resolve.train(fake_ds, speciesEncoding = "embed"),
-    "speciesIds"
-  )
-})
-
 
 # --- resolve.load ---
 
@@ -207,40 +70,12 @@ test_that("resolve.load rejects non-existent file", {
 })
 
 test_that("resolve.load rejects invalid device", {
-  # Use a path that doesn't exist - device check should come after path check
-  # but let's test with a temp file to isolate the device error
   tmp <- tempfile(fileext = ".pt")
   writeLines("fake", tmp)
   on.exit(unlink(tmp), add = TRUE)
 
   expect_error(resolve.load(tmp, device = "tpu"), "device")
   expect_error(resolve.load(tmp, device = "mps"), "device")
-})
-
-
-# --- resolve.predict ---
-
-test_that("resolve.predict rejects invalid outputSpace", {
-  fake_predictor <- structure(list(), class = "Rcpp_Predictor")
-  fake_ds <- structure(list(), class = "resolve.dataset")
-
-  expect_error(
-    resolve.predict(fake_predictor, fake_ds, outputSpace = "bad"),
-    "outputSpace"
-  )
-})
-
-test_that("resolve.predict rejects invalid model types", {
-  fake_ds <- structure(list(), class = "resolve.dataset")
-
-  expect_error(
-    resolve.predict("not_a_model", fake_ds),
-    "model must be"
-  )
-  expect_error(
-    resolve.predict(42, fake_ds),
-    "model must be"
-  )
 })
 
 
@@ -454,18 +289,18 @@ test_that("resolve.predict.dataset rejects invalid dataset type", {
 test_that("all exported R wrapper functions exist", {
   ns <- asNamespace("resolve")
 
-  # Main API
-
+  # Legacy facades retained as stub errors (so explicit "removed" messages
+  # show up at call time, rather than "could not find function").
   expect_true(exists("resolve.encoder", envir = ns))
   expect_true(exists("resolve.dataset", envir = ns))
   expect_true(exists("resolve.train", envir = ns))
   expect_true(exists("resolve.predict", envir = ns))
+
+  # Live API.
   expect_true(exists("resolve.load", envir = ns))
   expect_true(exists("resolve.save", envir = ns))
   expect_true(exists("resolve.progress", envir = ns))
   expect_true(exists("resolve.version", envir = ns))
-
-  # C++ API wrappers
   expect_true(exists("resolve.dataset.csv", envir = ns))
   expect_true(exists("resolve.train.dataset", envir = ns))
   expect_true(exists("resolve.predict.dataset", envir = ns))
@@ -485,11 +320,10 @@ test_that("all exported metric functions exist", {
 test_that("exported functions are actual functions, not stubs", {
   ns <- asNamespace("resolve")
 
-  expect_true(is.function(get("resolve.encoder", envir = ns)))
-  expect_true(is.function(get("resolve.train", envir = ns)))
-  expect_true(is.function(get("resolve.predict", envir = ns)))
   expect_true(is.function(get("resolve.load", envir = ns)))
   expect_true(is.function(get("resolve.dataset.csv", envir = ns)))
+  expect_true(is.function(get("resolve.train.dataset", envir = ns)))
+  expect_true(is.function(get("resolve.predict.dataset", envir = ns)))
   expect_true(is.function(get("resolve_mae", envir = ns)))
 })
 
@@ -497,35 +331,6 @@ test_that("exported functions are actual functions, not stubs", {
 # =============================================================================
 # 5. Wrapper function signatures
 # =============================================================================
-
-test_that("resolve.encoder has expected formal arguments", {
-  args <- names(formals(resolve.encoder))
-
-  expect_true("hashDim" %in% args)
-  expect_true("topK" %in% args)
-  expect_true("aggregation" %in% args)
-  expect_true("normalization" %in% args)
-  expect_true("trackUnknownCount" %in% args)
-  expect_true("selection" %in% args)
-  expect_true("representation" %in% args)
-  expect_true("minSpeciesFrequency" %in% args)
-})
-
-test_that("resolve.train has expected formal arguments", {
-  args <- names(formals(resolve.train))
-
-  expect_true("dataset" %in% args)
-  expect_true("speciesEncoding" %in% args)
-  expect_true("hiddenDims" %in% args)
-  expect_true("maxEpochs" %in% args)
-  expect_true("patience" %in% args)
-  expect_true("lr" %in% args)
-  expect_true("batchSize" %in% args)
-  expect_true("device" %in% args)
-  expect_true("savePath" %in% args)
-  expect_true("lossConfig" %in% args)
-  expect_true("verbose" %in% args)
-})
 
 test_that("resolve.train.dataset has expected formal arguments", {
   args <- names(formals(resolve.train.dataset))
@@ -558,16 +363,6 @@ test_that("resolve.dataset.csv has expected formal arguments", {
   expect_true("config" %in% args)
 })
 
-test_that("resolve.predict has expected formal arguments", {
-  args <- names(formals(resolve.predict))
-
-  expect_true("model" %in% args)
-  expect_true("dataset" %in% args)
-  expect_true("returnLatent" %in% args)
-  expect_true("outputSpace" %in% args)
-  expect_true("confidenceThreshold" %in% args)
-})
-
 test_that("resolve.load has expected formal arguments", {
   args <- names(formals(resolve.load))
 
@@ -580,44 +375,8 @@ test_that("resolve.load has expected formal arguments", {
 # 6. Default argument values
 # =============================================================================
 
-test_that("resolve.encoder defaults are sensible", {
-  defaults <- formals(resolve.encoder)
-
-  expect_equal(eval(defaults$hashDim), 32L)
-  expect_equal(eval(defaults$topK), 3L)
-  expect_equal(eval(defaults$aggregation), "abundance")
-  expect_equal(eval(defaults$normalization), "norm")
-  expect_equal(eval(defaults$trackUnknownCount), FALSE)
-  expect_equal(eval(defaults$selection), "top")
-  expect_equal(eval(defaults$representation), "abundance")
-  expect_equal(eval(defaults$minSpeciesFrequency), 1L)
-})
-
-test_that("resolve.train defaults are sensible", {
-  defaults <- formals(resolve.train)
-
-  expect_equal(eval(defaults$speciesEncoding), "hash")
-  expect_equal(eval(defaults$maxEpochs), 500L)
-  expect_equal(eval(defaults$patience), 50L)
-  expect_equal(eval(defaults$lr), 1e-3)
-  expect_equal(eval(defaults$batchSize), 4096L)
-  expect_equal(eval(defaults$device), "cpu")
-  expect_equal(eval(defaults$testSize), 0.2)
-  expect_equal(eval(defaults$seed), 42L)
-  expect_equal(eval(defaults$lossConfig), "mae")
-  expect_equal(eval(defaults$verbose), TRUE)
-})
-
 test_that("resolve.load defaults are sensible", {
   defaults <- formals(resolve.load)
 
   expect_equal(eval(defaults$device), "cpu")
-})
-
-test_that("resolve.predict defaults are sensible", {
-  defaults <- formals(resolve.predict)
-
-  expect_equal(eval(defaults$returnLatent), FALSE)
-  expect_equal(eval(defaults$outputSpace), "raw")
-  expect_equal(eval(defaults$confidenceThreshold), 0.0)
 })

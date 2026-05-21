@@ -2,41 +2,26 @@
 % Please edit documentation in R/resolve.R
 \name{resolve.predict}
 \alias{resolve.predict}
-\title{Predict with a RESOLVE Model}
+\title{Predict with a RESOLVE Model (legacy facade — removed)}
 \usage{
-resolve.predict(
-  model,
-  dataset,
-  returnLatent = FALSE,
-  outputSpace = "raw",
-  confidenceThreshold = 0
-)
+resolve.predict(...)
 }
 \arguments{
-\item{model}{A trained model (from resolve.train() or resolve.load())}
-
-\item{dataset}{A resolve.dataset to predict on}
-
-\item{returnLatent}{Return latent representations (default FALSE)}
-
-\item{outputSpace}{Output space for regression predictions:
-"raw" (default): inverse-transform predictions to original scale
-"transformed": keep predictions in transformed space (e.g., log1p)}
-
-\item{confidenceThreshold}{Minimum confidence for predictions (0-1).
-Predictions below threshold are set to NA. Default 0 keeps all predictions.
-Confidence is based on 1 - unknownFraction (species coverage).}
+\item{...}{Ignored; preserved for argument compatibility with the
+pre-removal signature so existing call sites surface a clear error
+instead of an "unused argument" message.}
 }
 \value{
-Named list of prediction arrays, plus 'confidence' for each target
+Never returns; always errors.
 }
 \description{
-Make predictions on a dataset using a trained model.
+The legacy \code{resolve.predict()} facade consumed \code{resolve.dataset()}
+output (a plain R list with \code{hashEmbedding} / \code{genusIds} etc.) which
+is no longer produced — see \code{\link[=resolve.encoder]{resolve.encoder()}} for the underlying
+engine change.
 }
-\examples{
-\donttest{
-preds <- resolve.predict(trainedModel, newDataset)
-preds <- resolve.predict(trainedModel, newDataset, confidenceThreshold = 0.5)
-}
-
+\details{
+Calling \code{resolve.predict()} therefore raises an error. Use
+\code{\link[=resolve.predict.dataset]{resolve.predict.dataset()}} together with \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}}
+and a \code{Predictor} loaded via \code{\link[=resolve.load]{resolve.load()}}.
 }

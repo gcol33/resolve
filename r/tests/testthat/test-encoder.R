@@ -1,48 +1,44 @@
-# Tests for SpeciesEncoder
+# Tests for removed standalone encoder facade.
+#
+# The unified resolve::SpeciesEncoder C++ class was split into
+# RankPoolEncoder + EmbeddingEncoder, and the standalone resolve.encoder()
+# wrapper has been removed (see r/R/resolve.R). The tests below pin the
+# replacement contract: calling resolve.encoder() must raise a clear error
+# that points users at the modern resolve.dataset.csv() pipeline, rather
+# than silently no-op or fail with an unused-argument message.
 
-test_that("SpeciesEncoder can be created with defaults", {
-  encoder <- resolve.encoder()
-
-  expect_equal(encoder$hash_dim(), 32L)
-  expect_equal(encoder$top_k(), 3L)
-  expect_false(encoder$is_fitted())
+test_that("resolve.encoder() raises a clear removal error", {
+  expect_error(resolve.encoder(), "resolve.encoder\\(\\) has been removed")
+  expect_error(resolve.encoder(), "resolve.dataset.csv\\(\\)")
 })
 
-test_that("SpeciesEncoder can be created with custom parameters", {
-  encoder <- resolve.encoder(
-    hashDim = 64L,
-    topK = 5L,
-    selection = "top_bottom"
+test_that("resolve.encoder() error survives extra arguments", {
+  # Pre-removal signature took hashDim/topK/etc.; the new stub accepts
+  # ... so existing call sites surface the removal message rather than
+  # an "unused argument" message.
+  expect_error(
+    resolve.encoder(hashDim = 32L, topK = 5L, selection = "top"),
+    "resolve.encoder\\(\\) has been removed"
   )
-
-  expect_equal(encoder$hash_dim(), 64L)
-  expect_equal(encoder$top_k(), 5L)
 })
 
-test_that("SpeciesEncoder fit and transform work", {
-  skip_on_cran()
+test_that("resolve.dataset() raises a clear removal error", {
+  # resolve.dataset() depended on resolve.encoder() and is removed in
+  # lockstep.
+  expect_error(resolve.dataset(), "resolve.dataset\\(\\) has been removed")
+  expect_error(resolve.dataset(), "resolve.dataset.csv\\(\\)")
+})
 
-  encoder <- resolve.encoder(hashDim = 16L, topK = 2L)
+test_that("resolve.train() raises a clear removal error", {
+  # resolve.train() consumed resolve.dataset() output and is removed
+  # together with that pair.
+  expect_error(resolve.train(), "resolve.train\\(\\) has been removed")
+  expect_error(resolve.train(), "resolve.train.dataset\\(\\)")
+})
 
-  # Create test species data
-  species_data <- data.frame(
-    plot_id = c("p1", "p1", "p2", "p2", "p3"),
-    species_id = c("sp1", "sp2", "sp1", "sp3", "sp2"),
-    abundance = c(0.5, 0.5, 0.8, 0.2, 1.0),
-    genus = c("Quercus", "Fagus", "Quercus", "Pinus", "Fagus"),
-    family = c("Fagaceae", "Fagaceae", "Fagaceae", "Pinaceae", "Fagaceae")
-  )
-
-  # Fit
-  encoder$fit(species_data)
-
-  expect_true(encoder$is_fitted())
-  expect_true(encoder$n_genera() > 0)
-  expect_true(encoder$n_families() > 0)
-
-  # Transform
-  result <- encoder$transform(species_data, unique(species_data$plot_id))
-
-  expect_equal(nrow(result$hash_embedding), 3)  # 3 plots
-  expect_equal(ncol(result$hash_embedding), 16)  # hash_dim
+test_that("resolve.predict() raises a clear removal error", {
+  # resolve.predict() consumed resolve.dataset() output and is removed
+  # together with that pair.
+  expect_error(resolve.predict(), "resolve.predict\\(\\) has been removed")
+  expect_error(resolve.predict(), "resolve.predict.dataset\\(\\)")
 })

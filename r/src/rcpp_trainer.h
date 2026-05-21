@@ -109,6 +109,7 @@ public:
         Nullable<NumericVector> unknown_fraction,
         Nullable<NumericVector> unknown_count,
         List targets,
+        Nullable<IntegerMatrix> categorical_ids = R_NilValue,
         double test_size = 0.2,
         int seed = 42
     ) {
@@ -117,6 +118,7 @@ public:
         torch::Tensor hash_t = r_mat_to_tensor(hash_embedding);
 
         torch::Tensor species_id_t, species_vec_t, genus_t, family_t, unk_frac_t, unk_cnt_t;
+        torch::Tensor cat_ids_t;
 
         if (species_ids.isNotNull()) {
             species_id_t = r_int_mat_to_tensor(as<IntegerMatrix>(species_ids));
@@ -136,6 +138,9 @@ public:
         if (unknown_count.isNotNull()) {
             unk_cnt_t = r_vec_to_tensor(as<NumericVector>(unknown_count));
         }
+        if (categorical_ids.isNotNull()) {
+            cat_ids_t = r_int_mat_to_tensor(as<IntegerMatrix>(categorical_ids));
+        }
 
         // Convert targets list to map
         std::unordered_map<std::string, torch::Tensor> target_map;
@@ -151,6 +156,7 @@ public:
             target_map,
             /*pool_genus_ids=*/{}, /*pool_family_ids=*/{},
             /*pool_weights=*/{}, /*pool_mask=*/{}, /*pool_has_cover=*/{},
+            cat_ids_t,
             static_cast<float>(test_size), seed
         );
     }
@@ -166,6 +172,7 @@ public:
         NumericVector pool_has_cover,
         Nullable<NumericVector> unknown_fraction,
         List targets,
+        Nullable<IntegerMatrix> categorical_ids = R_NilValue,
         double test_size = 0.2,
         int seed = 42
     ) {
@@ -174,11 +181,12 @@ public:
         torch::Tensor p_weights_t = r_mat_to_tensor(pool_weights);
         torch::Tensor p_mask_t = r_int_mat_to_tensor(pool_mask).to(torch::kBool);
         torch::Tensor p_cover_t = r_vec_to_tensor(pool_has_cover);
-        torch::Tensor p_genus_t, p_family_t, unk_frac_t;
+        torch::Tensor p_genus_t, p_family_t, unk_frac_t, cat_ids_t;
 
         if (pool_genus_ids.isNotNull()) p_genus_t = r_int_mat_to_tensor(as<IntegerMatrix>(pool_genus_ids));
         if (pool_family_ids.isNotNull()) p_family_t = r_int_mat_to_tensor(as<IntegerMatrix>(pool_family_ids));
         if (unknown_fraction.isNotNull()) unk_frac_t = r_vec_to_tensor(as<NumericVector>(unknown_fraction));
+        if (categorical_ids.isNotNull()) cat_ids_t = r_int_mat_to_tensor(as<IntegerMatrix>(categorical_ids));
 
         std::unordered_map<std::string, torch::Tensor> target_map;
         CharacterVector target_names = targets.names();
@@ -194,6 +202,7 @@ public:
             unk_frac_t, /*unknown_count=*/{},
             target_map,
             p_genus_t, p_family_t, p_weights_t, p_mask_t, p_cover_t,
+            cat_ids_t,
             static_cast<float>(test_size), seed
         );
     }
@@ -276,11 +285,12 @@ public:
         Nullable<IntegerMatrix> pool_family_ids = R_NilValue,
         Nullable<NumericMatrix> pool_weights = R_NilValue,
         Nullable<IntegerMatrix> pool_mask = R_NilValue,
-        Nullable<NumericVector> pool_has_cover = R_NilValue
+        Nullable<NumericVector> pool_has_cover = R_NilValue,
+        Nullable<IntegerMatrix> categorical_ids = R_NilValue
     ) {
         torch::Tensor cont_t = r_mat_to_tensor(continuous);
         torch::Tensor genus_t, family_t, species_id_t, species_vec_t;
-        torch::Tensor pg, pf, pw, pm, ph;
+        torch::Tensor pg, pf, pw, pm, ph, cat_ids_t;
         if (genus_ids.isNotNull()) genus_t = r_int_mat_to_tensor(as<IntegerMatrix>(genus_ids));
         if (family_ids.isNotNull()) family_t = r_int_mat_to_tensor(as<IntegerMatrix>(family_ids));
         if (species_ids.isNotNull()) species_id_t = r_int_mat_to_tensor(as<IntegerMatrix>(species_ids));
@@ -290,9 +300,10 @@ public:
         if (pool_weights.isNotNull()) pw = r_mat_to_tensor(as<NumericMatrix>(pool_weights));
         if (pool_mask.isNotNull()) pm = r_int_mat_to_tensor(as<IntegerMatrix>(pool_mask)).to(torch::kBool);
         if (pool_has_cover.isNotNull()) ph = r_vec_to_tensor(as<NumericVector>(pool_has_cover));
+        if (categorical_ids.isNotNull()) cat_ids_t = r_int_mat_to_tensor(as<IntegerMatrix>(categorical_ids));
 
         auto result = trainer_->predict(cont_t, genus_t, family_t, species_id_t, species_vec_t,
-                                        pg, pf, pw, pm, ph);
+                                        pg, pf, pw, pm, ph, cat_ids_t);
         List outputs;
         for (const auto& [name, tensor] : result) {
             outputs[name] = tensor_to_r_vec(tensor);

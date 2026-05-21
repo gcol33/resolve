@@ -4,10 +4,22 @@
 // Include all class wrappers
 #include "rcpp_common.h"
 #include "rcpp_dataset.h"
-#include "rcpp_encoder.h"
 #include "rcpp_model.h"
 #include "rcpp_trainer.h"
 #include "rcpp_predictor.h"
+//
+// The legacy standalone `SpeciesEncoder` wrapper (rcpp_encoder.h) bound a
+// `resolve::SpeciesEncoder` class that has since been split in the C++ core
+// into `resolve::RankPoolEncoder` (variable-length plot encoder) and
+// `resolve::EmbeddingEncoder` (fixed top-k encoder), neither of which is a
+// drop-in replacement for the old unified API (no hash_embedding output,
+// no save/load, different state surface). The R-side `resolve.encoder()`
+// facade is also a Python-POC mirror; the canonical modern path is
+// `resolve.dataset.csv()` which dispatches to `resolve::ResolveDataset::from_csv()`
+// and performs encoding inside the C++ engine. The standalone wrapper is
+// therefore removed until a full port is done (which would also need to add
+// save/load on the new C++ encoders); calling `resolve.encoder()` from R
+// raises a clear error pointing at the modern path.
 
 // =============================================================================
 // Expose module-managed wrapper classes to non-module Rcpp machinery.
@@ -25,7 +37,6 @@
 // forward-defined via the rcpp_*.h includes above.
 // =============================================================================
 
-RCPP_EXPOSED_CLASS_NODECL(RSpeciesEncoder)
 RCPP_EXPOSED_CLASS_NODECL(RResolveDataset)
 RCPP_EXPOSED_CLASS_NODECL(RResolveModel)
 RCPP_EXPOSED_CLASS_NODECL(RTrainer)
@@ -36,26 +47,6 @@ RCPP_EXPOSED_CLASS_NODECL(RPredictor)
 // =============================================================================
 
 RCPP_MODULE(resolve_module) {
-    // SpeciesEncoder
-    class_<RSpeciesEncoder>("SpeciesEncoder")
-        .constructor<int, int, std::string, std::string, bool, std::string, std::string, int>(
-            "Create a SpeciesEncoder")
-        .method("fit", &RSpeciesEncoder::fit, "Fit encoder on species data")
-        .method("transform", &RSpeciesEncoder::transform, "Transform species data")
-        .method("is_fitted", &RSpeciesEncoder::is_fitted, "Check if encoder is fitted")
-        .method("hash_dim", &RSpeciesEncoder::hash_dim, "Get hash dimension")
-        .method("top_k", &RSpeciesEncoder::top_k, "Get top-k value")
-        .method("n_genera", &RSpeciesEncoder::n_genera, "Get number of genera")
-        .method("n_families", &RSpeciesEncoder::n_families, "Get number of families")
-        .method("n_taxonomy_slots", &RSpeciesEncoder::n_taxonomy_slots, "Get taxonomy slot count")
-        .method("uses_explicit_vector", &RSpeciesEncoder::uses_explicit_vector, "Check if using explicit vector")
-        .method("n_species_vector", &RSpeciesEncoder::n_species_vector, "Get species vector size")
-        .method("n_known_species", &RSpeciesEncoder::n_known_species, "Get known species count")
-        .method("save", &RSpeciesEncoder::save, "Save encoder to file")
-        ;
-
-    function("SpeciesEncoder_load", &RSpeciesEncoder::load, "Load encoder from file");
-
     // ResolveDataset - high-level data loading (mirrors Python ResolveDataset)
     class_<RResolveDataset>("ResolveDataset")
         .method("coordinates", &RResolveDataset::coordinates, "Get coordinate matrix")

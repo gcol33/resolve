@@ -1,7 +1,7 @@
 // Damerau-Levenshtein automaton driven by row-state DP.
-// See fuzzy_internal.hpp for the public surface and references.
+// See fuzzy_internal.h for the public surface and references.
 
-#include "fuzzy_internal.hpp"
+#include "fuzzy_internal.h"
 
 #include <algorithm>
 #include <utility>

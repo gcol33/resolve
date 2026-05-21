@@ -2,7 +2,7 @@
 // Query/search logic lives in fuzzy_search.cpp.
 
 #include "resolve/fuzzy.hpp"
-#include "fuzzy_internal.hpp"
+#include "fuzzy_internal.h"
 
 #include <algorithm>
 #include <cstdint>

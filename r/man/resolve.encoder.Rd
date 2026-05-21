@@ -2,52 +2,31 @@
 % Please edit documentation in R/resolve.R
 \name{resolve.encoder}
 \alias{resolve.encoder}
-\title{Create a SpeciesEncoder}
+\title{Create a SpeciesEncoder (removed)}
 \usage{
-resolve.encoder(
-  hashDim = 32L,
-  topK = 3L,
-  aggregation = "abundance",
-  normalization = "norm",
-  trackUnknownCount = FALSE,
-  selection = "top",
-  representation = "abundance",
-  minSpeciesFrequency = 1L
-)
+resolve.encoder(...)
 }
 \arguments{
-\item{hashDim}{Dimension of species hash embedding (default 32)}
-
-\item{topK}{Number of top/bottom genera/families to track (default 3)}
-
-\item{aggregation}{Aggregation mode: "abundance" or "count" (default "abundance")}
-
-\item{normalization}{Normalization mode: "raw", "norm", or "log1p" (default "norm")}
-
-\item{trackUnknownCount}{Track count of unknown species (default FALSE)}
-
-\item{selection}{Selection mode: "top", "bottom", "top_bottom", or "all" (default "top")}
-
-\item{representation}{Representation mode: "abundance" or "presence_absence" (default "abundance")}
-
-\item{minSpeciesFrequency}{Minimum frequency for a species to be included (default 1)}
+\item{...}{Ignored; preserved for argument compatibility with the
+pre-removal signature so existing call sites surface a clear error
+instead of an "unused argument" message.}
 }
 \value{
-A SpeciesEncoder object
+Never returns; always errors.
 }
 \description{
-Create a species encoder that transforms species composition data into
-fixed-dimension embeddings for model input.
+The standalone \code{resolve.encoder()} wrapper bound a unified
+\code{resolve::SpeciesEncoder} C++ class that has since been split in the
+C++ engine into \code{resolve::RankPoolEncoder} (variable-length pool
+encoding for rank-pool / transformer modes) and
+\code{resolve::EmbeddingEncoder} (fixed top-k IDs for embed mode). Neither
+is a drop-in replacement for the old unified API: the hash-embedding
+output is gone, save/load is not implemented on the new C++ encoders,
+and the \code{aggregation} / \code{representation} parameters no longer apply.
 }
-\examples{
-\donttest{
-encoder <- resolve.encoder(
-  hashDim = 32,
-  topK = 5,
-  selection = "top_bottom"
-)
-encoder$fit(speciesData)
-encoded <- encoder$transform(speciesData, plotIds)
-}
-
+\details{
+Calling \code{resolve.encoder()} therefore raises an error. The modern
+canonical path is \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}}, which dispatches to
+\verb{resolve::ResolveDataset::from_csv()} and performs all encoding
+inside the C++ engine — no separate fit/transform step is needed.
 }

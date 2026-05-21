@@ -29,3 +29,7 @@ resolve_version <- function() {
     .Call(`_resolve_resolve_version`)
 }
 
+resolve_set_vram_fraction <- function(fraction, device_index = -1L) {
+    invisible(.Call(`_resolve_resolve_set_vram_fraction`, fraction, device_index))
+}
+

@@ -36,13 +36,14 @@ public:
         Nullable<NumericMatrix> pool_weights = R_NilValue,
         Nullable<IntegerMatrix> pool_mask = R_NilValue,
         Nullable<NumericVector> pool_has_cover = R_NilValue,
+        Nullable<IntegerMatrix> categorical_ids = R_NilValue,
         bool return_latent = false
     ) {
         torch::Tensor coords_t = r_mat_to_tensor(coordinates);
         torch::Tensor covs_t = r_mat_to_tensor(covariates);
         torch::Tensor hash_t = r_mat_to_tensor(hash_embedding);
         torch::Tensor species_id_t, species_vec_t, genus_t, family_t, uf_t, uc_t;
-        torch::Tensor pg, pf, pw, pm, ph;
+        torch::Tensor pg, pf, pw, pm, ph, cat_ids_t;
 
         if (species_ids.isNotNull()) species_id_t = r_int_mat_to_tensor(as<IntegerMatrix>(species_ids));
         if (species_vector.isNotNull()) species_vec_t = r_mat_to_tensor(as<NumericMatrix>(species_vector));
@@ -55,10 +56,11 @@ public:
         if (pool_weights.isNotNull()) pw = r_mat_to_tensor(as<NumericMatrix>(pool_weights));
         if (pool_mask.isNotNull()) pm = r_int_mat_to_tensor(as<IntegerMatrix>(pool_mask)).to(torch::kBool);
         if (pool_has_cover.isNotNull()) ph = r_vec_to_tensor(as<NumericVector>(pool_has_cover));
+        if (categorical_ids.isNotNull()) cat_ids_t = r_int_mat_to_tensor(as<IntegerMatrix>(categorical_ids));
 
         auto preds = predictor_.predict(coords_t, covs_t, hash_t, species_id_t, species_vec_t,
                                          genus_t, family_t, uf_t, uc_t,
-                                         pg, pf, pw, pm, ph, return_latent);
+                                         pg, pf, pw, pm, ph, cat_ids_t, return_latent);
 
         List result;
         List predictions;

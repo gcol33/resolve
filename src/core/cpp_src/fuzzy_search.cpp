@@ -2,7 +2,7 @@
 // Damerau-Levenshtein automaton, with top-N collection and adaptive k tightening.
 
 #include "resolve/fuzzy.hpp"
-#include "fuzzy_internal.hpp"
+#include "fuzzy_internal.h"
 
 #include <algorithm>
 #include <cstdint>

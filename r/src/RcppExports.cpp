@@ -94,6 +94,17 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// resolve_set_vram_fraction
+void resolve_set_vram_fraction(double fraction, int device_index);
+RcppExport SEXP _resolve_resolve_set_vram_fraction(SEXP fractionSEXP, SEXP device_indexSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type fraction(fractionSEXP);
+    Rcpp::traits::input_parameter< int >::type device_index(device_indexSEXP);
+    resolve_set_vram_fraction(fraction, device_index);
+    return R_NilValue;
+END_RCPP
+}
 
 RcppExport SEXP _rcpp_module_boot_resolve_module();
 
@@ -105,6 +116,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_resolve_resolve_accuracy", (DL_FUNC) &_resolve_resolve_accuracy, 2},
     {"_resolve_resolve_r_squared", (DL_FUNC) &_resolve_resolve_r_squared, 2},
     {"_resolve_resolve_version", (DL_FUNC) &_resolve_resolve_version, 0},
+    {"_resolve_resolve_set_vram_fraction", (DL_FUNC) &_resolve_resolve_set_vram_fraction, 2},
     {"_rcpp_module_boot_resolve_module", (DL_FUNC) &_rcpp_module_boot_resolve_module, 0},
     {NULL, NULL, 0}
 };
