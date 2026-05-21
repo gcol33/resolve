@@ -49,6 +49,28 @@ resolve.train.dataset(
 
 \item{lossConfig}{Loss configuration: "mae", "smape", or "combined" (default "mae")}
 
+\item{coverDropout}{Cover-dropout rate applied to species cover values
+in rank-pool / transformer encoding modes (default 0.0, no dropout).}
+
+\item{dModel}{Model dimension for the transformer / rank-pool encoder
+(default 128).}
+
+\item{nHeads}{Number of attention heads in the transformer encoder
+(default 4). Ignored unless \code{nAttentionLayers > 0}.}
+
+\item{nAttentionLayers}{Number of self-attention layers in the
+transformer encoder (default 0, i.e. rank-pool mean-only path).}
+
+\item{transformerFfDim}{Feed-forward hidden dimension inside each
+transformer block (default 256).}
+
+\item{transformerPooling}{Pooling strategy used to collapse the per-
+species token sequence into a plot embedding: \code{"attention"} or
+\code{"cls"} (default \code{"attention"}).}
+
+\item{transformerDropout}{Dropout rate applied inside transformer
+blocks (default 0.1).}
+
 \item{verbose}{Print training progress (default TRUE)}
 }
 \value{

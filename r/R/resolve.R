@@ -358,6 +358,21 @@ resolve.dataset.csv <- function(header,
 #' @param seed Random seed (default 42)
 #' @param savePath Path to save model checkpoint (optional)
 #' @param lossConfig Loss configuration: "mae", "smape", or "combined" (default "mae")
+#' @param coverDropout Cover-dropout rate applied to species cover values
+#'   in rank-pool / transformer encoding modes (default 0.0, no dropout).
+#' @param dModel Model dimension for the transformer / rank-pool encoder
+#'   (default 128).
+#' @param nHeads Number of attention heads in the transformer encoder
+#'   (default 4). Ignored unless `nAttentionLayers > 0`.
+#' @param nAttentionLayers Number of self-attention layers in the
+#'   transformer encoder (default 0, i.e. rank-pool mean-only path).
+#' @param transformerFfDim Feed-forward hidden dimension inside each
+#'   transformer block (default 256).
+#' @param transformerPooling Pooling strategy used to collapse the per-
+#'   species token sequence into a plot embedding: `"attention"` or
+#'   `"cls"` (default `"attention"`).
+#' @param transformerDropout Dropout rate applied inside transformer
+#'   blocks (default 0.1).
 #' @param verbose Print training progress (default TRUE)
 #'
 #' @return A list with trainer, result, and dataset
