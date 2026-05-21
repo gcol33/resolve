@@ -53,6 +53,13 @@ jobs:
           wget -q https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.6.0%2Bcpu.zip
           unzip -q libtorch-cxx11-abi-shared-with-deps-2.6.0+cpu.zip
           echo "LIBTORCH_PATH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
+          # rcmdcheck's "loading the freshly built .so" smoke test runs a
+          # fresh R process; -ltorch / -ltorch_cpu / -lc10 are recorded as
+          # NEEDED but their absolute path isn't, so the loader needs
+          # LD_LIBRARY_PATH to find them. Without this the test errors with
+          # "libtorch_cpu.so: cannot open shared object file" even though
+          # the .so itself compiled and linked successfully.
+          echo "LD_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Download libtorch (macOS)
         if: runner.os == 'macOS'
@@ -60,6 +67,12 @@ jobs:
           wget -q https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.6.0.zip
           unzip -q libtorch-macos-arm64-2.6.0.zip
           echo "LIBTORCH_PATH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
+          # macOS uses DYLD_LIBRARY_PATH (and DYLD_FALLBACK_LIBRARY_PATH).
+          # SIP strips DYLD_* from inherited environments when spawning
+          # system binaries, but the R session itself launches the dyn.load
+          # call inside the same process tree, so the path is honored.
+          echo "DYLD_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:$DYLD_LIBRARY_PATH" >> $GITHUB_ENV
+          echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:$DYLD_FALLBACK_LIBRARY_PATH" >> $GITHUB_ENV
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
