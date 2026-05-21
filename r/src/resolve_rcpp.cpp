@@ -10,6 +10,28 @@
 #include "rcpp_predictor.h"
 
 // =============================================================================
+// Expose module-managed wrapper classes to non-module Rcpp machinery.
+//
+// Free `function(name, &Class::factory)` registrations inside RCPP_MODULE() are
+// translated by Rcpp into ordinary CppFunction calls, which dispatch through
+// the generic Rcpp::wrap()/Rcpp::as(). Without an explicit specialization those
+// fail with "cannot convert type to SEXP" for module-managed classes, because
+// Rcpp::wrap() does not know how to box a foreign C++ type into an S4 object.
+//
+// RCPP_EXPOSED_CLASS_NODECL emits the Rcpp::wrap() and Rcpp::as() traits that
+// route through the module's S4 representation (the same Reference Class object
+// you get from new(.resolve_module$ClassName)), so factory-style functions can
+// return wrapper instances by value. The classes themselves are already
+// forward-defined via the rcpp_*.h includes above.
+// =============================================================================
+
+RCPP_EXPOSED_CLASS_NODECL(RSpeciesEncoder)
+RCPP_EXPOSED_CLASS_NODECL(RResolveDataset)
+RCPP_EXPOSED_CLASS_NODECL(RResolveModel)
+RCPP_EXPOSED_CLASS_NODECL(RTrainer)
+RCPP_EXPOSED_CLASS_NODECL(RPredictor)
+
+// =============================================================================
 // Module exports via Rcpp modules
 // =============================================================================
 
