@@ -1,6 +1,6 @@
-// rcpp_common.hpp - Shared type conversions and utilities for R bindings
-#ifndef RCPP_COMMON_HPP
-#define RCPP_COMMON_HPP
+// rcpp_common.h - Shared type conversions and utilities for R bindings
+#ifndef RCPP_COMMON_H
+#define RCPP_COMMON_H
 
 #include <Rcpp.h>
 #include <torch/torch.h>

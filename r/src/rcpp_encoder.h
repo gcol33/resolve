@@ -1,8 +1,8 @@
-// rcpp_encoder.hpp - RSpeciesEncoder class wrapper
-#ifndef RCPP_ENCODER_HPP
-#define RCPP_ENCODER_HPP
+// rcpp_encoder.h - RSpeciesEncoder class wrapper
+#ifndef RCPP_ENCODER_H
+#define RCPP_ENCODER_H
 
-#include "rcpp_common.hpp"
+#include "rcpp_common.h"
 
 // =============================================================================
 // SpeciesEncoder class wrapper

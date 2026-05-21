@@ -1,8 +1,8 @@
-// rcpp_dataset.hpp - RResolveDataset class wrapper
-#ifndef RCPP_DATASET_HPP
-#define RCPP_DATASET_HPP
+// rcpp_dataset.h - RResolveDataset class wrapper
+#ifndef RCPP_DATASET_H
+#define RCPP_DATASET_H
 
-#include "rcpp_common.hpp"
+#include "rcpp_common.h"
 
 // =============================================================================
 // ResolveDataset class wrapper (mirrors Python ResolveDataset)

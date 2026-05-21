@@ -2,12 +2,12 @@
 // [[Rcpp::plugins(cpp17)]]
 
 // Include all class wrappers
-#include "rcpp_common.hpp"
-#include "rcpp_dataset.hpp"
-#include "rcpp_encoder.hpp"
-#include "rcpp_model.hpp"
-#include "rcpp_trainer.hpp"
-#include "rcpp_predictor.hpp"
+#include "rcpp_common.h"
+#include "rcpp_dataset.h"
+#include "rcpp_encoder.h"
+#include "rcpp_model.h"
+#include "rcpp_trainer.h"
+#include "rcpp_predictor.h"
 
 // =============================================================================
 // Module exports via Rcpp modules

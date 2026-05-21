@@ -1,5 +1,5 @@
 // rcpp_metrics.cpp - Metrics functions for R
-#include "rcpp_common.hpp"
+#include "rcpp_common.h"
 
 // =============================================================================
 // Metrics (static functions exported to R)

@@ -1,8 +1,8 @@
-// rcpp_model.hpp - RResolveModel class wrapper
-#ifndef RCPP_MODEL_HPP
-#define RCPP_MODEL_HPP
+// rcpp_model.h - RResolveModel class wrapper
+#ifndef RCPP_MODEL_H
+#define RCPP_MODEL_H
 
-#include "rcpp_common.hpp"
+#include "rcpp_common.h"
 
 // =============================================================================
 // ResolveModel class wrapper

@@ -1,9 +1,9 @@
-// rcpp_predictor.hpp - RPredictor class wrapper
-#ifndef RCPP_PREDICTOR_HPP
-#define RCPP_PREDICTOR_HPP
+// rcpp_predictor.h - RPredictor class wrapper
+#ifndef RCPP_PREDICTOR_H
+#define RCPP_PREDICTOR_H
 
-#include "rcpp_common.hpp"
-#include "rcpp_dataset.hpp"
+#include "rcpp_common.h"
+#include "rcpp_dataset.h"
 
 // =============================================================================
 // Predictor class wrapper

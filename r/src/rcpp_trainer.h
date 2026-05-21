@@ -1,10 +1,10 @@
-// rcpp_trainer.hpp - RTrainer class wrapper
-#ifndef RCPP_TRAINER_HPP
-#define RCPP_TRAINER_HPP
+// rcpp_trainer.h - RTrainer class wrapper
+#ifndef RCPP_TRAINER_H
+#define RCPP_TRAINER_H
 
-#include "rcpp_common.hpp"
-#include "rcpp_model.hpp"
-#include "rcpp_dataset.hpp"
+#include "rcpp_common.h"
+#include "rcpp_model.h"
+#include "rcpp_dataset.h"
 
 // =============================================================================
 // Trainer class wrapper

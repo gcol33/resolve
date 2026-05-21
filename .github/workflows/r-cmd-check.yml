@@ -23,7 +23,15 @@ jobs:
           - {os: ubuntu-latest, r: 'release'}
           - {os: ubuntu-latest, r: 'devel'}
           - {os: macos-latest, r: 'release'}
-          - {os: windows-latest, r: 'release'}
+          # Windows R CMD check is intentionally not in the matrix.
+          # Upstream libtorch only ships an MSVC-built prebuilt for Windows,
+          # while R packages on Windows must be compiled with rtools45 (mingw
+          # gcc 14.3). The two ABIs are incompatible: mingw gcc rejects the
+          # inline `wrap()` definitions in <torch/csrc/jit/ir/ir.h> that are
+          # marked TORCH_API (dllimport) with a hard error
+          # ("definition is marked dllimport"). This is a libtorch upstream
+          # limitation, not a resolve bug. Python bindings use MSVC and work
+          # fine on Windows; see .github/workflows/tests.yml.
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
@@ -53,14 +61,6 @@ jobs:
           unzip -q libtorch-macos-arm64-2.6.0.zip
           echo "LIBTORCH_PATH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
 
-      - name: Download libtorch (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Invoke-WebRequest -Uri "https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.6.0%2Bcpu.zip" -OutFile libtorch.zip
-          Expand-Archive -Path libtorch.zip -DestinationPath .
-          echo "LIBTORCH_PATH=${{ github.workspace }}/libtorch" >> $env:GITHUB_ENV
-
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           working-directory: r
@@ -69,19 +69,19 @@ jobs:
             any::testthat
 
       - name: Bundle C++ core into R package
-        if: runner.os != 'Windows'
         run: |
+          # Public headers under include/resolve/ are bundled as a subdir so
+          # `#include "resolve/*.hpp"` from .cpp files resolves correctly.
           cp -r src/core/include/resolve r/src/resolve
-          for f in src/core/cpp_src/*.cpp; do
+          # Implementation sources from cpp_src/ are copied flat into r/src/.
+          # Both .cpp files and private headers (e.g. fuzzy_internal.hpp,
+          # which is shared by fuzzy_automaton.cpp / fuzzy_index.cpp /
+          # fuzzy_search.cpp) must be included; otherwise the build fails
+          # with "fuzzy_internal.hpp: No such file or directory".
+          for f in src/core/cpp_src/*.cpp src/core/cpp_src/*.hpp; do
+            [ -e "$f" ] || continue
             cp "$f" "r/src/$(basename "$f")"
           done
-
-      - name: Bundle C++ core into R package (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Copy-Item -Recurse src/core/include/resolve r/src/resolve
-          Get-ChildItem src/core/cpp_src/*.cpp | ForEach-Object { Copy-Item $_.FullName r/src/ }
 
       - name: Check R package
         uses: r-lib/actions/check-r-package@v2
