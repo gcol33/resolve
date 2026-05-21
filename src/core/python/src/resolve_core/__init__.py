@@ -127,7 +127,7 @@ def _trainer_save(self, path, metadata=None):
 Trainer.save = _trainer_save
 
 _Trainer_load_orig = Trainer.load
-def _trainer_load(path, device="cpu", vram_fraction=0.80):
+def _trainer_load(path, device="cpu", vram_fraction=1.0):
     return retry_io(
         lambda: _Trainer_load_orig(path, device, vram_fraction),
         what=f"Trainer.load({path!r})",
@@ -135,7 +135,7 @@ def _trainer_load(path, device="cpu", vram_fraction=0.80):
 Trainer.load = staticmethod(_trainer_load)
 
 _Predictor_load_orig = Predictor.load
-def _predictor_load(path, device="cpu", vram_fraction=0.80):
+def _predictor_load(path, device="cpu", vram_fraction=1.0):
     return retry_io(
         lambda: _Predictor_load_orig(path, device, vram_fraction),
         what=f"Predictor.load({path!r})",

@@ -14,7 +14,7 @@ public:
     static RPredictor load(
         std::string path,
         std::string device = "cpu",
-        double vram_fraction = 0.80
+        double vram_fraction = 1.0
     ) {
         torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
         return RPredictor(resolve::Predictor::load(

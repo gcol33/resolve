@@ -473,13 +473,13 @@ struct TrainConfig {
     bool allow_tf32 = true;             // Allow TF32 on Ampere+ GPUs (faster matmuls, ~0.1% precision loss)
 
     // Fraction of GPU VRAM the PyTorch caching allocator may use on the
-    // training device. 0.80 (default) keeps ~20% headroom so the Windows
-    // desktop / GUI / other GPU apps stay responsive while RESOLVE trains.
-    // The Windows WDDM driver spills overflowing VRAM allocations into shared
-    // system memory, which hangs the whole desktop under load — capping
-    // PyTorch's allocator prevents that. Set to 1.0 on dedicated training
-    // servers to use all available VRAM. Applied in Trainer::fit().
-    float vram_fraction = 0.80f;
+    // training device. 1.0 (default) lets dedicated training jobs on a solo
+    // GPU use the full device. Pass an explicit lower value (e.g. 0.80) when
+    // sharing the GPU with a desktop / GUI / other workloads — the Windows
+    // WDDM driver spills overflowing VRAM allocations into shared system
+    // memory, which hangs the whole desktop under load, so capping PyTorch's
+    // allocator prevents that. Applied in Trainer::fit().
+    float vram_fraction = 1.0f;
 };
 
 // Batch of data for training/inference

@@ -165,18 +165,20 @@ For datasets that fit in GPU memory, RESOLVE can load the entire dataset onto th
 
 ### Limiting VRAM Usage
 
-RESOLVE caps the PyTorch CUDA caching allocator at **80% of device VRAM by
-default** via `TrainConfig.vram_fraction`. The cap exists because on Windows
-the WDDM driver spills allocations beyond physical VRAM into shared system
-memory, which freezes the desktop under load. Leaving headroom keeps the
-compositor, browser, and other GPU clients responsive while training runs.
+RESOLVE leaves the PyTorch CUDA caching allocator uncapped by default
+(`TrainConfig.vram_fraction = 1.0`) so dedicated training jobs on a solo GPU
+use the full device. Pass an explicit lower value when sharing the GPU with a
+desktop — on Windows the WDDM driver spills allocations beyond physical VRAM
+into shared system memory, which freezes the desktop under load. Leaving
+headroom keeps the compositor, browser, and other GPU clients responsive
+while training runs.
 
 ```python
 from resolve_core import TrainConfig
 
 cfg = TrainConfig()
-cfg.vram_fraction = 0.80  # default — workstation
-cfg.vram_fraction = 1.0   # uncapped — dedicated training server
+cfg.vram_fraction = 1.0   # default — dedicated training job on solo GPU
+cfg.vram_fraction = 0.80  # sharing the GPU with a desktop / GUI
 ```
 
 The same cap is applied automatically when `Predictor.load` runs on a CUDA
@@ -191,10 +193,11 @@ import resolve_core
 resolve_core.set_vram_fraction(0.80)
 ```
 
-!!! note "When to relax the cap"
-    On a dedicated training server, set `vram_fraction = 1.0` so the
-    allocator can use all available VRAM. The default is tuned for
-    workstations where the desktop must stay responsive.
+!!! note "When to cap the allocator"
+    On a workstation where the desktop must stay responsive, set
+    `vram_fraction = 0.80` (or lower) to leave headroom for the compositor
+    and other GPU clients. The default (1.0) is tuned for dedicated training
+    jobs on a solo GPU.
 
 !!! note "Compute saturation"
     The cap addresses VRAM-exhaustion hangs only. If the desktop becomes

@@ -89,9 +89,10 @@ Train Options:
   --test-size FLOAT      Test split ratio (default: 0.2)
   --cuda                 Use CUDA if available
   --vram-fraction FLOAT  Fraction of GPU VRAM the PyTorch caching allocator may
-                         use (default: 0.80). Keeps the Windows desktop / GUI
-                         responsive on workstations by leaving ~20% headroom.
-                         Set to 1.0 on dedicated training servers.
+                         use (default: 1.0). Dedicated training jobs on a solo
+                         GPU use the full device. Pass an explicit lower value
+                         (e.g. 0.80) when sharing the GPU with a desktop / GUI
+                         to leave headroom.
 
 Predict Options:
   --model PATH           Path to trained model
@@ -107,8 +108,9 @@ Predict Options:
   --family COL           Column name for family (optional)
   --cuda                 Use CUDA if available
   --vram-fraction FLOAT  Fraction of GPU VRAM the PyTorch caching allocator may
-                         use (default: 0.80). Set to 1.0 on dedicated inference
-                         servers.
+                         use (default: 1.0). Pass an explicit lower value (e.g.
+                         0.80) when sharing the GPU with a desktop / GUI to
+                         leave headroom.
 
 Info Options:
   --model PATH           Path to trained model
@@ -221,7 +223,7 @@ int main(int argc, char* argv[]) {
             std::stof(args.get("--lr", "0.001")),
             std::stof(args.get("--test-size", "0.2")),
             args.has("--cuda"),
-            std::stof(args.get("--vram-fraction", "0.80"))
+            std::stof(args.get("--vram-fraction", "1.0"))
         );
     }
     else if (cmd == "predict") {
@@ -238,7 +240,7 @@ int main(int argc, char* argv[]) {
             args.get_optional("--genus"),
             args.get_optional("--family"),
             args.has("--cuda"),
-            std::stof(args.get("--vram-fraction", "0.80"))
+            std::stof(args.get("--vram-fraction", "1.0"))
         );
     }
     else if (cmd == "info") {

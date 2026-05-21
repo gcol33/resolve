@@ -33,13 +33,13 @@ public:
     // Load from saved checkpoint.
     // vram_fraction caps the PyTorch CUDA caching allocator on the target
     // device before model weights are uploaded; matches TrainConfig's default
-    // (0.80) so inference also leaves headroom for the desktop on Windows.
-    // Set to 1.0 on dedicated inference servers to use all VRAM. Ignored
-    // when device is CPU.
+    // (1.0) so dedicated training/inference jobs on a solo GPU use the full
+    // device. Pass an explicit lower value when sharing the GPU with a
+    // desktop or other workloads. Ignored when device is CPU.
     static Predictor load(
         const std::string& path,
         torch::Device device = torch::kCPU,
-        float vram_fraction = 0.80f
+        float vram_fraction = 1.0f
     );
 
     // Predict on a ResolveDataset (preferred API)
