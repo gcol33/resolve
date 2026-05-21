@@ -23,3 +23,6 @@ src/*.o
 src/*.so
 src/*.dll
 src/resolve.so
+
+# Local probes / one-off scripts (also Rbuildignored)
+dev_notes/

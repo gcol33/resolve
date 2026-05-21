@@ -13,14 +13,22 @@ using namespace Rcpp;
 // Type conversion: R -> Torch
 // =============================================================================
 
+// R's NumericVector stores values as 64-bit doubles. torch::from_blob does NOT
+// convert the underlying memory — passing a double* with a kFloat32 dtype option
+// reinterprets the byte buffer as float32, producing garbage values. We must
+// convert element-by-element via static_cast<float>(...) before constructing
+// the tensor, matching the pattern used by r_mat_to_tensor_impl below.
 inline torch::Tensor r_vec_to_tensor(NumericVector x) {
     auto options = torch::TensorOptions().dtype(torch::kFloat32);
-    torch::Tensor t = torch::from_blob(
-        x.begin(),
+    std::vector<float> data(x.size());
+    for (R_xlen_t i = 0; i < x.size(); ++i) {
+        data[i] = static_cast<float>(x[i]);
+    }
+    return torch::from_blob(
+        data.data(),
         {static_cast<int64_t>(x.size())},
         options
     ).clone();
-    return t;
 }
 
 // Generic matrix-to-tensor: works for NumericMatrix (float) and IntegerMatrix (int64)

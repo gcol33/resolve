@@ -70,7 +70,7 @@ Load a dataset directly using the C++ ResolveDataset class.
 This mirrors the Python \code{ResolveDataset.from_csv()} API exactly.
 }
 \examples{
-\donttest{
+\dontrun{
 # Load dataset using C++ implementation
 dataset <- resolve.dataset.csv(
   header = "plots.csv",

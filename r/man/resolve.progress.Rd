@@ -16,7 +16,7 @@ A list with progress information, or NULL if no checkpoint exists
 Read progress from a checkpoint directory.
 }
 \examples{
-\donttest{
+\dontrun{
 progress <- resolve.progress("checkpoints/my_model")
 if (!is.null(progress)) {
   cat(sprintf("Epoch \%d/\%d (\%.1f\%\%)\n",

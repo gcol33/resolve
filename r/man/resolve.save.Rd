@@ -15,7 +15,7 @@ resolve.save(trainer, path)
 Save model checkpoint.
 }
 \examples{
-\donttest{
+\dontrun{
 result <- resolve.train(dataset)
 resolve.save(result, "model_checkpoint.pt")
 }

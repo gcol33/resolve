@@ -136,7 +136,7 @@ resolve.predict <- function(...) {
 #' @return A Predictor object
 #'
 #' @examples
-#' \donttest{
+#' \dontrun{
 #' predictor <- resolve.load("model.pt")
 #' preds <- resolve.predict(predictor, newData)
 #' }
@@ -166,7 +166,7 @@ resolve.load <- function(path, device = "cpu") {
 #' @param path Path to save checkpoint
 #'
 #' @examples
-#' \donttest{
+#' \dontrun{
 #' result <- resolve.train(dataset)
 #' resolve.save(result, "model_checkpoint.pt")
 #' }
@@ -192,7 +192,7 @@ resolve.save <- function(trainer, path) {
 #' @return A list with progress information, or NULL if no checkpoint exists
 #'
 #' @examples
-#' \donttest{
+#' \dontrun{
 #' progress <- resolve.progress("checkpoints/my_model")
 #' if (!is.null(progress)) {
 #'   cat(sprintf("Epoch %d/%d (%.1f%%)\n",
@@ -256,7 +256,7 @@ resolve.progress <- function(checkpointDir) {
 #'   - n_plots(): Get number of plots
 #'
 #' @examples
-#' \donttest{
+#' \dontrun{
 #' # Load dataset using C++ implementation
 #' dataset <- resolve.dataset.csv(
 #'   header = "plots.csv",
@@ -363,7 +363,7 @@ resolve.dataset.csv <- function(header,
 #' @return A list with trainer, result, and dataset
 #'
 #' @examples
-#' \donttest{
+#' \dontrun{
 #' dataset <- resolve.dataset.csv(...)
 #' result <- resolve.train.dataset(dataset, maxEpochs = 100)
 #' }
@@ -511,7 +511,7 @@ resolve.train.dataset <- function(dataset,
 #' @return Named list of prediction arrays
 #'
 #' @examples
-#' \donttest{
+#' \dontrun{
 #' predictor <- resolve.load("model.pt")
 #' dataset <- resolve.dataset.csv(...)
 #' preds <- resolve.predict.dataset(predictor, dataset)

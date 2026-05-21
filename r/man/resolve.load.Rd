@@ -18,7 +18,7 @@ A Predictor object
 Load a model from a saved checkpoint.
 }
 \examples{
-\donttest{
+\dontrun{
 predictor <- resolve.load("model.pt")
 preds <- resolve.predict(predictor, newData)
 }

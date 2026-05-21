@@ -16,14 +16,21 @@ test_that("resolve_module is loaded", {
   mod <- tryCatch(resolve:::.resolve_module, error = function(e) NULL)
   skip_if(is.null(mod), "resolve module not available (needs libtorch)")
 
+  # NB: `names(mod)` on an Rcpp `Module` S4 object is NOT the registration
+  # list — it falls through to the underlying `.xData` environment (Rcpp
+  # internals + lazily cached `$` accesses). Use the internal introspection
+  # helper that reads `Module__classes_info` / `Module__functions_names`
+  # directly off the module pointer.
+  registered <- resolve:::.resolve_module_registered()
+
   # Verify core classes are registered. SpeciesEncoder was removed when the
   # unified resolve::SpeciesEncoder C++ class was split into RankPoolEncoder
   # and EmbeddingEncoder — see ?resolve.encoder for the full rationale.
-  expect_false("SpeciesEncoder" %in% names(mod))
-  expect_true("ResolveModel" %in% names(mod))
-  expect_true("Trainer" %in% names(mod))
-  expect_true("Predictor" %in% names(mod))
-  expect_true("ResolveDataset" %in% names(mod))
+  expect_false("SpeciesEncoder" %in% registered)
+  expect_true("ResolveModel" %in% registered)
+  expect_true("Trainer" %in% registered)
+  expect_true("Predictor" %in% registered)
+  expect_true("ResolveDataset" %in% registered)
 })
 
 test_that("module factory functions are registered", {
@@ -31,11 +38,13 @@ test_that("module factory functions are registered", {
   mod <- tryCatch(resolve:::.resolve_module, error = function(e) NULL)
   skip_if(is.null(mod), "resolve module not available (needs libtorch)")
 
-  expect_true("ResolveDataset_from_csv" %in% names(mod))
-  expect_true("ResolveDataset_from_species_csv" %in% names(mod))
-  expect_true("Predictor_load" %in% names(mod))
+  registered <- resolve:::.resolve_module_registered()
+
+  expect_true("ResolveDataset_from_csv" %in% registered)
+  expect_true("ResolveDataset_from_species_csv" %in% registered)
+  expect_true("Predictor_load" %in% registered)
   # SpeciesEncoder_load was removed alongside SpeciesEncoder.
-  expect_false("SpeciesEncoder_load" %in% names(mod))
+  expect_false("SpeciesEncoder_load" %in% registered)
 })
 
 

@@ -5,14 +5,17 @@ test_that("Trainer can be created with config", {
 
   # Create minimal schema
   schema <- list(
-    nPlots = 100,
-    nSpecies = 50,
-    hasCoordinates = TRUE,
-    hasTaxonomy = FALSE,
-    trackUnknownFraction = FALSE,
+    n_plots = 100L,
+    n_species = 50L,
+    has_coordinates = TRUE,
+    has_abundance = FALSE,
+    has_taxonomy = FALSE,
+    n_genera = 0L,
+    n_families = 0L,
+    track_unknown_fraction = FALSE,
+    track_unknown_count = FALSE,
     targets = list(
-      list(
-        name = "area",
+      area = list(
         task = "regression",
         transform = "none"
       )
@@ -20,14 +23,14 @@ test_that("Trainer can be created with config", {
   )
 
   model_config <- list(
-    speciesEncoding = "hash",
-    hashDim = 16L,
-    hiddenDims = c(32L, 16L)
+    species_encoding = "hash",
+    hash_dim = 16L,
+    hidden_dims = c(32L, 16L)
   )
 
   train_config <- list(
-    batchSize = 16L,
-    maxEpochs = 2L,
+    batch_size = 16L,
+    max_epochs = 2L,
     patience = 5L,
     lr = 0.001
   )
@@ -43,27 +46,31 @@ test_that("LR scheduler options are accepted", {
   skip_on_cran()
 
   schema <- list(
-    nPlots = 50,
-    nSpecies = 20,
-    hasCoordinates = TRUE,
-    hasTaxonomy = FALSE,
-    trackUnknownFraction = FALSE,
+    n_plots = 50L,
+    n_species = 20L,
+    has_coordinates = TRUE,
+    has_abundance = FALSE,
+    has_taxonomy = FALSE,
+    n_genera = 0L,
+    n_families = 0L,
+    track_unknown_fraction = FALSE,
+    track_unknown_count = FALSE,
     targets = list(
-      list(name = "area", task = "regression", transform = "none")
+      area = list(task = "regression", transform = "none")
     )
   )
 
   model_config <- list(
-    speciesEncoding = "hash",
-    hashDim = 16L,
-    hiddenDims = c(32L, 16L)
+    species_encoding = "hash",
+    hash_dim = 16L,
+    hidden_dims = c(32L, 16L)
   )
 
   # Config with LR scheduler
 
   train_config <- list(
-    batchSize = 16L,
-    maxEpochs = 3L,
+    batch_size = 16L,
+    max_epochs = 3L,
     lr = 0.01,
     lr_scheduler = "cosine",
     lr_min = 0.0001
@@ -79,25 +86,29 @@ test_that("Step LR scheduler config is accepted", {
   skip_on_cran()
 
   schema <- list(
-    nPlots = 50,
-    nSpecies = 20,
-    hasCoordinates = TRUE,
-    hasTaxonomy = FALSE,
-    trackUnknownFraction = FALSE,
+    n_plots = 50L,
+    n_species = 20L,
+    has_coordinates = TRUE,
+    has_abundance = FALSE,
+    has_taxonomy = FALSE,
+    n_genera = 0L,
+    n_families = 0L,
+    track_unknown_fraction = FALSE,
+    track_unknown_count = FALSE,
     targets = list(
-      list(name = "area", task = "regression", transform = "none")
+      area = list(task = "regression", transform = "none")
     )
   )
 
   model_config <- list(
-    speciesEncoding = "hash",
-    hashDim = 16L,
-    hiddenDims = c(32L, 16L)
+    species_encoding = "hash",
+    hash_dim = 16L,
+    hidden_dims = c(32L, 16L)
   )
 
   train_config <- list(
-    batchSize = 16L,
-    maxEpochs = 5L,
+    batch_size = 16L,
+    max_epochs = 5L,
     lr = 0.01,
     lr_scheduler = "step",
     lr_step_size = 2L,

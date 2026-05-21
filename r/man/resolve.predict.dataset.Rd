@@ -20,7 +20,7 @@ Named list of prediction arrays
 Make predictions on a ResolveDataset using a trained model.
 }
 \examples{
-\donttest{
+\dontrun{
 predictor <- resolve.load("model.pt")
 dataset <- resolve.dataset.csv(...)
 preds <- resolve.predict.dataset(predictor, dataset)

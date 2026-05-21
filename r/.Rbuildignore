@@ -7,3 +7,4 @@
 ^build_site\.R$
 ^\.github$
 ^tools$
+^dev_notes$

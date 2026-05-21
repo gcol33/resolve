@@ -59,7 +59,7 @@ Train a model using a ResolveDataset object loaded via resolve.dataset.csv().
 This provides the cleanest API matching Python exactly.
 }
 \examples{
-\donttest{
+\dontrun{
 dataset <- resolve.dataset.csv(...)
 result <- resolve.train.dataset(dataset, maxEpochs = 100)
 }
