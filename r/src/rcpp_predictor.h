@@ -130,12 +130,20 @@ public:
         return scalers_to_list(predictor_.scalers());
     }
 
-    // Predict from ResolveDataset (matches Python API)
+    // Predict from ResolveDataset (matches Python API).
+    //
+    // `batch_size` controls how the forward pass is chunked along dim 0:
+    //   -1L  : single forward pass over the whole dataset (legacy; can
+    //          OOM on >150k plots at typical hidden sizes).
+    //   >0L  : chunked forward, results concatenated on CPU.
+    // Default 4096 keeps peak VRAM bounded on 16 GiB-class GPUs.
     List predict_dataset(
         RResolveDataset& dataset,
-        bool return_latent = false
+        bool return_latent = false,
+        int64_t batch_size = 4096
     ) {
-        resolve::ResolvePredictions preds = predictor_.predict(*(dataset.dataset()), return_latent);
+        resolve::ResolvePredictions preds = predictor_.predict(
+            *(dataset.dataset()), return_latent, batch_size);
 
         List result;
         List predictions;

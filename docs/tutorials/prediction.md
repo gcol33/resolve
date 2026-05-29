@@ -5,10 +5,17 @@ This guide covers how to use trained RESOLVE models for inference.
 ## Loading a Trained Model
 
 ```python
-import resolve
+import resolve_core as rc
 
-predictor = resolve.Predictor.load("model.pt", device="auto")
+predictor = rc.Predictor.load("model.pt")
 ```
+
+`device` defaults to `"cpu"`. Inference on a typical RESOLVE model
+(~5M-param MLP, 300k plots) finishes in ~12 s on CPU vs ~1 s on a 16 GiB
+GPU; the throughput win on GPU does not amortise the operational cost
+of GPU OOMs at predict time, so the default leans towards "always
+works". Pass `device="cuda"` explicitly when the GPU is otherwise idle
+and the test set is small enough that you know it fits.
 
 ## Basic Prediction
 
@@ -118,12 +125,29 @@ The model uses these features to adjust predictions for plots with novel species
 
 ## Batch Processing
 
-For large datasets, predictions are made in batches automatically:
+`Predictor.predict_dataset` chunks the forward pass along dim 0 and
+concatenates results on CPU. Default `batch_size = 4096` keeps peak
+VRAM bounded on 16 GiB-class GPUs.
 
 ```python
-# Predictor handles batching internally
-predictions = predictor.predict(large_dataset)
+# Default: chunked forward at batch_size = 4096.
+predictions = predictor.predict_dataset(large_dataset)
+
+# Custom chunk size — useful when a wider hidden layer demands a
+# smaller chunk to fit on the device.
+predictions = predictor.predict_dataset(large_dataset, batch_size=1024)
+
+# Opt out of chunking entirely (legacy one-shot path). On a 16 GiB GPU
+# at the v7 recipe (hash_dim=32, hidden=[2048,1024,512,256,128,64],
+# 5.28M params) this OOMs above ~150k plots — only pass -1 when the
+# whole test set is known to fit.
+predictions = predictor.predict_dataset(large_dataset, batch_size=-1)
 ```
+
+Outputs from `batch_size > 0` are bit-equivalent to the one-shot path:
+each chunk goes through the same `model.forward()` call, and only the
+input slicing differs. Returned tensors live on CPU regardless of
+`Predictor.device` so callers can free GPU memory immediately after.
 
 ## Example: Complete Workflow
 

@@ -2,8 +2,21 @@
 #include "resolve/dataset.hpp"
 #include "resolve/utils.hpp"
 #include <fstream>
+#include <stdexcept>
 
 namespace resolve {
+
+namespace {
+
+// Slice a tensor along dim 0 in [start, end). Returns an empty/undefined
+// tensor if the input is itself undefined (mirrors the "defined or empty"
+// contract every downstream predict() call already handles).
+inline torch::Tensor slice0(const torch::Tensor& t, int64_t start, int64_t end) {
+    if (!t.defined() || t.numel() == 0) return t;
+    return t.slice(/*dim=*/0, start, end);
+}
+
+}  // namespace
 
 Predictor::Predictor(
     ResolveModel model,
@@ -40,31 +53,114 @@ Predictor Predictor::load(
 
 ResolvePredictions Predictor::predict(
     const ResolveDataset& dataset,
-    bool return_latent
+    bool return_latent,
+    int64_t batch_size
 ) {
-    // Thread the pool-* tensors through. Previously these were hardcoded to
-    // empty, which crashed PlotEncoderRankPool / PlotEncoderTransformer
-    // forward at the species_embedding lookup because species_ids was the
-    // (n_plots, top_k_species) embed-mode tensor (or undefined) instead of
-    // the rank-pool (n_plots, max_species) tensor.
-    auto result = predict(
-        dataset.coordinates(),
-        dataset.covariates(),
-        dataset.hash_embedding(),
-        dataset.species_ids(),
-        dataset.species_vector(),
-        dataset.genus_ids(),
-        dataset.family_ids(),
-        dataset.unknown_fraction(),
-        dataset.unknown_count(),
-        dataset.pool_genus_ids(),
-        dataset.pool_family_ids(),
-        dataset.pool_weights(),
-        dataset.pool_mask(),
-        dataset.pool_has_cover(),
-        dataset.categorical_ids(),
-        return_latent
-    );
+    const int64_t n = dataset.n_plots();
+
+    // Validate batch_size: -1 (one-shot) or strictly positive. 0 / <-1 reject.
+    if (batch_size != -1 && batch_size <= 0) {
+        throw std::invalid_argument(
+            "Predictor::predict: batch_size must be -1 (whole dataset) "
+            "or a positive integer; got " + std::to_string(batch_size));
+    }
+
+    // Single-shot path: legacy behavior. Used when caller opts out of
+    // chunking (-1) or when the dataset already fits in one chunk
+    // (n <= batch_size). The pool-* tensors are threaded through so
+    // PlotEncoderRankPool / PlotEncoderTransformer get the correct
+    // (n_plots, max_species) rank-pool tensors instead of the embed-mode
+    // species_ids (whose shape is (n_plots, top_k_species)).
+    if (batch_size == -1 || n <= batch_size) {
+        auto result = predict(
+            dataset.coordinates(),
+            dataset.covariates(),
+            dataset.hash_embedding(),
+            dataset.species_ids(),
+            dataset.species_vector(),
+            dataset.genus_ids(),
+            dataset.family_ids(),
+            dataset.unknown_fraction(),
+            dataset.unknown_count(),
+            dataset.pool_genus_ids(),
+            dataset.pool_family_ids(),
+            dataset.pool_weights(),
+            dataset.pool_mask(),
+            dataset.pool_has_cover(),
+            dataset.categorical_ids(),
+            return_latent
+        );
+
+        // Use actual plot IDs from dataset
+        result.plot_ids = dataset.plot_ids();
+
+        // Copy targets from dataset for residual analysis
+        result.targets = dataset.targets();
+
+        return result;
+    }
+
+    // Chunked path: slice every input tensor along dim 0, forward each
+    // chunk on `device_`, move the chunk outputs to CPU, accumulate, and
+    // concat on CPU at the end. Keeping accumulators on CPU is what
+    // bounds peak VRAM to a single chunk's footprint regardless of n.
+    const auto& coordinates       = dataset.coordinates();
+    const auto& covariates        = dataset.covariates();
+    const auto& hash_embedding    = dataset.hash_embedding();
+    const auto& species_ids       = dataset.species_ids();
+    const auto& species_vector    = dataset.species_vector();
+    const auto& genus_ids         = dataset.genus_ids();
+    const auto& family_ids        = dataset.family_ids();
+    const auto& unknown_fraction  = dataset.unknown_fraction();
+    const auto& unknown_count     = dataset.unknown_count();
+    const auto& pool_genus_ids    = dataset.pool_genus_ids();
+    const auto& pool_family_ids   = dataset.pool_family_ids();
+    const auto& pool_weights      = dataset.pool_weights();
+    const auto& pool_mask         = dataset.pool_mask();
+    const auto& pool_has_cover    = dataset.pool_has_cover();
+    const auto& categorical_ids   = dataset.categorical_ids();
+
+    // Per-target lists of CPU chunks to concatenate at the end.
+    std::unordered_map<std::string, std::vector<torch::Tensor>> pred_chunks;
+    std::vector<torch::Tensor> latent_chunks;
+
+    for (int64_t start = 0; start < n; start += batch_size) {
+        const int64_t end = std::min(start + batch_size, n);
+
+        auto chunk = predict(
+            slice0(coordinates,      start, end),
+            slice0(covariates,       start, end),
+            slice0(hash_embedding,   start, end),
+            slice0(species_ids,      start, end),
+            slice0(species_vector,   start, end),
+            slice0(genus_ids,        start, end),
+            slice0(family_ids,       start, end),
+            slice0(unknown_fraction, start, end),
+            slice0(unknown_count,    start, end),
+            slice0(pool_genus_ids,   start, end),
+            slice0(pool_family_ids,  start, end),
+            slice0(pool_weights,     start, end),
+            slice0(pool_mask,        start, end),
+            slice0(pool_has_cover,   start, end),
+            slice0(categorical_ids,  start, end),
+            return_latent
+        );
+
+        for (auto& [name, tensor] : chunk.predictions) {
+            pred_chunks[name].push_back(tensor.detach().to(torch::kCPU));
+        }
+        if (return_latent && chunk.latent.defined()) {
+            latent_chunks.push_back(chunk.latent.detach().to(torch::kCPU));
+        }
+    }
+
+    ResolvePredictions result;
+    for (auto& [name, chunks] : pred_chunks) {
+        result.predictions[name] = torch::cat(chunks, /*dim=*/0);
+    }
+    if (return_latent && !latent_chunks.empty()) {
+        result.latent = torch::cat(latent_chunks, /*dim=*/0);
+    }
 
     // Use actual plot IDs from dataset
     result.plot_ids = dataset.plot_ids();

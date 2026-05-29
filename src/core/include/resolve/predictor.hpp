@@ -42,10 +42,25 @@ public:
         float vram_fraction = 1.0f
     );
 
-    // Predict on a ResolveDataset (preferred API)
+    // Predict on a ResolveDataset (preferred API).
+    //
+    // `batch_size` controls how the forward pass is chunked along dim 0:
+    //   -1  : single forward pass over the whole dataset (legacy behavior).
+    //          Maximum throughput, but allocates O(n_plots * hidden) of
+    //          device memory in one shot — easy to OOM on large test sets.
+    //    0  : equivalent to -1 (rejected at runtime if non-positive other
+    //          than -1, see impl) — clarifies "no chunking" semantics.
+    //   >0  : forward over consecutive chunks of `batch_size` plots, with
+    //          results concatenated on CPU. Default of 4096 keeps peak VRAM
+    //          predictable while still amortising the host->device copy.
+    //
+    // The default (4096) matches the trainer's default batch size and keeps
+    // the predictor safe on 16 GiB-class GPUs at typical hidden sizes
+    // (see issue #2 for the OOM symptom that motivated this knob).
     ResolvePredictions predict(
         const ResolveDataset& dataset,
-        bool return_latent = false
+        bool return_latent = false,
+        int64_t batch_size = 4096
     );
 
     // Predict on new data (raw tensor API)

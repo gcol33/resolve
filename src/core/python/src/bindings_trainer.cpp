@@ -203,9 +203,17 @@ void register_trainer(nb::module_& m) {
            nb::arg("return_latent") = false)
         .def("predict_dataset", [](resolve::Predictor& self,
                                    const resolve::ResolveDataset& dataset,
-                                   bool return_latent) {
-            return self.predict(dataset, return_latent);
-        }, nb::arg("dataset"), nb::arg("return_latent") = false)
+                                   bool return_latent,
+                                   int64_t batch_size) {
+            return self.predict(dataset, return_latent, batch_size);
+        }, nb::arg("dataset"),
+           nb::arg("return_latent") = false,
+           nb::arg("batch_size") = 4096,
+           "Predict on a ResolveDataset. batch_size controls how the forward "
+           "pass is chunked along dim 0: -1 = single forward over the whole "
+           "dataset (legacy, can OOM on >150k plots at typical hidden sizes); "
+           ">0 = chunked forward with results concatenated on CPU. Default "
+           "4096 keeps peak VRAM bounded on 16 GiB-class GPUs.")
         .def("get_embeddings", [](resolve::Predictor& self,
                                   nb::object coordinates_obj,
                                   nb::object covariates_obj,

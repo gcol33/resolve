@@ -228,6 +228,11 @@ import resolve_core
 resolve_core.set_vram_fraction(0.80)  # affects current CUDA device
 ```
 
+`Predictor.load` defaults to `device="cpu"` and `predict_dataset` chunks
+its forward pass at `batch_size = 4096` along dim 0, with results
+concatenated on CPU. Pass `batch_size=-1` to opt back into the legacy
+one-shot path (only safe when the whole test set fits on the device).
+
 ## Documentation
 
 - **[Getting Started](https://gillescolling.com/resolve/tutorials/quickstart/)**: Complete workflow walkthrough
