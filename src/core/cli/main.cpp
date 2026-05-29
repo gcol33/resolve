@@ -50,7 +50,8 @@ int predict_command(
     const std::optional<std::string>& genus_col,
     const std::optional<std::string>& family_col,
     bool use_cuda,
-    float vram_fraction
+    float vram_fraction,
+    int64_t predict_batch_size
 );
 
 int info_command(const std::string& model_path);
@@ -106,7 +107,14 @@ Predict Options:
   --lat COL              Column name for latitude (optional)
   --genus COL            Column name for genus (optional)
   --family COL           Column name for family (optional)
-  --cuda                 Use CUDA if available
+  --cuda                 Use CUDA if available (default: CPU). Predict on a
+                         5M-param MLP over 300k plots is ~12s on CPU vs ~1s
+                         on GPU; the OOM and bookkeeping cost of GPU predict
+                         on 16 GiB-class cards usually outweighs the speedup.
+  --predict-batch-size N Forward-pass batch size for inference (default: 4096).
+                         Pass -1 to disable chunking (one forward over the
+                         entire dataset; can OOM on >150k plots at typical
+                         hidden sizes).
   --vram-fraction FLOAT  Fraction of GPU VRAM the PyTorch caching allocator may
                          use (default: 1.0). Pass an explicit lower value (e.g.
                          0.80) when sharing the GPU with a desktop / GUI to
@@ -240,7 +248,8 @@ int main(int argc, char* argv[]) {
             args.get_optional("--genus"),
             args.get_optional("--family"),
             args.has("--cuda"),
-            std::stof(args.get("--vram-fraction", "1.0"))
+            std::stof(args.get("--vram-fraction", "1.0")),
+            static_cast<int64_t>(std::stoll(args.get("--predict-batch-size", "4096")))
         );
     }
     else if (cmd == "info") {

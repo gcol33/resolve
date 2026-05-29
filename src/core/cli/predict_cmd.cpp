@@ -21,7 +21,8 @@ int predict_command(
     const std::optional<std::string>& genus_col,
     const std::optional<std::string>& family_col,
     bool use_cuda,
-    float vram_fraction
+    float vram_fraction,
+    int64_t predict_batch_size
 ) {
     using namespace resolve;
 
@@ -103,8 +104,14 @@ int predict_command(
     std::cout << "Loaded " << dataset.n_plots() << " plots" << std::endl;
 
     // Make predictions
-    std::cout << "Making predictions..." << std::endl;
-    auto predictions = predictor.predict(dataset);
+    std::cout << "Making predictions";
+    if (predict_batch_size == -1) {
+        std::cout << " (one-shot, no chunking)..." << std::endl;
+    } else {
+        std::cout << " (batch_size=" << predict_batch_size << ")..." << std::endl;
+    }
+    auto predictions = predictor.predict(
+        dataset, /*return_latent=*/false, predict_batch_size);
 
     // Write predictions to CSV
     std::cout << "Writing predictions to: " << output_path << std::endl;
