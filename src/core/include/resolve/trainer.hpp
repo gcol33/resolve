@@ -209,6 +209,14 @@ private:
     // Pre-load all data to GPU for faster training
     void cache_data_to_gpu();
 
+    // Release per-attempt training state on the way out of an OOM retry.
+    // Drops optimizer, AMP scaler, best-model snapshot, prefetch buffers,
+    // and all GPU-cached tensors, then asks the CUDA caching allocator to
+    // return free blocks to the device. After this returns the trainer is
+    // back in the pre-fit configuration (data_prepared_ stays true) and
+    // a fresh fit_attempt() can be made with a different batch_size.
+    void release_training_state();
+
     // Helper: bundle of pool tensors to avoid repeating 5-line blocks
     struct PoolTensors {
         torch::Tensor genus_ids, family_ids, weights, mask, has_cover;

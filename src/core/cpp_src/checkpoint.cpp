@@ -622,7 +622,22 @@ void save_train_config(
     torch::serialize::OutputArchive& archive,
     const TrainConfig& config
 ) {
+    // NOTE on batch_size semantics in the checkpoint:
+    // ------------------------------------------------
+    // Trainer::fit mutates `config_.batch_size` in place when the CUDA
+    // auto-halve-on-OOM loop fires, so `config.batch_size` at save time is
+    // ALREADY the effective batch size that actually trained the model. We
+    // therefore write it under the existing `train_batch_size` key (no
+    // schema break, no shadow field) and additionally emit a redundant
+    // `train_effective_batch_size` key plus the configured floor so callers
+    // who want to flag fallback runs can distinguish "I asked for 16384"
+    // (lost on the mutation) from "the model actually saw 8192". The two
+    // values are equal on a clean run; they diverge only when the retry
+    // ladder fired.
     archive.write("train_batch_size", torch::tensor(config.batch_size));
+    archive.write("train_effective_batch_size", torch::tensor(config.batch_size));
+    archive.write("train_batch_size_floor", torch::tensor(config.batch_size_floor));
+
     archive.write("train_max_epochs", torch::tensor(config.max_epochs));
     archive.write("train_patience", torch::tensor(config.patience));
     archive.write("train_lr", torch::tensor(config.lr));
@@ -764,9 +779,16 @@ void write_metadata_json(
     file << "]\n";
     file << "  },\n";
 
-    // Train config
+    // Train config. `batch_size` here is the effective value that actually
+    // trained the model (Trainer::fit mutates config_.batch_size when the
+    // CUDA OOM auto-halve retry fires). `batch_size_floor` is the configured
+    // lower bound for that retry. `effective_batch_size` is the same value
+    // as `batch_size`, kept under a distinct key for downstream tooling that
+    // wants to flag fallback runs.
     file << "  \"train_config\": {\n";
     file << "    \"batch_size\": " << train_config.batch_size << ",\n";
+    file << "    \"effective_batch_size\": " << train_config.batch_size << ",\n";
+    file << "    \"batch_size_floor\": " << train_config.batch_size_floor << ",\n";
     file << "    \"max_epochs\": " << train_config.max_epochs << ",\n";
     file << "    \"patience\": " << train_config.patience << ",\n";
     file << "    \"lr\": " << train_config.lr << ",\n";

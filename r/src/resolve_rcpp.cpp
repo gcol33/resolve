@@ -7,6 +7,9 @@
 #include "rcpp_model.h"
 #include "rcpp_trainer.h"
 #include "rcpp_predictor.h"
+
+#include <cstdlib>
+#include <string>
 //
 // The legacy standalone `SpeciesEncoder` wrapper (rcpp_encoder.h) bound a
 // `resolve::SpeciesEncoder` class that has since been split in the C++ core
@@ -147,4 +150,46 @@ std::string resolve_version() {
 // [[Rcpp::export]]
 void resolve_set_vram_fraction(double fraction, int device_index = -1) {
     resolve::set_vram_fraction(fraction, device_index);
+}
+
+//' Configure the PyTorch CUDA caching allocator
+//'
+//' Set the \code{PYTORCH_CUDA_ALLOC_CONF} environment variable to a
+//' platform-aware default. Linux/macOS get \code{expandable_segments:True,}
+//' prefixed; on Windows that prefix is intentionally omitted because the
+//' cuMemMap-backed expandable-segments allocator is not implemented (libtorch
+//' warns \dQuote{expandable_segments not supported on this platform}). The
+//' baseline \code{garbage_collection_threshold:0.8,max_split_size_mb:256}
+//' helps reduce reserved-but-unallocated fragmentation on both platforms.
+//'
+//' Mirrors \code{resolve_core.configure_cuda_allocator} in Python, with one
+//' caveat: the R/Rcpp binding loads libtorch via the package's shared library,
+//' which triggers torch initialization. By the time this function runs the
+//' PyTorch CUDA caching allocator has typically already initialized and read
+//' its config exactly once, so changes here are best-effort and may not affect
+//' the running allocator. To force the default before torch initializes, set
+//' \code{Sys.setenv(PYTORCH_CUDA_ALLOC_CONF = "...")} before \code{library(resolve)}.
+//'
+//' @param force If \code{TRUE}, overwrite any existing
+//'   \code{PYTORCH_CUDA_ALLOC_CONF}; default \code{FALSE} only sets when unset.
+//' @return The resulting value of \code{PYTORCH_CUDA_ALLOC_CONF} as a string.
+//' @keywords internal
+//' @export
+// [[Rcpp::export]]
+std::string resolve_configure_cuda_allocator(bool force = false) {
+    std::string base = "garbage_collection_threshold:0.8,max_split_size_mb:256";
+#if !defined(_WIN32)
+    base = "expandable_segments:True," + base;
+#endif
+
+    const char* existing = std::getenv("PYTORCH_CUDA_ALLOC_CONF");
+    if (force || existing == nullptr || existing[0] == '\0') {
+#if defined(_WIN32)
+        _putenv_s("PYTORCH_CUDA_ALLOC_CONF", base.c_str());
+#else
+        setenv("PYTORCH_CUDA_ALLOC_CONF", base.c_str(), 1);
+#endif
+        return base;
+    }
+    return std::string(existing);
 }

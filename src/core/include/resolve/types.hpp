@@ -480,6 +480,16 @@ struct TrainConfig {
     // memory, which hangs the whole desktop under load, so capping PyTorch's
     // allocator prevents that. Applied in Trainer::fit().
     float vram_fraction = 1.0f;
+
+    // Smallest batch size the auto-halve-on-OOM loop in Trainer::fit() is
+    // allowed to drop to. When training raises c10::OutOfMemoryError, the
+    // trainer releases optimizer/scheduler/scaler state, empties the CUDA
+    // caching allocator, halves batch_size, and restarts from epoch 0. If
+    // halving would take batch_size below this floor, the original OOM is
+    // rethrown as a std::runtime_error with the diagnostic context (original
+    // bs, floor, point of failure). Default 1024 is conservative; lower
+    // values are appropriate for memory-bound or sample-efficiency runs.
+    int batch_size_floor = 1024;
 };
 
 // Batch of data for training/inference

@@ -277,6 +277,12 @@ void register_types(nb::module_& m) {
         .def_rw("cudnn_benchmark", &resolve::TrainConfig::cudnn_benchmark)
         .def_rw("allow_tf32", &resolve::TrainConfig::allow_tf32)
         .def_rw("vram_fraction", &resolve::TrainConfig::vram_fraction)
+        // Floor for the auto-halve-on-OOM retry inside Trainer::fit. The
+        // training loop catches c10::OutOfMemoryError, releases optimizer /
+        // AMP / GPU caches, halves batch_size, and restarts from epoch 0.
+        // If halving would take batch_size below this floor, the original
+        // OOM is rethrown.
+        .def_rw("batch_size_floor", &resolve::TrainConfig::batch_size_floor)
         // Device property (string-based for Python convenience)
         .def_prop_rw("device",
             [](const resolve::TrainConfig& c) {

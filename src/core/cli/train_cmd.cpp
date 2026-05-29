@@ -25,6 +25,7 @@ int train_command(
     int hash_dim,
     int top_k,
     int batch_size,
+    int batch_size_floor,
     int max_epochs,
     int patience,
     float lr,
@@ -137,6 +138,7 @@ int train_command(
     // Set up training configuration
     TrainConfig train_config;
     train_config.batch_size = batch_size;
+    train_config.batch_size_floor = batch_size_floor;
     train_config.max_epochs = max_epochs;
     train_config.patience = patience;
     train_config.lr = lr;
@@ -163,6 +165,18 @@ int train_command(
     std::cout << "Training complete!" << std::endl;
     std::cout << "Best epoch: " << result.best_epoch << std::endl;
     std::cout << "Training time: " << result.train_time_seconds << "s" << std::endl;
+    // Show effective batch size: Trainer::fit mutates train_config.batch_size
+    // to the post-halve value when the OOM auto-halve retry fires. Surface
+    // it here so the operator can see whether a fallback run was used.
+    if (trainer.config().batch_size != batch_size) {
+        std::cout << "Effective batch size: " << trainer.config().batch_size
+                  << " (requested " << batch_size
+                  << ", floor " << trainer.config().batch_size_floor
+                  << ") -- OOM auto-halve fired during training"
+                  << std::endl;
+    } else {
+        std::cout << "Effective batch size: " << trainer.config().batch_size << std::endl;
+    }
 
     std::cout << "\nFinal metrics:" << std::endl;
     for (const auto& [target_name, metrics] : result.final_metrics) {

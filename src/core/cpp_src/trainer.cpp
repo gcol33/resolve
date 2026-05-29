@@ -18,8 +18,11 @@
 #include "resolve/cuda/feature_hash.hpp"
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
 #endif
+
+#include <c10/util/Exception.h>
 #include <ATen/autocast_mode.h>
 #include <algorithm>
 #include <fstream>
@@ -794,6 +797,83 @@ void Trainer::cache_data_to_gpu() {
     gpu_data_cached_ = true;
 }
 
+void Trainer::release_training_state() {
+    // Drop optimizer first so its parameter-state tensors (Adam m/v moments,
+    // momentum buffers, etc.) are freed before we ask the allocator to
+    // empty its cache.
+    optimizer_.reset();
+
+    // Forget best-model snapshot; the retry will compute a new one.
+    best_model_state_.clear();
+    best_model_state_.shrink_to_fit();
+
+    // Reset AMP runtime state. The actual config knobs (init_scale,
+    // growth_factor, etc.) live on config_ and are re-read on retry.
+    amp_enabled_ = false;
+    amp_scale_ = config_.amp_init_scale;
+    amp_growth_tracker_ = 0;
+
+    // Drop prefetched hash buffers (CUDA-only path).
+    prefetch_hash_[0] = torch::Tensor();
+    prefetch_hash_[1] = torch::Tensor();
+    prefetch_batch_idx_ = torch::Tensor();
+    prefetch_buffer_idx_ = 0;
+    prefetch_valid_ = false;
+
+    // Release every GPU-cached tensor. We don't drop the host-side train_*
+    // / test_* tensors because prepare_data_ semantics promise to keep them
+    // alive across fit() calls; only the GPU mirrors are torn down so the
+    // next cache_data_to_gpu() call can rebuild them.
+    gpu_data_cached_ = false;
+    gpu_continuous_ = torch::Tensor();
+    gpu_genus_ids_ = torch::Tensor();
+    gpu_family_ids_ = torch::Tensor();
+    gpu_species_ids_ = torch::Tensor();
+    gpu_species_vector_ = torch::Tensor();
+    gpu_targets_.clear();
+    gpu_scalers_.clear();
+    gpu_pool_genus_ids_ = torch::Tensor();
+    gpu_pool_family_ids_ = torch::Tensor();
+    gpu_pool_weights_ = torch::Tensor();
+    gpu_pool_mask_ = torch::Tensor();
+    gpu_pool_has_cover_ = torch::Tensor();
+    gpu_categorical_ids_ = torch::Tensor();
+    gpu_test_continuous_ = torch::Tensor();
+    gpu_test_genus_ids_ = torch::Tensor();
+    gpu_test_family_ids_ = torch::Tensor();
+    gpu_test_species_ids_ = torch::Tensor();
+    gpu_test_species_vector_ = torch::Tensor();
+    gpu_test_targets_.clear();
+    gpu_test_pool_genus_ids_ = torch::Tensor();
+    gpu_test_pool_family_ids_ = torch::Tensor();
+    gpu_test_pool_weights_ = torch::Tensor();
+    gpu_test_pool_mask_ = torch::Tensor();
+    gpu_test_pool_has_cover_ = torch::Tensor();
+    gpu_test_categorical_ids_ = torch::Tensor();
+    gpu_train_raw_species_ids_ = torch::Tensor();
+    gpu_train_raw_weights_ = torch::Tensor();
+    gpu_train_plot_offsets_ = torch::Tensor();
+    gpu_test_indices_ = torch::Tensor();
+
+    // Shuffled mirrors (rarely used today but cleared for completeness).
+    shuffled_continuous_ = torch::Tensor();
+    shuffled_genus_ids_ = torch::Tensor();
+    shuffled_family_ids_ = torch::Tensor();
+    shuffled_species_ids_ = torch::Tensor();
+    shuffled_species_vector_ = torch::Tensor();
+    shuffled_targets_.clear();
+
+#ifdef RESOLVE_HAS_CUDA
+    // Return free blocks to the device so the allocator's reserved pool
+    // shrinks before the next attempt. This is the bridge that makes the
+    // halved batch_size actually have more headroom: without it the
+    // previous attempt's reserved-but-unallocated blocks stay parked.
+    if (config_.device.is_cuda()) {
+        c10::cuda::CUDACachingAllocator::emptyCache();
+    }
+#endif
+}
+
 TrainResult Trainer::fit() {
     if (!data_prepared_) {
         throw std::runtime_error("Data must be prepared before training");
@@ -822,19 +902,22 @@ TrainResult Trainer::fit() {
         at::globalContext().setAllowTF32CuDNN(config_.allow_tf32);
     }
 
-    // Pre-cache all data on GPU for faster training (post-cap so it respects
-    // the allocator fraction).
-    cache_data_to_gpu();
-
-    // Initialize AMP (only enabled on CUDA devices)
-    amp_enabled_ = config_.use_amp && config_.device.is_cuda();
-    if (amp_enabled_) {
-        amp_scale_ = config_.amp_init_scale;
-        amp_growth_tracker_ = 0;
-        // Set autocast dtype to float16 for CUDA
-        at::autocast::set_autocast_dtype(at::kCUDA, at::kHalf);
+    // Snapshot the freshly-initialized model weights once. If a CUDA OOM
+    // halves the batch size and forces a retry, training restarts from
+    // epoch 0 against this same starting point — restarting from a
+    // partially-trained model under a different batch size mixes
+    // optimizer-state assumptions and is fragile.
+    std::vector<char> initial_model_state;
+    {
+        torch::serialize::OutputArchive snap;
+        model_->save(snap);
+        std::ostringstream oss;
+        snap.save_to(oss);
+        auto str = oss.str();
+        initial_model_state.assign(str.begin(), str.end());
     }
 
+    const int batch_size_at_entry = config_.batch_size;
     auto start_time = std::chrono::high_resolution_clock::now();
 
     // Create checkpoint directory if specified
@@ -843,76 +926,160 @@ TrainResult Trainer::fit() {
         std::filesystem::create_directories(config_.checkpoint_dir);
     }
 
-    // Create optimizer
-    optimizer_ = std::make_unique<torch::optim::AdamW>(
-        model_->parameters(),
-        torch::optim::AdamWOptions(config_.lr).weight_decay(config_.weight_decay)
-    );
-
     TrainResult result;
     float best_loss = std::numeric_limits<float>::infinity();
     int patience_counter = 0;
+    bool training_complete = false;
 
-    for (int epoch = 0; epoch < config_.max_epochs; ++epoch) {
-        // Update learning rate based on scheduler
-        float current_lr = get_learning_rate(epoch);
-        update_learning_rate(current_lr);
+    while (!training_complete) {
+        // Pre-cache all data on GPU for faster training (post-cap so it
+        // respects the allocator fraction). May be a no-op on a fresh attempt
+        // (cleared by release_training_state on retry).
+        cache_data_to_gpu();
 
-        float train_loss = train_epoch(epoch);
-        auto [test_loss, metrics] = eval_epoch(epoch);
-
-        result.train_loss_history.push_back(train_loss);
-        result.test_loss_history.push_back(test_loss);
-
-        // Check for improvement
-        if (test_loss < best_loss) {
-            best_loss = test_loss;
-            result.best_epoch = epoch;
-            result.final_metrics = metrics;
-            patience_counter = 0;
-
-            // Save best model state to memory
-            std::ostringstream oss;
-            torch::serialize::OutputArchive archive;
-            model_->save(archive);
-            archive.save_to(oss);
-            auto str = oss.str();
-            best_model_state_.assign(str.begin(), str.end());
-
-            // Save best checkpoint
-            if (use_checkpoints) {
-                save(config_.checkpoint_dir + "/best.pt");
-            }
-        } else {
-            patience_counter++;
-            if (patience_counter >= config_.patience) {
-                config_.log("Early stopping at epoch " + std::to_string(epoch));
-                break;
-            }
+        // Initialize AMP (only enabled on CUDA devices)
+        amp_enabled_ = config_.use_amp && config_.device.is_cuda();
+        if (amp_enabled_) {
+            amp_scale_ = config_.amp_init_scale;
+            amp_growth_tracker_ = 0;
+            // Set autocast dtype to float16 for CUDA
+            at::autocast::set_autocast_dtype(at::kCUDA, at::kHalf);
         }
 
-        // Periodic checkpoint saving
-        if (use_checkpoints && config_.checkpoint_every > 0 && (epoch + 1) % config_.checkpoint_every == 0) {
-            save(config_.checkpoint_dir + "/checkpoint_" + std::to_string(epoch + 1) + ".pt");
-        }
+        // Create optimizer
+        optimizer_ = std::make_unique<torch::optim::AdamW>(
+            model_->parameters(),
+            torch::optim::AdamWOptions(config_.lr).weight_decay(config_.weight_decay)
+        );
 
-        // Write progress file
-        if (use_checkpoints) {
-            write_progress_file(
-                config_.checkpoint_dir, epoch, config_.max_epochs,
-                result.best_epoch, best_loss, patience_counter, result.final_metrics
+        // Reset per-attempt accumulators. If a retry kicks in below, these
+        // are wiped along with the optimizer.
+        result = TrainResult{};
+        best_loss = std::numeric_limits<float>::infinity();
+        patience_counter = 0;
+
+        try {
+            for (int epoch = 0; epoch < config_.max_epochs; ++epoch) {
+                // Update learning rate based on scheduler
+                float current_lr = get_learning_rate(epoch);
+                update_learning_rate(current_lr);
+
+                float train_loss = train_epoch(epoch);
+                auto [test_loss, metrics] = eval_epoch(epoch);
+
+                result.train_loss_history.push_back(train_loss);
+                result.test_loss_history.push_back(test_loss);
+
+                // Check for improvement
+                if (test_loss < best_loss) {
+                    best_loss = test_loss;
+                    result.best_epoch = epoch;
+                    result.final_metrics = metrics;
+                    patience_counter = 0;
+
+                    // Save best model state to memory
+                    std::ostringstream oss;
+                    torch::serialize::OutputArchive archive;
+                    model_->save(archive);
+                    archive.save_to(oss);
+                    auto str = oss.str();
+                    best_model_state_.assign(str.begin(), str.end());
+
+                    // Save best checkpoint
+                    if (use_checkpoints) {
+                        save(config_.checkpoint_dir + "/best.pt");
+                    }
+                } else {
+                    patience_counter++;
+                    if (patience_counter >= config_.patience) {
+                        config_.log("Early stopping at epoch " + std::to_string(epoch));
+                        break;
+                    }
+                }
+
+                // Periodic checkpoint saving
+                if (use_checkpoints && config_.checkpoint_every > 0 && (epoch + 1) % config_.checkpoint_every == 0) {
+                    save(config_.checkpoint_dir + "/checkpoint_" + std::to_string(epoch + 1) + ".pt");
+                }
+
+                // Write progress file
+                if (use_checkpoints) {
+                    write_progress_file(
+                        config_.checkpoint_dir, epoch, config_.max_epochs,
+                        result.best_epoch, best_loss, patience_counter, result.final_metrics
+                    );
+                }
+
+                // Print progress
+                // Print progress using log callback
+                if (epoch % 10 == 0) {
+                    std::ostringstream msg;
+                    msg << "Epoch " << epoch << " - Train: " << train_loss << " Test: " << test_loss;
+                    if (config_.lr_scheduler != LRSchedulerType::None) {
+                        msg << " LR: " << current_lr;
+                    }
+                    config_.log(msg.str());
+                }
+            }
+            training_complete = true;
+        } catch (const c10::Error& cerr) {
+            // Two CUDA out-of-memory paths to catch:
+            //   - c10::OutOfMemoryError raised by the caching allocator
+            //     when its reserved cap is hit but cudaMalloc would succeed.
+            //   - c10::AcceleratorError carrying cudaErrorMemoryAllocation
+            //     when the allocator already released free blocks back to
+            //     the driver and a fresh cudaMalloc fails outright. This is
+            //     the terminal failure mode on near-cap workloads: the
+            //     cascade descends through several OutOfMemoryError catches
+            //     and eventually trips an AcceleratorError when even the
+            //     bare malloc can't be satisfied.
+            // We treat both as "retry with a halved batch", and let any
+            // other c10::Error propagate unchanged.
+            const std::string what_str = cerr.what();
+            const bool is_oom_err =
+                dynamic_cast<const c10::OutOfMemoryError*>(&cerr) != nullptr;
+            const bool is_cuda_oom =
+                what_str.find("out of memory") != std::string::npos
+                || what_str.find("cudaErrorMemoryAllocation") != std::string::npos;
+            if (!is_oom_err && !is_cuda_oom) {
+                throw;
+            }
+
+            const int prev_bs = config_.batch_size;
+            int new_bs = prev_bs;
+            std::string log_msg;
+            std::string err_msg;
+            const bool retry = decide_oom_retry(
+                prev_bs,
+                config_.batch_size_floor,
+                batch_size_at_entry,
+                cerr.what(),
+                new_bs,
+                log_msg,
+                err_msg
             );
-        }
 
-        // Print progress
-        // Print progress using log callback
-        if (epoch % 10 == 0) {
-            std::ostringstream msg;
-            msg << "Epoch " << epoch << " - Train: " << train_loss << " Test: " << test_loss;
-            if (config_.lr_scheduler != LRSchedulerType::None) {
-                msg << " LR: " << current_lr;
+            // Tear state down regardless: the trainer must be left in a
+            // consistent shape whether we retry or rethrow.
+            release_training_state();
+
+            if (!retry) {
+                throw std::runtime_error(err_msg);
             }
-            config_.log(msg.str());
+
+            config_.log(log_msg);
+            config_.batch_size = new_bs;
+
+            // Restore the original model state so the retry sees the same
+            // initial conditions, not a half-trained model.
+            {
+                std::istringstream iss(std::string(initial_model_state.begin(),
+                                                   initial_model_state.end()));
+                torch::serialize::InputArchive archive;
+                archive.load_from(iss);
+                model_->load(archive);
+            }
+            // Fall through and loop.
         }
     }
 

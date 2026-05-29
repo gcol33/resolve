@@ -206,6 +206,79 @@ resolve_core.set_vram_fraction(0.80)
     `dev_notes/compute_cap_plan.md` for the design path on a compute cap
     (CUDA Green Contexts) — not currently implemented.
 
+#### Allocator config: `configure_cuda_allocator`
+
+`resolve_core.configure_cuda_allocator()` runs once at module import time
+and sets a platform-aware `PYTORCH_CUDA_ALLOC_CONF` default. The PyTorch
+CUDA caching allocator reads that env var exactly once, on first
+initialization, so the call has to happen *before* the first `import torch`
+in the process. `resolve_core` performs this ordering automatically — call
+the helper explicitly only when your code imports torch before
+resolve_core, or when you want to log the active config:
+
+```python
+import resolve_core
+config = resolve_core.configure_cuda_allocator()  # idempotent; returns the active value
+# or, to overwrite an existing value:
+config = resolve_core.configure_cuda_allocator(force=True)
+print("PYTORCH_CUDA_ALLOC_CONF:", config)
+```
+
+The chosen defaults differ by platform:
+
+| Platform   | Prefix                          | Tail                                                       |
+|------------|---------------------------------|------------------------------------------------------------|
+| Linux/mac  | `expandable_segments:True,`     | `garbage_collection_threshold:0.8,max_split_size_mb:256`   |
+| Windows    | *(omitted)*                     | `garbage_collection_threshold:0.8,max_split_size_mb:256`   |
+
+The `expandable_segments` allocator uses cuMemMap-backed virtual memory and
+lets the allocator release fragmented reserved blocks. PyTorch's OOM message
+recommends turning it on, but **on Windows it is not implemented**: libtorch
+prints `Warning: expandable_segments not supported on this platform` and
+quietly ignores the request. RESOLVE skips the prefix on `win32` so the
+warning does not show up in user logs.
+
+The `garbage_collection_threshold:0.8` knob asks the allocator to GC reserved
+blocks when `reserved_bytes / cap > 0.8`, and `max_split_size_mb:256` keeps
+the allocator from carving very large free blocks into mismatched fragments.
+Together they reduce reserved-but-unallocated fragmentation enough on
+Windows to recover a few hundred MiB on heavy runs — but they cannot match
+the headroom Linux gets from `expandable_segments`, so for Windows jobs
+near the VRAM cap the right fallback is to halve the batch size.
+
+#### Auto-halve `batch_size` on OOM: `batch_size_floor`
+
+`Trainer::fit` catches `c10::OutOfMemoryError` from the CUDA caching
+allocator, releases the optimizer / AMP scaler / GPU caches, halves
+`config.batch_size`, asks the allocator to empty its cache, and restarts
+training from epoch 0 against the original model weights. The retry stops
+at `config.batch_size_floor` (default 1024); if halving would breach the
+floor the original OOM is rethrown as `std::runtime_error` with the
+original requested batch size, the post-halve value, the floor, and the
+underlying allocator message.
+
+```python
+from resolve_core import TrainConfig
+
+cfg = TrainConfig()
+cfg.batch_size = 16384       # what you'd like to train with
+cfg.batch_size_floor = 1024  # smallest the OOM retry will drop to
+```
+
+After `Trainer.fit()` returns, `trainer.config.batch_size` is the *effective*
+batch size — equal to `cfg.batch_size` on a clean run, smaller if the retry
+fired. The same value is persisted in the checkpoint under both
+`train_batch_size` and `train_effective_batch_size`, and the `--target`
+JSON sidecar adds a `batch_size_floor` field so downstream tooling can flag
+fallback runs without re-parsing the checkpoint.
+
+This is the cleaner cross-platform answer to the
+`expandable_segments`-unavailable problem: on Linux the allocator config
+delays the OOM by reducing fragmentation; on Windows the bs-halve recovers
+when fragmentation can no longer be papered over.
+
+CLI: `resolve train --batch-size 16384 --batch-size-floor 1024`.
+
 ## Early Stopping
 
 Early stopping monitors validation loss and halts training when the model stops improving.
