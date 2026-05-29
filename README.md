@@ -228,6 +228,32 @@ import resolve_core
 resolve_core.set_vram_fraction(0.80)  # affects current CUDA device
 ```
 
+### Auto-halve `batch_size` on OOM
+
+`Trainer.fit()` catches `c10::OutOfMemoryError`, releases optimizer / AMP /
+GPU caches, halves `batch_size`, and restarts training from epoch 0 against
+the original model weights. The retry stops at `batch_size_floor` (default
+1024); below the floor the OOM rethrows. After `fit()` returns,
+`trainer.config.batch_size` is the effective batch size that actually
+trained the model, also persisted in the checkpoint.
+
+```python
+cfg.batch_size = 16384
+cfg.batch_size_floor = 1024
+```
+
+CLI: `resolve train --batch-size 16384 --batch-size-floor 1024`.
+
+### CUDA allocator config (Linux vs Windows)
+
+`PYTORCH_CUDA_ALLOC_CONF` is set automatically at `import resolve_core` to
+a platform-aware default:
+`expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:256`
+on Linux/mac, and the same without `expandable_segments` on Windows (the
+cuMemMap-backed allocator is not implemented on win32; libtorch warns
+otherwise). To overwrite an existing value or simply log what is active:
+`resolve_core.configure_cuda_allocator(force=True)`.
+
 ## Documentation
 
 - **[Getting Started](https://gillescolling.com/resolve/tutorials/quickstart/)**: Complete workflow walkthrough

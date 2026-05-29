@@ -29,6 +29,7 @@ int train_command(
     int hash_dim,
     int top_k,
     int batch_size,
+    int batch_size_floor,
     int max_epochs,
     int patience,
     float lr,
@@ -83,6 +84,13 @@ Train Options:
   --hash-dim N           Hash dimension (default: 32)
   --top-k N              Top-k species for encoding (default: 3)
   --batch-size N         Batch size (default: 4096)
+  --batch-size-floor N   Smallest batch size the auto-halve-on-OOM retry in
+                         Trainer::fit is allowed to drop to (default: 1024).
+                         On CUDA OutOfMemoryError the trainer releases
+                         optimizer / AMP / GPU caches, halves batch_size, and
+                         restarts from epoch 0; below this floor the OOM is
+                         rethrown. Especially relevant on Windows, where the
+                         allocator's expandable_segments option is unavailable.
   --max-epochs N         Maximum epochs (default: 500)
   --patience N           Early stopping patience (default: 50)
   --lr FLOAT             Learning rate (default: 0.001)
@@ -218,6 +226,7 @@ int main(int argc, char* argv[]) {
             std::stoi(args.get("--hash-dim", "32")),
             std::stoi(args.get("--top-k", "3")),
             std::stoi(args.get("--batch-size", "4096")),
+            std::stoi(args.get("--batch-size-floor", "1024")),
             std::stoi(args.get("--max-epochs", "500")),
             std::stoi(args.get("--patience", "50")),
             std::stof(args.get("--lr", "0.001")),

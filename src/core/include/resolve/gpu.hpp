@@ -27,4 +27,28 @@ void set_vram_fraction(
     LogCallback log = default_log
 );
 
+// Decision helper for the auto-halve-on-OOM retry inside Trainer::fit.
+//
+// Pure logic, no torch dependency: given the batch size that just OOM'd
+// (`prev_bs`), the configured retry `floor`, the batch size originally
+// requested when fit() was entered (`original_bs`), and the OOM's
+// `oom_what()` string, decides whether to retry with `prev_bs/2` or
+// rethrow as a runtime_error.
+//
+// Returns true and fills `out_log_msg` if the caller should halve to
+// `out_new_batch_size` and retry. Returns false and fills `out_err_msg`
+// with a diagnostic that the caller must throw as std::runtime_error.
+//
+// Extracted into a free function so it can be unit-tested without needing
+// to actually exhaust CUDA VRAM.
+bool decide_oom_retry(
+    int prev_bs,
+    int floor,
+    int original_bs,
+    const char* oom_what,
+    int& out_new_batch_size,
+    std::string& out_log_msg,
+    std::string& out_err_msg
+);
+
 } // namespace resolve

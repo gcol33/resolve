@@ -23,6 +23,7 @@ add_executable(resolve_tests
     test_fuzzy.cpp
     test_categorical.cpp
     test_gpu.cpp
+    test_oom_retry.cpp
 )
 
 # Add CUDA library directory if CUDA is available

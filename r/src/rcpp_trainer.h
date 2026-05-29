@@ -94,6 +94,12 @@ public:
         if (config_list.containsElementNamed("vram_fraction")) {
             config.vram_fraction = as<float>(config_list["vram_fraction"]);
         }
+        // batch_size_floor mirrors TrainConfig.batch_size_floor in the
+        // nanobind binding. Auto-halve-on-OOM stops dropping at this floor;
+        // see TrainConfig in types.hpp.
+        if (config_list.containsElementNamed("batch_size_floor")) {
+            config.batch_size_floor = config_list["batch_size_floor"];
+        }
 
         trainer_ = std::make_unique<resolve::Trainer>(*(model.model()), config);
     }
@@ -237,8 +243,12 @@ public:
 
     List get_config() const {
         const auto& c = trainer_->config();
+        // After Trainer::fit() the `batch_size` field is the EFFECTIVE batch
+        // size (post-halve-on-OOM), so it doubles as the "what actually
+        // trained" value. `batch_size_floor` is the configured retry floor.
         return List::create(
             Named("batch_size") = c.batch_size,
+            Named("batch_size_floor") = c.batch_size_floor,
             Named("max_epochs") = c.max_epochs,
             Named("patience") = c.patience,
             Named("lr") = c.lr,
