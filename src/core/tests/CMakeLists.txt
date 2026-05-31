@@ -25,6 +25,7 @@ add_executable(resolve_tests
     test_gpu.cpp
     test_predictor.cpp
     test_trainer_eval.cpp
+    test_taxonomy_vocab.cpp
     test_oom_retry.cpp
 )
 

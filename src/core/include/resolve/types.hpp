@@ -7,6 +7,7 @@
 #include <optional>
 #include <functional>
 #include <iostream>
+#include <set>
 
 namespace resolve {
 
@@ -734,22 +735,33 @@ class TaxonomyVocab {
 public:
     TaxonomyVocab() = default;
 
-    // Fit vocabulary from species records
+    // Fit vocabulary from species records.
+    //
+    // IDs are assigned in sorted (alphabetical) order so the genus/family ->
+    // ID mapping is a pure function of the SET of names, independent of the
+    // order records arrive in. A first-appearance ordering made the IDs depend
+    // on CSV row order: a checkpoint trained on one ordering and scored against
+    // a differently-ordered rebuild (e.g. from_csv_with_schema in another
+    // process) silently misaligned the genus/family embedding lookups. This
+    // mirrors SpeciesVocab::from_records, which is already sorted. Index 0 is
+    // reserved for unknown. See gcol33/resolve#5.
     void fit(const std::vector<SpeciesRecord>& records) {
         genus_to_idx_.clear();
         family_to_idx_.clear();
 
-        // Index 0 reserved for unknown
         genus_to_idx_["<UNK>"] = 0;
         family_to_idx_["<UNK>"] = 0;
 
+        std::set<std::string> genera, families;
         for (const auto& rec : records) {
-            if (!rec.genus.empty() && genus_to_idx_.find(rec.genus) == genus_to_idx_.end()) {
-                genus_to_idx_[rec.genus] = static_cast<int64_t>(genus_to_idx_.size());
-            }
-            if (!rec.family.empty() && family_to_idx_.find(rec.family) == family_to_idx_.end()) {
-                family_to_idx_[rec.family] = static_cast<int64_t>(family_to_idx_.size());
-            }
+            if (!rec.genus.empty())  genera.insert(rec.genus);
+            if (!rec.family.empty()) families.insert(rec.family);
+        }
+        for (const auto& g : genera) {
+            genus_to_idx_[g] = static_cast<int64_t>(genus_to_idx_.size());
+        }
+        for (const auto& f : families) {
+            family_to_idx_[f] = static_cast<int64_t>(family_to_idx_.size());
         }
     }
 
