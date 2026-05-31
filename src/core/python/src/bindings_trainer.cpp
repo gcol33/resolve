@@ -95,6 +95,38 @@ void register_trainer(nb::module_& m) {
         .def("compute_residuals", &resolve::Trainer::compute_residuals,
              nb::arg("target_name"),
              "Compute residual analysis for a regression target")
+        .def("compute_classification_predictions",
+             &resolve::Trainer::compute_classification_predictions,
+             nb::arg("target_name"),
+             "Per-plot test-fold predictions for a classification target "
+             "(predicted_classes, probabilities, actuals).")
+        .def("load_state", [](resolve::Trainer& self, const std::string& path,
+                              const std::string& device, float vram_fraction) {
+            torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
+            self.load_state(path, dev, vram_fraction);
+        }, nb::arg("path"), nb::arg("device") = "cpu", nb::arg("vram_fraction") = 1.0f,
+           "Load checkpoint weights, scalers, and categorical vocab into this "
+           "trainer in place (first-class replacement for the static load()).")
+        .def("test_indices", [](const resolve::Trainer& self) {
+            auto t = self.test_indices();
+            if (t.defined()) {
+                auto cpu_tensor = t.detach().cpu().contiguous();
+                return nb::steal(THPVariable_Wrap(cpu_tensor));
+            }
+            return nb::steal(Py_None);
+        }, "Global plot indices of the held-out test fold (int64).")
+        .def("train_indices", [](const resolve::Trainer& self) {
+            auto t = self.train_indices();
+            if (t.defined()) {
+                auto cpu_tensor = t.detach().cpu().contiguous();
+                return nb::steal(THPVariable_Wrap(cpu_tensor));
+            }
+            return nb::steal(Py_None);
+        }, "Global plot indices of the training fold (int64).")
+        .def("test_plot_ids", &resolve::Trainer::test_plot_ids,
+             "Plot IDs of the held-out test fold (requires prepare_data(dataset)).")
+        .def("train_plot_ids", &resolve::Trainer::train_plot_ids,
+             "Plot IDs of the training fold (requires prepare_data(dataset)).")
         .def("cross_validate", &resolve::Trainer::cross_validate,
              nb::arg("n_folds") = 5,
              nb::arg("seed") = 42,

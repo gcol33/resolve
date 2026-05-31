@@ -670,6 +670,23 @@ struct ResidualAnalysis {
     float q95 = 0.0f;  // 95th percentile
 };
 
+// Per-plot classification predictions on the held-out test fold. The
+// regression-only ResidualAnalysis leaves classification targets without
+// per-plot outputs (compute_residuals returns empty for them); this is the
+// classification counterpart, so a saved checkpoint can be scored for
+// per-class F1, confusion matrices, and top-k against the trainer's own test
+// split. All tensors live on CPU with length n_test along dim 0.
+struct ClassificationPredictions {
+    std::string target_name;
+    torch::Tensor predicted_classes;  // (n_test,) int64 argmax class codes
+    torch::Tensor probabilities;      // (n_test, n_classes) float32 softmax rows
+    torch::Tensor actuals;            // (n_test,) int64 ground-truth class codes
+    // Ordered class vocabulary mirrored from the target's TargetConfig:
+    // class_names[code] is the original CSV string for integer class `code`.
+    // Empty when the classification column was already integer-coded.
+    std::vector<std::string> class_names;
+};
+
 // Run metadata for reproducibility and provenance tracking
 struct RunMetadata {
     std::string resolve_version = VERSION;

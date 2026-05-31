@@ -160,6 +160,50 @@ public:
         const std::string& target_name
     );
 
+    // Per-plot predictions for a CLASSIFICATION target over the held-out
+    // test fold. compute_residuals covers regression only (its predictions
+    // are empty for classification); this is the classification counterpart,
+    // exposing predicted class codes, the full softmax probability matrix,
+    // and ground-truth codes per test plot so callers can compute per-class
+    // F1, confusion matrices, and top-k. Returns a result with empty tensors
+    // when the named target is not a classification target. Requires
+    // prepare_data() first.
+    [[nodiscard]] ClassificationPredictions compute_classification_predictions(
+        const std::string& target_name
+    );
+
+    // Load model weights, scalers, and the categorical vocabulary from the
+    // checkpoint at `path` INTO this trainer, in place. First-class
+    // alternative to the static load() (whose
+    // std::tuple<ResolveModel, Scalers, CategoricalVocab> return has no
+    // nanobind/Rcpp converter and is therefore unusable from Python/R). The
+    // trainer's model architecture must already match the checkpoint (same
+    // schema/config) — typically the trainer was constructed as
+    // Trainer(ResolveModel(ds.schema(), mc), tc). After this returns,
+    // compute_residuals / compute_calibration /
+    // compute_classification_predictions score the loaded weights against the
+    // trainer's own test fold; call prepare_data() with the training seed
+    // first to reconstruct that split. vram_fraction caps the CUDA allocator
+    // before upload, matching fit() and the static load(); ignored on CPU.
+    void load_state(
+        const std::string& path,
+        torch::Device device = torch::kCPU,
+        float vram_fraction = 1.0f
+    );
+
+    // Global plot indices (into the dataset's original plot order) that
+    // prepare_data assigned to the train / test split. int64, shapes
+    // (n_train,) / (n_test,). Lets downstream code reconstruct exactly which
+    // plots are in the held-out fold (combine with the dataset's plot_ids()).
+    [[nodiscard]] torch::Tensor train_indices() const noexcept { return train_indices_; }
+    [[nodiscard]] torch::Tensor test_indices() const noexcept { return test_indices_; }
+
+    // Plot IDs for the train / test split, in fold order. Populated only when
+    // prepare_data(const ResolveDataset&) was used (the raw-tensor overload
+    // carries no plot IDs); empty otherwise.
+    [[nodiscard]] std::vector<std::string> train_plot_ids() const;
+    [[nodiscard]] std::vector<std::string> test_plot_ids() const;
+
     // Perform k-fold cross-validation
     // Returns aggregated metrics across all folds
     [[nodiscard]] CrossValidationResult cross_validate(
@@ -224,6 +268,22 @@ private:
     [[nodiscard]] PoolTensors get_test_pool_tensors() const;
     [[nodiscard]] PoolTensors get_train_pool_tensors() const;
 
+    // Run the model in eval mode over the held-out test fold and return the
+    // per-target prediction map (regression: scaled outputs; classification:
+    // logits). Single source of truth for the test-fold forward pass shared
+    // by compute_residuals / compute_calibration /
+    // compute_classification_predictions.
+    [[nodiscard]] std::unordered_map<std::string, torch::Tensor> forward_test_fold();
+
+    // Map global plot indices to their plot-ID strings via plot_ids_. Returns
+    // empty when plot_ids_ is empty (the raw-tensor prepare_data path).
+    [[nodiscard]] std::vector<std::string> select_plot_ids(const torch::Tensor& indices) const;
+
+    // Copy params + buffers from a checkpoint archive into `model` under a
+    // NoGradGuard (freshly-constructed leaf params require it). Single source
+    // of truth for the static load() and the instance load_state().
+    static void load_weights_into(torch::serialize::InputArchive& archive, ResolveModel& model);
+
     ResolveModel model_;
     TrainConfig config_;
     Scalers scalers_;
@@ -233,6 +293,12 @@ private:
     // it survives independently of the source ResolveDataset (which may go
     // out of scope before save).
     CategoricalVocab categorical_vocab_;
+
+    // Plot IDs captured at prepare_data(const ResolveDataset&) time, in the
+    // dataset's original plot order. Empty when the raw-tensor prepare_data
+    // overload was used. Indexed by train_indices_ / test_indices_ to recover
+    // the plot IDs of each fold (train_plot_ids() / test_plot_ids()).
+    std::vector<std::string> plot_ids_;
 
     // Raw coordinates stored for spatial CV (before scaling/concatenation)
     torch::Tensor coordinates_;

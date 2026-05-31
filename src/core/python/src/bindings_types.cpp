@@ -414,6 +414,35 @@ void register_types(nb::module_& m) {
         .def_ro("q75", &resolve::ResidualAnalysis::q75)
         .def_ro("q95", &resolve::ResidualAnalysis::q95);
 
+    // Per-plot classification predictions for test-fold scoring. The tensor
+    // fields are exposed lazily as torch tensors (None when undefined, e.g.
+    // for a non-classification target).
+    nb::class_<resolve::ClassificationPredictions>(m, "ClassificationPredictions")
+        .def(nb::init<>())
+        .def_ro("target_name", &resolve::ClassificationPredictions::target_name)
+        .def_ro("class_names", &resolve::ClassificationPredictions::class_names)
+        .def_prop_ro("predicted_classes", [](const resolve::ClassificationPredictions& c) {
+            if (c.predicted_classes.defined()) {
+                auto cpu_tensor = c.predicted_classes.detach().cpu().contiguous();
+                return nb::steal(THPVariable_Wrap(cpu_tensor));
+            }
+            return nb::steal(Py_None);
+        })
+        .def_prop_ro("probabilities", [](const resolve::ClassificationPredictions& c) {
+            if (c.probabilities.defined()) {
+                auto cpu_tensor = c.probabilities.detach().cpu().contiguous();
+                return nb::steal(THPVariable_Wrap(cpu_tensor));
+            }
+            return nb::steal(Py_None);
+        })
+        .def_prop_ro("actuals", [](const resolve::ClassificationPredictions& c) {
+            if (c.actuals.defined()) {
+                auto cpu_tensor = c.actuals.detach().cpu().contiguous();
+                return nb::steal(THPVariable_Wrap(cpu_tensor));
+            }
+            return nb::steal(Py_None);
+        });
+
     // Spatial block configuration
     nb::class_<resolve::SpatialBlockConfig>(m, "SpatialBlockConfig")
         .def(nb::init<>())

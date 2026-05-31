@@ -62,6 +62,11 @@ void Trainer::prepare_data(
     // copy the vocab would be a dangling reference at save time.
     categorical_vocab_ = dataset.categorical_vocab();
 
+    // Capture plot IDs so test_plot_ids() / train_plot_ids() can recover which
+    // plots landed in each split. The raw-tensor prepare_data overload below
+    // has no plot IDs, so this is the only place plot_ids_ is populated.
+    plot_ids_ = dataset.plot_ids();
+
     // Delegate to the raw tensor API using data from the dataset
     prepare_data(
         dataset.coordinates(),
@@ -1275,31 +1280,123 @@ std::tuple<ResolveModel, Scalers, CategoricalVocab> Trainer::load(
     // Create model with loaded schema
     ResolveModel model(schema, config);
 
-    // Load model weights manually (matching the prefixed save format).
-    // Why: freshly-constructed model parameters are leaf tensors with
-    // requires_grad=true. Calling .copy_() on them directly trips
-    // autograd's check_inplace ("a leaf Variable that requires grad is
-    // being used in an in-place operation"). Mirror PyTorch's pattern of
-    // copying inside torch.no_grad().
-    {
-        torch::NoGradGuard no_grad;
-        for (const auto& pair : model->named_parameters()) {
-            torch::Tensor t;
-            if (archive.try_read("param_" + pair.key(), t)) {
-                pair.value().copy_(t);
-            }
-        }
-        for (const auto& pair : model->named_buffers()) {
-            torch::Tensor t;
-            if (archive.try_read("buffer_" + pair.key(), t)) {
-                pair.value().copy_(t);
-            }
-        }
-    }
+    // Load model weights into the freshly-constructed model (matching the
+    // prefixed save format).
+    load_weights_into(archive, model);
 
     model->to(device);
 
     return {model, scalers, vocab};
+}
+
+void Trainer::load_weights_into(torch::serialize::InputArchive& archive, ResolveModel& model) {
+    // Freshly-constructed model parameters are leaf tensors with
+    // requires_grad=true. Calling .copy_() on them directly trips autograd's
+    // check_inplace ("a leaf Variable that requires grad is being used in an
+    // in-place operation"). Mirror PyTorch's copy-inside-torch.no_grad().
+    torch::NoGradGuard no_grad;
+    for (const auto& pair : model->named_parameters()) {
+        torch::Tensor t;
+        if (archive.try_read("param_" + pair.key(), t)) {
+            pair.value().copy_(t);
+        }
+    }
+    for (const auto& pair : model->named_buffers()) {
+        torch::Tensor t;
+        if (archive.try_read("buffer_" + pair.key(), t)) {
+            pair.value().copy_(t);
+        }
+    }
+}
+
+void Trainer::load_state(
+    const std::string& path,
+    torch::Device device,
+    float vram_fraction
+) {
+    // Apply the VRAM cap before any device allocation, matching fit() and the
+    // static load(); no-op on CPU or fraction >= 1.0.
+    if (device.is_cuda()) {
+        set_vram_fraction(static_cast<double>(vram_fraction), device.index());
+    }
+
+    torch::serialize::InputArchive archive;
+    archive.load_from(path);
+
+    // Restore weights into the existing model_ (its architecture must already
+    // match the checkpoint), the fitted scalers, and the categorical vocab.
+    load_weights_into(archive, model_);
+    model_->to(device);
+
+    scalers_ = load_scalers(archive);
+    categorical_vocab_ = CategoricalVocab::load(archive, "trainer_categorical_");
+
+    // Keep config_.device coherent with where the weights now live so the
+    // eval helpers move test tensors to the matching device.
+    config_.device = device;
+}
+
+std::vector<std::string> Trainer::select_plot_ids(const torch::Tensor& indices) const {
+    std::vector<std::string> out;
+    if (plot_ids_.empty() || !indices.defined() || indices.numel() == 0) {
+        return out;
+    }
+    auto idx_cpu = indices.to(torch::kCPU).contiguous();
+    auto acc = idx_cpu.accessor<int64_t, 1>();
+    out.reserve(static_cast<size_t>(idx_cpu.size(0)));
+    for (int64_t i = 0; i < idx_cpu.size(0); ++i) {
+        const int64_t g = acc[i];
+        if (g >= 0 && g < static_cast<int64_t>(plot_ids_.size())) {
+            out.push_back(plot_ids_[static_cast<size_t>(g)]);
+        }
+    }
+    return out;
+}
+
+std::vector<std::string> Trainer::train_plot_ids() const {
+    return select_plot_ids(train_indices_);
+}
+
+std::vector<std::string> Trainer::test_plot_ids() const {
+    return select_plot_ids(test_indices_);
+}
+
+std::unordered_map<std::string, torch::Tensor> Trainer::forward_test_fold() {
+    model_->eval();
+    torch::NoGradGuard no_grad;
+
+    auto test_continuous = test_continuous_.to(config_.device);
+    auto test_genus_ids = to_device_if_defined(test_genus_ids_, config_.device);
+    auto test_family_ids = to_device_if_defined(test_family_ids_, config_.device);
+    auto test_species_ids = to_device_if_defined(test_species_ids_, config_.device);
+    auto test_species_vector = to_device_if_defined(test_species_vector_, config_.device);
+    auto test_cat_ids = to_device_if_defined(test_categorical_ids_, config_.device);
+    auto pool = get_test_pool_tensors();
+
+    // CUDA hash mode stores raw species and computes the hash embedding on the
+    // fly; the precomputed-hash and other encodings already fold their species
+    // representation into test_continuous_ at prepare_data time.
+#ifdef RESOLVE_HAS_CUDA
+    if (use_cuda_hash_ && config_.device.is_cuda()) {
+        auto test_idx = test_indices_.to(config_.device);
+        auto test_hash = cuda::compute_batch_hash_embedding_cuda(
+            test_idx,
+            torch::Tensor(),
+            raw_species_ids_.to(config_.device),
+            raw_weights_.to(config_.device),
+            plot_offsets_.to(config_.device),
+            hash_dim_
+        );
+        test_continuous = torch::cat({test_continuous, test_hash}, /*dim=*/1);
+    }
+#endif
+
+    return model_->forward(
+        test_continuous, test_genus_ids, test_family_ids,
+        test_species_ids, test_species_vector,
+        pool.genus_ids, pool.family_ids, pool.weights, pool.mask, pool.has_cover,
+        test_cat_ids
+    );
 }
 
 NetworkDiagnostics Trainer::compute_diagnostics() {
@@ -1445,22 +1542,8 @@ CalibrationResult Trainer::compute_calibration(
         return result;
     }
 
-    // Get test predictions
-    auto test_continuous = test_continuous_.to(config_.device);
-    auto test_genus_ids = to_device_if_defined(test_genus_ids_, config_.device);
-    auto test_family_ids = to_device_if_defined(test_family_ids_, config_.device);
-    auto test_species_ids = to_device_if_defined(test_species_ids_, config_.device);
-    auto test_species_vector = to_device_if_defined(test_species_vector_, config_.device);
-    auto test_cat_ids = to_device_if_defined(test_categorical_ids_, config_.device);
-    auto cal_pool = get_test_pool_tensors();
-
-    auto predictions = model_->forward(
-        test_continuous, test_genus_ids, test_family_ids,
-        test_species_ids, test_species_vector,
-        cal_pool.genus_ids, cal_pool.family_ids,
-        cal_pool.weights, cal_pool.mask, cal_pool.has_cover,
-        test_cat_ids
-    );
+    // Get test predictions (shared single-source test-fold forward).
+    auto predictions = forward_test_fold();
 
     auto pred_it = predictions.find(target_name);
     auto target_it = test_targets_.find(target_name);
@@ -1547,22 +1630,8 @@ ResidualAnalysis Trainer::compute_residuals(
         return result;
     }
 
-    // Get test predictions
-    auto test_continuous = test_continuous_.to(config_.device);
-    auto test_genus_ids = to_device_if_defined(test_genus_ids_, config_.device);
-    auto test_family_ids = to_device_if_defined(test_family_ids_, config_.device);
-    auto test_species_ids = to_device_if_defined(test_species_ids_, config_.device);
-    auto test_species_vector = to_device_if_defined(test_species_vector_, config_.device);
-    auto test_cat_ids = to_device_if_defined(test_categorical_ids_, config_.device);
-    auto resid_pool = get_test_pool_tensors();
-
-    auto predictions = model_->forward(
-        test_continuous, test_genus_ids, test_family_ids,
-        test_species_ids, test_species_vector,
-        resid_pool.genus_ids, resid_pool.family_ids,
-        resid_pool.weights, resid_pool.mask, resid_pool.has_cover,
-        test_cat_ids
-    );
+    // Get test predictions (shared single-source test-fold forward).
+    auto predictions = forward_test_fold();
 
     auto pred_it = predictions.find(target_name);
     auto target_it = test_targets_.find(target_name);
@@ -1636,6 +1705,54 @@ ResidualAnalysis Trainer::compute_residuals(
     result.q50 = get_quantile(0.50f);
     result.q75 = get_quantile(0.75f);
     result.q95 = get_quantile(0.95f);
+
+    return result;
+}
+
+ClassificationPredictions Trainer::compute_classification_predictions(
+    const std::string& target_name
+) {
+    ClassificationPredictions result;
+    result.target_name = target_name;
+
+    if (!data_prepared_) {
+        throw std::runtime_error(
+            "compute_classification_predictions requires prepare_data() first");
+    }
+
+    // Locate the target and confirm it is a classification head. Non-matching
+    // or regression targets return empty tensors (parallels compute_residuals
+    // returning empty for classification targets).
+    const TargetConfig* target_cfg = nullptr;
+    for (const auto& cfg : model_->schema().targets) {
+        if (cfg.name == target_name) {
+            target_cfg = &cfg;
+            break;
+        }
+    }
+    if (!target_cfg || target_cfg->task != TaskType::Classification) {
+        return result;
+    }
+    result.class_names = target_cfg->class_names;
+
+    // Shared single-source test-fold forward.
+    auto predictions = forward_test_fold();
+
+    auto pred_it = predictions.find(target_name);
+    auto target_it = test_targets_.find(target_name);
+    if (pred_it == predictions.end() || target_it == test_targets_.end()) {
+        return result;
+    }
+
+    auto logits = pred_it->second;                 // (n_test, n_classes)
+    auto probs = torch::softmax(logits, /*dim=*/1);
+    auto predicted = probs.argmax(/*dim=*/1);      // (n_test,)
+
+    result.probabilities = probs.detach().to(torch::kCPU).contiguous();
+    result.predicted_classes =
+        predicted.detach().to(torch::kCPU).contiguous().to(torch::kLong);
+    result.actuals =
+        target_it->second.detach().to(torch::kCPU).contiguous().to(torch::kLong);
 
     return result;
 }

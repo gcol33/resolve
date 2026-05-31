@@ -274,6 +274,41 @@ public:
         return residual_analysis_to_list(result);
     }
 
+    List compute_classification_predictions(std::string target_name) {
+        auto result = trainer_->compute_classification_predictions(target_name);
+        return classification_predictions_to_list(result);
+    }
+
+    // Load checkpoint weights/scalers/categorical-vocab into this trainer in
+    // place. First-class replacement for the static load() (whose tuple
+    // return has no Rcpp converter). The trainer's model architecture must
+    // already match the checkpoint.
+    void load_state(std::string path, std::string device = "cpu",
+                    double vram_fraction = 1.0) {
+        torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
+        trainer_->load_state(path, dev, static_cast<float>(vram_fraction));
+    }
+
+    // Global plot indices (into the dataset's plot order) for each fold.
+    IntegerVector test_indices() {
+        auto t = trainer_->test_indices();
+        if (!t.defined() || t.numel() == 0) return IntegerVector(0);
+        return tensor_to_r_ivec(t);
+    }
+    IntegerVector train_indices() {
+        auto t = trainer_->train_indices();
+        if (!t.defined() || t.numel() == 0) return IntegerVector(0);
+        return tensor_to_r_ivec(t);
+    }
+
+    // Plot IDs per fold (empty unless prepare_data_from_dataset was used).
+    CharacterVector test_plot_ids() {
+        return wrap(trainer_->test_plot_ids());
+    }
+    CharacterVector train_plot_ids() {
+        return wrap(trainer_->train_plot_ids());
+    }
+
     List cross_validate(int n_folds = 5, int seed = 42) {
         auto result = trainer_->cross_validate(n_folds, seed);
         return cross_validation_result_to_list(result);

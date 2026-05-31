@@ -24,6 +24,7 @@ add_executable(resolve_tests
     test_categorical.cpp
     test_gpu.cpp
     test_predictor.cpp
+    test_trainer_eval.cpp
     test_oom_retry.cpp
 )
 

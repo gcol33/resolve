@@ -106,6 +106,24 @@ inline IntegerMatrix tensor_to_r_imat(const torch::Tensor& t) {
     return out;
 }
 
+// 1-D int64 tensor -> R IntegerVector. Narrows to 32-bit int and warns on
+// overflow (mirrors tensor_to_r_imat). Used for class codes / fold indices.
+inline IntegerVector tensor_to_r_ivec(const torch::Tensor& t) {
+    torch::Tensor cpu = t.cpu().contiguous().to(torch::kInt64);
+    int64_t* data = cpu.data_ptr<int64_t>();
+    IntegerVector out(cpu.numel());
+    for (int64_t i = 0; i < cpu.numel(); ++i) {
+        const int64_t v = data[i];
+        if (v > std::numeric_limits<int>::max() ||
+            v < std::numeric_limits<int>::min()) {
+            Rcpp::warning("tensor_to_r_ivec: value out of int range, "
+                          "narrowed: %lld", static_cast<long long>(v));
+        }
+        out[i] = static_cast<int>(v);
+    }
+    return out;
+}
+
 // =============================================================================
 // Enum conversions
 // =============================================================================
@@ -537,6 +555,23 @@ inline List residual_analysis_to_list(const resolve::ResidualAnalysis& ra) {
         Named("q75") = ra.q75,
         Named("q95") = ra.q95
     );
+}
+
+inline List classification_predictions_to_list(const resolve::ClassificationPredictions& cp) {
+    List result;
+    result["target_name"] = cp.target_name;
+    result["class_names"] = wrap(cp.class_names);
+    // Raw model class codes (0-based), not R indices; mirror the C++ engine.
+    result["predictions"] =
+        (cp.predicted_classes.defined() && cp.predicted_classes.numel() > 0)
+            ? tensor_to_r_ivec(cp.predicted_classes) : IntegerVector(0);
+    result["actuals"] =
+        (cp.actuals.defined() && cp.actuals.numel() > 0)
+            ? tensor_to_r_ivec(cp.actuals) : IntegerVector(0);
+    result["probabilities"] =
+        (cp.probabilities.defined() && cp.probabilities.numel() > 0)
+            ? tensor_to_r_mat(cp.probabilities) : NumericMatrix(0, 0);
+    return result;
 }
 
 inline List cross_validation_result_to_list(const resolve::CrossValidationResult& cvr) {
