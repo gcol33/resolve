@@ -1,5 +1,5 @@
 """
-RESOLVE: Representation Encoding of Species Outcomes via Linear Vector Embeddings.
+RESOLVE: Representation Encoding for Structured Observation Learning with Vector Embeddings.
 
 A framework for predicting plot-level ecological attributes from species composition
 using linear compositional pooling and learned representations.

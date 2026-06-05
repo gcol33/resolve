@@ -1,6 +1,6 @@
 # RESOLVE Roadmap
 
-**R**elational **E**ncoding via **S**tructured **O**bservation **L**earning with **V**ector **E**mbeddings
+**R**epresentation **E**ncoding for **S**tructured **O**bservation **L**earning with **V**ector **E**mbeddings
 
 ---
 
