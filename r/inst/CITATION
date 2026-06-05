@@ -1,8 +1,8 @@
 bibentry(
   bibtype = "Manual",
-  title   = "resolve: Species Composition Prediction via Linear Vector Embeddings",
+  title   = "resolve: Predicting Sample Outcomes from Compositional Data",
   author  = person("Gilles", "Colling"),
   year    = "2026",
   url     = "https://github.com/gcol33/resolve",
-  note    = "R package version 0.4.0"
+  note    = "R package version 0.5.0"
 )

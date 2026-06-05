@@ -12,7 +12,7 @@ figures:
   bg: "#F5F6F8"
 
 home:
-  title: "RESOLVE: Species Composition Prediction via Linear Embeddings"
+  title: "RESOLVE: Predicting Sample Outcomes from Compositional Data"
   description: >
     R interface to the RESOLVE Python package for predicting plot-level
     attributes from species composition using linear compositional pooling.
