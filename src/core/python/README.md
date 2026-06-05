@@ -1,6 +1,6 @@
 # resolve-core
 
-C++ bindings for the RESOLVE species composition prediction engine.
+C++ bindings for the RESOLVE compositional-data prediction engine.
 
 ## Installation
 

@@ -2,7 +2,7 @@
 
 **Representation Encoding for Structured Observation Learning with Vector Embeddings**
 
-An opinionated torch-based package for predicting plot-level attributes from species composition, environment, and space.
+An opinionated torch-based package for predicting sample attributes from compositional data — sets of entities with optional abundances, covariates, and coordinates.
 
 ## Overview
 

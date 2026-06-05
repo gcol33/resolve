@@ -1,8 +1,9 @@
 """
 RESOLVE: Representation Encoding for Structured Observation Learning with Vector Embeddings.
 
-A framework for predicting plot-level ecological attributes from species composition
-using linear compositional pooling and learned representations.
+A framework for predicting sample-level attributes from compositional data
+(species lists, item sets, or any variable-length categorical inputs) using
+linear compositional pooling and learned representations.
 """
 
 from resolve.data.dataset import ResolveDataset, ResolveSchema

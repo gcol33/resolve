@@ -344,7 +344,7 @@ def _ext_list(args: argparse.Namespace) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="resolve",
-        description="RESOLVE: Species composition prediction with neural networks",
+        description="RESOLVE: predict sample attributes from compositional data",
     )
     sub = parser.add_subparsers(dest="command")
 

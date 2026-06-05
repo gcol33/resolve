@@ -237,9 +237,9 @@ class ResolveSchema:
 
 class ResolveDataset:
     """
-    Validated container for ecological plot data.
+    Validated container for compositional sample data.
 
-    Holds header (plot-level) and species (occurrence) data with
+    Holds header (sample-level) and occurrence data with
     semantic role mappings. Validates structure and provides
     train/test splitting.
     """
