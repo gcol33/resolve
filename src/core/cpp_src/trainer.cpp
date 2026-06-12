@@ -462,59 +462,76 @@ float Trainer::train_epoch(int epoch) {
         torch::Tensor moe_aux_loss;
         torch::Tensor loss;
 
-        // Enable autocast for forward pass if AMP is enabled
-        if (amp_enabled_) {
-            at::autocast::set_autocast_enabled(at::kCUDA, true);
-            at::autocast::increment_nesting();
-        }
-
-        if (use_moe) {
-            // Use forward_with_aux to get MoE auxiliary loss
-            auto result = model_->forward_with_aux(
-                batch_continuous, batch_genus_ids, batch_family_ids,
-                batch_species_ids, batch_species_vector,
-                batch_pool_genus, batch_pool_family,
-                batch_pool_weights, batch_pool_mask, batch_pool_has_cover,
-                batch_categorical_ids
-            );
-            predictions = std::move(result.outputs);
-            moe_aux_loss = result.moe_aux_loss;
-        } else {
-            predictions = model_->forward(
-                batch_continuous, batch_genus_ids, batch_family_ids,
-                batch_species_ids, batch_species_vector,
-                batch_pool_genus, batch_pool_family,
-                batch_pool_weights, batch_pool_mask, batch_pool_has_cover,
-                batch_categorical_ids
-            );
-        }
-
-        // Compute loss - use cached scalers if available
-        std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>> batch_scalers;
-        if (gpu_data_cached_) {
-            batch_scalers = scalers_src;
-        } else {
-            for (const auto& [name, scaler] : scalers_.target_scalers) {
-                batch_scalers[name] = {
-                    scaler.first.to(config_.device),
-                    scaler.second.to(config_.device)
-                };
+        // RAII autocast scope covering the forward and loss. The nesting
+        // counter and enabled flag must unwind even if forward()/compute()
+        // throw — the expected throw is the c10::OutOfMemoryError that fit()
+        // catches to halve the batch and retry. Without RAII, an OOM mid-
+        // forward would leak the incremented nesting (its cache is cleared
+        // only when nesting returns to 0) and leave autocast enabled across
+        // every retried epoch.
+        struct AutocastScope {
+            bool active;
+            explicit AutocastScope(bool a) : active(a) {
+                if (active) {
+                    at::autocast::set_autocast_enabled(at::kCUDA, true);
+                    at::autocast::increment_nesting();
+                }
             }
-        }
+            ~AutocastScope() {
+                if (active) {
+                    at::autocast::decrement_nesting();
+                    at::autocast::set_autocast_enabled(at::kCUDA, false);
+                }
+            }
+            AutocastScope(const AutocastScope&) = delete;
+            AutocastScope& operator=(const AutocastScope&) = delete;
+        };
 
-        auto [loss_val, _] = loss_fn_.compute(predictions, batch_targets, epoch, batch_scalers);
-        loss = loss_val;
+        {
+            AutocastScope amp_scope(amp_enabled_);
 
-        // Add MoE auxiliary loss for load balancing
-        if (use_moe && moe_aux_loss.defined()) {
-            loss = loss + moe_aux_weight * moe_aux_loss;
-        }
+            if (use_moe) {
+                // Use forward_with_aux to get MoE auxiliary loss
+                auto result = model_->forward_with_aux(
+                    batch_continuous, batch_genus_ids, batch_family_ids,
+                    batch_species_ids, batch_species_vector,
+                    batch_pool_genus, batch_pool_family,
+                    batch_pool_weights, batch_pool_mask, batch_pool_has_cover,
+                    batch_categorical_ids
+                );
+                predictions = std::move(result.outputs);
+                moe_aux_loss = result.moe_aux_loss;
+            } else {
+                predictions = model_->forward(
+                    batch_continuous, batch_genus_ids, batch_family_ids,
+                    batch_species_ids, batch_species_vector,
+                    batch_pool_genus, batch_pool_family,
+                    batch_pool_weights, batch_pool_mask, batch_pool_has_cover,
+                    batch_categorical_ids
+                );
+            }
 
-        // Disable autocast before backward pass
-        if (amp_enabled_) {
-            at::autocast::decrement_nesting();
-            at::autocast::set_autocast_enabled(at::kCUDA, false);
-        }
+            // Compute loss - use cached scalers if available
+            std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>> batch_scalers;
+            if (gpu_data_cached_) {
+                batch_scalers = scalers_src;
+            } else {
+                for (const auto& [name, scaler] : scalers_.target_scalers) {
+                    batch_scalers[name] = {
+                        scaler.first.to(config_.device),
+                        scaler.second.to(config_.device)
+                    };
+                }
+            }
+
+            auto [loss_val, _] = loss_fn_.compute(predictions, batch_targets, epoch, batch_scalers);
+            loss = loss_val;
+
+            // Add MoE auxiliary loss for load balancing
+            if (use_moe && moe_aux_loss.defined()) {
+                loss = loss + moe_aux_weight * moe_aux_loss;
+            }
+        }  // autocast disabled here (also on exception unwind) before backward
 
         // Backward pass with gradient scaling for AMP
         if (amp_enabled_) {
@@ -1100,6 +1117,13 @@ TrainResult Trainer::fit() {
     if (use_checkpoints) {
         save(config_.checkpoint_dir + "/checkpoint.pt");
     }
+
+    // Restore the requested batch size. fit() may have shrunk config_.batch_size
+    // in place via the OOM auto-halve loop; the checkpoint above intentionally
+    // recorded the effective (shrunk) value, but the in-memory config must not
+    // carry the shrink into a subsequent fit() — e.g. later cross-validation
+    // folds would otherwise silently train at the reduced batch size.
+    config_.batch_size = batch_size_at_entry;
 
     auto end_time = std::chrono::high_resolution_clock::now();
     result.train_time_seconds = std::chrono::duration<float>(end_time - start_time).count();
