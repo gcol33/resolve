@@ -35,6 +35,36 @@
 
 namespace resolve {
 
+namespace {
+
+// One-time structural validation of the CSR plot offsets that feed the CUDA
+// hash kernels. The kernels (cuda/kernels.cu) guard against malformed ranges
+// per thread but only bump a device-side error flag that no host code reads,
+// so a corrupt CSR would silently drop species records. The offsets are fixed
+// for the whole run and live on the host at capture time, so validate them once
+// here (no per-batch sync) and fail loudly on a malformed CSR instead.
+void validate_csr_offsets(const torch::Tensor& offsets,
+                          int64_t n_records, int64_t n_weights) {
+    TORCH_CHECK(offsets.defined() && offsets.dim() == 1 && offsets.numel() >= 1,
+                "CUDA hash: plot_offsets must be a non-empty 1-D tensor");
+    TORCH_CHECK(n_records == n_weights,
+                "CUDA hash: raw_species_ids length (", n_records,
+                ") must match raw_weights length (", n_weights, ")");
+    auto off = offsets.to(torch::kCPU).contiguous();
+    auto a = off.accessor<int64_t, 1>();
+    TORCH_CHECK(a[0] == 0, "CUDA hash: plot_offsets[0] must be 0, got ", a[0]);
+    for (int64_t i = 1; i < off.numel(); ++i) {
+        TORCH_CHECK(a[i] >= a[i - 1],
+                    "CUDA hash: plot_offsets must be non-decreasing (offset[", i,
+                    "]=", a[i], " < offset[", i - 1, "]=", a[i - 1], ")");
+    }
+    TORCH_CHECK(a[off.numel() - 1] == n_records,
+                "CUDA hash: plot_offsets[-1] (", a[off.numel() - 1],
+                ") must equal the record count (", n_records, ")");
+}
+
+}  // namespace
+
 Trainer::Trainer(
     ResolveModel model,
     const TrainConfig& config
@@ -55,6 +85,8 @@ void Trainer::prepare_data(
         raw_species_ids_ = dataset.raw_species_ids();
         raw_weights_ = dataset.raw_weights();
         plot_offsets_ = dataset.plot_offsets();
+        validate_csr_offsets(plot_offsets_, raw_species_ids_.numel(),
+                             raw_weights_.numel());
     }
 
     // Capture the dataset's categorical vocab. The trainer outlives the
