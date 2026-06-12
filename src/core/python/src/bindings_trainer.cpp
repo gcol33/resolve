@@ -1,16 +1,5 @@
 #include "bindings_common.hpp"
 
-namespace {
-
-// Convert an nb::object that may be a Python tensor or None into an at::Tensor.
-// None / undefined → empty at::Tensor (matches the C++ default {} semantics).
-inline at::Tensor unpack_or_empty(const nb::object& obj) {
-    if (!obj.is_valid() || obj.is_none()) return at::Tensor();
-    return THPVariable_Unpack(obj.ptr());
-}
-
-}  // namespace
-
 void register_trainer(nb::module_& m) {
     nb::class_<resolve::Trainer>(m, "Trainer")
         .def(nb::init<resolve::ResolveModel, const resolve::TrainConfig&>(),
@@ -38,19 +27,19 @@ void register_trainer(nb::module_& m) {
                                nb::object categorical_ids_obj,
                                float test_size,
                                int seed) {
-            self.prepare_data(unpack_or_empty(coordinates_obj),
-                            unpack_or_empty(covariates_obj),
-                            unpack_or_empty(hash_embedding_obj),
-                            unpack_or_empty(species_ids_obj),
-                            unpack_or_empty(species_vector_obj),
-                            unpack_or_empty(genus_ids_obj),
-                            unpack_or_empty(family_ids_obj),
-                            unpack_or_empty(unknown_fraction_obj),
-                            unpack_or_empty(unknown_count_obj),
+            self.prepare_data(unpack_optional_tensor(coordinates_obj),
+                            unpack_optional_tensor(covariates_obj),
+                            unpack_optional_tensor(hash_embedding_obj),
+                            unpack_optional_tensor(species_ids_obj),
+                            unpack_optional_tensor(species_vector_obj),
+                            unpack_optional_tensor(genus_ids_obj),
+                            unpack_optional_tensor(family_ids_obj),
+                            unpack_optional_tensor(unknown_fraction_obj),
+                            unpack_optional_tensor(unknown_count_obj),
                             dict_to_tensor_map(targets),
                             /*pool_genus_ids=*/{}, /*pool_family_ids=*/{},
                             /*pool_weights=*/{}, /*pool_mask=*/{}, /*pool_has_cover=*/{},
-                            unpack_or_empty(categorical_ids_obj),
+                            unpack_optional_tensor(categorical_ids_obj),
                             test_size, seed);
         }, nb::arg("coordinates"),
            nb::arg("covariates"),
@@ -158,17 +147,25 @@ void register_trainer(nb::module_& m) {
                           nb::object pool_mask_obj,
                           nb::object pool_has_cover_obj,
                           nb::object categorical_ids_obj) {
-            auto result = self.predict(unpack_or_empty(continuous_obj),
-                                       unpack_or_empty(genus_ids_obj),
-                                       unpack_or_empty(family_ids_obj),
-                                       unpack_or_empty(species_ids_obj),
-                                       unpack_or_empty(species_vector_obj),
-                                       unpack_or_empty(pool_genus_ids_obj),
-                                       unpack_or_empty(pool_family_ids_obj),
-                                       unpack_or_empty(pool_weights_obj),
-                                       unpack_or_empty(pool_mask_obj),
-                                       unpack_or_empty(pool_has_cover_obj),
-                                       unpack_or_empty(categorical_ids_obj));
+            at::Tensor continuous = unpack_optional_tensor(continuous_obj);
+            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
+            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
+            at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
+            at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
+            at::Tensor pool_genus_ids = unpack_optional_tensor(pool_genus_ids_obj);
+            at::Tensor pool_family_ids = unpack_optional_tensor(pool_family_ids_obj);
+            at::Tensor pool_weights = unpack_optional_tensor(pool_weights_obj);
+            at::Tensor pool_mask = unpack_optional_tensor(pool_mask_obj);
+            at::Tensor pool_has_cover = unpack_optional_tensor(pool_has_cover_obj);
+            at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
+            std::unordered_map<std::string, torch::Tensor> result;
+            {
+                // Drop the GIL around the eval-mode forward (no Python C-API here).
+                nb::gil_scoped_release nogil;
+                result = self.predict(continuous, genus_ids, family_ids, species_ids, species_vector,
+                                      pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+                                      categorical_ids);
+            }
             return tensor_map_to_dict(result);
         }, nb::arg("continuous"),
            nb::arg("genus_ids") = nb::none(),
@@ -209,22 +206,33 @@ void register_trainer(nb::module_& m) {
                           nb::object pool_has_cover_obj,
                           nb::object categorical_ids_obj,
                           bool return_latent) {
-            return self.predict(unpack_or_empty(coordinates_obj),
-                                unpack_or_empty(covariates_obj),
-                                unpack_or_empty(hash_embedding_obj),
-                                unpack_or_empty(species_ids_obj),
-                                unpack_or_empty(species_vector_obj),
-                                unpack_or_empty(genus_ids_obj),
-                                unpack_or_empty(family_ids_obj),
-                                unpack_or_empty(unknown_fraction_obj),
-                                unpack_or_empty(unknown_count_obj),
-                                unpack_or_empty(pool_genus_ids_obj),
-                                unpack_or_empty(pool_family_ids_obj),
-                                unpack_or_empty(pool_weights_obj),
-                                unpack_or_empty(pool_mask_obj),
-                                unpack_or_empty(pool_has_cover_obj),
-                                unpack_or_empty(categorical_ids_obj),
-                                return_latent);
+            at::Tensor coordinates = unpack_optional_tensor(coordinates_obj);
+            at::Tensor covariates = unpack_optional_tensor(covariates_obj);
+            at::Tensor hash_embedding = unpack_optional_tensor(hash_embedding_obj);
+            at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
+            at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
+            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
+            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
+            at::Tensor unknown_fraction = unpack_optional_tensor(unknown_fraction_obj);
+            at::Tensor unknown_count = unpack_optional_tensor(unknown_count_obj);
+            at::Tensor pool_genus_ids = unpack_optional_tensor(pool_genus_ids_obj);
+            at::Tensor pool_family_ids = unpack_optional_tensor(pool_family_ids_obj);
+            at::Tensor pool_weights = unpack_optional_tensor(pool_weights_obj);
+            at::Tensor pool_mask = unpack_optional_tensor(pool_mask_obj);
+            at::Tensor pool_has_cover = unpack_optional_tensor(pool_has_cover_obj);
+            at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
+            resolve::ResolvePredictions result;
+            {
+                // Inference over many plots can take seconds (especially on CPU);
+                // release the GIL around the pure-C++ predict so concurrent
+                // Python threads are not blocked. No Python C-API runs here.
+                nb::gil_scoped_release nogil;
+                result = self.predict(coordinates, covariates, hash_embedding, species_ids, species_vector,
+                                      genus_ids, family_ids, unknown_fraction, unknown_count,
+                                      pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+                                      categorical_ids, return_latent);
+            }
+            return result;
         }, nb::arg("coordinates"),
            nb::arg("covariates"),
            nb::arg("hash_embedding"),
@@ -249,6 +257,7 @@ void register_trainer(nb::module_& m) {
         }, nb::arg("dataset"),
            nb::arg("return_latent") = false,
            nb::arg("batch_size") = 4096,
+           nb::call_guard<nb::gil_scoped_release>(),
            "Predict on a ResolveDataset. batch_size controls how the forward "
            "pass is chunked along dim 0: -1 = single forward over the whole "
            "dataset (legacy, can OOM on >150k plots at typical hidden sizes); "
@@ -260,11 +269,11 @@ void register_trainer(nb::module_& m) {
                                   nb::object hash_embedding_obj,
                                   nb::object genus_ids_obj,
                                   nb::object family_ids_obj) {
-            auto out = self.get_embeddings(unpack_or_empty(coordinates_obj),
-                                           unpack_or_empty(covariates_obj),
-                                           unpack_or_empty(hash_embedding_obj),
-                                           unpack_or_empty(genus_ids_obj),
-                                           unpack_or_empty(family_ids_obj));
+            auto out = self.get_embeddings(unpack_optional_tensor(coordinates_obj),
+                                           unpack_optional_tensor(covariates_obj),
+                                           unpack_optional_tensor(hash_embedding_obj),
+                                           unpack_optional_tensor(genus_ids_obj),
+                                           unpack_optional_tensor(family_ids_obj));
             return nb::steal(THPVariable_Wrap(out));
         }, nb::arg("coordinates"),
            nb::arg("covariates"),

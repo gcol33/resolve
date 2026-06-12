@@ -20,21 +20,28 @@ void register_model(nb::module_& m) {
                           nb::object pool_has_cover_obj,
                           nb::object categorical_ids_obj) {
             // Convert Python tensors to C++ tensors using THPVariable_Unpack
-            const at::Tensor& continuous = THPVariable_Unpack(continuous_obj.ptr());
-            const at::Tensor& genus_ids = THPVariable_Unpack(genus_ids_obj.ptr());
-            const at::Tensor& family_ids = THPVariable_Unpack(family_ids_obj.ptr());
-            const at::Tensor& species_ids = THPVariable_Unpack(species_ids_obj.ptr());
-            const at::Tensor& species_vector = THPVariable_Unpack(species_vector_obj.ptr());
-            at::Tensor pool_genus_ids = pool_genus_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_genus_ids_obj.ptr());
-            at::Tensor pool_family_ids = pool_family_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_family_ids_obj.ptr());
-            at::Tensor pool_weights = pool_weights_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_weights_obj.ptr());
-            at::Tensor pool_mask = pool_mask_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_mask_obj.ptr());
-            at::Tensor pool_has_cover = pool_has_cover_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_has_cover_obj.ptr());
-            at::Tensor categorical_ids = categorical_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(categorical_ids_obj.ptr());
+            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
+            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
+            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
+            at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
+            at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
+            at::Tensor pool_genus_ids = unpack_optional_tensor(pool_genus_ids_obj);
+            at::Tensor pool_family_ids = unpack_optional_tensor(pool_family_ids_obj);
+            at::Tensor pool_weights = unpack_optional_tensor(pool_weights_obj);
+            at::Tensor pool_mask = unpack_optional_tensor(pool_mask_obj);
+            at::Tensor pool_has_cover = unpack_optional_tensor(pool_has_cover_obj);
+            at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
 
-            auto result = self->forward(continuous, genus_ids, family_ids, species_ids, species_vector,
-                                         pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                                         categorical_ids);
+            std::unordered_map<std::string, torch::Tensor> result;
+            {
+                // Pure-C++ compute: drop the GIL so other Python threads can run
+                // during the (potentially multi-second) forward. Inputs are held
+                // as at::Tensor (storage stays alive); no Python C-API runs here.
+                nb::gil_scoped_release nogil;
+                result = self->forward(continuous, genus_ids, family_ids, species_ids, species_vector,
+                                       pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+                                       categorical_ids);
+            }
 
             // Convert output tensors to Python using THPVariable_Wrap
             PyObject* py_dict = PyDict_New();
@@ -45,10 +52,10 @@ void register_model(nb::module_& m) {
             }
             return nb::steal(py_dict);
         }, nb::arg("continuous"),
-           nb::arg("genus_ids"),
-           nb::arg("family_ids"),
-           nb::arg("species_ids"),
-           nb::arg("species_vector"),
+           nb::arg("genus_ids") = nb::none(),
+           nb::arg("family_ids") = nb::none(),
+           nb::arg("species_ids") = nb::none(),
+           nb::arg("species_vector") = nb::none(),
            nb::arg("pool_genus_ids") = nb::none(),
            nb::arg("pool_family_ids") = nb::none(),
            nb::arg("pool_weights") = nb::none(),
@@ -69,21 +76,28 @@ void register_model(nb::module_& m) {
                            nb::object pool_has_cover_obj,
                            nb::object categorical_ids_obj) {
             // Convert Python tensors to C++ tensors using THPVariable_Unpack
-            const at::Tensor& continuous = THPVariable_Unpack(continuous_obj.ptr());
-            const at::Tensor& genus_ids = THPVariable_Unpack(genus_ids_obj.ptr());
-            const at::Tensor& family_ids = THPVariable_Unpack(family_ids_obj.ptr());
-            const at::Tensor& species_ids = THPVariable_Unpack(species_ids_obj.ptr());
-            const at::Tensor& species_vector = THPVariable_Unpack(species_vector_obj.ptr());
-            at::Tensor pool_genus_ids = pool_genus_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_genus_ids_obj.ptr());
-            at::Tensor pool_family_ids = pool_family_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_family_ids_obj.ptr());
-            at::Tensor pool_weights = pool_weights_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_weights_obj.ptr());
-            at::Tensor pool_mask = pool_mask_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_mask_obj.ptr());
-            at::Tensor pool_has_cover = pool_has_cover_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_has_cover_obj.ptr());
-            at::Tensor categorical_ids = categorical_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(categorical_ids_obj.ptr());
+            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
+            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
+            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
+            at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
+            at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
+            at::Tensor pool_genus_ids = unpack_optional_tensor(pool_genus_ids_obj);
+            at::Tensor pool_family_ids = unpack_optional_tensor(pool_family_ids_obj);
+            at::Tensor pool_weights = unpack_optional_tensor(pool_weights_obj);
+            at::Tensor pool_mask = unpack_optional_tensor(pool_mask_obj);
+            at::Tensor pool_has_cover = unpack_optional_tensor(pool_has_cover_obj);
+            at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
 
-            auto result = self->forward(continuous, genus_ids, family_ids, species_ids, species_vector,
-                                         pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                                         categorical_ids);
+            std::unordered_map<std::string, torch::Tensor> result;
+            {
+                // Pure-C++ compute: drop the GIL so other Python threads can run
+                // during the (potentially multi-second) forward. Inputs are held
+                // as at::Tensor (storage stays alive); no Python C-API runs here.
+                nb::gil_scoped_release nogil;
+                result = self->forward(continuous, genus_ids, family_ids, species_ids, species_vector,
+                                       pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+                                       categorical_ids);
+            }
 
             // Convert output tensors to Python using THPVariable_Wrap
             PyObject* py_dict = PyDict_New();
@@ -94,10 +108,10 @@ void register_model(nb::module_& m) {
             }
             return nb::steal(py_dict);
         }, nb::arg("continuous"),
-           nb::arg("genus_ids"),
-           nb::arg("family_ids"),
-           nb::arg("species_ids"),
-           nb::arg("species_vector"),
+           nb::arg("genus_ids") = nb::none(),
+           nb::arg("family_ids") = nb::none(),
+           nb::arg("species_ids") = nb::none(),
+           nb::arg("species_vector") = nb::none(),
            nb::arg("pool_genus_ids") = nb::none(),
            nb::arg("pool_family_ids") = nb::none(),
            nb::arg("pool_weights") = nb::none(),
@@ -117,27 +131,31 @@ void register_model(nb::module_& m) {
                               nb::object pool_has_cover_obj,
                               nb::object categorical_ids_obj) {
             // Convert Python tensors to C++ tensors
-            const at::Tensor& continuous = THPVariable_Unpack(continuous_obj.ptr());
-            const at::Tensor& genus_ids = THPVariable_Unpack(genus_ids_obj.ptr());
-            const at::Tensor& family_ids = THPVariable_Unpack(family_ids_obj.ptr());
-            const at::Tensor& species_ids = THPVariable_Unpack(species_ids_obj.ptr());
-            const at::Tensor& species_vector = THPVariable_Unpack(species_vector_obj.ptr());
-            at::Tensor pool_genus_ids = pool_genus_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_genus_ids_obj.ptr());
-            at::Tensor pool_family_ids = pool_family_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_family_ids_obj.ptr());
-            at::Tensor pool_weights = pool_weights_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_weights_obj.ptr());
-            at::Tensor pool_mask = pool_mask_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_mask_obj.ptr());
-            at::Tensor pool_has_cover = pool_has_cover_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_has_cover_obj.ptr());
-            at::Tensor categorical_ids = categorical_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(categorical_ids_obj.ptr());
+            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
+            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
+            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
+            at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
+            at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
+            at::Tensor pool_genus_ids = unpack_optional_tensor(pool_genus_ids_obj);
+            at::Tensor pool_family_ids = unpack_optional_tensor(pool_family_ids_obj);
+            at::Tensor pool_weights = unpack_optional_tensor(pool_weights_obj);
+            at::Tensor pool_mask = unpack_optional_tensor(pool_mask_obj);
+            at::Tensor pool_has_cover = unpack_optional_tensor(pool_has_cover_obj);
+            at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
 
-            at::Tensor result = self->get_latent(continuous, genus_ids, family_ids, species_ids, species_vector,
-                                                  pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                                                  categorical_ids);
+            at::Tensor result;
+            {
+                nb::gil_scoped_release nogil;  // pure-C++ compute; see forward()
+                result = self->get_latent(continuous, genus_ids, family_ids, species_ids, species_vector,
+                                          pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+                                          categorical_ids);
+            }
             return nb::steal(THPVariable_Wrap(result));
         }, nb::arg("continuous"),
-           nb::arg("genus_ids"),
-           nb::arg("family_ids"),
-           nb::arg("species_ids"),
-           nb::arg("species_vector"),
+           nb::arg("genus_ids") = nb::none(),
+           nb::arg("family_ids") = nb::none(),
+           nb::arg("species_ids") = nb::none(),
+           nb::arg("species_vector") = nb::none(),
            nb::arg("pool_genus_ids") = nb::none(),
            nb::arg("pool_family_ids") = nb::none(),
            nb::arg("pool_weights") = nb::none(),
@@ -316,24 +334,24 @@ void register_model(nb::module_& m) {
                                     nb::object pool_mask_obj,
                                     nb::object pool_has_cover_obj,
                                     nb::object categorical_ids_obj) {
-            const at::Tensor& continuous = THPVariable_Unpack(continuous_obj.ptr());
-            const at::Tensor& genus_ids = THPVariable_Unpack(genus_ids_obj.ptr());
-            const at::Tensor& family_ids = THPVariable_Unpack(family_ids_obj.ptr());
-            const at::Tensor& species_ids = THPVariable_Unpack(species_ids_obj.ptr());
-            const at::Tensor& species_vector = THPVariable_Unpack(species_vector_obj.ptr());
-            at::Tensor pool_genus_ids = pool_genus_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_genus_ids_obj.ptr());
-            at::Tensor pool_family_ids = pool_family_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_family_ids_obj.ptr());
-            at::Tensor pool_weights = pool_weights_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_weights_obj.ptr());
-            at::Tensor pool_mask = pool_mask_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_mask_obj.ptr());
-            at::Tensor pool_has_cover = pool_has_cover_obj.is_none() ? at::Tensor() : THPVariable_Unpack(pool_has_cover_obj.ptr());
-            at::Tensor categorical_ids = categorical_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(categorical_ids_obj.ptr());
+            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
+            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
+            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
+            at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
+            at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
+            at::Tensor pool_genus_ids = unpack_optional_tensor(pool_genus_ids_obj);
+            at::Tensor pool_family_ids = unpack_optional_tensor(pool_family_ids_obj);
+            at::Tensor pool_weights = unpack_optional_tensor(pool_weights_obj);
+            at::Tensor pool_mask = unpack_optional_tensor(pool_mask_obj);
+            at::Tensor pool_has_cover = unpack_optional_tensor(pool_has_cover_obj);
+            at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
 
             auto result = self->forward_with_aux(continuous, genus_ids, family_ids, species_ids, species_vector,
                                                   pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
                                                   categorical_ids);
             return result;  // ModelForwardResult is already bound
-        }, nb::arg("continuous"), nb::arg("genus_ids"), nb::arg("family_ids"),
-           nb::arg("species_ids"), nb::arg("species_vector"),
+        }, nb::arg("continuous"), nb::arg("genus_ids") = nb::none(), nb::arg("family_ids") = nb::none(),
+           nb::arg("species_ids") = nb::none(), nb::arg("species_vector") = nb::none(),
            nb::arg("pool_genus_ids") = nb::none(), nb::arg("pool_family_ids") = nb::none(),
            nb::arg("pool_weights") = nb::none(), nb::arg("pool_mask") = nb::none(),
            nb::arg("pool_has_cover") = nb::none(),
@@ -346,49 +364,49 @@ void register_model(nb::module_& m) {
                                    nb::object species_ids_obj,
                                    nb::object species_vector_obj,
                                    nb::object categorical_ids_obj) {
-            const at::Tensor& continuous = THPVariable_Unpack(continuous_obj.ptr());
-            const at::Tensor& genus_ids = THPVariable_Unpack(genus_ids_obj.ptr());
-            const at::Tensor& family_ids = THPVariable_Unpack(family_ids_obj.ptr());
-            const at::Tensor& species_ids = THPVariable_Unpack(species_ids_obj.ptr());
-            const at::Tensor& species_vector = THPVariable_Unpack(species_vector_obj.ptr());
-            at::Tensor categorical_ids = categorical_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(categorical_ids_obj.ptr());
+            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
+            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
+            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
+            at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
+            at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
+            at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
             auto result = self->forward_single(target, continuous, genus_ids, family_ids, species_ids, species_vector,
                                                 categorical_ids);
             return nb::steal(THPVariable_Wrap(result));
-        }, nb::arg("target"), nb::arg("continuous"), nb::arg("genus_ids"),
-           nb::arg("family_ids"), nb::arg("species_ids"), nb::arg("species_vector"),
+        }, nb::arg("target"), nb::arg("continuous"), nb::arg("genus_ids") = nb::none(),
+           nb::arg("family_ids") = nb::none(), nb::arg("species_ids") = nb::none(), nb::arg("species_vector") = nb::none(),
            nb::arg("categorical_ids") = nb::none())
         .def("encode_with_activations", [](resolve::ResolveModel& self,
                                             nb::object continuous_obj,
                                             nb::object genus_ids_obj,
                                             nb::object family_ids_obj,
                                             nb::object categorical_ids_obj) {
-            const at::Tensor& continuous = THPVariable_Unpack(continuous_obj.ptr());
-            const at::Tensor& genus_ids = THPVariable_Unpack(genus_ids_obj.ptr());
-            const at::Tensor& family_ids = THPVariable_Unpack(family_ids_obj.ptr());
-            at::Tensor categorical_ids = categorical_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(categorical_ids_obj.ptr());
+            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
+            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
+            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
+            at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
             auto [latent, activations] = self->encode_with_activations(continuous, genus_ids, family_ids, categorical_ids);
             nb::list act_list;
             for (const auto& a : activations) {
                 act_list.append(nb::steal(THPVariable_Wrap(a)));
             }
             return std::make_pair(nb::steal(THPVariable_Wrap(latent)), act_list);
-        }, nb::arg("continuous"), nb::arg("genus_ids"), nb::arg("family_ids"),
+        }, nb::arg("continuous"), nb::arg("genus_ids") = nb::none(), nb::arg("family_ids") = nb::none(),
            nb::arg("categorical_ids") = nb::none())
         .def("get_gate_probs", [](resolve::ResolveModel& self,
                                    nb::object continuous_obj,
                                    nb::object genus_ids_obj,
                                    nb::object family_ids_obj) {
-            const at::Tensor& continuous = THPVariable_Unpack(continuous_obj.ptr());
-            const at::Tensor& genus_ids = THPVariable_Unpack(genus_ids_obj.ptr());
-            const at::Tensor& family_ids = THPVariable_Unpack(family_ids_obj.ptr());
+            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
+            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
+            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
             auto result = self->get_gate_probs(continuous, genus_ids, family_ids);
             return nb::steal(THPVariable_Wrap(result));
-        }, nb::arg("continuous"), nb::arg("genus_ids"), nb::arg("family_ids"))
+        }, nb::arg("continuous"), nb::arg("genus_ids") = nb::none(), nb::arg("family_ids") = nb::none())
         .def_prop_ro("uses_moe", [](resolve::ResolveModel& self) { return self->uses_moe(); })
         .def_prop_ro("n_experts", [](resolve::ResolveModel& self) { return self->n_experts(); })
         .def("set_traits", [](resolve::ResolveModel& self, nb::object traits_obj) {
-            const at::Tensor& traits = THPVariable_Unpack(traits_obj.ptr());
+            at::Tensor traits = unpack_required_tensor(traits_obj, "traits");
             self->set_traits(traits);
         }, nb::arg("traits"));
 

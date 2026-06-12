@@ -15,6 +15,25 @@
 
 namespace nb = nanobind;
 
+// Unpack an optional tensor argument. Returns an undefined tensor for None;
+// THPVariable_Unpack on Py_None reinterprets the None singleton as a
+// THPVariable and reads out of bounds (UB), so callers passing None for an
+// unused input (e.g. genus_ids in hash mode) must be guarded here.
+inline at::Tensor unpack_optional_tensor(const nb::object& obj) {
+    if (!obj.is_valid() || obj.is_none()) return at::Tensor();
+    return THPVariable_Unpack(obj.ptr());
+}
+
+// Unpack a required tensor argument. Raises a clear Python-visible error for
+// None or a non-tensor instead of the UB THPVariable_Unpack would hit.
+inline at::Tensor unpack_required_tensor(const nb::object& obj, const char* name) {
+    PyObject* p = obj.ptr();
+    if (obj.is_none() || !THPVariable_Check(p)) {
+        throw std::invalid_argument(std::string(name) + " must be a tensor");
+    }
+    return THPVariable_Unpack(p);
+}
+
 // Helper to convert Python dict to unordered_map of tensors
 inline std::unordered_map<std::string, torch::Tensor> dict_to_tensor_map(const nb::dict& d) {
     std::unordered_map<std::string, torch::Tensor> result;
