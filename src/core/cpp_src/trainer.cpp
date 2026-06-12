@@ -142,6 +142,10 @@ void Trainer::prepare_data(
     float test_size,
     int seed
 ) {
+    // Capture the seed so the per-epoch training shuffle is reproducible
+    // (the dataset overload forwards its seed here, so both paths set it).
+    data_seed_ = seed;
+
     // Store raw coordinates for spatial CV (before scaling/concatenation)
     if (coordinates.defined() && coordinates.numel() > 0) {
         coordinates_ = coordinates.clone();
@@ -361,8 +365,17 @@ float Trainer::train_epoch(int epoch) {
     int64_t n_train = continuous_src.size(0);
     int batch_size = config_.batch_size;
 
-    // Shuffle training data - generate permutation on same device as data
-    auto perm = torch::randperm(n_train, continuous_src.options().dtype(torch::kLong));
+    // Shuffle training data with a dedicated, seeded generator so the run is
+    // reproducible for a fixed seed. Generated on CPU (the permutation is tiny)
+    // and moved to the data device; using a private generator keeps the global
+    // RNG stream — and therefore dropout / cover-dropout — untouched.
+    auto perm_gen = at::detail::createCPUGenerator(
+        static_cast<uint64_t>(data_seed_) + static_cast<uint64_t>(epoch) + 1u);
+    auto perm = torch::randperm(
+        n_train, perm_gen, torch::TensorOptions().dtype(torch::kLong));
+    if (continuous_src.device() != perm.device()) {
+        perm = perm.to(continuous_src.device());
+    }
 
     float total_loss = 0.0f;
     int n_batches = 0;

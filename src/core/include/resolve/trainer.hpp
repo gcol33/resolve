@@ -395,6 +395,11 @@ private:
     float amp_scale_ = 65536.0f;       // Current gradient scale
     int amp_growth_tracker_ = 0;       // Steps since last overflow
 
+    // Seed captured at prepare_data time. Drives the deterministic per-epoch
+    // training shuffle (data_seed_ + epoch) via a dedicated generator, so a
+    // fixed seed reproduces the run. Defaults to the prepare_data default.
+    int data_seed_ = 42;
+
     // CUDA hash computation: raw species data for on-the-fly batch hashing
     bool use_cuda_hash_ = false;       // Whether to use CUDA hash computation
     int32_t hash_dim_ = 0;             // Hash embedding dimension
