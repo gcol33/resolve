@@ -138,6 +138,10 @@ RCPP_MODULE(resolve_module) {
         ;
 
     function("Predictor_load", &RPredictor::load, "Load predictor from checkpoint");
+    function("Trainer_load_train_config", &RTrainer::load_train_config,
+             "Recover the persisted TrainConfig from a checkpoint (as a list)");
+    function("Trainer_load_run_metadata", &RTrainer::load_run_metadata,
+             "Recover the persisted run metadata from a checkpoint (as a list)");
 }
 
 // =============================================================================

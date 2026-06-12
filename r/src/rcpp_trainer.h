@@ -289,6 +289,16 @@ public:
         trainer_->load_state(path, dev, static_cast<float>(vram_fraction));
     }
 
+    // Recover the persisted training config / run metadata from a checkpoint
+    // without loading the model (issue #14). Static — registered as free
+    // functions (resolve_rcpp.cpp) since no trainer instance is needed.
+    static List load_train_config(std::string path) {
+        return train_config_to_list(resolve::Trainer::load_train_config(path));
+    }
+    static List load_run_metadata(std::string path) {
+        return run_metadata_to_list(resolve::Trainer::load_run_metadata(path));
+    }
+
     // Global plot indices (into the dataset's plot order) for each fold.
     IntegerVector test_indices() {
         auto t = trainer_->test_indices();

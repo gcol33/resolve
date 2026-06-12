@@ -158,6 +158,63 @@ resolve.load <- function(path, device = "cpu") {
 }
 
 
+#' Recover the Training Configuration From a Checkpoint
+#'
+#' Reads back the training hyperparameters that were persisted in a RESOLVE
+#' checkpoint (batch size, learning rate, weight decay, phase boundaries,
+#' learning-rate schedule, band thresholds, VRAM fraction, ...) without loading
+#' the model weights. Fields the checkpoint does not persist (device, AMP and
+#' cuDNN flags) come back at their defaults.
+#'
+#' @param path Path to a `.pt` checkpoint written by [resolve.save()] or a
+#'   training run.
+#' @return A named list of training-configuration fields. `loss_config` and
+#'   `lr_scheduler` are integer enum codes.
+#' @examples
+#' \dontrun{
+#' cfg <- resolve.load_train_config("model.pt")
+#' cfg$batch_size
+#' cfg$band_thresholds
+#' }
+#' @export
+resolve.load_train_config <- function(path) {
+  if (!is.character(path) || length(path) != 1) {
+    stop("path must be a single file path string")
+  }
+  if (!file.exists(path)) {
+    stop(sprintf("checkpoint file does not exist: %s", path))
+  }
+  .resolve_module$Trainer_load_train_config(path)
+}
+
+
+#' Recover the Run Metadata From a Checkpoint
+#'
+#' Reads back the run metadata persisted in a RESOLVE checkpoint: training time,
+#' train/test plot counts, best and total epochs, the RESOLVE version and
+#' timestamps, and the per-target final-metric tree.
+#'
+#' @param path Path to a `.pt` checkpoint.
+#' @return A named list of run-metadata fields, including `final_metrics`, a
+#'   nested list keyed by target then metric (e.g. `$final_metrics$area$rmse`).
+#' @examples
+#' \dontrun{
+#' meta <- resolve.load_run_metadata("model.pt")
+#' meta$best_epoch
+#' meta$final_metrics$area$rmse
+#' }
+#' @export
+resolve.load_run_metadata <- function(path) {
+  if (!is.character(path) || length(path) != 1) {
+    stop("path must be a single file path string")
+  }
+  if (!file.exists(path)) {
+    stop(sprintf("checkpoint file does not exist: %s", path))
+  }
+  .resolve_module$Trainer_load_run_metadata(path)
+}
+
+
 #' Save a Trained RESOLVE Model
 #'
 #' Save model checkpoint.

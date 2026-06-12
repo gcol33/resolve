@@ -496,6 +496,48 @@ inline List nested_metrics_to_list(
     return result;
 }
 
+// Convert a persisted TrainConfig (from Trainer::load_train_config) to an R
+// list. Mirrors RTrainer::get_config but covers every field save_train_config
+// writes. Enums are returned as their integer codes (LossConfigMode /
+// LRSchedulerType), matching how the config-list parser accepts them.
+inline List train_config_to_list(const resolve::TrainConfig& c) {
+    return List::create(
+        Named("batch_size") = c.batch_size,
+        Named("batch_size_floor") = c.batch_size_floor,
+        Named("max_epochs") = c.max_epochs,
+        Named("patience") = c.patience,
+        Named("lr") = c.lr,
+        Named("weight_decay") = c.weight_decay,
+        Named("phase_boundaries") =
+            IntegerVector::create(c.phase_boundaries.first, c.phase_boundaries.second),
+        Named("loss_config") = static_cast<int>(c.loss_config),
+        Named("lr_scheduler") = static_cast<int>(c.lr_scheduler),
+        Named("lr_step_size") = c.lr_step_size,
+        Named("lr_gamma") = c.lr_gamma,
+        Named("lr_min") = c.lr_min,
+        Named("vram_fraction") = c.vram_fraction,
+        Named("band_thresholds") =
+            NumericVector(c.band_thresholds.begin(), c.band_thresholds.end())
+    );
+}
+
+// Convert RunMetadata (from Trainer::load_run_metadata) to an R list. int64
+// plot counts are returned as doubles (R has no native int64; the values are
+// well within double's exact-integer range).
+inline List run_metadata_to_list(const resolve::RunMetadata& m) {
+    return List::create(
+        Named("resolve_version") = m.resolve_version,
+        Named("created_at") = m.created_at,
+        Named("completed_at") = m.completed_at,
+        Named("train_time_seconds") = m.train_time_seconds,
+        Named("n_plots_train") = static_cast<double>(m.n_plots_train),
+        Named("n_plots_test") = static_cast<double>(m.n_plots_test),
+        Named("best_epoch") = m.best_epoch,
+        Named("total_epochs") = m.total_epochs,
+        Named("final_metrics") = nested_metrics_to_list(m.final_metrics)
+    );
+}
+
 inline List train_result_to_list(const resolve::TrainResult& tr) {
     // Baselines
     List baselines;
