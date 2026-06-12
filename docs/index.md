@@ -6,9 +6,9 @@ An opinionated torch-based package for predicting sample attributes from composi
 
 ## Overview
 
-RESOLVE treats species composition as *biotic context* — a rich, structured signal that encodes information about plot attributes. Rather than predicting species from environment (as in SDMs), RESOLVE predicts plot properties from species.
+RESOLVE treats compositional data as *contextual signal* — a rich, structured representation that encodes information about sample-level attributes. Given a set of entities (species in a plot, symptoms in a patient, products in a basket), RESOLVE learns to predict properties of the sample.
 
-**Core claim**: Species composition encodes a shared latent representation that simultaneously informs multiple plot attributes (area, elevation, climate, habitat class).
+**Core idea**: Compositional data encodes a shared latent representation that simultaneously informs multiple sample attributes.
 
 ## Key Features
 
