@@ -10,9 +10,9 @@ option(USE_CUDA "Enable CUDA support" ON)
 # Project declaration - CXX only initially
 # CUDA is enabled via project() so it's identified before PyTorch's find_package calls enable_language(CUDA)
 if(USE_CUDA)
-    project(resolve VERSION 0.1.0 LANGUAGES CXX CUDA)
+    project(resolve VERSION 0.6.0 LANGUAGES CXX CUDA)
 else()
-    project(resolve VERSION 0.1.0 LANGUAGES CXX)
+    project(resolve VERSION 0.6.0 LANGUAGES CXX)
 endif()
 
 # Skip Caffe2's CUDA detection by setting this before find_package(Torch)
