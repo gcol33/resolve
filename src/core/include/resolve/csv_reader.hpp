@@ -60,9 +60,27 @@ inline void CSVReader::parse_header() {
         throw std::runtime_error("Empty CSV file: " + filename_);
     }
 
+    // Strip a leading UTF-8 BOM (EF BB BF). Files exported from Excel and many
+    // Windows tools prepend one; without this the first column name binds to
+    // "﻿name" and every role/target lookup against it silently fails.
+    if (header_line.size() >= 3 &&
+        static_cast<unsigned char>(header_line[0]) == 0xEF &&
+        static_cast<unsigned char>(header_line[1]) == 0xBB &&
+        static_cast<unsigned char>(header_line[2]) == 0xBF) {
+        header_line.erase(0, 3);
+    }
+
     columns_ = parse_line(header_line);
     for (size_t i = 0; i < columns_.size(); ++i) {
-        column_indices_[columns_[i]] = static_cast<int>(i);
+        auto [it, inserted] = column_indices_.emplace(columns_[i], static_cast<int>(i));
+        if (!inserted) {
+            // Duplicate header names would otherwise bind every reader of this
+            // name to the last occurrence, silently mis-reading roles/targets.
+            throw std::runtime_error(
+                "Duplicate column name in CSV header: '" + columns_[i] +
+                "' (columns " + std::to_string(it->second + 1) + " and " +
+                std::to_string(i + 1) + ") in file: " + filename_);
+        }
     }
 }
 

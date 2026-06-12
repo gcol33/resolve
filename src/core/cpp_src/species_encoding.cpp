@@ -50,6 +50,28 @@ HashBucketSign feature_hash_bucket_sign(const std::string& species, int hash_dim
     return out;
 }
 
+int64_t percentile_linear_trunc(std::vector<int64_t>& values, double q) {
+    if (values.empty()) return 0;
+    const double rank = (q / 100.0) * static_cast<double>(values.size() - 1);
+    const size_t lo = static_cast<size_t>(std::floor(rank));
+    const size_t hi = static_cast<size_t>(std::ceil(rank));
+    const double frac = rank - static_cast<double>(lo);
+
+    // nth_element puts the lo-th order statistic in place with everything
+    // smaller to its left; the hi-th (lo+1) order statistic is then the
+    // minimum of the remaining right partition.
+    std::nth_element(values.begin(), values.begin() + lo, values.end());
+    const int64_t a_lo = values[lo];
+    int64_t a_hi = a_lo;
+    if (hi > lo) {
+        a_hi = *std::min_element(values.begin() + lo + 1, values.end());
+    }
+
+    const double interp = static_cast<double>(a_lo) +
+                          frac * static_cast<double>(a_hi - a_lo);
+    return static_cast<int64_t>(interp);  // int() truncation toward zero
+}
+
 void hash_species(
     const std::vector<std::pair<std::string, float>>& species_abundances,
     float* embedding,
@@ -393,14 +415,14 @@ RankPoolEncodedData RankPoolEncoder::transform(
             lengths.push_back(static_cast<int64_t>(pd.sp_ids.size()));
         }
         if (!lengths.empty()) {
-            // p99 via nth_element on the 99th-percentile index. Matches
-            // numpy.percentile's "linear" default closely enough for the
-            // padding-cap use case (we round down to an integer either way).
-            size_t p99_idx = static_cast<size_t>(0.99 * (lengths.size() - 1));
-            std::nth_element(lengths.begin(),
-                             lengths.begin() + p99_idx,
-                             lengths.end());
-            resolved_cap = std::max<int64_t>(lengths[p99_idx], 1);
+            // p99 matching the POC's int(np.percentile(lengths, 99)): linear
+            // interpolation between the bracketing order statistics, then
+            // integer truncation. The earlier floor-rank index took only the
+            // lower order statistic with no interpolation, over-truncating
+            // skewed length distributions (e.g. sorted [1,5,100] -> 5 here,
+            // 98 in numpy).
+            resolved_cap = std::max<int64_t>(
+                percentile_linear_trunc(lengths, 99.0), 1);
         }
     } else if (species_cap > 0) {
         resolved_cap = species_cap;

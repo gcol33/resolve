@@ -27,6 +27,7 @@ add_executable(resolve_tests
     test_trainer_eval.cpp
     test_taxonomy_vocab.cpp
     test_oom_retry.cpp
+    test_csv_utils.cpp
 )
 
 # Add CUDA library directory if CUDA is available

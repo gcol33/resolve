@@ -40,13 +40,9 @@ bool is_missing_cell(const std::string& s) {
 // maps every failure to 0.0f and would conflate "missing" with "actual zero".
 std::optional<float> parse_regression_target(const std::string& s) {
     if (is_missing_cell(s)) return std::nullopt;
-    try {
-        float v = std::stof(s);
-        if (!std::isfinite(v)) return std::nullopt;
-        return v;
-    } catch (...) {
-        return std::nullopt;
-    }
+    auto v = parse_float_strict(s);  // locale-free, rejects trailing garbage
+    if (!v || !std::isfinite(*v)) return std::nullopt;
+    return v;
 }
 
 // Try to parse a string as a strict signed integer. Returns nullopt on any

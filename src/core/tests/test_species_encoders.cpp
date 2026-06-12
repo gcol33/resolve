@@ -253,3 +253,57 @@ TEST_CASE("EmbeddingEncoder transform not fitted throws", "[embed_enc]") {
     std::vector<std::string> plot_ids;
     REQUIRE_THROWS(encoder.transform(records, plot_ids));
 }
+
+// ============================================================================
+// percentile_linear_trunc — numpy int(np.percentile(x, q, "linear")) parity
+// ============================================================================
+
+TEST_CASE("percentile_linear_trunc matches int(np.percentile) on skewed input",
+          "[percentile]") {
+    // The auto species cap (-1) takes the 99th percentile of per-plot lengths.
+    // Reference values are int(np.percentile(values, 99)) with numpy's linear
+    // interpolation default. The earlier floor-rank index (no interpolation)
+    // returned the lower order statistic and over-truncated.
+
+    // sorted [1,5,100]: rank=1.98 -> 5 + 0.98*(100-5) = 98.1 -> int 98.
+    // (floor-rank would have returned values[1] = 5.)
+    {
+        std::vector<int64_t> v{100, 1, 5};
+        REQUIRE(percentile_linear_trunc(v, 99.0) == 98);
+    }
+    // sorted [10,20,30,40,50]: rank=3.96 -> 40 + 0.96*10 = 49.6 -> int 49.
+    {
+        std::vector<int64_t> v{50, 40, 30, 20, 10};
+        REQUIRE(percentile_linear_trunc(v, 99.0) == 49);
+    }
+    // Single element: rank 0 -> that element.
+    {
+        std::vector<int64_t> v{7};
+        REQUIRE(percentile_linear_trunc(v, 99.0) == 7);
+    }
+    // Constant input: every order statistic equal -> that value.
+    {
+        std::vector<int64_t> v{3, 3, 3, 3};
+        REQUIRE(percentile_linear_trunc(v, 99.0) == 3);
+    }
+    // Empty input -> 0 (caller guards with std::max(..., 1)).
+    {
+        std::vector<int64_t> v{};
+        REQUIRE(percentile_linear_trunc(v, 99.0) == 0);
+    }
+}
+
+TEST_CASE("percentile_linear_trunc handles median and bounds", "[percentile]") {
+    // sorted [1,2,3,4]: q=50 -> rank=1.5 -> 2 + 0.5*(3-2) = 2.5 -> int 2.
+    {
+        std::vector<int64_t> v{4, 3, 2, 1};
+        REQUIRE(percentile_linear_trunc(v, 50.0) == 2);
+    }
+    // q=0 -> minimum; q=100 -> maximum.
+    {
+        std::vector<int64_t> v{9, 2, 7, 4};
+        REQUIRE(percentile_linear_trunc(v, 0.0) == 2);
+        std::vector<int64_t> w{9, 2, 7, 4};
+        REQUIRE(percentile_linear_trunc(w, 100.0) == 9);
+    }
+}

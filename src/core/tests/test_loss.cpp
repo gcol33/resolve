@@ -349,3 +349,51 @@ TEST_CASE("Metrics::compute classification", "[metrics][integration]") {
     // All predictions correct
     REQUIRE_THAT(metrics["accuracy"], WithinAbs(1.0f, 1e-5));
 }
+
+// ============================================================================
+// MultiTaskLoss accumulator seeding
+// ============================================================================
+
+TEST_CASE("MultiTaskLoss::compute seeds a deterministic scalar accumulator",
+          "[loss][multitask]") {
+    // The accumulator used to be seeded from predictions.begin()->second
+    // (an arbitrary head from an unordered_map) with shape {1}. It is now a
+    // true scalar on a device chosen deterministically from the first target
+    // in the configured order.
+    std::vector<TargetConfig> targets;
+    TargetConfig a; a.name = "a"; a.task = TaskType::Classification;
+    a.num_classes = 3; a.weight = 1.0f;
+    TargetConfig b; b.name = "b"; b.task = TaskType::Classification;
+    b.num_classes = 3; b.weight = 1.0f;
+    targets.push_back(a);
+    targets.push_back(b);
+
+    MultiTaskLoss loss(targets);
+
+    torch::manual_seed(0);
+    std::unordered_map<std::string, torch::Tensor> preds;
+    preds["a"] = torch::randn({4, 3});
+    preds["b"] = torch::randn({4, 3});
+    std::unordered_map<std::string, torch::Tensor> tgts;
+    tgts["a"] = torch::randint(0, 3, {4}, torch::kInt64);
+    tgts["b"] = torch::randint(0, 3, {4}, torch::kInt64);
+
+    auto [total, individual] = loss.compute(preds, tgts, /*epoch=*/0);
+
+    // Seed is a true scalar (shape {}), not {1}.
+    REQUIRE(total.dim() == 0);
+    REQUIRE(total.device().is_cpu());
+    REQUIRE(total.dtype() == torch::kFloat32);
+
+    // Total equals the weighted sum of the per-target losses (weights = 1).
+    float expected = individual["a"].item<float>() + individual["b"].item<float>();
+    REQUIRE_THAT(total.item<float>(), WithinAbs(expected, 1e-5));
+
+    // Gradient flows through the scalar accumulator.
+    preds["a"].requires_grad_(true);
+    preds["b"].requires_grad_(true);
+    auto [total2, ignored] = loss.compute(preds, tgts, /*epoch=*/0);
+    total2.backward();
+    REQUIRE(preds["a"].grad().defined());
+    REQUIRE(preds["b"].grad().defined());
+}

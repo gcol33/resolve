@@ -24,6 +24,15 @@ struct HashBucketSign {
 // scheme shared by the CPU and CUDA paths. Single definition of the contract.
 HashBucketSign feature_hash_bucket_sign(const std::string& species, int hash_dim);
 
+// Integer percentile matching numpy's `int(np.percentile(values, q,
+// interpolation="linear"))`: linear interpolation between the two bracketing
+// order statistics, then truncation toward zero. `values` is partially sorted
+// in place (nth_element); empty input returns 0. q is a percentage in [0, 100].
+// Used by RankPoolEncoder::transform for the auto (p99) species cap, where the
+// previous floor-rank index (no interpolation) over-truncated skewed per-plot
+// length distributions relative to the POC's int(np.percentile(...)).
+int64_t percentile_linear_trunc(std::vector<int64_t>& values, double q);
+
 // Feature hashing for species
 void hash_species(
     const std::vector<std::pair<std::string, float>>& species_abundances,

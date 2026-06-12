@@ -125,7 +125,18 @@ std::pair<torch::Tensor, std::unordered_map<std::string, torch::Tensor>> MultiTa
     const std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>>& scalers
 ) const {
     std::unordered_map<std::string, torch::Tensor> losses;
-    torch::Tensor total_loss = torch::zeros({1}, predictions.begin()->second.options());
+
+    // Seed the accumulator deterministically. `predictions` is an unordered_map,
+    // so predictions.begin() picks an arbitrary head's device/dtype and seeds a
+    // shape-{1} tensor; instead derive the device from the first target in the
+    // (ordered) targets_ list that has a prediction, and seed a true scalar.
+    torch::Device acc_device = torch::kCPU;
+    for (const auto& cfg : targets_) {
+        auto it = predictions.find(cfg.name);
+        if (it != predictions.end()) { acc_device = it->second.device(); break; }
+    }
+    torch::Tensor total_loss = torch::zeros(
+        {}, torch::TensorOptions().dtype(torch::kFloat32).device(acc_device));
 
     for (const auto& cfg : targets_) {
         auto pred_it = predictions.find(cfg.name);
