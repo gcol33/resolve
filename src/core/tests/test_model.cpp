@@ -53,6 +53,28 @@ TEST_CASE("PlotEncoderEmbed forward", "[encoder]") {
     REQUIRE(output.size(1) == 16);
 }
 
+TEST_CASE("FusedPositionalEmbedding zeroes padding/UNK at every position", "[encoder]") {
+    // Guards the fix where the fused table's single padding_idx only zeroed
+    // position 0; positions k>0 with id 0 returned a learnable row k*vocab_size.
+    const int64_t vocab = 50;
+    const int n_pos = 4, dim = 8;
+    FusedPositionalEmbedding emb(vocab, n_pos, dim);
+    emb->eval();
+
+    // Positions 0 and 2 are real species; positions 1 and 3 are padding (id 0).
+    auto ids = torch::tensor({{5, 0, 7, 0}}, torch::kInt64);  // (1, n_pos)
+    auto out = emb->forward(ids);                              // (1, n_pos*dim)
+    REQUIRE(out.size(1) == n_pos * dim);
+
+    auto out2d = out.view({1, n_pos, dim});
+    // Padding positions contribute exactly zero (regardless of position index).
+    REQUIRE(out2d.index({0, 1}).abs().sum().item<float>() == 0.0f);
+    REQUIRE(out2d.index({0, 3}).abs().sum().item<float>() == 0.0f);
+    // Real positions are non-zero (rows are N(0,1)-initialized).
+    REQUIRE(out2d.index({0, 0}).abs().sum().item<float>() > 0.0f);
+    REQUIRE(out2d.index({0, 2}).abs().sum().item<float>() > 0.0f);
+}
+
 TEST_CASE("PlotEncoderSparse forward", "[encoder]") {
     PlotEncoderSparse encoder(
         5,      // n_continuous

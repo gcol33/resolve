@@ -71,6 +71,15 @@ torch::Tensor FusedPositionalEmbeddingImpl::forward(torch::Tensor ids) {
     // Single embedding lookup: (batch * n_positions, embed_dim)
     auto flat_emb = embedding_(flat_ids);
 
+    // Zero out padding/UNK slots. The fused table has a single padding_idx (0),
+    // which only freezes position 0's id-0 row; for positions k>0 the id-0 slot
+    // offsets to row k*vocab_size, an ordinary learnable row. Mask the lookup by
+    // (original id != 0) so an absent/UNK entry at any position contributes the
+    // zero vector and receives no gradient, matching the per-rank
+    // nn::Embedding(..., padding_idx=0) tables used by the other encoders.
+    auto pad_mask = (ids.flatten() != 0).to(flat_emb.dtype()).unsqueeze(-1);
+    flat_emb = flat_emb * pad_mask;
+
     // Reshape to (batch, n_positions * embed_dim)
     return flat_emb.view({batch_size, n_positions_ * embed_dim_});
 }
