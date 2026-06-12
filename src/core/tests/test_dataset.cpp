@@ -277,6 +277,67 @@ TEST_CASE("ResolveDataset from_species_csv basic loading", "[dataset]") {
     }
 }
 
+TEST_CASE("ResolveDataset from_species_csv factorizes string classification targets", "[dataset]") {
+    // Regression guard for the bug where from_species_csv pushed every target
+    // cell through safe_stof and cast to int64, collapsing string-coded classes
+    // (e.g. "Forest"/"Grassland") to class 0 with no class_names and no NA drop.
+    TempFile csv(
+        "plot_id,species,cover,habitat\n"
+        "p1,sp1,0.5,Forest\n"
+        "p1,sp2,0.3,Forest\n"
+        "p2,sp1,0.8,Grassland\n"
+        "p3,sp3,0.2,Forest\n"
+        "p4,sp1,0.1,NA\n"   // missing target -> plot dropped
+    );
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id";
+    roles.species_id = "species";
+    roles.abundance = "cover";
+
+    std::vector<TargetSpec> targets = {
+        TargetSpec::classification("habitat", /*num_classes=*/0)  // auto-fit
+    };
+
+    DatasetConfig config;
+    config.species_encoding = SpeciesEncodingMode::Hash;
+    config.hash_dim = 16;
+    config.top_k = 2;
+
+    auto dataset = ResolveDataset::from_species_csv(csv.path(), roles, targets, config);
+
+    SECTION("NA-target plot dropped") {
+        REQUIRE(dataset.n_plots() == 3);  // p4 dropped, not 4
+    }
+
+    SECTION("string classes factorized to distinct codes") {
+        const auto& tgt = dataset.targets().at("habitat");
+        REQUIRE(tgt.dtype() == torch::kLong);
+        REQUIRE(tgt.size(0) == 3);
+        // Two distinct classes -> codes {0, 1}, not all 0 (the bug). Two Forest
+        // (0) + one Grassland (1) over the kept plots -> min 0, max 1, sum 1.
+        REQUIRE(tgt.min().item<int64_t>() == 0);
+        REQUIRE(tgt.max().item<int64_t>() == 1);
+        REQUIRE(tgt.sum().item<int64_t>() == 1);
+    }
+
+    SECTION("class_names and num_classes populated on schema") {
+        const auto& schema_targets = dataset.schema().targets;
+        bool found = false;
+        for (const auto& tc : schema_targets) {
+            if (tc.name == "habitat") {
+                found = true;
+                REQUIRE(tc.num_classes == 2);
+                REQUIRE(tc.class_names.size() == 2);
+                // Auto-fit sorts unique non-NA values: Forest < Grassland.
+                REQUIRE(tc.class_names[0] == "Forest");
+                REQUIRE(tc.class_names[1] == "Grassland");
+            }
+        }
+        REQUIRE(found);
+    }
+}
+
 TEST_CASE("ResolveDataset embed mode", "[dataset]") {
     TempFile csv(
         "plot_id,species,cover\n"

@@ -251,7 +251,7 @@ ResolveDataset ResolveDataset::from_species_csv(
     // First pass: collect all unique plots and their species
     std::unordered_map<std::string, std::vector<SpeciesRecord>> plot_records;
     std::unordered_map<std::string, std::pair<float, float>> plot_coords;
-    std::unordered_map<std::string, std::vector<float>> plot_targets;
+    std::unordered_map<std::string, std::vector<std::string>> plot_targets;
     std::unordered_set<std::string> seen_plots;
 
     reader.read_rows([&](size_t, const std::vector<std::string>& row) {
@@ -291,17 +291,21 @@ ResolveDataset ResolveDataset::from_species_csv(
                 };
             }
 
-            // Targets
-            std::vector<float> target_values;
+            // Targets — stash the raw cell strings; classification
+            // factorization and regression NaN-parsing happen post-scan
+            // (mirrors load_header_data) so string-coded classes are encoded
+            // against the full value distribution instead of collapsing to 0.
+            std::vector<std::string> target_values;
+            target_values.reserve(target_cols.size());
             for (size_t i = 0; i < target_cols.size(); ++i) {
                 int col = target_cols[i];
                 if (col >= 0 && row.size() > static_cast<size_t>(col)) {
-                    target_values.push_back(safe_stof(row[col]));
+                    target_values.push_back(row[col]);
                 } else {
-                    target_values.push_back(0.0f);
+                    target_values.emplace_back();  // missing -> dropped post-scan
                 }
             }
-            plot_targets[plot_id] = target_values;
+            plot_targets[plot_id] = std::move(target_values);
         }
     });
 
@@ -324,40 +328,112 @@ ResolveDataset ResolveDataset::from_species_csv(
         dataset.schema_.has_coordinates = true;
     }
 
-    // Build target tensors
+    // Build target tensors with the same semantics as load_header_data:
+    // classification targets are factorized against the full value distribution
+    // (explicit class_mapping or auto-fit -> codes + class_names), regression
+    // targets are NaN-parsed, and any plot whose target is missing/unmapped is
+    // dropped post-build (any-target semantics).
+    std::vector<char> keep(static_cast<size_t>(n_plots), 1);
+
+    // Raw cell for target t at plot i, in plot order.
+    auto raw_at = [&](size_t t, int64_t i) -> const std::string& {
+        static const std::string kEmpty;
+        const auto& vals = plot_targets[dataset.plot_ids_[i]];
+        return t < vals.size() ? vals[t] : kEmpty;
+    };
+
     for (size_t t = 0; t < targets.size(); ++t) {
         const auto& target_spec = targets[t];
+        std::string name = target_spec.target_name.empty()
+            ? target_spec.column_name : target_spec.target_name;
+
         dataset.target_configs_.push_back({
-            target_spec.target_name.empty() ? target_spec.column_name : target_spec.target_name,
+            name,
             target_spec.task,
             target_spec.transform,
             target_spec.num_classes,
             target_spec.weight
         });
 
-        torch::Tensor target_tensor;
         if (target_spec.task == TaskType::Classification) {
-            target_tensor = torch::zeros({n_plots}, torch::kLong);
-            auto acc = target_tensor.accessor<int64_t, 1>();
-            for (int64_t i = 0; i < n_plots; ++i) {
-                const auto& values = plot_targets[dataset.plot_ids_[i]];
-                if (t < values.size()) {
-                    acc[i] = static_cast<int64_t>(values[t]);
+            std::unordered_map<std::string, int64_t> mapping;
+            std::vector<std::string> class_names;
+            const bool explicit_mapping = !target_spec.class_mapping.empty();
+            if (explicit_mapping) {
+                mapping = target_spec.class_mapping;
+                int64_t max_code = -1;
+                for (const auto& [_, c] : mapping) if (c > max_code) max_code = c;
+                if (max_code >= 0) {
+                    class_names.assign(static_cast<size_t>(max_code + 1), std::string{});
+                    for (const auto& [k, c] : mapping)
+                        if (c >= 0) class_names[static_cast<size_t>(c)] = k;
                 }
+            } else {
+                std::vector<std::string> raw;
+                raw.reserve(static_cast<size_t>(n_plots));
+                for (int64_t i = 0; i < n_plots; ++i) raw.push_back(raw_at(t, i));
+                fit_classification_mapping(raw, mapping, class_names);
             }
+
+            auto target_tensor = torch::zeros({n_plots}, torch::kLong);
+            auto acc = target_tensor.accessor<int64_t, 1>();
+            int64_t n_null = 0;
+            for (int64_t i = 0; i < n_plots; ++i) {
+                const std::string& v = raw_at(t, i);
+                if (is_missing_cell(v)) { keep[i] = 0; ++n_null; continue; }
+                auto it = mapping.find(v);
+                if (it == mapping.end()) { keep[i] = 0; ++n_null; continue; }
+                acc[i] = it->second;
+            }
+            dataset.target_configs_[t].class_names = class_names;
+            if (dataset.target_configs_[t].num_classes == 0)
+                dataset.target_configs_[t].num_classes = static_cast<int>(mapping.size());
+            dataset.targets_[name] = target_tensor;
+
+            std::cout << "  Encoded '" << target_spec.column_name << "' as Int64 ("
+                      << (explicit_mapping ? "explicit" : "auto") << ", "
+                      << mapping.size() << " classes, " << n_null << " null)" << std::endl;
         } else {
-            target_tensor = torch::zeros({n_plots}, torch::kFloat32);
+            auto target_tensor = torch::zeros({n_plots}, torch::kFloat32);
             auto acc = target_tensor.accessor<float, 1>();
             for (int64_t i = 0; i < n_plots; ++i) {
-                const auto& values = plot_targets[dataset.plot_ids_[i]];
-                if (t < values.size()) {
-                    acc[i] = values[t];
-                }
+                auto parsed = parse_regression_target(raw_at(t, i));
+                if (!parsed.has_value()) { keep[i] = 0; continue; }
+                acc[i] = *parsed;
             }
+            dataset.targets_[name] = target_tensor;
         }
+    }
 
-        std::string name = target_spec.target_name.empty() ? target_spec.column_name : target_spec.target_name;
-        dataset.targets_[name] = target_tensor;
+    // Drop plots whose target was missing/unmapped, compacting plot_ids_,
+    // coordinates, and every target tensor in lockstep. encode_species (below)
+    // derives n_plots from plot_ids_, so dropping here is sufficient.
+    {
+        int64_t n_keep = 0;
+        for (char k : keep) if (k) ++n_keep;
+        if (n_keep < n_plots) {
+            std::vector<int64_t> keep_idx;
+            keep_idx.reserve(static_cast<size_t>(n_keep));
+            for (int64_t i = 0; i < n_plots; ++i) if (keep[i]) keep_idx.push_back(i);
+
+            std::vector<std::string> new_pids;
+            new_pids.reserve(static_cast<size_t>(n_keep));
+            for (int64_t i : keep_idx) new_pids.push_back(std::move(dataset.plot_ids_[i]));
+            dataset.plot_ids_ = std::move(new_pids);
+
+            auto idx_t = torch::tensor(keep_idx, torch::kInt64);
+            if (dataset.coordinates_.defined())
+                dataset.coordinates_ = dataset.coordinates_.index_select(0, idx_t);
+            for (auto& [nm, tensor] : dataset.targets_)
+                tensor = tensor.index_select(0, idx_t);
+
+            const int64_t n_dropped = n_plots - n_keep;
+            n_plots = n_keep;
+            dataset.schema_.n_plots = n_plots;
+            std::cout << "  Dropped " << n_dropped
+                      << " plots with missing/NaN target (" << n_keep
+                      << " of " << (n_keep + n_dropped) << " kept)" << std::endl;
+        }
     }
 
     dataset.schema_.targets = dataset.target_configs_;
