@@ -19,12 +19,14 @@
 // data at the reported fold indices).
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "resolve/dataset.hpp"
 #include "resolve/role_mapping.hpp"
 #include "resolve/model.hpp"
 #include "resolve/trainer.hpp"
+#include "resolve/checkpoint.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -289,4 +291,88 @@ TEST_CASE("Trainer::compute_residuals unaffected by shared forward refactor",
     // A regression target has no classification predictions.
     auto cls = trainer.compute_classification_predictions("y");
     REQUIRE_FALSE(cls.predicted_classes.defined());
+}
+
+TEST_CASE("Checkpoint train-config + run-metadata round-trip", "[trainer][checkpoint]") {
+    // The save_*_config / save_run_metadata writers now have matching readers
+    // (issue #14). Save a distinctive config + metadata to an archive and read
+    // it back through the path-based Trainer::load_* convenience methods.
+    TrainConfig cfg;
+    cfg.batch_size = 8192;
+    cfg.batch_size_floor = 512;
+    cfg.max_epochs = 77;
+    cfg.patience = 13;
+    cfg.lr = 2e-3f;
+    cfg.weight_decay = 5e-4f;
+    cfg.phase_boundaries = {10, 25};
+    cfg.loss_config = LossConfigMode::SMAPE;       // non-default (default Combined)
+    cfg.lr_scheduler = LRSchedulerType::CosineAnnealing;  // non-default (default None)
+    cfg.lr_step_size = 33;
+    cfg.lr_gamma = 0.2f;
+    cfg.lr_min = 1e-5f;
+    cfg.vram_fraction = 0.8f;
+    cfg.band_thresholds = {0.05f, 0.2f, 0.4f, 0.6f};
+
+    RunMetadata meta;
+    meta.created_at = "2026-06-12T10:00:00Z";
+    meta.completed_at = "2026-06-12T11:30:00Z";
+    meta.train_time_seconds = 5400.5f;
+    meta.n_plots_train = 1450000;
+    meta.n_plots_test = 362500;
+    meta.best_epoch = 42;
+    meta.total_epochs = 77;
+    meta.final_metrics["area"] = {{"rmse", 1.5f}, {"r2", 0.83f}};
+    meta.final_metrics["eunis"] = {{"accuracy", 0.91f}};
+
+    const std::string path =
+        (std::filesystem::temp_directory_path() / "resolve_ckpt_cfg_meta_roundtrip.pt").string();
+    {
+        torch::serialize::OutputArchive ar;
+        save_train_config(ar, cfg);
+        save_run_metadata(ar, meta);
+        ar.save_to(path);
+    }
+
+    const TrainConfig cfg2 = Trainer::load_train_config(path);
+    const RunMetadata meta2 = Trainer::load_run_metadata(path);
+    std::filesystem::remove(path);
+
+    SECTION("train config fields round-trip") {
+        REQUIRE(cfg2.batch_size == cfg.batch_size);
+        REQUIRE(cfg2.batch_size_floor == cfg.batch_size_floor);
+        REQUIRE(cfg2.max_epochs == cfg.max_epochs);
+        REQUIRE(cfg2.patience == cfg.patience);
+        REQUIRE(cfg2.lr == Catch::Approx(cfg.lr));
+        REQUIRE(cfg2.weight_decay == Catch::Approx(cfg.weight_decay));
+        REQUIRE(cfg2.phase_boundaries.first == cfg.phase_boundaries.first);
+        REQUIRE(cfg2.phase_boundaries.second == cfg.phase_boundaries.second);
+        REQUIRE(cfg2.loss_config == cfg.loss_config);
+        REQUIRE(cfg2.lr_scheduler == cfg.lr_scheduler);
+        REQUIRE(cfg2.lr_step_size == cfg.lr_step_size);
+        REQUIRE(cfg2.lr_gamma == Catch::Approx(cfg.lr_gamma));
+        REQUIRE(cfg2.lr_min == Catch::Approx(cfg.lr_min));
+        REQUIRE(cfg2.vram_fraction == Catch::Approx(cfg.vram_fraction));
+        REQUIRE(cfg2.band_thresholds == cfg.band_thresholds);
+    }
+
+    SECTION("unpersisted fields keep TrainConfig defaults") {
+        TrainConfig defaults;
+        REQUIRE(cfg2.device == defaults.device);
+        REQUIRE(cfg2.use_amp == defaults.use_amp);
+        REQUIRE(cfg2.checkpoint_dir == defaults.checkpoint_dir);
+    }
+
+    SECTION("run metadata fields round-trip") {
+        REQUIRE(meta2.created_at == meta.created_at);
+        REQUIRE(meta2.completed_at == meta.completed_at);
+        REQUIRE(meta2.train_time_seconds == Catch::Approx(meta.train_time_seconds));
+        REQUIRE(meta2.n_plots_train == meta.n_plots_train);
+        REQUIRE(meta2.n_plots_test == meta.n_plots_test);
+        REQUIRE(meta2.best_epoch == meta.best_epoch);
+        REQUIRE(meta2.total_epochs == meta.total_epochs);
+        REQUIRE(meta2.final_metrics.size() == 2);
+        REQUIRE(meta2.final_metrics.at("area").at("rmse") == Catch::Approx(1.5f));
+        REQUIRE(meta2.final_metrics.at("area").at("r2") == Catch::Approx(0.83f));
+        REQUIRE(meta2.final_metrics.at("eunis").at("accuracy") == Catch::Approx(0.91f));
+    }
 }

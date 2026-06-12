@@ -1358,6 +1358,20 @@ std::tuple<ResolveModel, Scalers, CategoricalVocab> Trainer::load(
     return {model, scalers, vocab};
 }
 
+TrainConfig Trainer::load_train_config(const std::string& path) {
+    torch::serialize::InputArchive archive;
+    archive.load_from(path);
+    // Qualify to the free function (checkpoint.cpp); the unqualified name would
+    // resolve to this static member and recurse.
+    return resolve::load_train_config(archive);
+}
+
+RunMetadata Trainer::load_run_metadata(const std::string& path) {
+    torch::serialize::InputArchive archive;
+    archive.load_from(path);
+    return resolve::load_run_metadata(archive);
+}
+
 void Trainer::load_weights_into(torch::serialize::InputArchive& archive, ResolveModel& model) {
     // Freshly-constructed model parameters are leaf tensors with
     // requires_grad=true. Calling .copy_() on them directly trips autograd's

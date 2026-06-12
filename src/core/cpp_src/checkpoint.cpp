@@ -732,6 +732,118 @@ void save_run_metadata(
     }
 }
 
+TrainConfig load_train_config(
+    torch::serialize::InputArchive& archive
+) {
+    // Inverse of save_train_config. Recovers the persisted training
+    // hyperparameters; fields not written by save_train_config (device,
+    // checkpoint_dir, AMP/cuDNN flags, log callback, ...) keep their
+    // TrainConfig defaults — the caller sets those for the run. Every read is
+    // try_read so a checkpoint missing a key falls back to the default instead
+    // of throwing (forward/backward compatibility across schema additions).
+    TrainConfig config;
+    // Each read uses a fresh tensor: InputArchive::read copies into the passed
+    // tensor, so reusing one across reads of different dtype/size trips a
+    // setStorage size-mismatch (e.g. int32 storage then an int64 read).
+    auto rd_int = [&](const char* key, int& dst) {
+        torch::Tensor x;
+        if (archive.try_read(key, x)) dst = x.item<int>();
+    };
+    auto rd_float = [&](const char* key, float& dst) {
+        torch::Tensor x;
+        if (archive.try_read(key, x)) dst = x.item<float>();
+    };
+    auto rd_enum_int = [&](const char* key) -> std::optional<int> {
+        torch::Tensor x;
+        if (archive.try_read(key, x)) return x.item<int>();
+        return std::nullopt;
+    };
+
+    rd_int("train_batch_size", config.batch_size);
+    rd_int("train_batch_size_floor", config.batch_size_floor);
+    rd_int("train_max_epochs", config.max_epochs);
+    rd_int("train_patience", config.patience);
+    rd_float("train_lr", config.lr);
+    rd_float("train_weight_decay", config.weight_decay);
+
+    torch::Tensor pb1_t, pb2_t;
+    const bool has_pb1 = archive.try_read("train_phase_boundary_1", pb1_t);
+    const bool has_pb2 = archive.try_read("train_phase_boundary_2", pb2_t);
+    if (has_pb1 && has_pb2) {
+        config.phase_boundaries = {pb1_t.item<int>(), pb2_t.item<int>()};
+    }
+
+    if (auto lc = rd_enum_int("train_loss_config"))
+        config.loss_config = static_cast<LossConfigMode>(*lc);
+    if (auto ls = rd_enum_int("train_lr_scheduler"))
+        config.lr_scheduler = static_cast<LRSchedulerType>(*ls);
+    rd_int("train_lr_step_size", config.lr_step_size);
+    rd_float("train_lr_gamma", config.lr_gamma);
+    rd_float("train_lr_min", config.lr_min);
+    rd_float("train_vram_fraction", config.vram_fraction);
+
+    torch::Tensor bt_t;
+    if (archive.try_read("train_band_thresholds", bt_t)) {
+        std::vector<float> bt(static_cast<size_t>(bt_t.size(0)));
+        for (int64_t i = 0; i < bt_t.size(0); ++i) bt[static_cast<size_t>(i)] = bt_t[i].item<float>();
+        config.band_thresholds = std::move(bt);
+    }
+    return config;
+}
+
+RunMetadata load_run_metadata(
+    torch::serialize::InputArchive& archive
+) {
+    // Inverse of save_run_metadata. Decodes the byte-stored strings and the
+    // flattened per-target metric tree. Missing keys fall back to defaults.
+    RunMetadata meta;
+
+    auto read_string_pair = [&](const std::string& prefix) -> std::string {
+        torch::Tensor len_t;
+        if (!archive.try_read(prefix + "_len", len_t)) return std::string();
+        int64_t len = len_t.item<int64_t>();
+        if (len <= 0) return std::string();
+        torch::Tensor t;
+        if (!archive.try_read(prefix, t)) return std::string();
+        auto ptr = t.data_ptr<uint8_t>();
+        return std::string(reinterpret_cast<const char*>(ptr), static_cast<size_t>(len));
+    };
+
+    std::string version = read_string_pair("meta_version");
+    if (!version.empty()) meta.resolve_version = version;
+    meta.created_at = read_string_pair("meta_created");
+    meta.completed_at = read_string_pair("meta_completed");
+
+    // Fresh tensor per read (see load_train_config note on InputArchive::read).
+    { torch::Tensor x; if (archive.try_read("meta_train_time", x)) meta.train_time_seconds = x.item<float>(); }
+    { torch::Tensor x; if (archive.try_read("meta_n_plots_train", x)) meta.n_plots_train = x.item<int64_t>(); }
+    { torch::Tensor x; if (archive.try_read("meta_n_plots_test", x)) meta.n_plots_test = x.item<int64_t>(); }
+    { torch::Tensor x; if (archive.try_read("meta_best_epoch", x)) meta.best_epoch = x.item<int>(); }
+    { torch::Tensor x; if (archive.try_read("meta_total_epochs", x)) meta.total_epochs = x.item<int>(); }
+
+    torch::Tensor n_targets_t;
+    if (archive.try_read("meta_n_targets", n_targets_t)) {
+        int64_t n_targets = n_targets_t.item<int64_t>();
+        for (int64_t ti = 0; ti < n_targets; ++ti) {
+            std::string prefix = "meta_target_" + std::to_string(ti) + "_";
+            std::string target_name = read_string_pair(prefix + "name");
+            torch::Tensor n_metrics_t;
+            if (!archive.try_read(prefix + "n_metrics", n_metrics_t)) continue;
+            int64_t n_metrics = n_metrics_t.item<int64_t>();
+            std::unordered_map<std::string, float> metrics;
+            for (int64_t mi = 0; mi < n_metrics; ++mi) {
+                std::string m_prefix = prefix + "metric_" + std::to_string(mi) + "_";
+                std::string metric_name = read_string_pair(m_prefix + "name");
+                torch::Tensor val_t;
+                if (archive.try_read(m_prefix + "value", val_t))
+                    metrics[metric_name] = val_t.item<float>();
+            }
+            meta.final_metrics[target_name] = std::move(metrics);
+        }
+    }
+    return meta;
+}
+
 void write_metadata_json(
     const std::string& checkpoint_path,
     const ModelConfig& model_config,

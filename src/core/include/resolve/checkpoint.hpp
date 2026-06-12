@@ -37,10 +37,22 @@ void save_train_config(
     const TrainConfig& config
 );
 
+// Load training config from archive (inverse of save_train_config). Recovers
+// the persisted training hyperparameters; fields save_train_config does not
+// write keep their TrainConfig defaults.
+TrainConfig load_train_config(
+    torch::serialize::InputArchive& archive
+);
+
 // Save run metadata to archive
 void save_run_metadata(
     torch::serialize::OutputArchive& archive,
     const RunMetadata& metadata
+);
+
+// Load run metadata from archive (inverse of save_run_metadata).
+RunMetadata load_run_metadata(
+    torch::serialize::InputArchive& archive
 );
 
 // Write run metadata as JSON file alongside checkpoint

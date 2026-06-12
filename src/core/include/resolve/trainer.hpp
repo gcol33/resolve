@@ -131,6 +131,20 @@ public:
         float vram_fraction = 1.0f
     );
 
+    // Recover the persisted training hyperparameters from a checkpoint without
+    // loading the model. Returns a TrainConfig populated with the fields save()
+    // wrote (batch_size, lr, weight_decay, phase_boundaries, loss_config,
+    // lr_scheduler + params, band_thresholds, vram_fraction, batch_size_floor,
+    // max_epochs, patience); fields not persisted (device, checkpoint_dir,
+    // AMP/cuDNN flags, log callback) keep their TrainConfig defaults. Lets a
+    // caller re-create a Trainer to resume or re-evaluate with the same recipe.
+    static TrainConfig load_train_config(const std::string& path);
+
+    // Recover the run metadata persisted in a checkpoint: timing, train/test
+    // plot counts, best/total epochs, version + timestamps, and the per-target
+    // final metric tree (e.g. final_metrics["area"]["rmse"]).
+    static RunMetadata load_run_metadata(const std::string& path);
+
     // Accessors
     [[nodiscard]] ResolveModel& model() noexcept { return model_; }
     [[nodiscard]] const ResolveModel& model() const noexcept { return model_; }

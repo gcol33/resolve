@@ -79,6 +79,14 @@ void register_trainer(nb::module_& m) {
             torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
             return resolve::Trainer::load(path, dev, vram_fraction);
         }, nb::arg("path"), nb::arg("device") = "cpu", nb::arg("vram_fraction") = 1.0f)
+        .def_static("load_train_config", &resolve::Trainer::load_train_config,
+                    nb::arg("path"),
+                    "Recover the persisted TrainConfig from a checkpoint (training "
+                    "hyperparameters; fields not persisted keep TrainConfig defaults).")
+        .def_static("load_run_metadata", &resolve::Trainer::load_run_metadata,
+                    nb::arg("path"),
+                    "Recover the persisted RunMetadata (timing, plot counts, best "
+                    "epoch, and the per-target final-metric tree) from a checkpoint.")
         .def_prop_ro("model", [](resolve::Trainer& self) -> resolve::ResolveModel { return self.model(); })
         .def_prop_ro("scalers", [](const resolve::Trainer& self) { return resolve::Scalers(self.scalers()); })
         .def_prop_ro("config", [](const resolve::Trainer& self) { return resolve::TrainConfig(self.config()); })
