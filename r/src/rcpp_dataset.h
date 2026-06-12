@@ -18,104 +18,38 @@ public:
         List targets_list,
         List config_list = List()
     ) {
-        // Build RoleMapping
-        resolve::RoleMapping roles;
-        if (roles_list.containsElementNamed("plot_id")) {
-            roles.plot_id = as<std::string>(roles_list["plot_id"]);
-        }
-        if (roles_list.containsElementNamed("species_id")) {
-            roles.species_id = as<std::string>(roles_list["species_id"]);
-        }
-        if (roles_list.containsElementNamed("abundance")) {
-            roles.abundance = as<std::string>(roles_list["abundance"]);
-        }
-        if (roles_list.containsElementNamed("longitude")) {
-            roles.longitude = as<std::string>(roles_list["longitude"]);
-        }
-        if (roles_list.containsElementNamed("latitude")) {
-            roles.latitude = as<std::string>(roles_list["latitude"]);
-        }
-        if (roles_list.containsElementNamed("genus")) {
-            roles.genus = as<std::string>(roles_list["genus"]);
-        }
-        if (roles_list.containsElementNamed("family")) {
-            roles.family = as<std::string>(roles_list["family"]);
-        }
-        if (roles_list.containsElementNamed("covariates")) {
-            roles.covariates = as<std::vector<std::string>>(roles_list["covariates"]);
-        }
-        if (roles_list.containsElementNamed("categoricals")) {
-            roles.categoricals = as<std::vector<std::string>>(roles_list["categoricals"]);
-        }
-
-        // Build TargetSpecs
-        std::vector<resolve::TargetSpec> targets;
-        CharacterVector target_names = targets_list.names();
-        for (int i = 0; i < targets_list.size(); ++i) {
-            List target_cfg = targets_list[i];
-            resolve::TargetSpec spec;
-            spec.target_name = as<std::string>(target_names[i]);
-            spec.column_name = as<std::string>(target_cfg["column"]);
-
-            if (target_cfg.containsElementNamed("task")) {
-                spec.task = parse_task_type(as<std::string>(target_cfg["task"]));
-            }
-            if (target_cfg.containsElementNamed("transform")) {
-                spec.transform = parse_transform_type(as<std::string>(target_cfg["transform"]));
-            }
-            if (target_cfg.containsElementNamed("num_classes")) {
-                spec.num_classes = target_cfg["num_classes"];
-            }
-            if (target_cfg.containsElementNamed("weight")) {
-                spec.weight = target_cfg["weight"];
-            }
-            targets.push_back(spec);
-        }
-
-        // Build DatasetConfig
-        resolve::DatasetConfig config;
-        if (config_list.containsElementNamed("species_encoding")) {
-            config.species_encoding = parse_species_encoding_mode(
-                as<std::string>(config_list["species_encoding"]));
-        }
-        if (config_list.containsElementNamed("hash_dim")) {
-            config.hash_dim = config_list["hash_dim"];
-        }
-        if (config_list.containsElementNamed("top_k")) {
-            config.top_k = config_list["top_k"];
-        }
-        if (config_list.containsElementNamed("top_k_species")) {
-            config.top_k_species = config_list["top_k_species"];
-        }
-        if (config_list.containsElementNamed("selection")) {
-            config.selection = parse_selection_mode(as<std::string>(config_list["selection"]));
-        }
-        if (config_list.containsElementNamed("representation")) {
-            config.representation = parse_representation_mode(
-                as<std::string>(config_list["representation"]));
-        }
-        if (config_list.containsElementNamed("normalization")) {
-            config.normalization = parse_normalization_mode(
-                as<std::string>(config_list["normalization"]));
-        }
-        if (config_list.containsElementNamed("track_unknown_fraction")) {
-            config.track_unknown_fraction = config_list["track_unknown_fraction"];
-        }
-        if (config_list.containsElementNamed("track_unknown_count")) {
-            config.track_unknown_count = config_list["track_unknown_count"];
-        }
-        if (config_list.containsElementNamed("use_taxonomy")) {
-            config.use_taxonomy = config_list["use_taxonomy"];
-        }
-        if (config_list.containsElementNamed("pool_weighting")) {
-            config.pool_weighting = parse_pool_weighting(
-                as<std::string>(config_list["pool_weighting"]));
-        }
-
-        // Load dataset via C++ core
+        CsvInputs in = parse_csv_inputs(roles_list, targets_list, config_list);
         RResolveDataset wrapper;
         wrapper.dataset_ = std::make_shared<resolve::ResolveDataset>(
-            resolve::ResolveDataset::from_csv(header_path, species_path, roles, targets, config)
+            resolve::ResolveDataset::from_csv(
+                header_path, species_path, in.roles, in.targets, in.config)
+        );
+        return wrapper;
+    }
+
+    // Load reusing the categorical / taxonomy / species vocabularies and
+    // classification class mappings from `schema_source` (mirrors Python
+    // ResolveDataset.from_csv_with_schema). Roles / targets / config are parsed
+    // exactly as from_csv (shared parse_csv_inputs); the held-out set is then
+    // encoded against schema_source's vocab so model lookup tables are indexed
+    // correctly. Used for leave-one-dataset-out / transfer evaluation.
+    static RResolveDataset from_csv_with_schema(
+        std::string header_path,
+        std::string species_path,
+        List roles_list,
+        List targets_list,
+        RResolveDataset schema_source,
+        List config_list = List()
+    ) {
+        if (!schema_source.dataset_) {
+            stop("from_csv_with_schema: schema_source is not a loaded dataset");
+        }
+        CsvInputs in = parse_csv_inputs(roles_list, targets_list, config_list);
+        RResolveDataset wrapper;
+        wrapper.dataset_ = std::make_shared<resolve::ResolveDataset>(
+            resolve::ResolveDataset::from_csv_with_schema(
+                header_path, species_path, in.roles, in.targets,
+                *schema_source.dataset_, in.config)
         );
         return wrapper;
     }
@@ -180,6 +114,13 @@ public:
         if (config_list.containsElementNamed("hash_dim")) config.hash_dim = config_list["hash_dim"];
         if (config_list.containsElementNamed("top_k")) config.top_k = config_list["top_k"];
         if (config_list.containsElementNamed("top_k_species")) config.top_k_species = config_list["top_k_species"];
+        if (config_list.containsElementNamed("pool_weighting")) {
+            config.pool_weighting = parse_pool_weighting(
+                as<std::string>(config_list["pool_weighting"]));
+        }
+        if (config_list.containsElementNamed("pool_species_cap")) {
+            config.pool_species_cap = config_list["pool_species_cap"];
+        }
 
         RResolveDataset wrapper;
         wrapper.dataset_ = std::make_shared<resolve::ResolveDataset>(
@@ -200,9 +141,13 @@ public:
         return tensor_to_r_mat(dataset_->hash_embedding());
     }
 
-    Nullable<NumericMatrix> species_ids() const {
+    // Species / genus / family IDs are integer embedding indices. They are
+    // returned as IntegerMatrix (int64 -> R int, with an overflow warning) to
+    // match the Python int64 accessors and avoid the float32 precision loss
+    // above 2^24 that a NumericMatrix cast would introduce.
+    Nullable<IntegerMatrix> species_ids() const {
         if (dataset_->species_ids().defined() && dataset_->species_ids().numel() > 0) {
-            return tensor_to_r_mat(dataset_->species_ids().to(torch::kFloat32));
+            return tensor_to_r_imat(dataset_->species_ids());
         }
         return R_NilValue;
     }
@@ -214,16 +159,16 @@ public:
         return R_NilValue;
     }
 
-    Nullable<NumericMatrix> genus_ids() const {
+    Nullable<IntegerMatrix> genus_ids() const {
         if (dataset_->genus_ids().defined() && dataset_->genus_ids().numel() > 0) {
-            return tensor_to_r_mat(dataset_->genus_ids().to(torch::kFloat32));
+            return tensor_to_r_imat(dataset_->genus_ids());
         }
         return R_NilValue;
     }
 
-    Nullable<NumericMatrix> family_ids() const {
+    Nullable<IntegerMatrix> family_ids() const {
         if (dataset_->family_ids().defined() && dataset_->family_ids().numel() > 0) {
-            return tensor_to_r_mat(dataset_->family_ids().to(torch::kFloat32));
+            return tensor_to_r_imat(dataset_->family_ids());
         }
         return R_NilValue;
     }
@@ -257,23 +202,7 @@ public:
     // with names() = the source strings}. Lets R callers re-encode raw CSVs
     // at inference using the same codes the model was trained against.
     List categorical_vocab() const {
-        const auto& vocab = dataset_->categorical_vocab();
-        List out;
-        for (const auto& col : vocab.column_names()) {
-            const auto& m = vocab.column_map(col);
-            std::vector<std::string> keys;
-            std::vector<int> values;
-            keys.reserve(m.size());
-            values.reserve(m.size());
-            for (const auto& [k, v] : m) {
-                keys.push_back(k);
-                values.push_back(static_cast<int>(v));
-            }
-            IntegerVector codes(values.begin(), values.end());
-            codes.attr("names") = wrap(keys);
-            out[col] = codes;
-        }
-        return out;
+        return categorical_vocab_to_list(dataset_->categorical_vocab());
     }
 
     List targets() const {
@@ -394,6 +323,117 @@ public:
     RResolveDataset() = default;
 
 private:
+    // Parsed inputs shared by from_csv and from_csv_with_schema. Extracted so
+    // the schema-load factory reuses one parse path instead of duplicating the
+    // ~90-line roles/targets/config block.
+    struct CsvInputs {
+        resolve::RoleMapping roles;
+        std::vector<resolve::TargetSpec> targets;
+        resolve::DatasetConfig config;
+    };
+
+    static resolve::DatasetConfig parse_dataset_config(List config_list) {
+        resolve::DatasetConfig config;
+        if (config_list.containsElementNamed("species_encoding")) {
+            config.species_encoding = parse_species_encoding_mode(
+                as<std::string>(config_list["species_encoding"]));
+        }
+        if (config_list.containsElementNamed("hash_dim")) {
+            config.hash_dim = config_list["hash_dim"];
+        }
+        if (config_list.containsElementNamed("top_k")) {
+            config.top_k = config_list["top_k"];
+        }
+        if (config_list.containsElementNamed("top_k_species")) {
+            config.top_k_species = config_list["top_k_species"];
+        }
+        if (config_list.containsElementNamed("selection")) {
+            config.selection = parse_selection_mode(as<std::string>(config_list["selection"]));
+        }
+        if (config_list.containsElementNamed("representation")) {
+            config.representation = parse_representation_mode(
+                as<std::string>(config_list["representation"]));
+        }
+        if (config_list.containsElementNamed("normalization")) {
+            config.normalization = parse_normalization_mode(
+                as<std::string>(config_list["normalization"]));
+        }
+        if (config_list.containsElementNamed("track_unknown_fraction")) {
+            config.track_unknown_fraction = config_list["track_unknown_fraction"];
+        }
+        if (config_list.containsElementNamed("track_unknown_count")) {
+            config.track_unknown_count = config_list["track_unknown_count"];
+        }
+        if (config_list.containsElementNamed("use_taxonomy")) {
+            config.use_taxonomy = config_list["use_taxonomy"];
+        }
+        if (config_list.containsElementNamed("pool_weighting")) {
+            config.pool_weighting = parse_pool_weighting(
+                as<std::string>(config_list["pool_weighting"]));
+        }
+        if (config_list.containsElementNamed("pool_species_cap")) {
+            config.pool_species_cap = config_list["pool_species_cap"];
+        }
+        return config;
+    }
+
+    static CsvInputs parse_csv_inputs(List roles_list, List targets_list, List config_list) {
+        CsvInputs in;
+
+        resolve::RoleMapping& roles = in.roles;
+        if (roles_list.containsElementNamed("plot_id")) {
+            roles.plot_id = as<std::string>(roles_list["plot_id"]);
+        }
+        if (roles_list.containsElementNamed("species_id")) {
+            roles.species_id = as<std::string>(roles_list["species_id"]);
+        }
+        if (roles_list.containsElementNamed("abundance")) {
+            roles.abundance = as<std::string>(roles_list["abundance"]);
+        }
+        if (roles_list.containsElementNamed("longitude")) {
+            roles.longitude = as<std::string>(roles_list["longitude"]);
+        }
+        if (roles_list.containsElementNamed("latitude")) {
+            roles.latitude = as<std::string>(roles_list["latitude"]);
+        }
+        if (roles_list.containsElementNamed("genus")) {
+            roles.genus = as<std::string>(roles_list["genus"]);
+        }
+        if (roles_list.containsElementNamed("family")) {
+            roles.family = as<std::string>(roles_list["family"]);
+        }
+        if (roles_list.containsElementNamed("covariates")) {
+            roles.covariates = as<std::vector<std::string>>(roles_list["covariates"]);
+        }
+        if (roles_list.containsElementNamed("categoricals")) {
+            roles.categoricals = as<std::vector<std::string>>(roles_list["categoricals"]);
+        }
+
+        CharacterVector target_names = targets_list.names();
+        for (int i = 0; i < targets_list.size(); ++i) {
+            List target_cfg = targets_list[i];
+            resolve::TargetSpec spec;
+            spec.target_name = as<std::string>(target_names[i]);
+            spec.column_name = as<std::string>(target_cfg["column"]);
+            if (target_cfg.containsElementNamed("task")) {
+                spec.task = parse_task_type(as<std::string>(target_cfg["task"]));
+            }
+            if (target_cfg.containsElementNamed("transform")) {
+                spec.transform = parse_transform_type(as<std::string>(target_cfg["transform"]));
+            }
+            if (target_cfg.containsElementNamed("num_classes")) {
+                spec.num_classes = target_cfg["num_classes"];
+            }
+            if (target_cfg.containsElementNamed("weight")) {
+                spec.weight = target_cfg["weight"];
+            }
+            in.targets.push_back(spec);
+        }
+
+        in.config = parse_dataset_config(config_list);
+        return in;
+    }
+
     std::shared_ptr<resolve::ResolveDataset> dataset_;
 };
 

@@ -130,6 +130,13 @@ public:
         return scalers_to_list(predictor_.scalers());
     }
 
+    // Categorical vocabulary loaded from the checkpoint, as a named list
+    // (column -> codes named by source string). Lets R callers re-encode raw
+    // CSVs for inference with the exact codes the model was trained against.
+    List categorical_vocab() const {
+        return categorical_vocab_to_list(predictor_.categorical_vocab());
+    }
+
     // Predict from ResolveDataset (matches Python API).
     //
     // `batch_size` controls how the forward pass is chunked along dim 0:

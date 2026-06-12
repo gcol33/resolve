@@ -9,7 +9,8 @@ resolve.dataset.csv(
   species,
   roles = list(),
   targets = list(),
-  config = list()
+  config = list(),
+  schemaSource = NULL
 )
 }
 \arguments{
@@ -50,7 +51,18 @@ resolve.dataset.csv(
 \item track_unknown_fraction: Track unknown species fraction (default TRUE)
 \item track_unknown_count: Track unknown species count (default FALSE)
 \item use_taxonomy: Use taxonomy embeddings (default TRUE if genus/family provided)
+\item pool_weighting: rank_pool weighting "binary", "abundance", "log1p",
+"norm", or "rank" (default "log1p")
+\item pool_species_cap: rank_pool per-plot species cap; 0 = no cap (default),
+-1 = auto p99, >0 = manual cap
 }}
+
+\item{schemaSource}{Optional ResolveDataset (from a previous
+\code{resolve.dataset.csv()} call). When supplied, this dataset is encoded
+against that dataset's species / taxonomy / categorical vocabularies and
+classification class mappings instead of fitting its own, so a held-out or
+transfer set lines up with the training set's embedding namespaces. Default
+\code{NULL} fits fresh vocabularies.}
 }
 \value{
 A ResolveDataset object (C++ class) with methods:

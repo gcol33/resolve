@@ -301,6 +301,16 @@ resolve.progress <- function(checkpointDir) {
 #'   - track_unknown_fraction: Track unknown species fraction (default TRUE)
 #'   - track_unknown_count: Track unknown species count (default FALSE)
 #'   - use_taxonomy: Use taxonomy embeddings (default TRUE if genus/family provided)
+#'   - pool_weighting: rank_pool weighting "binary", "abundance", "log1p",
+#'     "norm", or "rank" (default "log1p")
+#'   - pool_species_cap: rank_pool per-plot species cap; 0 = no cap (default),
+#'     -1 = auto p99, >0 = manual cap
+#' @param schemaSource Optional ResolveDataset (from a previous
+#'   \code{resolve.dataset.csv()} call). When supplied, this dataset is encoded
+#'   against that dataset's species / taxonomy / categorical vocabularies and
+#'   classification class mappings instead of fitting its own, so a held-out or
+#'   transfer set lines up with the training set's embedding namespaces. Default
+#'   \code{NULL} fits fresh vocabularies.
 #'
 #' @return A ResolveDataset object (C++ class) with methods:
 #'   - coordinates(): Get coordinate matrix
@@ -346,7 +356,8 @@ resolve.dataset.csv <- function(header,
                                 species,
                                 roles = list(),
                                 targets = list(),
-                                config = list()) {
+                                config = list(),
+                                schemaSource = NULL) {
   # Input validation
   if (!is.character(header) || length(header) != 1) {
     stop("header must be a single file path string")
@@ -387,6 +398,24 @@ resolve.dataset.csv <- function(header,
   # Set default roles
   if (is.null(roles$plot_id)) roles$plot_id <- "plot_id"
   if (is.null(roles$species_id)) roles$species_id <- "species_id"
+
+  # When schemaSource is supplied, encode this dataset against that dataset's
+  # species / taxonomy / categorical vocabularies and classification class
+  # mappings (leave-one-dataset-out / transfer evaluation), so the model's
+  # lookup tables are indexed with the right namespace.
+  if (!is.null(schemaSource)) {
+    if (!inherits(schemaSource, "Rcpp_ResolveDataset")) {
+      stop("schemaSource must be a ResolveDataset from resolve.dataset.csv()")
+    }
+    return(.resolve_module$ResolveDataset_from_csv_with_schema(
+      header_path = header,
+      species_path = species,
+      roles_list = roles,
+      targets_list = targets,
+      schema_source = schemaSource,
+      config_list = config
+    ))
+  }
 
   # Call C++ implementation
   .resolve_module$ResolveDataset_from_csv(

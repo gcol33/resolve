@@ -366,6 +366,13 @@ public:
         return outputs;
     }
 
+    // Categorical vocabulary captured at prepare_data time, as a named list
+    // (column -> codes named by source string). Lets R callers re-encode raw
+    // CSVs for inference with the exact codes the model was trained against.
+    List categorical_vocab() const {
+        return categorical_vocab_to_list(trainer_->categorical_vocab());
+    }
+
     resolve::Trainer& trainer() { return *trainer_; }
 
 private:

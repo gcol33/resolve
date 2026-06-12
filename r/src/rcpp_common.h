@@ -124,6 +124,30 @@ inline IntegerVector tensor_to_r_ivec(const torch::Tensor& t) {
     return out;
 }
 
+// CategoricalVocab -> named R list. One entry per categorical column, keyed by
+// column name; each entry is an IntegerVector of codes whose names() are the
+// source strings. Single source of truth shared by the ResolveDataset, Trainer,
+// and Predictor categorical_vocab() accessors so R callers can re-encode raw
+// CSVs at inference with the exact codes the model was trained against.
+inline List categorical_vocab_to_list(const resolve::CategoricalVocab& vocab) {
+    List out;
+    for (const auto& col : vocab.column_names()) {
+        const auto& m = vocab.column_map(col);
+        std::vector<std::string> keys;
+        std::vector<int> values;
+        keys.reserve(m.size());
+        values.reserve(m.size());
+        for (const auto& [k, v] : m) {
+            keys.push_back(k);
+            values.push_back(static_cast<int>(v));
+        }
+        IntegerVector codes(values.begin(), values.end());
+        codes.attr("names") = wrap(keys);
+        out[col] = codes;
+    }
+    return out;
+}
+
 // =============================================================================
 // Enum conversions
 // =============================================================================

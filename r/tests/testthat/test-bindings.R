@@ -42,6 +42,7 @@ test_that("module factory functions are registered", {
 
   expect_true("ResolveDataset_from_csv" %in% registered)
   expect_true("ResolveDataset_from_species_csv" %in% registered)
+  expect_true("ResolveDataset_from_csv_with_schema" %in% registered)
   expect_true("Predictor_load" %in% registered)
   # SpeciesEncoder_load was removed alongside SpeciesEncoder.
   expect_false("SpeciesEncoder_load" %in% registered)
@@ -189,6 +190,26 @@ test_that("resolve.dataset.csv rejects target without column", {
       targets = list(area = list(task = "regression"))
     ),
     "column"
+  )
+})
+
+test_that("resolve.dataset.csv rejects invalid schemaSource", {
+  tmp_h <- tempfile(fileext = ".csv")
+  tmp_s <- tempfile(fileext = ".csv")
+  writeLines("plot_id,area\np1,100", tmp_h)
+  writeLines("plot_id,species_id\np1,sp1", tmp_s)
+  on.exit({unlink(tmp_h); unlink(tmp_s)}, add = TRUE)
+
+  # A non-ResolveDataset schemaSource is rejected before any C++ call, so this
+  # runs without libtorch.
+  expect_error(
+    resolve.dataset.csv(
+      header = tmp_h,
+      species = tmp_s,
+      targets = list(area = list(column = "area", task = "regression")),
+      schemaSource = list()
+    ),
+    "schemaSource"
   )
 })
 
@@ -370,6 +391,7 @@ test_that("resolve.dataset.csv has expected formal arguments", {
   expect_true("roles" %in% args)
   expect_true("targets" %in% args)
   expect_true("config" %in% args)
+  expect_true("schemaSource" %in% args)
 })
 
 test_that("resolve.load has expected formal arguments", {

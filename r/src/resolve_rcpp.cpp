@@ -72,10 +72,12 @@ RCPP_MODULE(resolve_module) {
         .method("raw_weights", &RResolveDataset::raw_weights, "Get raw species weights")
         .method("plot_offsets", &RResolveDataset::plot_offsets, "Get plot offsets for raw data")
         .method("taxonomy_vocab", &RResolveDataset::taxonomy_vocab, "Get taxonomy vocabulary info")
+        .method("categorical_vocab", &RResolveDataset::categorical_vocab, "Get categorical covariate vocabulary (per-column code maps)")
         ;
 
     function("ResolveDataset_from_csv", &RResolveDataset::from_csv, "Load dataset from CSV files");
     function("ResolveDataset_from_species_csv", &RResolveDataset::from_species_csv, "Load dataset from single species CSV");
+    function("ResolveDataset_from_csv_with_schema", &RResolveDataset::from_csv_with_schema, "Load dataset reusing another dataset's vocabularies and class mappings");
 
     // ResolveModel
     class_<RResolveModel>("ResolveModel")
@@ -119,6 +121,7 @@ RCPP_MODULE(resolve_module) {
         .method("train_indices", &RTrainer::train_indices, "Global plot indices of the training fold")
         .method("test_plot_ids", &RTrainer::test_plot_ids, "Plot IDs of the held-out test fold")
         .method("train_plot_ids", &RTrainer::train_plot_ids, "Plot IDs of the training fold")
+        .method("categorical_vocab", &RTrainer::categorical_vocab, "Get categorical covariate vocabulary captured at prepare_data time")
         .method("cross_validate", &RTrainer::cross_validate, "Run k-fold cross-validation")
         .method("cross_validate_spatial", &RTrainer::cross_validate_spatial, "Run spatial block cross-validation")
         .method("predict_from_trainer", &RTrainer::predict_from_trainer, "Make predictions using trainer's model")
@@ -135,6 +138,7 @@ RCPP_MODULE(resolve_module) {
         .method("optimize_for_inference", &RPredictor::optimize_for_inference, "Fuse BatchNorm for faster inference")
         .method("device", &RPredictor::device, "Get current device")
         .method("get_scalers", &RPredictor::get_scalers, "Get fitted scalers")
+        .method("categorical_vocab", &RPredictor::categorical_vocab, "Get categorical covariate vocabulary loaded from the checkpoint")
         ;
 
     function("Predictor_load", &RPredictor::load, "Load predictor from checkpoint");
