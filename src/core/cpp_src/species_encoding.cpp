@@ -17,6 +17,39 @@ uint32_t murmur_hash(const std::string& key, uint32_t seed) {
     return h;
 }
 
+// MurmurHash3 64->32 finalizer (fmix). MUST stay bit-identical to the device
+// `murmur_hash32` in cuda/kernels.cu. The CUDA hash path stores
+// `(int64_t)murmur_hash(species, 0)` per record (dataset.cpp) and the kernel
+// applies this finalizer to derive the bucket and sign. The CPU path here
+// pre-aggregates the embedding at load time, so it must derive the bucket and
+// sign the same way or a model trained on one device produces garbage when
+// scored on the other (e.g. GPU training -> CPU-default Predictor). kernels.cu
+// is an isolated translation unit that cannot include this header; the parity
+// is locked by the "hash_species matches CUDA kernel hash formula" test.
+static inline int32_t murmur_hash3_fmix_i32(int64_t key) {
+    uint64_t h = static_cast<uint64_t>(key);
+    h ^= h >> 33;
+    h *= 0xff51afd7ed558ccdULL;
+    h ^= h >> 33;
+    h *= 0xc4ceb9fe1a85ec53ULL;
+    h ^= h >> 33;
+    return static_cast<int32_t>(h);
+}
+
+// Map a base string hash to (bucket, sign) using the CUDA kernel's scheme:
+// base hash (seed 0) -> int64 id -> MurmurHash3 finalizer -> bucket = |h| %
+// hash_dim, sign = sign bit. Shared by the CPU embedding aggregation and the
+// parity test so the contract has one definition.
+HashBucketSign feature_hash_bucket_sign(const std::string& species, int hash_dim) {
+    int64_t species_id = static_cast<int64_t>(murmur_hash(species, 0));
+    int32_t h = murmur_hash3_fmix_i32(species_id);
+    HashBucketSign out;
+    out.bucket = static_cast<int>(
+        static_cast<uint32_t>(h < 0 ? -h : h) % static_cast<uint32_t>(hash_dim));
+    out.sign = (h >= 0) ? 1.0f : -1.0f;
+    return out;
+}
+
 void hash_species(
     const std::vector<std::pair<std::string, float>>& species_abundances,
     float* embedding,
@@ -25,12 +58,8 @@ void hash_species(
     std::fill(embedding, embedding + hash_dim, 0.0f);
 
     for (const auto& [species, abundance] : species_abundances) {
-        uint32_t h1 = murmur_hash(species, 0);
-        uint32_t h2 = murmur_hash(species, 1);
-
-        int idx = h1 % hash_dim;
-        float sign = (h2 % 2 == 0) ? 1.0f : -1.0f;
-        embedding[idx] += sign * abundance;
+        const HashBucketSign bs = feature_hash_bucket_sign(species, hash_dim);
+        embedding[bs.bucket] += bs.sign * abundance;
     }
 }
 

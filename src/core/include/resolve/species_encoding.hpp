@@ -12,6 +12,18 @@ namespace resolve {
 // MurmurHash3 finalizer for feature hashing
 uint32_t murmur_hash(const std::string& key, uint32_t seed = 0);
 
+// Resolved feature-hash slot for one species: signed-feature-hashing bucket
+// and sign. The scheme mirrors the CUDA kernel (cuda/kernels.cu) exactly so the
+// CPU-aggregated embedding matches the GPU kernel output for the same data.
+struct HashBucketSign {
+    int bucket;
+    float sign;
+};
+
+// Compute the (bucket, sign) for a species under the canonical feature-hash
+// scheme shared by the CPU and CUDA paths. Single definition of the contract.
+HashBucketSign feature_hash_bucket_sign(const std::string& species, int hash_dim);
+
 // Feature hashing for species
 void hash_species(
     const std::vector<std::pair<std::string, float>>& species_abundances,
