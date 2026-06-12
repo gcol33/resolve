@@ -143,6 +143,59 @@ TEST_CASE("PlotEncoderRankPool gradient flow", "[rank_pool]") {
     REQUIRE(continuous.grad().abs().sum().item<float>() > 0);
 }
 
+TEST_CASE("PlotEncoderRankPool fused pool equals explicit weighted mean", "[rank_pool]") {
+    // The rank-pool forward replaced an explicit gather-multiply-sum over a
+    // (batch, max_sp, embed_dim) intermediate with a fused embedding_bag
+    // weighted-sum (issue #6). This guards the invariant that the fused path is
+    // numerically identical to the explicit one over the same embedding tables.
+    namespace F = torch::nn::functional;
+    torch::manual_seed(0);
+
+    const int64_t batch = 6, max_sp = 12;
+    const int64_t n_species = 40, n_genera = 15, n_families = 7;
+    const int64_t sp_dim = 8, g_dim = 4, f_dim = 4;
+
+    // Embedding tables with row 0 zeroed (padding_idx convention).
+    auto make_table = [](int64_t rows, int64_t dim) {
+        auto w = torch::randn({rows, dim});
+        w.index_put_({0}, torch::zeros({dim}));
+        return w;
+    };
+    auto sp_w = make_table(n_species, sp_dim);
+    auto g_w = make_table(n_genera, g_dim);
+    auto f_w = make_table(n_families, f_dim);
+
+    // IDs with some padding/UNK (id 0) entries; weights with a per-plot mask.
+    auto sp_ids = torch::randint(0, n_species, {batch, max_sp}, torch::kInt64);
+    auto g_ids = torch::randint(0, n_genera, {batch, max_sp}, torch::kInt64);
+    auto f_ids = torch::randint(0, n_families, {batch, max_sp}, torch::kInt64);
+    sp_ids.index_put_({torch::indexing::Slice(), torch::indexing::Slice(9, max_sp)}, 0);
+    auto mask = (sp_ids != 0).to(torch::kFloat32);
+    auto weights = torch::rand({batch, max_sp}) * mask;
+    auto w_sum = weights.sum(1, true).clamp_min(1e-8);
+    auto w_normed = weights / w_sum;
+
+    // Explicit path: materialize, multiply, sum.
+    auto combined = torch::cat({
+        F::embedding(sp_ids, sp_w, F::EmbeddingFuncOptions().padding_idx(0)),
+        F::embedding(g_ids, g_w, F::EmbeddingFuncOptions().padding_idx(0)),
+        F::embedding(f_ids, f_w, F::EmbeddingFuncOptions().padding_idx(0)),
+    }, -1);
+    auto explicit_pooled = (combined * w_normed.unsqueeze(-1)).sum(1);
+
+    // Fused path: three embedding_bags, concatenated.
+    auto bag_opts = F::EmbeddingBagFuncOptions()
+        .mode(torch::kSum).per_sample_weights(w_normed).padding_idx(0);
+    auto fused_pooled = torch::cat({
+        F::embedding_bag(sp_ids, sp_w, bag_opts),
+        F::embedding_bag(g_ids, g_w, bag_opts),
+        F::embedding_bag(f_ids, f_w, bag_opts),
+    }, -1);
+
+    REQUIRE(fused_pooled.sizes() == explicit_pooled.sizes());
+    REQUIRE(torch::allclose(fused_pooled, explicit_pooled, /*rtol=*/1e-5, /*atol=*/1e-6));
+}
+
 TEST_CASE("ResolveModel with RankPool mode constructs and forwards", "[rank_pool][model]") {
     ResolveSchema schema;
     schema.n_plots = 100;

@@ -106,23 +106,40 @@ torch::Tensor PlotEncoderRankPoolImpl::forward(
     apply_cover_dropout(is_training(), cover_dropout_, batch_size, device,
                         weights, mask, has_cover);
 
-    // Embed species: (batch, max_sp, species_embed_dim)
-    auto combined = species_embedding_->forward(species_ids);
-
-    // Concat taxonomy embeddings along last dim
-    if (has_taxonomy_ && genus_ids.defined() && genus_ids.numel() > 0) {
-        auto g_emb = genus_embedding_->forward(genus_ids);
-        auto f_emb = family_embedding_->forward(family_ids);
-        combined = torch::cat({combined, g_emb, f_emb}, /*dim=*/-1);
-    }
-
-    // Weighted mean pool: normalize weights, then weighted sum
+    // Weighted mean pool weights: normalize per plot. Padding and UNK (id 0)
+    // positions carry zero weight via `mask_float`, so they drop out of the
+    // reduction; a plot with no species reduces to the zero vector (w_sum
+    // clamped to kEpsilon, numerator 0).
     auto w = weights * mask_float;
     auto w_sum = w.sum(/*dim=*/1, /*keepdim=*/true).clamp_min(kEpsilon);
     auto w_normed = w / w_sum;  // (batch, max_sp)
 
-    // (batch, max_sp, embed_dim) * (batch, max_sp, 1) -> sum -> (batch, embed_dim)
-    auto pooled = (combined * w_normed.unsqueeze(-1)).sum(/*dim=*/1);
+    // Fused weighted-sum pooling via embedding_bag (mode=sum, per-sample
+    // weights = w_normed) computes sum_j w_normed[:, j] * emb[ids[:, j]] in a
+    // single kernel per table, WITHOUT materializing the
+    // (batch, max_sp, embed_dim) gather that the explicit multiply-then-sum
+    // path allocates. That transient scales with max_species and is the
+    // dominant training-time VRAM spike on species-rich targets; on a WDDM GPU
+    // it spilled into shared memory and stalled the driver past the watchdog
+    // (issue #6). padding_idx=0 excludes pad/UNK rows from the reduction and
+    // freezes row 0's gradient, matching each table's padding_idx and the
+    // explicit path exactly (emb[0] == 0 contributes nothing there either).
+    namespace F = torch::nn::functional;
+    const auto bag_opts = F::EmbeddingBagFuncOptions()
+        .mode(torch::kSum)
+        .per_sample_weights(w_normed)
+        .padding_idx(0);
+
+    auto pooled = F::embedding_bag(species_ids, species_embedding_->weight, bag_opts);
+
+    // Concat taxonomy pools along the feature dim. Pooling is linear, so the
+    // weighted mean of the concatenation equals the concatenation of the
+    // per-table weighted means.
+    if (has_taxonomy_ && genus_ids.defined() && genus_ids.numel() > 0) {
+        auto pooled_g = F::embedding_bag(genus_ids, genus_embedding_->weight, bag_opts);
+        auto pooled_f = F::embedding_bag(family_ids, family_embedding_->weight, bag_opts);
+        pooled = torch::cat({pooled, pooled_g, pooled_f}, /*dim=*/-1);
+    }
 
     // Concatenate: [continuous | pooled | has_cover]
     auto has_cover_col = has_cover.unsqueeze(-1);  // (batch, 1)
