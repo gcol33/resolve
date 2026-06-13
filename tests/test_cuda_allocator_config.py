@@ -23,6 +23,13 @@ import textwrap
 
 import pytest
 
+# Every test here exercises the compiled C++ extension (resolve_core), either
+# directly or by spawning a fresh interpreter that imports it. Skip the whole
+# module when the extension is not built (e.g. CI jobs that install only the
+# pure-Python POC); the same interpreter the subprocess would use cannot import
+# it either, so a parent-side check is sufficient.
+pytest.importorskip("resolve_core")
+
 
 def _expected_base() -> str:
     base = "garbage_collection_threshold:0.8,max_split_size_mb:256"
