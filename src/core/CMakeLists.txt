@@ -160,13 +160,25 @@ target_include_directories(resolve_core
 
 target_link_libraries(resolve_core PUBLIC ${TORCH_LIBRARIES})
 
-# OpenMP for fuzzy::FuzzyIndex::query_batch. Optional: serial fallback if missing.
-find_package(OpenMP QUIET)
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(resolve_core PUBLIC OpenMP::OpenMP_CXX)
-    message(STATUS "OpenMP enabled for resolve_core")
+# OpenMP for fuzzy::FuzzyIndex::query_batch. Optional: serial fallback if absent.
+#
+# RESOLVE_USE_OPENMP=OFF drops the OpenMP runtime entirely. The R package's
+# resolve_c build sets this: the package does not expose fuzzy::query_batch, and
+# stacking a third OpenMP runtime (MSVC vcomp) on top of libtorch's libiomp5md
+# and R's own libgomp inside a single mingw R process crashes on the first
+# parallel op. Dropping vcomp removes that conflict; query_batch falls back to
+# its serial path (unused from R anyway).
+option(RESOLVE_USE_OPENMP "Link OpenMP into resolve_core (fuzzy::query_batch)" ON)
+if(RESOLVE_USE_OPENMP)
+    find_package(OpenMP QUIET)
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(resolve_core PUBLIC OpenMP::OpenMP_CXX)
+        message(STATUS "OpenMP enabled for resolve_core")
+    else()
+        message(STATUS "OpenMP not found; fuzzy::query_batch will run serially")
+    endif()
 else()
-    message(STATUS "OpenMP not found; fuzzy::query_batch will run serially")
+    message(STATUS "OpenMP disabled (RESOLVE_USE_OPENMP=OFF); fuzzy::query_batch serial")
 endif()
 
 # Ensure ABI compatibility (matches CMAKE_CXX_STANDARD above)
@@ -180,6 +192,42 @@ install(TARGETS resolve_core
 )
 
 install(DIRECTORY include/resolve DESTINATION include)
+
+# ----------------------------------------------------------------------------
+# resolve_c: flat C ABI facade shared library (issue #17)
+#
+# A single extern "C" DLL/so wrapping the engine so non-MSVC clients (the R
+# package's Rtools mingw build on Windows) can call it without ever touching
+# libtorch's C++ ABI. libtorch only ships an MSVC build on Windows, and MSVC
+# and mingw C++ ABIs do not cross; a C ABI does. Built on every platform so the
+# C-client path is identical everywhere (not a Windows-only branch). See
+# include/resolve/resolve_capi.h and dev_notes/issue17_c_abi_facade_design.md.
+# ----------------------------------------------------------------------------
+option(BUILD_R_CAPI "Build the resolve_c C ABI shared library" ON)
+if(BUILD_R_CAPI)
+    add_library(resolve_c SHARED cpp_src/resolve_capi.cpp)
+    target_link_libraries(resolve_c PRIVATE resolve_core ${TORCH_LIBRARIES})
+    target_include_directories(resolve_c PRIVATE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    set_property(TARGET resolve_c PROPERTY CXX_STANDARD 20)
+    # Activate __declspec(dllexport) / visibility("default") on the C API.
+    target_compile_definitions(resolve_c PRIVATE RESOLVE_CAPI_BUILD=1)
+    # torch TUs are large; MSVC needs /bigobj for the object that pulls in
+    # the full engine + libtorch headers.
+    if(MSVC)
+        target_compile_options(resolve_c PRIVATE /bigobj)
+        # Stage the libtorch runtime DLLs next to resolve_c.dll so it loads
+        # standalone (the R package adds this dir to PATH at load time).
+        file(GLOB RESOLVE_C_TORCH_DLLS "${TORCH_INSTALL_PREFIX}/lib/*.dll")
+        add_custom_command(TARGET resolve_c POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${RESOLVE_C_TORCH_DLLS} $<TARGET_FILE_DIR:resolve_c>)
+    endif()
+    install(TARGETS resolve_c
+        RUNTIME DESTINATION bin
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib)
+endif()
 
 # Python bindings
 if(BUILD_PYTHON)

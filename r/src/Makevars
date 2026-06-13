@@ -1,12 +1,14 @@
-# Makevars for resolve R package
-
+# Makevars for the resolve R package (issue #17).
+#
+# Thin client over the `resolve_c` shared library (a flat C ABI over the
+# engine). No libtorch linkage: the only engine header is the vendored, pure-C
+# resolve/resolve_capi.h under src/.
+#
+#   RESOLVE_C_HOME: directory holding libresolve_c.{so,dylib}. Must also be on
+#                   LD_LIBRARY_PATH / DYLD_LIBRARY_PATH at load time so the
+#                   freshly built resolve.so can resolve it.
 CXX_STD = CXX17
 
-# Use LIBTORCH_PATH if set, otherwise try pkg-config
-ifdef LIBTORCH_PATH
-PKG_CXXFLAGS = -I"$(LIBTORCH_PATH)/include" -I"$(LIBTORCH_PATH)/include/torch/csrc/api/include" -I.
-PKG_LIBS = -L"$(LIBTORCH_PATH)/lib" -ltorch -ltorch_cpu -lc10
-else
-PKG_CXXFLAGS = $(shell pkg-config --cflags torch 2>/dev/null) -I.
-PKG_LIBS = $(shell pkg-config --libs torch 2>/dev/null || echo "-ltorch -ltorch_cpu -lc10")
-endif
+PKG_CPPFLAGS = -I.
+
+PKG_LIBS = -L"$(RESOLVE_C_HOME)" -lresolve_c

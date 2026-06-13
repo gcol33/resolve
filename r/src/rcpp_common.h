@@ -1,688 +1,332 @@
-// rcpp_common.h - Shared type conversions and utilities for R bindings
+// rcpp_common.h - R <-> C ABI marshaling for the resolve package.
+//
+// Issue #17: the R package no longer touches libtorch's C++ ABI. It links the
+// MSVC-built `resolve_c` shared library through the flat C facade in
+// resolve/resolve_capi.h and marshals everything across the boundary as a
+// `resolve_value_t` tree. This header is the ONLY engine header included under
+// r/src/; there is no `#include <torch/...>` anywhere in the package sources.
 #ifndef RCPP_COMMON_H
 #define RCPP_COMMON_H
 
 #include <Rcpp.h>
-#include <torch/torch.h>
+#include "resolve/resolve_capi.h"
+
 #include <limits>
-#include "resolve/resolve.hpp"
+#include <memory>
+#include <string>
+#include <vector>
 
 using namespace Rcpp;
 
 // =============================================================================
-// Type conversion: R -> Torch
+// Error checking: turn a C-facade failure into an R error
 // =============================================================================
 
-// R's NumericVector stores values as 64-bit doubles. torch::from_blob does NOT
-// convert the underlying memory — passing a double* with a kFloat32 dtype option
-// reinterprets the byte buffer as float32, producing garbage values. We must
-// convert element-by-element via static_cast<float>(...) before constructing
-// the tensor, matching the pattern used by r_mat_to_tensor_impl below.
-inline torch::Tensor r_vec_to_tensor(NumericVector x) {
-    auto options = torch::TensorOptions().dtype(torch::kFloat32);
-    std::vector<float> data(x.size());
-    for (R_xlen_t i = 0; i < x.size(); ++i) {
-        data[i] = static_cast<float>(x[i]);
+inline void capi_check(const void* p) {
+    if (p == nullptr) stop(resolve_last_error());
+}
+inline void capi_check_status(int rc) {
+    if (rc != 0) stop(resolve_last_error());
+}
+
+// =============================================================================
+// RAII for a resolve_value_t we own (input trees we build, result trees we get)
+// =============================================================================
+
+class ValuePtr {
+public:
+    ValuePtr() : v_(nullptr) {}
+    explicit ValuePtr(resolve_value_t* v) : v_(v) {}
+    ~ValuePtr() { if (v_) resolve_value_free(v_); }
+    ValuePtr(const ValuePtr&) = delete;
+    ValuePtr& operator=(const ValuePtr&) = delete;
+    ValuePtr(ValuePtr&& o) noexcept : v_(o.v_) { o.v_ = nullptr; }
+    resolve_value_t* get() const { return v_; }
+private:
+    resolve_value_t* v_;
+};
+
+// Custom-deleter shared handle factory: mirrors the old shared_ptr<engine>
+// ownership so Rcpp's value-returning factories and module storage can copy a
+// wrapper without double-freeing the underlying C handle.
+template <typename T>
+inline std::shared_ptr<T> capi_own(T* handle, void (*deleter)(T*)) {
+    capi_check(handle);
+    return std::shared_ptr<T>(handle, deleter);
+}
+
+// =============================================================================
+// value tree -> R object (recursive). Single source of truth for every result
+// accessor: each C op returns a resolve_value_t and this turns it into the same
+// R shape the old Rcpp converters produced.
+// =============================================================================
+
+inline RObject value_to_r(const resolve_value_t* v);
+
+// int64 scalar -> R integer when it fits, else double (R has no native int64).
+inline RObject int_scalar_to_r(int64_t x) {
+    if (x > std::numeric_limits<int>::max() || x < std::numeric_limits<int>::min()) {
+        return wrap(static_cast<double>(x));
     }
-    return torch::from_blob(
-        data.data(),
-        {static_cast<int64_t>(x.size())},
-        options
-    ).clone();
+    return wrap(static_cast<int>(x));
 }
 
-// Generic matrix-to-tensor: works for NumericMatrix (float) and IntegerMatrix (int64)
-template <typename MatT, typename ScalarT, torch::ScalarType DType>
-inline torch::Tensor r_mat_to_tensor_impl(MatT x) {
-    auto options = torch::TensorOptions().dtype(DType);
-    int nrow = x.nrow();
-    int ncol = x.ncol();
-    std::vector<ScalarT> data(nrow * ncol);
-    for (int i = 0; i < nrow; ++i) {
-        for (int j = 0; j < ncol; ++j) {
-            data[i * ncol + j] = static_cast<ScalarT>(x(i, j));
+inline IntegerVector int_array_to_r(const int64_t* data, int64_t n) {
+    IntegerVector out(n);
+    for (int64_t i = 0; i < n; ++i) {
+        const int64_t x = data ? data[i] : 0;
+        if (x > std::numeric_limits<int>::max() || x < std::numeric_limits<int>::min()) {
+            Rcpp::warning("resolve: int64 value out of int range, narrowed: %lld",
+                          static_cast<long long>(x));
         }
-    }
-    return torch::from_blob(data.data(), {nrow, ncol}, options).clone();
-}
-
-inline torch::Tensor r_mat_to_tensor(NumericMatrix x) {
-    return r_mat_to_tensor_impl<NumericMatrix, float, torch::kFloat32>(x);
-}
-
-inline torch::Tensor r_int_vec_to_tensor(IntegerVector x) {
-    auto options = torch::TensorOptions().dtype(torch::kInt64);
-    std::vector<int64_t> data(x.begin(), x.end());
-    return torch::from_blob(data.data(), {static_cast<int64_t>(x.size())}, options).clone();
-}
-
-inline torch::Tensor r_int_mat_to_tensor(IntegerMatrix x) {
-    return r_mat_to_tensor_impl<IntegerMatrix, int64_t, torch::kInt64>(x);
-}
-
-// =============================================================================
-// Type conversion: Torch -> R
-// =============================================================================
-
-inline NumericVector tensor_to_r_vec(const torch::Tensor& t) {
-    torch::Tensor cpu = t.cpu().contiguous().to(torch::kFloat32);
-    float* data = cpu.data_ptr<float>();
-    return NumericVector(data, data + cpu.numel());
-}
-
-inline NumericMatrix tensor_to_r_mat(const torch::Tensor& t) {
-    torch::Tensor cpu = t.cpu().contiguous().to(torch::kFloat32);
-    int nrow = cpu.size(0);
-    int ncol = cpu.size(1);
-    NumericMatrix out(nrow, ncol);
-    float* data = cpu.data_ptr<float>();
-    for (int i = 0; i < nrow; ++i) {
-        for (int j = 0; j < ncol; ++j) {
-            out(i, j) = data[i * ncol + j];
-        }
+        out[i] = static_cast<int>(x);
     }
     return out;
 }
 
-// Integer matrix conversion — for int64 tensors like categorical_ids.
-// R's IntegerMatrix is 32-bit; we narrow but warn if any value overflows.
-inline IntegerMatrix tensor_to_r_imat(const torch::Tensor& t) {
-    torch::Tensor cpu = t.cpu().contiguous().to(torch::kInt64);
-    int nrow = cpu.size(0);
-    int ncol = cpu.size(1);
-    IntegerMatrix out(nrow, ncol);
-    int64_t* data = cpu.data_ptr<int64_t>();
-    for (int i = 0; i < nrow; ++i) {
-        for (int j = 0; j < ncol; ++j) {
-            const int64_t v = data[i * ncol + j];
-            if (v > std::numeric_limits<int>::max() ||
-                v < std::numeric_limits<int>::min()) {
-                Rcpp::warning("tensor_to_r_imat: value out of int range, "
-                              "narrowed: %lld", static_cast<long long>(v));
+inline RObject value_to_r(const resolve_value_t* v) {
+    if (v == nullptr) return R_NilValue;
+    switch (resolve_value_kind(v)) {
+        case RESOLVE_VALUE_NULL:
+            return R_NilValue;
+        case RESOLVE_VALUE_BOOL:
+            return wrap(static_cast<bool>(resolve_value_as_bool(v)));
+        case RESOLVE_VALUE_INT:
+            return int_scalar_to_r(resolve_value_as_int(v));
+        case RESOLVE_VALUE_DOUBLE:
+            return wrap(resolve_value_as_double(v));
+        case RESOLVE_VALUE_STRING:
+            return wrap(std::string(resolve_value_as_string(v)));
+        case RESOLVE_VALUE_INT_ARRAY: {
+            int64_t n = 0;
+            const int64_t* d = resolve_value_as_int_array(v, &n);
+            return int_array_to_r(d, n);
+        }
+        case RESOLVE_VALUE_DOUBLE_ARRAY: {
+            int64_t n = 0;
+            const double* d = resolve_value_as_double_array(v, &n);
+            return NumericVector(d, d + n);
+        }
+        case RESOLVE_VALUE_STRING_ARRAY: {
+            int64_t n = resolve_value_string_array_size(v);
+            CharacterVector out(n);
+            for (int64_t i = 0; i < n; ++i) out[i] = resolve_value_string_at(v, i);
+            return out;
+        }
+        case RESOLVE_VALUE_DOUBLE_MATRIX: {
+            int64_t nr = 0, nc = 0;
+            const double* d = resolve_value_as_double_matrix(v, &nr, &nc);
+            NumericMatrix out(nr, nc);
+            for (int64_t i = 0; i < nr; ++i)
+                for (int64_t j = 0; j < nc; ++j)
+                    out(i, j) = d ? d[i * nc + j] : 0.0;
+            return out;
+        }
+        case RESOLVE_VALUE_INT_MATRIX: {
+            int64_t nr = 0, nc = 0;
+            const int64_t* d = resolve_value_as_int_matrix(v, &nr, &nc);
+            IntegerMatrix out(nr, nc);
+            for (int64_t i = 0; i < nr; ++i)
+                for (int64_t j = 0; j < nc; ++j) {
+                    const int64_t x = d ? d[i * nc + j] : 0;
+                    if (x > std::numeric_limits<int>::max() || x < std::numeric_limits<int>::min()) {
+                        Rcpp::warning("resolve: int64 value out of int range, narrowed: %lld",
+                                      static_cast<long long>(x));
+                    }
+                    out(i, j) = static_cast<int>(x);
+                }
+            return out;
+        }
+        case RESOLVE_VALUE_MAP: {
+            int64_t n = resolve_map_size(v);
+            List out(n);
+            CharacterVector names(n);
+            for (int64_t i = 0; i < n; ++i) {
+                names[i] = resolve_map_key_at(v, i);
+                out[i] = value_to_r(resolve_map_value_at(v, i));
             }
-            out(i, j) = static_cast<int>(v);
+            out.attr("names") = names;
+            return out;
+        }
+        case RESOLVE_VALUE_LIST: {
+            int64_t n = resolve_list_size(v);
+            List out(n);
+            for (int64_t i = 0; i < n; ++i) out[i] = value_to_r(resolve_list_at(v, i));
+            return out;
         }
     }
-    return out;
+    return R_NilValue;
 }
 
-// 1-D int64 tensor -> R IntegerVector. Narrows to 32-bit int and warns on
-// overflow (mirrors tensor_to_r_imat). Used for class codes / fold indices.
-inline IntegerVector tensor_to_r_ivec(const torch::Tensor& t) {
-    torch::Tensor cpu = t.cpu().contiguous().to(torch::kInt64);
-    int64_t* data = cpu.data_ptr<int64_t>();
-    IntegerVector out(cpu.numel());
-    for (int64_t i = 0; i < cpu.numel(); ++i) {
-        const int64_t v = data[i];
-        if (v > std::numeric_limits<int>::max() ||
-            v < std::numeric_limits<int>::min()) {
-            Rcpp::warning("tensor_to_r_ivec: value out of int range, "
-                          "narrowed: %lld", static_cast<long long>(v));
+// Take ownership of a C-returned value tree: stop on NULL (error), convert, free.
+inline RObject value_to_r_owned(resolve_value_t* v) {
+    capi_check(v);
+    ValuePtr guard(v);
+    return value_to_r(v);
+}
+
+// =============================================================================
+// R object -> value tree (recursive). Used for config / roles / targets /
+// schema lists. Matrices never appear inside these, so only scalars / atomic
+// vectors / (named) lists are handled; method-argument matrices are set
+// explicitly via the matrix helpers below.
+// =============================================================================
+
+inline resolve_value_t* r_to_value(SEXP x) {
+    if (Rf_isNull(x)) return resolve_value_new_null();
+
+    switch (TYPEOF(x)) {
+        case LGLSXP: {
+            LogicalVector v(x);
+            if (v.size() == 1) return resolve_value_new_bool(v[0] == TRUE ? 1 : 0);
+            std::vector<int64_t> a(v.size());
+            for (R_xlen_t i = 0; i < v.size(); ++i) a[i] = (v[i] == TRUE) ? 1 : 0;
+            return resolve_value_new_int_array(a.data(), a.size());
         }
-        out[i] = static_cast<int>(v);
+        case INTSXP: {
+            IntegerVector v(x);
+            if (v.size() == 1) return resolve_value_new_int(v[0]);
+            std::vector<int64_t> a(v.begin(), v.end());
+            return resolve_value_new_int_array(a.data(), a.size());
+        }
+        case REALSXP: {
+            NumericVector v(x);
+            if (v.size() == 1) return resolve_value_new_double(v[0]);
+            std::vector<double> a(v.begin(), v.end());
+            return resolve_value_new_double_array(a.data(), a.size());
+        }
+        case STRSXP: {
+            CharacterVector v(x);
+            if (v.size() == 1) return resolve_value_new_string(
+                v[0] == NA_STRING ? "" : (const char*)CHAR(v[0]));
+            std::vector<std::string> s(v.size());
+            std::vector<const char*> p(v.size());
+            for (R_xlen_t i = 0; i < v.size(); ++i) {
+                s[i] = (v[i] == NA_STRING) ? "" : std::string(CHAR(v[i]));
+                p[i] = s[i].c_str();
+            }
+            return resolve_value_new_string_array(p.data(), p.size());
+        }
+        case VECSXP: {
+            List v(x);
+            bool named = v.hasAttribute("names");
+            if (named) {
+                resolve_value_t* map = resolve_value_new_map();
+                CharacterVector names = v.names();
+                for (R_xlen_t i = 0; i < v.size(); ++i) {
+                    std::string key = (names[i] == NA_STRING) ? std::string()
+                                                              : std::string(CHAR(names[i]));
+                    resolve_map_set_value(map, key.c_str(), r_to_value(v[i]));
+                }
+                return map;
+            }
+            resolve_value_t* lst = resolve_value_new_list();
+            for (R_xlen_t i = 0; i < v.size(); ++i)
+                resolve_list_append_value(lst, r_to_value(v[i]));
+            return lst;
+        }
+        default:
+            stop("r_to_value: unsupported R type (SEXPTYPE %d)", TYPEOF(x));
     }
-    return out;
+    return resolve_value_new_null();
 }
 
-// CategoricalVocab -> named R list. One entry per categorical column, keyed by
-// column name; each entry is an IntegerVector of codes whose names() are the
-// source strings. Single source of truth shared by the ResolveDataset, Trainer,
-// and Predictor categorical_vocab() accessors so R callers can re-encode raw
-// CSVs at inference with the exact codes the model was trained against.
-inline List categorical_vocab_to_list(const resolve::CategoricalVocab& vocab) {
+// Build a value MAP from a (possibly empty / R_NilValue) R list argument.
+inline resolve_value_t* r_list_to_value_map(SEXP x) {
+    if (Rf_isNull(x)) return resolve_value_new_map();
+    resolve_value_t* v = r_to_value(x);
+    if (resolve_value_kind(v) != RESOLVE_VALUE_MAP) {
+        // A zero-length list arrives untyped; normalize to an empty map.
+        resolve_value_free(v);
+        return resolve_value_new_map();
+    }
+    return v;
+}
+
+// =============================================================================
+// Method-argument tensor helpers: set R matrices / vectors into an input map.
+// Float tensors are passed as double matrices/arrays (the engine casts to
+// float32); integer id tensors as int64 matrices/arrays.
+// =============================================================================
+
+inline void map_set_num_matrix(resolve_value_t* map, const char* key, NumericMatrix x) {
+    int nr = x.nrow(), nc = x.ncol();
+    std::vector<double> buf(static_cast<size_t>(nr) * nc);
+    for (int i = 0; i < nr; ++i)
+        for (int j = 0; j < nc; ++j) buf[static_cast<size_t>(i) * nc + j] = x(i, j);
+    resolve_map_set_double_matrix(map, key, buf.data(), nr, nc);
+}
+inline void map_set_int_matrix(resolve_value_t* map, const char* key, IntegerMatrix x) {
+    int nr = x.nrow(), nc = x.ncol();
+    std::vector<int64_t> buf(static_cast<size_t>(nr) * nc);
+    for (int i = 0; i < nr; ++i)
+        for (int j = 0; j < nc; ++j) buf[static_cast<size_t>(i) * nc + j] = x(i, j);
+    resolve_map_set_int_matrix(map, key, buf.data(), nr, nc);
+}
+inline void map_set_num_vector(resolve_value_t* map, const char* key, NumericVector x) {
+    std::vector<double> buf(x.begin(), x.end());
+    resolve_map_set_double_array(map, key, buf.data(), static_cast<int64_t>(buf.size()));
+}
+
+// Optional-argument variants: only set the key when the argument is non-null.
+inline void map_set_opt_num_matrix(resolve_value_t* map, const char* key, Nullable<NumericMatrix> x) {
+    if (x.isNotNull()) map_set_num_matrix(map, key, as<NumericMatrix>(x));
+}
+inline void map_set_opt_int_matrix(resolve_value_t* map, const char* key, Nullable<IntegerMatrix> x) {
+    if (x.isNotNull()) map_set_int_matrix(map, key, as<IntegerMatrix>(x));
+}
+inline void map_set_opt_num_vector(resolve_value_t* map, const char* key, Nullable<NumericVector> x) {
+    if (x.isNotNull()) map_set_num_vector(map, key, as<NumericVector>(x));
+}
+
+// Fill the standard forward/predict input map (continuous required; the rest
+// optional). Shared by model.forward / get_latent / forward_with_aux,
+// trainer.predict, and the species/pool part of predictor.predict.
+inline void fill_forward_inputs(
+    resolve_value_t* in,
+    NumericMatrix continuous,
+    Nullable<IntegerMatrix> genus_ids, Nullable<IntegerMatrix> family_ids,
+    Nullable<IntegerMatrix> species_ids, Nullable<NumericMatrix> species_vector,
+    Nullable<IntegerMatrix> pool_genus_ids, Nullable<IntegerMatrix> pool_family_ids,
+    Nullable<NumericMatrix> pool_weights, Nullable<IntegerMatrix> pool_mask,
+    Nullable<NumericVector> pool_has_cover, Nullable<IntegerMatrix> categorical_ids) {
+    map_set_num_matrix(in, "continuous", continuous);
+    map_set_opt_int_matrix(in, "genus_ids", genus_ids);
+    map_set_opt_int_matrix(in, "family_ids", family_ids);
+    map_set_opt_int_matrix(in, "species_ids", species_ids);
+    map_set_opt_num_matrix(in, "species_vector", species_vector);
+    map_set_opt_int_matrix(in, "pool_genus_ids", pool_genus_ids);
+    map_set_opt_int_matrix(in, "pool_family_ids", pool_family_ids);
+    map_set_opt_num_matrix(in, "pool_weights", pool_weights);
+    map_set_opt_int_matrix(in, "pool_mask", pool_mask);
+    map_set_opt_num_vector(in, "pool_has_cover", pool_has_cover);
+    map_set_opt_int_matrix(in, "categorical_ids", categorical_ids);
+}
+
+// =============================================================================
+// categorical_vocab: the C facade returns a MAP { column -> MAP{string->int} }.
+// Reshape each inner map into a NAMED IntegerVector (codes named by the source
+// string), matching the old accessor's return shape.
+// =============================================================================
+
+inline List categorical_vocab_value_to_r(const resolve_value_t* v) {
     List out;
-    for (const auto& col : vocab.column_names()) {
-        const auto& m = vocab.column_map(col);
-        std::vector<std::string> keys;
-        std::vector<int> values;
-        keys.reserve(m.size());
-        values.reserve(m.size());
-        for (const auto& [k, v] : m) {
-            keys.push_back(k);
-            values.push_back(static_cast<int>(v));
+    if (v == nullptr || resolve_value_kind(v) != RESOLVE_VALUE_MAP) return out;
+    int64_t ncol = resolve_map_size(v);
+    for (int64_t c = 0; c < ncol; ++c) {
+        const char* col = resolve_map_key_at(v, c);
+        const resolve_value_t* inner = resolve_map_value_at(v, c);
+        int64_t k = resolve_map_size(inner);
+        IntegerVector codes(k);
+        CharacterVector keys(k);
+        for (int64_t i = 0; i < k; ++i) {
+            keys[i] = resolve_map_key_at(inner, i);
+            codes[i] = static_cast<int>(resolve_value_as_int(resolve_map_value_at(inner, i)));
         }
-        IntegerVector codes(values.begin(), values.end());
-        codes.attr("names") = wrap(keys);
+        codes.attr("names") = keys;
         out[col] = codes;
     }
     return out;
 }
 
-// =============================================================================
-// Enum conversions
-// =============================================================================
-
-// Generic string-to-enum parser. Avoids duplicating the same if/stop pattern
-// for every enum type. Entries is an initializer_list of {string, EnumValue}.
-template <typename EnumT>
-inline EnumT parse_enum(
-    const std::string& s,
-    std::initializer_list<std::pair<const char*, EnumT>> entries,
-    const char* type_name
-) {
-    for (const auto& [key, val] : entries) {
-        if (s == key) return val;
-    }
-    stop("Invalid " + std::string(type_name) + ": " + s);
-}
-
-inline resolve::SelectionMode parse_selection_mode(const std::string& s) {
-    return parse_enum<resolve::SelectionMode>(s, {
-        {"top", resolve::SelectionMode::Top},
-        {"bottom", resolve::SelectionMode::Bottom},
-        {"top_bottom", resolve::SelectionMode::TopBottom},
-        {"all", resolve::SelectionMode::All},
-    }, "selection mode");
-}
-
-inline resolve::RepresentationMode parse_representation_mode(const std::string& s) {
-    return parse_enum<resolve::RepresentationMode>(s, {
-        {"abundance", resolve::RepresentationMode::Abundance},
-        {"presence_absence", resolve::RepresentationMode::PresenceAbsence},
-    }, "representation mode");
-}
-
-inline resolve::NormalizationMode parse_normalization_mode(const std::string& s) {
-    return parse_enum<resolve::NormalizationMode>(s, {
-        {"raw", resolve::NormalizationMode::Raw},
-        {"norm", resolve::NormalizationMode::Norm},
-        {"log1p", resolve::NormalizationMode::Log1p},
-    }, "normalization mode");
-}
-
-inline resolve::AggregationMode parse_aggregation_mode(const std::string& s) {
-    return parse_enum<resolve::AggregationMode>(s, {
-        {"abundance", resolve::AggregationMode::Abundance},
-        {"count", resolve::AggregationMode::Count},
-    }, "aggregation mode");
-}
-
-inline resolve::PoolWeighting parse_pool_weighting(const std::string& s) {
-    return parse_enum<resolve::PoolWeighting>(s, {
-        {"binary", resolve::PoolWeighting::Binary},
-        {"abundance", resolve::PoolWeighting::Abundance},
-        {"log1p", resolve::PoolWeighting::Log1p},
-        {"norm", resolve::PoolWeighting::Norm},
-        {"rank", resolve::PoolWeighting::Rank},
-    }, "pool weighting");
-}
-
-inline resolve::TaskType parse_task_type(const std::string& s) {
-    return parse_enum<resolve::TaskType>(s, {
-        {"regression", resolve::TaskType::Regression},
-        {"classification", resolve::TaskType::Classification},
-    }, "task type");
-}
-
-inline resolve::TransformType parse_transform_type(const std::string& s) {
-    return parse_enum<resolve::TransformType>(s, {
-        {"none", resolve::TransformType::None},
-        {"log1p", resolve::TransformType::Log1p},
-    }, "transform type");
-}
-
-inline resolve::SpeciesEncodingMode parse_species_encoding_mode(const std::string& s) {
-    return parse_enum<resolve::SpeciesEncodingMode>(s, {
-        {"hash", resolve::SpeciesEncodingMode::Hash},
-        {"embed", resolve::SpeciesEncodingMode::Embed},
-        {"sparse", resolve::SpeciesEncodingMode::Sparse},
-        {"rank_pool", resolve::SpeciesEncodingMode::RankPool},
-        {"transformer", resolve::SpeciesEncodingMode::Transformer},
-    }, "species encoding mode");
-}
-
-inline resolve::LossConfigMode parse_loss_config_mode(const std::string& s) {
-    return parse_enum<resolve::LossConfigMode>(s, {
-        {"mae", resolve::LossConfigMode::MAE},
-        {"smape", resolve::LossConfigMode::SMAPE},
-        {"combined", resolve::LossConfigMode::Combined},
-        {"nca", resolve::LossConfigMode::NCA},
-    }, "loss config mode");
-}
-
-inline resolve::LRSchedulerType parse_lr_scheduler_type(const std::string& s) {
-    return parse_enum<resolve::LRSchedulerType>(s, {
-        {"none", resolve::LRSchedulerType::None},
-        {"step", resolve::LRSchedulerType::StepLR},
-        {"cosine", resolve::LRSchedulerType::CosineAnnealing},
-    }, "LR scheduler type");
-}
-
-// =============================================================================
-// Enum parsers: new enums for full R binding parity
-// =============================================================================
-
-inline resolve::MoERoutingType parse_moe_routing_type(const std::string& s) {
-    return parse_enum<resolve::MoERoutingType>(s, {
-        {"none", resolve::MoERoutingType::None},
-        {"soft", resolve::MoERoutingType::Soft},
-        {"topk", resolve::MoERoutingType::TopK},
-    }, "MoE routing type");
-}
-
-inline resolve::ActivationType parse_activation_type(const std::string& s) {
-    return parse_enum<resolve::ActivationType>(s, {
-        {"relu", resolve::ActivationType::ReLU},
-        {"leaky_relu", resolve::ActivationType::LeakyReLU},
-        {"gelu", resolve::ActivationType::GELU},
-        {"silu", resolve::ActivationType::SiLU},
-        {"tanh", resolve::ActivationType::Tanh},
-        {"mish", resolve::ActivationType::Mish},
-        {"elu", resolve::ActivationType::ELU},
-        {"selu", resolve::ActivationType::SELU},
-        {"softplus", resolve::ActivationType::Softplus},
-        {"prelu", resolve::ActivationType::PReLU},
-    }, "activation type");
-}
-
-inline resolve::NormLayerType parse_norm_layer_type(const std::string& s) {
-    return parse_enum<resolve::NormLayerType>(s, {
-        {"batch_norm", resolve::NormLayerType::BatchNorm},
-        {"layer_norm", resolve::NormLayerType::LayerNorm},
-        {"group_norm", resolve::NormLayerType::GroupNorm},
-        {"rms_norm", resolve::NormLayerType::RMSNorm},
-        {"none", resolve::NormLayerType::None},
-    }, "normalization layer type");
-}
-
-inline resolve::EncoderArchitecture parse_encoder_architecture(const std::string& s) {
-    return parse_enum<resolve::EncoderArchitecture>(s, {
-        {"mlp", resolve::EncoderArchitecture::MLP},
-        {"ft_transformer", resolve::EncoderArchitecture::FTTransformer},
-        {"tabnet", resolve::EncoderArchitecture::TabNet},
-        {"saint", resolve::EncoderArchitecture::SAINT},
-        {"trait_net", resolve::EncoderArchitecture::TraitNet},
-        {"gnn", resolve::EncoderArchitecture::GNN},
-        {"excelformer", resolve::EncoderArchitecture::ExcelFormer},
-        {"heterogeneous_gnn", resolve::EncoderArchitecture::HeterogeneousGNN},
-    }, "encoder architecture");
-}
-
-inline resolve::GNNType parse_gnn_type(const std::string& s) {
-    return parse_enum<resolve::GNNType>(s, {
-        {"gcn", resolve::GNNType::GCN},
-        {"gat", resolve::GNNType::GAT},
-        {"graphsage", resolve::GNNType::GraphSAGE},
-    }, "GNN type");
-}
-
-inline resolve::GraphConstructionMode parse_graph_construction_mode(const std::string& s) {
-    return parse_enum<resolve::GraphConstructionMode>(s, {
-        {"spatial", resolve::GraphConstructionMode::Spatial},
-        {"taxonomic", resolve::GraphConstructionMode::Taxonomic},
-        {"cooccurrence", resolve::GraphConstructionMode::CoOccurrence},
-    }, "graph construction mode");
-}
-
-inline resolve::TraitInteractionMode parse_trait_interaction_mode(const std::string& s) {
-    return parse_enum<resolve::TraitInteractionMode>(s, {
-        {"bilinear", resolve::TraitInteractionMode::Bilinear},
-        {"mlp", resolve::TraitInteractionMode::MLP},
-        {"attention", resolve::TraitInteractionMode::Attention},
-    }, "trait interaction mode");
-}
-
-inline resolve::ParallelAggregation parse_parallel_aggregation(const std::string& s) {
-    return parse_enum<resolve::ParallelAggregation>(s, {
-        {"concat", resolve::ParallelAggregation::Concat},
-        {"sum", resolve::ParallelAggregation::Sum},
-        {"mean", resolve::ParallelAggregation::Mean},
-        {"attention", resolve::ParallelAggregation::Attention},
-        {"gated", resolve::ParallelAggregation::Gated},
-    }, "parallel aggregation");
-}
-
-// =============================================================================
-// Sub-config parsers: R List -> C++ config struct
-// =============================================================================
-
-inline resolve::FTTransformerConfig parse_ft_transformer_config(List cfg) {
-    resolve::FTTransformerConfig c;
-    if (cfg.containsElementNamed("d_model")) c.d_model = cfg["d_model"];
-    if (cfg.containsElementNamed("n_heads")) c.n_heads = cfg["n_heads"];
-    if (cfg.containsElementNamed("n_layers")) c.n_layers = cfg["n_layers"];
-    if (cfg.containsElementNamed("attention_dropout")) c.attention_dropout = cfg["attention_dropout"];
-    if (cfg.containsElementNamed("ffn_dropout")) c.ffn_dropout = cfg["ffn_dropout"];
-    if (cfg.containsElementNamed("ffn_multiplier")) c.ffn_multiplier = cfg["ffn_multiplier"];
-    if (cfg.containsElementNamed("pre_norm")) c.pre_norm = cfg["pre_norm"];
-    return c;
-}
-
-inline resolve::TabNetConfig parse_tabnet_config(List cfg) {
-    resolve::TabNetConfig c;
-    if (cfg.containsElementNamed("n_steps")) c.n_steps = cfg["n_steps"];
-    if (cfg.containsElementNamed("n_d")) c.n_d = cfg["n_d"];
-    if (cfg.containsElementNamed("n_a")) c.n_a = cfg["n_a"];
-    if (cfg.containsElementNamed("relaxation_factor")) c.relaxation_factor = cfg["relaxation_factor"];
-    if (cfg.containsElementNamed("sparsity_coefficient")) c.sparsity_coefficient = cfg["sparsity_coefficient"];
-    if (cfg.containsElementNamed("virtual_batch_size")) c.virtual_batch_size = cfg["virtual_batch_size"];
-    if (cfg.containsElementNamed("use_sparsemax")) c.use_sparsemax = cfg["use_sparsemax"];
-    return c;
-}
-
-inline resolve::SAINTConfig parse_saint_config(List cfg) {
-    resolve::SAINTConfig c;
-    if (cfg.containsElementNamed("d_model")) c.d_model = cfg["d_model"];
-    if (cfg.containsElementNamed("n_heads")) c.n_heads = cfg["n_heads"];
-    if (cfg.containsElementNamed("n_layers")) c.n_layers = cfg["n_layers"];
-    if (cfg.containsElementNamed("attention_dropout")) c.attention_dropout = cfg["attention_dropout"];
-    if (cfg.containsElementNamed("use_row_attention")) c.use_row_attention = cfg["use_row_attention"];
-    if (cfg.containsElementNamed("use_contrastive_pretrain")) c.use_contrastive_pretrain = cfg["use_contrastive_pretrain"];
-    if (cfg.containsElementNamed("mixup_alpha")) c.mixup_alpha = cfg["mixup_alpha"];
-    return c;
-}
-
-inline resolve::GNNConfig parse_gnn_config(List cfg) {
-    resolve::GNNConfig c;
-    if (cfg.containsElementNamed("gnn_type")) c.gnn_type = parse_gnn_type(as<std::string>(cfg["gnn_type"]));
-    if (cfg.containsElementNamed("n_layers")) c.n_layers = cfg["n_layers"];
-    if (cfg.containsElementNamed("hidden_dim")) c.hidden_dim = cfg["hidden_dim"];
-    if (cfg.containsElementNamed("n_heads")) c.n_heads = cfg["n_heads"];
-    if (cfg.containsElementNamed("k_neighbors")) c.k_neighbors = cfg["k_neighbors"];
-    if (cfg.containsElementNamed("graph_mode")) c.graph_mode = parse_graph_construction_mode(as<std::string>(cfg["graph_mode"]));
-    if (cfg.containsElementNamed("edge_dropout")) c.edge_dropout = cfg["edge_dropout"];
-    if (cfg.containsElementNamed("use_edge_features")) c.use_edge_features = cfg["use_edge_features"];
-    return c;
-}
-
-inline resolve::TraitNetConfig parse_trait_net_config(List cfg) {
-    resolve::TraitNetConfig c;
-    if (cfg.containsElementNamed("env_dim")) c.env_dim = cfg["env_dim"];
-    if (cfg.containsElementNamed("trait_dim")) c.trait_dim = cfg["trait_dim"];
-    if (cfg.containsElementNamed("interaction_dim")) c.interaction_dim = cfg["interaction_dim"];
-    if (cfg.containsElementNamed("interaction")) c.interaction = parse_trait_interaction_mode(as<std::string>(cfg["interaction"]));
-    if (cfg.containsElementNamed("shared_trait_encoder")) c.shared_trait_encoder = cfg["shared_trait_encoder"];
-    return c;
-}
-
-inline resolve::ExcelFormerConfig parse_excelformer_config(List cfg) {
-    resolve::ExcelFormerConfig c;
-    if (cfg.containsElementNamed("d_model")) c.d_model = cfg["d_model"];
-    if (cfg.containsElementNamed("n_heads")) c.n_heads = cfg["n_heads"];
-    if (cfg.containsElementNamed("n_layers")) c.n_layers = cfg["n_layers"];
-    if (cfg.containsElementNamed("attention_dropout")) c.attention_dropout = cfg["attention_dropout"];
-    if (cfg.containsElementNamed("ffn_multiplier")) c.ffn_multiplier = cfg["ffn_multiplier"];
-    if (cfg.containsElementNamed("importance_threshold")) c.importance_threshold = cfg["importance_threshold"];
-    if (cfg.containsElementNamed("pre_norm")) c.pre_norm = cfg["pre_norm"];
-    return c;
-}
-
-inline resolve::HeterogeneousGNNConfig parse_heterogeneous_gnn_config(List cfg) {
-    resolve::HeterogeneousGNNConfig c;
-    if (cfg.containsElementNamed("hidden_dim")) c.hidden_dim = cfg["hidden_dim"];
-    if (cfg.containsElementNamed("output_dim")) c.output_dim = cfg["output_dim"];
-    if (cfg.containsElementNamed("n_layers")) c.n_layers = cfg["n_layers"];
-    if (cfg.containsElementNamed("n_edge_types")) c.n_edge_types = cfg["n_edge_types"];
-    if (cfg.containsElementNamed("n_heads")) c.n_heads = cfg["n_heads"];
-    if (cfg.containsElementNamed("dropout")) c.dropout = cfg["dropout"];
-    if (cfg.containsElementNamed("k_cooccurrence")) c.k_cooccurrence = cfg["k_cooccurrence"];
-    if (cfg.containsElementNamed("cooccurrence_threshold")) c.cooccurrence_threshold = cfg["cooccurrence_threshold"];
-    if (cfg.containsElementNamed("use_taxonomic_edges")) c.use_taxonomic_edges = cfg["use_taxonomic_edges"];
-    if (cfg.containsElementNamed("use_cooccurrence_edges")) c.use_cooccurrence_edges = cfg["use_cooccurrence_edges"];
-    return c;
-}
-
-inline resolve::TabMConfig parse_tabm_config(List cfg) {
-    resolve::TabMConfig c;
-    if (cfg.containsElementNamed("enabled")) c.enabled = cfg["enabled"];
-    if (cfg.containsElementNamed("n_ensembles")) c.n_ensembles = cfg["n_ensembles"];
-    if (cfg.containsElementNamed("aggregation")) c.aggregation = as<std::string>(cfg["aggregation"]);
-    return c;
-}
-
-inline resolve::ParallelBranchConfig parse_parallel_branch_config(List cfg) {
-    resolve::ParallelBranchConfig c;
-    if (cfg.containsElementNamed("hidden_dims")) c.hidden_dims = as<std::vector<int64_t>>(cfg["hidden_dims"]);
-    if (cfg.containsElementNamed("activation")) c.activation = parse_activation_type(as<std::string>(cfg["activation"]));
-    if (cfg.containsElementNamed("normalization")) c.normalization = parse_norm_layer_type(as<std::string>(cfg["normalization"]));
-    if (cfg.containsElementNamed("dropout")) c.dropout = cfg["dropout"];
-    if (cfg.containsElementNamed("branch_weight")) c.branch_weight = cfg["branch_weight"];
-    return c;
-}
-
-inline resolve::ParallelLayersConfig parse_parallel_layers_config(List cfg) {
-    resolve::ParallelLayersConfig c;
-    if (cfg.containsElementNamed("enabled")) c.enabled = cfg["enabled"];
-    if (cfg.containsElementNamed("branches")) {
-        List branches = cfg["branches"];
-        for (int i = 0; i < branches.size(); ++i) {
-            c.branches.push_back(parse_parallel_branch_config(as<List>(branches[i])));
-        }
-    }
-    if (cfg.containsElementNamed("aggregation")) c.aggregation = parse_parallel_aggregation(as<std::string>(cfg["aggregation"]));
-    if (cfg.containsElementNamed("attention_heads")) c.attention_heads = cfg["attention_heads"];
-    if (cfg.containsElementNamed("use_residual")) c.use_residual = cfg["use_residual"];
-    return c;
-}
-
-// =============================================================================
-// Result converters: C++ struct -> R List
-// =============================================================================
-
-inline List baseline_metrics_to_list(const resolve::BaselineMetrics& bm) {
-    return List::create(
-        Named("baseline_mse") = bm.baseline_mse,
-        Named("baseline_mae") = bm.baseline_mae,
-        Named("model_mse") = bm.model_mse,
-        Named("model_mae") = bm.model_mae,
-        Named("skill_score") = bm.skill_score,
-        Named("r_squared") = bm.r_squared,
-        Named("baseline_accuracy") = bm.baseline_accuracy,
-        Named("model_accuracy") = bm.model_accuracy,
-        Named("accuracy_lift") = bm.accuracy_lift,
-        Named("training_mean") = bm.training_mean,
-        Named("training_mode") = bm.training_mode
-    );
-}
-
-inline List layer_diagnostics_to_list(const resolve::LayerDiagnostics& ld) {
-    return List::create(
-        Named("name") = ld.name,
-        Named("n_neurons") = (int)ld.n_neurons,
-        Named("n_dead") = (int)ld.n_dead,
-        Named("n_saturated") = (int)ld.n_saturated,
-        Named("dead_fraction") = ld.dead_fraction,
-        Named("saturated_fraction") = ld.saturated_fraction,
-        Named("mean_activation") = ld.mean_activation,
-        Named("std_activation") = ld.std_activation,
-        Named("sparsity") = ld.sparsity
-    );
-}
-
-inline List network_diagnostics_to_list(const resolve::NetworkDiagnostics& nd) {
-    List layers_list;
-    for (const auto& ld : nd.layers) {
-        layers_list.push_back(layer_diagnostics_to_list(ld));
-    }
-    return List::create(
-        Named("layers") = layers_list,
-        Named("total_neurons") = (int)nd.total_neurons,
-        Named("total_dead") = (int)nd.total_dead,
-        Named("total_saturated") = (int)nd.total_saturated,
-        Named("overall_dead_fraction") = nd.overall_dead_fraction,
-        Named("overall_saturated_fraction") = nd.overall_saturated_fraction,
-        Named("has_issues") = nd.has_issues,
-        Named("summary") = nd.summary
-    );
-}
-
-inline List nested_metrics_to_list(
-    const std::unordered_map<std::string, std::unordered_map<std::string, float>>& metrics
-) {
-    List result;
-    for (const auto& [target, metric_map] : metrics) {
-        List inner;
-        for (const auto& [metric, value] : metric_map) {
-            inner[metric] = value;
-        }
-        result[target] = inner;
-    }
-    return result;
-}
-
-// Convert a persisted TrainConfig (from Trainer::load_train_config) to an R
-// list. Mirrors RTrainer::get_config but covers every field save_train_config
-// writes. Enums are returned as their integer codes (LossConfigMode /
-// LRSchedulerType), matching how the config-list parser accepts them.
-inline List train_config_to_list(const resolve::TrainConfig& c) {
-    return List::create(
-        Named("batch_size") = c.batch_size,
-        Named("batch_size_floor") = c.batch_size_floor,
-        Named("max_epochs") = c.max_epochs,
-        Named("patience") = c.patience,
-        Named("lr") = c.lr,
-        Named("weight_decay") = c.weight_decay,
-        Named("phase_boundaries") =
-            IntegerVector::create(c.phase_boundaries.first, c.phase_boundaries.second),
-        Named("loss_config") = static_cast<int>(c.loss_config),
-        Named("lr_scheduler") = static_cast<int>(c.lr_scheduler),
-        Named("lr_step_size") = c.lr_step_size,
-        Named("lr_gamma") = c.lr_gamma,
-        Named("lr_min") = c.lr_min,
-        Named("vram_fraction") = c.vram_fraction,
-        Named("band_thresholds") =
-            NumericVector(c.band_thresholds.begin(), c.band_thresholds.end())
-    );
-}
-
-// Convert RunMetadata (from Trainer::load_run_metadata) to an R list. int64
-// plot counts are returned as doubles (R has no native int64; the values are
-// well within double's exact-integer range).
-inline List run_metadata_to_list(const resolve::RunMetadata& m) {
-    return List::create(
-        Named("resolve_version") = m.resolve_version,
-        Named("created_at") = m.created_at,
-        Named("completed_at") = m.completed_at,
-        Named("train_time_seconds") = m.train_time_seconds,
-        Named("n_plots_train") = static_cast<double>(m.n_plots_train),
-        Named("n_plots_test") = static_cast<double>(m.n_plots_test),
-        Named("best_epoch") = m.best_epoch,
-        Named("total_epochs") = m.total_epochs,
-        Named("final_metrics") = nested_metrics_to_list(m.final_metrics)
-    );
-}
-
-inline List train_result_to_list(const resolve::TrainResult& tr) {
-    // Baselines
-    List baselines;
-    for (const auto& [target, bm] : tr.baselines) {
-        baselines[target] = baseline_metrics_to_list(bm);
-    }
-
-    return List::create(
-        Named("best_epoch") = tr.best_epoch,
-        Named("final_metrics") = nested_metrics_to_list(tr.final_metrics),
-        Named("train_loss") = wrap(tr.train_loss_history),
-        Named("test_loss") = wrap(tr.test_loss_history),
-        Named("train_time_seconds") = tr.train_time_seconds,
-        Named("resumed_from_epoch") = tr.resumed_from_epoch,
-        Named("baselines") = baselines,
-        Named("diagnostics") = network_diagnostics_to_list(tr.diagnostics)
-    );
-}
-
-inline List calibration_bin_to_list(const resolve::CalibrationBin& cb) {
-    return List::create(
-        Named("bin_start") = cb.bin_start,
-        Named("bin_end") = cb.bin_end,
-        Named("mean_predicted_prob") = cb.mean_predicted_prob,
-        Named("actual_frequency") = cb.actual_frequency,
-        Named("count") = (int)cb.count
-    );
-}
-
-inline List calibration_result_to_list(const resolve::CalibrationResult& cr) {
-    List bins;
-    for (const auto& b : cr.bins) {
-        bins.push_back(calibration_bin_to_list(b));
-    }
-    return List::create(
-        Named("target_name") = cr.target_name,
-        Named("class_idx") = cr.class_idx,
-        Named("bins") = bins,
-        Named("expected_calibration_error") = cr.expected_calibration_error,
-        Named("max_calibration_error") = cr.max_calibration_error
-    );
-}
-
-inline List residual_analysis_to_list(const resolve::ResidualAnalysis& ra) {
-    return List::create(
-        Named("target_name") = ra.target_name,
-        Named("predictions") = wrap(ra.predictions),
-        Named("actuals") = wrap(ra.actuals),
-        Named("residuals") = wrap(ra.residuals),
-        Named("mean_residual") = ra.mean_residual,
-        Named("std_residual") = ra.std_residual,
-        Named("skewness") = ra.skewness,
-        Named("kurtosis") = ra.kurtosis,
-        Named("q05") = ra.q05,
-        Named("q25") = ra.q25,
-        Named("q50") = ra.q50,
-        Named("q75") = ra.q75,
-        Named("q95") = ra.q95
-    );
-}
-
-inline List classification_predictions_to_list(const resolve::ClassificationPredictions& cp) {
-    List result;
-    result["target_name"] = cp.target_name;
-    result["class_names"] = wrap(cp.class_names);
-    // Raw model class codes (0-based), not R indices; mirror the C++ engine.
-    result["predictions"] =
-        (cp.predicted_classes.defined() && cp.predicted_classes.numel() > 0)
-            ? tensor_to_r_ivec(cp.predicted_classes) : IntegerVector(0);
-    result["actuals"] =
-        (cp.actuals.defined() && cp.actuals.numel() > 0)
-            ? tensor_to_r_ivec(cp.actuals) : IntegerVector(0);
-    result["probabilities"] =
-        (cp.probabilities.defined() && cp.probabilities.numel() > 0)
-            ? tensor_to_r_mat(cp.probabilities) : NumericMatrix(0, 0);
-    return result;
-}
-
-inline List cross_validation_result_to_list(const resolve::CrossValidationResult& cvr) {
-    List fold_results;
-    for (const auto& fr : cvr.fold_results) {
-        fold_results.push_back(train_result_to_list(fr));
-    }
-    return List::create(
-        Named("n_folds") = cvr.n_folds,
-        Named("mean_metrics") = nested_metrics_to_list(cvr.mean_metrics),
-        Named("std_metrics") = nested_metrics_to_list(cvr.std_metrics),
-        Named("fold_results") = fold_results,
-        Named("total_time_seconds") = cvr.total_time_seconds
-    );
-}
-
-inline List scalers_to_list(const resolve::Scalers& s) {
-    List result;
-    if (s.continuous_mean.defined()) {
-        result["continuous_mean"] = tensor_to_r_vec(s.continuous_mean);
-    }
-    if (s.continuous_scale.defined()) {
-        result["continuous_scale"] = tensor_to_r_vec(s.continuous_scale);
-    }
-    return result;
-}
-
-inline resolve::RunMetadata parse_run_metadata(List cfg) {
-    resolve::RunMetadata rm;
-    if (cfg.containsElementNamed("created_at")) rm.created_at = as<std::string>(cfg["created_at"]);
-    if (cfg.containsElementNamed("completed_at")) rm.completed_at = as<std::string>(cfg["completed_at"]);
-    if (cfg.containsElementNamed("train_time_seconds")) rm.train_time_seconds = cfg["train_time_seconds"];
-    if (cfg.containsElementNamed("n_plots_train")) rm.n_plots_train = cfg["n_plots_train"];
-    if (cfg.containsElementNamed("n_plots_test")) rm.n_plots_test = cfg["n_plots_test"];
-    if (cfg.containsElementNamed("best_epoch")) rm.best_epoch = cfg["best_epoch"];
-    if (cfg.containsElementNamed("total_epochs")) rm.total_epochs = cfg["total_epochs"];
-    return rm;
-}
-
-inline resolve::SpatialBlockConfig parse_spatial_block_config(List cfg) {
-    resolve::SpatialBlockConfig c;
-    if (cfg.containsElementNamed("lat_size")) c.lat_size = cfg["lat_size"];
-    if (cfg.containsElementNamed("lon_size")) c.lon_size = cfg["lon_size"];
-    if (cfg.containsElementNamed("balance")) c.balance = cfg["balance"];
-    return c;
-}
-
-#endif // RCPP_COMMON_HPP
+#endif // RCPP_COMMON_H

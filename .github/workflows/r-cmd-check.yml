@@ -5,13 +5,21 @@ on:
     branches: [main, master]
     paths:
       - 'r/**'
+      - 'src/core/**'
       - '.github/workflows/r-cmd-check.yml'
   pull_request:
     branches: [main, master]
     paths:
       - 'r/**'
+      - 'src/core/**'
   workflow_dispatch:
 
+# Issue #17: the R package is a thin client over the prebuilt `resolve_c` C ABI
+# shared library; it never compiles the engine or links libtorch directly. Every
+# platform builds resolve_c the same way (CPU libtorch, OpenMP off) and links
+# it -- a single C-client path, including Windows, where mingw consumes the
+# MSVC-built import library. This is the acceptance test for the issue: a green
+# Windows R-CMD-check.
 jobs:
   R-CMD-check:
     runs-on: ${{ matrix.config.os }}
@@ -23,19 +31,16 @@ jobs:
           - {os: ubuntu-latest, r: 'release'}
           - {os: ubuntu-latest, r: 'devel'}
           - {os: macos-latest, r: 'release'}
-          # Windows R CMD check is intentionally not in the matrix.
-          # Upstream libtorch only ships an MSVC-built prebuilt for Windows,
-          # while R packages on Windows must be compiled with rtools45 (mingw
-          # gcc 14.3). The two ABIs are incompatible: mingw gcc rejects the
-          # inline `wrap()` definitions in <torch/csrc/jit/ir/ir.h> that are
-          # marked TORCH_API (dllimport) with a hard error
-          # ("definition is marked dllimport"). This is a libtorch upstream
-          # limitation, not a resolve bug. Python bindings use MSVC and work
-          # fine on Windows; see .github/workflows/tests.yml.
+          - {os: windows-latest, r: 'release'}
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
+      NOT_CRAN: true
+      # Run the heavy (skip_on_cran) tests, but skip the remote CRAN
+      # incoming-feasibility check (a network name-conflict probe vs
+      # Bioconductor's RESOLVE, unrelated to build correctness).
+      _R_CHECK_CRAN_INCOMING_REMOTE_: false
 
     steps:
       - uses: actions/checkout@v4
@@ -47,32 +52,80 @@ jobs:
           r-version: ${{ matrix.config.r }}
           use-public-rspm: true
 
+      # ---- libtorch (CPU) -------------------------------------------------
       - name: Download libtorch (Linux)
         if: runner.os == 'Linux'
+        shell: bash
         run: |
           wget -q https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.6.0%2Bcpu.zip
           unzip -q libtorch-cxx11-abi-shared-with-deps-2.6.0+cpu.zip
-          echo "LIBTORCH_PATH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
-          # rcmdcheck's "loading the freshly built .so" smoke test runs a
-          # fresh R process; -ltorch / -ltorch_cpu / -lc10 are recorded as
-          # NEEDED but their absolute path isn't, so the loader needs
-          # LD_LIBRARY_PATH to find them. Without this the test errors with
-          # "libtorch_cpu.so: cannot open shared object file" even though
-          # the .so itself compiled and linked successfully.
-          echo "LD_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+          echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
 
       - name: Download libtorch (macOS)
         if: runner.os == 'macOS'
+        shell: bash
         run: |
           wget -q https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.6.0.zip
           unzip -q libtorch-macos-arm64-2.6.0.zip
-          echo "LIBTORCH_PATH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
-          # macOS uses DYLD_LIBRARY_PATH (and DYLD_FALLBACK_LIBRARY_PATH).
-          # SIP strips DYLD_* from inherited environments when spawning
-          # system binaries, but the R session itself launches the dyn.load
-          # call inside the same process tree, so the path is honored.
-          echo "DYLD_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:$DYLD_LIBRARY_PATH" >> $GITHUB_ENV
-          echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:$DYLD_FALLBACK_LIBRARY_PATH" >> $GITHUB_ENV
+          echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
+
+      - name: Download libtorch (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          curl -sSL -o libtorch.zip https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.6.0%2Bcpu.zip
+          7z x -y libtorch.zip > /dev/null
+          echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
+
+      # ---- build the resolve_c C ABI shared library -----------------------
+      # Same flags on every platform: CPU libtorch, OpenMP off, only the
+      # resolve_c target. The R bindings never call fuzzy::query_batch (the only
+      # OpenMP user), and a CUDA/OpenMP-heavy DLL is unstable inside the R
+      # process -- see dev_notes/issue17_c_abi_facade_design.md.
+      - name: Build resolve_c (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cmake -S src/core -B build_c \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_PYTHON=OFF -DBUILD_CLI=OFF -DBUILD_TESTS=OFF \
+            -DBUILD_R_CAPI=ON -DUSE_CUDA=OFF -DRESOLVE_USE_OPENMP=OFF \
+            -DTorch_DIR="$LIBTORCH/share/cmake/Torch"
+          cmake --build build_c --target resolve_c --parallel 2
+          echo "RESOLVE_C_HOME=${{ github.workspace }}/build_c" >> $GITHUB_ENV
+
+      # Windows uses the Visual Studio generator (always available on
+      # windows-latest; needs no Ninja or manual MSVC env). The MSVC-built DLL +
+      # import library land in build_c/Release/.
+      - name: Build resolve_c (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cmake -S src/core -B build_c -G "Visual Studio 17 2022" -A x64 \
+            -DBUILD_PYTHON=OFF -DBUILD_CLI=OFF -DBUILD_TESTS=OFF \
+            -DBUILD_R_CAPI=ON -DUSE_CUDA=OFF -DRESOLVE_USE_OPENMP=OFF \
+            -DTorch_DIR="$LIBTORCH/share/cmake/Torch"
+          cmake --build build_c --config Release --target resolve_c
+          echo "RESOLVE_C_HOME=${{ github.workspace }}/build_c/Release" >> $GITHUB_ENV
+          echo "RESOLVE_C_LIB=${{ github.workspace }}/build_c/Release/resolve_c.lib" >> $GITHUB_ENV
+
+      # ---- loader path so the freshly built resolve.so/.dll finds its deps -
+      - name: Configure loader path (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: echo "LD_LIBRARY_PATH=${{ github.workspace }}/build_c:${{ github.workspace }}/libtorch/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+
+      - name: Configure loader path (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          echo "DYLD_LIBRARY_PATH=${{ github.workspace }}/build_c:${{ github.workspace }}/libtorch/lib:$DYLD_LIBRARY_PATH" >> $GITHUB_ENV
+          echo "DYLD_FALLBACK_LIBRARY_PATH=${{ github.workspace }}/build_c:${{ github.workspace }}/libtorch/lib:$DYLD_FALLBACK_LIBRARY_PATH" >> $GITHUB_ENV
+
+      - name: Configure loader path (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "${{ github.workspace }}/build_c/Release" >> $GITHUB_PATH
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
@@ -81,33 +134,11 @@ jobs:
             any::rcmdcheck
             any::testthat
 
-      - name: Bundle C++ core into R package
-        run: |
-          # Public headers under include/resolve/ are bundled as a subdir so
-          # `#include "resolve/*.hpp"` from .cpp files resolves correctly.
-          cp -r src/core/include/resolve r/src/resolve
-          # Implementation sources from cpp_src/ are copied flat into r/src/.
-          # Both .cpp files and private headers (e.g. fuzzy_internal.h, which
-          # is shared by fuzzy_automaton.cpp / fuzzy_index.cpp /
-          # fuzzy_search.cpp) must be included; otherwise the build fails
-          # with "fuzzy_internal.h: No such file or directory".
-          #
-          # Headers use the .h extension (not .hpp) because R CMD check
-          # --as-cran flags any .hpp file directly under src/ as an
-          # "unlikely file name for src files". The header is plain C++ —
-          # the extension is purely a CRAN-compatibility convention.
-          for f in src/core/cpp_src/*.cpp src/core/cpp_src/*.h; do
-            [ -e "$f" ] || continue
-            cp "$f" "r/src/$(basename "$f")"
-          done
-
       - name: Check R package
         uses: r-lib/actions/check-r-package@v2
         with:
           working-directory: r
-          args: 'c("--no-manual", "--as-cran", "--no-vignettes")'
-          build_args: 'c("--no-manual", "--no-build-vignettes")'
+          args: 'c("--no-manual", "--as-cran")'
+          build_args: 'c("--no-manual")'
           error-on: '"error"'
           check-dir: '"check"'
-        env:
-          LIBTORCH_PATH: ${{ env.LIBTORCH_PATH }}

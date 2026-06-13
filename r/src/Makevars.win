@@ -1,6 +1,17 @@
+# Makevars.win for the resolve R package (issue #17).
+#
+# The package is a thin client over the MSVC-built `resolve_c` shared library
+# (a flat C ABI over the engine). It no longer compiles the engine or links
+# libtorch directly -- mingw cannot consume libtorch's MSVC C++ ABI. The only
+# engine header is the vendored, pure-C resolve/resolve_capi.h under src/.
+#
+#   RESOLVE_C_LIB : full path to the resolve_c import library (resolve_c.lib on
+#                   Windows). mingw links the MSVC import library directly.
+#   RESOLVE_C_HOME: directory holding resolve_c.dll + the libtorch runtime DLLs;
+#                   used as a fallback to locate the import lib and must be on
+#                   PATH at load time (see R/zzz.R).
 CXX_STD = CXX17
 
-PKG_CXXFLAGS = -I"$(LIBTORCH_PATH)/include" -I"$(LIBTORCH_PATH)/include/torch/csrc/api/include" \
-               -I. -DNOMINMAX -D_USE_MATH_DEFINES
+PKG_CPPFLAGS = -I.
 
-PKG_LIBS = -L"$(LIBTORCH_PATH)/lib" -ltorch -ltorch_cpu -lc10
+PKG_LIBS = "$(RESOLVE_C_LIB)"

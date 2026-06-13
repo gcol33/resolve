@@ -10,238 +10,167 @@ vignette: >
 ---
 
 ```{r setup, include = FALSE}
+# The code below is illustrative: it shows the current API but is not executed
+# when the vignette is built (it needs the prebuilt resolve_c library and is
+# covered by the test suite). `purl = FALSE` keeps the code-running check from
+# tangling and executing it.
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  eval = FALSE
+  eval = FALSE,
+  purl = FALSE
 )
 ```
 
 ## Introduction
 
-RESOLVE (**R**epresentation **E**ncoding of **S**pecies **O**utcomes via **L**inear **V**ector **E**mbeddings) predicts plot-level environmental attributes from species composition data. It treats species composition as *biotic context*—a rich, structured signal that encodes information about plot attributes.
+RESOLVE predicts sample-level outcomes from compositional data: species lists,
+item sets, or any variable-length categorical input. It encodes the composition
+into a learned representation and trains a multi-task model on top of it. The R
+package is a thin client over the C++ engine.
 
 ## Installation
 
+The R package links a prebuilt `resolve_c` shared library (the C ABI over the
+engine). Build it from the monorepo `src/core` and point the package at it:
+
 ```{r install}
-# Install from GitHub
 remotes::install_github("gcol33/resolve", subdir = "r")
 ```
 
 ## Quick Start
 
-### Prepare Your Data
+RESOLVE reads two CSV files:
 
-RESOLVE requires two CSV files:
+1. **Header file**: one row per sample (plot) with an ID, optional coordinates
+   and covariates, and the target columns.
+2. **Species file**: one row per species-in-sample occurrence with a sample ID,
+   a species ID, and an optional abundance.
 
-1. **Header file**: One row per plot with plot ID, coordinates, covariates, and target variables
-2. **Species file**: One row per species-plot occurrence with species ID, plot ID, and abundance
-
-```{r data-structure}
-# Example header file structure
-header <- data.frame(
-  plot_id = c("P001", "P002", "P003"),
-  longitude = c(4.35, 4.36, 4.37),
-  latitude = c(50.85, 50.86, 50.87),
-  elevation = c(100, 120, 95),
-  biomass = c(45.2, 52.1, 38.7)
-)
-
-# Example species file structure
-species <- data.frame(
-  plot_id = c("P001", "P001", "P002", "P002", "P003"),
-  species = c("Quercus robur", "Fagus sylvatica", "Quercus robur",
-              "Pinus sylvestris", "Fagus sylvatica"),
-  cover = c(40, 25, 35, 45, 60),
-  genus = c("Quercus", "Fagus", "Quercus", "Pinus", "Fagus"),
-  family = c("Fagaceae", "Fagaceae", "Fagaceae", "Pinaceae", "Fagaceae")
-)
-```
-
-### Load and Configure Dataset
+### Load a dataset
 
 ```{r load-data}
 library(resolve)
 
-# Define column roles
-roles <- list(
-  plotId = "plot_id",
-  speciesId = "species",
-  speciesPlotId = "plot_id",
-  abundance = "cover",
-  genus = "genus",
-  family = "family",
-  x = "longitude",
-  y = "latitude"
-)
-
-# Define prediction targets
-targets <- list(
-  biomass = list(
-    column = "biomass",
-    task = "regression",
-    transform = "log1p"
+dataset <- resolve.dataset.csv(
+  header  = "header.csv",
+  species = "species.csv",
+  roles = list(
+    plot_id    = "plot_id",
+    species_id = "species_id",
+    abundance  = "cover",
+    longitude  = "lon",
+    latitude   = "lat",
+    genus      = "genus",
+    family     = "family"
+  ),
+  targets = list(
+    area = list(column = "area", task = "regression", transform = "log1p")
+  ),
+  config = list(
+    species_encoding = "hash",
+    hash_dim = 32,
+    top_k = 5
   )
 )
 
-# Create dataset
-dataset <- resolve.dataset(
-  header = "path/to/header.csv",
-  species = "path/to/species.csv",
-  roles = roles,
-  targets = targets,
-  hashDim = 32,
-  topK = 5
-)
-
-# Check dataset schema
-print(dataset$schema)
+# Inspect the inferred schema
+str(dataset$schema())
 ```
 
-### Train a Model
+### Train a model
+
+`resolve.train.dataset()` builds a model from the dataset's schema, trains it,
+and returns the trainer, the training result, and the dataset.
 
 ```{r train}
-# Train with default parameters
-result <- resolve.train(
+fit <- resolve.train.dataset(
   dataset,
-  maxEpochs = 500,
-  patience = 50,
-  batchSize = 4096,
-  device = "cpu",  # Use "cuda" for GPU
-  verbose = TRUE
+  hiddenDims = c(256, 128, 64),
+  maxEpochs  = 200,
+  patience   = 25,
+  batchSize  = 4096,
+  device     = "cpu",      # "cuda" is available via the GPU build of resolve_c
+  lossConfig = "mae",
+  verbose    = TRUE
 )
 
-# View training results
-print(result$result$final_metrics)
+fit$result$final_metrics
 
-# Save the model
-resolve.save(result, "my_model.pt")
+# Persist the trained model
+resolve.save(fit$trainer, "model.pt")
 ```
 
-### Make Predictions
+### Predict
 
 ```{r predict}
-# Load a saved model
-predictor <- resolve.load("my_model.pt")
+predictor <- resolve.load("model.pt")
 
-# Prepare new data
-new_dataset <- resolve.dataset(
-  header = "path/to/new_header.csv",
-  species = "path/to/new_species.csv",
-  roles = roles,
-  targets = targets
+# Encode new data against the same vocabularies the model was trained on
+new_dataset <- resolve.dataset.csv(
+  header  = "new_header.csv",
+  species = "new_species.csv",
+  roles   = list(plot_id = "plot_id", species_id = "species_id"),
+  targets = list(area = list(column = "area", task = "regression")),
+  schemaSource = dataset
 )
 
-# Generate predictions
-predictions <- resolve.predict(
-  predictor,
-  new_dataset,
-  outputSpace = "raw"  # Inverse-transform to original scale
-)
-
-# View predictions
-head(predictions$biomass)
+preds <- resolve.predict.dataset(predictor, new_dataset)
+head(preds$predictions$area)
 ```
 
-## Species Encoding Options
+## Species encoding modes
 
-RESOLVE supports two species encoding strategies:
+The `species_encoding` config field selects how a sample's species set is
+turned into features:
 
-### Hash Encoding (Default)
+```{r encoding-modes}
+# Feature hashing (default): fixed width, handles unseen species
+config_hash <- list(species_encoding = "hash", hash_dim = 64)
 
-Feature hashing creates a fixed-dimension representation regardless of species vocabulary size. This is memory-efficient and handles unseen species gracefully.
+# Learned per-species embeddings of the top-k species
+config_embed <- list(species_encoding = "embed", top_k_species = 20)
 
-```{r hash-encoding}
-result <- resolve.train(
-  dataset,
-  speciesEncoding = "hash",
-  hashDim = 64  # Increase for larger vocabularies
-)
+# Rank-pooled species embeddings with weighted pooling
+config_pool <- list(species_encoding = "rank_pool", pool_weighting = "log1p")
 ```
 
-### Learned Embeddings
+## Multi-task learning
 
-For datasets with consistent species vocabularies, learned embeddings can capture species-specific patterns.
-
-```{r embed-encoding}
-result <- resolve.train(
-  dataset,
-  speciesEncoding = "embed"
-)
-```
-
-## Confidence-Based Predictions
-
-RESOLVE tracks the fraction of unknown species per plot. Use confidence thresholds to filter unreliable predictions:
-
-```{r confidence}
-# Only return predictions for plots with >50% known species
-predictions <- resolve.predict(
-  predictor,
-  new_dataset,
-  confidenceThreshold = 0.5
-)
-
-# Predictions below threshold are set to NA
-sum(is.na(predictions$biomass))
-```
-
-## Multi-Task Learning
-
-RESOLVE supports simultaneous prediction of multiple targets:
+Pass several targets to predict them jointly:
 
 ```{r multi-task}
 targets <- list(
-  biomass = list(
-    column = "biomass",
-    task = "regression",
-    transform = "log1p"
-  ),
-  habitat = list(
-    column = "habitat_class",
-    task = "classification"
-  )
+  area = list(column = "area", task = "regression", transform = "log1p"),
+  habitat = list(column = "habitat_class", task = "classification")
 )
-
-dataset <- resolve.dataset(
-  header = "header.csv",
-  species = "species.csv",
-  roles = roles,
-  targets = targets
-)
-
-result <- resolve.train(dataset)
 ```
 
-## Loss Configuration
-
-Three loss configurations are available for regression tasks:
+## Loss configurations
 
 ```{r loss-config}
-# Pure MAE loss (default, stable training)
-result <- resolve.train(dataset, lossConfig = "mae")
+# Pure MAE (default, stable)
+fit <- resolve.train.dataset(dataset, lossConfig = "mae")
 
-# SMAPE loss (scale-invariant)
-result <- resolve.train(dataset, lossConfig = "smape")
+# SMAPE (scale-invariant)
+fit <- resolve.train.dataset(dataset, lossConfig = "smape")
 
-# Phased training: MAE -> MAE+SMAPE -> MAE+SMAPE+band penalty
-result <- resolve.train(dataset, lossConfig = "combined")
+# Phased: MAE -> MAE + SMAPE -> MAE + SMAPE + band penalty
+fit <- resolve.train.dataset(dataset, lossConfig = "combined")
 ```
 
-## GPU Acceleration
+## Metrics
 
-For large datasets, enable CUDA acceleration:
+The package exposes the engine's metric helpers for evaluating predictions:
 
-```{r gpu}
-result <- resolve.train(
-  dataset,
-  device = "cuda",
-  batchSize = 8192  # Larger batches for GPU
-)
+```{r metrics}
+resolve:::resolve_mae(pred, actual)
+resolve:::resolve_rmse(pred, actual)
+resolve:::resolve_smape(pred, actual)
 ```
 
-## Session Info
+## Session info
 
-```{r session-info, eval=TRUE}
+```{r session-info, eval = TRUE, purl = FALSE}
 sessionInfo()
 ```

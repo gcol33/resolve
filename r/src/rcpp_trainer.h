@@ -1,4 +1,4 @@
-// rcpp_trainer.h - RTrainer class wrapper
+// rcpp_trainer.h - RTrainer wrapper (thin C-facade client).
 #ifndef RCPP_TRAINER_H
 #define RCPP_TRAINER_H
 
@@ -6,331 +6,125 @@
 #include "rcpp_model.h"
 #include "rcpp_dataset.h"
 
-// =============================================================================
-// Trainer class wrapper
-// =============================================================================
-
 class RTrainer {
 public:
     RTrainer(RResolveModel& model, List config_list) {
-        resolve::TrainConfig config;
-        if (config_list.containsElementNamed("batch_size")) {
-            config.batch_size = config_list["batch_size"];
-        }
-        if (config_list.containsElementNamed("max_epochs")) {
-            config.max_epochs = config_list["max_epochs"];
-        }
-        if (config_list.containsElementNamed("patience")) {
-            config.patience = config_list["patience"];
-        }
-        if (config_list.containsElementNamed("lr")) {
-            config.lr = config_list["lr"];
-        }
-        if (config_list.containsElementNamed("weight_decay")) {
-            config.weight_decay = config_list["weight_decay"];
-        }
-        if (config_list.containsElementNamed("device")) {
-            std::string dev = as<std::string>(config_list["device"]);
-            config.device = (dev == "cuda") ? torch::kCUDA : torch::kCPU;
-        }
-        if (config_list.containsElementNamed("loss_config")) {
-            config.loss_config = parse_loss_config_mode(
-                as<std::string>(config_list["loss_config"]));
-        }
-        if (config_list.containsElementNamed("lr_scheduler")) {
-            config.lr_scheduler = parse_lr_scheduler_type(
-                as<std::string>(config_list["lr_scheduler"]));
-        }
-        if (config_list.containsElementNamed("lr_step_size")) {
-            config.lr_step_size = config_list["lr_step_size"];
-        }
-        if (config_list.containsElementNamed("lr_gamma")) {
-            config.lr_gamma = config_list["lr_gamma"];
-        }
-        if (config_list.containsElementNamed("lr_min")) {
-            config.lr_min = config_list["lr_min"];
-        }
-        // Phase boundaries
-        if (config_list.containsElementNamed("phase_boundaries")) {
-            IntegerVector pb = config_list["phase_boundaries"];
-            if (pb.size() >= 2) {
-                config.phase_boundaries = {pb[0], pb[1]};
-            }
-        }
-        // Band thresholds
-        if (config_list.containsElementNamed("band_thresholds")) {
-            config.band_thresholds = as<std::vector<float>>(config_list["band_thresholds"]);
-        }
-        // Checkpointing
-        if (config_list.containsElementNamed("checkpoint_dir")) {
-            config.checkpoint_dir = as<std::string>(config_list["checkpoint_dir"]);
-        }
-        if (config_list.containsElementNamed("checkpoint_every")) {
-            config.checkpoint_every = config_list["checkpoint_every"];
-        }
-        // AMP
-        if (config_list.containsElementNamed("use_amp")) {
-            config.use_amp = config_list["use_amp"];
-        }
-        if (config_list.containsElementNamed("amp_init_scale")) {
-            config.amp_init_scale = as<float>(config_list["amp_init_scale"]);
-        }
-        if (config_list.containsElementNamed("amp_growth_factor")) {
-            config.amp_growth_factor = as<float>(config_list["amp_growth_factor"]);
-        }
-        if (config_list.containsElementNamed("amp_backoff_factor")) {
-            config.amp_backoff_factor = as<float>(config_list["amp_backoff_factor"]);
-        }
-        if (config_list.containsElementNamed("amp_growth_interval")) {
-            config.amp_growth_interval = config_list["amp_growth_interval"];
-        }
-        // CUDA opts
-        if (config_list.containsElementNamed("cudnn_benchmark")) {
-            config.cudnn_benchmark = config_list["cudnn_benchmark"];
-        }
-        if (config_list.containsElementNamed("allow_tf32")) {
-            config.allow_tf32 = config_list["allow_tf32"];
-        }
-        if (config_list.containsElementNamed("vram_fraction")) {
-            config.vram_fraction = as<float>(config_list["vram_fraction"]);
-        }
-        // batch_size_floor mirrors TrainConfig.batch_size_floor in the
-        // nanobind binding. Auto-halve-on-OOM stops dropping at this floor;
-        // see TrainConfig in types.hpp.
-        if (config_list.containsElementNamed("batch_size_floor")) {
-            config.batch_size_floor = config_list["batch_size_floor"];
-        }
-
-        trainer_ = std::make_unique<resolve::Trainer>(*(model.model()), config);
+        ValuePtr config(r_list_to_value_map(config_list));
+        trainer_ = capi_own(resolve_trainer_create(model.handle(), config.get()),
+                            resolve_trainer_free);
     }
 
     void prepare_data(
-        NumericMatrix coordinates,
-        NumericMatrix covariates,
-        NumericMatrix hash_embedding,
-        Nullable<IntegerMatrix> species_ids,
-        Nullable<NumericMatrix> species_vector,
-        Nullable<IntegerMatrix> genus_ids,
-        Nullable<IntegerMatrix> family_ids,
-        Nullable<NumericVector> unknown_fraction,
-        Nullable<NumericVector> unknown_count,
-        List targets,
-        Nullable<IntegerMatrix> categorical_ids = R_NilValue,
-        double test_size = 0.2,
-        int seed = 42
-    ) {
-        torch::Tensor coords_t = r_mat_to_tensor(coordinates);
-        torch::Tensor covs_t = r_mat_to_tensor(covariates);
-        torch::Tensor hash_t = r_mat_to_tensor(hash_embedding);
-
-        torch::Tensor species_id_t, species_vec_t, genus_t, family_t, unk_frac_t, unk_cnt_t;
-        torch::Tensor cat_ids_t;
-
-        if (species_ids.isNotNull()) {
-            species_id_t = r_int_mat_to_tensor(as<IntegerMatrix>(species_ids));
-        }
-        if (species_vector.isNotNull()) {
-            species_vec_t = r_mat_to_tensor(as<NumericMatrix>(species_vector));
-        }
-        if (genus_ids.isNotNull()) {
-            genus_t = r_int_mat_to_tensor(as<IntegerMatrix>(genus_ids));
-        }
-        if (family_ids.isNotNull()) {
-            family_t = r_int_mat_to_tensor(as<IntegerMatrix>(family_ids));
-        }
-        if (unknown_fraction.isNotNull()) {
-            unk_frac_t = r_vec_to_tensor(as<NumericVector>(unknown_fraction));
-        }
-        if (unknown_count.isNotNull()) {
-            unk_cnt_t = r_vec_to_tensor(as<NumericVector>(unknown_count));
-        }
-        if (categorical_ids.isNotNull()) {
-            cat_ids_t = r_int_mat_to_tensor(as<IntegerMatrix>(categorical_ids));
-        }
-
-        // Convert targets list to map
-        std::unordered_map<std::string, torch::Tensor> target_map;
-        CharacterVector target_names = targets.names();
-        for (int i = 0; i < targets.size(); ++i) {
-            std::string name = as<std::string>(target_names[i]);
-            target_map[name] = r_vec_to_tensor(as<NumericVector>(targets[i]));
-        }
-
-        trainer_->prepare_data(
-            coords_t, covs_t, hash_t, species_id_t, species_vec_t,
-            genus_t, family_t, unk_frac_t, unk_cnt_t,
-            target_map,
-            /*pool_genus_ids=*/{}, /*pool_family_ids=*/{},
-            /*pool_weights=*/{}, /*pool_mask=*/{}, /*pool_has_cover=*/{},
-            cat_ids_t,
-            static_cast<float>(test_size), seed
-        );
+        NumericMatrix coordinates, NumericMatrix covariates, NumericMatrix hash_embedding,
+        Nullable<IntegerMatrix> species_ids, Nullable<NumericMatrix> species_vector,
+        Nullable<IntegerMatrix> genus_ids, Nullable<IntegerMatrix> family_ids,
+        Nullable<NumericVector> unknown_fraction, Nullable<NumericVector> unknown_count,
+        List targets, Nullable<IntegerMatrix> categorical_ids = R_NilValue,
+        double test_size = 0.2, int seed = 42) {
+        ValuePtr in(resolve_value_new_map());
+        map_set_num_matrix(in.get(), "coordinates", coordinates);
+        map_set_num_matrix(in.get(), "covariates", covariates);
+        map_set_num_matrix(in.get(), "hash_embedding", hash_embedding);
+        map_set_opt_int_matrix(in.get(), "species_ids", species_ids);
+        map_set_opt_num_matrix(in.get(), "species_vector", species_vector);
+        map_set_opt_int_matrix(in.get(), "genus_ids", genus_ids);
+        map_set_opt_int_matrix(in.get(), "family_ids", family_ids);
+        map_set_opt_num_vector(in.get(), "unknown_fraction", unknown_fraction);
+        map_set_opt_num_vector(in.get(), "unknown_count", unknown_count);
+        map_set_opt_int_matrix(in.get(), "categorical_ids", categorical_ids);
+        set_targets(in.get(), targets);
+        capi_check_status(resolve_trainer_prepare_data(trainer_.get(), in.get(), test_size, seed));
     }
 
-    // Prepare data with pool fields (for rank_pool / transformer modes)
     void prepare_data_pool(
-        NumericMatrix continuous,
-        IntegerMatrix species_ids,
-        Nullable<IntegerMatrix> pool_genus_ids,
-        Nullable<IntegerMatrix> pool_family_ids,
-        NumericMatrix pool_weights,
-        IntegerMatrix pool_mask,
-        NumericVector pool_has_cover,
-        Nullable<NumericVector> unknown_fraction,
-        List targets,
+        NumericMatrix continuous, IntegerMatrix species_ids,
+        Nullable<IntegerMatrix> pool_genus_ids, Nullable<IntegerMatrix> pool_family_ids,
+        NumericMatrix pool_weights, IntegerMatrix pool_mask, NumericVector pool_has_cover,
+        Nullable<NumericVector> unknown_fraction, List targets,
         Nullable<IntegerMatrix> categorical_ids = R_NilValue,
-        double test_size = 0.2,
-        int seed = 42
-    ) {
-        torch::Tensor cont_t = r_mat_to_tensor(continuous);
-        torch::Tensor sp_ids_t = r_int_mat_to_tensor(species_ids);
-        torch::Tensor p_weights_t = r_mat_to_tensor(pool_weights);
-        torch::Tensor p_mask_t = r_int_mat_to_tensor(pool_mask).to(torch::kBool);
-        torch::Tensor p_cover_t = r_vec_to_tensor(pool_has_cover);
-        torch::Tensor p_genus_t, p_family_t, unk_frac_t, cat_ids_t;
-
-        if (pool_genus_ids.isNotNull()) p_genus_t = r_int_mat_to_tensor(as<IntegerMatrix>(pool_genus_ids));
-        if (pool_family_ids.isNotNull()) p_family_t = r_int_mat_to_tensor(as<IntegerMatrix>(pool_family_ids));
-        if (unknown_fraction.isNotNull()) unk_frac_t = r_vec_to_tensor(as<NumericVector>(unknown_fraction));
-        if (categorical_ids.isNotNull()) cat_ids_t = r_int_mat_to_tensor(as<IntegerMatrix>(categorical_ids));
-
-        std::unordered_map<std::string, torch::Tensor> target_map;
-        CharacterVector target_names = targets.names();
-        for (int i = 0; i < targets.size(); ++i) {
-            target_map[as<std::string>(target_names[i])] = r_vec_to_tensor(as<NumericVector>(targets[i]));
-        }
-
-        trainer_->prepare_data(
-            cont_t,
-            /*covariates=*/{}, /*hash_embedding=*/{},
-            sp_ids_t, /*species_vector=*/{},
-            /*genus_ids=*/{}, /*family_ids=*/{},
-            unk_frac_t, /*unknown_count=*/{},
-            target_map,
-            p_genus_t, p_family_t, p_weights_t, p_mask_t, p_cover_t,
-            cat_ids_t,
-            static_cast<float>(test_size), seed
-        );
+        double test_size = 0.2, int seed = 42) {
+        // The pool path feeds the continuous features through the engine's
+        // "coordinates" slot (matches the original prepare_data_pool wiring).
+        ValuePtr in(resolve_value_new_map());
+        map_set_num_matrix(in.get(), "coordinates", continuous);
+        map_set_int_matrix(in.get(), "species_ids", species_ids);
+        map_set_opt_int_matrix(in.get(), "pool_genus_ids", pool_genus_ids);
+        map_set_opt_int_matrix(in.get(), "pool_family_ids", pool_family_ids);
+        map_set_num_matrix(in.get(), "pool_weights", pool_weights);
+        map_set_int_matrix(in.get(), "pool_mask", pool_mask);
+        map_set_num_vector(in.get(), "pool_has_cover", pool_has_cover);
+        map_set_opt_num_vector(in.get(), "unknown_fraction", unknown_fraction);
+        map_set_opt_int_matrix(in.get(), "categorical_ids", categorical_ids);
+        set_targets(in.get(), targets);
+        capi_check_status(resolve_trainer_prepare_data(trainer_.get(), in.get(), test_size, seed));
     }
 
-    // Prepare data from ResolveDataset (matches Python API)
-    void prepare_data_from_dataset(
-        RResolveDataset& dataset,
-        double test_size = 0.2,
-        int seed = 42
-    ) {
-        trainer_->prepare_data(*(dataset.dataset()), static_cast<float>(test_size), seed);
+    void prepare_data_from_dataset(RResolveDataset& dataset, double test_size = 0.2, int seed = 42) {
+        capi_check_status(resolve_trainer_prepare_data_from_dataset(
+            trainer_.get(), dataset.handle(), test_size, seed));
     }
 
-    List fit() {
-        auto result = trainer_->fit();
-        return train_result_to_list(result);
-    }
+    RObject fit() { return value_to_r_owned(resolve_trainer_fit(trainer_.get())); }
 
     void save(std::string path, Nullable<List> metadata = R_NilValue) {
         if (metadata.isNotNull()) {
-            auto rm = parse_run_metadata(as<List>(metadata));
-            trainer_->save(path, &rm);
+            ValuePtr md(r_list_to_value_map(as<List>(metadata)));
+            capi_check_status(resolve_trainer_save(trainer_.get(), path.c_str(), md.get()));
         } else {
-            trainer_->save(path);
+            capi_check_status(resolve_trainer_save(trainer_.get(), path.c_str(), nullptr));
         }
     }
 
-    // Accessors
-    List get_scalers() const {
-        return scalers_to_list(trainer_->scalers());
+    RObject get_scalers()   const { return get("scalers"); }
+    RObject get_config()    const { return get("config"); }
+    RObject test_indices()  const { return get("test_indices"); }
+    RObject train_indices() const { return get("train_indices"); }
+    RObject test_plot_ids() const { return get("test_plot_ids"); }
+    RObject train_plot_ids() const { return get("train_plot_ids"); }
+
+    List categorical_vocab() const {
+        ValuePtr v(resolve_trainer_get(trainer_.get(), "categorical_vocab"));
+        capi_check(v.get());
+        return categorical_vocab_value_to_r(v.get());
     }
 
-    List get_config() const {
-        const auto& c = trainer_->config();
-        // After Trainer::fit() the `batch_size` field is the EFFECTIVE batch
-        // size (post-halve-on-OOM), so it doubles as the "what actually
-        // trained" value. `batch_size_floor` is the configured retry floor.
-        return List::create(
-            Named("batch_size") = c.batch_size,
-            Named("batch_size_floor") = c.batch_size_floor,
-            Named("max_epochs") = c.max_epochs,
-            Named("patience") = c.patience,
-            Named("lr") = c.lr,
-            Named("weight_decay") = c.weight_decay,
-            Named("device") = c.device.is_cuda() ? "cuda" : "cpu",
-            Named("vram_fraction") = c.vram_fraction
-        );
+    RObject compute_diagnostics() {
+        ValuePtr args(resolve_value_new_map());
+        return value_to_r_owned(resolve_trainer_compute(trainer_.get(), "diagnostics", args.get()));
+    }
+    RObject compute_calibration(std::string target_name, int n_bins = 10) {
+        ValuePtr args(resolve_value_new_map());
+        resolve_map_set_string(args.get(), "target_name", target_name.c_str());
+        resolve_map_set_int(args.get(), "n_bins", n_bins);
+        return value_to_r_owned(resolve_trainer_compute(trainer_.get(), "calibration", args.get()));
+    }
+    RObject compute_residuals(std::string target_name) {
+        ValuePtr args(resolve_value_new_map());
+        resolve_map_set_string(args.get(), "target_name", target_name.c_str());
+        return value_to_r_owned(resolve_trainer_compute(trainer_.get(), "residuals", args.get()));
+    }
+    RObject compute_classification_predictions(std::string target_name) {
+        ValuePtr args(resolve_value_new_map());
+        resolve_map_set_string(args.get(), "target_name", target_name.c_str());
+        return value_to_r_owned(resolve_trainer_compute(
+            trainer_.get(), "classification_predictions", args.get()));
     }
 
-    // Diagnostic / evaluation methods
-    List compute_diagnostics() {
-        auto diag = trainer_->compute_diagnostics();
-        return network_diagnostics_to_list(diag);
+    void load_state(std::string path, std::string device = "cpu", double vram_fraction = 1.0) {
+        capi_check_status(resolve_trainer_load_state(
+            trainer_.get(), path.c_str(), device.c_str(), vram_fraction));
     }
 
-    List compute_calibration(std::string target_name, int n_bins = 10) {
-        auto result = trainer_->compute_calibration(target_name, n_bins);
-        return calibration_result_to_list(result);
+    RObject cross_validate(int n_folds = 5, int seed = 42) {
+        return value_to_r_owned(resolve_trainer_cross_validate(trainer_.get(), n_folds, seed));
+    }
+    RObject cross_validate_spatial(List spatial_config_list, int n_folds = 5, int seed = 42) {
+        ValuePtr cfg(r_list_to_value_map(spatial_config_list));
+        return value_to_r_owned(resolve_trainer_cross_validate_spatial(
+            trainer_.get(), cfg.get(), n_folds, seed));
     }
 
-    List compute_residuals(std::string target_name) {
-        auto result = trainer_->compute_residuals(target_name);
-        return residual_analysis_to_list(result);
-    }
-
-    List compute_classification_predictions(std::string target_name) {
-        auto result = trainer_->compute_classification_predictions(target_name);
-        return classification_predictions_to_list(result);
-    }
-
-    // Load checkpoint weights/scalers/categorical-vocab into this trainer in
-    // place. First-class replacement for the static load() (whose tuple
-    // return has no Rcpp converter). The trainer's model architecture must
-    // already match the checkpoint.
-    void load_state(std::string path, std::string device = "cpu",
-                    double vram_fraction = 1.0) {
-        torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
-        trainer_->load_state(path, dev, static_cast<float>(vram_fraction));
-    }
-
-    // Recover the persisted training config / run metadata from a checkpoint
-    // without loading the model (issue #14). Static — registered as free
-    // functions (resolve_rcpp.cpp) since no trainer instance is needed.
-    static List load_train_config(std::string path) {
-        return train_config_to_list(resolve::Trainer::load_train_config(path));
-    }
-    static List load_run_metadata(std::string path) {
-        return run_metadata_to_list(resolve::Trainer::load_run_metadata(path));
-    }
-
-    // Global plot indices (into the dataset's plot order) for each fold.
-    IntegerVector test_indices() {
-        auto t = trainer_->test_indices();
-        if (!t.defined() || t.numel() == 0) return IntegerVector(0);
-        return tensor_to_r_ivec(t);
-    }
-    IntegerVector train_indices() {
-        auto t = trainer_->train_indices();
-        if (!t.defined() || t.numel() == 0) return IntegerVector(0);
-        return tensor_to_r_ivec(t);
-    }
-
-    // Plot IDs per fold (empty unless prepare_data_from_dataset was used).
-    CharacterVector test_plot_ids() {
-        return wrap(trainer_->test_plot_ids());
-    }
-    CharacterVector train_plot_ids() {
-        return wrap(trainer_->train_plot_ids());
-    }
-
-    List cross_validate(int n_folds = 5, int seed = 42) {
-        auto result = trainer_->cross_validate(n_folds, seed);
-        return cross_validation_result_to_list(result);
-    }
-
-    List cross_validate_spatial(List spatial_config_list, int n_folds = 5, int seed = 42) {
-        auto config = parse_spatial_block_config(spatial_config_list);
-        auto result = trainer_->cross_validate_spatial(config, n_folds, seed);
-        return cross_validation_result_to_list(result);
-    }
-
-    List predict_from_trainer(
+    RObject predict_from_trainer(
         NumericMatrix continuous,
         Nullable<IntegerMatrix> genus_ids = R_NilValue,
         Nullable<IntegerMatrix> family_ids = R_NilValue,
@@ -341,42 +135,39 @@ public:
         Nullable<NumericMatrix> pool_weights = R_NilValue,
         Nullable<IntegerMatrix> pool_mask = R_NilValue,
         Nullable<NumericVector> pool_has_cover = R_NilValue,
-        Nullable<IntegerMatrix> categorical_ids = R_NilValue
-    ) {
-        torch::Tensor cont_t = r_mat_to_tensor(continuous);
-        torch::Tensor genus_t, family_t, species_id_t, species_vec_t;
-        torch::Tensor pg, pf, pw, pm, ph, cat_ids_t;
-        if (genus_ids.isNotNull()) genus_t = r_int_mat_to_tensor(as<IntegerMatrix>(genus_ids));
-        if (family_ids.isNotNull()) family_t = r_int_mat_to_tensor(as<IntegerMatrix>(family_ids));
-        if (species_ids.isNotNull()) species_id_t = r_int_mat_to_tensor(as<IntegerMatrix>(species_ids));
-        if (species_vector.isNotNull()) species_vec_t = r_mat_to_tensor(as<NumericMatrix>(species_vector));
-        if (pool_genus_ids.isNotNull()) pg = r_int_mat_to_tensor(as<IntegerMatrix>(pool_genus_ids));
-        if (pool_family_ids.isNotNull()) pf = r_int_mat_to_tensor(as<IntegerMatrix>(pool_family_ids));
-        if (pool_weights.isNotNull()) pw = r_mat_to_tensor(as<NumericMatrix>(pool_weights));
-        if (pool_mask.isNotNull()) pm = r_int_mat_to_tensor(as<IntegerMatrix>(pool_mask)).to(torch::kBool);
-        if (pool_has_cover.isNotNull()) ph = r_vec_to_tensor(as<NumericVector>(pool_has_cover));
-        if (categorical_ids.isNotNull()) cat_ids_t = r_int_mat_to_tensor(as<IntegerMatrix>(categorical_ids));
-
-        auto result = trainer_->predict(cont_t, genus_t, family_t, species_id_t, species_vec_t,
-                                        pg, pf, pw, pm, ph, cat_ids_t);
-        List outputs;
-        for (const auto& [name, tensor] : result) {
-            outputs[name] = tensor_to_r_vec(tensor);
-        }
-        return outputs;
+        Nullable<IntegerMatrix> categorical_ids = R_NilValue) {
+        ValuePtr in(resolve_value_new_map());
+        fill_forward_inputs(in.get(), continuous, genus_ids, family_ids, species_ids, species_vector,
+                            pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+                            categorical_ids);
+        return value_to_r_owned(resolve_trainer_predict(trainer_.get(), in.get()));
     }
 
-    // Categorical vocabulary captured at prepare_data time, as a named list
-    // (column -> codes named by source string). Lets R callers re-encode raw
-    // CSVs for inference with the exact codes the model was trained against.
-    List categorical_vocab() const {
-        return categorical_vocab_to_list(trainer_->categorical_vocab());
+    static List load_train_config(std::string path) {
+        return as<List>(value_to_r_owned(resolve_load_train_config(path.c_str())));
     }
-
-    resolve::Trainer& trainer() { return *trainer_; }
+    static List load_run_metadata(std::string path) {
+        return as<List>(value_to_r_owned(resolve_load_run_metadata(path.c_str())));
+    }
 
 private:
-    std::unique_ptr<resolve::Trainer> trainer_;
+    RObject get(const char* what) const {
+        return value_to_r_owned(resolve_trainer_get(trainer_.get(), what));
+    }
+    static void set_targets(resolve_value_t* in, List targets) {
+        resolve_value_t* tmap = resolve_value_new_map();
+        CharacterVector names = targets.names();
+        for (R_xlen_t i = 0; i < targets.size(); ++i) {
+            std::string name = std::string(names[i]);
+            NumericVector v = as<NumericVector>(targets[i]);
+            std::vector<double> buf(v.begin(), v.end());
+            resolve_map_set_double_array(tmap, name.c_str(), buf.data(),
+                                         static_cast<int64_t>(buf.size()));
+        }
+        resolve_map_set_value(in, "targets", tmap);
+    }
+
+    std::shared_ptr<resolve_trainer_t> trainer_;
 };
 
-#endif // RCPP_TRAINER_HPP
+#endif // RCPP_TRAINER_H

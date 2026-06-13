@@ -115,8 +115,11 @@ src/core/build_asan/
 # CMake test files
 *.cmd
 
-# Copied C++ headers in R package (CI only)
-r/src/resolve/
+# Vendored C facade header for the R package (issue #17). Only resolve_capi.h
+# lives here now and it is a tracked, load-bearing source file (the package's
+# only engine header); track it but ignore any other copied headers.
+r/src/resolve/*
+!r/src/resolve/resolve_capi.h
 benchmarks/results_*.json
 
 # Load-bearing tracked files inside otherwise-ignored locations.

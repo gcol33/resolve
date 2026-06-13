@@ -1,43 +1,23 @@
-// resolve_rcpp.cpp - Main entry point and module registration
+// resolve_rcpp.cpp - Module registration + free functions.
+//
+// Issue #17: the R bindings are now a thin client over the `resolve_c` C ABI
+// (resolve/resolve_capi.h). No libtorch C++ header is included anywhere under
+// r/src/. The Rcpp module surface (class / method / free-function names and R
+// argument types) is identical to the libtorch-linked version, so R/resolve.R
+// and the testthat suite are unchanged.
 // [[Rcpp::plugins(cpp17)]]
 
-// Include all class wrappers
 #include "rcpp_common.h"
 #include "rcpp_dataset.h"
 #include "rcpp_model.h"
 #include "rcpp_trainer.h"
 #include "rcpp_predictor.h"
 
-#include <cstdlib>
-#include <string>
-//
-// The legacy standalone `SpeciesEncoder` wrapper (rcpp_encoder.h) bound a
-// `resolve::SpeciesEncoder` class that has since been split in the C++ core
-// into `resolve::RankPoolEncoder` (variable-length plot encoder) and
-// `resolve::EmbeddingEncoder` (fixed top-k encoder), neither of which is a
-// drop-in replacement for the old unified API (no hash_embedding output,
-// no save/load, different state surface). The R-side `resolve.encoder()`
-// facade is also a Python-POC mirror; the canonical modern path is
-// `resolve.dataset.csv()` which dispatches to `resolve::ResolveDataset::from_csv()`
-// and performs encoding inside the C++ engine. The standalone wrapper is
-// therefore removed until a full port is done (which would also need to add
-// save/load on the new C++ encoders); calling `resolve.encoder()` from R
-// raises a clear error pointing at the modern path.
-
 // =============================================================================
-// Expose module-managed wrapper classes to non-module Rcpp machinery.
-//
-// Free `function(name, &Class::factory)` registrations inside RCPP_MODULE() are
-// translated by Rcpp into ordinary CppFunction calls, which dispatch through
-// the generic Rcpp::wrap()/Rcpp::as(). Without an explicit specialization those
-// fail with "cannot convert type to SEXP" for module-managed classes, because
-// Rcpp::wrap() does not know how to box a foreign C++ type into an S4 object.
-//
-// RCPP_EXPOSED_CLASS_NODECL emits the Rcpp::wrap() and Rcpp::as() traits that
-// route through the module's S4 representation (the same Reference Class object
-// you get from new(.resolve_module$ClassName)), so factory-style functions can
-// return wrapper instances by value. The classes themselves are already
-// forward-defined via the rcpp_*.h includes above.
+// Expose module-managed wrapper classes to non-module Rcpp machinery so the
+// factory-style free functions (from_csv, load, ...) can return wrappers by
+// value. See the previous implementation's note: RCPP_EXPOSED_CLASS_NODECL
+// emits the wrap()/as() traits routing through the module's S4 representation.
 // =============================================================================
 
 RCPP_EXPOSED_CLASS_NODECL(RResolveDataset)
@@ -45,12 +25,7 @@ RCPP_EXPOSED_CLASS_NODECL(RResolveModel)
 RCPP_EXPOSED_CLASS_NODECL(RTrainer)
 RCPP_EXPOSED_CLASS_NODECL(RPredictor)
 
-// =============================================================================
-// Module exports via Rcpp modules
-// =============================================================================
-
 RCPP_MODULE(resolve_module) {
-    // ResolveDataset - high-level data loading (mirrors Python ResolveDataset)
     class_<RResolveDataset>("ResolveDataset")
         .method("coordinates", &RResolveDataset::coordinates, "Get coordinate matrix")
         .method("covariates", &RResolveDataset::covariates, "Get covariate matrix")
@@ -79,7 +54,6 @@ RCPP_MODULE(resolve_module) {
     function("ResolveDataset_from_species_csv", &RResolveDataset::from_species_csv, "Load dataset from single species CSV");
     function("ResolveDataset_from_csv_with_schema", &RResolveDataset::from_csv_with_schema, "Load dataset reusing another dataset's vocabularies and class mappings");
 
-    // ResolveModel
     class_<RResolveModel>("ResolveModel")
         .constructor<List, List>("Create a ResolveModel")
         .method("forward", &RResolveModel::forward, "Forward pass")
@@ -102,7 +76,6 @@ RCPP_MODULE(resolve_module) {
         .method("get_species_weights", &RResolveModel::get_species_weights, "Get species embedding weights")
         ;
 
-    // Trainer
     class_<RTrainer>("Trainer")
         .constructor<RResolveModel&, List>("Create a Trainer")
         .method("prepare_data", &RTrainer::prepare_data, "Prepare training data from tensors")
@@ -127,7 +100,6 @@ RCPP_MODULE(resolve_module) {
         .method("predict_from_trainer", &RTrainer::predict_from_trainer, "Make predictions using trainer's model")
         ;
 
-    // Predictor
     class_<RPredictor>("Predictor")
         .method("predict", &RPredictor::predict, "Make predictions from tensors")
         .method("predict_dataset", &RPredictor::predict_dataset, "Make predictions from ResolveDataset")
@@ -149,40 +121,28 @@ RCPP_MODULE(resolve_module) {
 }
 
 // =============================================================================
-// Package initialization
+// Free functions (exported via compileAttributes)
 // =============================================================================
 
 // [[Rcpp::export]]
 std::string resolve_version() {
-    return resolve::VERSION;
+    return std::string(resolve_capi_version());
 }
 
 // Cap the PyTorch CUDA caching allocator at `fraction` of device VRAM.
-// fraction must be in (0, 1]; 1.0 disables the cap. device_index = -1L
-// uses the current CUDA device. No-op on CPU-only builds or when no
-// CUDA device is present.
+// fraction in (0, 1]; 1.0 disables the cap. device_index = -1L uses the current
+// CUDA device. No-op on CPU-only builds.
 // [[Rcpp::export]]
 void resolve_set_vram_fraction(double fraction, int device_index = -1) {
-    resolve::set_vram_fraction(fraction, device_index);
+    capi_check_status(resolve_capi_set_vram_fraction(fraction, device_index));
 }
 
 //' Configure the PyTorch CUDA caching allocator
 //'
 //' Set the \code{PYTORCH_CUDA_ALLOC_CONF} environment variable to a
-//' platform-aware default. Linux/macOS get \code{expandable_segments:True,}
-//' prefixed; on Windows that prefix is intentionally omitted because the
-//' cuMemMap-backed expandable-segments allocator is not implemented (libtorch
-//' warns \dQuote{expandable_segments not supported on this platform}). The
-//' baseline \code{garbage_collection_threshold:0.8,max_split_size_mb:256}
-//' helps reduce reserved-but-unallocated fragmentation on both platforms.
-//'
-//' Mirrors \code{resolve_core.configure_cuda_allocator} in Python, with one
-//' caveat: the R/Rcpp binding loads libtorch via the package's shared library,
-//' which triggers torch initialization. By the time this function runs the
-//' PyTorch CUDA caching allocator has typically already initialized and read
-//' its config exactly once, so changes here are best-effort and may not affect
-//' the running allocator. To force the default before torch initializes, set
-//' \code{Sys.setenv(PYTORCH_CUDA_ALLOC_CONF = "...")} before \code{library(resolve)}.
+//' platform-aware default (Linux/macOS get an \code{expandable_segments:True,}
+//' prefix; Windows omits it). Best-effort: if torch already initialized its
+//' allocator, the change may not take effect for the running process.
 //'
 //' @param force If \code{TRUE}, overwrite any existing
 //'   \code{PYTORCH_CUDA_ALLOC_CONF}; default \code{FALSE} only sets when unset.
@@ -191,19 +151,8 @@ void resolve_set_vram_fraction(double fraction, int device_index = -1) {
 //' @export
 // [[Rcpp::export]]
 std::string resolve_configure_cuda_allocator(bool force = false) {
-    std::string base = "garbage_collection_threshold:0.8,max_split_size_mb:256";
-#if !defined(_WIN32)
-    base = "expandable_segments:True," + base;
-#endif
-
-    const char* existing = std::getenv("PYTORCH_CUDA_ALLOC_CONF");
-    if (force || existing == nullptr || existing[0] == '\0') {
-#if defined(_WIN32)
-        _putenv_s("PYTORCH_CUDA_ALLOC_CONF", base.c_str());
-#else
-        setenv("PYTORCH_CUDA_ALLOC_CONF", base.c_str(), 1);
-#endif
-        return base;
-    }
-    return std::string(existing);
+    resolve_value_t* v = resolve_capi_configure_cuda_allocator(force ? 1 : 0);
+    capi_check(v);
+    ValuePtr guard(v);
+    return std::string(resolve_value_as_string(v));
 }

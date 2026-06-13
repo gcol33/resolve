@@ -17,12 +17,15 @@ LinkingTo:
     Rcpp
 Imports:
     Rcpp (>= 1.0.0),
-    jsonlite
+    jsonlite,
+    methods
 Suggests:
     testthat (>= 3.0.0),
     knitr,
     rmarkdown
 VignetteBuilder: knitr
 Config/testthat/edition: 3
-SystemRequirements: libtorch (>= 2.0)
+SystemRequirements: resolve_c shared library (the C ABI over the RESOLVE engine,
+    which bundles libtorch >= 2.0); built from src/core and located via the
+    RESOLVE_C_HOME / RESOLVE_C_LIB environment variables at install time.
 LazyData: false
