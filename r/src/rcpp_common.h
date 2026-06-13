@@ -665,20 +665,6 @@ inline List scalers_to_list(const resolve::Scalers& s) {
     return result;
 }
 
-inline List run_metadata_to_list(const resolve::RunMetadata& rm) {
-    return List::create(
-        Named("resolve_version") = rm.resolve_version,
-        Named("created_at") = rm.created_at,
-        Named("completed_at") = rm.completed_at,
-        Named("train_time_seconds") = rm.train_time_seconds,
-        Named("n_plots_train") = (int)rm.n_plots_train,
-        Named("n_plots_test") = (int)rm.n_plots_test,
-        Named("best_epoch") = rm.best_epoch,
-        Named("total_epochs") = rm.total_epochs,
-        Named("final_metrics") = nested_metrics_to_list(rm.final_metrics)
-    );
-}
-
 inline resolve::RunMetadata parse_run_metadata(List cfg) {
     resolve::RunMetadata rm;
     if (cfg.containsElementNamed("created_at")) rm.created_at = as<std::string>(cfg["created_at"]);
