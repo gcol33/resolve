@@ -1,5 +1,30 @@
 # RESOLVE Changelog
 
+## v0.6.1 (2026-06-14)
+
+### Bug fixes
+
+- **Windows process-crash hardening (#18, #19).** A native fault in a headless
+  training worker no longer hangs forever on the Windows JIT debugger
+  (`vsjitdebugger`): the engine installs an unhandled-exception filter plus a
+  first-in-line vectored handler that terminate via `TerminateProcess`, so the
+  worker fails fast with the fault's exit code and the orchestrator can record
+  and skip it instead of waiting on the AeDebug handshake. On Windows the R
+  bindings additionally pin libtorch's host thread pools to 1 and arm an on-exit
+  finalizer, mitigating the libtorch teardown access violation that could crash
+  the `Rscript.exe` launcher; set `RESOLVE_R_NO_THREAD_PIN` to keep libtorch's
+  default threading.
+
+### Internal
+
+- New `resolve::process` engine module (`process.{hpp,cpp}`) with the
+  `install_crash_handler` / `signal_work_complete` / `set_thread_pools` surface,
+  wired through the C ABI facade, nanobind (`resolve_core.install_crash_handler`,
+  `set_thread_pools`; armed at import with an `atexit` hook), Rcpp + `zzz.R`
+  `.onLoad`, and the CLI. Catch2 `test_process.cpp` plus a crash-handler smoke.
+- `tests/test_cuda_allocator_config.py` skips cleanly when the compiled
+  `resolve_core` extension is not built.
+
 ## v0.5.0 (2026-05-18)
 
 ### New Features
