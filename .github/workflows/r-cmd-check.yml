@@ -104,16 +104,24 @@ jobs:
 
       - name: Build resolve_c (Windows)
         if: runner.os == 'Windows'
-        shell: bash
+        shell: cmd
         run: |
-          cmake -S src/core -B build_c -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_PYTHON=OFF -DBUILD_CLI=OFF -DBUILD_TESTS=OFF \
-            -DBUILD_R_CAPI=ON -DUSE_CUDA=OFF -DRESOLVE_USE_OPENMP=OFF \
-            -DTorch_DIR="$LIBTORCH/share/cmake/Torch"
+          rem resolve_c MUST be built with MSVC: mingw cannot compile the MSVC
+          rem libtorch headers (this is the whole reason for the C facade). The
+          rem runner has Rtools on PATH (from setup-r), so force cl.exe
+          rem explicitly, or cmake's Ninja probe picks up Rtools g++ and hits the
+          rem "definition is marked dllimport" wall.
+          cmake -S src/core -B build_c -G Ninja ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
+            -DBUILD_PYTHON=OFF -DBUILD_CLI=OFF -DBUILD_TESTS=OFF ^
+            -DBUILD_R_CAPI=ON -DUSE_CUDA=OFF -DRESOLVE_USE_OPENMP=OFF ^
+            -DTorch_DIR="%LIBTORCH%/share/cmake/Torch"
+          if errorlevel 1 exit /b 1
           cmake --build build_c --target resolve_c
-          echo "RESOLVE_C_HOME=${{ github.workspace }}/build_c" >> $GITHUB_ENV
-          echo "RESOLVE_C_LIB=${{ github.workspace }}/build_c/resolve_c.lib" >> $GITHUB_ENV
+          if errorlevel 1 exit /b 1
+          echo RESOLVE_C_HOME=%GITHUB_WORKSPACE%\build_c>> %GITHUB_ENV%
+          echo RESOLVE_C_LIB=%GITHUB_WORKSPACE%\build_c\resolve_c.lib>> %GITHUB_ENV%
 
       # ---- loader path so the freshly built resolve.so/.dll finds its deps -
       - name: Configure loader path (Linux)
