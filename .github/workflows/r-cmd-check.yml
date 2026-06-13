@@ -94,20 +94,26 @@ jobs:
           cmake --build build_c --target resolve_c --parallel 2
           echo "RESOLVE_C_HOME=${{ github.workspace }}/build_c" >> $GITHUB_ENV
 
-      # Windows uses the Visual Studio generator (always available on
-      # windows-latest; needs no Ninja or manual MSVC env). The MSVC-built DLL +
-      # import library land in build_c/Release/.
+      # Windows builds with Ninja + the MSVC toolchain set up by msvc-dev-cmd
+      # (version-agnostic: works on whatever VS the runner ships -- the
+      # windows-latest image moves VS versions over time). Single-config Ninja
+      # puts the DLL + import library directly in build_c/.
+      - name: Set up MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Build resolve_c (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          cmake -S src/core -B build_c -G "Visual Studio 17 2022" -A x64 \
+          cmake -S src/core -B build_c -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_PYTHON=OFF -DBUILD_CLI=OFF -DBUILD_TESTS=OFF \
             -DBUILD_R_CAPI=ON -DUSE_CUDA=OFF -DRESOLVE_USE_OPENMP=OFF \
             -DTorch_DIR="$LIBTORCH/share/cmake/Torch"
-          cmake --build build_c --config Release --target resolve_c
-          echo "RESOLVE_C_HOME=${{ github.workspace }}/build_c/Release" >> $GITHUB_ENV
-          echo "RESOLVE_C_LIB=${{ github.workspace }}/build_c/Release/resolve_c.lib" >> $GITHUB_ENV
+          cmake --build build_c --target resolve_c
+          echo "RESOLVE_C_HOME=${{ github.workspace }}/build_c" >> $GITHUB_ENV
+          echo "RESOLVE_C_LIB=${{ github.workspace }}/build_c/resolve_c.lib" >> $GITHUB_ENV
 
       # ---- loader path so the freshly built resolve.so/.dll finds its deps -
       - name: Configure loader path (Linux)
@@ -125,7 +131,7 @@ jobs:
       - name: Configure loader path (Windows)
         if: runner.os == 'Windows'
         shell: bash
-        run: echo "${{ github.workspace }}/build_c/Release" >> $GITHUB_PATH
+        run: echo "${{ github.workspace }}/build_c" >> $GITHUB_PATH
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
