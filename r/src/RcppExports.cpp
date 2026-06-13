@@ -105,6 +105,47 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// resolve_set_thread_pools
+void resolve_set_thread_pools(int intraop_threads, int interop_threads);
+RcppExport SEXP _resolve_resolve_set_thread_pools(SEXP intraop_threadsSEXP, SEXP interop_threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type intraop_threads(intraop_threadsSEXP);
+    Rcpp::traits::input_parameter< int >::type interop_threads(interop_threadsSEXP);
+    resolve_set_thread_pools(intraop_threads, interop_threads);
+    return R_NilValue;
+END_RCPP
+}
+// resolve_install_crash_handler
+void resolve_install_crash_handler(int shutdown_exit_code);
+RcppExport SEXP _resolve_resolve_install_crash_handler(SEXP shutdown_exit_codeSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type shutdown_exit_code(shutdown_exit_codeSEXP);
+    resolve_install_crash_handler(shutdown_exit_code);
+    return R_NilValue;
+END_RCPP
+}
+// resolve_signal_work_complete
+void resolve_signal_work_complete();
+RcppExport SEXP _resolve_resolve_signal_work_complete() {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    resolve_signal_work_complete();
+    return R_NilValue;
+END_RCPP
+}
+// resolve_configure_cuda_allocator
+std::string resolve_configure_cuda_allocator(bool force);
+RcppExport SEXP _resolve_resolve_configure_cuda_allocator(SEXP forceSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< bool >::type force(forceSEXP);
+    rcpp_result_gen = Rcpp::wrap(resolve_configure_cuda_allocator(force));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 RcppExport SEXP _rcpp_module_boot_resolve_module();
 
@@ -117,6 +158,10 @@ static const R_CallMethodDef CallEntries[] = {
     {"_resolve_resolve_r_squared", (DL_FUNC) &_resolve_resolve_r_squared, 2},
     {"_resolve_resolve_version", (DL_FUNC) &_resolve_resolve_version, 0},
     {"_resolve_resolve_set_vram_fraction", (DL_FUNC) &_resolve_resolve_set_vram_fraction, 2},
+    {"_resolve_resolve_set_thread_pools", (DL_FUNC) &_resolve_resolve_set_thread_pools, 2},
+    {"_resolve_resolve_install_crash_handler", (DL_FUNC) &_resolve_resolve_install_crash_handler, 1},
+    {"_resolve_resolve_signal_work_complete", (DL_FUNC) &_resolve_resolve_signal_work_complete, 0},
+    {"_resolve_resolve_configure_cuda_allocator", (DL_FUNC) &_resolve_resolve_configure_cuda_allocator, 1},
     {"_rcpp_module_boot_resolve_module", (DL_FUNC) &_rcpp_module_boot_resolve_module, 0},
     {NULL, NULL, 0}
 };

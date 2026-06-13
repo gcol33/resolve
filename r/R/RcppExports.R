@@ -33,3 +33,31 @@ resolve_set_vram_fraction <- function(fraction, device_index = -1L) {
     invisible(.Call(`_resolve_resolve_set_vram_fraction`, fraction, device_index))
 }
 
+resolve_set_thread_pools <- function(intraop_threads, interop_threads = -1L) {
+    invisible(.Call(`_resolve_resolve_set_thread_pools`, intraop_threads, interop_threads))
+}
+
+resolve_install_crash_handler <- function(shutdown_exit_code = 0L) {
+    invisible(.Call(`_resolve_resolve_install_crash_handler`, shutdown_exit_code))
+}
+
+resolve_signal_work_complete <- function() {
+    invisible(.Call(`_resolve_resolve_signal_work_complete`))
+}
+
+#' Configure the PyTorch CUDA caching allocator
+#'
+#' Set the \code{PYTORCH_CUDA_ALLOC_CONF} environment variable to a
+#' platform-aware default (Linux/macOS get an \code{expandable_segments:True,}
+#' prefix; Windows omits it). Best-effort: if torch already initialized its
+#' allocator, the change may not take effect for the running process.
+#'
+#' @param force If \code{TRUE}, overwrite any existing
+#'   \code{PYTORCH_CUDA_ALLOC_CONF}; default \code{FALSE} only sets when unset.
+#' @return The resulting value of \code{PYTORCH_CUDA_ALLOC_CONF} as a string.
+#' @keywords internal
+#' @export
+resolve_configure_cuda_allocator <- function(force = FALSE) {
+    .Call(`_resolve_resolve_configure_cuda_allocator`, force)
+}
+

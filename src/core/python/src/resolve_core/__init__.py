@@ -171,6 +171,28 @@ except ImportError:
         """
         return None
 
+# Windows crash hardening (issue #19). The C++ module installs the
+# unhandled-exception filter at import (see bindings.cpp), so a native fault in
+# a headless training worker fails fast with the fault's NTSTATUS instead of
+# hanging forever on the JIT debugger. Register an atexit hook so a *clean*
+# interpreter shutdown after a successful run is treated as work-complete -- any
+# late libtorch teardown fault then exits 0 rather than being misreported as a
+# crash. All three symbols are tolerant of older installed .pyd files.
+try:
+    from ._resolve_core import set_thread_pools, install_crash_handler
+    from ._resolve_core import _signal_work_complete as _signal_work_complete
+
+    import atexit as _atexit
+    _atexit.register(_signal_work_complete)
+except ImportError:
+    def set_thread_pools(*_args, **_kwargs):
+        """Stub for older resolve_core builds that lack set_thread_pools."""
+        return None
+
+    def install_crash_handler(*_args, **_kwargs):
+        """Stub for older resolve_core builds that lack install_crash_handler."""
+        return None
+
 from ._io_retry import retry_io
 
 # Wrap checkpoint I/O entry points with retry_io so transient OSError on the
@@ -283,6 +305,9 @@ __all__ = [
     # GPU memory management
     "set_vram_fraction",
     "configure_cuda_allocator",
+    # Process hardening (Windows teardown / crash; issues #18, #19)
+    "set_thread_pools",
+    "install_crash_handler",
     # I/O resilience helper (also auto-applied to Trainer.save/load and Predictor.load)
     "retry_io",
 ]

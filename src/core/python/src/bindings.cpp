@@ -101,6 +101,53 @@ NB_MODULE(_resolve_core, m) {
         "CUDA device is present."
     );
 
+    // Pin libtorch's host thread pools. Standalone counterpart used at startup
+    // to avoid worker-thread teardown races on Windows (issue #18); harmless
+    // elsewhere. <=0 keeps libtorch's default for the corresponding pool.
+    m.def(
+        "set_thread_pools",
+        [](int intraop_threads, int interop_threads) {
+            resolve::set_thread_pools(intraop_threads, interop_threads);
+        },
+        nb::arg("intraop_threads"),
+        nb::arg("interop_threads") = -1,
+        "Pin libtorch's intra-op / inter-op thread pools (<=0 keeps the\n"
+        "default). Best-effort; call at startup before the first op."
+    );
+
+    // Windows crash hardening (issue #19): convert an unhandled native fault in
+    // a headless training worker into an immediate TerminateProcess with the
+    // fault's NTSTATUS, instead of an indefinite Windows-Error-Reporting /
+    // JIT-debugger (vsjitdebugger) hang that holds the GPU and stalls the
+    // batch. No-op off Windows. Auto-installed at import below; also exposed so
+    // callers can re-arm or adjust the shutdown exit code explicitly.
+    m.def(
+        "install_crash_handler",
+        [](int shutdown_exit_code) {
+            resolve::install_crash_handler(shutdown_exit_code);
+        },
+        nb::arg("shutdown_exit_code") = 0,
+        "Install the Windows unhandled-exception filter that fails fast via\n"
+        "TerminateProcess instead of hanging on the JIT debugger. No-op off\n"
+        "Windows. Idempotent."
+    );
+
+    // Internal: flip the crash handler to treat a subsequent native fault as a
+    // benign teardown artifact (exit with the shutdown code, not a failure
+    // code). Registered with atexit() in resolve_core/__init__.py so a clean
+    // interpreter shutdown after a successful run is not misreported as a crash.
+    m.def(
+        "_signal_work_complete",
+        []() { resolve::signal_work_complete(); },
+        "Mark all engine work complete (atexit hook; see __init__.py)."
+    );
+
+    // Arm the crash handler as soon as resolve_core is imported, so a training
+    // worker is hardened before Trainer::fit() ever runs (issue #19). Default
+    // shutdown code 0: a clean interpreter shutdown (after _signal_work_complete
+    // via atexit) exits 0; a mid-run native fault exits with its NTSTATUS.
+    resolve::install_crash_handler(0);
+
     // Version
     m.attr("__version__") = resolve::VERSION;
 }

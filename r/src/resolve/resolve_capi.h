@@ -162,6 +162,23 @@ RESOLVE_CAPI int resolve_capi_set_vram_fraction(double fraction, int device_inde
  * resulting value as a freshly-allocated value tree (STRING kind). */
 RESOLVE_CAPI resolve_value_t* resolve_capi_configure_cuda_allocator(int force);
 
+/* Pin libtorch's intra-op / inter-op thread pools (<=0 keeps the default).
+ * Best-effort: removes the worker threads whose teardown join crashes the
+ * Rscript.exe launcher on Windows (issue #18). Call at startup. */
+RESOLVE_CAPI int resolve_capi_set_thread_pools(int intraop_threads, int interop_threads);
+
+/* Install the Windows crash handler: turn an unhandled native fault into an
+ * immediate TerminateProcess instead of a JIT-debugger hang (issue #19) or a
+ * teardown access violation (issue #18). No-op off Windows. Exits with
+ * `shutdown_exit_code` once resolve_capi_signal_work_complete() has run, else a
+ * non-zero failure code derived from the fault. */
+RESOLVE_CAPI int resolve_capi_install_crash_handler(int shutdown_exit_code);
+
+/* Mark all engine work complete: a subsequent native fault is treated as a
+ * benign teardown artifact and exits with the shutdown code. Wire to the
+ * binding's normal-shutdown hook (R on-exit finalizer, Python atexit). */
+RESOLVE_CAPI int resolve_capi_signal_work_complete(void);
+
 /* ========================================================================== */
 /* Metrics (flat vectors in, scalar out via out-param; return 0/-1)           */
 /* ========================================================================== */

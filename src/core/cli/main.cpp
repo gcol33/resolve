@@ -191,7 +191,7 @@ private:
     std::vector<std::string> args_;
 };
 
-int main(int argc, char* argv[]) {
+static int run_cli(int argc, char* argv[]) {
     if (argc < 2) {
         print_usage();
         return 1;
@@ -277,4 +277,20 @@ int main(int argc, char* argv[]) {
         print_usage();
         return 1;
     }
+}
+
+int main(int argc, char* argv[]) {
+    // Issue #19: a native fault during a (possibly overnight, headless) run must
+    // fail fast with the fault's NTSTATUS, never hang on the Windows JIT
+    // debugger. Arm the handler before any engine work. No-op off Windows.
+    resolve::install_crash_handler(0);
+
+    const int rc = run_cli(argc, argv);
+
+    // Issue #18: the command is done and its output is flushed; from here a
+    // libtorch teardown fault is a benign artifact. Carry the command's real
+    // exit code through, then mark work complete so the handler exits with it.
+    resolve::install_crash_handler(rc);
+    resolve::signal_work_complete();
+    return rc;
 }

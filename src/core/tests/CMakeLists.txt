@@ -28,6 +28,7 @@ add_executable(resolve_tests
     test_taxonomy_vocab.cpp
     test_oom_retry.cpp
     test_csv_utils.cpp
+    test_process.cpp
 )
 
 # Add CUDA library directory if CUDA is available
@@ -50,6 +51,18 @@ target_link_libraries(resolve_tests
 # Tests can be run manually with the test executable
 include(CTest)
 add_test(NAME resolve_tests COMMAND resolve_tests)
+
+# Crash-handler smoke (issues #18 / #19). Deliberately faults, so it is a
+# standalone exe checked from outside by its exit code, not a Catch2 case.
+# Driver: src/core/dev_notes/crash_smoke_drive.ps1.
+add_executable(resolve_crash_smoke
+    crash_smoke.cpp
+)
+target_link_libraries(resolve_crash_smoke
+    PRIVATE
+        resolve_core
+        ${TORCH_LIBRARIES}
+)
 
 # Benchmark executable (standalone, no Catch2)
 add_executable(resolve_benchmark

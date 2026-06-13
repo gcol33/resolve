@@ -61,6 +61,7 @@ set(RESOLVE_CORE_SOURCES
     cpp_src/fuzzy_automaton.cpp
 
     cpp_src/gpu.cpp
+    cpp_src/process.cpp
 )
 
 set(RESOLVE_CORE_HEADERS
@@ -87,6 +88,7 @@ set(RESOLVE_CORE_HEADERS
     include/resolve/fuzzy.hpp
 
     include/resolve/gpu.hpp
+    include/resolve/process.hpp
 )
 
 # CUDA sources - split for CUDA 13.x compatibility:

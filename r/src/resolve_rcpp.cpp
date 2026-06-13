@@ -137,6 +137,31 @@ void resolve_set_vram_fraction(double fraction, int device_index = -1) {
     capi_check_status(resolve_capi_set_vram_fraction(fraction, device_index));
 }
 
+// Pin libtorch's intra-op / inter-op thread pools (issue #18). intraop /
+// interop <= 0 keep libtorch's default. Best-effort; call at load before the
+// first op. Removes the worker threads whose teardown join crashes the
+// Rscript.exe launcher on Windows.
+// [[Rcpp::export]]
+void resolve_set_thread_pools(int intraop_threads, int interop_threads = -1) {
+    capi_check_status(resolve_capi_set_thread_pools(intraop_threads, interop_threads));
+}
+
+// Install the Windows crash handler: turn an unhandled native fault into an
+// immediate TerminateProcess instead of a JIT-debugger hang (issue #19) or a
+// teardown access violation under Rscript.exe (issue #18). No-op off Windows.
+// [[Rcpp::export]]
+void resolve_install_crash_handler(int shutdown_exit_code = 0) {
+    capi_check_status(resolve_capi_install_crash_handler(shutdown_exit_code));
+}
+
+// Mark all engine work complete so a subsequent native fault during process
+// teardown exits with the shutdown code rather than a crash code (issue #18).
+// Registered as an on-exit finalizer in zzz.R.
+// [[Rcpp::export]]
+void resolve_signal_work_complete() {
+    capi_check_status(resolve_capi_signal_work_complete());
+}
+
 //' Configure the PyTorch CUDA caching allocator
 //'
 //' Set the \code{PYTORCH_CUDA_ALLOC_CONF} environment variable to a

@@ -1168,6 +1168,27 @@ int resolve_capi_set_vram_fraction(double fraction, int device_index) {
     })
 }
 
+int resolve_capi_set_thread_pools(int intraop_threads, int interop_threads) {
+    CAPI_BODY_INT({
+        resolve::set_thread_pools(intraop_threads, interop_threads);
+        return 0;
+    })
+}
+
+int resolve_capi_install_crash_handler(int shutdown_exit_code) {
+    CAPI_BODY_INT({
+        resolve::install_crash_handler(shutdown_exit_code);
+        return 0;
+    })
+}
+
+int resolve_capi_signal_work_complete(void) {
+    CAPI_BODY_INT({
+        resolve::signal_work_complete();
+        return 0;
+    })
+}
+
 resolve_value_t* resolve_capi_configure_cuda_allocator(int force) {
     CAPI_BODY_PTR({
         std::string base = default_cuda_alloc_conf();
