@@ -9,6 +9,10 @@ on:
         description: 'Publish to TestPyPI instead of PyPI'
         type: boolean
         default: true
+      publish:
+        description: 'Publish at all (off = build only, for iterating on the wheels)'
+        type: boolean
+        default: false
 
 env:
   CIBW_BUILD_VERBOSITY: 1
@@ -25,37 +29,60 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download libtorch (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          wget -q https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.6.0%2Bcpu.zip
-          unzip -q libtorch-cxx11-abi-shared-with-deps-2.6.0+cpu.zip
-          echo "Torch_DIR=${{ github.workspace }}/libtorch/share/cmake/Torch" >> $GITHUB_ENV
-
-      - name: Download libtorch (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          wget -q https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.6.0.zip
-          unzip -q libtorch-macos-arm64-2.6.0.zip
-          echo "Torch_DIR=${{ github.workspace }}/libtorch/share/cmake/Torch" >> $GITHUB_ENV
-
-      - name: Download libtorch (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Invoke-WebRequest -Uri "https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.6.0%2Bcpu.zip" -OutFile libtorch.zip
-          Expand-Archive -Path libtorch.zip -DestinationPath .
-          echo "Torch_DIR=${{ github.workspace }}/libtorch/share/cmake/Torch" >> $env:GITHUB_ENV
-
+      # The extension links libtorch located via the installed `torch` package
+      # (src/core/python/CMakeLists.txt), so no standalone libtorch is
+      # downloaded. CPU torch is installed in the build env (the default PyPI
+      # torch on Linux/Windows is the CUDA build); the wheel does NOT bundle
+      # libtorch -- it links the same libs the user's torch ships, and the
+      # repair step excludes them so the wheel stays small.
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.16
+        uses: pypa/cibuildwheel@v2.22.0
         with:
           package-dir: src/core/python
         env:
-          CIBW_SKIP: "cp38-* pp* *-musllinux*"
-          CIBW_ENVIRONMENT_LINUX: Torch_DIR="${{ github.workspace }}/libtorch/share/cmake/Torch"
-          CIBW_ENVIRONMENT_MACOS: Torch_DIR="${{ github.workspace }}/libtorch/share/cmake/Torch"
-          CIBW_ENVIRONMENT_WINDOWS: Torch_DIR="${{ github.workspace }}/libtorch/share/cmake/Torch"
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"
+          CIBW_SKIP: "*-musllinux* *-manylinux_i686 pp*"
+          CIBW_ARCHS_LINUX: x86_64
+          CIBW_ARCHS_WINDOWS: AMD64
+          CIBW_ARCHS_MACOS: native
+          CIBW_BUILD_FRONTEND: "build; args: --no-isolation"
+          # Install CPU torch + the build backend, then build without isolation
+          # so the build sees the CPU torch. macOS torch is CPU-only on PyPI; the
+          # explicit cpu index is for Linux/Windows where PyPI torch is CUDA.
+          CIBW_BEFORE_BUILD_LINUX: >
+            pip install --upgrade pip &&
+            pip install "torch>=2.0" --index-url https://download.pytorch.org/whl/cpu &&
+            pip install "scikit-build-core>=0.4.3" "nanobind>=2.0.0"
+          CIBW_BEFORE_BUILD_WINDOWS: >
+            pip install --upgrade pip &&
+            pip install "torch>=2.0" --index-url https://download.pytorch.org/whl/cpu &&
+            pip install "scikit-build-core>=0.4.3" "nanobind>=2.0.0" delvewheel
+          CIBW_BEFORE_BUILD_MACOS: >
+            pip install --upgrade pip &&
+            pip install "torch>=2.0" &&
+            pip install "scikit-build-core>=0.4.3" "nanobind>=2.0.0"
+          # Do not bundle libtorch: exclude torch's shared libs from the repair.
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: >
+            auditwheel repair
+            --exclude libtorch.so --exclude libtorch_cpu.so
+            --exclude libtorch_python.so --exclude libc10.so
+            --exclude libgomp.so.1
+            -w {dest_dir} {wheel}
+          CIBW_REPAIR_WHEEL_COMMAND_MACOS: >
+            delocate-wheel --ignore-missing-dependencies --require-archs {delocate_archs}
+            --exclude libtorch --exclude libtorch_cpu --exclude libtorch_python
+            --exclude libc10 --exclude libomp
+            -w {dest_dir} -v {wheel}
+          CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >
+            delvewheel repair
+            --exclude c10.dll --exclude torch_cpu.dll --exclude torch_python.dll
+            --exclude fbgemm.dll --exclude asmjit.dll --exclude libiomp5md.dll
+            --exclude uv.dll --exclude shm.dll
+            -w {dest_dir} {wheel}
+          # Importing the wheel needs torch in the test env; verify it imports.
+          CIBW_TEST_REQUIRES: "torch>=2.0"
+          CIBW_TEST_COMMAND: "python -c \"import resolve_core; print(resolve_core.__version__)\""
+          CIBW_TEST_SKIP: "*-macosx_x86_64"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -83,6 +110,8 @@ jobs:
     name: Publish to PyPI
     needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
+    # Publish on a real release, or on a manual dispatch that opts in.
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish)
     environment:
       name: pypi
       url: https://pypi.org/p/resolve-core

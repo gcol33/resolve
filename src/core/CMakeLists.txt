@@ -34,35 +34,11 @@ set(CAFFE2_USE_CUDA ${USE_CUDA})
 # cmake -DTorch_DIR=/path/to/libtorch/share/cmake/Torch ..
 find_package(Torch REQUIRED)
 
-# Core library sources
-set(RESOLVE_CORE_SOURCES
-    cpp_src/encoder_common.cpp
-    cpp_src/encoder_topk.cpp
-    cpp_src/encoder_pool.cpp
-    cpp_src/task_head.cpp
-    cpp_src/attention.cpp
-    cpp_src/gnn.cpp
-    cpp_src/tabm.cpp
-    cpp_src/adapter.cpp
-    cpp_src/model.cpp
-    cpp_src/trainer.cpp
-    cpp_src/predictor.cpp
-    cpp_src/loss.cpp
-    cpp_src/dataset.cpp
-    cpp_src/species_encoding.cpp
-    cpp_src/checkpoint.cpp
-    cpp_src/categorical.cpp
-
-    cpp_src/pretraining.cpp
-    cpp_src/vae.cpp
-
-    cpp_src/fuzzy_index.cpp
-    cpp_src/fuzzy_search.cpp
-    cpp_src/fuzzy_automaton.cpp
-
-    cpp_src/gpu.cpp
-    cpp_src/process.cpp
-)
+# Core library sources -- single source of truth shared with the Python
+# extension build (src/core/python/CMakeLists.txt) via resolve_core_sources.cmake
+# so the two lists never drift.
+set(RESOLVE_CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+include(${CMAKE_CURRENT_SOURCE_DIR}/resolve_core_sources.cmake)
 
 set(RESOLVE_CORE_HEADERS
     include/resolve/resolve.hpp
