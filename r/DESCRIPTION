@@ -1,6 +1,6 @@
 Package: resolve
 Title: Predicting Sample Outcomes from Compositional Data
-Version: 0.6.1
+Version: 0.6.2
 Authors@R:
     person("Gilles", "Colling", email = "gilles.colling@uliege.be", role = c("aut", "cre"))
 Description: Predict sample-level outcomes from compositional data (species lists,

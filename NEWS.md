@@ -1,5 +1,22 @@
 # RESOLVE Changelog
 
+## v0.6.2 (2026-06-14)
+
+### Bug fixes
+
+- **Bounded retry on transient storage I/O (#20).** The engine now retries its
+  explicit, idempotent file I/O on a transient storage fault instead of aborting
+  the run, the complement of #19. `resolve::io::with_retry` (header-only) backs a
+  new `io::IOError` thrown by the CSV reader on a failed open or a mid-read
+  stream error. The dataset loaders (`from_csv` / `from_csv_with_schema` /
+  `from_species_csv`) restart the whole load into a fresh dataset on a transient
+  read, while a CSV *parse* error propagates immediately and never re-reads a
+  multi-GB file; checkpoint save/load (`Trainer::save` / `load` / `load_state`
+  and `Predictor::load`) retry the archive read/write. Tunable via
+  `RESOLVE_IO_RETRY_ATTEMPTS` (3) and `RESOLVE_IO_RETRY_BACKOFF_MS` (100).
+  mmap-backed page-ins and DLL code-page faults remain out of scope (they cannot
+  be resumed at app level; that is #19's fail-fast domain).
+
 ## v0.6.1 (2026-06-14)
 
 ### Bug fixes

@@ -224,7 +224,7 @@ def _predictor_load(path, device="cpu", vram_fraction=1.0):
     )
 Predictor.load = staticmethod(_predictor_load)
 
-__version__ = "0.6.1"
+__version__ = "0.6.2"
 
 __all__ = [
     # Enums
