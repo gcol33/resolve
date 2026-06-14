@@ -188,6 +188,31 @@ public:
     ResolveDataset() = default;
 
 private:
+    // Single-attempt loader bodies. The public from_* verbs wrap these in
+    // io::with_retry<io::IOError> so a transient storage fault re-runs the
+    // whole load into a fresh dataset rather than aborting the run (issue #20).
+    static ResolveDataset from_csv_impl(
+        const std::string& header_path,
+        const std::string& species_path,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const DatasetConfig& config
+    );
+    static ResolveDataset from_csv_with_schema_impl(
+        const std::string& header_path,
+        const std::string& species_path,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const ResolveDataset& schema_source,
+        const DatasetConfig& config
+    );
+    static ResolveDataset from_species_csv_impl(
+        const std::string& species_path,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const DatasetConfig& config
+    );
+
     // Load header CSV data
     void load_header_data(
         const std::string& header_path,

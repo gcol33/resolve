@@ -8,6 +8,8 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "resolve/io_retry.hpp"  // io::IOError for transient-read classification
+
 namespace resolve {
 
 // Simple CSV reader that doesn't depend on external libraries
@@ -52,11 +54,14 @@ inline CSVReader::CSVReader(const std::string& filename, char delimiter)
 inline void CSVReader::parse_header() {
     std::ifstream file(filename_);
     if (!file.is_open()) {
-        throw std::runtime_error("Cannot open file: " + filename_);
+        throw io::IOError("Cannot open file: " + filename_);
     }
 
     std::string header_line;
     if (!std::getline(file, header_line)) {
+        // bad() is a transient read fault (retryable); a clean EOF on the first
+        // line is a genuinely empty file (a data error, not retried).
+        if (file.bad()) throw io::IOError("Read error in header of: " + filename_);
         throw std::runtime_error("Empty CSV file: " + filename_);
     }
 
@@ -122,7 +127,7 @@ inline std::vector<std::string> CSVReader::parse_line(const std::string& line) {
 inline void CSVReader::read_rows(std::function<void(size_t, const std::vector<std::string>&)> callback) {
     std::ifstream file(filename_);
     if (!file.is_open()) {
-        throw std::runtime_error("Cannot open file: " + filename_);
+        throw io::IOError("Cannot open file: " + filename_);
     }
 
     std::string line;
@@ -137,6 +142,11 @@ inline void CSVReader::read_rows(std::function<void(size_t, const std::vector<st
         auto fields = parse_line(line);
         callback(row_idx++, fields);
     }
+    // badbit (as opposed to a clean EOF) means the stream errored mid-read --
+    // a transient storage fault the caller can retry (issue #20).
+    if (file.bad()) {
+        throw io::IOError("Read error while streaming rows of: " + filename_);
+    }
 }
 
 inline std::vector<std::vector<std::string>> CSVReader::read_all() {
@@ -150,7 +160,7 @@ inline std::vector<std::vector<std::string>> CSVReader::read_all() {
 inline size_t CSVReader::count_rows() {
     std::ifstream file(filename_);
     if (!file.is_open()) {
-        throw std::runtime_error("Cannot open file: " + filename_);
+        throw io::IOError("Cannot open file: " + filename_);
     }
 
     size_t count = 0;
@@ -162,6 +172,9 @@ inline size_t CSVReader::count_rows() {
         if (!line.empty() && !(line.size() == 1 && line[0] == '\r')) {
             ++count;
         }
+    }
+    if (file.bad()) {
+        throw io::IOError("Read error while counting rows of: " + filename_);
     }
     return count;
 }

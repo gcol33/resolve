@@ -2,6 +2,7 @@
 #include "resolve/csv_reader.hpp"
 #include "resolve/csv_utils.hpp"
 #include "resolve/species_encoding.hpp"
+#include "resolve/io_retry.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -148,7 +149,52 @@ ColumnIndices ColumnIndices::from_reader(const CSVReader& reader, const RoleMapp
 }
 
 
+// --- Public loader verbs: thin io::with_retry<io::IOError> wrappers over the
+// single-attempt *_impl bodies. A transient storage read fault (issue #20) is
+// retried with backoff into a fresh dataset; a parse/logic error (not
+// io::IOError) propagates on the first try, so a permanent fault never re-reads
+// a multi-GB file. ---
+
 ResolveDataset ResolveDataset::from_csv(
+    const std::string& header_path,
+    const std::string& species_path,
+    const RoleMapping& roles,
+    const std::vector<TargetSpec>& targets,
+    const DatasetConfig& config
+) {
+    return io::with_retry<io::IOError>(
+        [&] { return from_csv_impl(header_path, species_path, roles, targets, config); },
+        "dataset CSV load");
+}
+
+ResolveDataset ResolveDataset::from_csv_with_schema(
+    const std::string& header_path,
+    const std::string& species_path,
+    const RoleMapping& roles,
+    const std::vector<TargetSpec>& targets,
+    const ResolveDataset& schema_source,
+    const DatasetConfig& config
+) {
+    return io::with_retry<io::IOError>(
+        [&] {
+            return from_csv_with_schema_impl(
+                header_path, species_path, roles, targets, schema_source, config);
+        },
+        "dataset CSV load (schema)");
+}
+
+ResolveDataset ResolveDataset::from_species_csv(
+    const std::string& species_path,
+    const RoleMapping& roles,
+    const std::vector<TargetSpec>& targets,
+    const DatasetConfig& config
+) {
+    return io::with_retry<io::IOError>(
+        [&] { return from_species_csv_impl(species_path, roles, targets, config); },
+        "species CSV load");
+}
+
+ResolveDataset ResolveDataset::from_csv_impl(
     const std::string& header_path,
     const std::string& species_path,
     const RoleMapping& roles,
@@ -167,7 +213,7 @@ ResolveDataset ResolveDataset::from_csv(
     return dataset;
 }
 
-ResolveDataset ResolveDataset::from_csv_with_schema(
+ResolveDataset ResolveDataset::from_csv_with_schema_impl(
     const std::string& header_path,
     const std::string& species_path,
     const RoleMapping& roles,
@@ -219,7 +265,7 @@ ResolveDataset ResolveDataset::from_csv_with_schema(
     return dataset;
 }
 
-ResolveDataset ResolveDataset::from_species_csv(
+ResolveDataset ResolveDataset::from_species_csv_impl(
     const std::string& species_path,
     const RoleMapping& roles,
     const std::vector<TargetSpec>& targets,

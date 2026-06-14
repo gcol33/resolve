@@ -13,6 +13,7 @@
 #include "resolve/utils.hpp"
 #include "resolve/checkpoint.hpp"
 #include "resolve/gpu.hpp"
+#include "resolve/io_retry.hpp"
 
 #ifdef RESOLVE_HAS_CUDA
 #include "resolve/cuda/feature_hash.hpp"
@@ -1311,7 +1312,9 @@ void Trainer::save(const std::string& path, const RunMetadata* metadata) const {
         save_run_metadata(archive, *metadata);
     }
 
-    archive.save_to(path);
+    // Retry a transient write fault on flaky storage (issue #20); a small
+    // checkpoint re-write is cheap, so any failure is retried.
+    io::with_retry([&] { archive.save_to(path); }, "checkpoint save");
 
     // Write human-readable JSON metadata alongside checkpoint
     if (metadata != nullptr) {
@@ -1335,7 +1338,10 @@ std::tuple<ResolveModel, Scalers, CategoricalVocab> Trainer::load(
     }
 
     torch::serialize::InputArchive archive;
-    archive.load_from(path);
+    // Retry a transient read fault on flaky storage (issue #20). Note: a
+    // mmap-backed load can still fault as an OS structured exception, which is
+    // #19's domain (fail fast); this catches the throwing-read failures.
+    io::with_retry([&] { archive.load_from(path); }, "checkpoint load");
 
     // Load config, schema, and scalers using checkpoint utilities
     ModelConfig config = load_model_config(archive);
@@ -1360,7 +1366,7 @@ std::tuple<ResolveModel, Scalers, CategoricalVocab> Trainer::load(
 
 TrainConfig Trainer::load_train_config(const std::string& path) {
     torch::serialize::InputArchive archive;
-    archive.load_from(path);
+    io::with_retry([&] { archive.load_from(path); }, "checkpoint load (train config)");
     // Qualify to the free function (checkpoint.cpp); the unqualified name would
     // resolve to this static member and recurse.
     return resolve::load_train_config(archive);
@@ -1368,7 +1374,7 @@ TrainConfig Trainer::load_train_config(const std::string& path) {
 
 RunMetadata Trainer::load_run_metadata(const std::string& path) {
     torch::serialize::InputArchive archive;
-    archive.load_from(path);
+    io::with_retry([&] { archive.load_from(path); }, "checkpoint load (run metadata)");
     return resolve::load_run_metadata(archive);
 }
 
@@ -1404,7 +1410,7 @@ void Trainer::load_state(
     }
 
     torch::serialize::InputArchive archive;
-    archive.load_from(path);
+    io::with_retry([&] { archive.load_from(path); }, "checkpoint load (state)");
 
     // Restore weights into the existing model_ (its architecture must already
     // match the checkpoint), the fitted scalers, and the categorical vocab.

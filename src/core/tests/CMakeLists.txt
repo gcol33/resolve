@@ -29,6 +29,7 @@ add_executable(resolve_tests
     test_oom_retry.cpp
     test_csv_utils.cpp
     test_process.cpp
+    test_io_retry.cpp
 )
 
 # Add CUDA library directory if CUDA is available

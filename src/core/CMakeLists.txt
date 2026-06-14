@@ -75,6 +75,7 @@ set(RESOLVE_CORE_HEADERS
     include/resolve/loss.hpp
     include/resolve/csv_reader.hpp
     include/resolve/csv_utils.hpp
+    include/resolve/io_retry.hpp
     include/resolve/role_mapping.hpp
     include/resolve/dataset.hpp
     include/resolve/species_encoding.hpp
