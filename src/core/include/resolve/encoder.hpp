@@ -5,6 +5,7 @@
 #include "resolve/tabm.hpp"
 #include <torch/torch.h>
 #include <utility>
+#include <functional>
 
 namespace resolve {
 
@@ -40,6 +41,46 @@ private:
 };
 
 TORCH_MODULE(RMSNorm);
+
+// =============================================================================
+// fp32 Normalization Under AMP Autocast
+// =============================================================================
+
+// Run a normalization layer in float32 even when CUDA autocast (AMP/fp16) is
+// active, then return its (fp32) output for the surrounding autocast region to
+// re-cast as needed.
+//
+// BatchNorm computes its batch statistics and updates its running mean/variance
+// buffers from the layer input. Under fp16 autocast those statistics are
+// computed and accumulated in fp16, so the running buffers drift: the model
+// trains correctly (train mode uses fresh per-batch statistics) but collapses
+// in eval mode (which uses the corrupted running statistics). Computing the
+// normalization in fp32 keeps the statistics accurate while the surrounding
+// Linear/embedding matmuls stay in fp16, preserving the AMP speed/memory win.
+//
+// A no-op (calls norm_fwd directly) when CUDA autocast is inactive (AMP off or
+// CPU build) or when the environment variable RESOLVE_FP32_NORM=0 is set. The
+// env toggle exists to A/B the fix against the original collapse in a single
+// build. See gcol33/resolve#21.
+torch::Tensor run_norm_fp32(
+    const std::function<torch::Tensor(torch::Tensor)>& norm_fwd,
+    torch::Tensor x
+);
+
+// Wraps a normalization module so its forward runs through run_norm_fp32. Used
+// by the non-residual nn::Sequential MLP path, where the norm module is invoked
+// opaquely by Sequential::forward and there is no other interception point.
+class Fp32NormImpl : public torch::nn::Module {
+public:
+    explicit Fp32NormImpl(torch::nn::AnyModule inner);
+    torch::Tensor forward(torch::Tensor x);
+    [[nodiscard]] bool is_empty() const { return inner_.is_empty(); }
+
+private:
+    torch::nn::AnyModule inner_;
+};
+
+TORCH_MODULE(Fp32Norm);
 
 // =============================================================================
 // Configurable Architecture Types

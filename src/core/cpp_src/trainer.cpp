@@ -28,6 +28,9 @@
 #include <algorithm>
 #include <fstream>
 #include <numeric>
+#include <cstdlib>
+#include <cstring>
+#include <sstream>
 #include <random>
 #include <iostream>
 #include <sstream>
@@ -724,6 +727,58 @@ Trainer::eval_epoch(int epoch) {
     );
 
     auto [loss, _] = loss_fn_.compute(predictions, test_targets, epoch, batch_scalers);
+
+    // AMP regression diagnostic (gcol33/resolve#21). Gated by RESOLVE_AMP_DEBUG.
+    // Compares the eval-mode test loss (BatchNorm running stats) against the
+    // train-mode test loss on the SAME inputs (BatchNorm batch stats), with
+    // running-stat save/restore so the probe does not pollute eval state, and
+    // scans BatchNorm running statistics for divergence. If trainmode_test is
+    // low while eval_test rises, the running statistics are the culprit.
+    static const bool amp_dbg = [] {
+        const char* v = std::getenv("RESOLVE_AMP_DEBUG");
+        return v != nullptr && std::strcmp(v, "0") != 0;
+    }();
+    if (amp_dbg) {
+        double max_mean = 0.0, max_var = 0.0, min_var = 1e30;
+        bool nonfinite = false;
+        std::vector<std::shared_ptr<torch::nn::BatchNorm1dImpl>> bns;
+        std::vector<std::pair<torch::Tensor, torch::Tensor>> saved;
+        for (auto& m : model_->modules(/*include_self=*/false)) {
+            if (auto bn = std::dynamic_pointer_cast<torch::nn::BatchNorm1dImpl>(m)) {
+                if (bn->running_mean.defined() && bn->running_var.defined()) {
+                    max_mean = std::max(max_mean, bn->running_mean.abs().max().item<double>());
+                    max_var = std::max(max_var, bn->running_var.max().item<double>());
+                    min_var = std::min(min_var, bn->running_var.min().item<double>());
+                    if (!torch::isfinite(bn->running_mean).all().item<bool>() ||
+                        !torch::isfinite(bn->running_var).all().item<bool>()) {
+                        nonfinite = true;
+                    }
+                    bns.push_back(bn);
+                    saved.emplace_back(bn->running_mean.clone(), bn->running_var.clone());
+                }
+            }
+        }
+        model_->train();
+        auto tm_preds = model_->forward(
+            test_continuous, test_genus_ids, test_family_ids,
+            test_species_ids, test_species_vector,
+            test_pool.genus_ids, test_pool.family_ids,
+            test_pool.weights, test_pool.mask, test_pool.has_cover,
+            test_categorical_ids);
+        auto [tm_loss, tm_ignored] = loss_fn_.compute(tm_preds, test_targets, epoch, batch_scalers);
+        for (size_t i = 0; i < bns.size(); ++i) {
+            bns[i]->running_mean.copy_(saved[i].first);
+            bns[i]->running_var.copy_(saved[i].second);
+        }
+        model_->eval();
+        std::ostringstream dbg;
+        dbg << "  [amp_dbg ep" << epoch << "] eval_test=" << loss.item<float>()
+            << " trainmode_test=" << tm_loss.item<float>()
+            << " | BN n=" << bns.size() << " max|mean|=" << max_mean
+            << " max_var=" << max_var << " min_var=" << min_var
+            << " nonfinite=" << (nonfinite ? "Y" : "N");
+        config_.log(dbg.str());
+    }
 
     // Compute metrics per target
     std::unordered_map<std::string, std::unordered_map<std::string, float>> all_metrics;

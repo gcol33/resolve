@@ -1,8 +1,75 @@
 #include "resolve/encoder.hpp"
 #include <cmath>
 #include <stdexcept>
+#include <cstdlib>
+#include <cstring>
+#include <cstdio>
+#include <ATen/autocast_mode.h>
 
 namespace resolve {
+
+// =============================================================================
+// fp32 Normalization Under AMP Autocast (see encoder.hpp / gcol33/resolve#21)
+// =============================================================================
+
+namespace {
+// Read RESOLVE_FP32_NORM once. Default enabled; only the literal "0" disables.
+bool fp32_norm_enabled() {
+    static const bool enabled = [] {
+        const char* v = std::getenv("RESOLVE_FP32_NORM");
+        return !(v != nullptr && std::strcmp(v, "0") == 0);
+    }();
+    return enabled;
+}
+}  // namespace
+
+torch::Tensor run_norm_fp32(
+    const std::function<torch::Tensor(torch::Tensor)>& norm_fwd,
+    torch::Tensor x
+) {
+#ifdef RESOLVE_HAS_CUDA
+    if (fp32_norm_enabled() && at::autocast::is_autocast_enabled(at::kCUDA)) {
+        // One-time confirmation that the fp32 branch is actually reached under a
+        // live autocast region (diagnostic for gcol33/resolve#21).
+        static const bool amp_dbg = [] {
+            const char* v = std::getenv("RESOLVE_AMP_DEBUG");
+            return v != nullptr && std::strcmp(v, "0") != 0;
+        }();
+        static bool announced = false;
+        if (amp_dbg && !announced) {
+            announced = true;
+            std::fprintf(stderr, "[amp_dbg] run_norm_fp32: fp32 branch active "
+                                 "(autocast enabled during forward)\n");
+            std::fflush(stderr);
+        }
+        // Locally disable autocast so the normalization (and, for BatchNorm, its
+        // running-statistic update) runs in fp32. The guard re-enables autocast
+        // even if norm_fwd throws; the autocast cast cache is keyed by nesting
+        // level, which is unchanged, so the outer region resumes cleanly.
+        struct ReenableAutocast {
+            ~ReenableAutocast() { at::autocast::set_autocast_enabled(at::kCUDA, true); }
+        };
+        at::autocast::set_autocast_enabled(at::kCUDA, false);
+        ReenableAutocast guard;
+        return norm_fwd(x.to(torch::kFloat32));
+    }
+#endif
+    return norm_fwd(std::move(x));
+}
+
+Fp32NormImpl::Fp32NormImpl(torch::nn::AnyModule inner)
+    : inner_(std::move(inner)) {
+    if (!inner_.is_empty()) {
+        register_module("inner", inner_.ptr());
+    }
+}
+
+torch::Tensor Fp32NormImpl::forward(torch::Tensor x) {
+    return run_norm_fp32(
+        [this](torch::Tensor t) { return inner_.forward(t); },
+        std::move(x)
+    );
+}
 
 // =============================================================================
 // RMSNorm Implementation
@@ -138,13 +205,17 @@ torch::nn::AnyModule make_normalization(
     int64_t dim,
     int norm_groups
 ) {
+    // Wrap each norm in Fp32Norm so it runs in fp32 under AMP autocast (see
+    // run_norm_fp32 / gcol33/resolve#21). Sequential::forward invokes the norm
+    // opaquely, so the wrapper is the only place to enforce fp32 on this path.
     switch (type) {
         case NormLayerType::BatchNorm:
-            return torch::nn::AnyModule(torch::nn::BatchNorm1d(dim));
+            return torch::nn::AnyModule(Fp32Norm(
+                torch::nn::AnyModule(torch::nn::BatchNorm1d(dim))));
         case NormLayerType::LayerNorm:
-            return torch::nn::AnyModule(torch::nn::LayerNorm(
-                torch::nn::LayerNormOptions({dim})
-            ));
+            return torch::nn::AnyModule(Fp32Norm(
+                torch::nn::AnyModule(torch::nn::LayerNorm(
+                    torch::nn::LayerNormOptions({dim})))));
         case NormLayerType::GroupNorm:
             // Ensure groups divides dim evenly
             {
@@ -152,10 +223,12 @@ torch::nn::AnyModule make_normalization(
                 while (groups > 1 && dim % groups != 0) {
                     groups--;
                 }
-                return torch::nn::AnyModule(torch::nn::GroupNorm(groups, dim));
+                return torch::nn::AnyModule(Fp32Norm(
+                    torch::nn::AnyModule(torch::nn::GroupNorm(groups, dim))));
             }
         case NormLayerType::RMSNorm:
-            return torch::nn::AnyModule(RMSNorm(dim));
+            return torch::nn::AnyModule(Fp32Norm(
+                torch::nn::AnyModule(RMSNorm(dim))));
         case NormLayerType::None:
         default:
             return torch::nn::AnyModule();  // Empty module
@@ -231,20 +304,22 @@ torch::Tensor ResidualBlockImpl::forward(torch::Tensor x) {
     // Main path: Linear -> Norm -> Activation -> Dropout
     auto out = linear_->forward(x);
 
-    // Apply normalization using typed module
+    // Apply normalization using typed module, in fp32 under AMP autocast
+    // (gcol33/resolve#21). Typed members keep their "norm" checkpoint key; only
+    // the forward is routed through run_norm_fp32.
     if (has_norm_) {
         switch (norm_type_) {
             case NormLayerType::BatchNorm:
-                out = norm_bn_->forward(out);
+                out = run_norm_fp32([this](torch::Tensor t) { return norm_bn_->forward(t); }, out);
                 break;
             case NormLayerType::LayerNorm:
-                out = norm_ln_->forward(out);
+                out = run_norm_fp32([this](torch::Tensor t) { return norm_ln_->forward(t); }, out);
                 break;
             case NormLayerType::GroupNorm:
-                out = norm_gn_->forward(out);
+                out = run_norm_fp32([this](torch::Tensor t) { return norm_gn_->forward(t); }, out);
                 break;
             case NormLayerType::RMSNorm:
-                out = norm_rms_->forward(out);
+                out = run_norm_fp32([this](torch::Tensor t) { return norm_rms_->forward(t); }, out);
                 break;
             default:
                 break;
