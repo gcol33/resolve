@@ -213,6 +213,31 @@ RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_species_csv(
     const resolve_value_t* roles, const resolve_value_t* targets,
     const resolve_value_t* config);
 
+/* In-memory (DataFrame) loaders (issue #22). `header` / `species` are MAP value
+ * trees: an ordered (column name -> STRING_ARRAY) mapping, i.e. a data.frame
+ * with every cell stringified (missing value = empty string). Identical result
+ * to the from_csv* verbs on the equivalent CSV; no disk round-trip. NULL on
+ * error. */
+RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_dataframe(
+    const resolve_value_t* header, const resolve_value_t* species,
+    const resolve_value_t* roles, const resolve_value_t* targets,
+    const resolve_value_t* config);
+
+RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_dataframe_header(
+    const resolve_value_t* header, const char* species_path,
+    const resolve_value_t* roles, const resolve_value_t* targets,
+    const resolve_value_t* config);
+
+RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_species_dataframe(
+    const resolve_value_t* species,
+    const resolve_value_t* roles, const resolve_value_t* targets,
+    const resolve_value_t* config);
+
+RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_dataframe_with_schema(
+    const resolve_value_t* header, const resolve_value_t* species,
+    const resolve_value_t* roles, const resolve_value_t* targets,
+    const resolve_dataset_t* schema_source, const resolve_value_t* config);
+
 RESOLVE_CAPI void resolve_dataset_free(resolve_dataset_t* ds);
 
 /* String-dispatched accessor. Returns a freshly-allocated value tree (caller

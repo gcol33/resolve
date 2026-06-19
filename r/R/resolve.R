@@ -371,33 +371,10 @@ resolve.dataset.csv <- function(header,
   if (!file.exists(species)) {
     stop(sprintf("species file does not exist: %s", species))
   }
-  if (!is.list(roles)) {
-    stop("roles must be a named list")
-  }
-  if (!is.list(targets)) {
-    stop("targets must be a named list")
-  }
-  if (length(targets) == 0) {
-    stop("targets must not be empty - at least one target is required")
-  }
 
-  # Validate target configurations
-  for (name in names(targets)) {
-    tgt <- targets[[name]]
-    if (!is.list(tgt)) {
-      stop(sprintf("target '%s' must be a list with 'column' and 'task'", name))
-    }
-    if (is.null(tgt$column)) {
-      stop(sprintf("target '%s' must have 'column' specified", name))
-    }
-    if (!is.null(tgt$task) && !tgt$task %in% c("regression", "classification")) {
-      stop(sprintf("target '%s' task must be 'regression' or 'classification'", name))
-    }
-  }
-
-  # Set default roles
-  if (is.null(roles$plot_id)) roles$plot_id <- "plot_id"
-  if (is.null(roles$species_id)) roles$species_id <- "species_id"
+  # Shared roles/targets validation + role defaults (single source of truth
+  # with resolve.dataset.frame()).
+  roles <- .resolve_normalize_roles_targets(roles, targets)
 
   # When schemaSource is supplied, encode this dataset against that dataset's
   # species / taxonomy / categorical vocabularies and classification class
@@ -421,6 +398,143 @@ resolve.dataset.csv <- function(header,
   .resolve_module$ResolveDataset_from_csv(
     header_path = header,
     species_path = species,
+    roles_list = roles,
+    targets_list = targets,
+    config_list = config
+  )
+}
+
+# Shared roles/targets validation + role defaults for the dataset loaders.
+.resolve_normalize_roles_targets <- function(roles, targets) {
+  if (!is.list(roles)) {
+    stop("roles must be a named list")
+  }
+  if (!is.list(targets)) {
+    stop("targets must be a named list")
+  }
+  if (length(targets) == 0) {
+    stop("targets must not be empty - at least one target is required")
+  }
+  for (name in names(targets)) {
+    tgt <- targets[[name]]
+    if (!is.list(tgt)) {
+      stop(sprintf("target '%s' must be a list with 'column' and 'task'", name))
+    }
+    if (is.null(tgt$column)) {
+      stop(sprintf("target '%s' must have 'column' specified", name))
+    }
+    if (!is.null(tgt$task) && !tgt$task %in% c("regression", "classification")) {
+      stop(sprintf("target '%s' task must be 'regression' or 'classification'", name))
+    }
+  }
+  if (is.null(roles$plot_id)) roles$plot_id <- "plot_id"
+  if (is.null(roles$species_id)) roles$species_id <- "species_id"
+  roles
+}
+
+# Coerce a data.frame to a named list of character columns with NA -> "" (CSV
+# missing-value semantics), preserving column order. The cross-binding carrier
+# for the in-memory dataset loaders.
+.resolve_df_to_columns <- function(df, what) {
+  if (!is.data.frame(df)) {
+    stop(sprintf("%s must be a data.frame", what))
+  }
+  cols <- lapply(df, function(col) {
+    x <- as.character(col)
+    x[is.na(x)] <- ""
+    x
+  })
+  names(cols) <- names(df)
+  cols
+}
+
+#' Load a ResolveDataset from in-memory data frames
+#'
+#' In-memory analog of [resolve.dataset.csv()] (issue #22). Builds and encodes a
+#' dataset directly from data frames already in R, eliminating the
+#' write-to-temp-CSV / re-read round-trip that the file-based loader forces when
+#' the header must be filtered or subset before a fit. The result is identical to
+#' [resolve.dataset.csv()] on the equivalent CSV; only the disk I/O is elided.
+#'
+#' @param header A data.frame of header data (one row per plot). In single-table
+#'   mode (\code{species = NULL}) this is instead the long-format species frame,
+#'   matching [resolve.dataset.csv()]'s single-file behaviour.
+#' @param species A data.frame of species data (long format), a single file path
+#'   string (the large species table is then read once from disk while the
+#'   header stays in memory), or \code{NULL} for single-table mode.
+#' @param roles Named list mapping roles to column names (see
+#'   [resolve.dataset.csv()]).
+#' @param targets Named list of target specifications.
+#' @param config Named list of dataset configuration options.
+#' @param schemaSource Optional ResolveDataset whose vocabularies / class
+#'   mappings are reused (the in-memory analog of \code{schemaSource} in
+#'   [resolve.dataset.csv()]). Only valid when \code{species} is a data.frame.
+#'
+#' @return A ResolveDataset object.
+#' @seealso [resolve.dataset.csv()]
+#' @export
+resolve.dataset.frame <- function(header,
+                                  species = NULL,
+                                  roles = list(),
+                                  targets = list(),
+                                  config = list(),
+                                  schemaSource = NULL) {
+  roles <- .resolve_normalize_roles_targets(roles, targets)
+
+  # Single-table mode: `header` is the long-format species frame.
+  if (is.null(species)) {
+    if (!is.null(schemaSource)) {
+      stop("schemaSource is not supported in single-table mode (pass a separate species frame)")
+    }
+    cols <- .resolve_df_to_columns(header, "header/species frame")
+    return(.resolve_module$ResolveDataset_from_species_dataframe(
+      species_cols = cols,
+      roles_list = roles,
+      targets_list = targets,
+      config_list = config
+    ))
+  }
+
+  header_cols <- .resolve_df_to_columns(header, "header")
+
+  # Header frame + species CSV path.
+  if (is.character(species)) {
+    if (length(species) != 1) {
+      stop("species path must be a single string")
+    }
+    if (!is.null(schemaSource)) {
+      stop("schemaSource is not supported with a species CSV path; pass both as data frames")
+    }
+    if (!file.exists(species)) {
+      stop(sprintf("species file does not exist: %s", species))
+    }
+    return(.resolve_module$ResolveDataset_from_dataframe_header(
+      header_cols = header_cols,
+      species_path = species,
+      roles_list = roles,
+      targets_list = targets,
+      config_list = config
+    ))
+  }
+
+  # Both frames in memory.
+  species_cols <- .resolve_df_to_columns(species, "species")
+  if (!is.null(schemaSource)) {
+    if (!inherits(schemaSource, "Rcpp_ResolveDataset")) {
+      stop("schemaSource must be a ResolveDataset from resolve.dataset.csv()/frame()")
+    }
+    return(.resolve_module$ResolveDataset_from_dataframe_with_schema(
+      header_cols = header_cols,
+      species_cols = species_cols,
+      roles_list = roles,
+      targets_list = targets,
+      schema_source = schemaSource,
+      config_list = config
+    ))
+  }
+  .resolve_module$ResolveDataset_from_dataframe(
+    header_cols = header_cols,
+    species_cols = species_cols,
     roles_list = roles,
     targets_list = targets,
     config_list = config

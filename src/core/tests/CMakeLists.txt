@@ -31,6 +31,7 @@ add_executable(resolve_tests
     test_process.cpp
     test_io_retry.cpp
     test_amp_norm.cpp
+    test_dataframe.cpp
 )
 
 # Add CUDA library directory if CUDA is available

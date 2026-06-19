@@ -52,6 +52,96 @@ void register_dataset(nb::module_& m) {
                     nb::arg("targets"),
                     nb::arg("config") = resolve::DatasetConfig{},
                     "Load dataset from a single species CSV file")
+        // --- In-memory (DataFrame) loaders (issue #22) ---
+        // Low-level column entry points: each frame arrives as (names, columns)
+        // with every cell already a string (column-major), so the result is
+        // identical to loading the equivalent CSV. The high-level `from_pandas`
+        // / `from_dataframe` wrappers in resolve_core/__init__.py convert pandas
+        // DataFrames to these and dispatch. The conversion (no Python C-API per
+        // cell on the C++ side) runs without the GIL where the engine works.
+        .def_static("from_columns",
+                    [](std::vector<std::string> header_names,
+                       std::vector<std::vector<std::string>> header_columns,
+                       std::vector<std::string> species_names,
+                       std::vector<std::vector<std::string>> species_columns,
+                       const resolve::RoleMapping& roles,
+                       const std::vector<resolve::TargetSpec>& targets,
+                       const resolve::DatasetConfig& config) {
+                        resolve::ColumnTable header(std::move(header_names),
+                                                    std::move(header_columns));
+                        resolve::ColumnTable species(std::move(species_names),
+                                                     std::move(species_columns));
+                        return resolve::ResolveDataset::from_dataframe(
+                            header, species, roles, targets, config);
+                    },
+                    nb::arg("header_names"), nb::arg("header_columns"),
+                    nb::arg("species_names"), nb::arg("species_columns"),
+                    nb::arg("roles"), nb::arg("targets"),
+                    nb::arg("config") = resolve::DatasetConfig{},
+                    nb::call_guard<nb::gil_scoped_release>(),
+                    "Load dataset from in-memory header + species column tables "
+                    "(string cells, column-major). Identical to from_csv on the "
+                    "equivalent CSV; no disk round-trip.")
+        .def_static("from_columns_header",
+                    [](std::vector<std::string> header_names,
+                       std::vector<std::vector<std::string>> header_columns,
+                       const std::string& species_path,
+                       const resolve::RoleMapping& roles,
+                       const std::vector<resolve::TargetSpec>& targets,
+                       const resolve::DatasetConfig& config) {
+                        resolve::ColumnTable header(std::move(header_names),
+                                                    std::move(header_columns));
+                        return resolve::ResolveDataset::from_dataframe_header(
+                            header, species_path, roles, targets, config);
+                    },
+                    nb::arg("header_names"), nb::arg("header_columns"),
+                    nb::arg("species_path"),
+                    nb::arg("roles"), nb::arg("targets"),
+                    nb::arg("config") = resolve::DatasetConfig{},
+                    nb::call_guard<nb::gil_scoped_release>(),
+                    "Load dataset from an in-memory header column table plus a "
+                    "species CSV path (the large species table is read once).")
+        .def_static("from_species_columns",
+                    [](std::vector<std::string> species_names,
+                       std::vector<std::vector<std::string>> species_columns,
+                       const resolve::RoleMapping& roles,
+                       const std::vector<resolve::TargetSpec>& targets,
+                       const resolve::DatasetConfig& config) {
+                        resolve::ColumnTable species(std::move(species_names),
+                                                     std::move(species_columns));
+                        return resolve::ResolveDataset::from_species_dataframe(
+                            species, roles, targets, config);
+                    },
+                    nb::arg("species_names"), nb::arg("species_columns"),
+                    nb::arg("roles"), nb::arg("targets"),
+                    nb::arg("config") = resolve::DatasetConfig{},
+                    nb::call_guard<nb::gil_scoped_release>(),
+                    "Load dataset from a single in-memory long-format column "
+                    "table (the DataFrame analog of from_species_csv).")
+        .def_static("from_columns_with_schema",
+                    [](std::vector<std::string> header_names,
+                       std::vector<std::vector<std::string>> header_columns,
+                       std::vector<std::string> species_names,
+                       std::vector<std::vector<std::string>> species_columns,
+                       const resolve::RoleMapping& roles,
+                       const std::vector<resolve::TargetSpec>& targets,
+                       const resolve::ResolveDataset& schema_source,
+                       const resolve::DatasetConfig& config) {
+                        resolve::ColumnTable header(std::move(header_names),
+                                                    std::move(header_columns));
+                        resolve::ColumnTable species(std::move(species_names),
+                                                     std::move(species_columns));
+                        return resolve::ResolveDataset::from_dataframe_with_schema(
+                            header, species, roles, targets, schema_source, config);
+                    },
+                    nb::arg("header_names"), nb::arg("header_columns"),
+                    nb::arg("species_names"), nb::arg("species_columns"),
+                    nb::arg("roles"), nb::arg("targets"),
+                    nb::arg("schema_source"),
+                    nb::arg("config") = resolve::DatasetConfig{},
+                    nb::call_guard<nb::gil_scoped_release>(),
+                    "In-memory analog of from_csv_with_schema: reuse the "
+                    "schema_source vocabularies / class mappings.")
         // Tensor accessors must be wrapped via THPVariable_Wrap; nanobind
         // has no built-in caster for at::Tensor (would produce
         // "Unable to convert function return value to a Python type").

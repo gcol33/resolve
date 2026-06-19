@@ -34,6 +34,7 @@ RCPP_MODULE(resolve_module) {
         .method("species_vector", &RResolveDataset::species_vector, "Get explicit species vector")
         .method("genus_ids", &RResolveDataset::genus_ids, "Get genus IDs matrix")
         .method("family_ids", &RResolveDataset::family_ids, "Get family IDs matrix")
+        .method("categorical_ids", &RResolveDataset::categorical_ids, "Get categorical covariate codes matrix")
         .method("unknown_fraction", &RResolveDataset::unknown_fraction, "Get unknown species fraction")
         .method("unknown_count", &RResolveDataset::unknown_count, "Get unknown species count")
         .method("targets", &RResolveDataset::targets, "Get target values as list")
@@ -53,6 +54,10 @@ RCPP_MODULE(resolve_module) {
     function("ResolveDataset_from_csv", &RResolveDataset::from_csv, "Load dataset from CSV files");
     function("ResolveDataset_from_species_csv", &RResolveDataset::from_species_csv, "Load dataset from single species CSV");
     function("ResolveDataset_from_csv_with_schema", &RResolveDataset::from_csv_with_schema, "Load dataset reusing another dataset's vocabularies and class mappings");
+    function("ResolveDataset_from_dataframe", &RResolveDataset::from_dataframe, "Load dataset from in-memory header + species column lists");
+    function("ResolveDataset_from_dataframe_header", &RResolveDataset::from_dataframe_header, "Load dataset from in-memory header columns + species CSV path");
+    function("ResolveDataset_from_species_dataframe", &RResolveDataset::from_species_dataframe, "Load dataset from a single in-memory long-format column list");
+    function("ResolveDataset_from_dataframe_with_schema", &RResolveDataset::from_dataframe_with_schema, "In-memory analog of from_csv_with_schema");
 
     class_<RResolveModel>("ResolveModel")
         .constructor<List, List>("Create a ResolveModel")

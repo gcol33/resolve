@@ -136,15 +136,15 @@ void fit_classification_mapping(
 
 
 // ColumnIndices implementation
-ColumnIndices ColumnIndices::from_reader(const CSVReader& reader, const RoleMapping& roles) {
+ColumnIndices ColumnIndices::from_source(const RowSource& source, const RoleMapping& roles) {
     ColumnIndices idx;
-    idx.plot = reader.column_index(roles.plot_id);
-    idx.species = reader.column_index(roles.species_id);
-    idx.abundance = roles.abundance ? reader.column_index(*roles.abundance) : -1;
-    idx.longitude = roles.longitude ? reader.column_index(*roles.longitude) : -1;
-    idx.latitude = roles.latitude ? reader.column_index(*roles.latitude) : -1;
-    idx.genus = roles.genus ? reader.column_index(*roles.genus) : -1;
-    idx.family = roles.family ? reader.column_index(*roles.family) : -1;
+    idx.plot = source.column_index(roles.plot_id);
+    idx.species = source.column_index(roles.species_id);
+    idx.abundance = roles.abundance ? source.column_index(*roles.abundance) : -1;
+    idx.longitude = roles.longitude ? source.column_index(*roles.longitude) : -1;
+    idx.latitude = roles.latitude ? source.column_index(*roles.latitude) : -1;
+    idx.genus = roles.genus ? source.column_index(*roles.genus) : -1;
+    idx.family = roles.family ? source.column_index(*roles.family) : -1;
     return idx;
 }
 
@@ -194,6 +194,78 @@ ResolveDataset ResolveDataset::from_species_csv(
         "species CSV load");
 }
 
+// --- In-memory (DataFrame) loaders (issue #22). These share the exact loader
+// bodies as the CSV verbs via the RowSource seam; the only difference is the row
+// provider (InMemoryRowSource over a ColumnTable instead of a CSVReader). A
+// fully in-memory load does no I/O, so it needs no io::with_retry; the mixed
+// header-frame + species-CSV verb retries only the CSV read. ---
+
+ResolveDataset ResolveDataset::from_dataframe(
+    const ColumnTable& header,
+    const ColumnTable& species,
+    const RoleMapping& roles,
+    const std::vector<TargetSpec>& targets,
+    const DatasetConfig& config
+) {
+    ResolveDataset dataset;
+    dataset.config_ = config;
+
+    InMemoryRowSource header_source(header);
+    dataset.load_header_data(header_source, roles, targets);
+
+    InMemoryRowSource species_source(species);
+    dataset.load_species_data(species_source, roles);
+
+    return dataset;
+}
+
+ResolveDataset ResolveDataset::from_dataframe_header(
+    const ColumnTable& header,
+    const std::string& species_path,
+    const RoleMapping& roles,
+    const std::vector<TargetSpec>& targets,
+    const DatasetConfig& config
+) {
+    return io::with_retry<io::IOError>(
+        [&] {
+            ResolveDataset dataset;
+            dataset.config_ = config;
+
+            InMemoryRowSource header_source(header);
+            dataset.load_header_data(header_source, roles, targets);
+
+            CSVReader species_reader(species_path);
+            dataset.load_species_data(species_reader, roles);
+
+            return dataset;
+        },
+        "dataset load (DataFrame header + species CSV)");
+}
+
+ResolveDataset ResolveDataset::from_dataframe_with_schema(
+    const ColumnTable& header,
+    const ColumnTable& species,
+    const RoleMapping& roles,
+    const std::vector<TargetSpec>& targets,
+    const ResolveDataset& schema_source,
+    const DatasetConfig& config
+) {
+    InMemoryRowSource header_source(header);
+    InMemoryRowSource species_source(species);
+    return load_with_schema(
+        header_source, species_source, roles, targets, schema_source, config);
+}
+
+ResolveDataset ResolveDataset::from_species_dataframe(
+    const ColumnTable& species,
+    const RoleMapping& roles,
+    const std::vector<TargetSpec>& targets,
+    const DatasetConfig& config
+) {
+    InMemoryRowSource source(species);
+    return from_species_source(source, roles, targets, config);
+}
+
 ResolveDataset ResolveDataset::from_csv_impl(
     const std::string& header_path,
     const std::string& species_path,
@@ -205,10 +277,12 @@ ResolveDataset ResolveDataset::from_csv_impl(
     dataset.config_ = config;
 
     // Load header data (coordinates, covariates, targets)
-    dataset.load_header_data(header_path, roles, targets);
+    CSVReader header_reader(header_path);
+    dataset.load_header_data(header_reader, roles, targets);
 
     // Load species data
-    dataset.load_species_data(species_path, roles);
+    CSVReader species_reader(species_path);
+    dataset.load_species_data(species_reader, roles);
 
     return dataset;
 }
@@ -216,6 +290,20 @@ ResolveDataset ResolveDataset::from_csv_impl(
 ResolveDataset ResolveDataset::from_csv_with_schema_impl(
     const std::string& header_path,
     const std::string& species_path,
+    const RoleMapping& roles,
+    const std::vector<TargetSpec>& targets,
+    const ResolveDataset& schema_source,
+    const DatasetConfig& config
+) {
+    CSVReader header_reader(header_path);
+    CSVReader species_reader(species_path);
+    return load_with_schema(
+        header_reader, species_reader, roles, targets, schema_source, config);
+}
+
+ResolveDataset ResolveDataset::load_with_schema(
+    RowSource& header,
+    RowSource& species,
     const RoleMapping& roles,
     const std::vector<TargetSpec>& targets,
     const ResolveDataset& schema_source,
@@ -259,8 +347,8 @@ ResolveDataset ResolveDataset::from_csv_with_schema_impl(
         }
     }
 
-    dataset.load_header_data(header_path, roles, targets_with_mappings);
-    dataset.load_species_data(species_path, roles);
+    dataset.load_header_data(header, roles, targets_with_mappings);
+    dataset.load_species_data(species, roles);
 
     return dataset;
 }
@@ -271,14 +359,21 @@ ResolveDataset ResolveDataset::from_species_csv_impl(
     const std::vector<TargetSpec>& targets,
     const DatasetConfig& config
 ) {
+    CSVReader reader(species_path);
+    return from_species_source(reader, roles, targets, config);
+}
+
+ResolveDataset ResolveDataset::from_species_source(
+    RowSource& reader,
+    const RoleMapping& roles,
+    const std::vector<TargetSpec>& targets,
+    const DatasetConfig& config
+) {
     ResolveDataset dataset;
     dataset.config_ = config;
 
-    // Load species data and extract plot-level info
-    CSVReader reader(species_path);
-
     // Find column indices
-    auto cols = ColumnIndices::from_reader(reader, roles);
+    auto cols = ColumnIndices::from_source(reader, roles);
     if (cols.plot < 0 || cols.species < 0) {
         throw std::runtime_error("Required columns not found: plot_id or species_id");
     }
@@ -487,12 +582,10 @@ ResolveDataset ResolveDataset::from_species_csv_impl(
 }
 
 void ResolveDataset::load_header_data(
-    const std::string& header_path,
+    RowSource& reader,
     const RoleMapping& roles,
     const std::vector<TargetSpec>& targets
 ) {
-    CSVReader reader(header_path);
-
     // Find column indices
     int plot_col = reader.column_index(roles.plot_id);
     if (plot_col < 0) {
@@ -557,7 +650,7 @@ void ResolveDataset::load_header_data(
     }
 
     // Count rows first
-    size_t n_rows = reader.count_rows();
+    size_t n_rows = reader.num_rows();
     int64_t n_plots = static_cast<int64_t>(n_rows);
     schema_.n_plots = n_plots;
 
@@ -847,13 +940,11 @@ void ResolveDataset::load_header_data(
 }
 
 void ResolveDataset::load_species_data(
-    const std::string& species_path,
+    RowSource& reader,
     const RoleMapping& roles
 ) {
-    CSVReader reader(species_path);
-
     // Find column indices
-    auto cols = ColumnIndices::from_reader(reader, roles);
+    auto cols = ColumnIndices::from_source(reader, roles);
     if (cols.plot < 0 || cols.species < 0) {
         throw std::runtime_error("Required columns not found: plot_id or species_id");
     }

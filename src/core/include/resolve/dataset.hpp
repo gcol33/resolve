@@ -5,6 +5,7 @@
 #include "resolve/encoder.hpp"
 #include "resolve/categorical.hpp"
 #include "resolve/species_encoding.hpp"
+#include "resolve/row_source.hpp"
 #include <torch/torch.h>
 #include <string>
 #include <vector>
@@ -13,9 +14,6 @@
 #include <memory>
 
 namespace resolve {
-
-// Forward declaration
-class CSVReader;
 
 // Column indices resolved from RoleMapping - reduces repeated column_index() calls
 struct ColumnIndices {
@@ -27,8 +25,9 @@ struct ColumnIndices {
     int genus = -1;
     int family = -1;
 
-    // Factory method to resolve all indices from a CSVReader and RoleMapping
-    static ColumnIndices from_reader(const CSVReader& reader, const RoleMapping& roles);
+    // Factory method to resolve all indices from any RowSource and RoleMapping
+    // (a CSVReader or an in-memory ColumnTable, via InMemoryRowSource).
+    static ColumnIndices from_source(const RowSource& source, const RoleMapping& roles);
 };
 
 // Configuration for dataset loading
@@ -129,6 +128,57 @@ public:
         const DatasetConfig& config = DatasetConfig{}
     );
 
+    // --- In-memory (DataFrame) loaders (issue #22) ---
+    // The on-disk from_csv* verbs above force a write-to-temp-CSV / re-read
+    // round-trip whenever the header must be filtered/subset before a fit. These
+    // accept the same data already in RAM as ColumnTable(s) (the cross-binding
+    // carrier built from a pandas DataFrame or an R data.frame). They share the
+    // exact loader bodies as the CSV path, so the result is identical to loading
+    // the equivalent CSV — only the disk I/O is elided.
+
+    // Header (one row per plot) and species (multiple rows per plot) both in
+    // memory. The DataFrame analog of from_csv.
+    static ResolveDataset from_dataframe(
+        const ColumnTable& header,
+        const ColumnTable& species,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const DatasetConfig& config = DatasetConfig{}
+    );
+
+    // Header in memory, species streamed from a CSV path. Targets the canonical
+    // pain point directly: the header is the per-fit-filtered frame, while the
+    // (large, unfiltered) species table is still read once from disk.
+    static ResolveDataset from_dataframe_header(
+        const ColumnTable& header,
+        const std::string& species_path,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const DatasetConfig& config = DatasetConfig{}
+    );
+
+    // In-memory analog of from_csv_with_schema: reuse the categorical / taxonomy
+    // / species vocabularies and classification class mappings from
+    // `schema_source` instead of fitting fresh ones. Required for cross-split
+    // workflows (held-out eval sets) when the data is already a filtered frame.
+    static ResolveDataset from_dataframe_with_schema(
+        const ColumnTable& header,
+        const ColumnTable& species,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const ResolveDataset& schema_source,
+        const DatasetConfig& config = DatasetConfig{}
+    );
+
+    // Single in-memory long table with species data only. The DataFrame analog
+    // of from_species_csv (header data inferred from first occurrence per plot).
+    static ResolveDataset from_species_dataframe(
+        const ColumnTable& species,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const DatasetConfig& config = DatasetConfig{}
+    );
+
     // Accessors for encoded data
     const torch::Tensor& coordinates() const { return coordinates_; }
     const torch::Tensor& covariates() const { return covariates_; }
@@ -213,16 +263,39 @@ private:
         const DatasetConfig& config
     );
 
-    // Load header CSV data
+    // Build a dataset from a single long-format row source (the shared body of
+    // from_species_csv / from_species_dataframe). The caller owns the source's
+    // lifetime and any I/O-retry wrapping.
+    static ResolveDataset from_species_source(
+        RowSource& source,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const DatasetConfig& config
+    );
+
+    // Shared body of from_csv_with_schema / from_dataframe_with_schema: copy the
+    // source's vocabularies, replay classification class mappings, then load the
+    // header and species from the given row sources. The caller owns the
+    // sources' lifetimes and any I/O-retry wrapping.
+    static ResolveDataset load_with_schema(
+        RowSource& header,
+        RowSource& species,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const ResolveDataset& schema_source,
+        const DatasetConfig& config
+    );
+
+    // Load header data (one row per plot) from any row source.
     void load_header_data(
-        const std::string& header_path,
+        RowSource& source,
         const RoleMapping& roles,
         const std::vector<TargetSpec>& targets
     );
 
-    // Load and encode species data
+    // Load and encode species data from any row source.
     void load_species_data(
-        const std::string& species_path,
+        RowSource& source,
         const RoleMapping& roles
     );
 

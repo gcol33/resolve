@@ -55,6 +55,71 @@ public:
         return w;
     }
 
+    // --- In-memory (DataFrame) loaders (issue #22). header_cols / species_cols
+    // are named lists of character vectors (the R verb coerces every column to
+    // character with NA -> "" before calling). ---
+    static RResolveDataset from_dataframe(
+        List header_cols, List species_cols,
+        List roles_list, List targets_list, List config_list = List()) {
+        ValuePtr header(r_charlist_to_value_map(header_cols));
+        ValuePtr species(r_charlist_to_value_map(species_cols));
+        ValuePtr roles(r_list_to_value_map(roles_list));
+        ValuePtr targets(r_list_to_value_map(targets_list));
+        ValuePtr config(r_list_to_value_map(config_list));
+        RResolveDataset w;
+        w.ds_ = capi_own(resolve_dataset_from_dataframe(
+            header.get(), species.get(), roles.get(), targets.get(), config.get()),
+            resolve_dataset_free);
+        return w;
+    }
+
+    static RResolveDataset from_dataframe_header(
+        List header_cols, std::string species_path,
+        List roles_list, List targets_list, List config_list = List()) {
+        ValuePtr header(r_charlist_to_value_map(header_cols));
+        ValuePtr roles(r_list_to_value_map(roles_list));
+        ValuePtr targets(r_list_to_value_map(targets_list));
+        ValuePtr config(r_list_to_value_map(config_list));
+        RResolveDataset w;
+        w.ds_ = capi_own(resolve_dataset_from_dataframe_header(
+            header.get(), species_path.c_str(),
+            roles.get(), targets.get(), config.get()),
+            resolve_dataset_free);
+        return w;
+    }
+
+    static RResolveDataset from_species_dataframe(
+        List species_cols, List roles_list, List targets_list,
+        List config_list = List()) {
+        ValuePtr species(r_charlist_to_value_map(species_cols));
+        ValuePtr roles(r_list_to_value_map(roles_list));
+        ValuePtr targets(r_list_to_value_map(targets_list));
+        ValuePtr config(r_list_to_value_map(config_list));
+        RResolveDataset w;
+        w.ds_ = capi_own(resolve_dataset_from_species_dataframe(
+            species.get(), roles.get(), targets.get(), config.get()),
+            resolve_dataset_free);
+        return w;
+    }
+
+    static RResolveDataset from_dataframe_with_schema(
+        List header_cols, List species_cols,
+        List roles_list, List targets_list, RResolveDataset schema_source,
+        List config_list = List()) {
+        if (!schema_source.ds_) stop("from_dataframe_with_schema: schema_source is not a loaded dataset");
+        ValuePtr header(r_charlist_to_value_map(header_cols));
+        ValuePtr species(r_charlist_to_value_map(species_cols));
+        ValuePtr roles(r_list_to_value_map(roles_list));
+        ValuePtr targets(r_list_to_value_map(targets_list));
+        ValuePtr config(r_list_to_value_map(config_list));
+        RResolveDataset w;
+        w.ds_ = capi_own(resolve_dataset_from_dataframe_with_schema(
+            header.get(), species.get(), roles.get(), targets.get(),
+            schema_source.ds_.get(), config.get()),
+            resolve_dataset_free);
+        return w;
+    }
+
     // Accessors: each dispatches by name to resolve_dataset_get and converts the
     // returned value tree. Optional tensors come back as a NULL-kind value ->
     // R NULL, matching the old Nullable<...> accessors.

@@ -377,6 +377,30 @@ std::vector<std::string> vstr_vec(const resolve_value* v) {
 }
 std::vector<std::string> vstr_vec(const resolve_value* m, const char* k) { return vstr_vec(vget(m, k)); }
 
+// MAP (ordered column name -> STRING_ARRAY) -> ColumnTable. The in-memory
+// DataFrame carrier for issue #22: a data.frame with every cell stringified.
+// ColumnTable's constructor validates equal-length columns and unique names.
+ColumnTable value_to_column_table(const resolve_value* v, const char* what) {
+    if (!v || v->kind != RESOLVE_VALUE_MAP) {
+        throw std::runtime_error(std::string(what) +
+            " must be a MAP value tree (ordered column name -> string array)");
+    }
+    std::vector<std::string> names;
+    std::vector<std::vector<std::string>> cols;
+    names.reserve(v->keys.size());
+    cols.reserve(v->vals.size());
+    for (size_t c = 0; c < v->keys.size(); ++c) {
+        const resolve_value* colv = v->vals[c];
+        if (!colv || colv->kind != RESOLVE_VALUE_STRING_ARRAY) {
+            throw std::runtime_error(std::string(what) + " column '" +
+                v->keys[c] + "' must be a string array");
+        }
+        names.push_back(v->keys[c]);
+        cols.push_back(colv->sarr);
+    }
+    return ColumnTable(std::move(names), std::move(cols));
+}
+
 // ============================================================================
 // Internal helpers: value <-> torch::Tensor
 // ============================================================================
@@ -1302,6 +1326,68 @@ resolve_dataset_t* resolve_dataset_from_species_csv(
         DatasetConfig c = parse_dataset_config(config);
         auto* h = new resolve_dataset{ResolveDataset::from_species_csv(species_path, r, t, c)};
         return h;
+    })
+}
+
+resolve_dataset_t* resolve_dataset_from_dataframe(
+    const resolve_value_t* header, const resolve_value_t* species,
+    const resolve_value_t* roles, const resolve_value_t* targets,
+    const resolve_value_t* config) {
+    CAPI_BODY_PTR({
+        ColumnTable h = value_to_column_table(header, "header");
+        ColumnTable s = value_to_column_table(species, "species");
+        RoleMapping r = parse_roles(roles);
+        std::vector<TargetSpec> t = parse_targets(targets);
+        DatasetConfig c = parse_dataset_config(config);
+        auto* d = new resolve_dataset{ResolveDataset::from_dataframe(h, s, r, t, c)};
+        return d;
+    })
+}
+
+resolve_dataset_t* resolve_dataset_from_dataframe_header(
+    const resolve_value_t* header, const char* species_path,
+    const resolve_value_t* roles, const resolve_value_t* targets,
+    const resolve_value_t* config) {
+    CAPI_BODY_PTR({
+        ColumnTable h = value_to_column_table(header, "header");
+        RoleMapping r = parse_roles(roles);
+        std::vector<TargetSpec> t = parse_targets(targets);
+        DatasetConfig c = parse_dataset_config(config);
+        auto* d = new resolve_dataset{ResolveDataset::from_dataframe_header(
+            h, species_path, r, t, c)};
+        return d;
+    })
+}
+
+resolve_dataset_t* resolve_dataset_from_species_dataframe(
+    const resolve_value_t* species,
+    const resolve_value_t* roles, const resolve_value_t* targets,
+    const resolve_value_t* config) {
+    CAPI_BODY_PTR({
+        ColumnTable s = value_to_column_table(species, "species");
+        RoleMapping r = parse_roles(roles);
+        std::vector<TargetSpec> t = parse_targets(targets);
+        DatasetConfig c = parse_dataset_config(config);
+        auto* d = new resolve_dataset{ResolveDataset::from_species_dataframe(s, r, t, c)};
+        return d;
+    })
+}
+
+resolve_dataset_t* resolve_dataset_from_dataframe_with_schema(
+    const resolve_value_t* header, const resolve_value_t* species,
+    const resolve_value_t* roles, const resolve_value_t* targets,
+    const resolve_dataset_t* schema_source, const resolve_value_t* config) {
+    CAPI_BODY_PTR({
+        if (!schema_source) throw std::runtime_error(
+            "from_dataframe_with_schema: schema_source is null");
+        ColumnTable h = value_to_column_table(header, "header");
+        ColumnTable s = value_to_column_table(species, "species");
+        RoleMapping r = parse_roles(roles);
+        std::vector<TargetSpec> t = parse_targets(targets);
+        DatasetConfig c = parse_dataset_config(config);
+        auto* d = new resolve_dataset{ResolveDataset::from_dataframe_with_schema(
+            h, s, r, t, schema_source->ds, c)};
+        return d;
     })
 }
 

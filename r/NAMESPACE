@@ -2,6 +2,7 @@
 
 export(resolve.dataset)
 export(resolve.dataset.csv)
+export(resolve.dataset.frame)
 export(resolve.encoder)
 export(resolve.load)
 export(resolve.load_run_metadata)

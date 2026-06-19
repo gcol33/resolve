@@ -243,6 +243,31 @@ inline resolve_value_t* r_list_to_value_map(SEXP x) {
     return v;
 }
 
+// Build a value MAP carrying an in-memory DataFrame (issue #22): an ordered
+// (column name -> STRING_ARRAY) mapping. `cols` is a named list of character
+// vectors (the caller coerces every column to character with NA -> "" so the
+// cell semantics match a CSV). Unlike r_to_value, a length-1 column still
+// becomes a STRING_ARRAY (never a STRING scalar), which ColumnTable requires.
+inline resolve_value_t* r_charlist_to_value_map(List cols) {
+    resolve_value_t* map = resolve_value_new_map();
+    CharacterVector names = cols.names();
+    for (R_xlen_t c = 0; c < cols.size(); ++c) {
+        CharacterVector col = as<CharacterVector>(cols[c]);
+        std::vector<std::string> s(static_cast<size_t>(col.size()));
+        std::vector<const char*> p(static_cast<size_t>(col.size()));
+        for (R_xlen_t i = 0; i < col.size(); ++i) {
+            s[static_cast<size_t>(i)] =
+                (col[i] == NA_STRING) ? std::string() : std::string(CHAR(col[i]));
+            p[static_cast<size_t>(i)] = s[static_cast<size_t>(i)].c_str();
+        }
+        std::string key = (names.size() > c && names[c] != NA_STRING)
+            ? std::string(CHAR(names[c])) : std::string();
+        resolve_map_set_string_array(map, key.c_str(), p.data(),
+                                     static_cast<int64_t>(p.size()));
+    }
+    return map;
+}
+
 // =============================================================================
 // Method-argument tensor helpers: set R matrices / vectors into an input map.
 // Float tensors are passed as double matrices/arrays (the engine casts to

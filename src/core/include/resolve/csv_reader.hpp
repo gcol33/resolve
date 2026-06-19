@@ -9,30 +9,35 @@
 #include <stdexcept>
 
 #include "resolve/io_retry.hpp"  // io::IOError for transient-read classification
+#include "resolve/row_source.hpp"  // RowSource interface (shared loader seam)
 
 namespace resolve {
 
 // Simple CSV reader that doesn't depend on external libraries
 // For production use, consider fast-cpp-csv-parser
-class CSVReader {
+class CSVReader : public RowSource {
 public:
     explicit CSVReader(const std::string& filename, char delimiter = ',');
 
     // Get column names (header row)
-    const std::vector<std::string>& columns() const { return columns_; }
+    const std::vector<std::string>& columns() const override { return columns_; }
 
     // Get column index by name (-1 if not found)
-    int column_index(const std::string& name) const;
+    int column_index(const std::string& name) const override;
 
     // Read all rows, calling callback for each row
     // Callback receives row index and vector of string values
-    void read_rows(std::function<void(size_t, const std::vector<std::string>&)> callback);
+    void read_rows(
+        const std::function<void(size_t, const std::vector<std::string>&)>& callback) override;
+
+    // Number of data rows (RowSource interface; reads the entire file).
+    size_t num_rows() const override { return count_rows(); }
 
     // Read all rows into memory
     std::vector<std::vector<std::string>> read_all();
 
     // Get number of rows (requires reading entire file)
-    size_t count_rows();
+    size_t count_rows() const;
 
 private:
     void parse_header();
@@ -124,7 +129,8 @@ inline std::vector<std::string> CSVReader::parse_line(const std::string& line) {
     return result;
 }
 
-inline void CSVReader::read_rows(std::function<void(size_t, const std::vector<std::string>&)> callback) {
+inline void CSVReader::read_rows(
+    const std::function<void(size_t, const std::vector<std::string>&)>& callback) {
     std::ifstream file(filename_);
     if (!file.is_open()) {
         throw io::IOError("Cannot open file: " + filename_);
@@ -157,7 +163,7 @@ inline std::vector<std::vector<std::string>> CSVReader::read_all() {
     return result;
 }
 
-inline size_t CSVReader::count_rows() {
+inline size_t CSVReader::count_rows() const {
     std::ifstream file(filename_);
     if (!file.is_open()) {
         throw io::IOError("Cannot open file: " + filename_);

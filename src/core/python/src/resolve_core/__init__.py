@@ -224,6 +224,11 @@ def _predictor_load(path, device="cpu", vram_fraction=1.0):
     )
 Predictor.load = staticmethod(_predictor_load)
 
+# Attach the high-level in-memory loaders ResolveDataset.from_pandas /
+# .from_dataframe (issue #22), wrapping the low-level from_columns* bindings.
+from . import _from_pandas as _from_pandas_mod
+_from_pandas_mod.install()
+
 __version__ = "0.6.2"
 
 __all__ = [
