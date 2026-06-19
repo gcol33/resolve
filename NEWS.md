@@ -1,5 +1,35 @@
 # RESOLVE Changelog
 
+## v0.7.0 (2026-06-19)
+
+### New features
+
+- **In-memory (DataFrame) dataset loaders (#22).** Build a dataset directly from
+  frames already in RAM, eliminating the write-to-temp-CSV / re-read round-trip
+  the CSV loaders force when the header is filtered or subset per fit. Python:
+  `ResolveDataset.from_pandas(header, species=, roles, targets, config=,
+  schema_source=)` (alias `.from_dataframe`), where `species` may be a
+  DataFrame, a CSV path (the large species table is read once from disk while
+  the header stays in memory), or `None` (single long frame). R:
+  `resolve.dataset.frame(header, species=, ...)`. C++: `from_dataframe` /
+  `from_dataframe_header` / `from_species_dataframe` / `from_dataframe_with_schema`.
+  A shared `RowSource` seam (implemented by both `CSVReader` and an in-memory
+  `ColumnTable`) makes `from_dataframe` byte-identical to `from_csv` on the
+  equivalent CSV by construction (an empty cell is a missing value). The
+  previously-missing `categorical_ids` R accessor was also registered.
+
+### Bug fixes
+
+- **AMP fp32-normalization guard (#21).** `run_norm_fp32` / `Fp32Norm` force
+  every normalization layer to compute in fp32 inside a CUDA autocast region
+  while the surrounding Linear/embedding matmuls stay fp16, guarding against
+  fp16 BatchNorm-statistic corruption/overflow (a running variance saturating to
+  `inf` collapses eval-mode normalization to mean-prediction). On the current
+  libtorch build autocast already promotes `batch_norm` to fp32, so the guard is
+  defensive there; it removes the dependency on that implicit, version-dependent
+  autocast policy. Toggle with `RESOLVE_FP32_NORM=0`; diagnose with
+  `RESOLVE_AMP_DEBUG=1`.
+
 ## v0.6.2 (2026-06-14)
 
 ### Bug fixes
