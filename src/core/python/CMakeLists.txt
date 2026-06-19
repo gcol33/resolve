@@ -134,6 +134,15 @@ elseif(APPLE)
     set_target_properties(_resolve_core PROPERTIES
         INSTALL_RPATH "@loader_path/../torch/lib"
         BUILD_WITH_INSTALL_RPATH TRUE)
+    # Linking against libtorch_python pulls libtorch's bundled pybind11 into the
+    # module (via torch/csrc/autograd/python_variable.h in bindings_model.cpp),
+    # which references Python C-API symbols (PyInstanceMethod_*, _PyThreadState_
+    # UncheckedGet) not in nanobind's restricted macOS symbol list. A Python
+    # extension on macOS does not link libpython; those symbols resolve at load
+    # time from the host interpreter, so allow undefined-symbol dynamic lookup
+    # (the canonical macOS Python-extension link flag). Without it the arm64 link
+    # fails with "Undefined symbols for architecture arm64".
+    target_link_options(_resolve_core PRIVATE -Wl,-undefined,dynamic_lookup)
 endif()
 
 # Install target for scikit-build-core

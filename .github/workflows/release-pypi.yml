@@ -49,18 +49,24 @@ jobs:
           # Install CPU torch + the build backend, then build without isolation
           # so the build sees the CPU torch. macOS torch is CPU-only on PyPI; the
           # explicit cpu index is for Linux/Windows where PyPI torch is CUDA.
+          # `python -m pip` (not bare `pip`) for the self-upgrade: on Windows
+          # `pip install --upgrade pip` aborts ("To modify pip, please run
+          # python -m pip ..."), which killed the whole chain. cmake + ninja are
+          # installed explicitly because the build runs with --no-isolation and
+          # scikit-build-core's get_requires_for_build_wheel asks for ninja>=1.5,
+          # which the manylinux container does not ship (Linux failed there).
           CIBW_BEFORE_BUILD_LINUX: >
-            pip install --upgrade pip &&
+            python -m pip install --upgrade pip &&
             pip install "torch>=2.0" --index-url https://download.pytorch.org/whl/cpu &&
-            pip install "scikit-build-core>=0.4.3" "nanobind>=2.0.0"
+            pip install "scikit-build-core>=0.4.3" "nanobind>=2.0.0" cmake ninja
           CIBW_BEFORE_BUILD_WINDOWS: >
-            pip install --upgrade pip &&
+            python -m pip install --upgrade pip &&
             pip install "torch>=2.0" --index-url https://download.pytorch.org/whl/cpu &&
-            pip install "scikit-build-core>=0.4.3" "nanobind>=2.0.0" delvewheel
+            pip install "scikit-build-core>=0.4.3" "nanobind>=2.0.0" delvewheel cmake ninja
           CIBW_BEFORE_BUILD_MACOS: >
-            pip install --upgrade pip &&
+            python -m pip install --upgrade pip &&
             pip install "torch>=2.0" &&
-            pip install "scikit-build-core>=0.4.3" "nanobind>=2.0.0"
+            pip install "scikit-build-core>=0.4.3" "nanobind>=2.0.0" cmake ninja
           # Do not bundle libtorch: exclude torch's shared libs from the repair.
           CIBW_REPAIR_WHEEL_COMMAND_LINUX: >
             auditwheel repair
