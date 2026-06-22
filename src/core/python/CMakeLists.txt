@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.18)
 # Check if we're being included as a subdirectory or built standalone
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # Standalone build - define project and build resolve_core
-    project(resolve_python VERSION 0.7.0 LANGUAGES CXX)
+    project(resolve_python VERSION 0.7.1 LANGUAGES CXX)
 
     # CPU by default: the PyPI wheels link the CPU libtorch the user's `torch`
     # ships and do not bundle CUDA. Pass -DUSE_CUDA=ON for a local CUDA build.

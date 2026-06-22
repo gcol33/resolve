@@ -229,7 +229,7 @@ Predictor.load = staticmethod(_predictor_load)
 from . import _from_pandas as _from_pandas_mod
 _from_pandas_mod.install()
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 
 __all__ = [
     # Enums

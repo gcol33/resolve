@@ -1,5 +1,20 @@
 # RESOLVE Changelog
 
+## v0.7.1 (2026-06-19)
+
+### Packaging
+
+- **PyPI wheel build repaired across all platforms.** The `resolve-core` wheel
+  pipeline (broken since 0.6.x) now builds cleanly on Linux, Windows, and both
+  macOS architectures. Linux/Windows install `cmake` and `ninja` explicitly
+  because the no-isolation build asks scikit-build-core for `ninja>=1.5`, which
+  the manylinux container does not ship; the pip self-upgrade uses `python -m
+  pip` so the Windows step no longer aborts. The macOS extension links with
+  `-Wl,-undefined,dynamic_lookup` so the Python C-API symbols pulled in via
+  `libtorch_python` (absent from nanobind's restricted macOS symbol list)
+  resolve from the host interpreter at load time instead of failing the arm64
+  link.
+
 ## v0.7.0 (2026-06-19)
 
 ### New features
