@@ -99,6 +99,24 @@ inline int CSVReader::column_index(const std::string& name) const {
     return it != column_indices_.end() ? it->second : -1;
 }
 
+// True if `s` ends with an open (unterminated) quoted field, i.e. a quoted
+// field runs past the end of this physical line into the next (an RFC-4180
+// embedded newline). Quote handling mirrors parse_line exactly (a doubled ""
+// inside a quoted field is an escaped quote, not a terminator).
+inline bool csv_has_open_quote(const std::string& s) {
+    bool in_quotes = false;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '"') {
+            if (in_quotes && i + 1 < s.size() && s[i + 1] == '"') {
+                ++i;  // escaped quote — consume the pair
+            } else {
+                in_quotes = !in_quotes;
+            }
+        }
+    }
+    return in_quotes;
+}
+
 inline std::vector<std::string> CSVReader::parse_line(const std::string& line) {
     std::vector<std::string> result;
     std::string field;
@@ -141,12 +159,35 @@ inline void CSVReader::read_rows(
     std::getline(file, line);
 
     size_t row_idx = 0;
+    std::string record;  // accumulates physical lines into one logical record
     while (std::getline(file, line)) {
-        if (line.empty() || (line.size() == 1 && line[0] == '\r')) {
-            continue;
+        if (record.empty()) {
+            record = line;
+        } else {
+            record += '\n';  // restore the embedded newline inside the quoted field
+            record += line;
         }
-        auto fields = parse_line(line);
-        callback(row_idx++, fields);
+        // A quoted field may span multiple physical lines; keep accumulating
+        // until the quotes balance so the field's embedded newline is preserved
+        // rather than splitting the record (which would corrupt the row and
+        // desync count_rows from read_rows).
+        if (csv_has_open_quote(record)) continue;
+
+        if (!record.empty() && !(record.size() == 1 && record[0] == '\r')) {
+            callback(row_idx++, parse_line(record));
+        }
+        record.clear();
+    }
+    // A leftover record with an open quote means the file ended inside a quoted
+    // field — a malformed CSV. Fail loudly rather than emit a corrupt row.
+    if (!record.empty()) {
+        if (csv_has_open_quote(record)) {
+            throw std::runtime_error(
+                "Unbalanced quote in CSV (file ended inside a quoted field): " + filename_);
+        }
+        if (!(record.size() == 1 && record[0] == '\r')) {
+            callback(row_idx++, parse_line(record));
+        }
     }
     // badbit (as opposed to a clean EOF) means the stream errored mid-read --
     // a transient storage fault the caller can retry (issue #20).
@@ -174,10 +215,23 @@ inline size_t CSVReader::count_rows() const {
     // Skip header
     std::getline(file, line);
 
+    std::string record;  // must match read_rows' multi-line record accumulation
     while (std::getline(file, line)) {
-        if (!line.empty() && !(line.size() == 1 && line[0] == '\r')) {
+        if (record.empty()) {
+            record = line;
+        } else {
+            record += '\n';
+            record += line;
+        }
+        if (csv_has_open_quote(record)) continue;  // quoted field spans lines
+        if (!record.empty() && !(record.size() == 1 && record[0] == '\r')) {
             ++count;
         }
+        record.clear();
+    }
+    // A trailing record (file did not end in a newline) still counts if present.
+    if (!record.empty() && !(record.size() == 1 && record[0] == '\r')) {
+        ++count;
     }
     if (file.bad()) {
         throw io::IOError("Read error while counting rows of: " + filename_);

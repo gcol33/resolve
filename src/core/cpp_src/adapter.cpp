@@ -203,8 +203,11 @@ TabularAdapterImpl::TabularAdapterImpl(
                     cfg.n_heads,
                     cfg.dropout
                 ));
-            // Output is: continuous_base + gnn_output
-            latent_dim_ = cfg.output_dim;
+            // Output is the environmental (continuous) block concatenated with
+            // the per-plot species-graph embedding, so covariates influence the
+            // plot representation. Previously only the graph output was returned,
+            // silently dropping every continuous/environmental feature.
+            latent_dim_ = n_continuous_base + cfg.output_dim;
             break;
         }
 
@@ -325,9 +328,11 @@ torch::Tensor TabularAdapterImpl::forward(
             // Run GNN on species graph to get species embeddings
             auto species_emb = hetero_gnn_->forward(ei, et);  // (n_species, output_dim)
 
-            // Aggregate per plot using species abundance vector
-            output = HeterogeneousGNNEncoderImpl::aggregate_for_plots(
+            // Aggregate per plot using species abundance vector, then prepend
+            // the environmental (continuous) features so they are not dropped.
+            auto gnn_plot = HeterogeneousGNNEncoderImpl::aggregate_for_plots(
                 species_emb, species_vector);  // (batch, output_dim)
+            output = torch::cat({continuous, gnn_plot}, /*dim=*/1);  // (batch, n_cont + output_dim)
             break;
         }
 

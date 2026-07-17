@@ -293,6 +293,16 @@ private:
     // empty when plot_ids_ is empty (the raw-tensor prepare_data path).
     [[nodiscard]] std::vector<std::string> select_plot_ids(const torch::Tensor& indices) const;
 
+    // Invert a prior standardization on continuous features and regression
+    // targets in place, using `scalers`. Single source of truth shared by the
+    // random and spatial cross-validation routines, which reassemble already-
+    // standardized train/test tensors and must recover raw values before each
+    // fold recomputes its own scalers (otherwise data is standardized twice).
+    static void unscale_continuous_targets(
+        torch::Tensor& continuous,
+        std::unordered_map<std::string, torch::Tensor>& targets,
+        const Scalers& scalers);
+
     // Copy params + buffers from a checkpoint archive into `model` under a
     // NoGradGuard (freshly-constructed leaf params require it). Single source
     // of truth for the static load() and the instance load_state().
@@ -420,12 +430,9 @@ private:
     torch::Tensor raw_species_ids_;    // (n_records,) int64 - pre-hashed species IDs
     torch::Tensor raw_weights_;        // (n_records,) float32 - species weights
     torch::Tensor plot_offsets_;       // (n_plots+1,) int64 - CSR offsets for each plot
-    torch::Tensor train_plot_offsets_; // Remapped offsets for training set
-    torch::Tensor test_plot_offsets_;  // Remapped offsets for test set
-    torch::Tensor train_raw_species_ids_;  // Species IDs for training plots
-    torch::Tensor train_raw_weights_;      // Weights for training plots
-    torch::Tensor test_raw_species_ids_;   // Species IDs for test plots
-    torch::Tensor test_raw_weights_;       // Weights for test plots
+    // The on-the-fly CUDA hash path uses the full-dataset CSR above and remaps
+    // train-local shuffle positions to global plot indices per batch (see
+    // train_epoch), so no train/test-local CSR copies are kept.
     torch::Tensor gpu_train_raw_species_ids_;  // GPU-cached training species IDs
     torch::Tensor gpu_train_raw_weights_;      // GPU-cached training weights
     torch::Tensor gpu_train_plot_offsets_;     // GPU-cached training offsets

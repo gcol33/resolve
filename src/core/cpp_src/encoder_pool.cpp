@@ -240,6 +240,18 @@ PlotEncoderTransformerImpl::PlotEncoderTransformerImpl(
             torch::nn::TransformerEncoder(enc_opts));
     }
 
+    // CLS pooling reads position 0 after the encoder mixes the CLS token with
+    // the species tokens; with zero attention layers there is no mixing and the
+    // pooled vector collapses to the constant CLS parameter (all species
+    // silently ignored). Require at least one attention layer for CLS pooling.
+    if (transformer_pooling != "attention" && n_attention_layers == 0) {
+        throw std::invalid_argument(
+            "PlotEncoderTransformer: transformer_pooling='cls' requires "
+            "n_attention_layers >= 1 (with 0 layers the CLS vector is a constant "
+            "that ignores all species). Use transformer_pooling='attention' or "
+            "set n_attention_layers >= 1.");
+    }
+
     // Pooling
     // NOTE: libtorch C++ API MultiheadAttentionOptions does not expose batch_first.
     // We transpose manually before/after calling forward.
@@ -344,18 +356,34 @@ torch::Tensor PlotEncoderTransformerImpl::forward(
         weights = mask.to(torch::kFloat32);
     }
 
+    // Guard fully-padded rows (no species): a row whose mask is entirely false
+    // makes the attention softmax operate over all -inf keys and produce NaN,
+    // which propagates through pooling into the loss. Force position 0 valid for
+    // such rows so the encoder / pool yields a finite output. Real vegetation
+    // plots always have >=1 species; this only affects degenerate or synthetic
+    // all-padding rows. (The rank-pool encoder handles the empty plot via a
+    // weight-sum clamp; the transformer path needs this explicit guard.)
+    {
+        auto all_padding = mask.to(torch::kBool).logical_not().all(/*dim=*/1);  // (B,)
+        if (all_padding.any().item<bool>()) {
+            auto rows = all_padding.nonzero().squeeze(-1);  // (k,) row indices
+            mask = mask.clone();
+            mask.index_put_({rows, 0}, torch::ones({rows.size(0)}, mask.options()));
+        }
+    }
+
     // Cover dropout
     apply_cover_dropout(is_training(), cover_dropout_, batch_size, device,
                         weights, mask, has_cover);
-
-    // Build token embeddings and run self-attention
-    auto tokens = forward_tokens(species_ids, genus_ids, family_ids, weights, mask, masked_positions);
 
     // Pooling
     torch::Tensor pooled;
     auto padding_mask = ~mask;  // True = ignore
 
     if (transformer_pooling_ == "attention") {
+        // Encode the species tokens (self-attention if configured), then pool
+        // them with a learned query.
+        auto tokens = forward_tokens(species_ids, genus_ids, family_ids, weights, mask, masked_positions);
         // MultiheadAttention expects (seq, batch, d_model) — transpose around call
         auto query = pool_query_.expand({batch_size, -1, -1});  // (B, 1, d_model)
         auto query_t = query.transpose(0, 1);   // (1, B, d_model)
@@ -365,19 +393,24 @@ torch::Tensor PlotEncoderTransformerImpl::forward(
         // Output: (1, B, d_model) -> transpose back and squeeze
         pooled = pool_norm_->forward(std::get<0>(attn_result).transpose(0, 1).squeeze(1));  // (B, d_model)
     } else {
-        // CLS pooling: prepend CLS token, run through transformer, extract pos 0
+        // CLS pooling: prepend the CLS token to the RAW (un-encoded) species
+        // tokens and run the encoder exactly once, so CLS attends to the tokens
+        // in a single pass (standard BERT-style pooling). Building via
+        // forward_tokens would encode the species tokens once and then re-encode
+        // them together with CLS — a double pass. n_attention_layers >= 1 is
+        // guaranteed by the constructor for this pooling mode.
+        auto tokens = build_tokens(species_ids, genus_ids, family_ids, weights, masked_positions);
         auto cls = cls_token_.expand({batch_size, -1, -1});
-        auto tokens_with_cls = torch::cat({cls, tokens}, /*dim=*/1);
+        auto tokens_with_cls = torch::cat({cls, tokens}, /*dim=*/1);  // (B, seq+1, d)
 
-        if (transformer_encoder_) {
-            // TransformerEncoder expects (seq, batch, d_model) — transpose around call
-            auto cls_pad = torch::zeros({batch_size, 1},
-                torch::TensorOptions().dtype(torch::kBool).device(device));
-            auto extended_mask = torch::cat({cls_pad, padding_mask}, /*dim=*/1);
-            tokens_with_cls = tokens_with_cls.transpose(0, 1);  // (B, seq+1, d) -> (seq+1, B, d)
-            tokens_with_cls = transformer_encoder_->forward(tokens_with_cls, /*mask=*/{}, extended_mask);
-            tokens_with_cls = tokens_with_cls.transpose(0, 1);  // (seq+1, B, d) -> (B, seq+1, d)
-        }
+        // TransformerEncoder expects (seq, batch, d_model) — transpose around call
+        auto cls_pad = torch::zeros({batch_size, 1},
+            torch::TensorOptions().dtype(torch::kBool).device(device));
+        auto extended_mask = torch::cat({cls_pad, padding_mask}, /*dim=*/1);
+        tokens_with_cls = tokens_with_cls.transpose(0, 1);  // (B, seq+1, d) -> (seq+1, B, d)
+        tokens_with_cls = transformer_encoder_->forward(tokens_with_cls, /*mask=*/{}, extended_mask);
+        tokens_with_cls = tokens_with_cls.transpose(0, 1);  // (seq+1, B, d) -> (B, seq+1, d)
+
         pooled = tokens_with_cls.index({torch::indexing::Slice(), 0});  // (B, d_model)
     }
 

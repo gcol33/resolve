@@ -16,31 +16,15 @@ namespace resolve {
 
 namespace {
 
-// A cell is "missing" if it is empty or matches a common NA marker.
-// Match is case-insensitive on the marker words. Mirrors the Python POC's
-// `_NA_STRINGS` ({"", "NA", "na", "N/A", "n/a", "NaN", "nan", "NULL", "null",
-// "None", "none", ".", "-"}) — kept in sync so the C++ and POC loaders drop
-// the same rows.
-bool is_missing_cell(const std::string& s) {
-    if (s.empty()) return true;
-    if (s == "." || s == "-") return true;
-    auto eq_ci = [&](const char* tok) {
-        if (s.size() != std::strlen(tok)) return false;
-        for (size_t i = 0; i < s.size(); ++i) {
-            if (std::tolower(static_cast<unsigned char>(s[i])) !=
-                std::tolower(static_cast<unsigned char>(tok[i]))) return false;
-        }
-        return true;
-    };
-    return eq_ci("NA") || eq_ci("N/A") || eq_ci("NaN") ||
-           eq_ci("NULL") || eq_ci("None");
-}
+// Missing-cell detection is the single canonical `resolve::is_na_string`
+// (declared in categorical.hpp), so target / covariate / categorical columns
+// all classify the same raw cell identically.
 
 // Parse a regression target string. Returns nullopt for empty / NA marker /
 // unparseable / non-finite values. Distinct from `safe_stof`, which silently
 // maps every failure to 0.0f and would conflate "missing" with "actual zero".
 std::optional<float> parse_regression_target(const std::string& s) {
-    if (is_missing_cell(s)) return std::nullopt;
+    if (is_na_string(s)) return std::nullopt;
     auto v = parse_float_strict(s);  // locale-free, rejects trailing garbage
     if (!v || !std::isfinite(*v)) return std::nullopt;
     return v;
@@ -87,7 +71,7 @@ void fit_classification_mapping(
         std::unordered_set<std::string> seen;
         seen.reserve(raw.size());
         for (const auto& v : raw) {
-            if (is_missing_cell(v)) continue;
+            if (is_na_string(v)) continue;
             if (seen.insert(v).second) uniques.push_back(v);
         }
     }
@@ -105,7 +89,22 @@ void fit_classification_mapping(
         parsed.push_back(*p);
     }
 
+    // Use the parsed integers directly as class codes ONLY when they are
+    // non-negative and reasonably dense. A negative label would index
+    // class_names_out at static_cast<size_t>(negative) == a huge value (OOB
+    // heap write); a very large label (e.g. an ID like 9999999999) would size
+    // class_names_out to ~that value (unbounded allocation / OOM) even for a
+    // handful of classes. In either case fall back to a compact 0..K-1
+    // factorization of the sorted unique labels.
+    constexpr int64_t kMaxDirectClassCode = 1 << 20;  // 1,048,575
+    bool use_direct_codes = false;
     if (all_int) {
+        int64_t min_code = *std::min_element(parsed.begin(), parsed.end());
+        int64_t max_code = *std::max_element(parsed.begin(), parsed.end());
+        use_direct_codes = (min_code >= 0 && max_code < kMaxDirectClassCode);
+    }
+
+    if (use_direct_codes) {
         // Use parsed ints as codes. class_names is ordered by code (so the
         // vocab round-trips through save/load), which means we need to sort
         // (code, name) pairs by code and dedupe to a dense vector.
@@ -363,6 +362,25 @@ ResolveDataset ResolveDataset::from_species_csv_impl(
     return from_species_source(reader, roles, targets, config);
 }
 
+// Build a SpeciesRecord from one table row using the resolved column indices.
+// Single source of truth shared by from_species_source and load_species_data.
+// The caller must have bounds-checked the plot and species columns already.
+static SpeciesRecord make_species_record(const std::vector<std::string>& row,
+                                         const ColumnIndices& cols) {
+    SpeciesRecord record;
+    record.plot_id = row[cols.plot];
+    record.species_id = row[cols.species];
+    record.abundance = (cols.abundance >= 0 && row.size() > static_cast<size_t>(cols.abundance))
+        ? safe_stof(row[cols.abundance], 1.0f) : 1.0f;
+    if (cols.genus >= 0 && row.size() > static_cast<size_t>(cols.genus)) {
+        record.genus = row[cols.genus];
+    }
+    if (cols.family >= 0 && row.size() > static_cast<size_t>(cols.family)) {
+        record.family = row[cols.family];
+    }
+    return record;
+}
+
 ResolveDataset ResolveDataset::from_species_source(
     RowSource& reader,
     const RoleMapping& roles,
@@ -376,6 +394,19 @@ ResolveDataset ResolveDataset::from_species_source(
     auto cols = ColumnIndices::from_source(reader, roles);
     if (cols.plot < 0 || cols.species < 0) {
         throw std::runtime_error("Required columns not found: plot_id or species_id");
+    }
+
+    // The single-long-table loader reads only plot-level coordinates/targets
+    // from each plot's first occurrence; it does not populate covariates or
+    // categorical covariates. Warn rather than silently discard requested roles
+    // (a shared RoleMapping reused from the two-file loader is a legitimate
+    // pattern, so this is a warning, not an error). Use from_csv (separate
+    // header + species tables) when plot-level covariates are needed.
+    if (!roles.covariates.empty() || !roles.categoricals.empty()) {
+        std::cerr << "[RESOLVE] warning: from_species_csv ignores roles.covariates ("
+                  << roles.covariates.size() << ") and roles.categoricals ("
+                  << roles.categoricals.size()
+                  << "); use from_csv for plot-level covariates" << std::endl;
     }
 
     // Find target columns
@@ -397,21 +428,8 @@ ResolveDataset ResolveDataset::from_species_source(
         }
 
         std::string plot_id = row[cols.plot];
-        std::string species_id = row[cols.species];
 
-        SpeciesRecord record;
-        record.plot_id = plot_id;
-        record.species_id = species_id;
-        record.abundance = cols.abundance >= 0 && row.size() > static_cast<size_t>(cols.abundance)
-            ? safe_stof(row[cols.abundance], 1.0f) : 1.0f;
-
-        if (cols.genus >= 0 && row.size() > static_cast<size_t>(cols.genus)) {
-            record.genus = row[cols.genus];
-        }
-        if (cols.family >= 0 && row.size() > static_cast<size_t>(cols.family)) {
-            record.family = row[cols.family];
-        }
-
+        SpeciesRecord record = make_species_record(row, cols);
         plot_records[plot_id].push_back(record);
 
         // Extract plot-level data from first occurrence
@@ -517,7 +535,7 @@ ResolveDataset ResolveDataset::from_species_source(
             int64_t n_null = 0;
             for (int64_t i = 0; i < n_plots; ++i) {
                 const std::string& v = raw_at(t, i);
-                if (is_missing_cell(v)) { keep[i] = 0; ++n_null; continue; }
+                if (is_na_string(v)) { keep[i] = 0; ++n_null; continue; }
                 auto it = mapping.find(v);
                 if (it == mapping.end()) { keep[i] = 0; ++n_null; continue; }
                 acc[i] = it->second;
@@ -665,6 +683,9 @@ void ResolveDataset::load_header_data(
     if (!covariate_cols.empty()) {
         covariates_ = torch::zeros({n_plots, static_cast<int64_t>(covariate_cols.size())}, torch::kFloat32);
     }
+    // Per-column count of covariate cells that were missing/unparseable and
+    // coerced to 0.0 during the scan (issue #32); warned about afterwards.
+    std::vector<int64_t> cov_na_counts(covariate_cols.size(), 0);
 
     // Initialize target tensors
     for (size_t t = 0; t < targets.size(); ++t) {
@@ -713,13 +734,26 @@ void ResolveDataset::load_header_data(
     std::vector<char> keep_row;
     keep_row.reserve(static_cast<size_t>(n_plots));
 
+    // Header rows are plot-level: plot_id must be unique. A duplicate would
+    // create two plot slots that both look up the same species records, so
+    // reject it (consistent with the strictness applied to duplicate columns).
+    std::unordered_set<std::string> seen_plot_ids;
+    seen_plot_ids.reserve(static_cast<size_t>(n_plots));
+
     int64_t row_idx = 0;
     reader.read_rows([&](size_t, const std::vector<std::string>& row) {
         if (row.size() <= static_cast<size_t>(plot_col)) {
             return;
         }
 
-        plot_ids_.push_back(row[plot_col]);
+        const std::string& pid = row[plot_col];
+        if (!seen_plot_ids.insert(pid).second) {
+            throw std::runtime_error(
+                "Duplicate plot_id '" + pid + "' in header data. Plot IDs must "
+                "be unique (each header row is one plot).");
+        }
+
+        plot_ids_.push_back(pid);
         bool row_ok = true;
 
         // Coordinates
@@ -728,12 +762,24 @@ void ResolveDataset::load_header_data(
             coords_data[row_idx * 2 + 1] = safe_stof(row[lat_col]);
         }
 
-        // Covariates
+        // Covariates. Parse with the NaN-aware helper so a blank / "NA" /
+        // unparseable cell is not silently read as a real 0.0 (which would bias
+        // standardization). We still write a well-defined 0.0 into the slot, but
+        // count the coercions per column and warn after the scan so the missing
+        // values are visible rather than silent (issue #32).
         if (cov_data) {
             for (size_t i = 0; i < covariate_cols.size(); ++i) {
                 int col = covariate_cols[i];
                 if (row.size() > static_cast<size_t>(col)) {
-                    cov_data[row_idx * cov_cols + static_cast<int64_t>(i)] = safe_stof(row[col]);
+                    auto parsed = parse_regression_target(row[col]);
+                    if (parsed.has_value()) {
+                        cov_data[row_idx * cov_cols + static_cast<int64_t>(i)] = *parsed;
+                    } else {
+                        cov_data[row_idx * cov_cols + static_cast<int64_t>(i)] = 0.0f;
+                        cov_na_counts[i]++;
+                    }
+                } else {
+                    cov_na_counts[i]++;
                 }
             }
         }
@@ -785,6 +831,18 @@ void ResolveDataset::load_header_data(
         row_idx++;
     });
 
+    // Surface covariate missingness: coercing NA/blank cells to 0.0 injects a
+    // real, extreme value into standardization, so make it visible rather than
+    // silent. Rows are NOT dropped here (covariates don't gate row validity the
+    // way targets do); the researcher decides how to handle them upstream.
+    for (size_t i = 0; i < cov_na_counts.size(); ++i) {
+        if (cov_na_counts[i] > 0) {
+            std::cerr << "[RESOLVE] warning: covariate column '"
+                      << schema_.covariate_names[i] << "' had " << cov_na_counts[i]
+                      << " missing/unparseable cell(s) coerced to 0.0" << std::endl;
+        }
+    }
+
     // ---- Fit + encode classification target columns ----
     // For each classification target, either use the explicit class_mapping
     // from the TargetSpec, or auto-fit one from the raw column data. Encode
@@ -827,7 +885,7 @@ void ResolveDataset::load_header_data(
         int64_t n_null = 0;
         for (int64_t i = 0; i < row_idx; ++i) {
             const std::string& v = raw[static_cast<size_t>(i)];
-            if (is_missing_cell(v)) {
+            if (is_na_string(v)) {
                 if (keep_row[static_cast<size_t>(i)]) keep_row[static_cast<size_t>(i)] = 0;
                 ++n_null;
                 continue;
@@ -868,12 +926,22 @@ void ResolveDataset::load_header_data(
     // target produced a usable value. Loud one-line summary mirrors the
     // POC's "Filtered N species records for invalid plots" log so users
     // see the n_plots drop instead of wondering where their plots went.
-    const int64_t n_loaded = row_idx;
+    const int64_t n_loaded = row_idx;   // rows actually appended during the scan
     int64_t n_keep = 0;
     for (char k : keep_row) if (k) ++n_keep;
 
-    if (n_keep < n_loaded) {
-        const int64_t n_dropped = n_loaded - n_keep;
+    // Tensors were sized to n_plots (= count_rows). Two effects can shrink the
+    // usable set: (a) rows too short to contain plot_id were skipped during the
+    // scan (n_loaded < n_plots), leaving trailing zero-filled phantom rows the
+    // species encoder would never fill; and (b) rows with a missing/NaN/unmapped
+    // target were marked for drop (n_keep < n_loaded). Compact whenever EITHER
+    // applies (n_keep < n_plots) so tensor length, plot_ids_, and
+    // schema_.n_plots always agree. Previously only case (b) triggered
+    // compaction, so a ragged row with no target drop left the target/coord/
+    // covariate tensors longer than plot_ids_ and desynced the species tensors.
+    if (n_keep < n_plots) {
+        const int64_t n_target_dropped = n_loaded - n_keep;
+        const int64_t n_ragged_skipped = n_plots - n_loaded;
         std::vector<int64_t> keep_idx;
         keep_idx.reserve(static_cast<size_t>(n_keep));
         for (int64_t i = 0; i < n_loaded; ++i) {
@@ -906,16 +974,25 @@ void ResolveDataset::load_header_data(
 
         schema_.n_plots = n_keep;
 
-        std::cout << "  Dropped " << n_dropped
-                  << " plots with missing/NaN target ("
-                  << n_keep << " of " << n_loaded << " kept; ";
-        // List the target column names so the user knows which target drove
-        // the drop. Multiple targets => any-missing semantics.
-        bool first = true;
-        for (const auto& target : targets) {
-            if (!first) std::cout << ", ";
-            std::cout << "'" << target.column_name << "'";
-            first = false;
+        std::cout << "  Kept " << n_keep << " of " << n_plots << " plots (";
+        bool need_sep = false;
+        if (n_target_dropped > 0) {
+            std::cout << n_target_dropped << " dropped for missing/NaN target ";
+            // List the target column names so the user knows which target drove
+            // the drop. Multiple targets => any-missing semantics.
+            bool first = true;
+            std::cout << "[";
+            for (const auto& target : targets) {
+                if (!first) std::cout << ", ";
+                std::cout << "'" << target.column_name << "'";
+                first = false;
+            }
+            std::cout << "]";
+            need_sep = true;
+        }
+        if (n_ragged_skipped > 0) {
+            if (need_sep) std::cout << "; ";
+            std::cout << n_ragged_skipped << " skipped as too short to contain plot_id";
         }
         std::cout << ")" << std::endl;
     }
@@ -958,22 +1035,7 @@ void ResolveDataset::load_species_data(
         }
 
         std::string plot_id = row[cols.plot];
-        std::string species_id = row[cols.species];
-
-        SpeciesRecord record;
-        record.plot_id = plot_id;
-        record.species_id = species_id;
-        record.abundance = cols.abundance >= 0 && row.size() > static_cast<size_t>(cols.abundance)
-            ? safe_stof(row[cols.abundance], 1.0f) : 1.0f;
-
-        if (cols.genus >= 0 && row.size() > static_cast<size_t>(cols.genus)) {
-            record.genus = row[cols.genus];
-        }
-        if (cols.family >= 0 && row.size() > static_cast<size_t>(cols.family)) {
-            record.family = row[cols.family];
-        }
-
-        plot_records[plot_id].push_back(record);
+        plot_records[plot_id].push_back(make_species_record(row, cols));
     });
 
     // Encode species
@@ -996,8 +1058,16 @@ void ResolveDataset::build_species_vocab(
     std::vector<std::pair<std::string, int>> sorted_species(
         species_counts.begin(), species_counts.end()
     );
+    // Sort by frequency descending, breaking ties by species name ascending so
+    // the ID assignment is a pure function of the data (independent of
+    // unordered_map iteration order). Without the name tie-break, tied-frequency
+    // species get IDs in nondeterministic hash order, so a checkpoint and a
+    // separately-rebuilt dataset can disagree on embedding rows (cf. #5 for the
+    // taxonomy vocab; SpeciesVocab::from_records already sorts by name).
     std::sort(sorted_species.begin(), sorted_species.end(),
-        [](const auto& a, const auto& b) { return a.second > b.second; }
+        [](const auto& a, const auto& b) {
+            return a.second != b.second ? a.second > b.second : a.first < b.first;
+        }
     );
 
     // Build vocabulary
@@ -1337,8 +1407,14 @@ void ResolveDataset::encode_species(
         }
     }
 
-    // Encode taxonomy
-    if (schema_.has_taxonomy) {
+    // Encode taxonomy into fixed slots. Skip for rank_pool / transformer, which
+    // consume the per-species pool_genus_ids_ / pool_family_ids_ populated above
+    // and never read these fixed-slot tensors; allocating + per-plot sorting
+    // them would be wasted work on large datasets.
+    const bool fixed_slot_taxonomy =
+        config_.species_encoding != SpeciesEncodingMode::RankPool &&
+        config_.species_encoding != SpeciesEncodingMode::Transformer;
+    if (schema_.has_taxonomy && fixed_slot_taxonomy) {
         genus_ids_ = torch::zeros({n_plots, n_taxonomy_slots}, torch::kLong);
         family_ids_ = torch::zeros({n_plots, n_taxonomy_slots}, torch::kLong);
         auto genus_acc = genus_ids_.accessor<int64_t, 2>();

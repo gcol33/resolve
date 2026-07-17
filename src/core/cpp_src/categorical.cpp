@@ -14,23 +14,26 @@ namespace resolve {
 // is_na_string
 // =============================================================================
 //
-// Matches Python POC's src/resolve/data/dataset.py::_NA_STRINGS exactly so
-// the two backends produce identical factorization output for the same CSV.
-
-namespace {
-
-const std::unordered_set<std::string>& na_string_set() {
-    static const std::unordered_set<std::string> kNa = {
-        "",   "NA",  "na",   "N/A", "n/a", "NaN", "nan",
-        "NULL", "null", "None", "none", ".", "-"
-    };
-    return kNa;
-}
-
-}  // namespace
-
+// Mirrors the Python POC's src/resolve/data/dataset.py::_NA_STRINGS, matched
+// case-insensitively. Single source of truth for NA/missing-cell detection
+// across the whole engine: the dataset target/covariate loaders and the
+// categorical factorizer both call this, so the same raw cell is classified
+// identically regardless of the column's role (previously the target path used
+// a case-insensitive matcher and the categorical path an exact set, so e.g.
+// "NAN" was missing in a target column but a real category in a covariate).
 bool is_na_string(const std::string& s) noexcept {
-    return na_string_set().count(s) > 0;
+    if (s.empty() || s == "." || s == "-") return true;
+    auto eq_ci = [&](const char* tok) noexcept {
+        const size_t n = std::strlen(tok);
+        if (s.size() != n) return false;
+        for (size_t i = 0; i < n; ++i) {
+            if (std::tolower(static_cast<unsigned char>(s[i])) !=
+                std::tolower(static_cast<unsigned char>(tok[i]))) return false;
+        }
+        return true;
+    };
+    return eq_ci("NA") || eq_ci("N/A") || eq_ci("NaN") ||
+           eq_ci("NULL") || eq_ci("None");
 }
 
 // =============================================================================

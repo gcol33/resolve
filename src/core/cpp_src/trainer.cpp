@@ -401,6 +401,17 @@ float Trainer::train_epoch(int epoch) {
     const auto& hash_species_src = gpu_data_cached_ ? gpu_train_raw_species_ids_ : raw_species_ids_;
     const auto& hash_weights_src = gpu_data_cached_ ? gpu_train_raw_weights_ : raw_weights_;
     const auto& hash_offsets_src = gpu_data_cached_ ? gpu_train_plot_offsets_ : plot_offsets_;
+
+    // Map train-local shuffle positions to GLOBAL plot indices before hashing.
+    // train_continuous_ row k is global plot train_indices_[k], but the CSR
+    // offsets used for the on-the-fly hash are full-dataset, so the hash must be
+    // looked up by global plot index (matching eval_epoch / the baseline paths).
+    // Without this remap, a batch row's species-hash comes from a different plot
+    // than its covariates and target.
+    torch::Tensor hash_index_map;
+    if (use_cuda_hash_ && config_.device.is_cuda()) {
+        hash_index_map = train_indices_.to(perm.device());
+    }
 #endif
 
     for (int64_t start = 0; start < n_train; start += batch_size) {
@@ -456,9 +467,9 @@ float Trainer::train_epoch(int epoch) {
                 batch_hash = prefetched_hash;
                 prefetch_ready = false;
             } else {
-                // First batch: compute synchronously
+                // First batch: compute synchronously. Hash by global plot index.
                 batch_hash = cuda::compute_batch_hash_embedding_cuda(
-                    batch_idx,
+                    hash_index_map.index_select(0, batch_idx),
                     torch::Tensor(),
                     hash_species_src,
                     hash_weights_src,
@@ -484,7 +495,7 @@ float Trainer::train_epoch(int epoch) {
                 // Compute next batch's hash on prefetch stream
                 c10::cuda::CUDAStreamGuard guard(prefetch_stream);
                 prefetched_hash = cuda::compute_batch_hash_embedding_cuda(
-                    next_batch_idx,
+                    hash_index_map.index_select(0, next_batch_idx),
                     torch::Tensor(),
                     hash_species_src,
                     hash_weights_src,
@@ -1549,9 +1560,16 @@ NetworkDiagnostics Trainer::compute_diagnostics() {
     torch::NoGradGuard no_grad;
     model_->eval();
 
-    // Use a subset of test data for diagnostics (max 10000 samples)
+    // Use a subset of test data for diagnostics (max 10000 samples). Draw the
+    // subset with a dedicated seeded generator so the diagnostics are
+    // reproducible for a fixed seed and do not perturb the global RNG stream
+    // mid-fit (matching the per-epoch shuffle; cf. #15).
     int64_t n_samples = std::min(test_continuous_.size(0), static_cast<int64_t>(10000));
-    auto sample_indices = torch::randperm(test_continuous_.size(0)).slice(0, 0, n_samples);
+    auto diag_gen = at::detail::createCPUGenerator(
+        static_cast<uint64_t>(data_seed_) + 0x51ADu);
+    auto sample_indices = torch::randperm(
+        test_continuous_.size(0), diag_gen,
+        torch::TensorOptions().dtype(torch::kLong)).slice(0, 0, n_samples);
 
     auto sample_continuous = test_continuous_.index_select(0, sample_indices).to(config_.device);
     auto sample_genus = to_device_if_defined(
@@ -1901,6 +1919,25 @@ ClassificationPredictions Trainer::compute_classification_predictions(
     return result;
 }
 
+void Trainer::unscale_continuous_targets(
+    torch::Tensor& continuous,
+    std::unordered_map<std::string, torch::Tensor>& targets,
+    const Scalers& scalers) {
+    // continuous: x_scaled -> x_raw = x_scaled * scale + mean (per feature).
+    if (continuous.defined() && continuous.size(1) > 0 &&
+        scalers.continuous_mean.defined() && scalers.continuous_scale.defined()) {
+        continuous = continuous * scalers.continuous_scale + scalers.continuous_mean;
+    }
+    // Regression targets: only those present in target_scalers were scaled;
+    // {mean, scale} stored as {first, second} at fit time.
+    for (const auto& [name, ms] : scalers.target_scalers) {
+        auto it = targets.find(name);
+        if (it != targets.end() && it->second.defined()) {
+            it->second = it->second * ms.second + ms.first;
+        }
+    }
+}
+
 CrossValidationResult Trainer::cross_validate(int n_folds, int seed) {
     if (!data_prepared_) {
         throw std::runtime_error("Data must be prepared before cross-validation");
@@ -1967,6 +2004,23 @@ CrossValidationResult Trainer::cross_validate(int n_folds, int seed) {
     // Store original scalers
     Scalers original_scalers = scalers_;
 
+    // all_continuous / all_targets were assembled from prepare_data's already-
+    // standardized train/test tensors. Invert that scaling once here so each
+    // fold computes its own scalers from raw values exactly once, rather than
+    // standardizing already-standardized data (which shifts the phased-loss
+    // SMAPE/band terms into single-scaled instead of original units).
+    unscale_continuous_targets(all_continuous, all_targets, original_scalers);
+
+    // Global plot index for each row of the concatenated arrays. Row i of
+    // all_continuous is global plot train_indices_[i] (i < n_train) or
+    // test_indices_[i - n_train]. The on-the-fly CUDA hash path indexes the
+    // full-dataset CSR by global plot index, so each fold must reconstruct
+    // train_indices_ / test_indices_ from these (see fit()/eval_epoch).
+    torch::Tensor all_global_idx;
+    if (train_indices_.defined() && test_indices_.defined()) {
+        all_global_idx = torch::cat({train_indices_, test_indices_}, 0);
+    }
+
     // Metric accumulators
     std::unordered_map<std::string, std::unordered_map<std::string, std::vector<float>>> metric_values;
 
@@ -2000,6 +2054,17 @@ CrossValidationResult Trainer::cross_validate(int n_folds, int seed) {
 
         auto train_idx = torch::tensor(train_indices);
         auto test_idx = torch::tensor(test_indices);
+
+        // Reconstruct the global plot indices for this fold so the CUDA-hash
+        // path hashes the correct plots, and invalidate the GPU cache so
+        // fit()/cache_data_to_gpu re-uploads THIS fold's split (cache_data_to_gpu
+        // early-returns while gpu_data_cached_ is set, so without this every
+        // fold after the first would reuse fold 0's cached data).
+        if (all_global_idx.defined()) {
+            train_indices_ = all_global_idx.index_select(0, train_idx);
+            test_indices_ = all_global_idx.index_select(0, test_idx);
+        }
+        gpu_data_cached_ = false;
 
         // Split data for this fold
         train_continuous_ = all_continuous.index_select(0, train_idx);
@@ -2275,6 +2340,16 @@ CrossValidationResult Trainer::cross_validate_spatial(
     std::string original_state = original_state_stream.str();
     Scalers original_scalers = scalers_;
 
+    // Invert prepare_data's standardization once so each fold scales raw values
+    // exactly once (see cross_validate for the rationale).
+    unscale_continuous_targets(all_continuous, all_targets, original_scalers);
+
+    // Global plot index per concatenated row, for the CUDA-hash path.
+    torch::Tensor all_global_idx;
+    if (train_indices_.defined() && test_indices_.defined()) {
+        all_global_idx = torch::cat({train_indices_, test_indices_}, 0);
+    }
+
     CrossValidationResult cv_result;
     cv_result.n_folds = n_folds;
 
@@ -2299,6 +2374,14 @@ CrossValidationResult Trainer::cross_validate_spatial(
 
         config_.log("  Train: " + std::to_string(train_idx.size()) +
                     " plots, Test: " + std::to_string(test_idx.size()) + " plots");
+
+        // Reconstruct global plot indices for the CUDA-hash path and force a
+        // GPU re-cache for this fold's split (see cross_validate).
+        if (all_global_idx.defined()) {
+            train_indices_ = all_global_idx.index_select(0, train_tensor);
+            test_indices_ = all_global_idx.index_select(0, test_tensor);
+        }
+        gpu_data_cached_ = false;
 
         // Split data for this fold
         train_continuous_ = all_continuous.index_select(0, train_tensor);
@@ -2437,18 +2520,51 @@ std::unordered_map<std::string, torch::Tensor> Trainer::predict(
     torch::NoGradGuard no_grad;
     model_->eval();
 
-    continuous = continuous.to(config_.device);
     auto to_dev = [&](torch::Tensor t) -> torch::Tensor {
         return t.defined() ? t.to(config_.device) : t;
     };
 
-    return model_->forward(
-        continuous, to_dev(genus_ids), to_dev(family_ids),
+    // Standardize the continuous block with the fitted scalers, exactly as
+    // Predictor::predict does. Callers pass raw features; the model was trained
+    // on standardized inputs, so skipping this silently biases every prediction.
+    torch::Tensor scaled_continuous = continuous;
+    if (scalers_.continuous_mean.defined() && continuous.defined() &&
+        continuous.size(1) > 0) {
+        scaled_continuous =
+            (continuous - scalers_.continuous_mean) / scalers_.continuous_scale;
+    }
+    scaled_continuous = scaled_continuous.to(config_.device);
+
+    auto outputs = model_->forward(
+        scaled_continuous, to_dev(genus_ids), to_dev(family_ids),
         to_dev(species_ids), to_dev(species_vector),
         to_dev(pool_genus_ids), to_dev(pool_family_ids),
         to_dev(pool_weights), to_dev(pool_mask), to_dev(pool_has_cover),
         to_dev(categorical_ids)
     );
+
+    // Inverse-transform regression outputs back to original units (un-scale +
+    // log1p inverse), mirroring Predictor::predict. Classification outputs are
+    // returned as raw logits (this map is the low-level surface; argmax /
+    // softmax is the caller's choice).
+    for (const auto& cfg : model_->schema().targets) {
+        if (cfg.task != TaskType::Regression) continue;
+        auto it = outputs.find(cfg.name);
+        if (it == outputs.end()) continue;
+
+        auto pred = it->second.squeeze(-1);
+        auto scaler_it = scalers_.target_scalers.find(cfg.name);
+        if (scaler_it != scalers_.target_scalers.end()) {
+            pred = pred * scaler_it->second.second.to(pred.device()) +
+                   scaler_it->second.first.to(pred.device());
+        }
+        if (cfg.transform == TransformType::Log1p) {
+            pred = torch::expm1(torch::clamp(pred, kExpClampMin, kExpClampMax));
+        }
+        it->second = pred;
+    }
+
+    return outputs;
 }
 
 } // namespace resolve

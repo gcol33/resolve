@@ -35,7 +35,12 @@ int train_command(
     float lr,
     float test_size,
     bool use_cuda,
-    float vram_fraction
+    float vram_fraction,
+    const std::string& pool_weighting,
+    int d_model,
+    int n_heads,
+    int n_attention_layers,
+    const std::string& transformer_pooling
 );
 
 int predict_command(
@@ -84,6 +89,15 @@ Train Options:
                          (default: hash)
   --hash-dim N           Hash dimension (default: 32)
   --top-k N              Top-k species for encoding (default: 3)
+  --pool-weighting W     Per-species pooling weight for rank_pool / transformer
+                         encoders: binary, abundance, log1p, norm, rank
+                         (default: log1p). Ignored for hash/embed/sparse.
+  --d-model N            Transformer token dimension (default: 128)
+  --n-heads N            Transformer attention heads (default: 4)
+  --n-attention-layers N Transformer self-attention layers (default: 2).
+                         Required >= 1 when --transformer-pooling cls.
+  --transformer-pooling P  Transformer pooling: attention or cls
+                         (default: attention)
   --batch-size N         Batch size (default: 4096)
   --batch-size-floor N   Smallest batch size the auto-halve-on-OOM retry in
                          Trainer::fit is allowed to drop to (default: 1024).
@@ -240,7 +254,12 @@ static int run_cli(int argc, char* argv[]) {
             std::stof(args.get("--lr", "0.001")),
             std::stof(args.get("--test-size", "0.2")),
             args.has("--cuda"),
-            std::stof(args.get("--vram-fraction", "1.0"))
+            std::stof(args.get("--vram-fraction", "1.0")),
+            args.get("--pool-weighting", "log1p"),
+            std::stoi(args.get("--d-model", "128")),
+            std::stoi(args.get("--n-heads", "4")),
+            std::stoi(args.get("--n-attention-layers", "2")),
+            args.get("--transformer-pooling", "attention")
         );
     }
     else if (cmd == "predict") {
@@ -285,7 +304,19 @@ int main(int argc, char* argv[]) {
     // debugger. Arm the handler before any engine work. No-op off Windows.
     resolve::install_crash_handler(0);
 
-    const int rc = run_cli(argc, argv);
+    int rc;
+    try {
+        rc = run_cli(argc, argv);
+    } catch (const std::invalid_argument& e) {
+        // e.g. a non-numeric value passed to a numeric flag (std::stoi/stof).
+        std::cerr << "Error: invalid argument value (" << e.what()
+                  << "). Check numeric flags like --hash-dim / --batch-size / --lr."
+                  << std::endl;
+        rc = 1;
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        rc = 1;
+    }
 
     // Issue #18: the command is done and its output is flushed; from here a
     // libtorch teardown fault is a benign artifact. Carry the command's real

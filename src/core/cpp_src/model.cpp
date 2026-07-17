@@ -279,16 +279,19 @@ torch::Tensor ResolveModelImpl::fuse_categoricals_(
 
     const int64_t batch = continuous.size(0);
     const int64_t expected_cols = categorical_embedder_->n_columns();
-    const int64_t cat_embed_dim = categorical_embedder_->output_dim();
 
     torch::Tensor cat_part;
     if (!categorical_ids.defined() || categorical_ids.numel() == 0) {
-        // Caller didn't supply categoricals but the model has them. Pad with
-        // zeros so the encoder shape is still valid. Mirrors the Python POC
-        // fallback path in src/resolve/model/resolve.py.
-        cat_part = torch::zeros({batch, cat_embed_dim},
-                                torch::TensorOptions().dtype(torch::kFloat32)
-                                    .device(continuous.device()));
+        // Caller didn't supply categoricals but the model has them. Feed an
+        // all-UNK (code 0) id tensor through the embedder so the encoder sees
+        // the trained UNK embedding, NOT a zero vector: the embedder has no
+        // padding_idx, so row 0 is a learned parameter and forward(no ids) must
+        // equal forward(all-UNK ids). A zeros pad would feed an input the model
+        // never saw in training.
+        auto unk_ids = torch::zeros({batch, expected_cols},
+                                    torch::TensorOptions().dtype(torch::kLong)
+                                        .device(continuous.device()));
+        cat_part = categorical_embedder_->forward(unk_ids);
     } else {
         if (categorical_ids.dim() != 2) {
             throw std::runtime_error(
@@ -397,6 +400,14 @@ std::pair<torch::Tensor, torch::Tensor> ResolveModelImpl::encode_with_aux(
 ) {
     if (trait_net_encoder_) {
         auto latent = trait_net_encoder_->forward(continuous);
+        // Apply post_moe_ on the training path too. encode() (get_latent) always
+        // runs it; omitting it here left post_moe_ untrained (no gradient) while
+        // get_latent still applied it, so extracted latents diverged from what
+        // the heads trained on.
+        if (post_moe_) {
+            auto moe_result = post_moe_->forward(latent);
+            return {moe_result.output, moe_result.aux_loss};
+        }
         return {latent, torch::Tensor()};
     } else if (adapter_) {
         auto latent = adapter_->forward(continuous, genus_ids, family_ids, species_ids, species_vector);

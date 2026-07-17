@@ -47,6 +47,13 @@ private:
     // s: (n_ensembles, out_features) - output scaling
     torch::Tensor r_;
     torch::Tensor s_;
+
+    // Per-ensemble bias, added AFTER the output scaling s so it is a free
+    // parameter (BatchEnsemble: y = s (W (r x)) + b). Undefined when bias=false.
+    // The base_linear carries no bias of its own; folding it in would scale the
+    // shared bias by s, coupling it to the per-member factor.
+    torch::Tensor ensemble_bias_;
+    bool has_bias_ = false;
 };
 
 TORCH_MODULE(BatchEnsembleLinear);

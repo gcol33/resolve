@@ -722,6 +722,10 @@ resolve.train.dataset <- function(dataset,
 #' @param predictor A Predictor object from resolve.load()
 #' @param dataset A ResolveDataset object from resolve.dataset.csv()
 #' @param returnLatent Return latent representations (default FALSE)
+#' @param batchSize Forward-pass chunk size along dim 0 (default 4096). Use -1
+#'   for a single forward over the whole dataset (can OOM on large inputs); a
+#'   positive value chunks the forward and concatenates results on CPU to bound
+#'   peak VRAM. Matches the Python `batch_size` argument.
 #'
 #' @return Named list of prediction arrays
 #'
@@ -733,7 +737,8 @@ resolve.train.dataset <- function(dataset,
 #' }
 #'
 #' @export
-resolve.predict.dataset <- function(predictor, dataset, returnLatent = FALSE) {
+resolve.predict.dataset <- function(predictor, dataset, returnLatent = FALSE,
+                                    batchSize = 4096L) {
   if (!inherits(predictor, "Rcpp_Predictor")) {
     stop("predictor must be loaded with resolve.load()")
   }
@@ -741,5 +746,5 @@ resolve.predict.dataset <- function(predictor, dataset, returnLatent = FALSE) {
     stop("dataset must be created with resolve.dataset.csv()")
   }
 
-  predictor$predict_dataset(dataset, returnLatent)
+  predictor$predict_dataset(dataset, returnLatent, as.integer(batchSize))
 }

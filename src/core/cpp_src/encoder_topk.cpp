@@ -421,10 +421,12 @@ void PlotEncoderMoEImpl::init(
         for (size_t i = 0; i < hidden_dims.size() - 2; ++i) {
             backbone_dims.push_back(hidden_dims[i]);
         }
-    } else {
-        // If hidden_dims is small, use just the first layer as backbone
+    } else if (!hidden_dims.empty()) {
+        // If hidden_dims is small (but non-empty), use just the first layer as backbone
         backbone_dims.push_back(hidden_dims[0]);
     }
+    // else: empty hidden_dims -> identity backbone (backbone_dims stays empty),
+    // matching build_mlp_configurable's tolerance for an empty spec.
 
     // Build backbone with configurable architecture
     auto result = build_mlp_configurable(input_dim, backbone_dims, config);

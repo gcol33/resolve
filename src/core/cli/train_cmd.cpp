@@ -31,7 +31,12 @@ int train_command(
     float lr,
     float test_size,
     bool use_cuda,
-    float vram_fraction
+    float vram_fraction,
+    const std::string& pool_weighting,
+    int d_model,
+    int n_heads,
+    int n_attention_layers,
+    const std::string& transformer_pooling
 ) {
     using namespace resolve;
 
@@ -88,17 +93,48 @@ int train_command(
                   << std::endl;
     }
 
-    // Set up dataset configuration
+    // Set up dataset configuration. Reject an unknown encoding rather than
+    // silently defaulting to hash (which would train the wrong model).
     DatasetConfig dataset_config;
-    if (species_encoding == "embed") {
+    if (species_encoding == "hash") {
+        dataset_config.species_encoding = SpeciesEncodingMode::Hash;
+    } else if (species_encoding == "embed") {
         dataset_config.species_encoding = SpeciesEncodingMode::Embed;
     } else if (species_encoding == "sparse") {
         dataset_config.species_encoding = SpeciesEncodingMode::Sparse;
+    } else if (species_encoding == "rank_pool") {
+        dataset_config.species_encoding = SpeciesEncodingMode::RankPool;
+    } else if (species_encoding == "transformer") {
+        dataset_config.species_encoding = SpeciesEncodingMode::Transformer;
     } else {
-        dataset_config.species_encoding = SpeciesEncodingMode::Hash;
+        std::cerr << "Error: unknown --encoding '" << species_encoding
+                  << "'. Valid values: hash, embed, sparse, rank_pool, transformer"
+                  << std::endl;
+        return 1;
     }
     dataset_config.hash_dim = hash_dim;
     dataset_config.top_k = top_k;
+
+    // Pool weighting applies to rank_pool / transformer encoders.
+    if (dataset_config.species_encoding == SpeciesEncodingMode::RankPool ||
+        dataset_config.species_encoding == SpeciesEncodingMode::Transformer) {
+        if (pool_weighting == "binary") {
+            dataset_config.pool_weighting = PoolWeighting::Binary;
+        } else if (pool_weighting == "abundance") {
+            dataset_config.pool_weighting = PoolWeighting::Abundance;
+        } else if (pool_weighting == "log1p") {
+            dataset_config.pool_weighting = PoolWeighting::Log1p;
+        } else if (pool_weighting == "norm") {
+            dataset_config.pool_weighting = PoolWeighting::Norm;
+        } else if (pool_weighting == "rank") {
+            dataset_config.pool_weighting = PoolWeighting::Rank;
+        } else {
+            std::cerr << "Error: unknown --pool-weighting '" << pool_weighting
+                      << "'. Valid values: binary, abundance, log1p, norm, rank"
+                      << std::endl;
+            return 1;
+        }
+    }
 
     // Load dataset
     std::cout << "\nLoading data..." << std::endl;
@@ -130,6 +166,26 @@ int train_command(
     model_config.species_encoding = dataset_config.species_encoding;
     model_config.hash_dim = hash_dim;
     model_config.top_k = top_k;
+
+    // Transformer / rank_pool knobs. The transformer encoder rejects
+    // pooling='cls' with 0 attention layers (the CLS vector would be constant),
+    // so validate here for a clean CLI error instead of an exception.
+    if (dataset_config.species_encoding == SpeciesEncodingMode::Transformer) {
+        if (transformer_pooling != "attention" && transformer_pooling != "cls") {
+            std::cerr << "Error: unknown --transformer-pooling '" << transformer_pooling
+                      << "'. Valid values: attention, cls" << std::endl;
+            return 1;
+        }
+        if (transformer_pooling == "cls" && n_attention_layers < 1) {
+            std::cerr << "Error: --transformer-pooling cls requires "
+                         "--n-attention-layers >= 1" << std::endl;
+            return 1;
+        }
+        model_config.d_model = d_model;
+        model_config.n_heads = n_heads;
+        model_config.n_attention_layers = n_attention_layers;
+        model_config.transformer_pooling = transformer_pooling;
+    }
 
     // Create model
     std::cout << "\nCreating model..." << std::endl;

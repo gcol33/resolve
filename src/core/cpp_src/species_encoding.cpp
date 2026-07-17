@@ -10,7 +10,11 @@ namespace resolve {
 uint32_t murmur_hash(const std::string& key, uint32_t seed) {
     uint32_t h = seed;
     for (char c : key) {
-        h ^= static_cast<uint32_t>(c);
+        // Cast through unsigned char so bytes >= 0x80 (accented / hybrid species
+        // names) are not sign-extended. Otherwise the hash of a non-ASCII name
+        // differs between signed-char (x86) and unsigned-char (ARM) builds, and
+        // a hash-mode checkpoint moved across platforms silently degrades.
+        h ^= static_cast<uint32_t>(static_cast<unsigned char>(c));
         h *= 0x5bd1e995;
         h ^= h >> 15;
     }

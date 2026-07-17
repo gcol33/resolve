@@ -102,12 +102,10 @@ class TabRWrapper:
         # Extract latent representations
         self.model.eval()
         with torch.no_grad():
+            # Pass None for absent inputs (the binding's "absent" convention);
+            # a defined zero-element tensor is distinct from absence.
             latent = self.model.get_latent(
-                continuous,
-                genus_ids if genus_ids is not None else torch.empty(0),
-                family_ids if family_ids is not None else torch.empty(0),
-                species_ids if species_ids is not None else torch.empty(0),
-                species_vector if species_vector is not None else torch.empty(0),
+                continuous, genus_ids, family_ids, species_ids, species_vector,
             )
 
         latent_np = latent.cpu().numpy().astype(np.float32)
@@ -152,22 +150,14 @@ class TabRWrapper:
 
         self.model.eval()
         with torch.no_grad():
-            # Get model predictions
+            # Get model predictions (None = absent input, per the binding).
             model_preds = self.model.forward(
-                continuous,
-                genus_ids if genus_ids is not None else torch.empty(0),
-                family_ids if family_ids is not None else torch.empty(0),
-                species_ids if species_ids is not None else torch.empty(0),
-                species_vector if species_vector is not None else torch.empty(0),
+                continuous, genus_ids, family_ids, species_ids, species_vector,
             )
 
             # Get latent representations for query
             latent = self.model.get_latent(
-                continuous,
-                genus_ids if genus_ids is not None else torch.empty(0),
-                family_ids if family_ids is not None else torch.empty(0),
-                species_ids if species_ids is not None else torch.empty(0),
-                species_vector if species_vector is not None else torch.empty(0),
+                continuous, genus_ids, family_ids, species_ids, species_vector,
             )
 
         query_np = latent.cpu().numpy().astype(np.float32)

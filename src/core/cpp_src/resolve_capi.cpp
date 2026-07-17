@@ -99,40 +99,78 @@ struct resolve_value {
 
 namespace {
 
-resolve_value* v_new(resolve_value_kind_t k) {
+// Every value-tree builder is marked noexcept. The header promises "C++
+// exceptions never cross the boundary" (resolve_capi.h), but the C header cannot
+// carry a C++ noexcept spec, so it is enforced here at the single choke point
+// through which all allocations flow: a std::bad_alloc (the only realistic
+// failure) terminates deterministically instead of unwinding into a possibly
+// foreign-ABI caller. Every extern "C" builder / setter below delegates to
+// these, so none of them can throw across the boundary either.
+resolve_value* v_new(resolve_value_kind_t k) noexcept {
     auto* v = new resolve_value();
     v->kind = k;
     return v;
 }
-resolve_value* v_null()            { return v_new(RESOLVE_VALUE_NULL); }
-resolve_value* v_bool(bool x)      { auto* v = v_new(RESOLVE_VALUE_BOOL);   v->b = x; return v; }
-resolve_value* v_int(int64_t x)    { auto* v = v_new(RESOLVE_VALUE_INT);    v->i = x; return v; }
-resolve_value* v_double(double x)  { auto* v = v_new(RESOLVE_VALUE_DOUBLE); v->d = x; return v; }
-resolve_value* v_string(const std::string& x) { auto* v = v_new(RESOLVE_VALUE_STRING); v->s = x; return v; }
+resolve_value* v_null() noexcept            { return v_new(RESOLVE_VALUE_NULL); }
+resolve_value* v_bool(bool x) noexcept      { auto* v = v_new(RESOLVE_VALUE_BOOL);   v->b = x; return v; }
+resolve_value* v_int(int64_t x) noexcept    { auto* v = v_new(RESOLVE_VALUE_INT);    v->i = x; return v; }
+resolve_value* v_double(double x) noexcept  { auto* v = v_new(RESOLVE_VALUE_DOUBLE); v->d = x; return v; }
+resolve_value* v_string(const std::string& x) noexcept { auto* v = v_new(RESOLVE_VALUE_STRING); v->s = x; return v; }
+resolve_value* v_string(const char* x) noexcept { auto* v = v_new(RESOLVE_VALUE_STRING); if (x) v->s = x; return v; }
 
-resolve_value* v_int_array(const std::vector<int64_t>& x) {
+resolve_value* v_int_array(const std::vector<int64_t>& x) noexcept {
     auto* v = v_new(RESOLVE_VALUE_INT_ARRAY); v->iarr = x; return v;
 }
-resolve_value* v_double_array(const std::vector<double>& x) {
+resolve_value* v_double_array(const std::vector<double>& x) noexcept {
     auto* v = v_new(RESOLVE_VALUE_DOUBLE_ARRAY); v->darr = x; return v;
 }
-resolve_value* v_double_array(const std::vector<float>& x) {
+resolve_value* v_double_array(const std::vector<float>& x) noexcept {
     auto* v = v_new(RESOLVE_VALUE_DOUBLE_ARRAY);
     v->darr.assign(x.begin(), x.end());
     return v;
 }
-resolve_value* v_string_array(const std::vector<std::string>& x) {
+resolve_value* v_string_array(const std::vector<std::string>& x) noexcept {
     auto* v = v_new(RESOLVE_VALUE_STRING_ARRAY); v->sarr = x; return v;
 }
-resolve_value* v_map()  { return v_new(RESOLVE_VALUE_MAP); }
-resolve_value* v_list() { return v_new(RESOLVE_VALUE_LIST); }
+// Raw-buffer overloads used by the extern "C" entry points (copy the caller's
+// buffer; the caller keeps ownership of its own memory).
+resolve_value* v_int_array(const int64_t* v, int64_t n) noexcept {
+    auto* node = v_new(RESOLVE_VALUE_INT_ARRAY);
+    node->iarr.assign(v, v + (n > 0 ? n : 0));
+    return node;
+}
+resolve_value* v_double_array(const double* v, int64_t n) noexcept {
+    auto* node = v_new(RESOLVE_VALUE_DOUBLE_ARRAY);
+    node->darr.assign(v, v + (n > 0 ? n : 0));
+    return node;
+}
+resolve_value* v_string_array(const char* const* v, int64_t n) noexcept {
+    auto* node = v_new(RESOLVE_VALUE_STRING_ARRAY);
+    node->sarr.reserve(n > 0 ? static_cast<size_t>(n) : 0);
+    for (int64_t j = 0; j < n; ++j) node->sarr.emplace_back(v[j] ? v[j] : "");
+    return node;
+}
+resolve_value* v_double_matrix(const double* v, int64_t nrow, int64_t ncol) noexcept {
+    auto* node = v_new(RESOLVE_VALUE_DOUBLE_MATRIX);
+    node->nrow = nrow; node->ncol = ncol;
+    node->darr.assign(v, v + (nrow * ncol > 0 ? nrow * ncol : 0));
+    return node;
+}
+resolve_value* v_int_matrix(const int64_t* v, int64_t nrow, int64_t ncol) noexcept {
+    auto* node = v_new(RESOLVE_VALUE_INT_MATRIX);
+    node->nrow = nrow; node->ncol = ncol;
+    node->iarr.assign(v, v + (nrow * ncol > 0 ? nrow * ncol : 0));
+    return node;
+}
+resolve_value* v_map() noexcept  { return v_new(RESOLVE_VALUE_MAP); }
+resolve_value* v_list() noexcept { return v_new(RESOLVE_VALUE_LIST); }
 
 // Put a child into a map (takes ownership). Used by C++ result assembly.
-void v_put(resolve_value* m, const std::string& key, resolve_value* child) {
+void v_put(resolve_value* m, const std::string& key, resolve_value* child) noexcept {
     m->keys.push_back(key);
     m->vals.push_back(child);
 }
-void v_append(resolve_value* l, resolve_value* child) { l->items.push_back(child); }
+void v_append(resolve_value* l, resolve_value* child) noexcept { l->items.push_back(child); }
 
 }  // namespace
 
@@ -152,32 +190,19 @@ resolve_value_t* resolve_value_new_int(int64_t v)     { return v_int(v); }
 resolve_value_t* resolve_value_new_double(double v)   { return v_double(v); }
 resolve_value_t* resolve_value_new_string(const char* v) { return v_string(v ? v : ""); }
 resolve_value_t* resolve_value_new_int_array(const int64_t* v, int64_t n) {
-    auto* node = v_new(RESOLVE_VALUE_INT_ARRAY);
-    node->iarr.assign(v, v + (n > 0 ? n : 0));
-    return node;
+    return v_int_array(v, n);
 }
 resolve_value_t* resolve_value_new_double_array(const double* v, int64_t n) {
-    auto* node = v_new(RESOLVE_VALUE_DOUBLE_ARRAY);
-    node->darr.assign(v, v + (n > 0 ? n : 0));
-    return node;
+    return v_double_array(v, n);
 }
 resolve_value_t* resolve_value_new_string_array(const char* const* v, int64_t n) {
-    auto* node = v_new(RESOLVE_VALUE_STRING_ARRAY);
-    node->sarr.reserve(n > 0 ? n : 0);
-    for (int64_t j = 0; j < n; ++j) node->sarr.emplace_back(v[j] ? v[j] : "");
-    return node;
+    return v_string_array(v, n);
 }
 resolve_value_t* resolve_value_new_double_matrix(const double* v, int64_t nrow, int64_t ncol) {
-    auto* node = v_new(RESOLVE_VALUE_DOUBLE_MATRIX);
-    node->nrow = nrow; node->ncol = ncol;
-    node->darr.assign(v, v + (nrow * ncol > 0 ? nrow * ncol : 0));
-    return node;
+    return v_double_matrix(v, nrow, ncol);
 }
 resolve_value_t* resolve_value_new_int_matrix(const int64_t* v, int64_t nrow, int64_t ncol) {
-    auto* node = v_new(RESOLVE_VALUE_INT_MATRIX);
-    node->nrow = nrow; node->ncol = ncol;
-    node->iarr.assign(v, v + (nrow * ncol > 0 ? nrow * ncol : 0));
-    return node;
+    return v_int_matrix(v, nrow, ncol);
 }
 
 void resolve_map_set_null  (resolve_value_t* m, const char* k) { v_put(m, k, v_null()); }
@@ -188,32 +213,19 @@ void resolve_map_set_string(resolve_value_t* m, const char* k, const char* v) {
     v_put(m, k, v_string(v ? v : ""));
 }
 void resolve_map_set_int_array(resolve_value_t* m, const char* k, const int64_t* v, int64_t n) {
-    auto* node = v_new(RESOLVE_VALUE_INT_ARRAY);
-    node->iarr.assign(v, v + (n > 0 ? n : 0));
-    v_put(m, k, node);
+    v_put(m, k, v_int_array(v, n));
 }
 void resolve_map_set_double_array(resolve_value_t* m, const char* k, const double* v, int64_t n) {
-    auto* node = v_new(RESOLVE_VALUE_DOUBLE_ARRAY);
-    node->darr.assign(v, v + (n > 0 ? n : 0));
-    v_put(m, k, node);
+    v_put(m, k, v_double_array(v, n));
 }
 void resolve_map_set_string_array(resolve_value_t* m, const char* k, const char* const* v, int64_t n) {
-    auto* node = v_new(RESOLVE_VALUE_STRING_ARRAY);
-    node->sarr.reserve(n > 0 ? n : 0);
-    for (int64_t j = 0; j < n; ++j) node->sarr.emplace_back(v[j] ? v[j] : "");
-    v_put(m, k, node);
+    v_put(m, k, v_string_array(v, n));
 }
 void resolve_map_set_double_matrix(resolve_value_t* m, const char* k, const double* v, int64_t nrow, int64_t ncol) {
-    auto* node = v_new(RESOLVE_VALUE_DOUBLE_MATRIX);
-    node->nrow = nrow; node->ncol = ncol;
-    node->darr.assign(v, v + (nrow * ncol > 0 ? nrow * ncol : 0));
-    v_put(m, k, node);
+    v_put(m, k, v_double_matrix(v, nrow, ncol));
 }
 void resolve_map_set_int_matrix(resolve_value_t* m, const char* k, const int64_t* v, int64_t nrow, int64_t ncol) {
-    auto* node = v_new(RESOLVE_VALUE_INT_MATRIX);
-    node->nrow = nrow; node->ncol = ncol;
-    node->iarr.assign(v, v + (nrow * ncol > 0 ? nrow * ncol : 0));
-    v_put(m, k, node);
+    v_put(m, k, v_int_matrix(v, nrow, ncol));
 }
 void resolve_map_set_value(resolve_value_t* m, const char* k, resolve_value_t* child) {
     v_put(m, k, child);
@@ -547,6 +559,12 @@ PoolWeighting parse_pool_weighting(const std::string& s) {
         {"rank", PoolWeighting::Rank},
     }, "pool weighting");
 }
+AggregationMode parse_aggregation_mode(const std::string& s) {
+    return parse_enum<AggregationMode>(s, {
+        {"abundance", AggregationMode::Abundance},
+        {"count", AggregationMode::Count},
+    }, "aggregation mode");
+}
 TaskType parse_task_type(const std::string& s) {
     return parse_enum<TaskType>(s, {
         {"regression", TaskType::Regression},
@@ -789,6 +807,15 @@ std::vector<TargetSpec> parse_targets(const resolve_value* targets) {
         if (vhas(spec, "transform")) ts.transform = parse_transform_type(vstr(spec, "transform"));
         if (vhas(spec, "num_classes")) ts.num_classes = (int)vint(spec, "num_classes");
         if (vhas(spec, "weight")) ts.weight = (float)vdbl(spec, "weight");
+        // Optional explicit class -> integer-code mapping (a sub-map of
+        // name->int), so a held-out set can be pinned to the same codes as the
+        // training set instead of auto-fitting a possibly-different order.
+        const resolve_value* cm = vget(spec, "class_mapping");
+        if (cm && cm->kind == RESOLVE_VALUE_MAP) {
+            for (size_t j = 0; j < cm->keys.size(); ++j) {
+                ts.class_mapping[cm->keys[j]] = vint(cm->vals[j]);
+            }
+        }
         out.push_back(ts);
     }
     return out;
@@ -808,6 +835,8 @@ DatasetConfig parse_dataset_config(const resolve_value* c) {
     if (vhas(c, "use_taxonomy")) config.use_taxonomy = vbool(c, "use_taxonomy");
     if (vhas(c, "pool_weighting")) config.pool_weighting = parse_pool_weighting(vstr(c, "pool_weighting"));
     if (vhas(c, "pool_species_cap")) config.pool_species_cap = (int)vint(c, "pool_species_cap");
+    if (vhas(c, "aggregation")) config.aggregation = parse_aggregation_mode(vstr(c, "aggregation"));
+    if (vhas(c, "use_cuda_hash")) config.use_cuda_hash = vbool(c, "use_cuda_hash");
     return config;
 }
 
@@ -1062,7 +1091,9 @@ resolve_value* classification_predictions_to_value(const ClassificationPredictio
     auto* m = v_map();
     v_put(m, "target_name", v_string(cp.target_name));
     v_put(m, "class_names", v_string_array(cp.class_names));
-    v_put(m, "predictions",
+    // Key name matches the nanobind field (ClassificationPredictions
+    // .predicted_classes) so code reads the same across R and Python.
+    v_put(m, "predicted_classes",
           (cp.predicted_classes.defined() && cp.predicted_classes.numel() > 0)
               ? tensor_to_ivec(cp.predicted_classes) : v_int_array({}));
     v_put(m, "actuals",
@@ -1750,16 +1781,12 @@ resolve_value_t* resolve_trainer_get(const resolve_trainer_t* t, const char* wha
         if (w == "test_plot_ids") return v_string_array(tr.test_plot_ids());
         if (w == "train_plot_ids") return v_string_array(tr.train_plot_ids());
         if (w == "config") {
+            // Reuse the full TrainConfig serializer (parity with the Python
+            // Trainer.config surface and resolve.load_train_config), plus the
+            // device, which train_config_to_value omits.
             const auto& c = tr.config();
-            auto* m = v_map();
-            v_put(m, "batch_size", v_int(c.batch_size));
-            v_put(m, "batch_size_floor", v_int(c.batch_size_floor));
-            v_put(m, "max_epochs", v_int(c.max_epochs));
-            v_put(m, "patience", v_int(c.patience));
-            v_put(m, "lr", v_double(c.lr));
-            v_put(m, "weight_decay", v_double(c.weight_decay));
+            auto* m = train_config_to_value(c);
             v_put(m, "device", v_string(c.device.is_cuda() ? "cuda" : "cpu"));
-            v_put(m, "vram_fraction", v_double(c.vram_fraction));
             return m;
         }
         throw std::runtime_error("trainer_get: unknown accessor '" + w + "'");

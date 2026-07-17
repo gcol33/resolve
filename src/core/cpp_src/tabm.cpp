@@ -22,9 +22,18 @@ BatchEnsembleLinearImpl::BatchEnsembleLinearImpl(
             "n_ensembles must be >= 1, got " + std::to_string(n_ensembles));
     }
 
-    // Shared base weight
+    // Shared base weight. The base linear never carries a bias: in
+    // BatchEnsemble the bias is added after the per-ensemble output scaling s,
+    // so folding it into base_linear would scale the shared bias by s (coupling
+    // it to the per-member factor). A separate per-ensemble bias is used below.
     base_linear_ = register_module("base_linear",
-        torch::nn::Linear(torch::nn::LinearOptions(in_features, out_features).bias(bias)));
+        torch::nn::Linear(torch::nn::LinearOptions(in_features, out_features).bias(false)));
+
+    has_bias_ = bias;
+    if (has_bias_) {
+        ensemble_bias_ = register_parameter("ensemble_bias",
+            torch::zeros({n_ensembles, out_features}));
+    }
 
     // Per-ensemble rank-1 factors, initialized near 1.0 (small perturbation)
     // Following TabM paper: initialize from N(1, 0.5) truncated to [0.5, 1.5]
@@ -59,6 +68,11 @@ torch::Tensor BatchEnsembleLinearImpl::forward(torch::Tensor x) {
 
     // Apply output scaling: (batch, n_ensembles, out_features) * s: (1, n_ensembles, out_features)
     out = out * s_.unsqueeze(0);
+
+    // Per-ensemble bias, added after scaling so it stays a free parameter.
+    if (has_bias_) {
+        out = out + ensemble_bias_.unsqueeze(0);
+    }
 
     return out;
 }

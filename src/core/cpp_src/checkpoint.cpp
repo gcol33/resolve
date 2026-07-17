@@ -1,6 +1,9 @@
 #include "resolve/checkpoint.hpp"
 #include <fstream>
 #include <filesystem>
+#include <algorithm>
+#include <vector>
+#include <string>
 
 namespace resolve {
 
@@ -28,18 +31,34 @@ void write_progress_file(
     file << "  \"epochs_without_improvement\": " << epochs_without_improvement << ",\n";
     file << "  \"progress_pct\": " << (100.0f * epoch / max_epochs) << ",\n";
 
-    // Write best metric (first target's first band metric if available)
+    // Write a deterministic "best metric": the lowest-threshold band accuracy
+    // of the alphabetically-first target. `metrics` is an unordered_map, so
+    // select via sorted keys rather than iteration order (which is unspecified
+    // and made the reported value vary across runs/builds). band_25 < band_50 <
+    // band_75 lexicographically, so the sorted-first band is the lowest one.
     float best_metric = 0.0f;
-    for (const auto& [target_name, target_metrics] : metrics) {
-        for (const auto& [metric_name, value] : target_metrics) {
-            if (metric_name.find("band_") == 0) {
-                best_metric = value;
+    std::string best_metric_name;
+    {
+        std::vector<std::string> target_names;
+        target_names.reserve(metrics.size());
+        for (const auto& [name, unused] : metrics) target_names.push_back(name);
+        std::sort(target_names.begin(), target_names.end());
+        for (const auto& tname : target_names) {
+            const auto& tm = metrics.at(tname);
+            std::vector<std::string> band_names;
+            for (const auto& [mname, unused] : tm) {
+                if (mname.rfind("band_", 0) == 0) band_names.push_back(mname);
+            }
+            if (!band_names.empty()) {
+                std::sort(band_names.begin(), band_names.end());
+                best_metric = tm.at(band_names.front());
+                best_metric_name = tname + "/" + band_names.front();
                 break;
             }
         }
-        break;
     }
-    file << "  \"best_metric\": " << best_metric << "\n";
+    file << "  \"best_metric\": " << best_metric << ",\n";
+    file << "  \"best_metric_name\": \"" << best_metric_name << "\"\n";
     file << "}\n";
 }
 

@@ -68,10 +68,13 @@ int info_command(const std::string& model_path) {
         std::cout << "\nModel Configuration:" << std::endl;
 
         std::string encoding_str = "hash";
-        if (config.species_encoding == SpeciesEncodingMode::Embed) {
-            encoding_str = "embed";
-        } else if (config.species_encoding == SpeciesEncodingMode::Sparse) {
-            encoding_str = "sparse";
+        switch (config.species_encoding) {
+            case SpeciesEncodingMode::Embed:       encoding_str = "embed"; break;
+            case SpeciesEncodingMode::Sparse:      encoding_str = "sparse"; break;
+            case SpeciesEncodingMode::RankPool:    encoding_str = "rank_pool"; break;
+            case SpeciesEncodingMode::Transformer: encoding_str = "transformer"; break;
+            case SpeciesEncodingMode::Hash:
+            default:                               encoding_str = "hash"; break;
         }
         std::cout << "  Species encoding: " << encoding_str << std::endl;
         std::cout << "  Hash dim: " << config.hash_dim << std::endl;

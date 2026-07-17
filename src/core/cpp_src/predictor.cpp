@@ -1,5 +1,6 @@
 #include "resolve/predictor.hpp"
 #include "resolve/dataset.hpp"
+#include "resolve/encoder.hpp"  // Fp32NormImpl (inference-time BN fusion)
 #include "resolve/utils.hpp"
 #include <fstream>
 #include <stdexcept>
@@ -336,7 +337,17 @@ void Predictor::optimize_for_inference() {
 
         for (size_t i = 0; i + 1 < seq->size(); ++i) {
             auto linear = std::dynamic_pointer_cast<torch::nn::LinearImpl>((*seq)[i]);
-            auto bn = std::dynamic_pointer_cast<torch::nn::BatchNorm1dImpl>((*seq)[i + 1]);
+            // Since the fp32-norm guard (gcol33/resolve#21), every norm in the
+            // Sequential MLP is wrapped in Fp32Norm, so the child is an
+            // Fp32NormImpl, not a bare BatchNorm1dImpl. Unwrap it to reach the
+            // inner BatchNorm1d; fall back to a direct cast for any un-wrapped
+            // norm (e.g. RESOLVE_FP32_NORM=0 builds).
+            std::shared_ptr<torch::nn::BatchNorm1dImpl> bn;
+            if (auto fp32 = std::dynamic_pointer_cast<Fp32NormImpl>((*seq)[i + 1])) {
+                bn = std::dynamic_pointer_cast<torch::nn::BatchNorm1dImpl>(fp32->inner_module());
+            } else {
+                bn = std::dynamic_pointer_cast<torch::nn::BatchNorm1dImpl>((*seq)[i + 1]);
+            }
             if (!linear || !bn) continue;
 
             // Fuse: W_new = bn.weight / sqrt(var + eps) * W_linear

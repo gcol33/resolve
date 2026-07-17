@@ -75,6 +75,12 @@ public:
     explicit Fp32NormImpl(torch::nn::AnyModule inner);
     torch::Tensor forward(torch::Tensor x);
     [[nodiscard]] bool is_empty() const { return inner_.is_empty(); }
+    // The wrapped normalization module. Exposed so inference-time BN fusion
+    // (Predictor::optimize_for_inference) can reach the inner BatchNorm1d that
+    // this wrapper would otherwise hide from a dynamic_pointer_cast.
+    [[nodiscard]] std::shared_ptr<torch::nn::Module> inner_module() const {
+        return inner_.is_empty() ? nullptr : inner_.ptr();
+    }
 
 private:
     torch::nn::AnyModule inner_;
