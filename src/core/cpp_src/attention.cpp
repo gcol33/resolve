@@ -336,8 +336,14 @@ torch::Tensor sparsemax(torch::Tensor input, int64_t dim) {
     auto is_in_support = (cumsum < bound).to(torch::kFloat32);
     auto k = is_in_support.sum(/*dim=*/-1, /*keepdim=*/true);
 
-    // Compute tau (threshold)
-    auto cumsum_k = (cumsum * is_in_support).sum(/*dim=*/-1, /*keepdim=*/true);
+    // Compute tau (threshold). tau = (cumsum_{k} - 1) / k, where cumsum_{k} is
+    // the cumulative sum AT the support boundary index k -- a single gathered
+    // value, not the sum of every in-support cumsum. Summing the in-support
+    // cumsums (cumsum_1 + ... + cumsum_k) over-counts by a factor that grows
+    // with k, giving a too-large tau and a non-normalized output for any
+    // support size > 1 (only k == 1 was correct).
+    auto k_idx = (k.to(torch::kLong) - 1).clamp_min(0);
+    auto cumsum_k = cumsum.gather(/*dim=*/-1, k_idx);
     auto tau = (cumsum_k - 1.0f) / k;
 
     // Compute output
@@ -492,64 +498,57 @@ torch::Tensor FTTransformerEncoderImpl::forward(
 // TabNet Step Implementation
 // =============================================================================
 
-TabNetStepImpl::TabNetStepImpl(
-    int64_t input_dim,
-    int64_t n_d,
-    int64_t n_a,
-    float relaxation_factor
-) : input_dim_(input_dim), n_d_(n_d), n_a_(n_a), relaxation_factor_(relaxation_factor) {
-
-    // Shared fully connected layer
-    shared_fc_ = register_module("shared_fc",
-        torch::nn::Linear(input_dim, n_d + n_a));
-    bn_shared_ = register_module("bn_shared",
-        torch::nn::BatchNorm1d(n_d + n_a));
-
-    // Decision layer (for output)
-    decision_fc_ = register_module("decision_fc",
-        torch::nn::Linear(n_d, n_d));
-    bn_decision_ = register_module("bn_decision",
-        torch::nn::BatchNorm1d(n_d));
-
-    // Attention layer (for feature selection)
-    attention_fc_ = register_module("attention_fc",
-        torch::nn::Linear(n_a, input_dim));
-    bn_attention_ = register_module("bn_attention",
-        torch::nn::BatchNorm1d(input_dim));
+TabNetGLUBlockImpl::TabNetGLUBlockImpl(int64_t in_dim, int64_t out_dim) {
+    fc_ = register_module("fc", torch::nn::Linear(in_dim, 2 * out_dim));
+    bn_ = register_module("bn", torch::nn::BatchNorm1d(2 * out_dim));
 }
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> TabNetStepImpl::forward(
-    torch::Tensor x,
-    torch::Tensor prior_scales
+torch::Tensor TabNetGLUBlockImpl::forward(torch::Tensor x) {
+    // GLU halves the last dimension: out = a * sigmoid(b) with [a,b] = FC(x).
+    return torch::glu(bn_->forward(fc_->forward(x)), /*dim=*/1);
+}
+
+TabNetStepImpl::TabNetStepImpl(
+    int64_t input_dim, int64_t n_d, int64_t n_a, int64_t n_independent
+) : input_dim_(input_dim), n_d_(n_d), n_a_(n_a) {
+    // Attentive transformer: maps the previous attention split (n_a) to a
+    // per-feature logit (input_dim), batch-normalized, then masked by the prior
+    // scale and passed through sparsemax by the caller.
+    attention_fc_ = register_module("attention_fc", torch::nn::Linear(n_a, input_dim));
+    bn_attention_ = register_module("bn_attention", torch::nn::BatchNorm1d(input_dim));
+
+    // Step-specific feature-transformer GLU blocks (dim n_d + n_a throughout).
+    independent_ = register_module("independent", torch::nn::ModuleList());
+    for (int64_t i = 0; i < n_independent; ++i) {
+        independent_->push_back(TabNetGLUBlock(n_d + n_a, n_d + n_a));
+    }
+}
+
+torch::Tensor TabNetStepImpl::attentive_forward(
+    torch::Tensor att_prev, torch::Tensor prior_scales
 ) {
-    // Shared transformation
-    auto shared = bn_shared_->forward(shared_fc_->forward(x));
-    shared = torch::relu(shared);
+    auto logits = bn_attention_->forward(attention_fc_->forward(att_prev));
+    logits = logits * prior_scales;  // Prior scale down features already used.
+    return sparsemax(logits, /*dim=*/-1);
+}
 
-    // Split into decision and attention parts
-    auto decision_input = shared.slice(/*dim=*/1, 0, n_d_);
-    auto attention_input = shared.slice(/*dim=*/1, n_d_, n_d_ + n_a_);
-
-    // Decision output
-    auto decision_out = bn_decision_->forward(decision_fc_->forward(decision_input));
-    decision_out = torch::relu(decision_out);
-
-    // Attention mask using sparsemax
-    auto attention_logits = bn_attention_->forward(attention_fc_->forward(attention_input));
-    attention_logits = attention_logits * prior_scales;  // Mask by prior scales
-    auto mask = sparsemax(attention_logits, /*dim=*/-1);
-
-    // Update prior scales
-    auto new_prior_scales = prior_scales * (relaxation_factor_ - mask);
-
-    // The mask is returned for the encoder loop to apply to the next step's
-    // input (attention.cpp encoder body); the step itself does not consume it.
-    return std::make_tuple(decision_out, mask, new_prior_scales);
+torch::Tensor TabNetStepImpl::feature_independent(torch::Tensor h) {
+    const float scale = std::sqrt(0.5f);
+    for (size_t i = 0; i < independent_->size(); ++i) {
+        auto block = independent_->ptr(i)->as<TabNetGLUBlockImpl>();
+        h = (h + block->forward(h)) * scale;
+    }
+    return h;
 }
 
 // =============================================================================
 // TabNet Encoder Implementation
 // =============================================================================
+
+namespace {
+constexpr int64_t kTabNetNShared = 2;       // Shared feature-transformer blocks
+constexpr int64_t kTabNetNIndependent = 2;  // Step-specific blocks
+}  // namespace
 
 TabNetEncoderImpl::TabNetEncoderImpl(
     int64_t input_dim,
@@ -559,60 +558,78 @@ TabNetEncoderImpl::TabNetEncoderImpl(
     float relaxation_factor,
     float sparsity_coefficient
 ) : input_dim_(input_dim), n_steps_(n_steps), n_d_(n_d), n_a_(n_a),
-    sparsity_coefficient_(sparsity_coefficient) {
+    relaxation_factor_(relaxation_factor), sparsity_coefficient_(sparsity_coefficient) {
 
-    // Initial batch normalization (using linear for simplicity)
-    initial_bn_ = register_module("initial_bn",
-        torch::nn::Linear(torch::nn::LinearOptions(input_dim, input_dim).bias(false)));
+    // Batch-normalize the raw input features (Arik & Pfister, Sec. 3.2).
+    initial_bn_ = register_module("initial_bn", torch::nn::BatchNorm1d(input_dim));
 
-    // Initialize as identity
-    torch::NoGradGuard no_grad;
-    initial_bn_->weight.copy_(torch::eye(input_dim));
+    // Shared feature-transformer GLU blocks, reused across every step. The first
+    // maps input_dim -> n_d + n_a; the rest keep n_d + n_a.
+    shared_ = register_module("shared", torch::nn::ModuleList());
+    for (int64_t i = 0; i < kTabNetNShared; ++i) {
+        int64_t in_dim = (i == 0) ? input_dim : (n_d + n_a);
+        shared_->push_back(TabNetGLUBlock(in_dim, n_d + n_a));
+    }
 
-    // Decision steps
+    // Decision steps (attentive transformer + independent feature-transformer).
     steps_ = register_module("steps", torch::nn::ModuleList());
     for (int64_t i = 0; i < n_steps; ++i) {
-        steps_->push_back(TabNetStep(input_dim, n_d, n_a, relaxation_factor));
+        steps_->push_back(TabNetStep(input_dim, n_d, n_a, kTabNetNIndependent));
     }
+}
+
+torch::Tensor TabNetEncoderImpl::run_shared(torch::Tensor x) const {
+    const float scale = std::sqrt(0.5f);
+    auto first = shared_->ptr(0)->as<TabNetGLUBlockImpl>();
+    torch::Tensor h = first->forward(x);  // dim change; no residual on the first
+    for (size_t i = 1; i < shared_->size(); ++i) {
+        auto block = shared_->ptr(i)->as<TabNetGLUBlockImpl>();
+        h = (h + block->forward(h)) * scale;
+    }
+    return h;
 }
 
 std::pair<torch::Tensor, torch::Tensor> TabNetEncoderImpl::forward(torch::Tensor x) {
     auto batch_size = x.size(0);
 
-    // Initial batch norm
-    x = initial_bn_->forward(x);
+    // Original (batch-normalized) features. These are what each step's mask is
+    // applied to -- masking is per-step over the ORIGINAL features (M[i] * f),
+    // not cumulative over a running product of masks.
+    auto features = initial_bn_->forward(x);
 
-    // Initialize prior scales (all features equally available)
-    auto prior_scales = torch::ones({batch_size, input_dim_}, x.options());
+    // Seed the first attention split a[0] from an initial (shared) feature
+    // transform over the full features.
+    auto att = run_shared(features).slice(/*dim=*/1, n_d_, n_d_ + n_a_);
 
-    // Aggregate outputs
-    auto aggregated_output = torch::zeros({batch_size, n_d_}, x.options());
-    auto total_entropy = torch::zeros({batch_size}, x.options());
-    auto feature_importance = torch::zeros({batch_size, input_dim_}, x.options());
+    // All features equally available at the start.
+    auto prior_scales = torch::ones({batch_size, input_dim_}, features.options());
+    auto aggregated_output = torch::zeros({batch_size, n_d_}, features.options());
+    auto total_entropy = torch::zeros({batch_size}, features.options());
+    auto feature_importance = torch::zeros({batch_size, input_dim_}, features.options());
 
     for (int64_t step = 0; step < n_steps_; ++step) {
         auto step_module = steps_->ptr(step)->as<TabNetStepImpl>();
-        auto [decision_out, mask, new_prior_scales] = step_module->forward(x, prior_scales);
 
-        // Aggregate decision outputs
-        aggregated_output = aggregated_output + decision_out;
+        // Attentive transformer -> sparsemax mask over the original features.
+        auto mask = step_module->attentive_forward(att, prior_scales);
 
-        // Track feature importance
+        // Relaxation: features selected now are less available to later steps.
+        prior_scales = prior_scales * (relaxation_factor_ - mask);
+
+        // Feature transformer over the masked original features.
+        auto ft = step_module->feature_independent(run_shared(mask * features));
+        auto decision = torch::relu(ft.slice(/*dim=*/1, 0, n_d_));
+        att = ft.slice(/*dim=*/1, n_d_, n_d_ + n_a_);
+
+        aggregated_output = aggregated_output + decision;
         feature_importance = feature_importance + mask;
 
-        // Sparsity loss: entropy of attention masks
+        // Sparsity loss: entropy of attention masks.
         auto mask_entropy = -mask * torch::log(mask + 1e-15f);
         total_entropy = total_entropy + mask_entropy.sum(/*dim=*/-1);
-
-        // Update for next step
-        prior_scales = new_prior_scales;
-        x = x * mask;  // Apply mask for next step
     }
 
-    // Normalize feature importance
     feature_importance = feature_importance / static_cast<float>(n_steps_);
-
-    // Store sparsity loss
     sparsity_loss_ = sparsity_coefficient_ * total_entropy.mean();
 
     return std::make_pair(aggregated_output, feature_importance);

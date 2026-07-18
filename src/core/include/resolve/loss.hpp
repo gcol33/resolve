@@ -70,6 +70,12 @@ public:
         const std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>>& scalers = {}
     ) const;
 
+    // Phase (1/2/3) the regression loss is in at `epoch`, using the effective
+    // phase boundaries this loss was built with (which from_config remaps for
+    // MAE/SMAPE modes). Single source of truth for phase-aware training logic
+    // in the Trainer (best-model selection / early-stopping gating).
+    int phase_for(int epoch) const { return phased_loss_.get_phase(epoch); }
+
 private:
     std::vector<TargetConfig> targets_;
     PhasedLoss phased_loss_;

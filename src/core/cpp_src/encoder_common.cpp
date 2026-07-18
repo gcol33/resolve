@@ -21,6 +21,17 @@ bool fp32_norm_enabled() {
     }();
     return enabled;
 }
+
+// GroupNorm needs a group count that divides the channel dim. Shrink the
+// requested count until it does (down to 1). Single source for both norm
+// construction paths (make_normalization and ResidualBlockImpl).
+int groupnorm_groups_for(int requested, int64_t dim) {
+    int groups = requested;
+    while (groups > 1 && dim % groups != 0) {
+        groups--;
+    }
+    return groups;
+}
 }  // namespace
 
 torch::Tensor run_norm_fp32(
@@ -217,15 +228,9 @@ torch::nn::AnyModule make_normalization(
                 torch::nn::AnyModule(torch::nn::LayerNorm(
                     torch::nn::LayerNormOptions({dim})))));
         case NormLayerType::GroupNorm:
-            // Ensure groups divides dim evenly
-            {
-                int groups = norm_groups;
-                while (groups > 1 && dim % groups != 0) {
-                    groups--;
-                }
-                return torch::nn::AnyModule(Fp32Norm(
-                    torch::nn::AnyModule(torch::nn::GroupNorm(groups, dim))));
-            }
+            return torch::nn::AnyModule(Fp32Norm(
+                torch::nn::AnyModule(torch::nn::GroupNorm(
+                    groupnorm_groups_for(norm_groups, dim), dim))));
         case NormLayerType::RMSNorm:
             return torch::nn::AnyModule(Fp32Norm(
                 torch::nn::AnyModule(RMSNorm(dim))));
@@ -262,14 +267,10 @@ ResidualBlockImpl::ResidualBlockImpl(
                 norm_ln_ = register_module("norm", torch::nn::LayerNorm(
                     torch::nn::LayerNormOptions({output_dim})));
                 break;
-            case NormLayerType::GroupNorm: {
-                int groups = config.norm_groups;
-                while (groups > 1 && output_dim % groups != 0) {
-                    groups--;
-                }
-                norm_gn_ = register_module("norm", torch::nn::GroupNorm(groups, output_dim));
+            case NormLayerType::GroupNorm:
+                norm_gn_ = register_module("norm", torch::nn::GroupNorm(
+                    groupnorm_groups_for(config.norm_groups, output_dim), output_dim));
                 break;
-            }
             case NormLayerType::RMSNorm:
                 norm_rms_ = register_module("norm", RMSNorm(output_dim));
                 break;
@@ -410,14 +411,19 @@ int64_t register_per_rank_embeddings(
     int64_t n_genera, int64_t n_families,
     int genus_emb_dim, int family_emb_dim, int top_k
 ) {
+    // padding_idx(0) zeros and freezes row 0 (the reserved UNK / empty-slot id),
+    // matching the fused embed / rank-pool / transformer tables. Without it the
+    // padding slots of species-poor plots and every UNK-genus species pull a
+    // learnable ~N(0,1) row that accumulates gradient and injects a constant
+    // per-slot signal into the MLP concat.
     for (int k = 0; k < top_k; ++k) {
         genus_embeddings.push_back(module.register_module(
             "genus_emb_" + std::to_string(k),
-            torch::nn::Embedding(n_genera, genus_emb_dim)
+            torch::nn::Embedding(torch::nn::EmbeddingOptions(n_genera, genus_emb_dim).padding_idx(0))
         ));
         family_embeddings.push_back(module.register_module(
             "family_emb_" + std::to_string(k),
-            torch::nn::Embedding(n_families, family_emb_dim)
+            torch::nn::Embedding(torch::nn::EmbeddingOptions(n_families, family_emb_dim).padding_idx(0))
         ));
     }
     return static_cast<int64_t>(top_k) * (genus_emb_dim + family_emb_dim);

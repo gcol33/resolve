@@ -206,9 +206,13 @@ float Metrics::smape(torch::Tensor pred, torch::Tensor target, float eps) {
 float Metrics::r_squared(torch::Tensor pred, torch::Tensor target) {
     auto ss_res = torch::pow(target - pred, 2).sum();
     auto ss_tot = torch::pow(target - target.mean(), 2).sum();
-    // Handle edge case where ss_tot is zero (constant target)
+    // Constant target: R^2 is undefined (no variance to explain). Report a
+    // perfect fit only when the predictions also match the constant; otherwise
+    // there is no explained variance, so report 0 rather than a spurious 1.0.
+    // (Matches fit()'s baseline-R^2 path, which leaves R^2 at its default when
+    // ss_tot ~ 0 instead of asserting a perfect fit.)
     if (ss_tot.item<float>() < 1e-10f) {
-        return 1.0f;  // Perfect fit if target is constant and pred matches
+        return (ss_res.item<float>() < 1e-10f) ? 1.0f : 0.0f;
     }
     return 1.0f - (ss_res / ss_tot).item<float>();
 }
@@ -255,8 +259,7 @@ ClassificationMetrics Metrics::classification_metrics(torch::Tensor pred, torch:
     auto cm_accessor = cm.accessor<int64_t, 2>();
 
     int64_t total_samples = 0;
-    float macro_precision_sum = 0.0f;
-    float macro_recall_sum = 0.0f;
+    float macro_f1_sum = 0.0f;
     float weighted_f1_sum = 0.0f;
     int valid_classes = 0;
 
@@ -289,21 +292,16 @@ ClassificationMetrics Metrics::classification_metrics(torch::Tensor pred, torch:
         result.per_class_f1[c] = f1;
 
         if (support > 0) {
-            macro_precision_sum += precision;
-            macro_recall_sum += recall;
+            // Macro-F1 is the mean of per-class F1 scores, not the F1 of the
+            // macro-averaged precision and recall (those differ whenever the
+            // per-class P/R are imbalanced). Average per_class_f1 directly.
+            macro_f1_sum += f1;
             weighted_f1_sum += f1 * support;
             valid_classes++;
         }
     }
 
-    if (valid_classes > 0) {
-        float macro_precision = macro_precision_sum / valid_classes;
-        float macro_recall = macro_recall_sum / valid_classes;
-        result.macro_f1 = (macro_precision + macro_recall > 0) ?
-            2.0f * macro_precision * macro_recall / (macro_precision + macro_recall) : 0.0f;
-    } else {
-        result.macro_f1 = 0.0f;
-    }
+    result.macro_f1 = (valid_classes > 0) ? macro_f1_sum / valid_classes : 0.0f;
 
     result.weighted_f1 = (total_samples > 0) ? weighted_f1_sum / total_samples : 0.0f;
 

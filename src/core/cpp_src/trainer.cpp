@@ -754,7 +754,16 @@ Trainer::eval_epoch(int epoch) {
         test_categorical_ids
     );
 
-    auto [loss, _] = loss_fn_.compute(predictions, test_targets, epoch, batch_scalers);
+    // Evaluate the validation loss at a phase-INVARIANT reference epoch (the
+    // last training epoch's phase) rather than the current epoch. The phased
+    // loss adds strictly non-negative SMAPE/band terms as phases advance, so a
+    // current-epoch eval loss jumps up at each phase boundary; comparing it
+    // across epochs for best-model selection / early stopping would lock the
+    // returned model to a phase-1 checkpoint and stop the curriculum early.
+    // Scoring every epoch on the final-phase objective gives one consistent
+    // scale, so best_loss is comparable across the whole run.
+    const int sel_epoch = std::max(0, config_.max_epochs - 1);
+    auto [loss, _] = loss_fn_.compute(predictions, test_targets, sel_epoch, batch_scalers);
 
     // AMP regression diagnostic (gcol33/resolve#21). Gated by RESOLVE_AMP_DEBUG.
     // Compares the eval-mode test loss (BatchNorm running stats) against the
@@ -796,7 +805,7 @@ Trainer::eval_epoch(int epoch) {
             test_pool.genus_ids, test_pool.family_ids,
             test_pool.weights, test_pool.mask, test_pool.has_cover,
             test_categorical_ids);
-        auto [tm_loss, tm_ignored] = loss_fn_.compute(tm_preds, test_targets, epoch, batch_scalers);
+        auto [tm_loss, tm_ignored] = loss_fn_.compute(tm_preds, test_targets, sel_epoch, batch_scalers);
         for (size_t i = 0; i < bns.size(); ++i) {
             bns[i]->running_mean.copy_(saved[i].first);
             bns[i]->running_var.copy_(saved[i].second);
@@ -1113,6 +1122,13 @@ TrainResult Trainer::fit() {
         best_loss = std::numeric_limits<float>::infinity();
         patience_counter = 0;
 
+        // The phased loss activates later terms (SMAPE, band) only once their
+        // phase begins, so early-stopping before the final phase would kill the
+        // curriculum before those objectives ever train. Only count patience
+        // once we are in the phase the last epoch is in; ask the loss for the
+        // phase so MAE/SMAPE mode's remapped boundaries are respected.
+        const int final_phase = loss_fn_.phase_for(std::max(0, config_.max_epochs - 1));
+
         try {
             for (int epoch = 0; epoch < config_.max_epochs; ++epoch) {
                 // Update learning rate based on scheduler
@@ -1125,7 +1141,11 @@ TrainResult Trainer::fit() {
                 result.train_loss_history.push_back(train_loss);
                 result.test_loss_history.push_back(test_loss);
 
-                // Check for improvement
+                const bool in_final_phase = loss_fn_.phase_for(epoch) == final_phase;
+
+                // Check for improvement. test_loss is the phase-invariant
+                // selection loss (see eval_epoch), so best_loss is comparable
+                // across the whole run and the returned model is the global best.
                 if (test_loss < best_loss) {
                     best_loss = test_loss;
                     result.best_epoch = epoch;
@@ -1144,7 +1164,7 @@ TrainResult Trainer::fit() {
                     if (use_checkpoints) {
                         save(config_.checkpoint_dir + "/best.pt");
                     }
-                } else {
+                } else if (in_final_phase) {
                     patience_counter++;
                     if (patience_counter >= config_.patience) {
                         config_.log("Early stopping at epoch " + std::to_string(epoch));

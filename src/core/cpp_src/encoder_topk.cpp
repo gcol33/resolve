@@ -57,7 +57,7 @@ void PlotEncoderImpl::init(
     const MLPBlockConfig& config,
     const TabMConfig& tabm_config
 ) {
-    has_taxonomy_ = (n_genera > 0 && n_families > 0);
+    has_taxonomy_ = (n_genera > 1 || n_families > 1);
     top_k_ = top_k;
     hidden_dims_ = hidden_dims;
     mlp_config_ = config;
@@ -292,7 +292,7 @@ void PlotEncoderSparseImpl::init(
     const MLPBlockConfig& config,
     const TabMConfig& tabm_config
 ) {
-    has_taxonomy_ = (n_genera > 0 && n_families > 0);
+    has_taxonomy_ = (n_genera > 1 || n_families > 1);
     n_species_ = n_species;
     top_k_ = top_k;
     mlp_config_ = config;
@@ -401,7 +401,7 @@ void PlotEncoderMoEImpl::init(
     int moe_top_k,
     float moe_noise_std
 ) {
-    has_taxonomy_ = (n_genera > 0 && n_families > 0);
+    has_taxonomy_ = (n_genera > 1 || n_families > 1);
     top_k_ = top_k;
     n_experts_ = n_experts;
     moe_routing_ = moe_routing;

@@ -42,6 +42,13 @@ TabularAdapterImpl::TabularAdapterImpl(
         n_species_features = top_k_species_ * species_embed_dim_;
         n_numerical_ = n_continuous_base + n_species_features;
     }
+    else if (architecture_ == EncoderArchitecture::HeterogeneousGNN) {
+        // HeterogeneousGNN builds plot features from the species graph and the
+        // continuous block directly (see forward()); it never runs a
+        // species-vector projection. Registering one here would add an untrained
+        // n_species_vocab x embed_dim parameter block and a wasted per-batch GEMM.
+        n_numerical_ = n_continuous_base;
+    }
     else {
         // Sparse mode: project species vector to embedding
         species_project_dim_ = config.species_embed_dim;
@@ -267,7 +274,12 @@ torch::Tensor TabularAdapterImpl::forward(
     torch::Tensor species_ids,
     torch::Tensor species_vector
 ) {
-    auto numerical = prepare_numerical(continuous, species_ids, species_vector);
+    // HeterogeneousGNN ignores the numerical block (it uses continuous + the
+    // species-graph embedding), so skip the projection GEMM for it.
+    torch::Tensor numerical;
+    if (architecture_ != EncoderArchitecture::HeterogeneousGNN) {
+        numerical = prepare_numerical(continuous, species_ids, species_vector);
+    }
     auto categoricals = prepare_categoricals(genus_ids, family_ids);
 
     torch::Tensor output;

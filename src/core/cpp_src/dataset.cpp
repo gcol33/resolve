@@ -1184,8 +1184,13 @@ void ResolveDataset::encode_species(
     schema_.pool_weighting = static_cast<int>(config_.pool_weighting);
     schema_.pool_species_cap = config_.pool_species_cap;
 
-    // Fit taxonomy vocabulary
-    if (schema_.has_taxonomy) {
+    // Fit taxonomy vocabulary. Rank-pool / transformer modes rebuild taxonomy
+    // from the RankPoolEncoder's own vocab further down (and overwrite these
+    // schema fields), so skip the O(n_records) fit here for them.
+    const bool pool_taxonomy_mode =
+        (config_.species_encoding == SpeciesEncodingMode::RankPool ||
+         config_.species_encoding == SpeciesEncodingMode::Transformer);
+    if (schema_.has_taxonomy && !pool_taxonomy_mode) {
         if (!use_external_vocabs_) {
             taxonomy_vocab_.fit(all_records);
         }

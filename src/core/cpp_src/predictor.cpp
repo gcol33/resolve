@@ -2,7 +2,9 @@
 #include "resolve/dataset.hpp"
 #include "resolve/encoder.hpp"  // Fp32NormImpl (inference-time BN fusion)
 #include "resolve/utils.hpp"
+#include <atomic>
 #include <fstream>
+#include <iostream>
 #include <stdexcept>
 
 namespace resolve {
@@ -66,13 +68,33 @@ ResolvePredictions Predictor::predict(
             "or a positive integer; got " + std::to_string(batch_size));
     }
 
+    // SAINT (inter-sample attention) and the coordinate-kNN GNN build each
+    // plot's representation from the OTHER plots in the same forward batch, so
+    // a chunked forward would make a plot's prediction depend on its chunk-mates
+    // and break the one-shot == chunked equivalence that holds for every other
+    // encoder. Force a single forward for them rather than silently returning
+    // chunk-composition-dependent predictions.
+    const EncoderArchitecture arch = model_->config().encoder_architecture;
+    const bool batch_dependent_encoder =
+        (arch == EncoderArchitecture::SAINT || arch == EncoderArchitecture::GNN);
+    if (batch_dependent_encoder && batch_size != -1 && n > batch_size) {
+        static std::atomic<bool> warned{false};
+        if (!warned.exchange(true)) {
+            std::cerr << "[resolve] warning: the model's encoder uses "
+                         "inter-sample / batch-local attention (SAINT or GNN); its "
+                         "predictions depend on batch composition, so chunked "
+                         "inference is disabled and a single full-batch forward is "
+                         "used. Pass predict batch_size=-1 to silence this.\n";
+        }
+    }
+
     // Single-shot path: legacy behavior. Used when caller opts out of
-    // chunking (-1) or when the dataset already fits in one chunk
-    // (n <= batch_size). The pool-* tensors are threaded through so
-    // PlotEncoderRankPool / PlotEncoderTransformer get the correct
-    // (n_plots, max_species) rank-pool tensors instead of the embed-mode
-    // species_ids (whose shape is (n_plots, top_k_species)).
-    if (batch_size == -1 || n <= batch_size) {
+    // chunking (-1), when the dataset already fits in one chunk
+    // (n <= batch_size), or for a batch-composition-dependent encoder (above).
+    // The pool-* tensors are threaded through so PlotEncoderRankPool /
+    // PlotEncoderTransformer get the correct (n_plots, max_species) rank-pool
+    // tensors instead of the embed-mode species_ids (shape (n_plots, top_k_species)).
+    if (batch_size == -1 || n <= batch_size || batch_dependent_encoder) {
         auto result = predict(
             dataset.coordinates(),
             dataset.covariates(),

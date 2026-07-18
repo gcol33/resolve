@@ -249,36 +249,52 @@ TORCH_MODULE(FTTransformerEncoder);
 // TabNet Encoder
 // =============================================================================
 
-// Feature step for TabNet sequential attention
+// GLU block of the TabNet feature transformer: FC -> BN -> GLU.
+// The FC produces 2*out_dim; the gated linear unit halves it back to out_dim
+// (Arik & Pfister, Fig. 4).
+class TabNetGLUBlockImpl : public torch::nn::Module {
+public:
+    TabNetGLUBlockImpl(int64_t in_dim, int64_t out_dim);
+    torch::Tensor forward(torch::Tensor x);
+
+private:
+    torch::nn::Linear fc_{nullptr};
+    torch::nn::BatchNorm1d bn_{nullptr};
+};
+
+TORCH_MODULE(TabNetGLUBlock);
+
+// One TabNet decision step. Holds the attentive transformer (produces a
+// sparsemax feature mask over the ORIGINAL features from the previous step's
+// attention split and the prior scale) and the step-specific ("independent")
+// half of the feature transformer. The shared half is owned by the encoder and
+// reused across steps.
 class TabNetStepImpl : public torch::nn::Module {
 public:
     TabNetStepImpl(
         int64_t input_dim,
-        int64_t n_d,  // Decision layer dimension
-        int64_t n_a,  // Attention layer dimension
-        float relaxation_factor = 1.5f
+        int64_t n_d,           // Decision layer dimension
+        int64_t n_a,           // Attention layer dimension
+        int64_t n_independent  // Step-specific feature-transformer GLU blocks
     );
 
-    // x: (batch, input_dim)
-    // prior_scales: (batch, input_dim) - accumulated attention from previous steps
-    // Returns: (decision_output, attention_output, new_prior_scales)
-    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> forward(
-        torch::Tensor x,
-        torch::Tensor prior_scales
-    );
+    // att_prev: (batch, n_a) previous step's attention split.
+    // prior_scales: (batch, input_dim) feature availability.
+    // Returns the sparsemax mask over features: (batch, input_dim).
+    torch::Tensor attentive_forward(torch::Tensor att_prev, torch::Tensor prior_scales);
+
+    // Apply this step's independent GLU blocks after the encoder's shared blocks.
+    // shared_out and the return are (batch, n_d + n_a).
+    torch::Tensor feature_independent(torch::Tensor shared_out);
 
 private:
     int64_t input_dim_;
     int64_t n_d_;
     int64_t n_a_;
-    float relaxation_factor_;
 
-    torch::nn::Linear shared_fc_{nullptr};
-    torch::nn::Linear decision_fc_{nullptr};
     torch::nn::Linear attention_fc_{nullptr};
-    torch::nn::BatchNorm1d bn_shared_{nullptr};
-    torch::nn::BatchNorm1d bn_decision_{nullptr};
     torch::nn::BatchNorm1d bn_attention_{nullptr};
+    torch::nn::ModuleList independent_{nullptr};
 };
 
 TORCH_MODULE(TabNetStep);
@@ -308,13 +324,19 @@ public:
     [[nodiscard]] int64_t output_dim() const { return n_d_; }
 
 private:
+    // Run the shared feature-transformer GLU blocks (input_dim -> n_d + n_a),
+    // with sqrt(0.5) residual scaling between blocks after the first.
+    torch::Tensor run_shared(torch::Tensor x) const;
+
     int64_t input_dim_;
     int64_t n_steps_;
     int64_t n_d_;
     int64_t n_a_;
+    float relaxation_factor_;
     float sparsity_coefficient_;
 
-    torch::nn::Linear initial_bn_{nullptr};  // Initial batch norm (linear with 1 weight)
+    torch::nn::BatchNorm1d initial_bn_{nullptr};  // Input feature batch norm
+    torch::nn::ModuleList shared_{nullptr};       // Shared feature-transformer blocks
     torch::nn::ModuleList steps_{nullptr};
 
     // Accumulated during forward pass
