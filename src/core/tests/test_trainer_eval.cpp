@@ -487,3 +487,29 @@ TEST_CASE("Checkpoint schema pool-weighting round-trip", "[trainer][checkpoint]"
         REQUIRE(legacy2.pool_species_cap == 0);  // auto
     }
 }
+
+// Issue #65: JSON sidecar string values must be escaped. A target name or
+// version containing a quote used to emit invalid JSON.
+TEST_CASE("write_metadata_json escapes string values", "[checkpoint][json]") {
+    resolve::ModelConfig mc;
+    resolve::TrainConfig tc;
+    resolve::ResolveSchema sch;
+    resolve::RunMetadata md;
+    md.resolve_version = "1.0\"x";
+    md.final_metrics["area\"m2"] = {{"mae", 1.5f}};
+
+    auto base = (std::filesystem::temp_directory_path() / "meta_escape_test.pt").string();
+    resolve::write_metadata_json(base, mc, tc, md, sch);
+    auto json_path = base.substr(0, base.size() - 3) + ".json";
+
+    std::ifstream f(json_path);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    std::string content = ss.str();
+    f.close();
+    std::filesystem::remove(json_path);
+
+    // The embedded quotes must appear escaped, not raw.
+    REQUIRE(content.find("area\\\"m2") != std::string::npos);
+    REQUIRE(content.find("1.0\\\"x") != std::string::npos);
+}
