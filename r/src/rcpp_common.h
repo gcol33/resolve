@@ -175,6 +175,36 @@ inline RObject value_to_r_owned(resolve_value_t* v) {
 inline resolve_value_t* r_to_value(SEXP x) {
     if (Rf_isNull(x)) return resolve_value_new_null();
 
+    // A NAMED atomic vector (e.g. a classification class_mapping written as
+    // c(forest = 0L, grass = 1L)) is semantically a map. Promote it to a map so
+    // the C-ABI parsers that only read maps (parse_targets' class_mapping)
+    // receive the names instead of silently getting a nameless array -- which
+    // would drop the mapping and let the loader re-factorize with a different
+    // code order.
+    const int atype = TYPEOF(x);
+    if (atype == INTSXP || atype == REALSXP || atype == STRSXP || atype == LGLSXP) {
+        SEXP nm = Rf_getAttrib(x, R_NamesSymbol);
+        if (nm != R_NilValue && Rf_xlength(x) > 0) {
+            resolve_value_t* map = resolve_value_new_map();
+            for (R_xlen_t i = 0; i < Rf_xlength(x); ++i) {
+                SEXP nm_i = STRING_ELT(nm, i);
+                std::string key = (nm_i == NA_STRING) ? std::string() : std::string(CHAR(nm_i));
+                resolve_value_t* val;
+                switch (atype) {
+                    case INTSXP:  val = resolve_value_new_int(INTEGER(x)[i]); break;
+                    case REALSXP: val = resolve_value_new_double(REAL(x)[i]); break;
+                    case LGLSXP:  val = resolve_value_new_bool(LOGICAL(x)[i] == TRUE ? 1 : 0); break;
+                    default: {
+                        SEXP e = STRING_ELT(x, i);
+                        val = resolve_value_new_string(e == NA_STRING ? "" : CHAR(e));
+                    }
+                }
+                resolve_map_set_value(map, key.c_str(), val);
+            }
+            return map;
+        }
+    }
+
     switch (TYPEOF(x)) {
         case LGLSXP: {
             LogicalVector v(x);

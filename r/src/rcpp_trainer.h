@@ -155,16 +155,23 @@ private:
         return value_to_r_owned(resolve_trainer_get(trainer_.get(), what));
     }
     static void set_targets(resolve_value_t* in, List targets) {
+        if (targets.size() > 0 && Rf_isNull(targets.names())) {
+            stop("set_targets: `targets` must be a named list of numeric vectors");
+        }
+        // Attach the map to `in` (caller owns `in` via ValuePtr) BEFORE filling
+        // it, so a throw from as<NumericVector> on a non-numeric target frees the
+        // partial map through `in` instead of leaking it.
         resolve_value_t* tmap = resolve_value_new_map();
+        resolve_map_set_value(in, "targets", tmap);
         CharacterVector names = targets.names();
         for (R_xlen_t i = 0; i < targets.size(); ++i) {
-            std::string name = std::string(names[i]);
+            SEXP nm_i = STRING_ELT(names, i);
+            std::string name = (nm_i == NA_STRING) ? std::string() : std::string(CHAR(nm_i));
             NumericVector v = as<NumericVector>(targets[i]);
             std::vector<double> buf(v.begin(), v.end());
             resolve_map_set_double_array(tmap, name.c_str(), buf.data(),
                                          static_cast<int64_t>(buf.size()));
         }
-        resolve_map_set_value(in, "targets", tmap);
     }
 
     std::shared_ptr<resolve_trainer_t> trainer_;

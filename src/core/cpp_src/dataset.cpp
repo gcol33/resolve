@@ -403,10 +403,12 @@ ResolveDataset ResolveDataset::from_species_source(
     // pattern, so this is a warning, not an error). Use from_csv (separate
     // header + species tables) when plot-level covariates are needed.
     if (!roles.covariates.empty() || !roles.categoricals.empty()) {
-        std::cerr << "[RESOLVE] warning: from_species_csv ignores roles.covariates ("
+        std::cerr << "[RESOLVE] warning: single-table (species-only) loading "
+                     "ignores roles.covariates ("
                   << roles.covariates.size() << ") and roles.categoricals ("
                   << roles.categoricals.size()
-                  << "); use from_csv for plot-level covariates" << std::endl;
+                  << "); use the header+species loader for plot-level covariates"
+                  << std::endl;
     }
 
     // Find target columns. A missing target column must fail loudly here too;

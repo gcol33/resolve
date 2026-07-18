@@ -461,6 +461,20 @@ torch::Tensor NCALossImpl::forward(
     auto mask = torch::eye(batch_size, sim.options()).to(torch::kBool);
     sim.masked_fill_(mask, -1e9f);
 
+    // Stochastic-neighborhood NCA: restrict each sample's neighbor set to its
+    // n_neighbors_ most similar (non-self) samples, masking the rest, so
+    // n_neighbors_ actually bounds the neighborhood (matching the ctor's intent).
+    // n_neighbors_ <= 0 or >= batch_size-1 keeps the full within-batch set.
+    if (n_neighbors_ > 0 && n_neighbors_ < batch_size - 1) {
+        const int64_t k = n_neighbors_;
+        auto topk_idx = std::get<1>(sim.topk(k, /*dim=*/1, /*largest=*/true));  // (batch, k)
+        auto keep = torch::zeros({batch_size, batch_size},
+                                 sim.options().dtype(torch::kBool));
+        keep.scatter_(1, topk_idx,
+                      torch::ones({batch_size, k}, keep.options()));
+        sim.masked_fill_(keep.logical_not(), -1e9f);
+    }
+
     // For each sample, compute probability of picking each other sample
     auto log_probs = torch::log_softmax(sim, /*dim=*/1);  // (batch, batch)
 

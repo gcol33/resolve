@@ -4,8 +4,37 @@
 #include <algorithm>
 #include <vector>
 #include <string>
+#include <cstdio>
 
 namespace resolve {
+
+namespace {
+// Escape a string for embedding in a JSON string literal. Target names and
+// class labels come from user CSV headers and may contain " or \; emitting them
+// raw produces invalid JSON that a monitoring parser chokes on.
+std::string json_escape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 8);
+    for (char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    out += buf;
+                } else {
+                    out += c;
+                }
+        }
+    }
+    return out;
+}
+}  // namespace
 
 void write_progress_file(
     const std::string& checkpoint_dir,
@@ -32,11 +61,12 @@ void write_progress_file(
     file << "  \"progress_pct\": "
          << (max_epochs > 0 ? 100.0f * epoch / max_epochs : 0.0f) << ",\n";
 
-    // Write a deterministic "best metric": the lowest-threshold band accuracy
-    // of the alphabetically-first target. `metrics` is an unordered_map, so
-    // select via sorted keys rather than iteration order (which is unspecified
-    // and made the reported value vary across runs/builds). band_25 < band_50 <
-    // band_75 lexicographically, so the sorted-first band is the lowest one.
+    // Write a deterministic "best metric": the lexicographically-first band
+    // accuracy of the alphabetically-first target. `metrics` is an unordered_map,
+    // so select via sorted keys rather than iteration order (which is unspecified
+    // and made the reported value vary across runs/builds). Ordering is
+    // lexicographic on the band name, which equals numeric order only for
+    // equal-width thresholds (band_25/50/75); a band_100 would sort before band_25.
     float best_metric = 0.0f;
     std::string best_metric_name;
     {
@@ -59,7 +89,7 @@ void write_progress_file(
         }
     }
     file << "  \"best_metric\": " << best_metric << ",\n";
-    file << "  \"best_metric_name\": \"" << best_metric_name << "\"\n";
+    file << "  \"best_metric_name\": \"" << json_escape(best_metric_name) << "\"\n";
     file << "}\n";
 }
 
@@ -1087,9 +1117,9 @@ void write_metadata_json(
     file << "{\n";
 
     // Run metadata
-    file << "  \"resolve_version\": \"" << metadata.resolve_version << "\",\n";
-    file << "  \"created_at\": \"" << metadata.created_at << "\",\n";
-    file << "  \"completed_at\": \"" << metadata.completed_at << "\",\n";
+    file << "  \"resolve_version\": \"" << json_escape(metadata.resolve_version) << "\",\n";
+    file << "  \"created_at\": \"" << json_escape(metadata.created_at) << "\",\n";
+    file << "  \"completed_at\": \"" << json_escape(metadata.completed_at) << "\",\n";
     file << "  \"train_time_seconds\": " << metadata.train_time_seconds << ",\n";
     file << "  \"n_plots_train\": " << metadata.n_plots_train << ",\n";
     file << "  \"n_plots_test\": " << metadata.n_plots_test << ",\n";
@@ -1149,12 +1179,12 @@ void write_metadata_json(
     for (const auto& [target_name, metrics] : metadata.final_metrics) {
         if (!first_target) file << ",\n";
         first_target = false;
-        file << "    \"" << target_name << "\": {\n";
+        file << "    \"" << json_escape(target_name) << "\": {\n";
         bool first_metric = true;
         for (const auto& [metric_name, value] : metrics) {
             if (!first_metric) file << ",\n";
             first_metric = false;
-            file << "      \"" << metric_name << "\": " << value;
+            file << "      \"" << json_escape(metric_name) << "\": " << value;
         }
         file << "\n    }";
     }

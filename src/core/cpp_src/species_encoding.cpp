@@ -48,8 +48,11 @@ HashBucketSign feature_hash_bucket_sign(const std::string& species, int hash_dim
     int64_t species_id = static_cast<int64_t>(murmur_hash(species, 0));
     int32_t h = murmur_hash3_fmix_i32(species_id);
     HashBucketSign out;
-    out.bucket = static_cast<int>(
-        static_cast<uint32_t>(h < 0 ? -h : h) % static_cast<uint32_t>(hash_dim));
+    // Take the magnitude in unsigned space: negating INT32_MIN in int is UB
+    // (and could desync this CPU path from the bit-identical CUDA hash kernel).
+    const uint32_t mag = (h < 0) ? (0u - static_cast<uint32_t>(h))
+                                  : static_cast<uint32_t>(h);
+    out.bucket = static_cast<int>(mag % static_cast<uint32_t>(hash_dim));
     out.sign = (h >= 0) ? 1.0f : -1.0f;
     return out;
 }
@@ -67,7 +70,9 @@ int64_t percentile_linear_trunc(std::vector<int64_t>& values, double q) {
     std::nth_element(values.begin(), values.begin() + lo, values.end());
     const int64_t a_lo = values[lo];
     int64_t a_hi = a_lo;
-    if (hi > lo) {
+    // hi can reach values.size() when q -> 100; guard the right partition so
+    // min_element is never called on an empty range (dereferencing end()).
+    if (hi > lo && (lo + 1) < values.size()) {
         a_hi = *std::min_element(values.begin() + lo + 1, values.end());
     }
 

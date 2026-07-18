@@ -2386,7 +2386,9 @@ SpatialBlockSplitter::split(torch::Tensor coords) const {
     auto block_row = torch::floor(lat / lat_size_).to(torch::kInt64);
     auto block_col = torch::floor(lon / lon_size_).to(torch::kInt64);
 
-    // Cantor pairing: label = row * 1e6 + col
+    // Linear block hash: label = row * 1e6 + col. Injective only while
+    // |block_col| < 5e5, which holds for degree-scale grids (lon in [-180, 180]);
+    // a sub-4e-4 deg lon_size could alias distinct blocks into one fold.
     auto block_labels = block_row * 1000000 + block_col;
 
     // Find unique blocks
@@ -2657,18 +2659,6 @@ Trainer::PoolTensors Trainer::get_test_pool_tensors() const {
             to_device_if_defined(test_pool_weights_, config_.device),
             to_device_if_defined(test_pool_mask_, config_.device),
             to_device_if_defined(test_pool_has_cover_, config_.device)};
-}
-
-Trainer::PoolTensors Trainer::get_train_pool_tensors() const {
-    if (gpu_data_cached_) {
-        return {gpu_pool_genus_ids_, gpu_pool_family_ids_,
-                gpu_pool_weights_, gpu_pool_mask_, gpu_pool_has_cover_};
-    }
-    return {to_device_if_defined(train_pool_genus_ids_, config_.device),
-            to_device_if_defined(train_pool_family_ids_, config_.device),
-            to_device_if_defined(train_pool_weights_, config_.device),
-            to_device_if_defined(train_pool_mask_, config_.device),
-            to_device_if_defined(train_pool_has_cover_, config_.device)};
 }
 
 // =============================================================================

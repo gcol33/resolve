@@ -291,7 +291,12 @@ torch::Tensor FeatureTokenizerImpl::forward(
         }
     }
 
-    // Categorical features
+    // Categorical features. Validate the count so passing more/fewer tensors
+    // than tables gives a clear error instead of an opaque ModuleList out-of-range
+    // (too many) or a silently shorter token sequence (too few).
+    TORCH_CHECK(static_cast<int64_t>(categoricals.size()) == n_categorical_,
+        "FeatureTokenizer: expected ", n_categorical_, " categorical tensors, got ",
+        categoricals.size());
     for (size_t i = 0; i < categoricals.size(); ++i) {
         auto embedding_module = categorical_embeddings_->ptr(static_cast<int64_t>(i))->as<torch::nn::EmbeddingImpl>();
         auto emb = embedding_module->forward(categoricals[i]);
@@ -930,8 +935,8 @@ torch::Tensor ExcelFormerEncoderImpl::forward(
     // Tokenize features
     auto tokens = tokenizer_->forward(numerical, categoricals);  // (batch, n_tokens, d_model)
 
-    // Build semi-permeable attention mask
-    auto attn_mask = build_attention_mask();  // (n_tokens, n_tokens)
+    // Build semi-permeable attention bias (additive log-bias, broadcasts over batch)
+    auto attn_mask = build_attention_mask();  // (1, n_tokens, n_tokens)
 
     // Pass through transformer layers with attention mask
     auto x = tokens;

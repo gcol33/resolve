@@ -412,8 +412,12 @@ public:
         torch::Tensor family_ids = {}
     );
 
-    // Forward pass that also returns intermediate activations (after each GELU)
-    // Used for network diagnostics - only call after training
+    // Forward pass intended to also return intermediate activations for network
+    // diagnostics. NOTE: this PlotEncoder path returns the final output with an
+    // EMPTY activations vector -- libtorch's type-erased nn::Sequential storage
+    // does not allow per-layer capture here. Only the hash-mode encoder path
+    // (encode_with_activations) actually populates activations; compute_diagnostics
+    // bails out for the other encoders accordingly.
     std::pair<torch::Tensor, std::vector<torch::Tensor>> forward_with_activations(
         torch::Tensor continuous,
         torch::Tensor genus_ids = {},

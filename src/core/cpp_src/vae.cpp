@@ -174,9 +174,12 @@ VAEPretrainResult VAEPretrainer::pretrain(torch::Tensor species_vectors) {
             n_batches++;
         }
 
-        result.loss_history.push_back(epoch_loss / n_batches);
-        result.recon_loss_history.push_back(epoch_recon / n_batches);
-        result.kl_loss_history.push_back(epoch_kl / n_batches);
+        // Guard against an empty pretraining set (no batches) so the loss
+        // histories record 0 rather than NaN from a divide-by-zero.
+        const float inv_nb = n_batches > 0 ? 1.0f / static_cast<float>(n_batches) : 0.0f;
+        result.loss_history.push_back(epoch_loss * inv_nb);
+        result.recon_loss_history.push_back(epoch_recon * inv_nb);
+        result.kl_loss_history.push_back(epoch_kl * inv_nb);
 
         if (epoch % 10 == 0) {
             std::ostringstream msg;

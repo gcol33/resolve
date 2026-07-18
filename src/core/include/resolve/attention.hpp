@@ -639,8 +639,10 @@ private:
     torch::nn::ModuleList layers_{nullptr};  // TransformerBlocks
     torch::nn::LayerNorm final_norm_{nullptr};
 
-    // Build semi-permeable attention mask from importance scores
-    // Returns: (n_tokens, n_tokens) mask where -inf blocks attention
+    // Build the semi-permeable attention bias from importance scores.
+    // Returns a (1, n_tokens, n_tokens) additive log-bias tensor (leading 1
+    // broadcasts over batch) that is ADDED to the pre-softmax scores -- a soft
+    // down-weighting, not a hard -inf block.
     [[nodiscard]] torch::Tensor build_attention_mask() const;
 };
 

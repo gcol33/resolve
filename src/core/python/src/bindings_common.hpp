@@ -38,11 +38,17 @@ inline at::Tensor unpack_required_tensor(const nb::object& obj, const char* name
 inline std::unordered_map<std::string, torch::Tensor> dict_to_tensor_map(const nb::dict& d) {
     std::unordered_map<std::string, torch::Tensor> result;
     for (auto item : d) {
-        // Use THPVariable_Unpack to convert Python tensor to C++ tensor
+        // Use THPVariable_Unpack to convert Python tensor to C++ tensor.
+        // Reject a non-tensor value loudly instead of silently dropping it,
+        // which would make a mistyped targets/inputs entry vanish.
         PyObject* py_tensor = item.second.ptr();
-        if (THPVariable_Check(py_tensor)) {
-            result[nb::cast<std::string>(item.first)] = THPVariable_Unpack(py_tensor);
+        auto key = nb::cast<std::string>(item.first);
+        if (!THPVariable_Check(py_tensor)) {
+            throw std::runtime_error(
+                "dict_to_tensor_map: value for key '" + key +
+                "' is not a torch.Tensor");
         }
+        result[key] = THPVariable_Unpack(py_tensor);
     }
     return result;
 }

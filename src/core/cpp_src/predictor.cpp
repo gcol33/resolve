@@ -15,7 +15,10 @@ namespace {
 // tensor if the input is itself undefined (mirrors the "defined or empty"
 // contract every downstream predict() call already handles).
 inline torch::Tensor slice0(const torch::Tensor& t, int64_t start, int64_t end) {
-    if (!t.defined() || t.numel() == 0) return t;
+    // Only pass undefined / scalar tensors through unchanged. A defined but
+    // 0-numel matrix (e.g. (n, 0)) must still be sliced along dim 0, otherwise
+    // the whole n-row tensor comes back for a [start,end) chunk.
+    if (!t.defined() || t.dim() == 0) return t;
     return t.slice(/*dim=*/0, start, end);
 }
 
@@ -338,8 +341,13 @@ torch::Tensor Predictor::get_embeddings(
     }
     auto continuous = torch::cat(continuous_parts, /*dim=*/1);
 
-    // Scale continuous features
-    auto scaled_continuous = (continuous - scalers_.continuous_mean) / scalers_.continuous_scale;
+    // Scale continuous features, guarding an unfit scaler the same way predict()
+    // does (a model whose continuous scalers were never fit leaves these
+    // undefined; subtracting an undefined tensor would throw).
+    auto scaled_continuous = continuous;
+    if (scalers_.continuous_mean.defined() && continuous.size(1) > 0) {
+        scaled_continuous = (continuous - scalers_.continuous_mean) / scalers_.continuous_scale;
+    }
     scaled_continuous = scaled_continuous.to(device_);
 
     genus_ids = to_device_if_defined(genus_ids, device_);

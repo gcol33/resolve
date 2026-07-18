@@ -1660,9 +1660,10 @@ resolve_value_t* resolve_model_call(resolve_model_t* m, const char* method, cons
                 in.pool_genus_ids, in.pool_family_ids, in.pool_weights, in.pool_mask,
                 in.pool_has_cover, in.categorical_ids);
             auto* ret = v_map();
+            ValueGuard g(ret);  // frees the partial tree if a conversion throws
             v_put(ret, "outputs", target_map_to_value(result.outputs));
             if (result.moe_aux_loss.defined()) v_put(ret, "moe_aux_loss", tensor_to_vec(result.moe_aux_loss));
-            return ret;
+            return g.release();
         }
         if (mt == "forward_single") {
             std::string target = vstr(inputs, "target");
@@ -1675,11 +1676,12 @@ resolve_value_t* resolve_model_call(resolve_model_t* m, const char* method, cons
             auto [latent, activations] = m->model->encode_with_activations(
                 in.continuous, in.genus_ids, in.family_ids, in.categorical_ids);
             auto* ret = v_map();
+            ValueGuard g(ret);  // frees the partial tree if a conversion throws
             v_put(ret, "latent", tensor_to_mat(latent));
             auto* acts = v_list();
+            v_put(ret, "activations", acts);  // attach before filling so acts is owned
             for (const auto& a : activations) v_append(acts, tensor_to_mat(a));
-            v_put(ret, "activations", acts);
-            return ret;
+            return g.release();
         }
         if (mt == "get_gate_probs") {
             auto result = m->model->get_gate_probs(in.continuous, in.genus_ids, in.family_ids);
@@ -1917,11 +1919,12 @@ namespace {
 // optional latent) shared by both predict paths.
 resolve_value* predictions_to_value(const ResolvePredictions& preds, bool return_latent) {
     auto* result = v_map();
+    ValueGuard g(result);  // frees the partial tree if a conversion throws
     v_put(result, "predictions", target_map_to_value(preds.predictions));
     v_put(result, "targets", target_map_to_value(preds.targets));
     if (return_latent && preds.latent.defined()) v_put(result, "latent", tensor_to_mat(preds.latent));
     v_put(result, "plot_ids", v_string_array(preds.plot_ids));
-    return result;
+    return g.release();
 }
 
 }  // namespace

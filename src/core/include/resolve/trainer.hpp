@@ -280,7 +280,6 @@ private:
         torch::Tensor genus_ids, family_ids, weights, mask, has_cover;
     };
     [[nodiscard]] PoolTensors get_test_pool_tensors() const;
-    [[nodiscard]] PoolTensors get_train_pool_tensors() const;
 
     // Run the model in eval mode over the held-out test fold and return the
     // per-target prediction map (regression: scaled outputs; classification:
