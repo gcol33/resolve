@@ -26,7 +26,12 @@ void register_trainer(nb::module_& m) {
                                const nb::dict& targets,
                                nb::object categorical_ids_obj,
                                float test_size,
-                               int seed) {
+                               int seed,
+                               nb::object pool_genus_ids_obj,
+                               nb::object pool_family_ids_obj,
+                               nb::object pool_weights_obj,
+                               nb::object pool_mask_obj,
+                               nb::object pool_has_cover_obj) {
             self.prepare_data(unpack_optional_tensor(coordinates_obj),
                             unpack_optional_tensor(covariates_obj),
                             unpack_optional_tensor(hash_embedding_obj),
@@ -37,8 +42,11 @@ void register_trainer(nb::module_& m) {
                             unpack_optional_tensor(unknown_fraction_obj),
                             unpack_optional_tensor(unknown_count_obj),
                             dict_to_tensor_map(targets),
-                            /*pool_genus_ids=*/{}, /*pool_family_ids=*/{},
-                            /*pool_weights=*/{}, /*pool_mask=*/{}, /*pool_has_cover=*/{},
+                            unpack_optional_tensor(pool_genus_ids_obj),
+                            unpack_optional_tensor(pool_family_ids_obj),
+                            unpack_optional_tensor(pool_weights_obj),
+                            unpack_optional_tensor(pool_mask_obj),
+                            unpack_optional_tensor(pool_has_cover_obj),
                             unpack_optional_tensor(categorical_ids_obj),
                             test_size, seed);
         }, nb::arg("coordinates"),
@@ -54,6 +62,13 @@ void register_trainer(nb::module_& m) {
            nb::arg("categorical_ids") = nb::none(),
            nb::arg("test_size") = 0.2f,
            nb::arg("seed") = 42,
+           // Rank-pool / transformer encoders need these; default none for the
+           // non-pool encoders (parity with the R prepare_data_pool path, #87).
+           nb::arg("pool_genus_ids") = nb::none(),
+           nb::arg("pool_family_ids") = nb::none(),
+           nb::arg("pool_weights") = nb::none(),
+           nb::arg("pool_mask") = nb::none(),
+           nb::arg("pool_has_cover") = nb::none(),
            "Prepare data from raw tensors (backwards compatible API)")
         .def("fit", &resolve::Trainer::fit, nb::call_guard<nb::gil_scoped_release>())
         .def("save", [](const resolve::Trainer& self, const std::string& path, nb::object metadata_obj) {

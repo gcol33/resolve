@@ -338,6 +338,83 @@ TEST_CASE("ResolveDataset from_species_csv factorizes string classification targ
     }
 }
 
+TEST_CASE("Classification num_classes smaller than emitted codes throws", "[dataset][classification]") {
+    // Direct integer labels are used verbatim as class codes, so a 1-indexed
+    // column 1..3 emits class_names of size 4 (index 0 reserved). Passing
+    // num_classes=3 would let a target code 3 index a 3-wide head out of bounds
+    // (issue #79). The loader must reject the too-small explicit value.
+    TempFile csv(
+        "plot_id,species,cover,habitat\n"
+        "p1,sp1,0.5,1\n"
+        "p2,sp2,0.5,2\n"
+        "p3,sp3,0.5,3\n"
+    );
+    RoleMapping roles;
+    roles.plot_id = "plot_id";
+    roles.species_id = "species";
+    roles.abundance = "cover";
+
+    DatasetConfig config;
+    config.species_encoding = SpeciesEncodingMode::Hash;
+    config.hash_dim = 16;
+    config.top_k = 2;
+
+    SECTION("too-small num_classes rejected") {
+        std::vector<TargetSpec> targets = { TargetSpec::classification("habitat", 3) };
+        REQUIRE_THROWS(ResolveDataset::from_species_csv(csv.path(), roles, targets, config));
+    }
+    SECTION("auto-size (num_classes=0) succeeds and sizes the head to max_code+1") {
+        std::vector<TargetSpec> targets = { TargetSpec::classification("habitat", 0) };
+        auto ds = ResolveDataset::from_species_csv(csv.path(), roles, targets, config);
+        for (const auto& tc : ds.schema().targets) {
+            if (tc.name == "habitat") REQUIRE(tc.num_classes == 4);  // codes 1..3 -> size 4
+        }
+    }
+    SECTION("num_classes >= max_code+1 is kept as-is") {
+        std::vector<TargetSpec> targets = { TargetSpec::classification("habitat", 10) };
+        auto ds = ResolveDataset::from_species_csv(csv.path(), roles, targets, config);
+        for (const auto& tc : ds.schema().targets) {
+            if (tc.name == "habitat") REQUIRE(tc.num_classes == 10);
+        }
+    }
+}
+
+TEST_CASE("Classification vocab is fit from surviving rows only", "[dataset][classification]") {
+    // A class that occurs only in a plot dropped because ANOTHER target (area) is
+    // missing must not enter class_names -- it would be an untrainable zero-example
+    // class and (lexicographically) shift every other code (issue #84).
+    TempFile csv(
+        "plot_id,species,cover,habitat,area\n"
+        "p1,sp1,0.5,Forest,100\n"
+        "p2,sp2,0.5,Grassland,200\n"
+        "p3,sp3,0.5,Xerophyte,NA\n"  // area NA -> p3 dropped; Xerophyte lives only here
+    );
+    RoleMapping roles;
+    roles.plot_id = "plot_id";
+    roles.species_id = "species";
+    roles.abundance = "cover";
+
+    std::vector<TargetSpec> targets = {
+        TargetSpec::classification("habitat", 0),
+        TargetSpec::regression("area")
+    };
+    DatasetConfig config;
+    config.species_encoding = SpeciesEncodingMode::Hash;
+    config.hash_dim = 16;
+    config.top_k = 2;
+
+    auto ds = ResolveDataset::from_species_csv(csv.path(), roles, targets, config);
+
+    REQUIRE(ds.n_plots() == 2);  // p3 dropped
+    for (const auto& tc : ds.schema().targets) {
+        if (tc.name == "habitat") {
+            REQUIRE(tc.num_classes == 2);          // not 3
+            REQUIRE(tc.class_names.size() == 2);
+            for (const auto& n : tc.class_names) REQUIRE(n != "Xerophyte");
+        }
+    }
+}
+
 TEST_CASE("ResolveDataset embed mode", "[dataset]") {
     TempFile csv(
         "plot_id,species,cover\n"

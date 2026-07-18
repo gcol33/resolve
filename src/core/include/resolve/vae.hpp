@@ -64,8 +64,14 @@ public:
         float kl_weight = 1.0f
     );
 
-    // Get the encoder weights for initializing species_projection in PlotEncoderSparse
-    // Returns the first linear layer weight transposed: (latent_dim, input_dim) -> (input_dim, latent_dim)
+    // Encoder weights for warm-starting the species projection in
+    // PlotEncoderSparse / TabularAdapter. Returns the VAE encoder's FIRST linear
+    // layer weight, shape (encoder_dims[0], input_dim) == (first_hidden_dim,
+    // n_species) in nn::Linear (out, in) convention. This directly initializes a
+    // Linear(n_species, species_embed_dim) species projection when
+    // species_embed_dim == encoder_dims[0]; the caller is responsible for that
+    // shape match (issue #85 — the prior doc claimed a transposed (input_dim,
+    // latent_dim) shape the implementation never returned).
     [[nodiscard]] torch::Tensor get_projection_weights() const;
 
     // Accessors

@@ -38,6 +38,10 @@ constexpr float kExpClampMin = -88.0f;
 constexpr float kExpClampMax = 88.0f;
 constexpr float kEpsilon = 1e-8f;
 
+// Gradient-norm clip threshold applied on every backward pass (matches the POC's
+// constants.MAX_GRAD_NORM). Single source of truth for both training paths.
+constexpr double kMaxGradNorm = 1.0;
+
 // Initialization constants
 constexpr float kBertInitStd = 0.02f;
 constexpr float kAttentionMaskFill = -1e9f;

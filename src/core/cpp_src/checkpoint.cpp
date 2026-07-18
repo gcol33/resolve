@@ -872,21 +872,20 @@ ResolveSchema load_schema(
 
 void save_train_config(
     torch::serialize::OutputArchive& archive,
-    const TrainConfig& config
+    const TrainConfig& config,
+    int requested_batch_size
 ) {
-    // NOTE on batch_size semantics in the checkpoint:
-    // ------------------------------------------------
+    // batch_size semantics in the checkpoint:
+    // ---------------------------------------
     // Trainer::fit mutates `config_.batch_size` in place when the CUDA
-    // auto-halve-on-OOM loop fires, so `config.batch_size` at save time is
-    // ALREADY the effective batch size that actually trained the model. We
-    // therefore write it under the existing `train_batch_size` key (no
-    // schema break, no shadow field) and additionally emit a redundant
-    // `train_effective_batch_size` key plus the configured floor so callers
-    // who want to flag fallback runs can distinguish "I asked for 16384"
-    // (lost on the mutation) from "the model actually saw 8192". The two
-    // values are equal on a clean run; they diverge only when the retry
-    // ladder fired.
-    archive.write("train_batch_size", torch::tensor(config.batch_size));
+    // auto-halve-on-OOM loop fires, so `config.batch_size` at save time is the
+    // EFFECTIVE batch size that actually trained the model. `train_batch_size`
+    // records the value the caller REQUESTED (passed here, restored by
+    // load_train_config), and `train_effective_batch_size` records the effective
+    // value, so a fallback run is detectable when the two diverge. On a clean run
+    // they are equal. A -1 requested value means "no separate request known".
+    const int requested = requested_batch_size >= 0 ? requested_batch_size : config.batch_size;
+    archive.write("train_batch_size", torch::tensor(requested));
     archive.write("train_effective_batch_size", torch::tensor(config.batch_size));
     archive.write("train_batch_size_floor", torch::tensor(config.batch_size_floor));
 
@@ -1101,7 +1100,8 @@ void write_metadata_json(
     const ModelConfig& model_config,
     const TrainConfig& train_config,
     const RunMetadata& metadata,
-    const ResolveSchema& schema
+    const ResolveSchema& schema,
+    int requested_batch_size
 ) {
     // Replace .pt extension with .json
     std::string json_path = checkpoint_path;
@@ -1143,14 +1143,13 @@ void write_metadata_json(
     file << "]\n";
     file << "  },\n";
 
-    // Train config. `batch_size` here is the effective value that actually
-    // trained the model (Trainer::fit mutates config_.batch_size when the
-    // CUDA OOM auto-halve retry fires). `batch_size_floor` is the configured
-    // lower bound for that retry. `effective_batch_size` is the same value
-    // as `batch_size`, kept under a distinct key for downstream tooling that
-    // wants to flag fallback runs.
+    // Train config. `batch_size` is the value the caller REQUESTED; the CUDA OOM
+    // auto-halve retry may have shrunk the value that actually trained the model,
+    // reported under `effective_batch_size`. `batch_size_floor` is the retry lower
+    // bound. When the two batch sizes diverge, the run fell back on OOM (issue #86).
+    const int req_bs = requested_batch_size >= 0 ? requested_batch_size : train_config.batch_size;
     file << "  \"train_config\": {\n";
-    file << "    \"batch_size\": " << train_config.batch_size << ",\n";
+    file << "    \"batch_size\": " << req_bs << ",\n";
     file << "    \"effective_batch_size\": " << train_config.batch_size << ",\n";
     file << "    \"batch_size_floor\": " << train_config.batch_size_floor << ",\n";
     file << "    \"max_epochs\": " << train_config.max_epochs << ",\n";

@@ -596,6 +596,26 @@ LRSchedulerType parse_lr_scheduler_type(const std::string& s) {
         {"cosine", LRSchedulerType::CosineAnnealing},
     }, "LR scheduler type");
 }
+// Inverses used by train_config_to_value so the config round-trips symmetrically:
+// parse_* read these enums as strings, so the serializer must emit strings too,
+// not the integer enum codes that the round-trip parser then rejects (issue #87).
+const char* loss_config_mode_to_string(LossConfigMode m) {
+    switch (m) {
+        case LossConfigMode::MAE: return "mae";
+        case LossConfigMode::SMAPE: return "smape";
+        case LossConfigMode::Combined: return "combined";
+        case LossConfigMode::NCA: return "nca";
+    }
+    return "combined";
+}
+const char* lr_scheduler_type_to_string(LRSchedulerType t) {
+    switch (t) {
+        case LRSchedulerType::None: return "none";
+        case LRSchedulerType::StepLR: return "step";
+        case LRSchedulerType::CosineAnnealing: return "cosine";
+    }
+    return "none";
+}
 MoERoutingType parse_moe_routing_type(const std::string& s) {
     return parse_enum<MoERoutingType>(s, {
         {"none", MoERoutingType::None}, {"soft", MoERoutingType::Soft},
@@ -1193,8 +1213,15 @@ resolve_value* train_config_to_value(const TrainConfig& c) {
     v_put(m, "weight_decay", v_double(c.weight_decay));
     v_put(m, "phase_boundaries",
           v_int_array({c.phase_boundaries.first, c.phase_boundaries.second}));
-    v_put(m, "loss_config", v_int(static_cast<int>(c.loss_config)));
-    v_put(m, "lr_scheduler", v_int(static_cast<int>(c.lr_scheduler)));
+    // Emit enums as strings so parse_train_config can read a get_config()/
+    // load_train_config list straight back (issue #87). Device and the checkpoint
+    // fields are emitted here too so both the trainer-get and load paths carry
+    // them (they were previously write-only from R / omitted from the load path).
+    v_put(m, "loss_config", v_string(loss_config_mode_to_string(c.loss_config)));
+    v_put(m, "lr_scheduler", v_string(lr_scheduler_type_to_string(c.lr_scheduler)));
+    v_put(m, "device", v_string(c.device.is_cuda() ? "cuda" : "cpu"));
+    v_put(m, "checkpoint_dir", v_string(c.checkpoint_dir));
+    v_put(m, "checkpoint_every", v_int(c.checkpoint_every));
     v_put(m, "lr_step_size", v_int(c.lr_step_size));
     v_put(m, "lr_gamma", v_double(c.lr_gamma));
     v_put(m, "lr_min", v_double(c.lr_min));
@@ -1488,6 +1515,12 @@ resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* wh
         auto vec_or_null = [](const torch::Tensor& t) -> resolve_value* {
             return (t.defined() && t.numel() > 0) ? tensor_to_vec(t) : v_null();
         };
+        // int64 flat accessor: keep exact values. Routing an int64 tensor through
+        // vec_or_null (float32) silently rounds every value above 2^24, so the CSR
+        // offsets and raw MurmurHash species IDs must use this at ASAAS scale.
+        auto ivec_or_null = [](const torch::Tensor& t) -> resolve_value* {
+            return (t.defined() && t.numel() > 0) ? tensor_to_ivec(t) : v_null();
+        };
 
         if (w == "coordinates") return mat_or_null(d.coordinates());
         if (w == "covariates") return mat_or_null(d.covariates());
@@ -1515,9 +1548,9 @@ resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* wh
         if (w == "species_vocab") return v_string_array(d.species_vocab());
         if (w == "n_plots") return v_int(d.n_plots());
         if (w == "has_raw_species_data") return v_bool(d.has_raw_species_data());
-        if (w == "raw_species_ids") return vec_or_null(d.raw_species_ids());
+        if (w == "raw_species_ids") return ivec_or_null(d.raw_species_ids());
         if (w == "raw_weights") return vec_or_null(d.raw_weights());
-        if (w == "plot_offsets") return vec_or_null(d.plot_offsets());
+        if (w == "plot_offsets") return ivec_or_null(d.plot_offsets());
 
         if (w == "taxonomy_vocab") {
             const auto& tv = d.taxonomy_vocab();
@@ -1885,13 +1918,10 @@ resolve_value_t* resolve_trainer_get(const resolve_trainer_t* t, const char* wha
         if (w == "test_plot_ids") return v_string_array(tr.test_plot_ids());
         if (w == "train_plot_ids") return v_string_array(tr.train_plot_ids());
         if (w == "config") {
-            // Reuse the full TrainConfig serializer (parity with the Python
-            // Trainer.config surface and resolve.load_train_config), plus the
-            // device, which train_config_to_value omits.
-            const auto& c = tr.config();
-            auto* m = train_config_to_value(c);
-            v_put(m, "device", v_string(c.device.is_cuda() ? "cuda" : "cpu"));
-            return m;
+            // Full TrainConfig serializer (parity with the Python Trainer.config
+            // surface and resolve.load_train_config). Device / checkpoint fields
+            // are now emitted by train_config_to_value itself.
+            return train_config_to_value(tr.config());
         }
         throw std::runtime_error("trainer_get: unknown accessor '" + w + "'");
     })

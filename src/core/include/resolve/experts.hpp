@@ -52,6 +52,17 @@ public:
             return;
         }
 
+        // A mixture needs at least two experts. With n_experts == 1 the Soft
+        // routing CV^2 load-balancing loss reduces to var() over a single value,
+        // which is NaN under Bessel correction and poisons the whole loss (issue
+        // #83). Reject it loudly; MoERoutingType::None is the way to disable MoE.
+        if (n_experts_ < 2) {
+            throw std::invalid_argument(
+                "MixtureOfExperts with routing requires n_experts >= 2 (got " +
+                std::to_string(n_experts_) +
+                "); use MoERoutingType::None to disable MoE.");
+        }
+
         // Gating network: Linear → Softmax (softmax applied in forward)
         gate_ = register_module("gate", torch::nn::Linear(input_dim, n_experts));
 
@@ -116,7 +127,11 @@ public:
             // Load-balancing: CV² of expert importance
             auto importance = gate_probs.sum(/*dim=*/0);  // (E,)
             auto mean_imp = importance.mean();
-            aux_loss = importance.var() / (mean_imp * mean_imp + 1e-8f);
+            // Population variance (unbiased=false): the constructor guarantees
+            // n_experts >= 2, but avoiding Bessel's N-1 divisor keeps this finite
+            // even in that degenerate case rather than depending on the guard.
+            aux_loss = importance.var(/*unbiased=*/false) /
+                (mean_imp * mean_imp + 1e-8f);
         } else {
             // TopK: select top-k experts per sample and re-normalize
             auto topk_result = torch::topk(gate_probs, top_k_, /*dim=*/-1);

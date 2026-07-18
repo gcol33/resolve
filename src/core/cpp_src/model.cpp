@@ -67,6 +67,18 @@ ResolveModelImpl::ResolveModelImpl(
     // Check if MoE is enabled
     bool use_moe = (config.moe_routing != MoERoutingType::None);
 
+    // MoE is only wired for the hash encoder (encoder_moe_) and the embed/sparse
+    // encoders (post_moe_). The non-MLP adapter architectures build neither, so a
+    // MoE request alongside an adapter arch would be silently discarded (issue
+    // #83). Reject it loudly rather than train a plain adapter with inert MoE knobs.
+    if (use_moe && use_adapter) {
+        throw std::invalid_argument(
+            "moe_routing is set but encoder_architecture is a non-MLP adapter "
+            "architecture (FT-Transformer/TabNet/SAINT/GNN/ExcelFormer/"
+            "HeterogeneousGNN); Mixture-of-Experts is not supported for these. "
+            "Use encoder_architecture=MLP, or set moe_routing=None.");
+    }
+
     // Create MLP block config from model config
     MLPBlockConfig mlp_config = MLPBlockConfig::from_model_config(config);
 

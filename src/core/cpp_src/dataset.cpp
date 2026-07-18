@@ -181,6 +181,117 @@ void resolve_classification_mapping(
     }
 }
 
+// Like resolve_classification_mapping, but for the auto-fit branch it fits the
+// vocabulary from KEPT rows only (issue #84): a class value that occurs solely in
+// rows that will be dropped because a *different* target is missing must not enter
+// class_names, since that both inflates num_classes with a zero-example class and
+// (for the lexicographic factorization) shifts every other code. Explicit mappings
+// are caller-fixed and therefore unaffected. `keep` is parallel to `raw_labels`.
+void resolve_classification_mapping_kept(
+    const std::unordered_map<std::string, int64_t>& explicit_mapping,
+    const std::vector<std::string>& raw_labels,
+    const std::vector<char>& keep,
+    std::unordered_map<std::string, int64_t>& mapping_out,
+    std::vector<std::string>& class_names_out
+) {
+    if (!explicit_mapping.empty()) {
+        resolve_classification_mapping(explicit_mapping, raw_labels, mapping_out, class_names_out);
+        return;
+    }
+    std::vector<std::string> kept;
+    kept.reserve(raw_labels.size());
+    for (size_t i = 0; i < raw_labels.size(); ++i) {
+        if (i < keep.size() && !keep[i]) continue;
+        kept.push_back(raw_labels[i]);
+    }
+    fit_classification_mapping(kept, mapping_out, class_names_out);
+}
+
+// Single source of truth for encoding one classification target, shared by both
+// the header (from_csv) and species-file (from_species_csv) loaders. Resolves the
+// mapping (fit on kept rows), writes the (n,) int64 code tensor, flips keep[i]=0
+// for NA/unmapped cells, and sets + validates cfg.class_names / cfg.num_classes.
+//
+// num_classes validation (issue #79): the direct-integer path emits the parsed
+// integers verbatim as class codes, so class_names.size() == max_code + 1. The
+// classification head is sized from num_classes, so a caller-supplied num_classes
+// smaller than class_names.size() (e.g. a 1-indexed column 1..9 built with
+// num_classes=9) would let a target code index the head out of bounds. Fill it
+// when the caller passed 0; reject a positive-but-too-small value loudly.
+torch::Tensor encode_classification_target(
+    const TargetSpec& spec,
+    const std::vector<std::string>& raw,
+    std::vector<char>& keep,
+    TargetConfig& cfg,
+    const std::string& log_name
+) {
+    std::unordered_map<std::string, int64_t> mapping;
+    std::vector<std::string> class_names;
+    const bool explicit_mapping = !spec.class_mapping.empty();
+    resolve_classification_mapping_kept(spec.class_mapping, raw, keep, mapping, class_names);
+
+    const int64_t n = static_cast<int64_t>(raw.size());
+    auto tensor = torch::zeros({n}, torch::kLong);
+    auto acc = tensor.accessor<int64_t, 1>();
+    int64_t n_null = 0;
+    for (int64_t i = 0; i < n; ++i) {
+        const std::string& v = raw[static_cast<size_t>(i)];
+        if (is_na_string(v)) {
+            if (i < static_cast<int64_t>(keep.size()) && keep[i]) keep[i] = 0;
+            ++n_null;
+            continue;
+        }
+        auto it = mapping.find(v);
+        if (it == mapping.end()) {
+            if (i < static_cast<int64_t>(keep.size()) && keep[i]) keep[i] = 0;
+            ++n_null;
+            continue;
+        }
+        acc[i] = it->second;
+    }
+
+    cfg.class_names = class_names;
+    const int n_classes = static_cast<int>(class_names.size());
+    if (cfg.num_classes == 0) {
+        cfg.num_classes = n_classes;
+    } else if (cfg.num_classes < n_classes) {
+        throw std::invalid_argument(
+            "classification target '" + log_name + "': num_classes=" +
+            std::to_string(cfg.num_classes) + " is smaller than the number of class "
+            "codes in the data (" + std::to_string(n_classes) + "). Direct integer "
+            "labels are used verbatim as class codes, so a 1-indexed column 1.." +
+            std::to_string(n_classes - 1) + " needs num_classes >= " +
+            std::to_string(n_classes) + " (index 0 reserved). Pass num_classes=0 to "
+            "size the head automatically, or use dense 0-based codes.");
+    }
+
+    std::cout << "  Encoded '" << spec.column_name << "' as Int64 ("
+              << (explicit_mapping ? "explicit" : "auto") << ", "
+              << mapping.size() << " classes, " << n_null << " null)" << std::endl;
+    return tensor;
+}
+
+// Finalize the keep flags for a classification target WITHOUT fitting the vocab
+// (issue #84): so that every classification vocab is fit against the final
+// surviving-row set even when another classification target drives additional
+// drops. Auto-fit maps every non-NA cell in a kept row, so only NA cells drop;
+// an explicit mapping additionally drops non-NA cells absent from the mapping.
+void mark_classification_drops(
+    const TargetSpec& spec,
+    const std::vector<std::string>& raw,
+    std::vector<char>& keep
+) {
+    const bool explicit_mapping = !spec.class_mapping.empty();
+    const int64_t n = static_cast<int64_t>(raw.size());
+    for (int64_t i = 0; i < n; ++i) {
+        if (i >= static_cast<int64_t>(keep.size()) || !keep[i]) continue;
+        const std::string& v = raw[static_cast<size_t>(i)];
+        if (is_na_string(v)) { keep[i] = 0; continue; }
+        if (explicit_mapping && spec.class_mapping.find(v) == spec.class_mapping.end())
+            keep[i] = 0;
+    }
+}
+
 // Drop species records for plots that were removed (missing/NA target) so the
 // species / taxonomy vocab is built only from surviving plots (issue #68):
 // species occurring solely in dropped plots must not inflate the embedding
@@ -594,6 +705,12 @@ ResolveDataset ResolveDataset::from_species_source(
         return t < vals.size() ? vals[t] : kEmpty;
     };
 
+    // Build target configs (in target order) + regression tensors; collect the
+    // raw classification cells. Classification encoding is deferred to a second
+    // pass so every vocab is fit from the final surviving-row set (issue #84),
+    // through the same encode_classification_target used by the header loader
+    // (single source of truth + num_classes validation, issues #79/#86).
+    std::vector<std::vector<std::string>> cls_raw(targets.size());
     for (size_t t = 0; t < targets.size(); ++t) {
         const auto& target_spec = targets[t];
         std::string name = target_spec.target_name.empty()
@@ -608,38 +725,8 @@ ResolveDataset ResolveDataset::from_species_source(
         });
 
         if (target_spec.task == TaskType::Classification) {
-            std::unordered_map<std::string, int64_t> mapping;
-            std::vector<std::string> class_names;
-            const bool explicit_mapping = !target_spec.class_mapping.empty();
-            std::vector<std::string> raw;
-            if (!explicit_mapping) {
-                raw.reserve(static_cast<size_t>(n_plots));
-                for (int64_t i = 0; i < n_plots; ++i) raw.push_back(raw_at(t, i));
-            }
-            resolve_classification_mapping(target_spec.class_mapping, raw, mapping, class_names);
-
-            auto target_tensor = torch::zeros({n_plots}, torch::kLong);
-            auto acc = target_tensor.accessor<int64_t, 1>();
-            int64_t n_null = 0;
-            for (int64_t i = 0; i < n_plots; ++i) {
-                const std::string& v = raw_at(t, i);
-                if (is_na_string(v)) { keep[i] = 0; ++n_null; continue; }
-                auto it = mapping.find(v);
-                if (it == mapping.end()) { keep[i] = 0; ++n_null; continue; }
-                acc[i] = it->second;
-            }
-            dataset.target_configs_[t].class_names = class_names;
-            // Size the head to hold the largest emitted code, not just the count
-            // of classes: the direct-int path emits the raw codes, so a sparse
-            // set like {0,2,5} needs num_classes = 6 (= class_names.size()), not
-            // 3, or a target of 5 indexes out of a 3-class head.
-            if (dataset.target_configs_[t].num_classes == 0)
-                dataset.target_configs_[t].num_classes = static_cast<int>(class_names.size());
-            dataset.targets_[name] = target_tensor;
-
-            std::cout << "  Encoded '" << target_spec.column_name << "' as Int64 ("
-                      << (explicit_mapping ? "explicit" : "auto") << ", "
-                      << mapping.size() << " classes, " << n_null << " null)" << std::endl;
+            cls_raw[t].reserve(static_cast<size_t>(n_plots));
+            for (int64_t i = 0; i < n_plots; ++i) cls_raw[t].push_back(raw_at(t, i));
         } else {
             auto target_tensor = torch::zeros({n_plots}, torch::kFloat32);
             auto acc = target_tensor.accessor<float, 1>();
@@ -650,6 +737,20 @@ ResolveDataset ResolveDataset::from_species_source(
             }
             dataset.targets_[name] = target_tensor;
         }
+    }
+
+    // Pass 1: finalize keep for classification NA / explicit-unmapped drops.
+    for (size_t t = 0; t < targets.size(); ++t) {
+        if (targets[t].task != TaskType::Classification) continue;
+        mark_classification_drops(targets[t], cls_raw[t], keep);
+    }
+    // Pass 2: fit each classification vocab on kept rows only, encode, validate.
+    for (size_t t = 0; t < targets.size(); ++t) {
+        if (targets[t].task != TaskType::Classification) continue;
+        std::string name = targets[t].target_name.empty()
+            ? targets[t].column_name : targets[t].target_name;
+        dataset.targets_[name] = encode_classification_target(
+            targets[t], cls_raw[t], keep, dataset.target_configs_[t], name);
     }
 
     // Drop plots whose target was missing/unmapped, compacting plot_ids_,
@@ -813,16 +914,14 @@ void ResolveDataset::load_header_data(
     // spatial-graph neighbours. Warned about after the scan.
     int64_t coord_na_count = 0;
 
-    // Initialize target tensors
+    // Initialize regression target tensors (written inline during the scan).
+    // Classification tensors are built post-scan by encode_classification_target
+    // from the collected classification_raw buffers, so they are not preallocated.
     for (size_t t = 0; t < targets.size(); ++t) {
         const auto& target = targets[t];
+        if (target.task == TaskType::Classification) continue;
         std::string name = target.target_name.empty() ? target.column_name : target.target_name;
-
-        if (target.task == TaskType::Classification) {
-            targets_[name] = torch::zeros({n_plots}, torch::kLong);
-        } else {
-            targets_[name] = torch::zeros({n_plots}, torch::kFloat32);
-        }
+        targets_[name] = torch::zeros({n_plots}, torch::kFloat32);
     }
 
     schema_.targets = target_configs_;
@@ -986,63 +1085,22 @@ void ResolveDataset::load_header_data(
     }
 
     // ---- Fit + encode classification target columns ----
-    // For each classification target, either use the explicit class_mapping
-    // from the TargetSpec, or auto-fit one from the raw column data. Encode
-    // the raw strings into the int64 target tensor. Missing/unmapped cells
-    // flip the corresponding `keep_row[i]` to 0 so the compaction below
-    // drops those plots — same semantics as a missing regression target.
-    //
-    // Mirrors the POC's `_apply_categorical_encoding` + `_encode_categorical`
-    // pipeline. Loud per-target log line ("Encoded 'Eunis_lvl1' as Int64
-    // (auto, 9 classes, 0 null)") matches what `from_fast_csv` prints.
+    // Two passes so every classification vocab is fit from the final surviving-row
+    // set (issue #84): pass 1 finalizes keep_row (regression drops are already in
+    // it from the scan; here we add classification NA / explicit-unmapped drops),
+    // pass 2 fits each vocab on kept rows only and encodes. The shared
+    // encode_classification_target also validates num_classes (issue #79) and is
+    // the single source of truth with the from_species_csv loader (issue #86).
+    for (size_t t = 0; t < targets.size(); ++t) {
+        if (targets[t].task != TaskType::Classification) continue;
+        mark_classification_drops(targets[t], classification_raw[t], keep_row);
+    }
     for (size_t t = 0; t < targets.size(); ++t) {
         const auto& target = targets[t];
         if (target.task != TaskType::Classification) continue;
         std::string name = target.target_name.empty() ? target.column_name : target.target_name;
-        const auto& raw = classification_raw[t];
-
-        std::unordered_map<std::string, int64_t> mapping;
-        std::vector<std::string> class_names;
-        const bool explicit_mapping = !target.class_mapping.empty();
-        resolve_classification_mapping(target.class_mapping, raw, mapping, class_names);
-
-        // Encode and count nulls. Tensor is preallocated to (n_plots,)
-        // kLong; write each row, flip keep_row[i] = 0 for unmapped/NA.
-        auto tgt = targets_[name];  // int64 tensor (n_plots,)
-        auto acc = tgt.accessor<int64_t, 1>();
-        int64_t n_null = 0;
-        for (int64_t i = 0; i < row_idx; ++i) {
-            const std::string& v = raw[static_cast<size_t>(i)];
-            if (is_na_string(v)) {
-                if (keep_row[static_cast<size_t>(i)]) keep_row[static_cast<size_t>(i)] = 0;
-                ++n_null;
-                continue;
-            }
-            auto it = mapping.find(v);
-            if (it == mapping.end()) {
-                if (keep_row[static_cast<size_t>(i)]) keep_row[static_cast<size_t>(i)] = 0;
-                ++n_null;
-                continue;
-            }
-            acc[i] = it->second;
-        }
-
-        // Persist the resolved vocab + num_classes on the target config so the
-        // schema/checkpoint round-trips it. num_classes = class_names.size(),
-        // which is the class count for a dense factorization and max_code + 1
-        // for the direct-int path. Sizing to mapping.size() (the distinct-class
-        // count) would under-size the head when the direct-int path emits sparse
-        // codes (e.g. {0,2,5} needs 6 outputs, not 3), so a target of 5 would
-        // index out of bounds. Auto-fill only when the caller passed 0.
-        target_configs_[t].class_names = class_names;
-        if (target_configs_[t].num_classes == 0) {
-            target_configs_[t].num_classes = static_cast<int>(class_names.size());
-        }
-
-        const char* src = explicit_mapping ? "explicit" : "auto";
-        std::cout << "  Encoded '" << target.column_name << "' as Int64 ("
-                  << src << ", " << mapping.size() << " classes, "
-                  << n_null << " null)" << std::endl;
+        targets_[name] = encode_classification_target(
+            target, classification_raw[t], keep_row, target_configs_[t], name);
     }
     schema_.targets = target_configs_;
 

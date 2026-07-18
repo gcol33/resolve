@@ -4,6 +4,24 @@
 
 namespace resolve {
 
+namespace {
+// Force position 0 valid for any fully-padded row (mask all-false): the attention
+// softmax over an all -inf key set produces NaN that propagates through pooling
+// into the loss. Idempotent, so it is safe to apply on both the public forward()
+// and forward_tokens() paths (the latter is entered directly by MLM pretraining
+// with an unguarded mask). Real vegetation plots always have >=1 species; this
+// only affects degenerate/synthetic all-padding rows (issues #6, #90).
+torch::Tensor guard_all_padding_rows(torch::Tensor mask) {
+    auto all_padding = mask.to(torch::kBool).logical_not().all(/*dim=*/1);  // (B,)
+    if (all_padding.any().item<bool>()) {
+        auto rows = all_padding.nonzero().squeeze(-1);  // (k,) row indices
+        mask = mask.clone();
+        mask.index_put_({rows, 0}, torch::ones({rows.size(0)}, mask.options()));
+    }
+    return mask;
+}
+}  // namespace
+
 // =============================================================================
 // Cover Dropout Helper
 // =============================================================================
@@ -301,8 +319,13 @@ torch::Tensor PlotEncoderTransformerImpl::build_tokens(
     // Additive embeddings in d_model space
     auto tokens = species_embedding_->forward(species_ids);  // (B, max_sp, d_model)
 
+    // Gate genus and family independently: a caller may pass one taxonomy tensor
+    // without the other, and dereferencing an undefined family_ids after checking
+    // only genus_ids would crash (issue #90).
     if (has_taxonomy_ && genus_ids.defined() && genus_ids.numel() > 0) {
         tokens = tokens + genus_embedding_->forward(genus_ids);
+    }
+    if (has_taxonomy_ && family_ids.defined() && family_ids.numel() > 0) {
         tokens = tokens + family_embedding_->forward(family_ids);
     }
 
@@ -328,6 +351,13 @@ torch::Tensor PlotEncoderTransformerImpl::forward_tokens(
     torch::Tensor mask,
     torch::Tensor masked_positions
 ) {
+    // Entered directly by MLM pretraining, so default + guard the mask here rather
+    // than relying on forward() having done it (issue #90).
+    if (!mask.defined() || mask.numel() == 0) {
+        mask = (species_ids != 0);
+    }
+    mask = guard_all_padding_rows(mask);
+
     auto tokens = build_tokens(species_ids, genus_ids, family_ids, weights, masked_positions);
 
     // Self-attention (libtorch expects (seq, batch, d_model) — transpose around call)
@@ -369,21 +399,10 @@ torch::Tensor PlotEncoderTransformerImpl::forward(
         weights = mask.to(torch::kFloat32);
     }
 
-    // Guard fully-padded rows (no species): a row whose mask is entirely false
-    // makes the attention softmax operate over all -inf keys and produce NaN,
-    // which propagates through pooling into the loss. Force position 0 valid for
-    // such rows so the encoder / pool yields a finite output. Real vegetation
-    // plots always have >=1 species; this only affects degenerate or synthetic
-    // all-padding rows. (The rank-pool encoder handles the empty plot via a
-    // weight-sum clamp; the transformer path needs this explicit guard.)
-    {
-        auto all_padding = mask.to(torch::kBool).logical_not().all(/*dim=*/1);  // (B,)
-        if (all_padding.any().item<bool>()) {
-            auto rows = all_padding.nonzero().squeeze(-1);  // (k,) row indices
-            mask = mask.clone();
-            mask.index_put_({rows, 0}, torch::ones({rows.size(0)}, mask.options()));
-        }
-    }
+    // Guard fully-padded rows (no species) so the attention softmax never runs
+    // over an all -inf key set. (The rank-pool encoder handles the empty plot via
+    // a weight-sum clamp; the transformer path needs this explicit guard.)
+    mask = guard_all_padding_rows(mask);
 
     // Cover dropout
     apply_cover_dropout(is_training(), cover_dropout_, batch_size, device,

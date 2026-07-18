@@ -31,10 +31,15 @@ ModelConfig load_model_config(
     torch::serialize::InputArchive& archive
 );
 
-// Save training config to archive
+// Save training config to archive. `requested_batch_size` is the batch size the
+// caller asked for before any CUDA OOM auto-halve; pass -1 (default) to fall back
+// to config.batch_size. It is written under `train_batch_size` (so load_train_config
+// restores the requested value) while `train_effective_batch_size` records the
+// effective config.batch_size, making an OOM fallback detectable (issue #86).
 void save_train_config(
     torch::serialize::OutputArchive& archive,
-    const TrainConfig& config
+    const TrainConfig& config,
+    int requested_batch_size = -1
 );
 
 // Load training config from archive (inverse of save_train_config). Recovers
@@ -55,13 +60,17 @@ RunMetadata load_run_metadata(
     torch::serialize::InputArchive& archive
 );
 
-// Write run metadata as JSON file alongside checkpoint
+// Write run metadata as JSON file alongside checkpoint. `requested_batch_size`
+// mirrors save_train_config: -1 (default) uses train_config.batch_size; otherwise
+// the sidecar's `batch_size` is the requested value and `effective_batch_size` the
+// value that actually trained the model (issue #86).
 void write_metadata_json(
     const std::string& checkpoint_path,
     const ModelConfig& model_config,
     const TrainConfig& train_config,
     const RunMetadata& metadata,
-    const ResolveSchema& schema
+    const ResolveSchema& schema,
+    int requested_batch_size = -1
 );
 
 // Save scalers to archive

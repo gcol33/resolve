@@ -248,6 +248,21 @@ torch::Tensor TypedMessagePassingLayerImpl::forward(
     auto messages = torch::zeros({n_edges, out_features_}, node_features.options());
     auto edge_input = torch::cat({src_feats, tgt_feats}, /*dim=*/1);
 
+    // Every edge must match exactly one typed message branch. An edge_type outside
+    // [0, n_edge_types_) matches none, leaving its message row all-zeros while it
+    // still participates in attention/aggregation as a (silent) zero message
+    // (issue #90). Reject the out-of-range input loudly instead.
+    if (n_edges > 0) {
+        const int64_t et_min = edge_type.min().item<int64_t>();
+        const int64_t et_max = edge_type.max().item<int64_t>();
+        if (et_min < 0 || et_max >= n_edge_types_) {
+            throw std::invalid_argument(
+                "typed message passing: edge_type values must be in [0, " +
+                std::to_string(n_edge_types_) + "), but got range [" +
+                std::to_string(et_min) + ", " + std::to_string(et_max) + "].");
+        }
+    }
+
     for (int64_t t = 0; t < n_edge_types_; ++t) {
         auto mask = (edge_type == t);
         if (!mask.any().item<bool>()) continue;

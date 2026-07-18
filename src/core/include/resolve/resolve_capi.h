@@ -246,6 +246,8 @@ RESOLVE_CAPI void resolve_dataset_free(resolve_dataset_t* ds);
  *   genus_ids family_ids unknown_fraction unknown_count categorical_ids
  *   categorical_vocab targets schema plot_ids species_vocab n_plots config
  *   has_raw_species_data raw_species_ids raw_weights plot_offsets taxonomy_vocab
+ *   pool_genus_ids pool_family_ids pool_weights pool_mask pool_has_cover
+ *   has_pool_data
  * Optional-tensor accessors return a NULL-kind value when the tensor is
  * undefined/empty. */
 RESOLVE_CAPI resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* what);

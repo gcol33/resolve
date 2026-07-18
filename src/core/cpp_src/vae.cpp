@@ -95,12 +95,14 @@ torch::Tensor SpeciesVAEImpl::vae_loss(
 }
 
 torch::Tensor SpeciesVAEImpl::get_projection_weights() const {
-    // Return the first encoder linear layer weights
-    // This maps from input_dim -> first_hidden, suitable for species projection
+    // First encoder linear weight, shape (encoder_dims[0], input_dim) in the
+    // nn::Linear (out_features, in_features) convention. Warm-starts a
+    // Linear(n_species, species_embed_dim) species projection when
+    // species_embed_dim == encoder_dims[0] (see header contract, issue #85).
     for (const auto& module : encoder_->children()) {
         auto linear = module->as<torch::nn::LinearImpl>();
         if (linear) {
-            return linear->weight.detach().clone();  // (first_hidden, input_dim)
+            return linear->weight.detach().clone();  // (encoder_dims[0], input_dim)
         }
     }
     throw std::runtime_error("No linear layer found in VAE encoder");

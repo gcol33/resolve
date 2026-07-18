@@ -254,6 +254,23 @@ void JEPAPretrainer::update_target_encoder(float decay) {
             }
         }
     }
+
+    // Buffers (BatchNorm running_mean/running_var/num_batches_tracked) are NOT
+    // gradient-tracked and are not updated by the parameter EMA above. Without
+    // this the target encoder — always run in eval() — would normalize with the
+    // construction-time init stats (mean 0, var 1) for the entire run, breaking
+    // the "target is a slow copy of the online encoder" invariant (issue #81).
+    // BYOL/JEPA copy buffers from the online encoder rather than EMA-ing them.
+    auto context_bufs = context_encoder_->named_buffers();
+    auto target_bufs = target_encoder_->named_buffers();
+    for (const auto& pair : context_bufs) {
+        for (const auto& t_pair : target_bufs) {
+            if (pair.key() == t_pair.key()) {
+                t_pair.value().copy_(pair.value());
+                break;
+            }
+        }
+    }
 }
 
 float JEPAPretrainer::get_ema_decay(int step, int total_steps) const {
@@ -610,30 +627,38 @@ mask_species_batch(
     // embedding, nullifying the 80/10/10 split entirely).
     auto mask_token_positions = torch::zeros_like(mlm_mask);
 
-    // BERT-style 80/10/10 split
-    auto n_masked = mlm_mask.sum().item<int64_t>();
+    // BERT-style 80/10/10 split, fully vectorized (issue #90). The prior
+    // per-token loop called .item() twice per masked position, forcing a
+    // GPU->CPU sync thousands of times per batch and serializing the MLM hot
+    // loop on CUDA. Here we draw one action value per masked slot, scatter the
+    // 80%/10% decisions back onto the (B, S) grid in mlm_mask's row-major order,
+    // and apply them with tensor ops (no host sync inside the split).
+    auto n_masked = mlm_mask.sum().item<int64_t>();  // single sync (empty-case guard)
     if (n_masked > 0) {
         auto action_rand = torch::rand({n_masked}, torch::TensorOptions().device(device));
 
-        // 80% → mask token (id set to 0; encoder applies mask_embedding here)
-        auto mask_replace = action_rand < 0.8f;
-        // 10% → random species ID (1 to n_species-1)
-        auto mask_random = (action_rand >= 0.8f) & (action_rand < 0.9f);
-        // 10% → keep original (no action needed)
+        // 80% -> mask token; next 10% -> random species id; last 10% -> keep.
+        auto mask_replace = action_rand < 0.8f;                          // (n_masked,)
+        auto mask_random = (action_rand >= 0.8f) & (action_rand < 0.9f); // (n_masked,)
 
-        // Apply masking
-        auto masked_positions_flat = mlm_mask.nonzero();
-        for (int64_t i = 0; i < n_masked; ++i) {
-            auto r = masked_positions_flat[i][0];
-            auto c = masked_positions_flat[i][1];
-            if (mask_replace[i].item<bool>()) {
-                masked_ids.index_put_({r, c}, 0);
-                mask_token_positions.index_put_({r, c}, true);
-            } else if (mask_random[i].item<bool>()) {
-                auto random_id = torch::randint(1, n_species, {1},
-                    torch::TensorOptions().dtype(torch::kInt64).device(device));
-                masked_ids.index_put_({r, c}, random_id.item<int64_t>());
-            }
+        // index_put_ with a boolean mask writes the 1-D values in the row-major
+        // order of the mask's true positions — the same order action_rand was
+        // drawn in — so these land on exactly the intended grid cells.
+        auto replace_grid = torch::zeros_like(mlm_mask);
+        auto random_grid = torch::zeros_like(mlm_mask);
+        replace_grid.index_put_({mlm_mask}, mask_replace);
+        random_grid.index_put_({mlm_mask}, mask_random);
+
+        mask_token_positions = replace_grid;
+        masked_ids = masked_ids.masked_fill(replace_grid, 0);
+
+        // Random-id replacement: draw a full-grid random-id tensor and select it
+        // only at the random positions. Needs at least two species ids (1..n-1).
+        if (n_species > 1) {
+            auto rand_ids = torch::randint(
+                1, n_species, mlm_mask.sizes(),
+                torch::TensorOptions().dtype(torch::kInt64).device(device));
+            masked_ids = torch::where(random_grid, rand_ids, masked_ids);
         }
     }
 

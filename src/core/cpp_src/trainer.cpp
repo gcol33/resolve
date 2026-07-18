@@ -650,7 +650,7 @@ float Trainer::train_epoch(int epoch) {
                 optimizer_->zero_grad();
             } else {
                 // Gradient clipping (on unscaled gradients)
-                torch::nn::utils::clip_grad_norm_(model_->parameters(), 1.0);
+                torch::nn::utils::clip_grad_norm_(model_->parameters(), kMaxGradNorm);
 
                 // Optimizer step
                 optimizer_->step();
@@ -670,7 +670,7 @@ float Trainer::train_epoch(int epoch) {
             loss.backward();
 
             // Gradient clipping
-            torch::nn::utils::clip_grad_norm_(model_->parameters(), 1.0);
+            torch::nn::utils::clip_grad_norm_(model_->parameters(), kMaxGradNorm);
 
             optimizer_->step();
 
@@ -728,29 +728,13 @@ Trainer::eval_epoch(int epoch) {
         }
     }
 
-    // CUDA hash computation: compute hash embedding for entire test set
-#ifdef RESOLVE_HAS_CUDA
-    if (use_cuda_hash_ && config_.device.is_cuda()) {
-        // Get the source data (GPU cached or original)
-        const auto& species_src = gpu_data_cached_ ? gpu_train_raw_species_ids_ : raw_species_ids_;
-        const auto& weights_src = gpu_data_cached_ ? gpu_train_raw_weights_ : raw_weights_;
-        const auto& offsets_src = gpu_data_cached_ ? gpu_train_plot_offsets_ : plot_offsets_;
-        const auto& test_idx = gpu_data_cached_ ? gpu_test_indices_ : test_indices_.to(config_.device);
-
-        // Compute hash embedding for test set
-        auto test_hash = cuda::compute_batch_hash_embedding_cuda(
-            test_idx,
-            torch::Tensor(),  // raw_plot_indices not needed with CSR offsets
-            species_src,
-            weights_src,
-            offsets_src,
-            hash_dim_
-        );
-
-        // Concatenate hash embedding with continuous features
-        test_continuous = torch::cat({test_continuous, test_hash}, /*dim=*/1);
-    }
-#endif
+    // CUDA hash computation for the full test set. eval_epoch runs inside the
+    // training loop, so it uses the GPU-resident CSR buffers + test indices when
+    // the dataset is cached on device.
+    test_continuous = append_cuda_hash(
+        test_continuous,
+        gpu_data_cached_ ? gpu_test_indices_ : test_indices_,
+        /*use_cache=*/gpu_data_cached_);
 
     // Forward pass
     auto predictions = model_->forward(
@@ -1092,6 +1076,7 @@ TrainResult Trainer::fit() {
     }
 
     const int batch_size_at_entry = config_.batch_size;
+    requested_batch_size_ = batch_size_at_entry;  // persisted distinct from effective (#86)
     auto start_time = std::chrono::high_resolution_clock::now();
     created_at_ = iso8601_now();
 
@@ -1317,21 +1302,8 @@ TrainResult Trainer::fit() {
         auto test_cat_gpu = to_device_if_defined(test_categorical_ids_, config_.device);
         auto baseline_pool = get_test_pool_tensors();
 
-        // CUDA hash computation: compute hash embedding for test set in baseline eval
-#ifdef RESOLVE_HAS_CUDA
-        if (use_cuda_hash_ && config_.device.is_cuda()) {
-            auto test_idx = test_indices_.to(config_.device);
-            auto test_hash = cuda::compute_batch_hash_embedding_cuda(
-                test_idx,
-                torch::Tensor(),  // raw_plot_indices not needed with CSR offsets
-                raw_species_ids_.to(config_.device),
-                raw_weights_.to(config_.device),
-                plot_offsets_.to(config_.device),
-                hash_dim_
-            );
-            test_cont_gpu = torch::cat({test_cont_gpu, test_hash}, /*dim=*/1);
-        }
-#endif
+        // CUDA hash embedding for the test set in baseline eval.
+        test_cont_gpu = append_cuda_hash(test_cont_gpu, test_indices_, /*use_cache=*/false);
 
         // Get final predictions on test set
         auto predictions = model_->forward(
@@ -1440,8 +1412,9 @@ void Trainer::save(const std::string& path, const RunMetadata* metadata) const {
     // a no-op for back-compat with pre-categorical-port checkpoints.
     categorical_vocab_.save(archive, "trainer_categorical_");
 
-    // Save training configuration for reproducibility
-    save_train_config(archive, config_);
+    // Save training configuration for reproducibility. Pass the requested batch
+    // size so an OOM fallback (effective < requested) is recoverable (issue #86).
+    save_train_config(archive, config_, requested_batch_size_);
 
     // Save run metadata if provided (final checkpoint only)
     if (metadata != nullptr) {
@@ -1454,7 +1427,8 @@ void Trainer::save(const std::string& path, const RunMetadata* metadata) const {
 
     // Write human-readable JSON metadata alongside checkpoint
     if (metadata != nullptr) {
-        write_metadata_json(path, model_->config(), config_, *metadata, model_->schema());
+        write_metadata_json(path, model_->config(), config_, *metadata, model_->schema(),
+                            requested_batch_size_);
     }
 }
 
@@ -1611,6 +1585,29 @@ std::vector<std::string> Trainer::test_plot_ids() const {
     return select_plot_ids(test_indices_);
 }
 
+torch::Tensor Trainer::append_cuda_hash(
+    torch::Tensor continuous, torch::Tensor plot_idx, bool use_cache) const {
+#ifdef RESOLVE_HAS_CUDA
+    if (use_cuda_hash_ && config_.device.is_cuda()) {
+        torch::Tensor species_src = use_cache ? gpu_train_raw_species_ids_
+                                              : raw_species_ids_.to(config_.device);
+        torch::Tensor weights_src = use_cache ? gpu_train_raw_weights_
+                                              : raw_weights_.to(config_.device);
+        torch::Tensor offsets_src = use_cache ? gpu_train_plot_offsets_
+                                              : plot_offsets_.to(config_.device);
+        auto hash = cuda::compute_batch_hash_embedding_cuda(
+            plot_idx.to(config_.device),
+            torch::Tensor(),  // raw_plot_indices not needed with CSR offsets
+            species_src, weights_src, offsets_src, hash_dim_);
+        return torch::cat({continuous, hash}, /*dim=*/1);
+    }
+#else
+    (void)plot_idx;
+    (void)use_cache;
+#endif
+    return continuous;
+}
+
 std::unordered_map<std::string, torch::Tensor> Trainer::forward_test_fold() {
     model_->eval();
     torch::NoGradGuard no_grad;
@@ -1623,23 +1620,9 @@ std::unordered_map<std::string, torch::Tensor> Trainer::forward_test_fold() {
     auto test_cat_ids = to_device_if_defined(test_categorical_ids_, config_.device);
     auto pool = get_test_pool_tensors();
 
-    // CUDA hash mode stores raw species and computes the hash embedding on the
-    // fly; the precomputed-hash and other encodings already fold their species
-    // representation into test_continuous_ at prepare_data time.
-#ifdef RESOLVE_HAS_CUDA
-    if (use_cuda_hash_ && config_.device.is_cuda()) {
-        auto test_idx = test_indices_.to(config_.device);
-        auto test_hash = cuda::compute_batch_hash_embedding_cuda(
-            test_idx,
-            torch::Tensor(),
-            raw_species_ids_.to(config_.device),
-            raw_weights_.to(config_.device),
-            plot_offsets_.to(config_.device),
-            hash_dim_
-        );
-        test_continuous = torch::cat({test_continuous, test_hash}, /*dim=*/1);
-    }
-#endif
+    // CUDA hash mode computes the hash embedding on the fly; other encodings
+    // already fold their species representation into test_continuous_.
+    test_continuous = append_cuda_hash(test_continuous, test_indices_, /*use_cache=*/false);
 
     return model_->forward(
         test_continuous, test_genus_ids, test_family_ids,
@@ -1681,22 +1664,12 @@ NetworkDiagnostics Trainer::compute_diagnostics() {
         ? test_categorical_ids_.index_select(0, sample_indices).to(config_.device)
         : torch::Tensor();
 
-    // CUDA hash computation: compute hash embedding for sampled test data
-#ifdef RESOLVE_HAS_CUDA
-    if (use_cuda_hash_ && config_.device.is_cuda()) {
-        // Map sample_indices (test-local) to global plot indices
-        auto global_indices = test_indices_.index_select(0, sample_indices).to(config_.device);
-        auto sample_hash = cuda::compute_batch_hash_embedding_cuda(
-            global_indices,
-            torch::Tensor(),
-            raw_species_ids_.to(config_.device),
-            raw_weights_.to(config_.device),
-            plot_offsets_.to(config_.device),
-            hash_dim_
-        );
-        sample_continuous = torch::cat({sample_continuous, sample_hash}, /*dim=*/1);
-    }
-#endif
+    // CUDA hash embedding for the sampled subset: map the test-local sample
+    // indices to global plot indices, then reuse the shared hash helper.
+    sample_continuous = append_cuda_hash(
+        sample_continuous,
+        test_indices_.index_select(0, sample_indices),
+        /*use_cache=*/false);
 
     // Use encode_with_activations to get intermediate layer outputs
     auto [latent, activations] = model_->encode_with_activations(
@@ -2391,6 +2364,21 @@ SpatialBlockSplitter::split(torch::Tensor coords) const {
     auto inverse_indices = std::get<1>(unique_result);
     int64_t n_blocks = unique_blocks.size(0);
 
+    // Every fold needs at least one spatial block or its test set is empty, which
+    // then divides by zero in the baseline metrics and NaNs the whole fold (issue
+    // #82). Round-robin and greedy bin-packing both give each fold >= 1 block once
+    // n_blocks >= n_splits, so fail loudly below that rather than silently emit an
+    // empty fold. Coarse lat_size/lon_size on geographically clustered data is the
+    // usual cause (e.g. all plots in one grid cell -> 1 block).
+    if (n_blocks < n_splits_) {
+        throw std::invalid_argument(
+            std::to_string(n_splits_) + "-fold spatial CV needs at least " +
+            std::to_string(n_splits_) + " spatial blocks, but the grid produced only " +
+            std::to_string(n_blocks) + " (lat_size=" + std::to_string(lat_size_) +
+            ", lon_size=" + std::to_string(lon_size_) +
+            "). Use a finer block size or fewer folds.");
+    }
+
     // Count block sizes
     auto inverse_cpu = inverse_indices.cpu();
     auto inv_ptr = inverse_cpu.data_ptr<int64_t>();
@@ -2441,6 +2429,19 @@ SpatialBlockSplitter::split(torch::Tensor coords) const {
             }
         }
         folds[f] = {std::move(train_idx), std::move(test_idx)};
+    }
+
+    // Defensive: guarantee no empty test/train fold reached the caller even if a
+    // future assignment scheme changed (issue #82). n_blocks >= n_splits above
+    // makes this hold for round-robin and bin-packing; assert it regardless.
+    for (int f = 0; f < n_splits_; ++f) {
+        if (folds[f].second.empty() || folds[f].first.empty()) {
+            throw std::runtime_error(
+                "spatial CV produced an empty " +
+                std::string(folds[f].second.empty() ? "test" : "train") +
+                " fold (fold " + std::to_string(f) + " of " +
+                std::to_string(n_splits_) + "); check block size vs fold count.");
+        }
     }
 
     return folds;

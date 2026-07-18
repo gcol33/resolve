@@ -179,6 +179,9 @@ public:
 
     // Accessors
     [[nodiscard]] ResolveModel& model() noexcept { return context_encoder_; }
+    // The slow EMA target encoder (no gradients). Exposed so callers can inspect
+    // or export it, and so the buffer-sync invariant is testable (issue #81).
+    [[nodiscard]] const ResolveModel& target_encoder() const noexcept { return target_encoder_; }
     [[nodiscard]] const PretrainConfig& config() const noexcept { return config_; }
 
 private:

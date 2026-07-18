@@ -61,8 +61,23 @@ std::vector<uint32_t> utf8_to_codepoints(std::string_view s) {
 
 uint32_t to_lower_cp(uint32_t cp) {
     if (cp >= 'A' && cp <= 'Z') return cp + 32u;
-    // Latin-1 Supplement: A0-DE -> E0-FE, excluding multiplication sign (D7).
+    // Latin-1 Supplement: C0-DE -> E0-FE, excluding multiplication sign (D7).
     if (cp >= 0x00C0u && cp <= 0x00DEu && cp != 0x00D7u) return cp + 0x20u;
+    // Latin Extended-A (0100-017F): simple lowercase mapping (issue #90). Common
+    // Central-European letters live here (Č/č, Š/š, Ž/ž, Ł/ł, Ć/ć, Ř/ř, Ő/ő, ...),
+    // so case-insensitive matching missed them entirely before. Letters come in
+    // upper/lower pairs one code point apart, but the parity of which is uppercase
+    // flips across three subranges, so the offset is range-dependent
+    // (per UnicodeData.txt). A handful of code points break the pattern.
+    if (cp >= 0x0100u && cp <= 0x017Fu) {
+        if (cp == 0x0130u) return 0x0069u;  // I with dot above -> 'i'
+        if (cp == 0x0178u) return 0x00FFu;  // Y with diaeresis -> y with diaeresis
+        if (cp == 0x017Fu) return 0x0073u;  // long s -> 's'
+        if (cp <= 0x0137u) return (cp % 2u == 0u) ? cp + 1u : cp;  // even = upper
+        if (cp <= 0x0148u) return (cp % 2u == 1u) ? cp + 1u : cp;  // odd  = upper
+        if (cp <= 0x0177u) return (cp % 2u == 0u) ? cp + 1u : cp;  // even = upper
+        return (cp % 2u == 1u) ? cp + 1u : cp;                     // 0179-017E odd = upper
+    }
     return cp;
 }
 

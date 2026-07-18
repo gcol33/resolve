@@ -17,6 +17,7 @@
 #include "resolve/role_mapping.hpp"
 #include "resolve/model.hpp"
 #include "resolve/trainer.hpp"
+#include "resolve/pretraining.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -299,4 +300,175 @@ TEST_CASE("fit persists run metadata to the checkpoint", "[recovery][metadata]")
     REQUIRE(std::filesystem::exists(ckpt_dir / "checkpoint.json"));
 
     std::filesystem::remove_all(ckpt_dir);
+}
+
+// =============================================================================
+// 5-6. Rank-pool and transformer species encoders recover a composition signal
+//      (issue #89): these are production encoders but were only shape/equivalence
+//      tested. Here the target is a deterministic weighted-pool function of a
+//      plot's species, so an encoder that actually learns composition recovers it
+//      on held-out plots, well above the ~0 a broken pooling path would give.
+// =============================================================================
+namespace {
+// Build a header (plot_id,y) + species (plot_id,sp,cover) pair where y is the sum
+// of per-species contributions over each plot's (fixed-size) species set.
+void make_species_signal_csv(std::ostringstream& hdr, std::ostringstream& spc,
+                             int64_t n_plots, int n_species) {
+    std::vector<double> species_value(n_species);
+    for (int s = 0; s < n_species; ++s) species_value[s] = std::sin(s * 1.7) * 2.0;
+    hdr << "plot_id,y\n";
+    spc << "plot_id,sp,cover\n";
+    for (int64_t i = 0; i < n_plots; ++i) {
+        int s0 = static_cast<int>(i % n_species);
+        int s1 = static_cast<int>((i / n_species) % n_species);
+        int s2 = static_cast<int>((i / (n_species * n_species) + i) % n_species);
+        double y = species_value[s0] + species_value[s1] + species_value[s2];
+        hdr << "P" << i << "," << y << "\n";
+        spc << "P" << i << ",sp" << s0 << ",1.0\n";
+        spc << "P" << i << ",sp" << s1 << ",1.0\n";
+        spc << "P" << i << ",sp" << s2 << ",1.0\n";
+    }
+}
+}  // namespace
+
+TEST_CASE("Rank-pool encoder recovers a species-driven target", "[recovery][rank_pool]") {
+    const int64_t n_plots = 600;
+    const int n_species = 12;
+    std::ostringstream hdr, spc;
+    make_species_signal_csv(hdr, spc, n_plots, n_species);
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id"; roles.species_id = "sp"; roles.abundance = "cover";
+
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::RankPool;
+    dcfg.use_taxonomy = false;
+    dcfg.track_unknown_fraction = false; dcfg.track_unknown_count = false;
+
+    auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(), roles,
+                                       {TargetSpec::regression("y")}, dcfg);
+
+    ModelConfig mcfg;
+    mcfg.species_encoding = SpeciesEncodingMode::RankPool;
+    mcfg.encoder_architecture = EncoderArchitecture::MLP;
+    mcfg.species_embed_dim = 16;
+    mcfg.hidden_dims = {64, 32};
+
+    ResolveModel model(ds.schema(), mcfg);
+    Trainer trainer(model, recovery_train_config(/*max_epochs=*/400));
+    trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/7);
+    trainer.fit();
+
+    auto res = trainer.compute_residuals("y");
+    REQUIRE(res.predictions.size() > 10);
+    REQUIRE(pearson(res.predictions, res.actuals) > 0.8);
+}
+
+TEST_CASE("Transformer encoder recovers a species-driven target", "[recovery][transformer]") {
+    const int64_t n_plots = 600;
+    const int n_species = 12;
+    std::ostringstream hdr, spc;
+    make_species_signal_csv(hdr, spc, n_plots, n_species);
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id"; roles.species_id = "sp"; roles.abundance = "cover";
+
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::Transformer;
+    dcfg.use_taxonomy = false;
+    dcfg.track_unknown_fraction = false; dcfg.track_unknown_count = false;
+
+    auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(), roles,
+                                       {TargetSpec::regression("y")}, dcfg);
+
+    ModelConfig mcfg;
+    mcfg.species_encoding = SpeciesEncodingMode::Transformer;
+    mcfg.encoder_architecture = EncoderArchitecture::MLP;
+    mcfg.d_model = 32;
+    mcfg.n_heads = 4;
+    mcfg.n_attention_layers = 1;
+    mcfg.transformer_ff_dim = 64;
+    mcfg.transformer_pooling = "attention";
+    mcfg.hidden_dims = {32};
+
+    ResolveModel model(ds.schema(), mcfg);
+    Trainer trainer(model, recovery_train_config(/*max_epochs=*/400));
+    trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/7);
+    trainer.fit();
+
+    auto res = trainer.compute_residuals("y");
+    REQUIRE(res.predictions.size() > 10);
+    REQUIRE(pearson(res.predictions, res.actuals) > 0.7);
+}
+
+// =============================================================================
+// 7. JEPA target encoder BatchNorm buffers track the online encoder (issue #81).
+//    The target encoder runs in eval(), so if its BN running stats were left at
+//    the construction-time init (mean 0, var 1) while the online encoder's BN
+//    adapts to the data, the "target = slow copy of online" invariant breaks.
+//    update_target_encoder must copy buffers, not only EMA the parameters.
+// =============================================================================
+TEST_CASE("JEPA target encoder syncs BatchNorm buffers", "[recovery][jepa]") {
+    const int64_t n_plots = 256;
+    std::ostringstream hdr, spc;
+    hdr << "plot_id,cov1,cov2,y\n";
+    spc << "plot_id,sp,cover\n";
+    for (int64_t i = 0; i < n_plots; ++i) {
+        // Large offset so the online encoder's BN running_mean moves clearly away
+        // from the init value of 0, making the buffer-sync check meaningful.
+        const double c1 = 10.0 + std::sin(i * 0.13);
+        const double c2 = -7.0 + std::cos(i * 0.07);
+        hdr << "P" << i << "," << c1 << "," << c2 << "," << (c1 - c2) << "\n";
+        spc << "P" << i << ",sp" << (i % 6) << ",1.0\n";
+    }
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id"; roles.species_id = "sp"; roles.abundance = "cover";
+    roles.covariates = {"cov1", "cov2"};
+
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::Hash;
+    dcfg.hash_dim = 4; dcfg.use_taxonomy = false;
+    dcfg.track_unknown_fraction = false; dcfg.track_unknown_count = false;
+
+    auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(), roles,
+                                       {TargetSpec::regression("y")}, dcfg);
+
+    ModelConfig mcfg;
+    mcfg.species_encoding = SpeciesEncodingMode::Hash;
+    mcfg.encoder_architecture = EncoderArchitecture::MLP;
+    mcfg.hash_dim = 4; mcfg.hidden_dims = {16, 8};
+    mcfg.normalization = NormLayerType::BatchNorm;  // default; BN has running buffers
+
+    ResolveModel model(ds.schema(), mcfg);
+
+    PretrainConfig pcfg;
+    pcfg.pretrain_epochs = 3;
+    pcfg.batch_size = 32;
+    pcfg.device = torch::kCPU;
+
+    JEPAPretrainer pretrainer(model, pcfg);
+    // Hash-mode get_latent expects the hash embedding folded into continuous.
+    auto cont = torch::cat({ds.covariates(), ds.hash_embedding()}, /*dim=*/1);
+    pretrainer.pretrain(cont);
+
+    // Find a BatchNorm running_mean buffer and compare online vs target.
+    auto ctx_bufs = pretrainer.model()->named_buffers();
+    auto tgt_bufs = pretrainer.target_encoder()->named_buffers();
+    bool checked = false;
+    for (const auto& b : ctx_bufs) {
+        if (b.key().find("running_mean") == std::string::npos) continue;
+        auto tgt = tgt_bufs.find(b.key());
+        REQUIRE(tgt != nullptr);
+        // Online BN stats actually moved from the init (mean 0)...
+        REQUIRE(b.value().abs().sum().item<float>() > 1e-3f);
+        // ...and the target encoder's buffers were synced to them (not stuck at
+        // init, which is what the bug left them as).
+        REQUIRE(torch::allclose(b.value(), *tgt, 1e-5, 1e-6));
+        checked = true;
+    }
+    REQUIRE(checked);  // the model must actually contain BatchNorm buffers
 }

@@ -82,33 +82,46 @@ TEST_CASE("SpatialBlockSplitter deterministic with same seed", "[spatial_cv]") {
 }
 
 TEST_CASE("SpatialBlockSplitter spatial coherence", "[spatial_cv]") {
-    // Points at the same location should be in the same fold
+    // Points at the same location should land in the same fold. Use three
+    // distinct blocks for a 3-fold split so every fold gets at least one block
+    // (fewer blocks than folds is now rejected; see the empty-fold-guard case).
     SpatialBlockSplitter splitter(1.0f, 1.0f, 3, 42);
 
-    // 10 points at (5.5, 5.5), 10 at (0.5, 0.5)
-    auto coords = torch::zeros({20, 2});
+    // 10 points each at three separate 1x1 grid cells.
+    auto coords = torch::zeros({30, 2});
     coords.index_put_({torch::indexing::Slice(0, 10), torch::indexing::Slice()}, 5.5f);
     coords.index_put_({torch::indexing::Slice(10, 20), torch::indexing::Slice()}, 0.5f);
+    coords.index_put_({torch::indexing::Slice(20, 30), torch::indexing::Slice()}, 8.5f);
 
     auto folds = splitter.split(coords);
 
-    // All points in same block should be in same test fold
+    // Every group of co-located points must stay whole within a test fold.
     for (auto& [train, test] : folds) {
         std::set<int64_t> test_set(test.begin(), test.end());
-        // If any of first group is in test, all should be
-        bool first_in_test = test_set.count(0) > 0;
-        if (first_in_test) {
-            for (int i = 0; i < 10; ++i) {
-                REQUIRE(test_set.count(i) == 1);
+        for (int g = 0; g < 3; ++g) {
+            const int lo = g * 10;
+            if (test_set.count(lo) > 0) {
+                for (int i = lo; i < lo + 10; ++i) REQUIRE(test_set.count(i) == 1);
             }
         }
-        // Same for second group
-        bool second_in_test = test_set.count(10) > 0;
-        if (second_in_test) {
-            for (int i = 10; i < 20; ++i) {
-                REQUIRE(test_set.count(i) == 1);
-            }
-        }
+    }
+}
+
+TEST_CASE("SpatialBlockSplitter rejects fewer blocks than folds", "[spatial_cv]") {
+    // Only two spatial blocks but three folds -> one fold would be empty and
+    // divide by zero in the baseline metrics; the splitter must reject it (#82).
+    SpatialBlockSplitter splitter(1.0f, 1.0f, 3, 42);
+    auto coords = torch::zeros({20, 2});
+    coords.index_put_({torch::indexing::Slice(0, 10), torch::indexing::Slice()}, 5.5f);
+    coords.index_put_({torch::indexing::Slice(10, 20), torch::indexing::Slice()}, 0.5f);
+    REQUIRE_THROWS(splitter.split(coords));
+
+    // Enough blocks for the fold count -> no throw, every fold non-empty.
+    SpatialBlockSplitter ok(1.0f, 1.0f, 2, 42);
+    auto folds = ok.split(coords);
+    for (auto& [train, test] : folds) {
+        REQUIRE(!test.empty());
+        REQUIRE(!train.empty());
     }
 }
 

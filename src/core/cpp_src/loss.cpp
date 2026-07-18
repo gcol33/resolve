@@ -495,11 +495,16 @@ torch::Tensor NCALossImpl::forward(
     auto masked_log_probs = log_probs + torch::log(same_class + 1e-10f);
     auto log_prob_correct = torch::logsumexp(masked_log_probs, /*dim=*/1);  // (batch,)
 
-    // Samples with no same-class neighbors get a default loss
+    // Samples with no same-class neighbor in the batch contribute 0; average over
+    // only the contributing samples, not the full batch (issue #90). Dividing by
+    // batch_size instead diluted the loss/gradient scale by the fraction of
+    // samples lacking an in-batch same-class neighbor, making the magnitude depend
+    // on class rarity within the batch.
     auto has_neighbor = same_class.sum(1) > 0;
     auto nca_loss = -log_prob_correct * has_neighbor.to(torch::kFloat32);
 
-    return nca_loss.mean();
+    auto n_contrib = has_neighbor.to(torch::kFloat32).sum().clamp_min(1.0f);
+    return nca_loss.sum() / n_contrib;
 }
 
 torch::Tensor NCALossImpl::predict(torch::Tensor latent) {

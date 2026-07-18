@@ -35,6 +35,7 @@ add_executable(resolve_tests
     test_recovery.cpp
     test_review_fixes.cpp
     test_review_fixes_round2.cpp
+    test_review_fixes_round3.cpp
 )
 
 # Add CUDA library directory if CUDA is available

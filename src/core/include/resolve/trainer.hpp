@@ -278,6 +278,15 @@ private:
     };
     [[nodiscard]] PoolTensors get_test_pool_tensors() const;
 
+    // Compute the CUDA hash embedding for the given global plot indices and
+    // concatenate it onto `continuous`. Non-CUDA-hash models (and CPU builds)
+    // return `continuous` unchanged, since their species representation is
+    // already folded into it at prepare_data time. `use_cache` selects the
+    // GPU-resident CSR buffers when the dataset is cached on device. Single
+    // source of truth for the four test-fold forwards (issue #86).
+    [[nodiscard]] torch::Tensor append_cuda_hash(
+        torch::Tensor continuous, torch::Tensor plot_idx, bool use_cache) const;
+
     // Run the model in eval mode over the held-out test fold and return the
     // per-target prediction map (regression: scaled outputs; classification:
     // logits). Single source of truth for the test-fold forward pass shared
@@ -308,6 +317,12 @@ private:
     TrainConfig config_;
     Scalers scalers_;
     MultiTaskLoss loss_fn_;
+
+    // The batch size the caller requested at fit() entry, before the CUDA OOM
+    // auto-halve retry may have shrunk config_.batch_size. Persisted so a fallback
+    // run is detectable (train_effective_batch_size != train_batch_size) and
+    // load_train_config restores the requested value (issue #86). 0 until fit runs.
+    int requested_batch_size_ = 0;
 
     // Copy of the categorical vocabulary captured at prepare_data time so
     // it survives independently of the source ResolveDataset (which may go
