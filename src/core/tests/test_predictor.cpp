@@ -263,3 +263,25 @@ TEST_CASE("Predictor::predict rejects batch_size=0 / negative non-(-1)",
         predictor.predict(ds, /*return_latent=*/false, /*batch_size=*/-2),
         std::invalid_argument);
 }
+
+// =============================================================================
+// 7. optimize_for_inference (Linear+BatchNorm fusion) preserves predictions
+// =============================================================================
+
+TEST_CASE("Predictor::optimize_for_inference preserves predictions",
+          "[predictor][inference]") {
+    auto ds = make_synthetic_dataset(/*n_plots=*/80);
+    auto predictor = make_test_predictor(ds);
+
+    auto before = predictor.predict(ds, /*return_latent=*/false, /*batch_size=*/-1);
+    predictor.optimize_for_inference();  // folds BatchNorm into the preceding Linear
+    auto after = predictor.predict(ds, /*return_latent=*/false, /*batch_size=*/-1);
+
+    REQUIRE(before.predictions.size() == after.predictions.size());
+    for (const auto& [name, t] : before.predictions) {
+        REQUIRE(after.predictions.count(name) == 1);
+        REQUIRE(torch::allclose(
+            t.to(torch::kCPU), after.predictions.at(name).to(torch::kCPU),
+            /*rtol=*/1e-4, /*atol=*/1e-5));
+    }
+}
