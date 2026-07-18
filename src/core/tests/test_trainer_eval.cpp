@@ -488,6 +488,73 @@ TEST_CASE("Checkpoint schema pool-weighting round-trip", "[trainer][checkpoint]"
     }
 }
 
+TEST_CASE("Checkpoint schema class-weights round-trip", "[trainer][checkpoint]") {
+    // TargetConfig.class_weights is consumed by MultiTaskLoss for imbalanced
+    // classification, but was never persisted, so a resumed / reloaded model
+    // silently reverted to unweighted CE (issue #91).
+    ResolveSchema schema;
+    schema.n_plots = 100;
+    schema.n_species = 40;
+    schema.n_species_vocab = 41;
+
+    TargetConfig weighted;
+    weighted.name = "habitat";
+    weighted.task = TaskType::Classification;
+    weighted.num_classes = 3;
+    weighted.class_names = {"forest", "grassland", "wetland"};
+    weighted.class_weights = {0.5f, 2.0f, 3.5f};
+    schema.targets.push_back(weighted);
+
+    TargetConfig unweighted;  // regression target: empty class_weights stays empty
+    unweighted.name = "area";
+    unweighted.task = TaskType::Regression;
+    schema.targets.push_back(unweighted);
+
+    const std::string path =
+        (std::filesystem::temp_directory_path() / "resolve_schema_classw_roundtrip.pt").string();
+    {
+        torch::serialize::OutputArchive ar;
+        save_schema(ar, schema);
+        ar.save_to(path);
+    }
+    torch::serialize::InputArchive ar;
+    ar.load_from(path);
+    ResolveSchema schema2 = load_schema(ar);
+    std::filesystem::remove(path);
+
+    REQUIRE(schema2.targets.size() == 2);
+    REQUIRE(schema2.targets[0].class_weights.size() == 3);
+    REQUIRE(schema2.targets[0].class_weights[0] == Catch::Approx(0.5f));
+    REQUIRE(schema2.targets[0].class_weights[1] == Catch::Approx(2.0f));
+    REQUIRE(schema2.targets[0].class_weights[2] == Catch::Approx(3.5f));
+    REQUIRE(schema2.targets[1].class_weights.empty());
+
+    SECTION("pre-#91 checkpoint reads class_weights as empty") {
+        // A schema whose targets never wrote class_weights must read back empty
+        // (unweighted CE), not throw.
+        ResolveSchema legacy;
+        legacy.n_plots = 5;
+        TargetConfig t;
+        t.name = "y";
+        t.task = TaskType::Classification;
+        t.num_classes = 2;
+        legacy.targets.push_back(t);
+        const std::string lpath =
+            (std::filesystem::temp_directory_path() / "resolve_schema_classw_legacy.pt").string();
+        {
+            torch::serialize::OutputArchive ar2;
+            save_schema(ar2, legacy);
+            ar2.save_to(lpath);
+        }
+        torch::serialize::InputArchive ar2;
+        ar2.load_from(lpath);
+        ResolveSchema legacy2 = load_schema(ar2);
+        std::filesystem::remove(lpath);
+        REQUIRE(legacy2.targets.size() == 1);
+        REQUIRE(legacy2.targets[0].class_weights.empty());
+    }
+}
+
 // Issue #65: JSON sidecar string values must be escaped. A target name or
 // version containing a quote used to emit invalid JSON.
 TEST_CASE("write_metadata_json escapes string values", "[checkpoint][json]") {

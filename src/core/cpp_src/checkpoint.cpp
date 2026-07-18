@@ -716,6 +716,19 @@ void save_schema(
                 prefix + "class_" + std::to_string(j),
                 target.class_names[j]);
         }
+
+        // Optional per-class loss weights for imbalanced classification
+        // (issue #91). Consumed by MultiTaskLoss via
+        // CrossEntropyFuncOptions().weight(...). Length-prefixed float array,
+        // matching the value-tree schema path that already carries it.
+        // Back-compat: pre-fix checkpoints omit this key; the load path
+        // treats absent == empty (unweighted CE).
+        archive.write(prefix + "n_class_weights",
+                      torch::tensor(static_cast<int64_t>(target.class_weights.size())));
+        if (!target.class_weights.empty()) {
+            archive.write(prefix + "class_weights",
+                          torch::tensor(target.class_weights));
+        }
     }
 
     // Categorical covariates: column count + per-column name + per-column
@@ -836,6 +849,19 @@ ResolveSchema load_schema(
             for (int64_t j = 0; j < n_cn; ++j) {
                 schema.targets[i].class_names[j] =
                     read_string(prefix + "class_" + std::to_string(j));
+            }
+        }
+
+        // Class weights (issue #91; back-compat: absent == empty == unweighted CE).
+        torch::Tensor n_cw_t;
+        if (archive.try_read(prefix + "n_class_weights", n_cw_t)) {
+            int64_t n_cw = n_cw_t.item<int64_t>();
+            if (n_cw > 0) {
+                torch::Tensor cw_t;
+                archive.read(prefix + "class_weights", cw_t);
+                cw_t = cw_t.to(torch::kFloat32).contiguous();
+                auto ptr = cw_t.data_ptr<float>();
+                schema.targets[i].class_weights.assign(ptr, ptr + n_cw);
             }
         }
     }

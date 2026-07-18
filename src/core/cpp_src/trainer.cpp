@@ -878,8 +878,9 @@ void Trainer::cache_data_to_gpu() {
         return;  // Already cached or not using CUDA
     }
 
-    // Enable cuDNN auto-tuner for faster convolutions
-    torch::globalContext().setBenchmarkCuDNN(true);
+    // cuDNN benchmark policy is set once from config_.cudnn_benchmark in fit()
+    // (issue #92). Do not force-enable it here: that silently overrode
+    // cudnn_benchmark=false and made the determinism knob a no-op.
 
     // Cache training data on GPU
     gpu_continuous_ = train_continuous_.to(config_.device);

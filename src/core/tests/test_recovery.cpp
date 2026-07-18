@@ -472,3 +472,68 @@ TEST_CASE("JEPA target encoder syncs BatchNorm buffers", "[recovery][jepa]") {
     }
     REQUIRE(checked);  // the model must actually contain BatchNorm buffers
 }
+
+// =============================================================================
+// 8. cudnn_benchmark=false survives the CUDA training loop (issue #92).
+//    cache_data_to_gpu() used to unconditionally re-enable the cuDNN
+//    auto-tuner, silently overriding the determinism knob fit() had just set
+//    from config. This asserts the global benchmark flag stays off across a
+//    CUDA fit that goes through cache_data_to_gpu().
+// =============================================================================
+TEST_CASE("cudnn_benchmark=false is not overridden by the CUDA cache path",
+          "[recovery][cuda]") {
+    if (!torch::cuda::is_available()) {
+        SUCCEED("No CUDA device available; skipping cuDNN-benchmark override check");
+        return;
+    }
+
+    const int64_t n_plots = 256;
+    std::ostringstream hdr, spc;
+    hdr << "plot_id,lat,lon,cov1,cov2,y\n";
+    spc << "plot_id,sp,cover\n";
+    for (int64_t i = 0; i < n_plots; ++i) {
+        const double c1 = std::sin(i * 0.13);
+        const double c2 = std::cos(i * 0.07);
+        const double y = 2.0 * c1 - 1.5 * c2 + 3.0;
+        hdr << "P" << i << "," << (40.0 + i * 0.001) << "," << (-5.0 + i * 0.001)
+            << "," << c1 << "," << c2 << "," << y << "\n";
+        spc << "P" << i << ",sp" << (i % 8) << ",1.0\n";
+    }
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id"; roles.species_id = "sp"; roles.abundance = "cover";
+    roles.latitude = "lat"; roles.longitude = "lon";
+    roles.covariates = {"cov1", "cov2"};
+
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::Hash;
+    dcfg.hash_dim = 4; dcfg.use_taxonomy = false;
+    dcfg.track_unknown_fraction = false; dcfg.track_unknown_count = false;
+
+    auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(), roles,
+                                       {TargetSpec::regression("y")}, dcfg);
+
+    ModelConfig mcfg;
+    mcfg.species_encoding = SpeciesEncodingMode::Hash;
+    mcfg.encoder_architecture = EncoderArchitecture::MLP;
+    mcfg.hash_dim = 4; mcfg.hidden_dims = {16, 8};
+
+    ResolveModel model(ds.schema(), mcfg);
+
+    TrainConfig tcfg;
+    tcfg.batch_size = 64;
+    tcfg.max_epochs = 3;
+    tcfg.patience = 5;
+    tcfg.device = torch::kCUDA;
+    tcfg.cudnn_benchmark = false;  // request deterministic cuDNN
+
+    // Poison the global flag so a failure to honor the config is visible.
+    at::globalContext().setBenchmarkCuDNN(true);
+
+    Trainer trainer(model, tcfg);
+    trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/11);
+    trainer.fit();  // goes through cache_data_to_gpu() on the CUDA path
+
+    REQUIRE_FALSE(at::globalContext().benchmarkCuDNN());
+}

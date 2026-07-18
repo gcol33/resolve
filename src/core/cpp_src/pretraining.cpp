@@ -302,22 +302,25 @@ MaskedSpeciesView mask_species_view(
 ) {
     MaskedSpeciesView v{genus_ids, family_ids, species_ids, species_vector};
 
-    if (species_ids.defined() && species_ids.numel() > 0) {
-        auto keep = (torch::rand_like(species_ids.to(torch::kFloat32)) >= ratio);
-        // Never drop existing padding into a "kept" state; masked tokens go to 0.
-        auto valid = (species_ids != 0);
+    // Drop a `ratio` fraction of valid (non-padding) id tokens to 0. Each id
+    // tensor is masked from its OWN shape rather than a single mask derived from
+    // species_ids: in embed mode species_ids is [batch, top_k_species] while
+    // genus/family are [batch, n_taxonomy_slots], so those column counts need
+    // not match and a shared mask would shape-error when indexing genus/family.
+    // Never flip existing padding (id == 0) into a "kept" state.
+    auto mask_ids = [ratio](const torch::Tensor& ids) -> torch::Tensor {
+        if (!ids.defined() || ids.numel() == 0) return ids;
+        auto keep = (torch::rand_like(ids.to(torch::kFloat32)) >= ratio);
+        auto valid = (ids != 0);
         auto drop = valid & ~keep;
-        v.species = species_ids.clone();
-        v.species.index_put_({drop}, 0);
-        if (genus_ids.defined() && genus_ids.numel() > 0) {
-            v.genus = genus_ids.clone();
-            v.genus.index_put_({drop}, 0);
-        }
-        if (family_ids.defined() && family_ids.numel() > 0) {
-            v.family = family_ids.clone();
-            v.family.index_put_({drop}, 0);
-        }
-    }
+        auto out = ids.clone();
+        out.index_put_({drop}, 0);
+        return out;
+    };
+
+    v.species = mask_ids(species_ids);
+    v.genus = mask_ids(genus_ids);
+    v.family = mask_ids(family_ids);
 
     if (species_vector.defined() && species_vector.numel() > 0) {
         auto keep = (torch::rand_like(species_vector) >= ratio).to(species_vector.dtype());
@@ -538,10 +541,21 @@ PretrainResult SCARFPretrainer::pretrain(
                 batch_cont, batch_genus, batch_family, batch_species, batch_vector);
             auto z_1 = projection_head_->forward(repr_1);
 
-            // View 2: corrupted features -> encoder -> projection
+            // View 2: corrupted features -> encoder -> projection. The species
+            // side is masked too (issue #93): for non-hash encoders the species
+            // composition lives in the ID / explicit-vector tensors, not in
+            // `continuous`, so feeding both views identical species tensors
+            // makes the InfoNCE positive pair matchable by species identity
+            // alone and the encoder degenerates to passing species through.
+            // Mirrors the JEPA mask_species_view fix. (For hash mode the species
+            // hash is inside `continuous` and already corrupted; the species-ID
+            // tensors are empty there, so masking is a no-op.)
             auto corrupted_cont = corruptor_->corrupt(batch_cont);
+            auto masked = mask_species_view(
+                batch_genus, batch_family, batch_species, batch_vector,
+                config_.corruption_rate);
             auto repr_2 = model_->get_latent(
-                corrupted_cont, batch_genus, batch_family, batch_species, batch_vector);
+                corrupted_cont, masked.genus, masked.family, masked.species, masked.vector);
             auto z_2 = projection_head_->forward(repr_2);
 
             // Normalize projections

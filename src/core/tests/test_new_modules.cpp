@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <cmath>
 #include <set>
 #include "resolve/tabm.hpp"
 #include "resolve/adapter.hpp"
@@ -203,6 +204,57 @@ TEST_CASE("ProjectionHead forward shape", "[pretraining]") {
 
     REQUIRE(out.size(0) == 16);
     REQUIRE(out.size(1) == 128);
+}
+
+TEST_CASE("SCARF pretrain runs on embed encoder with masked species views",
+          "[pretraining][scarf]") {
+    // Issue #93: for non-hash encoders the species composition lives in the
+    // ID / explicit-vector tensors, not in `continuous`. SCARF now masks the
+    // species side of view 2, so the two contrastive views differ in the
+    // species channel and the pretext task is not trivially solvable by
+    // species identity. This exercises the masked-species path end-to-end and
+    // guards its wiring (shape / finite loss).
+    ResolveSchema schema;
+    schema.n_plots = 64;
+    schema.n_species = 50;
+    schema.n_species_vocab = 100;
+    schema.has_coordinates = true;
+    schema.has_taxonomy = true;
+    schema.n_genera = 20;
+    schema.n_families = 10;
+    schema.n_genera_vocab = 25;
+    schema.n_families_vocab = 15;
+    schema.track_unknown_fraction = true;
+    schema.targets.push_back({"area", TaskType::Regression, TransformType::None, 0, 1.0f});
+
+    ModelConfig mcfg;
+    mcfg.species_encoding = SpeciesEncodingMode::Embed;
+    mcfg.species_embed_dim = 16;
+    mcfg.top_k_species = 5;
+    mcfg.n_taxonomy_slots = 3;
+    mcfg.hidden_dims = {32, 16};
+
+    ResolveModel model(schema, mcfg);
+
+    PretrainConfig pcfg;
+    pcfg.pretrain_epochs = 2;
+    pcfg.batch_size = 16;
+    pcfg.corruption_rate = 0.6f;
+    SCARFPretrainer pretrainer(model, pcfg);
+
+    // n_continuous = 2 (coords) + 1 (unknown_fraction) = 3
+    auto continuous = torch::randn({64, 3});
+    auto species_ids = torch::randint(1, 100, {64, 5});
+    auto genus_ids = torch::randint(1, 25, {64, 3});
+    auto family_ids = torch::randint(1, 15, {64, 3});
+
+    auto result = pretrainer.pretrain(continuous, genus_ids, family_ids, species_ids, {});
+
+    REQUIRE(result.epochs_completed == 2);
+    REQUIRE(result.loss_history.size() == 2);
+    for (float l : result.loss_history) {
+        REQUIRE(std::isfinite(l));
+    }
 }
 
 // ============================================================================
