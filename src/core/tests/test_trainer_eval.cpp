@@ -513,3 +513,66 @@ TEST_CASE("write_metadata_json escapes string values", "[checkpoint][json]") {
     REQUIRE(content.find("area\\\"m2") != std::string::npos);
     REQUIRE(content.find("1.0\\\"x") != std::string::npos);
 }
+
+// Issue #69: the target-scaler map must survive save/load so predictions come
+// back in original units, not scaled space.
+TEST_CASE("save/load_scalers round-trips target and continuous scalers",
+          "[checkpoint][scalers]") {
+    Scalers s;
+    s.continuous_mean  = torch::tensor({1.0f, 2.0f});
+    s.continuous_scale = torch::tensor({0.5f, 4.0f});
+    s.target_scalers["y"] = {torch::tensor(1000.0f), torch::tensor(20.0f)};
+
+    const std::string path =
+        (std::filesystem::temp_directory_path() / "scalers_roundtrip.pt").string();
+    {
+        torch::serialize::OutputArchive ar;
+        save_scalers(ar, s);
+        ar.save_to(path);
+    }
+    torch::serialize::InputArchive ar;
+    ar.load_from(path);
+    Scalers s2 = load_scalers(ar);
+    std::filesystem::remove(path);
+
+    REQUIRE(torch::allclose(s2.continuous_mean, s.continuous_mean));
+    REQUIRE(torch::allclose(s2.continuous_scale, s.continuous_scale));
+    REQUIRE(s2.target_scalers.count("y") == 1);
+    REQUIRE(s2.target_scalers.at("y").first.item<float>()  == Catch::Approx(1000.0f));
+    REQUIRE(s2.target_scalers.at("y").second.item<float>() == Catch::Approx(20.0f));
+}
+
+// Issue #69: a pre-#37 checkpoint that never wrote the arch sub-config keys must
+// load with struct defaults (try_read), not throw.
+TEST_CASE("load_model_config back-compat: missing sub-config keys -> defaults",
+          "[checkpoint][backcompat]") {
+    const std::string path =
+        (std::filesystem::temp_directory_path() / "modelcfg_legacy.pt").string();
+    {
+        // Write ONLY the keys load_model_config reads unconditionally.
+        torch::serialize::OutputArchive ar;
+        ar.write("species_encoding", torch::tensor(0));      // Hash
+        ar.write("uses_explicit_vector", torch::tensor(0));
+        ar.write("hash_dim", torch::tensor(32));
+        ar.write("species_embed_dim", torch::tensor(16));
+        ar.write("genus_emb_dim", torch::tensor(8));
+        ar.write("family_emb_dim", torch::tensor(8));
+        ar.write("top_k", torch::tensor(3));
+        ar.write("top_k_species", torch::tensor(5));
+        ar.write("n_taxonomy_slots", torch::tensor(3));
+        ar.write("dropout", torch::tensor(0.1f));
+        ar.write("hidden_dims", torch::tensor(std::vector<int64_t>{64, 32}));
+        ar.save_to(path);
+    }
+    torch::serialize::InputArchive ar;
+    ar.load_from(path);
+    ModelConfig cfg = load_model_config(ar);
+    std::filesystem::remove(path);
+
+    REQUIRE(cfg.hash_dim == 32);
+    REQUIRE(cfg.hidden_dims == std::vector<int64_t>{64, 32});
+    // Absent keys keep struct defaults.
+    REQUIRE(cfg.encoder_architecture == EncoderArchitecture::MLP);
+    REQUIRE(cfg.categorical_embed_dim == ModelConfig{}.categorical_embed_dim);
+    REQUIRE(cfg.tabnet.n_steps == TabNetConfig{}.n_steps);
+}

@@ -767,3 +767,38 @@ TEST_CASE("from_csv fails loudly on missing role columns", "[dataset][validation
         REQUIRE(ds.schema().covariate_names.size() == 2);
     }
 }
+
+// Issue #68: a species that occurs only in a plot dropped for a missing target
+// must NOT inflate the vocabulary (its embedding row would never be referenced).
+TEST_CASE("ResolveDataset vocab excludes species only in dropped plots",
+          "[dataset][vocab]") {
+    // p3 has a missing (NA) target -> dropped; "sp_only" appears only in p3.
+    TempFile csv(
+        "plot_id,species,cover,y\n"
+        "p1,sp1,1.0,10\n"
+        "p1,sp2,1.0,10\n"
+        "p2,sp1,1.0,20\n"
+        "p2,sp3,1.0,20\n"
+        "p3,sp_only,1.0,NA\n"
+    );
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id";
+    roles.species_id = "species";
+    roles.abundance = "cover";
+
+    DatasetConfig config;
+    config.species_encoding = SpeciesEncodingMode::Sparse;
+
+    auto ds = ResolveDataset::from_species_csv(
+        csv.path(), roles, {TargetSpec::regression("y")}, config);
+
+    REQUIRE(ds.n_plots() == 2);  // p3 dropped
+
+    const auto& vocab = ds.species_vocab();
+    REQUIRE(std::find(vocab.begin(), vocab.end(), "sp_only") == vocab.end());
+    REQUIRE(std::find(vocab.begin(), vocab.end(), "sp1") != vocab.end());
+    REQUIRE(std::find(vocab.begin(), vocab.end(), "sp3") != vocab.end());
+    // <UNK> + sp1 + sp2 + sp3 == 4 (sp_only excluded).
+    REQUIRE(ds.schema().n_species_vocab == 4);
+}

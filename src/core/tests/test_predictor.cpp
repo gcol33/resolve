@@ -285,3 +285,21 @@ TEST_CASE("Predictor::optimize_for_inference preserves predictions",
             /*rtol=*/1e-4, /*atol=*/1e-5));
     }
 }
+
+// =============================================================================
+// 8. get_embeddings smoke (issue #69: was untested)
+// =============================================================================
+
+TEST_CASE("Predictor::get_embeddings returns per-plot latent rows",
+          "[predictor][embeddings]") {
+    auto ds = make_synthetic_dataset(/*n_plots=*/48);
+    auto predictor = make_test_predictor(ds);
+
+    auto emb = predictor.get_embeddings(
+        ds.coordinates(), ds.covariates(), ds.hash_embedding(),
+        ds.genus_ids(), ds.family_ids());
+
+    REQUIRE(emb.size(0) == 48);
+    REQUIRE(emb.size(1) == predictor.model()->latent_dim());
+    REQUIRE(torch::isfinite(emb).all().item<bool>());
+}

@@ -470,3 +470,56 @@ TEST_CASE("FuzzyIndex: query_batch matches serial query", "[fuzzy][batch]") {
         }
     }
 }
+
+// Issue #69: exercise the adaptive-k tightening path (small top_n) and verify
+// the returned matches are exactly the closest top-N by distance, not merely a
+// high-recall subset (the other cross-checks use top_n = vocab_size, which never
+// tightens effective_k).
+TEST_CASE("FuzzyIndex: small top_n returns the exact closest-N by distance",
+          "[fuzzy][crosscheck]") {
+    std::mt19937 rng(777);
+    const int vocab_size = 400;
+    const int n_queries = 60;
+    const int max_k = 3;
+    const int top_n = 5;
+
+    std::vector<std::string> entries;
+    std::unordered_set<std::string> seen;
+    while (static_cast<int>(entries.size()) < vocab_size) {
+        std::uniform_int_distribution<int> len_dist(3, 10);
+        std::string w = random_word(rng, len_dist(rng));
+        if (seen.insert(w).second) entries.push_back(w);
+    }
+
+    resolve::fuzzy::BuildOptions bopts;
+    bopts.damerau = true;
+    bopts.max_edit_distance = max_k;
+    auto idx = resolve::fuzzy::FuzzyIndex::build(entries, bopts);
+
+    resolve::fuzzy::QueryOptions q;
+    q.max_edit_distance = max_k;
+    q.top_n = top_n;
+
+    for (int qi = 0; qi < n_queries; ++qi) {
+        std::uniform_int_distribution<int> qlen(3, 10);
+        std::string needle = random_word(rng, qlen(rng));
+
+        std::vector<int> truth_dists;
+        for (const auto& e : entries) {
+            int d = damerau_dp(needle, e);
+            if (d <= max_k) truth_dists.push_back(d);
+        }
+        std::sort(truth_dists.begin(), truth_dists.end());
+
+        auto got = idx.query(needle, q);
+        const std::size_t expect =
+            std::min<std::size_t>(static_cast<std::size_t>(top_n), truth_dists.size());
+        REQUIRE(got.size() == expect);
+        // got must be sorted ascending and hold exactly the `expect` smallest
+        // distances (ties at the boundary may pick different entries, so we
+        // compare the distance profile, which is what "closest N" pins down).
+        for (std::size_t i = 0; i < expect; ++i) {
+            REQUIRE(got[i].distance == truth_dists[i]);
+        }
+    }
+}

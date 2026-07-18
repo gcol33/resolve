@@ -11,6 +11,7 @@
 #include <iostream>
 #include <functional>
 #include <optional>
+#include <unordered_set>
 
 namespace resolve {
 
@@ -152,6 +153,22 @@ void resolve_classification_mapping(
         }
     } else {
         fit_classification_mapping(raw_labels, mapping_out, class_names_out);
+    }
+}
+
+// Drop species records for plots that were removed (missing/NA target) so the
+// species / taxonomy vocab is built only from surviving plots (issue #68):
+// species occurring solely in dropped plots must not inflate the embedding
+// tables with never-referenced rows. `kept_ids` is the compacted plot_ids_.
+void filter_records_to_plots(
+    std::unordered_map<std::string, std::vector<SpeciesRecord>>& plot_records,
+    const std::vector<std::string>& kept_ids
+) {
+    if (plot_records.size() <= kept_ids.size()) return;  // nothing dropped
+    std::unordered_set<std::string> kept(kept_ids.begin(), kept_ids.end());
+    for (auto it = plot_records.begin(); it != plot_records.end();) {
+        if (kept.find(it->first) == kept.end()) it = plot_records.erase(it);
+        else ++it;
     }
 }
 
@@ -631,6 +648,9 @@ ResolveDataset ResolveDataset::from_species_source(
 
     dataset.has_abundance_column_ = (cols.abundance >= 0);
 
+    // Build the vocab only from kept plots (issue #68).
+    filter_records_to_plots(plot_records, dataset.plot_ids_);
+
     // Encode species data
     dataset.encode_species(plot_records);
 
@@ -1106,6 +1126,10 @@ void ResolveDataset::load_species_data(
     });
 
     has_abundance_column_ = (cols.abundance >= 0);
+
+    // Build the vocab only from kept plots (issue #68): load_header_data has
+    // already dropped missing-target plots and compacted plot_ids_.
+    filter_records_to_plots(plot_records, plot_ids_);
 
     // Encode species
     encode_species(plot_records);
