@@ -55,6 +55,14 @@ public:
     [[nodiscard]] static torch::Tensor reparameterize(
         torch::Tensor mu, torch::Tensor log_var);
 
+    // Gaussian KL divergence D_KL(q(z|x) || N(0, I)) for a diagonal posterior:
+    //   -0.5 * sum_j (1 + log_var_j - mu_j^2 - exp(log_var_j))
+    // summed over the latent dimension (dim=1) and meaned over the batch, giving
+    // the true per-sample ELBO KL. Single source of truth for vae_loss and the
+    // pretraining loop so the two cannot drift (issue #96).
+    [[nodiscard]] static torch::Tensor kl_divergence(
+        torch::Tensor mu, torch::Tensor log_var);
+
     // Compute VAE loss: reconstruction + beta * KL divergence
     [[nodiscard]] static torch::Tensor vae_loss(
         torch::Tensor reconstruction,

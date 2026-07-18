@@ -519,6 +519,25 @@ TEST_CASE("SpeciesVAE vae_loss", "[vae]") {
     REQUIRE(loss.item<float>() > 0.0f);
 }
 
+TEST_CASE("SpeciesVAE kl_divergence sums over latent dim", "[vae]") {
+    // mu = 1, log_var = 0 over a 16-dim latent, batch 8:
+    //   per element: 1 + 0 - 1^2 - exp(0) = -1
+    //   -0.5 * sum_over_16(-1) = 8, meaned over batch = 8.
+    // The old mean-over-latent form would have given 0.5 (issue #96).
+    int64_t batch = 8, latent = 16;
+    auto mu = torch::ones({batch, latent});
+    auto logvar = torch::zeros({batch, latent});
+
+    auto kl = SpeciesVAEImpl::kl_divergence(mu, logvar);
+    REQUIRE(kl.dim() == 0);
+    REQUIRE_THAT(kl.item<float>(), WithinAbs(8.0f, 1e-4f));
+
+    // Standard normal posterior (mu = 0, log_var = 0) has zero KL.
+    auto kl_zero = SpeciesVAEImpl::kl_divergence(
+        torch::zeros({batch, latent}), torch::zeros({batch, latent}));
+    REQUIRE_THAT(kl_zero.item<float>(), WithinAbs(0.0f, 1e-5f));
+}
+
 TEST_CASE("SpeciesVAE get_projection_weights", "[vae]") {
     VAEConfig config;
     config.latent_dim = 32;

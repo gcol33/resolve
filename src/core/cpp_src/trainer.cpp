@@ -92,6 +92,16 @@ Trainer::Trainer(
 ) : model_(model), config_(config), loss_fn_(model->schema().targets, config.phase_boundaries, config.loss_config)
 {
     model_->to(config_.device);
+
+    // Snapshot the as-constructed weights so cross_validate can reset each fold
+    // to a fresh init even when run after fit() (issue #97).
+    std::ostringstream pristine_stream;
+    {
+        torch::serialize::OutputArchive archive;
+        model_->save(archive);
+        archive.save_to(pristine_stream);
+    }
+    pristine_model_state_ = pristine_stream.str();
 }
 
 void Trainer::prepare_data(
@@ -2166,9 +2176,13 @@ CrossValidationResult Trainer::run_cross_validation(
         config_.log("Cross-validation fold " + std::to_string(fold + 1) + "/" +
                     std::to_string(folds.size()));
 
-        // Restore the original model weights for this fold.
+        // Reset this fold to the as-constructed (untrained) weights, not the
+        // trainer's current weights. If cross_validate is run after fit(), the
+        // current weights are already trained on rows that fall in this fold's
+        // held-out test set; warm-starting from them yields optimistically
+        // biased CV metrics (issue #97).
         {
-            std::istringstream iss(original_state);
+            std::istringstream iss(pristine_model_state_);
             torch::serialize::InputArchive archive;
             archive.load_from(iss);
             model_->load(archive);

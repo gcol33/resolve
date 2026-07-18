@@ -289,6 +289,68 @@ TEST_CASE("cross_validate returns folds and restores split state", "[review2][cv
 }
 
 // =============================================================================
+// #97 - cross_validate resets each fold to the as-constructed (untrained)
+// weights, so running it after fit() does NOT warm-start folds from trained
+// weights (which would leak the fold's held-out rows into its starting point and
+// bias the metrics). Deterministic check: CV on a fresh trainer and CV re-run
+// after a full fit() must produce identical fold metrics.
+// =============================================================================
+TEST_CASE("cross_validate resets folds to pristine init after fit", "[review2][cv]") {
+    const int64_t n_plots = 400;
+    std::ostringstream hdr, spc;
+    hdr << "plot_id,lat,lon,cov1,y\n";
+    spc << "plot_id,sp,cover\n";
+    for (int64_t i = 0; i < n_plots; ++i) {
+        const double c1 = std::sin(i * 0.13);
+        const double y = 2.0 * c1 + 1.0;
+        hdr << "P" << i << "," << (40.0 + (i % 20) * 0.5) << "," << (-5.0 + (i / 20) * 0.5)
+            << "," << c1 << "," << y << "\n";
+        spc << "P" << i << ",sp" << (i % 8) << ",1.0\n";
+    }
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id"; roles.species_id = "sp"; roles.abundance = "cover";
+    roles.latitude = "lat"; roles.longitude = "lon"; roles.covariates = {"cov1"};
+
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::Hash;
+    dcfg.hash_dim = 4; dcfg.use_taxonomy = false;
+    dcfg.track_unknown_fraction = false; dcfg.track_unknown_count = false;
+
+    auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(), roles,
+                                       {TargetSpec::regression("y")}, dcfg);
+
+    ModelConfig mcfg;
+    mcfg.species_encoding = SpeciesEncodingMode::Hash;
+    mcfg.encoder_architecture = EncoderArchitecture::MLP;
+    mcfg.hash_dim = 4; mcfg.hidden_dims = {16, 8};
+
+    ResolveModel model(ds.schema(), mcfg);
+    Trainer trainer(model, cpu_train_config(15));
+    trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/9);
+
+    torch::manual_seed(123);
+    auto cv_fresh = trainer.cross_validate(/*n_folds=*/3, /*seed=*/7);
+
+    // Train to convergence, mutating the model's weights.
+    trainer.fit();
+
+    // Re-run identical CV. The per-fold pristine reset makes the fold metrics
+    // reproduce the fresh run; a warm start from the trained weights would not.
+    torch::manual_seed(123);
+    auto cv_after_fit = trainer.cross_validate(/*n_folds=*/3, /*seed=*/7);
+
+    REQUIRE(cv_fresh.mean_metrics.count("y") == 1);
+    REQUIRE(cv_after_fit.mean_metrics.count("y") == 1);
+    for (const auto& [name, val] : cv_fresh.mean_metrics.at("y")) {
+        REQUIRE(cv_after_fit.mean_metrics.at("y").count(name) == 1);
+        REQUIRE(cv_after_fit.mean_metrics.at("y").at(name) ==
+                Catch::Approx(val).margin(1e-4));
+    }
+}
+
+// =============================================================================
 // #70 - cross_validate_spatial runs to completion on shuffled data (the fold
 // indices are now applied in the same order as the split tensors) and returns
 // valid folds. Before the fix this silently scrambled the split; here we assert

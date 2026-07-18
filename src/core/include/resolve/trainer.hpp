@@ -318,6 +318,13 @@ private:
     Scalers scalers_;
     MultiTaskLoss loss_fn_;
 
+    // Serialized snapshot of the model's as-constructed (untrained) weights,
+    // taken in the constructor. cross_validate resets each fold to this pristine
+    // init rather than the trainer's current weights, so a cross_validate run
+    // after fit() does not warm-start every fold from fully-trained weights whose
+    // training data overlaps the fold's held-out test set (issue #97).
+    std::string pristine_model_state_;
+
     // The batch size the caller requested at fit() entry, before the CUDA OOM
     // auto-halve retry may have shrunk config_.batch_size. Persisted so a fallback
     // run is detectable (train_effective_batch_size != train_batch_size) and

@@ -68,8 +68,10 @@ TEST_CASE("Metrics::smape", "[metrics][regression]") {
 
     float smape = Metrics::smape(pred, target);
 
-    // SMAPE formula: |pred - target| / (|pred| + |target|)
-    // (10/210 + 0/400 + 20/580) / 3
+    // Standard sSMAPE: |pred - target| / ((|pred| + |target|) / 2), range [0, 2].
+    //   (10/105 + 0/200 + 20/290) / 3
+    float expected = (10.0f / 105.0f + 0.0f + 20.0f / 290.0f) / 3.0f;
+    REQUIRE_THAT(smape, Catch::Matchers::WithinAbs(expected, 1e-4f));
     REQUIRE(smape > 0.0f);
     REQUIRE(smape < 0.1f);  // Should be small for close predictions
 }
@@ -396,7 +398,7 @@ TEST_CASE("Metrics::compute reports regression metrics in original units",
 
     // smape and band are finite and within their natural ranges.
     REQUIRE(metrics["smape"] >= 0.0f);
-    REQUIRE(metrics["smape"] <= 1.0f);
+    REQUIRE(metrics["smape"] <= 2.0f);  // standard sSMAPE range (issue #95)
     REQUIRE(metrics["band_25"] >= 0.0f);
     REQUIRE(metrics["band_25"] <= 1.0f);
 

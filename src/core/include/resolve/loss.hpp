@@ -146,6 +146,8 @@ struct Metrics {
     static float band_accuracy(torch::Tensor pred, torch::Tensor target, float threshold);
     static float mae(torch::Tensor pred, torch::Tensor target);
     static float rmse(torch::Tensor pred, torch::Tensor target);
+    // Symmetric MAPE, standard definition |p-t| / ((|p|+|t|)/2 + eps), range
+    // [0, 2] (multiply by 100 for the [0, 200%] convention). Matches sklearn.
     static float smape(torch::Tensor pred, torch::Tensor target, float eps = 1e-8f);
     static float r_squared(torch::Tensor pred, torch::Tensor target);
 

@@ -77,6 +77,13 @@ torch::Tensor SpeciesVAEImpl::reparameterize(torch::Tensor mu, torch::Tensor log
     return mu + eps * std;
 }
 
+torch::Tensor SpeciesVAEImpl::kl_divergence(torch::Tensor mu, torch::Tensor log_var) {
+    // -0.5 * sum(1 + log_var - mu^2 - exp(log_var)) over the latent dim, meaned
+    // over the batch. Summing over latents (not meaning) matches the textbook
+    // ELBO so kl_weight = 1 is beta = 1 (issue #96).
+    return (-0.5f * (1.0f + log_var - mu.pow(2) - log_var.exp()).sum(/*dim=*/1)).mean();
+}
+
 torch::Tensor SpeciesVAEImpl::vae_loss(
     torch::Tensor reconstruction,
     torch::Tensor input,
@@ -87,11 +94,7 @@ torch::Tensor SpeciesVAEImpl::vae_loss(
     // Reconstruction loss: MSE for continuous abundance vectors
     auto recon_loss = torch::mse_loss(reconstruction, input, torch::Reduction::Mean);
 
-    // KL divergence: -0.5 * sum(1 + log_var - mu^2 - exp(log_var))
-    auto kl_loss = -0.5f * torch::mean(
-        1.0f + log_var - mu.pow(2) - log_var.exp());
-
-    return recon_loss + kl_weight * kl_loss;
+    return recon_loss + kl_weight * kl_divergence(mu, log_var);
 }
 
 torch::Tensor SpeciesVAEImpl::get_projection_weights() const {
@@ -161,8 +164,7 @@ VAEPretrainResult VAEPretrainer::pretrain(torch::Tensor species_vectors) {
 
             // Compute separate losses for logging
             auto recon_loss = torch::mse_loss(recon, batch, torch::Reduction::Mean);
-            auto kl_loss = -0.5f * torch::mean(
-                1.0f + log_var - mu.pow(2) - log_var.exp());
+            auto kl_loss = SpeciesVAEImpl::kl_divergence(mu, log_var);
             auto loss = recon_loss + kl_w * kl_loss;
 
             optimizer.zero_grad();

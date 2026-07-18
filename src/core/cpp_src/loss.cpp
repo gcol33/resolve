@@ -3,6 +3,22 @@
 
 namespace resolve {
 
+namespace {
+
+// Elementwise symmetric mean absolute percentage error, standard definition:
+//   |pred - target| / ((|pred| + |target|) / 2 + eps)
+// The /2 in the denominator gives the conventional [0, 2] range that sklearn and
+// the SMAPE literature use; omitting it halves every value (issue #95). Single
+// source of truth for the reported Metrics::smape and the phased-loss SMAPE term
+// so the two cannot drift apart.
+inline torch::Tensor smape_terms(const torch::Tensor& pred, const torch::Tensor& target, float eps) {
+    auto numerator = torch::abs(pred - target);
+    auto denominator = (torch::abs(pred) + torch::abs(target)) * 0.5f + eps;
+    return numerator / denominator;
+}
+
+}  // namespace
+
 // PhasedLoss implementation
 
 PhasedLoss::PhasedLoss(
@@ -80,10 +96,8 @@ torch::Tensor PhasedLoss::regression_loss(
         target_orig = torch::expm1(target_orig);
     }
 
-    // SMAPE loss
-    auto numerator = torch::abs(pred_orig - target_orig);
-    auto denominator = torch::abs(pred_orig) + torch::abs(target_orig) + eps_;
-    auto smape = (numerator / denominator).mean();
+    // SMAPE loss (standard symmetric form, shared with Metrics::smape)
+    auto smape = smape_terms(pred_orig, target_orig, eps_).mean();
 
     if (phase == 2) {
         return mae + smape_weight_p2_ * smape;
@@ -198,9 +212,7 @@ float Metrics::rmse(torch::Tensor pred, torch::Tensor target) {
 }
 
 float Metrics::smape(torch::Tensor pred, torch::Tensor target, float eps) {
-    auto numerator = torch::abs(pred - target);
-    auto denominator = torch::abs(pred) + torch::abs(target) + eps;
-    return (numerator / denominator).mean().item<float>();
+    return smape_terms(pred, target, eps).mean().item<float>();
 }
 
 float Metrics::r_squared(torch::Tensor pred, torch::Tensor target) {
