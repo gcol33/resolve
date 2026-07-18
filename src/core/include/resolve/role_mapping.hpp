@@ -114,10 +114,13 @@ struct TargetSpec {
     }
 
     // Classification target with an explicit user-provided string->int mapping.
-    // `num_classes` is derived from the mapping size (the +0 baseline assumes
-    // codes are dense 0..K-1, which is the convention the auto-fit path also
-    // produces). Use the regular `classification(column, num_classes)` factory
-    // when the column is already encoded as integers.
+    // `num_classes` is the head width = max_code + 1, matching the class_names
+    // vector the loader builds (class_names[code] == label). Sizing from
+    // mapping.size() would under-size the head for non-dense codes (e.g.
+    // {0,2,5} needs 6 outputs, not 3), so a target code of 5 would index the
+    // head out of bounds (issue #74). For dense 0..K-1 codes the two agree.
+    // Use the regular `classification(column, num_classes)` factory when the
+    // column is already encoded as integers.
     static TargetSpec classification_with_mapping(
         const std::string& column,
         const std::unordered_map<std::string, int64_t>& mapping
@@ -126,7 +129,11 @@ struct TargetSpec {
         spec.column_name = column;
         spec.target_name = column;
         spec.task = TaskType::Classification;
-        spec.num_classes = static_cast<int>(mapping.size());
+        int64_t max_code = -1;
+        for (const auto& kv : mapping) {
+            if (kv.second > max_code) max_code = kv.second;
+        }
+        spec.num_classes = static_cast<int>(max_code + 1);
         spec.class_mapping = mapping;
         return spec;
     }

@@ -280,14 +280,24 @@ void register_trainer(nb::module_& m) {
            nb::arg("hash_embedding"),
            nb::arg("genus_ids"),
            nb::arg("family_ids"))
+        // Move to CPU (detached) so a CUDA predictor returns a CPU tensor, like
+        // the sibling predict/scalers accessors and the C-ABI predictor_get
+        // (which always emits a CPU matrix). An undefined tensor (no taxonomy /
+        // non-embedding encoder) wraps to None, so only .cpu() when defined.
         .def("get_genus_embeddings", [](resolve::Predictor& self) {
-            return nb::steal(THPVariable_Wrap(self.get_genus_embeddings()));
+            auto t = self.get_genus_embeddings();
+            if (t.defined()) t = t.detach().cpu();
+            return nb::steal(THPVariable_Wrap(t));
         })
         .def("get_family_embeddings", [](resolve::Predictor& self) {
-            return nb::steal(THPVariable_Wrap(self.get_family_embeddings()));
+            auto t = self.get_family_embeddings();
+            if (t.defined()) t = t.detach().cpu();
+            return nb::steal(THPVariable_Wrap(t));
         })
         .def("get_species_embeddings", [](resolve::Predictor& self) {
-            return nb::steal(THPVariable_Wrap(self.get_species_embeddings()));
+            auto t = self.get_species_embeddings();
+            if (t.defined()) t = t.detach().cpu();
+            return nb::steal(THPVariable_Wrap(t));
         })
         .def("optimize_for_inference", &resolve::Predictor::optimize_for_inference)
         .def_prop_ro("device", [](const resolve::Predictor& self) {

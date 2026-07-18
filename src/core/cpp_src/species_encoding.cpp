@@ -121,12 +121,21 @@ static std::vector<std::pair<std::string, float>> select_k(
         return species;
     }
 
+    // Ties broken by species name ascending so the surviving top/bottom-k is
+    // deterministic regardless of input (CSV row) order -- otherwise equal-
+    // abundance ties (e.g. presence/absence data, every weight 1.0) resolve by
+    // the non-stable partial_sort's arbitrary order and a re-exported dataset
+    // encodes differently from the checkpoint it was trained against. Matches
+    // the tie-break in topk_by_abundance and build_species_vocab.
     std::partial_sort(
         species.begin(),
         species.begin() + k,
         species.end(),
         [descending](const auto& a, const auto& b) {
-            return descending ? a.second > b.second : a.second < b.second;
+            if (a.second != b.second) {
+                return descending ? a.second > b.second : a.second < b.second;
+            }
+            return a.first < b.first;
         }
     );
 

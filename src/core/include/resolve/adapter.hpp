@@ -82,6 +82,11 @@ private:
 
     // For GNN: adjacency matrix builder
     int k_neighbors_ = 10;
+    // The GNN builds its spatial graph from the first two continuous columns,
+    // which are the coordinates ONLY when the dataset has them. Captured from
+    // the schema so forward() can refuse to reinterpret covariates as
+    // coordinates when coordinates are absent (issue #73).
+    bool has_coordinates_ = false;
 
     // For Heterogeneous GNN: stored graph structure
     torch::Tensor hetero_edge_index_;  // (2, n_edges)

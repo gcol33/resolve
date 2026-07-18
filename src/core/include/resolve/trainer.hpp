@@ -255,9 +255,6 @@ private:
     std::pair<float, std::unordered_map<std::string, std::unordered_map<std::string, float>>>
     eval_epoch(int epoch);
 
-    // Create data loaders
-    void create_loaders();
-
     // Compute learning rate for given epoch based on scheduler config
     float get_learning_rate(int epoch) const;
 
@@ -385,6 +382,14 @@ private:
     };
     SplitState capture_split_state() const;
     void restore_split_state(const SplitState& s);
+
+    // Shared engine for cross_validate / cross_validate_spatial: given the fold
+    // (train_idx, test_idx) index lists into the concatenated train++test rows,
+    // runs every fold (per-fold model reset, split, scaler recompute, fit,
+    // metric aggregation) and restores the pre-CV split. The two public entry
+    // points differ only in how they generate `folds`.
+    CrossValidationResult run_cross_validation(
+        const std::vector<std::pair<std::vector<int64_t>, std::vector<int64_t>>>& folds);
 
     // Best model state for restoring
     std::vector<char> best_model_state_;

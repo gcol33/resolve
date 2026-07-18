@@ -135,9 +135,18 @@ torch::Tensor PlotEncoderRankPoolImpl::forward(
 
     auto pooled = F::embedding_bag(species_ids, species_embedding_->weight, bag_opts);
 
-    // Concat taxonomy pools along the feature dim. Pooling is linear, so the
-    // weighted mean of the concatenation equals the concatenation of the
-    // per-table weighted means.
+    // Concat taxonomy pools along the feature dim, reusing the species-mask
+    // weights `w_normed` (which sum to 1 over the present species). NOTE: this
+    // is an exact per-table weighted mean only for the species table. For the
+    // genus/family tables, padding_idx=0 drops species whose genus/family is
+    // UNK (id 0), but their weight is NOT redistributed, so a plot with a
+    // fraction f of its abundance on unknown-genus species gets its genus pool
+    // scaled by (1 - f) toward the zero vector -- unknown taxonomy attenuates
+    // the taxonomy signal rather than being re-normalized away. This is the
+    // current, deliberate behavior (UNK contributes a zero vector); a true
+    // per-table weighted mean would re-normalize the weights over the
+    // known-id subset, which is a different model and a hard checkpoint cutover
+    // (issue #75, left as a modeling decision).
     if (has_taxonomy_ && genus_ids.defined() && genus_ids.numel() > 0) {
         auto pooled_g = F::embedding_bag(genus_ids, genus_embedding_->weight, bag_opts);
         auto pooled_f = F::embedding_bag(family_ids, family_embedding_->weight, bag_opts);

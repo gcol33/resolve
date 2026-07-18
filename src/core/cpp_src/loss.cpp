@@ -261,7 +261,6 @@ ClassificationMetrics Metrics::classification_metrics(torch::Tensor pred, torch:
     int64_t total_samples = 0;
     float macro_f1_sum = 0.0f;
     float weighted_f1_sum = 0.0f;
-    int valid_classes = 0;
 
     for (int c = 0; c < num_classes; ++c) {
         int64_t tp = cm_accessor[c][c];
@@ -291,17 +290,20 @@ ClassificationMetrics Metrics::classification_metrics(torch::Tensor pred, torch:
         float f1 = (precision + recall > 0) ? 2.0f * precision * recall / (precision + recall) : 0.0f;
         result.per_class_f1[c] = f1;
 
-        if (support > 0) {
-            // Macro-F1 is the mean of per-class F1 scores, not the F1 of the
-            // macro-averaged precision and recall (those differ whenever the
-            // per-class P/R are imbalanced). Average per_class_f1 directly.
-            macro_f1_sum += f1;
-            weighted_f1_sum += f1 * support;
-            valid_classes++;
-        }
+        // Macro-F1 is the mean of per-class F1 scores, not the F1 of the
+        // macro-averaged precision and recall (those differ whenever the
+        // per-class P/R are imbalanced). Average per_class_f1 directly over ALL
+        // labels: a class with no support in this fold contributes f1=0 (its
+        // recall is 0), matching sklearn f1_score(average='macro',
+        // labels=range(num_classes)). Excluding zero-support classes would read
+        // systematically higher and diverge from the reported convention
+        // (issue #75). Weighted-F1 weights by support, so an absent class adds
+        // zero and needs no special case.
+        macro_f1_sum += f1;
+        weighted_f1_sum += f1 * support;
     }
 
-    result.macro_f1 = (valid_classes > 0) ? macro_f1_sum / valid_classes : 0.0f;
+    result.macro_f1 = (num_classes > 0) ? macro_f1_sum / num_classes : 0.0f;
 
     result.weighted_f1 = (total_samples > 0) ? weighted_f1_sum / total_samples : 0.0f;
 

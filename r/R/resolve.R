@@ -132,6 +132,9 @@ resolve.predict <- function(...) {
 #'
 #' @param path Path to checkpoint file
 #' @param device Device: "cpu" or "cuda" (default "cpu")
+#' @param vram_fraction Fraction of GPU VRAM the caching allocator may use when
+#'   loading onto CUDA (default 1.0). Pass a lower value (e.g. 0.80) when sharing
+#'   the GPU with a desktop / GUI to leave headroom.
 #'
 #' @return A Predictor object
 #'
@@ -142,7 +145,7 @@ resolve.predict <- function(...) {
 #' }
 #'
 #' @export
-resolve.load <- function(path, device = "cpu") {
+resolve.load <- function(path, device = "cpu", vram_fraction = 1.0) {
   # Input validation
   if (!is.character(path) || length(path) != 1) {
     stop("path must be a single file path string")
@@ -153,8 +156,12 @@ resolve.load <- function(path, device = "cpu") {
   if (!device %in% c("cpu", "cuda")) {
     stop("device must be 'cpu' or 'cuda'")
   }
+  if (!is.numeric(vram_fraction) || length(vram_fraction) != 1 ||
+      vram_fraction <= 0 || vram_fraction > 1) {
+    stop("vram_fraction must be a single number in (0, 1]")
+  }
 
-  .resolve_module$Predictor_load(path, device)
+  .resolve_module$Predictor_load(path, device, vram_fraction)
 }
 
 

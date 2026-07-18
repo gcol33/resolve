@@ -184,9 +184,9 @@ VAEPretrainResult VAEPretrainer::pretrain(torch::Tensor species_vectors) {
         if (epoch % 10 == 0) {
             std::ostringstream msg;
             msg << "VAE epoch " << epoch
-                << " - loss: " << (epoch_loss / n_batches)
-                << " recon: " << (epoch_recon / n_batches)
-                << " kl: " << (epoch_kl / n_batches);
+                << " - loss: " << (epoch_loss * inv_nb)
+                << " recon: " << (epoch_recon * inv_nb)
+                << " kl: " << (epoch_kl * inv_nb);
             config_.log(msg.str());
         }
     }

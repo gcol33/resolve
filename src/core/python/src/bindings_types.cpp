@@ -286,6 +286,11 @@ void register_types(nb::module_& m) {
         // If halving would take batch_size below this floor, the original
         // OOM is rethrown.
         .def_rw("batch_size_floor", &resolve::TrainConfig::batch_size_floor)
+        // Periodic checkpointing (parity with the C-ABI/R config surface):
+        // checkpoint_dir empty disables it; checkpoint_every N writes every N
+        // epochs (0 = only best).
+        .def_rw("checkpoint_dir", &resolve::TrainConfig::checkpoint_dir)
+        .def_rw("checkpoint_every", &resolve::TrainConfig::checkpoint_every)
         // Device property (string-based for Python convenience)
         .def_prop_rw("device",
             [](const resolve::TrainConfig& c) {

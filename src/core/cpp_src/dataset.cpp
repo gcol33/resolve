@@ -59,6 +59,12 @@ std::optional<int64_t> parse_strict_int64(const std::string& s) {
 // Returns:
 //   - mapping_out : string -> int64 code
 //   - class_names : ordered vocab (class_names[code] == original string)
+// Upper bound on a directly-used integer class code. A code at or above this
+// would size class_names to ~that many entries (unbounded allocation / OOM) for
+// only a handful of classes; a code beyond it falls back to a compact
+// factorization (auto path) or is rejected (explicit path).
+constexpr int64_t kMaxDirectClassCode = 1 << 20;  // 1,048,575
+
 void fit_classification_mapping(
     const std::vector<std::string>& raw,
     std::unordered_map<std::string, int64_t>& mapping_out,
@@ -97,7 +103,6 @@ void fit_classification_mapping(
     // class_names_out to ~that value (unbounded allocation / OOM) even for a
     // handful of classes. In either case fall back to a compact 0..K-1
     // factorization of the sorted unique labels.
-    constexpr int64_t kMaxDirectClassCode = 1 << 20;  // 1,048,575
     bool use_direct_codes = false;
     if (all_int) {
         int64_t min_code = *std::min_element(parsed.begin(), parsed.end());
@@ -145,11 +150,31 @@ void resolve_classification_mapping(
     if (!explicit_mapping.empty()) {
         mapping_out = explicit_mapping;
         int64_t max_code = -1;
-        for (const auto& [_, c] : mapping_out) if (c > max_code) max_code = c;
+        for (const auto& [name, c] : mapping_out) {
+            // A negative code is written verbatim into the int64 target tensor
+            // and later indexes the classification head out of bounds
+            // (static_cast<size_t> of a negative -> huge). Reject it here rather
+            // than only skipping it for class_names (issue #74).
+            if (c < 0) {
+                throw std::invalid_argument(
+                    "class_mapping code for '" + name + "' is negative (" +
+                    std::to_string(c) + "); class codes must be >= 0");
+            }
+            if (c > max_code) max_code = c;
+        }
+        // Bound the allocation exactly like the auto path: an ID-like code
+        // (e.g. 9999999999) would size class_names to ~10^10 entries -> OOM.
+        if (max_code >= kMaxDirectClassCode) {
+            throw std::invalid_argument(
+                "class_mapping code " + std::to_string(max_code) +
+                " exceeds the maximum direct class code (" +
+                std::to_string(kMaxDirectClassCode) +
+                "); use dense codes 0..K-1");
+        }
         if (max_code >= 0) {
             class_names_out.assign(static_cast<size_t>(max_code + 1), std::string{});
             for (const auto& [k, c] : mapping_out)
-                if (c >= 0) class_names_out[static_cast<size_t>(c)] = k;
+                class_names_out[static_cast<size_t>(c)] = k;
         }
     } else {
         fit_classification_mapping(raw_labels, mapping_out, class_names_out);
@@ -164,8 +189,22 @@ void filter_records_to_plots(
     std::unordered_map<std::string, std::vector<SpeciesRecord>>& plot_records,
     const std::vector<std::string>& kept_ids
 ) {
-    if (plot_records.size() <= kept_ids.size()) return;  // nothing dropped
+    // Filter by set membership, not a size comparison: plot_records (keyed from
+    // the species file) and kept_ids (surviving header plots) are independent
+    // key sets, so a size guard like `plot_records.size() <= kept_ids.size()`
+    // wrongly skips filtering when the species file references a plot absent
+    // from the kept set while staying within the count (e.g. one phantom plot,
+    // no header plots dropped) -- that plot's species then inflate and shift the
+    // frequency-sorted vocab (issue #71, the #68 class via the fast-path guard).
     std::unordered_set<std::string> kept(kept_ids.begin(), kept_ids.end());
+    if (plot_records.size() == kept.size()) {
+        // Same count: a full pass is only skippable when every key is kept.
+        bool all_kept = true;
+        for (const auto& [id, _] : plot_records) {
+            if (kept.find(id) == kept.end()) { all_kept = false; break; }
+        }
+        if (all_kept) return;
+    }
     for (auto it = plot_records.begin(); it != plot_records.end();) {
         if (kept.find(it->first) == kept.end()) it = plot_records.erase(it);
         else ++it;

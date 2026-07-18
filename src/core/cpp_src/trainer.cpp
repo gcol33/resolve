@@ -196,6 +196,17 @@ void Trainer::prepare_data(
     int64_t n_test = static_cast<int64_t>(n_plots * test_size);
     int64_t n_train = n_plots - n_test;
 
+    // An empty test fold makes every held-out metric divide by zero (accuracy,
+    // baseline, residuals) and returns NaN rather than an error. Fail loudly so
+    // a too-small dataset / test_size is caught here, not as silent NaNs
+    // downstream (issue #74).
+    if (test_size > 0.0f && n_test <= 0) {
+        throw std::runtime_error(
+            "prepare_data: test_size=" + std::to_string(test_size) +
+            " yields an empty test fold for " + std::to_string(n_plots) +
+            " plots; increase test_size or provide more data");
+    }
+
     auto train_idx = torch::tensor(std::vector<int64_t>(indices.begin(), indices.begin() + n_train));
     auto test_idx = torch::tensor(std::vector<int64_t>(indices.begin() + n_train, indices.end()));
 
@@ -354,10 +365,6 @@ void Trainer::prepare_data(
     }
 
     data_prepared_ = true;
-}
-
-void Trainer::create_loaders() {
-    // Note: For simplicity, we handle batching manually in train_epoch/eval_epoch
 }
 
 float Trainer::train_epoch(int epoch) {
@@ -860,9 +867,13 @@ float Trainer::get_learning_rate(int epoch) const {
             return config_.lr * std::pow(config_.lr_gamma, static_cast<float>(n_decays));
         }
         case LRSchedulerType::CosineAnnealing: {
-            // Cosine annealing from lr to lr_min
-            float progress = config_.max_epochs > 0
-                ? static_cast<float>(epoch) / config_.max_epochs : 0.0f;
+            // Cosine annealing from lr (epoch 0) to lr_min (final epoch). Divide
+            // by (max_epochs - 1) so progress reaches 1.0 on the last epoch and
+            // the schedule actually lands on lr_min; dividing by max_epochs
+            // leaves the endpoint a step short of lr_min (issue #74).
+            float progress = config_.max_epochs > 1
+                ? static_cast<float>(epoch) / (config_.max_epochs - 1) : 1.0f;
+            progress = std::min(progress, 1.0f);
             float cosine = 0.5f * (1.0f + std::cos(M_PI * progress));
             return config_.lr_min + (config_.lr - config_.lr_min) * cosine;
         }
@@ -2034,6 +2045,22 @@ void Trainer::unscale_continuous_targets(
     }
 }
 
+namespace {
+// Silences per-fold checkpoint writes during cross-validation: fit() otherwise
+// overwrites the user's checkpoint.pt / best.pt with each fold's subset model,
+// leaving the on-disk artifact describing the last fold rather than the
+// full-data model the user trained before CV (issue #75). Clears checkpoint_dir
+// on construction and restores it on any exit path (exception-safe).
+struct CheckpointDirSilencer {
+    std::string& dir;
+    std::string saved;
+    explicit CheckpointDirSilencer(std::string& d) : dir(d), saved(d) { d.clear(); }
+    ~CheckpointDirSilencer() { dir = saved; }
+    CheckpointDirSilencer(const CheckpointDirSilencer&) = delete;
+    CheckpointDirSilencer& operator=(const CheckpointDirSilencer&) = delete;
+};
+}  // namespace
+
 Trainer::SplitState Trainer::capture_split_state() const {
     SplitState s;
     s.train_continuous = train_continuous_;
@@ -2099,22 +2126,15 @@ void Trainer::restore_split_state(const SplitState& s) {
     gpu_data_cached_ = false;
 }
 
-CrossValidationResult Trainer::cross_validate(int n_folds, int seed) {
-    if (!data_prepared_) {
-        throw std::runtime_error("Data must be prepared before cross-validation");
-    }
-
+CrossValidationResult Trainer::run_cross_validation(
+    const std::vector<std::pair<std::vector<int64_t>, std::vector<int64_t>>>& folds
+) {
     auto start_time = std::chrono::high_resolution_clock::now();
 
     CrossValidationResult cv_result;
-    cv_result.n_folds = n_folds;
+    cv_result.n_folds = static_cast<int>(folds.size());
 
-    // Combine train and test data for CV splitting
-    int64_t n_train = train_continuous_.size(0);
-    int64_t n_test = test_continuous_.size(0);
-    int64_t n_total = n_train + n_test;
-
-    // Concatenate all data
+    // Concatenate the prepared train/test tensors so each fold re-splits them.
     auto all_continuous = torch::cat({train_continuous_, test_continuous_}, 0);
     auto cat_if_both_defined = [](const torch::Tensor& a, const torch::Tensor& b) -> torch::Tensor {
         if (a.defined() && b.defined()) return torch::cat({a, b}, 0);
@@ -2124,15 +2144,11 @@ CrossValidationResult Trainer::cross_validate(int n_folds, int seed) {
     auto all_family_ids = cat_if_both_defined(train_family_ids_, test_family_ids_);
     auto all_species_ids = cat_if_both_defined(train_species_ids_, test_species_ids_);
     auto all_species_vector = cat_if_both_defined(train_species_vector_, test_species_vector_);
-
-    // Concatenate pool fields
     auto all_pool_genus_ids = cat_if_both_defined(train_pool_genus_ids_, test_pool_genus_ids_);
     auto all_pool_family_ids = cat_if_both_defined(train_pool_family_ids_, test_pool_family_ids_);
     auto all_pool_weights = cat_if_both_defined(train_pool_weights_, test_pool_weights_);
     auto all_pool_mask = cat_if_both_defined(train_pool_mask_, test_pool_mask_);
     auto all_pool_has_cover = cat_if_both_defined(train_pool_has_cover_, test_pool_has_cover_);
-
-    // Concatenate categorical IDs across train+test for per-fold re-splitting
     auto all_categorical_ids = cat_if_both_defined(train_categorical_ids_, test_categorical_ids_);
 
     std::unordered_map<std::string, torch::Tensor> all_targets;
@@ -2143,17 +2159,7 @@ CrossValidationResult Trainer::cross_validate(int n_folds, int seed) {
         }
     }
 
-    // Create shuffled indices
-    std::vector<int64_t> indices(n_total);
-    std::iota(indices.begin(), indices.end(), 0);
-    std::mt19937 gen(seed);
-    std::shuffle(indices.begin(), indices.end(), gen);
-
-    // Compute fold sizes
-    int64_t fold_size = n_total / n_folds;
-    int64_t remainder = n_total % n_folds;
-
-    // Store original model state for restoration after each fold
+    // Snapshot original model weights + scalers + the full split for restoration.
     std::ostringstream original_state_stream;
     {
         torch::serialize::OutputArchive archive;
@@ -2161,40 +2167,32 @@ CrossValidationResult Trainer::cross_validate(int n_folds, int seed) {
         archive.save_to(original_state_stream);
     }
     std::string original_state = original_state_stream.str();
-
-    // Store original scalers
     Scalers original_scalers = scalers_;
-
-    // Snapshot the full split so it can be restored after the fold loop
-    // overwrites the train/test tensors, indices, and scalers.
     SplitState split_snapshot = capture_split_state();
 
-    // all_continuous / all_targets were assembled from prepare_data's already-
-    // standardized train/test tensors. Invert that scaling once here so each
-    // fold computes its own scalers from raw values exactly once, rather than
-    // standardizing already-standardized data (which shifts the phased-loss
-    // SMAPE/band terms into single-scaled instead of original units).
+    // Don't let per-fold fit() calls clobber the user's on-disk checkpoint.
+    CheckpointDirSilencer ckpt_silencer(config_.checkpoint_dir);
+
+    // Invert prepare_data's standardization once so each fold recomputes its own
+    // scalers from raw values exactly once (see the note in cross-validation).
     unscale_continuous_targets(all_continuous, all_targets, original_scalers);
 
-    // Global plot index for each row of the concatenated arrays. Row i of
-    // all_continuous is global plot train_indices_[i] (i < n_train) or
-    // test_indices_[i - n_train]. The on-the-fly CUDA hash path indexes the
-    // full-dataset CSR by global plot index, so each fold must reconstruct
-    // train_indices_ / test_indices_ from these (see fit()/eval_epoch).
+    // Global plot index per concatenated row, for the CUDA-hash path. Row i of
+    // all_continuous is global plot all_global_idx[i]; each fold reconstructs
+    // train_indices_ / test_indices_ from it so on-the-fly GPU hashing indexes
+    // the correct plots.
     torch::Tensor all_global_idx;
     if (train_indices_.defined() && test_indices_.defined()) {
         all_global_idx = torch::cat({train_indices_, test_indices_}, 0);
     }
 
-    // Metric accumulators
     std::unordered_map<std::string, std::unordered_map<std::string, std::vector<float>>> metric_values;
 
-    // Run each fold
-    int64_t fold_start = 0;
-    for (int fold = 0; fold < n_folds; ++fold) {
-        config_.log("Cross-validation fold " + std::to_string(fold + 1) + "/" + std::to_string(n_folds));
+    for (size_t fold = 0; fold < folds.size(); ++fold) {
+        config_.log("Cross-validation fold " + std::to_string(fold + 1) + "/" +
+                    std::to_string(folds.size()));
 
-        // Restore original model weights
+        // Restore the original model weights for this fold.
         {
             std::istringstream iss(original_state);
             torch::serialize::InputArchive archive;
@@ -2202,116 +2200,79 @@ CrossValidationResult Trainer::cross_validate(int n_folds, int seed) {
             model_->load(archive);
         }
 
-        // Determine fold boundaries
-        int64_t current_fold_size = fold_size + (fold < remainder ? 1 : 0);
-        int64_t fold_end = fold_start + current_fold_size;
+        const auto& train_index = folds[fold].first;
+        const auto& test_index = folds[fold].second;
+        auto train_idx = torch::tensor(train_index, torch::kInt64);
+        auto test_idx = torch::tensor(test_index, torch::kInt64);
 
-        // Create train/test indices for this fold
-        std::vector<int64_t> test_indices(indices.begin() + fold_start, indices.begin() + fold_end);
-        std::vector<int64_t> train_indices;
-        train_indices.reserve(n_total - current_fold_size);
-        for (int64_t i = 0; i < fold_start; ++i) {
-            train_indices.push_back(indices[i]);
-        }
-        for (int64_t i = fold_end; i < n_total; ++i) {
-            train_indices.push_back(indices[i]);
-        }
+        config_.log("  Train: " + std::to_string(train_index.size()) +
+                    " plots, Test: " + std::to_string(test_index.size()) + " plots");
 
-        auto train_idx = torch::tensor(train_indices);
-        auto test_idx = torch::tensor(test_indices);
-
-        // Reconstruct the global plot indices for this fold so the CUDA-hash
-        // path hashes the correct plots, and invalidate the GPU cache so
-        // fit()/cache_data_to_gpu re-uploads THIS fold's split (cache_data_to_gpu
-        // early-returns while gpu_data_cached_ is set, so without this every
-        // fold after the first would reuse fold 0's cached data).
+        // Reconstruct this fold's global plot indices for the CUDA-hash path and
+        // invalidate the GPU cache so fit() re-uploads THIS fold's split
+        // (cache_data_to_gpu early-returns while gpu_data_cached_ is set, so
+        // without this every fold after the first would reuse fold 0's data).
         if (all_global_idx.defined()) {
             train_indices_ = all_global_idx.index_select(0, train_idx);
             test_indices_ = all_global_idx.index_select(0, test_idx);
         }
         gpu_data_cached_ = false;
 
-        // Split data for this fold
         train_continuous_ = all_continuous.index_select(0, train_idx);
         test_continuous_ = all_continuous.index_select(0, test_idx);
 
-        if (all_genus_ids.defined()) {
-            train_genus_ids_ = all_genus_ids.index_select(0, train_idx);
-            test_genus_ids_ = all_genus_ids.index_select(0, test_idx);
-        }
-        if (all_family_ids.defined()) {
-            train_family_ids_ = all_family_ids.index_select(0, train_idx);
-            test_family_ids_ = all_family_ids.index_select(0, test_idx);
-        }
-        if (all_species_ids.defined()) {
-            train_species_ids_ = all_species_ids.index_select(0, train_idx);
-            test_species_ids_ = all_species_ids.index_select(0, test_idx);
-        }
-        if (all_species_vector.defined()) {
-            train_species_vector_ = all_species_vector.index_select(0, train_idx);
-            test_species_vector_ = all_species_vector.index_select(0, test_idx);
-        }
-
-        // Split pool fields for this fold
-        auto split_pool_fold = [&](const torch::Tensor& all, torch::Tensor& train_dst, torch::Tensor& test_dst) {
+        auto split_if_defined = [&](const torch::Tensor& all, torch::Tensor& train_dst, torch::Tensor& test_dst) {
             if (all.defined()) {
                 train_dst = all.index_select(0, train_idx);
                 test_dst = all.index_select(0, test_idx);
             }
         };
-        split_pool_fold(all_pool_genus_ids, train_pool_genus_ids_, test_pool_genus_ids_);
-        split_pool_fold(all_pool_family_ids, train_pool_family_ids_, test_pool_family_ids_);
-        split_pool_fold(all_pool_weights, train_pool_weights_, test_pool_weights_);
-        split_pool_fold(all_pool_mask, train_pool_mask_, test_pool_mask_);
-        split_pool_fold(all_pool_has_cover, train_pool_has_cover_, test_pool_has_cover_);
-        split_pool_fold(all_categorical_ids, train_categorical_ids_, test_categorical_ids_);
+        split_if_defined(all_genus_ids, train_genus_ids_, test_genus_ids_);
+        split_if_defined(all_family_ids, train_family_ids_, test_family_ids_);
+        split_if_defined(all_species_ids, train_species_ids_, test_species_ids_);
+        split_if_defined(all_species_vector, train_species_vector_, test_species_vector_);
+        split_if_defined(all_pool_genus_ids, train_pool_genus_ids_, test_pool_genus_ids_);
+        split_if_defined(all_pool_family_ids, train_pool_family_ids_, test_pool_family_ids_);
+        split_if_defined(all_pool_weights, train_pool_weights_, test_pool_weights_);
+        split_if_defined(all_pool_mask, train_pool_mask_, test_pool_mask_);
+        split_if_defined(all_pool_has_cover, train_pool_has_cover_, test_pool_has_cover_);
+        split_if_defined(all_categorical_ids, train_categorical_ids_, test_categorical_ids_);
 
         for (const auto& [name, tensor] : all_targets) {
             train_targets_[name] = tensor.index_select(0, train_idx);
             test_targets_[name] = tensor.index_select(0, test_idx);
         }
 
-        // Recompute scalers for this fold's training data
+        // Recompute scalers for this fold's training data.
         if (train_continuous_.size(1) > 0) {
             scalers_.continuous_mean = train_continuous_.mean(0);
             scalers_.continuous_scale = train_continuous_.std(0) + 1e-8f;
-
-            // Apply scaling
             train_continuous_ = (train_continuous_ - scalers_.continuous_mean) / scalers_.continuous_scale;
             test_continuous_ = (test_continuous_ - scalers_.continuous_mean) / scalers_.continuous_scale;
         }
 
-        // Recompute target scalers (only for regression targets)
         for (const auto& cfg : model_->schema().targets) {
             if (cfg.task != TaskType::Regression) continue;
-
             auto train_it = train_targets_.find(cfg.name);
             if (train_it == train_targets_.end()) continue;
-
             auto target_mean = train_it->second.mean();
             auto target_scale = train_it->second.std() + 1e-8f;
             scalers_.target_scalers[cfg.name] = {target_mean, target_scale};
-
-            // Apply scaling
             train_targets_[cfg.name] = (train_targets_[cfg.name] - target_mean) / target_scale;
             test_targets_[cfg.name] = (test_targets_[cfg.name] - target_mean) / target_scale;
         }
 
-        // Train this fold
         TrainResult fold_result = fit();
         cv_result.fold_results.push_back(fold_result);
 
-        // Accumulate metrics
         for (const auto& [target, metrics] : fold_result.final_metrics) {
             for (const auto& [metric_name, value] : metrics) {
                 metric_values[target][metric_name].push_back(value);
             }
         }
-
-        fold_start = fold_end;
     }
 
-    // Compute mean and std of metrics across folds
+    // Mean and std of each metric across folds.
     for (const auto& [target, metrics] : metric_values) {
         for (const auto& [metric_name, values] : metrics) {
             float sum = 0.0f;
@@ -2321,26 +2282,59 @@ CrossValidationResult Trainer::cross_validate(int n_folds, int seed) {
 
             float sq_sum = 0.0f;
             for (float v : values) sq_sum += (v - mean) * (v - mean);
-            float std = std::sqrt(sq_sum / values.size());
-            cv_result.std_metrics[target][metric_name] = std;
+            cv_result.std_metrics[target][metric_name] = std::sqrt(sq_sum / values.size());
         }
     }
 
-    // Restore original state
+    // Restore the original model weights and the pre-CV split (tensors, indices,
+    // scalers) so post-CV evaluators run against the original split.
     {
         std::istringstream iss(original_state);
         torch::serialize::InputArchive archive;
         archive.load_from(iss);
         model_->load(archive);
     }
-    // Restore the pre-CV split (tensors, indices, scalers) so post-CV
-    // evaluators run against the original split, not the last fold.
     restore_split_state(split_snapshot);
 
     auto end_time = std::chrono::high_resolution_clock::now();
     cv_result.total_time_seconds = std::chrono::duration<float>(end_time - start_time).count();
+    return cv_result;
+}
 
-    // Log summary
+CrossValidationResult Trainer::cross_validate(int n_folds, int seed) {
+    if (!data_prepared_) {
+        throw std::runtime_error("Data must be prepared before cross-validation");
+    }
+
+    const int64_t n_total = train_continuous_.size(0) + test_continuous_.size(0);
+
+    // Shuffled row indices into the concatenated train++test rows, partitioned
+    // into n_folds contiguous test blocks (the remaining rows are the train set).
+    std::vector<int64_t> indices(n_total);
+    std::iota(indices.begin(), indices.end(), 0);
+    std::mt19937 gen(seed);
+    std::shuffle(indices.begin(), indices.end(), gen);
+
+    const int64_t fold_size = n_total / n_folds;
+    const int64_t remainder = n_total % n_folds;
+
+    std::vector<std::pair<std::vector<int64_t>, std::vector<int64_t>>> folds;
+    folds.reserve(n_folds);
+    int64_t fold_start = 0;
+    for (int fold = 0; fold < n_folds; ++fold) {
+        const int64_t current = fold_size + (fold < remainder ? 1 : 0);
+        const int64_t fold_end = fold_start + current;
+        std::vector<int64_t> test_index(indices.begin() + fold_start, indices.begin() + fold_end);
+        std::vector<int64_t> train_index;
+        train_index.reserve(n_total - current);
+        for (int64_t i = 0; i < fold_start; ++i) train_index.push_back(indices[i]);
+        for (int64_t i = fold_end; i < n_total; ++i) train_index.push_back(indices[i]);
+        folds.emplace_back(std::move(train_index), std::move(test_index));
+        fold_start = fold_end;
+    }
+
+    auto cv_result = run_cross_validation(folds);
+
     std::ostringstream summary;
     summary << "Cross-validation complete (" << n_folds << " folds, "
             << cv_result.total_time_seconds << "s)\n";
@@ -2349,7 +2343,7 @@ CrossValidationResult Trainer::cross_validate(int n_folds, int seed) {
         for (const auto& [name, mean] : metrics) {
             auto std_it = cv_result.std_metrics[target].find(name);
             float std = (std_it != cv_result.std_metrics[target].end()) ? std_it->second : 0.0f;
-            summary << name << "=" << mean << "±" << std << " ";
+            summary << name << "=" << mean << "+/-" << std << " ";
         }
         summary << "\n";
     }
@@ -2468,176 +2462,27 @@ CrossValidationResult Trainer::cross_validate_spatial(
         spatial_config.lat_size, spatial_config.lon_size,
         n_folds, seed, spatial_config.balance);
 
-    auto folds = splitter.split(coordinates_);
-
     config_.log("Spatial block CV: " + std::to_string(n_folds) + " folds, "
                 "block_size=" + std::to_string(spatial_config.lat_size) + "x"
                 + std::to_string(spatial_config.lon_size) + " deg");
 
-    // Concatenate all data for fold splitting
-    auto all_continuous = torch::cat({train_continuous_, test_continuous_}, 0);
-    auto cat_if_both = [](const torch::Tensor& a, const torch::Tensor& b) -> torch::Tensor {
-        if (a.defined() && b.defined()) return torch::cat({a, b}, 0);
-        return {};
-    };
-    auto all_genus_ids = cat_if_both(train_genus_ids_, test_genus_ids_);
-    auto all_family_ids = cat_if_both(train_family_ids_, test_family_ids_);
-    auto all_species_ids = cat_if_both(train_species_ids_, test_species_ids_);
-    auto all_species_vector = cat_if_both(train_species_vector_, test_species_vector_);
-    auto all_pool_genus_ids = cat_if_both(train_pool_genus_ids_, test_pool_genus_ids_);
-    auto all_pool_family_ids = cat_if_both(train_pool_family_ids_, test_pool_family_ids_);
-    auto all_pool_weights = cat_if_both(train_pool_weights_, test_pool_weights_);
-    auto all_pool_mask = cat_if_both(train_pool_mask_, test_pool_mask_);
-    auto all_pool_has_cover = cat_if_both(train_pool_has_cover_, test_pool_has_cover_);
-    auto all_categorical_ids = cat_if_both(train_categorical_ids_, test_categorical_ids_);
-
-    std::unordered_map<std::string, torch::Tensor> all_targets;
-    for (const auto& [name, train_tensor] : train_targets_) {
-        auto test_it = test_targets_.find(name);
-        if (test_it != test_targets_.end()) {
-            all_targets[name] = torch::cat({train_tensor, test_it->second}, 0);
-        }
-    }
-
-    // Save original model state for restoration after each fold
-    std::ostringstream original_state_stream;
-    {
-        torch::serialize::OutputArchive archive;
-        model_->save(archive);
-        archive.save_to(original_state_stream);
-    }
-    std::string original_state = original_state_stream.str();
-    Scalers original_scalers = scalers_;
-
-    // Snapshot the full split so it can be restored after the fold loop.
-    SplitState split_snapshot = capture_split_state();
-
-    // Invert prepare_data's standardization once so each fold scales raw values
-    // exactly once (see cross_validate for the rationale).
-    unscale_continuous_targets(all_continuous, all_targets, original_scalers);
-
-    // Global plot index per concatenated row, for the CUDA-hash path.
-    torch::Tensor all_global_idx;
+    // coordinates_ is stored in ORIGINAL plot order (cloned in prepare_data
+    // before the shuffle), but run_cross_validation applies the fold indices to
+    // the concatenated train++test rows, which are in shuffled split order.
+    // Reorder the coordinates into that same order so the geographic block for
+    // fold index i lands on the plot whose coordinates produced it; otherwise
+    // the block assignment is paired with a different plot's features and the
+    // spatial split degenerates into a geographically-scrambled split (issue #70).
+    torch::Tensor split_order_coords = coordinates_;
     if (train_indices_.defined() && test_indices_.defined()) {
-        all_global_idx = torch::cat({train_indices_, test_indices_}, 0);
+        auto all_global_idx = torch::cat({train_indices_, test_indices_}, 0);
+        split_order_coords = coordinates_.index_select(
+            0, all_global_idx.to(coordinates_.device()));
     }
 
-    CrossValidationResult cv_result;
-    cv_result.n_folds = n_folds;
+    auto folds = splitter.split(split_order_coords);
 
-    auto cv_start = std::chrono::high_resolution_clock::now();
-
-    std::unordered_map<std::string, std::unordered_map<std::string, std::vector<float>>> all_metrics_values;
-
-    for (int fold = 0; fold < n_folds; ++fold) {
-        config_.log("\n--- Fold " + std::to_string(fold + 1) + "/" + std::to_string(n_folds) + " ---");
-
-        // Restore model to initial state
-        {
-            std::istringstream iss(original_state);
-            torch::serialize::InputArchive archive;
-            archive.load_from(iss);
-            model_->load(archive);
-        }
-
-        auto& [train_idx, test_idx] = folds[fold];
-        auto train_tensor = torch::tensor(train_idx, torch::kInt64);
-        auto test_tensor = torch::tensor(test_idx, torch::kInt64);
-
-        config_.log("  Train: " + std::to_string(train_idx.size()) +
-                    " plots, Test: " + std::to_string(test_idx.size()) + " plots");
-
-        // Reconstruct global plot indices for the CUDA-hash path and force a
-        // GPU re-cache for this fold's split (see cross_validate).
-        if (all_global_idx.defined()) {
-            train_indices_ = all_global_idx.index_select(0, train_tensor);
-            test_indices_ = all_global_idx.index_select(0, test_tensor);
-        }
-        gpu_data_cached_ = false;
-
-        // Split data for this fold
-        train_continuous_ = all_continuous.index_select(0, train_tensor);
-        test_continuous_ = all_continuous.index_select(0, test_tensor);
-
-        auto split_if_defined = [&](const torch::Tensor& all, torch::Tensor& train_dst, torch::Tensor& test_dst) {
-            if (all.defined()) {
-                train_dst = all.index_select(0, train_tensor);
-                test_dst = all.index_select(0, test_tensor);
-            }
-        };
-        split_if_defined(all_genus_ids, train_genus_ids_, test_genus_ids_);
-        split_if_defined(all_family_ids, train_family_ids_, test_family_ids_);
-        split_if_defined(all_species_ids, train_species_ids_, test_species_ids_);
-        split_if_defined(all_species_vector, train_species_vector_, test_species_vector_);
-        split_if_defined(all_pool_genus_ids, train_pool_genus_ids_, test_pool_genus_ids_);
-        split_if_defined(all_pool_family_ids, train_pool_family_ids_, test_pool_family_ids_);
-        split_if_defined(all_pool_weights, train_pool_weights_, test_pool_weights_);
-        split_if_defined(all_pool_mask, train_pool_mask_, test_pool_mask_);
-        split_if_defined(all_pool_has_cover, train_pool_has_cover_, test_pool_has_cover_);
-        split_if_defined(all_categorical_ids, train_categorical_ids_, test_categorical_ids_);
-
-        for (const auto& [name, tensor] : all_targets) {
-            train_targets_[name] = tensor.index_select(0, train_tensor);
-            test_targets_[name] = tensor.index_select(0, test_tensor);
-        }
-
-        // Recompute scalers for this fold's training data
-        if (train_continuous_.size(1) > 0) {
-            scalers_.continuous_mean = train_continuous_.mean(0);
-            scalers_.continuous_scale = train_continuous_.std(0) + 1e-8f;
-            train_continuous_ = (train_continuous_ - scalers_.continuous_mean) / scalers_.continuous_scale;
-            test_continuous_ = (test_continuous_ - scalers_.continuous_mean) / scalers_.continuous_scale;
-        }
-
-        for (const auto& cfg : model_->schema().targets) {
-            if (cfg.task != TaskType::Regression) continue;
-            auto train_it = train_targets_.find(cfg.name);
-            if (train_it == train_targets_.end()) continue;
-            auto target_mean = train_it->second.mean();
-            auto target_scale = train_it->second.std() + 1e-8f;
-            scalers_.target_scalers[cfg.name] = {target_mean, target_scale};
-            train_targets_[cfg.name] = (train_targets_[cfg.name] - target_mean) / target_scale;
-            test_targets_[cfg.name] = (test_targets_[cfg.name] - target_mean) / target_scale;
-        }
-
-        // Train this fold
-        TrainResult fold_result = fit();
-        cv_result.fold_results.push_back(fold_result);
-
-        for (const auto& [target, metrics] : fold_result.final_metrics) {
-            for (const auto& [metric_name, value] : metrics) {
-                all_metrics_values[target][metric_name].push_back(value);
-            }
-        }
-    }
-
-    // Compute mean and std of metrics across folds
-    for (const auto& [target, metrics] : all_metrics_values) {
-        for (const auto& [metric_name, values] : metrics) {
-            float sum = 0.0f;
-            for (float v : values) sum += v;
-            float mean = sum / values.size();
-            cv_result.mean_metrics[target][metric_name] = mean;
-
-            float sq_sum = 0.0f;
-            for (float v : values) sq_sum += (v - mean) * (v - mean);
-            float std_val = std::sqrt(sq_sum / values.size());
-            cv_result.std_metrics[target][metric_name] = std_val;
-        }
-    }
-
-    // Restore original state
-    {
-        std::istringstream iss(original_state);
-        torch::serialize::InputArchive archive;
-        archive.load_from(iss);
-        model_->load(archive);
-    }
-    // Restore the pre-CV split (tensors, indices, scalers).
-    restore_split_state(split_snapshot);
-
-    auto cv_end = std::chrono::high_resolution_clock::now();
-    cv_result.total_time_seconds = std::chrono::duration<float>(cv_end - cv_start).count();
+    auto cv_result = run_cross_validation(folds);
 
     config_.log("Spatial CV complete (" + std::to_string(n_folds) + " folds, "
                 + std::to_string(cv_result.total_time_seconds) + "s)");

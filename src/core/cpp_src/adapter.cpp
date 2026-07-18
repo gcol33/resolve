@@ -7,7 +7,8 @@ TabularAdapterImpl::TabularAdapterImpl(
     const ResolveSchema& schema,
     const ModelConfig& config
 ) : architecture_(config.encoder_architecture),
-    species_encoding_(config.species_encoding)
+    species_encoding_(config.species_encoding),
+    has_coordinates_(schema.has_coordinates)
 {
     // =========================================================================
     // Step 1: Determine numerical feature count from species encoding
@@ -306,9 +307,26 @@ torch::Tensor TabularAdapterImpl::forward(
             break;
 
         case EncoderArchitecture::GNN: {
-            // GNN needs adjacency matrix from coordinates
-            // Use first 2 dims of continuous as coordinates (if available)
+            // The first two continuous columns are the plot coordinates ONLY
+            // when the dataset carries them (continuous is laid out as
+            // [coordinates | covariates | unknown_* | categorical_embed | ...]).
+            // Without coordinates those columns are covariates, and building a
+            // "spatial" kNN graph from them is meaningless -- refuse rather than
+            // silently corrupt the graph (issue #73).
+            TORCH_CHECK(has_coordinates_,
+                "GNN encoder requires coordinates to build its spatial graph, "
+                "but the dataset has none. Provide longitude/latitude roles or "
+                "use a non-GNN encoder architecture.");
             auto coords = continuous.slice(/*dim=*/1, 0, 2);
+            // NOTE: the kNN graph is built over the plots in the CURRENT forward
+            // batch, so during mini-batch training each plot attends only to its
+            // batch-mates, not its true spatial neighbors. Inference forces a
+            // single full-batch forward for this architecture (see
+            // Predictor::predict) so predictions are batch-composition
+            // independent, but the training-time locality is a known limitation
+            // of this experimental encoder; a batch-composition-independent
+            // spatial GNN needs neighbor-sampling over a fixed global graph
+            // (issue #73, tracked separately).
             auto adj = build_knn_adjacency(coords, k_neighbors_);
             // Flatten features for GNN
             std::vector<torch::Tensor> all_feats;

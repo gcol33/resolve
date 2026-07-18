@@ -932,6 +932,7 @@ ResolveSchema parse_schema(const resolve_value* s) {
             if (vhas(tc_v, "num_classes")) tc.num_classes = (int)vint(tc_v, "num_classes");
             if (vhas(tc_v, "weight")) tc.weight = (float)vdbl(tc_v, "weight");
             if (vhas(tc_v, "class_weights")) tc.class_weights = vfloat_vec(tc_v, "class_weights");
+            if (vhas(tc_v, "class_names")) tc.class_names = vstr_vec(tc_v, "class_names");
             schema.targets.push_back(tc);
         }
     }
@@ -1593,6 +1594,10 @@ resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* wh
                 v_put(tm, "num_classes", v_int(tc.num_classes));
                 v_put(tm, "weight", v_double(tc.weight));
                 v_put(tm, "class_weights", v_double_array(tc.class_weights));
+                // Per-class label vocabulary (class_names[code] == label), so
+                // R callers can recover the code->label mapping like Python's
+                // TargetConfig.class_names (issue #76).
+                v_put(tm, "class_names", v_string_array(tc.class_names));
                 v_put(targets_m, tc.name, tm);
             }
             auto* m = v_map();

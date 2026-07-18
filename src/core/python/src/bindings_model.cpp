@@ -3,6 +3,53 @@
 #include <set>
 #include <torch/csrc/autograd/python_variable.h>  // For THPVariable_WrapList
 
+namespace {
+
+// Shared body for ResolveModel.forward and ResolveModel.__call__ (identical
+// marshalling): unpack the 11 optional input tensors, run the pure-C++ forward
+// with the GIL released, and return the {target -> tensor} dict.
+nb::object model_forward_dict(
+    resolve::ResolveModel& self,
+    nb::object continuous_obj, nb::object genus_ids_obj, nb::object family_ids_obj,
+    nb::object species_ids_obj, nb::object species_vector_obj,
+    nb::object pool_genus_ids_obj, nb::object pool_family_ids_obj,
+    nb::object pool_weights_obj, nb::object pool_mask_obj,
+    nb::object pool_has_cover_obj, nb::object categorical_ids_obj)
+{
+    at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
+    at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
+    at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
+    at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
+    at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
+    at::Tensor pool_genus_ids = unpack_optional_tensor(pool_genus_ids_obj);
+    at::Tensor pool_family_ids = unpack_optional_tensor(pool_family_ids_obj);
+    at::Tensor pool_weights = unpack_optional_tensor(pool_weights_obj);
+    at::Tensor pool_mask = unpack_optional_tensor(pool_mask_obj);
+    at::Tensor pool_has_cover = unpack_optional_tensor(pool_has_cover_obj);
+    at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
+
+    std::unordered_map<std::string, torch::Tensor> result;
+    {
+        // Pure-C++ compute: drop the GIL so other Python threads can run during
+        // the (potentially multi-second) forward. Inputs are held as at::Tensor
+        // (storage stays alive); no Python C-API runs here.
+        nb::gil_scoped_release nogil;
+        result = self->forward(continuous, genus_ids, family_ids, species_ids, species_vector,
+                               pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+                               categorical_ids);
+    }
+
+    PyObject* py_dict = PyDict_New();
+    for (const auto& [key, value] : result) {
+        PyObject* py_tensor = THPVariable_Wrap(value);
+        PyDict_SetItemString(py_dict, key.c_str(), py_tensor);
+        Py_DECREF(py_tensor);
+    }
+    return nb::steal(py_dict);
+}
+
+}  // namespace
+
 void register_model(nb::module_& m) {
     nb::class_<resolve::ResolveModel>(m, "ResolveModel")
         .def(nb::init<const resolve::ResolveSchema&, const resolve::ModelConfig&>(),
@@ -19,38 +66,9 @@ void register_model(nb::module_& m) {
                           nb::object pool_mask_obj,
                           nb::object pool_has_cover_obj,
                           nb::object categorical_ids_obj) {
-            // Convert Python tensors to C++ tensors using THPVariable_Unpack
-            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
-            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
-            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
-            at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
-            at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
-            at::Tensor pool_genus_ids = unpack_optional_tensor(pool_genus_ids_obj);
-            at::Tensor pool_family_ids = unpack_optional_tensor(pool_family_ids_obj);
-            at::Tensor pool_weights = unpack_optional_tensor(pool_weights_obj);
-            at::Tensor pool_mask = unpack_optional_tensor(pool_mask_obj);
-            at::Tensor pool_has_cover = unpack_optional_tensor(pool_has_cover_obj);
-            at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
-
-            std::unordered_map<std::string, torch::Tensor> result;
-            {
-                // Pure-C++ compute: drop the GIL so other Python threads can run
-                // during the (potentially multi-second) forward. Inputs are held
-                // as at::Tensor (storage stays alive); no Python C-API runs here.
-                nb::gil_scoped_release nogil;
-                result = self->forward(continuous, genus_ids, family_ids, species_ids, species_vector,
-                                       pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                                       categorical_ids);
-            }
-
-            // Convert output tensors to Python using THPVariable_Wrap
-            PyObject* py_dict = PyDict_New();
-            for (const auto& [key, value] : result) {
-                PyObject* py_tensor = THPVariable_Wrap(value);
-                PyDict_SetItemString(py_dict, key.c_str(), py_tensor);
-                Py_DECREF(py_tensor);
-            }
-            return nb::steal(py_dict);
+            return model_forward_dict(self, continuous_obj, genus_ids_obj, family_ids_obj,
+                species_ids_obj, species_vector_obj, pool_genus_ids_obj, pool_family_ids_obj,
+                pool_weights_obj, pool_mask_obj, pool_has_cover_obj, categorical_ids_obj);
         }, nb::arg("continuous"),
            nb::arg("genus_ids") = nb::none(),
            nb::arg("family_ids") = nb::none(),
@@ -75,38 +93,9 @@ void register_model(nb::module_& m) {
                            nb::object pool_mask_obj,
                            nb::object pool_has_cover_obj,
                            nb::object categorical_ids_obj) {
-            // Convert Python tensors to C++ tensors using THPVariable_Unpack
-            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
-            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
-            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
-            at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
-            at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
-            at::Tensor pool_genus_ids = unpack_optional_tensor(pool_genus_ids_obj);
-            at::Tensor pool_family_ids = unpack_optional_tensor(pool_family_ids_obj);
-            at::Tensor pool_weights = unpack_optional_tensor(pool_weights_obj);
-            at::Tensor pool_mask = unpack_optional_tensor(pool_mask_obj);
-            at::Tensor pool_has_cover = unpack_optional_tensor(pool_has_cover_obj);
-            at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
-
-            std::unordered_map<std::string, torch::Tensor> result;
-            {
-                // Pure-C++ compute: drop the GIL so other Python threads can run
-                // during the (potentially multi-second) forward. Inputs are held
-                // as at::Tensor (storage stays alive); no Python C-API runs here.
-                nb::gil_scoped_release nogil;
-                result = self->forward(continuous, genus_ids, family_ids, species_ids, species_vector,
-                                       pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                                       categorical_ids);
-            }
-
-            // Convert output tensors to Python using THPVariable_Wrap
-            PyObject* py_dict = PyDict_New();
-            for (const auto& [key, value] : result) {
-                PyObject* py_tensor = THPVariable_Wrap(value);
-                PyDict_SetItemString(py_dict, key.c_str(), py_tensor);
-                Py_DECREF(py_tensor);
-            }
-            return nb::steal(py_dict);
+            return model_forward_dict(self, continuous_obj, genus_ids_obj, family_ids_obj,
+                species_ids_obj, species_vector_obj, pool_genus_ids_obj, pool_family_ids_obj,
+                pool_weights_obj, pool_mask_obj, pool_has_cover_obj, categorical_ids_obj);
         }, nb::arg("continuous"),
            nb::arg("genus_ids") = nb::none(),
            nb::arg("family_ids") = nb::none(),
