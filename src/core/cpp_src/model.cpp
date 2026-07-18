@@ -499,6 +499,17 @@ torch::Tensor ResolveModelImpl::forward_single(
     torch::Tensor species_vector,
     torch::Tensor categorical_ids
 ) {
+    // forward_single carries no per-species pool tensors, so a rank_pool /
+    // transformer encoder would pool from empty inputs and return a wrong
+    // latent (taxonomy skipped, weighting silently binary). Refuse loudly and
+    // point callers at the full forward() path instead of failing silently.
+    if (config_.species_encoding == SpeciesEncodingMode::RankPool ||
+        config_.species_encoding == SpeciesEncodingMode::Transformer) {
+        throw std::runtime_error(
+            "forward_single does not support rank_pool/transformer encoders "
+            "(no pool tensors). Use forward() / forward_with_aux() with the "
+            "pool_* tensors instead.");
+    }
     continuous = fuse_categoricals_(std::move(continuous),
                                     std::move(categorical_ids));
     auto latent = encode(continuous, genus_ids, family_ids, species_ids, species_vector);

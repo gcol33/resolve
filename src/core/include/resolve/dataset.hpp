@@ -331,6 +331,11 @@ private:
     torch::Tensor pool_mask_;        // (n_plots, max_species) bool - true where species exists
     torch::Tensor pool_has_cover_;   // (n_plots,) float32 - 1.0 if plot has abundance data, 0.0 otherwise
 
+    // Whether an abundance/cover column was actually mapped in the roles. Drives
+    // the rank-pool has_cover flag by column presence (POC semantics), not by
+    // inspecting the values (a plot whose covers are all 1.0 still has cover).
+    bool has_abundance_column_ = false;
+
     // Raw species data in COO format for CUDA hash computation
     // Stored when use_cuda_hash=true in config, enables on-the-fly GPU hash computation
     torch::Tensor raw_plot_indices_;   // (n_records,) int64 - which plot each record belongs to

@@ -1,8 +1,19 @@
 #pragma once
 
+#include <string>
+
 #include "resolve/types.hpp"
 
 namespace resolve {
+
+// The default PYTORCH_CUDA_ALLOC_CONF value RESOLVE sets to tame WDDM
+// fragmentation. Single source for the two C++ callers (the nanobind
+// configure_cuda_allocator entry point and the C-ABI native shim); the Python
+// package keeps its own copy in resolve_core/__init__.py because it must set the
+// env var BEFORE `import torch`, i.e. before this library is loaded. Includes
+// the `expandable_segments:True` prefix off Windows (the cuMemMap allocator is
+// not implemented on win32).
+std::string default_cuda_alloc_conf();
 
 // Limit the fraction of GPU VRAM that the PyTorch caching allocator may use
 // on the given CUDA device. Wraps

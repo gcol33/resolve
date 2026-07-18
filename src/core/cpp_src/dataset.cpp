@@ -421,6 +421,7 @@ ResolveDataset ResolveDataset::from_species_source(
     std::unordered_map<std::string, std::pair<float, float>> plot_coords;
     std::unordered_map<std::string, std::vector<std::string>> plot_targets;
     std::unordered_set<std::string> seen_plots;
+    int64_t coord_na_count = 0;  // missing/unparseable coords coerced to (0,0)
 
     reader.read_rows([&](size_t, const std::vector<std::string>& row) {
         if (row.size() <= static_cast<size_t>(std::max({cols.plot, cols.species}))) {
@@ -437,13 +438,16 @@ ResolveDataset ResolveDataset::from_species_source(
             seen_plots.insert(plot_id);
             dataset.plot_ids_.push_back(plot_id);
 
-            // Coordinates
+            // Coordinates. NA-aware parse so a missing/unparseable cell is not
+            // silently read as a real (0, 0) location (issue #46).
             if (cols.longitude >= 0 && cols.latitude >= 0 &&
                 row.size() > static_cast<size_t>(std::max(cols.longitude, cols.latitude))) {
-                plot_coords[plot_id] = {
-                    safe_stof(row[cols.longitude]),
-                    safe_stof(row[cols.latitude])
-                };
+                auto lon = parse_regression_target(row[cols.longitude]);
+                auto lat = parse_regression_target(row[cols.latitude]);
+                plot_coords[plot_id] = {lon.value_or(0.0f), lat.value_or(0.0f)};
+                if (!lon.has_value() || !lat.has_value()) {
+                    coord_na_count++;
+                }
             }
 
             // Targets — stash the raw cell strings; classification
@@ -463,6 +467,13 @@ ResolveDataset ResolveDataset::from_species_source(
             plot_targets[plot_id] = std::move(target_values);
         }
     });
+
+    if (coord_na_count > 0) {
+        std::cerr << "[RESOLVE] warning: " << coord_na_count
+                  << " plot(s) had a missing/unparseable coordinate coerced to "
+                     "(0, 0); spatial models will treat these as a real location"
+                  << std::endl;
+    }
 
     int64_t n_plots = static_cast<int64_t>(dataset.plot_ids_.size());
     dataset.schema_.n_plots = n_plots;
@@ -541,8 +552,12 @@ ResolveDataset ResolveDataset::from_species_source(
                 acc[i] = it->second;
             }
             dataset.target_configs_[t].class_names = class_names;
+            // Size the head to hold the largest emitted code, not just the count
+            // of classes: the direct-int path emits the raw codes, so a sparse
+            // set like {0,2,5} needs num_classes = 6 (= class_names.size()), not
+            // 3, or a target of 5 indexes out of a 3-class head.
             if (dataset.target_configs_[t].num_classes == 0)
-                dataset.target_configs_[t].num_classes = static_cast<int>(mapping.size());
+                dataset.target_configs_[t].num_classes = static_cast<int>(class_names.size());
             dataset.targets_[name] = target_tensor;
 
             std::cout << "  Encoded '" << target_spec.column_name << "' as Int64 ("
@@ -592,6 +607,8 @@ ResolveDataset ResolveDataset::from_species_source(
     }
 
     dataset.schema_.targets = dataset.target_configs_;
+
+    dataset.has_abundance_column_ = (cols.abundance >= 0);
 
     // Encode species data
     dataset.encode_species(plot_records);
@@ -686,6 +703,10 @@ void ResolveDataset::load_header_data(
     // Per-column count of covariate cells that were missing/unparseable and
     // coerced to 0.0 during the scan (issue #32); warned about afterwards.
     std::vector<int64_t> cov_na_counts(covariate_cols.size(), 0);
+    // Count of rows whose longitude/latitude was missing/unparseable and
+    // coerced to 0.0 -- a real location (Gulf of Guinea) that silently corrupts
+    // spatial-graph neighbours. Warned about after the scan.
+    int64_t coord_na_count = 0;
 
     // Initialize target tensors
     for (size_t t = 0; t < targets.size(); ++t) {
@@ -756,10 +777,20 @@ void ResolveDataset::load_header_data(
         plot_ids_.push_back(pid);
         bool row_ok = true;
 
-        // Coordinates
+        // Coordinates. Parse with the NA-aware helper so a blank / "NA" /
+        // unparseable cell is not silently read as a real (0, 0) location; count
+        // the coercions and warn after the scan (issue #46). A genuine "0"
+        // parses to 0.0 and is not counted.
         if (coords_data && lon_col >= 0 && lat_col >= 0) {
-            coords_data[row_idx * 2 + 0] = safe_stof(row[lon_col]);
-            coords_data[row_idx * 2 + 1] = safe_stof(row[lat_col]);
+            auto lon = (row.size() > static_cast<size_t>(lon_col))
+                           ? parse_regression_target(row[lon_col]) : std::nullopt;
+            auto lat = (row.size() > static_cast<size_t>(lat_col))
+                           ? parse_regression_target(row[lat_col]) : std::nullopt;
+            coords_data[row_idx * 2 + 0] = lon.value_or(0.0f);
+            coords_data[row_idx * 2 + 1] = lat.value_or(0.0f);
+            if (!lon.has_value() || !lat.has_value()) {
+                coord_na_count++;
+            }
         }
 
         // Covariates. Parse with the NaN-aware helper so a blank / "NA" /
@@ -842,6 +873,12 @@ void ResolveDataset::load_header_data(
                       << " missing/unparseable cell(s) coerced to 0.0" << std::endl;
         }
     }
+    if (coord_na_count > 0) {
+        std::cerr << "[RESOLVE] warning: " << coord_na_count
+                  << " plot(s) had a missing/unparseable coordinate coerced to "
+                     "(0, 0); spatial models will treat these as a real location"
+                  << std::endl;
+    }
 
     // ---- Fit + encode classification target columns ----
     // For each classification target, either use the explicit class_mapping
@@ -899,18 +936,16 @@ void ResolveDataset::load_header_data(
             acc[i] = it->second;
         }
 
-        // Persist the resolved vocab + num_classes on the target config so
-        // the schema/checkpoint round-trips it. num_classes is the *count of
-        // distinct classes* (= mapping.size()), matching the POC's
-        // `cfg["num_classes"] = len(categorical_mappings[col])`. This can be
-        // smaller than class_names.size() when the integer-pass path
-        // produces sparse codes (e.g. mapping = {"0":0,"2":2,"5":5} →
-        // num_classes=3 but class_names is length 6 with gaps). Sparse-int
-        // EUNIS-style columns essentially never occur, but stay consistent
-        // with the POC anyway. Auto-fill only when the caller passed 0.
+        // Persist the resolved vocab + num_classes on the target config so the
+        // schema/checkpoint round-trips it. num_classes = class_names.size(),
+        // which is the class count for a dense factorization and max_code + 1
+        // for the direct-int path. Sizing to mapping.size() (the distinct-class
+        // count) would under-size the head when the direct-int path emits sparse
+        // codes (e.g. {0,2,5} needs 6 outputs, not 3), so a target of 5 would
+        // index out of bounds. Auto-fill only when the caller passed 0.
         target_configs_[t].class_names = class_names;
         if (target_configs_[t].num_classes == 0) {
-            target_configs_[t].num_classes = static_cast<int>(mapping.size());
+            target_configs_[t].num_classes = static_cast<int>(class_names.size());
         }
 
         const char* src = explicit_mapping ? "explicit" : "auto";
@@ -1038,6 +1073,8 @@ void ResolveDataset::load_species_data(
         plot_records[plot_id].push_back(make_species_record(row, cols));
     });
 
+    has_abundance_column_ = (cols.abundance >= 0);
+
     // Encode species
     encode_species(plot_records);
 }
@@ -1111,6 +1148,12 @@ void ResolveDataset::encode_species(
     // Copy tracking flags from config to schema
     schema_.track_unknown_fraction = config_.track_unknown_fraction;
     schema_.track_unknown_count = config_.track_unknown_count;
+
+    // Record the pool weighting scheme so a checkpoint can rebuild the matching
+    // inference-side DatasetConfig (issue #38). pool_species_cap is refined to
+    // the resolved max-species width in the rank_pool block below.
+    schema_.pool_weighting = static_cast<int>(config_.pool_weighting);
+    schema_.pool_species_cap = config_.pool_species_cap;
 
     // Fit taxonomy vocabulary
     if (schema_.has_taxonomy) {
@@ -1340,13 +1383,18 @@ void ResolveDataset::encode_species(
             rp_encoder.set_vocabs(std::move(sv), taxonomy_vocab_);
         }
         auto encoded = rp_encoder.transform(all_pool_records, plot_ids_,
-                                            config_.pool_species_cap);
+                                            config_.pool_species_cap,
+                                            has_abundance_column_);
 
         species_ids_ = encoded.species_ids;
         pool_genus_ids_ = encoded.genus_ids;
         pool_family_ids_ = encoded.family_ids;
         pool_weights_ = encoded.weights;
         pool_mask_ = encoded.mask;
+        // Record the resolved species-cap width so inference truncates each plot
+        // to the same max-species the model was trained on, even when the cap
+        // was auto (p99) and would resolve differently on the inference data.
+        schema_.pool_species_cap = static_cast<int>(encoded.species_ids.size(1));
         // Encoder returns float32 has_cover; downstream APIs accept either,
         // but we expose it as float32 so PlotEncoderRankPool's "default to
         // ones" path (which yields float32) stays consistent.

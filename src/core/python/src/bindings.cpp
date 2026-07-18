@@ -13,12 +13,6 @@
 #include <cstdlib>
 #include <string>
 
-#if defined(_WIN32)
-#define RESOLVE_IS_WIN32 1
-#else
-#define RESOLVE_IS_WIN32 0
-#endif
-
 namespace {
 
 // Mirror of resolve_core/__init__.py::configure_cuda_allocator. The Python
@@ -28,10 +22,8 @@ namespace {
 // has no effect on the active allocator config. Documented as such on the
 // Python wrapper.
 std::string configure_cuda_allocator_impl(bool force) {
-    std::string base = "garbage_collection_threshold:0.8,max_split_size_mb:256";
-    if constexpr (!RESOLVE_IS_WIN32) {
-        base = "expandable_segments:True," + base;
-    }
+    // Single source in resolve/gpu.hpp (shared with the C-ABI native shim).
+    std::string base = resolve::default_cuda_alloc_conf();
 
     const char* existing = std::getenv("PYTORCH_CUDA_ALLOC_CONF");
     if (force || existing == nullptr || existing[0] == '\0') {

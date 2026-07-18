@@ -202,12 +202,9 @@ JEPAPretrainer::JEPAPretrainer(
         config.predictor_dropout
     );
 
-    // Derive feature dimension from model schema (coordinates + hash/embed + covariates)
-    const auto& schema = context_encoder_->schema();
-    int64_t n_features = (schema.has_coordinates ? 2 : 0)
-                       + schema.n_species
-                       + static_cast<int64_t>(schema.covariate_names.size());
-    masker_ = FeatureMasker(n_features, config.mask_ratio, config.mask_strategy);
+    // masker_ is (re)built in pretrain() from the actual runtime feature count
+    // (continuous.size(1)); a schema-derived construction here would be a dead,
+    // and for hash mode inconsistent, first build.
 
     // Create target encoder as a deep copy (EMA copy)
     // We copy weights from context encoder after the first forward pass
@@ -265,6 +262,55 @@ float JEPAPretrainer::get_ema_decay(int step, int total_steps) const {
     float cosine = 0.5f * (1.0f + std::cos(M_PI * progress));
     return config_.ema_decay_end - (config_.ema_decay_end - config_.ema_decay) * cosine;
 }
+
+namespace {
+
+// Mask the species side of a JEPA context view. FeatureMasker only masks the
+// continuous block; for hash-mode encoders the species signal lives there and
+// is masked, but embed / rank / sparse encoders read composition from the
+// species-ID / explicit-vector tensors, which would otherwise pass through the
+// context encoder unmasked and let the pretext task read the answer. Dropping a
+// `ratio` fraction of species tokens (id -> 0 padding, and the same rows on
+// genus/family) and of explicit-vector entries restores a non-trivial task.
+struct MaskedSpeciesView {
+    torch::Tensor genus, family, species, vector;
+};
+
+MaskedSpeciesView mask_species_view(
+    const torch::Tensor& genus_ids,
+    const torch::Tensor& family_ids,
+    const torch::Tensor& species_ids,
+    const torch::Tensor& species_vector,
+    float ratio
+) {
+    MaskedSpeciesView v{genus_ids, family_ids, species_ids, species_vector};
+
+    if (species_ids.defined() && species_ids.numel() > 0) {
+        auto keep = (torch::rand_like(species_ids.to(torch::kFloat32)) >= ratio);
+        // Never drop existing padding into a "kept" state; masked tokens go to 0.
+        auto valid = (species_ids != 0);
+        auto drop = valid & ~keep;
+        v.species = species_ids.clone();
+        v.species.index_put_({drop}, 0);
+        if (genus_ids.defined() && genus_ids.numel() > 0) {
+            v.genus = genus_ids.clone();
+            v.genus.index_put_({drop}, 0);
+        }
+        if (family_ids.defined() && family_ids.numel() > 0) {
+            v.family = family_ids.clone();
+            v.family.index_put_({drop}, 0);
+        }
+    }
+
+    if (species_vector.defined() && species_vector.numel() > 0) {
+        auto keep = (torch::rand_like(species_vector) >= ratio).to(species_vector.dtype());
+        v.vector = species_vector * keep;
+    }
+
+    return v;
+}
+
+}  // namespace
 
 PretrainResult JEPAPretrainer::pretrain(
     torch::Tensor continuous,
@@ -332,10 +378,15 @@ PretrainResult JEPAPretrainer::pretrain(
             // Create mask for this batch
             auto mask = masker_->create_mask(batch_size);
 
-            // Masked view -> context encoder
+            // Masked view -> context encoder. Mask the continuous block AND the
+            // species-ID / explicit-vector inputs so embed/rank/sparse encoders
+            // cannot read the composition straight from an unmasked input.
             auto masked_cont = masker_->apply_mask(batch_cont, mask);
+            auto sv = mask_species_view(
+                batch_genus, batch_family, batch_species, batch_vector,
+                config_.mask_ratio);
             auto context_repr = context_encoder_->get_latent(
-                masked_cont, batch_genus, batch_family, batch_species, batch_vector);
+                masked_cont, sv.genus, sv.family, sv.species, sv.vector);
 
             // Predict target representation from context
             auto predicted_repr = predictor_->forward(context_repr);
@@ -535,7 +586,7 @@ torch::Tensor MaskedSpeciesHeadImpl::forward(torch::Tensor token_embeddings) {
     return proj_->forward(token_embeddings);
 }
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 mask_species_batch(
     torch::Tensor species_ids,
     torch::Tensor valid_mask,
@@ -552,12 +603,19 @@ mask_species_batch(
     // Save targets before masking
     auto mlm_targets = species_ids.index({mlm_mask}).clone();
 
+    // The 80% subset whose token embedding the encoder swaps for the learned
+    // mask embedding. Kept separate from mlm_mask so the 10%-random and
+    // 10%-keep ids in masked_ids survive to the encoder (passing the full
+    // mlm_mask here would overwrite every masked position with the mask
+    // embedding, nullifying the 80/10/10 split entirely).
+    auto mask_token_positions = torch::zeros_like(mlm_mask);
+
     // BERT-style 80/10/10 split
     auto n_masked = mlm_mask.sum().item<int64_t>();
     if (n_masked > 0) {
         auto action_rand = torch::rand({n_masked}, torch::TensorOptions().device(device));
 
-        // 80% → replace with 0 (mask token — encoder applies mask_embedding)
+        // 80% → mask token (id set to 0; encoder applies mask_embedding here)
         auto mask_replace = action_rand < 0.8f;
         // 10% → random species ID (1 to n_species-1)
         auto mask_random = (action_rand >= 0.8f) & (action_rand < 0.9f);
@@ -566,19 +624,20 @@ mask_species_batch(
         // Apply masking
         auto masked_positions_flat = mlm_mask.nonzero();
         for (int64_t i = 0; i < n_masked; ++i) {
+            auto r = masked_positions_flat[i][0];
+            auto c = masked_positions_flat[i][1];
             if (mask_replace[i].item<bool>()) {
-                masked_ids.index_put_(
-                    {masked_positions_flat[i][0], masked_positions_flat[i][1]}, 0);
+                masked_ids.index_put_({r, c}, 0);
+                mask_token_positions.index_put_({r, c}, true);
             } else if (mask_random[i].item<bool>()) {
                 auto random_id = torch::randint(1, n_species, {1},
                     torch::TensorOptions().dtype(torch::kInt64).device(device));
-                masked_ids.index_put_(
-                    {masked_positions_flat[i][0], masked_positions_flat[i][1]}, random_id.item<int64_t>());
+                masked_ids.index_put_({r, c}, random_id.item<int64_t>());
             }
         }
     }
 
-    return {masked_ids, mlm_mask, mlm_targets};
+    return {masked_ids, mlm_mask, mlm_targets, mask_token_positions};
 }
 
 MaskedSpeciesPretrainer::MaskedSpeciesPretrainer(
@@ -645,14 +704,16 @@ std::vector<float> MaskedSpeciesPretrainer::pretrain(
                 ? weights.index_select(0, idx) : torch::Tensor();
 
             // Apply BERT masking
-            auto [masked_ids, mlm_mask, mlm_targets] =
+            auto [masked_ids, mlm_mask, mlm_targets, mask_token_positions] =
                 mask_species_batch(batch_sp, batch_mask, n_species_, config_.mask_prob);
 
             if (mlm_targets.numel() == 0) continue;
 
-            // Get pre-pooling token embeddings
+            // Get pre-pooling token embeddings. Only the 80% mask-token subset
+            // is replaced with the mask embedding; the 10%-random and 10%-keep
+            // ids reach the encoder through masked_ids.
             auto tokens = encoder_->forward_tokens(
-                masked_ids, batch_g, batch_f, batch_w, batch_mask, mlm_mask);
+                masked_ids, batch_g, batch_f, batch_w, batch_mask, mask_token_positions);
 
             // Extract masked positions and project to species logits
             auto masked_tokens = tokens.index({mlm_mask});  // (N_masked, d_model)

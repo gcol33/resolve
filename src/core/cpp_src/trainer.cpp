@@ -754,6 +754,7 @@ Trainer::eval_epoch(int epoch) {
         bool nonfinite = false;
         std::vector<std::shared_ptr<torch::nn::BatchNorm1dImpl>> bns;
         std::vector<std::pair<torch::Tensor, torch::Tensor>> saved;
+        std::vector<torch::Tensor> saved_nbt;  // num_batches_tracked
         for (auto& m : model_->modules(/*include_self=*/false)) {
             if (auto bn = std::dynamic_pointer_cast<torch::nn::BatchNorm1dImpl>(m)) {
                 if (bn->running_mean.defined() && bn->running_var.defined()) {
@@ -766,6 +767,8 @@ Trainer::eval_epoch(int epoch) {
                     }
                     bns.push_back(bn);
                     saved.emplace_back(bn->running_mean.clone(), bn->running_var.clone());
+                    saved_nbt.push_back(bn->num_batches_tracked.defined()
+                        ? bn->num_batches_tracked.clone() : torch::Tensor());
                 }
             }
         }
@@ -780,6 +783,9 @@ Trainer::eval_epoch(int epoch) {
         for (size_t i = 0; i < bns.size(); ++i) {
             bns[i]->running_mean.copy_(saved[i].first);
             bns[i]->running_var.copy_(saved[i].second);
+            if (saved_nbt[i].defined() && bns[i]->num_batches_tracked.defined()) {
+                bns[i]->num_batches_tracked.copy_(saved_nbt[i]);
+            }
         }
         model_->eval();
         std::ostringstream dbg;
@@ -813,12 +819,13 @@ float Trainer::get_learning_rate(int epoch) const {
     switch (config_.lr_scheduler) {
         case LRSchedulerType::StepLR: {
             // Step decay: multiply LR by gamma every lr_step_size epochs
-            int n_decays = epoch / config_.lr_step_size;
+            int n_decays = config_.lr_step_size > 0 ? epoch / config_.lr_step_size : 0;
             return config_.lr * std::pow(config_.lr_gamma, static_cast<float>(n_decays));
         }
         case LRSchedulerType::CosineAnnealing: {
             // Cosine annealing from lr to lr_min
-            float progress = static_cast<float>(epoch) / config_.max_epochs;
+            float progress = config_.max_epochs > 0
+                ? static_cast<float>(epoch) / config_.max_epochs : 0.0f;
             float cosine = 0.5f * (1.0f + std::cos(M_PI * progress));
             return config_.lr_min + (config_.lr - config_.lr_min) * cosine;
         }
@@ -947,13 +954,6 @@ void Trainer::release_training_state() {
     amp_scale_ = config_.amp_init_scale;
     amp_growth_tracker_ = 0;
 
-    // Drop prefetched hash buffers (CUDA-only path).
-    prefetch_hash_[0] = torch::Tensor();
-    prefetch_hash_[1] = torch::Tensor();
-    prefetch_batch_idx_ = torch::Tensor();
-    prefetch_buffer_idx_ = 0;
-    prefetch_valid_ = false;
-
     // Release every GPU-cached tensor. We don't drop the host-side train_*
     // / test_* tensors because prepare_data_ semantics promise to keep them
     // alive across fit() calls; only the GPU mirrors are torn down so the
@@ -988,14 +988,6 @@ void Trainer::release_training_state() {
     gpu_train_raw_weights_ = torch::Tensor();
     gpu_train_plot_offsets_ = torch::Tensor();
     gpu_test_indices_ = torch::Tensor();
-
-    // Shuffled mirrors (rarely used today but cleared for completeness).
-    shuffled_continuous_ = torch::Tensor();
-    shuffled_genus_ids_ = torch::Tensor();
-    shuffled_family_ids_ = torch::Tensor();
-    shuffled_species_ids_ = torch::Tensor();
-    shuffled_species_vector_ = torch::Tensor();
-    shuffled_targets_.clear();
 
 #ifdef RESOLVE_HAS_CUDA
     // Return free blocks to the device so the allocator's reserved pool
@@ -1291,11 +1283,14 @@ TrainResult Trainer::fit() {
                 continue;
             }
 
-            auto pred = pred_it->second.squeeze();  // Squeeze to 1D for regression
-            auto test_target = test_target_it->second.to(config_.device).squeeze();
-            auto train_target = train_target_it->second.to(config_.device).squeeze();
+            // reshape({-1}) instead of squeeze() so a single-sample test fold
+            // (n_test == 1) keeps a 1-D batch dimension instead of collapsing to
+            // a 0-D scalar (which would break .size(0) / argmax below).
+            auto test_target = test_target_it->second.to(config_.device).reshape({-1});
+            auto train_target = train_target_it->second.to(config_.device).reshape({-1});
 
             if (cfg.task == TaskType::Regression) {
+                auto pred = pred_it->second.reshape({-1});
                 // Training mean (in scaled space for regression)
                 float train_mean = train_target.mean().item<float>();
                 baseline.training_mean = train_mean;
@@ -1332,7 +1327,11 @@ TrainResult Trainer::fit() {
                 auto baseline_correct = (test_target.to(torch::kLong) == mode_class).sum();
                 baseline.baseline_accuracy = baseline_correct.item<float>() / test_target.size(0);
 
-                auto pred_classes = pred.argmax(1);
+                // Keep the (n_test, n_classes) shape so argmax over classes works
+                // even when n_test == 1 (a squeezed (n_classes,) would misfire).
+                auto pred_logits = pred_it->second;
+                if (pred_logits.dim() == 1) pred_logits = pred_logits.unsqueeze(0);
+                auto pred_classes = pred_logits.argmax(1);
                 auto model_correct = (pred_classes == test_target.to(torch::kLong)).sum();
                 baseline.model_accuracy = model_correct.item<float>() / test_target.size(0);
                 baseline.accuracy_lift = baseline.model_accuracy - baseline.baseline_accuracy;
@@ -1450,17 +1449,42 @@ void Trainer::load_weights_into(torch::serialize::InputArchive& archive, Resolve
     // check_inplace ("a leaf Variable that requires grad is being used in an
     // in-place operation"). Mirror PyTorch's copy-inside-torch.no_grad().
     torch::NoGradGuard no_grad;
+    int64_t n_expected = 0, n_loaded = 0;
+    std::string first_missing;
+    auto note_missing = [&](const std::string& key) {
+        if (first_missing.empty()) first_missing = key;
+    };
     for (const auto& pair : model->named_parameters()) {
+        ++n_expected;
         torch::Tensor t;
         if (archive.try_read("param_" + pair.key(), t)) {
             pair.value().copy_(t);
+            ++n_loaded;
+        } else {
+            note_missing("param_" + pair.key());
         }
     }
     for (const auto& pair : model->named_buffers()) {
+        ++n_expected;
         torch::Tensor t;
         if (archive.try_read("buffer_" + pair.key(), t)) {
             pair.value().copy_(t);
+            ++n_loaded;
+        } else {
+            note_missing("buffer_" + pair.key());
         }
+    }
+    // A silent skip leaves those tensors at fresh random init, so a mismatched
+    // architecture would load as a partly-untrained model. Fail loudly instead
+    // (this is what makes an encoder_architecture / sub-config drift visible).
+    if (n_loaded != n_expected) {
+        std::ostringstream msg;
+        msg << "load_weights_into: checkpoint is missing " << (n_expected - n_loaded)
+            << " of " << n_expected << " model tensors, so the loaded model would "
+               "keep randomly-initialized weights. The model architecture likely "
+               "does not match the checkpoint (e.g. a different encoder_architecture "
+               "or architecture sub-config). First missing tensor: " << first_missing;
+        throw std::runtime_error(msg.str());
     }
 }
 
@@ -1938,6 +1962,71 @@ void Trainer::unscale_continuous_targets(
     }
 }
 
+Trainer::SplitState Trainer::capture_split_state() const {
+    SplitState s;
+    s.train_continuous = train_continuous_;
+    s.train_genus_ids = train_genus_ids_;
+    s.train_family_ids = train_family_ids_;
+    s.train_species_ids = train_species_ids_;
+    s.train_species_vector = train_species_vector_;
+    s.train_pool_genus_ids = train_pool_genus_ids_;
+    s.train_pool_family_ids = train_pool_family_ids_;
+    s.train_pool_weights = train_pool_weights_;
+    s.train_pool_mask = train_pool_mask_;
+    s.train_pool_has_cover = train_pool_has_cover_;
+    s.train_categorical_ids = train_categorical_ids_;
+    s.train_targets = train_targets_;
+    s.test_continuous = test_continuous_;
+    s.test_genus_ids = test_genus_ids_;
+    s.test_family_ids = test_family_ids_;
+    s.test_species_ids = test_species_ids_;
+    s.test_species_vector = test_species_vector_;
+    s.test_pool_genus_ids = test_pool_genus_ids_;
+    s.test_pool_family_ids = test_pool_family_ids_;
+    s.test_pool_weights = test_pool_weights_;
+    s.test_pool_mask = test_pool_mask_;
+    s.test_pool_has_cover = test_pool_has_cover_;
+    s.test_categorical_ids = test_categorical_ids_;
+    s.test_targets = test_targets_;
+    s.train_indices = train_indices_;
+    s.test_indices = test_indices_;
+    s.scalers = scalers_;
+    return s;
+}
+
+void Trainer::restore_split_state(const SplitState& s) {
+    train_continuous_ = s.train_continuous;
+    train_genus_ids_ = s.train_genus_ids;
+    train_family_ids_ = s.train_family_ids;
+    train_species_ids_ = s.train_species_ids;
+    train_species_vector_ = s.train_species_vector;
+    train_pool_genus_ids_ = s.train_pool_genus_ids;
+    train_pool_family_ids_ = s.train_pool_family_ids;
+    train_pool_weights_ = s.train_pool_weights;
+    train_pool_mask_ = s.train_pool_mask;
+    train_pool_has_cover_ = s.train_pool_has_cover;
+    train_categorical_ids_ = s.train_categorical_ids;
+    train_targets_ = s.train_targets;
+    test_continuous_ = s.test_continuous;
+    test_genus_ids_ = s.test_genus_ids;
+    test_family_ids_ = s.test_family_ids;
+    test_species_ids_ = s.test_species_ids;
+    test_species_vector_ = s.test_species_vector;
+    test_pool_genus_ids_ = s.test_pool_genus_ids;
+    test_pool_family_ids_ = s.test_pool_family_ids;
+    test_pool_weights_ = s.test_pool_weights;
+    test_pool_mask_ = s.test_pool_mask;
+    test_pool_has_cover_ = s.test_pool_has_cover;
+    test_categorical_ids_ = s.test_categorical_ids;
+    test_targets_ = s.test_targets;
+    train_indices_ = s.train_indices;
+    test_indices_ = s.test_indices;
+    scalers_ = s.scalers;
+    // The per-fold loop cached fold data on the GPU; those tensors no longer
+    // match the restored split, so force a re-cache on the next fit().
+    gpu_data_cached_ = false;
+}
+
 CrossValidationResult Trainer::cross_validate(int n_folds, int seed) {
     if (!data_prepared_) {
         throw std::runtime_error("Data must be prepared before cross-validation");
@@ -2003,6 +2092,10 @@ CrossValidationResult Trainer::cross_validate(int n_folds, int seed) {
 
     // Store original scalers
     Scalers original_scalers = scalers_;
+
+    // Snapshot the full split so it can be restored after the fold loop
+    // overwrites the train/test tensors, indices, and scalers.
+    SplitState split_snapshot = capture_split_state();
 
     // all_continuous / all_targets were assembled from prepare_data's already-
     // standardized train/test tensors. Invert that scaling once here so each
@@ -2168,7 +2261,9 @@ CrossValidationResult Trainer::cross_validate(int n_folds, int seed) {
         archive.load_from(iss);
         model_->load(archive);
     }
-    scalers_ = original_scalers;
+    // Restore the pre-CV split (tensors, indices, scalers) so post-CV
+    // evaluators run against the original split, not the last fold.
+    restore_split_state(split_snapshot);
 
     auto end_time = std::chrono::high_resolution_clock::now();
     cv_result.total_time_seconds = std::chrono::duration<float>(end_time - start_time).count();
@@ -2340,6 +2435,9 @@ CrossValidationResult Trainer::cross_validate_spatial(
     std::string original_state = original_state_stream.str();
     Scalers original_scalers = scalers_;
 
+    // Snapshot the full split so it can be restored after the fold loop.
+    SplitState split_snapshot = capture_split_state();
+
     // Invert prepare_data's standardization once so each fold scales raw values
     // exactly once (see cross_validate for the rationale).
     unscale_continuous_targets(all_continuous, all_targets, original_scalers);
@@ -2461,7 +2559,8 @@ CrossValidationResult Trainer::cross_validate_spatial(
         archive.load_from(iss);
         model_->load(archive);
     }
-    scalers_ = original_scalers;
+    // Restore the pre-CV split (tensors, indices, scalers).
+    restore_split_state(split_snapshot);
 
     auto cv_end = std::chrono::high_resolution_clock::now();
     cv_result.total_time_seconds = std::chrono::duration<float>(cv_end - cv_start).count();

@@ -62,6 +62,20 @@ TabularAdapterImpl::TabularAdapterImpl(
     }
     n_categoricals_ = static_cast<int64_t>(cat_cardinalities.size());
 
+    // Project a transformer-family encoder's d_model output down to the model's
+    // latent dim (the last hidden dim, or the arch output when no hidden dims).
+    // Shared by FT-Transformer / SAINT / ExcelFormer so the block lives once.
+    auto setup_output_proj = [&](int64_t arch_output) {
+        latent_dim_ = config.hidden_dims.empty() ? arch_output : config.hidden_dims.back();
+        if (arch_output != latent_dim_) {
+            output_proj_ = register_module("output_proj",
+                torch::nn::Linear(arch_output, latent_dim_));
+            needs_output_proj_ = true;
+        } else {
+            latent_dim_ = arch_output;
+        }
+    };
+
     // =========================================================================
     // Step 3: Create architecture-specific encoder
     // =========================================================================
@@ -82,15 +96,7 @@ TabularAdapterImpl::TabularAdapterImpl(
                     /*use_cls_token=*/true,
                     cfg.pre_norm
                 ));
-            int64_t arch_output = cfg.d_model;
-            latent_dim_ = config.hidden_dims.empty() ? arch_output : config.hidden_dims.back();
-            if (arch_output != latent_dim_) {
-                output_proj_ = register_module("output_proj",
-                    torch::nn::Linear(arch_output, latent_dim_));
-                needs_output_proj_ = true;
-            } else {
-                latent_dim_ = arch_output;
-            }
+            setup_output_proj(cfg.d_model);
             break;
         }
 
@@ -125,15 +131,7 @@ TabularAdapterImpl::TabularAdapterImpl(
                     cfg.use_row_attention,
                     /*use_cls_token=*/true
                 ));
-            int64_t arch_output = cfg.d_model;
-            latent_dim_ = config.hidden_dims.empty() ? arch_output : config.hidden_dims.back();
-            if (arch_output != latent_dim_) {
-                output_proj_ = register_module("output_proj",
-                    torch::nn::Linear(arch_output, latent_dim_));
-                needs_output_proj_ = true;
-            } else {
-                latent_dim_ = arch_output;
-            }
+            setup_output_proj(cfg.d_model);
             break;
         }
 
@@ -176,15 +174,7 @@ TabularAdapterImpl::TabularAdapterImpl(
                     cfg.importance_threshold,
                     /*use_cls_token=*/true
                 ));
-            int64_t arch_output = cfg.d_model;
-            latent_dim_ = config.hidden_dims.empty() ? arch_output : config.hidden_dims.back();
-            if (arch_output != latent_dim_) {
-                output_proj_ = register_module("output_proj",
-                    torch::nn::Linear(arch_output, latent_dim_));
-                needs_output_proj_ = true;
-            } else {
-                latent_dim_ = arch_output;
-            }
+            setup_output_proj(cfg.d_model);
             break;
         }
 

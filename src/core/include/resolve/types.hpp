@@ -195,6 +195,17 @@ struct ResolveSchema {
     // ModelConfig — important for Predictor.load.
     int64_t categorical_embed_dim = 8;
 
+    // Rank-pool / transformer pooling scheme + species cap used to build the
+    // pool weight tensors at load time. Stored so a checkpoint can rebuild the
+    // matching inference-side DatasetConfig instead of silently defaulting to
+    // Log1p (which recomputes different per-species weights for the same model).
+    // pool_weighting is the underlying PoolWeighting enum value
+    // (Binary=0, Abundance=1, Log1p=2, Norm=3, Rank=4); kept as int because
+    // types.hpp cannot include species_encoding.hpp. pool_species_cap mirrors
+    // DatasetConfig::pool_species_cap (0 = auto p99).
+    int pool_weighting = 2;    // PoolWeighting::Log1p
+    int pool_species_cap = 0;  // 0 = auto
+
     // Helper: true if this schema has categorical covariates configured.
     [[nodiscard]] bool has_categoricals() const noexcept {
         return !categorical_names.empty();

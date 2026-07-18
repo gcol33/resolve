@@ -81,6 +81,11 @@ int predict_command(
     dataset_config.species_encoding = predictor.model()->species_encoding();
     dataset_config.hash_dim = predictor.model()->config().hash_dim;
     dataset_config.top_k = predictor.model()->config().top_k;
+    // Recover the rank-pool weighting scheme + species cap from the checkpoint
+    // schema so the pool weights are recomputed with the SAME scheme the model
+    // was trained on (issue #38). Without this they silently default to Log1p.
+    dataset_config.pool_weighting = static_cast<PoolWeighting>(schema.pool_weighting);
+    dataset_config.pool_species_cap = schema.pool_species_cap;
 
     // Load dataset
     std::cout << "Loading data..." << std::endl;

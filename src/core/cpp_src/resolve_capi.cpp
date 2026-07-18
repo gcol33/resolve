@@ -918,6 +918,8 @@ ResolveSchema parse_schema(const resolve_value* s) {
     if (vhas(s, "categorical_names")) schema.categorical_names = vstr_vec(s, "categorical_names");
     if (vhas(s, "categorical_vocab_sizes")) schema.categorical_vocab_sizes = vint_vec(s, "categorical_vocab_sizes");
     if (vhas(s, "categorical_embed_dim")) schema.categorical_embed_dim = vint(s, "categorical_embed_dim");
+    if (vhas(s, "pool_weighting")) schema.pool_weighting = (int)vint(s, "pool_weighting");
+    if (vhas(s, "pool_species_cap")) schema.pool_species_cap = (int)vint(s, "pool_species_cap");
 
     const resolve_value* targets = vget(s, "targets");
     if (targets && targets->kind == RESOLVE_VALUE_MAP) {
@@ -983,6 +985,20 @@ RunMetadata parse_run_metadata(const resolve_value* c) {
 // ============================================================================
 // Result-struct -> value-tree converters. One-for-one with r/src/rcpp_common.h.
 // ============================================================================
+
+// RAII guard: frees a partially-built value tree if a converter throws
+// mid-build (e.g. a tensor->value conversion faults on a device error),
+// instead of leaking it -- CAPI_BODY_PTR catches the exception and returns
+// NULL, so the local root would otherwise have no owner. release() hands
+// ownership back to the caller on success.
+struct ValueGuard {
+    resolve_value* p;
+    explicit ValueGuard(resolve_value* v) noexcept : p(v) {}
+    ~ValueGuard() { if (p) resolve_value_free(p); }
+    ValueGuard(const ValueGuard&) = delete;
+    ValueGuard& operator=(const ValueGuard&) = delete;
+    resolve_value* release() noexcept { auto* q = p; p = nullptr; return q; }
+};
 
 resolve_value* baseline_metrics_to_value(const BaselineMetrics& bm) {
     auto* m = v_map();
@@ -1089,6 +1105,7 @@ resolve_value* residual_analysis_to_value(const ResidualAnalysis& ra) {
 }
 resolve_value* classification_predictions_to_value(const ClassificationPredictions& cp) {
     auto* m = v_map();
+    ValueGuard g(m);
     v_put(m, "target_name", v_string(cp.target_name));
     v_put(m, "class_names", v_string_array(cp.class_names));
     // Key name matches the nanobind field (ClassificationPredictions
@@ -1105,7 +1122,7 @@ resolve_value* classification_predictions_to_value(const ClassificationPredictio
         auto* empty = v_new(RESOLVE_VALUE_DOUBLE_MATRIX);  // 0x0
         v_put(m, "probabilities", empty);
     }
-    return m;
+    return g.release();
 }
 resolve_value* cross_validation_result_to_value(const CrossValidationResult& cvr) {
     auto* m = v_map();
@@ -1120,9 +1137,10 @@ resolve_value* cross_validation_result_to_value(const CrossValidationResult& cvr
 }
 resolve_value* scalers_to_value(const Scalers& s) {
     auto* m = v_map();
+    ValueGuard g(m);
     if (s.continuous_mean.defined()) v_put(m, "continuous_mean", tensor_to_vec(s.continuous_mean));
     if (s.continuous_scale.defined()) v_put(m, "continuous_scale", tensor_to_vec(s.continuous_scale));
-    return m;
+    return g.release();
 }
 resolve_value* categorical_vocab_to_value(const CategoricalVocab& vocab) {
     // One entry per column: a sub-map { name -> code } so the R side can rebuild
@@ -1174,8 +1192,9 @@ resolve_value* run_metadata_to_value(const RunMetadata& m0) {
 // model.forward(), trainer.predict(), predictor.predict().
 resolve_value* target_map_to_value(const std::unordered_map<std::string, torch::Tensor>& m0) {
     auto* m = v_map();
+    ValueGuard g(m);
     for (const auto& [name, tensor] : m0) v_put(m, name, tensor_to_vec(tensor));
-    return m;
+    return g.release();
 }
 
 }  // namespace
@@ -1194,15 +1213,7 @@ struct resolve_predictor { resolve::Predictor predictor; };
 // ============================================================================
 
 namespace {
-// Platform-specific bits kept OUT of the CAPI_BODY_* macro bodies: the C
-// preprocessor does not allow #if/#endif inside a macro argument.
-std::string default_cuda_alloc_conf() {
-    std::string base = "garbage_collection_threshold:0.8,max_split_size_mb:256";
-#if !defined(_WIN32)
-    base = "expandable_segments:True," + base;
-#endif
-    return base;
-}
+// default_cuda_alloc_conf() is the single source in resolve/gpu.hpp.
 void set_env_var(const char* name, const char* value) {
 #if defined(_WIN32)
     _putenv_s(name, value);
@@ -1486,6 +1497,40 @@ resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* wh
             v_put(m, "track_unknown_fraction", v_bool(c.track_unknown_fraction));
             v_put(m, "track_unknown_count", v_bool(c.track_unknown_count));
             v_put(m, "use_taxonomy", v_bool(c.use_taxonomy));
+            // Full parity with the Python DatasetConfig object: the read-back
+            // config() previously dropped these fields. Strings match the parse
+            // side so the list round-trips.
+            const char* sel = "top";
+            switch (c.selection) {
+                case SelectionMode::Top: sel = "top"; break;
+                case SelectionMode::Bottom: sel = "bottom"; break;
+                case SelectionMode::TopBottom: sel = "top_bottom"; break;
+                case SelectionMode::All: sel = "all"; break;
+            }
+            v_put(m, "selection", v_string(sel));
+            v_put(m, "representation", v_string(
+                c.representation == RepresentationMode::PresenceAbsence
+                    ? "presence_absence" : "abundance"));
+            const char* nrm = "raw";
+            switch (c.normalization) {
+                case NormalizationMode::Raw: nrm = "raw"; break;
+                case NormalizationMode::Norm: nrm = "norm"; break;
+                case NormalizationMode::Log1p: nrm = "log1p"; break;
+            }
+            v_put(m, "normalization", v_string(nrm));
+            v_put(m, "aggregation", v_string(
+                c.aggregation == AggregationMode::Count ? "count" : "abundance"));
+            const char* pw = "log1p";
+            switch (c.pool_weighting) {
+                case PoolWeighting::Binary: pw = "binary"; break;
+                case PoolWeighting::Abundance: pw = "abundance"; break;
+                case PoolWeighting::Log1p: pw = "log1p"; break;
+                case PoolWeighting::Norm: pw = "norm"; break;
+                case PoolWeighting::Rank: pw = "rank"; break;
+            }
+            v_put(m, "pool_weighting", v_string(pw));
+            v_put(m, "pool_species_cap", v_int(c.pool_species_cap));
+            v_put(m, "use_cuda_hash", v_bool(c.use_cuda_hash));
             return m;
         }
 
@@ -1521,6 +1566,8 @@ resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* wh
             v_put(m, "categorical_names", v_string_array(s.categorical_names));
             v_put(m, "categorical_vocab_sizes", v_int_array(s.categorical_vocab_sizes));
             v_put(m, "categorical_embed_dim", v_int(s.categorical_embed_dim));
+            v_put(m, "pool_weighting", v_int(s.pool_weighting));
+            v_put(m, "pool_species_cap", v_int(s.pool_species_cap));
             return m;
         }
 

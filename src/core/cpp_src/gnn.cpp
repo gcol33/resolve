@@ -355,11 +355,19 @@ torch::Tensor HeterogeneousGNNEncoderImpl::aggregate_for_plots(
 torch::Tensor build_knn_adjacency(torch::Tensor coords, int64_t k) {
     auto n_nodes = coords.size(0);
 
+    // Cap k at the number of *other* nodes: a batch smaller than k (a short
+    // final inference batch, or batch_size=1) would otherwise make topk throw.
+    int64_t k_eff = std::min<int64_t>(k, std::max<int64_t>(n_nodes - 1, 0));
+    if (k_eff == 0) {
+        // 0 or 1 node: no neighbours to connect.
+        return torch::zeros({n_nodes, n_nodes}, coords.options());
+    }
+
     auto diff = coords.unsqueeze(0) - coords.unsqueeze(1);
     auto dist = diff.pow(2).sum(-1).sqrt();
 
     dist.fill_diagonal_(std::numeric_limits<float>::infinity());
-    auto [_, indices] = dist.topk(k, /*dim=*/1, /*largest=*/false);
+    auto [_, indices] = dist.topk(k_eff, /*dim=*/1, /*largest=*/false);
 
     auto adj = torch::zeros({n_nodes, n_nodes}, coords.options());
 

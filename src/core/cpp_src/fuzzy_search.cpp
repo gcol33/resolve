@@ -201,7 +201,14 @@ std::vector<Match> FuzzyIndex::query(std::string_view needle, QueryOptions opts)
 
     TopNCollector collector(opts.top_n, k);
 
-    // Try bucket first if a hint was given and that bucket exists.
+    // Try bucket first if a hint was given and that bucket exists. This is a
+    // deliberate speed/completeness tradeoff: when the bucket yields any match
+    // we return the bucket-local top-N WITHOUT scanning the global trie, so the
+    // result is not guaranteed to be the global best if a strictly closer entry
+    // lives in another bucket (e.g. the hint's own key is the misspelled part).
+    // Callers that need a global guarantee should omit bucket_hint; the WFO
+    // matcher uses the hint as a genus fast-path and falls back to difflib for
+    // the misspelled-genus case.
     if (opts.bucket_hint && !impl.buckets.empty()) {
         std::string key = *opts.bucket_hint;
         if (impl.opts.case_insensitive) key = lower_to_utf8(key);

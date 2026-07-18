@@ -293,6 +293,30 @@ TEST_CASE("ExcelFormerEncoder feature_importance", "[excelformer]") {
     REQUIRE(importance.max().item<float>() <= 1.0f);
 }
 
+TEST_CASE("ExcelFormerEncoder importance_logits receive gradient", "[excelformer]") {
+    // The semi-permeable mask must be differentiable so the learnable
+    // importance parameter actually trains. A hard boolean mask leaves it
+    // gradient-dead (importance stuck at its init, mask permanently open).
+    std::vector<int64_t> no_cats;
+    ExcelFormerEncoder encoder(10, no_cats, 32, 4, 2, 0, 0.1f, 0.5f, true);
+
+    torch::Tensor importance_logits;
+    for (const auto& named : encoder->named_parameters()) {
+        if (named.key().find("importance_logits") != std::string::npos) {
+            importance_logits = named.value();
+        }
+    }
+    REQUIRE(importance_logits.defined());
+
+    auto numerical = torch::randn({8, 10});
+    auto out = encoder->forward(numerical);
+    auto loss = out.pow(2).mean();
+    loss.backward();
+
+    REQUIRE(importance_logits.grad().defined());
+    REQUIRE(importance_logits.grad().abs().sum().item<float>() > 0.0f);
+}
+
 // ============================================================================
 // Phase 8: VAE — SpeciesVAE
 // ============================================================================

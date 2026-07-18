@@ -110,7 +110,7 @@ void register_trainer(nb::module_& m) {
                 auto cpu_tensor = t.detach().cpu().contiguous();
                 return nb::steal(THPVariable_Wrap(cpu_tensor));
             }
-            return nb::steal(Py_None);
+            return nb::none();
         }, "Global plot indices of the held-out test fold (int64).")
         .def("train_indices", [](const resolve::Trainer& self) {
             auto t = self.train_indices();
@@ -118,7 +118,7 @@ void register_trainer(nb::module_& m) {
                 auto cpu_tensor = t.detach().cpu().contiguous();
                 return nb::steal(THPVariable_Wrap(cpu_tensor));
             }
-            return nb::steal(Py_None);
+            return nb::none();
         }, "Global plot indices of the training fold (int64).")
         .def("test_plot_ids", &resolve::Trainer::test_plot_ids,
              "Plot IDs of the held-out test fold (requires prepare_data(dataset)).")

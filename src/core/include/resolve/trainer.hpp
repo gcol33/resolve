@@ -361,6 +361,32 @@ private:
     torch::Tensor test_pool_has_cover_;
     torch::Tensor test_categorical_ids_;
 
+    // Snapshot of every train/test split member plus the scalers and fold
+    // indices. cross_validate / cross_validate_spatial overwrite these per fold;
+    // capturing at entry and restoring at exit keeps the trainer's post-CV state
+    // consistent so the checkpoint evaluators (compute_residuals /
+    // compute_classification_predictions / test_plot_ids) run against the
+    // original split rather than the last fold. Restore also invalidates the GPU
+    // cache since the cached tensors no longer match the restored split.
+    struct SplitState {
+        torch::Tensor train_continuous, train_genus_ids, train_family_ids,
+            train_species_ids, train_species_vector;
+        torch::Tensor train_pool_genus_ids, train_pool_family_ids,
+            train_pool_weights, train_pool_mask, train_pool_has_cover,
+            train_categorical_ids;
+        std::unordered_map<std::string, torch::Tensor> train_targets;
+        torch::Tensor test_continuous, test_genus_ids, test_family_ids,
+            test_species_ids, test_species_vector;
+        torch::Tensor test_pool_genus_ids, test_pool_family_ids,
+            test_pool_weights, test_pool_mask, test_pool_has_cover,
+            test_categorical_ids;
+        std::unordered_map<std::string, torch::Tensor> test_targets;
+        torch::Tensor train_indices, test_indices;
+        Scalers scalers;
+    };
+    SplitState capture_split_state() const;
+    void restore_split_state(const SplitState& s);
+
     // Best model state for restoring
     std::vector<char> best_model_state_;
 
@@ -406,14 +432,6 @@ private:
     torch::Tensor gpu_test_pool_has_cover_;
     torch::Tensor gpu_test_categorical_ids_;
 
-    // Shuffled training data (cached, reshuffled every N epochs)
-    torch::Tensor shuffled_continuous_;
-    torch::Tensor shuffled_genus_ids_;
-    torch::Tensor shuffled_family_ids_;
-    torch::Tensor shuffled_species_ids_;
-    torch::Tensor shuffled_species_vector_;
-    std::unordered_map<std::string, torch::Tensor> shuffled_targets_;
-
     // AMP (Automatic Mixed Precision) state
     bool amp_enabled_ = false;         // Whether AMP is actually enabled (CUDA only)
     float amp_scale_ = 65536.0f;       // Current gradient scale
@@ -441,13 +459,6 @@ private:
     torch::Tensor train_indices_;             // Global plot indices for training set
     torch::Tensor test_indices_;              // Global plot indices for test set
     torch::Tensor gpu_test_indices_;          // GPU-cached test indices
-
-    // Async prefetching for CUDA hash computation
-    // Double-buffered hash embeddings: compute next batch while training on current
-    torch::Tensor prefetch_hash_[2];          // Double-buffered hash embeddings
-    torch::Tensor prefetch_batch_idx_;        // Batch indices for prefetched data
-    int prefetch_buffer_idx_ = 0;             // Which buffer has prefetched data ready
-    bool prefetch_valid_ = false;             // Whether prefetched data is valid
 };
 
 } // namespace resolve

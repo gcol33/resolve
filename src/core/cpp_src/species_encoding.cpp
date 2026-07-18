@@ -224,16 +224,22 @@ static void build_taxonomy_maps(
     taxonomy_vocab = TaxonomyVocab();
     taxonomy_vocab.fit(records);
 
-    // Build species -> genus/family lookup (first occurrence wins)
+    // Build species -> genus/family lookup. On the (data-quality) case of a
+    // species carrying inconsistent genus/family across rows, keep the
+    // lexicographically smallest so the map is independent of CSV row order
+    // (first-occurrence would resolve to a different embedding row on a
+    // differently-ordered rebuild -- the cross-process desync class of #5).
     species_to_genus.clear();
     species_to_family.clear();
+    auto keep_min = [](std::unordered_map<std::string, std::string>& m,
+                       const std::string& key, const std::string& val) {
+        auto it = m.find(key);
+        if (it == m.end()) m.emplace(key, val);
+        else if (val < it->second) it->second = val;
+    };
     for (const auto& r : records) {
-        if (!r.genus.empty()) {
-            species_to_genus.emplace(r.species_id, r.genus);
-        }
-        if (!r.family.empty()) {
-            species_to_family.emplace(r.species_id, r.family);
-        }
+        if (!r.genus.empty()) keep_min(species_to_genus, r.species_id, r.genus);
+        if (!r.family.empty()) keep_min(species_to_family, r.species_id, r.family);
     }
 }
 
@@ -305,12 +311,15 @@ static void assign_rank_weights(
         return abundances[a] > abundances[b];
     });
 
-    // Dense ranking: ties share the same rank
+    // Dense ranking: ties share the same rank and ranks have no gaps
+    // (matches the POC's pl.rank(method="dense", descending=True)). A prior
+    // version set rank = j + 1 on a strict decrease, which is competition
+    // ranking with gaps and diverges from the POC on tied abundances.
     std::vector<int> ranks(n);
-    int rank = 1;
+    int rank = 0;
     for (size_t j = 0; j < n; ++j) {
-        if (j > 0 && abundances[order[j]] < abundances[order[j - 1]]) {
-            rank = static_cast<int>(j + 1);
+        if (j == 0 || abundances[order[j]] < abundances[order[j - 1]]) {
+            ++rank;
         }
         ranks[order[j]] = rank;
     }
@@ -324,14 +333,18 @@ static void assign_rank_weights(
 RankPoolEncodedData RankPoolEncoder::transform(
     const std::vector<SpeciesRecord>& records,
     const std::vector<std::string>& plot_ids,
-    int species_cap
+    int species_cap,
+    bool has_abundance_column
 ) const {
     if (!fitted_) {
         throw std::runtime_error("RankPoolEncoder must be fit before transform");
     }
 
     const int64_t n_plots = static_cast<int64_t>(plot_ids.size());
-    const bool has_taxonomy = taxonomy_vocab_.n_genera() > 1;  // >1 because index 0 is <UNK>
+    // >1 because index 0 is <UNK>. Gate on either rank so a family-only dataset
+    // (genus absent, family present) still looks up the family embeddings,
+    // matching RoleMapping::has_taxonomy() and the fixed-slot encode path.
+    const bool has_taxonomy = taxonomy_vocab_.n_genera() > 1 || taxonomy_vocab_.n_families() > 1;
 
     // Group record indices by plot_id
     std::unordered_map<std::string, std::vector<size_t>> plot_to_indices;
@@ -345,7 +358,6 @@ RankPoolEncodedData RankPoolEncoder::transform(
         std::vector<float> weights;
         float unknown_abd = 0.0f;
         float total_abd = 0.0f;
-        bool has_abundance = false;
     };
 
     std::vector<PlotData> plot_data(n_plots);
@@ -379,7 +391,6 @@ RankPoolEncodedData RankPoolEncoder::transform(
             pd.f_ids.push_back(f_id);
             abundances.push_back(r.abundance);
 
-            if (r.abundance != 1.0f) pd.has_abundance = true;
             pd.total_abd += r.abundance;
             if (sp_id == 0) pd.unknown_abd += r.abundance;
         }
@@ -480,7 +491,9 @@ RankPoolEncodedData RankPoolEncoder::transform(
             w_a[pi][j]  = pd.weights[j];
             m_a[pi][j]  = true;
         }
-        hc_a[pi] = pd.has_abundance ? 1.0f : 0.0f;
+        // Column-presence semantics (POC): every plot gets cover=1 when an
+        // abundance column was mapped, regardless of the per-plot values.
+        hc_a[pi] = has_abundance_column ? 1.0f : 0.0f;
         uf_a[pi] = (pd.total_abd > 0.0f) ? pd.unknown_abd / pd.total_abd : 0.0f;
     }
 
@@ -520,7 +533,8 @@ EmbeddingEncodedData EmbeddingEncoder::transform(
     }
 
     const int64_t n_plots = static_cast<int64_t>(plot_ids.size());
-    const bool has_taxonomy = taxonomy_vocab_.n_genera() > 1;
+    // Gate on either rank so a family-only dataset still uses family embeddings.
+    const bool has_taxonomy = taxonomy_vocab_.n_genera() > 1 || taxonomy_vocab_.n_families() > 1;
 
     // Group record indices by plot_id
     std::unordered_map<std::string, std::vector<size_t>> plot_to_indices;

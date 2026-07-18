@@ -59,7 +59,13 @@ torch::Tensor MultiHeadAttentionImpl::forward(
     // scores: (batch, n_heads, seq_len_q, seq_len_k)
     auto scores = torch::matmul(Q, K.transpose(-2, -1)) * scale_;
 
-    // Apply mask if provided
+    // Apply an additive attention bias if provided: 0 = attend freely,
+    // large-negative = blocked. A differentiable bias lets a learnable mask
+    // (ExcelFormer's importance gate) receive gradient, which a hard
+    // masked_fill(mask == 0) cannot. This custom attention is used only by the
+    // tabular transformer family (FT-Transformer / SAINT pass no mask,
+    // ExcelFormer passes the importance bias); the species transformer uses
+    // torch::nn::TransformerEncoder, so no other caller relies on 0/1 masks.
     if (mask.defined()) {
         if (mask.dim() == 2) {
             // (batch, seq_len_k) -> (batch, 1, 1, seq_len_k)
@@ -68,7 +74,7 @@ torch::Tensor MultiHeadAttentionImpl::forward(
             // (batch, seq_len_q, seq_len_k) -> (batch, 1, seq_len_q, seq_len_k)
             mask = mask.unsqueeze(1);
         }
-        scores = scores.masked_fill(mask == 0, -1e9f);
+        scores = scores + mask;
     }
 
     // Attention weights
@@ -869,35 +875,32 @@ ExcelFormerEncoderImpl::ExcelFormerEncoderImpl(
 }
 
 torch::Tensor ExcelFormerEncoderImpl::build_attention_mask() const {
-    // Feature importance via sigmoid
+    // Learned feature importance in (0, 1)
     auto importance = torch::sigmoid(importance_logits_);  // (n_tokens,)
 
-    // Sort features by importance (descending)
-    auto [sorted_imp, sorted_idx] = importance.sort(/*dim=*/0, /*descending=*/true);
-
-    // Build permeable attention mask:
-    // Feature i can attend to feature j if:
+    // Semi-permeable rule: feature i can attend to feature j if
     //   - importance(j) >= importance_threshold (j is informative, visible to all)
-    //   - OR importance(j) >= importance(i) (j is more important than i)
-    auto imp_row = importance.unsqueeze(1);  // (n_tokens, 1)
-    auto imp_col = importance.unsqueeze(0);  // (1, n_tokens)
+    //   - OR importance(j) >= importance(i) (j is at least as important as i)
+    auto imp_row = importance.unsqueeze(1);  // (n_tokens, 1) - querying token i
+    auto imp_col = importance.unsqueeze(0);  // (1, n_tokens) - key token j
 
-    // informative features are visible to everyone
-    auto is_informative = (imp_col >= importance_threshold_);  // (1, n_tokens)
+    // Build the rule as a SMOOTH gate so gradient flows into importance_logits_.
+    // A hard boolean cast (imp >= thr) has zero gradient, so the importance
+    // parameter never trains and, at the default threshold, every gate opens and
+    // ExcelFormer degenerates to a plain full-attention transformer.
+    const float tau = 0.1f;  // temperature for the soft comparisons
+    auto is_informative    = torch::sigmoid((imp_col - importance_threshold_) / tau);
+    auto is_more_important = torch::sigmoid((imp_col - imp_row) / tau);
+    // Soft OR (a + b - a*b), in (0, 1)
+    auto can_attend = is_informative + is_more_important - is_informative * is_more_important;
 
-    // feature j is at least as important as feature i
-    auto is_more_important = (imp_col >= imp_row);  // (n_tokens, n_tokens)
+    // Convert the [0,1] gate to an additive log-space attention bias: ~0 where
+    // the gate is open, large-negative where it is closed. MultiHeadAttention
+    // adds this to the pre-softmax scores. Shape (1, n_tokens, n_tokens) so the
+    // leading 1 broadcasts across the batch dimension.
+    auto bias = torch::log(can_attend + 1e-9f);
 
-    // Combine: can attend if target is informative OR more important
-    auto can_attend = is_informative | is_more_important;  // (n_tokens, n_tokens)
-
-    // Convert to boolean-style mask compatible with MultiHeadAttention:
-    // 1 = can attend, 0 = blocked. MHA uses masked_fill(mask == 0, -1e9).
-    // Shape (1, n_tokens, n_tokens) so MHA treats as (batch, seq_q, seq_k)
-    // and the leading 1 broadcasts across the batch dimension.
-    auto mask = can_attend.to(torch::kFloat).unsqueeze(0);
-
-    return mask;  // (1, n_tokens, n_tokens)
+    return bias.unsqueeze(0);  // (1, n_tokens, n_tokens)
 }
 
 torch::Tensor ExcelFormerEncoderImpl::forward(

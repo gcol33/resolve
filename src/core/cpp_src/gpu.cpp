@@ -12,6 +12,14 @@
 
 namespace resolve {
 
+std::string default_cuda_alloc_conf() {
+    std::string base = "garbage_collection_threshold:0.8,max_split_size_mb:256";
+#if !defined(_WIN32)
+    base = "expandable_segments:True," + base;
+#endif
+    return base;
+}
+
 void set_vram_fraction(double fraction, int device_index, LogCallback log) {
     if (fraction <= 0.0 || fraction > 1.0) {
         std::ostringstream err;

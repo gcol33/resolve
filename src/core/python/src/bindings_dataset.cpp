@@ -299,7 +299,8 @@ void register_dataset(nb::module_& m) {
         .def("fit", &resolve::RankPoolEncoder::fit)
         .def("transform", &resolve::RankPoolEncoder::transform,
              nb::arg("records"), nb::arg("plot_ids"),
-             nb::arg("species_cap") = 0)
+             nb::arg("species_cap") = 0,
+             nb::arg("has_abundance_column") = false)
         .def("is_fitted", &resolve::RankPoolEncoder::is_fitted)
         .def("n_species_vocab", &resolve::RankPoolEncoder::n_species_vocab)
         .def("n_genera_vocab", &resolve::RankPoolEncoder::n_genera_vocab)

@@ -196,7 +196,9 @@ __global__ void hash_and_aggregate_chunked_kernel(
     // Dominant plot = first element in this chunk
     int64_t dominant_plot = plot_indices[chunk_start];
     if (dominant_plot < 0 || dominant_plot >= n_plots) {
-        report_invalid_index();
+        // dominant_plot is uniform across the block, so report once (thread 0)
+        // rather than letting every thread inflate the counter by blockDim.
+        if (threadIdx.x == 0) report_invalid_index();
         return;  // entire block bails — shared mem was zeroed, nothing to flush
     }
 

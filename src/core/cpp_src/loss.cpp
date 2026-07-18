@@ -89,10 +89,13 @@ torch::Tensor PhasedLoss::regression_loss(
         return mae + smape_weight_p2_ * smape;
     }
 
-    // Phase 3: add band penalty
+    // Phase 3: differentiable band hinge. Penalize predictions whose ratio to
+    // the target falls outside [1 - thr, 1 + thr], proportional to how far
+    // outside they are. A hard indicator (ratio-outside-band cast to float) has
+    // zero gradient, so it shifts the reported loss without ever steering the
+    // optimizer toward the band the model is later scored on.
     auto ratio = pred_orig / (target_orig + eps_);
-    auto outside_band = (ratio < (1.0f - band_threshold_)) | (ratio > (1.0f + band_threshold_));
-    auto band_penalty = outside_band.to(torch::kFloat32).mean();
+    auto band_penalty = torch::relu(torch::abs(ratio - 1.0f) - band_threshold_).mean();
 
     return mae + smape_weight_p3_ * smape + band_weight_p3_ * band_penalty;
 }

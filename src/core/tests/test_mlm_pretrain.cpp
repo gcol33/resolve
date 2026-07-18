@@ -18,11 +18,15 @@ TEST_CASE("mask_species_batch respects padding", "[mlm]") {
 
     auto valid_mask = (species_ids != 0);
 
-    auto [masked_ids, mlm_mask, targets] = mask_species_batch(species_ids, valid_mask, 50, 0.5f);
+    auto [masked_ids, mlm_mask, targets, mask_token_positions] =
+        mask_species_batch(species_ids, valid_mask, 50, 0.5f);
 
     // No padding positions should be masked
     auto padding_positions = ~valid_mask;
     REQUIRE((mlm_mask & padding_positions).sum().item<int64_t>() == 0);
+    REQUIRE((mask_token_positions & padding_positions).sum().item<int64_t>() == 0);
+    // The mask-token subset is a subset of all masked positions.
+    REQUIRE((mask_token_positions & ~mlm_mask).sum().item<int64_t>() == 0);
 }
 
 TEST_CASE("mask_species_batch approximate ratios", "[mlm]") {
@@ -30,7 +34,8 @@ TEST_CASE("mask_species_batch approximate ratios", "[mlm]") {
     auto species_ids = torch::randint(1, 100, {100, 50}, torch::kInt64);
     auto valid_mask = torch::ones({100, 50}, torch::kBool);
 
-    auto [masked_ids, mlm_mask, targets] = mask_species_batch(species_ids, valid_mask, 100, 0.15f);
+    auto [masked_ids, mlm_mask, targets, mask_token_positions] =
+        mask_species_batch(species_ids, valid_mask, 100, 0.15f);
 
     // ~15% of 5000 valid positions should be masked
     float mask_ratio = static_cast<float>(mlm_mask.sum().item<int64_t>()) / 5000.0f;
@@ -38,6 +43,10 @@ TEST_CASE("mask_species_batch approximate ratios", "[mlm]") {
 
     // Targets should have same count as masked positions
     REQUIRE(targets.numel() == mlm_mask.sum().item<int64_t>());
+
+    // Only ~80% of masked positions carry the mask token, so the subset is a
+    // strict minority of masked positions (never the whole set).
+    REQUIRE(mask_token_positions.sum().item<int64_t>() < mlm_mask.sum().item<int64_t>());
 }
 
 TEST_CASE("mask_species_batch BERT 80/10/10 split", "[mlm]") {
@@ -45,7 +54,8 @@ TEST_CASE("mask_species_batch BERT 80/10/10 split", "[mlm]") {
     auto species_ids = torch::randint(1, 100, {200, 50}, torch::kInt64);
     auto valid_mask = torch::ones({200, 50}, torch::kBool);
 
-    auto [masked_ids, mlm_mask, targets] = mask_species_batch(species_ids, valid_mask, 100, 0.15f);
+    auto [masked_ids, mlm_mask, targets, mask_token_positions] =
+        mask_species_batch(species_ids, valid_mask, 100, 0.15f);
 
     int64_t n_masked = mlm_mask.sum().item<int64_t>();
     if (n_masked > 100) {  // Need enough samples for statistics
@@ -63,6 +73,13 @@ TEST_CASE("mask_species_batch BERT 80/10/10 split", "[mlm]") {
         REQUIRE_THAT(pct_zeroed, WithinAbs(0.8, 0.1));
         REQUIRE_THAT(pct_random, WithinAbs(0.1, 0.08));
         REQUIRE_THAT(pct_kept, WithinAbs(0.1, 0.08));
+
+        // The returned mask-token subset must be exactly the zeroed positions —
+        // this is what the encoder replaces with the mask embedding, so the
+        // random/keep branches actually reach the encoder.
+        auto zeroed_positions = (masked_ids == 0) & mlm_mask;
+        REQUIRE((mask_token_positions != zeroed_positions).sum().item<int64_t>() == 0);
+        REQUIRE(mask_token_positions.sum().item<int64_t>() == n_zeroed);
     }
 }
 

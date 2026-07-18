@@ -29,7 +29,8 @@ void write_progress_file(
     file << "  \"best_epoch\": " << best_epoch << ",\n";
     file << "  \"best_loss\": " << best_loss << ",\n";
     file << "  \"epochs_without_improvement\": " << epochs_without_improvement << ",\n";
-    file << "  \"progress_pct\": " << (100.0f * epoch / max_epochs) << ",\n";
+    file << "  \"progress_pct\": "
+         << (max_epochs > 0 ? 100.0f * epoch / max_epochs : 0.0f) << ",\n";
 
     // Write a deterministic "best metric": the lowest-threshold band accuracy
     // of the alphabetically-first target. `metrics` is an unordered_map, so
@@ -142,6 +143,87 @@ void save_model_config(
             tx_pool_bytes.data(),
             {static_cast<int64_t>(tx_pool_bytes.size())},
             torch::kUInt8).clone());
+    }
+
+    // Architecture-specific sub-configs (issue #37). These size the layers built
+    // by TabularAdapter / TraitNetEncoder, so a checkpoint of a non-MLP encoder
+    // must carry them or Predictor::load rebuilds default-sized modules whose
+    // weights then mismatch or fail to load. Written unconditionally; the loader
+    // reads each with try_read so pre-#37 checkpoints keep the struct defaults.
+    // FT-Transformer
+    archive.write("ft_d_model", torch::tensor(config.ft_transformer.d_model));
+    archive.write("ft_n_heads", torch::tensor(config.ft_transformer.n_heads));
+    archive.write("ft_n_layers", torch::tensor(config.ft_transformer.n_layers));
+    archive.write("ft_attention_dropout", torch::tensor(config.ft_transformer.attention_dropout));
+    archive.write("ft_ffn_dropout", torch::tensor(config.ft_transformer.ffn_dropout));
+    archive.write("ft_ffn_multiplier", torch::tensor(config.ft_transformer.ffn_multiplier));
+    archive.write("ft_pre_norm", torch::tensor(static_cast<int>(config.ft_transformer.pre_norm)));
+    // TabNet
+    archive.write("tabnet_n_steps", torch::tensor(config.tabnet.n_steps));
+    archive.write("tabnet_n_d", torch::tensor(config.tabnet.n_d));
+    archive.write("tabnet_n_a", torch::tensor(config.tabnet.n_a));
+    archive.write("tabnet_relaxation_factor", torch::tensor(config.tabnet.relaxation_factor));
+    archive.write("tabnet_sparsity_coefficient", torch::tensor(config.tabnet.sparsity_coefficient));
+    archive.write("tabnet_virtual_batch_size", torch::tensor(config.tabnet.virtual_batch_size));
+    archive.write("tabnet_use_sparsemax", torch::tensor(static_cast<int>(config.tabnet.use_sparsemax)));
+    // SAINT
+    archive.write("saint_d_model", torch::tensor(config.saint.d_model));
+    archive.write("saint_n_heads", torch::tensor(config.saint.n_heads));
+    archive.write("saint_n_layers", torch::tensor(config.saint.n_layers));
+    archive.write("saint_attention_dropout", torch::tensor(config.saint.attention_dropout));
+    archive.write("saint_use_row_attention", torch::tensor(static_cast<int>(config.saint.use_row_attention)));
+    archive.write("saint_use_contrastive_pretrain", torch::tensor(static_cast<int>(config.saint.use_contrastive_pretrain)));
+    archive.write("saint_mixup_alpha", torch::tensor(config.saint.mixup_alpha));
+    // GNN
+    archive.write("gnn_type", torch::tensor(static_cast<int>(config.gnn.gnn_type)));
+    archive.write("gnn_n_layers", torch::tensor(config.gnn.n_layers));
+    archive.write("gnn_hidden_dim", torch::tensor(config.gnn.hidden_dim));
+    archive.write("gnn_n_heads", torch::tensor(config.gnn.n_heads));
+    archive.write("gnn_k_neighbors", torch::tensor(config.gnn.k_neighbors));
+    archive.write("gnn_graph_mode", torch::tensor(static_cast<int>(config.gnn.graph_mode)));
+    archive.write("gnn_edge_dropout", torch::tensor(config.gnn.edge_dropout));
+    archive.write("gnn_use_edge_features", torch::tensor(static_cast<int>(config.gnn.use_edge_features)));
+    // TraitNet
+    archive.write("trait_env_dim", torch::tensor(config.trait_net.env_dim));
+    archive.write("trait_trait_dim", torch::tensor(config.trait_net.trait_dim));
+    archive.write("trait_interaction_dim", torch::tensor(config.trait_net.interaction_dim));
+    archive.write("trait_interaction", torch::tensor(static_cast<int>(config.trait_net.interaction)));
+    archive.write("trait_shared_trait_encoder", torch::tensor(static_cast<int>(config.trait_net.shared_trait_encoder)));
+    // ExcelFormer
+    archive.write("excel_d_model", torch::tensor(config.excelformer.d_model));
+    archive.write("excel_n_heads", torch::tensor(config.excelformer.n_heads));
+    archive.write("excel_n_layers", torch::tensor(config.excelformer.n_layers));
+    archive.write("excel_attention_dropout", torch::tensor(config.excelformer.attention_dropout));
+    archive.write("excel_ffn_multiplier", torch::tensor(config.excelformer.ffn_multiplier));
+    archive.write("excel_importance_threshold", torch::tensor(config.excelformer.importance_threshold));
+    archive.write("excel_pre_norm", torch::tensor(static_cast<int>(config.excelformer.pre_norm)));
+    // Heterogeneous GNN
+    archive.write("hgnn_hidden_dim", torch::tensor(config.heterogeneous_gnn.hidden_dim));
+    archive.write("hgnn_output_dim", torch::tensor(config.heterogeneous_gnn.output_dim));
+    archive.write("hgnn_n_layers", torch::tensor(config.heterogeneous_gnn.n_layers));
+    archive.write("hgnn_n_edge_types", torch::tensor(config.heterogeneous_gnn.n_edge_types));
+    archive.write("hgnn_n_heads", torch::tensor(config.heterogeneous_gnn.n_heads));
+    archive.write("hgnn_dropout", torch::tensor(config.heterogeneous_gnn.dropout));
+    archive.write("hgnn_k_cooccurrence", torch::tensor(config.heterogeneous_gnn.k_cooccurrence));
+    archive.write("hgnn_cooccurrence_threshold", torch::tensor(config.heterogeneous_gnn.cooccurrence_threshold));
+    archive.write("hgnn_use_taxonomic_edges", torch::tensor(static_cast<int>(config.heterogeneous_gnn.use_taxonomic_edges)));
+    archive.write("hgnn_use_cooccurrence_edges", torch::tensor(static_cast<int>(config.heterogeneous_gnn.use_cooccurrence_edges)));
+    // Parallel layers (variable number of branches)
+    archive.write("parallel_enabled", torch::tensor(static_cast<int>(config.parallel_layers.enabled)));
+    archive.write("parallel_aggregation", torch::tensor(static_cast<int>(config.parallel_layers.aggregation)));
+    archive.write("parallel_attention_heads", torch::tensor(config.parallel_layers.attention_heads));
+    archive.write("parallel_use_residual", torch::tensor(static_cast<int>(config.parallel_layers.use_residual)));
+    archive.write("parallel_n_branches",
+                  torch::tensor(static_cast<int64_t>(config.parallel_layers.branches.size())));
+    for (size_t i = 0; i < config.parallel_layers.branches.size(); ++i) {
+        const auto& b = config.parallel_layers.branches[i];
+        const std::string p = "parallel_branch_" + std::to_string(i) + "_";
+        std::vector<int64_t> hd(b.hidden_dims);
+        archive.write(p + "hidden_dims", torch::tensor(hd));
+        archive.write(p + "activation", torch::tensor(static_cast<int>(b.activation)));
+        archive.write(p + "normalization", torch::tensor(static_cast<int>(b.normalization)));
+        archive.write(p + "dropout", torch::tensor(b.dropout));
+        archive.write(p + "branch_weight", torch::tensor(b.branch_weight));
     }
 }
 
@@ -343,6 +425,111 @@ ModelConfig load_model_config(
         }
     }
 
+    // Architecture-specific sub-configs (issue #37). Each read uses a FRESH
+    // tensor (InputArchive::read copies into the passed tensor, so reusing one
+    // across differing dtypes/sizes trips a setStorage mismatch). try_read keeps
+    // the struct default for any key a pre-#37 checkpoint never wrote.
+    auto rd_int = [&](const char* key, int& dst) {
+        torch::Tensor t; if (archive.try_read(key, t)) dst = t.item<int>();
+    };
+    auto rd_flt = [&](const char* key, float& dst) {
+        torch::Tensor t; if (archive.try_read(key, t)) dst = t.item<float>();
+    };
+    auto rd_bool = [&](const char* key, bool& dst) {
+        torch::Tensor t; if (archive.try_read(key, t)) dst = t.item<int>() != 0;
+    };
+    auto rd_enum = [&](const char* key, auto& dst) {
+        torch::Tensor t;
+        if (archive.try_read(key, t)) {
+            dst = static_cast<std::decay_t<decltype(dst)>>(t.item<int>());
+        }
+    };
+
+    // FT-Transformer
+    rd_int("ft_d_model", config.ft_transformer.d_model);
+    rd_int("ft_n_heads", config.ft_transformer.n_heads);
+    rd_int("ft_n_layers", config.ft_transformer.n_layers);
+    rd_flt("ft_attention_dropout", config.ft_transformer.attention_dropout);
+    rd_flt("ft_ffn_dropout", config.ft_transformer.ffn_dropout);
+    rd_int("ft_ffn_multiplier", config.ft_transformer.ffn_multiplier);
+    rd_bool("ft_pre_norm", config.ft_transformer.pre_norm);
+    // TabNet
+    rd_int("tabnet_n_steps", config.tabnet.n_steps);
+    rd_int("tabnet_n_d", config.tabnet.n_d);
+    rd_int("tabnet_n_a", config.tabnet.n_a);
+    rd_flt("tabnet_relaxation_factor", config.tabnet.relaxation_factor);
+    rd_flt("tabnet_sparsity_coefficient", config.tabnet.sparsity_coefficient);
+    rd_int("tabnet_virtual_batch_size", config.tabnet.virtual_batch_size);
+    rd_bool("tabnet_use_sparsemax", config.tabnet.use_sparsemax);
+    // SAINT
+    rd_int("saint_d_model", config.saint.d_model);
+    rd_int("saint_n_heads", config.saint.n_heads);
+    rd_int("saint_n_layers", config.saint.n_layers);
+    rd_flt("saint_attention_dropout", config.saint.attention_dropout);
+    rd_bool("saint_use_row_attention", config.saint.use_row_attention);
+    rd_bool("saint_use_contrastive_pretrain", config.saint.use_contrastive_pretrain);
+    rd_flt("saint_mixup_alpha", config.saint.mixup_alpha);
+    // GNN
+    rd_enum("gnn_type", config.gnn.gnn_type);
+    rd_int("gnn_n_layers", config.gnn.n_layers);
+    rd_int("gnn_hidden_dim", config.gnn.hidden_dim);
+    rd_int("gnn_n_heads", config.gnn.n_heads);
+    rd_int("gnn_k_neighbors", config.gnn.k_neighbors);
+    rd_enum("gnn_graph_mode", config.gnn.graph_mode);
+    rd_flt("gnn_edge_dropout", config.gnn.edge_dropout);
+    rd_bool("gnn_use_edge_features", config.gnn.use_edge_features);
+    // TraitNet
+    rd_int("trait_env_dim", config.trait_net.env_dim);
+    rd_int("trait_trait_dim", config.trait_net.trait_dim);
+    rd_int("trait_interaction_dim", config.trait_net.interaction_dim);
+    rd_enum("trait_interaction", config.trait_net.interaction);
+    rd_bool("trait_shared_trait_encoder", config.trait_net.shared_trait_encoder);
+    // ExcelFormer
+    rd_int("excel_d_model", config.excelformer.d_model);
+    rd_int("excel_n_heads", config.excelformer.n_heads);
+    rd_int("excel_n_layers", config.excelformer.n_layers);
+    rd_flt("excel_attention_dropout", config.excelformer.attention_dropout);
+    rd_int("excel_ffn_multiplier", config.excelformer.ffn_multiplier);
+    rd_flt("excel_importance_threshold", config.excelformer.importance_threshold);
+    rd_bool("excel_pre_norm", config.excelformer.pre_norm);
+    // Heterogeneous GNN
+    rd_int("hgnn_hidden_dim", config.heterogeneous_gnn.hidden_dim);
+    rd_int("hgnn_output_dim", config.heterogeneous_gnn.output_dim);
+    rd_int("hgnn_n_layers", config.heterogeneous_gnn.n_layers);
+    rd_int("hgnn_n_edge_types", config.heterogeneous_gnn.n_edge_types);
+    rd_int("hgnn_n_heads", config.heterogeneous_gnn.n_heads);
+    rd_flt("hgnn_dropout", config.heterogeneous_gnn.dropout);
+    rd_int("hgnn_k_cooccurrence", config.heterogeneous_gnn.k_cooccurrence);
+    rd_flt("hgnn_cooccurrence_threshold", config.heterogeneous_gnn.cooccurrence_threshold);
+    rd_bool("hgnn_use_taxonomic_edges", config.heterogeneous_gnn.use_taxonomic_edges);
+    rd_bool("hgnn_use_cooccurrence_edges", config.heterogeneous_gnn.use_cooccurrence_edges);
+    // Parallel layers
+    rd_bool("parallel_enabled", config.parallel_layers.enabled);
+    rd_enum("parallel_aggregation", config.parallel_layers.aggregation);
+    rd_int("parallel_attention_heads", config.parallel_layers.attention_heads);
+    rd_bool("parallel_use_residual", config.parallel_layers.use_residual);
+    torch::Tensor n_branches_t;
+    if (archive.try_read("parallel_n_branches", n_branches_t)) {
+        int64_t n_branches = n_branches_t.item<int64_t>();
+        config.parallel_layers.branches.clear();
+        for (int64_t i = 0; i < n_branches; ++i) {
+            const std::string p = "parallel_branch_" + std::to_string(i) + "_";
+            ParallelBranchConfig b;
+            torch::Tensor hd_t;
+            if (archive.try_read(p + "hidden_dims", hd_t)) {
+                b.hidden_dims.resize(hd_t.size(0));
+                for (int64_t j = 0; j < hd_t.size(0); ++j) {
+                    b.hidden_dims[j] = hd_t[j].item<int64_t>();
+                }
+            }
+            rd_enum((p + "activation").c_str(), b.activation);
+            rd_enum((p + "normalization").c_str(), b.normalization);
+            rd_flt((p + "dropout").c_str(), b.dropout);
+            rd_flt((p + "branch_weight").c_str(), b.branch_weight);
+            config.parallel_layers.branches.push_back(std::move(b));
+        }
+    }
+
     return config;
 }
 
@@ -514,6 +701,12 @@ void save_schema(
         archive.write(prefix + "vocab_size",
                       torch::tensor(schema.categorical_vocab_sizes[i]));
     }
+
+    // Rank-pool / transformer pooling scheme + resolved species cap (issue #38),
+    // so the predict side rebuilds the same DatasetConfig instead of defaulting
+    // to Log1p.
+    archive.write("schema_pool_weighting", torch::tensor(schema.pool_weighting));
+    archive.write("schema_pool_species_cap", torch::tensor(schema.pool_species_cap));
 }
 
 ResolveSchema load_schema(
@@ -633,6 +826,16 @@ ResolveSchema load_schema(
             schema.categorical_names[i] = read_string(prefix + "name");
             schema.categorical_vocab_sizes[i] = read_i64(prefix + "vocab_size");
         }
+    }
+
+    // Pool weighting scheme + species cap (back-compat: pre-issue-#38
+    // checkpoints keep the schema defaults, Log1p / auto).
+    torch::Tensor pool_w_t, pool_cap_t;
+    if (archive.try_read("schema_pool_weighting", pool_w_t)) {
+        schema.pool_weighting = pool_w_t.item<int>();
+    }
+    if (archive.try_read("schema_pool_species_cap", pool_cap_t)) {
+        schema.pool_species_cap = pool_cap_t.item<int>();
     }
     return schema;
 }

@@ -4,6 +4,8 @@
 #include "resolve/categorical.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <cstring>
 #include <set>
 #include <stdexcept>
 #include <unordered_set>

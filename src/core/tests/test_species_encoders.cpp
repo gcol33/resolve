@@ -201,6 +201,35 @@ TEST_CASE("RankPoolEncoder rank weighting assigns 1/rank", "[rank_pool_enc]") {
     REQUIRE(max_w == 1.0f);
 }
 
+TEST_CASE("RankPoolEncoder rank weighting is dense (ties share rank, no gaps)", "[rank_pool_enc]") {
+    // Tied abundances must use DENSE ranking (1,2,2,3), not competition ranking
+    // with gaps (1,2,2,4). Sorted-desc [10,5,5,2] -> dense weights
+    // [1, 0.5, 0.5, 0.333]; the smallest must be 1/3, not 1/4.
+    std::vector<SpeciesRecord> records = {
+        {"sp_a", "g_a", "f_a", 10.0f, "P1"},
+        {"sp_b", "g_b", "f_b", 5.0f,  "P1"},
+        {"sp_c", "g_c", "f_c", 5.0f,  "P1"},
+        {"sp_d", "g_d", "f_d", 2.0f,  "P1"},
+    };
+    std::vector<std::string> plot_ids = {"P1"};
+
+    RankPoolEncoder encoder(PoolWeighting::Rank);
+    encoder.fit(records);
+    auto result = encoder.transform(records, plot_ids);
+
+    auto w_a = result.weights.accessor<float, 2>();
+    auto m_a = result.mask.accessor<bool, 2>();
+    std::vector<float> weights;
+    for (int64_t j = 0; j < result.weights.size(1); ++j) {
+        if (m_a[0][j]) weights.push_back(w_a[0][j]);
+    }
+    REQUIRE(weights.size() == 4);
+    float min_w = *std::min_element(weights.begin(), weights.end());
+    // Dense: rank 3 -> 1/3 ~= 0.333. Competition-with-gaps would give 1/4 = 0.25.
+    REQUIRE(min_w > 0.32f);
+    REQUIRE(min_w < 0.34f);
+}
+
 TEST_CASE("RankPoolEncoder transform not fitted throws", "[rank_pool_enc]") {
     RankPoolEncoder encoder;
     std::vector<SpeciesRecord> records;

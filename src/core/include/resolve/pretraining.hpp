@@ -256,8 +256,13 @@ private:
 TORCH_MODULE(MaskedSpeciesHead);
 
 // Apply BERT-style masking: 15% of valid positions; of those 80% mask, 10% random, 10% keep.
-// Returns: (masked_ids, mlm_mask [bool], mlm_targets [original IDs at masked positions])
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+// Returns: (masked_ids, mlm_mask [bool: all masked positions, used for targets/loss],
+//           mlm_targets [original IDs at masked positions],
+//           mask_token_positions [bool: the 80% subset the encoder replaces with
+//           the learned mask embedding]). The 80% subset is kept distinct from
+// mlm_mask so the 10%-random and 10%-keep ids in masked_ids actually reach the
+// encoder instead of every masked position collapsing to the mask embedding.
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 mask_species_batch(
     torch::Tensor species_ids,
     torch::Tensor valid_mask,

@@ -95,6 +95,8 @@ void register_types(nb::module_& m) {
         .def_rw("categorical_names", &resolve::ResolveSchema::categorical_names)
         .def_rw("categorical_vocab_sizes", &resolve::ResolveSchema::categorical_vocab_sizes)
         .def_rw("categorical_embed_dim", &resolve::ResolveSchema::categorical_embed_dim)
+        .def_rw("pool_weighting", &resolve::ResolveSchema::pool_weighting)
+        .def_rw("pool_species_cap", &resolve::ResolveSchema::pool_species_cap)
         .def("has_categoricals", &resolve::ResolveSchema::has_categoricals)
         .def("n_categoricals", &resolve::ResolveSchema::n_categoricals);
 
@@ -358,7 +360,7 @@ void register_types(nb::module_& m) {
                 auto cpu_tensor = p.latent.detach().cpu().contiguous();
                 return nb::steal(THPVariable_Wrap(cpu_tensor));
             }
-            return nb::steal(Py_None);
+            return nb::none();
         });
 
     m.attr("SpaccPredictions") = m.attr("ResolvePredictions");
@@ -370,14 +372,14 @@ void register_types(nb::module_& m) {
                 auto cpu_tensor = s.continuous_mean.detach().cpu().contiguous();
                 return nb::steal(THPVariable_Wrap(cpu_tensor));
             }
-            return nb::steal(Py_None);
+            return nb::none();
         })
         .def_prop_ro("continuous_scale", [](const resolve::Scalers& s) {
             if (s.continuous_scale.defined()) {
                 auto cpu_tensor = s.continuous_scale.detach().cpu().contiguous();
                 return nb::steal(THPVariable_Wrap(cpu_tensor));
             }
-            return nb::steal(Py_None);
+            return nb::none();
         });
 
     // Calibration types for classification evaluation
@@ -426,21 +428,21 @@ void register_types(nb::module_& m) {
                 auto cpu_tensor = c.predicted_classes.detach().cpu().contiguous();
                 return nb::steal(THPVariable_Wrap(cpu_tensor));
             }
-            return nb::steal(Py_None);
+            return nb::none();
         })
         .def_prop_ro("probabilities", [](const resolve::ClassificationPredictions& c) {
             if (c.probabilities.defined()) {
                 auto cpu_tensor = c.probabilities.detach().cpu().contiguous();
                 return nb::steal(THPVariable_Wrap(cpu_tensor));
             }
-            return nb::steal(Py_None);
+            return nb::none();
         })
         .def_prop_ro("actuals", [](const resolve::ClassificationPredictions& c) {
             if (c.actuals.defined()) {
                 auto cpu_tensor = c.actuals.detach().cpu().contiguous();
                 return nb::steal(THPVariable_Wrap(cpu_tensor));
             }
-            return nb::steal(Py_None);
+            return nb::none();
         });
 
     // Spatial block configuration
@@ -481,6 +483,6 @@ void register_types(nb::module_& m) {
                 auto cpu_tensor = r.moe_aux_loss.detach().cpu().contiguous();
                 return nb::steal(THPVariable_Wrap(cpu_tensor));
             }
-            return nb::steal(Py_None);
+            return nb::none();
         });
 }

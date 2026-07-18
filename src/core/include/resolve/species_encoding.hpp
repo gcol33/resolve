@@ -123,10 +123,16 @@ public:
     //         records in original CSV order (matching the POC's `a[:cap]`).
     // When the cap kicks in we print a one-line summary so users see the
     // drop ("rank_pool: capping species at p99=X (max=Y, saves Z% padding)").
+    // has_abundance_column mirrors the POC's `roles.has_abundance`: has_cover is
+    // 1 for every plot when an abundance/cover column was mapped, else 0. It is
+    // a column-presence flag, NOT inferred from values (a plot whose covers are
+    // all exactly 1.0 still has cover data), so pass whether the dataset mapped
+    // an abundance column rather than letting the encoder guess.
     [[nodiscard]] RankPoolEncodedData transform(
         const std::vector<SpeciesRecord>& records,
         const std::vector<std::string>& plot_ids,
-        int species_cap = 0) const;
+        int species_cap = 0,
+        bool has_abundance_column = false) const;
 
     [[nodiscard]] bool is_fitted() const noexcept { return fitted_; }
     [[nodiscard]] int64_t n_species_vocab() const noexcept { return species_vocab_.size(); }

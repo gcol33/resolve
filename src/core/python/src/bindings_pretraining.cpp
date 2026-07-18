@@ -44,12 +44,15 @@ void register_pretraining(nb::module_& m) {
                            nb::object family_ids_obj,
                            nb::object species_ids_obj,
                            nb::object species_vector_obj) {
-            const at::Tensor& continuous = THPVariable_Unpack(continuous_obj.ptr());
-            at::Tensor genus_ids = genus_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(genus_ids_obj.ptr());
-            at::Tensor family_ids = family_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(family_ids_obj.ptr());
-            at::Tensor species_ids = species_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(species_ids_obj.ptr());
-            at::Tensor species_vector = species_vector_obj.is_none() ? at::Tensor() : THPVariable_Unpack(species_vector_obj.ptr());
-
+            // Guard the unpack (THPVariable_Unpack on None/non-tensor is UB) and
+            // release the GIL around the multi-epoch loop so other Python
+            // threads run, matching Trainer.fit / Model.forward.
+            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
+            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
+            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
+            at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
+            at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
+            nb::gil_scoped_release release;
             return self.pretrain(continuous, genus_ids, family_ids, species_ids, species_vector);
         }, nb::arg("continuous"),
            nb::arg("genus_ids") = nb::none(),
@@ -67,12 +70,12 @@ void register_pretraining(nb::module_& m) {
                            nb::object family_ids_obj,
                            nb::object species_ids_obj,
                            nb::object species_vector_obj) {
-            const at::Tensor& continuous = THPVariable_Unpack(continuous_obj.ptr());
-            at::Tensor genus_ids = genus_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(genus_ids_obj.ptr());
-            at::Tensor family_ids = family_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(family_ids_obj.ptr());
-            at::Tensor species_ids = species_ids_obj.is_none() ? at::Tensor() : THPVariable_Unpack(species_ids_obj.ptr());
-            at::Tensor species_vector = species_vector_obj.is_none() ? at::Tensor() : THPVariable_Unpack(species_vector_obj.ptr());
-
+            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
+            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
+            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
+            at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
+            at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
+            nb::gil_scoped_release release;
             return self.pretrain(continuous, genus_ids, family_ids, species_ids, species_vector);
         }, nb::arg("continuous"),
            nb::arg("genus_ids") = nb::none(),
@@ -111,7 +114,9 @@ void register_pretraining(nb::module_& m) {
              nb::arg("n_species"), nb::arg("config") = resolve::VAEConfig{})
         .def("pretrain", [](resolve::VAEPretrainer& self,
                            nb::object species_vectors_obj) {
-            const at::Tensor& species_vectors = THPVariable_Unpack(species_vectors_obj.ptr());
+            at::Tensor species_vectors =
+                unpack_required_tensor(species_vectors_obj, "species_vectors");
+            nb::gil_scoped_release release;
             return self.pretrain(species_vectors);
         }, nb::arg("species_vectors"))
         .def("get_projection_weights", [](resolve::VAEPretrainer& self) {

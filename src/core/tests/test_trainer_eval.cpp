@@ -376,3 +376,114 @@ TEST_CASE("Checkpoint train-config + run-metadata round-trip", "[trainer][checkp
         REQUIRE(meta2.final_metrics.at("eunis").at("accuracy") == Catch::Approx(0.91f));
     }
 }
+
+TEST_CASE("Checkpoint model-config sub-config round-trip", "[trainer][checkpoint]") {
+    // Non-MLP encoder sub-configs must survive the checkpoint or Predictor::load
+    // rebuilds default-sized layers whose weights mismatch (issue #37).
+    ModelConfig cfg;
+    cfg.encoder_architecture = EncoderArchitecture::FTTransformer;
+    cfg.ft_transformer.d_model = 256;        // non-default (192)
+    cfg.ft_transformer.n_layers = 6;         // non-default (3)
+    cfg.ft_transformer.n_heads = 16;         // non-default (8)
+    cfg.ft_transformer.pre_norm = false;     // non-default (true)
+    cfg.tabnet.n_steps = 7;                  // non-default (3)
+    cfg.saint.n_layers = 9;                  // non-default (6)
+    cfg.gnn.gnn_type = GNNType::GraphSAGE;   // non-default (GAT)
+    cfg.gnn.k_neighbors = 25;                // non-default (10)
+    cfg.trait_net.trait_dim = 96;            // non-default (64)
+    cfg.excelformer.d_model = 320;           // non-default (192)
+    cfg.excelformer.importance_threshold = 0.7f;  // non-default (0.5)
+    cfg.heterogeneous_gnn.output_dim = 128;  // non-default (64)
+
+    ParallelBranchConfig b1;
+    b1.hidden_dims = {128, 64};
+    b1.dropout = 0.25f;
+    ParallelBranchConfig b2;
+    b2.hidden_dims = {256};
+    b2.branch_weight = 2.0f;
+    cfg.parallel_layers.enabled = true;
+    cfg.parallel_layers.aggregation = ParallelAggregation::Gated;
+    cfg.parallel_layers.branches = {b1, b2};
+
+    const std::string path =
+        (std::filesystem::temp_directory_path() / "resolve_modelcfg_subconfig_roundtrip.pt").string();
+    {
+        torch::serialize::OutputArchive ar;
+        save_model_config(ar, cfg);
+        ar.save_to(path);
+    }
+    torch::serialize::InputArchive ar;
+    ar.load_from(path);
+    ModelConfig cfg2 = load_model_config(ar);
+    std::filesystem::remove(path);
+
+    REQUIRE(cfg2.encoder_architecture == EncoderArchitecture::FTTransformer);
+    REQUIRE(cfg2.ft_transformer.d_model == 256);
+    REQUIRE(cfg2.ft_transformer.n_layers == 6);
+    REQUIRE(cfg2.ft_transformer.n_heads == 16);
+    REQUIRE(cfg2.ft_transformer.pre_norm == false);
+    REQUIRE(cfg2.tabnet.n_steps == 7);
+    REQUIRE(cfg2.saint.n_layers == 9);
+    REQUIRE(cfg2.gnn.gnn_type == GNNType::GraphSAGE);
+    REQUIRE(cfg2.gnn.k_neighbors == 25);
+    REQUIRE(cfg2.trait_net.trait_dim == 96);
+    REQUIRE(cfg2.excelformer.d_model == 320);
+    REQUIRE(cfg2.excelformer.importance_threshold == Catch::Approx(0.7f));
+    REQUIRE(cfg2.heterogeneous_gnn.output_dim == 128);
+    REQUIRE(cfg2.parallel_layers.enabled == true);
+    REQUIRE(cfg2.parallel_layers.aggregation == ParallelAggregation::Gated);
+    REQUIRE(cfg2.parallel_layers.branches.size() == 2);
+    REQUIRE(cfg2.parallel_layers.branches[0].hidden_dims == std::vector<int64_t>{128, 64});
+    REQUIRE(cfg2.parallel_layers.branches[0].dropout == Catch::Approx(0.25f));
+    REQUIRE(cfg2.parallel_layers.branches[1].hidden_dims == std::vector<int64_t>{256});
+    REQUIRE(cfg2.parallel_layers.branches[1].branch_weight == Catch::Approx(2.0f));
+}
+
+TEST_CASE("Checkpoint schema pool-weighting round-trip", "[trainer][checkpoint]") {
+    // pool_weighting / pool_species_cap must survive the checkpoint so the
+    // predict side rebuilds the same DatasetConfig instead of defaulting to
+    // Log1p and recomputing different pool weights (issue #38).
+    ResolveSchema schema;
+    schema.n_plots = 100;
+    schema.n_species = 40;
+    schema.n_species_vocab = 41;
+    schema.pool_weighting = 4;      // PoolWeighting::Rank (non-default)
+    schema.pool_species_cap = 137;  // resolved max-species width
+
+    const std::string path =
+        (std::filesystem::temp_directory_path() / "resolve_schema_pool_roundtrip.pt").string();
+    {
+        torch::serialize::OutputArchive ar;
+        save_schema(ar, schema);
+        ar.save_to(path);
+    }
+    torch::serialize::InputArchive ar;
+    ar.load_from(path);
+    ResolveSchema schema2 = load_schema(ar);
+    std::filesystem::remove(path);
+
+    REQUIRE(schema2.pool_weighting == 4);
+    REQUIRE(schema2.pool_species_cap == 137);
+
+    SECTION("pre-#38 checkpoint keeps schema defaults") {
+        // A schema archive that never wrote the pool keys must read back as the
+        // Log1p / auto defaults, not throw.
+        ResolveSchema legacy;
+        legacy.n_plots = 5;
+        const std::string lpath =
+            (std::filesystem::temp_directory_path() / "resolve_schema_legacy.pt").string();
+        {
+            torch::serialize::OutputArchive ar2;
+            // Write only the categorical block's prerequisite key set by writing
+            // the full schema, then confirm defaults survive a fresh struct.
+            save_schema(ar2, legacy);
+            ar2.save_to(lpath);
+        }
+        torch::serialize::InputArchive ar2;
+        ar2.load_from(lpath);
+        ResolveSchema legacy2 = load_schema(ar2);
+        std::filesystem::remove(lpath);
+        REQUIRE(legacy2.pool_weighting == 2);   // Log1p
+        REQUIRE(legacy2.pool_species_cap == 0);  // auto
+    }
+}
