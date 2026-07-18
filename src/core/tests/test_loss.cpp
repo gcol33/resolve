@@ -181,6 +181,39 @@ TEST_CASE("Metrics::classification_metrics", "[metrics][classification]") {
     }
 }
 
+TEST_CASE("Metrics::macro_f1 is mean of per-class F1, not F1 of averaged P/R",
+          "[metrics][classification]") {
+    // Samples: (true,pred) = (0,0), (0,1), (1,1).
+    //   class 0: P=1.0, R=0.5 -> F1 = 0.667
+    //   class 1: P=0.5, R=1.0 -> F1 = 0.667
+    // Correct macro-F1 = mean(F1) = 0.667.
+    // The old F1-of-averaged-P/R gave 2*0.75*0.75/1.5 = 0.75 (distinguishable).
+    auto pred = torch::tensor({
+        {0.9f, 0.1f},  // -> 0
+        {0.1f, 0.9f},  // -> 1
+        {0.1f, 0.9f}   // -> 1
+    });
+    auto target = torch::tensor(std::vector<int64_t>{0, 0, 1});
+    auto m = Metrics::classification_metrics(pred, target, 2);
+
+    REQUIRE_THAT(m.per_class_f1[0], WithinAbs(0.6667f, 1e-3));
+    REQUIRE_THAT(m.per_class_f1[1], WithinAbs(0.6667f, 1e-3));
+    // Mean of per-class F1, NOT the 0.75 the F1-of-means formula produced.
+    REQUIRE_THAT(m.macro_f1, WithinAbs(0.6667f, 1e-3));
+}
+
+TEST_CASE("Metrics::r_squared on a constant target", "[metrics][regression]") {
+    auto constant = torch::tensor({3.0f, 3.0f, 3.0f, 3.0f});
+
+    SECTION("exact match -> 1.0") {
+        REQUIRE_THAT(Metrics::r_squared(constant, constant), WithinAbs(1.0f, 1e-5));
+    }
+    SECTION("bad predictions -> 0.0, not a spurious 1.0") {
+        auto pred = torch::tensor({1.0f, 2.0f, 4.0f, 5.0f});
+        REQUIRE_THAT(Metrics::r_squared(pred, constant), WithinAbs(0.0f, 1e-5));
+    }
+}
+
 // ============================================================================
 // Confidence Metrics Tests
 // ============================================================================

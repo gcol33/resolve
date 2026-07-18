@@ -131,6 +131,30 @@ void fit_classification_mapping(
     }
 }
 
+// Resolve a classification target's (mapping, class_names): use the caller's
+// explicit class_mapping if non-empty (class_names indexed by code, with gaps
+// for sparse codes), otherwise fit from the raw string labels. Single source
+// for both the single-table and header+species loaders.
+void resolve_classification_mapping(
+    const std::unordered_map<std::string, int64_t>& explicit_mapping,
+    const std::vector<std::string>& raw_labels,
+    std::unordered_map<std::string, int64_t>& mapping_out,
+    std::vector<std::string>& class_names_out
+) {
+    if (!explicit_mapping.empty()) {
+        mapping_out = explicit_mapping;
+        int64_t max_code = -1;
+        for (const auto& [_, c] : mapping_out) if (c > max_code) max_code = c;
+        if (max_code >= 0) {
+            class_names_out.assign(static_cast<size_t>(max_code + 1), std::string{});
+            for (const auto& [k, c] : mapping_out)
+                if (c >= 0) class_names_out[static_cast<size_t>(c)] = k;
+        }
+    } else {
+        fit_classification_mapping(raw_labels, mapping_out, class_names_out);
+    }
+}
+
 }  // namespace
 
 
@@ -531,21 +555,12 @@ ResolveDataset ResolveDataset::from_species_source(
             std::unordered_map<std::string, int64_t> mapping;
             std::vector<std::string> class_names;
             const bool explicit_mapping = !target_spec.class_mapping.empty();
-            if (explicit_mapping) {
-                mapping = target_spec.class_mapping;
-                int64_t max_code = -1;
-                for (const auto& [_, c] : mapping) if (c > max_code) max_code = c;
-                if (max_code >= 0) {
-                    class_names.assign(static_cast<size_t>(max_code + 1), std::string{});
-                    for (const auto& [k, c] : mapping)
-                        if (c >= 0) class_names[static_cast<size_t>(c)] = k;
-                }
-            } else {
-                std::vector<std::string> raw;
+            std::vector<std::string> raw;
+            if (!explicit_mapping) {
                 raw.reserve(static_cast<size_t>(n_plots));
                 for (int64_t i = 0; i < n_plots; ++i) raw.push_back(raw_at(t, i));
-                fit_classification_mapping(raw, mapping, class_names);
             }
+            resolve_classification_mapping(target_spec.class_mapping, raw, mapping, class_names);
 
             auto target_tensor = torch::zeros({n_plots}, torch::kLong);
             auto acc = target_tensor.accessor<int64_t, 1>();
@@ -930,21 +945,7 @@ void ResolveDataset::load_header_data(
         std::unordered_map<std::string, int64_t> mapping;
         std::vector<std::string> class_names;
         const bool explicit_mapping = !target.class_mapping.empty();
-
-        if (explicit_mapping) {
-            mapping = target.class_mapping;
-            // Build class_names from the explicit mapping, indexed by code.
-            int64_t max_code = -1;
-            for (const auto& [_, c] : mapping) if (c > max_code) max_code = c;
-            if (max_code >= 0) {
-                class_names.assign(static_cast<size_t>(max_code + 1), std::string{});
-                for (const auto& [k, c] : mapping) {
-                    if (c >= 0) class_names[static_cast<size_t>(c)] = k;
-                }
-            }
-        } else {
-            fit_classification_mapping(raw, mapping, class_names);
-        }
+        resolve_classification_mapping(target.class_mapping, raw, mapping, class_names);
 
         // Encode and count nulls. Tensor is preallocated to (n_plots,)
         // kLong; write each row, flip keep_row[i] = 0 for unmapped/NA.
@@ -1515,19 +1516,25 @@ void ResolveDataset::encode_species(
             auto it = plot_records.find(plot_id);
             if (it == plot_records.end()) continue;
 
-            // Get sorted records by abundance
-            auto records = it->second;
-            std::sort(records.begin(), records.end(),
-                [](const auto& a, const auto& b) { return a.abundance > b.abundance; }
-            );
+            // Canonical embed-mode taxonomy: aggregate abundance per DISTINCT
+            // genus and per DISTINCT family, then take the top-k of each
+            // independently (shared topk_by_abundance; matches EmbeddingEncoder,
+            // resolving the former per-species-slot divergence, issue #60).
+            std::unordered_map<std::string, float> genus_abd, family_abd;
+            for (const auto& rec : it->second) {
+                if (!rec.genus.empty())  genus_abd[rec.genus]   += rec.abundance;
+                if (!rec.family.empty()) family_abd[rec.family] += rec.abundance;
+            }
 
-            // Fill taxonomy slots
-            int slot = 0;
-            for (const auto& rec : records) {
-                if (slot >= n_taxonomy_slots) break;
-                genus_acc[i][slot] = taxonomy_vocab_.encode_genus(rec.genus);
-                family_acc[i][slot] = taxonomy_vocab_.encode_family(rec.family);
-                slot++;
+            auto top_genera = topk_by_abundance(genus_abd, n_taxonomy_slots);
+            for (size_t slot = 0; slot < top_genera.size(); ++slot) {
+                genus_acc[i][static_cast<int64_t>(slot)] =
+                    taxonomy_vocab_.encode_genus(top_genera[slot]);
+            }
+            auto top_families = topk_by_abundance(family_abd, n_taxonomy_slots);
+            for (size_t slot = 0; slot < top_families.size(); ++slot) {
+                family_acc[i][static_cast<int64_t>(slot)] =
+                    taxonomy_vocab_.encode_family(top_families[slot]);
             }
         }
     }

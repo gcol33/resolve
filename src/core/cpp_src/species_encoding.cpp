@@ -57,6 +57,24 @@ HashBucketSign feature_hash_bucket_sign(const std::string& species, int hash_dim
     return out;
 }
 
+std::vector<std::string> topk_by_abundance(
+    const std::unordered_map<std::string, float>& name_to_abundance, int k
+) {
+    std::vector<std::pair<std::string, float>> items(
+        name_to_abundance.begin(), name_to_abundance.end());
+    // Descending abundance; ties broken by name ascending for determinism.
+    std::sort(items.begin(), items.end(),
+        [](const auto& a, const auto& b) {
+            if (a.second != b.second) return a.second > b.second;
+            return a.first < b.first;
+        });
+    std::vector<std::string> out;
+    const int n = std::min<int>(k, static_cast<int>(items.size()));
+    out.reserve(n);
+    for (int i = 0; i < n; ++i) out.push_back(items[i].first);
+    return out;
+}
+
 int64_t percentile_linear_trunc(std::vector<int64_t>& values, double q) {
     if (values.empty()) return 0;
     const double rank = (q / 100.0) * static_cast<double>(values.size() - 1);
@@ -606,20 +624,15 @@ EmbeddingEncodedData EmbeddingEncoder::transform(
                 }
             }
 
-            // Sort genera by abundance descending and take top-k
-            std::vector<std::pair<std::string, float>> genus_list(genus_abd.begin(), genus_abd.end());
-            std::sort(genus_list.begin(), genus_list.end(),
-                      [](const auto& a, const auto& b) { return a.second > b.second; });
-            for (int j = 0; j < top_k_taxonomy_ && j < static_cast<int>(genus_list.size()); ++j) {
-                g_a[pi][j] = taxonomy_vocab_.encode_genus(genus_list[j].first);
+            // Top-k distinct genera / families by aggregated abundance
+            // (shared canonical selection, deterministic tie-break).
+            auto top_genera = topk_by_abundance(genus_abd, top_k_taxonomy_);
+            for (size_t j = 0; j < top_genera.size(); ++j) {
+                g_a[pi][static_cast<int64_t>(j)] = taxonomy_vocab_.encode_genus(top_genera[j]);
             }
-
-            // Sort families by abundance descending and take top-k
-            std::vector<std::pair<std::string, float>> family_list(family_abd.begin(), family_abd.end());
-            std::sort(family_list.begin(), family_list.end(),
-                      [](const auto& a, const auto& b) { return a.second > b.second; });
-            for (int j = 0; j < top_k_taxonomy_ && j < static_cast<int>(family_list.size()); ++j) {
-                f_a[pi][j] = taxonomy_vocab_.encode_family(family_list[j].first);
+            auto top_families = topk_by_abundance(family_abd, top_k_taxonomy_);
+            for (size_t j = 0; j < top_families.size(); ++j) {
+                f_a[pi][static_cast<int64_t>(j)] = taxonomy_vocab_.encode_family(top_families[j]);
             }
         }
     }

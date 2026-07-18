@@ -33,6 +33,14 @@ HashBucketSign feature_hash_bucket_sign(const std::string& species, int hash_dim
 // length distributions relative to the POC's int(np.percentile(...)).
 int64_t percentile_linear_trunc(std::vector<int64_t>& values, double q);
 
+// Top-k distinct names by descending aggregated abundance, ties broken by name
+// ascending (deterministic; the previous ad-hoc sorts relied on unordered_map
+// iteration order for ties). Single source for embed-mode taxonomy slot
+// selection, shared by the dataset loader (encode_species) and EmbeddingEncoder
+// so both produce identical genus/family slots.
+std::vector<std::string> topk_by_abundance(
+    const std::unordered_map<std::string, float>& name_to_abundance, int k);
+
 // Feature hashing for species
 void hash_species(
     const std::vector<std::pair<std::string, float>>& species_abundances,

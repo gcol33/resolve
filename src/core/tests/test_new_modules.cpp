@@ -795,6 +795,27 @@ TEST_CASE("FTTransformerEncoder forward shape", "[attention]") {
     REQUIRE(out.size(1) == 64);  // d_model
 }
 
+TEST_CASE("sparsemax output is a normalized distribution", "[attention]") {
+    // The projection must sum to 1 along the sparsemax dim for ANY support size
+    // (the old tau bug produced non-normalized output for support > 1).
+    SECTION("worked example, support size 2") {
+        auto x = torch::tensor({{1.0f, 0.9f, 0.2f}});
+        auto y = sparsemax(x, /*dim=*/-1);
+        REQUIRE_THAT(y.sum().item<float>(), WithinAbs(1.0f, 1e-5));
+        // Expected: tau = (1.9-1)/2 = 0.45 -> [0.55, 0.45, 0].
+        REQUIRE_THAT(y[0][0].item<float>(), WithinAbs(0.55f, 1e-4));
+        REQUIRE_THAT(y[0][1].item<float>(), WithinAbs(0.45f, 1e-4));
+        REQUIRE_THAT(y[0][2].item<float>(), WithinAbs(0.00f, 1e-4));
+    }
+    SECTION("random batch, all rows sum to 1 and are non-negative") {
+        auto x = torch::randn({16, 40});
+        auto y = sparsemax(x, /*dim=*/-1);
+        auto sums = y.sum(/*dim=*/-1);
+        REQUIRE_THAT((sums - 1.0f).abs().max().item<float>(), WithinAbs(0.0f, 1e-4));
+        REQUIRE(y.min().item<float>() >= -1e-6f);
+    }
+}
+
 TEST_CASE("TabNetEncoder forward shape", "[attention]") {
     TabNetEncoder encoder(32, 3, 16, 16, 1.5f, 1e-3f);
     auto x = torch::randn({8, 32});
