@@ -427,6 +427,78 @@ TEST_CASE("ResolveModel with categoricals widens n_continuous and passes "
     }
 }
 
+TEST_CASE("ResolveModel adapter + categoricals sizes the numerical block correctly",
+          "[categorical][adapter]") {
+    // The model fuses the CategoricalEmbedder output into `continuous` before
+    // the adapter runs. The adapter must size n_numerical_ to include that
+    // width; otherwise TabNet/GNN crash on the shape mismatch and the
+    // transformer adapters silently read only the leading columns.
+    ResolveSchema schema;
+    schema.n_plots = 8;
+    schema.n_species = 10;
+    schema.has_coordinates = true;
+    schema.covariate_names = {"cov_a", "cov_b"};
+    schema.track_unknown_fraction = false;
+    schema.track_unknown_count = false;
+    schema.has_taxonomy = false;
+    schema.categorical_names = {"col1", "col2"};
+    schema.categorical_vocab_sizes = {5, 4};
+    schema.categorical_embed_dim = 6;
+
+    TargetConfig tgt;
+    tgt.name = "y";
+    tgt.task = TaskType::Regression;
+    schema.targets = {tgt};
+
+    const int64_t B = 4;
+    const int64_t hash_dim = 4;
+    const int64_t n_cont_input = 2 /*coords*/ + 2 /*cov*/ + hash_dim;  // hash already in continuous
+
+    auto continuous = torch::randn({B, n_cont_input});
+    auto cat_ids = torch::zeros({B, 2}, torch::kInt64);
+    {
+        auto a = cat_ids.accessor<int64_t, 2>();
+        a[0][0] = 0; a[0][1] = 1;
+        a[1][0] = 1; a[1][1] = 2;
+        a[2][0] = 4; a[2][1] = 3;
+        a[3][0] = 2; a[3][1] = 0;
+    }
+
+    auto make_cfg = [&](EncoderArchitecture arch) {
+        ModelConfig cfg;
+        cfg.species_encoding = SpeciesEncodingMode::Hash;
+        cfg.encoder_architecture = arch;
+        cfg.hash_dim = hash_dim;
+        cfg.hidden_dims = {16, 8};
+        cfg.categorical_embed_dim = 6;
+        return cfg;
+    };
+
+    SECTION("TabNet forward runs (previously crashed on the shape mismatch)") {
+        auto cfg = make_cfg(EncoderArchitecture::TabNet);
+        cfg.tabnet.n_d = 8;
+        cfg.tabnet.n_a = 8;
+        cfg.tabnet.n_steps = 2;
+        ResolveModel model(schema, cfg);
+        auto out = model->forward(continuous, {}, {}, {}, {},
+                                  {}, {}, {}, {}, {}, cat_ids);
+        REQUIRE(out.count("y") == 1);
+        REQUIRE(out["y"].size(0) == B);
+    }
+
+    SECTION("ExcelFormer forward runs with all fused columns visible") {
+        auto cfg = make_cfg(EncoderArchitecture::ExcelFormer);
+        cfg.excelformer.d_model = 32;
+        cfg.excelformer.n_heads = 4;
+        cfg.excelformer.n_layers = 2;
+        ResolveModel model(schema, cfg);
+        auto out = model->forward(continuous, {}, {}, {}, {},
+                                  {}, {}, {}, {}, {}, cat_ids);
+        REQUIRE(out.count("y") == 1);
+        REQUIRE(out["y"].size(0) == B);
+    }
+}
+
 // =============================================================================
 // 6. End-to-end checkpoint roundtrip with categoricals
 // =============================================================================

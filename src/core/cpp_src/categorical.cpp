@@ -224,6 +224,7 @@ std::vector<std::string> split_bytes_by_lengths(
 
     auto lengths_acc = lengths_t.accessor<int64_t, 1>();
     auto bytes_ptr = bytes_t.numel() > 0 ? bytes_t.data_ptr<uint8_t>() : nullptr;
+    const int64_t n_bytes = bytes_t.numel();
     int64_t offset = 0;
     out.reserve(lengths_t.size(0));
     for (int64_t i = 0; i < lengths_t.size(0); ++i) {
@@ -232,6 +233,13 @@ std::vector<std::string> split_bytes_by_lengths(
             throw std::runtime_error(
                 "CategoricalVocab::load: byte tensor is empty but lengths "
                 "report a non-zero string — corrupt archive");
+        }
+        // Bound the read against the byte buffer: a truncated/corrupt archive
+        // whose lengths sum past the buffer must throw, not read out of bounds.
+        if (len < 0 || offset + len > n_bytes) {
+            throw std::runtime_error(
+                "CategoricalVocab::load: string lengths exceed the byte buffer "
+                "— corrupt archive");
         }
         out.emplace_back(reinterpret_cast<const char*>(bytes_ptr + offset),
                          static_cast<size_t>(len));

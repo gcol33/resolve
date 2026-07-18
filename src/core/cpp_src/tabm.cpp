@@ -35,8 +35,8 @@ BatchEnsembleLinearImpl::BatchEnsembleLinearImpl(
             torch::zeros({n_ensembles, out_features}));
     }
 
-    // Per-ensemble rank-1 factors, initialized near 1.0 (small perturbation)
-    // Following TabM paper: initialize from N(1, 0.5) truncated to [0.5, 1.5]
+    // Per-ensemble rank-1 factors, initialized near 1.0: ones + N(0, 0.1) so
+    // each ensemble member starts as a small perturbation of the shared weight.
     r_ = register_parameter("r",
         torch::ones({n_ensembles, in_features}) +
         torch::randn({n_ensembles, in_features}) * 0.1f);

@@ -19,6 +19,8 @@
 #include "resolve/trainer.hpp"
 
 #include <cmath>
+#include <cstdint>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -227,4 +229,74 @@ TEST_CASE("Species composition recovers a species-driven target", "[recovery][sp
     // composition-determined target on held-out plots (well above the ~0
     // a broken species pathway would give).
     REQUIRE(pearson(res.predictions, res.actuals) > 0.8);
+}
+
+// =============================================================================
+// 4. fit() persists run metadata to the checkpoint (issue #54): load_run_metadata
+//    recovers the run's best epoch / total epochs / train time / metrics, which
+//    fit() previously never wrote.
+// =============================================================================
+TEST_CASE("fit persists run metadata to the checkpoint", "[recovery][metadata]") {
+    const int64_t n_plots = 300;
+    std::ostringstream hdr, spc;
+    hdr << "plot_id,lat,lon,cov1,y\n";
+    spc << "plot_id,sp,cover\n";
+    for (int64_t i = 0; i < n_plots; ++i) {
+        const double c1 = std::sin(i * 0.11);
+        const double y = 1.7 * c1 + 2.0;
+        hdr << "P" << i << "," << (40.0 + i * 0.001) << "," << (-5.0 + i * 0.001)
+            << "," << c1 << "," << y << "\n";
+        spc << "P" << i << ",sp" << (i % 6) << ",1.0\n";
+    }
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id"; roles.species_id = "sp"; roles.abundance = "cover";
+    roles.latitude = "lat"; roles.longitude = "lon";
+    roles.covariates = {"cov1"};
+
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::Hash;
+    dcfg.hash_dim = 4; dcfg.use_taxonomy = false;
+    dcfg.track_unknown_fraction = false; dcfg.track_unknown_count = false;
+
+    auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(), roles,
+                                       {TargetSpec::regression("y")}, dcfg);
+
+    ModelConfig mcfg;
+    mcfg.species_encoding = SpeciesEncodingMode::Hash;
+    mcfg.encoder_architecture = EncoderArchitecture::MLP;
+    mcfg.hash_dim = 4; mcfg.hidden_dims = {16, 8};
+
+    const auto ckpt_dir = std::filesystem::temp_directory_path() /
+        ("resolve_meta_" + std::to_string(::time(nullptr)) + "_" +
+         std::to_string(reinterpret_cast<uintptr_t>(&ds)));
+    std::filesystem::create_directories(ckpt_dir);
+
+    TrainConfig tcfg = recovery_train_config(/*max_epochs=*/30);
+    tcfg.checkpoint_dir = ckpt_dir.string();
+
+    ResolveModel model(ds.schema(), mcfg);
+    Trainer trainer(model, tcfg);
+    trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/7);
+    auto result = trainer.fit();
+
+    const std::string ckpt = (ckpt_dir / "checkpoint.pt").string();
+    REQUIRE(std::filesystem::exists(ckpt));
+
+    const RunMetadata meta = Trainer::load_run_metadata(ckpt);
+    // These were all-default (zeros/empty) before fit() passed a RunMetadata.
+    REQUIRE(meta.total_epochs > 0);
+    REQUIRE(meta.total_epochs == static_cast<int>(result.train_loss_history.size()));
+    REQUIRE(meta.best_epoch == result.best_epoch);
+    REQUIRE(meta.train_time_seconds > 0.0f);
+    REQUIRE(meta.n_plots_train > 0);
+    REQUIRE(meta.n_plots_test > 0);
+    REQUIRE(meta.final_metrics.count("y") == 1);
+    REQUIRE_FALSE(meta.created_at.empty());
+
+    // JSON sidecar is written alongside the checkpoint.
+    REQUIRE(std::filesystem::exists(ckpt_dir / "checkpoint.json"));
+
+    std::filesystem::remove_all(ckpt_dir);
 }

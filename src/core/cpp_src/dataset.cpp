@@ -409,10 +409,14 @@ ResolveDataset ResolveDataset::from_species_source(
                   << "); use from_csv for plot-level covariates" << std::endl;
     }
 
-    // Find target columns
+    // Find target columns. A missing target column must fail loudly here too;
+    // col == -1 would otherwise silently drop every plot's target value.
     std::vector<int> target_cols;
     for (const auto& target : targets) {
         int col = reader.column_index(target.column_name);
+        if (col < 0) {
+            throw std::runtime_error("Target column not found: " + target.column_name);
+        }
         target_cols.push_back(col);
     }
 
@@ -627,16 +631,35 @@ void ResolveDataset::load_header_data(
         throw std::runtime_error("Plot ID column not found: " + roles.plot_id);
     }
 
-    int lon_col = roles.longitude ? reader.column_index(*roles.longitude) : -1;
-    int lat_col = roles.latitude ? reader.column_index(*roles.latitude) : -1;
+    // A named coordinate column that is absent from the header is a
+    // configuration error, not a silent "no coordinates": failing loudly here
+    // avoids training a model that quietly dropped the coordinates the user
+    // asked for.
+    int lon_col = -1, lat_col = -1;
+    if (roles.longitude) {
+        lon_col = reader.column_index(*roles.longitude);
+        if (lon_col < 0) {
+            throw std::runtime_error("Longitude column not found in header CSV: " + *roles.longitude);
+        }
+    }
+    if (roles.latitude) {
+        lat_col = reader.column_index(*roles.latitude);
+        if (lat_col < 0) {
+            throw std::runtime_error("Latitude column not found in header CSV: " + *roles.latitude);
+        }
+    }
 
+    // A missing covariate column must fail loudly, not be silently dropped: a
+    // typo'd name would otherwise train a model with fewer features than the
+    // user requested and bake the wrong feature count into the checkpoint.
     std::vector<int> covariate_cols;
     for (const auto& cov : roles.covariates) {
         int col = reader.column_index(cov);
-        if (col >= 0) {
-            covariate_cols.push_back(col);
-            schema_.covariate_names.push_back(cov);
+        if (col < 0) {
+            throw std::runtime_error("Covariate column not found in header CSV: " + cov);
         }
+        covariate_cols.push_back(col);
+        schema_.covariate_names.push_back(cov);
     }
 
     // ---- Categorical covariates ----
@@ -670,9 +693,15 @@ void ResolveDataset::load_header_data(
         categorical_names_resolved.push_back(cat);
     }
 
+    // A missing target column must fail loudly. Left unchecked, col == -1 makes
+    // every row fail row_ok below -> "Kept 0 of N plots" with no exception, i.e.
+    // the entire dataset is silently discarded far from the actual cause.
     std::vector<int> target_cols;
     for (const auto& target : targets) {
         int col = reader.column_index(target.column_name);
+        if (col < 0) {
+            throw std::runtime_error("Target column not found in header CSV: " + target.column_name);
+        }
         target_cols.push_back(col);
 
         target_configs_.push_back({
@@ -1420,7 +1449,13 @@ void ResolveDataset::encode_species(
         schema_.n_species_vocab = encoded.n_species_vocab;
         // Refresh taxonomy schema fields from the encoder's own vocab so the
         // rank-pool encoder lookup tables match what the model is sized for.
-        schema_.has_taxonomy = encoded.n_genera_vocab > 1 && config_.use_taxonomy;
+        // Gate on genus OR family having real (non-UNK) entries so a family-only
+        // dataset keeps its family embeddings, matching the encoder's own gate
+        // (species_encoding.cpp: n_genera() > 1 || n_families() > 1) and the
+        // coarse loader gate at load_header_data. Genus-only vocab is 1 (UNK).
+        schema_.has_taxonomy =
+            (encoded.n_genera_vocab > 1 || encoded.n_families_vocab > 1)
+            && config_.use_taxonomy;
         if (schema_.has_taxonomy) {
             schema_.n_genera = encoded.n_genera_vocab;
             schema_.n_families = encoded.n_families_vocab;

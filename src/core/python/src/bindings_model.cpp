@@ -346,9 +346,14 @@ void register_model(nb::module_& m) {
             at::Tensor pool_has_cover = unpack_optional_tensor(pool_has_cover_obj);
             at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
 
-            auto result = self->forward_with_aux(continuous, genus_ids, family_ids, species_ids, species_vector,
-                                                  pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                                                  categorical_ids);
+            resolve::ModelForwardResult result;
+            {
+                // Pure-C++ compute; drop the GIL like forward()/get_latent().
+                nb::gil_scoped_release nogil;
+                result = self->forward_with_aux(continuous, genus_ids, family_ids, species_ids, species_vector,
+                                                 pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
+                                                 categorical_ids);
+            }
             return result;  // ModelForwardResult is already bound
         }, nb::arg("continuous"), nb::arg("genus_ids") = nb::none(), nb::arg("family_ids") = nb::none(),
            nb::arg("species_ids") = nb::none(), nb::arg("species_vector") = nb::none(),
@@ -370,8 +375,12 @@ void register_model(nb::module_& m) {
             at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
             at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
             at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
-            auto result = self->forward_single(target, continuous, genus_ids, family_ids, species_ids, species_vector,
-                                                categorical_ids);
+            at::Tensor result;
+            {
+                nb::gil_scoped_release nogil;
+                result = self->forward_single(target, continuous, genus_ids, family_ids, species_ids, species_vector,
+                                              categorical_ids);
+            }
             return nb::steal(THPVariable_Wrap(result));
         }, nb::arg("target"), nb::arg("continuous"), nb::arg("genus_ids") = nb::none(),
            nb::arg("family_ids") = nb::none(), nb::arg("species_ids") = nb::none(), nb::arg("species_vector") = nb::none(),
@@ -385,7 +394,13 @@ void register_model(nb::module_& m) {
             at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
             at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
             at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
-            auto [latent, activations] = self->encode_with_activations(continuous, genus_ids, family_ids, categorical_ids);
+            torch::Tensor latent;
+            std::vector<torch::Tensor> activations;
+            {
+                nb::gil_scoped_release nogil;
+                std::tie(latent, activations) =
+                    self->encode_with_activations(continuous, genus_ids, family_ids, categorical_ids);
+            }
             nb::list act_list;
             for (const auto& a : activations) {
                 act_list.append(nb::steal(THPVariable_Wrap(a)));
@@ -400,7 +415,11 @@ void register_model(nb::module_& m) {
             at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
             at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
             at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
-            auto result = self->get_gate_probs(continuous, genus_ids, family_ids);
+            at::Tensor result;
+            {
+                nb::gil_scoped_release nogil;
+                result = self->get_gate_probs(continuous, genus_ids, family_ids);
+            }
             return nb::steal(THPVariable_Wrap(result));
         }, nb::arg("continuous"), nb::arg("genus_ids") = nb::none(), nb::arg("family_ids") = nb::none())
         .def_prop_ro("uses_moe", [](resolve::ResolveModel& self) { return self->uses_moe(); })

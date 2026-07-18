@@ -16,8 +16,14 @@ TabularAdapterImpl::TabularAdapterImpl(
     int64_t n_coords = schema.has_coordinates ? 2 : 0;
     int64_t n_unknown_features = schema.track_unknown_fraction ? 1 : 0;
     if (schema.track_unknown_count) n_unknown_features += 1;
+    // Include the categorical-covariate embedding width: ResolveModel fuses the
+    // CategoricalEmbedder output into `continuous` (fuse_categoricals_) BEFORE
+    // calling the adapter, so the numerical block the adapter receives is wider
+    // by exactly this amount. Omitting it made the FeatureTokenizer read only
+    // the leading columns (silently dropping features) and crashed TabNet/GNN on
+    // the shape mismatch.
     int64_t n_continuous_base = n_coords + static_cast<int64_t>(schema.covariate_names.size())
-                                + n_unknown_features;
+                                + n_unknown_features + schema.categorical_embed_width();
 
     // Species features contribute to numerical features
     int64_t n_species_features = 0;

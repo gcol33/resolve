@@ -40,6 +40,14 @@ void set_vram_fraction(double fraction, int device_index, LogCallback log) {
         return;
     }
 
+    if (device_index >= static_cast<int>(n_devices)) {
+        std::ostringstream err;
+        err << "set_vram_fraction: device_index " << device_index
+            << " out of range (only " << static_cast<int>(n_devices)
+            << " CUDA device(s) present)";
+        throw std::invalid_argument(err.str());
+    }
+
     const c10::DeviceIndex dev = (device_index < 0)
         ? c10::cuda::current_device()
         : static_cast<c10::DeviceIndex>(device_index);
@@ -73,8 +81,11 @@ bool decide_oom_retry(
     std::string& out_err_msg
 ) {
     const int new_bs = prev_bs / 2;
-    out_new_batch_size = new_bs;
     if (new_bs < floor) {
+        // Rethrow path: leave out_new_batch_size at the unchanged current value
+        // so a caller that reads it without checking the return does not act on
+        // a sub-floor size.
+        out_new_batch_size = prev_bs;
         std::ostringstream err;
         err << "CUDA out of memory during Trainer::fit and the auto-halve "
                "retry hit the floor. Original batch_size="
@@ -89,6 +100,7 @@ bool decide_oom_retry(
         return false;
     }
 
+    out_new_batch_size = new_bs;
     std::ostringstream msg;
     msg << "OOM at batch_size=" << prev_bs
         << "; retrying at batch_size=" << new_bs

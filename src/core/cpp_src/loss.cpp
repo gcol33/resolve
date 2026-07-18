@@ -363,7 +363,9 @@ std::unordered_map<std::string, float> Metrics::compute(
     TaskType task,
     TransformType transform,
     const std::vector<float>& band_thresholds,
-    int num_classes
+    int num_classes,
+    torch::Tensor scaler_mean,
+    torch::Tensor scaler_scale
 ) {
     std::unordered_map<std::string, float> metrics;
 
@@ -388,17 +390,28 @@ std::unordered_map<std::string, float> Metrics::compute(
             pred = pred.squeeze(1);
         }
 
-        // Apply inverse transform for original scale metrics
+        // Map back to original units so every reported metric is in the same,
+        // interpretable space. Training stores regression targets standardized
+        // ((x - mean) / scale) and, for Log1p targets, log1p-transformed first;
+        // the model therefore predicts in standardized(-log) space. Undo the
+        // standardization, then the transform, matching PhasedLoss. Without the
+        // scalers, mae/rmse were reported in standardized units and smape/band
+        // took ratios of values straddling zero -- both meaningless.
         torch::Tensor pred_orig = pred;
         torch::Tensor target_orig = target;
 
-        if (transform == TransformType::Log1p) {
-            pred_orig = torch::expm1(torch::clamp(pred, /*min=*/-88.0f, /*max=*/88.0f));
-            target_orig = torch::expm1(target);
+        if (scaler_mean.defined() && scaler_scale.defined()) {
+            pred_orig = pred_orig * scaler_scale + scaler_mean;
+            target_orig = target_orig * scaler_scale + scaler_mean;
         }
 
-        metrics["mae"] = mae(pred, target);
-        metrics["rmse"] = rmse(pred, target);
+        if (transform == TransformType::Log1p) {
+            pred_orig = torch::expm1(torch::clamp(pred_orig, /*min=*/-88.0f, /*max=*/88.0f));
+            target_orig = torch::expm1(target_orig);
+        }
+
+        metrics["mae"] = mae(pred_orig, target_orig);
+        metrics["rmse"] = rmse(pred_orig, target_orig);
         metrics["r2"] = r_squared(pred_orig, target_orig);
         metrics["smape"] = smape(pred_orig, target_orig);
 

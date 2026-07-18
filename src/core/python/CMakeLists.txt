@@ -24,6 +24,13 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         # This is the key: tell Torch not to look for CUDA
         set(TORCH_CUDA_ARCH_LIST "" CACHE STRING "" FORCE)
         set(CMAKE_CUDA_COMPILER "" CACHE FILEPATH "" FORCE)
+    else()
+        # Local CUDA wheel build: link PyTorch's prebuilt CUDA libs (we do not
+        # compile CUDA ourselves except the custom kernels below). cuDNN off to
+        # match the engine build.
+        set(CAFFE2_USE_CUDA ON)
+        set(CAFFE2_USE_CUDNN OFF)
+        set(USE_CUDNN OFF)
     endif()
 
     # Locate libtorch via the installed `torch` package's CMake prefix when no
@@ -60,6 +67,11 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
     )
     target_link_libraries(resolve_core PUBLIC ${TORCH_LIBRARIES})
+
+    # Custom CUDA kernels + RESOLVE_HAS_CUDA, shared with the engine build. Under
+    # -DUSE_CUDA=ON this defines RESOLVE_HAS_CUDA so set_vram_fraction and the
+    # hash kernels are actually compiled in; a no-op on the default CPU wheel.
+    include(${RESOLVE_CORE_DIR}/resolve_cuda_kernels.cmake)
 
     # OpenMP for fuzzy::query_batch (optional).
     find_package(OpenMP QUIET)

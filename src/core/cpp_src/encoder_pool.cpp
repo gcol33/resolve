@@ -49,7 +49,10 @@ PlotEncoderRankPoolImpl::PlotEncoderRankPoolImpl(
     float cover_dropout,
     const TabMConfig& tabm_config
 ) : cover_dropout_(cover_dropout) {
-    has_taxonomy_ = (n_genera > 0 && n_families > 0);
+    // Enable taxonomy when genus OR family has real (non-UNK) entries, matching
+    // the encoder's transform gate and keeping family-only datasets' family
+    // embeddings. A vocab of 1 is UNK-only; its table is a harmless padding row.
+    has_taxonomy_ = (n_genera > 1 || n_families > 1);
 
     // Single shared embedding tables with padding_idx=0
     species_embedding_ = register_module("species_embedding",
@@ -191,7 +194,8 @@ PlotEncoderTransformerImpl::PlotEncoderTransformerImpl(
     transformer_pooling_(transformer_pooling),
     cover_dropout_(cover_dropout)
 {
-    has_taxonomy_ = (n_genera > 0 && n_families > 0);
+    // See PlotEncoderRankPool: genus OR family real entries enable taxonomy.
+    has_taxonomy_ = (n_genera > 1 || n_families > 1);
 
     // Additive embeddings (all d_model-dimensional) with padding_idx=0
     species_embedding_ = register_module("species_embedding",

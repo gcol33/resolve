@@ -1172,6 +1172,16 @@ resolve_value* train_config_to_value(const TrainConfig& c) {
     v_put(m, "lr_min", v_double(c.lr_min));
     v_put(m, "vram_fraction", v_double(c.vram_fraction));
     v_put(m, "band_thresholds", v_double_array(c.band_thresholds));
+    // AMP / cuDNN / tf32. These are not persisted by save_train_config (so
+    // load_train_config leaves them at defaults), but the live trainer's config
+    // holds them, so trainer$get_config() would otherwise silently drop them.
+    v_put(m, "use_amp", v_bool(c.use_amp));
+    v_put(m, "amp_init_scale", v_double(c.amp_init_scale));
+    v_put(m, "amp_growth_factor", v_double(c.amp_growth_factor));
+    v_put(m, "amp_backoff_factor", v_double(c.amp_backoff_factor));
+    v_put(m, "amp_growth_interval", v_int(c.amp_growth_interval));
+    v_put(m, "cudnn_benchmark", v_bool(c.cudnn_benchmark));
+    v_put(m, "allow_tf32", v_bool(c.allow_tf32));
     return m;
 }
 resolve_value* run_metadata_to_value(const RunMetadata& m0) {
@@ -1639,7 +1649,10 @@ resolve_value_t* resolve_model_call(resolve_model_t* m, const char* method, cons
                 in.continuous, in.genus_ids, in.family_ids, in.species_ids, in.species_vector,
                 in.pool_genus_ids, in.pool_family_ids, in.pool_weights, in.pool_mask,
                 in.pool_has_cover, in.categorical_ids);
-            return tensor_to_vec(latent);
+            // latent is [batch, latent_dim]; return a matrix so R gets per-plot
+            // rows (matching Python's 2-D get_latent and encode_with_activations
+            // below), not a flat length batch*latent_dim vector with no dims.
+            return tensor_to_mat(latent);
         }
         if (mt == "forward_with_aux") {
             auto result = m->model->forward_with_aux(
@@ -1982,9 +1995,16 @@ resolve_value_t* resolve_predictor_get(const resolve_predictor_t* p, const char*
         if (w == "device") return v_string(pr.device().is_cuda() ? "cuda" : "cpu");
         if (w == "scalers") return scalers_to_value(pr.scalers());
         if (w == "categorical_vocab") return categorical_vocab_to_value(pr.categorical_vocab());
-        if (w == "genus_embeddings") return tensor_to_mat(pr.get_genus_embeddings());
-        if (w == "family_embeddings") return tensor_to_mat(pr.get_family_embeddings());
-        if (w == "species_embeddings") return tensor_to_mat(pr.get_species_embeddings());
+        // Guard undefined tensors (an encoder without a given table returns an
+        // empty tensor) so R gets NULL rather than a throw from tensor_to_mat's
+        // .cpu(), matching the model weight accessors and Python (which returns
+        // None).
+        auto mat_or_null = [](const torch::Tensor& t) -> resolve_value* {
+            return (t.defined() && t.numel() > 0) ? tensor_to_mat(t) : v_null();
+        };
+        if (w == "genus_embeddings") return mat_or_null(pr.get_genus_embeddings());
+        if (w == "family_embeddings") return mat_or_null(pr.get_family_embeddings());
+        if (w == "species_embeddings") return mat_or_null(pr.get_species_embeddings());
         throw std::runtime_error("predictor_get: unknown accessor '" + w + "'");
     })
 }

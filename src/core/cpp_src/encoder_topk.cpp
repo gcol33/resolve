@@ -176,7 +176,9 @@ void PlotEncoderEmbedImpl::init(
     const MLPBlockConfig& config,
     const TabMConfig& tabm_config
 ) {
-    has_taxonomy_ = (n_genera > 0 && n_families > 0);
+    // Genus OR family real entries enable taxonomy (matches the transform gate
+    // in EmbeddingEncoder), so family-only datasets keep family embeddings.
+    has_taxonomy_ = (n_genera > 1 || n_families > 1);
     top_k_species_ = top_k_species;
     top_k_taxonomy_ = top_k_taxonomy;
     mlp_config_ = config;

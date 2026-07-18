@@ -542,9 +542,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> TabNetStepImpl::forward(
     // Update prior scales
     auto new_prior_scales = prior_scales * (relaxation_factor_ - mask);
 
-    // Masked input for next step
-    auto masked_x = x * mask;
-
+    // The mask is returned for the encoder loop to apply to the next step's
+    // input (attention.cpp encoder body); the step itself does not consume it.
     return std::make_tuple(decision_out, mask, new_prior_scales);
 }
 
@@ -863,11 +862,15 @@ ExcelFormerEncoderImpl::ExcelFormerEncoderImpl(
 
     // Transformer layers
     if (d_ff == 0) d_ff = 4 * d_model;
+    // Register blocks only through the ModuleList. Wrapping each block in its
+    // own register_module("block_i", ...) as well would register it twice (as a
+    // child of *this AND of layers_), so named_parameters() would yield every
+    // block weight twice -- doubling optimizer updates and checkpoint size.
+    // Matches SAINTEncoder / TransformerEncoder above.
     layers_ = register_module("layers", torch::nn::ModuleList());
     for (int64_t i = 0; i < n_layers; ++i) {
         layers_->push_back(
-            register_module("block_" + std::to_string(i),
-                TransformerBlock(d_model, n_heads, d_ff, dropout, /*pre_norm=*/true)));
+            TransformerBlock(d_model, n_heads, d_ff, dropout, /*pre_norm=*/true));
     }
 
     final_norm_ = register_module("final_norm",

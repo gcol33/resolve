@@ -54,6 +54,47 @@ TEST_CASE("PlotEncoderRankPool forward with taxonomy", "[rank_pool]") {
     REQUIRE(encoder->has_taxonomy());
 }
 
+TEST_CASE("PlotEncoderRankPool enables taxonomy for family-only data", "[rank_pool][taxonomy]") {
+    // Family mapped, no genus: genus vocab is 1 (UNK only), family vocab > 1.
+    // The gate must be (n_genera > 1 || n_families > 1), so the family
+    // embeddings survive. The old (n_genera > 0 && n_families > 0) gate dropped
+    // them whenever genus was absent.
+    PlotEncoderRankPool encoder(
+        /*n_continuous=*/10,
+        /*n_species=*/100,
+        /*n_genera=*/1,      // UNK-only
+        /*n_families=*/10,
+        /*species_embed_dim=*/32,
+        /*genus_embed_dim=*/16,
+        /*family_embed_dim=*/8
+    );
+    REQUIRE(encoder->has_taxonomy());
+
+    auto continuous = torch::randn({4, 10});
+    auto species_ids = torch::randint(1, 100, {4, 15}, torch::kInt64);
+    auto genus_ids = torch::zeros({4, 15}, torch::kInt64);            // all UNK
+    auto family_ids = torch::randint(1, 10, {4, 15}, torch::kInt64);
+    auto weights = torch::rand({4, 15});
+
+    encoder->eval();
+    auto out = encoder->forward(continuous, species_ids, genus_ids, family_ids, weights);
+    REQUIRE(out.size(0) == 4);
+    REQUIRE(out.size(1) == encoder->latent_dim());
+}
+
+TEST_CASE("PlotEncoderRankPool enables taxonomy for genus-only data", "[rank_pool][taxonomy]") {
+    PlotEncoderRankPool encoder(
+        /*n_continuous=*/10,
+        /*n_species=*/100,
+        /*n_genera=*/30,
+        /*n_families=*/1,    // UNK-only
+        /*species_embed_dim=*/32,
+        /*genus_embed_dim=*/16,
+        /*family_embed_dim=*/8
+    );
+    REQUIRE(encoder->has_taxonomy());
+}
+
 TEST_CASE("PlotEncoderRankPool mask handling excludes padding", "[rank_pool]") {
     PlotEncoderRankPool encoder(
         /*n_continuous=*/5,

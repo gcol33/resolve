@@ -423,7 +423,7 @@ PretrainResult JEPAPretrainer::pretrain(
             global_step++;
         }
 
-        float avg_loss = epoch_loss / n_batches;
+        float avg_loss = (n_batches > 0) ? epoch_loss / n_batches : 0.0f;
         result.loss_history.push_back(avg_loss);
 
         if (epoch % 10 == 0) {
@@ -555,7 +555,7 @@ PretrainResult SCARFPretrainer::pretrain(
             n_batches++;
         }
 
-        float avg_loss = epoch_loss / n_batches;
+        float avg_loss = (n_batches > 0) ? epoch_loss / n_batches : 0.0f;
         result.loss_history.push_back(avg_loss);
 
         if (epoch % 10 == 0) {

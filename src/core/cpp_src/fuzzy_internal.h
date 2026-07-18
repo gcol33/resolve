@@ -17,7 +17,7 @@ namespace resolve::fuzzy::detail {
 // Malformed sequences yield U+FFFD and resync.
 std::vector<uint32_t> utf8_to_codepoints(std::string_view s);
 
-// Lowercase a single code point (ASCII A-Z + Latin-1 supplement A0-DE).
+// Lowercase a single code point (ASCII A-Z + Latin-1 uppercase C0-DE, excl. D7).
 uint32_t to_lower_cp(uint32_t cp);
 
 // Lowercase all code points in-place.

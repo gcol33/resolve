@@ -328,6 +328,54 @@ TEST_CASE("Metrics::compute regression", "[metrics][integration]") {
     REQUIRE(metrics.count("band_75") > 0);
 }
 
+TEST_CASE("Metrics::compute reports regression metrics in original units",
+          "[metrics][regression][recovery]") {
+    // Reproduces the training pipeline: original-units targets are log1p'd then
+    // standardized, and the model predicts in that standardized-log space. The
+    // reported metrics must be mapped back to original units via the scalers,
+    // NOT left in standardized space (where mae/rmse are unitless and smape/band
+    // take ratios of values straddling zero).
+    auto y = torch::tensor({10.0f, 50.0f, 200.0f, 1000.0f, 5000.0f});  // e.g. plot areas
+    auto t = torch::log1p(y);
+    auto mean = t.mean();
+    auto scale = t.std() + 1e-8f;
+    auto t_std = (t - mean) / scale;          // == Trainer::test_targets_
+
+    // Model prediction in standardized-log space with a small systematic offset.
+    auto pred_std = t_std + 0.1f;
+
+    auto metrics = Metrics::compute(pred_std.unsqueeze(1), t_std,
+                                    TaskType::Regression, TransformType::Log1p,
+                                    {0.25f, 0.50f, 0.75f}, /*num_classes=*/0,
+                                    mean, scale);
+
+    // Ground truth computed independently in original units.
+    auto pred_orig = torch::expm1(pred_std * scale + mean);
+    float expected_mae = torch::abs(pred_orig - y).mean().item<float>();
+    float expected_rmse = torch::sqrt(torch::pow(pred_orig - y, 2).mean()).item<float>();
+
+    REQUIRE_THAT(metrics["mae"], WithinRel(expected_mae, 1e-4f));
+    REQUIRE_THAT(metrics["rmse"], WithinRel(expected_rmse, 1e-4f));
+
+    // Original-units error is on the scale of the targets (hundreds+), not the
+    // ~0.1 standardized-space number the pre-fix path reported.
+    REQUIRE(metrics["mae"] > 1.0f);
+
+    // smape and band are finite and within their natural ranges.
+    REQUIRE(metrics["smape"] >= 0.0f);
+    REQUIRE(metrics["smape"] <= 1.0f);
+    REQUIRE(metrics["band_25"] >= 0.0f);
+    REQUIRE(metrics["band_25"] <= 1.0f);
+
+    // Contrast: omitting the scalers leaves the metrics in standardized-log
+    // space, where the same inputs report a tiny, meaningless mae. This is the
+    // pre-fix behavior and confirms the unscale is load-bearing.
+    auto unscaled = Metrics::compute(pred_std.unsqueeze(1), t_std,
+                                     TaskType::Regression, TransformType::Log1p,
+                                     {0.25f}, 0);
+    REQUIRE(unscaled["mae"] < 1.0f);
+}
+
 TEST_CASE("Metrics::compute classification", "[metrics][integration]") {
     auto pred = torch::tensor({
         {0.9f, 0.1f, 0.0f},

@@ -714,3 +714,56 @@ TEST_CASE("ResolveDataset classification target", "[dataset]") {
         REQUIRE(schema.targets[0].num_classes == 10);
     }
 }
+
+TEST_CASE("from_csv fails loudly on missing role columns", "[dataset][validation]") {
+    TempFile header(
+        "plot_id,lat,lon,bio1,bio2,area\n"
+        "p1,50.0,10.0,1.0,2.0,100\n"
+        "p2,51.0,11.0,1.5,2.5,200\n"
+    );
+    TempFile species(
+        "plot_id,species,cover\n"
+        "p1,sp1,1.0\n"
+        "p2,sp2,1.0\n"
+    );
+
+    auto base_roles = [] {
+        RoleMapping r;
+        r.plot_id = "plot_id"; r.species_id = "species"; r.abundance = "cover";
+        r.latitude = "lat"; r.longitude = "lon";
+        return r;
+    };
+    DatasetConfig cfg;
+    cfg.species_encoding = SpeciesEncodingMode::Hash;
+    cfg.hash_dim = 8;
+
+    SECTION("typo'd covariate column throws (not silently dropped)") {
+        RoleMapping roles = base_roles();
+        roles.covariates = {"bio1", "boi2"};  // typo
+        REQUIRE_THROWS(ResolveDataset::from_csv(
+            header.path(), species.path(), roles, {TargetSpec::regression("area")}, cfg));
+    }
+
+    SECTION("missing target column throws (not a silent 0-row dataset)") {
+        RoleMapping roles = base_roles();
+        roles.covariates = {"bio1", "bio2"};
+        REQUIRE_THROWS(ResolveDataset::from_csv(
+            header.path(), species.path(), roles, {TargetSpec::regression("areea")}, cfg));
+    }
+
+    SECTION("missing coordinate column throws") {
+        RoleMapping roles = base_roles();
+        roles.latitude = "lattitude";  // typo
+        REQUIRE_THROWS(ResolveDataset::from_csv(
+            header.path(), species.path(), roles, {TargetSpec::regression("area")}, cfg));
+    }
+
+    SECTION("all columns present loads cleanly") {
+        RoleMapping roles = base_roles();
+        roles.covariates = {"bio1", "bio2"};
+        auto ds = ResolveDataset::from_csv(
+            header.path(), species.path(), roles, {TargetSpec::regression("area")}, cfg);
+        REQUIRE(ds.n_plots() == 2);
+        REQUIRE(ds.schema().covariate_names.size() == 2);
+    }
+}

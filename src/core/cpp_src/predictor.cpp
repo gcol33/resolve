@@ -356,8 +356,15 @@ void Predictor::optimize_for_inference() {
             auto scale = bn->weight / std_val;
 
             linear->weight.mul_(scale.unsqueeze(1));
+            // Fold the BN shift into the Linear bias. If the Linear has no bias
+            // (bias-free Linear immediately before BN, as in tabm/gnn/attention
+            // sub-blocks), synthesize one so the shift term is not silently
+            // dropped, which would change the fused output.
+            auto shift = bn->bias - scale * bn->running_mean;
             if (linear->bias.defined()) {
-                linear->bias.mul_(scale).add_(bn->bias - scale * bn->running_mean);
+                linear->bias.mul_(scale).add_(shift);
+            } else {
+                linear->bias = linear->register_parameter("bias", shift.clone());
             }
 
             // Replace BN with Identity (identity module in Sequential)

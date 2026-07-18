@@ -170,13 +170,20 @@ struct Metrics {
     // band_thresholds: vector of thresholds for band accuracy (e.g., {0.25, 0.50, 0.75})
     //                  metric names will be "band_25", "band_50", etc. (threshold * 100)
     // num_classes: required for classification tasks to compute per-class F1
+    // scaler_mean/scaler_scale: when defined, regression pred/target are mapped
+    //   back to original units via x*scale + mean before any transform inversion,
+    //   so every reported regression metric is in original units. Mirrors the
+    //   unscale convention in PhasedLoss::regression_loss. Omit (undefined) to
+    //   report in whatever space pred/target are already in.
     static std::unordered_map<std::string, float> compute(
         torch::Tensor pred,
         torch::Tensor target,
         TaskType task,
         TransformType transform = TransformType::None,
         const std::vector<float>& band_thresholds = {0.25f, 0.50f, 0.75f},
-        int num_classes = 0
+        int num_classes = 0,
+        torch::Tensor scaler_mean = {},
+        torch::Tensor scaler_scale = {}
     );
 };
 

@@ -36,10 +36,27 @@
 #include <sstream>
 #include <filesystem>
 #include <cmath>
+#include <ctime>
 
 namespace resolve {
 
 namespace {
+
+// ISO 8601 UTC timestamp ("YYYY-MM-DDTHH:MM:SSZ") for run metadata. Used only
+// for informational created_at/completed_at fields, never for anything the run
+// depends on, so the wall-clock read is fine.
+std::string iso8601_now() {
+    std::time_t t = std::time(nullptr);
+    std::tm tm_utc{};
+#if defined(_WIN32)
+    gmtime_s(&tm_utc, &t);
+#else
+    gmtime_r(&t, &tm_utc);
+#endif
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm_utc);
+    return std::string(buf);
+}
 
 // One-time structural validation of the CSR plot offsets that feed the CUDA
 // hash kernels. The kernels (cuda/kernels.cu) guard against malformed ranges
@@ -805,9 +822,20 @@ Trainer::eval_epoch(int epoch) {
         auto target_it = test_targets.find(cfg.name);
 
         if (pred_it != predictions.end() && target_it != test_targets.end()) {
+            // Pass the target scalers so regression metrics are reported in
+            // original units (the model and test_targets are both in
+            // standardized(-log) space here). Classification targets have no
+            // scaler entry -> undefined tensors -> Metrics::compute skips the
+            // unscale, as intended.
+            torch::Tensor sc_mean, sc_scale;
+            auto scaler_it = batch_scalers.find(cfg.name);
+            if (scaler_it != batch_scalers.end()) {
+                sc_mean = scaler_it->second.first;
+                sc_scale = scaler_it->second.second;
+            }
             all_metrics[cfg.name] = Metrics::compute(
                 pred_it->second, target_it->second, cfg.task, cfg.transform,
-                config_.band_thresholds, cfg.num_classes
+                config_.band_thresholds, cfg.num_classes, sc_mean, sc_scale
             );
         }
     }
@@ -1045,6 +1073,7 @@ TrainResult Trainer::fit() {
 
     const int batch_size_at_entry = config_.batch_size;
     auto start_time = std::chrono::high_resolution_clock::now();
+    created_at_ = iso8601_now();
 
     // Create checkpoint directory if specified
     bool use_checkpoints = !config_.checkpoint_dir.empty();
@@ -1217,9 +1246,23 @@ TrainResult Trainer::fit() {
         model_->load(archive);
     }
 
-    // Save final checkpoint
+    auto end_time = std::chrono::high_resolution_clock::now();
+    result.train_time_seconds = std::chrono::duration<float>(end_time - start_time).count();
+
+    // Save final checkpoint WITH run metadata so a saved checkpoint records its
+    // own train time, best epoch, and reported metrics (load_run_metadata /
+    // the JSON sidecar were otherwise write-only -- fit() never populated them).
     if (use_checkpoints) {
-        save(config_.checkpoint_dir + "/checkpoint.pt");
+        RunMetadata meta;
+        meta.created_at = created_at_;
+        meta.completed_at = iso8601_now();
+        meta.train_time_seconds = result.train_time_seconds;
+        meta.n_plots_train = train_indices_.defined() ? train_indices_.numel() : 0;
+        meta.n_plots_test = test_indices_.defined() ? test_indices_.numel() : 0;
+        meta.best_epoch = result.best_epoch;
+        meta.total_epochs = static_cast<int>(result.train_loss_history.size());
+        meta.final_metrics = result.final_metrics;
+        save(config_.checkpoint_dir + "/checkpoint.pt", &meta);
     }
 
     // Restore the requested batch size. fit() may have shrunk config_.batch_size
@@ -1228,9 +1271,6 @@ TrainResult Trainer::fit() {
     // carry the shrink into a subsequent fit() — e.g. later cross-validation
     // folds would otherwise silently train at the reduced batch size.
     config_.batch_size = batch_size_at_entry;
-
-    auto end_time = std::chrono::high_resolution_clock::now();
-    result.train_time_seconds = std::chrono::duration<float>(end_time - start_time).count();
 
     // Compute baseline comparisons for each target
     {
@@ -1708,6 +1748,11 @@ CalibrationResult Trainer::compute_calibration(
     const std::string& target_name,
     int n_bins
 ) {
+    if (!data_prepared_) {
+        throw std::runtime_error(
+            "compute_calibration requires prepare_data() first");
+    }
+
     CalibrationResult result;
     result.target_name = target_name;
 
@@ -1797,6 +1842,11 @@ CalibrationResult Trainer::compute_calibration(
 ResidualAnalysis Trainer::compute_residuals(
     const std::string& target_name
 ) {
+    if (!data_prepared_) {
+        throw std::runtime_error(
+            "compute_residuals requires prepare_data() first");
+    }
+
     ResidualAnalysis result;
     result.target_name = target_name;
 
@@ -1825,9 +1875,11 @@ ResidualAnalysis Trainer::compute_residuals(
         return result;
     }
 
-    // Get predictions and targets
-    auto preds = pred_it->second.squeeze().cpu();
-    auto targets = target_it->second.cpu();
+    // Get predictions and targets. reshape({-1}), not squeeze(): a single-plot
+    // test fold has a (1,1) output that squeeze() would collapse to a 0-D
+    // scalar, breaking size(0)/accessor and the element-wise subtraction below.
+    auto preds = pred_it->second.reshape({-1}).cpu();
+    auto targets = target_it->second.reshape({-1}).cpu();
 
     // Unscale if needed (predictions are in scaled space)
     auto scaler_it = scalers_.target_scalers.find(target_name);

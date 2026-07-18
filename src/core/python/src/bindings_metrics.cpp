@@ -38,7 +38,16 @@ void register_metrics(nb::module_& m) {
         .def_static("accuracy_coverage_curve", &resolve::Metrics::accuracy_coverage_curve,
                     nb::arg("pred"), nb::arg("target"), nb::arg("confidence"),
                     nb::arg("thresholds") = std::vector<float>{0.0f, 0.5f, 0.8f, 0.9f, 0.95f})
-        .def_static("compute", &resolve::Metrics::compute,
+        // Wrap in a lambda to keep the Python signature stable (no scaler args);
+        // the C++ overload's trailing scaler_mean/scaler_scale default to
+        // undefined, so metrics are reported in the space pred/target are in.
+        .def_static("compute",
+                    [](torch::Tensor pred, torch::Tensor target, resolve::TaskType task,
+                       resolve::TransformType transform,
+                       const std::vector<float>& band_thresholds, int num_classes) {
+                        return resolve::Metrics::compute(pred, target, task, transform,
+                                                         band_thresholds, num_classes);
+                    },
                     nb::arg("pred"), nb::arg("target"), nb::arg("task"),
                     nb::arg("transform") = resolve::TransformType::None,
                     nb::arg("band_thresholds") = std::vector<float>{0.25f, 0.50f, 0.75f},

@@ -265,7 +265,14 @@ torch::Tensor TypedMessagePassingLayerImpl::forward(
     auto attn_scores = (tgt_query * key).sum(-1) /
         std::sqrt(static_cast<float>(out_features_));
 
-    auto attn_exp = attn_scores.exp();
+    // Numerically stable per-target-node softmax: subtract each target node's
+    // max score before exp. Without this, large learned attention logits (only
+    // scaled by 1/sqrt(out_features)) overflow to inf, and inf/inf yields NaN
+    // weights that propagate into every embedding.
+    auto tgt_max = torch::full({n_nodes},
+        -std::numeric_limits<float>::infinity(), node_features.options());
+    tgt_max.scatter_reduce_(0, tgt_idx, attn_scores, "amax", /*include_self=*/true);
+    auto attn_exp = (attn_scores - tgt_max.index_select(0, tgt_idx)).exp();
     auto attn_sum = torch::zeros({n_nodes}, node_features.options());
     attn_sum.scatter_add_(0, tgt_idx, attn_exp);
     auto attn_weights = attn_exp /
@@ -309,12 +316,14 @@ HeterogeneousGNNEncoderImpl::HeterogeneousGNNEncoderImpl(
     input_proj_ = register_module("input_proj",
         torch::nn::Linear(hidden_dim, hidden_dim));
 
+    // Register layers only through the ModuleList; an additional
+    // register_module("mp_i", ...) would double-register each layer (child of
+    // *this AND of layers_), duplicating every parameter in named_parameters().
     layers_ = register_module("layers", torch::nn::ModuleList());
     for (int64_t i = 0; i < n_layers; ++i) {
         layers_->push_back(
-            register_module("mp_" + std::to_string(i),
-                TypedMessagePassingLayer(
-                    hidden_dim, hidden_dim, n_edge_types, n_heads, dropout)));
+            TypedMessagePassingLayer(
+                hidden_dim, hidden_dim, n_edge_types, n_heads, dropout));
     }
 
     output_proj_ = register_module("output_proj",
@@ -359,8 +368,10 @@ torch::Tensor build_knn_adjacency(torch::Tensor coords, int64_t k) {
     // final inference batch, or batch_size=1) would otherwise make topk throw.
     int64_t k_eff = std::min<int64_t>(k, std::max<int64_t>(n_nodes - 1, 0));
     if (k_eff == 0) {
-        // 0 or 1 node: no neighbours to connect.
-        return torch::zeros({n_nodes, n_nodes}, coords.options());
+        // 0 or 1 node: no neighbours to connect. Return self-loops (identity)
+        // rather than zeros so a single-node graph still has a valid, non-empty
+        // adjacency row -- an all-zero row makes GAT's masked softmax NaN.
+        return torch::eye(n_nodes, coords.options());
     }
 
     auto diff = coords.unsqueeze(0) - coords.unsqueeze(1);
@@ -376,6 +387,12 @@ torch::Tensor build_knn_adjacency(torch::Tensor coords, int64_t k) {
     adj.index_put_({rows, indices}, 1.0f);
 
     adj = (adj + adj.transpose(0, 1)).clamp_max(1.0f);
+
+    // Self-loops (A + I): standard GCN normalization, and it guarantees every
+    // node has at least one non-zero adjacency entry so GAT's per-row softmax
+    // over masked(adj==0) scores is never taken over an all -inf row (which
+    // would produce NaN for an isolated node).
+    adj = (adj + torch::eye(n_nodes, coords.options())).clamp_max(1.0f);
 
     auto degree = adj.sum(/*dim=*/1);
     auto d_inv_sqrt = torch::pow(degree.clamp_min(1.0f), -0.5f);

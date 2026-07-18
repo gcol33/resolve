@@ -188,17 +188,13 @@ The Triton kernel in `csrc/fused_embed_linear.py` is **correct** but ~90x slower
 - Adapter layers for sparse mode (input = explicit species vector -> expert input)
 - Update model construction in both C++ and Python backends
 
-### Embedding weight extraction API
+### Embedding weight extraction API — DONE
 
-**Goal**: Extract learned genus/family embedding weights for downstream analysis and export.
-
-**Current state** (`src/core/cpp_src/predictor.cpp`): Two stubs returning empty tensors.
-
-**What's needed**:
-- Access embedding tables from the encoder (varies by type)
-- Clone and return weight tensors
-- Expose via nanobind/Rcpp bindings
-
-(C++ rank_pool/transformer implementation: **DONE** 2026-05-19 — see the
-"Rank-pool / transformer species encoding" bullet under "Completed
-Infrastructure" above.)
+`Predictor::get_genus_embeddings` / `get_family_embeddings` /
+`get_species_embeddings` (`cpp_src/predictor.cpp`) delegate to
+`ResolveModelImpl::get_genus_weights` / `get_family_weights` /
+`get_species_weights` (`cpp_src/model.cpp:588-613`), which dispatch to the
+per-encoder weight accessors (`encoder_pool.cpp:161-166`, etc.) and return the
+detached weight tensors. Exposed on nanobind and the R C-ABI. (These were the
+"two stubs returning empty tensors" noted here previously; that description was
+stale.)

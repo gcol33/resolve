@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <set>
 #include "resolve/tabm.hpp"
 #include "resolve/adapter.hpp"
 #include "resolve/pretraining.hpp"
@@ -315,6 +316,79 @@ TEST_CASE("ExcelFormerEncoder importance_logits receive gradient", "[excelformer
 
     REQUIRE(importance_logits.grad().defined());
     REQUIRE(importance_logits.grad().abs().sum().item<float>() > 0.0f);
+}
+
+TEST_CASE("ExcelFormerEncoder does not double-register block parameters",
+          "[excelformer][params]") {
+    // Each transformer block must be a child of the layers ModuleList only.
+    // Registering it a second time by name would alias the same storage under
+    // two paths in named_parameters(), doubling optimizer updates and the
+    // checkpoint. libtorch C++ named_parameters() does not dedupe shared
+    // submodules (unlike Python's remove_duplicate default), so any aliasing
+    // surfaces here.
+    std::vector<int64_t> no_cats;
+    ExcelFormerEncoder encoder(10, no_cats, 64, 4, /*n_layers=*/2, 0, 0.1f, 0.5f, true);
+
+    std::set<void*> storages;
+    for (const auto& named : encoder->named_parameters()) {
+        void* ptr = named.value().data_ptr();
+        INFO("duplicate parameter storage under: " << named.key());
+        REQUIRE(storages.insert(ptr).second);
+    }
+}
+
+TEST_CASE("HeterogeneousGNNEncoder does not double-register layer parameters",
+          "[hetero_gnn][params]") {
+    HeterogeneousGNNEncoder encoder(/*n_species=*/100, 128, 64, /*n_layers=*/3, 3, 4, 0.1f);
+
+    std::set<void*> storages;
+    for (const auto& named : encoder->named_parameters()) {
+        void* ptr = named.value().data_ptr();
+        INFO("duplicate parameter storage under: " << named.key());
+        REQUIRE(storages.insert(ptr).second);
+    }
+}
+
+TEST_CASE("build_knn_adjacency adds self-loops", "[gnn][adjacency]") {
+    // Every node must have a non-zero diagonal so GAT's masked softmax always
+    // has at least the self entry (an all-masked row would be NaN).
+    SECTION("multi-node graph") {
+        auto coords = torch::randn({6, 2});
+        auto adj = build_knn_adjacency(coords, 2);
+        auto diag = adj.diagonal();
+        REQUIRE((diag > 0).all().item<bool>());
+    }
+    SECTION("single-node graph returns a self-loop, not zeros") {
+        auto coords = torch::randn({1, 2});
+        auto adj = build_knn_adjacency(coords, 3);
+        REQUIRE(adj.size(0) == 1);
+        REQUIRE(adj[0][0].item<float>() > 0.0f);
+    }
+}
+
+TEST_CASE("TypedMessagePassing attention is finite under large logits",
+          "[hetero_gnn][stability]") {
+    // Large attention logits used to overflow exp() to inf -> NaN weights.
+    // The per-target-node max subtraction keeps the softmax finite.
+    HeterogeneousGNNEncoder encoder(/*n_species=*/32, 64, 32, /*n_layers=*/2, 3, 4, 0.0f);
+    encoder->eval();
+
+    // Scale the learned species embeddings up so attention logits are large.
+    {
+        torch::NoGradGuard ng;
+        for (auto& p : encoder->parameters()) {
+            p.mul_(50.0f);
+        }
+    }
+
+    // Dense-ish random graph over the 32 species.
+    auto src = torch::randint(0, 32, {200}, torch::kInt64);
+    auto dst = torch::randint(0, 32, {200}, torch::kInt64);
+    auto edge_index = torch::stack({src, dst}, 0);
+    auto edge_type = torch::randint(0, 3, {200}, torch::kInt64);
+
+    auto species_emb = encoder->forward(edge_index, edge_type);
+    REQUIRE(torch::isfinite(species_emb).all().item<bool>());
 }
 
 // ============================================================================

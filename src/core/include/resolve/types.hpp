@@ -151,7 +151,7 @@ enum class NormLayerType {
 // Configuration for a prediction target
 struct TargetConfig {
     std::string name;
-    TaskType task;
+    TaskType task = TaskType::Regression;
     TransformType transform = TransformType::None;
     int num_classes = 0;  // For classification
     float weight = 1.0f;  // Loss weight in multi-task
@@ -213,6 +213,15 @@ struct ResolveSchema {
     // Helper: how many categorical columns.
     [[nodiscard]] int64_t n_categoricals() const noexcept {
         return static_cast<int64_t>(categorical_names.size());
+    }
+    // Helper: total width the CategoricalEmbedder concatenates into `continuous`
+    // (n_columns * embed_dim), matching CategoricalEmbedderImpl::output_dim().
+    // Single source of truth for the fused categorical width; the model builds
+    // the embedder and the adapter must size its input for the same width.
+    [[nodiscard]] int64_t categorical_embed_width() const noexcept {
+        return has_categoricals()
+            ? static_cast<int64_t>(categorical_vocab_sizes.size()) * categorical_embed_dim
+            : 0;
     }
 };
 
@@ -614,7 +623,7 @@ struct NetworkDiagnostics {
 
 // Results from training
 struct TrainResult {
-    int best_epoch;
+    int best_epoch = 0;
     std::unordered_map<std::string, std::unordered_map<std::string, float>> final_metrics;
     std::vector<float> train_loss_history;
     std::vector<float> test_loss_history;
