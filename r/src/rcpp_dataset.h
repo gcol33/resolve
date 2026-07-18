@@ -133,6 +133,13 @@ public:
     RObject unknown_fraction() const { return get("unknown_fraction"); }
     RObject unknown_count()    const { return get("unknown_count"); }
     RObject categorical_ids()  const { return get("categorical_ids"); }
+    // Rank-pool / transformer encoder tensors (parity with Python pool_* accessors).
+    RObject pool_genus_ids()   const { return get("pool_genus_ids"); }
+    RObject pool_family_ids()  const { return get("pool_family_ids"); }
+    RObject pool_weights()     const { return get("pool_weights"); }
+    RObject pool_mask()        const { return get("pool_mask"); }
+    RObject pool_has_cover()   const { return get("pool_has_cover"); }
+    RObject has_pool_data()    const { return get("has_pool_data"); }
     RObject targets()          const { return get("targets"); }
     RObject schema()           const { return get("schema"); }
     RObject plot_ids()         const { return get("plot_ids"); }

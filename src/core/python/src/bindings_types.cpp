@@ -264,6 +264,7 @@ void register_types(nb::module_& m) {
         .def_rw("lr", &resolve::TrainConfig::lr)
         .def_rw("weight_decay", &resolve::TrainConfig::weight_decay)
         .def_rw("phase_boundaries", &resolve::TrainConfig::phase_boundaries)
+        .def_rw("band_thresholds", &resolve::TrainConfig::band_thresholds)
         .def_rw("loss_config", &resolve::TrainConfig::loss_config)
         .def_rw("lr_scheduler", &resolve::TrainConfig::lr_scheduler)
         .def_rw("lr_step_size", &resolve::TrainConfig::lr_step_size)

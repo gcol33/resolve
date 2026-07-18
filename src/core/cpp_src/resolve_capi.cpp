@@ -970,8 +970,34 @@ TrainConfig parse_train_config(const resolve_value* c) {
     return config;
 }
 
+// Inverse of nested_metrics_to_value: a map(target -> map(metric -> number)).
+std::unordered_map<std::string, std::unordered_map<std::string, float>>
+value_to_nested_metrics(const resolve_value* v) {
+    std::unordered_map<std::string, std::unordered_map<std::string, float>> out;
+    if (!v || v->kind != RESOLVE_VALUE_MAP) return out;
+    const int64_t n_targets = resolve_map_size(v);
+    for (int64_t i = 0; i < n_targets; ++i) {
+        const char* tk = resolve_map_key_at(v, i);
+        if (!tk) continue;
+        const resolve_value* tm = vget(v, tk);
+        if (!tm || tm->kind != RESOLVE_VALUE_MAP) continue;
+        auto& inner = out[tk];
+        const int64_t n_metrics = resolve_map_size(tm);
+        for (int64_t j = 0; j < n_metrics; ++j) {
+            const char* mk = resolve_map_key_at(tm, j);
+            if (!mk) continue;
+            inner[mk] = static_cast<float>(vdbl(vget(tm, mk)));
+        }
+    }
+    return out;
+}
+
 RunMetadata parse_run_metadata(const resolve_value* c) {
     RunMetadata rm;
+    // Inverse of run_metadata_to_value: read every key it writes, so a metadata
+    // map handed in from R/save round-trips instead of dropping resolve_version
+    // and final_metrics.
+    if (vhas(c, "resolve_version")) rm.resolve_version = vstr(c, "resolve_version");
     if (vhas(c, "created_at")) rm.created_at = vstr(c, "created_at");
     if (vhas(c, "completed_at")) rm.completed_at = vstr(c, "completed_at");
     if (vhas(c, "train_time_seconds")) rm.train_time_seconds = (float)vdbl(c, "train_time_seconds");
@@ -979,6 +1005,7 @@ RunMetadata parse_run_metadata(const resolve_value* c) {
     if (vhas(c, "n_plots_test")) rm.n_plots_test = vint(c, "n_plots_test");
     if (vhas(c, "best_epoch")) rm.best_epoch = (int)vint(c, "best_epoch");
     if (vhas(c, "total_epochs")) rm.total_epochs = (int)vint(c, "total_epochs");
+    if (vhas(c, "final_metrics")) rm.final_metrics = value_to_nested_metrics(vget(c, "final_metrics"));
     return rm;
 }
 
@@ -1190,8 +1217,8 @@ resolve_value* run_metadata_to_value(const RunMetadata& m0) {
     v_put(m, "created_at", v_string(m0.created_at));
     v_put(m, "completed_at", v_string(m0.completed_at));
     v_put(m, "train_time_seconds", v_double(m0.train_time_seconds));
-    v_put(m, "n_plots_train", v_double(static_cast<double>(m0.n_plots_train)));
-    v_put(m, "n_plots_test", v_double(static_cast<double>(m0.n_plots_test)));
+    v_put(m, "n_plots_train", v_int(m0.n_plots_train));
+    v_put(m, "n_plots_test", v_int(m0.n_plots_test));
     v_put(m, "best_epoch", v_int(m0.best_epoch));
     v_put(m, "total_epochs", v_int(m0.total_epochs));
     v_put(m, "final_metrics", nested_metrics_to_value(m0.final_metrics));
@@ -1471,6 +1498,16 @@ resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* wh
         if (w == "unknown_fraction") return vec_or_null(d.unknown_fraction());
         if (w == "unknown_count") return vec_or_null(d.unknown_count());
         if (w == "categorical_ids") return imat_or_null(d.categorical_ids());
+        // Rank-pool / transformer encoder tensors (parity with the Python
+        // ResolveDataset pool_* accessors). pool_mask is bool -> emit as int.
+        if (w == "pool_genus_ids") return imat_or_null(d.pool_genus_ids());
+        if (w == "pool_family_ids") return imat_or_null(d.pool_family_ids());
+        if (w == "pool_weights") return mat_or_null(d.pool_weights());
+        if (w == "pool_mask") return d.pool_mask().defined()
+                ? imat_or_null(d.pool_mask().to(torch::kLong))
+                : resolve_value_new_null();
+        if (w == "pool_has_cover") return vec_or_null(d.pool_has_cover());
+        if (w == "has_pool_data") return v_bool(d.has_pool_data());
         if (w == "categorical_vocab") return categorical_vocab_to_value(d.categorical_vocab());
         if (w == "targets") return target_map_to_value(d.targets());
         if (w == "plot_ids") return v_string_array(d.plot_ids());
