@@ -9,6 +9,18 @@ namespace resolve {
 torch::Tensor average_embedding_weights(const std::vector<torch::nn::Embedding>& embeddings);
 torch::Tensor average_fused_weights(const FusedPositionalEmbedding& fused);
 
+namespace {
+// Per-position taxonomy weight accessor shared by the hash / sparse / MoE
+// encoders: an undefined tensor when taxonomy is disabled, else the position-
+// averaged embedding table. Single source for the three identical bodies
+// (issue #99).
+torch::Tensor taxonomy_weights(bool has_taxonomy,
+                               const std::vector<torch::nn::Embedding>& embeddings) {
+    if (!has_taxonomy) return torch::Tensor();
+    return average_embedding_weights(embeddings);
+}
+}  // namespace
+
 // =============================================================================
 // PlotEncoderImpl implementation (hash mode)
 // =============================================================================
@@ -226,8 +238,12 @@ torch::Tensor PlotEncoderEmbedImpl::forward(
     // species_ids: (batch, top_k_species) -> (batch, top_k_species * embed_dim)
     parts.push_back(fused_species_->forward(species_ids));
 
-    // Embed taxonomy if available
-    if (has_taxonomy_ && genus_ids.defined() && family_ids.defined()) {
+    // Embed taxonomy. A taxonomy-enabled embed model reserves fixed concat width
+    // for both genus and family, so both must be present; check_concat_taxonomy
+    // throws a clear error instead of the opaque cat/Linear shape error a partial
+    // or missing taxonomy input would otherwise trigger (issue #99).
+    check_concat_taxonomy(has_taxonomy_, genus_ids, family_ids, "PlotEncoderEmbed");
+    if (has_taxonomy_) {
         parts.push_back(fused_genus_->forward(genus_ids));
         parts.push_back(fused_family_->forward(family_ids));
     }
@@ -501,13 +517,11 @@ torch::Tensor PlotEncoderMoEImpl::get_gate_probs(
 
 // PlotEncoder (hash mode, per-position)
 torch::Tensor PlotEncoderImpl::get_genus_weights() const {
-    if (!has_taxonomy_) return torch::Tensor();
-    return average_embedding_weights(genus_embeddings_);
+    return taxonomy_weights(has_taxonomy_, genus_embeddings_);
 }
 
 torch::Tensor PlotEncoderImpl::get_family_weights() const {
-    if (!has_taxonomy_) return torch::Tensor();
-    return average_embedding_weights(family_embeddings_);
+    return taxonomy_weights(has_taxonomy_, family_embeddings_);
 }
 
 // PlotEncoderEmbed (embed mode, fused)
@@ -527,24 +541,20 @@ torch::Tensor PlotEncoderEmbedImpl::get_family_weights() const {
 
 // PlotEncoderSparse (sparse mode, per-position)
 torch::Tensor PlotEncoderSparseImpl::get_genus_weights() const {
-    if (!has_taxonomy_) return torch::Tensor();
-    return average_embedding_weights(genus_embeddings_);
+    return taxonomy_weights(has_taxonomy_, genus_embeddings_);
 }
 
 torch::Tensor PlotEncoderSparseImpl::get_family_weights() const {
-    if (!has_taxonomy_) return torch::Tensor();
-    return average_embedding_weights(family_embeddings_);
+    return taxonomy_weights(has_taxonomy_, family_embeddings_);
 }
 
 // PlotEncoderMoE (MoE mode, per-position)
 torch::Tensor PlotEncoderMoEImpl::get_genus_weights() const {
-    if (!has_taxonomy_) return torch::Tensor();
-    return average_embedding_weights(genus_embeddings_);
+    return taxonomy_weights(has_taxonomy_, genus_embeddings_);
 }
 
 torch::Tensor PlotEncoderMoEImpl::get_family_weights() const {
-    if (!has_taxonomy_) return torch::Tensor();
-    return average_embedding_weights(family_embeddings_);
+    return taxonomy_weights(has_taxonomy_, family_embeddings_);
 }
 
 } // namespace resolve

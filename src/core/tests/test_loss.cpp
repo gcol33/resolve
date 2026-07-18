@@ -323,6 +323,27 @@ TEST_CASE("PhasedLoss regression_loss", "[loss]") {
     }
 }
 
+// Issue #99: the phase-3 band penalty must optimize the configured band, not a
+// hardcoded 0.25. A 0.3 ratio deviation is inside a 0.5 band (no penalty) but
+// outside a 0.1 band (penalized), so a tighter configured band -> larger phase-3
+// loss on the same predictions.
+TEST_CASE("PhasedLoss phase-3 band penalty responds to band_threshold", "[loss]") {
+    auto pred = torch::tensor({1.3f, 0.7f});   // ratio deviation 0.3 both
+    auto target = torch::tensor({1.0f, 1.0f});
+    const int phase3_epoch = 25;               // past the {10, 20} boundaries
+
+    auto tight = PhasedLoss::from_config(LossConfigMode::Combined, {10, 20}, /*band_threshold=*/0.1f);
+    auto loose = PhasedLoss::from_config(LossConfigMode::Combined, {10, 20}, /*band_threshold=*/0.5f);
+
+    auto l_tight = tight.regression_loss(pred, target, phase3_epoch).item<float>();
+    auto l_loose = loose.regression_loss(pred, target, phase3_epoch).item<float>();
+
+    REQUIRE(l_tight > l_loose);
+    // MAE + SMAPE are identical between the two; the gap is exactly the band
+    // penalty: band_weight_p3 (0.05) * mean(relu(0.3 - 0.1)) = 0.05 * 0.2 = 0.01.
+    REQUIRE_THAT(l_tight - l_loose, WithinAbs(0.01f, 1e-4));
+}
+
 TEST_CASE("PhasedLoss classification_loss", "[loss]") {
     PhasedLoss loss;
 

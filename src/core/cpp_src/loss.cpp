@@ -36,18 +36,19 @@ PhasedLoss::PhasedLoss(
     eps_(eps)
 {}
 
-PhasedLoss PhasedLoss::from_config(LossConfigMode mode, std::pair<int, int> phase_boundaries) {
+PhasedLoss PhasedLoss::from_config(LossConfigMode mode, std::pair<int, int> phase_boundaries,
+                                   float band_threshold) {
     switch (mode) {
         case LossConfigMode::MAE:
             // Pure MAE: no SMAPE, no band penalty (set weights to 0)
-            return PhasedLoss({9999, 9999}, 0.0f, 0.0f, 0.0f);
+            return PhasedLoss({9999, 9999}, 0.0f, 0.0f, 0.0f, band_threshold);
         case LossConfigMode::SMAPE:
             // SMAPE as primary: high SMAPE weight from start
-            return PhasedLoss({0, 0}, 1.0f, 1.0f, 0.0f);
+            return PhasedLoss({0, 0}, 1.0f, 1.0f, 0.0f, band_threshold);
         case LossConfigMode::Combined:
         default:
             // Default phased training
-            return PhasedLoss(phase_boundaries);
+            return PhasedLoss(phase_boundaries, 0.2f, 0.15f, 0.05f, band_threshold);
     }
 }
 
@@ -131,8 +132,10 @@ torch::Tensor PhasedLoss::classification_loss(
 MultiTaskLoss::MultiTaskLoss(
     const std::vector<TargetConfig>& targets,
     std::pair<int, int> phase_boundaries,
-    LossConfigMode loss_config
-) : targets_(targets), phased_loss_(PhasedLoss::from_config(loss_config, phase_boundaries))
+    LossConfigMode loss_config,
+    float band_threshold
+) : targets_(targets),
+    phased_loss_(PhasedLoss::from_config(loss_config, phase_boundaries, band_threshold))
 {}
 
 std::pair<torch::Tensor, std::unordered_map<std::string, torch::Tensor>> MultiTaskLoss::compute(

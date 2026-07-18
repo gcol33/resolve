@@ -65,13 +65,20 @@ TabularAdapterImpl::TabularAdapterImpl(
 
     std::vector<int64_t> cat_cardinalities;
     if (schema.has_taxonomy) {
-        // Each taxonomy slot is a categorical feature
+        // Each taxonomy slot is a categorical feature. n_genera()/n_families()
+        // already count the reserved <UNK>=0 slot (ids run 0..n_genera-1), so the
+        // cardinality is n_genera, not n_genera + 1 -- the old +1 over-allocated
+        // one unused category per slot and disagreed with the model.cpp encoder
+        // sizing (issue #99). n_*_vocab (== n_* on dataset-built schemas) is
+        // preferred, mirroring model.cpp's single-source sizing.
+        const int64_t genus_card = schema.n_genera_vocab > 0 ? schema.n_genera_vocab : schema.n_genera;
+        const int64_t family_card = schema.n_families_vocab > 0 ? schema.n_families_vocab : schema.n_families;
         int n_slots = config.n_taxonomy_slots;
         for (int k = 0; k < n_slots; ++k) {
-            cat_cardinalities.push_back(schema.n_genera + 1);  // +1 for UNK
+            cat_cardinalities.push_back(genus_card);
         }
         for (int k = 0; k < n_slots; ++k) {
-            cat_cardinalities.push_back(schema.n_families + 1);
+            cat_cardinalities.push_back(family_card);
         }
     }
     n_categoricals_ = static_cast<int64_t>(cat_cardinalities.size());
@@ -158,7 +165,25 @@ TabularAdapterImpl::TabularAdapterImpl(
                 case GNNType::GAT: gnn_type = GNNEncoderImpl::GNNType::GAT; break;
                 case GNNType::GraphSAGE: gnn_type = GNNEncoderImpl::GNNType::GraphSAGE; break;
             }
-            int64_t gnn_input = n_numerical_ + n_categoricals_;  // Flatten all features
+            // Embed the taxonomy categoricals into the node-feature matrix instead
+            // of concatenating raw integer IDs as continuous magnitudes, which the
+            // encoder cannot interpret (issue #73). One table per slot, sized by
+            // that slot's cardinality; genus slots use genus_emb_dim, family slots
+            // use family_emb_dim (cat_cardinalities is [genus x n_slots, family x
+            // n_slots]).
+            gnn_cat_embed_total_ = 0;
+            if (!cat_cardinalities.empty()) {
+                gnn_cat_embeddings_ = register_module("gnn_cat_embeddings", torch::nn::ModuleList());
+                const int n_slots = config.n_taxonomy_slots;
+                for (size_t i = 0; i < cat_cardinalities.size(); ++i) {
+                    const int emb_dim = (static_cast<int>(i) < n_slots)
+                        ? config.genus_emb_dim : config.family_emb_dim;
+                    gnn_cat_embeddings_->push_back(torch::nn::Embedding(
+                        torch::nn::EmbeddingOptions(cat_cardinalities[i], emb_dim).padding_idx(0)));
+                    gnn_cat_embed_total_ += emb_dim;
+                }
+            }
+            int64_t gnn_input = n_numerical_ + gnn_cat_embed_total_;
             gnn_ = register_module("gnn",
                 GNNEncoder(
                     gnn_input,
@@ -318,21 +343,21 @@ torch::Tensor TabularAdapterImpl::forward(
                 "but the dataset has none. Provide longitude/latitude roles or "
                 "use a non-GNN encoder architecture.");
             auto coords = continuous.slice(/*dim=*/1, 0, 2);
-            // NOTE: the kNN graph is built over the plots in the CURRENT forward
-            // batch, so during mini-batch training each plot attends only to its
-            // batch-mates, not its true spatial neighbors. Inference forces a
-            // single full-batch forward for this architecture (see
-            // Predictor::predict) so predictions are batch-composition
-            // independent, but the training-time locality is a known limitation
-            // of this experimental encoder; a batch-composition-independent
-            // spatial GNN needs neighbor-sampling over a fixed global graph
-            // (issue #73, tracked separately).
+            // The kNN graph is built over the plots in the current forward. For
+            // this architecture BOTH training and inference forward the full node
+            // set in a single batch (ResolveModel::requires_full_batch_training
+            // forces full-batch training; Predictor::predict forces a single
+            // full-batch inference forward), so the graph is the global spatial
+            // structure over all plots -- each plot attends to its true nearest
+            // neighbors -- not an arbitrary mini-batch neighborhood (issue #73).
             auto adj = build_knn_adjacency(coords, k_neighbors_);
-            // Flatten features for GNN
+            // Flatten features for GNN: numerical block + embedded taxonomy slots.
             std::vector<torch::Tensor> all_feats;
             all_feats.push_back(numerical);
-            for (auto& cat : categoricals) {
-                all_feats.push_back(cat.unsqueeze(1).to(torch::kFloat32));
+            for (size_t i = 0; i < categoricals.size(); ++i) {
+                auto emb = gnn_cat_embeddings_->at<torch::nn::EmbeddingImpl>(i)
+                    .forward(categoricals[i]);  // (batch,) int64 -> (batch, emb_dim)
+                all_feats.push_back(emb);
             }
             auto flat = torch::cat(all_feats, /*dim=*/1);
             auto gnn_out = gnn_->forward(flat, adj);

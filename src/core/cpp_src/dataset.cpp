@@ -326,15 +326,44 @@ void filter_records_to_plots(
 
 
 // ColumnIndices implementation
-ColumnIndices ColumnIndices::from_source(const RowSource& source, const RoleMapping& roles) {
+ColumnIndices ColumnIndices::from_source(const RowSource& source, const RoleMapping& roles,
+                                         bool expect_coordinates) {
     ColumnIndices idx;
     idx.plot = source.column_index(roles.plot_id);
     idx.species = source.column_index(roles.species_id);
-    idx.abundance = roles.abundance ? source.column_index(*roles.abundance) : -1;
-    idx.longitude = roles.longitude ? source.column_index(*roles.longitude) : -1;
-    idx.latitude = roles.latitude ? source.column_index(*roles.latitude) : -1;
-    idx.genus = roles.genus ? source.column_index(*roles.genus) : -1;
-    idx.family = roles.family ? source.column_index(*roles.family) : -1;
+
+    // A named optional-role column that the source cannot resolve is a
+    // configuration error (typically a typo'd role name), not a silent "no such
+    // feature". The header loader (load_header_data) already throws loudly for
+    // an absent covariate/coordinate/target column; without the same guard here
+    // a species-table role typo (roles.genus = "genuss") would flip
+    // has_taxonomy/has_coordinates to false with no signal and bake the wrong
+    // feature count into the checkpoint (issue #94). A role left unset
+    // (nullopt) still resolves to -1 without throwing.
+    auto resolve_role = [&source](const std::optional<std::string>& name,
+                                  const char* role) -> int {
+        if (!name) return -1;
+        int col = source.column_index(*name);
+        if (col < 0) {
+            throw std::runtime_error(
+                std::string("Role column not found in species CSV: ") + role +
+                " = \"" + *name + "\"");
+        }
+        return col;
+    };
+    // abundance / genus / family live in the species source for BOTH the
+    // single-table and two-file loaders, so they are always guarded here.
+    idx.abundance = resolve_role(roles.abundance, "abundance");
+    idx.genus = resolve_role(roles.genus, "genus");
+    idx.family = resolve_role(roles.family, "family");
+    // Coordinates live in the species source only for the single-table loader
+    // (expect_coordinates); in the two-file loader they are header roles that
+    // load_header_data already validated, so looking them up in the species
+    // source would wrongly reject the normal case. Left unresolved (-1) there.
+    if (expect_coordinates) {
+        idx.longitude = resolve_role(roles.longitude, "longitude");
+        idx.latitude = resolve_role(roles.latitude, "latitude");
+    }
     return idx;
 }
 
@@ -556,13 +585,27 @@ ResolveDataset ResolveDataset::from_species_csv_impl(
 // Build a SpeciesRecord from one table row using the resolved column indices.
 // Single source of truth shared by from_species_source and load_species_data.
 // The caller must have bounds-checked the plot and species columns already.
+// When an abundance column is present but a cell is missing/NA/unparseable, the
+// weight defaults to 1.0 and *abundance_coerced (if given) is incremented so the
+// caller can warn -- mirroring the loud coordinate/covariate coercion warnings,
+// rather than silently conflating missing cover with a real presence (issue #94).
 static SpeciesRecord make_species_record(const std::vector<std::string>& row,
-                                         const ColumnIndices& cols) {
+                                         const ColumnIndices& cols,
+                                         int64_t* abundance_coerced = nullptr) {
     SpeciesRecord record;
     record.plot_id = row[cols.plot];
     record.species_id = row[cols.species];
-    record.abundance = (cols.abundance >= 0 && row.size() > static_cast<size_t>(cols.abundance))
-        ? safe_stof(row[cols.abundance], 1.0f) : 1.0f;
+    if (cols.abundance >= 0 && row.size() > static_cast<size_t>(cols.abundance)) {
+        auto parsed = parse_regression_target(row[cols.abundance]);
+        if (parsed.has_value()) {
+            record.abundance = *parsed;
+        } else {
+            record.abundance = 1.0f;
+            if (abundance_coerced) (*abundance_coerced)++;
+        }
+    } else {
+        record.abundance = 1.0f;
+    }
     if (cols.genus >= 0 && row.size() > static_cast<size_t>(cols.genus)) {
         record.genus = row[cols.genus];
     }
@@ -570,6 +613,17 @@ static SpeciesRecord make_species_record(const std::vector<std::string>& row,
         record.family = row[cols.family];
     }
     return record;
+}
+
+// Emit the abundance-coercion warning shared by both species loaders.
+static void warn_abundance_coercions(int64_t abundance_coerced) {
+    if (abundance_coerced > 0) {
+        std::cerr << "[RESOLVE] warning: " << abundance_coerced
+                  << " abundance cell(s) were missing/NA/unparseable and "
+                     "defaulted to weight 1.0; these are treated as real "
+                     "presences, not missing cover"
+                  << std::endl;
+    }
 }
 
 ResolveDataset ResolveDataset::from_species_source(
@@ -581,8 +635,9 @@ ResolveDataset ResolveDataset::from_species_source(
     ResolveDataset dataset;
     dataset.config_ = config;
 
-    // Find column indices
-    auto cols = ColumnIndices::from_source(reader, roles);
+    // Find column indices. The single-table loader reads coordinates from the
+    // species source, so a named longitude/latitude role must resolve here too.
+    auto cols = ColumnIndices::from_source(reader, roles, /*expect_coordinates=*/true);
     if (cols.plot < 0 || cols.species < 0) {
         throw std::runtime_error("Required columns not found: plot_id or species_id");
     }
@@ -619,6 +674,7 @@ ResolveDataset ResolveDataset::from_species_source(
     std::unordered_map<std::string, std::vector<std::string>> plot_targets;
     std::unordered_set<std::string> seen_plots;
     int64_t coord_na_count = 0;  // missing/unparseable coords coerced to (0,0)
+    int64_t abundance_coerced = 0;  // missing/unparseable abundance coerced to 1.0
 
     reader.read_rows([&](size_t, const std::vector<std::string>& row) {
         if (row.size() <= static_cast<size_t>(std::max({cols.plot, cols.species}))) {
@@ -627,7 +683,7 @@ ResolveDataset ResolveDataset::from_species_source(
 
         std::string plot_id = row[cols.plot];
 
-        SpeciesRecord record = make_species_record(row, cols);
+        SpeciesRecord record = make_species_record(row, cols, &abundance_coerced);
         plot_records[plot_id].push_back(record);
 
         // Extract plot-level data from first occurrence
@@ -671,6 +727,7 @@ ResolveDataset ResolveDataset::from_species_source(
                      "(0, 0); spatial models will treat these as a real location"
                   << std::endl;
     }
+    warn_abundance_coercions(abundance_coerced);
 
     int64_t n_plots = static_cast<int64_t>(dataset.plot_ids_.size());
     dataset.schema_.n_plots = n_plots;
@@ -1212,6 +1269,7 @@ void ResolveDataset::load_species_data(
 
     // Collect species records by plot
     std::unordered_map<std::string, std::vector<SpeciesRecord>> plot_records;
+    int64_t abundance_coerced = 0;
 
     reader.read_rows([&](size_t, const std::vector<std::string>& row) {
         if (row.size() <= static_cast<size_t>(std::max(cols.plot, cols.species))) {
@@ -1219,8 +1277,9 @@ void ResolveDataset::load_species_data(
         }
 
         std::string plot_id = row[cols.plot];
-        plot_records[plot_id].push_back(make_species_record(row, cols));
+        plot_records[plot_id].push_back(make_species_record(row, cols, &abundance_coerced));
     });
+    warn_abundance_coercions(abundance_coerced);
 
     has_abundance_column_ = (cols.abundance >= 0);
 

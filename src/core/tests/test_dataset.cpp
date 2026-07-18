@@ -845,6 +845,99 @@ TEST_CASE("from_csv fails loudly on missing role columns", "[dataset][validation
     }
 }
 
+// Issue #94: the single-table species loaders must throw loudly when a role
+// names a column that cannot be resolved (typo / absent), instead of silently
+// dropping the feature and baking the wrong feature count into the checkpoint --
+// matching the header loader's guard tested above.
+TEST_CASE("ResolveDataset from_species_csv throws on unresolvable role column",
+          "[dataset]") {
+    TempFile csv(
+        "plot_id,species,cover,lon,lat,genus,family,area\n"
+        "p1,sp1,0.5,10.0,50.0,Quercus,Fagaceae,100\n"
+        "p2,sp1,0.8,11.0,51.0,Quercus,Fagaceae,200\n"
+    );
+
+    auto base_roles = [] {
+        RoleMapping r;
+        r.plot_id = "plot_id"; r.species_id = "species"; r.abundance = "cover";
+        r.longitude = "lon"; r.latitude = "lat";
+        r.genus = "genus"; r.family = "family";
+        return r;
+    };
+    std::vector<TargetSpec> targets = {TargetSpec::regression("area")};
+    DatasetConfig config;
+    config.species_encoding = SpeciesEncodingMode::Hash;
+    config.hash_dim = 8;
+
+    SECTION("typo'd genus column throws") {
+        RoleMapping roles = base_roles();
+        roles.genus = "genuss";  // typo
+        REQUIRE_THROWS(ResolveDataset::from_species_csv(csv.path(), roles, targets, config));
+    }
+    SECTION("typo'd family column throws") {
+        RoleMapping roles = base_roles();
+        roles.family = "fam";  // typo
+        REQUIRE_THROWS(ResolveDataset::from_species_csv(csv.path(), roles, targets, config));
+    }
+    SECTION("typo'd abundance column throws") {
+        RoleMapping roles = base_roles();
+        roles.abundance = "coverr";  // typo
+        REQUIRE_THROWS(ResolveDataset::from_species_csv(csv.path(), roles, targets, config));
+    }
+    SECTION("typo'd longitude column throws") {
+        RoleMapping roles = base_roles();
+        roles.longitude = "long";  // typo
+        REQUIRE_THROWS(ResolveDataset::from_species_csv(csv.path(), roles, targets, config));
+    }
+    SECTION("typo'd latitude column throws") {
+        RoleMapping roles = base_roles();
+        roles.latitude = "lattitude";  // typo
+        REQUIRE_THROWS(ResolveDataset::from_species_csv(csv.path(), roles, targets, config));
+    }
+    SECTION("all role columns present loads with taxonomy + coordinates") {
+        RoleMapping roles = base_roles();
+        auto ds = ResolveDataset::from_species_csv(csv.path(), roles, targets, config);
+        REQUIRE(ds.n_plots() == 2);
+        REQUIRE(ds.schema().has_taxonomy == true);
+        REQUIRE(ds.schema().has_coordinates == true);
+    }
+    SECTION("unset optional roles do not throw (only named-but-absent do)") {
+        RoleMapping roles;
+        roles.plot_id = "plot_id"; roles.species_id = "species";
+        // no abundance / coords / taxonomy roles set at all
+        auto ds = ResolveDataset::from_species_csv(csv.path(), roles, targets, config);
+        REQUIRE(ds.n_plots() == 2);
+        REQUIRE(ds.schema().has_taxonomy == false);
+        REQUIRE(ds.schema().has_coordinates == false);
+    }
+}
+
+// Issue #94 (related): an abundance column that is present but holds a
+// missing/NA/unparseable cell defaults the weight to 1.0 and warns, rather than
+// silently conflating missing cover with a real presence. Load must still
+// succeed (warning, not error).
+TEST_CASE("ResolveDataset from_species_csv coerces unparseable abundance to 1.0",
+          "[dataset]") {
+    TempFile csv(
+        "plot_id,species,cover,area\n"
+        "p1,sp1,0.5,100\n"
+        "p1,sp2,NA,100\n"       // NA cover -> 1.0 + warn
+        "p2,sp1,,200\n"         // empty cover -> 1.0 + warn
+        "p2,sp3,2.5abc,200\n"   // garbage cover -> 1.0 + warn
+    );
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id"; roles.species_id = "species"; roles.abundance = "cover";
+    std::vector<TargetSpec> targets = {TargetSpec::regression("area")};
+    DatasetConfig config;
+    config.species_encoding = SpeciesEncodingMode::Sparse;
+
+    auto ds = ResolveDataset::from_species_csv(csv.path(), roles, targets, config);
+    REQUIRE(ds.n_plots() == 2);
+    // sp2 (NA cover) and sp3 (garbage cover) still loaded as presences.
+    REQUIRE(ds.schema().n_species_vocab == 4);  // <UNK> + sp1 + sp2 + sp3
+}
+
 // Issue #68: a species that occurs only in a plot dropped for a missing target
 // must NOT inflate the vocabulary (its embedding row would never be referenced).
 TEST_CASE("ResolveDataset vocab excludes species only in dropped plots",

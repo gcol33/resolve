@@ -77,6 +77,15 @@ private:
     TabNetEncoder tabnet_{nullptr};
     SAINTEncoder saint_{nullptr};
     GNNEncoder gnn_{nullptr};
+
+    // GNN taxonomy embeddings: one table per categorical (taxonomy) slot. The
+    // GNN flattens all features into a node-feature matrix, so unlike the
+    // attention encoders (which embed categoricals internally) it must embed the
+    // genus/family IDs here rather than feed raw integer IDs as continuous
+    // magnitudes (issue #73). Ordered [genus x n_slots, family x n_slots], matching
+    // prepare_categoricals / cat_cardinalities.
+    torch::nn::ModuleList gnn_cat_embeddings_{nullptr};
+    int64_t gnn_cat_embed_total_ = 0;
     ExcelFormerEncoder excelformer_{nullptr};
     HeterogeneousGNNEncoder hetero_gnn_{nullptr};
 

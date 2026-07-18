@@ -537,3 +537,66 @@ TEST_CASE("cudnn_benchmark=false is not overridden by the CUDA cache path",
 
     REQUIRE_FALSE(at::globalContext().benchmarkCuDNN());
 }
+
+// =============================================================================
+// 9. GNN trains full-batch and embeds taxonomy (issue #73).
+//    The coordinate-kNN GNN forces full-batch training
+//    (requires_full_batch_training) so its spatial graph spans all plots rather
+//    than an arbitrary mini-batch, and it embeds genus/family IDs instead of
+//    feeding raw integers as magnitudes. This trains a GNN end-to-end and asserts
+//    it recovers a per-plot covariate signal on the held-out fold (self-loops let
+//    each node carry its own features, and spatial neighbors share the signal).
+// =============================================================================
+TEST_CASE("GNN trains full-batch and recovers a covariate signal", "[recovery][gnn]") {
+    const int64_t n_plots = 240;
+    std::ostringstream hdr, spc;
+    hdr << "plot_id,lat,lon,cov1,cov2,y\n";
+    spc << "plot_id,sp,cover,genus,family\n";
+    for (int64_t i = 0; i < n_plots; ++i) {
+        const double c1 = std::sin(i * 0.13);
+        const double c2 = std::cos(i * 0.07);
+        const double y = 2.0 * c1 - 1.5 * c2 + 3.0;  // deterministic linear signal
+        hdr << "P" << i << "," << (40.0 + i * 0.01) << "," << (-5.0 + i * 0.017)
+            << "," << c1 << "," << c2 << "," << y << "\n";
+        spc << "P" << i << ",sp" << (i % 8) << ",1.0,g" << (i % 4) << ",f" << (i % 2) << "\n";
+    }
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id"; roles.species_id = "sp"; roles.abundance = "cover";
+    roles.latitude = "lat"; roles.longitude = "lon";
+    roles.covariates = {"cov1", "cov2"};
+    roles.genus = "genus"; roles.family = "family";
+
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::Hash;
+    dcfg.hash_dim = 4; dcfg.use_taxonomy = true;
+    dcfg.track_unknown_fraction = false; dcfg.track_unknown_count = false;
+
+    auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(), roles,
+                                       {TargetSpec::regression("y")}, dcfg);
+    REQUIRE(ds.schema().has_taxonomy);       // taxonomy embeddings are exercised
+
+    ModelConfig mcfg;
+    mcfg.species_encoding = SpeciesEncodingMode::Hash;
+    mcfg.encoder_architecture = EncoderArchitecture::GNN;
+    mcfg.hash_dim = 4;
+    mcfg.genus_emb_dim = 4; mcfg.family_emb_dim = 4;
+    mcfg.n_taxonomy_slots = 3;
+    mcfg.gnn.hidden_dim = 32;
+    mcfg.gnn.n_layers = 2;
+    mcfg.gnn.k_neighbors = 8;
+
+    ResolveModel model(ds.schema(), mcfg);
+    REQUIRE(model->requires_full_batch_training());  // issue #73: full-batch GNN
+
+    Trainer trainer(model, recovery_train_config(120));
+    trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/11);
+    trainer.fit();
+
+    auto res = trainer.compute_residuals("y");
+    REQUIRE(res.predictions.size() > 10);
+    for (float p : res.predictions) REQUIRE(std::isfinite(p));
+    // Learned the signal well above chance on the held-out fold.
+    REQUIRE(pearson(res.predictions, res.actuals) > 0.5);
+}

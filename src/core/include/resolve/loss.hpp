@@ -20,8 +20,11 @@ public:
         float eps = 1e-8f
     );
 
-    // Factory method to create loss from config mode
-    static PhasedLoss from_config(LossConfigMode mode, std::pair<int, int> phase_boundaries = {100, 300});
+    // Factory method to create loss from config mode. band_threshold sets the
+    // phase-3 band-penalty tolerance (issue #99); the MAE/SMAPE modes zero the
+    // band weight so the threshold is inert there.
+    static PhasedLoss from_config(LossConfigMode mode, std::pair<int, int> phase_boundaries = {100, 300},
+                                  float band_threshold = 0.25f);
 
     // Get current phase (1, 2, or 3)
     int get_phase(int epoch) const;
@@ -58,7 +61,8 @@ public:
     MultiTaskLoss(
         const std::vector<TargetConfig>& targets,
         std::pair<int, int> phase_boundaries = {100, 300},
-        LossConfigMode loss_config = LossConfigMode::Combined
+        LossConfigMode loss_config = LossConfigMode::Combined,
+        float band_threshold = 0.25f
     );
 
     // Compute combined loss

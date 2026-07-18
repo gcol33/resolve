@@ -89,7 +89,8 @@ void validate_csr_offsets(const torch::Tensor& offsets,
 Trainer::Trainer(
     ResolveModel model,
     const TrainConfig& config
-) : model_(model), config_(config), loss_fn_(model->schema().targets, config.phase_boundaries, config.loss_config)
+) : model_(model), config_(config),
+    loss_fn_(model->schema().targets, config.phase_boundaries, config.loss_config, config.band_threshold)
 {
     model_->to(config_.device);
 
@@ -401,7 +402,12 @@ float Trainer::train_epoch(int epoch) {
     const auto& categorical_src = gpu_data_cached_ ? gpu_categorical_ids_ : train_categorical_ids_;
 
     int64_t n_train = continuous_src.size(0);
-    int batch_size = config_.batch_size;
+    // The coordinate-kNN GNN must see the whole train set in one forward so its
+    // spatial graph spans all plots (their true neighbors), not an arbitrary
+    // mini-batch. Force full-batch training for it, matching the single
+    // full-batch inference forward the Predictor already uses (issue #73).
+    int64_t batch_size = model_->requires_full_batch_training()
+        ? n_train : static_cast<int64_t>(config_.batch_size);
 
     // Shuffle training data with a dedicated, seeded generator so the run is
     // reproducible for a fixed seed. Generated on CPU (the permutation is tiny)
@@ -1904,9 +1910,15 @@ ResidualAnalysis Trainer::compute_residuals(
         targets = targets * scale + mean;
     }
 
-    // Apply inverse transform if needed
+    // Apply inverse transform if needed. Clamp the exponent to [kExpClampMin,
+    // kExpClampMax] before expm1, matching every other Log1p inverse in the
+    // engine (PhasedLoss::regression_loss, Metrics::compute, predict(),
+    // TaskHeadImpl::inverse_transform): a single wild prediction would otherwise
+    // overflow to inf and poison mean/std/skewness/kurtosis of the residuals
+    // (issue #99). Targets are real log1p(area) and cannot overflow, so only the
+    // predictions need the guard.
     if (target_cfg->transform == TransformType::Log1p) {
-        preds = torch::expm1(preds);
+        preds = torch::expm1(torch::clamp(preds, kExpClampMin, kExpClampMax));
         targets = torch::expm1(targets);
     }
 

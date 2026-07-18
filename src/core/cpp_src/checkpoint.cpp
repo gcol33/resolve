@@ -936,6 +936,9 @@ void save_train_config(
     // Save band thresholds
     std::vector<float> thresholds(config.band_thresholds);
     archive.write("train_band_thresholds", torch::tensor(thresholds));
+
+    // Save phase-3 loss band-penalty threshold (issue #99)
+    archive.write("train_band_threshold", torch::tensor(config.band_threshold));
 }
 
 void save_run_metadata(
@@ -1065,6 +1068,7 @@ TrainConfig load_train_config(
         for (int64_t i = 0; i < bt_t.size(0); ++i) bt[static_cast<size_t>(i)] = bt_t[i].item<float>();
         config.band_thresholds = std::move(bt);
     }
+    rd_float("train_band_threshold", config.band_threshold);  // back-compat: absent -> default
     return config;
 }
 

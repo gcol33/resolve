@@ -475,8 +475,16 @@ struct TrainConfig {
     float lr_gamma = 0.1f;       // For StepLR: multiply LR by gamma
     float lr_min = 1e-6f;        // For CosineAnnealing: minimum LR
 
-    // Band accuracy thresholds for regression metrics
+    // Band accuracy thresholds for regression metrics. Reporting only: each
+    // threshold t produces a "band_<100t>" metric (band_10, band_25, band_50).
     std::vector<float> band_thresholds = {0.1f, 0.25f, 0.5f};
+
+    // Tolerance band the phase-3 PhasedLoss penalty optimizes toward -- the loss
+    // penalizes predictions whose ratio to the target falls outside [1 - t, 1 + t]
+    // (issue #99). Distinct from band_thresholds above (which only selects which
+    // band accuracies are *reported*): the loss optimizes a single band, and it is
+    // this knob, not the reporting vector, that changes what training minimizes.
+    float band_threshold = 0.25f;
 
     // Checkpointing
     std::string checkpoint_dir;   // Directory for checkpoints (empty = disabled)

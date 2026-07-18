@@ -977,6 +977,7 @@ TrainConfig parse_train_config(const resolve_value* c) {
         if (pb.size() >= 2) config.phase_boundaries = {(int)pb[0], (int)pb[1]};
     }
     if (vhas(c, "band_thresholds")) config.band_thresholds = vfloat_vec(c, "band_thresholds");
+    if (vhas(c, "band_threshold")) config.band_threshold = (float)vdbl(c, "band_threshold");
     if (vhas(c, "checkpoint_dir")) config.checkpoint_dir = vstr(c, "checkpoint_dir");
     if (vhas(c, "checkpoint_every")) config.checkpoint_every = (int)vint(c, "checkpoint_every");
     if (vhas(c, "use_amp")) config.use_amp = vbool(c, "use_amp");
@@ -1227,6 +1228,7 @@ resolve_value* train_config_to_value(const TrainConfig& c) {
     v_put(m, "lr_min", v_double(c.lr_min));
     v_put(m, "vram_fraction", v_double(c.vram_fraction));
     v_put(m, "band_thresholds", v_double_array(c.band_thresholds));
+    v_put(m, "band_threshold", v_double(c.band_threshold));
     // AMP / cuDNN / tf32. These are not persisted by save_train_config (so
     // load_train_config leaves them at defaults), but the live trainer's config
     // holds them, so trainer$get_config() would otherwise silently drop them.

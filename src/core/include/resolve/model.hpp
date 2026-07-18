@@ -123,6 +123,17 @@ public:
     [[nodiscard]] bool uses_moe() const noexcept { return config_.moe_routing != MoERoutingType::None; }
     [[nodiscard]] int n_experts() const noexcept { return uses_moe() ? config_.n_experts : 0; }
 
+    // The coordinate-kNN GNN builds its spatial graph from the coordinates of the
+    // plots in the current forward. Mini-batching would build the graph from an
+    // arbitrary subset of plots, so each plot would attend to random batch-mates
+    // rather than its true spatial neighbors. Training must therefore forward the
+    // full node set in a single batch, so the graph is the global spatial
+    // structure -- mirroring the single full-batch inference forward the Predictor
+    // already forces for this architecture (issue #73).
+    [[nodiscard]] bool requires_full_batch_training() const noexcept {
+        return config_.encoder_architecture == EncoderArchitecture::GNN;
+    }
+
     // Embedding weight extraction (delegates to active encoder)
     [[nodiscard]] torch::Tensor get_genus_weights() const;
     [[nodiscard]] torch::Tensor get_family_weights() const;

@@ -345,6 +345,23 @@ int64_t register_per_rank_embeddings(
     int genus_emb_dim, int family_emb_dim, int top_k
 );
 
+// Validate that a concat-based encoder was given the taxonomy tensors it
+// reserved concat width for. A concat encoder (fused embed / per-rank hash /
+// sparse / MoE) allocates fixed input width for BOTH genus and family at
+// construction, so once taxonomy is enabled its forward pass needs both tensors;
+// supplying only one (or an empty tensor) would otherwise produce an x narrower
+// than the MLP's input_dim and an opaque torch::cat/Linear shape error. This
+// throws a clear message instead. Unlike the additive transformer/rank-pool
+// encoders (issue #90), independent gating cannot apply here -- a missing column
+// cannot be "not added" without shrinking the concat (issue #99). No-op when
+// taxonomy is disabled.
+void check_concat_taxonomy(
+    bool has_taxonomy,
+    const torch::Tensor& genus_ids,
+    const torch::Tensor& family_ids,
+    const char* encoder_name
+);
+
 // Collect per-rank embedding lookups into parts vector.
 // Appends top_k genus embeddings then top_k family embeddings.
 void embed_per_rank_taxonomy(

@@ -26,8 +26,13 @@ struct ColumnIndices {
     int family = -1;
 
     // Factory method to resolve all indices from any RowSource and RoleMapping
-    // (a CSVReader or an in-memory ColumnTable, via InMemoryRowSource).
-    static ColumnIndices from_source(const RowSource& source, const RoleMapping& roles);
+    // (a CSVReader or an in-memory ColumnTable, via InMemoryRowSource). A named
+    // role column that cannot be resolved throws (issue #94). expect_coordinates
+    // must be true only for the single-table species loader, where longitude/
+    // latitude live in the species source; in the two-file loader they are header
+    // roles absent from the species source, so they are not looked up here.
+    static ColumnIndices from_source(const RowSource& source, const RoleMapping& roles,
+                                     bool expect_coordinates = false);
 };
 
 // Configuration for dataset loading

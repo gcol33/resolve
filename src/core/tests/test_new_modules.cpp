@@ -675,8 +675,8 @@ TEST_CASE("TabularAdapter FTTransformer forward", "[adapter]") {
 
     // n_continuous = 2 (coords) + 1 (unknown_fraction) + 32 (hash) = 35
     auto continuous = torch::randn({8, 35});
-    auto genus_ids = torch::randint(0, 21, {8, 3});
-    auto family_ids = torch::randint(0, 11, {8, 3});
+    auto genus_ids = torch::randint(0, 20, {8, 3});   // valid ids 0..n_genera-1 (issue #99)
+    auto family_ids = torch::randint(0, 10, {8, 3});  // valid ids 0..n_families-1
 
     auto out = adapter->forward(continuous, genus_ids, family_ids);
 
@@ -738,8 +738,8 @@ TEST_CASE("TabularAdapter TabNet forward", "[adapter]") {
     TabularAdapter adapter(schema, config);
 
     auto continuous = torch::randn({8, 35});
-    auto genus_ids = torch::randint(0, 21, {8, 3});
-    auto family_ids = torch::randint(0, 11, {8, 3});
+    auto genus_ids = torch::randint(0, 20, {8, 3});   // valid ids 0..n_genera-1 (issue #99)
+    auto family_ids = torch::randint(0, 10, {8, 3});  // valid ids 0..n_families-1
 
     auto out = adapter->forward(continuous, genus_ids, family_ids);
 
@@ -770,8 +770,8 @@ TEST_CASE("TabularAdapter SAINT forward", "[adapter]") {
     TabularAdapter adapter(schema, config);
 
     auto continuous = torch::randn({8, 35});
-    auto genus_ids = torch::randint(0, 21, {8, 3});
-    auto family_ids = torch::randint(0, 11, {8, 3});
+    auto genus_ids = torch::randint(0, 20, {8, 3});   // valid ids 0..n_genera-1 (issue #99)
+    auto family_ids = torch::randint(0, 10, {8, 3});  // valid ids 0..n_families-1
 
     auto out = adapter->forward(continuous, genus_ids, family_ids);
 
@@ -802,8 +802,8 @@ TEST_CASE("TabularAdapter GNN forward", "[adapter]") {
     TabularAdapter adapter(schema, config);
 
     auto continuous = torch::randn({8, 35});
-    auto genus_ids = torch::randint(0, 21, {8, 3});
-    auto family_ids = torch::randint(0, 11, {8, 3});
+    auto genus_ids = torch::randint(0, 20, {8, 3});   // valid ids 0..n_genera-1 (issue #99)
+    auto family_ids = torch::randint(0, 10, {8, 3});  // valid ids 0..n_families-1
 
     auto out = adapter->forward(continuous, genus_ids, family_ids);
 
@@ -842,8 +842,8 @@ TEST_CASE("TabularAdapter HeterogeneousGNN forward", "[adapter]") {
 
     // n_continuous = 2 (coords) + 1 (unknown_fraction) = 3
     auto continuous = torch::randn({8, 3});
-    auto genus_ids = torch::randint(0, 21, {8, 3});
-    auto family_ids = torch::randint(0, 11, {8, 3});
+    auto genus_ids = torch::randint(0, 20, {8, 3});   // valid ids 0..n_genera-1 (issue #99)
+    auto family_ids = torch::randint(0, 10, {8, 3});  // valid ids 0..n_families-1
     auto species_vector = torch::rand({8, 50});  // Required for HeterogeneousGNN
 
     auto out = adapter->forward(continuous, genus_ids, family_ids, {}, species_vector);

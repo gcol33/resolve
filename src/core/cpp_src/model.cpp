@@ -49,11 +49,19 @@ ResolveModelImpl::ResolveModelImpl(
     int64_t n_continuous_base = n_coords + schema.covariate_names.size()
                               + n_unknown_features + n_categorical_embed;
 
-    // Pre-compute vocab sizes for taxonomy (avoids repeating nested ternaries)
+    // Pre-compute the taxonomy embedding-table sizes once (single source of
+    // truth for every encoder family). TaxonomyVocab::fit reserves <UNK>=0, so
+    // n_genera()/n_families() already count the UNK slot (max id = n_genera - 1)
+    // and the correct table size is exactly n_genera, NOT n_genera + 1. The
+    // hash/sparse/MoE/adapter paths previously passed n_genera + 1 directly and
+    // over-allocated one unused row per table, disagreeing with the embed/pool/
+    // transformer paths that used these locals (issue #99). n_*_vocab (set by the
+    // dataset alongside n_*) is preferred; the bare-n_* fallback covers a
+    // hand-built schema that left n_*_vocab at 0.
     auto genus_vocab_size = schema.has_taxonomy
-        ? (schema.n_genera_vocab > 0 ? schema.n_genera_vocab : schema.n_genera + 1) : 0;
+        ? (schema.n_genera_vocab > 0 ? schema.n_genera_vocab : schema.n_genera) : 0;
     auto family_vocab_size = schema.has_taxonomy
-        ? (schema.n_families_vocab > 0 ? schema.n_families_vocab : schema.n_families + 1) : 0;
+        ? (schema.n_families_vocab > 0 ? schema.n_families_vocab : schema.n_families) : 0;
 
     // Check if using advanced architecture (non-MLP)
     bool use_adapter = (config.encoder_architecture != EncoderArchitecture::MLP &&
@@ -108,8 +116,8 @@ ResolveModelImpl::ResolveModelImpl(
             // MoE-enabled encoder with configurable architecture
             encoder_moe_ = register_module("encoder", PlotEncoderMoE(
                 n_continuous,
-                schema.has_taxonomy ? schema.n_genera + 1 : 0,
-                schema.has_taxonomy ? schema.n_families + 1 : 0,
+                genus_vocab_size,
+                family_vocab_size,
                 config.genus_emb_dim,
                 config.family_emb_dim,
                 config.n_taxonomy_slots,
@@ -125,8 +133,8 @@ ResolveModelImpl::ResolveModelImpl(
             // Standard encoder with configurable architecture (+ optional TabM)
             encoder_hash_ = register_module("encoder", PlotEncoder(
                 n_continuous,
-                schema.has_taxonomy ? schema.n_genera + 1 : 0,
-                schema.has_taxonomy ? schema.n_families + 1 : 0,
+                genus_vocab_size,
+                family_vocab_size,
                 config.genus_emb_dim,
                 config.family_emb_dim,
                 config.n_taxonomy_slots,
@@ -214,8 +222,8 @@ ResolveModelImpl::ResolveModelImpl(
             n_continuous_base,
             schema.n_species_vocab,
             config.species_embed_dim,
-            schema.has_taxonomy ? schema.n_genera + 1 : 0,
-            schema.has_taxonomy ? schema.n_families + 1 : 0,
+            genus_vocab_size,
+            family_vocab_size,
             config.genus_emb_dim,
             config.family_emb_dim,
             config.n_taxonomy_slots,

@@ -429,6 +429,25 @@ int64_t register_per_rank_embeddings(
     return static_cast<int64_t>(top_k) * (genus_emb_dim + family_emb_dim);
 }
 
+void check_concat_taxonomy(
+    bool has_taxonomy,
+    const torch::Tensor& genus_ids,
+    const torch::Tensor& family_ids,
+    const char* encoder_name
+) {
+    if (!has_taxonomy) return;
+    const bool have_genus = genus_ids.defined() && genus_ids.numel() > 0;
+    const bool have_family = family_ids.defined() && family_ids.numel() > 0;
+    if (!have_genus || !have_family) {
+        throw std::runtime_error(
+            std::string(encoder_name) +
+            ": taxonomy is enabled but was not given both taxonomy inputs (genus=" +
+            (have_genus ? "yes" : "no") + ", family=" + (have_family ? "yes" : "no") +
+            "). This encoder reserves concat width for both genus and family; pass "
+            "both taxonomy tensors, or construct the model without taxonomy.");
+    }
+}
+
 void embed_per_rank_taxonomy(
     std::vector<torch::Tensor>& parts,
     std::vector<torch::nn::Embedding>& genus_embeddings,
@@ -436,7 +455,9 @@ void embed_per_rank_taxonomy(
     torch::Tensor genus_ids, torch::Tensor family_ids,
     int top_k, bool has_taxonomy
 ) {
-    if (!has_taxonomy || !genus_ids.defined() || !family_ids.defined()) return;
+    check_concat_taxonomy(has_taxonomy, genus_ids, family_ids,
+                          "PlotEncoder (per-rank taxonomy)");
+    if (!has_taxonomy) return;
     for (int k = 0; k < top_k; ++k) {
         parts.push_back(genus_embeddings[k](genus_ids.select(1, k)));
     }

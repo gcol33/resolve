@@ -312,6 +312,7 @@ TEST_CASE("Checkpoint train-config + run-metadata round-trip", "[trainer][checkp
     cfg.lr_min = 1e-5f;
     cfg.vram_fraction = 0.8f;
     cfg.band_thresholds = {0.05f, 0.2f, 0.4f, 0.6f};
+    cfg.band_threshold = 0.33f;                    // non-default (default 0.25)
 
     RunMetadata meta;
     meta.created_at = "2026-06-12T10:00:00Z";
@@ -353,6 +354,7 @@ TEST_CASE("Checkpoint train-config + run-metadata round-trip", "[trainer][checkp
         REQUIRE(cfg2.lr_min == Catch::Approx(cfg.lr_min));
         REQUIRE(cfg2.vram_fraction == Catch::Approx(cfg.vram_fraction));
         REQUIRE(cfg2.band_thresholds == cfg.band_thresholds);
+        REQUIRE(cfg2.band_threshold == Catch::Approx(cfg.band_threshold));
     }
 
     SECTION("unpersisted fields keep TrainConfig defaults") {

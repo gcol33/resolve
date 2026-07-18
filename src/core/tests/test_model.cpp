@@ -27,6 +27,72 @@ TEST_CASE("PlotEncoder forward with taxonomy", "[encoder]") {
     REQUIRE(output.size(1) == 16);
 }
 
+// Issue #99 item 1: a taxonomy-enabled concat encoder reserves fixed input width
+// for BOTH genus and family, so forward() must be given both. Missing or partial
+// taxonomy inputs previously fell through to an opaque torch::cat/Linear shape
+// error; now check_concat_taxonomy throws a clear message.
+TEST_CASE("PlotEncoder with taxonomy throws on missing taxonomy input", "[encoder]") {
+    PlotEncoder encoder(10, 100, 50, 8, 8, 3, std::vector<int64_t>{32, 16}, 0.3f);
+    auto continuous = torch::randn({4, 10});
+    auto genus_ids = torch::randint(0, 100, {4, 3});
+
+    SECTION("no taxonomy tensors at all") {
+        REQUIRE_THROWS(encoder->forward(continuous));
+    }
+    SECTION("only genus provided, family missing") {
+        REQUIRE_THROWS(encoder->forward(continuous, genus_ids, torch::Tensor()));
+    }
+    SECTION("both provided still works") {
+        auto family_ids = torch::randint(0, 50, {4, 3});
+        REQUIRE_NOTHROW(encoder->forward(continuous, genus_ids, family_ids));
+    }
+}
+
+// check_concat_taxonomy is the shared guard (issue #99). Direct unit coverage.
+TEST_CASE("check_concat_taxonomy gates on both taxonomy tensors", "[encoder]") {
+    auto g = torch::randint(0, 10, {4, 3});
+    auto f = torch::randint(0, 10, {4, 3});
+    // Disabled taxonomy: never throws regardless of inputs.
+    REQUIRE_NOTHROW(check_concat_taxonomy(false, torch::Tensor(), torch::Tensor(), "x"));
+    // Enabled taxonomy: both required.
+    REQUIRE_NOTHROW(check_concat_taxonomy(true, g, f, "x"));
+    REQUIRE_THROWS(check_concat_taxonomy(true, g, torch::Tensor(), "x"));
+    REQUIRE_THROWS(check_concat_taxonomy(true, torch::Tensor(), f, "x"));
+    REQUIRE_THROWS(check_concat_taxonomy(true, torch::Tensor(), torch::Tensor(), "x"));
+}
+
+// Issue #99 item 2: TaxonomyVocab::fit reserves <UNK>=0 so n_genera()/n_families()
+// already count UNK; the correct table size is exactly n_genera, not n_genera + 1.
+// The hash/sparse/MoE/adapter paths now size to n_genera like the embed/pool paths.
+TEST_CASE("Hash+taxonomy embedding tables sized to n_genera (no +1 over-alloc)", "[model]") {
+    ResolveSchema schema;
+    schema.n_plots = 100;
+    schema.n_species = 50;
+    schema.has_coordinates = true;
+    schema.has_taxonomy = true;
+    schema.n_genera = 20;          // dataset convention: count includes <UNK>=0
+    schema.n_families = 10;
+    schema.n_genera_vocab = 20;
+    schema.n_families_vocab = 10;
+    schema.track_unknown_fraction = true;
+    schema.targets.push_back({"area", TaskType::Regression, TransformType::None, 0, 1.0f});
+
+    ModelConfig config;
+    config.species_encoding = SpeciesEncodingMode::Hash;
+    config.hash_dim = 16;
+    config.n_taxonomy_slots = 3;
+    config.hidden_dims = {32, 16};
+
+    ResolveModel model(schema, config);
+
+    auto gw = model->get_genus_weights();
+    auto fw = model->get_family_weights();
+    REQUIRE(gw.defined());
+    REQUIRE(fw.defined());
+    REQUIRE(gw.size(0) == 20);   // exactly n_genera, not 21
+    REQUIRE(fw.size(0) == 10);   // exactly n_families, not 11
+}
+
 TEST_CASE("PlotEncoderEmbed forward", "[encoder]") {
     PlotEncoderEmbed encoder(
         5,      // n_continuous
@@ -160,8 +226,8 @@ TEST_CASE("ResolveModel hash mode forward", "[model]") {
 
     // n_continuous = 2 (coords) + 0 (covariates) + 1 (unknown_fraction) + 32 (hash) = 35
     auto continuous = torch::randn({8, 35});
-    auto genus_ids = torch::randint(0, 21, {8, 3});
-    auto family_ids = torch::randint(0, 11, {8, 3});
+    auto genus_ids = torch::randint(0, 20, {8, 3});   // valid ids 0..n_genera-1 (issue #99)
+    auto family_ids = torch::randint(0, 10, {8, 3});  // valid ids 0..n_families-1
 
     auto outputs = model->forward(continuous, genus_ids, family_ids);
 
@@ -175,6 +241,10 @@ TEST_CASE("ResolveModel hash mode forward", "[model]") {
         REQUIRE(outputs["area"].size(1) == 1);
         REQUIRE(outputs["habitat"].size(0) == 8);
         REQUIRE(outputs["habitat"].size(1) == 5);
+    }
+
+    SECTION("MLP does not require full-batch training (issue #73)") {
+        REQUIRE_FALSE(model->requires_full_batch_training());
     }
 }
 
