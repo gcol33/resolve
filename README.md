@@ -1,291 +1,260 @@
 # RESOLVE
 
+*predicting what a sample is from what's in it*
+
 [![Tests](https://github.com/gcol33/resolve/actions/workflows/tests.yml/badge.svg)](https://github.com/gcol33/resolve/actions/workflows/tests.yml)
+[![R-CMD-check](https://github.com/gcol33/resolve/actions/workflows/r-cmd-check.yml/badge.svg)](https://github.com/gcol33/resolve/actions/workflows/r-cmd-check.yml)
 [![Documentation](https://img.shields.io/badge/docs-online-blue)](https://gillescolling.com/resolve)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-**Representation Encoding for Structured Observation Learning with Vector Embeddings**
+**Predict sample-level outcomes from compositional data, with a C++ engine on libtorch.**
 
-A torch-based package for predicting sample attributes from compositional data—sets of entities with optional abundances or weights.
-
-## Overview
-
-RESOLVE treats compositional data as *contextual signal*—a rich, structured representation that encodes information about sample-level attributes. Given a set of entities (species in a plot, symptoms in a patient, products in a basket), RESOLVE learns to predict properties of the sample.
-
-**Core idea**: Compositional data encodes a shared latent representation that simultaneously informs multiple sample attributes.
-
-### Example Domains
-
-| Domain | Entities | Sample | Predictions |
-|--------|----------|--------|-------------|
-| **Ecology** | Plant species | Vegetation plot | Plot area, habitat type, elevation |
-| **Medicine** | Symptoms, conditions | Patient | Diagnosis, severity, treatment response |
-| **Retail** | Products | Shopping basket | Customer segment, churn risk |
-| **Genomics** | Genes, variants | Sample | Phenotype, disease risk |
-| **Text** | Words, n-grams | Document | Topic, sentiment, author |
-
-## Quick Start
+Hand RESOLVE two tables: one row per sample, and one row per entity observed in a
+sample. It learns a single representation of the composition and reads several
+attributes off it at once, so one encoder answers a continuous question and a
+categorical one from the same latent state. The engine is a standalone C++ library;
+Python, R, and the command line are thin bindings over it, so a model trained from
+one is identical to a model trained from any other.
 
 ```python
-from resolve import ResolveDataset, Trainer
+import resolve_core as rc
 
-# Load data
-dataset = ResolveDataset.from_csv(
-    header="samples.csv",       # one row per sample
-    species="entities.csv",     # entity-sample associations
-    roles={
-        "plot_id": "sample_id",
-        "species_id": "entity_id",
-        "species_plot_id": "sample_id",
-    },
-    targets={"y": {"column": "response", "task": "regression"}},
+roles = rc.RoleMapping()
+roles.plot_id    = "PlotID"
+roles.species_id = "Species"
+roles.abundance  = "Cover"
+
+dataset = rc.ResolveDataset.from_csv(
+    "plots.csv", "species.csv", roles,
+    [rc.TargetSpec.regression("Area", rc.TransformType.Log1p),
+     rc.TargetSpec.classification("Habitat", 9)],
 )
 
-# Train
-trainer = Trainer(dataset)
-trainer.fit()
-
-# Predict with confidence filtering
-preds = trainer.predict(dataset)
-preds = trainer.predict(dataset, confidence_threshold=0.8)
-```
-
-### Ecology Example
-
-Predict vegetation plot area and habitat from species composition:
-
-```python
-from resolve import ResolveDataset, Trainer, RoleMapping, TargetConfig, TrainerConfig
-
-dataset = ResolveDataset.from_csv(
-    header="plots.csv",
-    species="species_records.csv",
-    roles=RoleMapping(
-        plot_id="PlotID",
-        species_id="Species",
-        species_plot_id="PlotID",
-        abundance="Cover",
-        taxonomy_genus="Genus",
-        taxonomy_family="Family",
-        coords_lat="Latitude",
-        coords_lon="Longitude",
-    ),
-    targets={
-        "area": TargetConfig(column="Area", task="regression", transform="log1p"),
-        "habitat": TargetConfig(column="Habitat", task="classification", num_classes=5),
-    },
-)
-
-config = TrainerConfig(hash_dim=64, top_k=10, hidden_dims=[512, 256, 128])
-trainer = Trainer(**config.to_trainer_kwargs(dataset))
+trainer = rc.Trainer(rc.ResolveModel(dataset.schema, rc.ModelConfig()), rc.TrainConfig())
+trainer.prepare_data(dataset, test_size=0.2, seed=42)
 trainer.fit()
 ```
 
-### Medical Example
+## Set-valued input, not a design matrix
 
-Predict diagnosis from patient symptoms:
+A sample's composition is a variable-length set: this plot holds nine species, the
+next holds sixty, and the identities differ. RESOLVE takes that set directly. Entity
+effects are pooled linearly, weighted by abundance, before the encoder mixes them, so
+each entity contributes additively to the latent signal and the pooling stays readable
+after training.
+
+Five ways to encode the set are available, selected on the dataset config:
+
+| Mode | What it encodes |
+|------|-----------------|
+| `Hash` | Feature hashing over the full entity list, fixed width regardless of vocabulary |
+| `Embed` | Learned embeddings for the dominant entities |
+| `Sparse` | Explicit abundance vector over the known vocabulary |
+| `RankPool` | Shared entity/genus/family tables, abundance-weighted mean pooling |
+| `Transformer` | Additive tokens with self-attention and attention or CLS pooling |
 
 ```python
-dataset = ResolveDataset.from_csv(
-    header="patients.csv",
-    species="symptoms.csv",
-    roles=RoleMapping(
-        plot_id="patient_id",
-        species_id="symptom_code",
-        species_plot_id="patient_id",
-        abundance="severity",  # optional: symptom intensity
-    ),
-    targets={
-        "diagnosis": TargetConfig(column="icd_code", task="classification", num_classes=50),
-        "severity": TargetConfig(column="severity_score", task="regression"),
-    },
-)
+cfg = rc.DatasetConfig()
+cfg.species_encoding = rc.SpeciesEncodingMode.RankPool
+cfg.pool_weighting   = rc.PoolWeighting.Log1p
 ```
 
-## Features
+Above the entity encoder, the sample encoder itself is swappable: `MLP`,
+`FTTransformer`, `TabNet`, `SAINT`, `ExcelFormer`, `TraitNet`, and graph encoders
+(`GNN`, `HeterogeneousGNN`) with spatial, taxonomic, or co-occurrence graph
+construction.
 
-| Feature | Description |
-|---------|-------------|
-| **Hybrid entity encoding** | Feature hashing for full entity lists + learned embeddings for dominant entities |
-| **Multi-target prediction** | Single shared encoder, multiple task heads (regression & classification) |
-| **Phased training** | MAE → SMAPE → band accuracy optimization |
-| **Semantic role mapping** | Flexible column naming via `RoleMapping` dataclass |
-| **Unknown entity tracking** | Detects and quantifies novel entities at inference time |
-| **Abundance normalization** | Raw, normalized (sum-to-one), or log1p modes |
-| **Confidence filtering** | Set threshold to filter uncertain predictions |
-| **Typed configuration** | `TrainerConfig` dataclass with presets (TINY_MODEL → MAX_MODEL) |
-| **CPU-first** | Works without GPU, scales with CUDA when available |
+## More than the entity list
 
-## Performance
+Coordinates, numeric covariates, and string covariates join the composition in the
+same encoder. Taxonomy gives an entity a fallback identity, so a species the model
+has never seen still lands near its genus and family:
 
-Optimized CUDA kernels for GPU acceleration. Benchmarks on RTX 4090:
+```python
+roles.latitude     = "Latitude"
+roles.longitude    = "Longitude"
+roles.genus        = "Genus"
+roles.family       = "Family"
+roles.covariates   = ["elevation", "slope"]
+roles.categoricals = ["bedrock", "country"]
+```
 
-| Operation | Dataset Size | CPU | GPU | Speedup |
-|-----------|-------------|-----|-----|---------|
-| Hash Embedding | 10K records | 0.08 ms | 0.02 ms | 5x |
-| Hash Embedding | 100K records | 1.3 ms | 0.04 ms | **35x** |
-| Hash Embedding | 1M records | 32 ms | 0.08 ms | **400x** |
+String columns are factorized at load time into their own embedding tables, and the
+vocabulary travels in the checkpoint so raw CSVs score correctly at inference.
+Unknown entities are counted and reported rather than silently dropped.
+
+## Reading the model after it trains
+
+The held-out fold stays reachable from the trainer, with per-sample output for both
+task types and the fold indices to tie any of it back to your own table:
+
+```python
+resid = trainer.compute_residuals("Area")             # per-sample residuals, skew, kurtosis
+cls   = trainer.compute_classification_predictions("Habitat")
+cls.predicted_classes, cls.probabilities, cls.actuals
+
+trainer.test_plot_ids()                                # which samples were held out
+trainer.compute_calibration("Habitat")                 # reliability bins
+trainer.cross_validate(n_folds=5)                      # or cross_validate_spatial(...)
+```
+
+Latent representations come off a fitted predictor, which is where the encoder earns
+its keep outside prediction: cluster the samples, project them, or feed them to a
+downstream model.
+
+```python
+pred = rc.Predictor.load("model.pt", device="cpu")
+out  = pred.predict_dataset(dataset, return_latent=True)
+out.latent                                             # one row per sample
+pred.get_species_embeddings()                          # the learned entity space
+```
+
+## Learning before the labels arrive
+
+Labelled samples are usually the scarce part. Self-supervised pretext tasks train the
+encoder on composition alone, then hand the weights to a supervised fit:
+
+```python
+jepa = rc.JEPAPretrainer(model, rc.PretrainConfig())    # joint-embedding prediction
+jepa.pretrain(dataset.covariates,
+              genus_ids=dataset.genus_ids,
+              family_ids=dataset.family_ids,
+              species_ids=dataset.species_ids)
+
+scarf = rc.SCARFPretrainer(model, rc.PretrainConfig())  # contrastive corruption
+vae   = rc.VAEPretrainer(dataset.species_vector.shape[1], rc.VAEConfig())
+vae.pretrain(dataset.species_vector)                    # variational reconstruction
+```
+
+Masked-entity modelling is available alongside them, masking entity identities so the
+pretext task cannot read its own answer.
+
+## From the command line
+
+The engine runs without a language runtime:
+
+```bash
+resolve train --header plots.csv --species species.csv \
+              --plot-id PlotID --species-id Species --abundance Cover \
+              --target Area:regression --target Habitat:classification:9 \
+              --encoding rank_pool --cuda --output model.pt
+
+resolve predict --model model.pt --header new_plots.csv --species new_species.csv \
+                --output predictions.csv
+
+resolve info --model model.pt
+```
+
+## From R
+
+The R package speaks to the same engine through a C ABI, so it needs no libtorch
+headers of its own:
+
+```r
+library(resolve)
+
+dataset <- resolve.dataset.csv(
+  header  = "plots.csv",
+  species = "species.csv",
+  roles   = list(plot_id = "PlotID", species_id = "Species", abundance = "Cover"),
+  targets = list(
+    area    = list(column = "Area", task = "regression", transform = "log1p"),
+    habitat = list(column = "Habitat", task = "classification", num_classes = 9)
+  ),
+  config  = list(species_encoding = "rank_pool", hash_dim = 64)
+)
+
+trainer <- resolve.train.dataset(dataset, maxEpochs = 200L, device = "cuda",
+                                 savePath = "model.pt")
+
+predictor <- resolve.load("model.pt")
+preds     <- resolve.predict.dataset(predictor, dataset)
+```
+
+## The same two tables, other fields
+
+The shape RESOLVE takes is a sample and the set of things observed in it, which is not
+specific to ecology:
+
+| Field | Entities | Sample | Predictions |
+|-------|----------|--------|-------------|
+| Ecology | Plant species | Vegetation plot | Plot area, habitat type, elevation |
+| Medicine | Symptoms, conditions | Patient | Diagnosis, severity, treatment response |
+| Retail | Products | Basket | Customer segment, churn risk |
+| Genomics | Genes, variants | Sample | Phenotype, disease risk |
+| Text | Words, n-grams | Document | Topic, sentiment, author |
+
+Role names carry the ecological vocabulary the package grew up with; they map onto any
+of these by pointing `plot_id` and `species_id` at your own columns.
+
+## Running on a GPU
+
+CUDA is used when available, with hash embedding kernels written for it. Training
+recovers from a device that runs out of memory on its own: the trainer releases its
+caches, halves the batch size, and restarts, down to a floor you set. On a GPU shared
+with a desktop, `vram_fraction` leaves headroom for the compositor.
+
+```python
+cfg = rc.TrainConfig()
+cfg.batch_size     = 16384
+cfg.vram_fraction  = 0.80    # sharing the GPU; 1.0 (default) for a dedicated job
+```
 
 ## Installation
 
-```bash
-pip install resolve
-```
-
-Or from source:
+The engine and its Python bindings build from source with CMake and an installed
+PyTorch:
 
 ```bash
 git clone https://github.com/gcol33/resolve.git
-cd resolve
-pip install -e .
+cd resolve/src/core/python
+pip install .
 ```
 
-## Architecture
-
-```
-Entity data ──────┐
-                  ├──→ EntityEncoder ──→ hash embedding + hierarchy IDs
-Coordinates ──────┤                      + unknown mass features
-                  ├──→ SampleEncoder (shared) ──→ latent representation
-Covariates ───────┘
-                                                      │
-                                    ┌─────────────────┼─────────────────┐
-                                    ↓                 ↓                 ↓
-                              TaskHead(y1)     TaskHead(y2)     TaskHead(y3)
-                                    │                 │                 │
-                                    ↓                 ↓                 ↓
-                              regression       regression       classification
-```
-
-### Linear Compositional Pooling
-
-Entity effects are aggregated linearly (abundance-weighted sum) before nonlinear mixing in the encoder. This preserves interpretability: each entity contributes additively to the latent signal before the network learns complex interactions.
-
-## Configuration
-
-Use `TrainerConfig` for clean, reusable training setups:
-
-```python
-from resolve import TrainerConfig
-
-# Custom config
-config = TrainerConfig(
-    hash_dim=128,
-    top_k=20,
-    hidden_dims=[1024, 512, 256],
-    max_epochs=500,
-    patience=30,
-)
-
-# Or use presets
-from resolve.config import LARGE_MODEL, MEDIUM_MODEL
-trainer = Trainer(**LARGE_MODEL.to_trainer_kwargs(dataset))
-```
-
-## Limiting GPU VRAM usage
-
-RESOLVE leaves the PyTorch CUDA caching allocator uncapped by default
-(`vram_fraction = 1.0`) so dedicated training jobs on a solo GPU use the full
-device. Pass an explicit lower value when sharing the GPU with a desktop or
-other workloads — the Windows WDDM driver spills allocations beyond physical
-VRAM into shared system memory, which freezes the whole desktop under load,
-so leaving ~20% headroom keeps the compositor, browser, and other GPU
-clients responsive while training runs.
-
-```python
-from resolve_core import TrainConfig
-
-cfg = TrainConfig()
-cfg.vram_fraction = 1.0   # default — dedicated training job on solo GPU
-
-# Sharing the GPU with a desktop / GUI: leave headroom
-cfg.vram_fraction = 0.80
-```
-
-CLI:
-
-```bash
-resolve train --vram-fraction 1.0 ...    # default (dedicated)
-resolve predict --vram-fraction 0.80 ... # shared with desktop
-```
-
-R:
+R, once the C ABI library is built and pointed at by `RESOLVE_C_HOME`:
 
 ```r
-trainer <- Trainer$new(model, list(
-    batch_size = 4096L,
-    device = "cuda",
-    vram_fraction = 1.0  # default
-))
+install.packages("pak")
+pak::pak("gcol33/resolve/r")
 ```
-
-The cap applies to both `Trainer` and `Predictor::load`. To apply it
-independently of either (e.g., before loading any model):
-
-```python
-import resolve_core
-resolve_core.set_vram_fraction(0.80)  # affects current CUDA device
-```
-
-`Predictor.load` defaults to `device="cpu"` and `predict_dataset` chunks
-its forward pass at `batch_size = 4096` along dim 0, with results
-concatenated on CPU. Pass `batch_size=-1` to opt back into the legacy
-one-shot path (only safe when the whole test set fits on the device).
-
-### Auto-halve `batch_size` on OOM
-
-`Trainer.fit()` catches `c10::OutOfMemoryError`, releases optimizer / AMP /
-GPU caches, halves `batch_size`, and restarts training from epoch 0 against
-the original model weights. The retry stops at `batch_size_floor` (default
-1024); below the floor the OOM rethrows. After `fit()` returns,
-`trainer.config.batch_size` is the effective batch size that actually
-trained the model, also persisted in the checkpoint.
-
-```python
-cfg.batch_size = 16384
-cfg.batch_size_floor = 1024
-```
-
-CLI: `resolve train --batch-size 16384 --batch-size-floor 1024`.
-
-### CUDA allocator config (Linux vs Windows)
-
-`PYTORCH_CUDA_ALLOC_CONF` is set automatically at `import resolve_core` to
-a platform-aware default:
-`expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:256`
-on Linux/mac, and the same without `expandable_segments` on Windows (the
-cuMemMap-backed allocator is not implemented on win32; libtorch warns
-otherwise). To overwrite an existing value or simply log what is active:
-`resolve_core.configure_cuda_allocator(force=True)`.
 
 ## Documentation
 
-- **[Getting Started](https://gillescolling.com/resolve/tutorials/quickstart/)**: Complete workflow walkthrough
-- **[Data Preparation](https://gillescolling.com/resolve/tutorials/data-preparation/)**: Data formatting guide
-- **[Training](https://gillescolling.com/resolve/tutorials/training/)**: Advanced training options
-- **[API Reference](https://gillescolling.com/resolve/api/dataset/)**: Full API documentation
+- [Installation](https://gillescolling.com/resolve/tutorials/installation/)
+- [Quick Start](https://gillescolling.com/resolve/tutorials/quickstart/)
+- [Data Preparation](https://gillescolling.com/resolve/tutorials/data-preparation/)
+- [Training Models](https://gillescolling.com/resolve/tutorials/training/)
+- [Encoding Modes](https://gillescolling.com/resolve/tutorials/encoding-modes/)
+- [Performance Tuning](https://gillescolling.com/resolve/tutorials/performance-tuning/)
+- [Making Predictions](https://gillescolling.com/resolve/tutorials/prediction/)
+- [Understanding Embeddings](https://gillescolling.com/resolve/tutorials/embeddings/)
+- [API Reference](https://gillescolling.com/resolve/api/dataset/)
 
-## Requirements
+## Support
 
-- Python ≥ 3.10
-- PyTorch ≥ 2.0
-- pandas ≥ 2.0
-- scikit-learn ≥ 1.3
+> "Software is like sex: it's better when it's free." — Linus Torvalds
+
+I'm a PhD student who builds packages in my free time because I believe good tools
+should be free and open. I started these projects for my own work and figured others
+might find them useful too.
+
+If this package saved you some time, buying me a coffee is a nice way to say thanks.
+It helps with my coffee addiction.
+
+[![Buy Me A Coffee](https://img.shields.io/badge/-Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/gcol33)
 
 ## License
 
-MIT License - see [LICENSE.md](LICENSE.md) for details.
+MIT (see the LICENSE.md file)
 
 ## Citation
-
-If you use RESOLVE in your research, please cite:
 
 ```bibtex
 @software{resolve,
   author = {Colling, Gilles},
-  title = {RESOLVE: Representation Encoding for Structured Observation Learning with Vector Embeddings},
-  year = {2025},
-  url = {https://github.com/gcol33/resolve}
+  title  = {RESOLVE: Predicting Sample Outcomes from Compositional Data},
+  year   = {2026},
+  url    = {https://github.com/gcol33/resolve}
 }
 ```
