@@ -1,4 +1,5 @@
 #include "resolve/checkpoint.hpp"
+#include "resolve/checkpoint_schema_keys.hpp"
 #include <fstream>
 #include <filesystem>
 #include <algorithm>
@@ -675,32 +676,33 @@ void save_schema(
     torch::serialize::OutputArchive& archive,
     const ResolveSchema& schema
 ) {
-    archive.write("schema_n_plots", torch::tensor(schema.n_plots));
-    archive.write("schema_n_species", torch::tensor(schema.n_species));
-    archive.write("schema_n_species_vocab", torch::tensor(schema.n_species_vocab));
-    archive.write("schema_has_coordinates", torch::tensor(static_cast<int>(schema.has_coordinates)));
-    archive.write("schema_has_abundance", torch::tensor(static_cast<int>(schema.has_abundance)));
-    archive.write("schema_has_taxonomy", torch::tensor(static_cast<int>(schema.has_taxonomy)));
-    archive.write("schema_n_genera", torch::tensor(schema.n_genera));
-    archive.write("schema_n_families", torch::tensor(schema.n_families));
-    archive.write("schema_n_genera_vocab", torch::tensor(schema.n_genera_vocab));
-    archive.write("schema_n_families_vocab", torch::tensor(schema.n_families_vocab));
-    archive.write("schema_track_unknown_fraction", torch::tensor(static_cast<int>(schema.track_unknown_fraction)));
-    archive.write("schema_track_unknown_count", torch::tensor(static_cast<int>(schema.track_unknown_count)));
-    archive.write("schema_n_covariates", torch::tensor(static_cast<int64_t>(schema.covariate_names.size())));
+    namespace k = ckpt_schema_keys;
+    archive.write(k::kNPlots, torch::tensor(schema.n_plots));
+    archive.write(k::kNSpecies, torch::tensor(schema.n_species));
+    archive.write(k::kNSpeciesVocab, torch::tensor(schema.n_species_vocab));
+    archive.write(k::kHasCoordinates, torch::tensor(static_cast<int>(schema.has_coordinates)));
+    archive.write(k::kHasAbundance, torch::tensor(static_cast<int>(schema.has_abundance)));
+    archive.write(k::kHasTaxonomy, torch::tensor(static_cast<int>(schema.has_taxonomy)));
+    archive.write(k::kNGenera, torch::tensor(schema.n_genera));
+    archive.write(k::kNFamilies, torch::tensor(schema.n_families));
+    archive.write(k::kNGeneraVocab, torch::tensor(schema.n_genera_vocab));
+    archive.write(k::kNFamiliesVocab, torch::tensor(schema.n_families_vocab));
+    archive.write(k::kTrackUnknownFrac, torch::tensor(static_cast<int>(schema.track_unknown_fraction)));
+    archive.write(k::kTrackUnknownCount, torch::tensor(static_cast<int>(schema.track_unknown_count)));
+    archive.write(k::kNCovariates, torch::tensor(static_cast<int64_t>(schema.covariate_names.size())));
     for (size_t i = 0; i < schema.covariate_names.size(); ++i) {
-        write_string_to_archive(archive, "schema_covariate_" + std::to_string(i),
+        write_string_to_archive(archive, k::covariate(static_cast<int64_t>(i)),
                                 schema.covariate_names[i]);
     }
-    archive.write("schema_n_targets", torch::tensor(static_cast<int64_t>(schema.targets.size())));
+    archive.write(k::kNTargets, torch::tensor(static_cast<int64_t>(schema.targets.size())));
     for (size_t i = 0; i < schema.targets.size(); ++i) {
         const auto& target = schema.targets[i];
-        std::string prefix = "schema_target_" + std::to_string(i) + "_";
-        write_string_to_archive(archive, prefix + "name", target.name);
-        archive.write(prefix + "task", torch::tensor(static_cast<int>(target.task)));
-        archive.write(prefix + "transform", torch::tensor(static_cast<int>(target.transform)));
-        archive.write(prefix + "num_classes", torch::tensor(target.num_classes));
-        archive.write(prefix + "weight", torch::tensor(target.weight));
+        std::string prefix = k::target_prefix(static_cast<int64_t>(i));
+        write_string_to_archive(archive, prefix + k::kTargetName, target.name);
+        archive.write(prefix + k::kTargetTask, torch::tensor(static_cast<int>(target.task)));
+        archive.write(prefix + k::kTargetTransform, torch::tensor(static_cast<int>(target.transform)));
+        archive.write(prefix + k::kTargetNumClasses, torch::tensor(target.num_classes));
+        archive.write(prefix + k::kTargetWeight, torch::tensor(target.weight));
 
         // Ordered class vocabulary for classification targets. Empty (count
         // 0) for regression. Empty for already-integer-encoded
@@ -709,11 +711,11 @@ void save_schema(
         // UInt8 bytes scheme used elsewhere. Back-compat: pre-classification
         // checkpoints won't have this key; the load path treats absent ==
         // empty (see schema load below).
-        archive.write(prefix + "n_class_names",
+        archive.write(prefix + k::kTargetNClassNames,
                       torch::tensor(static_cast<int64_t>(target.class_names.size())));
         for (size_t j = 0; j < target.class_names.size(); ++j) {
             write_string_to_archive(archive,
-                prefix + "class_" + std::to_string(j),
+                prefix + k::kTargetClassPrefix + std::to_string(j),
                 target.class_names[j]);
         }
 
@@ -723,10 +725,10 @@ void save_schema(
         // matching the value-tree schema path that already carries it.
         // Back-compat: pre-fix checkpoints omit this key; the load path
         // treats absent == empty (unweighted CE).
-        archive.write(prefix + "n_class_weights",
+        archive.write(prefix + k::kTargetNClassWeights,
                       torch::tensor(static_cast<int64_t>(target.class_weights.size())));
         if (!target.class_weights.empty()) {
-            archive.write(prefix + "class_weights",
+            archive.write(prefix + k::kTargetClassWeights,
                           torch::tensor(target.class_weights));
         }
     }
@@ -734,22 +736,22 @@ void save_schema(
     // Categorical covariates: column count + per-column name + per-column
     // vocab size + shared embed_dim. Vocab sizes include the reserved UNK
     // slot at code 0 (so the column's embedding table is size K+1).
-    archive.write("schema_n_categoricals",
+    archive.write(k::kNCategoricals,
                   torch::tensor(static_cast<int64_t>(schema.categorical_names.size())));
-    archive.write("schema_categorical_embed_dim",
+    archive.write(k::kCategoricalEmbedDim,
                   torch::tensor(schema.categorical_embed_dim));
     for (size_t i = 0; i < schema.categorical_names.size(); ++i) {
-        const std::string prefix = "schema_categorical_" + std::to_string(i) + "_";
-        write_string_to_archive(archive, prefix + "name", schema.categorical_names[i]);
-        archive.write(prefix + "vocab_size",
+        const std::string prefix = k::categorical_prefix(static_cast<int64_t>(i));
+        write_string_to_archive(archive, prefix + k::kCategoricalName, schema.categorical_names[i]);
+        archive.write(prefix + k::kCategoricalVocabSize,
                       torch::tensor(schema.categorical_vocab_sizes[i]));
     }
 
     // Rank-pool / transformer pooling scheme + resolved species cap (issue #38),
     // so the predict side rebuilds the same DatasetConfig instead of defaulting
     // to Log1p.
-    archive.write("schema_pool_weighting", torch::tensor(schema.pool_weighting));
-    archive.write("schema_pool_species_cap", torch::tensor(schema.pool_species_cap));
+    archive.write(k::kPoolWeighting, torch::tensor(schema.pool_weighting));
+    archive.write(k::kPoolSpeciesCap, torch::tensor(schema.pool_species_cap));
 }
 
 ResolveSchema load_schema(
@@ -788,20 +790,21 @@ ResolveSchema load_schema(
         return std::string(reinterpret_cast<const char*>(ptr), len);
     };
 
+    namespace k = ckpt_schema_keys;
     ResolveSchema schema;
-    schema.n_plots = read_i64("schema_n_plots");
-    schema.n_species = read_i64("schema_n_species");
-    schema.n_species_vocab = read_i64("schema_n_species_vocab");
-    schema.has_coordinates = read_bool("schema_has_coordinates");
-    schema.has_abundance = read_bool("schema_has_abundance");
-    schema.has_taxonomy = read_bool("schema_has_taxonomy");
-    schema.n_genera = read_i64("schema_n_genera");
-    schema.n_families = read_i64("schema_n_families");
-    schema.n_genera_vocab = read_i64("schema_n_genera_vocab");
-    schema.n_families_vocab = read_i64("schema_n_families_vocab");
-    schema.track_unknown_fraction = read_bool("schema_track_unknown_fraction");
-    schema.track_unknown_count = read_bool("schema_track_unknown_count");
-    int64_t n_covariates = read_i64("schema_n_covariates");
+    schema.n_plots = read_i64(k::kNPlots);
+    schema.n_species = read_i64(k::kNSpecies);
+    schema.n_species_vocab = read_i64(k::kNSpeciesVocab);
+    schema.has_coordinates = read_bool(k::kHasCoordinates);
+    schema.has_abundance = read_bool(k::kHasAbundance);
+    schema.has_taxonomy = read_bool(k::kHasTaxonomy);
+    schema.n_genera = read_i64(k::kNGenera);
+    schema.n_families = read_i64(k::kNFamilies);
+    schema.n_genera_vocab = read_i64(k::kNGeneraVocab);
+    schema.n_families_vocab = read_i64(k::kNFamiliesVocab);
+    schema.track_unknown_fraction = read_bool(k::kTrackUnknownFrac);
+    schema.track_unknown_count = read_bool(k::kTrackUnknownCount);
+    int64_t n_covariates = read_i64(k::kNCovariates);
     schema.covariate_names.resize(n_covariates);
     for (int64_t i = 0; i < n_covariates; ++i) {
         // Back-compat: older checkpoints didn't save covariate names.
@@ -810,55 +813,55 @@ ResolveSchema load_schema(
         // for model construction (model indexes by count, not name), so
         // empty-string fallback is safe.
         torch::Tensor len_t;
-        if (archive.try_read("schema_covariate_" + std::to_string(i) + "_len", len_t)) {
+        if (archive.try_read(k::covariate(i) + "_len", len_t)) {
             int64_t len = len_t.item<int64_t>();
             if (len > 0) {
                 torch::Tensor name_t;
-                archive.read("schema_covariate_" + std::to_string(i), name_t);
+                archive.read(k::covariate(i), name_t);
                 auto ptr = name_t.data_ptr<uint8_t>();
                 schema.covariate_names[i] = std::string(reinterpret_cast<const char*>(ptr), len);
             }
         }
     }
-    int64_t n_targets = read_i64("schema_n_targets");
+    int64_t n_targets = read_i64(k::kNTargets);
     schema.targets.resize(n_targets);
     for (int64_t i = 0; i < n_targets; ++i) {
-        std::string prefix = "schema_target_" + std::to_string(i) + "_";
+        std::string prefix = k::target_prefix(i);
         // Back-compat: older checkpoints didn't save target names. Missing
         // names would collide on register_module("head_") for all targets,
         // so synthesize a fallback name when absent.
         torch::Tensor name_len_t;
-        if (archive.try_read(prefix + "name_len", name_len_t)) {
-            schema.targets[i].name = read_string(prefix + "name");
+        if (archive.try_read(prefix + k::kTargetName + "_len", name_len_t)) {
+            schema.targets[i].name = read_string(prefix + k::kTargetName);
         }
         if (schema.targets[i].name.empty()) {
             schema.targets[i].name = "target_" + std::to_string(i);
         }
-        schema.targets[i].task = static_cast<TaskType>(read_i32(prefix + "task"));
-        schema.targets[i].transform = static_cast<TransformType>(read_i32(prefix + "transform"));
-        schema.targets[i].num_classes = read_i32(prefix + "num_classes");
-        schema.targets[i].weight = read_f32(prefix + "weight");
+        schema.targets[i].task = static_cast<TaskType>(read_i32(prefix + k::kTargetTask));
+        schema.targets[i].transform = static_cast<TransformType>(read_i32(prefix + k::kTargetTransform));
+        schema.targets[i].num_classes = read_i32(prefix + k::kTargetNumClasses);
+        schema.targets[i].weight = read_f32(prefix + k::kTargetWeight);
 
         // Class names (back-compat: pre-classification checkpoints omit
         // these keys; treat absent as no class vocab, which matches the
         // original behaviour where classification just used raw int codes).
         torch::Tensor n_cn_t;
-        if (archive.try_read(prefix + "n_class_names", n_cn_t)) {
+        if (archive.try_read(prefix + k::kTargetNClassNames, n_cn_t)) {
             int64_t n_cn = n_cn_t.item<int64_t>();
             schema.targets[i].class_names.resize(static_cast<size_t>(n_cn));
             for (int64_t j = 0; j < n_cn; ++j) {
                 schema.targets[i].class_names[j] =
-                    read_string(prefix + "class_" + std::to_string(j));
+                    read_string(prefix + k::kTargetClassPrefix + std::to_string(j));
             }
         }
 
         // Class weights (issue #91; back-compat: absent == empty == unweighted CE).
         torch::Tensor n_cw_t;
-        if (archive.try_read(prefix + "n_class_weights", n_cw_t)) {
+        if (archive.try_read(prefix + k::kTargetNClassWeights, n_cw_t)) {
             int64_t n_cw = n_cw_t.item<int64_t>();
             if (n_cw > 0) {
                 torch::Tensor cw_t;
-                archive.read(prefix + "class_weights", cw_t);
+                archive.read(prefix + k::kTargetClassWeights, cw_t);
                 cw_t = cw_t.to(torch::kFloat32).contiguous();
                 auto ptr = cw_t.data_ptr<float>();
                 schema.targets[i].class_weights.assign(ptr, ptr + n_cw);
@@ -869,28 +872,28 @@ ResolveSchema load_schema(
     // Categorical covariates (back-compat: pre-categorical-port checkpoints
     // won't have any of these keys; treat as schema with zero categoricals).
     torch::Tensor n_cat_t;
-    if (archive.try_read("schema_n_categoricals", n_cat_t)) {
+    if (archive.try_read(k::kNCategoricals, n_cat_t)) {
         int64_t n_cat = n_cat_t.item<int64_t>();
         torch::Tensor embed_dim_t;
-        if (archive.try_read("schema_categorical_embed_dim", embed_dim_t)) {
+        if (archive.try_read(k::kCategoricalEmbedDim, embed_dim_t)) {
             schema.categorical_embed_dim = embed_dim_t.item<int64_t>();
         }
         schema.categorical_names.resize(n_cat);
         schema.categorical_vocab_sizes.resize(n_cat);
         for (int64_t i = 0; i < n_cat; ++i) {
-            const std::string prefix = "schema_categorical_" + std::to_string(i) + "_";
-            schema.categorical_names[i] = read_string(prefix + "name");
-            schema.categorical_vocab_sizes[i] = read_i64(prefix + "vocab_size");
+            const std::string prefix = k::categorical_prefix(i);
+            schema.categorical_names[i] = read_string(prefix + k::kCategoricalName);
+            schema.categorical_vocab_sizes[i] = read_i64(prefix + k::kCategoricalVocabSize);
         }
     }
 
     // Pool weighting scheme + species cap (back-compat: pre-issue-#38
     // checkpoints keep the schema defaults, Log1p / auto).
     torch::Tensor pool_w_t, pool_cap_t;
-    if (archive.try_read("schema_pool_weighting", pool_w_t)) {
+    if (archive.try_read(k::kPoolWeighting, pool_w_t)) {
         schema.pool_weighting = pool_w_t.item<int>();
     }
-    if (archive.try_read("schema_pool_species_cap", pool_cap_t)) {
+    if (archive.try_read(k::kPoolSpeciesCap, pool_cap_t)) {
         schema.pool_species_cap = pool_cap_t.item<int>();
     }
     return schema;

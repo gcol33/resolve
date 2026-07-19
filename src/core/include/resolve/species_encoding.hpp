@@ -9,8 +9,11 @@
 
 namespace resolve {
 
-// MurmurHash3 finalizer for feature hashing
-uint32_t murmur_hash(const std::string& key, uint32_t seed = 0);
+// Per-byte string mixer producing a 32-bit feature-hash seed. Not MurmurHash2/3
+// (that name is reserved for the genuine 64->32 finalizer applied downstream);
+// this is an ad-hoc multiply-xor mixer whose only contract is determinism +
+// cross-platform stability (see the unsigned-char cast in the impl).
+uint32_t feature_hash(const std::string& key, uint32_t seed = 0);
 
 // Resolved feature-hash slot for one species: signed-feature-hashing bucket
 // and sign. The scheme mirrors the CUDA kernel (cuda/kernels.cu) exactly so the
@@ -196,7 +199,15 @@ public:
         const std::vector<SpeciesRecord>& records,
         const std::vector<std::string>& plot_ids) const;
 
+    // Swap the fitted species + taxonomy vocab for externally-supplied ones
+    // (the from_csv_with_schema inference path: fit() first so transform() can
+    // look up each species's genus/family string, then adopt the training-set
+    // vocabs). Mirrors RankPoolEncoder::set_vocabs; throws if called before fit().
+    void set_vocabs(SpeciesVocab species_vocab, TaxonomyVocab taxonomy_vocab);
+
     [[nodiscard]] bool is_fitted() const noexcept { return fitted_; }
+    [[nodiscard]] const SpeciesVocab& species_vocab() const noexcept { return species_vocab_; }
+    [[nodiscard]] const TaxonomyVocab& taxonomy_vocab() const noexcept { return taxonomy_vocab_; }
     [[nodiscard]] int64_t n_species_vocab() const noexcept { return species_vocab_.size(); }
     [[nodiscard]] int64_t n_genera_vocab() const noexcept { return taxonomy_vocab_.n_genera(); }
     [[nodiscard]] int64_t n_families_vocab() const noexcept { return taxonomy_vocab_.n_families(); }

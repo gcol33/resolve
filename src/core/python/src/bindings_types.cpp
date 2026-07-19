@@ -387,6 +387,18 @@ void register_types(nb::module_& m) {
                 return nb::steal(THPVariable_Wrap(cpu_tensor));
             }
             return nb::none();
+        })
+        // Per-target regression scaling as { name: (mean, scale) }. Mirrors the
+        // C-ABI scalers_to_value target_scalers marshal so both bindings expose
+        // the target scaling that save_scalers/load_scalers persist.
+        .def_prop_ro("target_scalers", [](const resolve::Scalers& s) {
+            nb::dict out;
+            for (const auto& [name, ms] : s.target_scalers) {
+                double mean = ms.first.defined() ? ms.first.item<double>() : 0.0;
+                double scale = ms.second.defined() ? ms.second.item<double>() : 0.0;
+                out[name.c_str()] = nb::make_tuple(mean, scale);
+            }
+            return out;
         });
 
     // Calibration types for classification evaluation

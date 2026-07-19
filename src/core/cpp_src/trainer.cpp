@@ -1548,6 +1548,26 @@ void Trainer::load_weights_into(torch::serialize::InputArchive& archive, Resolve
                "or architecture sub-config). First missing tensor: " << first_missing;
         throw std::runtime_error(msg.str());
     }
+    // The missing-tensor check above catches a subset model loaded from a subset
+    // checkpoint, but not the reverse: a checkpoint from a SUPERSET architecture
+    // whose overlapping tensor names + shapes match a smaller model loads a
+    // silent partial subset (copy_ shape-checks miss same-name/same-shape drift).
+    // Count the checkpoint's own weight tensors and reject a mismatch loudly.
+    int64_t n_ckpt_weights = 0;
+    for (const auto& key : archive.keys()) {
+        if (key.rfind("param_", 0) == 0 || key.rfind("buffer_", 0) == 0) {
+            ++n_ckpt_weights;
+        }
+    }
+    if (n_ckpt_weights != n_expected) {
+        std::ostringstream msg;
+        msg << "load_weights_into: checkpoint holds " << n_ckpt_weights
+            << " weight tensors but the model has " << n_expected
+            << ". The architecture does not match the checkpoint (a superset "
+               "checkpoint would load only its overlapping tensors, silently "
+               "leaving the extra checkpoint weights unused).";
+        throw std::runtime_error(msg.str());
+    }
 }
 
 void Trainer::load_state(

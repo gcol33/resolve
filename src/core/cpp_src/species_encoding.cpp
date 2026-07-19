@@ -7,7 +7,7 @@
 
 namespace resolve {
 
-uint32_t murmur_hash(const std::string& key, uint32_t seed) {
+uint32_t feature_hash(const std::string& key, uint32_t seed) {
     uint32_t h = seed;
     for (char c : key) {
         // Cast through unsigned char so bytes >= 0x80 (accented / hybrid species
@@ -23,7 +23,7 @@ uint32_t murmur_hash(const std::string& key, uint32_t seed) {
 
 // MurmurHash3 64->32 finalizer (fmix). MUST stay bit-identical to the device
 // `murmur_hash32` in cuda/kernels.cu. The CUDA hash path stores
-// `(int64_t)murmur_hash(species, 0)` per record (dataset.cpp) and the kernel
+// `(int64_t)feature_hash(species, 0)` per record (dataset.cpp) and the kernel
 // applies this finalizer to derive the bucket and sign. The CPU path here
 // pre-aggregates the embedding at load time, so it must derive the bucket and
 // sign the same way or a model trained on one device produces garbage when
@@ -45,7 +45,7 @@ static inline int32_t murmur_hash3_fmix_i32(int64_t key) {
 // hash_dim, sign = sign bit. Shared by the CPU embedding aggregation and the
 // parity test so the contract has one definition.
 HashBucketSign feature_hash_bucket_sign(const std::string& species, int hash_dim) {
-    int64_t species_id = static_cast<int64_t>(murmur_hash(species, 0));
+    int64_t species_id = static_cast<int64_t>(feature_hash(species, 0));
     int32_t h = murmur_hash3_fmix_i32(species_id);
     HashBucketSign out;
     // Take the magnitude in unsigned space: negating INT32_MIN in int is UB
@@ -655,6 +655,20 @@ EmbeddingEncodedData EmbeddingEncoder::transform(
     result.n_genera_vocab   = taxonomy_vocab_.n_genera();
     result.n_families_vocab = taxonomy_vocab_.n_families();
     return result;
+}
+
+void EmbeddingEncoder::set_vocabs(SpeciesVocab species_vocab, TaxonomyVocab taxonomy_vocab) {
+    // Only swap the vocabs; fit() (with real records) is the sole thing that
+    // flips fitted_ and populates species_to_genus_/_family_ (which transform()
+    // needs for genus/family string lookup). Same invariant as
+    // RankPoolEncoder::set_vocabs.
+    if (!fitted_) {
+        throw std::runtime_error(
+            "EmbeddingEncoder::set_vocabs called before fit(); call fit() first so "
+            "species_to_genus_/_family_ are populated before swapping vocabs");
+    }
+    species_vocab_ = std::move(species_vocab);
+    taxonomy_vocab_ = std::move(taxonomy_vocab);
 }
 
 } // namespace resolve

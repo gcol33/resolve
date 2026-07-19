@@ -22,13 +22,13 @@ static std::vector<SpeciesRecord> make_test_records() {
 // ============================================================================
 
 // Independent reimplementation of the device hash (cuda/kernels.cu:
-// murmur_hash32 applied to (int64)murmur_hash(species, 0)). If hash_species or
+// murmur_hash32 applied to (int64)feature_hash(species, 0)). If hash_species or
 // feature_hash_bucket_sign ever diverges from the kernel scheme (the original
 // bug: CPU used a single string hash for the bucket and a second string hash's
 // parity for the sign, while the kernel double-hashes), this fails.
 static void kernel_hash_formula(const std::string& s, int hash_dim,
                                 int& bucket_out, float& sign_out) {
-    uint64_t h = static_cast<uint64_t>(static_cast<int64_t>(resolve::murmur_hash(s, 0)));
+    uint64_t h = static_cast<uint64_t>(static_cast<int64_t>(resolve::feature_hash(s, 0)));
     h ^= h >> 33;
     h *= 0xff51afd7ed558ccdULL;
     h ^= h >> 33;
@@ -72,10 +72,10 @@ TEST_CASE("hash_species aggregates into the CUDA-parity buckets", "[hash][parity
         int bucket; float sign;
         kernel_hash_formula(name, hash_dim, bucket, sign);
         expected[bucket] += sign * abd;
-        // The old (buggy) CPU bucket was murmur_hash(name,0) % hash_dim; confirm
+        // The old (buggy) CPU bucket was feature_hash(name,0) % hash_dim; confirm
         // the finalizer actually changes at least one bucket so this test would
         // have failed against the pre-fix implementation.
-        int old_bucket = static_cast<int>(resolve::murmur_hash(name, 0) % static_cast<uint32_t>(hash_dim));
+        int old_bucket = static_cast<int>(resolve::feature_hash(name, 0) % static_cast<uint32_t>(hash_dim));
         if (old_bucket != bucket) uses_finalizer_distinct_from_single_hash = true;
     }
     for (int i = 0; i < hash_dim; ++i) {

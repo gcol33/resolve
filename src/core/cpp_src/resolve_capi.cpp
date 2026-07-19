@@ -15,6 +15,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
 #include <limits>
 #include <memory>
 #include <new>
@@ -576,13 +577,29 @@ TransformType parse_transform_type(const std::string& s) {
         {"none", TransformType::None}, {"log1p", TransformType::Log1p},
     }, "transform type");
 }
+// Single source of truth for the SpeciesEncodingMode <-> string mapping. Both
+// the parser (config input) and the two emitters (config / model_get output)
+// derive from this one table, so the string spellings cannot drift between the
+// three sites (issue #98).
+struct SpeciesEncodingName { const char* name; SpeciesEncodingMode mode; };
+constexpr SpeciesEncodingName kSpeciesEncodingNames[] = {
+    {"hash", SpeciesEncodingMode::Hash},
+    {"embed", SpeciesEncodingMode::Embed},
+    {"sparse", SpeciesEncodingMode::Sparse},
+    {"rank_pool", SpeciesEncodingMode::RankPool},
+    {"transformer", SpeciesEncodingMode::Transformer},
+};
+const char* species_encoding_to_string(SpeciesEncodingMode m) {
+    for (const auto& e : kSpeciesEncodingNames) {
+        if (e.mode == m) return e.name;
+    }
+    return "unknown";
+}
 SpeciesEncodingMode parse_species_encoding_mode(const std::string& s) {
-    return parse_enum<SpeciesEncodingMode>(s, {
-        {"hash", SpeciesEncodingMode::Hash}, {"embed", SpeciesEncodingMode::Embed},
-        {"sparse", SpeciesEncodingMode::Sparse},
-        {"rank_pool", SpeciesEncodingMode::RankPool},
-        {"transformer", SpeciesEncodingMode::Transformer},
-    }, "species encoding mode");
+    for (const auto& e : kSpeciesEncodingNames) {
+        if (s == e.name) return e.mode;
+    }
+    throw std::runtime_error("Invalid species encoding mode: " + s);
 }
 LossConfigMode parse_loss_config_mode(const std::string& s) {
     return parse_enum<LossConfigMode>(s, {
@@ -916,43 +933,78 @@ ModelConfig parse_model_config(const resolve_value* c) {
     return config;
 }
 
+// Single source of truth for the value-tree schema keys, consumed by both
+// parse_schema (read) and the dataset "schema" emitter (write) below. A field
+// emitted under one spelling but read under another silently drops on the
+// round-trip — the same field-drop mechanism behind issue #91 — so both sites
+// reference these constants (issue #98).
+namespace schema_tree_keys {
+inline constexpr const char* kNPlots             = "n_plots";
+inline constexpr const char* kNSpecies           = "n_species";
+inline constexpr const char* kNSpeciesVocab      = "n_species_vocab";
+inline constexpr const char* kHasCoordinates     = "has_coordinates";
+inline constexpr const char* kHasAbundance       = "has_abundance";
+inline constexpr const char* kHasTaxonomy        = "has_taxonomy";
+inline constexpr const char* kNGenera            = "n_genera";
+inline constexpr const char* kNFamilies          = "n_families";
+inline constexpr const char* kNGeneraVocab       = "n_genera_vocab";
+inline constexpr const char* kNFamiliesVocab     = "n_families_vocab";
+inline constexpr const char* kCovariateNames     = "covariate_names";
+inline constexpr const char* kTargets            = "targets";
+inline constexpr const char* kTrackUnknownFrac   = "track_unknown_fraction";
+inline constexpr const char* kTrackUnknownCount  = "track_unknown_count";
+inline constexpr const char* kCategoricalNames   = "categorical_names";
+inline constexpr const char* kCategoricalVocabSizes = "categorical_vocab_sizes";
+inline constexpr const char* kCategoricalEmbedDim   = "categorical_embed_dim";
+inline constexpr const char* kPoolWeighting      = "pool_weighting";
+inline constexpr const char* kPoolSpeciesCap     = "pool_species_cap";
+// Per-target sub-map keys.
+inline constexpr const char* kTargetTask         = "task";
+inline constexpr const char* kTargetTransform    = "transform";
+inline constexpr const char* kTargetNumClasses   = "num_classes";
+inline constexpr const char* kTargetWeight       = "weight";
+inline constexpr const char* kTargetClassWeights = "class_weights";
+inline constexpr const char* kTargetClassNames   = "class_names";
+}  // namespace schema_tree_keys
+
 // Schema map -> ResolveSchema. Reads the full set the dataset's schema()
 // accessor emits, INCLUDING categorical_names / categorical_vocab_sizes /
 // categorical_embed_dim, so a categorical dataset's schema round-trips into a
 // categorical-aware model (matches the nanobind path; harmless when absent).
 ResolveSchema parse_schema(const resolve_value* s) {
+    namespace k = schema_tree_keys;
     ResolveSchema schema;
-    if (vhas(s, "n_plots")) schema.n_plots = vint(s, "n_plots");
-    if (vhas(s, "n_species")) schema.n_species = vint(s, "n_species");
-    if (vhas(s, "n_species_vocab")) schema.n_species_vocab = vint(s, "n_species_vocab");
-    if (vhas(s, "has_coordinates")) schema.has_coordinates = vbool(s, "has_coordinates");
-    if (vhas(s, "has_abundance")) schema.has_abundance = vbool(s, "has_abundance");
-    if (vhas(s, "has_taxonomy")) schema.has_taxonomy = vbool(s, "has_taxonomy");
-    if (vhas(s, "n_genera")) schema.n_genera = vint(s, "n_genera");
-    if (vhas(s, "n_families")) schema.n_families = vint(s, "n_families");
-    if (vhas(s, "n_genera_vocab")) schema.n_genera_vocab = vint(s, "n_genera_vocab");
-    if (vhas(s, "n_families_vocab")) schema.n_families_vocab = vint(s, "n_families_vocab");
-    if (vhas(s, "covariate_names")) schema.covariate_names = vstr_vec(s, "covariate_names");
-    if (vhas(s, "track_unknown_fraction")) schema.track_unknown_fraction = vbool(s, "track_unknown_fraction");
-    if (vhas(s, "track_unknown_count")) schema.track_unknown_count = vbool(s, "track_unknown_count");
-    if (vhas(s, "categorical_names")) schema.categorical_names = vstr_vec(s, "categorical_names");
-    if (vhas(s, "categorical_vocab_sizes")) schema.categorical_vocab_sizes = vint_vec(s, "categorical_vocab_sizes");
-    if (vhas(s, "categorical_embed_dim")) schema.categorical_embed_dim = vint(s, "categorical_embed_dim");
-    if (vhas(s, "pool_weighting")) schema.pool_weighting = (int)vint(s, "pool_weighting");
-    if (vhas(s, "pool_species_cap")) schema.pool_species_cap = (int)vint(s, "pool_species_cap");
+    if (vhas(s, k::kNPlots)) schema.n_plots = vint(s, k::kNPlots);
+    if (vhas(s, k::kNSpecies)) schema.n_species = vint(s, k::kNSpecies);
+    if (vhas(s, k::kNSpeciesVocab)) schema.n_species_vocab = vint(s, k::kNSpeciesVocab);
+    if (vhas(s, k::kHasCoordinates)) schema.has_coordinates = vbool(s, k::kHasCoordinates);
+    if (vhas(s, k::kHasAbundance)) schema.has_abundance = vbool(s, k::kHasAbundance);
+    if (vhas(s, k::kHasTaxonomy)) schema.has_taxonomy = vbool(s, k::kHasTaxonomy);
+    if (vhas(s, k::kNGenera)) schema.n_genera = vint(s, k::kNGenera);
+    if (vhas(s, k::kNFamilies)) schema.n_families = vint(s, k::kNFamilies);
+    if (vhas(s, k::kNGeneraVocab)) schema.n_genera_vocab = vint(s, k::kNGeneraVocab);
+    if (vhas(s, k::kNFamiliesVocab)) schema.n_families_vocab = vint(s, k::kNFamiliesVocab);
+    if (vhas(s, k::kCovariateNames)) schema.covariate_names = vstr_vec(s, k::kCovariateNames);
+    if (vhas(s, k::kTrackUnknownFrac)) schema.track_unknown_fraction = vbool(s, k::kTrackUnknownFrac);
+    if (vhas(s, k::kTrackUnknownCount)) schema.track_unknown_count = vbool(s, k::kTrackUnknownCount);
+    if (vhas(s, k::kCategoricalNames)) schema.categorical_names = vstr_vec(s, k::kCategoricalNames);
+    if (vhas(s, k::kCategoricalVocabSizes)) schema.categorical_vocab_sizes = vint_vec(s, k::kCategoricalVocabSizes);
+    if (vhas(s, k::kCategoricalEmbedDim)) schema.categorical_embed_dim = vint(s, k::kCategoricalEmbedDim);
+    if (vhas(s, k::kPoolWeighting)) schema.pool_weighting = (int)vint(s, k::kPoolWeighting);
+    if (vhas(s, k::kPoolSpeciesCap)) schema.pool_species_cap = (int)vint(s, k::kPoolSpeciesCap);
 
-    const resolve_value* targets = vget(s, "targets");
+    const resolve_value* targets = vget(s, k::kTargets);
     if (targets && targets->kind == RESOLVE_VALUE_MAP) {
         for (size_t i = 0; i < targets->keys.size(); ++i) {
             const resolve_value* tc_v = targets->vals[i];
             TargetConfig tc;
             tc.name = targets->keys[i];
-            if (vhas(tc_v, "task")) tc.task = parse_task_type(vstr(tc_v, "task"));
-            if (vhas(tc_v, "transform")) tc.transform = parse_transform_type(vstr(tc_v, "transform"));
-            if (vhas(tc_v, "num_classes")) tc.num_classes = (int)vint(tc_v, "num_classes");
-            if (vhas(tc_v, "weight")) tc.weight = (float)vdbl(tc_v, "weight");
-            if (vhas(tc_v, "class_weights")) tc.class_weights = vfloat_vec(tc_v, "class_weights");
-            if (vhas(tc_v, "class_names")) tc.class_names = vstr_vec(tc_v, "class_names");
+            if (vhas(tc_v, k::kTargetTask)) tc.task = parse_task_type(vstr(tc_v, k::kTargetTask));
+            if (vhas(tc_v, k::kTargetTransform)) tc.transform = parse_transform_type(vstr(tc_v, k::kTargetTransform));
+            if (vhas(tc_v, k::kTargetNumClasses)) tc.num_classes = (int)vint(tc_v, k::kTargetNumClasses);
+            if (vhas(tc_v, k::kTargetWeight)) tc.weight = (float)vdbl(tc_v, k::kTargetWeight);
+            if (vhas(tc_v, k::kTargetClassWeights)) tc.class_weights = vfloat_vec(tc_v, k::kTargetClassWeights);
+            if (vhas(tc_v, k::kTargetClassNames)) tc.class_names = vstr_vec(tc_v, k::kTargetClassNames);
             schema.targets.push_back(tc);
         }
     }
@@ -1189,6 +1241,26 @@ resolve_value* scalers_to_value(const Scalers& s) {
     ValueGuard g(m);
     if (s.continuous_mean.defined()) v_put(m, "continuous_mean", tensor_to_vec(s.continuous_mean));
     if (s.continuous_scale.defined()) v_put(m, "continuous_scale", tensor_to_vec(s.continuous_scale));
+    // Per-target regression scaling { name -> {mean, scale} }. save_scalers /
+    // load_scalers persist these in the checkpoint, but the accessor marshal
+    // previously dropped them, so trainer$get("scalers") / predictor$get("scalers")
+    // from R (and the nanobind Scalers view) could not see target scaling.
+    if (!s.target_scalers.empty()) {
+        auto* ts = v_map();
+        // Deterministic key order (unordered_map iteration is not reproducible).
+        std::vector<std::string> names;
+        names.reserve(s.target_scalers.size());
+        for (const auto& kv : s.target_scalers) names.push_back(kv.first);
+        std::sort(names.begin(), names.end());
+        for (const auto& name : names) {
+            const auto& ms = s.target_scalers.at(name);
+            auto* pair_m = v_map();
+            v_put(pair_m, "mean", v_double(ms.first.defined() ? ms.first.item<double>() : 0.0));
+            v_put(pair_m, "scale", v_double(ms.second.defined() ? ms.second.item<double>() : 0.0));
+            v_put(ts, name, pair_m);
+        }
+        v_put(m, "target_scalers", ts);
+    }
     return g.release();
 }
 resolve_value* categorical_vocab_to_value(const CategoricalVocab& vocab) {
@@ -1564,16 +1636,8 @@ resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* wh
 
         if (w == "config") {
             const auto& c = d.config();
-            std::string enc;
-            switch (c.species_encoding) {
-                case SpeciesEncodingMode::Hash: enc = "hash"; break;
-                case SpeciesEncodingMode::Embed: enc = "embed"; break;
-                case SpeciesEncodingMode::Sparse: enc = "sparse"; break;
-                case SpeciesEncodingMode::RankPool: enc = "rank_pool"; break;
-                case SpeciesEncodingMode::Transformer: enc = "transformer"; break;
-            }
             auto* m = v_map();
-            v_put(m, "species_encoding", v_string(enc));
+            v_put(m, "species_encoding", v_string(species_encoding_to_string(c.species_encoding)));
             v_put(m, "hash_dim", v_int(c.hash_dim));
             v_put(m, "top_k", v_int(c.top_k));
             v_put(m, "top_k_species", v_int(c.top_k_species));
@@ -1618,43 +1682,44 @@ resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* wh
         }
 
         if (w == "schema") {
+            namespace k = schema_tree_keys;
             const auto& s = d.schema();
             auto* targets_m = v_map();
             for (const auto& tc : s.targets) {
                 std::string task_str = (tc.task == TaskType::Regression) ? "regression" : "classification";
                 std::string transform_str = (tc.transform == TransformType::Log1p) ? "log1p" : "none";
                 auto* tm = v_map();
-                v_put(tm, "task", v_string(task_str));
-                v_put(tm, "transform", v_string(transform_str));
-                v_put(tm, "num_classes", v_int(tc.num_classes));
-                v_put(tm, "weight", v_double(tc.weight));
-                v_put(tm, "class_weights", v_double_array(tc.class_weights));
+                v_put(tm, k::kTargetTask, v_string(task_str));
+                v_put(tm, k::kTargetTransform, v_string(transform_str));
+                v_put(tm, k::kTargetNumClasses, v_int(tc.num_classes));
+                v_put(tm, k::kTargetWeight, v_double(tc.weight));
+                v_put(tm, k::kTargetClassWeights, v_double_array(tc.class_weights));
                 // Per-class label vocabulary (class_names[code] == label), so
                 // R callers can recover the code->label mapping like Python's
                 // TargetConfig.class_names (issue #76).
-                v_put(tm, "class_names", v_string_array(tc.class_names));
+                v_put(tm, k::kTargetClassNames, v_string_array(tc.class_names));
                 v_put(targets_m, tc.name, tm);
             }
             auto* m = v_map();
-            v_put(m, "n_plots", v_int(s.n_plots));
-            v_put(m, "n_species", v_int(s.n_species));
-            v_put(m, "n_species_vocab", v_int(s.n_species_vocab));
-            v_put(m, "has_coordinates", v_bool(s.has_coordinates));
-            v_put(m, "has_abundance", v_bool(s.has_abundance));
-            v_put(m, "has_taxonomy", v_bool(s.has_taxonomy));
-            v_put(m, "n_genera", v_int(s.n_genera));
-            v_put(m, "n_families", v_int(s.n_families));
-            v_put(m, "n_genera_vocab", v_int(s.n_genera_vocab));
-            v_put(m, "n_families_vocab", v_int(s.n_families_vocab));
-            v_put(m, "covariate_names", v_string_array(s.covariate_names));
-            v_put(m, "targets", targets_m);
-            v_put(m, "track_unknown_fraction", v_bool(s.track_unknown_fraction));
-            v_put(m, "track_unknown_count", v_bool(s.track_unknown_count));
-            v_put(m, "categorical_names", v_string_array(s.categorical_names));
-            v_put(m, "categorical_vocab_sizes", v_int_array(s.categorical_vocab_sizes));
-            v_put(m, "categorical_embed_dim", v_int(s.categorical_embed_dim));
-            v_put(m, "pool_weighting", v_int(s.pool_weighting));
-            v_put(m, "pool_species_cap", v_int(s.pool_species_cap));
+            v_put(m, k::kNPlots, v_int(s.n_plots));
+            v_put(m, k::kNSpecies, v_int(s.n_species));
+            v_put(m, k::kNSpeciesVocab, v_int(s.n_species_vocab));
+            v_put(m, k::kHasCoordinates, v_bool(s.has_coordinates));
+            v_put(m, k::kHasAbundance, v_bool(s.has_abundance));
+            v_put(m, k::kHasTaxonomy, v_bool(s.has_taxonomy));
+            v_put(m, k::kNGenera, v_int(s.n_genera));
+            v_put(m, k::kNFamilies, v_int(s.n_families));
+            v_put(m, k::kNGeneraVocab, v_int(s.n_genera_vocab));
+            v_put(m, k::kNFamiliesVocab, v_int(s.n_families_vocab));
+            v_put(m, k::kCovariateNames, v_string_array(s.covariate_names));
+            v_put(m, k::kTargets, targets_m);
+            v_put(m, k::kTrackUnknownFrac, v_bool(s.track_unknown_fraction));
+            v_put(m, k::kTrackUnknownCount, v_bool(s.track_unknown_count));
+            v_put(m, k::kCategoricalNames, v_string_array(s.categorical_names));
+            v_put(m, k::kCategoricalVocabSizes, v_int_array(s.categorical_vocab_sizes));
+            v_put(m, k::kCategoricalEmbedDim, v_int(s.categorical_embed_dim));
+            v_put(m, k::kPoolWeighting, v_int(s.pool_weighting));
+            v_put(m, k::kPoolSpeciesCap, v_int(s.pool_species_cap));
             return m;
         }
 
@@ -1777,14 +1842,7 @@ resolve_value_t* resolve_model_get(const resolve_model_t* m, const char* what) {
         if (w == "uses_moe") return v_bool(m->model->uses_moe());
         if (w == "n_experts") return v_int(m->model->n_experts());
         if (w == "species_encoding") {
-            switch (m->model->species_encoding()) {
-                case SpeciesEncodingMode::Hash: return v_string("hash");
-                case SpeciesEncodingMode::Embed: return v_string("embed");
-                case SpeciesEncodingMode::Sparse: return v_string("sparse");
-                case SpeciesEncodingMode::RankPool: return v_string("rank_pool");
-                case SpeciesEncodingMode::Transformer: return v_string("transformer");
-                default: return v_string("unknown");
-            }
+            return v_string(species_encoding_to_string(m->model->species_encoding()));
         }
         auto weights_or_null = [](const torch::Tensor& t) -> resolve_value* {
             return t.defined() ? tensor_to_mat(t) : v_null();

@@ -18,6 +18,7 @@
 #include "resolve/model.hpp"
 #include "resolve/trainer.hpp"
 #include "resolve/pretraining.hpp"
+#include "resolve/vae.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -599,4 +600,495 @@ TEST_CASE("GNN trains full-batch and recovers a covariate signal", "[recovery][g
     for (float p : res.predictions) REQUIRE(std::isfinite(p));
     // Learned the signal well above chance on the held-out fold.
     REQUIRE(pearson(res.predictions, res.actuals) > 0.5);
+}
+
+// =============================================================================
+// Issue #78: parameter-recovery for non-MLP architectures and non-Hash species
+// encoders, model-level calibration/coverage, categorical recovery, a real CV
+// run, and a pretext-learning check. These close the "structurally tested, not
+// statistically validated" gap the suite had for the model/encoder layer.
+// =============================================================================
+
+namespace {
+
+// Build the standard linear-covariate-signal dataset (Hash species pathway kept
+// neutral), fit `mcfg`, and return held-out Pearson(pred, actual) for "y". The
+// signal lives entirely in cov1/cov2, so any encoder architecture that routes
+// the continuous features correctly recovers it; a broken adapter (ignores its
+// input / wrong feature routing) collapses to ~0.
+double covariate_recovery_pearson(const ModelConfig& mcfg, int max_epochs = 150,
+                                  int seed = 11) {
+    const int64_t n_plots = 300;
+    std::ostringstream hdr, spc;
+    hdr << "plot_id,lat,lon,cov1,cov2,y\n";
+    spc << "plot_id,sp,cover\n";
+    for (int64_t i = 0; i < n_plots; ++i) {
+        const double c1 = std::sin(i * 0.13);
+        const double c2 = std::cos(i * 0.07);
+        const double y = 2.0 * c1 - 1.5 * c2 + 3.0;
+        hdr << "P" << i << "," << (40.0 + i * 0.001) << "," << (-5.0 + i * 0.001)
+            << "," << c1 << "," << c2 << "," << y << "\n";
+        spc << "P" << i << ",sp" << (i % 8) << ",1.0\n";
+    }
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id"; roles.species_id = "sp"; roles.abundance = "cover";
+    roles.latitude = "lat"; roles.longitude = "lon";
+    roles.covariates = {"cov1", "cov2"};
+
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::Hash;
+    dcfg.hash_dim = 4; dcfg.use_taxonomy = false;
+    dcfg.track_unknown_fraction = false; dcfg.track_unknown_count = false;
+
+    auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(), roles,
+                                       {TargetSpec::regression("y")}, dcfg);
+
+    ResolveModel model(ds.schema(), mcfg);
+    Trainer trainer(model, recovery_train_config(max_epochs));
+    trainer.prepare_data(ds, /*test_size=*/0.25f, seed);
+    trainer.fit();
+
+    auto res = trainer.compute_residuals("y");
+    REQUIRE(res.predictions.size() > 10);
+    for (float p : res.predictions) REQUIRE(std::isfinite(p));
+    return pearson(res.predictions, res.actuals);
+}
+
+}  // namespace
+
+// -----------------------------------------------------------------------------
+// P1: every non-MLP TABULAR architecture recovers the covariate signal. Before
+// this, FT-Transformer / TabNet / SAINT / ExcelFormer were only shape + gradient
+// checked, so a subtly broken adapter passed the whole suite. (GNN and the
+// full-batch graph path are covered by the dedicated GNN test above.)
+// -----------------------------------------------------------------------------
+TEST_CASE("Non-MLP tabular architectures recover a covariate signal",
+          "[recovery][architecture]") {
+    auto base = []() {
+        ModelConfig mcfg;
+        mcfg.species_encoding = SpeciesEncodingMode::Hash;
+        mcfg.hash_dim = 4;
+        mcfg.hidden_dims = {32, 16};
+        return mcfg;
+    };
+
+    SECTION("FTTransformer") {
+        ModelConfig mcfg = base();
+        mcfg.encoder_architecture = EncoderArchitecture::FTTransformer;
+        mcfg.ft_transformer.d_model = 24;
+        mcfg.ft_transformer.n_heads = 4;
+        mcfg.ft_transformer.n_layers = 1;
+        REQUIRE(covariate_recovery_pearson(mcfg) > 0.75);
+    }
+    SECTION("TabNet") {
+        ModelConfig mcfg = base();
+        mcfg.encoder_architecture = EncoderArchitecture::TabNet;
+        mcfg.tabnet.n_d = 12;
+        mcfg.tabnet.n_a = 12;
+        mcfg.tabnet.n_steps = 2;
+        REQUIRE(covariate_recovery_pearson(mcfg) > 0.75);
+    }
+    SECTION("SAINT") {
+        ModelConfig mcfg = base();
+        mcfg.encoder_architecture = EncoderArchitecture::SAINT;
+        mcfg.saint.d_model = 24;
+        mcfg.saint.n_heads = 4;
+        mcfg.saint.n_layers = 1;
+        REQUIRE(covariate_recovery_pearson(mcfg) > 0.75);
+    }
+    SECTION("ExcelFormer") {
+        ModelConfig mcfg = base();
+        mcfg.encoder_architecture = EncoderArchitecture::ExcelFormer;
+        mcfg.excelformer.d_model = 24;
+        mcfg.excelformer.n_heads = 4;
+        mcfg.excelformer.n_layers = 1;
+        REQUIRE(covariate_recovery_pearson(mcfg) > 0.75);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// P2: embed and sparse species-encoding modes carry the composition signal
+// end-to-end. Only Hash (and, above, rank_pool / transformer) were proven; embed
+// and sparse were shape-only. This also exercises the embed path routed through
+// EmbeddingEncoder (issue #77).
+// -----------------------------------------------------------------------------
+TEST_CASE("Embed encoder recovers a species-driven target", "[recovery][embed]") {
+    const int64_t n_plots = 600;
+    const int n_species = 12;
+    std::ostringstream hdr, spc;
+    make_species_signal_csv(hdr, spc, n_plots, n_species);
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id"; roles.species_id = "sp"; roles.abundance = "cover";
+
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::Embed;
+    dcfg.top_k_species = 5;
+    dcfg.use_taxonomy = false;
+    dcfg.track_unknown_fraction = false; dcfg.track_unknown_count = false;
+
+    auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(), roles,
+                                       {TargetSpec::regression("y")}, dcfg);
+
+    ModelConfig mcfg;
+    mcfg.species_encoding = SpeciesEncodingMode::Embed;
+    mcfg.encoder_architecture = EncoderArchitecture::MLP;
+    mcfg.species_embed_dim = 16;
+    mcfg.top_k_species = 5;
+    mcfg.hidden_dims = {64, 32};
+
+    ResolveModel model(ds.schema(), mcfg);
+    Trainer trainer(model, recovery_train_config(/*max_epochs=*/400));
+    trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/7);
+    trainer.fit();
+
+    auto res = trainer.compute_residuals("y");
+    REQUIRE(res.predictions.size() > 10);
+    REQUIRE(pearson(res.predictions, res.actuals) > 0.7);
+}
+
+TEST_CASE("Sparse encoder recovers a species-driven target", "[recovery][sparse]") {
+    const int64_t n_plots = 600;
+    const int n_species = 12;
+    std::ostringstream hdr, spc;
+    make_species_signal_csv(hdr, spc, n_plots, n_species);
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id"; roles.species_id = "sp"; roles.abundance = "cover";
+
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::Sparse;
+    dcfg.use_taxonomy = false;
+    dcfg.track_unknown_fraction = false; dcfg.track_unknown_count = false;
+
+    auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(), roles,
+                                       {TargetSpec::regression("y")}, dcfg);
+
+    ModelConfig mcfg;
+    mcfg.species_encoding = SpeciesEncodingMode::Sparse;
+    mcfg.encoder_architecture = EncoderArchitecture::MLP;
+    mcfg.hidden_dims = {64, 32};
+
+    ResolveModel model(ds.schema(), mcfg);
+    Trainer trainer(model, recovery_train_config(/*max_epochs=*/400));
+    trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/7);
+    trainer.fit();
+
+    auto res = trainer.compute_residuals("y");
+    REQUIRE(res.predictions.size() > 10);
+    REQUIRE(pearson(res.predictions, res.actuals) > 0.7);
+}
+
+// -----------------------------------------------------------------------------
+// P3: model-level calibration / coverage. On a cleanly separable class signal a
+// trained model should be confident AND accurate, so its reliability curve is
+// well-calibrated (low ECE) and its high-confidence predictions are almost all
+// correct (empirical accuracy tracks confidence). For regression, the realized
+// band coverage on a learnable signal is high.
+// -----------------------------------------------------------------------------
+TEST_CASE("Classification predictions are calibrated on a separable signal",
+          "[recovery][calibration]") {
+    const int64_t n_plots = 600;
+    const int n_classes = 3;
+    std::ostringstream hdr, spc;
+    hdr << "plot_id,cov1,cov2,hab\n";
+    spc << "plot_id,sp,cover\n";
+    for (int64_t i = 0; i < n_plots; ++i) {
+        const double c1 = std::sin(i * 0.13);
+        const double c2 = std::cos(i * 0.07);
+        int hab = (c1 < -0.33) ? 0 : (c1 < 0.33 ? 1 : 2);
+        hdr << "P" << i << "," << c1 << "," << c2 << "," << hab << "\n";
+        spc << "P" << i << ",sp" << (i % 8) << ",1.0\n";
+    }
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id"; roles.species_id = "sp"; roles.abundance = "cover";
+    roles.covariates = {"cov1", "cov2"};
+
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::Hash;
+    dcfg.hash_dim = 4; dcfg.use_taxonomy = false;
+    dcfg.track_unknown_fraction = false; dcfg.track_unknown_count = false;
+
+    auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(), roles,
+                                       {TargetSpec::classification("hab", n_classes)}, dcfg);
+
+    ModelConfig mcfg;
+    mcfg.species_encoding = SpeciesEncodingMode::Hash;
+    mcfg.encoder_architecture = EncoderArchitecture::MLP;
+    mcfg.hash_dim = 4; mcfg.hidden_dims = {32, 16};
+
+    ResolveModel model(ds.schema(), mcfg);
+    Trainer trainer(model, recovery_train_config());
+    trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/11);
+    trainer.fit();
+
+    // Reliability curve: bins sum to the test set, ECE is finite and low.
+    auto cal = trainer.compute_calibration("hab", /*n_bins=*/10);
+    REQUIRE_FALSE(cal.bins.empty());
+    int64_t binned = 0;
+    for (const auto& b : cal.bins) binned += b.count;
+    auto pred = trainer.compute_classification_predictions("hab");
+    const int64_t n_test = pred.predicted_classes.size(0);
+    REQUIRE(binned == n_test);
+    REQUIRE(std::isfinite(cal.expected_calibration_error));
+    REQUIRE(cal.expected_calibration_error < 0.3f);
+
+    // Empirical accuracy tracks confidence: bin held-out predictions by their
+    // max softmax probability and require the high-confidence bin (>= 0.8) to be
+    // almost always correct.
+    auto probs = pred.probabilities.cpu().contiguous();   // (n_test, n_classes)
+    auto max_probs = std::get<0>(probs.max(1)).contiguous();
+    auto pred_cls = probs.argmax(1);
+    auto correct = (pred_cls == pred.actuals).to(torch::kBool).contiguous();
+    auto mp = max_probs.accessor<float, 1>();
+    auto cc = correct.accessor<bool, 1>();
+    int64_t hi_conf = 0, hi_conf_correct = 0;
+    for (int64_t s = 0; s < n_test; ++s) {
+        if (mp[s] >= 0.8f) { ++hi_conf; if (cc[s]) ++hi_conf_correct; }
+    }
+    REQUIRE(hi_conf > 0);
+    REQUIRE(static_cast<double>(hi_conf_correct) / hi_conf > 0.85);
+}
+
+TEST_CASE("Regression band coverage is high on a learnable signal",
+          "[recovery][coverage]") {
+    const int64_t n_plots = 600;
+    std::ostringstream hdr, spc;
+    hdr << "plot_id,cov1,cov2,y\n";
+    spc << "plot_id,sp,cover\n";
+    for (int64_t i = 0; i < n_plots; ++i) {
+        const double c1 = std::sin(i * 0.13);
+        const double c2 = std::cos(i * 0.07);
+        // Positive target (band coverage is a relative-error criterion) with a
+        // small deterministic perturbation so predictions are not exact.
+        const double y = 10.0 + 2.0 * c1 + 1.5 * c2 + 0.05 * std::sin(i * 0.5);
+        hdr << "P" << i << "," << c1 << "," << c2 << "," << y << "\n";
+        spc << "P" << i << ",sp" << (i % 8) << ",1.0\n";
+    }
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id"; roles.species_id = "sp"; roles.abundance = "cover";
+    roles.covariates = {"cov1", "cov2"};
+
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::Hash;
+    dcfg.hash_dim = 4; dcfg.use_taxonomy = false;
+    dcfg.track_unknown_fraction = false; dcfg.track_unknown_count = false;
+
+    auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(), roles,
+                                       {TargetSpec::regression("y")}, dcfg);
+
+    ModelConfig mcfg;
+    mcfg.species_encoding = SpeciesEncodingMode::Hash;
+    mcfg.encoder_architecture = EncoderArchitecture::MLP;
+    mcfg.hash_dim = 4; mcfg.hidden_dims = {32, 16};
+
+    ResolveModel model(ds.schema(), mcfg);
+    Trainer trainer(model, recovery_train_config());
+    trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/11);
+    trainer.fit();
+
+    auto res = trainer.compute_residuals("y");
+    REQUIRE(res.predictions.size() > 10);
+    // Realized coverage of the 25% relative-error band on the held-out fold.
+    int64_t within = 0;
+    for (size_t i = 0; i < res.predictions.size(); ++i) {
+        const float denom = std::abs(res.actuals[i]) + 1e-6f;
+        if (std::abs(res.predictions[i] - res.actuals[i]) / denom <= 0.25f) ++within;
+    }
+    const double coverage = static_cast<double>(within) / res.predictions.size();
+    REQUIRE(coverage > 0.9);
+}
+
+// -----------------------------------------------------------------------------
+// P4: categorical-covariate recovery. The target is a function of the category
+// alone, so a CategoricalEmbedder that fuses zeros (or is ignored) collapses to
+// the mean; a working one recovers the per-category value.
+// -----------------------------------------------------------------------------
+TEST_CASE("Categorical covariate alone recovers the target",
+          "[recovery][categorical]") {
+    const int64_t n_plots = 600;
+    const char* regions[] = {"north", "south", "east", "west"};
+    const double region_value[] = {1.0, 4.0, 7.0, 10.0};
+    std::ostringstream hdr, spc;
+    hdr << "plot_id,cov1,region,y\n";
+    spc << "plot_id,sp,cover\n";
+    for (int64_t i = 0; i < n_plots; ++i) {
+        const int r = static_cast<int>(i % 4);
+        // y depends ONLY on region; cov1 is uninformative noise-like oscillation.
+        const double y = region_value[r];
+        hdr << "P" << i << "," << std::sin(i * 0.31) << "," << regions[r] << "," << y << "\n";
+        spc << "P" << i << ",sp" << (i % 8) << ",1.0\n";
+    }
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id"; roles.species_id = "sp"; roles.abundance = "cover";
+    roles.covariates = {"cov1"};
+    roles.categoricals = {"region"};
+
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::Hash;
+    dcfg.hash_dim = 4; dcfg.use_taxonomy = false;
+    dcfg.track_unknown_fraction = false; dcfg.track_unknown_count = false;
+
+    auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(), roles,
+                                       {TargetSpec::regression("y")}, dcfg);
+    REQUIRE(ds.schema().categorical_names.size() == 1);
+
+    ModelConfig mcfg;
+    mcfg.species_encoding = SpeciesEncodingMode::Hash;
+    mcfg.encoder_architecture = EncoderArchitecture::MLP;
+    mcfg.hash_dim = 4; mcfg.hidden_dims = {32, 16};
+    mcfg.categorical_embed_dim = 8;
+
+    ResolveModel model(ds.schema(), mcfg);
+    Trainer trainer(model, recovery_train_config());
+    trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/11);
+    trainer.fit();
+
+    auto res = trainer.compute_residuals("y");
+    REQUIRE(res.predictions.size() > 10);
+    REQUIRE(pearson(res.predictions, res.actuals) > 0.9);
+}
+
+// -----------------------------------------------------------------------------
+// P5: cross_validate / cross_validate_spatial actually train folds and return
+// sensible per-fold metrics, and leave the trainer's post-CV split intact so the
+// checkpoint evaluators still work (guards the #45 restore-split + #97 pristine
+// reset fixes, which had no end-to-end CV test).
+// -----------------------------------------------------------------------------
+TEST_CASE("cross_validate trains folds and restores post-CV state",
+          "[recovery][cv]") {
+    const int64_t n_plots = 400;
+    std::ostringstream hdr, spc;
+    hdr << "plot_id,lat,lon,cov1,cov2,y\n";
+    spc << "plot_id,sp,cover\n";
+    for (int64_t i = 0; i < n_plots; ++i) {
+        const double c1 = std::sin(i * 0.13);
+        const double c2 = std::cos(i * 0.07);
+        const double y = 2.0 * c1 - 1.5 * c2 + 3.0;
+        // Well-distributed coordinates: a 10x10 degree grid so spatial CV has
+        // far more blocks than folds.
+        const double lat = 40.0 + static_cast<double>(i % 10);
+        const double lon = -5.0 + static_cast<double>((i / 10) % 10);
+        hdr << "P" << i << "," << lat << "," << lon << "," << c1 << "," << c2
+            << "," << y << "\n";
+        spc << "P" << i << ",sp" << (i % 8) << ",1.0\n";
+    }
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id"; roles.species_id = "sp"; roles.abundance = "cover";
+    roles.latitude = "lat"; roles.longitude = "lon";
+    roles.covariates = {"cov1", "cov2"};
+
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::Hash;
+    dcfg.hash_dim = 4; dcfg.use_taxonomy = false;
+    dcfg.track_unknown_fraction = false; dcfg.track_unknown_count = false;
+
+    auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(), roles,
+                                       {TargetSpec::regression("y")}, dcfg);
+
+    ModelConfig mcfg;
+    mcfg.species_encoding = SpeciesEncodingMode::Hash;
+    mcfg.encoder_architecture = EncoderArchitecture::MLP;
+    mcfg.hash_dim = 4; mcfg.hidden_dims = {32, 16};
+
+    SECTION("random k-fold") {
+        ResolveModel model(ds.schema(), mcfg);
+        Trainer trainer(model, recovery_train_config(/*max_epochs=*/60));
+        trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/11);
+
+        auto cv = trainer.cross_validate(/*n_folds=*/3, /*seed=*/7);
+        REQUIRE(cv.n_folds == 3);
+        REQUIRE(cv.fold_results.size() == 3);
+        REQUIRE(cv.mean_metrics.count("y") == 1);
+        for (const auto& [name, value] : cv.mean_metrics.at("y")) {
+            INFO("metric " << name);
+            REQUIRE(std::isfinite(value));
+        }
+        // Post-CV state restored: the held-out evaluator still runs on the
+        // original split rather than the last fold's leftover state.
+        auto res = trainer.compute_residuals("y");
+        REQUIRE(res.predictions.size() > 10);
+        for (float p : res.predictions) REQUIRE(std::isfinite(p));
+    }
+
+    SECTION("spatial block CV") {
+        ResolveModel model(ds.schema(), mcfg);
+        Trainer trainer(model, recovery_train_config(/*max_epochs=*/60));
+        trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/11);
+
+        SpatialBlockConfig scfg;
+        scfg.lat_size = 1.0f; scfg.lon_size = 1.0f; scfg.balance = true;
+        auto cv = trainer.cross_validate_spatial(scfg, /*n_folds=*/3, /*seed=*/7);
+        REQUIRE(cv.n_folds == 3);
+        REQUIRE(cv.mean_metrics.count("y") == 1);
+        for (const auto& [name, value] : cv.mean_metrics.at("y")) {
+            REQUIRE(std::isfinite(value));
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// P6: a pretrainer actually learns its pretext task (not just "loss is finite").
+// The VAE reconstruction loss must fall over pretraining; a decoder that ignores
+// the latent (or a broken ELBO) leaves it flat.
+// -----------------------------------------------------------------------------
+TEST_CASE("VAE pretraining reduces reconstruction loss", "[recovery][pretrain][vae]") {
+    const int64_t n_plots = 400;
+    const int n_species = 16;
+    std::ostringstream hdr, spc;
+    hdr << "plot_id,y\n";
+    spc << "plot_id,sp,cover\n";
+    for (int64_t i = 0; i < n_plots; ++i) {
+        hdr << "P" << i << ",0.0\n";
+        // Structured composition (correlated species) so there is something to
+        // reconstruct beyond noise.
+        const int base = static_cast<int>(i % 4) * 4;
+        for (int j = 0; j < 4; ++j) {
+            spc << "P" << i << ",sp" << (base + j) % n_species << ",1.0\n";
+        }
+    }
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    RoleMapping roles;
+    roles.plot_id = "plot_id"; roles.species_id = "sp"; roles.abundance = "cover";
+
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::Sparse;  // populates species_vector()
+    dcfg.use_taxonomy = false;
+    dcfg.track_unknown_fraction = false; dcfg.track_unknown_count = false;
+
+    auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(), roles,
+                                       {TargetSpec::regression("y")}, dcfg);
+    REQUIRE(ds.species_vector().defined());
+    const int64_t vocab = ds.schema().n_species_vocab;
+
+    VAEConfig vcfg;
+    vcfg.latent_dim = 8;
+    vcfg.encoder_dims = {32, 16};
+    vcfg.kl_anneal_epochs = 5;
+    vcfg.pretrain_epochs = 60;
+    vcfg.batch_size = 64;
+    vcfg.device = torch::kCPU;
+
+    VAEPretrainer pretrainer(vocab, vcfg);
+    auto result = pretrainer.pretrain(ds.species_vector());
+    REQUIRE(result.recon_loss_history.size() >= 2);
+    const float first = result.recon_loss_history.front();
+    const float last = result.recon_loss_history.back();
+    REQUIRE(std::isfinite(first));
+    REQUIRE(std::isfinite(last));
+    // The pretext task is learned: reconstruction improves by a clear margin.
+    REQUIRE(last < first * 0.9f);
 }

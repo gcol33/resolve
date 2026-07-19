@@ -1477,8 +1477,9 @@ void ResolveDataset::encode_species(
 
                 for (const auto& [sp_name, weight] : selected) {
                     plot_idx_acc[record_idx] = i;
-                    // Hash species name to int64 using MurmurHash
-                    species_id_acc[record_idx] = static_cast<int64_t>(murmur_hash(sp_name));
+                    // Feature-hash the species name to an int64 seed; the GPU
+                    // kernel applies the MurmurHash3 finalizer to this per batch.
+                    species_id_acc[record_idx] = static_cast<int64_t>(feature_hash(sp_name));
                     weight_acc[record_idx] = weight;
                     record_idx++;
                 }
@@ -1514,26 +1515,58 @@ void ResolveDataset::encode_species(
         }
 
     } else if (config_.species_encoding == SpeciesEncodingMode::Embed) {
-        // Learnable embeddings for top-k species
-        species_ids_ = torch::zeros({n_plots, config_.top_k_species}, torch::kLong);
-        auto ids_acc = species_ids_.accessor<int64_t, 2>();
+        // Learnable embeddings for top-k species + fixed-slot taxonomy. Route
+        // through the standalone EmbeddingEncoder (single source of truth for the
+        // top-k species selection and the top-k-by-abundance taxonomy selection),
+        // mirroring how RankPool/Transformer route through RankPoolEncoder so the
+        // two copies cannot diverge. The encoder adopts the dataset's own species
+        // vocab (frequency-ranked, built by build_species_vocab above) and
+        // taxonomy vocab via set_vocabs, so the emitted IDs match the tables the
+        // model is sized against (both for training and the from_csv_with_schema
+        // inference path, where species_to_idx_ / taxonomy_vocab_ are the reused
+        // training-set vocabs).
 
+        // Ensure each record carries its plot_id so the encoder groups correctly
+        // (the two-file loader sets it, but a bare SpeciesRecord may not).
+        std::vector<SpeciesRecord> embed_records;
+        embed_records.reserve(all_records.size());
         for (int64_t i = 0; i < n_plots; ++i) {
             const auto& plot_id = plot_ids_[i];
             auto it = plot_records.find(plot_id);
             if (it == plot_records.end()) continue;
-
-            std::vector<std::pair<std::string, float>> species;
             for (const auto& rec : it->second) {
-                species.push_back({rec.species_id, rec.abundance});
+                SpeciesRecord r = rec;
+                if (r.plot_id.empty()) r.plot_id = plot_id;
+                embed_records.push_back(std::move(r));
             }
+        }
 
-            auto selected = select_top_k(species, config_.top_k_species);
+        // top_k_taxonomy = n_taxonomy_slots preserves the fixed-slot width (2*top_k
+        // under TopBottom selection); SelectionMode::Top preserves the embed
+        // contract of encoding the top-k most-abundant species per plot.
+        EmbeddingEncoder emb_encoder(config_.top_k_species, n_taxonomy_slots,
+                                     SelectionMode::Top);
+        emb_encoder.fit(embed_records);  // builds species_to_genus_/_family_ maps
 
-            for (size_t j = 0; j < selected.size() && j < static_cast<size_t>(config_.top_k_species); ++j) {
-                auto sp_it = species_to_idx_.find(selected[j].first);
-                ids_acc[i][j] = sp_it != species_to_idx_.end() ? sp_it->second : 0;
-            }
+        // Strip the dataset "<UNK>"=>0 sentinel (SpeciesVocab reserves code 0 for
+        // UNK implicitly); hand the freq-ranked species IDs + taxonomy vocab over.
+        std::unordered_map<std::string, int64_t> sp_map;
+        sp_map.reserve(species_to_idx_.size());
+        for (const auto& [name, id] : species_to_idx_) {
+            if (name == "<UNK>" || id == 0) continue;
+            sp_map.emplace(name, id);
+        }
+        emb_encoder.set_vocabs(SpeciesVocab::from_map(std::move(sp_map)),
+                               taxonomy_vocab_);
+
+        auto encoded = emb_encoder.transform(embed_records, plot_ids_);
+        species_ids_ = encoded.species_ids;
+        // Taxonomy fixed slots come from the encoder here; the shared fixed-slot
+        // block below is skipped for embed mode. Only publish when the schema
+        // reports taxonomy (matches the prior fixed-slot gate).
+        if (schema_.has_taxonomy) {
+            genus_ids_ = encoded.genus_ids;
+            family_ids_ = encoded.family_ids;
         }
 
     } else if (config_.species_encoding == SpeciesEncodingMode::RankPool ||
@@ -1678,13 +1711,15 @@ void ResolveDataset::encode_species(
         }
     }
 
-    // Encode taxonomy into fixed slots. Skip for rank_pool / transformer, which
-    // consume the per-species pool_genus_ids_ / pool_family_ids_ populated above
-    // and never read these fixed-slot tensors; allocating + per-plot sorting
-    // them would be wasted work on large datasets.
+    // Encode taxonomy into fixed slots for hash / sparse modes. Skipped for
+    // rank_pool / transformer (which consume the per-species pool_genus_ids_ /
+    // pool_family_ids_ populated above) and for embed (whose fixed-slot taxonomy
+    // is produced by the EmbeddingEncoder above); allocating + per-plot sorting
+    // them again would be wasted work and a second copy of the same selection.
     const bool fixed_slot_taxonomy =
         config_.species_encoding != SpeciesEncodingMode::RankPool &&
-        config_.species_encoding != SpeciesEncodingMode::Transformer;
+        config_.species_encoding != SpeciesEncodingMode::Transformer &&
+        config_.species_encoding != SpeciesEncodingMode::Embed;
     if (schema_.has_taxonomy && fixed_slot_taxonomy) {
         genus_ids_ = torch::zeros({n_plots, n_taxonomy_slots}, torch::kLong);
         family_ids_ = torch::zeros({n_plots, n_taxonomy_slots}, torch::kLong);
