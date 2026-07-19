@@ -709,9 +709,10 @@ ResolveDataset ResolveDataset::from_species_source(
             // against the full value distribution instead of collapsing to 0.
             std::vector<std::string> target_values;
             target_values.reserve(target_cols.size());
-            for (size_t i = 0; i < target_cols.size(); ++i) {
-                int col = target_cols[i];
-                if (col >= 0 && row.size() > static_cast<size_t>(col)) {
+            for (int col : target_cols) {
+                // target_cols entries are validated >= 0 (throw above), so the
+                // only miss here is a row too short to hold the column.
+                if (row.size() > static_cast<size_t>(col)) {
                     target_values.push_back(row[col]);
                 } else {
                     target_values.emplace_back();  // missing -> dropped post-scan
@@ -947,22 +948,26 @@ void ResolveDataset::load_header_data(
         });
     }
 
-    // Count rows first
-    size_t n_rows = reader.num_rows();
-    int64_t n_plots = static_cast<int64_t>(n_rows);
-    schema_.n_plots = n_plots;
+    // Single streaming pass: accumulate into growable buffers rather than a
+    // count_rows() prepass followed by preallocated tensors written by row index.
+    // The old two-pass approach read the whole (~1.9M-row) header file twice; here
+    // the file is read exactly once and tensors are materialized from the buffers
+    // afterward, at the true loaded-row count.
+    const bool has_coords = (lon_col >= 0 && lat_col >= 0);
+    if (has_coords) schema_.has_coordinates = true;
+    const int64_t cov_cols = static_cast<int64_t>(covariate_cols.size());
 
-    // Allocate tensors
-    plot_ids_.reserve(n_plots);
-
-    if (lon_col >= 0 && lat_col >= 0) {
-        coordinates_ = torch::zeros({n_plots, 2}, torch::kFloat32);
-        schema_.has_coordinates = true;
+    std::vector<float> coords_buf;   // 2 values per loaded row (lon, lat)
+    std::vector<float> cov_buf;      // cov_cols values per loaded row
+    // One growable float buffer per regression target (classification targets are
+    // built post-scan by encode_classification_target from classification_raw).
+    std::vector<std::vector<float>> reg_bufs(targets.size());
+    std::vector<std::string> target_names(targets.size());
+    for (size_t t = 0; t < targets.size(); ++t) {
+        target_names[t] = targets[t].target_name.empty()
+                              ? targets[t].column_name : targets[t].target_name;
     }
 
-    if (!covariate_cols.empty()) {
-        covariates_ = torch::zeros({n_plots, static_cast<int64_t>(covariate_cols.size())}, torch::kFloat32);
-    }
     // Per-column count of covariate cells that were missing/unparseable and
     // coerced to 0.0 during the scan (issue #32); warned about afterwards.
     std::vector<int64_t> cov_na_counts(covariate_cols.size(), 0);
@@ -970,42 +975,22 @@ void ResolveDataset::load_header_data(
     // coerced to 0.0 -- a real location (Gulf of Guinea) that silently corrupts
     // spatial-graph neighbours. Warned about after the scan.
     int64_t coord_na_count = 0;
-
-    // Initialize regression target tensors (written inline during the scan).
-    // Classification tensors are built post-scan by encode_classification_target
-    // from the collected classification_raw buffers, so they are not preallocated.
-    for (size_t t = 0; t < targets.size(); ++t) {
-        const auto& target = targets[t];
-        if (target.task == TaskType::Classification) continue;
-        std::string name = target.target_name.empty() ? target.column_name : target.target_name;
-        targets_[name] = torch::zeros({n_plots}, torch::kFloat32);
-    }
+    // Rows too short to even hold plot_id are skipped during the scan; count them
+    // for the post-scan summary (they never enter any buffer).
+    int64_t n_ragged_skipped = 0;
 
     schema_.targets = target_configs_;
 
-    // Read data
-    float* coords_data = coordinates_.defined() ? coordinates_.data_ptr<float>() : nullptr;
-    float* cov_data = covariates_.defined() ? covariates_.data_ptr<float>() : nullptr;
-    int64_t cov_cols = covariates_.defined() ? covariates_.size(1) : 0;
-
-    // Raw string buffer for each categorical column. Pre-reserved to n_plots
-    // so the row-scan loop only does a push_back (no per-row allocation).
-    // Filled with "" (NA) when a row is too short to hold the column.
+    // Raw string buffer for each categorical column. Grows via push_back during
+    // the single scan (no count prepass to reserve against); filled with "" (NA)
+    // when a row is too short to hold the column.
     std::vector<std::vector<std::string>> categorical_raw(categorical_cols.size());
-    for (auto& buf : categorical_raw) {
-        buf.reserve(static_cast<size_t>(n_plots));
-    }
 
-    // Raw string buffer for each classification target column. Same layout
-    // as `categorical_raw` — we collect strings during the scan and factorize
-    // them post-scan into int64 codes that get written into targets_[name].
-    // Regression targets are still parsed inline (see the row-scan body).
+    // Raw string buffer for each classification target column. Same layout as
+    // `categorical_raw` — we collect strings during the scan and factorize them
+    // post-scan into int64 codes that get written into targets_[name].
+    // Regression targets are accumulated into reg_bufs (see the row-scan body).
     std::vector<std::vector<std::string>> classification_raw(targets.size());
-    for (size_t t = 0; t < targets.size(); ++t) {
-        if (targets[t].task == TaskType::Classification) {
-            classification_raw[t].reserve(static_cast<size_t>(n_plots));
-        }
-    }
 
     // Per-row keep mask. A row is "kept" iff every requested target column
     // produced a usable value (finite numeric for regression, non-missing
@@ -1014,17 +999,16 @@ void ResolveDataset::load_header_data(
     // NaN-target drop semantics, including the classification case (the POC
     // drops nulls produced by `_encode_categorical`).
     std::vector<char> keep_row;
-    keep_row.reserve(static_cast<size_t>(n_plots));
 
     // Header rows are plot-level: plot_id must be unique. A duplicate would
     // create two plot slots that both look up the same species records, so
     // reject it (consistent with the strictness applied to duplicate columns).
     std::unordered_set<std::string> seen_plot_ids;
-    seen_plot_ids.reserve(static_cast<size_t>(n_plots));
 
     int64_t row_idx = 0;
     reader.read_rows([&](size_t, const std::vector<std::string>& row) {
         if (row.size() <= static_cast<size_t>(plot_col)) {
+            ++n_ragged_skipped;
             return;
         }
 
@@ -1042,13 +1026,13 @@ void ResolveDataset::load_header_data(
         // unparseable cell is not silently read as a real (0, 0) location; count
         // the coercions and warn after the scan (issue #46). A genuine "0"
         // parses to 0.0 and is not counted.
-        if (coords_data && lon_col >= 0 && lat_col >= 0) {
+        if (has_coords) {
             auto lon = (row.size() > static_cast<size_t>(lon_col))
                            ? parse_regression_target(row[lon_col]) : std::nullopt;
             auto lat = (row.size() > static_cast<size_t>(lat_col))
                            ? parse_regression_target(row[lat_col]) : std::nullopt;
-            coords_data[row_idx * 2 + 0] = lon.value_or(0.0f);
-            coords_data[row_idx * 2 + 1] = lat.value_or(0.0f);
+            coords_buf.push_back(lon.value_or(0.0f));
+            coords_buf.push_back(lat.value_or(0.0f));
             if (!lon.has_value() || !lat.has_value()) {
                 coord_na_count++;
             }
@@ -1059,20 +1043,18 @@ void ResolveDataset::load_header_data(
         // standardization). We still write a well-defined 0.0 into the slot, but
         // count the coercions per column and warn after the scan so the missing
         // values are visible rather than silent (issue #32).
-        if (cov_data) {
+        if (cov_cols > 0) {
             for (size_t i = 0; i < covariate_cols.size(); ++i) {
                 int col = covariate_cols[i];
+                float val = 0.0f;
                 if (row.size() > static_cast<size_t>(col)) {
                     auto parsed = parse_regression_target(row[col]);
-                    if (parsed.has_value()) {
-                        cov_data[row_idx * cov_cols + static_cast<int64_t>(i)] = *parsed;
-                    } else {
-                        cov_data[row_idx * cov_cols + static_cast<int64_t>(i)] = 0.0f;
-                        cov_na_counts[i]++;
-                    }
+                    if (parsed.has_value()) val = *parsed;
+                    else cov_na_counts[i]++;
                 } else {
                     cov_na_counts[i]++;
                 }
+                cov_buf.push_back(val);
             }
         }
 
@@ -1086,42 +1068,68 @@ void ResolveDataset::load_header_data(
             }
         }
 
-        // Targets — parse with NaN-aware helpers and mark the row for drop
-        // if any target is missing/non-finite/out-of-range. We still write a
-        // sentinel zero into the tensor so the slot is well-defined; the
-        // post-scan compaction step will drop it.
+        // Targets — parse with NaN-aware helpers and mark the row for drop if
+        // any target is missing/non-finite/out-of-range. Every scanned row pushes
+        // exactly one value per target (a sentinel for missing) so the per-target
+        // buffers stay aligned with row_idx; the post-scan compaction drops the
+        // marked rows. target_cols entries are validated >= 0 above, so the only
+        // miss here is a row too short to hold the column.
         for (size_t t = 0; t < targets.size(); ++t) {
             const auto& target = targets[t];
-            std::string name = target.target_name.empty() ? target.column_name : target.target_name;
-            int col = target_cols[t];
+            const int col = target_cols[t];
+            const bool have_cell = row.size() > static_cast<size_t>(col);
 
-            if (col < 0 || row.size() <= static_cast<size_t>(col)) {
-                row_ok = false;
-                // Still push to classification_raw[t] so the buffer stays
-                // aligned with row_idx; the post-scan compaction will drop
-                // it. Empty string is treated as missing by the auto-fit
-                // path, but we mark the row dead via row_ok anyway.
-                if (target.task == TaskType::Classification) {
-                    classification_raw[t].emplace_back();
-                }
-                continue;
-            }
             if (target.task == TaskType::Classification) {
                 // Defer string->int encoding until post-scan so the auto-fit
-                // path sees the full distribution of values. Just stash the
-                // raw cell here; row_ok will be flipped to false later if
-                // the cell is missing/unmapped under the resolved mapping.
-                classification_raw[t].push_back(row[col]);
+                // path sees the full distribution of values. A short row pushes
+                // "" (missing) and drops the row.
+                if (have_cell) {
+                    classification_raw[t].push_back(row[col]);
+                } else {
+                    classification_raw[t].emplace_back();
+                    row_ok = false;
+                }
             } else {
-                auto parsed = parse_regression_target(row[col]);
-                if (!parsed.has_value()) { row_ok = false; continue; }
-                targets_[name][row_idx] = *parsed;
+                float val = 0.0f;
+                if (have_cell) {
+                    auto parsed = parse_regression_target(row[col]);
+                    if (parsed.has_value()) val = *parsed;
+                    else row_ok = false;
+                } else {
+                    row_ok = false;
+                }
+                reg_bufs[t].push_back(val);
             }
         }
 
         keep_row.push_back(row_ok ? 1 : 0);
         row_idx++;
     });
+
+    const int64_t n_loaded = row_idx;   // rows actually appended during the scan
+
+    // Materialize tensors from the streaming buffers at the true loaded-row count.
+    // from_blob + clone copies out of the std::vector storage into tensor-owned
+    // memory before the buffers go out of scope. Ragged rows were never appended,
+    // so there are no trailing phantom zero rows to compact away (the old prealloc
+    // path sized to count_rows and had to trim them).
+    if (has_coords) {
+        coordinates_ = (n_loaded > 0)
+            ? torch::from_blob(coords_buf.data(), {n_loaded, 2}, torch::kFloat32).clone()
+            : torch::zeros({0, 2}, torch::kFloat32);
+    }
+    if (cov_cols > 0) {
+        covariates_ = (n_loaded > 0)
+            ? torch::from_blob(cov_buf.data(), {n_loaded, cov_cols}, torch::kFloat32).clone()
+            : torch::zeros({0, cov_cols}, torch::kFloat32);
+    }
+    for (size_t t = 0; t < targets.size(); ++t) {
+        if (targets[t].task == TaskType::Classification) continue;
+        targets_[target_names[t]] = (n_loaded > 0)
+            ? torch::from_blob(reg_bufs[t].data(), {n_loaded}, torch::kFloat32).clone()
+            : torch::zeros({0}, torch::kFloat32);
+    }
+    schema_.n_plots = n_loaded;
 
     // Surface covariate missingness: coercing NA/blank cells to 0.0 injects a
     // real, extreme value into standardization, so make it visible rather than
@@ -1162,27 +1170,19 @@ void ResolveDataset::load_header_data(
     schema_.targets = target_configs_;
 
     // ---- Filter rows with missing targets ----
-    // After the scan, compact every per-plot buffer (plot_ids, coords,
-    // covariates, categorical_raw, targets) to only the rows where every
-    // target produced a usable value. Loud one-line summary mirrors the
-    // POC's "Filtered N species records for invalid plots" log so users
-    // see the n_plots drop instead of wondering where their plots went.
-    const int64_t n_loaded = row_idx;   // rows actually appended during the scan
+    // Compact every per-plot buffer (plot_ids, coords, covariates,
+    // categorical_raw, targets) to the rows where every target produced a usable
+    // value. With the single streaming pass the tensors are already sized to
+    // n_loaded (ragged rows were never appended), so only target-dropped rows
+    // (n_keep < n_loaded) need index_select. Loud one-line summary mirrors the
+    // POC's "Filtered N species records for invalid plots" log so users see the
+    // plot-count drop instead of wondering where their plots went.
     int64_t n_keep = 0;
     for (char k : keep_row) if (k) ++n_keep;
+    const int64_t n_target_dropped = n_loaded - n_keep;
+    const int64_t n_total = n_loaded + n_ragged_skipped;   // physical data rows
 
-    // Tensors were sized to n_plots (= count_rows). Two effects can shrink the
-    // usable set: (a) rows too short to contain plot_id were skipped during the
-    // scan (n_loaded < n_plots), leaving trailing zero-filled phantom rows the
-    // species encoder would never fill; and (b) rows with a missing/NaN/unmapped
-    // target were marked for drop (n_keep < n_loaded). Compact whenever EITHER
-    // applies (n_keep < n_plots) so tensor length, plot_ids_, and
-    // schema_.n_plots always agree. Previously only case (b) triggered
-    // compaction, so a ragged row with no target drop left the target/coord/
-    // covariate tensors longer than plot_ids_ and desynced the species tensors.
-    if (n_keep < n_plots) {
-        const int64_t n_target_dropped = n_loaded - n_keep;
-        const int64_t n_ragged_skipped = n_plots - n_loaded;
+    if (n_keep < n_loaded) {
         std::vector<int64_t> keep_idx;
         keep_idx.reserve(static_cast<size_t>(n_keep));
         for (int64_t i = 0; i < n_loaded; ++i) {
@@ -1214,8 +1214,12 @@ void ResolveDataset::load_header_data(
         }
 
         schema_.n_plots = n_keep;
+    }
 
-        std::cout << "  Kept " << n_keep << " of " << n_plots << " plots (";
+    // Report any physical row that was dropped (missing target) or skipped
+    // (ragged) so the plot-count change is never silent.
+    if (n_target_dropped > 0 || n_ragged_skipped > 0) {
+        std::cout << "  Kept " << n_keep << " of " << n_total << " plots (";
         bool need_sep = false;
         if (n_target_dropped > 0) {
             std::cout << n_target_dropped << " dropped for missing/NaN target ";

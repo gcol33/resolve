@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <stdexcept>
 #include "resolve/pretraining.hpp"
 #include "resolve/encoder.hpp"
 
@@ -127,6 +128,35 @@ TEST_CASE("MaskedSpeciesPretrainer single epoch runs", "[mlm]") {
     REQUIRE(losses.size() == 1);
     REQUIRE(std::isfinite(losses[0]));
     REQUIRE(losses[0] > 0);
+}
+
+TEST_CASE("MLMPretrainConfig::validate rejects bad values", "[mlm][validation]") {
+    // Issue #100 item 4: guard batch_size / mask_prob before they reach the
+    // divide/step and masking paths. The pretrainer constructor calls validate().
+    PlotEncoderTransformer encoder(
+        /*n_continuous=*/5, /*n_species=*/50, /*n_genera=*/0, /*n_families=*/0,
+        /*d_model=*/32, /*n_heads=*/2, /*n_attention_layers=*/1);
+
+    SECTION("valid config passes") {
+        MLMPretrainConfig ok;
+        REQUIRE_NOTHROW(ok.validate());
+    }
+    SECTION("batch_size == 0 throws") {
+        MLMPretrainConfig bad;
+        bad.batch_size = 0;
+        REQUIRE_THROWS_AS(bad.validate(), std::invalid_argument);
+        REQUIRE_THROWS_AS(MaskedSpeciesPretrainer(encoder, 50, bad), std::invalid_argument);
+    }
+    SECTION("mask_prob >= 1 throws") {
+        MLMPretrainConfig bad;
+        bad.mask_prob = 1.0f;
+        REQUIRE_THROWS_AS(bad.validate(), std::invalid_argument);
+    }
+    SECTION("mask_prob <= 0 throws") {
+        MLMPretrainConfig bad;
+        bad.mask_prob = 0.0f;
+        REQUIRE_THROWS_AS(bad.validate(), std::invalid_argument);
+    }
 }
 
 TEST_CASE("MaskedSpeciesPretrainer encoder weights change after training", "[mlm]") {

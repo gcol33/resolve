@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cmath>
 #include <set>
+#include <stdexcept>
 #include "resolve/tabm.hpp"
 #include "resolve/adapter.hpp"
 #include "resolve/pretraining.hpp"
@@ -254,6 +255,48 @@ TEST_CASE("SCARF pretrain runs on embed encoder with masked species views",
     REQUIRE(result.loss_history.size() == 2);
     for (float l : result.loss_history) {
         REQUIRE(std::isfinite(l));
+    }
+}
+
+TEST_CASE("PretrainConfig::validate rejects bad values", "[pretraining][validation]") {
+    // Issue #100 item 4: batch_size == 0 divides by zero when computing steps;
+    // mask_ratio >= 1 makes the Block strategy's randint bound <= 0 (throws).
+    // The pretrainer constructors call validate(), so a bad config fails fast at
+    // construction rather than deep inside pretrain().
+    ResolveSchema schema;
+    schema.n_plots = 8;
+    schema.n_species = 10;
+    schema.n_species_vocab = 20;
+    schema.targets.push_back({"area", TaskType::Regression, TransformType::None, 0, 1.0f});
+    ModelConfig mcfg;
+    mcfg.hidden_dims = {8};
+    ResolveModel model(schema, mcfg);
+
+    SECTION("valid config passes") {
+        PretrainConfig ok;
+        REQUIRE_NOTHROW(ok.validate());
+    }
+    SECTION("batch_size == 0 throws") {
+        PretrainConfig bad;
+        bad.batch_size = 0;
+        REQUIRE_THROWS_AS(bad.validate(), std::invalid_argument);
+        REQUIRE_THROWS_AS(JEPAPretrainer(model, bad), std::invalid_argument);
+        REQUIRE_THROWS_AS(SCARFPretrainer(model, bad), std::invalid_argument);
+    }
+    SECTION("mask_ratio >= 1 throws") {
+        PretrainConfig bad;
+        bad.mask_ratio = 1.0f;
+        REQUIRE_THROWS_AS(bad.validate(), std::invalid_argument);
+    }
+    SECTION("mask_ratio <= 0 throws") {
+        PretrainConfig bad;
+        bad.mask_ratio = 0.0f;
+        REQUIRE_THROWS_AS(bad.validate(), std::invalid_argument);
+    }
+    SECTION("corruption_rate out of [0,1] throws") {
+        PretrainConfig bad;
+        bad.corruption_rate = 1.5f;
+        REQUIRE_THROWS_AS(bad.validate(), std::invalid_argument);
     }
 }
 

@@ -21,6 +21,25 @@ on:
 # MSVC-built import library. This is the acceptance test for the issue: a green
 # Windows R-CMD-check.
 jobs:
+  # The R package vendors the pure-C facade header at r/src/resolve/resolve_capi.h
+  # (a file.copy from the canonical src/core/include/resolve/resolve_capi.h, done
+  # by r/tools/vendor.R). Nothing else re-runs vendor(), so a forgotten re-vendor
+  # after an ABI change would compile the R client against a stale facade -> a
+  # runtime crash / link error with no signal. Fail fast when the two drift.
+  vendor-drift:
+    runs-on: ubuntu-latest
+    name: R vendored header drift guard
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify vendored resolve_capi.h matches canonical
+        shell: bash
+        run: |
+          if ! diff -u src/core/include/resolve/resolve_capi.h r/src/resolve/resolve_capi.h; then
+            echo "::error::r/src/resolve/resolve_capi.h is out of date. Run 'Rscript tools/vendor.R' from r/ and commit the result."
+            exit 1
+          fi
+          echo "Vendored C facade header is up to date."
+
   R-CMD-check:
     runs-on: ${{ matrix.config.os }}
     name: ${{ matrix.config.os }} (${{ matrix.config.r }})

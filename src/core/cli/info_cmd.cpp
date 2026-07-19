@@ -93,6 +93,23 @@ int info_command(const std::string& model_path) {
         }
         std::cout << "]" << std::endl;
 
+        // Encoder-specific hyperparameters. cover_dropout is shared by the
+        // rank-pool and transformer encoders; the transformer block defines the
+        // rest of a transformer checkpoint's architecture and was previously
+        // invisible in `info`.
+        if (config.species_encoding == SpeciesEncodingMode::RankPool ||
+            config.species_encoding == SpeciesEncodingMode::Transformer) {
+            std::cout << "  Cover dropout: " << config.cover_dropout << std::endl;
+        }
+        if (config.species_encoding == SpeciesEncodingMode::Transformer) {
+            std::cout << "  d_model: " << config.d_model << std::endl;
+            std::cout << "  Attention heads: " << config.n_heads << std::endl;
+            std::cout << "  Attention layers: " << config.n_attention_layers << std::endl;
+            std::cout << "  Transformer FF dim: " << config.transformer_ff_dim << std::endl;
+            std::cout << "  Transformer pooling: " << config.transformer_pooling << std::endl;
+            std::cout << "  Transformer dropout: " << config.transformer_dropout << std::endl;
+        }
+
         std::cout << "  Latent dim: " << model->latent_dim() << std::endl;
 
         // Print parameter count

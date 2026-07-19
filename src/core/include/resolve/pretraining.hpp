@@ -10,11 +10,13 @@ namespace resolve {
 // Configuration for self-supervised pretraining
 // =============================================================================
 
-// Masking strategy for feature corruption
+// Masking strategy for feature corruption. All three operate on the continuous
+// feature vector; none is species/taxonomy-aware (that masking is done
+// separately by mask_species_view for the ID/vector inputs).
 enum class MaskStrategy {
-    Random,     // Mask random features uniformly
-    Block,      // Mask contiguous blocks of species features
-    Structured  // Mask by taxonomic group (all species in a genus)
+    Random,     // Mask random individual features uniformly
+    Block,      // Mask one contiguous feature range per sample
+    Structured  // Mask whole contiguous feature groups (n_features/4 groups)
 };
 
 // Pretraining configuration
@@ -40,6 +42,13 @@ struct PretrainConfig {
     float corruption_rate = 0.6f;             // Fraction of features to corrupt
     float temperature = 0.1f;                 // InfoNCE temperature
     int projection_dim = 128;                 // Projection head output dimension
+
+    // Throws std::invalid_argument if batch_size < 1, mask_ratio not in (0, 1),
+    // or corruption_rate not in [0, 1]. Only reachable via the C-API/Python
+    // bindings (the CLI does not expose pretraining), so guard here rather than
+    // at a CLI parse site: batch_size == 0 divides by zero when computing steps,
+    // and mask_ratio >= 1 makes the Block strategy's randint bound <= 0 (throws).
+    void validate() const;
 };
 
 // =============================================================================
@@ -54,8 +63,9 @@ public:
         MaskStrategy strategy = MaskStrategy::Random
     );
 
-    // Create a binary mask (1 = keep, 0 = mask)
-    // Returns: (batch_size, n_features) boolean tensor
+    // Create a binary mask (1.0 = keep, 0.0 = mask).
+    // Returns: (batch_size, n_features) kFloat32 tensor (not bool — apply_mask
+    // multiplies by it, `features * mask + token * (1 - mask)`).
     [[nodiscard]] torch::Tensor create_mask(int64_t batch_size) const;
 
     // Apply mask to features: masked positions replaced with learnable mask token
@@ -242,6 +252,9 @@ struct MLMPretrainConfig {
     int batch_size = 4096;
     torch::Device device = torch::kCPU;
     LogCallback log = default_log;
+
+    // Throws std::invalid_argument if batch_size < 1 or mask_prob not in (0, 1).
+    void validate() const;
 };
 
 // Linear head projecting token embeddings to species logits

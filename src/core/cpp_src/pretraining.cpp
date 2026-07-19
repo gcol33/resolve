@@ -17,6 +17,43 @@
 namespace resolve {
 
 // =============================================================================
+// Config validation
+// =============================================================================
+
+void PretrainConfig::validate() const {
+    if (batch_size < 1) {
+        throw std::invalid_argument(
+            "PretrainConfig.batch_size must be >= 1 (got " +
+            std::to_string(batch_size) + "); a batch_size of 0 divides by zero "
+            "when computing the step count.");
+    }
+    if (!(mask_ratio > 0.0f && mask_ratio < 1.0f)) {
+        throw std::invalid_argument(
+            "PretrainConfig.mask_ratio must be in (0, 1) (got " +
+            std::to_string(mask_ratio) + "); mask_ratio >= 1 makes the Block "
+            "strategy's block size span all features and its randint bound <= 0.");
+    }
+    if (!(corruption_rate >= 0.0f && corruption_rate <= 1.0f)) {
+        throw std::invalid_argument(
+            "PretrainConfig.corruption_rate must be in [0, 1] (got " +
+            std::to_string(corruption_rate) + ").");
+    }
+}
+
+void MLMPretrainConfig::validate() const {
+    if (batch_size < 1) {
+        throw std::invalid_argument(
+            "MLMPretrainConfig.batch_size must be >= 1 (got " +
+            std::to_string(batch_size) + ").");
+    }
+    if (!(mask_prob > 0.0f && mask_prob < 1.0f)) {
+        throw std::invalid_argument(
+            "MLMPretrainConfig.mask_prob must be in (0, 1) (got " +
+            std::to_string(mask_prob) + ").");
+    }
+}
+
+// =============================================================================
 // FeatureMasker
 // =============================================================================
 
@@ -66,8 +103,9 @@ torch::Tensor FeatureMaskerImpl::create_mask(int64_t batch_size) const {
             // Groups approximate RESOLVE's feature layout: coords (2), species embedding,
             // covariates. Each sample randomly selects groups to mask.
             mask.fill_(1.0f);  // start with all visible
-            constexpr int64_t min_group_size = 2;
-            int64_t n_groups = std::max(int64_t(1), n_features_ / std::max(min_group_size, int64_t(4)));
+            // Target ~4 features per group (at least one group).
+            constexpr int64_t group_target_size = 4;
+            int64_t n_groups = std::max(int64_t(1), n_features_ / group_target_size);
             int64_t group_size = n_features_ / n_groups;
             int64_t n_mask = std::max(int64_t(1), static_cast<int64_t>(n_groups * mask_ratio_));
             for (int64_t i = 0; i < batch_size; ++i) {
@@ -192,6 +230,7 @@ JEPAPretrainer::JEPAPretrainer(
 ) : context_encoder_(model),
     config_(config)
 {
+    config_.validate();
     int64_t latent = context_encoder_->latent_dim();
 
     // Create predictor
@@ -471,6 +510,7 @@ SCARFPretrainer::SCARFPretrainer(
 ) : model_(model),
     config_(config)
 {
+    config_.validate();
     int64_t latent = model_->latent_dim();
 
     // Corruptor will be recreated with correct n_features in pretrain()
@@ -687,6 +727,7 @@ MaskedSpeciesPretrainer::MaskedSpeciesPretrainer(
     n_species_(n_species),
     config_(config)
 {
+    config_.validate();
     mlm_head_ = MaskedSpeciesHead(encoder_->d_model(), n_species);
 }
 
