@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import traceback
@@ -35,7 +36,13 @@ from resolve.data.roles import RoleMapping, TargetConfig
 # Constants
 # ---------------------------------------------------------------------------
 
-DATA_DIR = Path("J:/Phd Local/Gilles_paper_resolve/data")
+_root = os.environ.get("RESEARCH_DATA")
+if not _root:
+    raise RuntimeError(
+        "RESEARCH_DATA is not set. It must point at the research data root, "
+        "e.g. setx RESEARCH_DATA E:\\research"
+    )
+DATA_DIR = Path(_root) / "outputs" / "resolve-2026" / "data"
 
 REAL_DATA_FILES = {
     "10k": {
