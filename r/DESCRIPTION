@@ -25,7 +25,11 @@ Suggests:
     rmarkdown
 VignetteBuilder: knitr
 Config/testthat/edition: 3
-SystemRequirements: resolve_c shared library (the C ABI over the RESOLVE engine,
-    which bundles libtorch >= 2.0); built from src/core and located via the
-    RESOLVE_C_HOME / RESOLVE_C_LIB environment variables at install time.
+SystemRequirements: The resolve_c shared library (a C ABI over the RESOLVE
+    engine, bundling libtorch >= 2.0), loaded at run time. It is NOT needed to
+    install or check this package. Install it afterwards with
+    resolve.install_backend(), which downloads a prebuilt build into the user
+    data directory, or point the RESOLVE_C_HOME environment variable at a
+    directory that contains it. The dataset, training and prediction verbs
+    require it; resolve.available() reports whether it is loaded.
 LazyData: false

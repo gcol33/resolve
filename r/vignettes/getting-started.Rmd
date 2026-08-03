@@ -31,12 +31,24 @@ package is a thin client over the C++ engine.
 
 ## Installation
 
-The R package links a prebuilt `resolve_c` shared library (the C ABI over the
-engine). Build it from the monorepo `src/core` and point the package at it:
+The R package itself is small and has no heavy dependencies. Install it, then
+fetch the `resolve_c` backend (the C ABI over the engine, which bundles
+libtorch) once with `resolve.install_backend()` -- the same delayed-binary model
+the `torch` package uses:
 
 ```{r install}
 remotes::install_github("gcol33/resolve", subdir = "r")
+
+library(resolve)
+resolve.install_backend()          # downloads the CPU backend on first use
+# resolve.install_backend(variant = "cuda")   # GPU build, where published
+
+resolve.available()                # TRUE once the backend is loaded
 ```
+
+Alternatively, point the `RESOLVE_C_HOME` environment variable at a directory
+that already contains a built `resolve_c` library (for example one built from
+the monorepo `src/core`) and it is loaded automatically at package load.
 
 ## Quick Start
 

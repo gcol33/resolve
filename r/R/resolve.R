@@ -126,6 +126,131 @@ resolve.predict <- function(...) {
 }
 
 
+#' Is the resolve_c backend available?
+#'
+#' The R package is a thin client over the `resolve_c` shared library (the C ABI
+#' over the RESOLVE engine, which bundles libtorch). That library is loaded at
+#' runtime rather than linked at build time, so the package installs and checks
+#' without it. This returns `TRUE` once the backend has been located and bound
+#' (at load, or after [resolve.install_backend()]). The dataset / training /
+#' prediction verbs require it; metric helpers and input validation do not.
+#'
+#' @return `TRUE` if the resolve_c backend is loaded, else `FALSE`.
+#' @seealso [resolve.install_backend()]
+#' @examples
+#' resolve.available()
+#' @export
+resolve.available <- function() {
+  isTRUE(tryCatch(resolve_capi_is_available(), error = function(e) FALSE))
+}
+
+# Stop with a consistent, actionable error when an engine verb is called with no
+# backend loaded. Called after a verb's pure-R input validation so argument
+# errors still surface first.
+.resolve_require_backend <- function() {
+  if (!resolve.available()) {
+    stop(
+      "The resolve_c backend is not installed.\n",
+      "Install it with resolve.install_backend(), or set RESOLVE_C_HOME to a ",
+      "directory containing the resolve_c shared library.",
+      call. = FALSE
+    )
+  }
+}
+
+#' Download and install the resolve_c backend
+#'
+#' Fetch a prebuilt `resolve_c` shared library (with its bundled libtorch
+#' runtime) and load it, so the dataset / training / prediction verbs become
+#' available. This mirrors `torch::install_torch()`: the CRAN package is small
+#' and backend-free, and the heavy binary is fetched on first use into the
+#' user's data directory (`tools::R_user_dir("resolve", "data")`).
+#'
+#' The default download URL points at a per-platform asset on the package's
+#' GitHub Releases; supply `url` to install from a local or private mirror. The
+#' `cpu` variant is the default and matches what the R bindings are tested
+#' against; `cuda` pulls a GPU-enabled build where published.
+#'
+#' @param version Release version to fetch (default: the installed package
+#'   version). Ignored when `url` is given.
+#' @param variant `"cpu"` (default) or `"cuda"`.
+#' @param url Explicit download URL for a `.zip` containing the library and its
+#'   runtime dependencies. Overrides `version` / `variant`.
+#' @param dir Destination directory (default: the package's user data dir).
+#' @param quiet Suppress progress messages (default `FALSE`).
+#' @param force Reinstall even if the backend is already present (default
+#'   `FALSE`).
+#' @return (Invisibly) the directory the backend was installed into.
+#' @seealso [resolve.available()]
+#' @examples
+#' \dontrun{
+#' resolve.install_backend()
+#' resolve.install_backend(variant = "cuda")
+#' resolve.install_backend(url = "file:///path/to/resolve_c-linux-x86_64-cpu.zip")
+#' }
+#' @export
+resolve.install_backend <- function(version = NULL,
+                                     variant = c("cpu", "cuda"),
+                                     url = NULL,
+                                     dir = NULL,
+                                     quiet = FALSE,
+                                     force = FALSE) {
+  variant <- match.arg(variant)
+  if (is.null(dir)) {
+    dir <- file.path(tools::R_user_dir("resolve", "data"), "resolve_c")
+  }
+  libname <- .resolve_backend_libname()
+  dest_lib <- file.path(dir, libname)
+
+  # Already installed: just (re)bind it unless a reinstall was requested.
+  if (file.exists(dest_lib) && !force) {
+    if (!quiet) {
+      message("resolve_c already installed at ", dir,
+              " (use force = TRUE to reinstall).")
+    }
+    .resolve_prepend_loader_path(dir)
+    invisible(tryCatch(resolve_capi_load_lib(dest_lib), error = function(e) FALSE))
+    return(invisible(dir))
+  }
+
+  if (is.null(url)) {
+    if (is.null(version)) version <- as.character(utils::packageVersion("resolve"))
+    os <- if (.Platform$OS.type == "windows") "windows"
+          else if (Sys.info()[["sysname"]] == "Darwin") "macos"
+          else "linux"
+    arch <- switch(R.version$arch,
+                   "x86_64"  = "x86_64",
+                   "aarch64" = "arm64",
+                   R.version$arch)
+    asset <- sprintf("resolve_c-%s-%s-%s.zip", os, arch, variant)
+    url <- sprintf(
+      "https://github.com/gcol33/resolve/releases/download/v%s/%s",
+      version, asset
+    )
+  }
+
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+  tmp <- tempfile(fileext = ".zip")
+  on.exit(unlink(tmp), add = TRUE)
+  if (!quiet) message("Downloading resolve_c from ", url)
+  utils::download.file(url, tmp, mode = "wb", quiet = quiet)
+  utils::unzip(tmp, exdir = dir)
+
+  if (!file.exists(dest_lib)) {
+    stop("The downloaded archive did not contain ", libname, " under ", dir, ".")
+  }
+
+  .resolve_prepend_loader_path(dir)
+  ok <- isTRUE(tryCatch(resolve_capi_load_lib(dest_lib), error = function(e) FALSE))
+  if (!ok) {
+    stop("Downloaded resolve_c but could not load it: ",
+         tryCatch(resolve_capi_load_error(), error = function(e) ""))
+  }
+  if (!quiet) message("resolve_c installed and loaded from ", dir, ".")
+  invisible(dir)
+}
+
+
 #' Load a Trained RESOLVE Model
 #'
 #' Load a model from a saved checkpoint.
@@ -161,6 +286,7 @@ resolve.load <- function(path, device = "cpu", vram_fraction = 1.0) {
     stop("vram_fraction must be a single number in (0, 1]")
   }
 
+  .resolve_require_backend()
   .resolve_module$Predictor_load(path, device, vram_fraction)
 }
 
@@ -191,6 +317,7 @@ resolve.load_train_config <- function(path) {
   if (!file.exists(path)) {
     stop(sprintf("checkpoint file does not exist: %s", path))
   }
+  .resolve_require_backend()
   .resolve_module$Trainer_load_train_config(path)
 }
 
@@ -218,6 +345,7 @@ resolve.load_run_metadata <- function(path) {
   if (!file.exists(path)) {
     stop(sprintf("checkpoint file does not exist: %s", path))
   }
+  .resolve_require_backend()
   .resolve_module$Trainer_load_run_metadata(path)
 }
 
@@ -237,10 +365,13 @@ resolve.load_run_metadata <- function(path) {
 #'
 #' @export
 resolve.save <- function(trainer, path) {
+  # Pass the optional `metadata` arg explicitly as NULL: Rcpp module methods
+  # register the full C++ arity and do not honor the `= R_NilValue` default, so
+  # a one-argument `$save(path)` fails to match ("could not find valid method").
   if (is.list(trainer) && !is.null(trainer$trainer)) {
-    trainer$trainer$save(path)
+    trainer$trainer$save(path, NULL)
   } else if (inherits(trainer, "Rcpp_Trainer") || inherits(trainer, "Rcpp_RTrainer")) {
-    trainer$save(path)
+    trainer$save(path, NULL)
   } else {
     stop("trainer must be a Trainer object or result from resolve.train()")
   }
@@ -391,6 +522,7 @@ resolve.dataset.csv <- function(header,
     if (!inherits(schemaSource, "Rcpp_ResolveDataset")) {
       stop("schemaSource must be a ResolveDataset from resolve.dataset.csv()")
     }
+    .resolve_require_backend()
     return(.resolve_module$ResolveDataset_from_csv_with_schema(
       header_path = header,
       species_path = species,
@@ -402,6 +534,7 @@ resolve.dataset.csv <- function(header,
   }
 
   # Call C++ implementation
+  .resolve_require_backend()
   .resolve_module$ResolveDataset_from_csv(
     header_path = header,
     species_path = species,
@@ -487,6 +620,7 @@ resolve.dataset.frame <- function(header,
                                   config = list(),
                                   schemaSource = NULL) {
   roles <- .resolve_normalize_roles_targets(roles, targets)
+  .resolve_require_backend()
 
   # Single-table mode: `header` is the long-format species frame.
   if (is.null(species)) {
@@ -637,6 +771,8 @@ resolve.train.dataset <- function(dataset,
     stop("lossConfig must be 'mae', 'smape', or 'combined'")
   }
 
+  .resolve_require_backend()
+
   # Get schema from dataset
   schema <- dataset$schema()
 
@@ -706,9 +842,10 @@ resolve.train.dataset <- function(dataset,
     }
   }
 
-  # Save if requested
+  # Save if requested. Pass `metadata = NULL` explicitly: Rcpp module methods do
+  # not honor the C++ default arg, so a one-argument `$save()` fails to match.
   if (!is.null(savePath)) {
-    trainer$save(savePath)
+    trainer$save(savePath, NULL)
     if (verbose) {
       cat(sprintf("Model saved to: %s\n", savePath))
     }
@@ -753,5 +890,6 @@ resolve.predict.dataset <- function(predictor, dataset, returnLatent = FALSE,
     stop("dataset must be created with resolve.dataset.csv()")
   }
 
+  .resolve_require_backend()
   predictor$predict_dataset(dataset, returnLatent, as.integer(batchSize))
 }

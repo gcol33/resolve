@@ -1,6 +1,7 @@
 # Tests for RESOLVE metrics functions
 
 test_that("resolve_mae computes mean absolute error", {
+  skip_if_no_backend()
   pred <- c(1.0, 2.0, 3.0, 4.0, 5.0)
   target <- c(1.5, 2.0, 2.5, 4.5, 5.0)
 
@@ -10,6 +11,7 @@ test_that("resolve_mae computes mean absolute error", {
 })
 
 test_that("resolve_rmse computes root mean squared error", {
+  skip_if_no_backend()
   pred <- c(1.0, 2.0, 3.0)
   target <- c(2.0, 2.0, 4.0)
 
@@ -19,6 +21,7 @@ test_that("resolve_rmse computes root mean squared error", {
 })
 
 test_that("resolve_r_squared returns 1 for perfect fit", {
+  skip_if_no_backend()
   vals <- c(1.0, 2.0, 3.0, 4.0, 5.0)
 
   r2 <- resolve_r_squared(vals, vals)
@@ -27,6 +30,7 @@ test_that("resolve_r_squared returns 1 for perfect fit", {
 })
 
 test_that("resolve_r_squared computes correct value for good fit", {
+  skip_if_no_backend()
   pred <- c(1.0, 2.0, 3.0, 4.0, 5.0)
   target <- c(1.1, 2.0, 2.9, 4.1, 5.0)
 
@@ -36,6 +40,7 @@ test_that("resolve_r_squared computes correct value for good fit", {
 })
 
 test_that("resolve_smape computes symmetric mean absolute percentage error", {
+  skip_if_no_backend()
   pred <- c(100.0, 200.0, 300.0)
   target <- c(110.0, 200.0, 280.0)
 
@@ -46,6 +51,7 @@ test_that("resolve_smape computes symmetric mean absolute percentage error", {
 })
 
 test_that("resolve_band_accuracy computes band accuracy", {
+  skip_if_no_backend()
   pred <- c(100.0, 200.0, 300.0, 400.0)
   target <- c(100.0, 180.0, 250.0, 500.0)
 

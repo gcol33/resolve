@@ -25,6 +25,15 @@
  * returning `int` return 0 on success and -1 on failure. In both cases a
  * human-readable message is available from `resolve_last_error()` (thread-local).
  * C++ exceptions never cross the boundary.
+ *
+ * Runtime binding (issue: CRAN R package): a client that defines
+ * RESOLVE_CAPI_DYNLOAD before including this header gets ONLY the opaque handle
+ * typedefs and the resolve_value_kind_t enum -- every function PROTOTYPE is
+ * suppressed. Such a client supplies its own dynamically-loaded forwarders
+ * (see r/src/resolve_capi_dynload.h) so it can `dlopen`/`LoadLibrary` the
+ * resolve_c shared library at runtime instead of linking an import library at
+ * build time. The engine build (RESOLVE_CAPI_BUILD) never defines
+ * RESOLVE_CAPI_DYNLOAD, so it always sees the prototypes it must define.
  */
 #ifndef RESOLVE_CAPI_H
 #define RESOLVE_CAPI_H
@@ -51,18 +60,20 @@ extern "C" {
 #endif
 
 /* ========================================================================== */
-/* Error reporting                                                            */
+/* Opaque handles and the value-tree tag enum                                 */
+/*                                                                            */
+/* These types are needed by BOTH the engine build and a dynamic-loading      */
+/* client, so they live above the RESOLVE_CAPI_DYNLOAD prototype guard.       */
 /* ========================================================================== */
 
-/* Message for the most recent failure on the calling thread. Valid until the
- * next failing call on the same thread. Never NULL (empty string if no error). */
-RESOLVE_CAPI const char* resolve_last_error(void);
-
-/* ========================================================================== */
-/* resolve_value_t - the single marshaling primitive                          */
-/* ========================================================================== */
-
+/* The single marshaling primitive: a heap tagged tree. */
 typedef struct resolve_value resolve_value_t;
+
+/* Engine object handles (defined only inside the library). */
+typedef struct resolve_dataset   resolve_dataset_t;
+typedef struct resolve_model     resolve_model_t;
+typedef struct resolve_trainer   resolve_trainer_t;
+typedef struct resolve_predictor resolve_predictor_t;
 
 /* Tag returned by resolve_value_kind(). */
 typedef enum {
@@ -79,6 +90,20 @@ typedef enum {
     RESOLVE_VALUE_MAP,          /* ordered key -> value         */
     RESOLVE_VALUE_LIST          /* ordered values               */
 } resolve_value_kind_t;
+
+#ifndef RESOLVE_CAPI_DYNLOAD
+
+/* ========================================================================== */
+/* Error reporting                                                            */
+/* ========================================================================== */
+
+/* Message for the most recent failure on the calling thread. Valid until the
+ * next failing call on the same thread. Never NULL (empty string if no error). */
+RESOLVE_CAPI const char* resolve_last_error(void);
+
+/* ========================================================================== */
+/* resolve_value_t - the single marshaling primitive                          */
+/* ========================================================================== */
 
 /* ---- construction --------------------------------------------------------- */
 RESOLVE_CAPI resolve_value_t* resolve_value_new_null(void);
@@ -194,8 +219,6 @@ RESOLVE_CAPI int resolve_metric_r_squared    (const double* pred, const double* 
 /* Dataset                                                                    */
 /* ========================================================================== */
 
-typedef struct resolve_dataset resolve_dataset_t;
-
 /* `roles`, `targets`, `config` are MAP value trees (see r/src marshaling).
  * Return NULL on error. */
 RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_csv(
@@ -256,8 +279,6 @@ RESOLVE_CAPI resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, c
 /* Model                                                                      */
 /* ========================================================================== */
 
-typedef struct resolve_model resolve_model_t;
-
 /* `schema` and `config` are MAP value trees. Return NULL on error. */
 RESOLVE_CAPI resolve_model_t* resolve_model_create(
     const resolve_value_t* schema, const resolve_value_t* config);
@@ -286,8 +307,6 @@ RESOLVE_CAPI int resolve_model_set_traits(resolve_model_t* m, const resolve_valu
 /* ========================================================================== */
 /* Trainer                                                                    */
 /* ========================================================================== */
-
-typedef struct resolve_trainer resolve_trainer_t;
 
 /* `config` is a MAP value tree. The model is shared (TORCH_MODULE holder). */
 RESOLVE_CAPI resolve_trainer_t* resolve_trainer_create(
@@ -348,8 +367,6 @@ RESOLVE_CAPI resolve_value_t* resolve_load_run_metadata(const char* path);
 /* Predictor                                                                  */
 /* ========================================================================== */
 
-typedef struct resolve_predictor resolve_predictor_t;
-
 RESOLVE_CAPI resolve_predictor_t* resolve_predictor_load(
     const char* path, const char* device, double vram_fraction);
 
@@ -376,6 +393,8 @@ RESOLVE_CAPI int resolve_predictor_optimize_for_inference(resolve_predictor_t* p
 /* Zero-arg accessor. `what`: device scalers categorical_vocab genus_embeddings
  * family_embeddings species_embeddings. Returns value / NULL. */
 RESOLVE_CAPI resolve_value_t* resolve_predictor_get(const resolve_predictor_t* p, const char* what);
+
+#endif /* !RESOLVE_CAPI_DYNLOAD */
 
 #ifdef __cplusplus
 }  /* extern "C" */

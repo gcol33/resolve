@@ -137,6 +137,7 @@ RCPP_MODULE(resolve_module) {
 
 // [[Rcpp::export]]
 std::string resolve_version() {
+    capi_require_loaded();
     return std::string(resolve_capi_version());
 }
 
@@ -145,6 +146,7 @@ std::string resolve_version() {
 // CUDA device. No-op on CPU-only builds.
 // [[Rcpp::export]]
 void resolve_set_vram_fraction(double fraction, int device_index = -1) {
+    capi_require_loaded();
     capi_check_status(resolve_capi_set_vram_fraction(fraction, device_index));
 }
 
@@ -154,6 +156,7 @@ void resolve_set_vram_fraction(double fraction, int device_index = -1) {
 // Rscript.exe launcher on Windows.
 // [[Rcpp::export]]
 void resolve_set_thread_pools(int intraop_threads, int interop_threads = -1) {
+    capi_require_loaded();
     capi_check_status(resolve_capi_set_thread_pools(intraop_threads, interop_threads));
 }
 
@@ -162,6 +165,7 @@ void resolve_set_thread_pools(int intraop_threads, int interop_threads = -1) {
 // teardown access violation under Rscript.exe (issue #18). No-op off Windows.
 // [[Rcpp::export]]
 void resolve_install_crash_handler(int shutdown_exit_code = 0) {
+    capi_require_loaded();
     capi_check_status(resolve_capi_install_crash_handler(shutdown_exit_code));
 }
 
@@ -170,6 +174,7 @@ void resolve_install_crash_handler(int shutdown_exit_code = 0) {
 // Registered as an on-exit finalizer in zzz.R.
 // [[Rcpp::export]]
 void resolve_signal_work_complete() {
+    capi_require_loaded();
     capi_check_status(resolve_capi_signal_work_complete());
 }
 
@@ -187,8 +192,34 @@ void resolve_signal_work_complete() {
 //' @export
 // [[Rcpp::export]]
 std::string resolve_configure_cuda_allocator(bool force = false) {
+    capi_require_loaded();
     resolve_value_t* v = resolve_capi_configure_cuda_allocator(force ? 1 : 0);
     capi_check(v);
     ValuePtr guard(v);
     return std::string(resolve_value_as_string(v));
+}
+
+// =============================================================================
+// resolve_c runtime-loader entry points (see resolve_capi_dynload.*). Called
+// from .onLoad / resolve.available() / resolve.install_backend() in R. These are
+// the ONLY package functions safe to call before the backend has been loaded.
+// =============================================================================
+
+// Load the resolve_c shared library from `path` and bind its symbols. Returns
+// TRUE on success; on failure the reason is available via resolve_capi_load_error().
+// [[Rcpp::export]]
+bool resolve_capi_load_lib(std::string path) {
+    return resolve_capi_load(path.c_str()) == 0;
+}
+
+// TRUE once resolve_c has been loaded. Cheap; safe before any load.
+// [[Rcpp::export]]
+bool resolve_capi_is_available() {
+    return resolve_capi_available() != 0;
+}
+
+// Human-readable message for the most recent resolve_capi_load_lib() failure.
+// [[Rcpp::export]]
+std::string resolve_capi_load_error() {
+    return std::string(resolve_capi_dynload_error());
 }

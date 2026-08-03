@@ -1,6 +1,7 @@
 # Tests for ResolveDataset C++ binding
 
 test_that("resolve.dataset.csv loads data correctly", {
+  skip_if_no_backend()
   skip_on_cran()
 
   # Create temporary test CSV files
@@ -88,6 +89,7 @@ test_that("resolve.dataset.csv loads data correctly", {
 
 
 test_that("resolve.dataset.csv works without taxonomy", {
+  skip_if_no_backend()
 
   skip_on_cran()
 
@@ -134,6 +136,7 @@ test_that("resolve.dataset.csv works without taxonomy", {
 
 
 test_that("resolve.dataset.csv supports classification targets", {
+  skip_if_no_backend()
   skip_on_cran()
 
   header_file <- tempfile(fileext = ".csv")
@@ -177,6 +180,7 @@ test_that("resolve.dataset.csv supports classification targets", {
 
 
 test_that("resolve.dataset.csv config options work", {
+  skip_if_no_backend()
   skip_on_cran()
 
   header_file <- tempfile(fileext = ".csv")

@@ -61,3 +61,15 @@ resolve_configure_cuda_allocator <- function(force = FALSE) {
     .Call(`_resolve_resolve_configure_cuda_allocator`, force)
 }
 
+resolve_capi_load_lib <- function(path) {
+    .Call(`_resolve_resolve_capi_load_lib`, path)
+}
+
+resolve_capi_is_available <- function() {
+    .Call(`_resolve_resolve_capi_is_available`)
+}
+
+resolve_capi_load_error <- function() {
+    .Call(`_resolve_resolve_capi_load_error`)
+}
+

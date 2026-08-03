@@ -5,6 +5,7 @@
 # reloaded model produces finite predictions correlated with the truth.
 
 test_that("train -> save -> load -> predict round trip recovers a signal", {
+  skip_if_no_backend()
   skip_on_cran()
 
   header_file <- tempfile(fileext = ".csv")
@@ -79,8 +80,11 @@ test_that("train -> save -> load -> predict round trip recovers a signal", {
   predictor <- resolve.load(model_file, device = "cpu")
   preds <- resolve.predict.dataset(predictor, dataset)
 
-  expect_true("y" %in% names(preds))
-  pred_y <- as.numeric(preds$y)
+  # predict_dataset returns the documented C-ABI contract: a list with
+  # `predictions` / `targets` / `plot_ids`, where `predictions` is keyed by
+  # target name (resolve_capi.h resolve_predictor_predict_dataset).
+  expect_true("y" %in% names(preds$predictions))
+  pred_y <- as.numeric(preds$predictions$y)
   expect_equal(length(pred_y), n)
   expect_true(all(is.finite(pred_y)))
   # The reloaded model recovers the signal (an untrained/broken load would be ~0).
@@ -88,6 +92,7 @@ test_that("train -> save -> load -> predict round trip recovers a signal", {
 })
 
 test_that("load_train_config round-trips the training hyperparameters", {
+  skip_if_no_backend()
   skip_on_cran()
 
   header_file <- tempfile(fileext = ".csv")

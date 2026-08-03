@@ -1,6 +1,7 @@
 # Tests for RESOLVE Trainer
 
 test_that("Trainer can be created with config", {
+  skip_if_no_backend()
   skip_on_cran()
 
   # Create minimal schema
@@ -43,6 +44,7 @@ test_that("Trainer can be created with config", {
 })
 
 test_that("LR scheduler options are accepted", {
+  skip_if_no_backend()
   skip_on_cran()
 
   schema <- list(
@@ -83,6 +85,7 @@ test_that("LR scheduler options are accepted", {
 })
 
 test_that("Step LR scheduler config is accepted", {
+  skip_if_no_backend()
   skip_on_cran()
 
   schema <- list(

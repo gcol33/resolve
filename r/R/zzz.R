@@ -1,14 +1,17 @@
 # Package initialization for resolve.
 #
-# Issue #17: the package DLL (resolve.dll / resolve.so) links the prebuilt
-# `resolve_c` shared library, which links the libtorch runtime libraries. Those
-# must be on the loader path (PATH on Windows, LD_LIBRARY_PATH / DYLD_LIBRARY_PATH
-# on Unix) when the package DLL is loaded. The expected mechanism is to put the
-# resolve_c directory (which also holds the libtorch DLLs) on that path before
-# starting R -- set the RESOLVE_C_HOME environment variable to it; the CI and the
-# install/check tooling add it to the loader path. As a convenience .onLoad also
-# best-effort prepends RESOLVE_C_HOME, which covers re-loads and interactive use
-# when the variable is set but the path was not exported.
+# The package is a thin client over the `resolve_c` shared library (a flat C ABI
+# over the RESOLVE engine, which bundles libtorch). resolve_c is NOT linked at
+# build time; it is loaded at RUNTIME via dlopen/LoadLibrary
+# (src/resolve_capi_dynload.*), the way the mlverse/torch R package loads
+# libtorch. This lets the package install and R CMD check with no backend
+# present. The engine verbs gate on resolve.available(); when the backend is
+# absent they raise a clear "install it" error instead of crashing.
+#
+# Backend discovery order (.resolve_find_backend): $RESOLVE_C_HOME, then the
+# user data dir where resolve.install_backend() puts it, then a packaged copy.
+# When found, its directory is prepended to the loader path so resolve_c's
+# sibling libtorch libraries resolve, and the library is bound.
 
 #' @importFrom Rcpp evalCpp
 #' @importFrom methods new
@@ -18,21 +21,64 @@ NULL
 # Rcpp module reference
 .resolve_module <- NULL
 
-# Best-effort: prepend a dev DLL directory (RESOLVE_C_HOME) to the loader path.
-# Only useful for source-tree workflows where the runtime DLLs are not staged
-# in libs/<arch>; for an installed package the altered-search-path covers it.
-.resolve_setup_libpath <- function() {
+# Platform file name of the resolve_c shared library.
+.resolve_backend_libname <- function() {
+  if (.Platform$OS.type == "windows") {
+    "resolve_c.dll"
+  } else if (Sys.info()[["sysname"]] == "Darwin") {
+    "libresolve_c.dylib"
+  } else {
+    "libresolve_c.so"
+  }
+}
+
+# Directories to search for the backend, in priority order.
+.resolve_backend_dirs <- function() {
+  dirs <- character(0)
   home <- Sys.getenv("RESOLVE_C_HOME", "")
-  if (!nzchar(home) || !dir.exists(home)) return(invisible())
+  if (nzchar(home)) dirs <- c(dirs, home)
+  data_dir <- tryCatch(tools::R_user_dir("resolve", "data"), error = function(e) "")
+  if (nzchar(data_dir)) dirs <- c(dirs, file.path(data_dir, "resolve_c"))
+  pkg_dir <- system.file("resolve_c", package = "resolve")
+  if (nzchar(pkg_dir)) dirs <- c(dirs, pkg_dir)
+  dirs
+}
+
+# Full path to the backend library if present, else "".
+.resolve_find_backend <- function() {
+  libname <- .resolve_backend_libname()
+  for (d in .resolve_backend_dirs()) {
+    p <- file.path(d, libname)
+    if (file.exists(p)) return(p)
+  }
+  ""
+}
+
+# Prepend `dir` to the OS loader path so resolve_c's sibling runtime libraries
+# (the libtorch DLLs / shared objects that live next to it) resolve at load.
+.resolve_prepend_loader_path <- function(dir) {
+  if (!nzchar(dir) || !dir.exists(dir)) return(invisible())
   var <- if (.Platform$OS.type == "windows") "PATH"
          else if (Sys.info()[["sysname"]] == "Darwin") "DYLD_LIBRARY_PATH"
          else "LD_LIBRARY_PATH"
   cur <- Sys.getenv(var, "")
-  newval <- paste(c(home, if (nzchar(cur)) cur), collapse = .Platform$path.sep)
-  args <- list(newval)
+  parts <- if (nzchar(cur)) c(dir, cur) else dir
+  args <- list(paste(parts, collapse = .Platform$path.sep))
   names(args) <- var
   do.call(Sys.setenv, args)
   invisible()
+}
+
+# Locate and bind the resolve_c backend. Returns TRUE on success. Idempotent:
+# resolve_capi_load_lib() is a no-op once the library is already bound.
+.resolve_load_backend <- function() {
+  if (isTRUE(tryCatch(resolve_capi_is_available(), error = function(e) FALSE))) {
+    return(TRUE)
+  }
+  path <- .resolve_find_backend()
+  if (!nzchar(path)) return(FALSE)
+  .resolve_prepend_loader_path(dirname(path))
+  isTRUE(tryCatch(resolve_capi_load_lib(path), error = function(e) FALSE))
 }
 
 # Token whose on-exit finalizer marks engine work complete (see
@@ -41,21 +87,20 @@ NULL
 .resolve_exit_token <- new.env(parent = emptyenv())
 
 # Issue #18 / #19: harden the process against a native fault becoming a hang or
-# a launcher teardown crash.
+# a launcher teardown crash. Only called once the backend is bound, since the
+# handlers are engine (resolve_c) calls.
 #
-#   * install_crash_handler() (always; no-op off Windows, no throughput cost):
-#     converts an otherwise-unhandled native fault into an immediate
-#     TerminateProcess instead of a Windows JIT-debugger handshake that hangs a
-#     headless run forever (issue #19) or a teardown access violation that
-#     crashes the Rscript.exe launcher (issue #18).
+#   * install_crash_handler() (no-op off Windows, no throughput cost): converts
+#     an otherwise-unhandled native fault into an immediate TerminateProcess
+#     instead of a Windows JIT-debugger hang (issue #19) or a teardown access
+#     violation that crashes the Rscript.exe launcher (issue #18).
 #   * On Windows, pin libtorch's host thread pools to 1 so there are no worker
 #     threads to join during process exit -- the join is the suspected source of
-#     the Rscript.exe teardown crash (the at::set_num_threads(1) mitigation #18
-#     points at). This is the only part with a throughput trade-off, rare for
-#     the thin-client metrics / small-CPU workloads that run through the R
-#     bindings; set RESOLVE_R_NO_THREAD_PIN to keep libtorch's default threading.
+#     the Rscript.exe teardown crash. The only part with a throughput trade-off,
+#     rare for the thin-client CPU workloads that run through the R bindings; set
+#     RESOLVE_R_NO_THREAD_PIN to keep libtorch's default threading.
 #   * An on-exit finalizer marks work complete so a teardown fault after a
-#     finished session is treated as a benign artifact (exit with code 0).
+#     finished session is treated as benign (exit code 0).
 .resolve_harden_process <- function() {
   try(.Call("_resolve_resolve_install_crash_handler", 0L, PACKAGE = "resolve"),
       silent = TRUE)
@@ -76,11 +121,25 @@ NULL
 }
 
 .onLoad <- function(libname, pkgname) {
-  .resolve_setup_libpath()
-  # Lazy module init: the boot symbol pulls in resolve_c + libtorch, so defer it
-  # to the first `$` access rather than forcing mustStart here.
+  # Bind resolve_c if it is installed; the package loads fine either way.
+  loaded <- .resolve_load_backend()
+  # Lazy module init: the boot symbol only registers class/method pointers (no
+  # engine call), so it is safe with or without the backend; the actual engine
+  # work happens when a method is invoked, gated by resolve.available().
   .resolve_module <<- Rcpp::Module("resolve_module", PACKAGE = "resolve")
-  .resolve_harden_process()
+  # Hardening is an engine call, so only when the backend is bound.
+  if (loaded) .resolve_harden_process()
+}
+
+.onAttach <- function(libname, pkgname) {
+  if (!isTRUE(tryCatch(resolve_capi_is_available(), error = function(e) FALSE))) {
+    packageStartupMessage(
+      "resolve: the resolve_c backend is not installed, so training / dataset / ",
+      "prediction verbs are unavailable.\n",
+      "Install it with resolve.install_backend(), or set RESOLVE_C_HOME to a ",
+      "directory containing the resolve_c shared library."
+    )
+  }
 }
 
 # Internal: enumerate every class and free function registered in the resolve
@@ -104,8 +163,9 @@ NULL
 
 #' Get RESOLVE version
 #'
-#' @return Version string from C++ core
+#' @return Version string from the C++ core.
 #' @export
 resolve.version <- function() {
+  .resolve_require_backend()
   .Call("_resolve_resolve_version", PACKAGE = "resolve")
 }

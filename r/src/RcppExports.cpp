@@ -146,6 +146,37 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// resolve_capi_load_lib
+bool resolve_capi_load_lib(std::string path);
+RcppExport SEXP _resolve_resolve_capi_load_lib(SEXP pathSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< std::string >::type path(pathSEXP);
+    rcpp_result_gen = Rcpp::wrap(resolve_capi_load_lib(path));
+    return rcpp_result_gen;
+END_RCPP
+}
+// resolve_capi_is_available
+bool resolve_capi_is_available();
+RcppExport SEXP _resolve_resolve_capi_is_available() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(resolve_capi_is_available());
+    return rcpp_result_gen;
+END_RCPP
+}
+// resolve_capi_load_error
+std::string resolve_capi_load_error();
+RcppExport SEXP _resolve_resolve_capi_load_error() {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    rcpp_result_gen = Rcpp::wrap(resolve_capi_load_error());
+    return rcpp_result_gen;
+END_RCPP
+}
 
 RcppExport SEXP _rcpp_module_boot_resolve_module();
 
@@ -162,6 +193,9 @@ static const R_CallMethodDef CallEntries[] = {
     {"_resolve_resolve_install_crash_handler", (DL_FUNC) &_resolve_resolve_install_crash_handler, 1},
     {"_resolve_resolve_signal_work_complete", (DL_FUNC) &_resolve_resolve_signal_work_complete, 0},
     {"_resolve_resolve_configure_cuda_allocator", (DL_FUNC) &_resolve_resolve_configure_cuda_allocator, 1},
+    {"_resolve_resolve_capi_load_lib", (DL_FUNC) &_resolve_resolve_capi_load_lib, 1},
+    {"_resolve_resolve_capi_is_available", (DL_FUNC) &_resolve_resolve_capi_is_available, 0},
+    {"_resolve_resolve_capi_load_error", (DL_FUNC) &_resolve_resolve_capi_load_error, 0},
     {"_rcpp_module_boot_resolve_module", (DL_FUNC) &_rcpp_module_boot_resolve_module, 0},
     {NULL, NULL, 0}
 };

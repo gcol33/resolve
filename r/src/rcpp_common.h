@@ -1,15 +1,22 @@
 // rcpp_common.h - R <-> C ABI marshaling for the resolve package.
 //
-// Issue #17: the R package no longer touches libtorch's C++ ABI. It links the
-// MSVC-built `resolve_c` shared library through the flat C facade in
-// resolve/resolve_capi.h and marshals everything across the boundary as a
-// `resolve_value_t` tree. This header is the ONLY engine header included under
-// r/src/; there is no `#include <torch/...>` anywhere in the package sources.
+// Issue #17: the R package no longer touches libtorch's C++ ABI. It reaches the
+// `resolve_c` shared library through the flat C facade in resolve/resolve_capi.h
+// and marshals everything across the boundary as a `resolve_value_t` tree. This
+// is the ONLY engine header included under r/src/; there is no `#include
+// <torch/...>` anywhere in the package sources.
+//
+// resolve_c is bound at RUNTIME (resolve_capi_dynload.h), not linked at build
+// time, so the package installs and R CMD checks with no backend present (the
+// mlverse/torch model). The dynload header supplies the same `resolve_*` symbols
+// as forwarders, so every call site below is unchanged; a call made before the
+// backend is loaded would hit a NULL forwarder, so engine entry points guard
+// with capi_require_loaded() first (the R verbs also gate on resolve.available()).
 #ifndef RCPP_COMMON_H
 #define RCPP_COMMON_H
 
 #include <Rcpp.h>
-#include "resolve/resolve_capi.h"
+#include "resolve_capi_dynload.h"
 
 #include <limits>
 #include <memory>
@@ -21,6 +28,17 @@ using namespace Rcpp;
 // =============================================================================
 // Error checking: turn a C-facade failure into an R error
 // =============================================================================
+
+// Raise a clean R error (never a NULL-pointer call) when the resolve_c backend
+// has not been loaded. Call at the top of any function that reaches a forwarder
+// without going through an R verb that already gated on resolve.available().
+inline void capi_require_loaded() {
+    if (!resolve_capi_available()) {
+        stop("The resolve_c backend is not installed. Install it with "
+             "resolve.install_backend(), or set RESOLVE_C_HOME to a directory "
+             "containing the resolve_c shared library.");
+    }
+}
 
 inline void capi_check(const void* p) {
     if (p == nullptr) stop(resolve_last_error());
