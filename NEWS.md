@@ -71,11 +71,13 @@
   (`vsjitdebugger`): the engine installs an unhandled-exception filter plus a
   first-in-line vectored handler that terminate via `TerminateProcess`, so the
   worker fails fast with the fault's exit code and the orchestrator can record
-  and skip it instead of waiting on the AeDebug handshake. On Windows the R
-  bindings additionally pin libtorch's host thread pools to 1 and arm an on-exit
-  finalizer, mitigating the libtorch teardown access violation that could crash
-  the `Rscript.exe` launcher; set `RESOLVE_R_NO_THREAD_PIN` to keep libtorch's
-  default threading.
+  and skip it instead of waiting on the AeDebug handshake. The R bindings arm an
+  on-exit finalizer alongside the crash handler, mitigating the libtorch teardown
+  access violation that could crash the `Rscript.exe` launcher. libtorch's thread
+  pools are left at their multi-threaded default so training and prediction use
+  all cores; set `RESOLVE_R_TORCH_THREADS=N` (a positive integer) to pin both
+  pools to N threads -- to cap CPU use on a shared machine, or as a workaround
+  (`N=1`) if a Windows environment still hits the teardown crash.
 
 ### Internal
 

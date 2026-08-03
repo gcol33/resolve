@@ -94,19 +94,26 @@ NULL
 #     an otherwise-unhandled native fault into an immediate TerminateProcess
 #     instead of a Windows JIT-debugger hang (issue #19) or a teardown access
 #     violation that crashes the Rscript.exe launcher (issue #18).
-#   * On Windows, pin libtorch's host thread pools to 1 so there are no worker
-#     threads to join during process exit -- the join is the suspected source of
-#     the Rscript.exe teardown crash. The only part with a throughput trade-off,
-#     rare for the thin-client CPU workloads that run through the R bindings; set
-#     RESOLVE_R_NO_THREAD_PIN to keep libtorch's default threading.
 #   * An on-exit finalizer marks work complete so a teardown fault after a
 #     finished session is treated as benign (exit code 0).
+#
+# libtorch thread pools are left at libtorch's own default (all cores) so
+# training and prediction are multi-threaded -- that is where the CPU throughput
+# comes from. Issue #18 previously pinned Windows to a single thread as a
+# teardown-crash mitigation (no worker threads to join at process exit), but the
+# crash handler installed above already turns a teardown fault into an immediate
+# TerminateProcess, which never joins the pools, so full threading is safe by
+# default. Set RESOLVE_R_TORCH_THREADS=N (a positive integer) to pin both the
+# intra- and inter-op pools to N threads -- to cap CPU use on a shared machine,
+# or as a workaround (N=1 restores the old single-threaded behaviour) if a
+# specific Windows environment still hits the #18 teardown crash.
 .resolve_harden_process <- function() {
   try(.Call("_resolve_resolve_install_crash_handler", 0L, PACKAGE = "resolve"),
       silent = TRUE)
-  if (.Platform$OS.type == "windows" &&
-      !nzchar(Sys.getenv("RESOLVE_R_NO_THREAD_PIN"))) {
-    try(.Call("_resolve_resolve_set_thread_pools", 1L, 1L, PACKAGE = "resolve"),
+  n_threads <- suppressWarnings(as.integer(Sys.getenv("RESOLVE_R_TORCH_THREADS", "")))
+  if (!is.na(n_threads) && n_threads >= 1L) {
+    try(.Call("_resolve_resolve_set_thread_pools", n_threads, n_threads,
+              PACKAGE = "resolve"),
         silent = TRUE)
   }
   reg.finalizer(
