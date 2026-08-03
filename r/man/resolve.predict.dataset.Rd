@@ -4,7 +4,7 @@
 \alias{resolve.predict.dataset}
 \title{Predict with Dataset (C++ API)}
 \usage{
-resolve.predict.dataset(predictor, dataset, returnLatent = FALSE)
+resolve.predict.dataset(predictor, dataset, returnLatent = FALSE, batchSize = 4096L)
 }
 \arguments{
 \item{predictor}{A Predictor object from resolve.load()}
@@ -12,6 +12,11 @@ resolve.predict.dataset(predictor, dataset, returnLatent = FALSE)
 \item{dataset}{A ResolveDataset object from resolve.dataset.csv()}
 
 \item{returnLatent}{Return latent representations (default FALSE)}
+
+\item{batchSize}{Forward-pass chunk size along dim 0 (default 4096). Use -1
+for a single forward over the whole dataset (can OOM on large inputs); a
+positive value chunks the forward and concatenates results on CPU to bound
+peak VRAM. Matches the Python \code{batch_size} argument.}
 }
 \value{
 Named list of prediction arrays

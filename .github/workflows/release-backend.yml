@@ -1,0 +1,237 @@
+name: Release resolve_c backend
+
+# Builds the prebuilt `resolve_c` shared library (bundling libtorch) for each
+# supported platform and attaches it to the GitHub Release as
+#   resolve_c-<os>-<arch>-cpu.zip
+# which is exactly the asset resolve.install_backend() downloads:
+#   https://github.com/gcol33/resolve/releases/download/v<version>/resolve_c-<os>-<arch>-cpu.zip
+# (r/R/resolve.R). The tag MUST be v<r/DESCRIPTION Version> because the R side
+# builds the URL from packageVersion("resolve"); the prepare job enforces that.
+#
+# Build flags mirror .github/workflows/r-cmd-check.yml exactly (CPU libtorch,
+# OpenMP off, only the resolve_c target) -- that is the reviewed, per-PR-tested
+# build path. The new work here is packaging a SELF-CONTAINED zip (resolve_c +
+# every libtorch runtime library flattened to the archive root) and verifying it
+# loads through the installed package before publishing.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and attach assets to (e.g. v0.7.2)'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-backend-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  LIBTORCH_VERSION: '2.6.0'
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag and guard against version drift
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          VERSION="$(grep '^Version:' r/DESCRIPTION | awk '{print $2}')"
+          echo "Release tag: $TAG   r/DESCRIPTION Version: $VERSION"
+          if [ "$TAG" != "v${VERSION}" ]; then
+            echo "::error::tag '$TAG' != 'v${VERSION}'. resolve.install_backend() builds its download URL from packageVersion('resolve'), so the release tag MUST be v<DESCRIPTION Version>. Bump r/DESCRIPTION or retag."
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure the release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.meta.outputs.tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; assets will be uploaded with --clobber."
+          else
+            gh release create "$TAG" --verify-tag --title "$TAG" \
+              --notes "Prebuilt \`resolve_c\` backends for the R package. After \`install.packages(\"resolve\")\`, call \`resolve.install_backend()\` to fetch the asset matching the host OS/arch."
+          fi
+
+  build:
+    needs: prepare
+    runs-on: ${{ matrix.config.os }}
+    name: ${{ matrix.config.os_name }}-${{ matrix.config.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {os: ubuntu-latest,  os_name: linux,   arch: x86_64}
+          - {os: macos-latest,   os_name: macos,   arch: arm64}
+          - {os: windows-latest, os_name: windows, arch: x86_64}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ASSET: resolve_c-${{ matrix.config.os_name }}-${{ matrix.config.arch }}-cpu.zip
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---- libtorch (CPU) -- same artifacts as r-cmd-check.yml ------------
+      - name: Download libtorch (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          wget -q "https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
+          unzip -q "libtorch-cxx11-abi-shared-with-deps-${LIBTORCH_VERSION}+cpu.zip"
+          echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
+
+      - name: Download libtorch (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          wget -q "https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-${LIBTORCH_VERSION}.zip"
+          unzip -q "libtorch-macos-arm64-${LIBTORCH_VERSION}.zip"
+          echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
+
+      - name: Download libtorch (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          curl -sSL -o libtorch.zip "https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
+          7z x -y libtorch.zip > /dev/null
+          echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
+
+      # ---- build resolve_c -- same flags as r-cmd-check.yml ---------------
+      - name: Build resolve_c (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cmake -S src/core -B build_c \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_PYTHON=OFF -DBUILD_CLI=OFF -DBUILD_TESTS=OFF \
+            -DBUILD_R_CAPI=ON -DUSE_CUDA=OFF -DRESOLVE_USE_OPENMP=OFF \
+            -DTorch_DIR="$LIBTORCH/share/cmake/Torch"
+          cmake --build build_c --target resolve_c --parallel 2
+
+      - name: Set up MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build resolve_c (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          rem resolve_c MUST be built with MSVC (mingw cannot compile the MSVC
+          rem libtorch headers -- the whole reason for the C facade). Rtools is on
+          rem PATH from setup-r elsewhere; force cl.exe so Ninja does not pick up
+          rem a stray g++.
+          cmake -S src/core -B build_c -G Ninja ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
+            -DBUILD_PYTHON=OFF -DBUILD_CLI=OFF -DBUILD_TESTS=OFF ^
+            -DBUILD_R_CAPI=ON -DUSE_CUDA=OFF -DRESOLVE_USE_OPENMP=OFF ^
+            -DTorch_DIR="%LIBTORCH%/share/cmake/Torch"
+          if errorlevel 1 exit /b 1
+          cmake --build build_c --target resolve_c
+          if errorlevel 1 exit /b 1
+
+      # ---- package a self-contained zip ----------------------------------
+      # Flatten resolve_c + every libtorch runtime library to the archive root,
+      # so unzipping into resolve.install_backend()'s target dir yields the
+      # library and all its dependencies as siblings (the loader path prepends
+      # exactly that dir). Windows resolves siblings via LOAD_WITH_ALTERED_SEARCH_PATH
+      # (resolve_capi_dynload.cpp); Linux via $ORIGIN in libtorch + LD_LIBRARY_PATH;
+      # macOS via an added @loader_path rpath (below) + DYLD_LIBRARY_PATH.
+      - name: Stage and zip (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf stage && mkdir stage
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            cp build_c/libresolve_c.dylib stage/
+            cp libtorch/lib/*.dylib stage/
+            # Make the bundle resolve libtorch next to itself regardless of
+            # DYLD_LIBRARY_PATH. install_name_tool invalidates the ad-hoc
+            # signature on arm64 (which then refuses to load), so re-sign.
+            install_name_tool -add_rpath @loader_path stage/libresolve_c.dylib || true
+            codesign --force --sign - stage/libresolve_c.dylib
+          else
+            cp build_c/libresolve_c.so stage/
+            cp -a libtorch/lib/*.so* stage/
+          fi
+          ( cd stage && zip -rq -X "../$ASSET" . )
+          echo "Archive contents:"; unzip -l "$ASSET"
+
+      - name: Stage and zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -Recurse -Force stage -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path stage | Out-Null
+          Copy-Item build_c\resolve_c.dll stage\
+          # libtorch win ships its runtime DLLs under lib/. The MSVC C++ runtime
+          # (vcruntime140*, msvcp140*) is assumed present, matching libtorch's own
+          # redistribution model.
+          Copy-Item libtorch\lib\*.dll stage\
+          Compress-Archive -Path stage\* -DestinationPath $env:ASSET -Force
+          Write-Host "Archive contents:"
+          Expand-Archive -Path $env:ASSET -DestinationPath _peek -Force
+          Get-ChildItem _peek | Select-Object Name | Format-Table -AutoSize
+          Remove-Item -Recurse -Force _peek
+
+      # ---- install the backend-free package and verify the zip loads ------
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: r
+          extra-packages: any::Rcpp
+
+      - name: Install resolve (no backend linked)
+        shell: bash
+        run: R CMD INSTALL r
+
+      - name: Verify the packaged backend loads
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf backend_home && mkdir backend_home
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            powershell -NoProfile -Command "Expand-Archive -Path '$ASSET' -DestinationPath backend_home -Force"
+          else
+            unzip -q "$ASSET" -d backend_home
+          fi
+          # Move the build-tree libtorch aside so a stale absolute rpath cannot
+          # satisfy the load: the backend must resolve every dependency from the
+          # unzipped bundle alone -- the situation on a user's machine.
+          mv libtorch libtorch_aside
+          export RESOLVE_C_HOME="$PWD/backend_home"
+          Rscript r/tools/verify_backend.R
+
+      - name: Upload asset to workflow run
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET }}
+          path: ${{ env.ASSET }}
+          retention-days: 7
+
+      - name: Attach asset to the release
+        shell: bash
+        run: gh release upload "${{ needs.prepare.outputs.tag }}" "$ASSET" --clobber
