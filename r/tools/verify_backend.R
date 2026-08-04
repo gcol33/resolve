@@ -9,9 +9,13 @@
 home <- Sys.getenv("RESOLVE_C_HOME", "")
 if (!nzchar(home)) stop("RESOLVE_C_HOME is not set")
 
-libname <- if (.Platform$OS.type == "windows") "resolve_c.dll"
-           else if (Sys.info()[["sysname"]] == "Darwin") "libresolve_c.dylib"
-           else "libresolve_c.so"
+libname <- if (.Platform$OS.type == "windows") {
+  "resolve_c.dll"
+} else if (Sys.info()[["sysname"]] == "Darwin") {
+  "libresolve_c.dylib"
+} else {
+  "libresolve_c.so"
+}
 lib <- file.path(home, libname)
 if (!file.exists(lib)) {
   stop("bundle at ", home, " does not contain ", libname,
