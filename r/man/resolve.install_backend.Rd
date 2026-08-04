@@ -6,7 +6,7 @@
 \usage{
 resolve.install_backend(
   version = NULL,
-  variant = c("cpu", "cuda"),
+  variant = "cpu",
   url = NULL,
   dir = NULL,
   quiet = FALSE,
@@ -17,10 +17,13 @@ resolve.install_backend(
 \item{version}{Release version to fetch (default: the installed package
 version). Ignored when \code{url} is given.}
 
-\item{variant}{\code{"cpu"} (default) or \code{"cuda"}.}
+\item{variant}{One of \code{"cpu"} (default), \code{"cu128"}, \code{"cu130"}, or \code{"cuda"}.
+\code{"cuda"} auto-selects the CUDA line from the installed NVIDIA driver
+(\code{cu130} for CUDA >= 13, else \code{cu128}). CUDA variants are Windows/Linux
+x86_64 only (no CUDA on macOS).}
 
-\item{url}{Explicit download URL for a \code{.zip} containing the library and
-its runtime dependencies. Overrides \code{version} / \code{variant}.}
+\item{url}{Explicit download URL for a \code{.zip} containing the library and its
+runtime dependencies. Overrides \code{version} / \code{variant}.}
 
 \item{dir}{Destination directory (default: the package's user data dir).}
 
@@ -36,14 +39,20 @@ its runtime dependencies. Overrides \code{version} / \code{variant}.}
 Fetch a prebuilt \code{resolve_c} shared library (with its bundled libtorch
 runtime) and load it, so the dataset / training / prediction verbs become
 available. This mirrors \code{torch::install_torch()}: the CRAN package is small
-and backend-free, and the heavy binary is fetched on first use into the user's
-data directory (\code{tools::R_user_dir("resolve", "data")}).
+and backend-free, and the heavy binary is fetched on first use into the
+user's data directory (\code{tools::R_user_dir("resolve", "data")}).
 }
 \details{
-The default download URL points at a per-platform asset on the package's GitHub
-Releases; supply \code{url} to install from a local or private mirror. The
-\code{cpu} variant is the default and matches what the R bindings are tested
-against; \code{cuda} pulls a GPU-enabled build where published.
+The default download URL points at a per-platform asset on the package's
+GitHub Releases; supply \code{url} to install from a local or private mirror.
+
+The \code{cpu} variant is self-contained (its libtorch is bundled in the download).
+The CUDA variants ship only the small \code{resolve_c} library on the GitHub
+release and fetch the matching official libtorch (2-4 GB) from
+\code{download.pytorch.org} on first install, pinned to the exact version
+\code{resolve_c} was built against so the ABI matches. GPU training then runs
+through the ordinary \code{device = "cuda"} path of \code{\link[=resolve.train.dataset]{resolve.train.dataset()}} /
+\code{\link[=resolve.load]{resolve.load()}}.
 }
 \examples{
 \dontrun{
@@ -53,5 +62,5 @@ resolve.install_backend(url = "file:///path/to/resolve_c-linux-x86_64-cpu.zip")
 }
 }
 \seealso{
-\code{\link{resolve.available}}
+\code{\link[=resolve.available]{resolve.available()}}
 }

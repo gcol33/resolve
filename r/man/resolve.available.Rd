@@ -10,17 +10,16 @@ resolve.available()
 \code{TRUE} if the resolve_c backend is loaded, else \code{FALSE}.
 }
 \description{
-The R package is a thin client over the \code{resolve_c} shared library (the C
-ABI over the RESOLVE engine, which bundles libtorch). That library is loaded at
+The R package is a thin client over the \code{resolve_c} shared library (the C ABI
+over the RESOLVE engine, which bundles libtorch). That library is loaded at
 runtime rather than linked at build time, so the package installs and checks
 without it. This returns \code{TRUE} once the backend has been located and bound
-(at load, or after \code{\link{resolve.install_backend}}). The dataset /
-training / prediction verbs require it; metric helpers and input validation do
-not.
+(at load, or after \code{\link[=resolve.install_backend]{resolve.install_backend()}}). The dataset / training /
+prediction verbs require it; metric helpers and input validation do not.
 }
 \examples{
 resolve.available()
 }
 \seealso{
-\code{\link{resolve.install_backend}}
+\code{\link[=resolve.install_backend]{resolve.install_backend()}}
 }

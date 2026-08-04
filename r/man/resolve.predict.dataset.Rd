@@ -4,7 +4,12 @@
 \alias{resolve.predict.dataset}
 \title{Predict with Dataset (C++ API)}
 \usage{
-resolve.predict.dataset(predictor, dataset, returnLatent = FALSE, batchSize = 4096L)
+resolve.predict.dataset(
+  predictor,
+  dataset,
+  returnLatent = FALSE,
+  batchSize = 4096L
+)
 }
 \arguments{
 \item{predictor}{A Predictor object from resolve.load()}

@@ -7,7 +7,7 @@
 resolve.version()
 }
 \value{
-Version string from C++ core
+Version string from the C++ core.
 }
 \description{
 Get RESOLVE version

@@ -54,6 +54,132 @@ NULL
   ""
 }
 
+# --- backend variant registry + GPU detection --------------------------------
+
+# Pinned libtorch version the CUDA resolve_c binaries are built against. The
+# release CI MUST build resolve_c against this same version: a resolve_c built
+# against libtorch X only loads against libtorch X's DLLs (no cross-version C++
+# ABI), so this constant is the single source both the downloader and CI share.
+.RESOLVE_LIBTORCH_CUDA_VERSION <- "2.9.0"
+
+# Host OS ("windows"/"macos"/"linux") and CPU arch ("x86_64"/"arm64").
+.resolve_os_arch <- function() {
+  os <- if (.Platform$OS.type == "windows") "windows"
+        else if (Sys.info()[["sysname"]] == "Darwin") "macos" else "linux"
+  arch <- switch(R.version$arch, x86_64 = "x86_64", aarch64 = "arm64", R.version$arch)
+  list(os = os, arch = arch)
+}
+
+# Fetch plan for a backend variant: the small resolve_c asset on the package's
+# GitHub release, plus (CUDA only) the matching official libtorch on PyTorch's
+# CDN that resolve_c was built against. Adding a CUDA line later is one row here
+# plus one CI matrix entry -- no other code changes.
+.resolve_backend_registry <- function(variant, os = NULL, arch = NULL) {
+  oa <- .resolve_os_arch()
+  if (is.null(os)) os <- oa$os
+  if (is.null(arch)) arch <- oa$arch
+  ver <- .RESOLVE_LIBTORCH_CUDA_VERSION
+  libtorch_url <- function(cu) {
+    # Linux CUDA libtorch is the pre-cxx11 ABI build; Windows is win-shared. The
+    # C ABI boundary is plain C types, so resolve_c's internal libstdc++ ABI does
+    # not reach the R client either way.
+    stem <- if (os == "windows") "libtorch-win-shared-with-deps"
+            else "libtorch-shared-with-deps"
+    sprintf("https://download.pytorch.org/libtorch/%s/%s-%s%%2B%s.zip",
+            cu, stem, ver, cu)
+  }
+  reg <- list(
+    cpu   = list(cuda = FALSE, libtorch_url = NULL),
+    cu128 = list(cuda = TRUE,  libtorch_url = libtorch_url("cu128")),
+    cu130 = list(cuda = TRUE,  libtorch_url = libtorch_url("cu130"))
+  )
+  entry <- reg[[variant]]
+  if (is.null(entry)) {
+    stop(sprintf("unknown backend variant '%s' (known: %s)",
+                 variant, paste(names(reg), collapse = ", ")), call. = FALSE)
+  }
+  entry$variant <- variant
+  entry$github_asset <- sprintf("resolve_c-%s-%s-%s.zip", os, arch, variant)
+  entry
+}
+
+# TRUE if an NVIDIA GPU is visible (nvidia-smi lists at least one device).
+.resolve_has_nvidia_gpu <- function() {
+  smi <- Sys.which("nvidia-smi")
+  if (!nzchar(smi)) return(FALSE)
+  out <- tryCatch(
+    suppressWarnings(system2(smi, "--query-gpu=name --format=csv,noheader",
+                             stdout = TRUE, stderr = FALSE)),
+    error = function(e) character())
+  length(out) > 0 && any(nzchar(out))
+}
+
+# Max CUDA version the installed driver supports (from nvidia-smi's banner), as a
+# numeric like 13.1, or NA if unavailable.
+.resolve_driver_cuda_version <- function() {
+  smi <- Sys.which("nvidia-smi")
+  if (!nzchar(smi)) return(NA_real_)
+  out <- tryCatch(suppressWarnings(system2(smi, stdout = TRUE, stderr = FALSE)),
+                  error = function(e) character())
+  # Linux/older banners say "CUDA Version: 12.6"; recent Windows drivers say
+  # "CUDA UMD Version: 13.3" (the driver's max supported CUDA). Match both.
+  hit <- grep("CUDA[^:]*Version:", out, value = TRUE)
+  if (!length(hit)) return(NA_real_)
+  m <- regmatches(hit[1], regexpr("CUDA[^:]*Version:\\s*[0-9]+\\.[0-9]+", hit[1]))
+  if (!length(m)) return(NA_real_)
+  as.numeric(sub(".*Version:\\s*", "", m))
+}
+
+# Resolve variant="cuda" to a concrete line from the driver's CUDA version.
+# NULL if no GPU is present; errors if the driver is too old for any line.
+.resolve_auto_cuda_variant <- function() {
+  if (!.resolve_has_nvidia_gpu()) return(NULL)
+  cv <- .resolve_driver_cuda_version()
+  if (is.na(cv)) return("cu128")            # GPU present, version unknown -> broadest
+  if (cv >= 13.0) return("cu130")
+  if (cv >= 12.8) return("cu128")
+  stop(sprintf(paste0("the NVIDIA driver supports only CUDA %.1f, but resolve's ",
+                      "CUDA backends need >= 12.8; update the driver or use ",
+                      "variant='cpu'"), cv), call. = FALSE)
+}
+
+# Normalize a user variant to a concrete one ("cuda" -> cu130/cu128 by driver).
+.resolve_normalize_variant <- function(variant) {
+  variant <- variant[1]
+  if (variant %in% c("cpu", "cu128", "cu130")) return(variant)
+  if (identical(variant, "cuda")) {
+    v <- .resolve_auto_cuda_variant()
+    if (is.null(v)) {
+      stop("variant='cuda' but no NVIDIA GPU was detected; use variant='cpu', ",
+           "or name a line explicitly (cu128 / cu130)", call. = FALSE)
+    }
+    return(v)
+  }
+  stop("variant must be one of 'cpu', 'cu128', 'cu130', or 'cuda'", call. = FALSE)
+}
+
+# TRUE if the installed backend is a CUDA build (torch_cuda ships beside
+# resolve_c). Used to nudge CPU-backend users who actually have a GPU.
+.resolve_backend_is_cuda <- function() {
+  cuda_lib <- if (.Platform$OS.type == "windows") "torch_cuda.dll" else "libtorch_cuda.so"
+  for (d in .resolve_backend_dirs()) {
+    if (file.exists(file.path(d, cuda_lib))) return(TRUE)
+  }
+  FALSE
+}
+
+# Download a .zip from `url` and unzip it into `dir`. Raises the download timeout
+# for the multi-GB libtorch archives (R's 60s default would abort them).
+.resolve_download_unzip <- function(url, dir, quiet = FALSE) {
+  old <- options(timeout = max(3600, getOption("timeout", 60)))
+  on.exit(options(old), add = TRUE)
+  tmp <- tempfile(fileext = ".zip")
+  on.exit(unlink(tmp), add = TRUE)
+  if (!quiet) message("Downloading ", url)
+  utils::download.file(url, tmp, mode = "wb", quiet = quiet)
+  utils::unzip(tmp, exdir = dir)
+}
+
 # Prepend `dir` to the OS loader path so resolve_c's sibling runtime libraries
 # (the libtorch DLLs / shared objects that live next to it) resolve at load.
 .resolve_prepend_loader_path <- function(dir) {
@@ -139,12 +265,23 @@ NULL
 }
 
 .onAttach <- function(libname, pkgname) {
-  if (!isTRUE(tryCatch(resolve_capi_is_available(), error = function(e) FALSE))) {
+  have <- isTRUE(tryCatch(resolve_capi_is_available(), error = function(e) FALSE))
+  gpu <- .resolve_has_nvidia_gpu()
+  if (!have) {
+    hint <- if (gpu) "resolve.install_backend(variant = \"cuda\")  # GPU build for your NVIDIA card"
+            else     "resolve.install_backend()"
     packageStartupMessage(
       "resolve: the resolve_c backend is not installed, so training / dataset / ",
       "prediction verbs are unavailable.\n",
-      "Install it with resolve.install_backend(), or set RESOLVE_C_HOME to a ",
-      "directory containing the resolve_c shared library."
+      "Install it with ", hint, ", or set RESOLVE_C_HOME to a directory ",
+      "containing the resolve_c shared library."
+    )
+  } else if (gpu && !.resolve_backend_is_cuda()) {
+    # Backend works, but it's the CPU build on a machine that has a GPU.
+    packageStartupMessage(
+      "resolve: an NVIDIA GPU was detected but the CPU backend is loaded. ",
+      "For GPU-accelerated training install the GPU build:\n",
+      "  resolve.install_backend(variant = \"cuda\", force = TRUE)"
     )
   }
 }

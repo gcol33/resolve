@@ -167,13 +167,22 @@ resolve.available <- function() {
 #' user's data directory (`tools::R_user_dir("resolve", "data")`).
 #'
 #' The default download URL points at a per-platform asset on the package's
-#' GitHub Releases; supply `url` to install from a local or private mirror. The
-#' `cpu` variant is the default and matches what the R bindings are tested
-#' against; `cuda` pulls a GPU-enabled build where published.
+#' GitHub Releases; supply `url` to install from a local or private mirror.
+#'
+#' The `cpu` variant is self-contained (its libtorch is bundled in the download).
+#' The CUDA variants ship only the small `resolve_c` library on the GitHub
+#' release and fetch the matching official libtorch (2-4 GB) from
+#' `download.pytorch.org` on first install, pinned to the exact version
+#' `resolve_c` was built against so the ABI matches. GPU training then runs
+#' through the ordinary `device = "cuda"` path of [resolve.train.dataset()] /
+#' [resolve.load()].
 #'
 #' @param version Release version to fetch (default: the installed package
 #'   version). Ignored when `url` is given.
-#' @param variant `"cpu"` (default) or `"cuda"`.
+#' @param variant One of `"cpu"` (default), `"cu128"`, `"cu130"`, or `"cuda"`.
+#'   `"cuda"` auto-selects the CUDA line from the installed NVIDIA driver
+#'   (`cu130` for CUDA >= 13, else `cu128`). CUDA variants are Windows/Linux
+#'   x86_64 only (no CUDA on macOS).
 #' @param url Explicit download URL for a `.zip` containing the library and its
 #'   runtime dependencies. Overrides `version` / `variant`.
 #' @param dir Destination directory (default: the package's user data dir).
@@ -190,12 +199,19 @@ resolve.available <- function() {
 #' }
 #' @export
 resolve.install_backend <- function(version = NULL,
-                                     variant = c("cpu", "cuda"),
+                                     variant = "cpu",
                                      url = NULL,
                                      dir = NULL,
                                      quiet = FALSE,
                                      force = FALSE) {
-  variant <- match.arg(variant)
+  # "cuda" -> a concrete cu128/cu130 line from the installed driver.
+  variant <- .resolve_normalize_variant(variant)
+  oa <- .resolve_os_arch()
+  entry <- .resolve_backend_registry(variant, oa$os, oa$arch)
+  if (isTRUE(entry$cuda) && oa$os == "macos") {
+    stop("CUDA backends are not available on macOS (no CUDA on Apple hardware); ",
+         "use variant = 'cpu'.", call. = FALSE)
+  }
   if (is.null(dir)) {
     dir <- file.path(tools::R_user_dir("resolve", "data"), "resolve_c")
   }
@@ -213,28 +229,43 @@ resolve.install_backend <- function(version = NULL,
     return(invisible(dir))
   }
 
+  # resolve_c itself (small): explicit url override, else the GitHub release asset.
   if (is.null(url)) {
     if (is.null(version)) version <- as.character(utils::packageVersion("resolve"))
-    os <- if (.Platform$OS.type == "windows") "windows"
-          else if (Sys.info()[["sysname"]] == "Darwin") "macos"
-          else "linux"
-    arch <- switch(R.version$arch,
-                   "x86_64"  = "x86_64",
-                   "aarch64" = "arm64",
-                   R.version$arch)
-    asset <- sprintf("resolve_c-%s-%s-%s.zip", os, arch, variant)
     url <- sprintf(
       "https://github.com/gcol33/resolve/releases/download/v%s/%s",
-      version, asset
+      version, entry$github_asset
     )
   }
 
   dir.create(dir, recursive = TRUE, showWarnings = FALSE)
-  tmp <- tempfile(fileext = ".zip")
-  on.exit(unlink(tmp), add = TRUE)
-  if (!quiet) message("Downloading resolve_c from ", url)
-  utils::download.file(url, tmp, mode = "wb", quiet = quiet)
-  utils::unzip(tmp, exdir = dir)
+  if (force) unlink(list.files(dir, full.names = TRUE), recursive = TRUE)
+
+  if (!quiet) message("Installing resolve_c backend '", variant, "' into ", dir)
+  .resolve_download_unzip(url, dir, quiet)
+
+  # CUDA variants ship only resolve_c on GitHub (the >2 GB libtorch cannot be a
+  # release asset). Fetch the matching official libtorch from PyTorch's CDN,
+  # pinned to the exact version resolve_c was built against so the C++ ABI
+  # matches, and flatten its runtime libraries next to resolve_c.
+  if (isTRUE(entry$cuda)) {
+    if (!quiet) {
+      message("Fetching matching libtorch (", variant, ", ~2-4 GB, one-time) ",
+              "from download.pytorch.org ...")
+    }
+    lt_dir <- file.path(dir, ".libtorch_tmp")
+    unlink(lt_dir, recursive = TRUE)
+    dir.create(lt_dir, showWarnings = FALSE)
+    on.exit(unlink(lt_dir, recursive = TRUE), add = TRUE)
+    .resolve_download_unzip(entry$libtorch_url, lt_dir, quiet)
+    lt_lib <- file.path(lt_dir, "libtorch", "lib")
+    if (!dir.exists(lt_lib)) {
+      stop("the downloaded libtorch archive had no libtorch/lib directory.")
+    }
+    if (!all(file.copy(list.files(lt_lib, full.names = TRUE), dir, overwrite = TRUE))) {
+      stop("failed to place the libtorch runtime libraries next to resolve_c.")
+    }
+  }
 
   if (!file.exists(dest_lib)) {
     stop("The downloaded archive did not contain ", libname, " under ", dir, ".")
@@ -246,7 +277,7 @@ resolve.install_backend <- function(version = NULL,
     stop("Downloaded resolve_c but could not load it: ",
          tryCatch(resolve_capi_load_error(), error = function(e) ""))
   }
-  if (!quiet) message("resolve_c installed and loaded from ", dir, ".")
+  if (!quiet) message("resolve_c backend '", variant, "' installed and loaded from ", dir, ".")
   invisible(dir)
 }
 

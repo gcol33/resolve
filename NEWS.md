@@ -1,5 +1,24 @@
 # RESOLVE Changelog
 
+## v0.7.2 (unreleased)
+
+### R package
+
+- **GPU training from R.** `resolve.install_backend()` gains CUDA variants:
+  `variant = "cu128"`, `"cu130"`, or `"cuda"` (auto-selects the line from the
+  installed NVIDIA driver -- `cu130` for CUDA >= 13, else `cu128`). The CUDA
+  builds ship only the small `resolve_c` library on the GitHub release and fetch
+  the matching official libtorch from `download.pytorch.org` on first install,
+  pinned to the exact version `resolve_c` was built against so the ABI matches;
+  GPU training then runs through the ordinary `device = "cuda"` path. A
+  backend-variant registry (`{os, arch, variant} -> {asset, libtorch}`) drives
+  the downloader, so adding a CUDA line later is one table row.
+- **GPU nudge.** On attach, if an NVIDIA GPU is detected but the CPU backend is
+  loaded (or none is), the package points to the GPU build.
+- The backend is loaded at runtime (`dlopen`/`LoadLibrary`) rather than linked,
+  so the package installs and `R CMD check`s with no backend present; libtorch
+  threads default to all cores (`RESOLVE_R_TORCH_THREADS=N` to pin/cap).
+
 ## v0.7.1 (2026-06-19)
 
 ### Packaging
