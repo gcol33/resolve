@@ -235,3 +235,115 @@ jobs:
       - name: Attach asset to the release
         shell: bash
         run: gh release upload "${{ needs.prepare.outputs.tag }}" "$ASSET" --clobber
+
+  # CUDA backends (Windows + Linux, x86_64). Unlike the CPU variant, these ship
+  # ONLY resolve_c on the release -- the multi-GB libtorch is fetched from
+  # download.pytorch.org by resolve.install_backend() at install time, pinned to
+  # TORCH_VER so the C++ ABI matches. TORCH_VER MUST equal
+  # .RESOLVE_LIBTORCH_CUDA_VERSION in r/R/zzz.R (the downloader's pinned version).
+  #
+  # CI has no GPU, so these jobs BUILD but cannot run a GPU smoke; runtime GPU
+  # verification is done on a real CUDA host (see dev_notes / project memory).
+  # First-run items to confirm on a real runner: the Jimver toolkit version
+  # strings resolve for 12.8/13.0, and TORCH_CUDA_ARCH_LIST is accepted by each
+  # toolkit (CUDA 13 dropped pre-Ampere archs).
+  build-cuda:
+    needs: prepare
+    runs-on: ${{ matrix.config.os }}
+    name: ${{ matrix.config.os_name }}-${{ matrix.config.cuda }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {os: windows-latest, os_name: windows, cuda: cu128, toolkit: '12.8.0'}
+          - {os: windows-latest, os_name: windows, cuda: cu130, toolkit: '13.0.0'}
+          - {os: ubuntu-latest,  os_name: linux,   cuda: cu128, toolkit: '12.8.0'}
+          - {os: ubuntu-latest,  os_name: linux,   cuda: cu130, toolkit: '13.0.0'}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ASSET: resolve_c-${{ matrix.config.os_name }}-x86_64-${{ matrix.config.cuda }}.zip
+      # Keep in lock-step with .RESOLVE_LIBTORCH_CUDA_VERSION in r/R/zzz.R.
+      TORCH_VER: '2.9.0'
+      # Ampere / Ampere-GA / Ada / Hopper / Blackwell. Covers modern NVIDIA cards
+      # including the sm_120 RTX 50-series; both cu128 and cu130 toolkits accept it.
+      TORCH_CUDA_ARCH_LIST: '8.0;8.6;8.9;9.0;12.0'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.24
+        with:
+          cuda: ${{ matrix.config.toolkit }}
+          method: network
+          sub-packages: '["nvcc"]'
+
+      - name: Download libtorch (Windows CUDA)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          curl -sSL -o libtorch.zip "https://download.pytorch.org/libtorch/${{ matrix.config.cuda }}/libtorch-win-shared-with-deps-${TORCH_VER}%2B${{ matrix.config.cuda }}.zip"
+          7z x -y libtorch.zip > /dev/null
+          echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
+
+      - name: Download libtorch (Linux CUDA, pre-cxx11)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          wget -q "https://download.pytorch.org/libtorch/${{ matrix.config.cuda }}/libtorch-shared-with-deps-${TORCH_VER}%2B${{ matrix.config.cuda }}.zip" -O libtorch.zip
+          unzip -q libtorch.zip
+          echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
+
+      - name: Set up MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build resolve_c (Windows CUDA)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          cmake -S src/core -B build_c -G Ninja ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_CXX_COMPILER=cl ^
+            -DBUILD_PYTHON=OFF -DBUILD_CLI=OFF -DBUILD_TESTS=OFF ^
+            -DBUILD_R_CAPI=ON -DUSE_CUDA=ON -DRESOLVE_USE_OPENMP=OFF ^
+            -DTORCH_CUDA_ARCH_LIST="%TORCH_CUDA_ARCH_LIST%" ^
+            -DCMAKE_CUDA_FLAGS="-allow-unsupported-compiler" ^
+            -DTorch_DIR="%LIBTORCH%/share/cmake/Torch"
+          if errorlevel 1 exit /b 1
+          cmake --build build_c --target resolve_c
+          if errorlevel 1 exit /b 1
+
+      - name: Build resolve_c (Linux CUDA)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cmake -S src/core -B build_c \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_PYTHON=OFF -DBUILD_CLI=OFF -DBUILD_TESTS=OFF \
+            -DBUILD_R_CAPI=ON -DUSE_CUDA=ON -DRESOLVE_USE_OPENMP=OFF \
+            -DTORCH_CUDA_ARCH_LIST="$TORCH_CUDA_ARCH_LIST" \
+            -DTorch_DIR="$LIBTORCH/share/cmake/Torch"
+          cmake --build build_c --target resolve_c --parallel 2
+
+      # Package resolve_c ONLY (no libtorch). The user's install_backend fetches
+      # the matching libtorch from PyTorch's CDN and flattens it beside this.
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path build_c\resolve_c.dll -DestinationPath $env:ASSET -Force
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: (cd build_c && zip -rq -X "../$ASSET" libresolve_c.so)
+
+      - name: Upload asset to workflow run
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET }}
+          path: ${{ env.ASSET }}
+          retention-days: 7
+
+      - name: Attach asset to the release
+        shell: bash
+        run: gh release upload "${{ needs.prepare.outputs.tag }}" "$ASSET" --clobber
