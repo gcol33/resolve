@@ -62,6 +62,25 @@ NULL
 # ABI), so this constant is the single source both the downloader and CI share.
 .RESOLVE_LIBTORCH_CUDA_VERSION <- "2.9.0"
 
+# NVIDIA CUDA math libraries that PyTorch's LINUX libtorch links by standard
+# soname but does not bundle (cudart/cusparse/cufft/cusolver/curand/cublas/
+# nvJitLink). resolve_c + libtorch_cuda need them, so install_backend fetches
+# them from NVIDIA's official redistributable CDN, version-pinned to the CUDA
+# line. Windows libtorch bundles the standard-named DLLs, so this is Linux-only.
+# URLs come from developer.download.nvidia.com/.../redist/redistrib_<cuda>.json.
+.RESOLVE_CUDA_REDIST <- list(
+  cu130 = c(
+    "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/linux-x86_64/cuda_cudart-linux-x86_64-13.0.48-archive.tar.xz",
+    "https://developer.download.nvidia.com/compute/cuda/redist/libcublas/linux-x86_64/libcublas-linux-x86_64-13.0.0.19-archive.tar.xz",
+    "https://developer.download.nvidia.com/compute/cuda/redist/libcusparse/linux-x86_64/libcusparse-linux-x86_64-12.6.2.49-archive.tar.xz",
+    "https://developer.download.nvidia.com/compute/cuda/redist/libcufft/linux-x86_64/libcufft-linux-x86_64-12.0.0.15-archive.tar.xz",
+    "https://developer.download.nvidia.com/compute/cuda/redist/libcusolver/linux-x86_64/libcusolver-linux-x86_64-12.0.3.29-archive.tar.xz",
+    "https://developer.download.nvidia.com/compute/cuda/redist/libcurand/linux-x86_64/libcurand-linux-x86_64-10.4.0.35-archive.tar.xz",
+    "https://developer.download.nvidia.com/compute/cuda/redist/libnvjitlink/linux-x86_64/libnvjitlink-linux-x86_64-13.0.39-archive.tar.xz"
+  )
+  # cu128 added when that line is built (from redistrib_12.8.x.json).
+)
+
 # Host OS ("windows"/"macos"/"linux") and CPU arch ("x86_64"/"arm64").
 .resolve_os_arch <- function() {
   os <- if (.Platform$OS.type == "windows") "windows"
@@ -100,6 +119,12 @@ NULL
   }
   entry$variant <- variant
   entry$github_asset <- sprintf("resolve_c-%s-%s-%s.zip", os, arch, variant)
+  # NVIDIA CUDA math libs to fetch alongside libtorch (Linux CUDA only).
+  entry$cuda_redist <- if (isTRUE(entry$cuda) && os == "linux") {
+    .RESOLVE_CUDA_REDIST[[variant]]
+  } else {
+    NULL
+  }
   entry
 }
 
@@ -178,6 +203,28 @@ NULL
   if (!quiet) message("Downloading ", url)
   utils::download.file(url, tmp, mode = "wb", quiet = quiet)
   utils::unzip(tmp, exdir = dir)
+}
+
+# Fetch an NVIDIA CUDA redistributable .tar.xz and flatten its lib/*.so* next to
+# resolve_c, preserving the soname symlinks. Linux-only (system tar handles xz;
+# cp -a preserves the libX.so.N -> libX.so.N.M.K links the loader resolves by
+# soname). Called once per component from install_backend on Linux CUDA installs.
+.resolve_fetch_cuda_lib <- function(url, dir, quiet = FALSE) {
+  old <- options(timeout = max(3600, getOption("timeout", 60)))
+  on.exit(options(old), add = TRUE)
+  tmp <- tempfile(fileext = ".tar.xz")
+  ex <- tempfile("nvcuda_")
+  on.exit(unlink(c(tmp, ex), recursive = TRUE), add = TRUE)
+  dir.create(ex, showWarnings = FALSE)
+  if (!quiet) message("  ", basename(url))
+  utils::download.file(url, tmp, mode = "wb", quiet = quiet)
+  utils::untar(tmp, exdir = ex)
+  libs <- Sys.glob(file.path(ex, "*", "lib", "*.so*"))
+  if (!length(libs)) stop("no lib/*.so in ", basename(url), call. = FALSE)
+  status <- system2("cp", c("-a", shQuote(libs), shQuote(dir)))
+  if (!identical(as.integer(status), 0L)) {
+    stop("failed to place CUDA runtime libraries from ", basename(url), call. = FALSE)
+  }
 }
 
 # Prepend `dir` to the OS loader path so resolve_c's sibling runtime libraries

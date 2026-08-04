@@ -267,6 +267,19 @@ resolve.install_backend <- function(version = NULL,
     }
   }
 
+  # Linux CUDA: PyTorch's libtorch links several NVIDIA math libraries by
+  # standard soname without bundling them (cudart / cusparse / cufft / cusolver
+  # / curand / cublas / nvJitLink). Fetch them from NVIDIA's redistributable CDN,
+  # version-pinned to the CUDA line, and flatten beside resolve_c. Windows
+  # libtorch bundles the standard-named DLLs, so this runs on Linux only.
+  if (isTRUE(entry$cuda) && length(entry$cuda_redist)) {
+    if (!quiet) {
+      message("Fetching CUDA runtime libraries from NVIDIA (",
+              length(entry$cuda_redist), " components, ~1.4 GB, one-time) ...")
+    }
+    for (u in entry$cuda_redist) .resolve_fetch_cuda_lib(u, dir, quiet)
+  }
+
   if (!file.exists(dest_lib)) {
     stop("The downloaded archive did not contain ", libname, " under ", dir, ".")
   }
