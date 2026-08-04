@@ -262,8 +262,12 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - {os: windows-latest, os_name: windows, cuda: cu128, toolkit: '12.8.0', subpkgs: '[]'}
-          - {os: windows-latest, os_name: windows, cuda: cu130, toolkit: '13.0.0', subpkgs: '[]'}
+          # Windows CUDA runs on windows-2022 (VS 2022 / MSVC 14.44). windows-latest
+          # ships VS18 / MSVC 14.51, on which CUDA's host frontend cudafe++ crashes
+          # (ACCESS_VIOLATION). The CPU windows build stays on windows-latest -- it
+          # never invokes nvcc, so the newer MSVC is fine there.
+          - {os: windows-2022,   os_name: windows, cuda: cu128, toolkit: '12.8.0', subpkgs: '[]'}
+          - {os: windows-2022,   os_name: windows, cuda: cu130, toolkit: '13.0.0', subpkgs: '[]'}
           - {os: ubuntu-latest,  os_name: linux,   cuda: cu128, toolkit: '12.8.0', subpkgs: '["toolkit"]'}
           - {os: ubuntu-latest,  os_name: linux,   cuda: cu130, toolkit: '13.0.0', subpkgs: '["toolkit"]'}
     env:
@@ -314,6 +318,10 @@ jobs:
       - name: Set up MSVC (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
+        with:
+          # Pin the CUDA-supported VS 2022 toolset. Without this, vcvars selects
+          # the newest installed toolset, and CUDA's cudafe++ crashes on 14.5x.
+          toolset: '14.44'
 
       - name: Build resolve_c (Windows CUDA)
         if: runner.os == 'Windows'
