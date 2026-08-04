@@ -137,6 +137,19 @@ if(BUILD_R_CAPI)
     set_property(TARGET resolve_c PROPERTY CXX_STANDARD 20)
     # Activate __declspec(dllexport) / visibility("default") on the C API.
     target_compile_definitions(resolve_c PRIVATE RESOLVE_CAPI_BUILD=1)
+    # Relocatable RPATH so the shipped library finds its sibling libtorch
+    # runtimes wherever the release zip is unzipped (issue #17 packaging flattens
+    # resolve_c + libtorch into one dir). libc10.so is a direct DT_NEEDED of
+    # libresolve_c.so, so $ORIGIN must be in this library's own DT_RUNPATH --
+    # a build-tree absolute RPATH to libtorch/lib alone leaves a relocated
+    # bundle unable to resolve it. macOS gets @loader_path via install_name_tool
+    # in the release workflow; Windows resolves siblings via the altered search
+    # path in resolve_capi_dynload.cpp.
+    if(UNIX AND NOT APPLE)
+        set_target_properties(resolve_c PROPERTIES
+            BUILD_RPATH "$ORIGIN"
+            INSTALL_RPATH "$ORIGIN")
+    endif()
     # torch TUs are large; MSVC needs /bigobj for the object that pulls in
     # the full engine + libtorch headers.
     if(MSVC)
