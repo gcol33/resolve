@@ -328,11 +328,24 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $exe = "$env:RUNNER_TEMP\vs_BuildTools.exe"
           Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vs_BuildTools.exe' -OutFile $exe
+          # A bare toolset component does not create a discoverable instance; install
+          # the VCTools workload (which lays down vcvarsall + a Windows SDK) plus the
+          # pinned 14.44 toolset, into the standard 2022\BuildTools path msvc-dev-cmd
+          # searches.
+          $installPath = 'C:\Program Files\Microsoft Visual Studio\2022\BuildTools'
           $p = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList @(
             '--quiet','--wait','--norestart','--nocache',
-            '--add','Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64'
+            '--installPath', $installPath,
+            '--add','Microsoft.VisualStudio.Workload.VCTools',
+            '--add','Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64',
+            '--includeRecommended'
           )
           if ($p.ExitCode -notin @(0,3010)) { throw "VS Build Tools install failed: exit $($p.ExitCode)" }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) { & $vswhere -products * -property installationPath }
+          if (-not (Test-Path "$installPath\VC\Auxiliary\Build\vcvarsall.bat")) {
+            throw "vcvarsall.bat not found under $installPath after install"
+          }
 
       - name: Set up MSVC (Windows)
         if: runner.os == 'Windows'
