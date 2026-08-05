@@ -262,12 +262,12 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          # Windows CUDA runs on windows-2022 (VS 2022 / MSVC 14.44). windows-latest
-          # ships VS18 / MSVC 14.51, on which CUDA's host frontend cudafe++ crashes
-          # (ACCESS_VIOLATION). The CPU windows build stays on windows-latest -- it
-          # never invokes nvcc, so the newer MSVC is fine there.
-          - {os: windows-2022,   os_name: windows, cuda: cu128, toolkit: '12.8.0', subpkgs: '[]'}
-          - {os: windows-2022,   os_name: windows, cuda: cu130, toolkit: '13.0.0', subpkgs: '[]'}
+          # windows-latest ships both VS 2022 (MSVC 14.44) and VS18 (MSVC 14.51).
+          # The MSVC step below pins the VS 2022 / 14.44 toolset because CUDA's host
+          # frontend cudafe++ crashes (ACCESS_VIOLATION) on 14.51. The CPU windows
+          # build uses the default (newest) toolset -- it never invokes nvcc.
+          - {os: windows-latest, os_name: windows, cuda: cu128, toolkit: '12.8.0', subpkgs: '[]'}
+          - {os: windows-latest, os_name: windows, cuda: cu130, toolkit: '13.0.0', subpkgs: '[]'}
           - {os: ubuntu-latest,  os_name: linux,   cuda: cu128, toolkit: '12.8.0', subpkgs: '["toolkit"]'}
           - {os: ubuntu-latest,  os_name: linux,   cuda: cu130, toolkit: '13.0.0', subpkgs: '["toolkit"]'}
     env:
@@ -319,9 +319,19 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
         with:
-          # Pin the CUDA-supported VS 2022 toolset. Without this, vcvars selects
-          # the newest installed toolset, and CUDA's cudafe++ crashes on 14.5x.
+          # Select VS 2022's CUDA-supported 14.44 toolset. windows-latest also has
+          # VS18 (MSVC 14.51), which vcvars picks by default and on which CUDA's
+          # cudafe++ crashes (ACCESS_VIOLATION). vsversion forces the VS 2022
+          # instance; toolset forces the 14.44 tools within it.
+          vsversion: '2022'
           toolset: '14.44'
+
+      - name: Show selected MSVC toolset (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          echo VCToolsVersion=%VCToolsVersion%
+          where cl
 
       - name: Build resolve_c (Windows CUDA)
         if: runner.os == 'Windows'
