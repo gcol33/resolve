@@ -262,10 +262,10 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          # windows-latest ships both VS 2022 (MSVC 14.44) and VS18 (MSVC 14.51).
-          # The MSVC step below pins the VS 2022 / 14.44 toolset because CUDA's host
-          # frontend cudafe++ crashes (ACCESS_VIOLATION) on 14.51. The CPU windows
-          # build uses the default (newest) toolset -- it never invokes nvcc.
+          # windows-latest ships only VS18 (MSVC 14.51), on which CUDA's cudafe++
+          # crashes; the Windows CUDA steps below install and pin the VS 2022 / 14.44
+          # toolset. The CPU windows build (separate job) uses the default VS18
+          # toolset -- it never invokes nvcc, so 14.51 is fine there.
           - {os: windows-latest, os_name: windows, cuda: cu128, toolkit: '12.8.0', subpkgs: '[]'}
           - {os: windows-latest, os_name: windows, cuda: cu130, toolkit: '13.0.0', subpkgs: '[]'}
           - {os: ubuntu-latest,  os_name: linux,   cuda: cu128, toolkit: '12.8.0', subpkgs: '["toolkit"]'}
@@ -315,14 +315,30 @@ jobs:
           rm -f libtorch.zip
           echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
 
+      # windows-latest ships only VS18 (MSVC 14.51), on which CUDA's host frontend
+      # cudafe++ crashes (ACCESS_VIOLATION). Install a VS 2022 (17.14) Build Tools
+      # instance carrying the 14.44 toolset -- the CUDA-supported one the local
+      # GPU-verified build used -- so nvcc gets a working host compiler. Only the
+      # compiler component is added; vcvarsall reuses a Windows SDK already on the
+      # runner, keeping the install small.
+      - name: Install VS 2022 MSVC 14.44 toolset (Windows CUDA)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = "$env:RUNNER_TEMP\vs_BuildTools.exe"
+          Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vs_BuildTools.exe' -OutFile $exe
+          $p = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList @(
+            '--quiet','--wait','--norestart','--nocache',
+            '--add','Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64'
+          )
+          if ($p.ExitCode -notin @(0,3010)) { throw "VS Build Tools install failed: exit $($p.ExitCode)" }
+
       - name: Set up MSVC (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
         with:
-          # Select VS 2022's CUDA-supported 14.44 toolset. windows-latest also has
-          # VS18 (MSVC 14.51), which vcvars picks by default and on which CUDA's
-          # cudafe++ crashes (ACCESS_VIOLATION). vsversion forces the VS 2022
-          # instance; toolset forces the 14.44 tools within it.
+          # Select the VS 2022 / 14.44 toolset installed above, not VS18 / 14.51.
           vsversion: '2022'
           toolset: '14.44'
 
