@@ -262,12 +262,14 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          # windows-latest ships only VS18 (MSVC 14.51), on which CUDA's cudafe++
-          # crashes; the Windows CUDA steps below install and pin the VS 2022 / 14.44
-          # toolset. The CPU windows build (separate job) uses the default VS18
-          # toolset -- it never invokes nvcc, so 14.51 is fine there.
-          - {os: windows-latest, os_name: windows, cuda: cu128, toolkit: '12.8.0', subpkgs: '[]'}
-          - {os: windows-latest, os_name: windows, cuda: cu130, toolkit: '13.0.0', subpkgs: '[]'}
+          # Windows CUDA runs on windows-2022 (VS 2022 / MSVC 14.44). CUDA's host
+          # frontend cudafe++ crashes (ACCESS_VIOLATION) on the MSVC 14.51 that
+          # windows-latest (VS18) now ships, and no VS 2022 toolset can be grafted
+          # onto that image (its VS18-era installer will not co-install VS 2022).
+          # 14.44 is the toolset the local GPU-verified build uses. The CPU windows
+          # build stays on windows-latest -- it never invokes nvcc.
+          - {os: windows-2022,   os_name: windows, cuda: cu128, toolkit: '12.8.0', subpkgs: '[]'}
+          - {os: windows-2022,   os_name: windows, cuda: cu130, toolkit: '13.0.0', subpkgs: '[]'}
           - {os: ubuntu-latest,  os_name: linux,   cuda: cu128, toolkit: '12.8.0', subpkgs: '["toolkit"]'}
           - {os: ubuntu-latest,  os_name: linux,   cuda: cu130, toolkit: '13.0.0', subpkgs: '["toolkit"]'}
     env:
@@ -315,44 +317,13 @@ jobs:
           rm -f libtorch.zip
           echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
 
-      # windows-latest ships only VS18 (MSVC 14.51), on which CUDA's host frontend
-      # cudafe++ crashes (ACCESS_VIOLATION). Install a VS 2022 (17.14) Build Tools
-      # instance carrying the 14.44 toolset -- the CUDA-supported one the local
-      # GPU-verified build used -- so nvcc gets a working host compiler. Only the
-      # compiler component is added; vcvarsall reuses a Windows SDK already on the
-      # runner, keeping the install small.
-      - name: Install VS 2022 MSVC 14.44 toolset (Windows CUDA)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $exe = "$env:RUNNER_TEMP\vs_BuildTools.exe"
-          Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vs_BuildTools.exe' -OutFile $exe
-          # A bare toolset component does not create a discoverable instance; install
-          # the VCTools workload (which lays down vcvarsall + a Windows SDK) plus the
-          # pinned 14.44 toolset, into the standard 2022\BuildTools path msvc-dev-cmd
-          # searches.
-          $installPath = 'C:\Program Files\Microsoft Visual Studio\2022\BuildTools'
-          $p = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList @(
-            '--quiet','--wait','--norestart','--nocache',
-            '--installPath', $installPath,
-            '--add','Microsoft.VisualStudio.Workload.VCTools',
-            '--add','Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64',
-            '--includeRecommended'
-          )
-          if ($p.ExitCode -notin @(0,3010)) { throw "VS Build Tools install failed: exit $($p.ExitCode)" }
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          if (Test-Path $vswhere) { & $vswhere -products * -property installationPath }
-          if (-not (Test-Path "$installPath\VC\Auxiliary\Build\vcvarsall.bat")) {
-            throw "vcvarsall.bat not found under $installPath after install"
-          }
-
       - name: Set up MSVC (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
         with:
-          # Select the VS 2022 / 14.44 toolset installed above, not VS18 / 14.51.
-          vsversion: '2022'
+          # Pin VS 2022's CUDA-supported 14.44 toolset. windows-2022 also carries the
+          # 14.51 runtime; without this, vcvars could select a newer toolset that
+          # CUDA's cudafe++ crashes on.
           toolset: '14.44'
 
       - name: Show selected MSVC toolset (Windows)
