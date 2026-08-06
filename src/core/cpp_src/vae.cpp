@@ -1,6 +1,7 @@
 #include "resolve/vae.hpp"
 #include <chrono>
 #include <sstream>
+#include <utility>
 
 namespace resolve {
 
@@ -52,10 +53,11 @@ SpeciesVAEImpl::SpeciesVAEImpl(
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> SpeciesVAEImpl::forward(
-    torch::Tensor species_vector
+    torch::Tensor species_vector,
+    PretrainRng rng
 ) {
     auto [mu, log_var] = encode(species_vector);
-    auto z = reparameterize(mu, log_var);
+    auto z = reparameterize(mu, log_var, rng);
     auto reconstruction = decode(z);
     return {reconstruction, mu, log_var};
 }
@@ -71,9 +73,11 @@ torch::Tensor SpeciesVAEImpl::decode(torch::Tensor z) {
     return decoder_->forward(z);
 }
 
-torch::Tensor SpeciesVAEImpl::reparameterize(torch::Tensor mu, torch::Tensor log_var) {
+torch::Tensor SpeciesVAEImpl::reparameterize(
+    torch::Tensor mu, torch::Tensor log_var, PretrainRng rng
+) {
     auto std = torch::exp(0.5f * log_var);
-    auto eps = torch::randn_like(std);
+    auto eps = rng.randn_like(std);
     return mu + eps * std;
 }
 
@@ -124,81 +128,73 @@ VAEPretrainer::VAEPretrainer(
 }
 
 VAEPretrainResult VAEPretrainer::pretrain(torch::Tensor species_vectors) {
-    auto start_time = std::chrono::high_resolution_clock::now();
     VAEPretrainResult result;
 
-    int64_t n_samples = species_vectors.size(0);
+    // Per-epoch accumulators for the ELBO's two components, which the shared
+    // loop does not track (it only knows the scalar it backpropagates).
+    float epoch_recon = 0.0f;
+    float epoch_kl = 0.0f;
+    int epoch_batches = 0;
+    float kl_w = config_.kl_weight;
 
-    // Move to device
-    vae_->to(config_.device);
-    species_vectors = species_vectors.to(config_.device);
+    PretrainLoopSpec spec;
+    spec.modules = {vae_.ptr()};
+    spec.params = vae_->parameters();
+    spec.inputs = {species_vectors};
+    spec.epochs = config_.pretrain_epochs;
+    spec.batch_size = config_.batch_size;
+    spec.lr = config_.pretrain_lr;
+    spec.weight_decay = config_.pretrain_weight_decay;
+    spec.device = config_.device;
+    spec.seed = config_.seed;
+    spec.log = config_.log;
+    spec.task_name = "VAE";
 
-    // Optimizer
-    auto optimizer = torch::optim::AdamW(
-        vae_->parameters(),
-        torch::optim::AdamWOptions(config_.pretrain_lr)
-    );
+    auto batch_fn = [&](const PretrainBatch& batch, PretrainRng& rng) {
+        const auto& x = batch[0];
+        auto [recon, mu, log_var] = vae_->forward(x, rng);
 
-    for (int epoch = 0; epoch < config_.pretrain_epochs; ++epoch) {
-        vae_->train();
-        float epoch_loss = 0.0f;
-        float epoch_recon = 0.0f;
-        float epoch_kl = 0.0f;
-        int n_batches = 0;
+        // Track the components separately for the per-epoch histories.
+        auto recon_loss = torch::mse_loss(recon, x, torch::Reduction::Mean);
+        auto kl_loss = SpeciesVAEImpl::kl_divergence(mu, log_var);
+
+        epoch_recon += recon_loss.item<float>();
+        epoch_kl += kl_loss.item<float>();
+        ++epoch_batches;
+
+        return recon_loss + kl_w * kl_loss;
+    };
+
+    PretrainLoopHooks hooks;
+    hooks.on_epoch_begin = [&](int epoch) {
+        epoch_recon = 0.0f;
+        epoch_kl = 0.0f;
+        epoch_batches = 0;
 
         // KL annealing: linearly increase from 0 to kl_weight
-        float kl_w = config_.kl_weight;
-        if (config_.kl_anneal_epochs > 0 && epoch < config_.kl_anneal_epochs) {
-            kl_w = config_.kl_weight * static_cast<float>(epoch) / config_.kl_anneal_epochs;
-        }
-
-        auto perm = torch::randperm(n_samples,
-            torch::TensorOptions().dtype(torch::kLong).device(config_.device));
-
-        for (int64_t start = 0; start < n_samples; start += config_.batch_size) {
-            int64_t end = std::min(start + static_cast<int64_t>(config_.batch_size), n_samples);
-            auto idx = perm.slice(0, start, end);
-            auto batch = species_vectors.index_select(0, idx);
-
-            auto [recon, mu, log_var] = vae_->forward(batch);
-
-            // Compute separate losses for logging
-            auto recon_loss = torch::mse_loss(recon, batch, torch::Reduction::Mean);
-            auto kl_loss = SpeciesVAEImpl::kl_divergence(mu, log_var);
-            auto loss = recon_loss + kl_w * kl_loss;
-
-            optimizer.zero_grad();
-            loss.backward();
-            torch::nn::utils::clip_grad_norm_(vae_->parameters(), 1.0);
-            optimizer.step();
-
-            epoch_loss += loss.item<float>();
-            epoch_recon += recon_loss.item<float>();
-            epoch_kl += kl_loss.item<float>();
-            n_batches++;
-        }
-
+        kl_w = (config_.kl_anneal_epochs > 0 && epoch < config_.kl_anneal_epochs)
+            ? config_.kl_weight * static_cast<float>(epoch) / config_.kl_anneal_epochs
+            : config_.kl_weight;
+    };
+    hooks.on_epoch_end = [&](int /*epoch*/, float /*mean_loss*/) {
         // Guard against an empty pretraining set (no batches) so the loss
         // histories record 0 rather than NaN from a divide-by-zero.
-        const float inv_nb = n_batches > 0 ? 1.0f / static_cast<float>(n_batches) : 0.0f;
-        result.loss_history.push_back(epoch_loss * inv_nb);
+        const float inv_nb = epoch_batches > 0
+            ? 1.0f / static_cast<float>(epoch_batches) : 0.0f;
         result.recon_loss_history.push_back(epoch_recon * inv_nb);
         result.kl_loss_history.push_back(epoch_kl * inv_nb);
+    };
+    hooks.epoch_detail = [&](int /*epoch*/) {
+        std::ostringstream detail;
+        detail << " recon: " << result.recon_loss_history.back()
+               << " kl: " << result.kl_loss_history.back();
+        return detail.str();
+    };
 
-        if (epoch % 10 == 0) {
-            std::ostringstream msg;
-            msg << "VAE epoch " << epoch
-                << " - loss: " << (epoch_loss * inv_nb)
-                << " recon: " << (epoch_recon * inv_nb)
-                << " kl: " << (epoch_kl * inv_nb);
-            config_.log(msg.str());
-        }
-    }
-
-    result.epochs_completed = config_.pretrain_epochs;
-
-    auto end_time = std::chrono::high_resolution_clock::now();
-    result.total_time_seconds = std::chrono::duration<float>(end_time - start_time).count();
+    auto loop = run_pretrain_loop(std::move(spec), batch_fn, hooks);
+    result.loss_history = std::move(loop.loss_history);
+    result.epochs_completed = loop.epochs_completed;
+    result.total_time_seconds = loop.total_time_seconds;
 
     return result;
 }

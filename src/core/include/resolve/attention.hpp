@@ -174,8 +174,18 @@ TORCH_MODULE(FeatureTokenizer);
 // Projects onto probability simplex, producing exact zeros
 torch::Tensor sparsemax(torch::Tensor input, int64_t dim = -1);
 
-// Entmax-1.5: smoother version of sparsemax
-// alpha=1 is softmax, alpha=2 is sparsemax, alpha=1.5 is in between
+// Entmax-1.5: the alpha = 1.5 member of the alpha-entmax family
+//     alpha-entmax(z) = [ (alpha - 1) z - tau * 1 ]_+ ^ (1/(alpha - 1))
+// (Peters, Niculae & Martins, "Sparse Sequence-to-Sequence Models", ACL 2019,
+// arXiv:1905.05702, Eq. 13), i.e. [ z/2 - tau ]_+^2 here. alpha = 1 is softmax
+// and alpha = 2 is sparsemax, so 1.5-entmax is sparse but keeps a strictly
+// larger support than sparsemax on the same scores.
+//
+// Computed exactly by the paper's sort-based Algorithm 2 (never by bisection,
+// which is the general-alpha `entmax_bisect` routine), with the closed-form
+// Proposition 1 Jacobian as the backward. Differentiable, and reduces over an
+// arbitrary `dim` of an arbitrarily strided input. See cpp_src/attention.cpp
+// for the transcribed algorithm and gradient.
 torch::Tensor entmax15(torch::Tensor input, int64_t dim = -1);
 
 // =============================================================================
@@ -264,33 +274,38 @@ private:
 
 TORCH_MODULE(TabNetGLUBlock);
 
-// One TabNet decision step. Holds the attentive transformer (produces a
-// sparsemax feature mask over the ORIGINAL features from the previous step's
-// attention split and the prior scale) and the step-specific ("independent")
-// half of the feature transformer. The shared half is owned by the encoder and
-// reused across steps.
+// One TabNet decision step. Holds the attentive transformer (produces a sparse
+// feature mask over the ORIGINAL features from the previous step's attention
+// split and the prior scale) and the step-specific ("independent") half of the
+// feature transformer. The shared half is owned by the encoder and reused
+// across steps.
 class TabNetStepImpl : public torch::nn::Module {
 public:
     TabNetStepImpl(
         int64_t input_dim,
-        int64_t n_d,           // Decision layer dimension
-        int64_t n_a,           // Attention layer dimension
-        int64_t n_independent  // Step-specific feature-transformer GLU blocks
+        int64_t n_d,            // Decision layer dimension
+        int64_t n_a,            // Attention layer dimension
+        int64_t n_independent,  // Step-specific feature-transformer GLU blocks
+        bool use_sparsemax = true  // sparsemax (alpha=2) vs 1.5-entmax mask
     );
 
     // att_prev: (batch, n_a) previous step's attention split.
     // prior_scales: (batch, input_dim) feature availability.
-    // Returns the sparsemax mask over features: (batch, input_dim).
+    // Returns the simplex mask over features: (batch, input_dim), produced by
+    // sparsemax when use_sparsemax, otherwise by entmax15.
     torch::Tensor attentive_forward(torch::Tensor att_prev, torch::Tensor prior_scales);
 
     // Apply this step's independent GLU blocks after the encoder's shared blocks.
     // shared_out and the return are (batch, n_d + n_a).
     torch::Tensor feature_independent(torch::Tensor shared_out);
 
+    [[nodiscard]] bool use_sparsemax() const noexcept { return use_sparsemax_; }
+
 private:
     int64_t input_dim_;
     int64_t n_d_;
     int64_t n_a_;
+    bool use_sparsemax_;
 
     torch::nn::Linear attention_fc_{nullptr};
     torch::nn::BatchNorm1d bn_attention_{nullptr};
@@ -309,7 +324,8 @@ public:
         int64_t n_d = 64,
         int64_t n_a = 64,
         float relaxation_factor = 1.5f,
-        float sparsity_coefficient = 1e-3f
+        float sparsity_coefficient = 1e-3f,
+        bool use_sparsemax = true  // TabNetConfig::use_sparsemax
     );
 
     // x: (batch, input_dim)
@@ -323,6 +339,9 @@ public:
 
     [[nodiscard]] int64_t output_dim() const { return n_d_; }
 
+    // Which simplex mapping every step's attentive transformer applies.
+    [[nodiscard]] bool use_sparsemax() const noexcept { return use_sparsemax_; }
+
 private:
     // Run the shared feature-transformer GLU blocks (input_dim -> n_d + n_a),
     // with sqrt(0.5) residual scaling between blocks after the first.
@@ -334,6 +353,7 @@ private:
     int64_t n_a_;
     float relaxation_factor_;
     float sparsity_coefficient_;
+    bool use_sparsemax_;
 
     torch::nn::BatchNorm1d initial_bn_{nullptr};  // Input feature batch norm
     torch::nn::ModuleList shared_{nullptr};       // Shared feature-transformer blocks
@@ -654,6 +674,9 @@ TORCH_MODULE(ExcelFormerEncoder);
 
 // Each edge type has its own message function (MLP).
 // Messages are aggregated via attention-weighted scatter to target nodes.
+// Attention runs with n_heads heads over disjoint out_features / n_heads
+// slices of the message vector, concatenated back to out_features (the GAT
+// convention); out_features must be divisible by n_heads.
 class TypedMessagePassingLayerImpl : public torch::nn::Module {
 public:
     TypedMessagePassingLayerImpl(
@@ -663,6 +686,9 @@ public:
         int64_t n_heads = 4,
         float dropout = 0.1f
     );
+
+    int64_t n_heads() const { return n_heads_; }
+    int64_t head_dim() const { return head_dim_; }
 
     // node_features: (n_nodes, in_features)
     // edge_index: (2, n_edges) - [source, target] node indices
@@ -678,6 +704,8 @@ private:
     int64_t n_edge_types_;
     int64_t in_features_;
     int64_t out_features_;
+    int64_t n_heads_;
+    int64_t head_dim_;
 
     // Per-edge-type message MLPs: (src_feat || tgt_feat) -> message
     torch::nn::ModuleList message_fns_{nullptr};

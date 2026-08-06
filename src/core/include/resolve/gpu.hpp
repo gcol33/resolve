@@ -15,6 +15,17 @@ namespace resolve {
 // not implemented on win32).
 std::string default_cuda_alloc_conf();
 
+// Apply default_cuda_alloc_conf() to the process environment and return the
+// value PYTORCH_CUDA_ALLOC_CONF ends up holding.
+//
+// An existing non-empty setting wins unless `force` is true, so a user's own
+// allocator tuning is never overwritten silently. Late-bound: once the CUDA
+// caching allocator has initialized, changing the variable no longer affects
+// it, which is why resolve_core/__init__.py sets the same value before
+// `import torch`. Single source for the nanobind and C-ABI entry points, which
+// each carried a copy of this branch.
+std::string configure_cuda_allocator(bool force);
+
 // Limit the fraction of GPU VRAM that the PyTorch caching allocator may use
 // on the given CUDA device. Wraps
 // c10::cuda::CUDACachingAllocator::setMemoryFraction.

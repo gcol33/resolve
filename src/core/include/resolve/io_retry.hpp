@@ -1,5 +1,6 @@
 #pragma once
 
+#include "resolve/env.hpp"    // get_env
 #include "resolve/types.hpp"  // LogCallback, default_log
 
 #include <chrono>
@@ -27,15 +28,15 @@ public:
 //   RESOLVE_IO_RETRY_ATTEMPTS   total tries (default 3)
 //   RESOLVE_IO_RETRY_BACKOFF_MS base backoff in ms (default 100; exp, capped)
 inline int default_retry_attempts() {
-    if (const char* e = std::getenv("RESOLVE_IO_RETRY_ATTEMPTS")) {
-        const int v = std::atoi(e);
+    if (const auto e = get_env("RESOLVE_IO_RETRY_ATTEMPTS")) {
+        const int v = std::atoi(e->c_str());
         if (v > 0) return v;
     }
     return 3;
 }
 inline int default_retry_backoff_ms() {
-    if (const char* e = std::getenv("RESOLVE_IO_RETRY_BACKOFF_MS")) {
-        const int v = std::atoi(e);
+    if (const auto e = get_env("RESOLVE_IO_RETRY_BACKOFF_MS")) {
+        const int v = std::atoi(e->c_str());
         if (v >= 0) return v;
     }
     return 100;

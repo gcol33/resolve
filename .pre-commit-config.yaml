@@ -22,7 +22,10 @@ repos:
       - id: mypy
         additional_dependencies: [types-all]
         args: [--ignore-missing-imports]
-        files: ^src/resolve/
+        # Every directory holding maintained Python: the resolve_core shims over
+        # the compiled extension, the repo tooling, the benchmark harness, and
+        # the pytest suite that exercises the bindings.
+        files: ^(src/core/python/src/resolve_core/|tools/|benchmarks/|tests/core/)
 
   - repo: local
     hooks:

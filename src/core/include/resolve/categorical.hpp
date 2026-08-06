@@ -20,11 +20,11 @@
 // Design notes:
 //   * Code 0 is always reserved for <UNK>. Vocab sizes reported to the
 //     model are K + 1 where K is the number of distinct non-NA strings.
-//   * NA-string detection mirrors the Python POC (see
-//     src/resolve/data/dataset.py::_NA_STRINGS) so the two implementations
-//     factorize identically.
-//   * Embedding dim is shared across all columns; matches Python POC.
-//     We could make it per-column later if it becomes a tuning lever.
+//   * NA-string detection goes through is_na_string (categorical.cpp), the
+//     same matcher the target and covariate loaders use, so a raw cell is
+//     classified identically whatever role its column carries.
+//   * Embedding dim is shared across all columns. It could be made per-column
+//     if that becomes a tuning lever.
 //   * No public copy/move ctors on CategoricalEmbedder beyond what
 //     torch::nn::Module gives us — clone/serialize via state_dict like any
 //     other Module.
@@ -37,9 +37,9 @@
 
 namespace resolve {
 
-// Strings treated as NA when factorizing a categorical column. Must match
-// the Python POC's _NA_STRINGS set so both backends produce the same codes
-// from the same CSV.
+// Strings treated as NA when factorizing a categorical column. The single
+// matcher every loader shares, so one raw cell is classified the same way
+// whatever role its column carries.
 [[nodiscard]] bool is_na_string(const std::string& s) noexcept;
 
 // =============================================================================
@@ -131,6 +131,16 @@ public:
     // users.
     [[nodiscard]] const std::unordered_map<std::string, int64_t>& column_map(
         const std::string& column_name) const;
+
+    // Install a column's string -> code map verbatim, appending the column to
+    // the fit order if it is new. The counterpart to column_map(), for
+    // RESTORING a persisted vocabulary rather than fitting one: the codes come
+    // from the checkpoint and must be reproduced exactly, whereas fit_column
+    // re-derives them from the sorted unique values. Used by the C-ABI
+    // ExternalVocabs carrier (issue #102). Code 0 stays reserved for UNK and
+    // must not appear in `map`.
+    void set_column_map(const std::string& column_name,
+                        const std::unordered_map<std::string, int64_t>& map);
 
 private:
     // Insertion order of fitted columns. Defines the canonical column order

@@ -16,6 +16,9 @@ resolve.train.dataset(
   seed = 42L,
   savePath = NULL,
   lossConfig = "mae",
+  ncaTemperature = 0.1,
+  ncaNeighbors = 32L,
+  ncaWeight = 0.1,
   coverDropout = 0,
   dModel = 128L,
   nHeads = 4L,
@@ -47,7 +50,20 @@ resolve.train.dataset(
 
 \item{savePath}{Path to save model checkpoint (optional)}
 
-\item{lossConfig}{Loss configuration: "mae", "smape", or "combined" (default "mae")}
+\item{lossConfig}{Loss configuration: "mae", "smape", "combined", or "nca"
+(default "mae"). "nca" takes the "combined" regression schedule and adds
+the Neighbourhood Components Analysis term to classification targets.}
+
+\item{ncaTemperature}{Scale of the stochastic-neighbour softmax in the NCA
+term, i.e. the effective number of neighbours each sample spreads over
+(default 0.1). Acts only when \code{lossConfig = "nca"}.}
+
+\item{ncaNeighbors}{Neighbours per sample the NCA term sums over, its most
+similar in-batch samples (default 32). Zero or less keeps the whole batch.
+Acts only when \code{lossConfig = "nca"}.}
+
+\item{ncaWeight}{Weight of the NCA term against the cross-entropy it is
+added to (default 0.1). Acts only when \code{lossConfig = "nca"}.}
 
 \item{coverDropout}{Cover-dropout rate applied to species cover values
 in rank-pool / transformer encoding modes (default 0.0, no dropout).}
@@ -74,7 +90,11 @@ blocks (default 0.1).}
 \item{verbose}{Print training progress (default TRUE)}
 }
 \value{
-A list with trainer, result, and dataset
+A list with \code{trainer}, \code{result}, and \code{dataset}. \code{result} carries
+\code{best_epoch}, \code{train_time_seconds}, \code{final_metrics}, the loss histories,
+the per-target \code{baselines}, \code{diagnostics}, and \code{effective_batch_size} --
+the batch size the run actually trained at, which is smaller than
+\code{batchSize} when the CUDA auto-halve-on-OOM retry fired.
 }
 \description{
 Train a model using a ResolveDataset object loaded via resolve.dataset.csv().

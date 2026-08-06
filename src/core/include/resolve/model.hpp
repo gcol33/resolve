@@ -189,11 +189,9 @@ private:
     // Single source of truth for categorical concat. Takes the user-supplied
     // continuous tensor and (possibly empty) categorical_ids; returns the
     // continuous tensor that matches the n_continuous the encoders were
-    // constructed with. Behavior matches the Python POC
-    // (src/resolve/model/resolve.py): if the model has no categoricals,
-    // returns continuous unchanged; if it has categoricals but the caller
-    // passed an empty/undefined cat_ids, pads with zeros to keep the encoder
-    // shape valid.
+    // constructed with. If the model has no categoricals, returns continuous
+    // unchanged; if it has categoricals but the caller passed an
+    // empty/undefined cat_ids, pads with zeros to keep the encoder shape valid.
     torch::Tensor fuse_categoricals_(torch::Tensor continuous,
                                      torch::Tensor categorical_ids);
 

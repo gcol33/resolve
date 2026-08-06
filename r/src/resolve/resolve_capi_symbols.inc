@@ -99,6 +99,12 @@ RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_dataframe, (const resolve_v
 RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_dataframe_header, (const resolve_value_t* header, const char* species_path, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* config), (header, species_path, roles, targets, config))
 RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_species_dataframe, (const resolve_value_t* species, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* config), (species, roles, targets, config))
 RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_dataframe_with_schema, (const resolve_value_t* header, const resolve_value_t* species, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_dataset_t* schema_source, const resolve_value_t* config), (header, species, roles, targets, schema_source, config))
+/* Vocabulary-reusing loaders (issue #102): build the dataset in a trained
+ * model's integer-code namespace from a checkpoint-derived `vocabs` tree. */
+RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_csv_with_vocabs, (const char* header_path, const char* species_path, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* vocabs, const resolve_value_t* config), (header_path, species_path, roles, targets, vocabs, config))
+RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_species_csv_with_vocabs, (const char* species_path, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* vocabs, const resolve_value_t* config), (species_path, roles, targets, vocabs, config))
+RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_dataframe_with_vocabs, (const resolve_value_t* header, const resolve_value_t* species, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* vocabs, const resolve_value_t* config), (header, species, roles, targets, vocabs, config))
+RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_species_dataframe_with_vocabs, (const resolve_value_t* species, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* vocabs, const resolve_value_t* config), (species, roles, targets, vocabs, config))
 RESOLVE_SYM_VOID(resolve_dataset_free, (resolve_dataset_t* ds), (ds))
 RESOLVE_SYM(resolve_value_t*, resolve_dataset_get, (const resolve_dataset_t* ds, const char* what), (ds, what))
 

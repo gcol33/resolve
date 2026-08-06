@@ -94,6 +94,10 @@ void register_trainer(nb::module_& m) {
         .def_prop_ro("model", [](resolve::Trainer& self) -> resolve::ResolveModel { return self.model(); })
         .def_prop_ro("scalers", [](const resolve::Trainer& self) { return resolve::Scalers(self.scalers()); })
         .def_prop_ro("config", [](const resolve::Trainer& self) { return resolve::TrainConfig(self.config()); })
+        .def_prop_ro("effective_batch_size", &resolve::Trainer::effective_batch_size,
+                     "Batch size the last fit() actually trained at. Equal to "
+                     "config.batch_size on a clean run, smaller when the CUDA "
+                     "auto-halve-on-OOM retry fired; 0 before the first fit().")
         .def_prop_ro("categorical_vocab",
                      [](const resolve::Trainer& self) -> const resolve::CategoricalVocab& {
                          return self.categorical_vocab();
@@ -323,5 +327,38 @@ void register_trainer(nb::module_& m) {
         .def_prop_ro("categorical_vocab",
                      [](const resolve::Predictor& self) -> const resolve::CategoricalVocab& {
                          return self.categorical_vocab();
+                     })
+        // Issue #102: everything needed to build an inference dataset in this
+        // model's integer-code namespace.
+        //
+        //   vocabs = predictor.external_vocabs
+        //   cfg    = predictor.dataset_config
+        //   ds     = ResolveDataset.from_csv_with_vocabs(
+        //                header, species, roles, targets, vocabs, cfg)
+        //   out    = predictor.predict_dataset(ds)
+        //
+        // predict_dataset rejects a dataset built any other way.
+        .def_prop_ro("schema",
+                     [](const resolve::Predictor& self) -> resolve::ResolveSchema {
+                         return self.schema();
+                     })
+        .def_prop_ro("external_vocabs", &resolve::Predictor::external_vocabs)
+        .def_prop_ro("species_vocab",
+                     [](const resolve::Predictor& self) -> const std::vector<std::string>& {
+                         return self.species_vocab();
+                     })
+        .def_prop_ro("genus_vocab",
+                     [](const resolve::Predictor& self) -> const std::vector<std::string>& {
+                         return self.genus_vocab();
+                     })
+        .def_prop_ro("family_vocab",
+                     [](const resolve::Predictor& self) -> const std::vector<std::string>& {
+                         return self.family_vocab();
+                     })
+        // The DatasetConfig this checkpoint implies, ready to pass to a loader.
+        .def_prop_ro("dataset_config",
+                     [](const resolve::Predictor& self) -> resolve::DatasetConfig {
+                         return resolve::dataset_config_from_checkpoint(
+                             self.schema(), self.model()->config());
                      });
 }

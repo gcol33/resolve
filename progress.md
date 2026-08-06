@@ -1,5 +1,13 @@
 # RESOLVE — fuzzy_index_plan.md implementation: progress
 
+> **Historical record.** The C++ `FuzzyIndex` this tracks is in the engine
+> (`include/resolve/fuzzy.hpp`, `cpp_src/fuzzy_*.cpp`, exposed as
+> `resolve_core.fuzzy`). The `src/resolve/ext/wfo.py` consumer it describes was
+> part of the Python proof-of-concept removed in
+> [#106](https://github.com/gcol33/resolve/issues/106), so the WFO integration
+> section records what existed at the time. Kept because the MSVC build-fix
+> history is still cited from `.gitignore`.
+
 ## What is done and working
 
 ### C++ FuzzyIndex (verified, all tests pass)

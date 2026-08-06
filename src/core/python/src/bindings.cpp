@@ -10,34 +10,7 @@
 
 #include "bindings_common.hpp"
 
-#include <cstdlib>
 #include <string>
-
-namespace {
-
-// Mirror of resolve_core/__init__.py::configure_cuda_allocator. The Python
-// helper runs at module import (pre-torch); this C++ entry point exists so
-// users who imported torch first can still call it explicitly. It is
-// late-bound: if the CUDA allocator has already initialized, the new env var
-// has no effect on the active allocator config. Documented as such on the
-// Python wrapper.
-std::string configure_cuda_allocator_impl(bool force) {
-    // Single source in resolve/gpu.hpp (shared with the C-ABI native shim).
-    std::string base = resolve::default_cuda_alloc_conf();
-
-    const char* existing = std::getenv("PYTORCH_CUDA_ALLOC_CONF");
-    if (force || existing == nullptr || existing[0] == '\0') {
-#if defined(_WIN32)
-        _putenv_s("PYTORCH_CUDA_ALLOC_CONF", base.c_str());
-#else
-        setenv("PYTORCH_CUDA_ALLOC_CONF", base.c_str(), 1);
-#endif
-        return base;
-    }
-    return std::string(existing);
-}
-
-} // namespace
 
 NB_MODULE(_resolve_core, m) {
     m.doc() = "RESOLVE C++ core library for species-composition based prediction";
@@ -67,7 +40,7 @@ NB_MODULE(_resolve_core, m) {
     // string for logging.
     m.def(
         "_configure_cuda_allocator_native",
-        &configure_cuda_allocator_impl,
+        &resolve::configure_cuda_allocator,
         nb::arg("force") = false,
         "Set PYTORCH_CUDA_ALLOC_CONF if unset (or force-set). Linux/macOS\n"
         "prepend expandable_segments:True; Windows omits it. Returns the\n"

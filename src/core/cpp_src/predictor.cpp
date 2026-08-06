@@ -5,6 +5,7 @@
 #include <atomic>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 
 namespace resolve {
@@ -20,6 +21,66 @@ inline torch::Tensor slice0(const torch::Tensor& t, int64_t start, int64_t end) 
     // the whole n-row tensor comes back for a [start,end) chunk.
     if (!t.defined() || t.dim() == 0) return t;
     return t.slice(/*dim=*/0, start, end);
+}
+
+// True when the encoder looks species IDs up in an embedding table, i.e. when a
+// species-code mismatch silently returns another species' row. Hash mode
+// derives its features from the species STRING (content-derived, so the vocab
+// codes never reach the model) unless it was built with an explicit species
+// vector, which is indexed by code like sparse mode.
+bool indexes_species_codes(const ResolveModel& model) {
+    switch (model->species_encoding()) {
+        case SpeciesEncodingMode::Embed:
+        case SpeciesEncodingMode::Sparse:
+        case SpeciesEncodingMode::RankPool:
+        case SpeciesEncodingMode::Transformer:
+            return true;
+        case SpeciesEncodingMode::Hash:
+            return model->uses_explicit_vector();
+    }
+    return false;
+}
+
+// Shared body of every vocabulary check: sizes first (cheap, and the only
+// comparison a pre-issue-#102 checkpoint supports), then the ordered name lists
+// when both sides carry them. `what` names the vocabulary in the error.
+void require_matching_vocab(
+    const char* what,
+    int64_t model_size,
+    int64_t dataset_size,
+    const std::vector<std::string>& model_names,
+    const std::vector<std::string>& dataset_names
+) {
+    auto fail = [&](const std::string& detail) {
+        std::ostringstream msg;
+        msg << "Predictor::predict: the dataset's " << what << " vocabulary is not "
+               "the one the model was trained with (" << detail << "). Its integer "
+               "codes therefore index the wrong embedding rows, which would "
+               "produce wrong predictions with no error. Build the dataset in the "
+               "model's namespace: ResolveDataset::from_csv_with_vocabs(header, "
+               "species, roles, targets, predictor.external_vocabs(), "
+               "dataset_config_from_checkpoint(predictor.schema(), "
+               "predictor.model()->config())). See gcol33/resolve#102.";
+        throw std::runtime_error(msg.str());
+    };
+
+    if (model_size != dataset_size) {
+        fail("model has " + std::to_string(model_size) + " entries, dataset has " +
+             std::to_string(dataset_size));
+    }
+    if (model_names.empty() || dataset_names.empty()) {
+        return;  // pre-#102 checkpoint (or an unfit vocab): size check is all there is
+    }
+    if (model_names.size() != dataset_names.size()) {
+        fail("model vocabulary lists " + std::to_string(model_names.size()) +
+             " names, dataset lists " + std::to_string(dataset_names.size()));
+    }
+    for (size_t i = 0; i < model_names.size(); ++i) {
+        if (model_names[i] != dataset_names[i]) {
+            fail("code " + std::to_string(i) + " is '" + model_names[i] +
+                 "' in the model but '" + dataset_names[i] + "' in the dataset");
+        }
+    }
 }
 
 }  // namespace
@@ -54,7 +115,95 @@ Predictor Predictor::load(
     float vram_fraction
 ) {
     auto [model, scalers, vocab] = Trainer::load(path, device, vram_fraction);
-    return Predictor(std::move(model), std::move(scalers), std::move(vocab), device);
+    Predictor predictor(std::move(model), std::move(scalers), std::move(vocab), device);
+
+    // A checkpoint written before gcol33/resolve#102 recorded only the
+    // vocabulary SIZES, so nothing can rebuild an inference dataset in this
+    // model's ID namespace and predict() can only compare sizes. Say so once,
+    // loudly: the failure it guards against is silent wrong predictions.
+    if (indexes_species_codes(predictor.model()) &&
+        !predictor.schema().has_species_vocab()) {
+        std::cerr << "[resolve] warning: this checkpoint does not carry the fitted "
+                     "species/taxonomy vocabularies (written before "
+                     "gcol33/resolve#102). Its encoder indexes species embeddings "
+                     "by an integer code that depends on the file the vocabulary "
+                     "was fitted on, so scoring new data can silently look up the "
+                     "wrong embedding rows. Only the vocabulary SIZES can be "
+                     "checked. Retrain or re-save with a current build, or build "
+                     "the inference dataset with "
+                     "ResolveDataset::from_csv_with_schema(..., training_dataset, "
+                     "...) against the original training data.\n";
+    }
+    return predictor;
+}
+
+ExternalVocabs Predictor::external_vocabs() const {
+    // The schema carries species + taxonomy; the categorical string -> code
+    // maps live on the Predictor (Trainer::save writes them under their own
+    // archive block), so fold them in here to get the complete carrier.
+    ExternalVocabs vocabs = external_vocabs_from_schema(schema());
+    vocabs.categorical = categorical_vocab_;
+    return vocabs;
+}
+
+void Predictor::validate_dataset_vocabs(const ResolveDataset& dataset) const {
+    const ResolveSchema& model_schema = schema();
+    const ResolveSchema& data_schema = dataset.schema();
+
+    if (indexes_species_codes(model_)) {
+        require_matching_vocab("species",
+                               model_schema.n_species_vocab,
+                               data_schema.n_species_vocab,
+                               model_schema.species_vocab,
+                               data_schema.species_vocab);
+    }
+
+    // Taxonomy IDs index genus/family embedding tables in every encoder that
+    // has taxonomy, hash mode included (its fixed genus/family slots are
+    // embedding lookups even though its species features are not).
+    if (model_schema.has_taxonomy) {
+        require_matching_vocab("genus",
+                               model_schema.n_genera_vocab,
+                               data_schema.n_genera_vocab,
+                               model_schema.genus_vocab,
+                               data_schema.genus_vocab);
+        require_matching_vocab("family",
+                               model_schema.n_families_vocab,
+                               data_schema.n_families_vocab,
+                               model_schema.family_vocab,
+                               data_schema.family_vocab);
+    }
+
+    // Categorical covariates: the dataset's own per-column maps must be the
+    // ones training fitted, because predict() forwards dataset.categorical_ids()
+    // straight to the embedder. The dataset retains no raw strings, so a
+    // mismatch cannot be repaired here -- only detected.
+    if (!categorical_vocab_.column_names().empty()) {
+        const auto& model_cols = categorical_vocab_.column_names();
+        const auto& data_cols = dataset.categorical_vocab().column_names();
+        if (model_cols != data_cols) {
+            std::ostringstream msg;
+            msg << "Predictor::predict: the dataset's categorical columns ("
+                << data_cols.size() << ") do not match the model's ("
+                << model_cols.size() << ") in name or order. Build the dataset "
+                   "with ResolveDataset::from_csv_with_vocabs(..., "
+                   "predictor.external_vocabs(), ...). See gcol33/resolve#102.";
+            throw std::runtime_error(msg.str());
+        }
+        for (const auto& col : model_cols) {
+            if (categorical_vocab_.column_map(col) !=
+                dataset.categorical_vocab().column_map(col)) {
+                std::ostringstream msg;
+                msg << "Predictor::predict: the dataset's categorical column '"
+                    << col << "' was factorized against its own values, so its "
+                       "codes mean something different from the model's. Build "
+                       "the dataset with ResolveDataset::from_csv_with_vocabs("
+                       "..., predictor.external_vocabs(), ...). See "
+                       "gcol33/resolve#102.";
+                throw std::runtime_error(msg.str());
+            }
+        }
+    }
 }
 
 ResolvePredictions Predictor::predict(
@@ -62,6 +211,11 @@ ResolvePredictions Predictor::predict(
     bool return_latent,
     int64_t batch_size
 ) {
+    // Reject a dataset whose integer codes are not the model's BEFORE any
+    // forward pass: every non-hash encoder would otherwise index the wrong
+    // embedding rows and return plausible, wrong numbers (issue #102).
+    validate_dataset_vocabs(dataset);
+
     const int64_t n = dataset.n_plots();
 
     // Validate batch_size: -1 (one-shot) or strictly positive. 0 / <-1 reject.

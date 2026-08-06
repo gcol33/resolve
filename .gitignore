@@ -80,6 +80,10 @@ venv.bak/
 *.csv
 *.parquet
 
+# Committed CLI fixtures. The CLI end-to-end job in tests.yml trains and
+# predicts on these, so they are tracked sources despite the *.csv rule.
+!src/core/tests/fixtures/*.csv
+
 # OS
 .DS_Store
 Thumbs.db
@@ -99,13 +103,15 @@ reference/
 build_*.txt
 nul
 
-# C++ build directories
-build_cuda/
-build_cpu/
-build_asan/
-src/core/build_cuda/*
-src/core/build_cpu/
-src/core/build_asan/
+# C++ build directories. One pattern per location, covering every variant a
+# working tree accumulates: build, build_cpu, build_cpu2, build_cpucheck,
+# build_cpu_rcapi, build_cuda, build_cuda_rcapi, build_cu128_rcapi, build_asan.
+# The `/*` form ignores the CONTENTS rather than the directory itself, which is
+# what lets the negations at the bottom of this file re-include the two tracked
+# build scripts under src/core/build_cuda/ (git cannot re-include a file whose
+# parent directory is excluded).
+/build*/
+src/core/build*/*
 
 # Windows DLLs and libs
 *.dll

@@ -4,6 +4,7 @@
 // Predict plot-level environmental variables from species composition
 
 #include "resolve/types.hpp"
+#include "resolve/enum_names.hpp"
 #include "resolve/csv_reader.hpp"
 #include "resolve/role_mapping.hpp"
 #include "resolve/categorical.hpp"

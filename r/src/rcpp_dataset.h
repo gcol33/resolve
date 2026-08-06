@@ -42,6 +42,28 @@ public:
         return w;
     }
 
+    // Vocabulary-reusing loaders (issue #102). `vocabs_list` is the list a
+    // Predictor's `vocabs()` (or a dataset's `vocabs()`) returns: species /
+    // genus / family vocabularies + target class vocabularies + the per-column
+    // categorical code maps. The resulting dataset is encoded in the trained
+    // model's integer-code namespace, which is what Predictor$predict_dataset
+    // requires.
+    static RResolveDataset from_csv_with_vocabs(
+        std::string header_path, std::string species_path,
+        List roles_list, List targets_list, List vocabs_list,
+        List config_list = List()) {
+        ValuePtr roles(r_list_to_value_map(roles_list));
+        ValuePtr targets(r_list_to_value_map(targets_list));
+        ValuePtr vocabs(r_list_to_value_map(vocabs_list));
+        ValuePtr config(r_list_to_value_map(config_list));
+        RResolveDataset w;
+        w.ds_ = capi_own(resolve_dataset_from_csv_with_vocabs(
+            header_path.c_str(), species_path.c_str(),
+            roles.get(), targets.get(), vocabs.get(), config.get()),
+            resolve_dataset_free);
+        return w;
+    }
+
     static RResolveDataset from_species_csv(
         std::string species_path, List roles_list, List targets_list,
         List config_list = List()) {
@@ -51,6 +73,21 @@ public:
         RResolveDataset w;
         w.ds_ = capi_own(resolve_dataset_from_species_csv(
             species_path.c_str(), roles.get(), targets.get(), config.get()),
+            resolve_dataset_free);
+        return w;
+    }
+
+    static RResolveDataset from_species_csv_with_vocabs(
+        std::string species_path, List roles_list, List targets_list,
+        List vocabs_list, List config_list = List()) {
+        ValuePtr roles(r_list_to_value_map(roles_list));
+        ValuePtr targets(r_list_to_value_map(targets_list));
+        ValuePtr vocabs(r_list_to_value_map(vocabs_list));
+        ValuePtr config(r_list_to_value_map(config_list));
+        RResolveDataset w;
+        w.ds_ = capi_own(resolve_dataset_from_species_csv_with_vocabs(
+            species_path.c_str(), roles.get(), targets.get(),
+            vocabs.get(), config.get()),
             resolve_dataset_free);
         return w;
     }
@@ -120,6 +157,40 @@ public:
         return w;
     }
 
+    static RResolveDataset from_dataframe_with_vocabs(
+        List header_cols, List species_cols,
+        List roles_list, List targets_list, List vocabs_list,
+        List config_list = List()) {
+        ValuePtr header(r_charlist_to_value_map(header_cols));
+        ValuePtr species(r_charlist_to_value_map(species_cols));
+        ValuePtr roles(r_list_to_value_map(roles_list));
+        ValuePtr targets(r_list_to_value_map(targets_list));
+        ValuePtr vocabs(r_list_to_value_map(vocabs_list));
+        ValuePtr config(r_list_to_value_map(config_list));
+        RResolveDataset w;
+        w.ds_ = capi_own(resolve_dataset_from_dataframe_with_vocabs(
+            header.get(), species.get(), roles.get(), targets.get(),
+            vocabs.get(), config.get()),
+            resolve_dataset_free);
+        return w;
+    }
+
+    static RResolveDataset from_species_dataframe_with_vocabs(
+        List species_cols, List roles_list, List targets_list,
+        List vocabs_list, List config_list = List()) {
+        ValuePtr species(r_charlist_to_value_map(species_cols));
+        ValuePtr roles(r_list_to_value_map(roles_list));
+        ValuePtr targets(r_list_to_value_map(targets_list));
+        ValuePtr vocabs(r_list_to_value_map(vocabs_list));
+        ValuePtr config(r_list_to_value_map(config_list));
+        RResolveDataset w;
+        w.ds_ = capi_own(resolve_dataset_from_species_dataframe_with_vocabs(
+            species.get(), roles.get(), targets.get(),
+            vocabs.get(), config.get()),
+            resolve_dataset_free);
+        return w;
+    }
+
     // Accessors: each dispatches by name to resolve_dataset_get and converts the
     // returned value tree. Optional tensors come back as a NULL-kind value ->
     // R NULL, matching the old Nullable<...> accessors.
@@ -151,6 +222,9 @@ public:
     RObject raw_weights()      const { return get("raw_weights"); }
     RObject plot_offsets()     const { return get("plot_offsets"); }
     RObject taxonomy_vocab()   const { return get("taxonomy_vocab"); }
+    // Every vocabulary this dataset fitted, in the form the *_with_vocabs
+    // loaders take (issue #102).
+    RObject vocabs()           const { return get("vocabs"); }
 
     // Per-column vocabulary: named list of named integer vectors.
     List categorical_vocab() const {

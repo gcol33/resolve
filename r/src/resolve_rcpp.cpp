@@ -55,6 +55,7 @@ RCPP_MODULE(resolve_module) {
         .method("plot_offsets", &RResolveDataset::plot_offsets, "Get plot offsets for raw data")
         .method("taxonomy_vocab", &RResolveDataset::taxonomy_vocab, "Get taxonomy vocabulary info")
         .method("categorical_vocab", &RResolveDataset::categorical_vocab, "Get categorical covariate vocabulary (per-column code maps)")
+        .method("vocabs", &RResolveDataset::vocabs, "Get every fitted vocabulary, for the *_with_vocabs loaders")
         ;
 
     function("ResolveDataset_from_csv", &RResolveDataset::from_csv, "Load dataset from CSV files");
@@ -64,6 +65,10 @@ RCPP_MODULE(resolve_module) {
     function("ResolveDataset_from_dataframe_header", &RResolveDataset::from_dataframe_header, "Load dataset from in-memory header columns + species CSV path");
     function("ResolveDataset_from_species_dataframe", &RResolveDataset::from_species_dataframe, "Load dataset from a single in-memory long-format column list");
     function("ResolveDataset_from_dataframe_with_schema", &RResolveDataset::from_dataframe_with_schema, "In-memory analog of from_csv_with_schema");
+    function("ResolveDataset_from_csv_with_vocabs", &RResolveDataset::from_csv_with_vocabs, "Load dataset from CSV files reusing a checkpoint's vocabularies");
+    function("ResolveDataset_from_species_csv_with_vocabs", &RResolveDataset::from_species_csv_with_vocabs, "Load dataset from a single species CSV reusing a checkpoint's vocabularies");
+    function("ResolveDataset_from_dataframe_with_vocabs", &RResolveDataset::from_dataframe_with_vocabs, "In-memory analog of from_csv_with_vocabs");
+    function("ResolveDataset_from_species_dataframe_with_vocabs", &RResolveDataset::from_species_dataframe_with_vocabs, "In-memory analog of from_species_csv_with_vocabs");
 
     class_<RResolveModel>("ResolveModel")
         .constructor<List, List>("Create a ResolveModel")
@@ -105,6 +110,7 @@ RCPP_MODULE(resolve_module) {
         .method("train_indices", &RTrainer::train_indices, "Global plot indices of the training fold")
         .method("test_plot_ids", &RTrainer::test_plot_ids, "Plot IDs of the held-out test fold")
         .method("train_plot_ids", &RTrainer::train_plot_ids, "Plot IDs of the training fold")
+        .method("effective_batch_size", &RTrainer::effective_batch_size, "Batch size the last fit() actually trained at (post OOM auto-halve)")
         .method("categorical_vocab", &RTrainer::categorical_vocab, "Get categorical covariate vocabulary captured at prepare_data time")
         .method("cross_validate", &RTrainer::cross_validate, "Run k-fold cross-validation")
         .method("cross_validate_spatial", &RTrainer::cross_validate_spatial, "Run spatial block cross-validation")
@@ -122,6 +128,12 @@ RCPP_MODULE(resolve_module) {
         .method("device", &RPredictor::device, "Get current device")
         .method("get_scalers", &RPredictor::get_scalers, "Get fitted scalers")
         .method("categorical_vocab", &RPredictor::categorical_vocab, "Get categorical covariate vocabulary loaded from the checkpoint")
+        .method("schema", &RPredictor::schema, "Get the checkpoint's schema (incl. the fitted species/taxonomy vocabularies)")
+        .method("vocabs", &RPredictor::vocabs, "Get every training vocabulary, for the *_with_vocabs loaders")
+        .method("species_vocab", &RPredictor::species_vocab, "Ordered species vocabulary the model was trained with")
+        .method("genus_vocab", &RPredictor::genus_vocab, "Ordered genus vocabulary the model was trained with")
+        .method("family_vocab", &RPredictor::family_vocab, "Ordered family vocabulary the model was trained with")
+        .method("dataset_config", &RPredictor::dataset_config, "The DatasetConfig this checkpoint implies")
         ;
 
     function("Predictor_load", &RPredictor::load, "Load predictor from checkpoint");

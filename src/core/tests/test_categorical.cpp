@@ -104,9 +104,9 @@ TEST_CASE("CategoricalVocab treats NA-like strings as code 0",
     REQUIRE(vocab.encode("c", "y") == 2);
 
     SECTION("every NA-like string maps to 0") {
-        for (const std::string& s : {"", "NA", "na", "N/A", "n/a", "NaN",
-                                      "nan", "NULL", "null", "None",
-                                      "none", ".", "-"}) {
+        for (const char* const s : {"", "NA", "na", "N/A", "n/a", "NaN",
+                                    "nan", "NULL", "null", "None",
+                                    "none", ".", "-"}) {
             REQUIRE(vocab.encode("c", s) == 0);
         }
     }
@@ -451,7 +451,7 @@ TEST_CASE("ResolveModel adapter + categoricals sizes the numerical block correct
     schema.targets = {tgt};
 
     const int64_t B = 4;
-    const int64_t hash_dim = 4;
+    const int hash_dim = 4;  // matches ModelConfig::hash_dim's type
     const int64_t n_cont_input = 2 /*coords*/ + 2 /*cov*/ + hash_dim;  // hash already in continuous
 
     auto continuous = torch::randn({B, n_cont_input});

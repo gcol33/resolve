@@ -1,5 +1,34 @@
 #include "bindings_common.hpp"
 
+#include "resolve/config_registry.hpp"
+
+#include <type_traits>
+
+namespace {
+
+// Registers one field-registry row as a read/write Python attribute. The
+// training device is reachable through a string property (torch::Device has no
+// natural Python spelling) and the log callback has no Python form at all, so
+// both are skipped by TYPE rather than by being quietly left off a list -- the
+// omission a reader would have to notice.
+template <typename Class, typename Cfg, typename T>
+void bind_config_field(Class& cls, const char* name, T Cfg::*member) {
+    if constexpr (resolve::is_python_bindable_field_v<T>) {
+        cls.def_rw(name, member);
+    } else {
+        (void)cls;
+        (void)name;
+        (void)member;
+    }
+}
+
+}  // namespace
+
+// Expands one registry row into a def_rw. `cls` and `Cfg` come from the
+// enclosing block, so a struct is bound by opening a scope, naming it once, and
+// handing its field list to this macro.
+#define RESOLVE_BIND_FIELD(member, key) bind_config_field(cls, #member, &Cfg::member);
+
 void register_types(nb::module_& m) {
     // Role Mapping and Dataset Configuration
     nb::class_<resolve::RoleMapping>(m, "RoleMapping")
@@ -29,7 +58,7 @@ void register_types(nb::module_& m) {
         .def_rw("weight", &resolve::TargetSpec::weight)
         // Optional explicit string -> int mapping for classification target
         // columns. When empty (default), the loader auto-fits the mapping
-        // from the data. Mirrors the POC's `cfg["mapping"]`.
+        // from the data.
         .def_rw("class_mapping", &resolve::TargetSpec::class_mapping)
         .def_static("regression", &resolve::TargetSpec::regression,
                     nb::arg("column"), nb::arg("transform") = resolve::TransformType::None)
@@ -39,27 +68,16 @@ void register_types(nb::module_& m) {
                     &resolve::TargetSpec::classification_with_mapping,
                     nb::arg("column"), nb::arg("mapping"));
 
-    nb::class_<resolve::DatasetConfig>(m, "DatasetConfig")
-        .def(nb::init<>())
-        .def_rw("species_encoding", &resolve::DatasetConfig::species_encoding)
-        .def_rw("hash_dim", &resolve::DatasetConfig::hash_dim)
-        .def_rw("top_k", &resolve::DatasetConfig::top_k)
-        .def_rw("top_k_species", &resolve::DatasetConfig::top_k_species)
-        .def_rw("selection", &resolve::DatasetConfig::selection)
-        .def_rw("representation", &resolve::DatasetConfig::representation)
-        .def_rw("normalization", &resolve::DatasetConfig::normalization)
-        .def_rw("aggregation", &resolve::DatasetConfig::aggregation)
-        .def_rw("track_unknown_fraction", &resolve::DatasetConfig::track_unknown_fraction)
-        .def_rw("track_unknown_count", &resolve::DatasetConfig::track_unknown_count)
-        .def_rw("use_taxonomy", &resolve::DatasetConfig::use_taxonomy)
-        .def_rw("use_cuda_hash", &resolve::DatasetConfig::use_cuda_hash)
-        // Per-species weight scheme for rank_pool / transformer encoders
-        // (binary, abundance, log1p, norm, rank). Ignored otherwise.
-        .def_rw("pool_weighting", &resolve::DatasetConfig::pool_weighting)
-        // Cap on species-per-plot for rank_pool / transformer encoders. See
-        // DatasetConfig::pool_species_cap doc for the sentinel meanings:
-        // 0 = no cap (default), -1 = auto p99, >0 = manual cap.
-        .def_rw("pool_species_cap", &resolve::DatasetConfig::pool_species_cap);
+    // Loader configuration. Attribute names come from the field registry, so
+    // `pool_weighting` (the rank_pool / transformer per-species weight scheme)
+    // and `pool_species_cap` (0 = no cap, -1 = auto p99, >0 = manual) reach
+    // Python the moment they exist on the struct.
+    {
+        using Cfg = resolve::DatasetConfig;
+        auto cls = nb::class_<Cfg>(m, "DatasetConfig");
+        cls.def(nb::init<>());
+        RESOLVE_DATASET_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+    }
 
     // Configuration structs
     nb::class_<resolve::TargetConfig>(m, "TargetConfig")
@@ -97,209 +115,120 @@ void register_types(nb::module_& m) {
         .def_rw("categorical_embed_dim", &resolve::ResolveSchema::categorical_embed_dim)
         .def_rw("pool_weighting", &resolve::ResolveSchema::pool_weighting)
         .def_rw("pool_species_cap", &resolve::ResolveSchema::pool_species_cap)
+        // Remaining DatasetConfig knobs the loader consumed (issue #102). #38
+        // restored pool_weighting only; without these an inference-side
+        // DatasetConfig silently reverted to the struct defaults.
+        .def_rw("top_k_species", &resolve::ResolveSchema::top_k_species)
+        .def_rw("selection", &resolve::ResolveSchema::selection)
+        .def_rw("representation", &resolve::ResolveSchema::representation)
+        .def_rw("normalization", &resolve::ResolveSchema::normalization)
+        .def_rw("aggregation", &resolve::ResolveSchema::aggregation)
+        .def_rw("use_taxonomy", &resolve::ResolveSchema::use_taxonomy)
+        // Fitted species / genus / family vocabularies, index = integer code,
+        // [0] = "<UNK>" (issue #102). Empty on a pre-fix checkpoint.
+        .def_rw("species_vocab", &resolve::ResolveSchema::species_vocab)
+        .def_rw("genus_vocab", &resolve::ResolveSchema::genus_vocab)
+        .def_rw("family_vocab", &resolve::ResolveSchema::family_vocab)
         .def("has_categoricals", &resolve::ResolveSchema::has_categoricals)
-        .def("n_categoricals", &resolve::ResolveSchema::n_categoricals);
+        .def("n_categoricals", &resolve::ResolveSchema::n_categoricals)
+        .def("has_species_vocab", &resolve::ResolveSchema::has_species_vocab)
+        .def("has_taxonomy_vocab", &resolve::ResolveSchema::has_taxonomy_vocab);
+
+    // ExternalVocabs (issue #102) is registered in register_dataset, after the
+    // TaxonomyVocab / CategoricalVocab classes it holds.
 
     // Alias for backwards compatibility
     m.attr("SpaccSchema") = m.attr("ResolveSchema");
 
-    // Architecture-specific config structs
-    nb::class_<resolve::FTTransformerConfig>(m, "FTTransformerConfig")
-        .def(nb::init<>())
-        .def_rw("d_model", &resolve::FTTransformerConfig::d_model)
-        .def_rw("n_heads", &resolve::FTTransformerConfig::n_heads)
-        .def_rw("n_layers", &resolve::FTTransformerConfig::n_layers)
-        .def_rw("attention_dropout", &resolve::FTTransformerConfig::attention_dropout)
-        .def_rw("ffn_dropout", &resolve::FTTransformerConfig::ffn_dropout)
-        .def_rw("ffn_multiplier", &resolve::FTTransformerConfig::ffn_multiplier)
-        .def_rw("pre_norm", &resolve::FTTransformerConfig::pre_norm);
+    // Architecture-specific config structs. Each is bound from its field
+    // registry, so a hyperparameter added to the struct becomes a Python
+    // attribute in the same edit that adds it -- no second list to keep in step.
+    // The sub-configs are registered before ModelConfig, which exposes them as
+    // attributes of its own.
+    {
+        using Cfg = resolve::FTTransformerConfig;
+        auto cls = nb::class_<Cfg>(m, "FTTransformerConfig");
+        cls.def(nb::init<>());
+        RESOLVE_FT_TRANSFORMER_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+    }
+    {
+        using Cfg = resolve::TabNetConfig;
+        auto cls = nb::class_<Cfg>(m, "TabNetConfig");
+        cls.def(nb::init<>());
+        RESOLVE_TABNET_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+    }
+    {
+        using Cfg = resolve::SAINTConfig;
+        auto cls = nb::class_<Cfg>(m, "SAINTConfig");
+        cls.def(nb::init<>());
+        RESOLVE_SAINT_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+    }
+    {
+        using Cfg = resolve::GNNConfig;
+        auto cls = nb::class_<Cfg>(m, "GNNConfig");
+        cls.def(nb::init<>());
+        RESOLVE_GNN_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+    }
+    {
+        using Cfg = resolve::TraitNetConfig;
+        auto cls = nb::class_<Cfg>(m, "TraitNetConfig");
+        cls.def(nb::init<>());
+        RESOLVE_TRAIT_NET_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+    }
+    {
+        using Cfg = resolve::ExcelFormerConfig;
+        auto cls = nb::class_<Cfg>(m, "ExcelFormerConfig");
+        cls.def(nb::init<>());
+        RESOLVE_EXCELFORMER_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+    }
+    {
+        using Cfg = resolve::HeterogeneousGNNConfig;
+        auto cls = nb::class_<Cfg>(m, "HeterogeneousGNNConfig");
+        cls.def(nb::init<>());
+        RESOLVE_HETEROGENEOUS_GNN_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+    }
+    {
+        using Cfg = resolve::TabMConfig;
+        auto cls = nb::class_<Cfg>(m, "TabMConfig");
+        cls.def(nb::init<>());
+        RESOLVE_TABM_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+    }
+    {
+        using Cfg = resolve::ParallelBranchConfig;
+        auto cls = nb::class_<Cfg>(m, "ParallelBranchConfig");
+        cls.def(nb::init<>());
+        RESOLVE_PARALLEL_BRANCH_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+    }
+    {
+        using Cfg = resolve::ParallelLayersConfig;
+        auto cls = nb::class_<Cfg>(m, "ParallelLayersConfig");
+        cls.def(nb::init<>());
+        RESOLVE_PARALLEL_LAYERS_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+    }
 
-    nb::class_<resolve::TabNetConfig>(m, "TabNetConfig")
-        .def(nb::init<>())
-        .def_rw("n_steps", &resolve::TabNetConfig::n_steps)
-        .def_rw("n_d", &resolve::TabNetConfig::n_d)
-        .def_rw("n_a", &resolve::TabNetConfig::n_a)
-        .def_rw("relaxation_factor", &resolve::TabNetConfig::relaxation_factor)
-        .def_rw("sparsity_coefficient", &resolve::TabNetConfig::sparsity_coefficient)
-        .def_rw("virtual_batch_size", &resolve::TabNetConfig::virtual_batch_size)
-        .def_rw("use_sparsemax", &resolve::TabNetConfig::use_sparsemax);
+    {
+        using Cfg = resolve::ModelConfig;
+        auto cls = nb::class_<Cfg>(m, "ModelConfig");
+        cls.def(nb::init<>());
+        RESOLVE_MODEL_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+    }
 
-    nb::class_<resolve::SAINTConfig>(m, "SAINTConfig")
-        .def(nb::init<>())
-        .def_rw("d_model", &resolve::SAINTConfig::d_model)
-        .def_rw("n_heads", &resolve::SAINTConfig::n_heads)
-        .def_rw("n_layers", &resolve::SAINTConfig::n_layers)
-        .def_rw("attention_dropout", &resolve::SAINTConfig::attention_dropout)
-        .def_rw("use_row_attention", &resolve::SAINTConfig::use_row_attention)
-        .def_rw("use_contrastive_pretrain", &resolve::SAINTConfig::use_contrastive_pretrain)
-        .def_rw("mixup_alpha", &resolve::SAINTConfig::mixup_alpha);
-
-    nb::class_<resolve::GNNConfig>(m, "GNNConfig")
-        .def(nb::init<>())
-        .def_rw("gnn_type", &resolve::GNNConfig::gnn_type)
-        .def_rw("n_layers", &resolve::GNNConfig::n_layers)
-        .def_rw("hidden_dim", &resolve::GNNConfig::hidden_dim)
-        .def_rw("n_heads", &resolve::GNNConfig::n_heads)
-        .def_rw("k_neighbors", &resolve::GNNConfig::k_neighbors)
-        .def_rw("graph_mode", &resolve::GNNConfig::graph_mode)
-        .def_rw("edge_dropout", &resolve::GNNConfig::edge_dropout)
-        .def_rw("use_edge_features", &resolve::GNNConfig::use_edge_features);
-
-    nb::class_<resolve::TraitNetConfig>(m, "TraitNetConfig")
-        .def(nb::init<>())
-        .def_rw("env_dim", &resolve::TraitNetConfig::env_dim)
-        .def_rw("trait_dim", &resolve::TraitNetConfig::trait_dim)
-        .def_rw("interaction_dim", &resolve::TraitNetConfig::interaction_dim)
-        .def_rw("interaction", &resolve::TraitNetConfig::interaction)
-        .def_rw("shared_trait_encoder", &resolve::TraitNetConfig::shared_trait_encoder);
-
-    // ExcelFormer configuration
-    nb::class_<resolve::ExcelFormerConfig>(m, "ExcelFormerConfig")
-        .def(nb::init<>())
-        .def_rw("d_model", &resolve::ExcelFormerConfig::d_model)
-        .def_rw("n_heads", &resolve::ExcelFormerConfig::n_heads)
-        .def_rw("n_layers", &resolve::ExcelFormerConfig::n_layers)
-        .def_rw("attention_dropout", &resolve::ExcelFormerConfig::attention_dropout)
-        .def_rw("ffn_multiplier", &resolve::ExcelFormerConfig::ffn_multiplier)
-        .def_rw("importance_threshold", &resolve::ExcelFormerConfig::importance_threshold)
-        .def_rw("pre_norm", &resolve::ExcelFormerConfig::pre_norm);
-
-    // Heterogeneous GNN configuration
-    nb::class_<resolve::HeterogeneousGNNConfig>(m, "HeterogeneousGNNConfig")
-        .def(nb::init<>())
-        .def_rw("hidden_dim", &resolve::HeterogeneousGNNConfig::hidden_dim)
-        .def_rw("output_dim", &resolve::HeterogeneousGNNConfig::output_dim)
-        .def_rw("n_layers", &resolve::HeterogeneousGNNConfig::n_layers)
-        .def_rw("n_edge_types", &resolve::HeterogeneousGNNConfig::n_edge_types)
-        .def_rw("n_heads", &resolve::HeterogeneousGNNConfig::n_heads)
-        .def_rw("dropout", &resolve::HeterogeneousGNNConfig::dropout)
-        .def_rw("k_cooccurrence", &resolve::HeterogeneousGNNConfig::k_cooccurrence)
-        .def_rw("cooccurrence_threshold", &resolve::HeterogeneousGNNConfig::cooccurrence_threshold)
-        .def_rw("use_taxonomic_edges", &resolve::HeterogeneousGNNConfig::use_taxonomic_edges)
-        .def_rw("use_cooccurrence_edges", &resolve::HeterogeneousGNNConfig::use_cooccurrence_edges);
-
-    // TabM configuration
-    nb::class_<resolve::TabMConfig>(m, "TabMConfig")
-        .def(nb::init<>())
-        .def_rw("enabled", &resolve::TabMConfig::enabled)
-        .def_rw("n_ensembles", &resolve::TabMConfig::n_ensembles)
-        .def_rw("aggregation", &resolve::TabMConfig::aggregation);
-
-    // Parallel layers configuration
-    nb::class_<resolve::ParallelBranchConfig>(m, "ParallelBranchConfig")
-        .def(nb::init<>())
-        .def_rw("hidden_dims", &resolve::ParallelBranchConfig::hidden_dims)
-        .def_rw("activation", &resolve::ParallelBranchConfig::activation)
-        .def_rw("normalization", &resolve::ParallelBranchConfig::normalization)
-        .def_rw("dropout", &resolve::ParallelBranchConfig::dropout)
-        .def_rw("branch_weight", &resolve::ParallelBranchConfig::branch_weight);
-
-    nb::class_<resolve::ParallelLayersConfig>(m, "ParallelLayersConfig")
-        .def(nb::init<>())
-        .def_rw("enabled", &resolve::ParallelLayersConfig::enabled)
-        .def_rw("branches", &resolve::ParallelLayersConfig::branches)
-        .def_rw("aggregation", &resolve::ParallelLayersConfig::aggregation)
-        .def_rw("attention_heads", &resolve::ParallelLayersConfig::attention_heads)
-        .def_rw("use_residual", &resolve::ParallelLayersConfig::use_residual);
-
-    nb::class_<resolve::ModelConfig>(m, "ModelConfig")
-        .def(nb::init<>())
-        .def_rw("species_encoding", &resolve::ModelConfig::species_encoding)
-        .def_rw("uses_explicit_vector", &resolve::ModelConfig::uses_explicit_vector)
-        .def_rw("hash_dim", &resolve::ModelConfig::hash_dim)
-        .def_rw("species_embed_dim", &resolve::ModelConfig::species_embed_dim)
-        .def_rw("genus_emb_dim", &resolve::ModelConfig::genus_emb_dim)
-        .def_rw("family_emb_dim", &resolve::ModelConfig::family_emb_dim)
-        .def_rw("categorical_embed_dim", &resolve::ModelConfig::categorical_embed_dim)
-        .def_rw("top_k", &resolve::ModelConfig::top_k)
-        .def_rw("top_k_species", &resolve::ModelConfig::top_k_species)
-        .def_rw("n_taxonomy_slots", &resolve::ModelConfig::n_taxonomy_slots)
-        .def_rw("hidden_dims", &resolve::ModelConfig::hidden_dims)
-        .def_rw("dropout", &resolve::ModelConfig::dropout)
-        // MoE configuration
-        .def_rw("moe_routing", &resolve::ModelConfig::moe_routing)
-        .def_rw("n_experts", &resolve::ModelConfig::n_experts)
-        .def_rw("expert_hidden_dims", &resolve::ModelConfig::expert_hidden_dims)
-        .def_rw("moe_top_k", &resolve::ModelConfig::moe_top_k)
-        .def_rw("moe_noise_std", &resolve::ModelConfig::moe_noise_std)
-        .def_rw("moe_aux_loss_weight", &resolve::ModelConfig::moe_aux_loss_weight)
-        // Configurable architecture
-        .def_rw("activation", &resolve::ModelConfig::activation)
-        .def_rw("normalization", &resolve::ModelConfig::normalization)
-        .def_rw("norm_groups", &resolve::ModelConfig::norm_groups)
-        .def_rw("use_residual", &resolve::ModelConfig::use_residual)
-        .def_rw("leaky_relu_slope", &resolve::ModelConfig::leaky_relu_slope)
-        .def_rw("elu_alpha", &resolve::ModelConfig::elu_alpha)
-        // Multi-layer heads
-        .def_rw("head_hidden_dims", &resolve::ModelConfig::head_hidden_dims)
-        .def_rw("head_activation", &resolve::ModelConfig::head_activation)
-        .def_rw("head_dropout", &resolve::ModelConfig::head_dropout)
-        // Advanced architecture (v2.0)
-        .def_rw("encoder_architecture", &resolve::ModelConfig::encoder_architecture)
-        .def_rw("ft_transformer", &resolve::ModelConfig::ft_transformer)
-        .def_rw("tabnet", &resolve::ModelConfig::tabnet)
-        .def_rw("saint", &resolve::ModelConfig::saint)
-        .def_rw("gnn", &resolve::ModelConfig::gnn)
-        .def_rw("trait_net", &resolve::ModelConfig::trait_net)
-        .def_rw("excelformer", &resolve::ModelConfig::excelformer)
-        .def_rw("heterogeneous_gnn", &resolve::ModelConfig::heterogeneous_gnn)
-        // Parallel layers
-        .def_rw("parallel_layers", &resolve::ModelConfig::parallel_layers)
-        // TabM configuration
-        .def_rw("tabm", &resolve::ModelConfig::tabm)
-        // RankPool / Transformer encoder fields
-        .def_rw("cover_dropout", &resolve::ModelConfig::cover_dropout)
-        .def_rw("d_model", &resolve::ModelConfig::d_model)
-        .def_rw("n_heads", &resolve::ModelConfig::n_heads)
-        .def_rw("n_attention_layers", &resolve::ModelConfig::n_attention_layers)
-        .def_rw("transformer_ff_dim", &resolve::ModelConfig::transformer_ff_dim)
-        .def_rw("transformer_pooling", &resolve::ModelConfig::transformer_pooling)
-        .def_rw("transformer_dropout", &resolve::ModelConfig::transformer_dropout);
-
-    nb::class_<resolve::TrainConfig>(m, "TrainConfig")
-        .def(nb::init<>())
-        .def_rw("batch_size", &resolve::TrainConfig::batch_size)
-        .def_rw("max_epochs", &resolve::TrainConfig::max_epochs)
-        .def_rw("patience", &resolve::TrainConfig::patience)
-        .def_rw("lr", &resolve::TrainConfig::lr)
-        .def_rw("weight_decay", &resolve::TrainConfig::weight_decay)
-        .def_rw("phase_boundaries", &resolve::TrainConfig::phase_boundaries)
-        .def_rw("band_thresholds", &resolve::TrainConfig::band_thresholds)
-        .def_rw("band_threshold", &resolve::TrainConfig::band_threshold)
-        .def_rw("loss_config", &resolve::TrainConfig::loss_config)
-        .def_rw("lr_scheduler", &resolve::TrainConfig::lr_scheduler)
-        .def_rw("lr_step_size", &resolve::TrainConfig::lr_step_size)
-        .def_rw("lr_gamma", &resolve::TrainConfig::lr_gamma)
-        .def_rw("lr_min", &resolve::TrainConfig::lr_min)
-        // Automatic Mixed Precision (AMP)
-        .def_rw("use_amp", &resolve::TrainConfig::use_amp)
-        .def_rw("amp_init_scale", &resolve::TrainConfig::amp_init_scale)
-        .def_rw("amp_growth_factor", &resolve::TrainConfig::amp_growth_factor)
-        .def_rw("amp_backoff_factor", &resolve::TrainConfig::amp_backoff_factor)
-        .def_rw("amp_growth_interval", &resolve::TrainConfig::amp_growth_interval)
-        // CUDA performance optimizations
-        .def_rw("cudnn_benchmark", &resolve::TrainConfig::cudnn_benchmark)
-        .def_rw("allow_tf32", &resolve::TrainConfig::allow_tf32)
-        .def_rw("vram_fraction", &resolve::TrainConfig::vram_fraction)
-        // Floor for the auto-halve-on-OOM retry inside Trainer::fit. The
-        // training loop catches c10::OutOfMemoryError, releases optimizer /
-        // AMP / GPU caches, halves batch_size, and restarts from epoch 0.
-        // If halving would take batch_size below this floor, the original
-        // OOM is rethrown.
-        .def_rw("batch_size_floor", &resolve::TrainConfig::batch_size_floor)
-        // Periodic checkpointing (parity with the C-ABI/R config surface):
-        // checkpoint_dir empty disables it; checkpoint_every N writes every N
-        // epochs (0 = only best).
-        .def_rw("checkpoint_dir", &resolve::TrainConfig::checkpoint_dir)
-        .def_rw("checkpoint_every", &resolve::TrainConfig::checkpoint_every)
-        // Device property (string-based for Python convenience)
-        .def_prop_rw("device",
-            [](const resolve::TrainConfig& c) {
+    {
+        using Cfg = resolve::TrainConfig;
+        auto cls = nb::class_<Cfg>(m, "TrainConfig");
+        cls.def(nb::init<>());
+        RESOLVE_TRAIN_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+        // The device is the one field the registry cannot bind directly:
+        // torch::Device has no natural Python spelling, so it is exposed as the
+        // string "cuda" / "cpu". The log callback has no Python form at all.
+        cls.def_prop_rw("device",
+            [](const Cfg& c) {
                 return c.device.is_cuda() ? "cuda" : "cpu";
             },
-            [](resolve::TrainConfig& c, const std::string& dev) {
+            [](Cfg& c, const std::string& dev) {
                 c.device = (dev == "cuda") ? torch::kCUDA : torch::kCPU;
             });
+    }
 
     // Baseline metrics for comparison against naive baselines
     nb::class_<resolve::BaselineMetrics>(m, "BaselineMetrics")
@@ -350,6 +279,7 @@ void register_types(nb::module_& m) {
         .def_ro("test_loss_history", &resolve::TrainResult::test_loss_history)
         .def_ro("train_time_seconds", &resolve::TrainResult::train_time_seconds)
         .def_ro("resumed_from_epoch", &resolve::TrainResult::resumed_from_epoch)
+        .def_ro("effective_batch_size", &resolve::TrainResult::effective_batch_size)
         .def_ro("baselines", &resolve::TrainResult::baselines)
         .def_ro("diagnostics", &resolve::TrainResult::diagnostics);
 
@@ -505,3 +435,5 @@ void register_types(nb::module_& m) {
             return nb::none();
         });
 }
+
+#undef RESOLVE_BIND_FIELD

@@ -1,204 +1,229 @@
 # Understanding Embeddings
 
-RESOLVE learns several types of embeddings that capture ecological relationships. This guide explains how to extract and interpret them.
+A trained RESOLVE model holds three kinds of learned representation: one vector
+per plot, one per species, and one per genus and family. This guide covers how
+to get them out and what they mean.
 
-## Types of Embeddings
+## Plot embeddings
 
-### 1. Plot Embeddings (Latent Representations)
-
-The shared encoder produces a latent vector for each plot that captures its ecological "fingerprint":
+The shared encoder turns a plot's composition, coordinates, and covariates into
+a single latent vector, and the task heads read their predictions off it.
 
 ```python
-predictions = predictor.predict(dataset, return_latent=True)
-latent = predictions.latent  # Shape: (n_plots, latent_dim)
+import resolve_core as rc
+
+predictor = rc.Predictor.load("model.pt", device="cpu")
+out = predictor.predict_dataset(dataset, return_latent=True)
+
+latent = out.latent                  # (n_plots, latent_dim)
+plot_ids = list(out.plot_ids)
 ```
 
-These embeddings encode:
-- Species composition patterns
-- Spatial context (if coordinates provided)
-- Environmental conditions (if covariates provided)
+`latent` is a CPU float tensor with one row per plot, in the dataset's plot
+order. `predictor.model.latent_dim` is its width, and it is the width of the
+last entry in `ModelConfig.hidden_dims`.
 
-### 2. Genus Embeddings
+Because every head reads the same vector, two plots that sit close together in
+latent space are plots the model expects to behave alike on every target at
+once.
 
-Learned representations for each genus:
+## Species embeddings
+
+The encoders that give each species its own row expose the table:
 
 ```python
-genus_emb = predictor.get_genus_embeddings()
-# Shape: (n_genera, genus_emb_dim)
+species = predictor.get_species_embeddings()   # (n_species_vocab, species_embed_dim)
+names   = predictor.species_vocab              # index -> species name, [0] is "<UNK>"
 ```
 
-Similar genera (ecologically or phylogenetically related) should have similar embeddings.
+`Embed`, `RankPool`, and `Transformer` build such a table. `Hash` derives its
+representation from the name itself and has none, and `Sparse` carries species
+identity in the first layer's weight matrix rather than an embedding, so both
+return `None`.
 
-### 3. Family Embeddings
+Row 0 is the reserved unknown token, which is where every species outside the
+training vocabulary is encoded.
 
-Learned representations for each family:
+## Taxonomy embeddings
 
 ```python
-family_emb = predictor.get_family_embeddings()
-# Shape: (n_families, family_emb_dim)
+genus  = predictor.get_genus_embeddings()      # (n_genera, genus_emb_dim)
+family = predictor.get_family_embeddings()     # (n_families, family_emb_dim)
+
+genus_names  = predictor.genus_vocab
+family_names = predictor.family_vocab
 ```
 
-## Visualizing Plot Embeddings
+They are present whenever the dataset carried a genus or family column and
+`DatasetConfig.use_taxonomy` was left on. Both tables also reserve index 0 for
+the unknown token.
 
-### UMAP Projection
+The same vocabularies travel on the schema, so a dataset gives them without a
+checkpoint:
 
 ```python
+dataset.schema.genus_vocab
+dataset.schema.family_vocab
+dataset.species_vocab
+```
+
+## Projecting plot embeddings
+
+```python
+import numpy as np
 import umap
 import matplotlib.pyplot as plt
 
-# Get embeddings
-predictions = predictor.predict(dataset, return_latent=True)
-latent = predictions.latent
+latent = predictor.predict_dataset(dataset, return_latent=True).latent.numpy()
 
-# Reduce to 2D
 reducer = umap.UMAP(n_neighbors=15, min_dist=0.1, random_state=42)
-embedding_2d = reducer.fit_transform(latent)
+xy = reducer.fit_transform(latent)
 
-# Plot colored by target
 plt.figure(figsize=(10, 8))
-plt.scatter(
-    embedding_2d[:, 0],
-    embedding_2d[:, 1],
-    c=dataset.get_targets()["area"],
-    cmap="viridis",
-    alpha=0.6,
-)
+plt.scatter(xy[:, 0], xy[:, 1], c=dataset.targets["area"].numpy(),
+            cmap="viridis", alpha=0.6)
 plt.colorbar(label="Area")
 plt.xlabel("UMAP 1")
 plt.ylabel("UMAP 2")
-plt.title("Plot Embeddings Colored by Area")
+plt.tight_layout()
 plt.savefig("plot_embeddings.png", dpi=150)
 ```
 
-### t-SNE Projection
+`dataset.targets` is a dict of target-name to tensor, in whatever space the
+loader stored it: a `Log1p` target is stored transformed, so invert it with
+`np.expm1` before using it as a colour scale in original units.
+
+t-SNE takes the same input:
 
 ```python
 from sklearn.manifold import TSNE
 
-tsne = TSNE(n_components=2, perplexity=30, random_state=42)
-embedding_2d = tsne.fit_transform(latent)
+xy = TSNE(n_components=2, perplexity=30, random_state=42).fit_transform(latent)
 ```
 
-## Analyzing Taxonomy Embeddings
-
-### Genus Similarity
-
-Find genera with similar ecological roles:
+## Comparing species and genera
 
 ```python
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
-genus_emb = predictor.get_genus_embeddings()
-genus_names = dataset.schema.genus_vocab  # Get genus names
+genus = predictor.get_genus_embeddings().numpy()
+names = list(predictor.genus_vocab)
 
-# Compute similarity matrix
-similarities = cosine_similarity(genus_emb)
+similarity = cosine_similarity(genus)
 
-# Find most similar genera for a target genus
-target_genus = "Quercus"
-target_idx = genus_names.index(target_genus)
-sim_scores = similarities[target_idx]
+target = "Quercus"
+i = names.index(target)
+order = np.argsort(similarity[i])[::-1]
 
-# Sort by similarity
-sorted_idx = np.argsort(sim_scores)[::-1]
-print(f"Genera most similar to {target_genus}:")
-for i in sorted_idx[1:6]:  # Top 5 (excluding self)
-    print(f"  {genus_names[i]}: {sim_scores[i]:.3f}")
+print(f"Closest to {target}:")
+for j in order[1:6]:
+    print(f"  {names[j]}: {similarity[i, j]:.3f}")
 ```
 
-### Hierarchical Clustering
+Two genera end up close when the model found them interchangeable for
+predicting its targets, on this dataset. That can line up with ecological or
+phylogenetic similarity, and it is not a measurement of either.
+
+Hierarchical clustering over the same table:
 
 ```python
 from scipy.cluster.hierarchy import dendrogram, linkage
 import matplotlib.pyplot as plt
 
-genus_emb = predictor.get_genus_embeddings()
-genus_names = dataset.schema.genus_vocab
+Z = linkage(genus, method="ward")
 
-# Compute linkage
-Z = linkage(genus_emb, method="ward")
-
-# Plot dendrogram
 plt.figure(figsize=(12, 8))
-dendrogram(Z, labels=genus_names, leaf_rotation=90)
-plt.title("Genus Embedding Dendrogram")
+dendrogram(Z, labels=names, leaf_rotation=90)
 plt.tight_layout()
 plt.savefig("genus_dendrogram.png", dpi=150)
 ```
 
-## Linear Compositional Pooling
+## Linear pooling and what stays readable
 
-RESOLVE aggregates species effects linearly before nonlinear mixing. This means:
+RESOLVE aggregates species effects linearly before any nonlinearity mixes them.
 
-1. Each species contributes additively to the hash embedding
-2. Contributions are weighted by abundance (after normalization)
-3. The encoder then applies nonlinear transformations
+- `Hash` accumulates `sign * weight` for each species at its hashed bucket, so a
+  plot's hashed vector is a signed sum of per-species contributions.
+- `RankPool` takes a weight-normalized mean of per-species embeddings.
+- `Sparse` hands the abundance vector straight to a linear layer.
 
-This design preserves interpretability: you can decompose a plot's embedding into species contributions.
+In all three the species contribution to the encoder's input is additive, so a
+plot's input decomposes into per-species terms. That decomposition holds up to
+the first nonlinearity, past which the encoder mixes them.
 
-### Decomposing Plot Embeddings
+The transformer encoder breaks this on purpose: attention makes a species'
+contribution depend on the rest of the plot, which is the point of using it.
 
-```python
-# For a single plot, its hash embedding is:
-# h = sum(abundance[i] * hash_vector[species[i]]) for all species in plot
-#
-# The species encoder's contribution to the latent space
-# follows this linear structure before the PlotEncoder's nonlinear layers.
-```
+## Practical uses
 
-## Practical Applications
-
-### 1. Plot Similarity Search
-
-Find plots with similar ecological characteristics:
+### Similar plots
 
 ```python
 from sklearn.neighbors import NearestNeighbors
 
-# Fit nearest neighbors model
-nn = NearestNeighbors(n_neighbors=5, metric="cosine")
-nn.fit(latent)
+latent = predictor.predict_dataset(dataset, return_latent=True).latent.numpy()
+plot_ids = np.asarray(dataset.plot_ids)
 
-# Find similar plots for a query
-query_idx = 0
-distances, indices = nn.kneighbors([latent[query_idx]])
+nn = NearestNeighbors(n_neighbors=5, metric="cosine").fit(latent)
+distances, indices = nn.kneighbors(latent[:1])
 
-print(f"Plots similar to {dataset.plot_ids[query_idx]}:")
+print(f"Closest to {plot_ids[0]}:")
 for idx, dist in zip(indices[0], distances[0]):
-    print(f"  {dataset.plot_ids[idx]}: distance={dist:.3f}")
+    print(f"  {plot_ids[idx]}: {dist:.3f}")
 ```
 
-### 2. Outlier Detection
-
-Identify plots with unusual species compositions:
+### Unusual plots
 
 ```python
 from sklearn.ensemble import IsolationForest
 
-detector = IsolationForest(contamination=0.05, random_state=42)
-outlier_labels = detector.fit_predict(latent)
-
-outlier_plots = dataset.plot_ids[outlier_labels == -1]
-print(f"Potential outliers: {outlier_plots}")
+labels = IsolationForest(contamination=0.05, random_state=42).fit_predict(latent)
+print("Flagged:", plot_ids[labels == -1])
 ```
 
-### 3. Ecological Gradients
+A plot lands far from the rest when its composition is unlike what the model
+saw. Read it next to that plot's residual before calling it an outlier.
 
-Project embeddings onto interpretable axes:
+### Gradients
 
 ```python
 from sklearn.decomposition import PCA
 
-pca = PCA(n_components=3)
-pca_emb = pca.fit_transform(latent)
-
-print("Variance explained by first 3 PCs:")
-for i, var in enumerate(pca.explained_variance_ratio_):
-    print(f"  PC{i+1}: {var:.1%}")
+pca = PCA(n_components=3).fit(latent)
+for i, var in enumerate(pca.explained_variance_ratio_, start=1):
+    print(f"PC{i}: {var:.1%}")
 ```
 
-## Next Steps
+## Embeddings without a predictor
 
-- [Training Models](training.md): Customize model architecture
-- [Making Predictions](prediction.md): Use models for inference
+`ResolveModel.get_latent` runs the encoder on tensors directly, which is what a
+custom training loop or an ablation needs:
+
+```python
+latent = model.get_latent(
+    continuous,
+    genus_ids=dataset.genus_ids,
+    family_ids=dataset.family_ids,
+    species_ids=dataset.species_ids,
+)
+```
+
+`continuous` is the concatenation the trainer builds: coordinates, covariates,
+the unknown-mass columns, and the hash embedding in hash mode, in that order.
+`tests/core/conftest.py` has a `trainer_continuous` helper that assembles it.
+
+The untrained weight tables are reachable the same way, from the model rather
+than a predictor:
+
+```python
+model.get_species_weights()
+model.get_genus_weights()
+model.get_family_weights()
+```
+
+## Next steps
+
+- [Making Predictions](prediction.md): scoring new data and writing results
+- [Encoding Modes](encoding-modes.md): which encoders build which tables
+- [Training Models](training.md): configuring the encoder these vectors come from

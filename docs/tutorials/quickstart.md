@@ -1,90 +1,81 @@
 # Quick Start
 
-This guide walks through a complete RESOLVE workflow: loading data, training a model, and making predictions.
+This guide walks through a complete RESOLVE workflow: loading data, training a
+model, and making predictions.
 
 ## Installation
 
-=== "Python"
-
-    ```bash
-    pip install resolve
-    ```
-
-=== "R"
-
-    ```r
-    # Install from GitHub (CRAN submission pending)
-    remotes::install_github("gcol33/resolve", subdir = "r")
-    ```
+See [Installation](installation.md); the engine builds from source against your
+installed PyTorch.
 
 ## Data Requirements
 
 RESOLVE expects two data sources:
 
 1. **Header file**: One row per plot with plot-level attributes
-2. **Species file**: One row per species occurrence (plot × species)
+2. **Species file**: One row per species occurrence (plot x species)
+
+A single long table also works, with the targets carried inline; see
+`ResolveDataset.from_species_csv`.
 
 ## Example Workflow
 
 === "Python"
 
     ```python
-    import resolve
+    import resolve_core as rc
 
-    # 1. Define semantic roles (map your column names)
-    roles = {
-        "plot_id": "PlotObservationID",
-        "species_id": "Species",
-        "species_plot_id": "PlotObservationID",
-        "coords_lat": "Latitude",
-        "coords_lon": "Longitude",
-        "abundance": "Cover",           # optional
-        "taxonomy_genus": "Genus",      # optional
-        "taxonomy_family": "Family",    # optional
-    }
+    # 1. Map your column names onto RESOLVE's semantic roles
+    roles = rc.RoleMapping()
+    roles.plot_id     = "PlotObservationID"
+    roles.species_id  = "Species"
+    roles.latitude    = "Latitude"
+    roles.longitude   = "Longitude"
+    roles.abundance   = "Cover"      # optional
+    roles.genus       = "Genus"      # optional
+    roles.family      = "Family"     # optional
+    roles.covariates  = ["Elevation"]
 
-    # 2. Define targets
-    targets = {
-        "area": {
-            "column": "Area",
-            "task": "regression",
-            "transform": "log1p",
-        },
-        "habitat": {
-            "column": "Habitat",
-            "task": "classification",
-            "num_classes": 5,
-        },
-    }
+    # 2. Declare the targets
+    targets = [
+        rc.TargetSpec.regression("Area", rc.TransformType.Log1p),
+        rc.TargetSpec.classification("Habitat", 5),
+    ]
 
-    # 3. Load data
-    dataset = resolve.ResolveDataset.from_csv(
-        header="plots.csv",
-        species="species.csv",
-        roles=roles,
-        targets=targets,
-        species_normalization="relative",
+    # 3. Choose how the species set is encoded
+    data_config = rc.DatasetConfig()
+    data_config.species_encoding = rc.SpeciesEncodingMode.RankPool
+    data_config.pool_weighting   = rc.PoolWeighting.Log1p
+
+    # 4. Load
+    dataset = rc.ResolveDataset.from_csv(
+        "plots.csv", "species.csv", roles, targets, data_config,
     )
-
-    # 4. Check schema
     print(f"Plots: {dataset.schema.n_plots}")
-    print(f"Species: {dataset.schema.n_species}")
+    print(f"Species vocabulary: {dataset.schema.n_species_vocab}")
 
-    # 5. Train (model built automatically from dataset)
-    trainer = resolve.Trainer(
-        dataset,
-        species_encoding="hash",
-        hash_dim=32,
-        max_epochs=200,
-        patience=30,
-    )
+    # 5. Build the model from the dataset's schema
+    model_config = rc.ModelConfig()
+    model_config.species_encoding = rc.SpeciesEncodingMode.RankPool
+    model_config.hidden_dims      = [256, 128]
+    model = rc.ResolveModel(dataset.schema, model_config)
+
+    # 6. Train
+    train_config = rc.TrainConfig()
+    train_config.max_epochs = 200
+    train_config.patience   = 30
+    trainer = rc.Trainer(model, train_config)
+    trainer.prepare_data(dataset, test_size=0.2, seed=42)
     result = trainer.fit()
+    print(result.final_metrics)
 
-    # 6. Save model
+    # 7. Save
     trainer.save("model.pt")
 
-    # 7. Predict with confidence filtering
-    predictions = trainer.predict(new_dataset, confidence_threshold=0.8)
+    # 8. Predict
+    predictor  = rc.Predictor.load("model.pt")
+    predictions = predictor.predict_dataset(dataset)
+    print(predictions.predictions["Area"][:5])
     ```
 
 === "R"
@@ -92,78 +83,79 @@ RESOLVE expects two data sources:
     ```r
     library(resolve)
 
-    # 1. Load and prepare data
-    header <- read.csv("plots.csv")
-    species <- read.csv("species.csv")
-
-    # 2. Create encoder and fit on species data
-    encoder <- resolve.encoder(hashDim = 32L, topK = 5L)
-    encoder$fit(species)
-
-    # 3. Define schema
-    schema <- list(
-      nPlots = nrow(header),
-      nSpecies = encoder$n_species(),
-      hasCoordinates = TRUE,
-      hasTaxonomy = TRUE,
+    dataset <- resolve.dataset.csv(
+      header  = "plots.csv",
+      species = "species.csv",
+      roles   = list(
+        plot_id    = "PlotObservationID",
+        species_id = "Species",
+        latitude   = "Latitude",
+        longitude  = "Longitude",
+        abundance  = "Cover",
+        genus      = "Genus",
+        family     = "Family"
+      ),
       targets = list(
-        list(name = "area", task = "regression", transform = "log1p"),
-        list(name = "habitat", task = "classification", numClasses = 5L)
-      )
+        Area    = list(column = "Area",    task = "regression",     transform = "log1p"),
+        Habitat = list(column = "Habitat", task = "classification", num_classes = 5L)
+      ),
+      config  = list(species_encoding = "rank_pool", pool_weighting = "log1p")
     )
 
-    # 4. Create model and trainer
-    model_config <- list(
-      speciesEncoding = "hash",
-      hashDim = 32L,
-      hiddenDims = c(128L, 64L)
-    )
-
-    train_config <- list(
-      batchSize = 64L,
-      maxEpochs = 200L,
-      patience = 30L,
-      lr = 0.001
-    )
-
-    model <- new(.resolve_module$ResolveModel, schema, model_config)
-    trainer <- new(.resolve_module$Trainer, model, train_config)
-
-    # 5. Train
-    # trainer$fit(train_data)
-
-    # 6. Save model
+    trainer <- resolve.train.dataset(dataset, maxEpochs = 200L, patience = 30L)
     resolve.save(trainer, "model.pt")
 
-    # 7. Predict
-    # predictions <- resolve.predict(trainer, new_data)
+    predictor <- resolve.load("model.pt")
+    preds     <- resolve.predict.dataset(predictor, dataset)
+    ```
+
+=== "Command line"
+
+    ```bash
+    resolve train \
+      --header plots.csv --species species.csv \
+      --plot-id PlotObservationID --species-id Species \
+      --lat Latitude --lon Longitude --abundance Cover \
+      --genus Genus --family Family \
+      --target Area:regression --target Habitat:classification:5 \
+      --encoding rank_pool --pool-weighting log1p \
+      --output model.pt
+
+    resolve predict \
+      --model model.pt --header plots.csv --species species.csv \
+      --plot-id PlotObservationID --species-id Species \
+      --output predictions.csv
     ```
 
 ## Role Mapping
 
-The `roles` dictionary maps your column names to RESOLVE's semantic roles:
+`RoleMapping` maps your column names onto RESOLVE's semantic roles:
 
 | Role | Required | Description |
 |------|----------|-------------|
-| `plot_id` | Yes | Unique plot identifier in header |
-| `species_id` | Yes | Species identifier in species file |
-| `species_plot_id` | Yes | Plot identifier in species file (for joining) |
-| `coords_lat` | No | Latitude coordinate |
-| `coords_lon` | No | Longitude coordinate |
-| `abundance` | No | Species abundance/cover value |
-| `taxonomy_genus` | No | Genus name for taxonomy embeddings |
-| `taxonomy_family` | No | Family name for taxonomy embeddings |
-| `covariates` | No | List of additional predictor columns |
+| `plot_id` | Yes | Plot identifier, present in both files |
+| `species_id` | Yes | Species identifier in the species file |
+| `latitude` | No | Latitude coordinate |
+| `longitude` | No | Longitude coordinate |
+| `abundance` | No | Species abundance / cover value |
+| `genus` | No | Genus name for taxonomy embeddings |
+| `family` | No | Family name for taxonomy embeddings |
+| `covariates` | No | Numeric predictor columns |
+| `categoricals` | No | String predictor columns, factorized on load |
 
 ## Target Configuration
 
-Each target specifies:
+Targets are built with the `TargetSpec` constructors:
 
-- `column`: Column name in header file
-- `task`: `"regression"` or `"classification"`
-- `transform`: Optional transform (`"log1p"` for regression)
-- `num_classes`: Required for classification tasks
-- `weight`: Optional loss weighting (default: 1.0)
+```python
+rc.TargetSpec.regression("Area")                            # untransformed
+rc.TargetSpec.regression("Area", rc.TransformType.Log1p)    # log1p target
+rc.TargetSpec.classification("Habitat", 5)                  # 5 classes
+rc.TargetSpec.classification_with_mapping("Habitat", {"M": 0, "N": 1})
+```
+
+A classification column of strings is factorized alphabetically when no explicit
+mapping is given, and the class names are recorded on the schema.
 
 ## Next Steps
 

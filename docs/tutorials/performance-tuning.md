@@ -1,174 +1,145 @@
 # Performance Tuning
 
-This guide covers the key levers for optimizing RESOLVE training speed and model accuracy.
+This guide covers the levers for RESOLVE's training speed, memory footprint, and
+accuracy, and what each one actually does in the engine.
 
-## Learning Rate
+## Learning rate
 
-The learning rate is the single most impactful hyperparameter. The right value depends on the encoding mode and model architecture.
-
-### Defaults by Encoding Mode
-
-| Encoding | Recommended LR | Notes |
-|----------|---------------|-------|
-| `hash` | `1e-3` | Default. Works reliably across dataset sizes. |
-| `embed` | `1e-3` | Same as hash. Embedding gradients are well-behaved. |
-| `rank_pool` | `1e-3` | Same as hash. Pooling stabilizes gradients. |
-| `transformer` | `3e-4` | Lower LR required. Attention layers overflow at `1e-3`. |
-
-### OneCycle Schedule
-
-RESOLVE uses a OneCycle learning rate schedule by default. The LR ramps up from `lr/25` to `lr` over the first 30% of training, then anneals to near zero. This usually outperforms constant LR and requires no manual scheduling.
+`TrainConfig.lr` feeds AdamW, together with `weight_decay` (default `1e-4`).
 
 ```python
-trainer = resolve.Trainer(
-    dataset,
-    lr=1e-3,  # Peak learning rate for OneCycle
-)
+cfg = rc.TrainConfig()
+cfg.lr           = 1e-3
+cfg.weight_decay = 1e-4
 ```
 
-### Signs of Wrong LR
+`1e-3` is the default and a reasonable starting point for the hash, embed,
+sparse, and rank-pool encoders. Attention layers are more sensitive: with
+`n_attention_layers >= 1`, a lower rate such as `3e-4` is the usual place to
+start.
 
-- **LR too high**: Loss spikes or NaN after a few epochs. Reduce by 3-10x.
-- **LR too low**: Loss decreases very slowly, never reaching a good minimum. Increase by 3-10x.
-- **LR slightly too high**: Loss oscillates without clear downward trend. Reduce by 2-3x.
+Reading the loss curve:
 
-## Batch Size
+- Loss spikes or turns to NaN within a few epochs: reduce by 3-10x.
+- Loss falls very slowly and flattens high: raise by 3-10x.
+- Loss oscillates without a downward trend: reduce by 2-3x.
 
-Batch size controls the trade-off between gradient noise and training speed.
+### Schedules
 
-### Guidelines
-
-| Dataset size | Recommended batch size | Reasoning |
-|-------------|----------------------|-----------|
-| <10k plots | 512-2048 | Smaller batches add regularization, prevent overfitting |
-| 10k-100k plots | 4096 (default) | Good balance of speed and gradient quality |
-| >100k plots | 8192-16384 | Larger batches utilize GPU parallelism fully |
+No schedule runs by default (`lr_scheduler = LRSchedulerType.None_`); the rate
+stays at `lr` for the whole run. Two schedules are available:
 
 ```python
-trainer = resolve.Trainer(
-    dataset,
-    batch_size=4096,
-)
+cfg.lr_scheduler = rc.LRSchedulerType.StepLR
+cfg.lr_step_size = 100      # decay every 100 epochs
+cfg.lr_gamma     = 0.1      # by this factor
+
+cfg.lr_scheduler = rc.LRSchedulerType.CosineAnnealing
+cfg.lr_min       = 1e-6     # reached on the last epoch
 ```
 
-### Batch Size and Learning Rate
+Cosine annealing spans `max_epochs`, so it lands on `lr_min` at the last epoch
+rather than a step short of it.
 
-When increasing batch size, consider scaling the learning rate proportionally. A common heuristic: if you double the batch size, multiply the LR by 1.5x (not 2x, since OneCycle already adapts).
+## Batch size
 
-### Memory Limits
-
-If you hit GPU out-of-memory errors, reduce batch size first. RESOLVE's memory footprint scales linearly with batch size for all encoding modes except transformer, which scales quadratically due to the attention matrix.
-
-## Hidden Dimensions
-
-The `hidden_dims` parameter controls the shared MLP encoder's depth and width.
-
-### Presets
+`batch_size` trades gradient noise against throughput.
 
 ```python
-# Small: fast training, less overfitting risk
-model = resolve.ResolveModel(
-    schema=dataset.schema,
-    targets=targets,
-    hidden_dims=[256, 128, 64],
-)
-
-# Default: deep network, good for most datasets
-model = resolve.ResolveModel(
-    schema=dataset.schema,
-    targets=targets,
-    hidden_dims=[2048, 1024, 512, 256, 128, 64],
-)
-
-# Wide: more capacity per layer, fewer layers
-model = resolve.ResolveModel(
-    schema=dataset.schema,
-    targets=targets,
-    hidden_dims=[2048, 1024, 512],
-)
+cfg.batch_size = 4096       # default
 ```
 
-### Choosing Dimensions
+Starting points, to be measured rather than trusted:
 
-- **Small datasets (<5k plots)**: Use `[256, 128, 64]`. Deeper networks overfit without enough data.
-- **Medium datasets (5k-50k plots)**: Use `[512, 256, 128]` or the default.
-- **Large datasets (>50k plots)**: The default `[2048, 1024, 512, 256, 128, 64]` is a good starting point. Going wider (e.g., `[4096, 2048, 1024, 512]`) can help if the model underfits.
-- **With transformer encoding**: The attention layers already provide capacity, so a shallower MLP (`[512, 256, 128]`) often suffices.
+| Dataset size | Try |
+|--------------|-----|
+| under 10k plots | 512 to 2048 |
+| 10k to 100k plots | 4096 |
+| over 100k plots | 8192 to 16384 |
 
-## Mixed Precision (AMP)
+Smaller batches add gradient noise, which acts as regularization on a small
+dataset; larger batches keep a GPU busy. When you raise the batch size, the
+learning rate usually has to rise with it.
 
-Automatic Mixed Precision uses fp16 for most operations while keeping critical accumulations in fp32. This roughly halves memory usage and doubles throughput on modern GPUs.
+Memory grows linearly with batch size for every encoder. The transformer
+encoder additionally holds an attention matrix quadratic in species per plot, so
+`pool_species_cap` matters there as much as `batch_size`.
+
+## Model size
+
+`hidden_dims` sets the shared encoder's depth and width. The default is
+`[2048, 1024, 512, 256, 128, 64]`.
 
 ```python
-trainer = resolve.Trainer(
-    dataset,
-    use_amp=True,   # Default: enabled on CUDA
-)
+model_config = rc.ModelConfig()
+model_config.hidden_dims = [256, 128, 64]        # small
+model_config.hidden_dims = [512, 256, 128]       # mid
+model_config.hidden_dims = [2048, 1024, 512]     # wide and shallow
 ```
 
-### When to Disable AMP
+- Small datasets (under 5k plots): a deep default overfits before it converges;
+  `[256, 128, 64]` is a better place to start.
+- Mid-size datasets: `[512, 256, 128]` or the default.
+- Large datasets: the default, widened if the training loss plateaus above the
+  test loss.
+- With the transformer encoder: the attention layers already carry capacity, so
+  a shallower MLP above them is usually enough.
 
-Disable AMP for transformer encoding. Self-attention computes softmax over dot products that can overflow in fp16, producing NaN losses:
+`dropout` (default `0.3`) applies between encoder layers, and `head_dropout`
+(default `0.0`) inside the per-target heads. `use_residual = True` adds residual
+connections, which helps deeper stacks train.
+
+## Mixed precision
+
+AMP runs most operations in fp16 and keeps the accumulations that need range in
+fp32. It is off by default:
 
 ```python
-trainer = resolve.Trainer(
-    dataset,
-    species_encoding="transformer",
-    use_amp=False,  # Required for stable transformer training
-)
+cfg.use_amp             = True
+cfg.amp_init_scale      = 65536.0
+cfg.amp_growth_factor   = 2.0
+cfg.amp_backoff_factor  = 0.5
+cfg.amp_growth_interval = 2000
 ```
 
-For hash, embed, and rank_pool modes, AMP is safe and recommended.
+Normalization layers are forced to fp32 inside the autocast region, so
+BatchNorm statistics cannot saturate at the fp16 maximum and collapse
+eval-mode output. Set `RESOLVE_FP32_NORM=0` to A/B that guard.
 
-## GPU Optimization
+If a loss goes to NaN a few steps into an AMP run with attention layers, turn
+AMP off before touching anything else.
 
-### cuDNN Benchmark Mode
+## GPU settings
 
-Enabled by default when training on CUDA. Auto-tunes convolution and matmul algorithms for the specific input sizes, providing a one-time warmup cost in exchange for faster subsequent operations.
+### cuDNN and TF32
 
 ```python
-# Enabled automatically — no configuration needed
-# Equivalent to: torch.backends.cudnn.benchmark = True
+cfg.cudnn_benchmark = True    # default; auto-tunes algorithms for fixed shapes
+cfg.allow_tf32      = True    # default; TF32 matmuls on Ampere and later
 ```
 
-### torch.compile
+Both are set once at the start of `fit`, so `cudnn_benchmark = False` for a
+deterministic run stays false for the whole run.
 
-PyTorch 2.0+ can JIT-compile the model graph for 10-20% speedup. This is experimental and adds compilation overhead at the start of training.
+### GPU-resident data
 
-```python
-trainer = resolve.Trainer(
-    dataset,
-    compile_model=True,  # Default: False
-)
-```
+On CUDA, the trainer uploads the training split once and indexes batches on the
+device, so no batch crosses the bus during the epoch loop. This happens on its
+own; there is no knob.
 
-!!! note "Compilation overhead"
-    The first epoch will be slower due to compilation. The speedup appears from the second epoch onward. Worth it for long training runs (>50 epochs) but counterproductive for quick experiments.
+### Hash prefetch
 
-### Data Prefetching
+In hash mode with `use_cuda_hash = True`, each batch's hash embedding is
+computed by a CUDA kernel. The trainer runs the next batch's hash on a side
+stream while the current batch's forward pass runs, so the two overlap. This
+also happens on its own.
 
-Double-buffered GPU prefetching overlaps data transfer with computation. Auto-enabled when `batch_size >= 16384` on CUDA.
-
-```python
-trainer = resolve.Trainer(
-    dataset,
-    prefetch_data=True,   # Force enable
-    # prefetch_data=False  # Force disable
-)
-```
-
-For smaller batch sizes, the transfer overhead is negligible and prefetching adds no benefit.
-
-### GPU-Resident Data
-
-For datasets that fit in GPU memory, RESOLVE can load the entire dataset onto the GPU once, eliminating all CPU-to-GPU transfers during training. This is handled automatically via `GPUTensorLoader` when CUDA is available and the dataset is small enough.
-
-### Limiting VRAM Usage
+### Limiting VRAM usage
 
 RESOLVE leaves the PyTorch CUDA caching allocator uncapped by default
 (`TrainConfig.vram_fraction = 1.0`) so dedicated training jobs on a solo GPU
 use the full device. Pass an explicit lower value when sharing the GPU with a
-desktop — on Windows the WDDM driver spills allocations beyond physical VRAM
+desktop: on Windows the WDDM driver spills allocations beyond physical VRAM
 into shared system memory, which freezes the desktop under load. Leaving
 headroom keeps the compositor, browser, and other GPU clients responsive
 while training runs.
@@ -177,50 +148,43 @@ while training runs.
 from resolve_core import TrainConfig
 
 cfg = TrainConfig()
-cfg.vram_fraction = 1.0   # default — dedicated training job on solo GPU
-cfg.vram_fraction = 0.80  # sharing the GPU with a desktop / GUI
+cfg.vram_fraction = 1.0   # default, dedicated training job on a solo GPU
+cfg.vram_fraction = 0.80  # sharing the GPU with a desktop or GUI
 ```
 
 The same cap is applied automatically when `Predictor.load` runs on a CUDA
-device, with the same default. CLI exposes `--vram-fraction FLOAT` for both
+device, with the same default. The CLI exposes `--vram-fraction FLOAT` for both
 `resolve train` and `resolve predict`.
 
-To apply the cap independently of either (e.g., before constructing any
-RESOLVE object):
+To apply the cap independently of either, before constructing any RESOLVE
+object:
 
 ```python
 import resolve_core
 resolve_core.set_vram_fraction(0.80)
 ```
 
-!!! note "When to cap the allocator"
-    On a workstation where the desktop must stay responsive, set
-    `vram_fraction = 0.80` (or lower) to leave headroom for the compositor
-    and other GPU clients. The default (1.0) is tuned for dedicated training
-    jobs on a solo GPU.
-
 !!! note "Compute saturation"
     The cap addresses VRAM-exhaustion hangs only. If the desktop becomes
-    sluggish (rather than fully freezing) while RESOLVE trains, that's GPU
+    sluggish rather than fully freezing while RESOLVE trains, that is GPU
     *compute* saturation, not memory. See
     `dev_notes/compute_cap_plan.md` for the design path on a compute cap
-    (CUDA Green Contexts) — not currently implemented.
+    (CUDA Green Contexts), which is not currently implemented.
 
-#### Allocator config: `configure_cuda_allocator`
+### Allocator config: `configure_cuda_allocator`
 
 `resolve_core.configure_cuda_allocator()` runs once at module import time
 and sets a platform-aware `PYTORCH_CUDA_ALLOC_CONF` default. The PyTorch
-CUDA caching allocator reads that env var exactly once, on first
+CUDA caching allocator reads that variable exactly once, on first
 initialization, so the call has to happen *before* the first `import torch`
-in the process. `resolve_core` performs this ordering automatically — call
-the helper explicitly only when your code imports torch before
-resolve_core, or when you want to log the active config:
+in the process. `resolve_core` performs this ordering itself; call the helper
+explicitly only when your code imports torch before resolve_core, or when you
+want to log the active config:
 
 ```python
 import resolve_core
 config = resolve_core.configure_cuda_allocator()  # idempotent; returns the active value
-# or, to overwrite an existing value:
-config = resolve_core.configure_cuda_allocator(force=True)
+config = resolve_core.configure_cuda_allocator(force=True)  # overwrite an existing value
 print("PYTORCH_CUDA_ALLOC_CONF:", config)
 ```
 
@@ -241,19 +205,18 @@ warning does not show up in user logs.
 The `garbage_collection_threshold:0.8` knob asks the allocator to GC reserved
 blocks when `reserved_bytes / cap > 0.8`, and `max_split_size_mb:256` keeps
 the allocator from carving very large free blocks into mismatched fragments.
-Together they reduce reserved-but-unallocated fragmentation enough on
-Windows to recover a few hundred MiB on heavy runs — but they cannot match
-the headroom Linux gets from `expandable_segments`, so for Windows jobs
-near the VRAM cap the right fallback is to halve the batch size.
+Together they reduce reserved-but-unallocated fragmentation on Windows, and
+they cannot match the headroom Linux gets from `expandable_segments`, so for
+Windows jobs near the VRAM cap the right fallback is to halve the batch size.
 
-#### Auto-halve `batch_size` on OOM: `batch_size_floor`
+### Auto-halve `batch_size` on OOM: `batch_size_floor`
 
 `Trainer::fit` catches `c10::OutOfMemoryError` from the CUDA caching
-allocator, releases the optimizer / AMP scaler / GPU caches, halves
+allocator, releases the optimizer, AMP scaler, and GPU caches, halves
 `config.batch_size`, asks the allocator to empty its cache, and restarts
 training from epoch 0 against the original model weights. The retry stops
 at `config.batch_size_floor` (default 1024); if halving would breach the
-floor the original OOM is rethrown as `std::runtime_error` with the
+floor the original OOM is rethrown as a `std::runtime_error` carrying the
 original requested batch size, the post-halve value, the floor, and the
 underlying allocator message.
 
@@ -261,143 +224,136 @@ underlying allocator message.
 from resolve_core import TrainConfig
 
 cfg = TrainConfig()
-cfg.batch_size = 16384       # what you'd like to train with
+cfg.batch_size = 16384       # what you would like to train with
 cfg.batch_size_floor = 1024  # smallest the OOM retry will drop to
 ```
 
 After `Trainer.fit()` returns, `trainer.config.batch_size` is the *effective*
-batch size — equal to `cfg.batch_size` on a clean run, smaller if the retry
+batch size: equal to `cfg.batch_size` on a clean run, smaller if the retry
 fired. The same value is persisted in the checkpoint under both
-`train_batch_size` and `train_effective_batch_size`, and the `--target`
-JSON sidecar adds a `batch_size_floor` field so downstream tooling can flag
-fallback runs without re-parsing the checkpoint.
+`train_batch_size` and `train_effective_batch_size`, alongside
+`train_batch_size_floor`, so downstream tooling can flag fallback runs.
 
-This is the cleaner cross-platform answer to the
-`expandable_segments`-unavailable problem: on Linux the allocator config
-delays the OOM by reducing fragmentation; on Windows the bs-halve recovers
-when fragmentation can no longer be papered over.
+On Linux the allocator config delays the OOM by reducing fragmentation; on
+Windows the batch-size halving recovers when fragmentation can no longer be
+papered over.
 
 CLI: `resolve train --batch-size 16384 --batch-size-floor 1024`.
 
-## Early Stopping
+## Early stopping
 
-Early stopping monitors validation loss and halts training when the model stops improving.
-
-```python
-trainer = resolve.Trainer(
-    dataset,
-    patience=50,      # Default: stop after 50 epochs without improvement
-    max_epochs=200,   # Hard upper limit
-)
-```
-
-### Tuning Patience
-
-| Use case | Patience | Reasoning |
-|----------|----------|-----------|
-| Quick experiments | 10-20 | Fast feedback, accept slightly suboptimal convergence |
-| Standard training | 30-50 | Good balance of convergence and compute |
-| Final production runs | 100 | Ensure the model has fully converged |
-| Transformer encoding | 50-100 | Attention layers converge slower than MLP |
-
-The best epoch's model weights are always restored after early stopping triggers, so higher patience never produces a worse model — it only costs more compute.
-
-## Species Encoding Tips
-
-### Hash Dimension
-
-`hash_dim=64` consistently outperforms `hash_dim=32` on datasets with >1k species. The reduction in hash collisions more than compensates for the increased input dimension. For very large species pools (>50k), `hash_dim=128` can help further.
+Early stopping watches the test-fold loss and halts when it stops improving.
 
 ```python
-trainer = resolve.Trainer(
-    dataset,
-    species_encoding="hash",
-    hash_dim=64,  # Default is 32; 64 is usually better
-)
+cfg.patience   = 50     # default
+cfg.max_epochs = 500    # default; hard upper limit
 ```
 
-### Rank-Pool Normalization
+| Use case | Patience |
+|----------|----------|
+| Quick experiments | 10 to 20 |
+| Standard training | 30 to 50 |
+| Final runs | 100 |
+| Attention layers | 50 to 100, since they converge slower |
 
-For rank_pool encoding, `log1p` normalization works best in practice. It compresses the abundance distribution without losing the ordering, which helps the weighted pooling attend to dominant species without ignoring rare ones.
+The best epoch's weights are restored when early stopping fires, so a larger
+patience never gives a worse model. It costs compute.
+
+## Encoding settings
+
+### Hash dimension
+
+Raising `hash_dim` gives species more buckets to land in, so fewer of them
+collide. It also widens the encoder's input. `32` is the default; `64` and `128`
+are the usual next steps on large vocabularies. Measure rather than assume:
+
+```bash
+python benchmarks/run_benchmarks.py --configs hash_32,hash_64
+```
+
+Remember that `selection` and `top_k` gate what reaches the hash at all; the
+default keeps only the three most abundant species per plot.
+
+### Pool weighting and capping
+
+`pool_weighting = PoolWeighting.Log1p` (the default for rank-pool and
+transformer modes) compresses the abundance range while preserving order, so
+pooling attends to dominant species without ignoring the rest.
+
+`pool_species_cap` bounds the padded per-plot width, which is the dominant term
+in pool-mode memory:
 
 ```python
-trainer = resolve.Trainer(
-    dataset,
-    species_encoding="rank_pool",
-    species_normalization="log1p",
-)
+data_config.pool_species_cap = 0     # default; pad to the longest plot
+data_config.pool_species_cap = -1    # auto: 99th percentile, reports the drop
+data_config.pool_species_cap = 256   # manual
 ```
 
-### Transformer Architecture
+A cap truncates the species list, so it changes what the model sees. Leave it at
+`0` for a result you intend to publish unless the uncapped run does not fit, and
+say what you capped at if it does not.
 
-A good starting point for transformer encoding:
+### Transformer settings
 
 ```python
-trainer = resolve.Trainer(
-    dataset,
-    species_encoding="transformer",
-    n_attention_layers=2,   # 2 self-attention layers
-    n_heads=4,              # 4 attention heads
-    transformer_ff_dim=256, # Feed-forward dimension
-    transformer_pooling="attention",  # Learned attention pooling
-    lr=3e-4,
-    use_amp=False,
-)
+model_config.species_encoding    = rc.SpeciesEncodingMode.Transformer
+model_config.d_model             = 128
+model_config.n_heads             = 4
+model_config.n_attention_layers  = 2
+model_config.transformer_ff_dim  = 256
+model_config.transformer_pooling = "attention"
+train_config.lr      = 3e-4
+train_config.use_amp = False
 ```
 
-- More attention layers (3-4) can help on very large datasets but increase compute quadratically.
-- `transformer_pooling="attention"` usually outperforms `"mean"` because it learns which species to weight.
-- Keep `transformer_ff_dim` proportional to the embedding dimension (2-4x is typical).
+`transformer_pooling = "cls"` needs at least one attention layer, since the CLS
+token only sees the species through attention. `transformer_ff_dim` is normally
+2 to 4 times `d_model`.
 
-## Recommended Configurations
+## Recommended starting points
 
-### Quick Experiment (minutes)
+### Quick experiment
 
 ```python
-trainer = resolve.Trainer(
-    dataset,
-    species_encoding="hash",
-    hash_dim=64,
-    hidden_dims=[256, 128, 64],
-    max_epochs=50,
-    patience=10,
-    batch_size=4096,
-)
+data_config  = rc.DatasetConfig()
+data_config.species_encoding = rc.SpeciesEncodingMode.Hash
+data_config.hash_dim         = 64
+data_config.selection        = rc.SelectionMode.All
+
+model_config = rc.ModelConfig()
+model_config.species_encoding = rc.SpeciesEncodingMode.Hash
+model_config.hash_dim         = 64
+model_config.hidden_dims      = [256, 128, 64]
+
+train_config = rc.TrainConfig()
+train_config.max_epochs = 50
+train_config.patience   = 10
+train_config.batch_size = 4096
 ```
 
-### Standard Training (tens of minutes)
+### Standard training
 
 ```python
-trainer = resolve.Trainer(
-    dataset,
-    species_encoding="hash",
-    hash_dim=64,
-    max_epochs=200,
-    patience=30,
-    batch_size=4096,
-)
+model_config.hidden_dims = [512, 256, 128]
+train_config.max_epochs  = 200
+train_config.patience    = 30
+train_config.batch_size  = 4096
 ```
 
-### Maximum Accuracy (hours)
+### Longer run with pooling
 
 ```python
-trainer = resolve.Trainer(
-    dataset,
-    species_encoding="transformer",
-    n_attention_layers=2,
-    n_heads=4,
-    transformer_ff_dim=256,
-    transformer_pooling="attention",
-    lr=3e-4,
-    use_amp=False,
-    max_epochs=300,
-    patience=100,
-    batch_size=2048,
-)
+data_config.species_encoding  = rc.SpeciesEncodingMode.RankPool
+data_config.pool_weighting    = rc.PoolWeighting.Log1p
+model_config.species_encoding = rc.SpeciesEncodingMode.RankPool
+model_config.cover_dropout    = 0.1
+train_config.max_epochs = 300
+train_config.patience   = 100
+train_config.use_amp    = True
 ```
 
-## Next Steps
+## Next steps
 
-- [Encoding Modes](encoding-modes.md): Understand each encoding strategy in depth
-- [Training Models](training.md): Full training configuration reference
-- [Making Predictions](prediction.md): Use trained models for inference
+- [Encoding Modes](encoding-modes.md): what each encoder does with the species set
+- [Training Models](training.md): the full configuration reference
+- [Making Predictions](prediction.md): inference-time memory and batching

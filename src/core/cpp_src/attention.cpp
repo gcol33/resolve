@@ -1,6 +1,9 @@
 #include "resolve/attention.hpp"
 #include "resolve/types.hpp"
+#include <torch/autograd.h>
 #include <algorithm>
+#include <utility>
+#include <vector>
 
 namespace resolve {
 
@@ -371,53 +374,153 @@ torch::Tensor sparsemax(torch::Tensor input, int64_t dim) {
 // =============================================================================
 // Entmax-1.5 Implementation
 // =============================================================================
+//
+// alpha-entmax (Peters, Niculae & Martins, "Sparse Sequence-to-Sequence
+// Models", ACL 2019; arXiv:1905.05702) is the family of simplex mappings
+//
+//     alpha-entmax(z) := argmax_{p in simplex} p^T z + H^T_alpha(p)     (Eq. 10)
+//
+// over the Tsallis alpha-entropies, with softmax (alpha = 1) and sparsemax
+// (alpha = 2) as its endpoints. The solution has the closed form
+//
+//     alpha-entmax(z) = [ (alpha - 1) z - tau * 1 ]_+ ^ (1/(alpha - 1))  (Eq. 13)
+//
+// where tau is the unique threshold making the entries sum to one; entries with
+// z_j <= tau/(alpha - 1) get exactly zero. At alpha = 1.5 this reads
+// [ z/2 - tau ]_+^2. The (alpha - 1) = 1/2 rescaling of z is what separates
+// 1.5-entmax from a plain squared-hinge simplex projection: dropping it runs the
+// operator at a different temperature and collapses its support towards
+// sparsemax's.
+//
+// alpha = 1.5 admits an EXACT sort-based solution -- Algorithm 2 of the paper
+// (Sec. 3.3, derived in Appendix C.2) -- reproduced here verbatim:
+//
+//     Algorithm 2  Compute 1.5-entmax(z) exactly
+//     1  Sort z, yielding z_[d] <= ... <= z_[1]; set z <- z/2
+//     2  for rho in 1, ..., d do
+//     3      M(rho) <- 1/rho sum_{j=1}^{rho} z_[j]
+//     4      S(rho) <- sum_{j=1}^{rho} (z_[j] - M(rho))^2
+//     5      tau(rho) <- M(rho) - sqrt( 1/rho (1 - S(rho)) )
+//     6      if z_[rho+1] <= tau(rho) <= z_[rho] then
+//     7          return p* = [z - tau * 1]_+^2
+//
+// which is what the reference implementation (github.com/deep-spin/entmax,
+// `entmax15`) computes. The paper's Algorithm 1 (bisection) is the
+// general-alpha routine (`entmax_bisect`) and is deliberately not implemented
+// here: alpha = 1.5 is the only value the engine uses, and Algorithm 2 solves
+// it exactly and in closed form.
+//
+// The backward pass uses the closed-form Jacobian of Proposition 1 (Sec. 3.4):
+// with s_i = (p*_i)^(2 - alpha) on the support and 0 elsewhere -- so
+// s = sqrt(p*) at alpha = 1.5 --
+//
+//     d alpha-entmax(z) / dz = diag(s) - (1 / ||s||_1) s s^T.
+//
+// It is a hand-written autograd Function rather than autograd through the
+// sort/sqrt because line 5's discriminant has to be clamped for the rho past
+// the support, where sqrt's derivative is not finite.
+
+namespace {
+
+// Algorithm 2, lines 1-6, vectorized over rho and over every slice along `dim`.
+// `z_half` is (alpha - 1) * z = z / 2 (line 1). Returns tau (keepdim) and the
+// support size rho*.
+std::pair<torch::Tensor, torch::Tensor> entmax15_threshold(
+    const torch::Tensor& z_half, int64_t dim
+) {
+    const int64_t n = z_half.size(dim);
+
+    // Line 1: z_[1] >= ... >= z_[d].
+    auto sorted = std::get<0>(z_half.sort(dim, /*descending=*/true));
+
+    // rho = 1, ..., d, laid out along `dim` so it broadcasts against `sorted`.
+    std::vector<int64_t> rho_shape(static_cast<size_t>(z_half.dim()), 1);
+    rho_shape[static_cast<size_t>(dim)] = n;
+    auto rho = torch::arange(1, n + 1, z_half.options()).view(rho_shape);
+
+    // Lines 3-4. S(rho) = sum_{j<=rho} (z_[j] - M(rho))^2 = rho (E[z^2] - E[z]^2)
+    // over the top-rho prefix.
+    auto mean = sorted.cumsum(dim) / rho;
+    auto mean_sq = sorted.square().cumsum(dim) / rho;
+    auto ss = rho * (mean_sq - mean.square());
+
+    // Line 5. Past the true support 1 - S(rho) turns negative; clamping keeps
+    // sqrt finite, and those rho fail the line-6 test regardless.
+    auto delta = ((1.0 - ss) / rho).clamp_min(0.0);
+    auto tau_all = mean - delta.sqrt();
+
+    // Line 6. tau(rho) <= z_[rho] holds exactly for rho = 1, ..., rho*, so
+    // counting it recovers rho* (the paired z_[rho*+1] <= tau(rho*) then follows
+    // from the descending order).
+    auto support = (tau_all <= sorted).to(torch::kLong).sum(dim, /*keepdim=*/true);
+    auto tau = tau_all.gather(dim, (support - 1).clamp_min(0));
+    return {tau, support};
+}
+
+class Entmax15Function : public torch::autograd::Function<Entmax15Function> {
+public:
+    static torch::Tensor forward(
+        torch::autograd::AutogradContext* ctx,
+        torch::Tensor input,
+        int64_t dim
+    ) {
+        // alpha-entmax is invariant to adding a constant to every score, so
+        // centering on the row max is free and keeps the squaring in range.
+        auto shifted = input - std::get<0>(input.max(dim, /*keepdim=*/true));
+
+        // Eq. 13 at alpha = 1.5: the (alpha - 1) = 1/2 rescaling of z (line 1).
+        auto z_half = shifted / 2.0;
+
+        // Line 7.
+        auto tau = entmax15_threshold(z_half, dim).first;
+        auto output = (z_half - tau).clamp_min(0.0).square();
+
+        ctx->save_for_backward({output});
+        ctx->saved_data["dim"] = dim;
+        return output;
+    }
+
+    static torch::autograd::tensor_list backward(
+        torch::autograd::AutogradContext* ctx,
+        torch::autograd::tensor_list grad_outputs
+    ) {
+        const auto saved = ctx->get_saved_variables();
+        const auto& p = saved[0];
+        const int64_t dim = ctx->saved_data["dim"].toInt();
+
+        // Proposition 1: s_i = (p*_i)^(2 - alpha) = sqrt(p*_i) at alpha = 1.5,
+        // and 0 off the support -- which sqrt(0) = 0 already gives. The Jacobian
+        // diag(s) - s s^T / ||s||_1 applied to dY is s . dY - <s, dY>/||s||_1 s.
+        auto s = p.sqrt();
+        auto ds = grad_outputs[0] * s;
+        auto q = ds.sum(dim, /*keepdim=*/true) / s.sum(dim, /*keepdim=*/true);
+        return {ds - q * s, torch::Tensor()};
+    }
+};
+
+}  // namespace
 
 torch::Tensor entmax15(torch::Tensor input, int64_t dim) {
-    // Entmax with alpha=1.5
-    // This is a simplified iterative implementation
-
-    auto original_dim = dim;
+    const int64_t ndim = input.dim();
+    TORCH_CHECK(ndim > 0, "entmax15: input must have at least 1 dimension");
+    TORCH_CHECK(input.is_floating_point(),
+        "entmax15: input must be a floating-point tensor, got ",
+        input.scalar_type());
+    TORCH_CHECK(dim >= -ndim && dim < ndim,
+        "entmax15: dim ", dim, " is out of range for a ", ndim, "-D input");
     if (dim < 0) {
-        dim = input.dim() + dim;
+        dim += ndim;
     }
 
-    if (dim != input.dim() - 1) {
-        input = input.transpose(dim, -1);
-    }
+    // The threshold search squares the scores and differences near-equal
+    // cumulative moments; run it at >= float32 and hand the result back in the
+    // caller's dtype so an autocast fp16 call site stays well conditioned.
+    const auto dtype = input.scalar_type();
+    const bool promote = (dtype == torch::kHalf || dtype == torch::kBFloat16);
 
-    auto original_shape = input.sizes().vec();
-    auto n = input.size(-1);
-    input = input.reshape({-1, n});
-
-    // Iterative bisection to find threshold tau
-    auto tau_lo = std::get<0>(input.min(/*dim=*/-1, /*keepdim=*/true)) - 1.0f;
-    auto tau_hi = std::get<0>(input.max(/*dim=*/-1, /*keepdim=*/true));
-
-    for (int iter = 0; iter < 20; ++iter) {
-        auto tau_mid = (tau_lo + tau_hi) / 2.0f;
-        auto p = torch::relu(input - tau_mid).pow(2);
-        auto sum_p = p.sum(/*dim=*/-1, /*keepdim=*/true);
-
-        auto mask = (sum_p > 1.0f);
-        tau_lo = torch::where(mask, tau_mid, tau_lo);
-        tau_hi = torch::where(mask, tau_hi, tau_mid);
-    }
-
-    auto tau = (tau_lo + tau_hi) / 2.0f;
-    auto output = torch::relu(input - tau).pow(2);
-
-    // Normalize
-    output = output / output.sum(/*dim=*/-1, /*keepdim=*/true).clamp_min(1e-10f);
-
-    output = output.reshape(original_shape);
-    if (original_dim < 0) {
-        original_dim = static_cast<int64_t>(original_shape.size()) + original_dim;
-    }
-    if (original_dim != static_cast<int64_t>(original_shape.size()) - 1) {
-        output = output.transpose(original_dim, -1);
-    }
-
-    return output;
+    auto output =
+        Entmax15Function::apply(promote ? input.to(torch::kFloat) : input, dim);
+    return promote ? output.to(dtype) : output;
 }
 
 // =============================================================================
@@ -438,10 +541,6 @@ RowAttentionImpl::RowAttentionImpl(
 torch::Tensor RowAttentionImpl::forward(torch::Tensor x) {
     // x: (batch, n_features, d_model)
     // We want attention across batch dim for each feature
-
-    auto batch_size = x.size(0);
-    auto n_features = x.size(1);
-    auto d_model = x.size(2);
 
     // Transpose to (n_features, batch, d_model) - treat features as batch
     x = x.transpose(0, 1);
@@ -514,11 +613,12 @@ torch::Tensor TabNetGLUBlockImpl::forward(torch::Tensor x) {
 }
 
 TabNetStepImpl::TabNetStepImpl(
-    int64_t input_dim, int64_t n_d, int64_t n_a, int64_t n_independent
-) : input_dim_(input_dim), n_d_(n_d), n_a_(n_a) {
+    int64_t input_dim, int64_t n_d, int64_t n_a, int64_t n_independent,
+    bool use_sparsemax
+) : input_dim_(input_dim), n_d_(n_d), n_a_(n_a), use_sparsemax_(use_sparsemax) {
     // Attentive transformer: maps the previous attention split (n_a) to a
     // per-feature logit (input_dim), batch-normalized, then masked by the prior
-    // scale and passed through sparsemax by the caller.
+    // scale and projected onto the simplex by `attentive_forward`.
     attention_fc_ = register_module("attention_fc", torch::nn::Linear(n_a, input_dim));
     bn_attention_ = register_module("bn_attention", torch::nn::BatchNorm1d(input_dim));
 
@@ -534,7 +634,11 @@ torch::Tensor TabNetStepImpl::attentive_forward(
 ) {
     auto logits = bn_attention_->forward(attention_fc_->forward(att_prev));
     logits = logits * prior_scales;  // Prior scale down features already used.
-    return sparsemax(logits, /*dim=*/-1);
+    // TabNetConfig::use_sparsemax picks the sparse simplex mapping: sparsemax
+    // (alpha = 2, Arik & Pfister's default) or 1.5-entmax, which is strictly
+    // less aggressive and keeps a larger mask support.
+    return use_sparsemax_ ? sparsemax(logits, /*dim=*/-1)
+                          : entmax15(logits, /*dim=*/-1);
 }
 
 torch::Tensor TabNetStepImpl::feature_independent(torch::Tensor h) {
@@ -561,9 +665,11 @@ TabNetEncoderImpl::TabNetEncoderImpl(
     int64_t n_d,
     int64_t n_a,
     float relaxation_factor,
-    float sparsity_coefficient
+    float sparsity_coefficient,
+    bool use_sparsemax
 ) : input_dim_(input_dim), n_steps_(n_steps), n_d_(n_d), n_a_(n_a),
-    relaxation_factor_(relaxation_factor), sparsity_coefficient_(sparsity_coefficient) {
+    relaxation_factor_(relaxation_factor), sparsity_coefficient_(sparsity_coefficient),
+    use_sparsemax_(use_sparsemax) {
 
     // Batch-normalize the raw input features (Arik & Pfister, Sec. 3.2).
     initial_bn_ = register_module("initial_bn", torch::nn::BatchNorm1d(input_dim));
@@ -579,7 +685,8 @@ TabNetEncoderImpl::TabNetEncoderImpl(
     // Decision steps (attentive transformer + independent feature-transformer).
     steps_ = register_module("steps", torch::nn::ModuleList());
     for (int64_t i = 0; i < n_steps; ++i) {
-        steps_->push_back(TabNetStep(input_dim, n_d, n_a, kTabNetNIndependent));
+        steps_->push_back(
+            TabNetStep(input_dim, n_d, n_a, kTabNetNIndependent, use_sparsemax));
     }
 }
 
@@ -615,7 +722,8 @@ std::pair<torch::Tensor, torch::Tensor> TabNetEncoderImpl::forward(torch::Tensor
     for (int64_t step = 0; step < n_steps_; ++step) {
         auto step_module = steps_->ptr(step)->as<TabNetStepImpl>();
 
-        // Attentive transformer -> sparsemax mask over the original features.
+        // Attentive transformer -> sparse simplex mask over the original
+        // features (sparsemax or 1.5-entmax, per use_sparsemax_).
         auto mask = step_module->attentive_forward(att, prior_scales);
 
         // Relaxation: features selected now are less available to later steps.
@@ -749,9 +857,6 @@ torch::Tensor BilinearTraitInteractionImpl::forward(
     // env: (batch, env_dim)
     // traits: (n_species, trait_dim)
     // weight: (output_dim, env_dim, trait_dim)
-
-    auto batch_size = env.size(0);
-    auto n_species = traits.size(0);
 
     // Compute bilinear: env @ W @ traits^T
     // Result: (batch, output_dim, n_species)

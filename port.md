@@ -1,5 +1,13 @@
 # Port: `PlotEncoderRankPool` (+ `PlotEncoderTransformer`) to C++ Engine
 
+> **Historical record.** The port this plan describes is complete: both
+> encoders are wired end to end through dataset, model, trainer, checkpoint,
+> and predictor. The `src/resolve/...` paths it reads from are the Python
+> proof-of-concept it ported *out of*, which was removed in
+> [#106](https://github.com/gcol33/resolve/issues/106). Kept because its
+> pitfall list is still cited from the engine sources and the build-entry-point
+> note is still cited from `.gitignore`.
+
 **Mission:** end-to-end port of the Python POC's rank-pool species encoder
 to the C++ engine in this repo, with **the same S+++ rigor we applied to
 the categorical-covariate port on 2026-05-19**. No shortcuts. The bar is

@@ -65,6 +65,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # build via resolve_core_sources.cmake (no drift -- this is why the wheel
     # previously failed to link set_vram_fraction / install_crash_handler).
     set(RESOLVE_CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
+    include(${RESOLVE_CORE_DIR}/resolve_warnings.cmake)
     include(${RESOLVE_CORE_DIR}/resolve_core_sources.cmake)
 
     add_library(resolve_core STATIC ${RESOLVE_CORE_SOURCES})
@@ -72,6 +73,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
     )
     target_link_libraries(resolve_core PUBLIC ${TORCH_LIBRARIES})
+    target_link_libraries(resolve_core PRIVATE resolve_warnings)
 
     # Custom CUDA kernels + RESOLVE_HAS_CUDA, shared with the engine build. Under
     # -DUSE_CUDA=ON this defines RESOLVE_HAS_CUDA so set_vram_fraction and the
@@ -89,6 +91,11 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
     set_property(TARGET resolve_core PROPERTY CXX_STANDARD 20)
 endif()
+
+# Warning flags for RESOLVE's own targets. Already included by the branch above
+# when this directory configures standalone (the sdist root) and by
+# src/core/CMakeLists.txt when it is a subdirectory; the file guards itself.
+include(${CMAKE_CURRENT_SOURCE_DIR}/../resolve_warnings.cmake)
 
 # Python bindings using nanobind
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
@@ -126,6 +133,25 @@ else()
     message(WARNING "torch_python library not found, some features may not work")
     target_link_libraries(_resolve_core PRIVATE resolve_core ${TORCH_LIBRARIES})
 endif()
+
+target_link_libraries(_resolve_core PRIVATE resolve_warnings)
+
+# nanobind reaches the binding sources through a FetchContent target, which is
+# not IMPORTED, so CMake does not mark its headers SYSTEM the way it does
+# libtorch's. Promote them, otherwise /W4 and -Wall report nanobind's internals
+# instead of our bindings. Which target carries them depends on the
+# nanobind_add_module mode (static / shared / abi3 variants), so read it off
+# the link line rather than hardcoding a name.
+get_target_property(RESOLVE_NB_LINKED _resolve_core LINK_LIBRARIES)
+foreach(RESOLVE_NB_LIB IN LISTS RESOLVE_NB_LINKED)
+    if(RESOLVE_NB_LIB MATCHES "^nanobind" AND TARGET ${RESOLVE_NB_LIB})
+        get_target_property(RESOLVE_NB_INCS ${RESOLVE_NB_LIB} INTERFACE_INCLUDE_DIRECTORIES)
+        if(RESOLVE_NB_INCS)
+            set_property(TARGET ${RESOLVE_NB_LIB} APPEND PROPERTY
+                INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${RESOLVE_NB_INCS})
+        endif()
+    endif()
+endforeach()
 
 target_include_directories(_resolve_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include

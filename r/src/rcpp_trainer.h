@@ -81,6 +81,7 @@ public:
     RObject train_indices() const { return get("train_indices"); }
     RObject test_plot_ids() const { return get("test_plot_ids"); }
     RObject train_plot_ids() const { return get("train_plot_ids"); }
+    RObject effective_batch_size() const { return get("effective_batch_size"); }
 
     List categorical_vocab() const {
         ValuePtr v(resolve_trainer_get(trainer_.get(), "categorical_vocab"));

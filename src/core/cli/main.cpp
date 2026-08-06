@@ -3,64 +3,31 @@
 //   resolve train --header h.csv --species s.csv --output model.pt [options]
 //   resolve predict --model model.pt --header h.csv --species s.csv --output predictions.csv
 //   resolve info --model model.pt
+//
+// Flags are declared once per subcommand in cli_spec.hpp. This file only
+// routes: it picks the subcommand's table, hands the remaining tokens to
+// parse_args (which rejects anything the table does not declare), and passes
+// the result to the command implementation.
 
 #include <iostream>
 #include <string>
 #include <vector>
-#include <optional>
 
 #include "resolve/resolve.hpp"
 
-// Forward declarations for command handlers
-int train_command(
-    const std::string& header_path,
-    const std::string& species_path,
-    const std::string& output_path,
-    const std::string& plot_id_col,
-    const std::string& species_id_col,
-    const std::optional<std::string>& abundance_col,
-    const std::optional<std::string>& lon_col,
-    const std::optional<std::string>& lat_col,
-    const std::optional<std::string>& genus_col,
-    const std::optional<std::string>& family_col,
-    const std::vector<std::string>& target_cols,
-    const std::vector<std::string>& target_types,
-    const std::string& species_encoding,
-    int hash_dim,
-    int top_k,
-    int batch_size,
-    int batch_size_floor,
-    int max_epochs,
-    int patience,
-    float lr,
-    float test_size,
-    bool use_cuda,
-    float vram_fraction,
-    const std::string& pool_weighting,
-    int d_model,
-    int n_heads,
-    int n_attention_layers,
-    const std::string& transformer_pooling
-);
+#include "arg_parser.hpp"
+#include "cli_spec.hpp"
 
-int predict_command(
-    const std::string& model_path,
-    const std::string& header_path,
-    const std::string& species_path,
-    const std::string& output_path,
-    const std::string& plot_id_col,
-    const std::string& species_id_col,
-    const std::optional<std::string>& abundance_col,
-    const std::optional<std::string>& lon_col,
-    const std::optional<std::string>& lat_col,
-    const std::optional<std::string>& genus_col,
-    const std::optional<std::string>& family_col,
-    bool use_cuda,
-    float vram_fraction,
-    int64_t predict_batch_size
-);
+using resolve_cli::ArgError;
+using resolve_cli::ParsedArgs;
 
-int info_command(const std::string& model_path);
+// Command handlers. Each reads its values from the ParsedArgs by the same flag
+// names its CommandSpec declares; reading an undeclared name throws.
+int train_command(const ParsedArgs& args);
+int predict_command(const ParsedArgs& args);
+int info_command(const ParsedArgs& args);
+
+namespace {
 
 void print_usage() {
     std::cout << R"(
@@ -72,231 +39,85 @@ Usage:
   resolve info [options]      Display model information
   resolve version             Print version
 
-Train Options:
-  --header PATH          Path to header CSV file (plot-level data)
-  --species PATH         Path to species CSV file (species occurrences)
-  --output PATH          Output path for trained model (default: model.pt)
-  --plot-id COL          Column name for plot ID (default: plot_id)
-  --species-id COL       Column name for species ID (default: species_id)
-  --abundance COL        Column name for abundance (optional)
-  --lon COL              Column name for longitude (optional)
-  --lat COL              Column name for latitude (optional)
-  --genus COL            Column name for genus (optional)
-  --family COL           Column name for family (optional)
-  --target COL:TYPE      Target column and type (regression/classification:N)
-                         Can be specified multiple times
-  --encoding MODE        Species encoding: hash, embed, sparse, rank_pool, transformer
-                         (default: hash)
-  --hash-dim N           Hash dimension (default: 32)
-  --top-k N              Top-k species for encoding (default: 3)
-  --pool-weighting W     Per-species pooling weight for rank_pool / transformer
-                         encoders: binary, abundance, log1p, norm, rank
-                         (default: log1p). Ignored for hash/embed/sparse.
-  --d-model N            Transformer token dimension (default: 128)
-  --n-heads N            Transformer attention heads (default: 4)
-  --n-attention-layers N Transformer self-attention layers (default: 2).
-                         Required >= 1 when --transformer-pooling cls.
-  --transformer-pooling P  Transformer pooling: attention or cls
-                         (default: attention)
-  --batch-size N         Batch size (default: 4096)
-  --batch-size-floor N   Smallest batch size the auto-halve-on-OOM retry in
-                         Trainer::fit is allowed to drop to (default: 1024).
-                         On CUDA OutOfMemoryError the trainer releases
-                         optimizer / AMP / GPU caches, halves batch_size, and
-                         restarts from epoch 0; below this floor the OOM is
-                         rethrown. Especially relevant on Windows, where the
-                         allocator's expandable_segments option is unavailable.
-  --max-epochs N         Maximum epochs (default: 500)
-  --patience N           Early stopping patience (default: 50)
-  --lr FLOAT             Learning rate (default: 0.001)
-  --test-size FLOAT      Test split ratio (default: 0.2)
-  --cuda                 Use CUDA if available
-  --vram-fraction FLOAT  Fraction of GPU VRAM the PyTorch caching allocator may
-                         use (default: 1.0). Dedicated training jobs on a solo
-                         GPU use the full device. Pass an explicit lower value
-                         (e.g. 0.80) when sharing the GPU with a desktop / GUI
-                         to leave headroom.
+Pass --help after a subcommand for that command's flags only.
 
-Predict Options:
-  --model PATH           Path to trained model
-  --header PATH          Path to header CSV file
-  --species PATH         Path to species CSV file
-  --output PATH          Output path for predictions (default: predictions.csv)
-  --plot-id COL          Column name for plot ID (default: plot_id)
-  --species-id COL       Column name for species ID (default: species_id)
-  --abundance COL        Column name for abundance (optional)
-  --lon COL              Column name for longitude (optional)
-  --lat COL              Column name for latitude (optional)
-  --genus COL            Column name for genus (optional)
-  --family COL           Column name for family (optional)
-  --cuda                 Use CUDA if available (default: CPU). Predict on a
-                         5M-param MLP over 300k plots is ~12s on CPU vs ~1s
-                         on GPU; the OOM and bookkeeping cost of GPU predict
-                         on 16 GiB-class cards usually outweighs the speedup.
-  --predict-batch-size N Forward-pass batch size for inference (default: 4096).
-                         Pass -1 to disable chunking (one forward over the
-                         entire dataset; can OOM on >150k plots at typical
-                         hidden sizes).
-  --vram-fraction FLOAT  Fraction of GPU VRAM the PyTorch caching allocator may
-                         use (default: 1.0). Pass an explicit lower value (e.g.
-                         0.80) when sharing the GPU with a desktop / GUI to
-                         leave headroom.
-
-Info Options:
-  --model PATH           Path to trained model
+)";
+    std::cout << resolve_cli::render_usage(resolve_cli::train_spec()) << "\n";
+    std::cout << resolve_cli::render_usage(resolve_cli::predict_spec()) << "\n";
+    std::cout << resolve_cli::render_usage(resolve_cli::info_spec()) << "\n";
+    std::cout << R"(Prediction output columns:
+  plot_id, then one column per schema target in schema order. A classification
+  target gets TWO columns: <target> carries the original class label from the
+  checkpoint's class vocabulary (the integer code when the checkpoint has no
+  label vocabulary, or the column was already integer-coded) and <target>_code
+  always carries the integer code the model predicted.
 
 Examples:
   resolve train --header plots.csv --species occurrences.csv \
-                --target area:regression --target habitat:classification:9 \
-                --output model.pt
+                --target area:regression:log1p \
+                --target habitat:classification:9 \
+                --covariate elevation --covariate slope \
+                --categorical bedrock \
+                --seed 42 --output model.pt
 
   resolve predict --model model.pt --header new_plots.csv \
                   --species new_occurrences.csv --output predictions.csv
 )" << std::endl;
 }
 
-// Simple argument parser
-class ArgParser {
-public:
-    ArgParser(int argc, char* argv[]) {
-        for (int i = 1; i < argc; ++i) {
-            args_.push_back(argv[i]);
-        }
+// `--help` / `-h` after a subcommand prints that command's block. Handled here
+// rather than as a table row so every command gets it without repeating a row,
+// and so it works even alongside an otherwise invalid flag.
+bool wants_command_help(const std::vector<std::string>& tokens) {
+    for (const auto& token : tokens) {
+        if (token == "--help" || token == "-h") return true;
     }
+    return false;
+}
 
-    bool has(const std::string& flag) const {
-        return std::find(args_.begin(), args_.end(), flag) != args_.end();
+int run_command(const resolve_cli::CommandSpec& spec,
+                const std::vector<std::string>& tokens,
+                int (*handler)(const ParsedArgs&)) {
+    if (wants_command_help(tokens)) {
+        std::cout << resolve_cli::render_usage(spec);
+        return 0;
     }
+    return handler(resolve_cli::parse_args(spec, tokens));
+}
 
-    std::string get(const std::string& flag, const std::string& default_val = "") const {
-        auto it = std::find(args_.begin(), args_.end(), flag);
-        if (it != args_.end() && (it + 1) != args_.end()) {
-            return *(it + 1);
-        }
-        return default_val;
-    }
-
-    std::optional<std::string> get_optional(const std::string& flag) const {
-        auto it = std::find(args_.begin(), args_.end(), flag);
-        if (it != args_.end() && (it + 1) != args_.end()) {
-            return *(it + 1);
-        }
-        return std::nullopt;
-    }
-
-    std::vector<std::string> get_all(const std::string& flag) const {
-        std::vector<std::string> result;
-        for (auto it = args_.begin(); it != args_.end(); ++it) {
-            if (*it == flag && (it + 1) != args_.end()) {
-                result.push_back(*(it + 1));
-            }
-        }
-        return result;
-    }
-
-    std::string command() const {
-        if (!args_.empty() && args_[0][0] != '-') {
-            return args_[0];
-        }
-        return "";
-    }
-
-private:
-    std::vector<std::string> args_;
-};
-
-static int run_cli(int argc, char* argv[]) {
+int run_cli(int argc, char* argv[]) {
     if (argc < 2) {
         print_usage();
         return 1;
     }
 
-    ArgParser args(argc, argv);
-    std::string cmd = args.command();
+    const std::string cmd = argv[1];
+    const std::vector<std::string> tokens(argv + 2, argv + argc);
 
     if (cmd == "train") {
-        // Parse target specifications
-        auto target_specs = args.get_all("--target");
-        std::vector<std::string> target_cols;
-        std::vector<std::string> target_types;
-
-        for (const auto& spec : target_specs) {
-            auto pos = spec.find(':');
-            if (pos != std::string::npos) {
-                target_cols.push_back(spec.substr(0, pos));
-                target_types.push_back(spec.substr(pos + 1));
-            } else {
-                target_cols.push_back(spec);
-                target_types.push_back("regression");
-            }
-        }
-
-        return train_command(
-            args.get("--header"),
-            args.get("--species"),
-            args.get("--output", "model.pt"),
-            args.get("--plot-id", "plot_id"),
-            args.get("--species-id", "species_id"),
-            args.get_optional("--abundance"),
-            args.get_optional("--lon"),
-            args.get_optional("--lat"),
-            args.get_optional("--genus"),
-            args.get_optional("--family"),
-            target_cols,
-            target_types,
-            args.get("--encoding", "hash"),
-            std::stoi(args.get("--hash-dim", "32")),
-            std::stoi(args.get("--top-k", "3")),
-            std::stoi(args.get("--batch-size", "4096")),
-            std::stoi(args.get("--batch-size-floor", "1024")),
-            std::stoi(args.get("--max-epochs", "500")),
-            std::stoi(args.get("--patience", "50")),
-            std::stof(args.get("--lr", "0.001")),
-            std::stof(args.get("--test-size", "0.2")),
-            args.has("--cuda"),
-            std::stof(args.get("--vram-fraction", "1.0")),
-            args.get("--pool-weighting", "log1p"),
-            std::stoi(args.get("--d-model", "128")),
-            std::stoi(args.get("--n-heads", "4")),
-            std::stoi(args.get("--n-attention-layers", "2")),
-            args.get("--transformer-pooling", "attention")
-        );
+        return run_command(resolve_cli::train_spec(), tokens, &train_command);
     }
-    else if (cmd == "predict") {
-        return predict_command(
-            args.get("--model"),
-            args.get("--header"),
-            args.get("--species"),
-            args.get("--output", "predictions.csv"),
-            args.get("--plot-id", "plot_id"),
-            args.get("--species-id", "species_id"),
-            args.get_optional("--abundance"),
-            args.get_optional("--lon"),
-            args.get_optional("--lat"),
-            args.get_optional("--genus"),
-            args.get_optional("--family"),
-            args.has("--cuda"),
-            std::stof(args.get("--vram-fraction", "1.0")),
-            static_cast<int64_t>(std::stoll(args.get("--predict-batch-size", "4096")))
-        );
+    if (cmd == "predict") {
+        return run_command(resolve_cli::predict_spec(), tokens, &predict_command);
     }
-    else if (cmd == "info") {
-        return info_command(args.get("--model"));
+    if (cmd == "info") {
+        return run_command(resolve_cli::info_spec(), tokens, &info_command);
     }
-    else if (cmd == "version" || cmd == "--version") {
+    if (cmd == "version" || cmd == "--version") {
         std::cout << "resolve " << resolve::VERSION << std::endl;
         return 0;
     }
-    else if (cmd == "help" || cmd == "--help" || cmd == "-h") {
+    if (cmd == "help" || cmd == "--help" || cmd == "-h") {
         print_usage();
         return 0;
     }
-    else {
-        std::cerr << "Unknown command: " << cmd << std::endl;
-        print_usage();
-        return 1;
-    }
+
+    std::cerr << "Unknown command: " << cmd << std::endl;
+    print_usage();
+    return 1;
 }
+
+}  // namespace
 
 int main(int argc, char* argv[]) {
     // Issue #19: a native fault during a (possibly overnight, headless) run must
@@ -307,11 +128,11 @@ int main(int argc, char* argv[]) {
     int rc;
     try {
         rc = run_cli(argc, argv);
-    } catch (const std::invalid_argument& e) {
-        // e.g. a non-numeric value passed to a numeric flag (std::stoi/stof).
-        std::cerr << "Error: invalid argument value (" << e.what()
-                  << "). Check numeric flags like --hash-dim / --batch-size / --lr."
-                  << std::endl;
+    } catch (const ArgError& e) {
+        // Unknown flag, missing value, stray positional, or a non-numeric value
+        // for a numeric flag. Every one of these used to be ignored, which for
+        // a research CLI is a wrong run that looks fine.
+        std::cerr << "Error: " << e.what() << std::endl;
         rc = 1;
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;

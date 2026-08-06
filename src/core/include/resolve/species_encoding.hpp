@@ -33,7 +33,7 @@ HashBucketSign feature_hash_bucket_sign(const std::string& species, int hash_dim
 // in place (nth_element); empty input returns 0. q is a percentage in [0, 100].
 // Used by RankPoolEncoder::transform for the auto (p99) species cap, where the
 // previous floor-rank index (no interpolation) over-truncated skewed per-plot
-// length distributions relative to the POC's int(np.percentile(...)).
+// length distributions relative to numpy's int(np.percentile(...)).
 int64_t percentile_linear_trunc(std::vector<int64_t>& values, double q);
 
 // Top-k distinct names by descending aggregated abundance, ties broken by name
@@ -103,6 +103,47 @@ private:
 };
 
 // =============================================================================
+// Unknown-species (novelty) statistics
+// =============================================================================
+
+// Per-plot novelty of an assemblage, measured against a fitted vocabulary.
+// A record whose species name is absent from `vocab` encodes to the reserved
+// UNK code 0 and counts as unknown:
+//
+//   fraction[p] = sum(abundance of p's unknown records) / sum(abundance in p)
+//   count[p]    = number of unknown records in p
+//
+// Both are over the plot's FULL record list, before any top-k selection or
+// pool-cap truncation, so the value describes the assemblage rather than the
+// slice a particular encoder consumed.
+struct UnknownSpeciesStats {
+    torch::Tensor fraction;  // (n_plots,) float32, in [0, 1]
+    torch::Tensor count;     // (n_plots,) float32, whole numbers
+};
+
+// Compute the per-plot unknown fraction and count. Results are aligned to
+// `plot_ids` by SpeciesRecord::plot_id; a record naming a plot outside
+// `plot_ids` is ignored, and a plot with no records (or whose abundances sum to
+// <= 0) reports 0 for both. Abundances accumulate in double so a long
+// species list does not lose the tail of the sum before the division.
+//
+// This is the single definition of "unknown species" in the engine, shared by
+// RankPoolEncoder::transform, EmbeddingEncoder::transform and
+// ResolveDataset::encode_species, so the dataset's unknown-mass feature columns
+// and the standalone encoders' cannot drift apart.
+//
+// The measurement is only non-zero when `vocab` was fitted on OTHER data: a
+// vocabulary fitted on the same records covers every name in them by
+// construction. The live cases are the vocab-reusing loaders
+// (ResolveDataset::from_*_with_schema / _with_vocabs, which adopt a training
+// checkpoint's vocabulary) and any caller that fits an encoder on one split and
+// transforms another.
+UnknownSpeciesStats compute_unknown_species_stats(
+    const std::vector<SpeciesRecord>& records,
+    const std::vector<std::string>& plot_ids,
+    const SpeciesVocab& vocab);
+
+// =============================================================================
 // RankPoolEncoder — variable-length species lists with weighted pooling
 // =============================================================================
 
@@ -114,6 +155,7 @@ struct RankPoolEncodedData {
     torch::Tensor mask;              // (n_plots, max_species) bool
     torch::Tensor has_cover;         // (n_plots,) float32
     torch::Tensor unknown_fraction;  // (n_plots,) float32
+    torch::Tensor unknown_count;     // (n_plots,) float32
     int64_t n_species_vocab = 0;
     int64_t n_genera_vocab = 0;
     int64_t n_families_vocab = 0;
@@ -131,10 +173,10 @@ public:
     //   0  -> no cap (default; pad to global per-plot max).
     //   -1 -> auto p99 (compute 99th percentile of per-plot species counts).
     //   >0 -> manual cap; per-plot lists are truncated to the first `cap`
-    //         records in original CSV order (matching the POC's `a[:cap]`).
+    //         records in original CSV order.
     // When the cap kicks in we print a one-line summary so users see the
     // drop ("rank_pool: capping species at p99=X (max=Y, saves Z% padding)").
-    // has_abundance_column mirrors the POC's `roles.has_abundance`: has_cover is
+    // has_abundance_column follows RoleMapping::has_abundance: has_cover is
     // 1 for every plot when an abundance/cover column was mapped, else 0. It is
     // a column-presence flag, NOT inferred from values (a plot whose covers are
     // all exactly 1.0 still has cover data), so pass whether the dataset mapped
@@ -182,6 +224,7 @@ struct EmbeddingEncodedData {
     torch::Tensor genus_ids;         // (n_plots, top_k_taxonomy) int64
     torch::Tensor family_ids;        // (n_plots, top_k_taxonomy) int64
     torch::Tensor unknown_fraction;  // (n_plots,) float32
+    torch::Tensor unknown_count;     // (n_plots,) float32
     int64_t n_species_vocab = 0;
     int64_t n_genera_vocab = 0;
     int64_t n_families_vocab = 0;

@@ -243,6 +243,56 @@ SpeciesVocab SpeciesVocab::from_map(std::unordered_map<std::string, int64_t> spe
 }
 
 // =============================================================================
+// Unknown-species (novelty) statistics
+// =============================================================================
+
+UnknownSpeciesStats compute_unknown_species_stats(
+    const std::vector<SpeciesRecord>& records,
+    const std::vector<std::string>& plot_ids,
+    const SpeciesVocab& vocab
+) {
+    const int64_t n_plots = static_cast<int64_t>(plot_ids.size());
+
+    UnknownSpeciesStats out;
+    out.fraction = torch::zeros({n_plots}, torch::kFloat32);
+    out.count    = torch::zeros({n_plots}, torch::kFloat32);
+    if (n_plots == 0) return out;
+
+    std::unordered_map<std::string, int64_t> plot_to_index;
+    plot_to_index.reserve(plot_ids.size());
+    for (int64_t i = 0; i < n_plots; ++i) {
+        plot_to_index.emplace(plot_ids[i], i);
+    }
+
+    // Accumulate in double: a species-rich plot sums thousands of float
+    // abundances, and the ratio is taken at the end.
+    std::vector<double> total(static_cast<size_t>(n_plots), 0.0);
+    std::vector<double> unknown(static_cast<size_t>(n_plots), 0.0);
+
+    auto count_a = out.count.accessor<float, 1>();
+    for (const auto& r : records) {
+        auto it = plot_to_index.find(r.plot_id);
+        if (it == plot_to_index.end()) continue;
+        const int64_t p = it->second;
+
+        total[static_cast<size_t>(p)] += static_cast<double>(r.abundance);
+        if (vocab.encode(r.species_id) == 0) {
+            unknown[static_cast<size_t>(p)] += static_cast<double>(r.abundance);
+            count_a[p] += 1.0f;
+        }
+    }
+
+    auto frac_a = out.fraction.accessor<float, 1>();
+    for (int64_t p = 0; p < n_plots; ++p) {
+        const double t = total[static_cast<size_t>(p)];
+        if (t > 0.0) {
+            frac_a[p] = static_cast<float>(unknown[static_cast<size_t>(p)] / t);
+        }
+    }
+    return out;
+}
+
+// =============================================================================
 // Shared helper: build taxonomy vocab and species-to-genus/family maps
 // =============================================================================
 
@@ -344,9 +394,9 @@ static void assign_rank_weights(
     });
 
     // Dense ranking: ties share the same rank and ranks have no gaps
-    // (matches the POC's pl.rank(method="dense", descending=True)). A prior
+    // (dense ranking, descending by abundance). A prior
     // version set rank = j + 1 on a strict decrease, which is competition
-    // ranking with gaps and diverges from the POC on tied abundances.
+    // ranking with gaps, which differs on tied abundances.
     std::vector<int> ranks(n);
     int rank = 0;
     for (size_t j = 0; j < n; ++j) {
@@ -384,12 +434,14 @@ RankPoolEncodedData RankPoolEncoder::transform(
         plot_to_indices[records[i].plot_id].push_back(i);
     }
 
-    // Per-plot intermediate data
+    // Per-plot intermediate data. The unknown-species statistics are NOT
+    // accumulated here: they are a pure function of (records, plot_ids, vocab)
+    // and come from the shared compute_unknown_species_stats below, so the
+    // encoders and ResolveDataset report the same numbers by construction.
     struct PlotData {
         std::vector<int64_t> sp_ids, g_ids, f_ids;
         std::vector<float> weights;
-        float unknown_abd = 0.0f;
-        float total_abd = 0.0f;
+        float total_abd = 0.0f;  // PoolWeighting::Norm denominator
     };
 
     std::vector<PlotData> plot_data(n_plots);
@@ -424,7 +476,6 @@ RankPoolEncodedData RankPoolEncoder::transform(
             abundances.push_back(r.abundance);
 
             pd.total_abd += r.abundance;
-            if (sp_id == 0) pd.unknown_abd += r.abundance;
         }
 
         // Compute weights
@@ -448,7 +499,7 @@ RankPoolEncodedData RankPoolEncoder::transform(
     //   >0 -> use the value as-is.
     // Then, if the resolved cap is smaller than max_species, truncate each
     // plot's per-species buffers to the first `cap` entries (matching the
-    // POC's `a[:cap]` slice in `_data.py`) and shrink max_species. Print a
+    // first `cap` entries in CSV row order) and shrink max_species. Print a
     // one-line summary so users see the drop in n_padding.
     int64_t resolved_cap = max_species;  // default: no cap
     if (species_cap == -1) {
@@ -462,7 +513,7 @@ RankPoolEncodedData RankPoolEncoder::transform(
             lengths.push_back(static_cast<int64_t>(pd.sp_ids.size()));
         }
         if (!lengths.empty()) {
-            // p99 matching the POC's int(np.percentile(lengths, 99)): linear
+            // p99 matching numpy's int(np.percentile(lengths, 99)): linear
             // interpolation between the bracketing order statistics, then
             // integer truncation. The earlier floor-rank index took only the
             // lower order statistic with no interpolation, over-truncating
@@ -503,7 +554,6 @@ RankPoolEncodedData RankPoolEncoder::transform(
     auto wts    = torch::zeros({n_plots, max_species}, torch::kFloat32);
     auto msk    = torch::zeros({n_plots, max_species}, torch::kBool);
     auto has_cov  = torch::zeros({n_plots}, torch::kFloat32);
-    auto unk_frac = torch::zeros({n_plots}, torch::kFloat32);
 
     auto sp_a  = sp_ids.accessor<int64_t, 2>();
     auto g_a   = g_ids.accessor<int64_t, 2>();
@@ -511,7 +561,6 @@ RankPoolEncodedData RankPoolEncoder::transform(
     auto w_a   = wts.accessor<float, 2>();
     auto m_a   = msk.accessor<bool, 2>();
     auto hc_a  = has_cov.accessor<float, 1>();
-    auto uf_a  = unk_frac.accessor<float, 1>();
 
     for (int64_t pi = 0; pi < n_plots; ++pi) {
         const auto& pd = plot_data[pi];
@@ -523,11 +572,14 @@ RankPoolEncodedData RankPoolEncoder::transform(
             w_a[pi][j]  = pd.weights[j];
             m_a[pi][j]  = true;
         }
-        // Column-presence semantics (POC): every plot gets cover=1 when an
+        // Column-presence semantics: every plot gets cover=1 when an
         // abundance column was mapped, regardless of the per-plot values.
         hc_a[pi] = has_abundance_column ? 1.0f : 0.0f;
-        uf_a[pi] = (pd.total_abd > 0.0f) ? pd.unknown_abd / pd.total_abd : 0.0f;
     }
+
+    // Novelty is measured over each plot's full record list, so it is computed
+    // from `records` rather than the (possibly cap-truncated) buffers above.
+    const auto unknown = compute_unknown_species_stats(records, plot_ids, species_vocab_);
 
     RankPoolEncodedData result;
     result.species_ids      = sp_ids;
@@ -536,7 +588,8 @@ RankPoolEncodedData RankPoolEncoder::transform(
     result.weights          = wts;
     result.mask             = msk;
     result.has_cover        = has_cov;
-    result.unknown_fraction = unk_frac;
+    result.unknown_fraction = unknown.fraction;
+    result.unknown_count    = unknown.count;
     result.n_species_vocab  = species_vocab_.size();
     result.n_genera_vocab   = taxonomy_vocab_.n_genera();
     result.n_families_vocab = taxonomy_vocab_.n_families();
@@ -578,12 +631,10 @@ EmbeddingEncodedData EmbeddingEncoder::transform(
     auto sp_ids   = torch::zeros({n_plots, static_cast<int64_t>(top_k_species_)}, torch::kInt64);
     auto g_ids    = torch::zeros({n_plots, static_cast<int64_t>(top_k_taxonomy_)}, torch::kInt64);
     auto f_ids    = torch::zeros({n_plots, static_cast<int64_t>(top_k_taxonomy_)}, torch::kInt64);
-    auto unk_frac = torch::zeros({n_plots}, torch::kFloat32);
 
     auto sp_a = sp_ids.accessor<int64_t, 2>();
     auto g_a  = g_ids.accessor<int64_t, 2>();
     auto f_a  = f_ids.accessor<int64_t, 2>();
-    auto uf_a = unk_frac.accessor<float, 1>();
 
     for (int64_t pi = 0; pi < n_plots; ++pi) {
         const auto& pid = plot_ids[pi];
@@ -595,19 +646,11 @@ EmbeddingEncodedData EmbeddingEncoder::transform(
         // Build species abundance pairs for selection
         std::vector<std::pair<std::string, float>> species_abd;
         species_abd.reserve(indices.size());
-        float total_abd = 0.0f;
-        float unknown_abd = 0.0f;
 
         for (size_t idx : indices) {
             const auto& r = records[idx];
             species_abd.emplace_back(r.species_id, r.abundance);
-            total_abd += r.abundance;
-            if (species_vocab_.encode(r.species_id) == 0) {
-                unknown_abd += r.abundance;
-            }
         }
-
-        uf_a[pi] = (total_abd > 0.0f) ? unknown_abd / total_abd : 0.0f;
 
         // Select top-k species using the existing apply_selection helper
         auto selected_species = apply_selection(species_abd, selection_, top_k_species_);
@@ -646,11 +689,16 @@ EmbeddingEncodedData EmbeddingEncoder::transform(
         }
     }
 
+    // Novelty is measured over each plot's full record list, before the top-k
+    // selection above narrows it (shared definition, see the helper).
+    const auto unknown = compute_unknown_species_stats(records, plot_ids, species_vocab_);
+
     EmbeddingEncodedData result;
     result.species_ids      = sp_ids;
     result.genus_ids        = g_ids;
     result.family_ids       = f_ids;
-    result.unknown_fraction = unk_frac;
+    result.unknown_fraction = unknown.fraction;
+    result.unknown_count    = unknown.count;
     result.n_species_vocab  = species_vocab_.size();
     result.n_genera_vocab   = taxonomy_vocab_.n_genera();
     result.n_families_vocab = taxonomy_vocab_.n_families();

@@ -10,7 +10,8 @@ resolve.dataset.csv(
   roles = list(),
   targets = list(),
   config = list(),
-  schemaSource = NULL
+  schemaSource = NULL,
+  vocabs = NULL
 )
 }
 \arguments{
@@ -63,6 +64,16 @@ against that dataset's species / taxonomy / categorical vocabularies and
 classification class mappings instead of fitting its own, so a held-out or
 transfer set lines up with the training set's embedding namespaces. Default
 \code{NULL} fits fresh vocabularies.}
+
+\item{vocabs}{Optional vocabulary list from \code{predictor$vocabs()} (or
+\code{dataset$vocabs()}). Same effect as \code{schemaSource}, sourced from a
+CHECKPOINT rather than an in-memory training dataset, so the training CSVs
+need not exist. This is the path for scoring new data: every non-hash
+encoder indexes an embedding table with a code that is a function of the
+file the vocabulary was fitted on, so a dataset built without the training
+vocabularies looks up the wrong rows and \code{predictor$predict_dataset()}
+rejects it. Pair with \code{config = predictor$dataset_config()}. Mutually
+exclusive with \code{schemaSource}.}
 }
 \value{
 A ResolveDataset object (C++ class) with methods:

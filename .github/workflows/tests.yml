@@ -17,7 +17,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: python3 tools/version.py --check
 
-  # C++ tests with Catch2 (+ CLI compile & smoke)
+  # C++ tests with Catch2 (+ CLI compile & smoke). The built CLI is published as
+  # an artifact so cli-e2e can exercise it without paying for a second build.
   cpp-tests:
     runs-on: ubuntu-latest
     steps:
@@ -31,10 +32,17 @@ jobs:
           wget -q https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.6.0%2Bcpu.zip
           unzip -q libtorch-cxx11-abi-shared-with-deps-2.6.0+cpu.zip
 
-      - name: Configure and build (tests + CLI)
+      # RESOLVE_WERROR is set here and nowhere else. resolve_warnings.cmake
+      # gives every RESOLVE target -Wall -Wextra -Wshadow -Wnon-virtual-dtor
+      # (/W4 on MSVC), but only this job promotes them to errors: it is one
+      # fixed compiler on one fixed libtorch, so a new warning here is a real
+      # regression rather than a toolchain difference. A local Windows/CUDA
+      # build stays tolerant.
+      - name: Configure and build (tests + CLI, warnings are errors)
         run: |
           cd src/core
           cmake -B build -DBUILD_TESTS=ON -DBUILD_PYTHON=OFF -DBUILD_CLI=ON -DUSE_CUDA=OFF \
+                -DRESOLVE_WERROR=ON \
                 -DTorch_DIR=${{ github.workspace }}/libtorch/share/cmake/Torch
           # ubuntu-latest has 16GB RAM; torch-heavy translation units peak at
           # 3-5GB each, so unbounded -j on a 4-vCPU runner OOM-kills the build.
@@ -52,9 +60,294 @@ jobs:
           ./bin/resolve version
           ./bin/resolve help
 
-  # Production Python bindings (nanobind _resolve_core). The POC package under
-  # src/resolve is legacy; this job exercises the MAINTAINED engine surface that
-  # the legacy python-tests job below never touches (it imports the POC).
+      - name: Publish the CLI binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: resolve-cli
+          path: src/core/build/bin/resolve
+          retention-days: 1
+
+  # End-to-end CLI: train a model on the committed fixture, predict with it, and
+  # check the written CSV. `resolve version` / `resolve help` link the binary but
+  # never touch the loader, trainer, checkpoint, or the prediction writer, which
+  # is how two CLI defects reached master unnoticed.
+  #
+  # The binary comes from cpp-tests as an artifact; rebuilding the engine here
+  # would cost a second ~30-minute compile to run a five-second command.
+  cli-e2e:
+    needs: cpp-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: resolve-cli
+          path: cli
+
+      # Same URL as cpp-tests, so the shared libraries match the binary's build.
+      - name: Install libtorch
+        run: |
+          wget -q https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.6.0%2Bcpu.zip
+          unzip -q libtorch-cxx11-abi-shared-with-deps-2.6.0+cpu.zip
+
+      - name: Train, predict, and check the output
+        run: |
+          set -euo pipefail
+          # Artifacts do not carry the executable bit.
+          chmod +x cli/resolve
+          export LD_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:${LD_LIBRARY_PATH:-}
+          RESOLVE=${{ github.workspace }}/cli/resolve
+          FIXTURES=${{ github.workspace }}/src/core/tests/fixtures
+          OUT=$(mktemp -d)
+          echo "OUT=$OUT" >> "$GITHUB_ENV"
+
+          # elevation is a continuous covariate and bedrock a categorical one.
+          # Before issue #104 the CLI had no flag for either, so both columns
+          # were silently dropped and a CLI-trained model was structurally
+          # different from the same configuration trained through resolve_core.
+          "$RESOLVE" train \
+            --header "$FIXTURES/cli_header.csv" \
+            --species "$FIXTURES/cli_species.csv" \
+            --plot-id plot_id --species-id species --abundance cover \
+            --lat lat --lon lon --genus genus --family family \
+            --covariate elevation --categorical bedrock \
+            --target area:regression --target habitat:classification:3 \
+            --encoding rank_pool --pool-weighting log1p \
+            --hidden-dims 64,32 --dropout 0.0 \
+            --batch-size 32 --max-epochs 20 --patience 20 --lr 0.01 \
+            --test-size 0.25 --seed 7 \
+            --loss-config nca --nca-temperature 0.45 --nca-neighbors 7 \
+            --nca-weight 0.6 \
+            --output "$OUT/model.pt"
+          test -s "$OUT/model.pt"
+
+          "$RESOLVE" info --model "$OUT/model.pt" | tee "$OUT/info.txt"
+          grep -q "Species encoding: rank_pool" "$OUT/info.txt"
+          grep -q "Encoder architecture: mlp" "$OUT/info.txt"
+          grep -q "area: regression" "$OUT/info.txt"
+          grep -q "habitat: classification (3 classes)" "$OUT/info.txt"
+          # The covariate and the categorical reached the model's schema.
+          grep -q "Covariates: elevation" "$OUT/info.txt"
+          grep -q "Categoricals: bedrock" "$OUT/info.txt"
+          # The training recipe the checkpoint records, including the NCA
+          # hyperparameters, which were constants no caller could set.
+          grep -q "Train loss_config: nca" "$OUT/info.txt"
+          grep -q "Train nca_temperature: 0.45" "$OUT/info.txt"
+          grep -q "Train nca_neighbors: 7" "$OUT/info.txt"
+          grep -q "Train nca_weight: 0.6" "$OUT/info.txt"
+
+          # No --covariate / --categorical here: predict defaults to the column
+          # names the checkpoint's schema carries, so a covariate model is
+          # scoreable without repeating them.
+          "$RESOLVE" predict \
+            --model "$OUT/model.pt" \
+            --header "$FIXTURES/cli_header.csv" \
+            --species "$FIXTURES/cli_species.csv" \
+            --plot-id plot_id --species-id species --abundance cover \
+            --lat lat --lon lon --genus genus --family family \
+            --predict-batch-size 64 \
+            --output "$OUT/predictions.csv"
+
+          python3 - "$OUT/predictions.csv" "$FIXTURES/cli_header.csv" <<'CHECK'
+          import csv
+          import math
+          import sys
+
+          predictions_path, fixture_path = sys.argv[1], sys.argv[2]
+
+          with open(fixture_path, newline="") as fh:
+              fixture = list(csv.DictReader(fh))
+          with open(predictions_path, newline="") as fh:
+              reader = csv.reader(fh)
+              header = next(reader)
+              rows = list(reader)
+
+          # One column per schema target in schema order, keyed by plot, and a
+          # classification target carries both its label and its integer code.
+          assert header == ["plot_id", "area", "habitat", "habitat_code"], header
+          assert len(rows) == len(fixture), f"{len(rows)} rows for {len(fixture)} plots"
+          assert [r[0] for r in rows] == [p["plot_id"] for p in fixture], "plot order"
+
+          # The loader factorizes sorted-unique labels, so the code of a label
+          # is its index in the sorted label set.
+          labels = sorted({p["habitat"] for p in fixture})
+          expected_code = {label: i for i, label in enumerate(labels)}
+
+          for plot_id, area, habitat, habitat_code in rows:
+              value = float(area)
+              assert math.isfinite(value), f"{plot_id}: area is {area}"
+              assert habitat in expected_code, f"{plot_id}: habitat is {habitat}"
+              assert int(habitat_code) == expected_code[habitat], (
+                  f"{plot_id}: {habitat} coded as {habitat_code}"
+              )
+
+          print(f"OK: {len(rows)} predictions, columns {header}")
+          CHECK
+
+      # The covariate is not merely recorded in the schema: it widens the
+      # encoder's input, so an otherwise identical model trained without it has
+      # strictly fewer parameters.
+      - name: A covariate reaches the model
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:${LD_LIBRARY_PATH:-}
+          RESOLVE=${{ github.workspace }}/cli/resolve
+          FIXTURES=${{ github.workspace }}/src/core/tests/fixtures
+
+          "$RESOLVE" train \
+            --header "$FIXTURES/cli_header.csv" \
+            --species "$FIXTURES/cli_species.csv" \
+            --plot-id plot_id --species-id species --abundance cover \
+            --lat lat --lon lon --genus genus --family family \
+            --target area:regression --target habitat:classification:3 \
+            --encoding rank_pool --pool-weighting log1p \
+            --hidden-dims 64,32 --dropout 0.0 \
+            --batch-size 32 --max-epochs 2 --patience 2 --lr 0.01 \
+            --test-size 0.25 --seed 7 \
+            --output "$OUT/bare.pt"
+          "$RESOLVE" info --model "$OUT/bare.pt" > "$OUT/info_bare.txt"
+
+          if grep -q "Covariates:" "$OUT/info_bare.txt"; then
+            echo "::error::a model trained without --covariate reports covariates"
+            exit 1
+          fi
+
+          with_cov=$(grep "^Total parameters:" "$OUT/info.txt" | awk '{print $3}')
+          without_cov=$(grep "^Total parameters:" "$OUT/info_bare.txt" | awk '{print $3}')
+          echo "parameters with covariate+categorical: $with_cov, without: $without_cov"
+          if [ "$with_cov" -le "$without_cov" ]; then
+            echo "::error::the covariate did not widen the model ($with_cov <= $without_cov)"
+            exit 1
+          fi
+
+      # --seed feeds torch::manual_seed before the model is constructed AND the
+      # train/test split, so the same seed reproduces a run and a different seed
+      # does not. Before issue #104 weight init came from an unseeded
+      # process-global RNG and two identical invocations gave different models.
+      - name: --seed makes a run reproducible
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:${LD_LIBRARY_PATH:-}
+          RESOLVE=${{ github.workspace }}/cli/resolve
+          FIXTURES=${{ github.workspace }}/src/core/tests/fixtures
+
+          run_one () {
+            "$RESOLVE" train \
+              --header "$FIXTURES/cli_header.csv" \
+              --species "$FIXTURES/cli_species.csv" \
+              --plot-id plot_id --species-id species --abundance cover \
+              --lat lat --lon lon --genus genus --family family \
+              --covariate elevation --categorical bedrock \
+              --target area:regression --target habitat:classification:3 \
+              --encoding rank_pool --pool-weighting log1p \
+              --hidden-dims 64,32 --dropout 0.0 \
+              --batch-size 32 --max-epochs 5 --patience 5 --lr 0.01 \
+              --test-size 0.25 --seed "$2" \
+              --output "$OUT/seed_$1.pt" > /dev/null
+            "$RESOLVE" predict \
+              --model "$OUT/seed_$1.pt" \
+              --header "$FIXTURES/cli_header.csv" \
+              --species "$FIXTURES/cli_species.csv" \
+              --plot-id plot_id --species-id species --abundance cover \
+              --lat lat --lon lon --genus genus --family family \
+              --output "$OUT/seed_$1.csv" > /dev/null
+          }
+
+          run_one a 7
+          run_one b 7
+          run_one c 8
+
+          if ! cmp -s "$OUT/seed_a.csv" "$OUT/seed_b.csv"; then
+            echo "::error::two runs at --seed 7 produced different predictions"
+            diff "$OUT/seed_a.csv" "$OUT/seed_b.csv" | head -20
+            exit 1
+          fi
+          if cmp -s "$OUT/seed_a.csv" "$OUT/seed_c.csv"; then
+            echo "::error::--seed 7 and --seed 8 produced identical predictions"
+            exit 1
+          fi
+
+      # Every one of these used to be accepted and ignored, which for a research
+      # CLI is a wrong run that looks fine.
+      - name: Reject bad flags and values instead of silently defaulting
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:${LD_LIBRARY_PATH:-}
+          RESOLVE=${{ github.workspace }}/cli/resolve
+          FIXTURES=${{ github.workspace }}/src/core/tests/fixtures
+
+          expect_failure () {
+            local label="$1"
+            shift
+            if "$@" > /tmp/cli_reject.log 2>&1; then
+              echo "::error::train accepted $label"
+              cat /tmp/cli_reject.log
+              exit 1
+            fi
+            echo "rejected as expected: $label"
+            tail -2 /tmp/cli_reject.log
+          }
+
+          base_train=("$RESOLVE" train
+            --header "$FIXTURES/cli_header.csv"
+            --species "$FIXTURES/cli_species.csv"
+            --plot-id plot_id --species-id species
+            --target area:regression
+            --hidden-dims 64,32 --max-epochs 1
+            --output /tmp/should_not_exist.pt)
+
+          expect_failure "--encoding not_an_encoding" \
+            "${base_train[@]}" --encoding not_an_encoding
+          expect_failure "the misspelled flag --maxepochs" \
+            "${base_train[@]}" --maxepochs 10
+          expect_failure "the underscore-spelled flag --test_size" \
+            "${base_train[@]}" --test_size 0.3
+          expect_failure "a non-numeric --batch-size" \
+            "${base_train[@]}" --batch-size not_a_number
+          expect_failure "--max-epochs with no value" \
+            "$RESOLVE" train --header "$FIXTURES/cli_header.csv" \
+            --species "$FIXTURES/cli_species.csv" --target area:regression \
+            --max-epochs
+          expect_failure "a stray positional argument" \
+            "${base_train[@]}" extra_positional
+          expect_failure "--covariate without --header" \
+            "$RESOLVE" train --species "$FIXTURES/cli_species.csv" \
+            --plot-id plot_id --species-id species --target area:regression \
+            --covariate elevation --output /tmp/should_not_exist.pt
+          expect_failure "a covariate count that disagrees with the checkpoint" \
+            "$RESOLVE" predict --model "$OUT/model.pt" \
+            --header "$FIXTURES/cli_header.csv" \
+            --species "$FIXTURES/cli_species.csv" \
+            --plot-id plot_id --species-id species --abundance cover \
+            --covariate elevation --covariate slope \
+            --output /tmp/should_not_exist.csv
+
+          test ! -f /tmp/should_not_exist.pt
+
+      # The help block is generated from the same flag tables the parser uses,
+      # so it cannot drift from what the CLI accepts.
+      - name: Help documents the flags the parser accepts
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:${LD_LIBRARY_PATH:-}
+          ${{ github.workspace }}/cli/resolve help > /tmp/usage.txt
+          for flag in --covariate --categorical --seed --weight-decay --lr-scheduler \
+                      --checkpoint-dir --band-threshold --encoder-architecture \
+                      --cv-folds --cv-spatial --top-k-species --selection \
+                      --representation --normalization --use-cuda-hash \
+                      --batch-size-floor; do
+            grep -q -- "$flag" /tmp/usage.txt || {
+              echo "::error::resolve help does not document $flag"
+              exit 1
+            }
+          done
+          grep -q "log1p" /tmp/usage.txt
+          grep -q "_code" /tmp/usage.txt
+          ${{ github.workspace }}/cli/resolve train --help | grep -q -- "--covariate"
+
+  # Production Python bindings (nanobind _resolve_core): builds the engine, then
+  # runs the tests/core suite against it.
   resolve-core-tests:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -77,6 +370,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install "torch>=2.0" --index-url https://download.pytorch.org/whl/cpu
           pip install "scikit-build-core>=0.4.3" "nanobind>=2.0.0" cmake ninja pandas numpy
+          pip install pytest pytest-cov
 
       - name: Build & install resolve_core
         run: pip install ./src/core/python --no-build-isolation
@@ -90,36 +384,16 @@ jobs:
       - name: Dataset bindings equivalence (from_pandas == from_csv)
         run: python src/core/dev_notes/issue22_from_pandas_smoke.py
 
-  # Legacy POC Python package (src/resolve). Kept only while the POC remains
-  # in-tree as a C++ port reference; new work targets resolve_core above.
-  python-tests:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-cov torch
-
-      - name: Run Python tests
-        run: |
-          pip install -e .
-          pytest tests/ -v --tb=short --cov=resolve --cov-report=xml
+      # Dataset / trainer / predictor / categorical / spatial / pretraining
+      # bindings, plus the held-out recovery fits in tests/core/test_recovery.py.
+      # --cov measures the resolve_core Python shims (the allocator config, the
+      # I/O retry wrapper, from_pandas); the engine under them is C++ and is
+      # covered by the Catch2 suite.
+      - name: Run the resolve_core test suite
+        run: pytest tests/core -v --tb=short --cov=resolve_core --cov-report=xml
 
       - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.11'
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         uses: codecov/codecov-action@v4
         with:
           file: coverage.xml

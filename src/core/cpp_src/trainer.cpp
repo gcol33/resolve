@@ -1,15 +1,6 @@
-// Define _USE_MATH_DEFINES before cmath for M_PI on Windows
-#ifndef _USE_MATH_DEFINES
-#define _USE_MATH_DEFINES
-#endif
-
-// Fallback definition of M_PI if still not defined
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
 #include "resolve/trainer.hpp"
 #include "resolve/dataset.hpp"
+#include "resolve/env.hpp"
 #include "resolve/utils.hpp"
 #include "resolve/checkpoint.hpp"
 #include "resolve/gpu.hpp"
@@ -29,7 +20,6 @@
 #include <fstream>
 #include <numeric>
 #include <cstdlib>
-#include <cstring>
 #include <sstream>
 #include <random>
 #include <iostream>
@@ -90,7 +80,8 @@ Trainer::Trainer(
     ResolveModel model,
     const TrainConfig& config
 ) : model_(model), config_(config),
-    loss_fn_(model->schema().targets, config.phase_boundaries, config.loss_config, config.band_threshold)
+    loss_fn_(model->schema().targets, config.phase_boundaries, config.loss_config,
+             config.band_threshold, nca_term_of(config))
 {
     model_->to(config_.device);
 
@@ -388,7 +379,14 @@ float Trainer::train_epoch(int epoch) {
     const auto& species_ids_src = gpu_data_cached_ ? gpu_species_ids_ : train_species_ids_;
     const auto& species_vec_src = gpu_data_cached_ ? gpu_species_vector_ : train_species_vector_;
     const auto& targets_src = gpu_data_cached_ ? gpu_targets_ : train_targets_;
-    const auto& scalers_src = gpu_data_cached_ ? gpu_scalers_ : std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>>{};
+    // The CPU path has no scaler cache, so the alternative is an empty map.
+    // Spelling it as a temporary here made the conditional a prvalue, so the
+    // reference bound to a lifetime-extended COPY of gpu_scalers_ rather than
+    // to the member -- a per-epoch map copy, and misleading next to the lines
+    // above, which genuinely alias (issue #110 item 2).
+    static const std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>>
+        kNoScalers;
+    const auto& scalers_src = gpu_data_cached_ ? gpu_scalers_ : kNoScalers;
 
     // Pool-style data sources (rank_pool / transformer modes)
     const auto& pool_genus_src = gpu_data_cached_ ? gpu_pool_genus_ids_ : train_pool_genus_ids_;
@@ -778,10 +776,7 @@ Trainer::eval_epoch(int epoch) {
     // running-stat save/restore so the probe does not pollute eval state, and
     // scans BatchNorm running statistics for divergence. If trainmode_test is
     // low while eval_test rises, the running statistics are the culprit.
-    static const bool amp_dbg = [] {
-        const char* v = std::getenv("RESOLVE_AMP_DEBUG");
-        return v != nullptr && std::strcmp(v, "0") != 0;
-    }();
+    static const bool amp_dbg = env_flag_enabled("RESOLVE_AMP_DEBUG");
     if (amp_dbg) {
         double max_mean = 0.0, max_var = 0.0, min_var = 1e30;
         bool nonfinite = false;
@@ -872,9 +867,9 @@ float Trainer::get_learning_rate(int epoch) const {
             // the schedule actually lands on lr_min; dividing by max_epochs
             // leaves the endpoint a step short of lr_min (issue #74).
             float progress = config_.max_epochs > 1
-                ? static_cast<float>(epoch) / (config_.max_epochs - 1) : 1.0f;
-            progress = std::min(progress, 1.0f);
-            float cosine = 0.5f * (1.0f + std::cos(M_PI * progress));
+                ? static_cast<float>(epoch) / static_cast<float>(config_.max_epochs - 1)
+                : 1.0f;
+            float cosine = cosine_ramp(progress);
             return config_.lr_min + (config_.lr - config_.lr_min) * cosine;
         }
         case LRSchedulerType::None:
@@ -1094,6 +1089,7 @@ TrainResult Trainer::fit() {
 
     const int batch_size_at_entry = config_.batch_size;
     requested_batch_size_ = batch_size_at_entry;  // persisted distinct from effective (#86)
+    effective_batch_size_ = batch_size_at_entry;  // tracks the halves below (#105)
     auto start_time = std::chrono::high_resolution_clock::now();
     created_at_ = iso8601_now();
 
@@ -1257,6 +1253,7 @@ TrainResult Trainer::fit() {
 
             config_.log(log_msg);
             config_.batch_size = new_bs;
+            effective_batch_size_ = new_bs;
 
             // Restore the original model state so the retry sees the same
             // initial conditions, not a half-trained model.
@@ -1297,6 +1294,12 @@ TrainResult Trainer::fit() {
         meta.final_metrics = result.final_metrics;
         save(config_.checkpoint_dir + "/checkpoint.pt", &meta);
     }
+
+    // Report the batch size that actually trained the model before restoring
+    // the requested one below. Nothing downstream can recover it from the
+    // config afterwards, which made the CLI's fallback report unreachable
+    // (issue #105).
+    result.effective_batch_size = effective_batch_size_;
 
     // Restore the requested batch size. fit() may have shrunk config_.batch_size
     // in place via the OOM auto-halve loop; the checkpoint above intentionally
@@ -1429,9 +1432,18 @@ void Trainer::save(const std::string& path, const RunMetadata* metadata) const {
     // a no-op for back-compat with pre-categorical-port checkpoints.
     categorical_vocab_.save(archive, "trainer_categorical_");
 
-    // Save training configuration for reproducibility. Pass the requested batch
-    // size so an OOM fallback (effective < requested) is recoverable (issue #86).
-    save_train_config(archive, config_, requested_batch_size_);
+    // Save training configuration for reproducibility. save_train_config writes
+    // the REQUESTED batch size (passed explicitly, issue #86) and the EFFECTIVE
+    // one it reads off the config. fit() restores config_.batch_size to the
+    // requested value before returning, so a save() called after fit() -- what
+    // the CLI and most callers do -- would otherwise record effective ==
+    // requested and lose the OOM fallback the run used. Hand it a copy carrying
+    // the tracked effective value instead (issue #105).
+    TrainConfig persisted_config = config_;
+    if (effective_batch_size_ > 0) {
+        persisted_config.batch_size = effective_batch_size_;
+    }
+    save_train_config(archive, persisted_config, requested_batch_size_);
 
     // Save run metadata if provided (final checkpoint only)
     if (metadata != nullptr) {
@@ -1444,8 +1456,8 @@ void Trainer::save(const std::string& path, const RunMetadata* metadata) const {
 
     // Write human-readable JSON metadata alongside checkpoint
     if (metadata != nullptr) {
-        write_metadata_json(path, model_->config(), config_, *metadata, model_->schema(),
-                            requested_batch_size_);
+        write_metadata_json(path, model_->config(), persisted_config, *metadata,
+                            model_->schema(), requested_batch_size_);
     }
 }
 
@@ -1829,7 +1841,6 @@ CalibrationResult Trainer::compute_calibration(
     auto targets = target_it->second.to(torch::kLong).cpu();  // (n_samples,)
 
     int64_t n_samples = probs.size(0);
-    int64_t n_classes = probs.size(1);
 
     // For each class, compute calibration (here we do class 0 as example for binary,
     // or the most common class for multiclass)

@@ -1,7 +1,30 @@
 #include "resolve/adapter.hpp"
 #include <stdexcept>
+#include <string>
 
 namespace resolve {
+
+namespace {
+
+// ModelConfig's GNNType and the encoder's own GNNType are separate enums, so
+// the two have to be mapped. A switch that returns from every case keeps
+// -Wswitch coverage (adding a variant is still a compile-time warning) while
+// leaving no path that reads an uninitialized value: the previous form
+// declared the target uninitialized and assigned it inside the switch, so a
+// value outside the enumerators -- which a checkpoint written by a newer
+// version, or a C-ABI caller passing a raw int, can produce -- fell through to
+// an uninitialized read.
+GNNEncoderImpl::GNNType to_encoder_gnn_type(GNNType type) {
+    switch (type) {
+        case GNNType::GCN:       return GNNEncoderImpl::GNNType::GCN;
+        case GNNType::GAT:       return GNNEncoderImpl::GNNType::GAT;
+        case GNNType::GraphSAGE: return GNNEncoderImpl::GNNType::GraphSAGE;
+    }
+    throw std::invalid_argument(
+        "unknown GNNType value: " + std::to_string(static_cast<int>(type)));
+}
+
+}  // namespace
 
 TabularAdapterImpl::TabularAdapterImpl(
     const ResolveSchema& schema,
@@ -131,7 +154,8 @@ TabularAdapterImpl::TabularAdapterImpl(
                     cfg.n_d,
                     cfg.n_a,
                     cfg.relaxation_factor,
-                    cfg.sparsity_coefficient
+                    cfg.sparsity_coefficient,
+                    cfg.use_sparsemax
                 ));
             latent_dim_ = cfg.n_d;
             break;
@@ -159,12 +183,7 @@ TabularAdapterImpl::TabularAdapterImpl(
         case EncoderArchitecture::GNN: {
             const auto& cfg = config.gnn;
             k_neighbors_ = cfg.k_neighbors;
-            GNNEncoderImpl::GNNType gnn_type;
-            switch (cfg.gnn_type) {
-                case GNNType::GCN: gnn_type = GNNEncoderImpl::GNNType::GCN; break;
-                case GNNType::GAT: gnn_type = GNNEncoderImpl::GNNType::GAT; break;
-                case GNNType::GraphSAGE: gnn_type = GNNEncoderImpl::GNNType::GraphSAGE; break;
-            }
+            const GNNEncoderImpl::GNNType gnn_type = to_encoder_gnn_type(cfg.gnn_type);
             // Embed the taxonomy categoricals into the node-feature matrix instead
             // of concatenating raw integer IDs as continuous magnitudes, which the
             // encoder cannot interpret (issue #73). One table per slot, sized by
@@ -282,11 +301,11 @@ std::vector<torch::Tensor> TabularAdapterImpl::prepare_categoricals(
     std::vector<torch::Tensor> cats;
     if (genus_ids.defined() && family_ids.defined()) {
         // Each taxonomy slot becomes a separate categorical
-        int n_slots = genus_ids.size(1);
-        for (int k = 0; k < n_slots; ++k) {
+        const int64_t n_slots = genus_ids.size(1);
+        for (int64_t k = 0; k < n_slots; ++k) {
             cats.push_back(genus_ids.select(1, k));
         }
-        for (int k = 0; k < n_slots; ++k) {
+        for (int64_t k = 0; k < n_slots; ++k) {
             cats.push_back(family_ids.select(1, k));
         }
     }

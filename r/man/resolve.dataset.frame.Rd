@@ -10,7 +10,8 @@ resolve.dataset.frame(
   roles = list(),
   targets = list(),
   config = list(),
-  schemaSource = NULL
+  schemaSource = NULL,
+  vocabs = NULL
 )
 }
 \arguments{
@@ -32,6 +33,12 @@ header stays in memory), or \code{NULL} for single-table mode.}
 \item{schemaSource}{Optional ResolveDataset whose vocabularies / class
 mappings are reused (the in-memory analog of \code{schemaSource} in
 \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}}). Only valid when \code{species} is a data.frame.}
+
+\item{vocabs}{Optional vocabulary list from \code{predictor$vocabs()} (the
+in-memory analog of \code{vocabs} in \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}}). Supported in
+single-table mode and with both frames in memory; not with a species CSV
+path (use \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}} there). Mutually exclusive with
+\code{schemaSource}.}
 }
 \value{
 A ResolveDataset object.

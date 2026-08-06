@@ -13,8 +13,11 @@
 
 namespace resolve {
 
-// Simple CSV reader that doesn't depend on external libraries
-// For production use, consider fast-cpp-csv-parser
+// The engine's CSV reader, hand-rolled against no external dependency. Handles
+// the RFC-4180 forms the loaders meet: a configurable delimiter, quoted fields,
+// doubled quotes as an escaped quote, newlines embedded in a quoted field, CRLF
+// line endings, and a leading UTF-8 BOM; a duplicate header name is rejected
+// rather than silently binding every lookup to the last occurrence.
 class CSVReader : public RowSource {
 public:
     explicit CSVReader(const std::string& filename, char delimiter = ',');

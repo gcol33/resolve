@@ -75,6 +75,12 @@ _RESOLVE_CUDA_ALLOC_CONF = configure_cuda_allocator()
 # segfaults inside THPVariable_Wrap.
 import torch  # noqa: F401  (must come AFTER configure_cuda_allocator)
 
+# Every public name the compiled extension registers is re-exported here, and
+# listed in __all__ below. `resolve_core.X` is the supported import path for all
+# of them; reaching into `resolve_core._resolve_core` is never necessary.
+# tests/core/test_bindings_surface.py enforces both halves of that, so a new
+# binding that skips this block fails CI rather than being reachable only
+# through the private module.
 try:
     from ._resolve_core import (
         # Enums
@@ -111,6 +117,8 @@ try:
         ResolvePredictions,
         Scalers,
         DatasetConfig,
+        SpatialBlockConfig,
+        ModelForwardResult,
         # Architecture configs (v2.0)
         FTTransformerConfig,
         TabNetConfig,
@@ -119,17 +127,30 @@ try:
         TraitNetConfig,
         ExcelFormerConfig,
         HeterogeneousGNNConfig,
+        TabMConfig,
         ParallelBranchConfig,
         ParallelLayersConfig,
         # Calibration and residual analysis
         CalibrationBin,
         CalibrationResult,
         ResidualAnalysis,
+        ClassificationPredictions,
         CrossValidationResult,
         # Species encoding
         TaxonomyVocab,
+        CategoricalVocab,
+        SpeciesVocab,
         SpeciesRecord,
-        EncodedSpecies,
+        RankPoolEncoder,
+        RankPoolEncodedData,
+        EmbeddingEncoder,
+        EmbeddingEncodedData,
+        UnknownSpeciesStats,
+        compute_unknown_species_stats,
+        # Training-time vocabularies + checkpoint -> DatasetConfig (issue #102)
+        ExternalVocabs,
+        external_vocabs_from_schema,
+        dataset_config_from_checkpoint,
         # Model
         ResolveModel,
         # Training
@@ -138,6 +159,8 @@ try:
         Predictor,
         # Metrics
         Metrics,
+        ClassificationMetrics,
+        ConfidenceMetrics,
         # Role mapping
         RoleMapping,
         TargetSpec,
@@ -153,6 +176,8 @@ try:
         VAEConfig,
         VAEPretrainResult,
         VAEPretrainer,
+        # Native fuzzy-string index submodule (fuzzy.FuzzyIndex, fuzzy.Match)
+        fuzzy,
     )
 except ImportError as e:
     raise ImportError(
@@ -268,6 +293,8 @@ __all__ = [
     "ResolvePredictions",
     "Scalers",
     "DatasetConfig",
+    "SpatialBlockConfig",
+    "ModelForwardResult",
     # Architecture configs (v2.0)
     "FTTransformerConfig",
     "TabNetConfig",
@@ -276,17 +303,30 @@ __all__ = [
     "TraitNetConfig",
     "ExcelFormerConfig",
     "HeterogeneousGNNConfig",
+    "TabMConfig",
     "ParallelBranchConfig",
     "ParallelLayersConfig",
     # Calibration and residual analysis
     "CalibrationBin",
     "CalibrationResult",
     "ResidualAnalysis",
+    "ClassificationPredictions",
     "CrossValidationResult",
     # Species encoding
     "TaxonomyVocab",
+    "CategoricalVocab",
+    "SpeciesVocab",
     "SpeciesRecord",
-    "EncodedSpecies",
+    "RankPoolEncoder",
+    "RankPoolEncodedData",
+    "EmbeddingEncoder",
+    "EmbeddingEncodedData",
+    "UnknownSpeciesStats",
+    "compute_unknown_species_stats",
+    # Training-time vocabularies + checkpoint -> DatasetConfig (issue #102)
+    "ExternalVocabs",
+    "external_vocabs_from_schema",
+    "dataset_config_from_checkpoint",
     # Model
     "ResolveModel",
     # Training
@@ -295,6 +335,8 @@ __all__ = [
     "Predictor",
     # Metrics
     "Metrics",
+    "ClassificationMetrics",
+    "ConfidenceMetrics",
     # Role mapping
     "RoleMapping",
     "TargetSpec",
@@ -310,6 +352,8 @@ __all__ = [
     "VAEConfig",
     "VAEPretrainResult",
     "VAEPretrainer",
+    # Native fuzzy-string index submodule
+    "fuzzy",
     # GPU memory management
     "set_vram_fraction",
     "configure_cuda_allocator",

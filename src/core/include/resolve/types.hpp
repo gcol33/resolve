@@ -15,7 +15,7 @@ namespace resolve {
 // Version and constants
 // =============================================================================
 
-inline constexpr const char* VERSION = "0.7.3";
+inline constexpr const char* VERSION = "0.8.0";
 
 // Training defaults
 constexpr int kDefaultBatchSize = 4096;
@@ -38,8 +38,8 @@ constexpr float kExpClampMin = -88.0f;
 constexpr float kExpClampMax = 88.0f;
 constexpr float kEpsilon = 1e-8f;
 
-// Gradient-norm clip threshold applied on every backward pass (matches the POC's
-// constants.MAX_GRAD_NORM). Single source of truth for both training paths.
+// Gradient-norm clip threshold applied on every backward pass. Single source of
+// truth for both training paths.
 constexpr double kMaxGradNorm = 1.0;
 
 // Initialization constants
@@ -50,6 +50,14 @@ constexpr float kGATInitStd = 0.01f;
 // Phase boundaries for phased loss
 constexpr int kDefaultPhase1Epoch = 100;
 constexpr int kDefaultPhase2Epoch = 300;
+
+// Neighbourhood Components Analysis term (LossConfigMode::NCA). Shared by
+// TrainConfig's nca_* knobs, NCATerm and NCALossImpl's constructor defaults, so
+// the module and the loss preset cannot drift apart. See nca_objective in
+// loss.hpp for what each one controls.
+constexpr float kNCATemperature = 0.1f;
+constexpr int   kNCANeighbors   = 32;
+constexpr float kNCAWeight      = 0.1f;
 
 // =============================================================================
 // Logging
@@ -92,7 +100,9 @@ enum class LossConfigMode {
     MAE,       // Pure MAE loss (no SMAPE, no band penalty)
     SMAPE,     // SMAPE as primary loss
     Combined,  // Phased: MAE -> MAE+SMAPE -> MAE+SMAPE+band (default)
-    NCA        // Neighborhood Component Analysis loss (classification only)
+    NCA        // Combined regression schedule + the Neighbourhood Components
+               // Analysis term on classification targets (Goldberger et al.,
+               // NIPS 2004; see nca_objective in loss.hpp)
 };
 
 // Learning rate scheduler type
@@ -159,14 +169,17 @@ struct TargetConfig {
     TransformType transform = TransformType::None;
     int num_classes = 0;  // For classification
     float weight = 1.0f;  // Loss weight in multi-task
-    std::vector<float> class_weights;  // Optional class weights for imbalanced classification
+    std::vector<float> class_weights = {};  // Optional class weights for imbalanced classification
     // Ordered class vocabulary for classification targets. class_names[i] is
     // the original CSV string that encodes to int code i. Empty for
     // regression. Populated by ResolveDataset::load_header_data when it
     // factorizes a string-coded classification column (e.g. EUNIS "M","N",
     // "P",...) into int64 codes. Persisted in the checkpoint so the
     // Predictor can map predicted codes back to human-readable class names.
-    std::vector<std::string> class_names;
+    // Both vector members carry an explicit default so a brace-initialization
+    // that stops after `weight` -- the common form at the call sites -- is not
+    // a missing-initializer under -Wextra.
+    std::vector<std::string> class_names = {};
 };
 
 // Schema information for a dataset
@@ -206,13 +219,64 @@ struct ResolveSchema {
     // pool_weighting is the underlying PoolWeighting enum value
     // (Binary=0, Abundance=1, Log1p=2, Norm=3, Rank=4); kept as int because
     // types.hpp cannot include species_encoding.hpp. pool_species_cap mirrors
-    // DatasetConfig::pool_species_cap (0 = auto p99).
+    // DatasetConfig::pool_species_cap, whose sentinels are 0 = no cap (pad to
+    // the global per-plot max), -1 = auto p99, >0 = manual cap. After a
+    // rank-pool / transformer load the dataset overwrites this with the
+    // RESOLVED width, so a checkpoint always carries a concrete >0 cap.
     int pool_weighting = 2;    // PoolWeighting::Log1p
-    int pool_species_cap = 0;  // 0 = auto
+    int pool_species_cap = 0;  // 0 = no cap, -1 = auto p99, >0 = manual cap
+
+    // Remaining DatasetConfig knobs that shape the encoded tensors but are not
+    // recoverable from ModelConfig (issue #102). Persisted so an inference-side
+    // DatasetConfig can be rebuilt in full from the checkpoint rather than
+    // silently reverting to the struct defaults: top_k_species and
+    // track_unknown_count change tensor widths (loud shape errors), while
+    // selection / representation / normalization / aggregation / use_taxonomy
+    // change values silently. Read back through
+    // dataset_config_from_checkpoint() (dataset.hpp), the single place that
+    // reassembles a DatasetConfig from a checkpoint.
+    int top_k_species = 10;
+    SelectionMode selection = SelectionMode::Top;
+    RepresentationMode representation = RepresentationMode::Abundance;
+    NormalizationMode normalization = NormalizationMode::Raw;
+    AggregationMode aggregation = AggregationMode::Abundance;
+    bool use_taxonomy = true;
+
+    // Ordered species / genus / family vocabularies fitted at training time
+    // (issue #102). Element i is the name that encodes to integer code i, and
+    // index 0 is always the reserved "<UNK>" slot, so the vector length equals
+    // n_species_vocab / n_genera_vocab / n_families_vocab respectively.
+    //
+    // Every non-hash encoder indexes an embedding table with a code that is a
+    // function of the FILE the dataset was built from: the species vocab is
+    // frequency-ranked and the taxonomy vocab is a function of the name set, so
+    // a checkpoint carrying only the vocabulary SIZES lets an inference run
+    // re-fit different codes and look up the wrong embedding rows -- wrong
+    // predictions, no error. Carrying the names makes the mapping recoverable
+    // from the checkpoint alone (ResolveDataset::from_csv_with_schema(const
+    // ResolveSchema&) builds a dataset directly in this namespace) and makes a
+    // mismatch detectable (Predictor::predict rejects a dataset whose vocab is
+    // not the model's).
+    //
+    // Empty on a pre-issue-#102 checkpoint; the loaders warn and fall back to
+    // the size-only guard in that case.
+    std::vector<std::string> species_vocab;
+    std::vector<std::string> genus_vocab;
+    std::vector<std::string> family_vocab;
 
     // Helper: true if this schema has categorical covariates configured.
     [[nodiscard]] bool has_categoricals() const noexcept {
         return !categorical_names.empty();
+    }
+    // Helper: true if the fitted species vocabulary travelled with the schema.
+    // False for a pre-issue-#102 checkpoint (only sizes were persisted).
+    [[nodiscard]] bool has_species_vocab() const noexcept {
+        return !species_vocab.empty();
+    }
+    // Helper: true if either taxonomy vocabulary travelled with the schema.
+    // A family-only dataset has an empty genus vocab and vice versa.
+    [[nodiscard]] bool has_taxonomy_vocab() const noexcept {
+        return !genus_vocab.empty() || !family_vocab.empty();
     }
     // Helper: how many categorical columns.
     [[nodiscard]] int64_t n_categoricals() const noexcept {
@@ -295,7 +359,14 @@ struct TabNetConfig {
     float relaxation_factor = 1.5f; // Sparsity relaxation
     float sparsity_coefficient = 1e-3f;
     int virtual_batch_size = 128;   // Ghost batch norm size
-    bool use_sparsemax = true;      // Use sparsemax vs entmax-1.5
+    // Simplex mapping every decision step's attentive transformer applies to
+    // its feature logits. true = sparsemax (alpha = 2; Arik & Pfister's
+    // default); false = 1.5-entmax (Peters et al. 2019, Eq. 13), which is still
+    // sparse but keeps a strictly larger mask support on the same logits.
+    // Reaches TabNetEncoder -> TabNetStep::attentive_forward via
+    // ModelAdapter's TabNet branch, and round-trips through the checkpoint key
+    // "tabnet_use_sparsemax".
+    bool use_sparsemax = true;
 };
 
 // SAINT configuration
@@ -486,6 +557,18 @@ struct TrainConfig {
     // this knob, not the reporting vector, that changes what training minimizes.
     float band_threshold = 0.25f;
 
+    // Neighbourhood Components Analysis term on classification targets. Active
+    // only under loss_config == LossConfigMode::NCA, which is the one preset
+    // that enables it; inert under MAE / SMAPE / Combined.
+    //   nca_temperature sets the scale of the stochastic-neighbour softmax,
+    //     i.e. the effective number of neighbours each sample spreads over.
+    //   nca_neighbors truncates a sample's neighbour set to its most similar
+    //     in-batch samples; <= 0 (or >= batch - 1) keeps the whole batch.
+    //   nca_weight scales the term against the cross-entropy it is added to.
+    float nca_temperature = kNCATemperature;
+    int nca_neighbors = kNCANeighbors;
+    float nca_weight = kNCAWeight;
+
     // Checkpointing
     std::string checkpoint_dir;   // Directory for checkpoints (empty = disabled)
     int checkpoint_every = 0;     // Save checkpoint every N epochs (0 = only best)
@@ -642,6 +725,17 @@ struct TrainResult {
     float train_time_seconds = 0.0f;
     int resumed_from_epoch = 0;
 
+    // The batch size this run actually trained at, i.e. the value after any
+    // CUDA auto-halve-on-OOM retries. Equal to the requested TrainConfig
+    // batch_size on a clean run; smaller when the retry fired (issue #105).
+    //
+    // fit() restores config_.batch_size to the requested value before
+    // returning -- otherwise a later cross-validation fold would silently
+    // train at the reduced size -- so the effective value is not readable off
+    // the config afterwards. It is copied here (and onto the trainer's
+    // effective_batch_size() accessor, from the same member) at fit() exit.
+    int effective_batch_size = 0;
+
     // Baseline comparisons per target
     std::unordered_map<std::string, BaselineMetrics> baselines;
 
@@ -750,18 +844,6 @@ struct SpeciesRecord {
     std::string plot_id;
 };
 
-// Encoded species data (output of encoding process)
-struct EncodedSpecies {
-    torch::Tensor hash_embedding;   // (n_plots, hash_dim) for hash mode
-    torch::Tensor genus_ids;        // (n_plots, n_taxonomy_slots)
-    torch::Tensor family_ids;       // (n_plots, n_taxonomy_slots)
-    torch::Tensor unknown_fraction; // (n_plots,)
-    torch::Tensor unknown_count;    // (n_plots,)
-    torch::Tensor species_vector;   // (n_plots, n_species) for sparse mode
-    torch::Tensor species_ids;      // (n_plots, top_k_species) for embed mode
-    std::vector<std::string> plot_ids;
-};
-
 // Taxonomy vocabulary for encoding genus/family names to IDs
 class TaxonomyVocab {
 public:
@@ -820,17 +902,43 @@ public:
     void set_genus_map(const std::unordered_map<std::string, int64_t>& m) { genus_to_idx_ = m; }
     void set_family_map(const std::unordered_map<std::string, int64_t>& m) { family_to_idx_ = m; }
 
+    // Ordered views of the two maps: element i is the name that encodes to
+    // integer code i, with index 0 the reserved "<UNK>" slot. This is the
+    // canonical serialization form -- save() below writes exactly these, and
+    // ResolveSchema::genus_vocab / family_vocab carry them into the checkpoint
+    // so an inference-side dataset can be rebuilt in the model's ID namespace
+    // (issue #102).
+    [[nodiscard]] std::vector<std::string> genus_names() const {
+        return ordered_names(genus_to_idx_);
+    }
+    [[nodiscard]] std::vector<std::string> family_names() const {
+        return ordered_names(family_to_idx_);
+    }
+
+    // Inverse of genus_names()/family_names(): rebuild the encoder from the two
+    // ordered name lists (index = code). An empty list yields an empty map,
+    // which encode_genus/encode_family already treat as "everything is UNK".
+    [[nodiscard]] static TaxonomyVocab from_ordered(
+        const std::vector<std::string>& genus_names,
+        const std::vector<std::string>& family_names
+    ) {
+        TaxonomyVocab vocab;
+        for (size_t i = 0; i < genus_names.size(); ++i) {
+            vocab.genus_to_idx_[genus_names[i]] = static_cast<int64_t>(i);
+        }
+        for (size_t i = 0; i < family_names.size(); ++i) {
+            vocab.family_to_idx_[family_names[i]] = static_cast<int64_t>(i);
+        }
+        return vocab;
+    }
+
     // Save vocabulary to archive (strings serialized as concatenated bytes with lengths)
     void save(torch::serialize::OutputArchive& archive, const std::string& prefix = "taxonomy_") const {
-        // Build ordered lists from maps
-        std::vector<std::string> genera(genus_to_idx_.size());
-        for (const auto& [name, idx] : genus_to_idx_) {
-            genera[idx] = name;
-        }
-        std::vector<std::string> families(family_to_idx_.size());
-        for (const auto& [name, idx] : family_to_idx_) {
-            families[idx] = name;
-        }
+        // Ordered lists (index = code); same source of truth as genus_names()
+        // / family_names() so the archive layout and the schema vectors cannot
+        // drift apart.
+        const std::vector<std::string> genera = genus_names();
+        const std::vector<std::string> families = family_names();
 
         // Serialize genus vocab: lengths tensor + concatenated bytes tensor
         std::vector<int64_t> genus_lengths;
@@ -899,6 +1007,22 @@ public:
     }
 
 private:
+    // Invert a {name -> code} map into a code-indexed name list. Codes are
+    // dense 0..N-1 by construction (fit / from_ordered / load all assign them
+    // that way); a sparse map would leave holes as empty strings rather than
+    // throwing, matching the pre-existing save() behaviour.
+    [[nodiscard]] static std::vector<std::string> ordered_names(
+        const std::unordered_map<std::string, int64_t>& to_idx
+    ) {
+        std::vector<std::string> names(to_idx.size());
+        for (const auto& [name, idx] : to_idx) {
+            if (idx >= 0 && idx < static_cast<int64_t>(names.size())) {
+                names[static_cast<size_t>(idx)] = name;
+            }
+        }
+        return names;
+    }
+
     std::unordered_map<std::string, int64_t> genus_to_idx_;
     std::unordered_map<std::string, int64_t> family_to_idx_;
 };

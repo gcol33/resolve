@@ -1,31 +1,45 @@
 # RESOLVE Examples
 
-Example notebooks and scripts demonstrating RESOLVE usage.
+Notebooks and scripts demonstrating RESOLVE usage.
 
 ## Contents
 
-- **getting_started.ipynb** - Quick start tutorial covering data loading, training, and prediction
+- **getting_started.ipynb** — builds a small dataset, trains a multi-target
+  model, reads the held-out fold, saves a checkpoint, and scores a new survey
+  through the training vocabularies.
 
-## Running the Examples
+## Running the examples
+
+The examples use `resolve_core`, the Python binding over the C++ engine. It
+builds from source against the PyTorch you already have installed:
 
 ```bash
-# Install dependencies
-pip install resolve-ml jupyter matplotlib
-
-# Launch Jupyter
-jupyter notebook
+git clone https://github.com/gcol33/resolve.git
+cd resolve/src/core/python
+pip install .
 ```
 
-## Data Format
+Then, for the notebook:
 
-RESOLVE expects two CSV files:
+```bash
+pip install jupyter matplotlib
+jupyter notebook examples/getting_started.ipynb
+```
 
-1. **Header file**: Plot-level data (one row per plot)
+See [Installation](https://gillescolling.com/resolve/tutorials/installation/)
+for the R package and the command line.
+
+## Data format
+
+RESOLVE reads two tables, as CSV paths or as pandas DataFrames:
+
+1. **Header table**: one row per plot
    - Required: plot ID column
-   - Optional: coordinates, covariates, target columns
+   - Optional: coordinates, numeric covariates, string covariates, target columns
 
-2. **Species file**: Species occurrences (one row per species-plot combination)
-   - Required: species ID, plot ID columns
-   - Optional: abundance, taxonomy (genus, family)
+2. **Species table**: one row per species occurrence
+   - Required: species ID and plot ID columns
+   - Optional: abundance, genus, family
 
-See the notebooks for detailed examples.
+A single long table works too, with the targets carried inline; see
+`ResolveDataset.from_species_csv`.

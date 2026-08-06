@@ -73,6 +73,18 @@ public:
     RObject device()      const { return get("device"); }
     RObject get_scalers() const { return get("scalers"); }
 
+    // Issue #102: everything needed to build an inference dataset in this
+    // model's integer-code namespace. `vocabs()` goes to a *_with_vocabs
+    // loader, `dataset_config()` is that loader's config, and `schema()`
+    // exposes the checkpoint's full data description (including the fitted
+    // species / genus / family vocabularies).
+    RObject schema()         const { return get("schema"); }
+    RObject vocabs()         const { return get("vocabs"); }
+    RObject species_vocab()  const { return get("species_vocab"); }
+    RObject genus_vocab()    const { return get("genus_vocab"); }
+    RObject family_vocab()   const { return get("family_vocab"); }
+    RObject dataset_config() const { return get("dataset_config"); }
+
     List categorical_vocab() const {
         ValuePtr v(resolve_predictor_get(predictor_.get(), "categorical_vocab"));
         capi_check(v.get());

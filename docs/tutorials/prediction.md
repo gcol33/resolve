@@ -20,65 +20,78 @@ and the test set is small enough that you know it fits.
 ## Basic Prediction
 
 ```python
-# Load new data (same format as training data)
-new_dataset = resolve.ResolveDataset.from_csv(
-    header="new_plots.csv",
-    species="new_species.csv",
-    roles=roles,
-    targets=targets,  # Can be empty dict if no targets
+# Load new data through the training vocabularies, so species, taxonomy, and
+# categorical ids index the same embedding rows the model was trained on.
+new_dataset = rc.ResolveDataset.from_csv_with_schema(
+    "new_plots.csv", "new_species.csv", roles, targets, training_dataset,
 )
 
-# Predict
-predictions = predictor.predict(new_dataset)
+predictions = predictor.predict_dataset(new_dataset)
 
-# Access results
-for target in predictions.predictions:
-    print(f"{target}: {predictions[target][:5]}")  # First 5 predictions
+for target, values in predictions.predictions.items():
+    print(f"{target}: {values[:5]}")
 ```
+
+Regression targets come back on the original scale; a `Log1p` target is
+inverted before it is returned. Classification targets come back as `int64`
+class codes indexed into `schema.targets[i].class_names`.
 
 ## Output Formats
 
-### DataFrame Export
+`ResolvePredictions` carries `plot_ids` plus a dict of tensors, which writes out
+with whatever frame library you already use:
 
 ```python
-df = predictions.to_polars()
-print(df.head())
+import pandas as pd
+
+df = pd.DataFrame({"plot_id": list(predictions.plot_ids)})
+for target, values in predictions.predictions.items():
+    df[target] = values.numpy()
+df.to_csv("predictions.csv", index=False)
 ```
 
-Output:
-```
-   plot_id   area  habitat
-0    P001  125.3        2
-1    P002  340.1        0
-2    P003   45.8        2
+The CLI writes the same layout directly:
+
+```bash
+resolve predict --model model.pt --header new_plots.csv \
+                --species new_species.csv --output predictions.csv
 ```
 
-### CSV Export
+```
+plot_id,area,habitat,habitat_code
+P001,125.3,Forest,2
+P002,340.1,Grassland,0
+P003,45.8,Forest,2
+```
+
+A classification target is written as two columns: `<target>` carries the
+original class label the model was trained on, and `<target>_code` the integer
+code it predicted. A checkpoint that has no class vocabulary (an
+already-integer-coded column) repeats the code in both.
+
+The CLI builds its dataset from the checkpoint's own species, taxonomy, and
+categorical vocabularies, so the codes it feeds the model mean what they meant
+at training time. Building a dataset for inference yourself needs the same:
 
 ```python
-predictions.to_csv("predictions.csv")
+vocabs = predictor.external_vocabs
+dataset = rc.ResolveDataset.from_csv_with_vocabs(
+    "new_plots.csv", "new_species.csv", roles, targets,
+    vocabs, predictor.dataset_config,
+)
 ```
+
+`predict_dataset` rejects a dataset built any other way, because a
+freshly-fitted vocabulary assigns different integer codes to the same species
+and the model would read the wrong embedding rows.
 
 ## Prediction Options
-
-### Output Space
-
-For regression targets with transforms:
-
-```python
-# Get predictions in original scale (default)
-predictions = predictor.predict(dataset, output_space="raw")
-
-# Get predictions in transformed space (e.g., log1p)
-predictions = predictor.predict(dataset, output_space="transformed")
-```
 
 ### Include Latent Representations
 
 ```python
-predictions = predictor.predict(dataset, return_latent=True)
+predictions = predictor.predict_dataset(dataset, return_latent=True)
 
-# Access latent vectors
 latent = predictions.latent
 print(f"Latent shape: {latent.shape}")  # (n_plots, latent_dim)
 ```
@@ -90,8 +103,8 @@ print(f"Latent shape: {latent.shape}")  # (n_plots, latent_dim)
 Get learned representations for all plots:
 
 ```python
-embeddings = predictor.get_embeddings(dataset)
-print(f"Shape: {embeddings.shape}")  # (n_plots, latent_dim)
+latent = predictor.predict_dataset(dataset, return_latent=True).latent
+print(f"Shape: {latent.shape}")  # (n_plots, latent_dim)
 ```
 
 Use for:
@@ -113,15 +126,22 @@ print(f"Family embeddings: {family_emb.shape}") # (n_families, emb_dim)
 
 ## Handling New Species
 
-RESOLVE tracks species not seen during training:
+A dataset built against a checkpoint's vocabulary measures how much of each plot
+the model has never seen:
 
 ```python
-# During encoding, unknown species contribute to:
-# - unknown_fraction: Proportion of abundance from unknown species
-# - unknown_count: Number of unknown species (if enabled)
+ds = rc.ResolveDataset.from_csv_with_schema(
+    header, species, roles, targets, predictor.schema, cfg)
+
+ds.unknown_fraction    # (n_plots,) share of abundance from species outside the vocabulary
+ds.unknown_count       # (n_plots,) records naming a species outside the vocabulary
 ```
 
-The model uses these features to adjust predictions for plots with novel species.
+Both are computed over each plot's full record list, before top-k selection or a
+pool cap, and both are concatenated into the encoder's continuous block when
+`track_unknown_fraction` / `track_unknown_count` are set. A dataset built with
+plain `from_csv` fits its own vocabulary from the file it reads, so every plot
+reads 0.0 there.
 
 ## Batch Processing
 
@@ -152,43 +172,44 @@ input slicing differs. Returned tensors live on CPU regardless of
 ## Example: Complete Workflow
 
 ```python
-import resolve
+import numpy as np
 import pandas as pd
+import resolve_core as rc
 
-# Load trained model
-predictor = resolve.Predictor.load("trained_model.pt")
+predictor = rc.Predictor.load("trained_model.pt")
 
-# Prepare new data
-new_header = pd.read_csv("new_plots.csv")
-new_species = pd.read_csv("new_species.csv")
+roles = rc.RoleMapping()
+roles.plot_id    = "PlotID"
+roles.species_id = "Species"
+roles.latitude   = "Latitude"
+roles.longitude  = "Longitude"
+roles.abundance  = "Cover"
+roles.genus      = "Genus"
+roles.family     = "Family"
 
-roles = {
-    "plot_id": "PlotID",
-    "species_id": "Species",
-    "species_plot_id": "PlotID",
-    "coords_lat": "Latitude",
-    "coords_lon": "Longitude",
-    "abundance": "Cover",
-    "taxonomy_genus": "Genus",
-    "taxonomy_family": "Family",
-}
+targets = [
+    rc.TargetSpec.regression("Area", rc.TransformType.Log1p),
+    rc.TargetSpec.classification("Habitat", 5),
+]
 
-new_dataset = resolve.ResolveDataset(
-    header=new_header,
-    species=new_species,
-    roles=roles,
-    targets={},  # No targets for prediction-only
+# In-memory frames avoid a temp-CSV round trip when the header is filtered
+# per run; `from_pandas` is byte-identical to `from_csv` on the same data.
+new_dataset = rc.ResolveDataset.from_pandas(
+    pd.read_csv("new_plots.csv"),
+    pd.read_csv("new_species.csv"),
+    roles,
+    targets,
+    schema_source=training_dataset,
 )
 
-# Predict with latent representations
-predictions = predictor.predict(new_dataset, return_latent=True)
+predictions = predictor.predict_dataset(new_dataset, return_latent=True)
 
-# Export results
-predictions.to_csv("results.csv")
+results = pd.DataFrame({"plot_id": list(predictions.plot_ids)})
+for target, values in predictions.predictions.items():
+    results[target] = values.numpy()
+results.to_csv("results.csv", index=False)
 
-# Save latent representations
-import numpy as np
-np.save("latent_vectors.npy", predictions.latent)
+np.save("latent_vectors.npy", predictions.latent.numpy())
 ```
 
 ## Next Steps

@@ -288,6 +288,24 @@ test_that("resolve.train.dataset rejects invalid lossConfig", {
   fake_ds <- structure(list(), class = "Rcpp_ResolveDataset")
 
   expect_error(resolve.train.dataset(fake_ds, lossConfig = "mse"), "lossConfig")
+
+  # "nca" is a real preset (Neighbourhood Components Analysis on classification
+  # targets), so it must clear validation. The fake dataset still fails the call
+  # further in; what matters is that lossConfig is not what rejected it.
+  nca_err <- tryCatch(
+    resolve.train.dataset(fake_ds, lossConfig = "nca"),
+    error = function(e) conditionMessage(e)
+  )
+  expect_false(grepl("lossConfig", nca_err, fixed = TRUE))
+})
+
+test_that("resolve.train.dataset rejects invalid NCA hyperparameters", {
+  fake_ds <- structure(list(), class = "Rcpp_ResolveDataset")
+
+  expect_error(resolve.train.dataset(fake_ds, ncaTemperature = 0), "ncaTemperature")
+  expect_error(resolve.train.dataset(fake_ds, ncaTemperature = "hot"), "ncaTemperature")
+  expect_error(resolve.train.dataset(fake_ds, ncaNeighbors = "many"), "ncaNeighbors")
+  expect_error(resolve.train.dataset(fake_ds, ncaWeight = -1), "ncaWeight")
 })
 
 
@@ -373,6 +391,10 @@ test_that("resolve.train.dataset has expected formal arguments", {
   expect_true("batchSize" %in% args)
   expect_true("device" %in% args)
   expect_true("lossConfig" %in% args)
+  # NCA term hyperparameters
+  expect_true("ncaTemperature" %in% args)
+  expect_true("ncaNeighbors" %in% args)
+  expect_true("ncaWeight" %in% args)
   # RankPool/Transformer options
   expect_true("coverDropout" %in% args)
   expect_true("dModel" %in% args)

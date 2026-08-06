@@ -1,6 +1,9 @@
 #pragma once
 
 #include "resolve/types.hpp"
+// The VAE pretrainer is part of the pretraining family: it shares
+// run_pretrain_loop and draws its reparameterization noise from PretrainRng.
+#include "resolve/pretraining.hpp"
 #include <torch/torch.h>
 
 namespace resolve {
@@ -18,9 +21,18 @@ struct VAEConfig {
     float kl_anneal_epochs = 20;       // Epochs to linearly anneal KL weight from 0 to kl_weight
     int pretrain_epochs = 100;
     float pretrain_lr = 1e-3f;
+    // AdamW decoupled weight decay. The value is AdamWOptions' own default,
+    // which the pretraining loop used implicitly before the knob existed.
+    float pretrain_weight_decay = 1e-2f;
     int batch_size = 4096;
     torch::Device device = torch::kCPU;
     LogCallback log = default_log;
+
+    // Seed for the dedicated pretraining RNG (shuffle + reparameterization
+    // noise); see PretrainConfig::seed for the contract it buys. The encoder /
+    // decoder dropout layers keep drawing from the global RNG stream, since
+    // torch::nn::Dropout takes no generator.
+    int seed = 42;
 };
 
 // =============================================================================
@@ -40,8 +52,11 @@ public:
 
     // Full forward pass: encode -> reparameterize -> decode
     // Returns: (reconstruction, mu, log_var)
+    // `rng` supplies the reparameterization noise; leaving it at the default
+    // draws from the global RNG stream.
     std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> forward(
-        torch::Tensor species_vector
+        torch::Tensor species_vector,
+        PretrainRng rng = PretrainRng{}
     );
 
     // Encode species vector to latent representation
@@ -51,9 +66,12 @@ public:
     // Decode latent representation back to species vector
     torch::Tensor decode(torch::Tensor z);
 
-    // Reparameterization trick: z = mu + eps * exp(0.5 * log_var)
+    // Reparameterization trick: z = mu + eps * exp(0.5 * log_var).
+    // eps is drawn from `rng`, so a seeded pretraining run reproduces its
+    // sampling noise instead of consuming the global RNG stream.
     [[nodiscard]] static torch::Tensor reparameterize(
-        torch::Tensor mu, torch::Tensor log_var);
+        torch::Tensor mu, torch::Tensor log_var,
+        PretrainRng rng = PretrainRng{});
 
     // Gaussian KL divergence D_KL(q(z|x) || N(0, I)) for a diagonal posterior:
     //   -0.5 * sum_j (1 + log_var_j - mu_j^2 - exp(log_var_j))

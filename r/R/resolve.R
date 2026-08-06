@@ -493,6 +493,15 @@ resolve.progress <- function(checkpointDir) {
 #'   classification class mappings instead of fitting its own, so a held-out or
 #'   transfer set lines up with the training set's embedding namespaces. Default
 #'   \code{NULL} fits fresh vocabularies.
+#' @param vocabs Optional vocabulary list from \code{predictor$vocabs()} (or
+#'   \code{dataset$vocabs()}). Same effect as \code{schemaSource}, sourced from a
+#'   CHECKPOINT rather than an in-memory training dataset, so the training CSVs
+#'   need not exist. This is the path for scoring new data: every non-hash
+#'   encoder indexes an embedding table with a code that is a function of the
+#'   file the vocabulary was fitted on, so a dataset built without the training
+#'   vocabularies looks up the wrong rows and \code{predictor$predict_dataset()}
+#'   rejects it. Pair with \code{config = predictor$dataset_config()}. Mutually
+#'   exclusive with \code{schemaSource}.
 #'
 #' @return A ResolveDataset object (C++ class) with methods:
 #'   - coordinates(): Get coordinate matrix
@@ -539,7 +548,8 @@ resolve.dataset.csv <- function(header,
                                 roles = list(),
                                 targets = list(),
                                 config = list(),
-                                schemaSource = NULL) {
+                                schemaSource = NULL,
+                                vocabs = NULL) {
   # Input validation
   if (!is.character(header) || length(header) != 1) {
     stop("header must be a single file path string")
@@ -557,15 +567,13 @@ resolve.dataset.csv <- function(header,
   # Shared roles/targets validation + role defaults (single source of truth
   # with resolve.dataset.frame()).
   roles <- .resolve_normalize_roles_targets(roles, targets)
+  vocabs <- .resolve_check_vocab_source(schemaSource, vocabs)
 
   # When schemaSource is supplied, encode this dataset against that dataset's
   # species / taxonomy / categorical vocabularies and classification class
   # mappings (leave-one-dataset-out / transfer evaluation), so the model's
   # lookup tables are indexed with the right namespace.
   if (!is.null(schemaSource)) {
-    if (!inherits(schemaSource, "Rcpp_ResolveDataset")) {
-      stop("schemaSource must be a ResolveDataset from resolve.dataset.csv()")
-    }
     .resolve_require_backend()
     return(.resolve_module$ResolveDataset_from_csv_with_schema(
       header_path = header,
@@ -573,6 +581,19 @@ resolve.dataset.csv <- function(header,
       roles_list = roles,
       targets_list = targets,
       schema_source = schemaSource,
+      config_list = config
+    ))
+  }
+
+  # Same reuse, sourced from a checkpoint's vocabularies (issue #102).
+  if (!is.null(vocabs)) {
+    .resolve_require_backend()
+    return(.resolve_module$ResolveDataset_from_csv_with_vocabs(
+      header_path = header,
+      species_path = species,
+      roles_list = roles,
+      targets_list = targets,
+      vocabs_list = vocabs,
       config_list = config
     ))
   }
@@ -586,6 +607,31 @@ resolve.dataset.csv <- function(header,
     targets_list = targets,
     config_list = config
   )
+}
+
+# Validate the two mutually-exclusive vocabulary sources shared by
+# resolve.dataset.csv() and resolve.dataset.frame(). Returns the normalized
+# `vocabs` list (NULL when none was supplied).
+.resolve_check_vocab_source <- function(schemaSource, vocabs) {
+  if (!is.null(schemaSource) && !is.null(vocabs)) {
+    stop("supply either schemaSource or vocabs, not both")
+  }
+  if (!is.null(schemaSource) && !inherits(schemaSource, "Rcpp_ResolveDataset")) {
+    stop("schemaSource must be a ResolveDataset from resolve.dataset.csv()/frame()")
+  }
+  if (!is.null(vocabs)) {
+    if (!is.list(vocabs)) {
+      stop("vocabs must be the list returned by predictor$vocabs() or dataset$vocabs()")
+    }
+    if (is.null(vocabs$species_vocab) || length(vocabs$species_vocab) == 0) {
+      stop(paste0(
+        "vocabs carries no species vocabulary, so the dataset would re-fit its ",
+        "own species codes and index the model's embedding tables with the ",
+        "wrong rows. A checkpoint written before gcol33/resolve#102 stores only ",
+        "the vocabulary sizes; retrain or re-save the model."))
+    }
+  }
+  vocabs
 }
 
 # Shared roles/targets validation + role defaults for the dataset loaders.
@@ -653,6 +699,11 @@ resolve.dataset.csv <- function(header,
 #' @param schemaSource Optional ResolveDataset whose vocabularies / class
 #'   mappings are reused (the in-memory analog of \code{schemaSource} in
 #'   [resolve.dataset.csv()]). Only valid when \code{species} is a data.frame.
+#' @param vocabs Optional vocabulary list from \code{predictor$vocabs()} (the
+#'   in-memory analog of \code{vocabs} in [resolve.dataset.csv()]). Supported in
+#'   single-table mode and with both frames in memory; not with a species CSV
+#'   path (use [resolve.dataset.csv()] there). Mutually exclusive with
+#'   \code{schemaSource}.
 #'
 #' @return A ResolveDataset object.
 #' @seealso [resolve.dataset.csv()]
@@ -662,8 +713,10 @@ resolve.dataset.frame <- function(header,
                                   roles = list(),
                                   targets = list(),
                                   config = list(),
-                                  schemaSource = NULL) {
+                                  schemaSource = NULL,
+                                  vocabs = NULL) {
   roles <- .resolve_normalize_roles_targets(roles, targets)
+  vocabs <- .resolve_check_vocab_source(schemaSource, vocabs)
   .resolve_require_backend()
 
   # Single-table mode: `header` is the long-format species frame.
@@ -672,6 +725,15 @@ resolve.dataset.frame <- function(header,
       stop("schemaSource is not supported in single-table mode (pass a separate species frame)")
     }
     cols <- .resolve_df_to_columns(header, "header/species frame")
+    if (!is.null(vocabs)) {
+      return(.resolve_module$ResolveDataset_from_species_dataframe_with_vocabs(
+        species_cols = cols,
+        roles_list = roles,
+        targets_list = targets,
+        vocabs_list = vocabs,
+        config_list = config
+      ))
+    }
     return(.resolve_module$ResolveDataset_from_species_dataframe(
       species_cols = cols,
       roles_list = roles,
@@ -690,6 +752,9 @@ resolve.dataset.frame <- function(header,
     if (!is.null(schemaSource)) {
       stop("schemaSource is not supported with a species CSV path; pass both as data frames")
     }
+    if (!is.null(vocabs)) {
+      stop("vocabs is not supported with a species CSV path; use resolve.dataset.csv(vocabs = ...)")
+    }
     if (!file.exists(species)) {
       stop(sprintf("species file does not exist: %s", species))
     }
@@ -705,15 +770,22 @@ resolve.dataset.frame <- function(header,
   # Both frames in memory.
   species_cols <- .resolve_df_to_columns(species, "species")
   if (!is.null(schemaSource)) {
-    if (!inherits(schemaSource, "Rcpp_ResolveDataset")) {
-      stop("schemaSource must be a ResolveDataset from resolve.dataset.csv()/frame()")
-    }
     return(.resolve_module$ResolveDataset_from_dataframe_with_schema(
       header_cols = header_cols,
       species_cols = species_cols,
       roles_list = roles,
       targets_list = targets,
       schema_source = schemaSource,
+      config_list = config
+    ))
+  }
+  if (!is.null(vocabs)) {
+    return(.resolve_module$ResolveDataset_from_dataframe_with_vocabs(
+      header_cols = header_cols,
+      species_cols = species_cols,
+      roles_list = roles,
+      targets_list = targets,
+      vocabs_list = vocabs,
       config_list = config
     ))
   }
@@ -742,7 +814,17 @@ resolve.dataset.frame <- function(header,
 #' @param testSize Fraction of data for testing (default 0.2)
 #' @param seed Random seed (default 42)
 #' @param savePath Path to save model checkpoint (optional)
-#' @param lossConfig Loss configuration: "mae", "smape", or "combined" (default "mae")
+#' @param lossConfig Loss configuration: "mae", "smape", "combined", or "nca"
+#'   (default "mae"). "nca" takes the "combined" regression schedule and adds
+#'   the Neighbourhood Components Analysis term to classification targets.
+#' @param ncaTemperature Scale of the stochastic-neighbour softmax in the NCA
+#'   term, i.e. the effective number of neighbours each sample spreads over
+#'   (default 0.1). Acts only when `lossConfig = "nca"`.
+#' @param ncaNeighbors Neighbours per sample the NCA term sums over, its most
+#'   similar in-batch samples (default 32). Zero or less keeps the whole batch.
+#'   Acts only when `lossConfig = "nca"`.
+#' @param ncaWeight Weight of the NCA term against the cross-entropy it is
+#'   added to (default 0.1). Acts only when `lossConfig = "nca"`.
 #' @param coverDropout Cover-dropout rate applied to species cover values
 #'   in rank-pool / transformer encoding modes (default 0.0, no dropout).
 #' @param dModel Model dimension for the transformer / rank-pool encoder
@@ -760,7 +842,11 @@ resolve.dataset.frame <- function(header,
 #'   blocks (default 0.1).
 #' @param verbose Print training progress (default TRUE)
 #'
-#' @return A list with trainer, result, and dataset
+#' @return A list with `trainer`, `result`, and `dataset`. `result` carries
+#'   `best_epoch`, `train_time_seconds`, `final_metrics`, the loss histories,
+#'   the per-target `baselines`, `diagnostics`, and `effective_batch_size` --
+#'   the batch size the run actually trained at, which is smaller than
+#'   `batchSize` when the CUDA auto-halve-on-OOM retry fired.
 #'
 #' @examples
 #' \dontrun{
@@ -780,6 +866,9 @@ resolve.train.dataset <- function(dataset,
                                   seed = 42L,
                                   savePath = NULL,
                                   lossConfig = "mae",
+                                  ncaTemperature = 0.1,
+                                  ncaNeighbors = 32L,
+                                  ncaWeight = 0.1,
                                   # RankPool / Transformer options
                                   coverDropout = 0.0,
                                   dModel = 128L,
@@ -811,8 +900,17 @@ resolve.train.dataset <- function(dataset,
   if (!is.numeric(testSize) || testSize <= 0 || testSize >= 1) {
     stop("testSize must be between 0 and 1 (exclusive)")
   }
-  if (!lossConfig %in% c("mae", "smape", "combined")) {
-    stop("lossConfig must be 'mae', 'smape', or 'combined'")
+  if (!lossConfig %in% c("mae", "smape", "combined", "nca")) {
+    stop("lossConfig must be 'mae', 'smape', 'combined', or 'nca'")
+  }
+  if (!is.numeric(ncaTemperature) || ncaTemperature <= 0) {
+    stop("ncaTemperature must be a positive number")
+  }
+  if (!is.numeric(ncaNeighbors)) {
+    stop("ncaNeighbors must be an integer")
+  }
+  if (!is.numeric(ncaWeight) || ncaWeight < 0) {
+    stop("ncaWeight must be a non-negative number")
   }
 
   .resolve_require_backend()
@@ -857,7 +955,10 @@ resolve.train.dataset <- function(dataset,
     patience = as.integer(patience),
     lr = lr,
     device = device,
-    loss_config = lossConfig
+    loss_config = lossConfig,
+    nca_temperature = ncaTemperature,
+    nca_neighbors = as.integer(ncaNeighbors),
+    nca_weight = ncaWeight
   )
 
   # Create trainer
@@ -876,6 +977,13 @@ resolve.train.dataset <- function(dataset,
   if (verbose) {
     cat(sprintf("Training complete. Best epoch: %d\n", result$best_epoch))
     cat(sprintf("Training time: %.1f seconds\n", result$train_time_seconds))
+    if (!is.null(result$effective_batch_size) &&
+        result$effective_batch_size != as.integer(batchSize)) {
+      cat(sprintf(
+        "Effective batch size: %d (requested %d) -- OOM auto-halve fired\n",
+        result$effective_batch_size, as.integer(batchSize)
+      ))
+    }
     for (targetName in names(result$final_metrics)) {
       metrics <- result$final_metrics[[targetName]]
       cat(sprintf("  %s: ", targetName))

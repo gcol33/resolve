@@ -1,69 +1,92 @@
 # Installation
 
+RESOLVE is a C++ engine on libtorch. Python (`resolve_core`), R (`resolve`), and
+the `resolve` command line are bindings over the same library, so a model
+trained from one loads in any other.
+
 ## Requirements
 
 - Python >= 3.10
-- PyTorch >= 2.0
-- pandas >= 2.0
-- scikit-learn >= 1.3
+- PyTorch >= 2.0 (the extension links the libtorch that ships with it)
+- CMake >= 3.18 and a C++17 compiler
+- pandas and numpy for the in-memory (`from_pandas`) loaders
 
-## From PyPI
+## Python
 
-```bash
-pip install resolve
-```
-
-## From Source
-
-Clone the repository and install in development mode:
+The engine builds from source against the PyTorch you already have installed:
 
 ```bash
 git clone https://github.com/gcol33/resolve.git
-cd resolve
-pip install -e .
+cd resolve/src/core/python
+pip install .
 ```
 
-## Optional Dependencies
-
-For development and testing:
+To iterate on the C++ sources, build in place instead:
 
 ```bash
-pip install -e ".[dev]"
+pip install "scikit-build-core>=0.4.3" "nanobind>=2.0.0" cmake ninja
+pip install . --no-build-isolation
 ```
 
-This includes:
-- pytest for testing
-- ruff for linting
-- mypy for type checking
+## R
 
-## Verifying Installation
+```r
+install.packages("pak")
+pak::pak("gcol33/resolve/r")
+```
+
+The R package loads the engine at runtime from a prebuilt backend library:
+
+```r
+library(resolve)
+resolve.install_backend()          # CPU
+resolve.install_backend(variant = "cuda")
+```
+
+## Command line
+
+The CLI is built by the same CMake project:
+
+```bash
+cd resolve/src/core
+cmake -B build -DBUILD_CLI=ON -DBUILD_TESTS=OFF -DBUILD_PYTHON=OFF
+cmake --build build
+./build/bin/resolve version
+```
+
+## Verifying the installation
 
 ```python
-import resolve
-print(resolve.__version__)
+import resolve_core as rc
 
-# Quick check
-from resolve import ResolveDataset, ResolveModel, Trainer
-print("RESOLVE installed successfully!")
+print(rc.__version__)
+print(rc.TrainConfig().batch_size)
 ```
 
-## GPU Support
+`resolve_core.__version__` is re-exported from the compiled engine constant, so
+it reports the version of the binary actually loaded.
 
-RESOLVE automatically detects CUDA availability:
+```r
+library(resolve)
+resolve.version()
+```
+
+## GPU support
+
+CUDA is used when available:
 
 ```python
 import torch
 print(f"CUDA available: {torch.cuda.is_available()}")
 ```
 
-To use GPU for training, simply specify the device:
+Select the device on the training config:
 
 ```python
-trainer = resolve.Trainer(model, dataset, device="cuda")
+cfg = rc.TrainConfig()
+cfg.device = "cuda"
+cfg.vram_fraction = 0.80   # leave headroom when sharing the GPU with a desktop
 ```
 
-Or let RESOLVE auto-detect:
-
-```python
-trainer = resolve.Trainer(model, dataset, device="auto")  # default
-```
+Inference defaults to CPU. Pass `device="cuda"` to `Predictor.load` when the GPU
+is idle and the test set is known to fit.

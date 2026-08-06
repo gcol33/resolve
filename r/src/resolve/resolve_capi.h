@@ -231,10 +231,31 @@ RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_csv_with_schema(
     const resolve_value_t* roles, const resolve_value_t* targets,
     const resolve_dataset_t* schema_source, const resolve_value_t* config);
 
+/* Vocabulary-reusing loaders (issue #102). `vocabs` is a MAP value tree: a
+ * schema tree (species_vocab / genus_vocab / family_vocab / targets, as emitted
+ * by resolve_predictor_get(p, "vocabs") or resolve_dataset_get(ds, "vocabs"))
+ * plus an optional "categorical_vocab" sub-map of {column -> {name -> code}}.
+ *
+ * The resulting dataset is encoded in the TRAINING model's integer-code
+ * namespace: every non-hash encoder indexes an embedding table by a code that
+ * is a function of the file its vocab was fitted on, so a plain from_csv on new
+ * data looks up the wrong rows and predicts wrongly with no error. NULL on
+ * error, including when `vocabs` carries no species vocabulary (a checkpoint
+ * written before issue #102). */
+RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_csv_with_vocabs(
+    const char* header_path, const char* species_path,
+    const resolve_value_t* roles, const resolve_value_t* targets,
+    const resolve_value_t* vocabs, const resolve_value_t* config);
+
 RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_species_csv(
     const char* species_path,
     const resolve_value_t* roles, const resolve_value_t* targets,
     const resolve_value_t* config);
+
+RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_species_csv_with_vocabs(
+    const char* species_path,
+    const resolve_value_t* roles, const resolve_value_t* targets,
+    const resolve_value_t* vocabs, const resolve_value_t* config);
 
 /* In-memory (DataFrame) loaders (issue #22). `header` / `species` are MAP value
  * trees: an ordered (column name -> STRING_ARRAY) mapping, i.e. a data.frame
@@ -261,16 +282,27 @@ RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_dataframe_with_schema(
     const resolve_value_t* roles, const resolve_value_t* targets,
     const resolve_dataset_t* schema_source, const resolve_value_t* config);
 
+/* In-memory counterparts of the vocabulary-reusing CSV loaders above. */
+RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_dataframe_with_vocabs(
+    const resolve_value_t* header, const resolve_value_t* species,
+    const resolve_value_t* roles, const resolve_value_t* targets,
+    const resolve_value_t* vocabs, const resolve_value_t* config);
+
+RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_species_dataframe_with_vocabs(
+    const resolve_value_t* species,
+    const resolve_value_t* roles, const resolve_value_t* targets,
+    const resolve_value_t* vocabs, const resolve_value_t* config);
+
 RESOLVE_CAPI void resolve_dataset_free(resolve_dataset_t* ds);
 
 /* String-dispatched accessor. Returns a freshly-allocated value tree (caller
  * frees), or NULL on error. `what` is one of:
  *   coordinates covariates hash_embedding species_ids species_vector
  *   genus_ids family_ids unknown_fraction unknown_count categorical_ids
- *   categorical_vocab targets schema plot_ids species_vocab n_plots config
- *   has_raw_species_data raw_species_ids raw_weights plot_offsets taxonomy_vocab
- *   pool_genus_ids pool_family_ids pool_weights pool_mask pool_has_cover
- *   has_pool_data
+ *   categorical_vocab targets schema vocabs plot_ids species_vocab n_plots
+ *   config has_raw_species_data raw_species_ids raw_weights plot_offsets
+ *   taxonomy_vocab pool_genus_ids pool_family_ids pool_weights pool_mask
+ *   pool_has_cover has_pool_data
  * Optional-tensor accessors return a NULL-kind value when the tensor is
  * undefined/empty. */
 RESOLVE_CAPI resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* what);
@@ -337,7 +369,8 @@ RESOLVE_CAPI int resolve_trainer_load_state(
     resolve_trainer_t* t, const char* path, const char* device, double vram_fraction);
 
 /* Zero-arg accessor. `what`: scalers config test_indices train_indices
- * test_plot_ids train_plot_ids categorical_vocab. Returns value / NULL. */
+ * test_plot_ids train_plot_ids categorical_vocab effective_batch_size.
+ * Returns value / NULL. */
 RESOLVE_CAPI resolve_value_t* resolve_trainer_get(const resolve_trainer_t* t, const char* what);
 
 /* Evaluation. `kind`: diagnostics calibration residuals
@@ -391,7 +424,12 @@ RESOLVE_CAPI resolve_value_t* resolve_predictor_get_embeddings(
 RESOLVE_CAPI int resolve_predictor_optimize_for_inference(resolve_predictor_t* p);
 
 /* Zero-arg accessor. `what`: device scalers categorical_vocab genus_embeddings
- * family_embeddings species_embeddings. Returns value / NULL. */
+ * family_embeddings species_embeddings schema vocabs species_vocab genus_vocab
+ * family_vocab dataset_config. Returns value / NULL.
+ *
+ * "vocabs" + "dataset_config" are what a caller needs to score new data
+ * correctly (issue #102): pass the first to a resolve_dataset_from_*_with_vocabs
+ * loader and the second as that loader's `config`. */
 RESOLVE_CAPI resolve_value_t* resolve_predictor_get(const resolve_predictor_t* p, const char* what);
 
 #endif /* !RESOLVE_CAPI_DYNLOAD */

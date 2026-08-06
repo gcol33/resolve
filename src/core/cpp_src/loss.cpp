@@ -27,17 +27,19 @@ PhasedLoss::PhasedLoss(
     float smape_weight_p3,
     float band_weight_p3,
     float band_threshold,
-    float eps
+    float eps,
+    NCATerm nca
 ) : phase_boundaries_(phase_boundaries),
     smape_weight_p2_(smape_weight_p2),
     smape_weight_p3_(smape_weight_p3),
     band_weight_p3_(band_weight_p3),
     band_threshold_(band_threshold),
-    eps_(eps)
+    eps_(eps),
+    nca_(nca)
 {}
 
 PhasedLoss PhasedLoss::from_config(LossConfigMode mode, std::pair<int, int> phase_boundaries,
-                                   float band_threshold) {
+                                   float band_threshold, NCATerm nca) {
     switch (mode) {
         case LossConfigMode::MAE:
             // Pure MAE: no SMAPE, no band penalty (set weights to 0)
@@ -45,6 +47,19 @@ PhasedLoss PhasedLoss::from_config(LossConfigMode mode, std::pair<int, int> phas
         case LossConfigMode::SMAPE:
             // SMAPE as primary: high SMAPE weight from start
             return PhasedLoss({0, 0}, 1.0f, 1.0f, 0.0f, band_threshold);
+        case LossConfigMode::NCA: {
+            // The NCA objective is defined over class labels, so it applies to
+            // classification targets only; regression targets keep the default
+            // phased schedule (taken from the Combined case rather than
+            // restated, so the two cannot drift). The caller's hyperparameters
+            // are adopted wholesale and only `enabled` is decided here, which is
+            // what keeps the mode the single switch for the term.
+            PhasedLoss loss = from_config(LossConfigMode::Combined, phase_boundaries,
+                                          band_threshold);
+            loss.nca_ = nca;
+            loss.nca_.enabled = true;
+            return loss;
+        }
         case LossConfigMode::Combined:
         default:
             // Default phased training
@@ -120,11 +135,33 @@ torch::Tensor PhasedLoss::classification_loss(
     torch::Tensor target,
     torch::Tensor class_weights
 ) const {
+    torch::Tensor loss;
     if (class_weights.defined() && class_weights.numel() > 0) {
-        return torch::nn::functional::cross_entropy(pred, target,
+        loss = torch::nn::functional::cross_entropy(pred, target,
             torch::nn::functional::CrossEntropyFuncOptions().weight(class_weights));
+    } else {
+        loss = torch::nn::functional::cross_entropy(pred, target);
     }
-    return torch::nn::functional::cross_entropy(pred, target);
+
+    if (!nca_.enabled) {
+        return loss;
+    }
+
+    // The NCA term acts on the head's own output space: it pulls same-class
+    // samples together and pushes different-class ones apart on the unit
+    // sphere, a pressure cross-entropy does not apply (cross-entropy is driven
+    // by logit magnitude along one coordinate, and is blind to how the rest of
+    // the output vector is arranged).
+    //
+    // Cross-entropy stays in the sum because the NCA objective alone is
+    // invariant under a permutation of the output coordinates: it constrains
+    // only the neighbourhood structure, never which coordinate belongs to which
+    // class. A head trained on the NCA term alone therefore carries no
+    // coordinate -> class mapping, and argmax over it -- the rule every
+    // prediction, accuracy and calibration path in the engine uses -- would be
+    // meaningless. Cross-entropy fixes that mapping; NCA shapes the space.
+    return loss + nca_.weight * nca_objective(pred, target,
+                                              nca_.temperature, nca_.n_neighbors);
 }
 
 // MultiTaskLoss implementation
@@ -133,9 +170,10 @@ MultiTaskLoss::MultiTaskLoss(
     const std::vector<TargetConfig>& targets,
     std::pair<int, int> phase_boundaries,
     LossConfigMode loss_config,
-    float band_threshold
+    float band_threshold,
+    NCATerm nca
 ) : targets_(targets),
-    phased_loss_(PhasedLoss::from_config(loss_config, phase_boundaries, band_threshold))
+    phased_loss_(PhasedLoss::from_config(loss_config, phase_boundaries, band_threshold, nca))
 {}
 
 std::pair<torch::Tensor, std::unordered_map<std::string, torch::Tensor>> MultiTaskLoss::compute(
@@ -444,6 +482,68 @@ std::unordered_map<std::string, float> Metrics::compute(
 // NCA Loss implementation
 // =============================================================================
 
+torch::Tensor nca_objective(
+    torch::Tensor embeddings,
+    torch::Tensor targets,
+    float temperature,
+    int n_neighbors
+) {
+    const int64_t batch_size = embeddings.size(0);
+
+    // Unit-norm rows, so the scaled dot product below is the paper's softmax
+    // over Euclidean distances in the transformed space (see the header: for
+    // unit vectors the two differ by a constant that cancels in the softmax).
+    auto emb_norm = torch::nn::functional::normalize(embeddings,
+        torch::nn::functional::NormalizeFuncOptions().dim(1));
+
+    // Similarity matrix: (batch, batch)
+    auto sim = torch::mm(emb_norm, emb_norm.t()) / temperature;
+
+    // p_ii = 0 (paper eq. 1): exclude self from both the numerator and the
+    // normalizing sum by pushing the diagonal below the softmax floor.
+    auto mask = torch::eye(batch_size, sim.options()).to(torch::kBool);
+    sim.masked_fill_(mask, -1e9f);
+
+    // Truncated neighbour set: restrict each sample to its n_neighbors most
+    // similar (non-self) samples and mask the rest, so n_neighbors bounds the
+    // neighbourhood. n_neighbors <= 0 or >= batch_size - 1 keeps the full set.
+    if (n_neighbors > 0 && n_neighbors < batch_size - 1) {
+        const int64_t k = n_neighbors;
+        auto topk_idx = std::get<1>(sim.topk(k, /*dim=*/1, /*largest=*/true));  // (batch, k)
+        auto keep = torch::zeros({batch_size, batch_size},
+                                 sim.options().dtype(torch::kBool));
+        keep.scatter_(1, topk_idx,
+                      torch::ones({batch_size, k}, keep.options()));
+        sim.masked_fill_(keep.logical_not(), -1e9f);
+    }
+
+    // p_ij for every pair, in log space (paper eq. 1).
+    auto log_probs = torch::log_softmax(sim, /*dim=*/1);  // (batch, batch)
+
+    // C_i = { j : c_i = c_j }, self excluded.
+    auto targets_row = targets.unsqueeze(1);  // (batch, 1)
+    auto targets_col = targets.unsqueeze(0);  // (1, batch)
+    auto same_class = (targets_row == targets_col).to(torch::kFloat32);  // (batch, batch)
+    same_class.masked_fill_(mask, 0.0f);
+
+    // log p_i = log sum_{j in C_i} p_ij (paper eq. 2), via logsumexp for
+    // numerical stability. The 1e-10 floor keeps log() finite on the
+    // out-of-class entries, which the exponential then drives to ~0.
+    auto masked_log_probs = log_probs + torch::log(same_class + 1e-10f);
+    auto log_prob_correct = torch::logsumexp(masked_log_probs, /*dim=*/1);  // (batch,)
+
+    // Negated eq. (6) objective. Samples with no same-class neighbour in the
+    // batch contribute 0 and are excluded from the denominator (issue #90);
+    // dividing by batch_size instead diluted the loss/gradient scale by the
+    // fraction of samples lacking an in-batch same-class neighbour, making the
+    // magnitude depend on class rarity within the batch.
+    auto has_neighbor = same_class.sum(1) > 0;
+    auto nca_loss = -log_prob_correct * has_neighbor.to(torch::kFloat32);
+
+    auto n_contrib = has_neighbor.to(torch::kFloat32).sum().clamp_min(1.0f);
+    return nca_loss.sum() / n_contrib;
+}
+
 NCALossImpl::NCALossImpl(
     int64_t latent_dim,
     int64_t n_classes,
@@ -464,62 +564,8 @@ torch::Tensor NCALossImpl::forward(
     torch::Tensor latent,
     torch::Tensor targets
 ) {
-    int64_t batch_size = latent.size(0);
-
-    // Normalize embeddings for cosine similarity
-    auto latent_norm = torch::nn::functional::normalize(latent,
-        torch::nn::functional::NormalizeFuncOptions().dim(1));
-
-    // Use within-batch NCA: each sample uses other samples in the batch as references
-    // Similarity matrix: (batch, batch)
-    auto sim = torch::mm(latent_norm, latent_norm.t()) / temperature_;
-
-    // Remove self-similarity (set diagonal to -inf)
-    auto mask = torch::eye(batch_size, sim.options()).to(torch::kBool);
-    sim.masked_fill_(mask, -1e9f);
-
-    // Stochastic-neighborhood NCA: restrict each sample's neighbor set to its
-    // n_neighbors_ most similar (non-self) samples, masking the rest, so
-    // n_neighbors_ actually bounds the neighborhood (matching the ctor's intent).
-    // n_neighbors_ <= 0 or >= batch_size-1 keeps the full within-batch set.
-    if (n_neighbors_ > 0 && n_neighbors_ < batch_size - 1) {
-        const int64_t k = n_neighbors_;
-        auto topk_idx = std::get<1>(sim.topk(k, /*dim=*/1, /*largest=*/true));  // (batch, k)
-        auto keep = torch::zeros({batch_size, batch_size},
-                                 sim.options().dtype(torch::kBool));
-        keep.scatter_(1, topk_idx,
-                      torch::ones({batch_size, k}, keep.options()));
-        sim.masked_fill_(keep.logical_not(), -1e9f);
-    }
-
-    // For each sample, compute probability of picking each other sample
-    auto log_probs = torch::log_softmax(sim, /*dim=*/1);  // (batch, batch)
-
-    // Create label match mask: 1 if same class, 0 otherwise
-    auto targets_row = targets.unsqueeze(1);  // (batch, 1)
-    auto targets_col = targets.unsqueeze(0);  // (1, batch)
-    auto same_class = (targets_row == targets_col).to(torch::kFloat32);  // (batch, batch)
-
-    // Zero out self-comparisons
-    same_class.masked_fill_(mask, 0.0f);
-
-    // NCA loss: negative log probability of picking a same-class neighbor
-    // For each sample, sum probabilities of all same-class samples
-    // log P(correct class) = log sum_j[same_class(i,j) * softmax(sim_ij)]
-    // Use log-sum-exp trick for numerical stability
-    auto masked_log_probs = log_probs + torch::log(same_class + 1e-10f);
-    auto log_prob_correct = torch::logsumexp(masked_log_probs, /*dim=*/1);  // (batch,)
-
-    // Samples with no same-class neighbor in the batch contribute 0; average over
-    // only the contributing samples, not the full batch (issue #90). Dividing by
-    // batch_size instead diluted the loss/gradient scale by the fraction of
-    // samples lacking an in-batch same-class neighbor, making the magnitude depend
-    // on class rarity within the batch.
-    auto has_neighbor = same_class.sum(1) > 0;
-    auto nca_loss = -log_prob_correct * has_neighbor.to(torch::kFloat32);
-
-    auto n_contrib = has_neighbor.to(torch::kFloat32).sum().clamp_min(1.0f);
-    return nca_loss.sum() / n_contrib;
+    return nca_objective(std::move(latent), std::move(targets),
+                         temperature_, n_neighbors_);
 }
 
 torch::Tensor NCALossImpl::predict(torch::Tensor latent) {
@@ -538,7 +584,9 @@ torch::Tensor NCALossImpl::predict(torch::Tensor latent) {
     auto sim = torch::mm(latent_norm, ref_norm.t()) / temperature_;
     auto probs = torch::softmax(sim, /*dim=*/1);  // (n_query, n_ref)
 
-    // Aggregate probabilities by class
+    // Aggregate probabilities by class -- the paper's eq. (2) p_i, evaluated
+    // against the stored reference set instead of the training batch, which is
+    // the stochastic-neighbour classification rule NCA is trained for.
     auto class_probs = torch::zeros({latent.size(0), n_classes_}, latent.options());
     for (int64_t c = 0; c < n_classes_; ++c) {
         auto class_mask = (ref_labels_ == c).to(torch::kFloat32);  // (n_ref,)

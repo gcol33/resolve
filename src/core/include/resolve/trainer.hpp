@@ -150,6 +150,19 @@ public:
     [[nodiscard]] const ResolveModel& model() const noexcept { return model_; }
     [[nodiscard]] const Scalers& scalers() const noexcept { return scalers_; }
     [[nodiscard]] const TrainConfig& config() const noexcept { return config_; }
+    // The batch size the last fit() actually trained at: the requested
+    // config().batch_size on a clean run, the post-halve value when the CUDA
+    // auto-halve-on-OOM retry fired. 0 before the first fit().
+    //
+    // fit() restores config_.batch_size to the requested value on the way out
+    // (so a later cross-validation fold does not inherit the shrink), which
+    // makes config().batch_size unable to report a fallback run. This member is
+    // the single source for the effective value: TrainResult::effective_batch_size
+    // is a copy of it taken at fit() exit, and save() writes it to the
+    // checkpoint's train_effective_batch_size key (issue #105).
+    [[nodiscard]] int effective_batch_size() const noexcept {
+        return effective_batch_size_;
+    }
     // Categorical vocabulary captured at prepare_data time. Empty when the
     // dataset had no categorical covariates. Used by save() to persist the
     // string -> code maps so Predictor.load() can decode new CSVs with the
@@ -330,6 +343,15 @@ private:
     // run is detectable (train_effective_batch_size != train_batch_size) and
     // load_train_config restores the requested value (issue #86). 0 until fit runs.
     int requested_batch_size_ = 0;
+
+    // The batch size training is running (or last ran) at, tracked across the
+    // OOM auto-halve retries so it survives fit()'s restore of
+    // config_.batch_size. Read by effective_batch_size(), copied onto
+    // TrainResult, and written to the checkpoint by save() -- which is called
+    // both inside fit() (best / periodic checkpoints) and after it returns, so
+    // the value cannot come from config_.batch_size (issue #105). 0 until fit
+    // runs.
+    int effective_batch_size_ = 0;
 
     // Copy of the categorical vocabulary captured at prepare_data time so
     // it survives independently of the source ResolveDataset (which may go

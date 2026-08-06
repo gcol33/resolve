@@ -1,5 +1,15 @@
 # Plan: Native C++ FuzzyIndex for RESOLVE
 
+**Status.** The engine half shipped and is live: `resolve::fuzzy::FuzzyIndex`
+(`src/core/include/resolve/fuzzy.hpp`, `src/core/cpp_src/fuzzy_{index,search,automaton}.cpp`,
+Catch2 in `src/core/tests/test_fuzzy.cpp`, Python surface `resolve_core.fuzzy.FuzzyIndex`).
+The caller half described below targeted `src/resolve/ext/wfo.py` in the Python
+POC package; that package was removed in issue #106, so §5 (WFO integration),
+Step 7 of the plan, the `tests/test_wfo.py` items and the difflib-fallback
+discussion describe a consumer that no longer exists in this repo. Read them as
+the design record for the index's API shape, not as outstanding work. A future
+taxonomic-backbone matcher builds on `FuzzyIndex` directly.
+
 **Author note (read first):** This plan replaces the dropped `rapidfuzz`-or-`difflib` split in `src/resolve/ext/wfo.py` with a generic native fuzzy-string index in the C++ core. The index is general-purpose (no domain assumptions baked in), exposes an optional bucket hint for callers that have structural knowledge (e.g. WFO knowing the first word is usually a genus), and falls back to the existing Python difflib path when `_resolve_core` is not installed — same dual-backend pattern as the rest of RESOLVE.
 
 ---

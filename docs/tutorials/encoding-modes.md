@@ -1,236 +1,254 @@
 # Encoding Modes
 
-RESOLVE supports four species encoding strategies, each with different trade-offs between speed, expressiveness, and data requirements. This guide explains how each mode works, when to use it, and how to configure it.
+Every encoder solves the same problem: turn a variable-length set of species,
+with optional abundances, into something a neural network can read. They differ
+in how much structure survives and how much of it is learned.
 
-## Overview
-
-All encoders solve the same problem: compress a variable-length list of species (with abundances) into a fixed-dimension vector that the shared MLP encoder can process. They differ in how much structure they preserve and how much they can learn.
-
-| Mode | Input | Output | Learnable | Handles unseen species |
-|------|-------|--------|-----------|----------------------|
-| `hash` | species names + abundances | fixed-dim vector | No | Yes |
-| `embed` | top-k species IDs | concatenated embeddings | Yes | No |
-| `rank_pool` | all species + abundances | pooled embeddings | Yes | Partially (via taxonomy) |
-| `transformer` | species tokens | attention-pooled vector | Yes | Partially (via taxonomy) |
-
-## Hash Encoding (default)
-
-Feature hashing maps each species name to a position in a fixed-dimension vector using a hash function. Abundances are accumulated at the hashed positions. No vocabulary or training is needed.
+The mode is chosen once and used twice, because the loader and the model have to
+agree on the tensors that pass between them:
 
 ```python
-trainer = resolve.Trainer(
-    dataset,
-    species_encoding="hash",
-    hash_dim=64,  # Output dimension (default: 32)
-)
+mode = rc.SpeciesEncodingMode.RankPool
+
+data_config  = rc.DatasetConfig()
+model_config = rc.ModelConfig()
+data_config.species_encoding  = mode
+model_config.species_encoding = mode
 ```
 
-**How it works:**
+| Mode | Model input | Learned | Unseen species |
+|------|-------------|---------|----------------|
+| `Hash` | hashed vector | no | hashed like any name |
+| `Embed` | concatenated top-k embeddings | yes | unknown token |
+| `Sparse` | abundance vector over the vocabulary | first layer | no column |
+| `RankPool` | weight-pooled embeddings | yes | unknown token |
+| `Transformer` | attention-pooled tokens | yes | unknown token |
 
-1. For each species in a plot, hash the species name to an index in `[0, hash_dim)`
-2. Add the species abundance at that index
-3. The resulting vector has `hash_dim` dimensions regardless of species count
+## Hash
 
-**Strengths:**
-
-- O(1) memory per species (no vocabulary or embedding table)
-- Handles any species pool size, including species never seen during training
-- Fastest encoding mode, both in training and inference
-- Good baseline that is hard to beat on noisy or small datasets
-
-**Weaknesses:**
-
-- Hash collisions: two species can map to the same index, losing signal
-- No learnable species representations; the encoder must compensate
-- Higher `hash_dim` reduces collisions but increases input dimension
-
-**When to use:**
-
-- Starting point for any new dataset
-- Large species pools (>10k species) where embedding tables would be huge
-- Fast iteration during development and hyperparameter search
-- Datasets where species identity matters less than aggregate composition
-
-## Embed Encoding
-
-Learned per-species embeddings assign each of the top-k most frequent species its own embedding vector. Less frequent species are grouped into an "unknown" bucket.
+Each species name is hashed to a bucket in `[0, hash_dim)` and to a sign, and
+its weight is accumulated there. The signed variant makes collisions cancel in
+expectation rather than accumulate.
 
 ```python
-trainer = resolve.Trainer(
-    dataset,
-    species_encoding="embed",
-    species_embed_dim=32,  # Embedding dimension per species
-    top_k_species=10,      # Number of species with own embeddings
-)
+data_config.species_encoding  = rc.SpeciesEncodingMode.Hash
+data_config.hash_dim          = 64
+data_config.selection         = rc.SelectionMode.All      # hash every species
+data_config.normalization     = rc.NormalizationMode.Log1p
+
+model_config.species_encoding = rc.SpeciesEncodingMode.Hash
+model_config.hash_dim         = 64
 ```
 
-**How it works:**
+Before hashing, the loader applies `selection` with `top_k` and then
+`normalization`:
 
-1. During `fit()`, identify the top-k most frequent species across all plots
-2. Assign each a learnable embedding vector of dimension `species_embed_dim`
-3. For a given plot, look up embeddings for present top-k species and concatenate
-4. Species outside the top-k contribute to an "unknown mass" feature
+| `selection` | Species kept per plot |
+|-------------|-----------------------|
+| `Top` (default) | the `top_k` most abundant |
+| `Bottom` | the `top_k` least abundant |
+| `TopBottom` | both ends, deduplicated |
+| `All` | every species in the plot |
 
-**Strengths:**
+`top_k` defaults to `3`, so the default hash embedding summarizes a plot's three
+most abundant species. Set `selection = SelectionMode.All` to hash the whole
+list. `top_k` also sets the number of fixed genus and family slots, so raising
+it widens the taxonomy input as well.
 
-- Learnable representations capture species-specific patterns
-- The model can learn that certain species are strong indicators of specific targets
-- Compact: only stores embeddings for the most informative species
+`normalization` rescales the weights: `Raw` uses abundance as recorded, `Norm`
+divides by the plot total, `Log1p` compresses the range.
 
-**Weaknesses:**
+**Strengths.** No embedding table, so memory is flat in vocabulary size. A
+species the model never saw still lands in a bucket, so the representation
+degrades smoothly on new data. Fastest mode to train and to score, and the only
+one with a dedicated CUDA kernel and with layer diagnostics.
 
-- Cannot represent species not in the top-k vocabulary
-- Top-k truncation discards information from rare species
-- Requires enough data for the embeddings to learn meaningful representations
-- Fixed input dimension depends on `top_k_species * species_embed_dim`
+**Costs.** Two species can share a bucket, and the encoder has no way to tell
+them apart. Nothing about a species is learned; whatever the model knows about
+composition it infers from the hashed mixture.
 
-**When to use:**
+**Reach for it** as the first thing you run on a new dataset, on very large
+vocabularies where an embedding table would dominate memory, and during
+hyperparameter search where iteration speed matters.
 
-- Datasets with strong species identity signal (certain species are diagnostic)
-- Moderate species pools where most signal comes from common species
-- When you want interpretable species embeddings for downstream analysis
+## Embed
 
-## Rank-Pool Encoding
-
-Variable-length species lists with weighted mean pooling. Every species gets a learnable embedding, and the plot representation is the abundance-weighted mean of all present species' embeddings.
+The `top_k_species` most abundant species in a plot are looked up in a
+frequency-ranked vocabulary, and their embeddings are concatenated. Genus and
+family go into `n_taxonomy_slots` fixed slots, filled with the most abundant
+distinct genera and families.
 
 ```python
-trainer = resolve.Trainer(
-    dataset,
-    species_encoding="rank_pool",
-    species_normalization="log1p",  # Recommended for rank_pool
-)
+data_config.species_encoding   = rc.SpeciesEncodingMode.Embed
+data_config.top_k_species      = 10
+
+model_config.species_encoding  = rc.SpeciesEncodingMode.Embed
+model_config.top_k_species     = 10
+model_config.species_embed_dim = 32
 ```
 
-**How it works:**
+The input width is fixed at `top_k_species * species_embed_dim`, and a plot with
+fewer species pads with the reserved unknown row at index 0.
 
-1. Build a vocabulary of all species seen during training
-2. Assign each species a learnable embedding
-3. For a plot, look up embeddings for all present species
-4. Compute abundance-weighted mean pooling over the embeddings
-5. Taxonomy embeddings (genus, family) are included when available
+**Strengths.** A species gets its own vector, so the model can learn that one
+species is diagnostic of a target. The table only covers the species that
+actually appear, and the concatenation keeps the slots positional, so the
+encoder can treat "most abundant" differently from "fourth most abundant".
 
-**Strengths:**
+**Costs.** Everything past rank `top_k_species` is discarded, which is most of a
+species-rich plot. A species the model never saw resolves to the unknown row.
 
-- Uses all species, not just top-k (no truncation)
-- Learnable embeddings with the flexibility of variable-length input
-- Taxonomy integration provides a fallback signal for rare species
-- Abundance weighting preserves dominance information
+**Reach for it** when a handful of dominant species carries the signal, and when
+you want per-species vectors to inspect afterwards.
 
-**Weaknesses:**
+## Sparse
 
-- Requires padding for batched training (variable-length lists)
-- Larger vocabulary table than embed mode (all species, not just top-k)
-- Slower than hash encoding due to embedding lookups and pooling
-- Novel species at inference fall back to taxonomy-only signal
-
-**When to use:**
-
-- Datasets where species richness varies widely across plots
-- When rare species carry important signal (e.g., indicator species)
-- When taxonomy information is available and informative
-- Mid-size species pools (1k-10k species)
-
-## Transformer Encoding
-
-Self-attention over species tokens with attention pooling. Each species is a token; the transformer learns which species combinations matter and how they interact.
+The plot becomes one row of an explicit abundance vector, `n_species_vocab`
+wide, with each known species at its own position.
 
 ```python
-trainer = resolve.Trainer(
-    dataset,
-    species_encoding="transformer",
-    n_attention_layers=2,
-    n_heads=4,
-    transformer_ff_dim=256,
-    transformer_pooling="attention",  # or "mean"
-    lr=3e-4,          # Lower LR required for attention layers
-    use_amp=False,     # Disable AMP to avoid fp16 overflow in attention
-)
+data_config.species_encoding  = rc.SpeciesEncodingMode.Sparse
+data_config.representation    = rc.RepresentationMode.Abundance  # or PresenceAbsence
+
+model_config.species_encoding = rc.SpeciesEncodingMode.Sparse
 ```
 
-**How it works:**
+`RepresentationMode.PresenceAbsence` writes `1.0` for every present species
+instead of its abundance.
 
-1. Each species becomes a token: embedding + positional encoding
-2. Self-attention layers model species-species interactions
-3. Attention pooling (or mean pooling) compresses the token sequence into a fixed vector
-4. The pooled vector feeds into the shared MLP encoder
+**Strengths.** Nothing is discarded and nothing collides; the first layer sees
+the exact community matrix, which is the representation classical vegetation
+analysis works on. The first weight matrix is a per-species vector, so it stays
+interpretable.
 
-**Strengths:**
+**Costs.** The input width is the whole vocabulary, so the first layer grows
+linearly with it and most entries in a row are zero. A species absent from the
+training vocabulary has no column at all.
 
-- Models species co-occurrence and interaction patterns
-- Attention pooling learns which species to focus on per plot
-- Best empirical performance on large, complex datasets
-- Can capture non-linear species assemblage signatures
+**Reach for it** on small to moderate vocabularies, and when you want the model
+input to line up column for column with a community matrix.
 
-**Weaknesses:**
+## RankPool
 
-- Quadratic attention cost in the number of species per plot
-- Requires lower learning rate (3e-4 vs 1e-3) to avoid attention overflow
-- AMP (mixed precision) should be disabled to prevent fp16 precision loss
-- Needs more data and longer training to converge
-- Slower per epoch than all other modes
+Every species in a plot contributes. The loader emits padded per-species tensors
+`(n_plots, max_species)` of species, genus, and family IDs plus a weight and a
+mask, and the encoder pools each table with a weighted `embedding_bag`.
 
-**When to use:**
+```python
+data_config.species_encoding  = rc.SpeciesEncodingMode.RankPool
+data_config.pool_weighting    = rc.PoolWeighting.Log1p
+data_config.pool_species_cap  = -1        # auto p99
 
-- Maximum accuracy is the priority and compute budget allows it
-- Species interactions are meaningful for the target variable
-- Large datasets (>50k plots) where the model has enough data to learn attention patterns
-- Final production runs after simpler modes have been benchmarked
-
-## Decision Flowchart
-
-```
-Is your dataset small (<1k plots)?
-  YES → Use hash (fast iteration, less overfitting risk)
-  NO  ↓
-
-Do you have >10k species?
-  YES → Use hash or rank_pool (embed vocabulary too large)
-  NO  ↓
-
-Is species identity a strong signal (diagnostic species)?
-  YES → Use embed (learnable per-species representations)
-  NO  ↓
-
-Does species richness vary widely across plots?
-  YES → Use rank_pool (handles variable-length lists naturally)
-  NO  ↓
-
-Do you need maximum accuracy and have >50k plots?
-  YES → Use transformer (self-attention + attention pooling)
-  NO  ↓
-
-Default starting point:
-  → hash with hash_dim=64 (best speed/accuracy trade-off)
+model_config.species_encoding = rc.SpeciesEncodingMode.RankPool
+model_config.species_embed_dim = 32
+model_config.cover_dropout    = 0.1
 ```
 
-## Benchmark Comparison (ASAAS 10k subset)
+`pool_weighting` sets the per-species weight before pooling:
 
-Results from the ASAAS dataset (10,000 sample plots), 3-fold spatial block cross-validation, 50 epochs with patience=10. All runs on a single GPU with `hidden_dims=[512, 256, 128]`.
+| Value | Weight |
+|-------|--------|
+| `Binary` | `1` for every present species |
+| `Abundance` | the recorded abundance |
+| `Log1p` (default) | `log(1 + abundance)` |
+| `Norm` | abundance divided by the plot total |
+| `Rank` | `1 / rank`, dense-ranked by descending abundance |
 
-| Encoding | Area MAE | Area Band-10% | EUNIS Accuracy | EUNIS F1 (macro) | Time/epoch |
-|----------|----------|---------------|----------------|-------------------|------------|
-| `hash_32` | baseline | baseline | baseline | baseline | 1x |
-| `hash_64` | -3-5% | +2-4% | +1-2% | +1-2% | ~1x |
-| `embed` | -5-8% | +3-6% | +2-4% | +2-4% | ~1.2x |
-| `rank_pool` | -8-12% | +5-8% | +3-5% | +3-5% | ~1.5x |
-| `transformer_v4` | -10-14% | +6-10% | +4-6% | +4-6% | ~2x |
-| `transformer_v5` | -12-16% | +8-12% | +5-8% | +5-8% | ~3x |
+`pool_species_cap` bounds the padded width: `0` (default) pads to the longest
+plot in the dataset, `-1` truncates at the 99th percentile of species counts and
+prints what it dropped, and a positive value truncates at that many species.
 
-!!! note "Relative improvements"
-    Values show improvement relative to `hash_32`. Actual numbers depend on the specific dataset, target configuration, and random seed. Run `python benchmarks/run_benchmarks.py --data-size 10k --configs encodings` to reproduce.
+`cover_dropout` replaces a training plot's weights with the plain presence mask
+and clears its `has_cover` flag, at that probability per plot per epoch. The
+encoder receives `has_cover` as a feature, so a model trained with cover dropout
+learns to work from presence alone and still score plots that arrive without
+abundances.
 
-## Combining with Other Settings
+**Strengths.** No truncation and no collisions: every species contributes at its
+own weight. Genus and family are pooled the same way, so rare species arrive
+with taxonomic company. The fused pooling keeps memory flat in `max_species`
+rather than materializing a per-species embedding tensor.
 
-Encoding mode interacts with several other training parameters:
+**Costs.** Pooling is order-free, so it holds which species are present and how
+strongly, and nothing about how they interact. Padding to `max_species` means one
+species-rich plot widens every row unless you cap it.
 
-- **Learning rate**: Hash/embed/rank_pool work well with `lr=1e-3`. Transformer needs `lr=3e-4`.
-- **AMP**: Safe for hash/embed/rank_pool. Disable for transformer (`use_amp=False`).
-- **Batch size**: All modes work with the default `batch_size=4096`. Transformer benefits from smaller batches (2048) on small datasets.
-- **Hidden dims**: Deeper networks help more with hash encoding (compensating for lost signal) than with transformer (which already has attention capacity).
+**Reach for it** when species richness varies widely across plots, when rare
+species matter, and when taxonomy is available.
 
-## Next Steps
+## Transformer
 
-- [Training Models](training.md): Full training configuration reference
-- [Performance Tuning](performance-tuning.md): Optimize speed and accuracy
-- [Understanding Embeddings](embeddings.md): Extract and interpret learned representations
+The same pool tensors as rank pooling, read differently. Species, genus, and
+family embeddings are summed into one token per species in `d_model` space,
+optionally passed through self-attention layers, and then pooled.
+
+```python
+data_config.species_encoding      = rc.SpeciesEncodingMode.Transformer
+data_config.pool_weighting        = rc.PoolWeighting.Log1p
+
+model_config.species_encoding     = rc.SpeciesEncodingMode.Transformer
+model_config.d_model              = 128
+model_config.n_heads              = 4
+model_config.n_attention_layers   = 2
+model_config.transformer_ff_dim   = 256
+model_config.transformer_pooling  = "attention"   # or "cls"
+model_config.transformer_dropout  = 0.1
+```
+
+`transformer_pooling = "attention"` learns a weight per token and takes the
+weighted sum. `"cls"` prepends a learned token and reads its output, so it needs
+at least one attention layer; `n_attention_layers = 0` with `"cls"` is rejected.
+
+With `n_attention_layers = 0` the encoder is additive token embeddings plus
+attention pooling, which is rank pooling with a learned weighting.
+
+**Strengths.** Attention lets a species' contribution depend on what else is in
+the plot, which is where co-occurrence structure can enter the representation.
+Attention pooling learns which species to read from, per plot.
+
+**Costs.** Attention is quadratic in species per plot, so a cap matters more
+here. Attention layers are the part of the model most sensitive to learning rate
+and to fp16 range, so lower `lr` and disabling AMP are the usual starting point.
+It is the slowest mode per epoch.
+
+**Reach for it** when species interactions plausibly carry signal, on datasets
+large enough to fit attention weights, and after the simpler modes have given
+you a number to beat.
+
+## Choosing
+
+| Situation | Start with |
+|-----------|-----------|
+| First run on a new dataset | `Hash`, `hash_dim=64`, `selection=All` |
+| Vocabulary in the tens of thousands | `Hash` or `RankPool` |
+| Small vocabulary, community matrix semantics | `Sparse` |
+| A few dominant species carry the signal | `Embed` |
+| Richness varies widely, rare species matter | `RankPool` |
+| Interactions matter and the data is large | `Transformer` |
+
+Nothing here substitutes for measuring. `benchmarks/run_benchmarks.py` runs the
+modes against each other on your own data, under one cross-validation split:
+
+```bash
+python benchmarks/run_benchmarks.py --data-size 10k --configs encodings
+python benchmarks/run_benchmarks.py --synthetic --configs hash_64,rank_pool
+```
+
+It writes a JSON file of per-fold metrics and prints a comparison table.
+
+## Settings that travel with the mode
+
+| Setting | Hash / Embed / Sparse | RankPool | Transformer |
+|---------|----------------------|----------|-------------|
+| `lr` | `1e-3` | `1e-3` | lower, `3e-4` is a common starting point |
+| `use_amp` | safe | safe | try it off first if the loss goes to NaN |
+| `pool_weighting` | ignored | used | used |
+| `pool_species_cap` | ignored | used | used, and matters more |
+| `selection` / `top_k` | used by hash | ignored | ignored |
+| Layer diagnostics | hash only | unavailable | unavailable |
+
+## Next steps
+
+- [Training Models](training.md): the rest of the configuration
+- [Performance Tuning](performance-tuning.md): speed, memory, and accuracy levers
+- [Understanding Embeddings](embeddings.md): reading what the encoders learned

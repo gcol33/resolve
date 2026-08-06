@@ -664,6 +664,104 @@ TEST_CASE("HeterogeneousGNNEncoder accessors", "[hetero_gnn]") {
     REQUIRE(encoder->n_species() == 100);
 }
 
+TEST_CASE("TypedMessagePassingLayer runs n_heads attention heads", "[hetero_gnn][attention]") {
+    // n_heads was accepted by the constructor and never read: the layer always
+    // scored attention as a single dot product over the whole message vector,
+    // so HeterogeneousGNNConfig::n_heads -- a persisted, user-facing knob --
+    // changed nothing. Attention now runs over n_heads disjoint slices.
+    const int64_t n_nodes = 12;
+    const int64_t features = 16;
+    const int64_t n_edge_types = 2;
+
+    torch::manual_seed(1234);
+    auto node_features = torch::randn({n_nodes, features});
+
+    // Complete directed graph so every target node mixes several messages and
+    // the per-(target, head) softmax is actually exercised.
+    std::vector<int64_t> src, tgt, types;
+    for (int64_t i = 0; i < n_nodes; ++i) {
+        for (int64_t j = 0; j < n_nodes; ++j) {
+            if (i == j) continue;
+            src.push_back(i);
+            tgt.push_back(j);
+            types.push_back((i + j) % n_edge_types);
+        }
+    }
+    auto edge_index = torch::stack({
+        torch::tensor(src, torch::kInt64),
+        torch::tensor(tgt, torch::kInt64)});
+    auto edge_type = torch::tensor(types, torch::kInt64);
+
+    SECTION("head geometry is reported and the output shape is unchanged") {
+        TypedMessagePassingLayer layer(features, features, n_edge_types, 4, 0.0f);
+        layer->eval();
+        REQUIRE(layer->n_heads() == 4);
+        REQUIRE(layer->head_dim() == features / 4);
+
+        auto out = layer->forward(node_features, edge_index, edge_type);
+        REQUIRE(out.size(0) == n_nodes);
+        REQUIRE(out.size(1) == features);
+        REQUIRE(torch::isfinite(out).all().item<bool>());
+    }
+
+    SECTION("a different head count is a different function") {
+        // Same seed before each construction, so the two layers hold identical
+        // weights and any difference is the head count alone.
+        torch::manual_seed(7);
+        TypedMessagePassingLayer single(features, features, n_edge_types, 1, 0.0f);
+        torch::manual_seed(7);
+        TypedMessagePassingLayer multi(features, features, n_edge_types, 4, 0.0f);
+        single->eval();
+        multi->eval();
+
+        auto a = single->forward(node_features, edge_index, edge_type);
+        auto b = multi->forward(node_features, edge_index, edge_type);
+        REQUIRE(a.sizes() == b.sizes());
+        CHECK_FALSE(torch::allclose(a, b, /*rtol=*/1e-4, /*atol=*/1e-6));
+    }
+
+    SECTION("gradients flow through every head") {
+        TypedMessagePassingLayer layer(features, features, n_edge_types, 4, 0.0f);
+        auto out = layer->forward(node_features, edge_index, edge_type);
+        out.sum().backward();
+        bool attn_has_grad = false;
+        for (auto& named : layer->named_parameters()) {
+            if (named.key().rfind("attn_", 0) != 0) continue;
+            if (named.value().grad().defined() &&
+                named.value().grad().abs().sum().item<float>() > 0) {
+                attn_has_grad = true;
+            }
+        }
+        REQUIRE(attn_has_grad);
+    }
+
+    SECTION("an unusable head count is rejected at construction") {
+        REQUIRE_THROWS_AS(
+            TypedMessagePassingLayer(features, 15, n_edge_types, 4, 0.0f),
+            std::invalid_argument);
+        REQUIRE_THROWS_AS(
+            TypedMessagePassingLayer(features, features, n_edge_types, 0, 0.0f),
+            std::invalid_argument);
+    }
+}
+
+TEST_CASE("HeterogeneousGNNEncoder threads n_heads into its layers", "[hetero_gnn]") {
+    // The config -> encoder -> layer path is where n_heads was being dropped.
+    HeterogeneousGNNEncoder encoder(/*n_species=*/16, /*hidden_dim=*/32,
+                                    /*output_dim=*/16, /*n_layers=*/2,
+                                    /*n_edge_types=*/3, /*n_heads=*/8, 0.0f);
+
+    int n_layers_seen = 0;
+    for (auto& module : encoder->modules(/*include_self=*/false)) {
+        if (auto layer = std::dynamic_pointer_cast<TypedMessagePassingLayerImpl>(module)) {
+            CHECK(layer->n_heads() == 8);
+            CHECK(layer->head_dim() == 32 / 8);
+            ++n_layers_seen;
+        }
+    }
+    REQUIRE(n_layers_seen == 2);
+}
+
 TEST_CASE("HeterogeneousGNNEncoder gradient flow", "[hetero_gnn]") {
     int n_species = 20;
     HeterogeneousGNNEncoder encoder(n_species, 32, 16, 2, 3, 4, 0.0f);

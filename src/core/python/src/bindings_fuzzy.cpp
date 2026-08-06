@@ -93,10 +93,10 @@ void register_fuzzy(nb::module_& m) {
                 "Index into the `entries` list passed to FuzzyIndex.build.")
         .def_ro("distance", &resolve::fuzzy::Match::distance,
                 "Damerau-Levenshtein distance from the query.")
-        .def("__repr__", [](const resolve::fuzzy::Match& m) {
-            return "Match(entry='" + m.entry +
-                   "', id=" + std::to_string(m.id) +
-                   ", distance=" + std::to_string(m.distance) + ")";
+        .def("__repr__", [](const resolve::fuzzy::Match& match) {
+            return "Match(entry='" + match.entry +
+                   "', id=" + std::to_string(match.id) +
+                   ", distance=" + std::to_string(match.distance) + ")";
         });
 
     nb::class_<resolve::fuzzy::FuzzyIndex>(sub, "FuzzyIndex",

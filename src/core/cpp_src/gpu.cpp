@@ -1,4 +1,5 @@
 #include "resolve/gpu.hpp"
+#include "resolve/env.hpp"
 
 #include <sstream>
 #include <stdexcept>
@@ -18,6 +19,16 @@ std::string default_cuda_alloc_conf() {
     base = "expandable_segments:True," + base;
 #endif
     return base;
+}
+
+std::string configure_cuda_allocator(bool force) {
+    const std::string base = default_cuda_alloc_conf();
+    const auto existing = get_env("PYTORCH_CUDA_ALLOC_CONF");
+    if (force || !existing.has_value() || existing->empty()) {
+        set_env("PYTORCH_CUDA_ALLOC_CONF", base.c_str());
+        return base;
+    }
+    return *existing;
 }
 
 void set_vram_fraction(double fraction, int device_index, LogCallback log) {

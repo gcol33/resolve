@@ -199,8 +199,22 @@ TypedMessagePassingLayerImpl::TypedMessagePassingLayerImpl(
     float dropout
 ) : n_edge_types_(n_edge_types),
     in_features_(in_features),
-    out_features_(out_features)
+    out_features_(out_features),
+    n_heads_(n_heads),
+    head_dim_(0)
 {
+    if (n_heads < 1) {
+        throw std::invalid_argument(
+            "typed message passing: n_heads must be >= 1, got " +
+            std::to_string(n_heads) + ".");
+    }
+    if (out_features % n_heads != 0) {
+        throw std::invalid_argument(
+            "typed message passing: out_features (" + std::to_string(out_features) +
+            ") must be divisible by n_heads (" + std::to_string(n_heads) + ").");
+    }
+    head_dim_ = out_features / n_heads;
+
     torch::nn::ModuleList msg_fns;
     for (int64_t t = 0; t < n_edge_types; ++t) {
         auto seq = torch::nn::Sequential();
@@ -272,34 +286,43 @@ torch::Tensor TypedMessagePassingLayerImpl::forward(
         messages.index_put_({mask}, type_msgs);
     }
 
-    auto query = attn_query_->forward(node_features);
-    auto key = attn_key_->forward(messages);
+    auto query = attn_query_->forward(node_features);   // (n_nodes, out_features)
+    auto key = attn_key_->forward(messages);            // (n_edges, out_features)
 
-    auto tgt_query = query.index_select(0, tgt_idx);
+    // Multi-head attention: each head scores over its own out_features /
+    // n_heads slice, and the per-head aggregates are concatenated back to
+    // out_features (the GAT concatenation convention). n_heads == 1 reduces to
+    // a single dot product over the whole vector.
+    auto tgt_query = query.index_select(0, tgt_idx)
+                          .view({n_edges, n_heads_, head_dim_});
+    auto key_heads = key.view({n_edges, n_heads_, head_dim_});
 
-    auto attn_scores = (tgt_query * key).sum(-1) /
-        std::sqrt(static_cast<float>(out_features_));
+    // (n_edges, n_heads)
+    auto attn_scores = (tgt_query * key_heads).sum(-1) /
+        std::sqrt(static_cast<float>(head_dim_));
 
-    // Numerically stable per-target-node softmax: subtract each target node's
-    // max score before exp. Without this, large learned attention logits (only
-    // scaled by 1/sqrt(out_features)) overflow to inf, and inf/inf yields NaN
+    // Numerically stable per-(target node, head) softmax: subtract each target
+    // node's max score before exp. Without this, large learned attention logits
+    // (only scaled by 1/sqrt(head_dim)) overflow to inf, and inf/inf yields NaN
     // weights that propagate into every embedding.
-    auto tgt_max = torch::full({n_nodes},
+    auto tgt_idx_heads = tgt_idx.unsqueeze(1).expand({n_edges, n_heads_});
+    auto tgt_max = torch::full({n_nodes, n_heads_},
         -std::numeric_limits<float>::infinity(), node_features.options());
-    tgt_max.scatter_reduce_(0, tgt_idx, attn_scores, "amax", /*include_self=*/true);
+    tgt_max.scatter_reduce_(0, tgt_idx_heads, attn_scores, "amax", /*include_self=*/true);
     auto attn_exp = (attn_scores - tgt_max.index_select(0, tgt_idx)).exp();
-    auto attn_sum = torch::zeros({n_nodes}, node_features.options());
-    attn_sum.scatter_add_(0, tgt_idx, attn_exp);
+    auto attn_sum = torch::zeros({n_nodes, n_heads_}, node_features.options());
+    attn_sum.scatter_add_(0, tgt_idx_heads, attn_exp);
     auto attn_weights = attn_exp /
         (attn_sum.index_select(0, tgt_idx) + kEpsilon);
 
-    auto weighted_msgs = messages * attn_weights.unsqueeze(1);
-    auto aggregated = torch::zeros({n_nodes, out_features_}, node_features.options());
+    auto weighted_msgs = messages.view({n_edges, n_heads_, head_dim_}) *
+        attn_weights.unsqueeze(-1);
+    auto aggregated = torch::zeros({n_nodes, n_heads_, head_dim_}, node_features.options());
     aggregated.scatter_add_(0,
-        tgt_idx.unsqueeze(1).expand_as(weighted_msgs),
+        tgt_idx_heads.unsqueeze(-1).expand_as(weighted_msgs),
         weighted_msgs);
 
-    auto out = output_->forward(aggregated);
+    auto out = output_->forward(aggregated.reshape({n_nodes, out_features_}));
     out = dropout_->forward(out);
 
     if (in_features_ == out_features_) {

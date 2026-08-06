@@ -32,6 +32,25 @@ inline constexpr const char* kCategoricalEmbedDim = "schema_categorical_embed_di
 inline constexpr const char* kPoolWeighting     = "schema_pool_weighting";
 inline constexpr const char* kPoolSpeciesCap    = "schema_pool_species_cap";
 
+// Remaining DatasetConfig knobs (issue #102). Absent on a pre-fix checkpoint;
+// the load path then keeps the ResolveSchema defaults, which are the
+// DatasetConfig defaults, i.e. exactly today's behaviour.
+inline constexpr const char* kTopKSpecies       = "schema_top_k_species";
+inline constexpr const char* kSelection         = "schema_selection";
+inline constexpr const char* kRepresentation    = "schema_representation";
+inline constexpr const char* kNormalization     = "schema_normalization";
+inline constexpr const char* kAggregation       = "schema_aggregation";
+inline constexpr const char* kUseTaxonomy       = "schema_use_taxonomy";
+
+// Fitted species / genus / family vocabularies (issue #102). Each is one
+// string list written under the shared "<prefix>_lengths" (int64) +
+// "<prefix>_bytes" (uint8) layout that TaxonomyVocab::save and
+// CategoricalVocab::save already use -- two archive entries per list, not one
+// per name, so a 30k-species vocab does not become 30k zip members.
+inline constexpr const char* kSpeciesVocab      = "schema_species_vocab";
+inline constexpr const char* kGenusVocab        = "schema_genus_vocab";
+inline constexpr const char* kFamilyVocab       = "schema_family_vocab";
+
 // Indexed / prefixed keys. The per-target and per-categorical blocks build a
 // prefix once, then suffix each field; keep the suffixes here so save/load
 // cannot disagree on a spelling.

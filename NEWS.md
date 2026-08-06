@@ -1,5 +1,129 @@
 # RESOLVE Changelog
 
+## v0.8.0 (2026-08-07)
+
+A sweep of issues #102-#110. The engine is the only implementation, the CLI
+covers what the bindings cover, and four knobs that were persisted but wired to
+nothing now do what they say.
+
+### Breaking
+
+- **The Python POC is gone.** `src/resolve/` (55 files) is deleted; `import
+  resolve` no longer resolves. `resolve_core` is the Python surface, and the
+  root `pyproject.toml` no longer declares a package. It was kept in-tree for
+  one stated reason, the unported `rank_pool` and `transformer` encoders, and
+  both have been wired end to end in C++ for some time.
+
+### Retrain before comparing numbers
+
+Existing checkpoints all load. These three change what a loaded model predicts:
+
+- **HeterogeneousGNN attention was single-head.** `HeterogeneousGNNConfig::n_heads`
+  reached `TypedMessagePassingLayerImpl` and was dropped on the floor. It is now
+  real multi-head attention over disjoint `out_features / n_heads` slices. The
+  default is 4, so parameter shapes are unchanged and predictions are not.
+- **TabNet checkpoints recording `use_sparsemax = false`** now genuinely run
+  1.5-entmax where they previously ran sparsemax regardless.
+- **`unknown_fraction` / `unknown_count` carry values when scoring.** Training
+  through the plain `from_csv` path still reads 0.0 for every plot, which is the
+  correct value there, so training is bit-for-bit unchanged. Scoring through the
+  vocabulary-reusing loaders now feeds real values through a weight that only
+  ever saw zeros.
+
+### Correctness
+
+- **Checkpoints carry the fitted vocabularies** (#102). A checkpoint stored only
+  the *sizes* of the species and taxonomy vocabularies, so scoring new data from
+  a checkpoint alone re-fitted the codes and every non-hash encoder looked up
+  other species' embedding rows: wrong predictions, no error. `ResolveSchema`
+  now carries the ordered species, genus and family vocabularies, and
+  `Predictor` rejects a dataset whose vocabularies are not the model's rather
+  than silently scoring it. A pre-0.8.0 checkpoint still loads, with a warning.
+- **1.5-entmax is the published operator** (#103). `entmax15` dropped the
+  `(alpha - 1)` factor of Eq. 13 in Peters, Niculae and Martins (ACL 2019), so
+  it ran at a different temperature and collapsed onto sparsemax's support. It
+  is now that paper's exact sort-based Algorithm 2, with the closed-form
+  Proposition 1 backward.
+- **`LossConfigMode::NCA` trained something else.** `PhasedLoss::from_config`
+  had no NCA case and fell through to `Combined`, while `NCALossImpl` had zero
+  call sites. The preset is live, and its three hyperparameters are now
+  `TrainConfig` fields instead of unreachable constants. R's
+  `resolve.train.dataset()` also rejected `lossConfig = "nca"` outright.
+- **The effective batch size was unreadable after `fit()`** (#105). The OOM
+  auto-halve report compared a value `fit()` restores before returning, so it
+  was unreachable, and a `save()` after `fit()` recorded the requested batch size
+  as the effective one.
+- **Uninitialized read in the GNN adapter.** An out-of-range `GNNType` from a
+  newer checkpoint or the C ABI read an uninitialized enum.
+- **The CLI silently dropped every covariate** (#104). `resolve train` read
+  `--header` but nothing populated `RoleMapping::covariates` or `categoricals`,
+  so a CLI-trained model was structurally different from the same configuration
+  trained through `resolve_core` or R.
+
+### Reproducibility
+
+- **Pretraining is seeded** (#107). `PretrainConfig`, `MLMPretrainConfig` and
+  `VAEConfig` gain a `seed`, and every shuffle, mask, corruption and
+  reparameterization draw goes through one `PretrainRng` seam. A pretraining run
+  no longer advances the global RNG stream, so it cannot shift the dropout draws
+  of the finetuning that follows. Module dropout is the exception and is
+  documented as such: `torch::nn::Dropout` takes no generator.
+- **`resolve train --seed N`** seeds weight initialization, the split and the
+  cross-validation folds. Two identical invocations previously produced
+  different models.
+
+### CLI
+
+- `--covariate` and `--categorical` (repeatable) on `train` and `predict`,
+  `--seed`, cross-validation (`--cv-folds`, `--cv-spatial`, ...), and roughly
+  thirty `TrainConfig` / `ModelConfig` / `DatasetConfig` flags the bindings
+  already exposed.
+- A declarative flag table per subcommand generates the usage text and **rejects
+  unknown flags**, naming the near miss. `--maxepochs 10` was previously ignored
+  and the default used, with no diagnostic.
+- `resolve info` prints every architecture sub-config and the training
+  configuration.
+- `resolve predict` writes a classification target as the original label plus a
+  `<target>_code` column.
+
+### Maintainability
+
+- **One field registry per config struct** (#108). An X-macro list gives each
+  field its name and checkpoint key exactly once, and the checkpoint reader and
+  writer, the C ABI value tree, the nanobind bindings, the JSON sidecar and
+  `resolve info` are all visitors over it. A member added without a registry row
+  fails a `static_assert`. Every archive key spelling is unchanged.
+- **Compiler warnings are on** (#109). `-Wall -Wextra -Wshadow
+  -Wnon-virtual-dtor` on GCC/Clang and `/W4 /permissive-` on MSVC, applied to
+  the engine, the C ABI, the CLI and the tests but not to vendored
+  dependencies. 619 MSVC and 56 GCC warnings fixed; `-Werror` is armed on the
+  Linux CI job.
+- Four pretraining loops that each carried their own copy of the epoch scaffold
+  now share one, so a fifth pretext task is one loss function.
+
+### Testing and CI
+
+- The Catch2 suite goes from 281 to 375 cases (2999 to 4563 assertions).
+- New `tests/core/`, a pytest suite over `resolve_core` including
+  parameter-recovery cases that fit to convergence and assert held-out
+  correlation and accuracy. The 8-job `python-tests` matrix it replaces was
+  installing and exercising the deleted POC, and the production Python surface
+  had no automated test at all.
+- A CLI end-to-end job trains, inspects and predicts over a committed fixture,
+  asserting covariates reach the model, that `--seed` reproduces, and that every
+  rejection path exits non-zero. CI previously ran `resolve version` and
+  `resolve help`.
+- A mechanical check that every public nanobind name is re-exported from
+  `resolve_core`. Twelve types and the `fuzzy` submodule were reachable only
+  through the private module.
+
+### Removed
+
+- `EncodedSpecies`, a struct with no producer and no caller.
+- Documentation claims that the build fetches CLI11 and fast-cpp-csv-parser.
+  Neither is fetched anywhere; the argument parser and the CSV reader are both
+  hand-rolled.
+
 ## v0.7.3 (2026-08-04)
 
 ### R package

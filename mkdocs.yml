@@ -46,6 +46,11 @@ markdown_extensions:
       combine_header_slug: true
   - pymdownx.arithmatex:
       generic: true
+  # docs/changelog.md includes the repo-root NEWS.md, the maintained changelog,
+  # so the site cannot drift from it.
+  - pymdownx.snippets:
+      base_path: ['.']
+      check_paths: true
   - admonition
   - pymdownx.details
   - tables

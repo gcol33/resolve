@@ -59,34 +59,85 @@ struct DatasetConfig {
     // This avoids pre-computing hash embeddings and allows dynamic batch processing
     bool use_cuda_hash = false;
 
-    // Per-species weight scheme for the rank_pool / transformer encoders.
-    // Mirrors the Python POC's BasePoolEncoder weighting modes
-    // (binary, abundance, log1p, norm, rank). Defaults to Log1p which is the
+    // Per-species weight scheme for the rank_pool / transformer encoders:
+    // binary, abundance, log1p, norm or rank. Defaults to Log1p, which is the
     // v7 paper headline (`rank_log1p_big`). Ignored for hash / embed / sparse
     // encodings.
     PoolWeighting pool_weighting = PoolWeighting::Log1p;
 
     // Cap on species-per-plot for rank_pool / transformer encoders. Caps the
     // padded `max_species` dimension to avoid one outlier plot inflating the
-    // padding for the whole dataset. Mirrors the Python POC's
-    // `rank_pool_species_cap` (auto p99 by default in the POC; opt-in here).
+    // padding for the whole dataset.
     //
     //   0 (default) : no cap. Pad to the global per-plot max. Matches the
     //                 untrimmed behaviour; the longest plot in the dataset
     //                 dictates the width of every row's pool tensors.
     //  -1           : auto p99. Compute the 99th percentile of per-plot
     //                 species counts and truncate longer plots to that
-    //                 length. Matches the POC's default behaviour and prints
-    //                 a one-line summary so users see the drop.
-    //  >0           : manual cap. Truncate longer plots to this many species
-    //                 (kept in original CSV row order, matching the POC's
-    //                 `a[:cap]` slice).
+    //                 length, printing a one-line summary so users see the
+    //                 drop.
+    //  >0           : manual cap. Truncate longer plots to this many species,
+    //                 kept in original CSV row order.
     //
     // Plots shorter than the cap are unaffected. Truncation is a hard slice
     // (not top-k by abundance); the rank-pool weighting still applies to
     // whatever survives the slice.
     int pool_species_cap = 0;
 };
+
+// Forward declaration: the vocab-carrying loaders take one of these.
+class ResolveDataset;
+
+// Vocabularies fitted at training time, handed to a loader so the dataset it
+// builds lives in the SAME integer-code namespace as the trained model
+// (issue #102). Every non-hash encoder indexes an embedding table by a code
+// that is a function of the file it was fitted on, so an inference dataset that
+// re-fits its own codes looks up the wrong embedding rows.
+//
+// Two sources produce one of these:
+//   * an in-memory training ResolveDataset (the from_csv_with_schema(const
+//     ResolveDataset&) path), and
+//   * a ResolveSchema recovered from a checkpoint (external_vocabs_from_schema),
+//     which is the path that needs no training data on disk at all.
+struct ExternalVocabs {
+    // Ordered species vocabulary; index = integer code, [0] = "<UNK>".
+    std::vector<std::string> species_vocab;
+    // Genus/family name -> code encoder.
+    TaxonomyVocab taxonomy;
+    // Per-column categorical string -> code maps.
+    CategoricalVocab categorical;
+    // Training-time target configs, used to replay each classification
+    // target's class -> code mapping so the new dataset encodes labels the
+    // same way (the caller need not populate TargetSpec::class_mapping).
+    std::vector<TargetConfig> targets;
+};
+
+// Rebuild the vocabularies a checkpoint's schema carries. `schema.species_vocab`
+// / `genus_vocab` / `family_vocab` are empty on a pre-issue-#102 checkpoint; the
+// result is then an empty ExternalVocabs, and the loaders that receive it throw
+// rather than silently re-fitting (the failure mode this whole path exists to
+// prevent). The categorical maps are NOT on the schema -- only the column names
+// and vocab sizes are -- so pass the Predictor's `categorical_vocab()` through
+// `categorical` when scoring a categorical model.
+ExternalVocabs external_vocabs_from_schema(const ResolveSchema& schema);
+
+// Reassemble the loading-side DatasetConfig a checkpoint was built with.
+// Single source of truth for "what DatasetConfig does this checkpoint imply",
+// shared by the CLI predict path and any caller scoring new data.
+//
+// `model_config` supplies the three knobs that also SIZE the model
+// (species_encoding, hash_dim, top_k) and are therefore authoritative there;
+// `schema` supplies everything else the dataset loader consumed
+// (top_k_species, selection, representation, normalization, aggregation,
+// track_unknown_fraction, track_unknown_count, use_taxonomy, pool_weighting and
+// the resolved pool_species_cap).
+//
+// `use_cuda_hash` is deliberately NOT restored: it swaps the precomputed hash
+// embedding for raw COO species data, which is a training-time compute choice,
+// and Predictor::predict needs the precomputed embedding. It stays at the
+// DatasetConfig default (false).
+DatasetConfig dataset_config_from_checkpoint(const ResolveSchema& schema,
+                                             const ModelConfig& model_config);
 
 // Loaded dataset ready for training
 class ResolveDataset {
@@ -125,11 +176,72 @@ public:
         const DatasetConfig& config = DatasetConfig{}
     );
 
+    // Same verb, sourcing the vocabularies from a CHECKPOINT's schema instead of
+    // an in-memory training dataset (issue #102). This is the path for a user
+    // who has only a saved model and a new CSV: the training CSVs need not
+    // exist, and no dataset has to be rebuilt to recover the vocab.
+    //
+    //   Predictor p = Predictor::load(ckpt);
+    //   auto cfg = dataset_config_from_checkpoint(p.schema(), p.model()->config());
+    //   auto ds  = ResolveDataset::from_csv_with_schema(
+    //                  header, species, roles, targets, p.schema(), cfg);
+    //   auto out = p.predict(ds);
+    //
+    // Throws when the schema carries no species vocabulary (a pre-issue-#102
+    // checkpoint): silently re-fitting is the bug this overload exists to
+    // prevent, so the caller is told to retrain / re-save instead.
+    //
+    // Categorical covariates: the schema carries column names and vocab sizes
+    // but not the string -> code maps, so pass the Predictor's
+    // `categorical_vocab()` via the ExternalVocabs overload below when the
+    // model has categoricals. Without it the categorical columns are re-fit and
+    // Predictor::predict rejects the dataset.
+    static ResolveDataset from_csv_with_schema(
+        const std::string& header_path,
+        const std::string& species_path,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const ResolveSchema& schema,
+        const DatasetConfig& config = DatasetConfig{}
+    );
+
+    // Fully-explicit form: the caller supplies every vocabulary. Used when the
+    // model has categorical covariates (whose maps live on the Predictor, not
+    // on the schema) and by the two overloads above, which both funnel here.
+    static ResolveDataset from_csv_with_vocabs(
+        const std::string& header_path,
+        const std::string& species_path,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const ExternalVocabs& vocabs,
+        const DatasetConfig& config = DatasetConfig{}
+    );
+
     // Load from single CSV file with species data only (header data inferred)
     static ResolveDataset from_species_csv(
         const std::string& species_path,
         const RoleMapping& roles,
         const std::vector<TargetSpec>& targets,
+        const DatasetConfig& config = DatasetConfig{}
+    );
+
+    // Single-table counterpart of from_csv_with_schema: reuse a checkpoint's
+    // vocabularies when scoring a species-only CSV (issue #102). The two-file
+    // loader had a *_with_schema sibling; this one did not, so `resolve predict
+    // --species-only` had no way to stay in the model's ID namespace.
+    static ResolveDataset from_species_csv_with_schema(
+        const std::string& species_path,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const ResolveSchema& schema,
+        const DatasetConfig& config = DatasetConfig{}
+    );
+
+    static ResolveDataset from_species_csv_with_vocabs(
+        const std::string& species_path,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const ExternalVocabs& vocabs,
         const DatasetConfig& config = DatasetConfig{}
     );
 
@@ -175,12 +287,48 @@ public:
         const DatasetConfig& config = DatasetConfig{}
     );
 
+    // In-memory analog of the checkpoint-schema overload above (issue #102).
+    static ResolveDataset from_dataframe_with_schema(
+        const ColumnTable& header,
+        const ColumnTable& species,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const ResolveSchema& schema,
+        const DatasetConfig& config = DatasetConfig{}
+    );
+
+    static ResolveDataset from_dataframe_with_vocabs(
+        const ColumnTable& header,
+        const ColumnTable& species,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const ExternalVocabs& vocabs,
+        const DatasetConfig& config = DatasetConfig{}
+    );
+
     // Single in-memory long table with species data only. The DataFrame analog
     // of from_species_csv (header data inferred from first occurrence per plot).
     static ResolveDataset from_species_dataframe(
         const ColumnTable& species,
         const RoleMapping& roles,
         const std::vector<TargetSpec>& targets,
+        const DatasetConfig& config = DatasetConfig{}
+    );
+
+    // In-memory analog of from_species_csv_with_schema (issue #102).
+    static ResolveDataset from_species_dataframe_with_schema(
+        const ColumnTable& species,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const ResolveSchema& schema,
+        const DatasetConfig& config = DatasetConfig{}
+    );
+
+    static ResolveDataset from_species_dataframe_with_vocabs(
+        const ColumnTable& species,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const ExternalVocabs& vocabs,
         const DatasetConfig& config = DatasetConfig{}
     );
 
@@ -230,8 +378,16 @@ public:
     const TaxonomyVocab& taxonomy_vocab() const { return taxonomy_vocab_; }
     TaxonomyVocab& taxonomy_vocab() { return taxonomy_vocab_; }
 
-    // Species vocabulary (for embed mode)
+    // Species vocabulary (for embed mode). Ordered: index = integer code,
+    // [0] = "<UNK>". Mirrored onto schema().species_vocab so it survives into
+    // the checkpoint (issue #102).
     const std::vector<std::string>& species_vocab() const { return species_vocab_; }
+
+    // The vocabularies this dataset fitted, in the form the *_with_vocabs
+    // loaders accept. Equivalent to passing the dataset itself to
+    // from_csv_with_schema, but usable after the dataset's source files are
+    // gone and serializable through the checkpoint schema.
+    [[nodiscard]] ExternalVocabs external_vocabs() const;
 
     // Number of plots
     int64_t n_plots() const { return schema_.n_plots; }
@@ -253,14 +409,6 @@ private:
         const std::vector<TargetSpec>& targets,
         const DatasetConfig& config
     );
-    static ResolveDataset from_csv_with_schema_impl(
-        const std::string& header_path,
-        const std::string& species_path,
-        const RoleMapping& roles,
-        const std::vector<TargetSpec>& targets,
-        const ResolveDataset& schema_source,
-        const DatasetConfig& config
-    );
     static ResolveDataset from_species_csv_impl(
         const std::string& species_path,
         const RoleMapping& roles,
@@ -269,26 +417,50 @@ private:
     );
 
     // Build a dataset from a single long-format row source (the shared body of
-    // from_species_csv / from_species_dataframe). The caller owns the source's
-    // lifetime and any I/O-retry wrapping.
+    // from_species_csv / from_species_dataframe and their *_with_vocabs
+    // siblings). The caller owns the source's lifetime and any I/O-retry
+    // wrapping. `vocabs` is null for a fresh fit; non-null adopts the supplied
+    // vocabularies and replays classification class mappings from them.
     static ResolveDataset from_species_source(
         RowSource& source,
         const RoleMapping& roles,
         const std::vector<TargetSpec>& targets,
-        const DatasetConfig& config
+        const DatasetConfig& config,
+        const ExternalVocabs* vocabs = nullptr
     );
 
-    // Shared body of from_csv_with_schema / from_dataframe_with_schema: copy the
-    // source's vocabularies, replay classification class mappings, then load the
-    // header and species from the given row sources. The caller owns the
+    // Shared body of every two-file vocab-reusing verb (from_csv_with_schema,
+    // from_dataframe_with_schema, and their checkpoint-schema overloads): adopt
+    // the supplied vocabularies, replay classification class mappings, then load
+    // the header and species from the given row sources. The caller owns the
     // sources' lifetimes and any I/O-retry wrapping.
-    static ResolveDataset load_with_schema(
+    static ResolveDataset load_with_vocabs(
         RowSource& header,
         RowSource& species,
         const RoleMapping& roles,
         const std::vector<TargetSpec>& targets,
-        const ResolveDataset& schema_source,
+        const ExternalVocabs& vocabs,
         const DatasetConfig& config
+    );
+
+    // Pre-populate the vocab members and flip use_external_vocabs_, so the
+    // load_*/encode_species paths skip their own fit calls and encode against
+    // these instead. Any value not in the supplied vocab encodes as the
+    // reserved UNK code 0 via the existing encode paths.
+    void adopt_vocabs(const ExternalVocabs& vocabs);
+
+    // Copy the fitted species / genus / family vocabularies onto schema_ so they
+    // travel into the checkpoint (issue #102). Called once at the end of
+    // encode_species, after every encoding branch has settled its vocab.
+    void publish_vocabs_to_schema();
+
+    // Fill each classification TargetSpec's class_mapping from `source_configs`
+    // so labels encode to the training-time codes instead of being auto-fit
+    // against the new file's value distribution. Shared by every vocab-reusing
+    // loader; specs that already carry a mapping are left alone.
+    static std::vector<TargetSpec> replay_class_mappings(
+        const std::vector<TargetSpec>& targets,
+        const std::vector<TargetConfig>& source_configs
     );
 
     // Load header data (one row per plot) from any row source.
@@ -337,8 +509,8 @@ private:
     torch::Tensor pool_has_cover_;   // (n_plots,) float32 - 1.0 if plot has abundance data, 0.0 otherwise
 
     // Whether an abundance/cover column was actually mapped in the roles. Drives
-    // the rank-pool has_cover flag by column presence (POC semantics), not by
-    // inspecting the values (a plot whose covers are all 1.0 still has cover).
+    // the rank-pool has_cover flag by column presence, not by inspecting the
+    // values (a plot whose covers are all 1.0 still has cover).
     bool has_abundance_column_ = false;
 
     // Raw species data in COO format for CUDA hash computation

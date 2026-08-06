@@ -130,8 +130,13 @@ void install_crash_handler(int shutdown_exit_code) {
     // on wer.lib in the resolve_c build.
     if (HMODULE k32 = ::GetModuleHandleW(L"kernel32.dll")) {
         using WerSetFlagsFn = HRESULT(WINAPI*)(DWORD);
+        // Route through void*: GetProcAddress returns FARPROC, and a direct
+        // reinterpret_cast between two unrelated function-pointer types is what
+        // GCC's -Wcast-function-type reports. Windows guarantees function
+        // pointers and void* are interconvertible, so the two-step cast is the
+        // portable spelling of the same conversion.
         if (auto wer_set_flags = reinterpret_cast<WerSetFlagsFn>(
-                ::GetProcAddress(k32, "WerSetFlags"))) {
+                reinterpret_cast<void*>(::GetProcAddress(k32, "WerSetFlags")))) {
             constexpr DWORD kWerFaultReportingNoUi = 0x0020;  // WER_FAULT_REPORTING_NO_UI
             wer_set_flags(kWerFaultReportingNoUi);
         }

@@ -2,8 +2,8 @@
 """Keep every declaration of the RESOLVE version in sync with the VERSION file.
 
 The repo-root ``VERSION`` file is the single source of truth. Every file that
-spells the version out in its own syntax -- a C++ constant, three package
-manifests, two citation records -- is listed in ``SITES``. ``--check`` reports
+spells the version out in its own syntax -- a C++ constant, two package
+manifests, a citation record -- is listed in ``SITES``. ``--check`` reports
 drift and exits non-zero (the CI gate); ``--set X.Y.Z`` rewrites them all.
 
 Adding a new place that carries the version is one ``Site`` row here, not a new
@@ -18,6 +18,7 @@ or run time and therefore cannot drift.
   resolve --version (CLI),        read resolve::VERSION, i.e. the types.hpp
   R resolve.version(),            constant this script keeps canonical
   RunMetadata.resolve_version
+  pyproject.toml (repo root)      tool configuration only; declares no package
 
 The R package version doubles as the release-tag version: resolve.install_backend()
 builds its download URL from packageVersion("resolve"), so a bump here is only
@@ -68,16 +69,6 @@ SITES: tuple[Site, ...] = (
         "src/core/python/pyproject.toml",
         r'^version = "([^"]+)"',
         "resolve-core wheel (PyPI)",
-    ),
-    Site(
-        "pyproject.toml",
-        r'^version = "([^"]+)"',
-        "resolve Python POC package",
-    ),
-    Site(
-        "src/resolve/__init__.py",
-        r'^__version__ = "([^"]+)"',
-        "resolve Python POC __version__",
     ),
     Site(
         "r/DESCRIPTION",

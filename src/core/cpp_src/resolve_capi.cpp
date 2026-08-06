@@ -10,6 +10,7 @@
 #define RESOLVE_CAPI_BUILD 1
 #include "resolve/resolve_capi.h"
 #include "resolve/resolve.hpp"
+#include "resolve/config_registry.hpp"
 
 #include <torch/torch.h>
 
@@ -20,6 +21,7 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -35,7 +37,6 @@ namespace {
 thread_local std::string g_last_error;
 
 void set_error(const char* msg) { g_last_error = msg ? msg : "unknown error"; }
-void set_error(const std::string& msg) { g_last_error = msg; }
 
 }  // namespace
 
@@ -122,9 +123,8 @@ resolve_value* v_string(const char* x) noexcept { auto* v = v_new(RESOLVE_VALUE_
 resolve_value* v_int_array(const std::vector<int64_t>& x) noexcept {
     auto* v = v_new(RESOLVE_VALUE_INT_ARRAY); v->iarr = x; return v;
 }
-resolve_value* v_double_array(const std::vector<double>& x) noexcept {
-    auto* v = v_new(RESOLVE_VALUE_DOUBLE_ARRAY); v->darr = x; return v;
-}
+// Every engine-side float vector reaching the boundary is std::vector<float>;
+// the DOUBLE_ARRAY kind is the wire representation, not the source type.
 resolve_value* v_double_array(const std::vector<float>& x) noexcept {
     auto* v = v_new(RESOLVE_VALUE_DOUBLE_ARRAY);
     v->darr.assign(x.begin(), x.end());
@@ -315,10 +315,7 @@ bool vhas(const resolve_value* m, const char* k) {
 std::string vstr(const resolve_value* v) {
     return v ? v->s : std::string();
 }
-std::string vstr(const resolve_value* m, const char* k) {
-    const resolve_value* v = vget(m, k);
-    return v ? v->s : std::string();
-}
+std::string vstr(const resolve_value* m, const char* k) { return vstr(vget(m, k)); }
 int64_t vint(const resolve_value* v) {
     if (!v) return 0;
     switch (v->kind) {
@@ -350,13 +347,25 @@ bool vbool(const resolve_value* v) {
 }
 bool vbool(const resolve_value* m, const char* k) { return vbool(vget(m, k)); }
 
+// Narrowing conversions at the C ABI boundary are deliberate: an R or Python
+// caller hands whatever numeric vector its language has (R has no int64, so a
+// count arrives as double; a float weight arrives as double), and the engine
+// wants the target type. Spelling the cast out per element keeps that intent
+// visible instead of letting a vector range-construct convert implicitly.
+template <typename Out, typename In>
+std::vector<Out> narrow_vec(const std::vector<In>& src) {
+    std::vector<Out> out;
+    out.reserve(src.size());
+    for (const In& x : src) out.push_back(static_cast<Out>(x));
+    return out;
+}
+
 std::vector<int64_t> vint_vec(const resolve_value* v) {
     std::vector<int64_t> out;
     if (!v) return out;
     if (v->kind == RESOLVE_VALUE_INT_ARRAY) return v->iarr;
     if (v->kind == RESOLVE_VALUE_DOUBLE_ARRAY) {
-        out.reserve(v->darr.size());
-        for (double x : v->darr) out.push_back(static_cast<int64_t>(x));
+        out = narrow_vec<int64_t>(v->darr);
     } else if (v->kind == RESOLVE_VALUE_INT) {
         out.push_back(v->i);
     } else if (v->kind == RESOLVE_VALUE_DOUBLE) {
@@ -370,9 +379,9 @@ std::vector<float> vfloat_vec(const resolve_value* v) {
     std::vector<float> out;
     if (!v) return out;
     if (v->kind == RESOLVE_VALUE_DOUBLE_ARRAY) {
-        out.assign(v->darr.begin(), v->darr.end());
+        out = narrow_vec<float>(v->darr);
     } else if (v->kind == RESOLVE_VALUE_INT_ARRAY) {
-        out.assign(v->iarr.begin(), v->iarr.end());
+        out = narrow_vec<float>(v->iarr);
     } else if (v->kind == RESOLVE_VALUE_DOUBLE) {
         out.push_back(static_cast<float>(v->d));
     } else if (v->kind == RESOLVE_VALUE_INT) {
@@ -424,24 +433,35 @@ torch::Tensor value_to_f32(const resolve_value* v) {
     if (!v || v->kind == RESOLVE_VALUE_NULL) return torch::Tensor();
     auto opts = torch::TensorOptions().dtype(torch::kFloat32);
     if (v->kind == RESOLVE_VALUE_DOUBLE_MATRIX) {
-        std::vector<float> data(v->darr.begin(), v->darr.end());
+        std::vector<float> data = narrow_vec<float>(v->darr);
         return torch::from_blob(data.data(), {v->nrow, v->ncol}, opts).clone();
     }
     if (v->kind == RESOLVE_VALUE_DOUBLE_ARRAY) {
-        std::vector<float> data(v->darr.begin(), v->darr.end());
+        std::vector<float> data = narrow_vec<float>(v->darr);
         return torch::from_blob(data.data(),
             {static_cast<int64_t>(data.size())}, opts).clone();
     }
     if (v->kind == RESOLVE_VALUE_INT_MATRIX) {
-        std::vector<float> data(v->iarr.begin(), v->iarr.end());
+        std::vector<float> data = narrow_vec<float>(v->iarr);
         return torch::from_blob(data.data(), {v->nrow, v->ncol}, opts).clone();
     }
     if (v->kind == RESOLVE_VALUE_INT_ARRAY) {
-        std::vector<float> data(v->iarr.begin(), v->iarr.end());
+        std::vector<float> data = narrow_vec<float>(v->iarr);
         return torch::from_blob(data.data(),
             {static_cast<int64_t>(data.size())}, opts).clone();
     }
     throw std::runtime_error("value_to_f32: unsupported value kind");
+}
+
+// Raw caller-owned double buffer -> float32 tensor. The metric entry points
+// all take their inputs this way (R has no float vector, and the C ABI carries
+// doubles), so the per-element narrowing lives here rather than being repeated
+// as an implicit vector range-construct in each one.
+torch::Tensor f32_tensor_from_doubles(const double* src, int64_t n) {
+    std::vector<float> data;
+    data.reserve(static_cast<size_t>(n < 0 ? 0 : n));
+    for (int64_t i = 0; i < n; ++i) data.push_back(static_cast<float>(src[i]));
+    return torch::from_blob(data.data(), {n}, torch::kFloat32).clone();
 }
 
 // INT_MATRIX / INT_ARRAY -> int64 tensor.
@@ -458,11 +478,11 @@ torch::Tensor value_to_i64(const resolve_value* v) {
             {static_cast<int64_t>(data.size())}, opts).clone();
     }
     if (v->kind == RESOLVE_VALUE_DOUBLE_MATRIX) {
-        std::vector<int64_t> data(v->darr.begin(), v->darr.end());
+        std::vector<int64_t> data = narrow_vec<int64_t>(v->darr);
         return torch::from_blob(data.data(), {v->nrow, v->ncol}, opts).clone();
     }
     if (v->kind == RESOLVE_VALUE_DOUBLE_ARRAY) {
-        std::vector<int64_t> data(v->darr.begin(), v->darr.end());
+        std::vector<int64_t> data = narrow_vec<int64_t>(v->darr);
         return torch::from_blob(data.data(),
             {static_cast<int64_t>(data.size())}, opts).clone();
     }
@@ -520,287 +540,136 @@ resolve_value* tensor_to_ivec(const torch::Tensor& t) {
 }  // namespace
 
 // ============================================================================
-// Enum parsers (string -> engine enum). Moved from r/src/rcpp_common.h.
+// Enum parsers / emitters
 // ============================================================================
+//
+// The string <-> enum tables these call sites use live in
+// include/resolve/enum_names.hpp, one table per enum, read by both the parser
+// and the emitter. They are shared with the CLI, which parses the same
+// spellings off its flags and prints them back in `resolve info`. The
+// file-level `using namespace resolve` brings parse_selection_mode /
+// selection_mode_to_string / ... into scope unqualified.
 
 namespace {
 
-template <typename EnumT>
-EnumT parse_enum(const std::string& s,
-                 std::initializer_list<std::pair<const char*, EnumT>> entries,
-                 const char* type_name) {
-    for (const auto& [key, val] : entries) {
-        if (s == key) return val;
-    }
-    throw std::runtime_error(std::string("Invalid ") + type_name + ": " + s);
-}
+// ============================================================================
+// Config <-> value tree, driven by the field registry
+// ============================================================================
+//
+// A registry row's member name IS its value-tree key, so one visitor reads a map
+// into a config struct and its inverse writes the struct back out, both walking
+// the list in resolve/config_registry.hpp. Neither side can carry a field the
+// other drops, and the enum spellings come from enum_names.hpp, which the CLI
+// and `resolve info` read too (issue #108).
 
-SelectionMode parse_selection_mode(const std::string& s) {
-    return parse_enum<SelectionMode>(s, {
-        {"top", SelectionMode::Top}, {"bottom", SelectionMode::Bottom},
-        {"top_bottom", SelectionMode::TopBottom}, {"all", SelectionMode::All},
-    }, "selection mode");
-}
-RepresentationMode parse_representation_mode(const std::string& s) {
-    return parse_enum<RepresentationMode>(s, {
-        {"abundance", RepresentationMode::Abundance},
-        {"presence_absence", RepresentationMode::PresenceAbsence},
-    }, "representation mode");
-}
-NormalizationMode parse_normalization_mode(const std::string& s) {
-    return parse_enum<NormalizationMode>(s, {
-        {"raw", NormalizationMode::Raw}, {"norm", NormalizationMode::Norm},
-        {"log1p", NormalizationMode::Log1p},
-    }, "normalization mode");
-}
-PoolWeighting parse_pool_weighting(const std::string& s) {
-    return parse_enum<PoolWeighting>(s, {
-        {"binary", PoolWeighting::Binary}, {"abundance", PoolWeighting::Abundance},
-        {"log1p", PoolWeighting::Log1p}, {"norm", PoolWeighting::Norm},
-        {"rank", PoolWeighting::Rank},
-    }, "pool weighting");
-}
-AggregationMode parse_aggregation_mode(const std::string& s) {
-    return parse_enum<AggregationMode>(s, {
-        {"abundance", AggregationMode::Abundance},
-        {"count", AggregationMode::Count},
-    }, "aggregation mode");
-}
-TaskType parse_task_type(const std::string& s) {
-    return parse_enum<TaskType>(s, {
-        {"regression", TaskType::Regression},
-        {"classification", TaskType::Classification},
-    }, "task type");
-}
-TransformType parse_transform_type(const std::string& s) {
-    return parse_enum<TransformType>(s, {
-        {"none", TransformType::None}, {"log1p", TransformType::Log1p},
-    }, "transform type");
-}
-// Single source of truth for the SpeciesEncodingMode <-> string mapping. Both
-// the parser (config input) and the two emitters (config / model_get output)
-// derive from this one table, so the string spellings cannot drift between the
-// three sites (issue #98).
-struct SpeciesEncodingName { const char* name; SpeciesEncodingMode mode; };
-constexpr SpeciesEncodingName kSpeciesEncodingNames[] = {
-    {"hash", SpeciesEncodingMode::Hash},
-    {"embed", SpeciesEncodingMode::Embed},
-    {"sparse", SpeciesEncodingMode::Sparse},
-    {"rank_pool", SpeciesEncodingMode::RankPool},
-    {"transformer", SpeciesEncodingMode::Transformer},
+// Value map -> config struct. An absent key leaves the struct default in place,
+// which is what makes every entry of an R config list optional.
+struct ValueFieldReader {
+    const resolve_value* map;
+
+    template <typename T>
+    void operator()(const char* name, const char*, T& value) const {
+        if constexpr (std::is_same_v<T, LogCallback>) {
+            // A callback cannot cross the C boundary.
+            (void)name;
+            (void)value;
+        } else if constexpr (std::is_same_v<T, torch::Device>) {
+            if (vhas(map, name)) {
+                value = (vstr(map, name) == "cuda") ? torch::kCUDA : torch::kCPU;
+            }
+        } else if constexpr (is_registered_config_v<T>) {
+            if (vhas(map, name)) for_each_field(value, ValueFieldReader{vget(map, name)});
+        } else if constexpr (std::is_same_v<T, std::vector<ParallelBranchConfig>>) {
+            const resolve_value* list = vget(map, name);
+            if (list && list->kind == RESOLVE_VALUE_LIST) {
+                value.clear();
+                for (auto* item : list->items) {
+                    ParallelBranchConfig branch;
+                    for_each_field(branch, ValueFieldReader{item});
+                    value.push_back(std::move(branch));
+                }
+            }
+        } else if constexpr (std::is_same_v<T, bool>) {
+            if (vhas(map, name)) value = vbool(map, name);
+        } else if constexpr (std::is_enum_v<T>) {
+            if (vhas(map, name)) value = enum_from_name<T>(vstr(map, name));
+        } else if constexpr (std::is_same_v<T, int>) {
+            if (vhas(map, name)) value = static_cast<int>(vint(map, name));
+        } else if constexpr (std::is_same_v<T, float>) {
+            if (vhas(map, name)) value = static_cast<float>(vdbl(map, name));
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            if (vhas(map, name)) value = vstr(map, name);
+        } else if constexpr (std::is_same_v<T, std::vector<int64_t>>) {
+            if (vhas(map, name)) value = vint_vec(map, name);
+        } else if constexpr (std::is_same_v<T, std::vector<float>>) {
+            if (vhas(map, name)) value = vfloat_vec(map, name);
+        } else if constexpr (std::is_same_v<T, std::pair<int, int>>) {
+            if (vhas(map, name)) {
+                const std::vector<int64_t> pair_values = vint_vec(map, name);
+                if (pair_values.size() >= 2) {
+                    value = {static_cast<int>(pair_values[0]),
+                             static_cast<int>(pair_values[1])};
+                }
+            }
+        } else {
+            static_assert(registry_detail::always_false<T>,
+                          "config field type has no value-tree representation; "
+                          "add a branch here and to ValueFieldWriter");
+        }
+    }
 };
-const char* species_encoding_to_string(SpeciesEncodingMode m) {
-    for (const auto& e : kSpeciesEncodingNames) {
-        if (e.mode == m) return e.name;
-    }
-    return "unknown";
-}
-SpeciesEncodingMode parse_species_encoding_mode(const std::string& s) {
-    for (const auto& e : kSpeciesEncodingNames) {
-        if (s == e.name) return e.mode;
-    }
-    throw std::runtime_error("Invalid species encoding mode: " + s);
-}
-LossConfigMode parse_loss_config_mode(const std::string& s) {
-    return parse_enum<LossConfigMode>(s, {
-        {"mae", LossConfigMode::MAE}, {"smape", LossConfigMode::SMAPE},
-        {"combined", LossConfigMode::Combined}, {"nca", LossConfigMode::NCA},
-    }, "loss config mode");
-}
-LRSchedulerType parse_lr_scheduler_type(const std::string& s) {
-    return parse_enum<LRSchedulerType>(s, {
-        {"none", LRSchedulerType::None}, {"step", LRSchedulerType::StepLR},
-        {"cosine", LRSchedulerType::CosineAnnealing},
-    }, "LR scheduler type");
-}
-// Inverses used by train_config_to_value so the config round-trips symmetrically:
-// parse_* read these enums as strings, so the serializer must emit strings too,
-// not the integer enum codes that the round-trip parser then rejects (issue #87).
-const char* loss_config_mode_to_string(LossConfigMode m) {
-    switch (m) {
-        case LossConfigMode::MAE: return "mae";
-        case LossConfigMode::SMAPE: return "smape";
-        case LossConfigMode::Combined: return "combined";
-        case LossConfigMode::NCA: return "nca";
-    }
-    return "combined";
-}
-const char* lr_scheduler_type_to_string(LRSchedulerType t) {
-    switch (t) {
-        case LRSchedulerType::None: return "none";
-        case LRSchedulerType::StepLR: return "step";
-        case LRSchedulerType::CosineAnnealing: return "cosine";
-    }
-    return "none";
-}
-MoERoutingType parse_moe_routing_type(const std::string& s) {
-    return parse_enum<MoERoutingType>(s, {
-        {"none", MoERoutingType::None}, {"soft", MoERoutingType::Soft},
-        {"topk", MoERoutingType::TopK},
-    }, "MoE routing type");
-}
-ActivationType parse_activation_type(const std::string& s) {
-    return parse_enum<ActivationType>(s, {
-        {"relu", ActivationType::ReLU}, {"leaky_relu", ActivationType::LeakyReLU},
-        {"gelu", ActivationType::GELU}, {"silu", ActivationType::SiLU},
-        {"tanh", ActivationType::Tanh}, {"mish", ActivationType::Mish},
-        {"elu", ActivationType::ELU}, {"selu", ActivationType::SELU},
-        {"softplus", ActivationType::Softplus}, {"prelu", ActivationType::PReLU},
-    }, "activation type");
-}
-NormLayerType parse_norm_layer_type(const std::string& s) {
-    return parse_enum<NormLayerType>(s, {
-        {"batch_norm", NormLayerType::BatchNorm}, {"layer_norm", NormLayerType::LayerNorm},
-        {"group_norm", NormLayerType::GroupNorm}, {"rms_norm", NormLayerType::RMSNorm},
-        {"none", NormLayerType::None},
-    }, "normalization layer type");
-}
-EncoderArchitecture parse_encoder_architecture(const std::string& s) {
-    return parse_enum<EncoderArchitecture>(s, {
-        {"mlp", EncoderArchitecture::MLP}, {"ft_transformer", EncoderArchitecture::FTTransformer},
-        {"tabnet", EncoderArchitecture::TabNet}, {"saint", EncoderArchitecture::SAINT},
-        {"trait_net", EncoderArchitecture::TraitNet}, {"gnn", EncoderArchitecture::GNN},
-        {"excelformer", EncoderArchitecture::ExcelFormer},
-        {"heterogeneous_gnn", EncoderArchitecture::HeterogeneousGNN},
-    }, "encoder architecture");
-}
-GNNType parse_gnn_type(const std::string& s) {
-    return parse_enum<GNNType>(s, {
-        {"gcn", GNNType::GCN}, {"gat", GNNType::GAT}, {"graphsage", GNNType::GraphSAGE},
-    }, "GNN type");
-}
-GraphConstructionMode parse_graph_construction_mode(const std::string& s) {
-    return parse_enum<GraphConstructionMode>(s, {
-        {"spatial", GraphConstructionMode::Spatial},
-        {"taxonomic", GraphConstructionMode::Taxonomic},
-        {"cooccurrence", GraphConstructionMode::CoOccurrence},
-    }, "graph construction mode");
-}
-TraitInteractionMode parse_trait_interaction_mode(const std::string& s) {
-    return parse_enum<TraitInteractionMode>(s, {
-        {"bilinear", TraitInteractionMode::Bilinear}, {"mlp", TraitInteractionMode::MLP},
-        {"attention", TraitInteractionMode::Attention},
-    }, "trait interaction mode");
-}
-ParallelAggregation parse_parallel_aggregation(const std::string& s) {
-    return parse_enum<ParallelAggregation>(s, {
-        {"concat", ParallelAggregation::Concat}, {"sum", ParallelAggregation::Sum},
-        {"mean", ParallelAggregation::Mean}, {"attention", ParallelAggregation::Attention},
-        {"gated", ParallelAggregation::Gated},
-    }, "parallel aggregation");
-}
 
-// ============================================================================
-// Sub-config parsers (value map -> engine config struct)
-// ============================================================================
+// Config struct -> value map. A child node is attached to its parent before it is
+// filled, so a throw part-way through leaves it owned (and freed) by the root.
+struct ValueFieldWriter {
+    resolve_value* map;
 
-FTTransformerConfig parse_ft_transformer_config(const resolve_value* c) {
-    FTTransformerConfig x;
-    if (vhas(c, "d_model")) x.d_model = (int)vint(c, "d_model");
-    if (vhas(c, "n_heads")) x.n_heads = (int)vint(c, "n_heads");
-    if (vhas(c, "n_layers")) x.n_layers = (int)vint(c, "n_layers");
-    if (vhas(c, "attention_dropout")) x.attention_dropout = (float)vdbl(c, "attention_dropout");
-    if (vhas(c, "ffn_dropout")) x.ffn_dropout = (float)vdbl(c, "ffn_dropout");
-    if (vhas(c, "ffn_multiplier")) x.ffn_multiplier = (int)vint(c, "ffn_multiplier");
-    if (vhas(c, "pre_norm")) x.pre_norm = vbool(c, "pre_norm");
-    return x;
-}
-TabNetConfig parse_tabnet_config(const resolve_value* c) {
-    TabNetConfig x;
-    if (vhas(c, "n_steps")) x.n_steps = (int)vint(c, "n_steps");
-    if (vhas(c, "n_d")) x.n_d = (int)vint(c, "n_d");
-    if (vhas(c, "n_a")) x.n_a = (int)vint(c, "n_a");
-    if (vhas(c, "relaxation_factor")) x.relaxation_factor = (float)vdbl(c, "relaxation_factor");
-    if (vhas(c, "sparsity_coefficient")) x.sparsity_coefficient = (float)vdbl(c, "sparsity_coefficient");
-    if (vhas(c, "virtual_batch_size")) x.virtual_batch_size = (int)vint(c, "virtual_batch_size");
-    if (vhas(c, "use_sparsemax")) x.use_sparsemax = vbool(c, "use_sparsemax");
-    return x;
-}
-SAINTConfig parse_saint_config(const resolve_value* c) {
-    SAINTConfig x;
-    if (vhas(c, "d_model")) x.d_model = (int)vint(c, "d_model");
-    if (vhas(c, "n_heads")) x.n_heads = (int)vint(c, "n_heads");
-    if (vhas(c, "n_layers")) x.n_layers = (int)vint(c, "n_layers");
-    if (vhas(c, "attention_dropout")) x.attention_dropout = (float)vdbl(c, "attention_dropout");
-    if (vhas(c, "use_row_attention")) x.use_row_attention = vbool(c, "use_row_attention");
-    if (vhas(c, "use_contrastive_pretrain")) x.use_contrastive_pretrain = vbool(c, "use_contrastive_pretrain");
-    if (vhas(c, "mixup_alpha")) x.mixup_alpha = (float)vdbl(c, "mixup_alpha");
-    return x;
-}
-GNNConfig parse_gnn_config(const resolve_value* c) {
-    GNNConfig x;
-    if (vhas(c, "gnn_type")) x.gnn_type = parse_gnn_type(vstr(c, "gnn_type"));
-    if (vhas(c, "n_layers")) x.n_layers = (int)vint(c, "n_layers");
-    if (vhas(c, "hidden_dim")) x.hidden_dim = (int)vint(c, "hidden_dim");
-    if (vhas(c, "n_heads")) x.n_heads = (int)vint(c, "n_heads");
-    if (vhas(c, "k_neighbors")) x.k_neighbors = (int)vint(c, "k_neighbors");
-    if (vhas(c, "graph_mode")) x.graph_mode = parse_graph_construction_mode(vstr(c, "graph_mode"));
-    if (vhas(c, "edge_dropout")) x.edge_dropout = (float)vdbl(c, "edge_dropout");
-    if (vhas(c, "use_edge_features")) x.use_edge_features = vbool(c, "use_edge_features");
-    return x;
-}
-TraitNetConfig parse_trait_net_config(const resolve_value* c) {
-    TraitNetConfig x;
-    if (vhas(c, "env_dim")) x.env_dim = (int)vint(c, "env_dim");
-    if (vhas(c, "trait_dim")) x.trait_dim = (int)vint(c, "trait_dim");
-    if (vhas(c, "interaction_dim")) x.interaction_dim = (int)vint(c, "interaction_dim");
-    if (vhas(c, "interaction")) x.interaction = parse_trait_interaction_mode(vstr(c, "interaction"));
-    if (vhas(c, "shared_trait_encoder")) x.shared_trait_encoder = vbool(c, "shared_trait_encoder");
-    return x;
-}
-ExcelFormerConfig parse_excelformer_config(const resolve_value* c) {
-    ExcelFormerConfig x;
-    if (vhas(c, "d_model")) x.d_model = (int)vint(c, "d_model");
-    if (vhas(c, "n_heads")) x.n_heads = (int)vint(c, "n_heads");
-    if (vhas(c, "n_layers")) x.n_layers = (int)vint(c, "n_layers");
-    if (vhas(c, "attention_dropout")) x.attention_dropout = (float)vdbl(c, "attention_dropout");
-    if (vhas(c, "ffn_multiplier")) x.ffn_multiplier = (int)vint(c, "ffn_multiplier");
-    if (vhas(c, "importance_threshold")) x.importance_threshold = (float)vdbl(c, "importance_threshold");
-    if (vhas(c, "pre_norm")) x.pre_norm = vbool(c, "pre_norm");
-    return x;
-}
-HeterogeneousGNNConfig parse_heterogeneous_gnn_config(const resolve_value* c) {
-    HeterogeneousGNNConfig x;
-    if (vhas(c, "hidden_dim")) x.hidden_dim = (int)vint(c, "hidden_dim");
-    if (vhas(c, "output_dim")) x.output_dim = (int)vint(c, "output_dim");
-    if (vhas(c, "n_layers")) x.n_layers = (int)vint(c, "n_layers");
-    if (vhas(c, "n_edge_types")) x.n_edge_types = (int)vint(c, "n_edge_types");
-    if (vhas(c, "n_heads")) x.n_heads = (int)vint(c, "n_heads");
-    if (vhas(c, "dropout")) x.dropout = (float)vdbl(c, "dropout");
-    if (vhas(c, "k_cooccurrence")) x.k_cooccurrence = (int)vint(c, "k_cooccurrence");
-    if (vhas(c, "cooccurrence_threshold")) x.cooccurrence_threshold = (float)vdbl(c, "cooccurrence_threshold");
-    if (vhas(c, "use_taxonomic_edges")) x.use_taxonomic_edges = vbool(c, "use_taxonomic_edges");
-    if (vhas(c, "use_cooccurrence_edges")) x.use_cooccurrence_edges = vbool(c, "use_cooccurrence_edges");
-    return x;
-}
-TabMConfig parse_tabm_config(const resolve_value* c) {
-    TabMConfig x;
-    if (vhas(c, "enabled")) x.enabled = vbool(c, "enabled");
-    if (vhas(c, "n_ensembles")) x.n_ensembles = (int)vint(c, "n_ensembles");
-    if (vhas(c, "aggregation")) x.aggregation = vstr(c, "aggregation");
-    return x;
-}
-ParallelBranchConfig parse_parallel_branch_config(const resolve_value* c) {
-    ParallelBranchConfig x;
-    if (vhas(c, "hidden_dims")) x.hidden_dims = vint_vec(c, "hidden_dims");
-    if (vhas(c, "activation")) x.activation = parse_activation_type(vstr(c, "activation"));
-    if (vhas(c, "normalization")) x.normalization = parse_norm_layer_type(vstr(c, "normalization"));
-    if (vhas(c, "dropout")) x.dropout = (float)vdbl(c, "dropout");
-    if (vhas(c, "branch_weight")) x.branch_weight = (float)vdbl(c, "branch_weight");
-    return x;
-}
-ParallelLayersConfig parse_parallel_layers_config(const resolve_value* c) {
-    ParallelLayersConfig x;
-    if (vhas(c, "enabled")) x.enabled = vbool(c, "enabled");
-    const resolve_value* branches = vget(c, "branches");
-    if (branches && branches->kind == RESOLVE_VALUE_LIST) {
-        for (auto* b : branches->items) x.branches.push_back(parse_parallel_branch_config(b));
+    template <typename T>
+    void operator()(const char* name, const char*, const T& value) const {
+        if constexpr (std::is_same_v<T, LogCallback>) {
+            (void)name;
+        } else if constexpr (std::is_same_v<T, torch::Device>) {
+            v_put(map, name, v_string(value.is_cuda() ? "cuda" : "cpu"));
+        } else if constexpr (is_registered_config_v<T>) {
+            auto* child = v_map();
+            v_put(map, name, child);
+            for_each_field(value, ValueFieldWriter{child});
+        } else if constexpr (std::is_same_v<T, std::vector<ParallelBranchConfig>>) {
+            auto* list = v_list();
+            v_put(map, name, list);
+            for (const auto& branch : value) {
+                auto* item = v_map();
+                v_append(list, item);
+                for_each_field(branch, ValueFieldWriter{item});
+            }
+        } else if constexpr (std::is_same_v<T, bool>) {
+            v_put(map, name, v_bool(value));
+        } else if constexpr (std::is_enum_v<T>) {
+            v_put(map, name, v_string(enum_to_name(value)));
+        } else if constexpr (std::is_same_v<T, int>) {
+            v_put(map, name, v_int(value));
+        } else if constexpr (std::is_same_v<T, float>) {
+            v_put(map, name, v_double(value));
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            v_put(map, name, v_string(value));
+        } else if constexpr (std::is_same_v<T, std::vector<int64_t>>) {
+            v_put(map, name, v_int_array(value));
+        } else if constexpr (std::is_same_v<T, std::vector<float>>) {
+            v_put(map, name, v_double_array(value));
+        } else if constexpr (std::is_same_v<T, std::pair<int, int>>) {
+            v_put(map, name, v_int_array(std::vector<int64_t>{
+                static_cast<int64_t>(value.first),
+                static_cast<int64_t>(value.second)}));
+        } else {
+            static_assert(registry_detail::always_false<T>,
+                          "config field type has no value-tree representation; "
+                          "add a branch here and to ValueFieldReader");
+        }
     }
-    if (vhas(c, "aggregation")) x.aggregation = parse_parallel_aggregation(vstr(c, "aggregation"));
-    if (vhas(c, "attention_heads")) x.attention_heads = (int)vint(c, "attention_heads");
-    if (vhas(c, "use_residual")) x.use_residual = vbool(c, "use_residual");
-    return x;
-}
+};
+
+// SpatialBlockConfig is a cross-validation argument rather than a persisted
+// config, so it has no registry: it is parsed here and never written back.
 SpatialBlockConfig parse_spatial_block_config(const resolve_value* c) {
     SpatialBlockConfig x;
     if (vhas(c, "lat_size")) x.lat_size = (float)vdbl(c, "lat_size");
@@ -860,76 +729,13 @@ std::vector<TargetSpec> parse_targets(const resolve_value* targets) {
 
 DatasetConfig parse_dataset_config(const resolve_value* c) {
     DatasetConfig config;
-    if (vhas(c, "species_encoding")) config.species_encoding = parse_species_encoding_mode(vstr(c, "species_encoding"));
-    if (vhas(c, "hash_dim")) config.hash_dim = (int)vint(c, "hash_dim");
-    if (vhas(c, "top_k")) config.top_k = (int)vint(c, "top_k");
-    if (vhas(c, "top_k_species")) config.top_k_species = (int)vint(c, "top_k_species");
-    if (vhas(c, "selection")) config.selection = parse_selection_mode(vstr(c, "selection"));
-    if (vhas(c, "representation")) config.representation = parse_representation_mode(vstr(c, "representation"));
-    if (vhas(c, "normalization")) config.normalization = parse_normalization_mode(vstr(c, "normalization"));
-    if (vhas(c, "track_unknown_fraction")) config.track_unknown_fraction = vbool(c, "track_unknown_fraction");
-    if (vhas(c, "track_unknown_count")) config.track_unknown_count = vbool(c, "track_unknown_count");
-    if (vhas(c, "use_taxonomy")) config.use_taxonomy = vbool(c, "use_taxonomy");
-    if (vhas(c, "pool_weighting")) config.pool_weighting = parse_pool_weighting(vstr(c, "pool_weighting"));
-    if (vhas(c, "pool_species_cap")) config.pool_species_cap = (int)vint(c, "pool_species_cap");
-    if (vhas(c, "aggregation")) config.aggregation = parse_aggregation_mode(vstr(c, "aggregation"));
-    if (vhas(c, "use_cuda_hash")) config.use_cuda_hash = vbool(c, "use_cuda_hash");
+    for_each_field(config, ValueFieldReader{c});
     return config;
 }
 
 ModelConfig parse_model_config(const resolve_value* c) {
     ModelConfig config;
-    if (vhas(c, "species_encoding")) config.species_encoding = parse_species_encoding_mode(vstr(c, "species_encoding"));
-    if (vhas(c, "hash_dim")) config.hash_dim = (int)vint(c, "hash_dim");
-    if (vhas(c, "species_embed_dim")) config.species_embed_dim = (int)vint(c, "species_embed_dim");
-    if (vhas(c, "genus_emb_dim")) config.genus_emb_dim = (int)vint(c, "genus_emb_dim");
-    if (vhas(c, "family_emb_dim")) config.family_emb_dim = (int)vint(c, "family_emb_dim");
-    if (vhas(c, "categorical_embed_dim")) config.categorical_embed_dim = (int)vint(c, "categorical_embed_dim");
-    if (vhas(c, "top_k")) config.top_k = (int)vint(c, "top_k");
-    if (vhas(c, "top_k_species")) config.top_k_species = (int)vint(c, "top_k_species");
-    if (vhas(c, "n_taxonomy_slots")) config.n_taxonomy_slots = (int)vint(c, "n_taxonomy_slots");
-    if (vhas(c, "hidden_dims")) config.hidden_dims = vint_vec(c, "hidden_dims");
-    if (vhas(c, "dropout")) config.dropout = (float)vdbl(c, "dropout");
-
-    if (vhas(c, "cover_dropout")) config.cover_dropout = (float)vdbl(c, "cover_dropout");
-    if (vhas(c, "d_model")) config.d_model = (int)vint(c, "d_model");
-    if (vhas(c, "n_heads")) config.n_heads = (int)vint(c, "n_heads");
-    if (vhas(c, "n_attention_layers")) config.n_attention_layers = (int)vint(c, "n_attention_layers");
-    if (vhas(c, "transformer_ff_dim")) config.transformer_ff_dim = (int)vint(c, "transformer_ff_dim");
-    if (vhas(c, "transformer_pooling")) config.transformer_pooling = vstr(c, "transformer_pooling");
-    if (vhas(c, "transformer_dropout")) config.transformer_dropout = (float)vdbl(c, "transformer_dropout");
-
-    if (vhas(c, "uses_explicit_vector")) config.uses_explicit_vector = vbool(c, "uses_explicit_vector");
-
-    if (vhas(c, "moe_routing")) config.moe_routing = parse_moe_routing_type(vstr(c, "moe_routing"));
-    if (vhas(c, "n_experts")) config.n_experts = (int)vint(c, "n_experts");
-    if (vhas(c, "expert_hidden_dims")) config.expert_hidden_dims = vint_vec(c, "expert_hidden_dims");
-    if (vhas(c, "moe_top_k")) config.moe_top_k = (int)vint(c, "moe_top_k");
-    if (vhas(c, "moe_noise_std")) config.moe_noise_std = (float)vdbl(c, "moe_noise_std");
-    if (vhas(c, "moe_aux_loss_weight")) config.moe_aux_loss_weight = (float)vdbl(c, "moe_aux_loss_weight");
-
-    if (vhas(c, "activation")) config.activation = parse_activation_type(vstr(c, "activation"));
-    if (vhas(c, "normalization")) config.normalization = parse_norm_layer_type(vstr(c, "normalization"));
-    if (vhas(c, "norm_groups")) config.norm_groups = (int)vint(c, "norm_groups");
-    if (vhas(c, "use_residual")) config.use_residual = vbool(c, "use_residual");
-    if (vhas(c, "leaky_relu_slope")) config.leaky_relu_slope = (float)vdbl(c, "leaky_relu_slope");
-    if (vhas(c, "elu_alpha")) config.elu_alpha = (float)vdbl(c, "elu_alpha");
-
-    if (vhas(c, "head_hidden_dims")) config.head_hidden_dims = vint_vec(c, "head_hidden_dims");
-    if (vhas(c, "head_activation")) config.head_activation = parse_activation_type(vstr(c, "head_activation"));
-    if (vhas(c, "head_dropout")) config.head_dropout = (float)vdbl(c, "head_dropout");
-
-    if (vhas(c, "encoder_architecture")) config.encoder_architecture = parse_encoder_architecture(vstr(c, "encoder_architecture"));
-
-    if (vhas(c, "ft_transformer")) config.ft_transformer = parse_ft_transformer_config(vget(c, "ft_transformer"));
-    if (vhas(c, "tabnet")) config.tabnet = parse_tabnet_config(vget(c, "tabnet"));
-    if (vhas(c, "saint")) config.saint = parse_saint_config(vget(c, "saint"));
-    if (vhas(c, "gnn")) config.gnn = parse_gnn_config(vget(c, "gnn"));
-    if (vhas(c, "trait_net")) config.trait_net = parse_trait_net_config(vget(c, "trait_net"));
-    if (vhas(c, "excelformer")) config.excelformer = parse_excelformer_config(vget(c, "excelformer"));
-    if (vhas(c, "heterogeneous_gnn")) config.heterogeneous_gnn = parse_heterogeneous_gnn_config(vget(c, "heterogeneous_gnn"));
-    if (vhas(c, "parallel_layers")) config.parallel_layers = parse_parallel_layers_config(vget(c, "parallel_layers"));
-    if (vhas(c, "tabm")) config.tabm = parse_tabm_config(vget(c, "tabm"));
+    for_each_field(config, ValueFieldReader{c});
     return config;
 }
 
@@ -958,6 +764,20 @@ inline constexpr const char* kCategoricalVocabSizes = "categorical_vocab_sizes";
 inline constexpr const char* kCategoricalEmbedDim   = "categorical_embed_dim";
 inline constexpr const char* kPoolWeighting      = "pool_weighting";
 inline constexpr const char* kPoolSpeciesCap     = "pool_species_cap";
+// Remaining DatasetConfig knobs + the fitted vocabularies (issue #102).
+inline constexpr const char* kTopKSpecies        = "top_k_species";
+inline constexpr const char* kSelection          = "selection";
+inline constexpr const char* kRepresentation     = "representation";
+inline constexpr const char* kNormalization      = "normalization";
+inline constexpr const char* kAggregation        = "aggregation";
+inline constexpr const char* kUseTaxonomy        = "use_taxonomy";
+inline constexpr const char* kSpeciesVocab       = "species_vocab";
+inline constexpr const char* kGenusVocab         = "genus_vocab";
+inline constexpr const char* kFamilyVocab        = "family_vocab";
+// Categorical string -> code maps. Not part of ResolveSchema (which carries
+// only column names + sizes); carried alongside it in the "vocabs" tree the
+// *_with_vocabs dataset loaders take.
+inline constexpr const char* kCategoricalVocab   = "categorical_vocab";
 // Per-target sub-map keys.
 inline constexpr const char* kTargetTask         = "task";
 inline constexpr const char* kTargetTransform    = "transform";
@@ -992,6 +812,18 @@ ResolveSchema parse_schema(const resolve_value* s) {
     if (vhas(s, k::kCategoricalEmbedDim)) schema.categorical_embed_dim = vint(s, k::kCategoricalEmbedDim);
     if (vhas(s, k::kPoolWeighting)) schema.pool_weighting = (int)vint(s, k::kPoolWeighting);
     if (vhas(s, k::kPoolSpeciesCap)) schema.pool_species_cap = (int)vint(s, k::kPoolSpeciesCap);
+    // Remaining loader knobs + the fitted vocabularies (issue #102). The enum
+    // fields reuse the DatasetConfig string spellings so one parser serves both
+    // trees.
+    if (vhas(s, k::kTopKSpecies)) schema.top_k_species = (int)vint(s, k::kTopKSpecies);
+    if (vhas(s, k::kSelection)) schema.selection = parse_selection_mode(vstr(s, k::kSelection));
+    if (vhas(s, k::kRepresentation)) schema.representation = parse_representation_mode(vstr(s, k::kRepresentation));
+    if (vhas(s, k::kNormalization)) schema.normalization = parse_normalization_mode(vstr(s, k::kNormalization));
+    if (vhas(s, k::kAggregation)) schema.aggregation = parse_aggregation_mode(vstr(s, k::kAggregation));
+    if (vhas(s, k::kUseTaxonomy)) schema.use_taxonomy = vbool(s, k::kUseTaxonomy);
+    if (vhas(s, k::kSpeciesVocab)) schema.species_vocab = vstr_vec(s, k::kSpeciesVocab);
+    if (vhas(s, k::kGenusVocab)) schema.genus_vocab = vstr_vec(s, k::kGenusVocab);
+    if (vhas(s, k::kFamilyVocab)) schema.family_vocab = vstr_vec(s, k::kFamilyVocab);
 
     const resolve_value* targets = vget(s, k::kTargets);
     if (targets && targets->kind == RESOLVE_VALUE_MAP) {
@@ -1013,34 +845,7 @@ ResolveSchema parse_schema(const resolve_value* s) {
 
 TrainConfig parse_train_config(const resolve_value* c) {
     TrainConfig config;
-    if (vhas(c, "batch_size")) config.batch_size = (int)vint(c, "batch_size");
-    if (vhas(c, "max_epochs")) config.max_epochs = (int)vint(c, "max_epochs");
-    if (vhas(c, "patience")) config.patience = (int)vint(c, "patience");
-    if (vhas(c, "lr")) config.lr = (float)vdbl(c, "lr");
-    if (vhas(c, "weight_decay")) config.weight_decay = (float)vdbl(c, "weight_decay");
-    if (vhas(c, "device")) config.device = (vstr(c, "device") == "cuda") ? torch::kCUDA : torch::kCPU;
-    if (vhas(c, "loss_config")) config.loss_config = parse_loss_config_mode(vstr(c, "loss_config"));
-    if (vhas(c, "lr_scheduler")) config.lr_scheduler = parse_lr_scheduler_type(vstr(c, "lr_scheduler"));
-    if (vhas(c, "lr_step_size")) config.lr_step_size = (int)vint(c, "lr_step_size");
-    if (vhas(c, "lr_gamma")) config.lr_gamma = (float)vdbl(c, "lr_gamma");
-    if (vhas(c, "lr_min")) config.lr_min = (float)vdbl(c, "lr_min");
-    if (vhas(c, "phase_boundaries")) {
-        auto pb = vint_vec(c, "phase_boundaries");
-        if (pb.size() >= 2) config.phase_boundaries = {(int)pb[0], (int)pb[1]};
-    }
-    if (vhas(c, "band_thresholds")) config.band_thresholds = vfloat_vec(c, "band_thresholds");
-    if (vhas(c, "band_threshold")) config.band_threshold = (float)vdbl(c, "band_threshold");
-    if (vhas(c, "checkpoint_dir")) config.checkpoint_dir = vstr(c, "checkpoint_dir");
-    if (vhas(c, "checkpoint_every")) config.checkpoint_every = (int)vint(c, "checkpoint_every");
-    if (vhas(c, "use_amp")) config.use_amp = vbool(c, "use_amp");
-    if (vhas(c, "amp_init_scale")) config.amp_init_scale = (float)vdbl(c, "amp_init_scale");
-    if (vhas(c, "amp_growth_factor")) config.amp_growth_factor = (float)vdbl(c, "amp_growth_factor");
-    if (vhas(c, "amp_backoff_factor")) config.amp_backoff_factor = (float)vdbl(c, "amp_backoff_factor");
-    if (vhas(c, "amp_growth_interval")) config.amp_growth_interval = (int)vint(c, "amp_growth_interval");
-    if (vhas(c, "cudnn_benchmark")) config.cudnn_benchmark = vbool(c, "cudnn_benchmark");
-    if (vhas(c, "allow_tf32")) config.allow_tf32 = vbool(c, "allow_tf32");
-    if (vhas(c, "vram_fraction")) config.vram_fraction = (float)vdbl(c, "vram_fraction");
-    if (vhas(c, "batch_size_floor")) config.batch_size_floor = (int)vint(c, "batch_size_floor");
+    for_each_field(config, ValueFieldReader{c});
     return config;
 }
 
@@ -1161,6 +966,7 @@ resolve_value* train_result_to_value(const TrainResult& tr) {
     v_put(m, "test_loss", v_double_array(tr.test_loss_history));
     v_put(m, "train_time_seconds", v_double(tr.train_time_seconds));
     v_put(m, "resumed_from_epoch", v_int(tr.resumed_from_epoch));
+    v_put(m, "effective_batch_size", v_int(tr.effective_batch_size));
     auto* baselines = v_map();
     for (const auto& [target, bm] : tr.baselines) v_put(baselines, target, baseline_metrics_to_value(bm));
     v_put(m, "baselines", baselines);
@@ -1276,43 +1082,129 @@ resolve_value* categorical_vocab_to_value(const CategoricalVocab& vocab) {
     }
     return out;
 }
-resolve_value* train_config_to_value(const TrainConfig& c) {
+
+// Inverse of categorical_vocab_to_value. Restores the per-column string -> code
+// maps verbatim from the tree the *_with_vocabs dataset loaders receive
+// (issue #102): the codes come from the checkpoint, so they are assigned, not
+// re-derived.
+CategoricalVocab value_to_categorical_vocab(const resolve_value* v) {
+    CategoricalVocab vocab;
+    if (!v || v->kind != RESOLVE_VALUE_MAP) return vocab;
+    for (size_t i = 0; i < v->keys.size(); ++i) {
+        const resolve_value* inner = v->vals[i];
+        if (!inner || inner->kind != RESOLVE_VALUE_MAP) continue;
+        std::unordered_map<std::string, int64_t> cmap;
+        cmap.reserve(inner->keys.size());
+        for (size_t j = 0; j < inner->keys.size(); ++j) {
+            cmap[inner->keys[j]] = vint(inner->vals[j]);
+        }
+        vocab.set_column_map(v->keys[i], cmap);
+    }
+    return vocab;
+}
+
+// ResolveSchema -> MAP tree. Single source of truth for the emitted schema,
+// shared by the dataset "schema" accessor and the predictor "schema"/"vocabs"
+// accessors (issue #102) -- a field emitted by one but not the other is exactly
+// how the vocab would go missing on one binding path.
+resolve_value* schema_to_value(const ResolveSchema& s) {
+    namespace k = schema_tree_keys;
+    auto* targets_m = v_map();
+    for (const auto& tc : s.targets) {
+        std::string task_str = (tc.task == TaskType::Regression) ? "regression" : "classification";
+        std::string transform_str = (tc.transform == TransformType::Log1p) ? "log1p" : "none";
+        auto* tm = v_map();
+        v_put(tm, k::kTargetTask, v_string(task_str));
+        v_put(tm, k::kTargetTransform, v_string(transform_str));
+        v_put(tm, k::kTargetNumClasses, v_int(tc.num_classes));
+        v_put(tm, k::kTargetWeight, v_double(tc.weight));
+        v_put(tm, k::kTargetClassWeights, v_double_array(tc.class_weights));
+        // Per-class label vocabulary (class_names[code] == label), so
+        // R callers can recover the code->label mapping like Python's
+        // TargetConfig.class_names (issue #76).
+        v_put(tm, k::kTargetClassNames, v_string_array(tc.class_names));
+        v_put(targets_m, tc.name, tm);
+    }
     auto* m = v_map();
-    v_put(m, "batch_size", v_int(c.batch_size));
-    v_put(m, "batch_size_floor", v_int(c.batch_size_floor));
-    v_put(m, "max_epochs", v_int(c.max_epochs));
-    v_put(m, "patience", v_int(c.patience));
-    v_put(m, "lr", v_double(c.lr));
-    v_put(m, "weight_decay", v_double(c.weight_decay));
-    v_put(m, "phase_boundaries",
-          v_int_array({c.phase_boundaries.first, c.phase_boundaries.second}));
-    // Emit enums as strings so parse_train_config can read a get_config()/
-    // load_train_config list straight back (issue #87). Device and the checkpoint
-    // fields are emitted here too so both the trainer-get and load paths carry
-    // them (they were previously write-only from R / omitted from the load path).
-    v_put(m, "loss_config", v_string(loss_config_mode_to_string(c.loss_config)));
-    v_put(m, "lr_scheduler", v_string(lr_scheduler_type_to_string(c.lr_scheduler)));
-    v_put(m, "device", v_string(c.device.is_cuda() ? "cuda" : "cpu"));
-    v_put(m, "checkpoint_dir", v_string(c.checkpoint_dir));
-    v_put(m, "checkpoint_every", v_int(c.checkpoint_every));
-    v_put(m, "lr_step_size", v_int(c.lr_step_size));
-    v_put(m, "lr_gamma", v_double(c.lr_gamma));
-    v_put(m, "lr_min", v_double(c.lr_min));
-    v_put(m, "vram_fraction", v_double(c.vram_fraction));
-    v_put(m, "band_thresholds", v_double_array(c.band_thresholds));
-    v_put(m, "band_threshold", v_double(c.band_threshold));
-    // AMP / cuDNN / tf32. These are not persisted by save_train_config (so
-    // load_train_config leaves them at defaults), but the live trainer's config
-    // holds them, so trainer$get_config() would otherwise silently drop them.
-    v_put(m, "use_amp", v_bool(c.use_amp));
-    v_put(m, "amp_init_scale", v_double(c.amp_init_scale));
-    v_put(m, "amp_growth_factor", v_double(c.amp_growth_factor));
-    v_put(m, "amp_backoff_factor", v_double(c.amp_backoff_factor));
-    v_put(m, "amp_growth_interval", v_int(c.amp_growth_interval));
-    v_put(m, "cudnn_benchmark", v_bool(c.cudnn_benchmark));
-    v_put(m, "allow_tf32", v_bool(c.allow_tf32));
+    v_put(m, k::kNPlots, v_int(s.n_plots));
+    v_put(m, k::kNSpecies, v_int(s.n_species));
+    v_put(m, k::kNSpeciesVocab, v_int(s.n_species_vocab));
+    v_put(m, k::kHasCoordinates, v_bool(s.has_coordinates));
+    v_put(m, k::kHasAbundance, v_bool(s.has_abundance));
+    v_put(m, k::kHasTaxonomy, v_bool(s.has_taxonomy));
+    v_put(m, k::kNGenera, v_int(s.n_genera));
+    v_put(m, k::kNFamilies, v_int(s.n_families));
+    v_put(m, k::kNGeneraVocab, v_int(s.n_genera_vocab));
+    v_put(m, k::kNFamiliesVocab, v_int(s.n_families_vocab));
+    v_put(m, k::kCovariateNames, v_string_array(s.covariate_names));
+    v_put(m, k::kTargets, targets_m);
+    v_put(m, k::kTrackUnknownFrac, v_bool(s.track_unknown_fraction));
+    v_put(m, k::kTrackUnknownCount, v_bool(s.track_unknown_count));
+    v_put(m, k::kCategoricalNames, v_string_array(s.categorical_names));
+    v_put(m, k::kCategoricalVocabSizes, v_int_array(s.categorical_vocab_sizes));
+    v_put(m, k::kCategoricalEmbedDim, v_int(s.categorical_embed_dim));
+    v_put(m, k::kPoolWeighting, v_int(s.pool_weighting));
+    v_put(m, k::kPoolSpeciesCap, v_int(s.pool_species_cap));
+    // Remaining loader knobs + the fitted vocabularies (issue #102).
+    v_put(m, k::kTopKSpecies, v_int(s.top_k_species));
+    v_put(m, k::kSelection, v_string(selection_mode_to_string(s.selection)));
+    v_put(m, k::kRepresentation, v_string(representation_mode_to_string(s.representation)));
+    v_put(m, k::kNormalization, v_string(normalization_mode_to_string(s.normalization)));
+    v_put(m, k::kAggregation, v_string(aggregation_mode_to_string(s.aggregation)));
+    v_put(m, k::kUseTaxonomy, v_bool(s.use_taxonomy));
+    v_put(m, k::kSpeciesVocab, v_string_array(s.species_vocab));
+    v_put(m, k::kGenusVocab, v_string_array(s.genus_vocab));
+    v_put(m, k::kFamilyVocab, v_string_array(s.family_vocab));
     return m;
 }
+
+// ExternalVocabs <-> MAP tree. The tree is a schema tree (which already carries
+// species/genus/family + the target class vocabularies) plus the categorical
+// string -> code maps, which live on the Predictor rather than the schema.
+resolve_value* external_vocabs_to_value(const ExternalVocabs& v) {
+    ResolveSchema s;
+    s.species_vocab = v.species_vocab;
+    s.genus_vocab = v.taxonomy.genus_names();
+    s.family_vocab = v.taxonomy.family_names();
+    s.targets = v.targets;
+    auto* m = schema_to_value(s);
+    v_put(m, schema_tree_keys::kCategoricalVocab, categorical_vocab_to_value(v.categorical));
+    return m;
+}
+
+ExternalVocabs value_to_external_vocabs(const resolve_value* v) {
+    ExternalVocabs out = external_vocabs_from_schema(parse_schema(v));
+    if (vhas(v, schema_tree_keys::kCategoricalVocab)) {
+        out.categorical = value_to_categorical_vocab(
+            vget(v, schema_tree_keys::kCategoricalVocab));
+    }
+    return out;
+}
+
+// TrainConfig -> value map. Emits every field the registry carries, so a live
+// trainer's get_config() and a checkpoint's load_train_config() expose the same
+// names and parse_train_config reads either straight back (issue #87). Enums
+// travel as their names; the device, the checkpoint destination and the AMP /
+// cuDNN switches are part of a live config even though save_train_config leaves
+// them out of the archive.
+resolve_value* train_config_to_value(const TrainConfig& c) {
+    auto* m = v_map();
+    ValueGuard g(m);
+    for_each_field(c, ValueFieldWriter{m});
+    return g.release();
+}
+
+// DatasetConfig -> value map. One emitter for both callers -- the dataset's own
+// `config` accessor and the predictor's `dataset_config` (the loading config a
+// checkpoint implies) -- which were two hand-written blocks that had to agree on
+// every key and every enum spelling.
+resolve_value* dataset_config_to_value(const DatasetConfig& c) {
+    auto* m = v_map();
+    ValueGuard g(m);
+    for_each_field(c, ValueFieldWriter{m});
+    return g.release();
+}
+
 resolve_value* run_metadata_to_value(const RunMetadata& m0) {
     auto* m = v_map();
     v_put(m, "resolve_version", v_string(m0.resolve_version));
@@ -1351,17 +1243,6 @@ struct resolve_predictor { resolve::Predictor predictor; };
 // Free functions + metrics
 // ============================================================================
 
-namespace {
-// default_cuda_alloc_conf() is the single source in resolve/gpu.hpp.
-void set_env_var(const char* name, const char* value) {
-#if defined(_WIN32)
-    _putenv_s(name, value);
-#else
-    setenv(name, value, 1);
-#endif
-}
-}  // namespace
-
 extern "C" {
 
 const char* resolve_capi_version(void) { return resolve::VERSION; }
@@ -1396,67 +1277,51 @@ int resolve_capi_signal_work_complete(void) {
 
 resolve_value_t* resolve_capi_configure_cuda_allocator(int force) {
     CAPI_BODY_PTR({
-        std::string base = default_cuda_alloc_conf();
-        const char* existing = std::getenv("PYTORCH_CUDA_ALLOC_CONF");
-        if (force || existing == nullptr || existing[0] == '\0') {
-            set_env_var("PYTORCH_CUDA_ALLOC_CONF", base.c_str());
-            return v_string(base);
-        }
-        return v_string(std::string(existing));
+        return v_string(resolve::configure_cuda_allocator(force != 0));
     })
 }
 
 int resolve_metric_band_accuracy(const double* pred, const double* target, int64_t n, double threshold, double* out) {
     CAPI_BODY_INT({
-        std::vector<float> p(pred, pred + n), t(target, target + n);
-        auto pt = torch::from_blob(p.data(), {n}, torch::kFloat32).clone();
-        auto tt = torch::from_blob(t.data(), {n}, torch::kFloat32).clone();
-        *out = resolve::Metrics::band_accuracy(pt, tt, (float)threshold);
+        *out = resolve::Metrics::band_accuracy(
+            f32_tensor_from_doubles(pred, n), f32_tensor_from_doubles(target, n),
+            static_cast<float>(threshold));
         return 0;
     })
 }
 int resolve_metric_mae(const double* pred, const double* target, int64_t n, double* out) {
     CAPI_BODY_INT({
-        std::vector<float> p(pred, pred + n), t(target, target + n);
-        auto pt = torch::from_blob(p.data(), {n}, torch::kFloat32).clone();
-        auto tt = torch::from_blob(t.data(), {n}, torch::kFloat32).clone();
-        *out = resolve::Metrics::mae(pt, tt);
+        *out = resolve::Metrics::mae(
+            f32_tensor_from_doubles(pred, n), f32_tensor_from_doubles(target, n));
         return 0;
     })
 }
 int resolve_metric_rmse(const double* pred, const double* target, int64_t n, double* out) {
     CAPI_BODY_INT({
-        std::vector<float> p(pred, pred + n), t(target, target + n);
-        auto pt = torch::from_blob(p.data(), {n}, torch::kFloat32).clone();
-        auto tt = torch::from_blob(t.data(), {n}, torch::kFloat32).clone();
-        *out = resolve::Metrics::rmse(pt, tt);
+        *out = resolve::Metrics::rmse(
+            f32_tensor_from_doubles(pred, n), f32_tensor_from_doubles(target, n));
         return 0;
     })
 }
 int resolve_metric_smape(const double* pred, const double* target, int64_t n, double eps, double* out) {
     CAPI_BODY_INT({
-        std::vector<float> p(pred, pred + n), t(target, target + n);
-        auto pt = torch::from_blob(p.data(), {n}, torch::kFloat32).clone();
-        auto tt = torch::from_blob(t.data(), {n}, torch::kFloat32).clone();
-        *out = resolve::Metrics::smape(pt, tt, (float)eps);
+        *out = resolve::Metrics::smape(
+            f32_tensor_from_doubles(pred, n), f32_tensor_from_doubles(target, n),
+            static_cast<float>(eps));
         return 0;
     })
 }
 int resolve_metric_accuracy(const double* pred, const double* target, int64_t n, double* out) {
     CAPI_BODY_INT({
-        std::vector<float> p(pred, pred + n), t(target, target + n);
-        auto pt = torch::from_blob(p.data(), {n}, torch::kFloat32).clone();
-        auto tt = torch::from_blob(t.data(), {n}, torch::kFloat32).clone();
-        *out = resolve::Metrics::accuracy(pt, tt);
+        *out = resolve::Metrics::accuracy(
+            f32_tensor_from_doubles(pred, n), f32_tensor_from_doubles(target, n));
         return 0;
     })
 }
 int resolve_metric_r_squared(const double* pred, const double* target, int64_t n, double* out) {
     CAPI_BODY_INT({
-        std::vector<float> p(pred, pred + n), t(target, target + n);
-        auto pt = torch::from_blob(p.data(), {n}, torch::kFloat32).clone();
-        auto tt = torch::from_blob(t.data(), {n}, torch::kFloat32).clone();
-        *out = resolve::Metrics::r_squared(pt, tt);
+        *out = resolve::Metrics::r_squared(
+            f32_tensor_from_doubles(pred, n), f32_tensor_from_doubles(target, n));
         return 0;
     })
 }
@@ -1497,6 +1362,21 @@ resolve_dataset_t* resolve_dataset_from_csv_with_schema(
     })
 }
 
+resolve_dataset_t* resolve_dataset_from_csv_with_vocabs(
+    const char* header_path, const char* species_path,
+    const resolve_value_t* roles, const resolve_value_t* targets,
+    const resolve_value_t* vocabs, const resolve_value_t* config) {
+    CAPI_BODY_PTR({
+        RoleMapping r = parse_roles(roles);
+        std::vector<TargetSpec> t = parse_targets(targets);
+        DatasetConfig c = parse_dataset_config(config);
+        ExternalVocabs v = value_to_external_vocabs(vocabs);
+        auto* h = new resolve_dataset{ResolveDataset::from_csv_with_vocabs(
+            header_path, species_path, r, t, v, c)};
+        return h;
+    })
+}
+
 resolve_dataset_t* resolve_dataset_from_species_csv(
     const char* species_path,
     const resolve_value_t* roles, const resolve_value_t* targets,
@@ -1506,6 +1386,21 @@ resolve_dataset_t* resolve_dataset_from_species_csv(
         std::vector<TargetSpec> t = parse_targets(targets);
         DatasetConfig c = parse_dataset_config(config);
         auto* h = new resolve_dataset{ResolveDataset::from_species_csv(species_path, r, t, c)};
+        return h;
+    })
+}
+
+resolve_dataset_t* resolve_dataset_from_species_csv_with_vocabs(
+    const char* species_path,
+    const resolve_value_t* roles, const resolve_value_t* targets,
+    const resolve_value_t* vocabs, const resolve_value_t* config) {
+    CAPI_BODY_PTR({
+        RoleMapping r = parse_roles(roles);
+        std::vector<TargetSpec> t = parse_targets(targets);
+        DatasetConfig c = parse_dataset_config(config);
+        ExternalVocabs v = value_to_external_vocabs(vocabs);
+        auto* h = new resolve_dataset{ResolveDataset::from_species_csv_with_vocabs(
+            species_path, r, t, v, c)};
         return h;
     })
 }
@@ -1572,6 +1467,39 @@ resolve_dataset_t* resolve_dataset_from_dataframe_with_schema(
     })
 }
 
+resolve_dataset_t* resolve_dataset_from_dataframe_with_vocabs(
+    const resolve_value_t* header, const resolve_value_t* species,
+    const resolve_value_t* roles, const resolve_value_t* targets,
+    const resolve_value_t* vocabs, const resolve_value_t* config) {
+    CAPI_BODY_PTR({
+        ColumnTable h = value_to_column_table(header, "header");
+        ColumnTable s = value_to_column_table(species, "species");
+        RoleMapping r = parse_roles(roles);
+        std::vector<TargetSpec> t = parse_targets(targets);
+        DatasetConfig c = parse_dataset_config(config);
+        ExternalVocabs v = value_to_external_vocabs(vocabs);
+        auto* d = new resolve_dataset{ResolveDataset::from_dataframe_with_vocabs(
+            h, s, r, t, v, c)};
+        return d;
+    })
+}
+
+resolve_dataset_t* resolve_dataset_from_species_dataframe_with_vocabs(
+    const resolve_value_t* species,
+    const resolve_value_t* roles, const resolve_value_t* targets,
+    const resolve_value_t* vocabs, const resolve_value_t* config) {
+    CAPI_BODY_PTR({
+        ColumnTable s = value_to_column_table(species, "species");
+        RoleMapping r = parse_roles(roles);
+        std::vector<TargetSpec> t = parse_targets(targets);
+        DatasetConfig c = parse_dataset_config(config);
+        ExternalVocabs v = value_to_external_vocabs(vocabs);
+        auto* d = new resolve_dataset{ResolveDataset::from_species_dataframe_with_vocabs(
+            s, r, t, v, c)};
+        return d;
+    })
+}
+
 void resolve_dataset_free(resolve_dataset_t* ds) { delete ds; }
 
 resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* what) {
@@ -1634,94 +1562,12 @@ resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* wh
             return m;
         }
 
-        if (w == "config") {
-            const auto& c = d.config();
-            auto* m = v_map();
-            v_put(m, "species_encoding", v_string(species_encoding_to_string(c.species_encoding)));
-            v_put(m, "hash_dim", v_int(c.hash_dim));
-            v_put(m, "top_k", v_int(c.top_k));
-            v_put(m, "top_k_species", v_int(c.top_k_species));
-            v_put(m, "track_unknown_fraction", v_bool(c.track_unknown_fraction));
-            v_put(m, "track_unknown_count", v_bool(c.track_unknown_count));
-            v_put(m, "use_taxonomy", v_bool(c.use_taxonomy));
-            // Full parity with the Python DatasetConfig object: the read-back
-            // config() previously dropped these fields. Strings match the parse
-            // side so the list round-trips.
-            const char* sel = "top";
-            switch (c.selection) {
-                case SelectionMode::Top: sel = "top"; break;
-                case SelectionMode::Bottom: sel = "bottom"; break;
-                case SelectionMode::TopBottom: sel = "top_bottom"; break;
-                case SelectionMode::All: sel = "all"; break;
-            }
-            v_put(m, "selection", v_string(sel));
-            v_put(m, "representation", v_string(
-                c.representation == RepresentationMode::PresenceAbsence
-                    ? "presence_absence" : "abundance"));
-            const char* nrm = "raw";
-            switch (c.normalization) {
-                case NormalizationMode::Raw: nrm = "raw"; break;
-                case NormalizationMode::Norm: nrm = "norm"; break;
-                case NormalizationMode::Log1p: nrm = "log1p"; break;
-            }
-            v_put(m, "normalization", v_string(nrm));
-            v_put(m, "aggregation", v_string(
-                c.aggregation == AggregationMode::Count ? "count" : "abundance"));
-            const char* pw = "log1p";
-            switch (c.pool_weighting) {
-                case PoolWeighting::Binary: pw = "binary"; break;
-                case PoolWeighting::Abundance: pw = "abundance"; break;
-                case PoolWeighting::Log1p: pw = "log1p"; break;
-                case PoolWeighting::Norm: pw = "norm"; break;
-                case PoolWeighting::Rank: pw = "rank"; break;
-            }
-            v_put(m, "pool_weighting", v_string(pw));
-            v_put(m, "pool_species_cap", v_int(c.pool_species_cap));
-            v_put(m, "use_cuda_hash", v_bool(c.use_cuda_hash));
-            return m;
-        }
+        if (w == "config") return dataset_config_to_value(d.config());
 
-        if (w == "schema") {
-            namespace k = schema_tree_keys;
-            const auto& s = d.schema();
-            auto* targets_m = v_map();
-            for (const auto& tc : s.targets) {
-                std::string task_str = (tc.task == TaskType::Regression) ? "regression" : "classification";
-                std::string transform_str = (tc.transform == TransformType::Log1p) ? "log1p" : "none";
-                auto* tm = v_map();
-                v_put(tm, k::kTargetTask, v_string(task_str));
-                v_put(tm, k::kTargetTransform, v_string(transform_str));
-                v_put(tm, k::kTargetNumClasses, v_int(tc.num_classes));
-                v_put(tm, k::kTargetWeight, v_double(tc.weight));
-                v_put(tm, k::kTargetClassWeights, v_double_array(tc.class_weights));
-                // Per-class label vocabulary (class_names[code] == label), so
-                // R callers can recover the code->label mapping like Python's
-                // TargetConfig.class_names (issue #76).
-                v_put(tm, k::kTargetClassNames, v_string_array(tc.class_names));
-                v_put(targets_m, tc.name, tm);
-            }
-            auto* m = v_map();
-            v_put(m, k::kNPlots, v_int(s.n_plots));
-            v_put(m, k::kNSpecies, v_int(s.n_species));
-            v_put(m, k::kNSpeciesVocab, v_int(s.n_species_vocab));
-            v_put(m, k::kHasCoordinates, v_bool(s.has_coordinates));
-            v_put(m, k::kHasAbundance, v_bool(s.has_abundance));
-            v_put(m, k::kHasTaxonomy, v_bool(s.has_taxonomy));
-            v_put(m, k::kNGenera, v_int(s.n_genera));
-            v_put(m, k::kNFamilies, v_int(s.n_families));
-            v_put(m, k::kNGeneraVocab, v_int(s.n_genera_vocab));
-            v_put(m, k::kNFamiliesVocab, v_int(s.n_families_vocab));
-            v_put(m, k::kCovariateNames, v_string_array(s.covariate_names));
-            v_put(m, k::kTargets, targets_m);
-            v_put(m, k::kTrackUnknownFrac, v_bool(s.track_unknown_fraction));
-            v_put(m, k::kTrackUnknownCount, v_bool(s.track_unknown_count));
-            v_put(m, k::kCategoricalNames, v_string_array(s.categorical_names));
-            v_put(m, k::kCategoricalVocabSizes, v_int_array(s.categorical_vocab_sizes));
-            v_put(m, k::kCategoricalEmbedDim, v_int(s.categorical_embed_dim));
-            v_put(m, k::kPoolWeighting, v_int(s.pool_weighting));
-            v_put(m, k::kPoolSpeciesCap, v_int(s.pool_species_cap));
-            return m;
-        }
+        if (w == "schema") return schema_to_value(d.schema());
+        // Every vocabulary this dataset fitted, in the carrier the
+        // *_with_vocabs loaders take (issue #102).
+        if (w == "vocabs") return external_vocabs_to_value(d.external_vocabs());
 
         throw std::runtime_error("dataset_get: unknown accessor '" + w + "'");
     })
@@ -1977,6 +1823,7 @@ resolve_value_t* resolve_trainer_get(const resolve_trainer_t* t, const char* wha
         }
         if (w == "test_plot_ids") return v_string_array(tr.test_plot_ids());
         if (w == "train_plot_ids") return v_string_array(tr.train_plot_ids());
+        if (w == "effective_batch_size") return v_int(tr.effective_batch_size());
         if (w == "config") {
             // Full TrainConfig serializer (parity with the Python Trainer.config
             // surface and resolve.load_train_config). Device / checkpoint fields
@@ -2130,6 +1977,20 @@ resolve_value_t* resolve_predictor_get(const resolve_predictor_t* p, const char*
         if (w == "device") return v_string(pr.device().is_cuda() ? "cuda" : "cpu");
         if (w == "scalers") return scalers_to_value(pr.scalers());
         if (w == "categorical_vocab") return categorical_vocab_to_value(pr.categorical_vocab());
+        // Issue #102: the checkpoint's schema (loader knobs + fitted species /
+        // taxonomy vocabularies) and the complete vocabulary carrier the
+        // *_with_vocabs dataset loaders take. `dataset_config` is the
+        // DatasetConfig the checkpoint implies, ready to pass straight to a
+        // loader.
+        if (w == "schema") return schema_to_value(pr.schema());
+        if (w == "vocabs") return external_vocabs_to_value(pr.external_vocabs());
+        if (w == "species_vocab") return v_string_array(pr.species_vocab());
+        if (w == "genus_vocab") return v_string_array(pr.genus_vocab());
+        if (w == "family_vocab") return v_string_array(pr.family_vocab());
+        if (w == "dataset_config") {
+            return dataset_config_to_value(dataset_config_from_checkpoint(
+                pr.schema(), pr.model()->config()));
+        }
         // Guard undefined tensors (an encoder without a given table returns an
         // empty tensor) so R gets NULL rather than a throw from tensor_to_mat's
         // .cpu(), matching the model weight accessors and Python (which returns

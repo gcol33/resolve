@@ -5,6 +5,65 @@
 
 namespace resolve {
 
+// Neighbourhood Components Analysis objective (Goldberger, Roweis, Hinton &
+// Salakhutdinov, "Neighbourhood Components Analysis", NIPS 2004).
+//
+// Each sample's stochastic neighbour distribution is the paper's eq. (1),
+//     p_ij = exp(-||A x_i - A x_j||^2) / sum_{k != i} exp(-||A x_i - A x_k||^2),
+//     p_ii = 0,
+// and the returned value is the negated eq. (6) log objective,
+//     g(A) = sum_i log( sum_{j in C_i} p_ij ),   C_i = { j : c_i = c_j },
+// averaged over the samples that have at least one same-class neighbour, so it
+// is minimized rather than maximized and its scale does not depend on how many
+// samples happen to lack an in-batch partner.
+//
+// `embeddings` (batch, dim) plays the role of A x. The single matrix A of the
+// paper is here the network that produced `embeddings`, followed by L2
+// normalization and the temperature; that composition reproduces eq. (1)
+// exactly rather than approximating it. For unit-norm u, v,
+// ||u - v||^2 = 2 - 2 u.v, and the constant cancels in the softmax over j, so
+//     softmax_j( u_i . u_j / temperature ) = softmax_j( -||A x_i - A x_j||^2 )
+// with A = (2 * temperature)^(-1/2) * (normalize o network). Section 2 of the
+// paper notes that the overall scale of A sets the effective number of
+// neighbours, which is the quantity `temperature` tunes.
+//
+// Both truncations are the ones the paper's section 2 sanctions ("the sums that
+// appear in equations (5) and (7) over the data points and over the neighbours
+// of each point can be truncated"): the sum over data points is the mini-batch,
+// and each sample's neighbour set is its `n_neighbors` most similar in-batch
+// samples. n_neighbors <= 0, or >= batch - 1, keeps the full in-batch set.
+//
+// `targets` is (batch,) int64 class labels.
+[[nodiscard]] torch::Tensor nca_objective(
+    torch::Tensor embeddings,
+    torch::Tensor targets,
+    float temperature = kNCATemperature,
+    int n_neighbors = kNCANeighbors
+);
+
+// The NCA term PhasedLoss adds to its classification loss. Off by default;
+// LossConfigMode::NCA turns it on (see PhasedLoss::from_config). The three
+// hyperparameters default to the shared kNCA* constants in types.hpp and are
+// user-tunable through TrainConfig's nca_* fields.
+struct NCATerm {
+    bool enabled = false;
+    float weight = kNCAWeight;
+    float temperature = kNCATemperature;
+    int n_neighbors = kNCANeighbors;
+};
+
+// The NCA hyperparameters a TrainConfig carries, as the term PhasedLoss takes.
+// `enabled` is left off here: the mode alone decides whether the term acts, so
+// PhasedLoss::from_config turns it on for LossConfigMode::NCA and leaves it off
+// for every other preset while the knobs travel with the config either way.
+[[nodiscard]] inline NCATerm nca_term_of(const TrainConfig& config) {
+    NCATerm term;
+    term.weight = config.nca_weight;
+    term.temperature = config.nca_temperature;
+    term.n_neighbors = config.nca_neighbors;
+    return term;
+}
+
 // Phased loss for regression targets
 // Phase 1: MAE only
 // Phase 2: MAE + SMAPE
@@ -17,14 +76,17 @@ public:
         float smape_weight_p3 = 0.15f,
         float band_weight_p3 = 0.05f,
         float band_threshold = 0.25f,
-        float eps = 1e-8f
+        float eps = 1e-8f,
+        NCATerm nca = {}
     );
 
     // Factory method to create loss from config mode. band_threshold sets the
     // phase-3 band-penalty tolerance (issue #99); the MAE/SMAPE modes zero the
-    // band weight so the threshold is inert there.
+    // band weight so the threshold is inert there. LossConfigMode::NCA takes the
+    // Combined regression schedule and enables the NCA classification term with
+    // `nca`'s hyperparameters; the other modes carry `nca` disabled.
     static PhasedLoss from_config(LossConfigMode mode, std::pair<int, int> phase_boundaries = {100, 300},
-                                  float band_threshold = 0.25f);
+                                  float band_threshold = 0.25f, NCATerm nca = {});
 
     // Get current phase (1, 2, or 3)
     int get_phase(int epoch) const;
@@ -39,12 +101,17 @@ public:
         TransformType transform = TransformType::None
     ) const;
 
-    // Compute classification loss (with optional class weights for imbalanced data)
+    // Compute classification loss (with optional class weights for imbalanced
+    // data). When the NCA term is enabled, the NCA objective over `pred` is
+    // added to the cross-entropy; see the impl for why both terms are present.
     torch::Tensor classification_loss(
         torch::Tensor pred,
         torch::Tensor target,
         torch::Tensor class_weights = {}
     ) const;
+
+    // Whether the NCA neighbourhood term is part of classification_loss.
+    [[nodiscard]] bool uses_nca() const noexcept { return nca_.enabled; }
 
 private:
     std::pair<int, int> phase_boundaries_;
@@ -53,6 +120,7 @@ private:
     float band_weight_p3_;
     float band_threshold_;
     float eps_;
+    NCATerm nca_;
 };
 
 // Multi-task loss combiner
@@ -62,7 +130,8 @@ public:
         const std::vector<TargetConfig>& targets,
         std::pair<int, int> phase_boundaries = {100, 300},
         LossConfigMode loss_config = LossConfigMode::Combined,
-        float band_threshold = 0.25f
+        float band_threshold = 0.25f,
+        NCATerm nca = {}
     );
 
     // Compute combined loss
@@ -80,22 +149,29 @@ public:
     // in the Trainer (best-model selection / early-stopping gating).
     int phase_for(int epoch) const { return phased_loss_.get_phase(epoch); }
 
+    // Whether the NCA neighbourhood term is active on classification targets
+    // (i.e. this loss was built with LossConfigMode::NCA).
+    [[nodiscard]] bool uses_nca() const noexcept { return phased_loss_.uses_nca(); }
+
 private:
     std::vector<TargetConfig> targets_;
     PhasedLoss phased_loss_;
 };
 
-// NCA (Neighborhood Component Analysis) loss for classification
-// Instead of cross-entropy, predictions are based on softmax similarity
-// to training examples in embedding space. Encourages well-separated
-// latent clusters.
+// Module wrapper around nca_objective that also carries the reference set the
+// paper's stochastic-neighbour classification rule needs at inference: class
+// probabilities are the neighbour probability mass per class (eq. 2) taken
+// against stored reference embeddings rather than the current batch.
+//
+// The module owns no learnable parameters -- the transformation NCA learns is
+// whatever network produces `latent` -- so `forward` is exactly nca_objective.
 class NCALossImpl : public torch::nn::Module {
 public:
     NCALossImpl(
         int64_t latent_dim,
         int64_t n_classes,
-        float temperature = 0.1f,
-        int n_neighbors = 32  // Stochastic: subsample neighbors for efficiency
+        float temperature = kNCATemperature,
+        int n_neighbors = kNCANeighbors  // truncated neighbour set per sample
     );
 
     // Compute NCA loss from latent representations and targets

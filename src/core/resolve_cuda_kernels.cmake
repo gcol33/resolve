@@ -9,6 +9,7 @@
 # Expects, before inclusion:
 #   RESOLVE_CORE_DIR  - absolute path to src/core (holds cuda/ and include/)
 #   resolve_core      - an already-defined library target
+#   resolve_warnings  - the INTERFACE warning target (resolve_warnings.cmake)
 #   USE_CUDA          - whether CUDA is requested
 #   TORCH_LIBRARIES   - from find_package(Torch)
 # On success it links the custom kernels into resolve_core and defines
@@ -46,7 +47,11 @@ if(USE_CUDA AND CMAKE_CUDA_COMPILER AND NOT SKIP_CUDA_KERNELS)
             CUDA_STANDARD 17
             CUDA_ARCHITECTURES "${RESOLVE_CUDA_ARCHITECTURES}")
 
-        # C++ wrapper that includes PyTorch headers.
+        # C++ wrapper that includes PyTorch headers. resolve_warnings gates its
+        # flags on COMPILE_LANGUAGE:CXX, so linking it into the pure-CUDA
+        # kernel target too is a no-op today and covers any .cpp added later.
+        target_link_libraries(resolve_cuda_kernels PRIVATE resolve_warnings)
+
         add_library(resolve_cuda_wrapper STATIC ${RESOLVE_CORE_DIR}/cuda/feature_hash.cpp)
         target_include_directories(resolve_cuda_wrapper PUBLIC
             $<BUILD_INTERFACE:${RESOLVE_CORE_DIR}/include>
@@ -55,6 +60,7 @@ if(USE_CUDA AND CMAKE_CUDA_COMPILER AND NOT SKIP_CUDA_KERNELS)
             ${TORCH_LIBRARIES}
             resolve_cuda_kernels
             CUDA::cudart)
+        target_link_libraries(resolve_cuda_wrapper PRIVATE resolve_warnings)
 
         target_link_libraries(resolve_core PUBLIC resolve_cuda_wrapper)
         target_compile_definitions(resolve_core PUBLIC RESOLVE_HAS_CUDA)

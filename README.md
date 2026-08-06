@@ -82,7 +82,10 @@ roles.categoricals = ["bedrock", "country"]
 
 String columns are factorized at load time into their own embedding tables, and the
 vocabulary travels in the checkpoint so raw CSVs score correctly at inference.
-Unknown entities are counted and reported rather than silently dropped.
+An entity the model never saw is encoded on the reserved unknown row rather than
+dropped, so the sample still gets a prediction. How novel the sample is travels
+with it: the share of its abundance coming from entities outside the training
+vocabulary, and how many such entities it holds, are both encoder inputs.
 
 ## Reading the model after it trains
 
@@ -116,8 +119,10 @@ Labelled samples are usually the scarce part. Self-supervised pretext tasks trai
 encoder on composition alone, then hand the weights to a supervised fit:
 
 ```python
+# `continuous` is the encoder's continuous block: coordinates, covariates, the
+# unknown-mass columns, and the hash embedding in hash mode, concatenated.
 jepa = rc.JEPAPretrainer(model, rc.PretrainConfig())    # joint-embedding prediction
-jepa.pretrain(dataset.covariates,
+jepa.pretrain(continuous,
               genus_ids=dataset.genus_ids,
               family_ids=dataset.family_ids,
               species_ids=dataset.species_ids)
@@ -212,11 +217,15 @@ cd resolve/src/core/python
 pip install .
 ```
 
-R, once the C ABI library is built and pointed at by `RESOLVE_C_HOME`:
+R installs without a backend and fetches one afterwards:
 
 ```r
 install.packages("pak")
 pak::pak("gcol33/resolve/r")
+
+library(resolve)
+resolve.install_backend()                  # CPU
+resolve.install_backend(variant = "cuda")
 ```
 
 ## Documentation

@@ -16,7 +16,9 @@ RESOLVE treats compositional data as *contextual signal* — a rich, structured 
 - **Multi-target prediction**: Single shared encoder, multiple task heads
 - **Phased training**: MAE → SMAPE → band accuracy optimization
 - **Semantic role mapping**: Flexible column naming, strict structure
-- **Unknown species tracking**: Detects and quantifies novel species at inference time
+- **Categorical covariates**: String columns factorized on load into their own embedding tables
+- **Vocabularies in the checkpoint**: New data is encoded against the codes the model trained on
+- **Unknown species tracking**: Each sample carries the share of its abundance from species outside the training vocabulary, and how many there are, as encoder inputs
 - **Abundance normalization**: Raw, relative (per-plot), or log-scaled modes
 - **CPU-first**: Works without GPU, scales with CUDA when available
 
@@ -42,30 +44,32 @@ Covariates ───────┘
 === "Python"
 
     ```python
-    import resolve
+    import resolve_core as rc
 
-    # Load data with semantic role mapping
-    dataset = resolve.ResolveDataset.from_csv(
-        header="plots.csv",
-        species="species.csv",
-        roles={
-            "plot_id": "PlotObservationID",
-            "species_id": "Species",
-            "species_plot_id": "PlotObservationID",
-        },
-        targets={
-            "area": {"column": "Area", "task": "regression", "transform": "log1p"},
-            "habitat": {"column": "Habitat", "task": "classification", "num_classes": 5},
-        },
+    # Map your column names onto RESOLVE's semantic roles
+    roles = rc.RoleMapping()
+    roles.plot_id    = "PlotObservationID"
+    roles.species_id = "Species"
+    roles.abundance  = "Cover"
+
+    dataset = rc.ResolveDataset.from_csv(
+        "plots.csv",
+        "species.csv",
+        roles,
+        [rc.TargetSpec.regression("Area", rc.TransformType.Log1p),
+         rc.TargetSpec.classification("Habitat", 5)],
     )
 
-    # Train (model built automatically)
-    trainer = resolve.Trainer(dataset)
+    # Train
+    model   = rc.ResolveModel(dataset.schema, rc.ModelConfig())
+    trainer = rc.Trainer(model, rc.TrainConfig())
+    trainer.prepare_data(dataset, test_size=0.2, seed=42)
     trainer.fit()
     trainer.save("model.pt")
 
-    # Predict with confidence filtering
-    predictions = trainer.predict(new_dataset, confidence_threshold=0.8)
+    # Predict
+    predictor  = rc.Predictor.load("model.pt")
+    predictions = predictor.predict_dataset(new_dataset)
     ```
 
 === "R"
@@ -73,40 +77,42 @@ Covariates ───────┘
     ```r
     library(resolve)
 
-    # Create and fit encoder
-    encoder <- resolve.encoder(hashDim = 32L)
-    encoder$fit(species_data)
+    dataset <- resolve.dataset.csv(
+      header  = "plots.csv",
+      species = "species.csv",
+      roles   = list(plot_id = "PlotObservationID", species_id = "Species",
+                     abundance = "Cover"),
+      targets = list(
+        Area    = list(column = "Area", task = "regression", transform = "log1p"),
+        Habitat = list(column = "Habitat", task = "classification", num_classes = 5L)
+      )
+    )
 
-    # Configure and train
-    schema <- list(nPlots = 100, nSpecies = 50, ...)
-    model <- new(.resolve_module$ResolveModel, schema, model_config)
-    trainer <- new(.resolve_module$Trainer, model, train_config)
-
-    # Save and predict
+    trainer   <- resolve.train.dataset(dataset, maxEpochs = 200L)
     resolve.save(trainer, "model.pt")
+
+    predictor <- resolve.load("model.pt")
+    preds     <- resolve.predict.dataset(predictor, dataset)
     ```
 
 ## Installation
 
 === "Python"
 
-    ```bash
-    pip install resolve
-    ```
-
-    Or from source:
+    The engine and its bindings build from source with CMake and an installed
+    PyTorch:
 
     ```bash
     git clone https://github.com/gcol33/resolve.git
-    cd resolve
-    pip install -e .
+    cd resolve/src/core/python
+    pip install .
     ```
 
 === "R"
 
     ```r
-    # Install from GitHub (CRAN submission pending)
-    remotes::install_github("gcol33/resolve", subdir = "r")
+    install.packages("pak")
+    pak::pak("gcol33/resolve/r")
     ```
 
 ## License

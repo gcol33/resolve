@@ -1,24 +1,9 @@
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+# The repository root is not itself a Python distribution. The installable
+# Python package is resolve-core (src/core/python), the nanobind bindings over
+# the C++ engine; build it with `pip install ./src/core/python`.
+#
+# This file carries repo-level tool configuration only, so it does not spell out
+# a version and is not listed in tools/version.py.
 
-[project]
-name = "resolve"
-version = "0.7.3"
-description = "RESOLVE: Predict outcomes from compositional data via learned representations"
-requires-python = ">=3.10"
-dependencies = [
-    "torch>=2.0",
-    "numpy",
-    "polars>=1.0",
-    "scikit-learn",
-]
-
-[project.scripts]
-resolve = "resolve.cli:main"
-
-[project.optional-dependencies]
-cuda = ["triton"]
-
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.pytest.ini_options]
+testpaths = ["tests/core"]

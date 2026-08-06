@@ -21,8 +21,18 @@ public:
     );
 
     // Constructor that also carries the categorical vocabulary captured at
-    // training time. Used by `load()`; lets `predict(ResolveDataset)` decode
-    // new CSVs with the same codes the model was trained against.
+    // training time. Used by `load()`.
+    //
+    // The vocabulary is the model's ID namespace, not a decoder applied to
+    // whatever a dataset happens to carry: `predict(ResolveDataset)` consumes
+    // `dataset.categorical_ids()` (and the species / taxonomy IDs) as given,
+    // because a ResolveDataset retains only encoded codes, never the raw
+    // strings they came from. So this vocabulary is used to VALIDATE the
+    // dataset: predict() rejects one whose codes mean something else. Build the
+    // dataset in the model's namespace to begin with --
+    // `ResolveDataset::from_csv_with_vocabs(..., predictor.external_vocabs(), ...)`
+    // (or `from_csv_with_schema(..., predictor.schema(), ...)` when the model
+    // has no categorical covariates). See gcol33/resolve#102.
     Predictor(
         ResolveModel model,
         Scalers scalers,
@@ -43,6 +53,25 @@ public:
     );
 
     // Predict on a ResolveDataset (preferred API).
+    //
+    // The dataset must have been built in the model's integer-code namespace,
+    // i.e. with the training vocabularies. Every non-hash encoder indexes an
+    // embedding table with a code that is a function of the file the vocab was
+    // fitted on (the species vocab is frequency-ranked; the taxonomy and
+    // categorical vocabs are functions of their value sets), so a dataset built
+    // with a plain `from_csv` on new data carries codes that point at other
+    // species' embedding rows. That produces wrong predictions with no error,
+    // which is why this rejects such a dataset instead of scoring it:
+    //
+    //     auto ds = ResolveDataset::from_csv_with_vocabs(
+    //         header, species, roles, targets, predictor.external_vocabs(),
+    //         dataset_config_from_checkpoint(predictor.schema(),
+    //                                        predictor.model()->config()));
+    //
+    // A vocabulary mismatch throws std::runtime_error naming the offending
+    // vocabulary. A checkpoint written before gcol33/resolve#102 carries only
+    // the vocabulary SIZES, so only those can be compared; `load()` warns once
+    // in that case.
     //
     // `batch_size` controls how the forward pass is chunked along dim 0:
     //   -1  : single forward pass over the whole dataset (legacy behavior).
@@ -118,7 +147,48 @@ public:
         return categorical_vocab_;
     }
 
+    // The model's schema, i.e. everything the checkpoint recorded about the
+    // data it was trained on -- including the fitted species / genus / family
+    // vocabularies and the loader knobs needed to rebuild a matching
+    // DatasetConfig (issue #102). Pass to
+    // ResolveDataset::from_csv_with_schema / from_species_csv_with_schema to
+    // build an inference dataset in this model's ID namespace.
+    // Not noexcept: the module holder's operator-> checks for an empty holder,
+    // so dereferencing model_ is a throwing operation.
+    [[nodiscard]] const ResolveSchema& schema() const {
+        return model_->schema();
+    }
+
+    // Ordered species vocabulary the model was trained with: element i is the
+    // name that encodes to code i, index 0 the reserved "<UNK>" slot. Empty for
+    // a checkpoint written before issue #102 (which stored only the size).
+    [[nodiscard]] const std::vector<std::string>& species_vocab() const {
+        return schema().species_vocab;
+    }
+    // Ordered genus / family vocabularies, same layout as species_vocab().
+    [[nodiscard]] const std::vector<std::string>& genus_vocab() const {
+        return schema().genus_vocab;
+    }
+    [[nodiscard]] const std::vector<std::string>& family_vocab() const {
+        return schema().family_vocab;
+    }
+
+    // Every training vocabulary in the form the ResolveDataset *_with_vocabs
+    // loaders accept: the schema's species / taxonomy vocabularies plus the
+    // categorical maps, which live on the Predictor rather than the schema.
+    // This is the complete carrier -- prefer it over schema() when the model
+    // has categorical covariates.
+    [[nodiscard]] ExternalVocabs external_vocabs() const;
+
 private:
+    // Throw when `dataset` was not built in this model's integer-code
+    // namespace. Compares the full ordered vocabularies when the checkpoint
+    // carries them, otherwise the vocabulary sizes alone (the pre-issue-#102
+    // fallback). Species IDs are only checked for encoders that actually index
+    // a species embedding table (hash mode derives its features from the
+    // species STRING, so its codes are irrelevant).
+    void validate_dataset_vocabs(const ResolveDataset& dataset) const;
+
     ResolveModel model_;
     Scalers scalers_;
     CategoricalVocab categorical_vocab_;

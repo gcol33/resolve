@@ -1,4 +1,7 @@
 # Tests for resolve core library
+#
+# Every test/benchmark target links resolve_warnings (resolve_warnings.cmake),
+# so the test sources compile under the same flags as the engine.
 
 # Download Catch2
 include(FetchContent)
@@ -8,6 +11,24 @@ FetchContent_Declare(
     GIT_TAG v3.5.2
 )
 FetchContent_MakeAvailable(Catch2)
+
+# Catch2 builds with its own flags, but its headers reach the test translation
+# units through a FetchContent target, which is not IMPORTED, so CMake does not
+# mark them SYSTEM the way it does libtorch's. Promote them: RESOLVE's warning
+# flags are for RESOLVE's code, and with -Werror on the Linux CI job a future
+# Catch2 bump that ships a header diagnostic would otherwise fail the build.
+# Diagnostics raised inside a TEST_CASE / REQUIRE expansion still land on our
+# source line and are still reported.
+foreach(RESOLVE_CATCH_TARGET Catch2 Catch2WithMain)
+    if(TARGET ${RESOLVE_CATCH_TARGET})
+        get_target_property(RESOLVE_CATCH_INCS ${RESOLVE_CATCH_TARGET}
+            INTERFACE_INCLUDE_DIRECTORIES)
+        if(RESOLVE_CATCH_INCS)
+            set_property(TARGET ${RESOLVE_CATCH_TARGET} APPEND PROPERTY
+                INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${RESOLVE_CATCH_INCS})
+        endif()
+    endif()
+endforeach()
 
 # Test executable
 add_executable(resolve_tests
@@ -36,6 +57,13 @@ add_executable(resolve_tests
     test_review_fixes.cpp
     test_review_fixes_round2.cpp
     test_review_fixes_round3.cpp
+    test_entmax.cpp
+    test_pretrain_seed.cpp
+    test_checkpoint_vocab.cpp
+    test_effective_batch.cpp
+    test_config_registry.cpp
+    test_unknown_tracking.cpp
+    test_env_utils.cpp
 )
 
 # Add CUDA library directory if CUDA is available
@@ -52,6 +80,7 @@ target_link_libraries(resolve_tests
         resolve_core
         ${TORCH_LIBRARIES}
         Catch2::Catch2WithMain
+        resolve_warnings
 )
 
 # Register test without discovery (avoids needing to run the binary at build time)
@@ -69,6 +98,7 @@ target_link_libraries(resolve_crash_smoke
     PRIVATE
         resolve_core
         ${TORCH_LIBRARIES}
+        resolve_warnings
 )
 
 # Benchmark executable (standalone, no Catch2)
@@ -89,6 +119,7 @@ target_link_libraries(resolve_benchmark
     PRIVATE
         resolve_core
         ${TORCH_LIBRARIES}
+        resolve_warnings
 )
 
 # Catch2 benchmarks (with statistical analysis)
@@ -110,4 +141,5 @@ target_link_libraries(resolve_benchmark_catch2
         resolve_core
         ${TORCH_LIBRARIES}
         Catch2::Catch2WithMain
+        resolve_warnings
 )

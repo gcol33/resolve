@@ -19,6 +19,9 @@ void register_pretraining(nb::module_& m) {
         .def_rw("pretrain_lr", &resolve::PretrainConfig::pretrain_lr)
         .def_rw("pretrain_weight_decay", &resolve::PretrainConfig::pretrain_weight_decay)
         .def_rw("batch_size", &resolve::PretrainConfig::batch_size)
+        // Seeds the dedicated pretraining RNG: a fixed value reproduces the run
+        // and leaves the global torch RNG stream untouched (issue #107).
+        .def_rw("seed", &resolve::PretrainConfig::seed)
         .def_rw("ema_decay", &resolve::PretrainConfig::ema_decay)
         .def_rw("ema_decay_end", &resolve::PretrainConfig::ema_decay_end)
         .def_rw("predictor_hidden_dim", &resolve::PretrainConfig::predictor_hidden_dim)
@@ -98,7 +101,11 @@ void register_pretraining(nb::module_& m) {
         .def_rw("kl_anneal_epochs", &resolve::VAEConfig::kl_anneal_epochs)
         .def_rw("pretrain_epochs", &resolve::VAEConfig::pretrain_epochs)
         .def_rw("pretrain_lr", &resolve::VAEConfig::pretrain_lr)
-        .def_rw("batch_size", &resolve::VAEConfig::batch_size);
+        .def_rw("pretrain_weight_decay", &resolve::VAEConfig::pretrain_weight_decay)
+        .def_rw("batch_size", &resolve::VAEConfig::batch_size)
+        // Seeds the shuffle and the reparameterization noise; see
+        // PretrainConfig.seed.
+        .def_rw("seed", &resolve::VAEConfig::seed);
 
     // VAEPretrainResult
     nb::class_<resolve::VAEPretrainResult>(m, "VAEPretrainResult")

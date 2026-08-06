@@ -16,9 +16,9 @@ namespace resolve {
 // is_na_string
 // =============================================================================
 //
-// Mirrors the Python POC's src/resolve/data/dataset.py::_NA_STRINGS, matched
-// case-insensitively. Single source of truth for NA/missing-cell detection
-// across the whole engine: the dataset target/covariate loaders and the
+// Matches the conventional NA spellings, case-insensitively. Single source of
+// truth for NA/missing-cell detection across the whole engine: the dataset
+// target/covariate loaders and the
 // categorical factorizer both call this, so the same raw cell is classified
 // identically regardless of the column's role (previously the target path used
 // a case-insensitive matcher and the categorical path an exact set, so e.g.
@@ -165,6 +165,15 @@ const std::unordered_map<std::string, int64_t>& CategoricalVocab::column_map(
             "' has not been fit");
     }
     return it->second;
+}
+
+void CategoricalVocab::set_column_map(
+    const std::string& column_name,
+    const std::unordered_map<std::string, int64_t>& map) {
+    if (maps_.find(column_name) == maps_.end()) {
+        column_order_.push_back(column_name);
+    }
+    maps_[column_name] = map;
 }
 
 // =============================================================================

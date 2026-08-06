@@ -433,7 +433,6 @@ TEST_CASE("End-to-End Training Benchmark Production", "[benchmark][training-prod
     // Real dataset: ~1.9M plots, but we use 100K for benchmark
     const int64_t n_plots = 100000;
     const int32_t hash_dim = 1024;
-    const int64_t n_continuous = 2 + hash_dim + 1;
 
     // Create schema matching paper configuration
     ResolveSchema schema;
@@ -557,7 +556,6 @@ TEST_CASE("End-to-End Training Benchmark Large", "[benchmark][training-large]") 
     // Larger synthetic dataset for training benchmark
     const int64_t n_plots = 10000;
     const int32_t hash_dim = 512;
-    const int64_t n_continuous = 2 + hash_dim + 1;  // coords + hash + unknown_frac
 
     // Create schema
     ResolveSchema schema;
@@ -684,7 +682,6 @@ TEST_CASE("End-to-End Training Benchmark", "[benchmark][training]") {
     // Small synthetic dataset for training benchmark
     const int64_t n_plots = 500;
     const int32_t hash_dim = 128;
-    const int64_t n_continuous = 2 + hash_dim + 1;  // coords + hash + unknown_frac
 
     // Create schema
     ResolveSchema schema;

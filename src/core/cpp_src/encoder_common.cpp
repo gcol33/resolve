@@ -1,8 +1,7 @@
 #include "resolve/encoder.hpp"
+#include "resolve/env.hpp"
 #include <cmath>
 #include <stdexcept>
-#include <cstdlib>
-#include <cstring>
 #include <cstdio>
 #include <ATen/autocast_mode.h>
 
@@ -13,14 +12,15 @@ namespace resolve {
 // =============================================================================
 
 namespace {
+#ifdef RESOLVE_HAS_CUDA
 // Read RESOLVE_FP32_NORM once. Default enabled; only the literal "0" disables.
+// Guarded with its only caller in run_norm_fp32: the fp32 branch exists for
+// CUDA autocast, so a CPU build has no use for the switch.
 bool fp32_norm_enabled() {
-    static const bool enabled = [] {
-        const char* v = std::getenv("RESOLVE_FP32_NORM");
-        return !(v != nullptr && std::strcmp(v, "0") == 0);
-    }();
+    static const bool enabled = !env_flag_disabled("RESOLVE_FP32_NORM");
     return enabled;
 }
+#endif
 
 // GroupNorm needs a group count that divides the channel dim. Shrink the
 // requested count until it does (down to 1). Single source for both norm
@@ -42,10 +42,7 @@ torch::Tensor run_norm_fp32(
     if (fp32_norm_enabled() && at::autocast::is_autocast_enabled(at::kCUDA)) {
         // One-time confirmation that the fp32 branch is actually reached under a
         // live autocast region (diagnostic for gcol33/resolve#21).
-        static const bool amp_dbg = [] {
-            const char* v = std::getenv("RESOLVE_AMP_DEBUG");
-            return v != nullptr && std::strcmp(v, "0") != 0;
-        }();
+        static const bool amp_dbg = env_flag_enabled("RESOLVE_AMP_DEBUG");
         static bool announced = false;
         if (amp_dbg && !announced) {
             announced = true;
@@ -549,7 +546,7 @@ torch::Tensor ParallelBranchImpl::forward(torch::Tensor x) {
 // Branch Attention Implementation
 // =============================================================================
 
-BranchAttentionImpl::BranchAttentionImpl(int64_t branch_dim, int n_branches, int n_heads)
+BranchAttentionImpl::BranchAttentionImpl(int64_t branch_dim, int n_heads)
     : n_heads_(n_heads)
 {
     // Ensure head_dim is valid
@@ -603,8 +600,7 @@ torch::Tensor BranchAttentionImpl::forward(torch::Tensor branch_outputs) {
 // Gated Aggregation Implementation
 // =============================================================================
 
-GatedAggregationImpl::GatedAggregationImpl(int64_t input_dim, int n_branches, int64_t branch_dim)
-    : n_branches_(n_branches)
+GatedAggregationImpl::GatedAggregationImpl(int64_t input_dim, int n_branches)
 {
     // Project input to gate weights for each branch
     gate_proj_ = register_module("gate_proj", torch::nn::Linear(input_dim, n_branches));
@@ -688,10 +684,10 @@ ParallelBlockImpl::ParallelBlockImpl(
     // Create aggregation-specific modules
     if (aggregation_ == ParallelAggregation::Attention) {
         attention_ = register_module("attention",
-            BranchAttention(first_branch_dim, static_cast<int>(branches_.size()), config.attention_heads));
+            BranchAttention(first_branch_dim, config.attention_heads));
     } else if (aggregation_ == ParallelAggregation::Gated) {
         gated_ = register_module("gated",
-            GatedAggregation(input_dim, static_cast<int>(branches_.size()), first_branch_dim));
+            GatedAggregation(input_dim, static_cast<int>(branches_.size())));
     }
 
     // Residual projection if needed

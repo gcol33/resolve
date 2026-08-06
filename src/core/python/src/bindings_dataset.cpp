@@ -32,8 +32,18 @@ void register_dataset(nb::module_& m) {
                     nb::arg("targets"),
                     nb::arg("config") = resolve::DatasetConfig{},
                     "Load dataset from header CSV and species CSV files")
+        // from_csv_with_schema is overloaded on the vocabulary source, so each
+        // overload needs an explicit function-pointer cast (a bare &member is
+        // ambiguous). nanobind dispatches on the argument type, keeping one
+        // Python-level verb.
         .def_static("from_csv_with_schema",
-                    &resolve::ResolveDataset::from_csv_with_schema,
+                    static_cast<resolve::ResolveDataset (*)(
+                        const std::string&, const std::string&,
+                        const resolve::RoleMapping&,
+                        const std::vector<resolve::TargetSpec>&,
+                        const resolve::ResolveDataset&,
+                        const resolve::DatasetConfig&)>(
+                        &resolve::ResolveDataset::from_csv_with_schema),
                     nb::arg("header_path"),
                     nb::arg("species_path"),
                     nb::arg("roles"),
@@ -46,12 +56,61 @@ void register_dataset(nb::module_& m) {
                     "dataset-out, sample efficiency, transfer) where the test "
                     "set must be encoded against the training set's vocab so "
                     "model lookup tables are indexed correctly.")
+        .def_static("from_csv_with_schema",
+                    static_cast<resolve::ResolveDataset (*)(
+                        const std::string&, const std::string&,
+                        const resolve::RoleMapping&,
+                        const std::vector<resolve::TargetSpec>&,
+                        const resolve::ResolveSchema&,
+                        const resolve::DatasetConfig&)>(
+                        &resolve::ResolveDataset::from_csv_with_schema),
+                    nb::arg("header_path"),
+                    nb::arg("species_path"),
+                    nb::arg("roles"),
+                    nb::arg("targets"),
+                    nb::arg("schema"),
+                    nb::arg("config") = resolve::DatasetConfig{},
+                    "Load dataset reusing the vocabularies a CHECKPOINT's schema "
+                    "carries (issue #102), so the training CSVs need not exist. "
+                    "Raises when the schema has no species vocabulary (a "
+                    "pre-#102 checkpoint). Pass predictor.external_vocabs to "
+                    "from_csv_with_vocabs instead when the model has "
+                    "categorical covariates.")
+        .def_static("from_csv_with_vocabs",
+                    &resolve::ResolveDataset::from_csv_with_vocabs,
+                    nb::arg("header_path"),
+                    nb::arg("species_path"),
+                    nb::arg("roles"),
+                    nb::arg("targets"),
+                    nb::arg("vocabs"),
+                    nb::arg("config") = resolve::DatasetConfig{},
+                    "Load dataset with every vocabulary supplied explicitly "
+                    "(ExternalVocabs). The complete form: use with "
+                    "predictor.external_vocabs, whose categorical maps live on "
+                    "the Predictor rather than the schema.")
         .def_static("from_species_csv", &resolve::ResolveDataset::from_species_csv,
                     nb::arg("species_path"),
                     nb::arg("roles"),
                     nb::arg("targets"),
                     nb::arg("config") = resolve::DatasetConfig{},
                     "Load dataset from a single species CSV file")
+        .def_static("from_species_csv_with_schema",
+                    &resolve::ResolveDataset::from_species_csv_with_schema,
+                    nb::arg("species_path"),
+                    nb::arg("roles"),
+                    nb::arg("targets"),
+                    nb::arg("schema"),
+                    nb::arg("config") = resolve::DatasetConfig{},
+                    "Single-table counterpart of from_csv_with_schema: reuse a "
+                    "checkpoint's vocabularies when scoring a species-only CSV.")
+        .def_static("from_species_csv_with_vocabs",
+                    &resolve::ResolveDataset::from_species_csv_with_vocabs,
+                    nb::arg("species_path"),
+                    nb::arg("roles"),
+                    nb::arg("targets"),
+                    nb::arg("vocabs"),
+                    nb::arg("config") = resolve::DatasetConfig{},
+                    "Single-table counterpart of from_csv_with_vocabs.")
         // --- In-memory (DataFrame) loaders (issue #22) ---
         // Low-level column entry points: each frame arrives as (names, columns)
         // with every cell already a string (column-major), so the result is
@@ -142,6 +201,47 @@ void register_dataset(nb::module_& m) {
                     nb::call_guard<nb::gil_scoped_release>(),
                     "In-memory analog of from_csv_with_schema: reuse the "
                     "schema_source vocabularies / class mappings.")
+        .def_static("from_columns_with_vocabs",
+                    [](std::vector<std::string> header_names,
+                       std::vector<std::vector<std::string>> header_columns,
+                       std::vector<std::string> species_names,
+                       std::vector<std::vector<std::string>> species_columns,
+                       const resolve::RoleMapping& roles,
+                       const std::vector<resolve::TargetSpec>& targets,
+                       const resolve::ExternalVocabs& vocabs,
+                       const resolve::DatasetConfig& config) {
+                        resolve::ColumnTable header(std::move(header_names),
+                                                    std::move(header_columns));
+                        resolve::ColumnTable species(std::move(species_names),
+                                                     std::move(species_columns));
+                        return resolve::ResolveDataset::from_dataframe_with_vocabs(
+                            header, species, roles, targets, vocabs, config);
+                    },
+                    nb::arg("header_names"), nb::arg("header_columns"),
+                    nb::arg("species_names"), nb::arg("species_columns"),
+                    nb::arg("roles"), nb::arg("targets"),
+                    nb::arg("vocabs"),
+                    nb::arg("config") = resolve::DatasetConfig{},
+                    nb::call_guard<nb::gil_scoped_release>(),
+                    "In-memory analog of from_csv_with_vocabs (issue #102).")
+        .def_static("from_species_columns_with_vocabs",
+                    [](std::vector<std::string> species_names,
+                       std::vector<std::vector<std::string>> species_columns,
+                       const resolve::RoleMapping& roles,
+                       const std::vector<resolve::TargetSpec>& targets,
+                       const resolve::ExternalVocabs& vocabs,
+                       const resolve::DatasetConfig& config) {
+                        resolve::ColumnTable species(std::move(species_names),
+                                                     std::move(species_columns));
+                        return resolve::ResolveDataset::from_species_dataframe_with_vocabs(
+                            species, roles, targets, vocabs, config);
+                    },
+                    nb::arg("species_names"), nb::arg("species_columns"),
+                    nb::arg("roles"), nb::arg("targets"),
+                    nb::arg("vocabs"),
+                    nb::arg("config") = resolve::DatasetConfig{},
+                    nb::call_guard<nb::gil_scoped_release>(),
+                    "In-memory analog of from_species_csv_with_vocabs (issue #102).")
         // Tensor accessors must be wrapped via THPVariable_Wrap; nanobind
         // has no built-in caster for at::Tensor (would produce
         // "Unable to convert function return value to a Python type").
@@ -238,7 +338,12 @@ void register_dataset(nb::module_& m) {
         })
         .def_prop_ro("taxonomy_vocab", [](const resolve::ResolveDataset& self) -> const resolve::TaxonomyVocab& {
             return self.taxonomy_vocab();
-        });
+        })
+        // Every vocabulary this dataset fitted, in the carrier the
+        // *_with_vocabs loaders take (issue #102). Equivalent to passing the
+        // dataset itself to from_csv_with_schema, but usable after its source
+        // files are gone.
+        .def("external_vocabs", &resolve::ResolveDataset::external_vocabs);
 
     // Species Encoding helpers
     nb::class_<resolve::TaxonomyVocab>(m, "TaxonomyVocab")
@@ -259,17 +364,6 @@ void register_dataset(nb::module_& m) {
         .def_rw("abundance", &resolve::SpeciesRecord::abundance)
         .def_rw("plot_id", &resolve::SpeciesRecord::plot_id);
 
-    nb::class_<resolve::EncodedSpecies>(m, "EncodedSpecies")
-        .def(nb::init<>())
-        .def_ro("hash_embedding", &resolve::EncodedSpecies::hash_embedding)
-        .def_ro("genus_ids", &resolve::EncodedSpecies::genus_ids)
-        .def_ro("family_ids", &resolve::EncodedSpecies::family_ids)
-        .def_ro("unknown_fraction", &resolve::EncodedSpecies::unknown_fraction)
-        .def_ro("unknown_count", &resolve::EncodedSpecies::unknown_count)
-        .def_ro("species_vector", &resolve::EncodedSpecies::species_vector)
-        .def_ro("species_ids", &resolve::EncodedSpecies::species_ids)
-        .def_ro("plot_ids", &resolve::EncodedSpecies::plot_ids);
-
     nb::class_<resolve::SpeciesVocab>(m, "SpeciesVocab")
         .def(nb::init<>())
         .def_static("from_records", &resolve::SpeciesVocab::from_records,
@@ -278,6 +372,20 @@ void register_dataset(nb::module_& m) {
         .def("size", &resolve::SpeciesVocab::size)
         .def("empty", &resolve::SpeciesVocab::empty)
         .def_prop_ro("species_to_id", &resolve::SpeciesVocab::species_to_id);
+
+    // Per-plot novelty of an assemblage against a fitted vocabulary. Same
+    // definition the dataset's unknown_fraction / unknown_count columns use.
+    nb::class_<resolve::UnknownSpeciesStats>(m, "UnknownSpeciesStats")
+        .def(nb::init<>())
+        .def_ro("fraction", &resolve::UnknownSpeciesStats::fraction)
+        .def_ro("count", &resolve::UnknownSpeciesStats::count);
+
+    m.def("compute_unknown_species_stats", &resolve::compute_unknown_species_stats,
+          nb::arg("records"), nb::arg("plot_ids"), nb::arg("vocab"),
+          "Per-plot unknown-species fraction (abundance-weighted) and count, "
+          "measured against a fitted SpeciesVocab. Non-zero only where the vocab "
+          "was fitted on other data; a vocab fitted on these records covers every "
+          "name in them.");
 
     nb::class_<resolve::RankPoolEncodedData>(m, "RankPoolEncodedData")
         .def(nb::init<>())
@@ -288,6 +396,7 @@ void register_dataset(nb::module_& m) {
         .def_ro("mask", &resolve::RankPoolEncodedData::mask)
         .def_ro("has_cover", &resolve::RankPoolEncodedData::has_cover)
         .def_ro("unknown_fraction", &resolve::RankPoolEncodedData::unknown_fraction)
+        .def_ro("unknown_count", &resolve::RankPoolEncodedData::unknown_count)
         .def_ro("n_species_vocab", &resolve::RankPoolEncodedData::n_species_vocab)
         .def_ro("n_genera_vocab", &resolve::RankPoolEncodedData::n_genera_vocab)
         .def_ro("n_families_vocab", &resolve::RankPoolEncodedData::n_families_vocab);
@@ -314,6 +423,7 @@ void register_dataset(nb::module_& m) {
         .def_ro("genus_ids", &resolve::EmbeddingEncodedData::genus_ids)
         .def_ro("family_ids", &resolve::EmbeddingEncodedData::family_ids)
         .def_ro("unknown_fraction", &resolve::EmbeddingEncodedData::unknown_fraction)
+        .def_ro("unknown_count", &resolve::EmbeddingEncodedData::unknown_count)
         .def_ro("n_species_vocab", &resolve::EmbeddingEncodedData::n_species_vocab)
         .def_ro("n_genera_vocab", &resolve::EmbeddingEncodedData::n_genera_vocab)
         .def_ro("n_families_vocab", &resolve::EmbeddingEncodedData::n_families_vocab);
@@ -329,4 +439,30 @@ void register_dataset(nb::module_& m) {
         .def("n_species_vocab", &resolve::EmbeddingEncoder::n_species_vocab)
         .def("n_genera_vocab", &resolve::EmbeddingEncoder::n_genera_vocab)
         .def("n_families_vocab", &resolve::EmbeddingEncoder::n_families_vocab);
+
+    // Vocabularies fitted at training time, in the form the ResolveDataset
+    // *_with_vocabs loaders accept (issue #102). Get one from
+    // `predictor.external_vocabs` (complete, including the categorical maps) or
+    // `dataset.external_vocabs()`. Registered here, after the TaxonomyVocab /
+    // CategoricalVocab classes it holds.
+    nb::class_<resolve::ExternalVocabs>(m, "ExternalVocabs")
+        .def(nb::init<>())
+        .def_rw("species_vocab", &resolve::ExternalVocabs::species_vocab)
+        .def_rw("taxonomy", &resolve::ExternalVocabs::taxonomy)
+        .def_rw("categorical", &resolve::ExternalVocabs::categorical)
+        .def_rw("targets", &resolve::ExternalVocabs::targets);
+
+    m.def("external_vocabs_from_schema", &resolve::external_vocabs_from_schema,
+          nb::arg("schema"),
+          "Rebuild the vocabularies a checkpoint's schema carries. The "
+          "categorical string -> code maps are not on the schema; take them "
+          "from Predictor.categorical_vocab (or use Predictor.external_vocabs, "
+          "which folds them in).");
+
+    m.def("dataset_config_from_checkpoint", &resolve::dataset_config_from_checkpoint,
+          nb::arg("schema"), nb::arg("model_config"),
+          "Reassemble the loading-side DatasetConfig a checkpoint was built "
+          "with. species_encoding / hash_dim / top_k come from the ModelConfig "
+          "(they size the model); everything else the loader consumed comes "
+          "from the schema. use_cuda_hash is deliberately not restored.");
 }

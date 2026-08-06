@@ -39,6 +39,10 @@ set(CAFFE2_USE_CUDA ${USE_CUDA})
 # cmake -DTorch_DIR=/path/to/libtorch/share/cmake/Torch ..
 find_package(Torch REQUIRED)
 
+# Warning flags for RESOLVE's own targets, as the INTERFACE library
+# resolve_warnings. Shared with the Python extension build so both agree.
+include(${CMAKE_CURRENT_SOURCE_DIR}/resolve_warnings.cmake)
+
 # Core library sources -- single source of truth shared with the Python
 # extension build (src/core/python/CMakeLists.txt) via resolve_core_sources.cmake
 # so the two lists never drift.
@@ -89,6 +93,7 @@ target_include_directories(resolve_core
 )
 
 target_link_libraries(resolve_core PUBLIC ${TORCH_LIBRARIES})
+target_link_libraries(resolve_core PRIVATE resolve_warnings)
 
 # OpenMP for fuzzy::FuzzyIndex::query_batch. Optional: serial fallback if absent.
 #
@@ -114,8 +119,11 @@ endif()
 # Ensure ABI compatibility (matches CMAKE_CXX_STANDARD above)
 set_property(TARGET resolve_core PROPERTY CXX_STANDARD 20)
 
-# Export for bindings
-install(TARGETS resolve_core
+# Export for bindings. resolve_warnings rides along because resolve_core links
+# it PRIVATE, which for a static library records it in the interface under
+# $<LINK_ONLY:>; an install(EXPORT) of this set would otherwise fail on a
+# target that is not part of it.
+install(TARGETS resolve_core resolve_warnings
     EXPORT resolve_core-targets
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib
@@ -136,7 +144,7 @@ install(DIRECTORY include/resolve DESTINATION include)
 option(BUILD_R_CAPI "Build the resolve_c C ABI shared library" ON)
 if(BUILD_R_CAPI)
     add_library(resolve_c SHARED cpp_src/resolve_capi.cpp)
-    target_link_libraries(resolve_c PRIVATE resolve_core ${TORCH_LIBRARIES})
+    target_link_libraries(resolve_c PRIVATE resolve_core ${TORCH_LIBRARIES} resolve_warnings)
     target_include_directories(resolve_c PRIVATE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     set_property(TARGET resolve_c PROPERTY CXX_STANDARD 20)

@@ -1,52 +1,154 @@
 // RESOLVE CLI - Train command implementation
+//
+// Reads its values from the ParsedArgs produced by the `train` flag table in
+// cli_spec.hpp. Every DatasetConfig / ModelConfig / TrainConfig knob the CLI
+// exposes is set here; the flag names below are the ones that table declares,
+// and reading a name it does not declare throws rather than silently returning
+// a default.
 
+#include <cstdint>
 #include <iostream>
-#include <fstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
-#include <optional>
 
 #include "resolve/resolve.hpp"
 
-int train_command(
-    const std::string& header_path,
-    const std::string& species_path,
-    const std::string& output_path,
-    const std::string& plot_id_col,
-    const std::string& species_id_col,
-    const std::optional<std::string>& abundance_col,
-    const std::optional<std::string>& lon_col,
-    const std::optional<std::string>& lat_col,
-    const std::optional<std::string>& genus_col,
-    const std::optional<std::string>& family_col,
-    const std::vector<std::string>& target_cols,
-    const std::vector<std::string>& target_types,
-    const std::string& species_encoding,
-    int hash_dim,
-    int top_k,
-    int batch_size,
-    int batch_size_floor,
-    int max_epochs,
-    int patience,
-    float lr,
-    float test_size,
-    bool use_cuda,
-    float vram_fraction,
-    const std::string& pool_weighting,
-    int d_model,
-    int n_heads,
-    int n_attention_layers,
-    const std::string& transformer_pooling
-) {
+#include "arg_parser.hpp"
+
+using resolve_cli::ArgError;
+using resolve_cli::ParsedArgs;
+
+namespace {
+
+// Parse one --target value: COL[:TYPE[:N][:log1p]].
+//
+//   area                        regression on `area`
+//   area:regression:log1p       regression on log1p(area), inverted on predict
+//   habitat:classification:9    9-class classification
+//
+// Fields after the type are order-free modifiers: an integer sets the class
+// count, "log1p" selects the target transform.
+resolve::TargetSpec parse_target_spec(const std::string& raw) {
+    std::vector<std::string> fields;
+    size_t start = 0;
+    while (start <= raw.size()) {
+        const size_t sep = raw.find(':', start);
+        if (sep == std::string::npos) {
+            fields.push_back(raw.substr(start));
+            break;
+        }
+        fields.push_back(raw.substr(start, sep - start));
+        start = sep + 1;
+    }
+
+    if (fields.empty() || fields[0].empty()) {
+        throw ArgError("--target expects COL[:TYPE[:N][:log1p]], got '" + raw + "'");
+    }
+
+    resolve::TargetSpec spec;
+    spec.column_name = fields[0];
+    spec.target_name = fields[0];
+
+    const std::string type_str = fields.size() > 1 && !fields[1].empty()
+                                     ? fields[1]
+                                     : std::string("regression");
+    try {
+        spec.task = resolve::parse_task_type(type_str);
+    } catch (const std::exception& e) {
+        throw ArgError(std::string("--target ") + raw + ": " + e.what());
+    }
+
+    bool saw_log1p = false;
+    bool saw_classes = false;
+    for (size_t i = 2; i < fields.size(); ++i) {
+        const std::string& modifier = fields[i];
+        if (modifier.empty()) continue;
+        if (modifier == "log1p") {
+            saw_log1p = true;
+            continue;
+        }
+        try {
+            size_t consumed = 0;
+            const int value = std::stoi(modifier, &consumed);
+            if (consumed != modifier.size()) throw std::invalid_argument("trailing");
+            spec.num_classes = value;
+            saw_classes = true;
+        } catch (const std::exception&) {
+            throw ArgError("--target " + raw + ": unknown modifier '" + modifier +
+                           "'. Expected a class count or 'log1p'.");
+        }
+    }
+
+    if (spec.task == resolve::TaskType::Classification) {
+        if (saw_log1p) {
+            throw ArgError("--target " + raw +
+                           ": log1p is a regression transform and cannot be "
+                           "combined with classification");
+        }
+        if (!saw_classes || spec.num_classes < 2) {
+            throw ArgError("--target " + raw +
+                           ": classification needs a class count >= 2, e.g. "
+                           "habitat:classification:9");
+        }
+    } else if (saw_log1p) {
+        spec.transform = resolve::TransformType::Log1p;
+    }
+
+    return spec;
+}
+
+void print_metric_tree(
+    const std::unordered_map<std::string, std::unordered_map<std::string, float>>& tree,
+    const std::string& indent) {
+    for (const auto& [target_name, metrics] : tree) {
+        std::cout << indent << target_name << ":" << std::endl;
+        for (const auto& [metric_name, value] : metrics) {
+            std::cout << indent << "  " << metric_name << ": " << value << std::endl;
+        }
+    }
+}
+
+void print_cross_validation(const resolve::CrossValidationResult& cv) {
+    std::cout << "\nCross-validation (" << cv.n_folds << " folds, "
+              << cv.total_time_seconds << "s):" << std::endl;
+    for (size_t fold = 0; fold < cv.fold_results.size(); ++fold) {
+        std::cout << "  Fold " << (fold + 1) << " (best epoch "
+                  << cv.fold_results[fold].best_epoch << "):" << std::endl;
+        print_metric_tree(cv.fold_results[fold].final_metrics, "    ");
+    }
+    std::cout << "  Across folds (mean +/- std):" << std::endl;
+    for (const auto& [target_name, metrics] : cv.mean_metrics) {
+        std::cout << "    " << target_name << ":" << std::endl;
+        for (const auto& [metric_name, mean] : metrics) {
+            float stddev = 0.0f;
+            auto target_it = cv.std_metrics.find(target_name);
+            if (target_it != cv.std_metrics.end()) {
+                auto metric_it = target_it->second.find(metric_name);
+                if (metric_it != target_it->second.end()) stddev = metric_it->second;
+            }
+            std::cout << "      " << metric_name << ": " << mean << " +/- "
+                      << stddev << std::endl;
+        }
+    }
+}
+
+}  // namespace
+
+int train_command(const ParsedArgs& args) {
     using namespace resolve;
 
-    // Validate required arguments
+    const std::string header_path = args.get("--header");
+    const std::string species_path = args.get("--species");
+    const std::string output_path = args.get("--output");
+
     if (species_path.empty()) {
         std::cerr << "Error: --species is required" << std::endl;
         return 1;
     }
 
-    if (target_cols.empty()) {
+    const auto target_specs = args.get_all("--target");
+    if (target_specs.empty()) {
         std::cerr << "Error: At least one --target is required" << std::endl;
         return 1;
     }
@@ -54,89 +156,103 @@ int train_command(
     std::cout << "RESOLVE Training" << std::endl;
     std::cout << "================" << std::endl;
 
-    // Set up role mapping
+    // ---------------------------------------------------------------- roles
     RoleMapping roles;
-    roles.plot_id = plot_id_col;
-    roles.species_id = species_id_col;
+    roles.plot_id = args.get("--plot-id");
+    roles.species_id = args.get("--species-id");
 
-    if (abundance_col) roles.abundance = *abundance_col;
-    if (lon_col) roles.longitude = *lon_col;
-    if (lat_col) roles.latitude = *lat_col;
-    if (genus_col) roles.genus = *genus_col;
-    if (family_col) roles.family = *family_col;
+    std::string role_value;
+    if (args.get_if_present("--abundance", role_value)) roles.abundance = role_value;
+    if (args.get_if_present("--lon", role_value)) roles.longitude = role_value;
+    if (args.get_if_present("--lat", role_value)) roles.latitude = role_value;
+    if (args.get_if_present("--genus", role_value)) roles.genus = role_value;
+    if (args.get_if_present("--family", role_value)) roles.family = role_value;
 
-    // Parse target specifications
-    std::vector<TargetSpec> targets;
-    for (size_t i = 0; i < target_cols.size(); ++i) {
-        TargetSpec spec;
-        spec.column_name = target_cols[i];
-        spec.target_name = target_cols[i];
+    roles.covariates = args.get_all("--covariate");
+    roles.categoricals = args.get_all("--categorical");
 
-        const std::string& type_str = target_types[i];
-        if (type_str.find("classification") != std::string::npos) {
-            spec.task = TaskType::Classification;
-            // Parse number of classes: classification:9
-            auto pos = type_str.find(':');
-            if (pos != std::string::npos) {
-                spec.num_classes = std::stoi(type_str.substr(pos + 1));
-            }
-        } else {
-            spec.task = TaskType::Regression;
-            if (type_str.find("log1p") != std::string::npos) {
-                spec.transform = TransformType::Log1p;
+    // Covariates and categoricals are header (plot-level) columns; the
+    // single-table species loader has no plot-level row to read them from.
+    if (header_path.empty() && (!roles.covariates.empty() || !roles.categoricals.empty())) {
+        std::cerr << "Error: --covariate / --categorical name plot-level columns "
+                     "and need --header" << std::endl;
+        return 1;
+    }
+    for (const auto& categorical : roles.categoricals) {
+        for (const auto& covariate : roles.covariates) {
+            if (categorical == covariate) {
+                std::cerr << "Error: column '" << categorical
+                          << "' is listed as both --covariate and --categorical"
+                          << std::endl;
+                return 1;
             }
         }
-
-        targets.push_back(spec);
-        std::cout << "Target: " << spec.column_name
-                  << " (" << (spec.task == TaskType::Classification ? "classification" : "regression") << ")"
-                  << std::endl;
+    }
+    if (!roles.covariates.empty()) {
+        std::cout << "Covariates: ";
+        for (size_t i = 0; i < roles.covariates.size(); ++i) {
+            if (i > 0) std::cout << ", ";
+            std::cout << roles.covariates[i];
+        }
+        std::cout << std::endl;
+    }
+    if (!roles.categoricals.empty()) {
+        std::cout << "Categoricals: ";
+        for (size_t i = 0; i < roles.categoricals.size(); ++i) {
+            if (i > 0) std::cout << ", ";
+            std::cout << roles.categoricals[i];
+        }
+        std::cout << std::endl;
     }
 
-    // Set up dataset configuration. Reject an unknown encoding rather than
-    // silently defaulting to hash (which would train the wrong model).
+    // -------------------------------------------------------------- targets
+    std::vector<TargetSpec> targets;
+    targets.reserve(target_specs.size());
+    for (const auto& raw : target_specs) {
+        TargetSpec spec = parse_target_spec(raw);
+        std::cout << "Target: " << spec.column_name << " ("
+                  << task_type_to_string(spec.task);
+        if (spec.task == TaskType::Classification) {
+            std::cout << ", " << spec.num_classes << " classes";
+        } else if (spec.transform == TransformType::Log1p) {
+            std::cout << ", log1p";
+        }
+        std::cout << ")" << std::endl;
+        targets.push_back(std::move(spec));
+    }
+
+    // ------------------------------------------------------- dataset config
     DatasetConfig dataset_config;
-    if (species_encoding == "hash") {
-        dataset_config.species_encoding = SpeciesEncodingMode::Hash;
-    } else if (species_encoding == "embed") {
-        dataset_config.species_encoding = SpeciesEncodingMode::Embed;
-    } else if (species_encoding == "sparse") {
-        dataset_config.species_encoding = SpeciesEncodingMode::Sparse;
-    } else if (species_encoding == "rank_pool") {
-        dataset_config.species_encoding = SpeciesEncodingMode::RankPool;
-    } else if (species_encoding == "transformer") {
-        dataset_config.species_encoding = SpeciesEncodingMode::Transformer;
-    } else {
-        std::cerr << "Error: unknown --encoding '" << species_encoding
-                  << "'. Valid values: hash, embed, sparse, rank_pool, transformer"
+    dataset_config.species_encoding =
+        parse_species_encoding_mode(args.get("--encoding"));
+    dataset_config.hash_dim = args.get_int("--hash-dim");
+    dataset_config.top_k = args.get_int("--top-k");
+    dataset_config.top_k_species = args.get_int("--top-k-species");
+    dataset_config.selection = parse_selection_mode(args.get("--selection"));
+    dataset_config.representation =
+        parse_representation_mode(args.get("--representation"));
+    dataset_config.normalization =
+        parse_normalization_mode(args.get("--normalization"));
+    dataset_config.aggregation = parse_aggregation_mode(args.get("--aggregation"));
+    dataset_config.use_taxonomy = !args.has("--no-taxonomy");
+    dataset_config.track_unknown_fraction = !args.has("--no-unknown-fraction");
+    dataset_config.track_unknown_count = args.has("--unknown-count");
+    dataset_config.use_cuda_hash = args.has("--use-cuda-hash");
+    dataset_config.pool_weighting = parse_pool_weighting(args.get("--pool-weighting"));
+    dataset_config.pool_species_cap = args.get_int("--pool-species-cap");
+
+    const bool is_pool_encoder =
+        dataset_config.species_encoding == SpeciesEncodingMode::RankPool ||
+        dataset_config.species_encoding == SpeciesEncodingMode::Transformer;
+
+    if (dataset_config.use_cuda_hash &&
+        dataset_config.species_encoding != SpeciesEncodingMode::Hash) {
+        std::cerr << "Error: --use-cuda-hash applies to --encoding hash only"
                   << std::endl;
         return 1;
     }
-    dataset_config.hash_dim = hash_dim;
-    dataset_config.top_k = top_k;
 
-    // Pool weighting applies to rank_pool / transformer encoders.
-    if (dataset_config.species_encoding == SpeciesEncodingMode::RankPool ||
-        dataset_config.species_encoding == SpeciesEncodingMode::Transformer) {
-        if (pool_weighting == "binary") {
-            dataset_config.pool_weighting = PoolWeighting::Binary;
-        } else if (pool_weighting == "abundance") {
-            dataset_config.pool_weighting = PoolWeighting::Abundance;
-        } else if (pool_weighting == "log1p") {
-            dataset_config.pool_weighting = PoolWeighting::Log1p;
-        } else if (pool_weighting == "norm") {
-            dataset_config.pool_weighting = PoolWeighting::Norm;
-        } else if (pool_weighting == "rank") {
-            dataset_config.pool_weighting = PoolWeighting::Rank;
-        } else {
-            std::cerr << "Error: unknown --pool-weighting '" << pool_weighting
-                      << "'. Valid values: binary, abundance, log1p, norm, rank"
-                      << std::endl;
-            return 1;
-        }
-    }
-
-    // Load dataset
+    // ----------------------------------------------------------------- load
     std::cout << "\nLoading data..." << std::endl;
     ResolveDataset dataset;
     try {
@@ -161,16 +277,59 @@ int train_command(
         std::cout << "Families: " << dataset.schema().n_families << std::endl;
     }
 
-    // Set up model configuration
+    // ---------------------------------------------------------------- seed
+    // Seed BEFORE the model is constructed: weight initialization draws from
+    // the global torch RNG, so an unseeded process gives two identical
+    // invocations different models. The same seed drives the train/test split,
+    // the per-epoch shuffle, and the cross-validation folds below.
+    const int seed = args.get_int("--seed");
+    torch::manual_seed(static_cast<uint64_t>(seed));
+
+    // --------------------------------------------------------- model config
     ModelConfig model_config;
     model_config.species_encoding = dataset_config.species_encoding;
-    model_config.hash_dim = hash_dim;
-    model_config.top_k = top_k;
+    model_config.hash_dim = dataset_config.hash_dim;
+    model_config.top_k = dataset_config.top_k;
+    model_config.top_k_species = dataset_config.top_k_species;
+    model_config.encoder_architecture =
+        parse_encoder_architecture(args.get("--encoder-architecture"));
+    model_config.dropout = args.get_float("--dropout");
+
+    // The taxonomy-slot count is a property of the tensors the loader actually
+    // built (top_k, doubled for top_bottom selection). Read it off the dataset
+    // rather than recomputing the rule here, so the model can never be sized
+    // against a different width than the data carries.
+    const torch::Tensor& genus_ids = dataset.genus_ids();
+    if (genus_ids.defined() && genus_ids.dim() == 2 && genus_ids.size(1) > 0) {
+        model_config.n_taxonomy_slots = static_cast<int>(genus_ids.size(1));
+    }
+
+    const auto hidden_dims = args.get_list("--hidden-dims");
+    if (hidden_dims.empty()) {
+        std::cerr << "Error: --hidden-dims needs at least one width, e.g. 256,128"
+                  << std::endl;
+        return 1;
+    }
+    model_config.hidden_dims.clear();
+    for (const auto& width : hidden_dims) {
+        try {
+            model_config.hidden_dims.push_back(std::stoll(width));
+        } catch (const std::exception&) {
+            std::cerr << "Error: --hidden-dims expects integers, got '" << width
+                      << "'" << std::endl;
+            return 1;
+        }
+    }
 
     // Transformer / rank_pool knobs. The transformer encoder rejects
     // pooling='cls' with 0 attention layers (the CLS vector would be constant),
     // so validate here for a clean CLI error instead of an exception.
+    if (is_pool_encoder) {
+        model_config.cover_dropout = args.get_float("--cover-dropout");
+    }
     if (dataset_config.species_encoding == SpeciesEncodingMode::Transformer) {
+        const std::string transformer_pooling = args.get("--transformer-pooling");
+        const int n_attention_layers = args.get_int("--n-attention-layers");
         if (transformer_pooling != "attention" && transformer_pooling != "cls") {
             std::cerr << "Error: unknown --transformer-pooling '" << transformer_pooling
                       << "'. Valid values: attention, cls" << std::endl;
@@ -181,26 +340,60 @@ int train_command(
                          "--n-attention-layers >= 1" << std::endl;
             return 1;
         }
-        model_config.d_model = d_model;
-        model_config.n_heads = n_heads;
+        model_config.d_model = args.get_int("--d-model");
+        model_config.n_heads = args.get_int("--n-heads");
         model_config.n_attention_layers = n_attention_layers;
+        model_config.transformer_ff_dim = args.get_int("--transformer-ff-dim");
         model_config.transformer_pooling = transformer_pooling;
+        model_config.transformer_dropout = args.get_float("--transformer-dropout");
     }
 
-    // Create model
     std::cout << "\nCreating model..." << std::endl;
     ResolveModel model(dataset.schema(), model_config);
 
-    // Set up training configuration
+    // --------------------------------------------------------- train config
     TrainConfig train_config;
-    train_config.batch_size = batch_size;
-    train_config.batch_size_floor = batch_size_floor;
-    train_config.max_epochs = max_epochs;
-    train_config.patience = patience;
-    train_config.lr = lr;
-    train_config.vram_fraction = vram_fraction;
+    const int requested_batch_size = args.get_int("--batch-size");
+    train_config.batch_size = requested_batch_size;
+    train_config.batch_size_floor = args.get_int("--batch-size-floor");
+    train_config.max_epochs = args.get_int("--max-epochs");
+    train_config.patience = args.get_int("--patience");
+    train_config.lr = args.get_float("--lr");
+    train_config.weight_decay = args.get_float("--weight-decay");
+    train_config.loss_config = parse_loss_config_mode(args.get("--loss-config"));
+    train_config.lr_scheduler = parse_lr_scheduler_type(args.get("--lr-scheduler"));
+    train_config.lr_step_size = args.get_int("--lr-step-size");
+    train_config.lr_gamma = args.get_float("--lr-gamma");
+    train_config.lr_min = args.get_float("--lr-min");
+    train_config.band_threshold = args.get_float("--band-threshold");
+    train_config.nca_temperature = args.get_float("--nca-temperature");
+    train_config.nca_neighbors = args.get_int("--nca-neighbors");
+    train_config.nca_weight = args.get_float("--nca-weight");
+    train_config.checkpoint_dir = args.get("--checkpoint-dir");
+    train_config.checkpoint_every = args.get_int("--checkpoint-every");
+    train_config.use_amp = args.get_switch("--amp", "--no-amp", false);
+    train_config.cudnn_benchmark =
+        args.get_switch("--cudnn-benchmark", "--no-cudnn-benchmark", true);
+    train_config.allow_tf32 = !args.has("--no-tf32");
+    train_config.vram_fraction = args.get_float("--vram-fraction");
 
-    if (use_cuda && torch::cuda::is_available()) {
+    train_config.band_thresholds.clear();
+    for (const auto& threshold : args.get_list("--band-thresholds")) {
+        try {
+            train_config.band_thresholds.push_back(std::stof(threshold));
+        } catch (const std::exception&) {
+            std::cerr << "Error: --band-thresholds expects numbers, got '"
+                      << threshold << "'" << std::endl;
+            return 1;
+        }
+    }
+
+    if (train_config.checkpoint_every > 0 && train_config.checkpoint_dir.empty()) {
+        std::cerr << "Error: --checkpoint-every needs --checkpoint-dir" << std::endl;
+        return 1;
+    }
+
+    if (args.has("--cuda") && torch::cuda::is_available()) {
         train_config.device = torch::kCUDA;
         std::cout << "Using CUDA" << std::endl;
     } else {
@@ -208,41 +401,60 @@ int train_command(
         std::cout << "Using CPU" << std::endl;
     }
 
-    // Create trainer and prepare data
+    // ------------------------------------------------------- prepare + train
     Trainer trainer(model, train_config);
-    trainer.prepare_data(dataset, test_size);
+    trainer.prepare_data(dataset, args.get_float("--test-size"), seed);
 
-    // Train
+    // Cross-validation runs first and restores the trainer's weights and split
+    // when it finishes, so the model saved below is the same one a run without
+    // --cv-folds produces.
+    const int cv_folds = args.get_int("--cv-folds");
+    if (cv_folds > 0) {
+        std::cout << "\nCross-validating..." << std::endl;
+        try {
+            if (args.has("--cv-spatial")) {
+                if (!dataset.schema().has_coordinates) {
+                    std::cerr << "Error: --cv-spatial needs coordinates; pass "
+                                 "--lon and --lat" << std::endl;
+                    return 1;
+                }
+                SpatialBlockConfig spatial_config;
+                spatial_config.lat_size = args.get_float("--cv-lat-size");
+                spatial_config.lon_size = args.get_float("--cv-lon-size");
+                spatial_config.balance = args.has("--cv-balance");
+                print_cross_validation(
+                    trainer.cross_validate_spatial(spatial_config, cv_folds, seed));
+            } else {
+                print_cross_validation(trainer.cross_validate(cv_folds, seed));
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error during cross-validation: " << e.what() << std::endl;
+            return 1;
+        }
+    }
+
     std::cout << "\nTraining..." << std::endl;
     auto result = trainer.fit();
 
-    // Print results
+    // ------------------------------------------------------------- report
     std::cout << "\n================" << std::endl;
     std::cout << "Training complete!" << std::endl;
     std::cout << "Best epoch: " << result.best_epoch << std::endl;
     std::cout << "Training time: " << result.train_time_seconds << "s" << std::endl;
-    // Show effective batch size: Trainer::fit mutates train_config.batch_size
-    // to the post-halve value when the OOM auto-halve retry fires. Surface
-    // it here so the operator can see whether a fallback run was used.
-    if (trainer.config().batch_size != batch_size) {
-        std::cout << "Effective batch size: " << trainer.config().batch_size
-                  << " (requested " << batch_size
-                  << ", floor " << trainer.config().batch_size_floor
-                  << ") -- OOM auto-halve fired during training"
-                  << std::endl;
-    } else {
-        std::cout << "Effective batch size: " << trainer.config().batch_size << std::endl;
+    // The batch size the run actually trained at. fit() restores
+    // config().batch_size to the requested value before returning, so the
+    // effective value is the one the result carries (issue #105).
+    std::cout << "Effective batch size: " << result.effective_batch_size;
+    if (result.effective_batch_size != requested_batch_size) {
+        std::cout << " (requested " << requested_batch_size
+                  << ", floor " << train_config.batch_size_floor
+                  << ") -- OOM auto-halve fired during training";
     }
+    std::cout << std::endl;
 
     std::cout << "\nFinal metrics:" << std::endl;
-    for (const auto& [target_name, metrics] : result.final_metrics) {
-        std::cout << "  " << target_name << ":" << std::endl;
-        for (const auto& [metric_name, value] : metrics) {
-            std::cout << "    " << metric_name << ": " << value << std::endl;
-        }
-    }
+    print_metric_tree(result.final_metrics, "  ");
 
-    // Save model
     std::cout << "\nSaving model to: " << output_path << std::endl;
     trainer.save(output_path);
 

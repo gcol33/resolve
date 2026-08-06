@@ -79,7 +79,6 @@ struct TargetSpec {
     float weight = 1.0f;
 
     // Optional explicit string->int class mapping for classification targets.
-    // Mirrors the Python POC's `cfg["mapping"]`:
     //   - empty (default): the loader auto-fits the mapping from the data.
     //                      If every unique non-NA value is integer-parseable
     //                      (e.g. "0".."8"), the parsed integers are used as

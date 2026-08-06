@@ -226,7 +226,9 @@ TORCH_MODULE(ParallelBranch);
 // Attention-based aggregation for parallel branches
 class BranchAttentionImpl : public torch::nn::Module {
 public:
-    BranchAttentionImpl(int64_t branch_dim, int n_branches, int n_heads = 4);
+    // The branch count comes from the input tensor at forward time, so it is
+    // not a construction parameter.
+    BranchAttentionImpl(int64_t branch_dim, int n_heads = 4);
 
     // Input: (batch, n_branches, branch_dim)
     // Output: (batch, branch_dim)
@@ -246,14 +248,15 @@ TORCH_MODULE(BranchAttention);
 // Gated aggregation for parallel branches
 class GatedAggregationImpl : public torch::nn::Module {
 public:
-    GatedAggregationImpl(int64_t input_dim, int n_branches, int64_t branch_dim);
+    // n_branches sizes the gate head; the branch width comes from the input
+    // tensor at forward time.
+    GatedAggregationImpl(int64_t input_dim, int n_branches);
 
     // Input: original input + (batch, n_branches, branch_dim)
     // Output: (batch, branch_dim)
     torch::Tensor forward(torch::Tensor input, torch::Tensor branch_outputs);
 
 private:
-    int n_branches_;
     torch::nn::Linear gate_proj_{nullptr};
 };
 
