@@ -2,8 +2,13 @@ cmake_minimum_required(VERSION 3.18)
 
 # Check if we're being included as a subdirectory or built standalone
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    # Standalone build - define project and build resolve_core
-    project(resolve_python VERSION 0.7.1 LANGUAGES CXX)
+    # Standalone build - define project and build resolve_core.
+    # No VERSION here: the wheel's version comes from pyproject.toml, the
+    # engine's from resolve::VERSION, and both are kept in sync with the
+    # repo-root VERSION file by tools/version.py. Nothing consumes
+    # PROJECT_VERSION, and this directory is also the sdist root, which does
+    # not carry the repo-root file.
+    project(resolve_python LANGUAGES CXX)
 
     # CPU by default: the PyPI wheels link the CPU libtorch the user's `torch`
     # ships and do not bundle CUDA. Pass -DUSE_CUDA=ON for a local CUDA build.

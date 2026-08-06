@@ -14,7 +14,7 @@ from resolve.train.loss import PhaseConfig
 from resolve.inference.predictor import Predictor, ResolvePredictions
 from resolve import backend
 
-__version__ = "0.7.1"
+__version__ = "0.7.3"
 __all__ = [
     "ResolveDataset",
     "ResolveSchema",

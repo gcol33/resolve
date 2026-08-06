@@ -229,7 +229,10 @@ Predictor.load = staticmethod(_predictor_load)
 from . import _from_pandas as _from_pandas_mod
 _from_pandas_mod.install()
 
-__version__ = "0.7.1"
+# Report the version of the engine actually loaded, not a literal that can go
+# stale against the .pyd. bindings.cpp sets this from resolve::VERSION, which
+# tools/version.py keeps equal to the repo-root VERSION file.
+from ._resolve_core import __version__ as __version__  # noqa: E402
 
 __all__ = [
     # Enums

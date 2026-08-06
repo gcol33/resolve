@@ -1,6 +1,6 @@
 # RESOLVE Changelog
 
-## v0.7.2 (unreleased)
+## v0.7.3 (2026-08-04)
 
 ### R package
 
@@ -18,6 +18,59 @@
 - The backend is loaded at runtime (`dlopen`/`LoadLibrary`) rather than linked,
   so the package installs and `R CMD check`s with no backend present; libtorch
   threads default to all cores (`RESOLVE_R_TORCH_THREADS=N` to pin/cap).
+
+## v0.7.2 (2026-07-19)
+
+A review sweep of the whole engine, issues #37-#100. Highlights below; each
+commit carries the per-issue detail.
+
+### Correctness
+
+- **Checkpoints round-trip the full architecture.** `save_model_config` /
+  `load_model_config` serialize every architecture sub-config (FT-Transformer,
+  TabNet, SAINT, GNN, TraitNet, ExcelFormer, heterogeneous GNN, parallel
+  branches), and weight loading now throws on a missing parameter instead of
+  silently leaving it at random init (#37). Classification `class_weights` and
+  the rank-pool weighting scheme + species cap are persisted too, so a reloaded
+  model keeps its loss and its pooling semantics (#38, #91).
+- **Gradients reach the objectives they belong to.** The phase-3 band penalty is
+  a differentiable hinge, ExcelFormer's semi-permeable mask is a soft gate with
+  an additive log-bias, and BERT-style MLM feeds the 10%-random / 10%-keep ids
+  through to the encoder (#42, #43, #44).
+- **Self-supervised views hide the answer.** JEPA and SCARF mask the species and
+  taxonomy side of each view, so the pretext task cannot be solved by species
+  identity alone (#44, #93).
+- **Cross-validation starts each fold from the untrained weights** and restores
+  the trainer's split afterwards, so CV after `fit()` no longer warm-starts from
+  weights that saw the held-out rows (#45, #97).
+- **Loaders fail loudly.** A named role column that cannot be resolved throws
+  rather than dropping the feature; coordinates parse NA-aware; ranking is dense;
+  `num_classes` follows the class list (#40, #46, #47, #94).
+- **Determinism knobs are honored.** `cudnn_benchmark = false` survives the
+  training loop instead of being re-enabled inside `cache_data_to_gpu` (#92).
+
+### Reported metrics
+
+- **SMAPE** uses the standard `(|p|+|t|)/2` denominator (range 0-2, matches
+  sklearn); values previously came out at half scale, and the phased-loss SMAPE
+  term shifts by the same constant factor (#95).
+- **The VAE ELBO** sums KL over the latent dimension and means over the batch, so
+  `kl_weight = 1` is beta = 1 (#96).
+
+### Retraining required
+
+- Taxonomy embedding tables for the hash / sparse / MoE / adapter encoders lose
+  the one over-allocated row (`n_genera` already counts `<UNK>`), and the
+  coordinate-kNN GNN embeds taxonomy ids instead of concatenating them as
+  magnitudes and trains full-batch. Checkpoints from before these changes cannot
+  be loaded (#73, #99).
+
+### Tooling
+
+- CI gains a vendored-header drift guard for the R C facade; `resolve info`
+  prints the transformer / rank-pool hyperparameters; pretraining configs
+  validate their batch size, mask ratio and corruption rate; the header loader
+  reads the file in a single streaming pass instead of a count prepass (#100).
 
 ## v0.7.1 (2026-06-19)
 

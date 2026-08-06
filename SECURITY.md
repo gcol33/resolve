@@ -12,7 +12,7 @@
 If you discover a security vulnerability in RESOLVE, please report it responsibly:
 
 1. **Do not** open a public GitHub issue for security vulnerabilities
-2. Email the maintainer directly at gilles.colling@uliege.be
+2. Email the maintainer directly at gilles.colling051@gmail.com
 3. Include:
    - Description of the vulnerability
    - Steps to reproduce

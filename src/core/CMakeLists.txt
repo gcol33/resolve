@@ -7,12 +7,17 @@ option(BUILD_CLI "Build CLI application" ON)
 option(BUILD_TESTS "Build tests" ON)
 option(USE_CUDA "Enable CUDA support" ON)
 
+# Version - single source of truth is the repo-root VERSION file, which
+# tools/version.py keeps in sync with resolve::VERSION and the R/Python manifests
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../VERSION" RESOLVE_VERSION)
+string(STRIP "${RESOLVE_VERSION}" RESOLVE_VERSION)
+
 # Project declaration - CXX only initially
 # CUDA is enabled via project() so it's identified before PyTorch's find_package calls enable_language(CUDA)
 if(USE_CUDA)
-    project(resolve VERSION 0.6.0 LANGUAGES CXX CUDA)
+    project(resolve VERSION ${RESOLVE_VERSION} LANGUAGES CXX CUDA)
 else()
-    project(resolve VERSION 0.6.0 LANGUAGES CXX)
+    project(resolve VERSION ${RESOLVE_VERSION} LANGUAGES CXX)
 endif()
 
 # Skip Caffe2's CUDA detection by setting this before find_package(Torch)

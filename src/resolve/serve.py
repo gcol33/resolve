@@ -41,6 +41,7 @@ def create_app(model_path: str, device: str = "cpu"):
             "Install with: pip install fastapi uvicorn"
         )
 
+    from resolve import __version__
     from resolve.inference.predictor import Predictor
 
     # Load model once at startup
@@ -49,7 +50,7 @@ def create_app(model_path: str, device: str = "cpu"):
     app = FastAPI(
         title="RESOLVE Prediction API",
         description="Compositional data prediction via learned representations",
-        version="0.6.0",
+        version=__version__,
     )
 
     class PredictionRequest(BaseModel):

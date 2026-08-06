@@ -61,6 +61,9 @@ jobs:
             echo "::error::tag '$TAG' != 'v${VERSION}'. resolve.install_backend() builds its download URL from packageVersion('resolve'), so the release tag MUST be v<DESCRIPTION Version>. Bump r/DESCRIPTION or retag."
             exit 1
           fi
+          # r/DESCRIPTION agrees with the tag; the rest of the repo (engine
+          # constant, wheels, citation records) must agree with r/DESCRIPTION.
+          python3 tools/version.py --check
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Ensure the release exists

@@ -202,10 +202,32 @@ resolve/
 - Avoid external dependencies unless essential.
 - Use pytest fixtures for shared setup.
 
+## Versioning
+
+The repo-root `VERSION` file is the single source of truth. Bump it with:
+
+```bash
+python tools/version.py --set 0.7.4          # add --date YYYY-MM-DD on release day
+```
+
+That rewrites the engine constant (`resolve::VERSION`), the three package
+manifests, `r/DESCRIPTION`, `CITATION.cff`, and opens a `NEWS.md` section.
+Everything else reads the version at build or run time, so it cannot drift:
+the CLI, `resolve.version()` in R, `resolve_core.__version__`, and the
+checkpoint metadata all report the compiled `resolve::VERSION`, and
+`r/inst/CITATION` reads `r/DESCRIPTION`.
+
+`python tools/version.py --check` reports drift and gates CI; the engine
+constant is compiled in, so rebuild after a bump. The R package version doubles
+as the release-tag version: `resolve.install_backend()` builds its download URL
+from `packageVersion("resolve")`, so a bump is only usable once a matching
+`v<VERSION>` release carries the backend assets.
+
 ## Pull request checklist
 
 - [ ] Tests pass (`pytest`)
 - [ ] Code passes linting (`ruff check src/`)
+- [ ] Version declarations agree (`python tools/version.py --check`)
 - [ ] Documentation updated (`NEWS.md`)
 - [ ] Examples updated if needed
 - [ ] No unrelated formatting changes

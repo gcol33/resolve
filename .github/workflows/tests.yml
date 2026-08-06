@@ -8,6 +8,15 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Every file that spells the version out must agree with the repo-root VERSION
+  # file (tools/version.py holds the list). Cheap, so it runs first.
+  version-drift:
+    runs-on: ubuntu-latest
+    name: Version drift guard
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/version.py --check
+
   # C++ tests with Catch2 (+ CLI compile & smoke)
   cpp-tests:
     runs-on: ubuntu-latest
@@ -72,8 +81,11 @@ jobs:
       - name: Build & install resolve_core
         run: pip install ./src/core/python --no-build-isolation
 
-      - name: Import smoke
-        run: python -c "import resolve_core as rc; print(rc.__version__)"
+      # resolve_core.__version__ is re-exported from the compiled resolve::VERSION,
+      # so this imports the freshly built engine and checks it against the
+      # repo-root VERSION file.
+      - name: Import smoke (built engine reports VERSION)
+        run: python tools/version.py --check-built
 
       - name: Dataset bindings equivalence (from_pandas == from_csv)
         run: python src/core/dev_notes/issue22_from_pandas_smoke.py
