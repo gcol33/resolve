@@ -1,9 +1,13 @@
 [files]
 exclude = [
-    "src/core/build_cpu/*",
-    "src/core/build_cuda/*",
+    "src/core/build*",
+    "src/core/build*/*",
+    "*/_deps/*",
+    "*_deps*",
     "prototype/*",
     "*.egg-info/*",
     "__pycache__/*",
     "todo/*",
+    "paper/*",
+    "dev_notes/*",
 ]
