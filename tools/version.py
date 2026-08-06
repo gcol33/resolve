@@ -91,11 +91,15 @@ DATE_SITE = Site(
 
 def read(path: Path) -> str:
     """Read a file preserving its line endings, so rewrites do not churn them."""
-    return path.read_text(encoding="utf-8", newline="")
+    # Path.read_text/write_text only grew `newline` in 3.13; CI runs 3.11 and
+    # 3.12, so go through open() to keep the no-translation behaviour there.
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return handle.read()
 
 
 def write(path: Path, text: str) -> None:
-    path.write_text(text, encoding="utf-8", newline="")
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
 
 
 def locate(site: Site) -> tuple[Path, re.Match[str], str]:

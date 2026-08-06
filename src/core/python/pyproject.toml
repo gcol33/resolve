@@ -45,7 +45,9 @@ Homepage = "https://github.com/gcol33/resolve"
 Repository = "https://github.com/gcol33/resolve"
 
 [tool.scikit-build]
-cmake.minimum-version = "3.18"
+# cmake.version, not cmake.minimum-version: scikit-build-core >= 0.8 rejects the
+# old key outright, which fails metadata generation before any build starts.
+cmake.version = ">=3.18"
 cmake.build-type = "Release"
 wheel.packages = ["src/resolve_core"]
 

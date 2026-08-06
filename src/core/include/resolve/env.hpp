@@ -48,6 +48,20 @@ inline void set_env(const char* name, const char* value) {
 #endif
 }
 
+// Remove an environment variable from the current process.
+//
+// Separate from set_env(name, "") because the two platforms disagree about what
+// an empty value means: _putenv_s deletes the variable, while setenv keeps it
+// defined and empty. Routing removal through its own call makes "unset" mean
+// unset on both, so get_env is nullopt and the flag helpers below read false.
+inline void unset_env(const char* name) {
+#if defined(_WIN32)
+    _putenv_s(name, "");
+#else
+    unsetenv(name);
+#endif
+}
+
 // RESOLVE's debug/feature switches share one convention: set to anything other
 // than the literal "0" to enable, unset or "0" to disable.
 inline bool env_flag_enabled(const char* name) {

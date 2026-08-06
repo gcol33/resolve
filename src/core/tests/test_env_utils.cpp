@@ -42,7 +42,7 @@ public:
     ScopedEnv& operator=(const ScopedEnv&) = delete;
 
 private:
-    void clear() { set_env(name_, ""); }
+    void clear() { unset_env(name_); }
 
     const char* name_;
     std::optional<std::string> saved_;
@@ -61,11 +61,19 @@ TEST_CASE("get_env returns an owned copy, or nullopt when unset", "[env]") {
     }
 
     SECTION("an unset variable is nullopt") {
-        // set_env("") is how Windows removes a variable; POSIX keeps it as an
-        // empty string, so accept either "absent" or "present but empty".
         ScopedEnv guard(kProbe, nullptr);
-        const auto value = get_env(kProbe);
-        CHECK((!value.has_value() || value->empty()));
+        CHECK_FALSE(get_env(kProbe).has_value());
+    }
+
+    SECTION("unset_env removes rather than emptying") {
+        // The reason unset_env exists: _putenv_s(name, "") deletes on Windows
+        // while setenv(name, "", 1) keeps the name defined with an empty value,
+        // so a test that spelled removal as set_env(name, "") saw "unset" on
+        // one platform and "present but empty" on the other.
+        set_env(kProbe, "value");
+        REQUIRE(get_env(kProbe).has_value());
+        unset_env(kProbe);
+        CHECK_FALSE(get_env(kProbe).has_value());
     }
 
     SECTION("a null name is nullopt rather than a crash") {
