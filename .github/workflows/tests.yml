@@ -381,8 +381,10 @@ jobs:
       - name: Import smoke (built engine reports VERSION)
         run: python tools/version.py --check-built
 
-      - name: Dataset bindings equivalence (from_pandas == from_csv)
-        run: python src/core/dev_notes/issue22_from_pandas_smoke.py
+      # The from_pandas == from_csv equivalence this step used to run as a
+      # standalone script is tests/core/test_dataset.py::test_from_pandas_matches_from_csv
+      # below. The script lived under src/core/dev_notes/, which is not tracked,
+      # so the step could only ever fail once it was reached.
 
       # Dataset / trainer / predictor / categorical / spatial / pretraining
       # bindings, plus the held-out recovery fits in tests/core/test_recovery.py.
