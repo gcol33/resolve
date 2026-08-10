@@ -12,3 +12,11 @@
 CXX_STD = CXX17
 
 PKG_CPPFLAGS = -I.
+
+# Every object reaches the vendored C ABI, directly or through
+# resolve_capi_dynload.h, and the symbol list is what fixes the member layout of
+# the function-pointer table they all share. R's build tracks .cpp timestamps
+# only, so an unmodified source would otherwise keep an object compiled against
+# an older list: the mismatch shifts each member's offset and calls land on a
+# neighbouring symbol instead of failing to link.
+$(OBJECTS): resolve/resolve_capi.h resolve/resolve_capi_symbols.inc
