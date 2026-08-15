@@ -13,6 +13,11 @@ CXX_STD = CXX17
 
 PKG_CPPFLAGS = -I.
 
+# R reads this file before shlib.mk, so the first target named here would become
+# make's default goal and the shared library would never link. Restating the
+# real goal keeps it, per Writing R Extensions on adding targets in Makevars.
+all: $(SHLIB)
+
 # Every object reaches the vendored C ABI, directly or through
 # resolve_capi_dynload.h, and the symbol list is what fixes the member layout of
 # the function-pointer table they all share. R's build tracks .cpp timestamps

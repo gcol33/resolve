@@ -24,7 +24,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-13, macos-14]
+        # macOS is arm64 only: PyPI carries no macOS x86_64 torch wheel past
+        # 2.2.2, and this package requires torch>=2.0 at runtime, so an Intel
+        # wheel would install and then fail to import for want of its libtorch.
+        os: [ubuntu-latest, windows-latest, macos-14]
 
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +48,11 @@ jobs:
           CIBW_ARCHS_LINUX: x86_64
           CIBW_ARCHS_WINDOWS: AMD64
           CIBW_ARCHS_MACOS: native
+          # manylinux_2_28 rather than the manylinux2014 default: numpy and
+          # torch no longer publish manylinux2014 wheels, so the test env
+          # resolved numpy to its sdist and tried to compile it with the 2014
+          # image's gcc 10.2.1, under the gcc >= 10.3 that numpy requires.
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
           CIBW_BUILD_FRONTEND: "build; args: --no-isolation"
           # Install CPU torch + the build backend, then build without isolation
           # so the build sees the CPU torch. macOS torch is CPU-only on PyPI; the
@@ -88,7 +96,6 @@ jobs:
           # Importing the wheel needs torch in the test env; verify it imports.
           CIBW_TEST_REQUIRES: "torch>=2.0"
           CIBW_TEST_COMMAND: "python -c \"import resolve_core; print(resolve_core.__version__)\""
-          CIBW_TEST_SKIP: "*-macosx_x86_64"
 
       - uses: actions/upload-artifact@v4
         with:
