@@ -92,6 +92,28 @@ target_include_directories(resolve_core
         $<INSTALL_INTERFACE:include>
 )
 
+# Prefer the libstdc++ the engine was compiled against over the one libtorch
+# re-exports.
+#
+# PyTorch builds libtorch with -static-libstdc++ for portability, and
+# libtorch.so / libtorch_cpu.so then export the absorbed libstdc++ symbols
+# (64 and 142 std::filesystem entries respectively). The compiler links
+# libstdc++ last, so libtorch precedes it in DT_NEEDED and the dynamic
+# linker -- which takes the first definition it finds -- resolves the
+# engine's std::filesystem calls into libtorch's copy instead of the one the
+# headers were compiled against. Against a pip libtorch under GCC 13.3 that
+# copy sends std::filesystem::remove_all through a null pointer and the
+# process takes SIGSEGV.
+#
+# Naming libstdc++ in the link-options slot puts it ahead of the objects and
+# of ${TORCH_LIBRARIES}, so it takes the first DT_NEEDED entry. --no-as-needed
+# is required because nothing is undefined yet at that point, so the linker
+# would otherwise drop it. This only reorders a library the driver already
+# links; any symbol absent from it still falls through to the next definer.
+if(UNIX AND NOT APPLE)
+    target_link_options(resolve_core PUBLIC "-Wl,--no-as-needed,-lstdc++,--as-needed")
+endif()
+
 target_link_libraries(resolve_core PUBLIC ${TORCH_LIBRARIES})
 target_link_libraries(resolve_core PRIVATE resolve_warnings)
 

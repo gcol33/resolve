@@ -48,6 +48,25 @@ jobs:
           # 3-5GB each, so unbounded -j on a 4-vCPU runner OOM-kills the build.
           cmake --build build --parallel 2
 
+      - name: libstdc++ precedes libtorch in DT_NEEDED
+        run: |
+          # libtorch re-exports the libstdc++ it was statically built against,
+          # so if it precedes libstdc++ in DT_NEEDED the engine's
+          # std::filesystem calls resolve into libtorch's copy and
+          # remove_all() jumps to a null pointer. src/core/CMakeLists.txt
+          # orders libstdc++ first; assert it stayed that way.
+          cd src/core/build
+          for bin in tests/resolve_tests bin/resolve; do
+            order=$(readelf -d "$bin" | awk '/NEEDED/{gsub(/[][]/,"",$NF); print $NF}')
+            std=$(echo "$order" | grep -n '^libstdc++' | cut -d: -f1)
+            trc=$(echo "$order" | grep -n '^libtorch' | head -1 | cut -d: -f1)
+            echo "$bin: libstdc++ at $std, first libtorch at $trc"
+            if [ -z "$std" ] || { [ -n "$trc" ] && [ "$std" -gt "$trc" ]; }; then
+              echo "FAIL: libstdc++ must come first in DT_NEEDED for $bin"
+              exit 1
+            fi
+          done
+
       - name: Run C++ tests
         run: |
           cd src/core/build
