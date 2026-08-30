@@ -1,5 +1,20 @@
 # RESOLVE Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A CPU run no longer touches the CUDA runtime (#114).** `Trainer::train_epoch`
+  acquired its two CUDA streams before checking whether the run was on CUDA at
+  all. `RESOLVE_HAS_CUDA` is a COMPILE-time guard, so a CUDA-enabled build ran
+  those lines on a `device="cpu"` run too, initializing the CUDA runtime and
+  killing the first epoch on a host with no usable driver -- a CPU queue node, a
+  CI runner, a laptop. The streams are now held in `std::optional` and acquired
+  inside the branch that already gated every USE of them, so the GPU prefetch
+  path is unchanged and the CPU path is driver-free. The decision is the pure
+  `resolve::use_hash_prefetch()` (`gpu.hpp`), unit-tested without a CUDA device
+  the way `decide_oom_retry` is.
+
 ## v0.8.1 (2026-08-30)
 
 Three reported defects, all of the same shape: a value the API accepts and

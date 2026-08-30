@@ -73,4 +73,23 @@ bool decide_oom_retry(
     std::string& out_err_msg
 );
 
+// Whether Trainer::train_epoch runs the side-stream CUDA-hash prefetch, and so
+// whether it acquires the two CUDA streams that path needs.
+//
+// The prefetch needs the CUDA hash path selected, the run actually on a CUDA
+// device, and more than one batch to overlap. The middle term is the one that
+// matters here: RESOLVE_HAS_CUDA is a COMPILE-time guard, so a CUDA-enabled
+// build reaches the prefetch setup on a device="cpu" run too, and acquiring the
+// streams there initializes the CUDA runtime -- which throws on a host with no
+// usable driver, a CPU queue node or CI runner (issue #114).
+//
+// Pure logic, no torch dependency, so the decision is testable without a CUDA
+// device -- the same reason decide_oom_retry above is a free function.
+bool use_hash_prefetch(
+    bool use_cuda_hash,
+    bool device_is_cuda,
+    int64_t n_train,
+    int64_t batch_size
+);
+
 } // namespace resolve

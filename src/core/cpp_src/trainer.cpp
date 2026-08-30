@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <fstream>
 #include <numeric>
+#include <optional>
 #include <cstdlib>
 #include <sstream>
 #include <random>
@@ -428,9 +429,20 @@ float Trainer::train_epoch(int epoch) {
 
     // Async prefetching setup for CUDA hash computation
 #ifdef RESOLVE_HAS_CUDA
-    c10::cuda::CUDAStream prefetch_stream = c10::cuda::getStreamFromPool(/*isHighPriority=*/false);
-    c10::cuda::CUDAStream default_stream = at::cuda::getCurrentCUDAStream();
-    bool use_prefetch = use_cuda_hash_ && config_.device.is_cuda() && n_train > batch_size;
+    // RESOLVE_HAS_CUDA is a COMPILE-time guard, so a CUDA-enabled build reaches
+    // this line on a CPU run too. Acquiring the streams unconditionally
+    // initialized the CUDA runtime there, which kills a device="cpu" run on a
+    // host with no usable driver -- a CPU queue node, a CI runner, a laptop
+    // (issue #114). They are now acquired only when the prefetch will actually
+    // run, which is the condition every USE of them was already gated on.
+    const bool use_prefetch = use_hash_prefetch(
+        use_cuda_hash_, config_.device.is_cuda(), n_train, batch_size);
+    std::optional<c10::cuda::CUDAStream> prefetch_stream;
+    std::optional<c10::cuda::CUDAStream> default_stream;
+    if (use_prefetch) {
+        prefetch_stream = c10::cuda::getStreamFromPool(/*isHighPriority=*/false);
+        default_stream = at::cuda::getCurrentCUDAStream();
+    }
     torch::Tensor prefetched_hash;
     torch::Tensor prefetched_continuous;
     bool prefetch_ready = false;
@@ -497,10 +509,12 @@ float Trainer::train_epoch(int epoch) {
 
             if (prefetch_ready) {
                 // Use prefetched hash from previous iteration
-                // Wait for prefetch stream to complete on default stream
+                // Wait for prefetch stream to complete on default stream.
+                // prefetch_ready only ever becomes true under use_prefetch, so
+                // the streams are engaged here.
                 at::cuda::CUDAEvent prefetch_done;
-                prefetch_done.record(prefetch_stream);
-                prefetch_done.block(default_stream);
+                prefetch_done.record(*prefetch_stream);
+                prefetch_done.block(*default_stream);
 
                 batch_hash = prefetched_hash;
                 prefetch_ready = false;
@@ -527,11 +541,11 @@ float Trainer::train_epoch(int epoch) {
 
                 // Record event on default stream, then wait for it on prefetch stream
                 at::cuda::CUDAEvent compute_done;
-                compute_done.record(default_stream);
-                compute_done.block(prefetch_stream);
+                compute_done.record(*default_stream);
+                compute_done.block(*prefetch_stream);
 
                 // Compute next batch's hash on prefetch stream
-                c10::cuda::CUDAStreamGuard guard(prefetch_stream);
+                c10::cuda::CUDAStreamGuard guard(*prefetch_stream);
                 prefetched_hash = cuda::compute_batch_hash_embedding_cuda(
                     hash_index_map.index_select(0, next_batch_idx),
                     torch::Tensor(),

@@ -121,4 +121,9 @@ bool decide_oom_retry(
     return true;
 }
 
+bool use_hash_prefetch(bool use_cuda_hash, bool device_is_cuda,
+                       int64_t n_train, int64_t batch_size) {
+    return use_cuda_hash && device_is_cuda && n_train > batch_size;
+}
+
 } // namespace resolve

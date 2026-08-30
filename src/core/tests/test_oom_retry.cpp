@@ -105,3 +105,43 @@ TEST_CASE("TrainConfig exposes batch_size_floor with the documented default", "[
     TrainConfig cfg;
     REQUIRE(cfg.batch_size_floor == 1024);
 }
+
+// ===========================================================================
+// use_hash_prefetch (issue #114)
+// ===========================================================================
+//
+// Trainer::train_epoch acquired its two CUDA streams before checking whether
+// the run was on CUDA at all. RESOLVE_HAS_CUDA is a COMPILE-time guard, so a
+// CUDA-enabled build ran those lines on a device="cpu" run too, initializing
+// the CUDA runtime and killing the first epoch on a host with no usable driver
+// (a CPU queue node, a CI runner, a laptop). The acquisition is now behind this
+// predicate, which is the same condition every USE of the streams was already
+// gated on -- so the GPU prefetch path is unchanged and the CPU path never
+// touches the CUDA runtime.
+//
+// The failure it prevents needs a driverless host to reproduce, and a CPU-only
+// build compiles the whole block out, so the decision is pinned here as pure
+// logic instead.
+
+TEST_CASE("use_hash_prefetch requires a CUDA device", "[gpu][prefetch][issue114]") {
+    SECTION("a CPU run never prefetches, whatever else is set") {
+        REQUIRE_FALSE(use_hash_prefetch(/*use_cuda_hash=*/true, /*device_is_cuda=*/false,
+                                        /*n_train=*/1024, /*batch_size=*/32));
+        REQUIRE_FALSE(use_hash_prefetch(false, false, 1024, 32));
+    }
+
+    SECTION("a CUDA run without the CUDA hash path never prefetches") {
+        REQUIRE_FALSE(use_hash_prefetch(/*use_cuda_hash=*/false, /*device_is_cuda=*/true,
+                                        1024, 32));
+    }
+
+    SECTION("a single batch has nothing to overlap with") {
+        REQUIRE_FALSE(use_hash_prefetch(true, true, /*n_train=*/32, /*batch_size=*/32));
+        REQUIRE_FALSE(use_hash_prefetch(true, true, /*n_train=*/16, /*batch_size=*/32));
+    }
+
+    SECTION("the GPU path is unchanged: it prefetches when it always did") {
+        REQUIRE(use_hash_prefetch(true, true, /*n_train=*/33, /*batch_size=*/32));
+        REQUIRE(use_hash_prefetch(true, true, 1024, 32));
+    }
+}
