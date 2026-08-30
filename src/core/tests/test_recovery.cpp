@@ -9,6 +9,10 @@
 // Recovery Tests" bar.
 //
 // Kept small and seeded so they run in a few seconds and are deterministic.
+// Seeded means BOTH halves: prepare_data's seed fixes the split, and
+// seed_recovery() below fixes the weight initialisation, which draws from the
+// process-global torch RNG. Without the second one a threshold is evaluated on
+// a different random draw every run (issue #115).
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
@@ -63,6 +67,18 @@ double pearson(const std::vector<float>& a, const std::vector<float>& b) {
     return sab / std::sqrt(saa * sbb);
 }
 
+// Fix the weights every recovery test starts from.
+//
+// These tests fit to convergence and assert a correlation or accuracy
+// threshold, so they need the same starting point every run. The seed passed
+// to prepare_data covers the SPLIT; model weight initialisation draws from
+// the process-global torch RNG, which nothing here seeded (issue #115), so a
+// recovered correlation moved from run to run and a threshold could miss by a
+// hair on one CI leg and pass on the next -- observed as the GNN case
+// returning 0.455 against its > 0.5 bar. Call this BEFORE constructing the
+// model, which is where the draw happens.
+void seed_recovery(uint64_t seed = 20260830) { torch::manual_seed(seed); }
+
 TrainConfig recovery_train_config(int max_epochs = 300) {
     TrainConfig tcfg;
     tcfg.batch_size = 64;
@@ -79,6 +95,7 @@ TrainConfig recovery_train_config(int max_epochs = 300) {
 // 1. Regression head recovers a known linear signal in the covariates.
 // =============================================================================
 TEST_CASE("Regression recovers a known covariate signal", "[recovery][regression]") {
+    seed_recovery();
     const int64_t n_plots = 600;
     std::ostringstream hdr, spc;
     hdr << "plot_id,lat,lon,cov1,cov2,y\n";
@@ -128,6 +145,7 @@ TEST_CASE("Regression recovers a known covariate signal", "[recovery][regression
 // 2. Classification head separates a synthetic, separable class signal.
 // =============================================================================
 TEST_CASE("Classification recovers a separable class signal", "[recovery][classification]") {
+    seed_recovery();
     const int64_t n_plots = 600;
     const int n_classes = 3;
     std::ostringstream hdr, spc;
@@ -182,6 +200,7 @@ TEST_CASE("Classification recovers a separable class signal", "[recovery][classi
 //    the hash encoder: y is a deterministic function of the plot's species.
 // =============================================================================
 TEST_CASE("Species composition recovers a species-driven target", "[recovery][species]") {
+    seed_recovery();
     const int64_t n_plots = 600;
     const int n_species = 12;
     // Per-species contribution; the plot target is the sum over its species.
@@ -239,6 +258,7 @@ TEST_CASE("Species composition recovers a species-driven target", "[recovery][sp
 //    fit() previously never wrote.
 // =============================================================================
 TEST_CASE("fit persists run metadata to the checkpoint", "[recovery][metadata]") {
+    seed_recovery();
     const int64_t n_plots = 300;
     std::ostringstream hdr, spc;
     hdr << "plot_id,lat,lon,cov1,y\n";
@@ -333,6 +353,7 @@ void make_species_signal_csv(std::ostringstream& hdr, std::ostringstream& spc,
 }  // namespace
 
 TEST_CASE("Rank-pool encoder recovers a species-driven target", "[recovery][rank_pool]") {
+    seed_recovery();
     const int64_t n_plots = 600;
     const int n_species = 12;
     std::ostringstream hdr, spc;
@@ -367,6 +388,7 @@ TEST_CASE("Rank-pool encoder recovers a species-driven target", "[recovery][rank
 }
 
 TEST_CASE("Transformer encoder recovers a species-driven target", "[recovery][transformer]") {
+    seed_recovery();
     const int64_t n_plots = 600;
     const int n_species = 12;
     std::ostringstream hdr, spc;
@@ -412,6 +434,7 @@ TEST_CASE("Transformer encoder recovers a species-driven target", "[recovery][tr
 //    update_target_encoder must copy buffers, not only EMA the parameters.
 // =============================================================================
 TEST_CASE("JEPA target encoder syncs BatchNorm buffers", "[recovery][jepa]") {
+    seed_recovery();
     const int64_t n_plots = 256;
     std::ostringstream hdr, spc;
     hdr << "plot_id,cov1,cov2,y\n";
@@ -483,6 +506,7 @@ TEST_CASE("JEPA target encoder syncs BatchNorm buffers", "[recovery][jepa]") {
 // =============================================================================
 TEST_CASE("cudnn_benchmark=false is not overridden by the CUDA cache path",
           "[recovery][cuda]") {
+    seed_recovery();
     if (!torch::cuda::is_available()) {
         SUCCEED("No CUDA device available; skipping cuDNN-benchmark override check");
         return;
@@ -549,6 +573,7 @@ TEST_CASE("cudnn_benchmark=false is not overridden by the CUDA cache path",
 //    each node carry its own features, and spatial neighbors share the signal).
 // =============================================================================
 TEST_CASE("GNN trains full-batch and recovers a covariate signal", "[recovery][gnn]") {
+    seed_recovery();
     const int64_t n_plots = 240;
     std::ostringstream hdr, spc;
     hdr << "plot_id,lat,lon,cov1,cov2,y\n";
@@ -666,6 +691,7 @@ double covariate_recovery_pearson(const ModelConfig& mcfg, int max_epochs = 150,
 // -----------------------------------------------------------------------------
 TEST_CASE("Non-MLP tabular architectures recover a covariate signal",
           "[recovery][architecture]") {
+    seed_recovery();
     auto base = []() {
         ModelConfig mcfg;
         mcfg.species_encoding = SpeciesEncodingMode::Hash;
@@ -715,6 +741,7 @@ TEST_CASE("Non-MLP tabular architectures recover a covariate signal",
 // EmbeddingEncoder (issue #77).
 // -----------------------------------------------------------------------------
 TEST_CASE("Embed encoder recovers a species-driven target", "[recovery][embed]") {
+    seed_recovery();
     const int64_t n_plots = 600;
     const int n_species = 12;
     std::ostringstream hdr, spc;
@@ -751,6 +778,7 @@ TEST_CASE("Embed encoder recovers a species-driven target", "[recovery][embed]")
 }
 
 TEST_CASE("Sparse encoder recovers a species-driven target", "[recovery][sparse]") {
+    seed_recovery();
     const int64_t n_plots = 600;
     const int n_species = 12;
     std::ostringstream hdr, spc;
@@ -792,6 +820,7 @@ TEST_CASE("Sparse encoder recovers a species-driven target", "[recovery][sparse]
 // -----------------------------------------------------------------------------
 TEST_CASE("Classification predictions are calibrated on a separable signal",
           "[recovery][calibration]") {
+    seed_recovery();
     const int64_t n_plots = 600;
     const int n_classes = 3;
     std::ostringstream hdr, spc;
@@ -858,6 +887,7 @@ TEST_CASE("Classification predictions are calibrated on a separable signal",
 
 TEST_CASE("Regression band coverage is high on a learnable signal",
           "[recovery][coverage]") {
+    seed_recovery();
     const int64_t n_plots = 600;
     std::ostringstream hdr, spc;
     hdr << "plot_id,cov1,cov2,y\n";
@@ -914,6 +944,7 @@ TEST_CASE("Regression band coverage is high on a learnable signal",
 // -----------------------------------------------------------------------------
 TEST_CASE("Categorical covariate alone recovers the target",
           "[recovery][categorical]") {
+    seed_recovery();
     const int64_t n_plots = 600;
     const char* regions[] = {"north", "south", "east", "west"};
     const double region_value[] = {1.0, 4.0, 7.0, 10.0};
@@ -967,6 +998,7 @@ TEST_CASE("Categorical covariate alone recovers the target",
 // -----------------------------------------------------------------------------
 TEST_CASE("cross_validate trains folds and restores post-CV state",
           "[recovery][cv]") {
+    seed_recovery();
     const int64_t n_plots = 400;
     std::ostringstream hdr, spc;
     hdr << "plot_id,lat,lon,cov1,cov2,y\n";
@@ -1045,6 +1077,7 @@ TEST_CASE("cross_validate trains folds and restores post-CV state",
 // the latent (or a broken ELBO) leaves it flat.
 // -----------------------------------------------------------------------------
 TEST_CASE("VAE pretraining reduces reconstruction loss", "[recovery][pretrain][vae]") {
+    seed_recovery();
     const int64_t n_plots = 400;
     const int n_species = 16;
     std::ostringstream hdr, spc;
