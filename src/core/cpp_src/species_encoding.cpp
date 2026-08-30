@@ -112,13 +112,27 @@ void hash_species(
     }
 }
 
-static std::vector<std::pair<std::string, float>> select_k(
-    std::vector<std::pair<std::string, float>> species,
+namespace {
+
+// Every index in `species`, in original order.
+std::vector<size_t> all_indices(size_t n) {
+    std::vector<size_t> idx(n);
+    std::iota(idx.begin(), idx.end(), size_t{0});
+    return idx;
+}
+
+// Indices of the k entries at one end of the abundance ranking, ordered by
+// that ranking (idx[0] is the most / least abundant). Fewer than k entries are
+// returned unranked, in original order, which is what a caller that pads to a
+// fixed width already handles.
+std::vector<size_t> select_k_indices(
+    const std::vector<std::pair<std::string, float>>& species,
     int k,
     bool descending
 ) {
-    if (static_cast<int>(species.size()) <= k) {
-        return species;
+    std::vector<size_t> idx = all_indices(species.size());
+    if (k < 0 || static_cast<int>(idx.size()) <= k) {
+        return idx;
     }
 
     // Ties broken by species name ascending so the surviving top/bottom-k is
@@ -128,33 +142,95 @@ static std::vector<std::pair<std::string, float>> select_k(
     // encodes differently from the checkpoint it was trained against. Matches
     // the tie-break in topk_by_abundance and build_species_vocab.
     std::partial_sort(
-        species.begin(),
-        species.begin() + k,
-        species.end(),
-        [descending](const auto& a, const auto& b) {
-            if (a.second != b.second) {
-                return descending ? a.second > b.second : a.second < b.second;
+        idx.begin(),
+        idx.begin() + k,
+        idx.end(),
+        [&species, descending](size_t a, size_t b) {
+            const auto& pa = species[a];
+            const auto& pb = species[b];
+            if (pa.second != pb.second) {
+                return descending ? pa.second > pb.second : pa.second < pb.second;
             }
-            return a.first < b.first;
+            return pa.first < pb.first;
         }
     );
 
-    species.resize(k);
-    return species;
+    idx.resize(static_cast<size_t>(k));
+    return idx;
+}
+
+std::vector<std::pair<std::string, float>> gather(
+    const std::vector<std::pair<std::string, float>>& species,
+    const std::vector<size_t>& idx
+) {
+    std::vector<std::pair<std::string, float>> out;
+    out.reserve(idx.size());
+    for (size_t i : idx) out.push_back(species[i]);
+    return out;
+}
+
+}  // namespace
+
+std::vector<size_t> selection_indices(
+    const std::vector<std::pair<std::string, float>>& species,
+    SelectionMode mode,
+    int k
+) {
+    switch (mode) {
+        case SelectionMode::Top:
+            return select_k_indices(species, k, /*descending=*/true);
+        case SelectionMode::Bottom:
+            return select_k_indices(species, k, /*descending=*/false);
+        case SelectionMode::TopBottom: {
+            auto top = select_k_indices(species, k, /*descending=*/true);
+            auto bottom = select_k_indices(species, k, /*descending=*/false);
+            // Merge, avoiding duplicates. A species can sit in both ends when
+            // the plot holds fewer than 2k of them, and it must occupy one slot.
+            for (size_t bi : bottom) {
+                const std::string& name = species[bi].first;
+                const bool already = std::any_of(
+                    top.begin(), top.end(),
+                    [&](size_t ti) { return species[ti].first == name; });
+                if (!already) top.push_back(bi);
+            }
+            return top;
+        }
+        case SelectionMode::All:
+        default:
+            return all_indices(species.size());
+    }
+}
+
+std::vector<size_t> species_budget_indices(
+    const std::vector<std::pair<std::string, float>>& species,
+    SelectionMode mode,
+    int budget
+) {
+    if (budget <= 0 || mode == SelectionMode::All) {
+        return all_indices(species.size());
+    }
+    auto idx = selection_indices(species, mode, budget);
+    // Back to original (CSV row) order: the callers that take this path either
+    // do not care about order (the sparse vector is written by species code) or
+    // document their own truncation as a slice of CSV order (the rank-pool
+    // species cap), so handing them the abundance ranking would silently
+    // redefine what that slice means.
+    std::sort(idx.begin(), idx.end());
+    return idx;
 }
 
 std::vector<std::pair<std::string, float>> select_top_k(
     std::vector<std::pair<std::string, float>> species,
     int k
 ) {
-    return select_k(std::move(species), k, /*descending=*/true);
+    return gather(species, select_k_indices(species, k, /*descending=*/true));
 }
 
 std::vector<std::pair<std::string, float>> select_bottom_k(
     std::vector<std::pair<std::string, float>> species,
     int k
 ) {
-    return select_k(std::move(species), k, /*descending=*/false);
+    return gather(species, select_k_indices(species, k, /*descending=*/false));
 }
 
 std::vector<std::pair<std::string, float>> apply_selection(
@@ -162,27 +238,10 @@ std::vector<std::pair<std::string, float>> apply_selection(
     SelectionMode mode,
     int k
 ) {
-    switch (mode) {
-        case SelectionMode::Top:
-            return select_top_k(std::move(species), k);
-        case SelectionMode::Bottom:
-            return select_bottom_k(std::move(species), k);
-        case SelectionMode::TopBottom: {
-            auto top = select_top_k(species, k);
-            auto bottom = select_bottom_k(species, k);
-            // Merge, avoiding duplicates
-            for (const auto& s : bottom) {
-                if (std::find_if(top.begin(), top.end(),
-                        [&s](const auto& x) { return x.first == s.first; }) == top.end()) {
-                    top.push_back(s);
-                }
-            }
-            return top;
-        }
-        case SelectionMode::All:
-        default:
-            return species;
+    if (mode == SelectionMode::All) {
+        return species;
     }
+    return gather(species, selection_indices(species, mode, k));
 }
 
 void apply_normalization(
@@ -329,8 +388,12 @@ static void build_taxonomy_maps(
 // RankPoolEncoder
 // =============================================================================
 
-RankPoolEncoder::RankPoolEncoder(PoolWeighting weighting, int min_frequency)
-    : weighting_(weighting), min_frequency_(min_frequency) {}
+RankPoolEncoder::RankPoolEncoder(PoolWeighting weighting, int min_frequency,
+                                 SelectionMode selection, int species_budget)
+    : weighting_(weighting),
+      min_frequency_(min_frequency),
+      selection_(selection),
+      species_budget_(species_budget) {}
 
 void RankPoolEncoder::fit(const std::vector<SpeciesRecord>& records) {
     species_vocab_ = SpeciesVocab::from_records(records, min_frequency_);
@@ -444,6 +507,10 @@ RankPoolEncodedData RankPoolEncoder::transform(
         float total_abd = 0.0f;  // PoolWeighting::Norm denominator
     };
 
+    // A budget of 0 -- the default -- and SelectionMode::All both mean "encode
+    // every record", so the per-plot narrowing below is skipped entirely.
+    const bool has_budget = species_budget_ > 0 && selection_ != SelectionMode::All;
+
     std::vector<PlotData> plot_data(n_plots);
     int64_t max_species = 0;
 
@@ -453,7 +520,29 @@ RankPoolEncodedData RankPoolEncoder::transform(
         if (it == plot_to_indices.end()) continue;
 
         auto& pd = plot_data[pi];
-        const auto& indices = it->second;
+
+        // Narrow the plot to its species budget before anything is built, so
+        // the weights, the taxonomy IDs, the padded width and the species cap
+        // all describe the selected assemblage (issue #113). A budget of 0 --
+        // the default -- returns every record, so this is a no-op unless the
+        // caller asked for a budget.
+        const auto& plot_indices = it->second;
+        std::vector<size_t> budgeted;
+        // Alias the plot's own index list when there is no budget, rather than
+        // copying it: this loop runs once per plot over datasets of ~1.9M.
+        const std::vector<size_t>* selected = &plot_indices;
+        if (has_budget) {
+            std::vector<std::pair<std::string, float>> species_abd;
+            species_abd.reserve(plot_indices.size());
+            for (size_t idx : plot_indices) {
+                species_abd.emplace_back(records[idx].species_id, records[idx].abundance);
+            }
+            const auto keep = species_budget_indices(species_abd, selection_, species_budget_);
+            budgeted.reserve(keep.size());
+            for (size_t s : keep) budgeted.push_back(plot_indices[s]);
+            selected = &budgeted;
+        }
+        const auto& indices = *selected;
 
         // Collect raw entries for this plot
         std::vector<float> abundances;
@@ -616,6 +705,22 @@ EmbeddingEncodedData EmbeddingEncoder::transform(
     if (!fitted_) {
         throw std::runtime_error("EmbeddingEncoder must be fit before transform");
     }
+    if (selection_ == SelectionMode::All) {
+        // This encoder writes a fixed number of ranked slots, so there is no
+        // encoding of "every species" for it to produce. Refuse rather than
+        // quietly filling the slots by abundance and reporting All (issue #113):
+        // the pooled and sparse encodings are the ones that encode a whole plot.
+        throw std::invalid_argument(
+            "EmbeddingEncoder: SelectionMode::All cannot be encoded into a fixed "
+            "top_k_species slots. Use Top, Bottom or TopBottom, or switch to the "
+            "rank_pool / transformer / sparse species encoding, which encode "
+            "every species a plot records.");
+    }
+    // TopBottom draws from both ends into one fixed-width row, so the per-side
+    // k is half the slot count (rounded up) rather than the slot count itself.
+    const int per_side_k = (selection_ == SelectionMode::TopBottom)
+                               ? (top_k_species_ + 1) / 2
+                               : top_k_species_;
 
     const int64_t n_plots = static_cast<int64_t>(plot_ids.size());
     // Gate on either rank so a family-only dataset still uses family embeddings.
@@ -652,8 +757,12 @@ EmbeddingEncodedData EmbeddingEncoder::transform(
             species_abd.emplace_back(r.species_id, r.abundance);
         }
 
-        // Select top-k species using the existing apply_selection helper
-        auto selected_species = apply_selection(species_abd, selection_, top_k_species_);
+        // Fill the plot's species slots under the requested selection. The
+        // width is fixed at top_k_species (the model's embed encoder is sized
+        // against it), so TopBottom takes ceil(k/2) from each end rather than k
+        // from each: that fills every slot, and an odd slot count drops the
+        // last bottom entry instead of overflowing the row.
+        auto selected_species = apply_selection(species_abd, selection_, per_side_k);
 
         // Encode selected species IDs (pad with 0 if fewer than top_k)
         for (int j = 0; j < top_k_species_ && j < static_cast<int>(selected_species.size()); ++j) {

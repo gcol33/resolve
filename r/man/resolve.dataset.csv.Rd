@@ -29,7 +29,12 @@ resolve.dataset.csv(
 \item genus: Column name for genus (optional)
 \item family: Column name for family (optional)
 \item covariates: Vector of covariate column names (optional)
-}}
+}
+
+An optional role is unset by omitting it, or by giving it the empty
+string, which is the spelling to use when a role has to be cleared from a
+list that already carries it. A non-empty column name the file does not
+have is still an error, so a typo fails loudly.}
 
 \item{targets}{Named list of target configurations. Each target should have:
 \itemize{
@@ -46,7 +51,16 @@ resolve.dataset.csv(
 \item hash_dim: Hash dimension (default 32)
 \item top_k: Top-k genera/families (default 5)
 \item top_k_species: Top-k species for embed mode (default 10)
-\item selection: "top", "bottom", "top_bottom", or "all" (default "top")
+\item selection: "top", "bottom", "top_bottom", or "all" (default "top").
+Which species of a plot survive its per-plot budget: \code{top_k} for the
+hash encoding, \code{top_k_species} for embed (which rejects "all", having a
+fixed number of ranked slots), and \code{species_budget} for rank_pool,
+transformer and sparse.
+\item species_budget: species kept per plot by \code{selection} for the rank_pool,
+transformer and sparse encodings; 0 = no budget (default), so every
+species a plot records is encoded and \code{selection} has nothing to narrow.
+Set it to run a top-versus-bottom species ablation on the pooled
+encoders.
 \item representation: "abundance" or "presence_absence" (default "abundance")
 \item normalization: "raw", "norm", or "log1p" (default "norm")
 \item track_unknown_fraction: Track unknown species fraction (default TRUE)

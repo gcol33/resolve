@@ -55,6 +55,23 @@ most abundant species. Set `selection = SelectionMode.All` to hash the whole
 list. `top_k` also sets the number of fixed genus and family slots, so raising
 it widens the taxonomy input as well.
 
+Each encoding takes its per-plot budget from the knob that also fixes its width:
+`top_k` for hash, `top_k_species` for embed, and `species_budget` for the
+variable-width `RankPool`, `Transformer` and `Sparse` encodings. `species_budget`
+defaults to `0`, which is no budget: those encodings encode every species a plot
+records, and the schema reports `All` to say so. Set it to run a species
+ablation on the pooled encoders:
+
+```python
+data_config.species_encoding = rc.SpeciesEncodingMode.RankPool
+data_config.selection        = rc.SelectionMode.Bottom
+data_config.species_budget   = 20     # the 20 least abundant species per plot
+```
+
+Embed writes a fixed number of ranked slots, so `All` has no encoding there and
+is rejected rather than quietly treated as `Top`; under `TopBottom` it takes
+half its slots from each end.
+
 `normalization` rescales the weights: `Raw` uses abundance as recorded, `Norm`
 divides by the plot total, `Log1p` compresses the range.
 
@@ -244,7 +261,8 @@ It writes a JSON file of per-fold metrics and prints a comparison table.
 | `use_amp` | safe | safe | try it off first if the loss goes to NaN |
 | `pool_weighting` | ignored | used | used |
 | `pool_species_cap` | ignored | used | used, and matters more |
-| `selection` / `top_k` | used by hash | ignored | ignored |
+| `selection` | used, with `top_k` (hash) or `top_k_species` (embed) | used, with `species_budget` | used, with `species_budget` |
+| `species_budget` | ignored | used | used |
 | Layer diagnostics | hash only | unavailable | unavailable |
 
 ## Next steps

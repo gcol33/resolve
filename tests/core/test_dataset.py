@@ -275,3 +275,70 @@ def test_missing_file_raises(tmp_path, plot_csvs):
             make_targets(),
             make_dataset_config(),
         )
+
+
+# ---------------------------------------------------------------------------
+# Clearing an optional role (issue #111)
+# ---------------------------------------------------------------------------
+
+def test_optional_roles_accept_none():
+    """``roles.latitude = None`` is the unset path, matching the getter.
+
+    ``def_rw`` on an ``std::optional`` member gave a getter that read back
+    ``None`` and a setter that refused it, so downstream code had no way to
+    clear a role and reached for an empty-string sentinel instead.
+    """
+    roles = make_roles()
+    assert roles.has_coordinates()
+
+    roles.latitude = None
+    roles.longitude = None
+    assert roles.latitude is None
+    assert roles.longitude is None
+    assert not roles.has_coordinates()
+
+    roles.genus = None
+    roles.family = None
+    assert not roles.has_taxonomy()
+
+    roles.abundance = None
+    assert not roles.has_abundance()
+
+    # Still a string attribute for a real column name.
+    roles.latitude = "lat"
+    assert roles.latitude == "lat"
+
+
+def test_empty_string_clears_a_role(plot_csvs):
+    """The empty string is unset too, so the sentinel downstream already uses works."""
+    cleared = make_roles()
+    cleared.latitude = ""
+    cleared.longitude = ""
+    assert not cleared.has_coordinates()
+
+    unset = make_roles()
+    unset.latitude = None
+    unset.longitude = None
+
+    cfg = make_dataset_config()
+    from_cleared = rc.ResolveDataset.from_csv(
+        plot_csvs.header, plot_csvs.species, cleared, make_targets(), cfg
+    )
+    from_unset = rc.ResolveDataset.from_csv(
+        plot_csvs.header, plot_csvs.species, unset, make_targets(), cfg
+    )
+
+    assert not from_cleared.schema.has_coordinates
+    assert from_cleared.n_plots == from_unset.n_plots
+    assert torch.equal(from_cleared.hash_embedding, from_unset.hash_embedding)
+
+
+def test_a_misspelled_role_column_still_throws(plot_csvs):
+    """Only EMPTY means unset: a typo is still the loud configuration error."""
+    roles = make_roles()
+    roles.latitude = "lattitude"
+    with pytest.raises(Exception):
+        rc.ResolveDataset.from_csv(
+            plot_csvs.header, plot_csvs.species, roles, make_targets(),
+            make_dataset_config(),
+        )

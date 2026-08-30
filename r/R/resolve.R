@@ -466,6 +466,11 @@ resolve.progress <- function(checkpointDir) {
 #'   - genus: Column name for genus (optional)
 #'   - family: Column name for family (optional)
 #'   - covariates: Vector of covariate column names (optional)
+#'
+#'   An optional role is unset by omitting it, or by giving it the empty
+#'   string, which is the spelling to use when a role has to be cleared from a
+#'   list that already carries it. A non-empty column name the file does not
+#'   have is still an error, so a typo fails loudly.
 #' @param targets Named list of target configurations. Each target should have:
 #'   - column: Column name in header file
 #'   - task: "regression" or "classification"
@@ -477,7 +482,16 @@ resolve.progress <- function(checkpointDir) {
 #'   - hash_dim: Hash dimension (default 32)
 #'   - top_k: Top-k genera/families (default 5)
 #'   - top_k_species: Top-k species for embed mode (default 10)
-#'   - selection: "top", "bottom", "top_bottom", or "all" (default "top")
+#'   - selection: "top", "bottom", "top_bottom", or "all" (default "top").
+#'     Which species of a plot survive its per-plot budget: `top_k` for the
+#'     hash encoding, `top_k_species` for embed (which rejects "all", having a
+#'     fixed number of ranked slots), and `species_budget` for rank_pool,
+#'     transformer and sparse.
+#'   - species_budget: species kept per plot by `selection` for the rank_pool,
+#'     transformer and sparse encodings; 0 = no budget (default), so every
+#'     species a plot records is encoded and `selection` has nothing to narrow.
+#'     Set it to run a top-versus-bottom species ablation on the pooled
+#'     encoders.
 #'   - representation: "abundance" or "presence_absence" (default "abundance")
 #'   - normalization: "raw", "norm", or "log1p" (default "norm")
 #'   - track_unknown_fraction: Track unknown species fraction (default TRUE)

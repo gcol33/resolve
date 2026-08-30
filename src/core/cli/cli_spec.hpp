@@ -72,6 +72,11 @@ inline const CommandSpec& train_spec() {
                          "Species slots kept per plot in embed mode"});
         flags.push_back({"--selection", Arity::Value, "MODE", "top",
                          "Which species to keep: top, bottom, top_bottom, all"});
+        flags.push_back({"--species-budget", Arity::Value, "N", "0",
+                         "Species kept per plot by --selection for the\n"
+                         "rank_pool / transformer / sparse encodings:\n"
+                         "0 = no budget (encode every species). hash uses\n"
+                         "--top-k and embed uses --top-k-species instead."});
         flags.push_back({"--representation", Arity::Value, "MODE", "abundance",
                          "Species values: abundance or presence_absence"});
         flags.push_back({"--normalization", Arity::Value, "MODE", "raw",

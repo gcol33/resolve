@@ -465,4 +465,13 @@ void register_dataset(nb::module_& m) {
           "with. species_encoding / hash_dim / top_k come from the ModelConfig "
           "(they size the model); everything else the loader consumed comes "
           "from the schema. use_cuda_hash is deliberately not restored.");
+
+    m.def("effective_selection", &resolve::effective_selection, nb::arg("config"),
+          "The species selection a dataset built under this config actually "
+          "applies. hash and embed always select (their widths are per-plot "
+          "budgets: top_k and top_k_species). rank_pool / transformer / sparse "
+          "select only when species_budget gives them a budget, and report All "
+          "otherwise, because they encode every record. This is the value the "
+          "dataset publishes on its schema, so a checkpoint cannot claim a "
+          "selection the run never made.");
 }

@@ -151,6 +151,7 @@ try:
         ExternalVocabs,
         external_vocabs_from_schema,
         dataset_config_from_checkpoint,
+        effective_selection,
         # Model
         ResolveModel,
         # Training
@@ -327,6 +328,7 @@ __all__ = [
     "ExternalVocabs",
     "external_vocabs_from_schema",
     "dataset_config_from_checkpoint",
+    "effective_selection",
     # Model
     "ResolveModel",
     # Training

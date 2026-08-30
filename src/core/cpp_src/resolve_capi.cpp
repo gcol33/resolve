@@ -767,6 +767,7 @@ inline constexpr const char* kPoolSpeciesCap     = "pool_species_cap";
 // Remaining DatasetConfig knobs + the fitted vocabularies (issue #102).
 inline constexpr const char* kTopKSpecies        = "top_k_species";
 inline constexpr const char* kSelection          = "selection";
+inline constexpr const char* kSpeciesBudget      = "species_budget";
 inline constexpr const char* kRepresentation     = "representation";
 inline constexpr const char* kNormalization      = "normalization";
 inline constexpr const char* kAggregation        = "aggregation";
@@ -817,6 +818,7 @@ ResolveSchema parse_schema(const resolve_value* s) {
     // trees.
     if (vhas(s, k::kTopKSpecies)) schema.top_k_species = (int)vint(s, k::kTopKSpecies);
     if (vhas(s, k::kSelection)) schema.selection = parse_selection_mode(vstr(s, k::kSelection));
+    if (vhas(s, k::kSpeciesBudget)) schema.species_budget = (int)vint(s, k::kSpeciesBudget);
     if (vhas(s, k::kRepresentation)) schema.representation = parse_representation_mode(vstr(s, k::kRepresentation));
     if (vhas(s, k::kNormalization)) schema.normalization = parse_normalization_mode(vstr(s, k::kNormalization));
     if (vhas(s, k::kAggregation)) schema.aggregation = parse_aggregation_mode(vstr(s, k::kAggregation));
@@ -1148,6 +1150,7 @@ resolve_value* schema_to_value(const ResolveSchema& s) {
     // Remaining loader knobs + the fitted vocabularies (issue #102).
     v_put(m, k::kTopKSpecies, v_int(s.top_k_species));
     v_put(m, k::kSelection, v_string(selection_mode_to_string(s.selection)));
+    v_put(m, k::kSpeciesBudget, v_int(s.species_budget));
     v_put(m, k::kRepresentation, v_string(representation_mode_to_string(s.representation)));
     v_put(m, k::kNormalization, v_string(normalization_mode_to_string(s.normalization)));
     v_put(m, k::kAggregation, v_string(aggregation_mode_to_string(s.aggregation)));

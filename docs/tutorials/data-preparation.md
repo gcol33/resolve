@@ -108,6 +108,12 @@ At minimum:
 `covariates` and `categoricals` have to be disjoint; a column in both is
 rejected.
 
+An optional role is unset by leaving it out. To clear one that a role object or
+list already carries, assign `None` in Python (`roles.latitude = None`) or the
+empty string in either language; both mean "no such column". A non-empty column
+name the file does not have is an error, so a typo fails loudly rather than
+silently training without the feature.
+
 ## Targets
 
 Targets are declared separately from roles, because each one carries a task and

@@ -972,3 +972,98 @@ TEST_CASE("ResolveDataset vocab excludes species only in dropped plots",
     // <UNK> + sp1 + sp2 + sp3 == 4 (sp_only excluded).
     REQUIRE(ds.schema().n_species_vocab == 4);
 }
+
+// ============================================================================
+// Clearing an optional role (issue #111)
+// ============================================================================
+//
+// RoleMapping's optional columns are std::optional<std::string>, but a caller
+// whose language binding offers no "unset" spelling clears a role by assigning
+// the empty string. Read as a NAME that produced `column not found: ""`, so a
+// deliberately cleared coordinate role became a load failure. Empty means
+// unset -- and only empty: a non-empty name the file does not carry is still
+// the loud configuration error issue #94 added.
+
+TEST_CASE("an optional role cleared with an empty string is unset",
+          "[dataset][roles][issue111]") {
+    TempFile header(
+        "plot_id,lat,lon,bio1,area\n"
+        "p1,50.0,10.0,1.0,100\n"
+        "p2,51.0,11.0,1.5,200\n"
+    );
+    TempFile species(
+        "plot_id,species,cover,genus,family\n"
+        "p1,sp1,1.0,Quercus,Fagaceae\n"
+        "p2,sp2,1.0,Pinus,Pinaceae\n"
+    );
+
+    auto base_roles = [] {
+        RoleMapping r;
+        r.plot_id = "plot_id"; r.species_id = "species"; r.abundance = "cover";
+        r.latitude = "lat"; r.longitude = "lon";
+        r.genus = "genus"; r.family = "family";
+        return r;
+    };
+    DatasetConfig cfg;
+    cfg.species_encoding = SpeciesEncodingMode::Hash;
+    cfg.hash_dim = 8;
+
+    SECTION("RoleMapping reports a cleared role as unset") {
+        RoleMapping roles = base_roles();
+        roles.latitude = "";
+        roles.longitude = "";
+        REQUIRE_FALSE(roles.has_coordinates());
+        REQUIRE_FALSE(roles.latitude_column().has_value());
+        REQUIRE_FALSE(roles.longitude_column().has_value());
+
+        roles.genus = "";
+        REQUIRE(roles.has_taxonomy());  // family still mapped
+        roles.family = "";
+        REQUIRE_FALSE(roles.has_taxonomy());
+
+        roles.abundance = "";
+        REQUIRE_FALSE(roles.has_abundance());
+    }
+
+    SECTION("a nullopt role and an empty-string role load identically") {
+        RoleMapping cleared = base_roles();
+        cleared.latitude = "";
+        cleared.longitude = "";
+
+        RoleMapping unset = base_roles();
+        unset.latitude = std::nullopt;
+        unset.longitude = std::nullopt;
+
+        auto from_cleared = ResolveDataset::from_csv(
+            header.path(), species.path(), cleared, {TargetSpec::regression("area")}, cfg);
+        auto from_unset = ResolveDataset::from_csv(
+            header.path(), species.path(), unset, {TargetSpec::regression("area")}, cfg);
+
+        REQUIRE(from_cleared.n_plots() == from_unset.n_plots());
+        REQUIRE(from_cleared.schema().has_coordinates == from_unset.schema().has_coordinates);
+        REQUIRE_FALSE(from_cleared.schema().has_coordinates);
+        REQUIRE(torch::equal(from_cleared.hash_embedding(), from_unset.hash_embedding()));
+    }
+
+    SECTION("clearing a species-table role is unset, not a missing column") {
+        RoleMapping roles = base_roles();
+        roles.genus = "";
+        roles.family = "";
+        auto ds = ResolveDataset::from_csv(
+            header.path(), species.path(), roles, {TargetSpec::regression("area")}, cfg);
+        REQUIRE(ds.n_plots() == 2);
+        REQUIRE_FALSE(ds.schema().has_taxonomy);
+    }
+
+    SECTION("a non-empty name the file lacks still throws") {
+        RoleMapping roles = base_roles();
+        roles.latitude = "lattitude";
+        REQUIRE_THROWS(ResolveDataset::from_csv(
+            header.path(), species.path(), roles, {TargetSpec::regression("area")}, cfg));
+
+        RoleMapping typo_genus = base_roles();
+        typo_genus.genus = "genuss";
+        REQUIRE_THROWS(ResolveDataset::from_csv(
+            header.path(), species.path(), typo_genus, {TargetSpec::regression("area")}, cfg));
+    }
+}

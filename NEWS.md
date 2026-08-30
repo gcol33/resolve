@@ -1,5 +1,65 @@
 # RESOLVE Changelog
 
+## v0.8.1 (2026-08-30)
+
+Three reported defects, all of the same shape: a value the API accepts and
+persists, and then does not act on.
+
+### Fixed
+
+- **`SelectionMode` is honoured outside the hash encoding (#113).**
+  `apply_selection` was called only inside the hash branch of the loader, so a
+  `rank_pool` / `transformer` / `sparse` dataset recorded the selection it was
+  given on its schema and encoded every species anyway, and the embed branch
+  hardcoded `Top` whatever it was asked for. Each encoding now takes its
+  per-plot species budget from the knob that also fixes its width: `top_k` for
+  hash, `top_k_species` for embed, and the new **`DatasetConfig.species_budget`**
+  for the variable-width encodings. The new knob defaults to `0` -- no budget --
+  so every existing configuration encodes exactly what it encoded before;
+  setting it makes a top-versus-bottom species ablation reachable on the pooled
+  encoders for the first time. The species vocabulary is still fitted over every
+  record, so the arms of an ablation share one integer-code namespace and stay
+  comparable. The schema now records the selection the run APPLIED, which is
+  `All` for a pooled or sparse load with no budget, so a checkpoint can no
+  longer report a selection that never happened. Threaded through the schema,
+  the checkpoint (`schema_species_budget`, absent on older checkpoints and read
+  as `0`), `dataset_config_from_checkpoint`, the C ABI, nanobind, R
+  (`config = list(species_budget = ...)`) and the CLI (`--species-budget N`).
+
+- **`Predictor.load(device="cpu")` works on a machine with no CUDA device
+  (#112).** `Trainer::load` called `InputArchive::load_from(path)` without the
+  requested device, so the unpickler restored every tensor to the device the
+  checkpoint was SAVED on and the `model->to(device)` that follows never got the
+  chance -- reading a GPU-trained checkpoint on a GPU-less node threw "No CUDA
+  GPUs are available" from inside deserialization. The device is now passed to
+  the unpickler, in `Trainer::load`, `Trainer::load_state`, and (forced to CPU,
+  since they return only scalars) `load_train_config` / `load_run_metadata`.
+
+- **An optional role can be cleared (#111).** `roles.latitude = None` raised
+  `TypeError` on the Python bindings: `def_rw` on a `std::optional` member gave
+  a getter that read back `None` and a setter that refused it, because a
+  nanobind function with no argument annotations takes a fast dispatch path that
+  rejects every `None` argument before any caster runs. The five optional role
+  columns are now bound with an explicit `str | None` setter. The empty string
+  also means unset engine-wide (`RoleMapping::as_column`), so the sentinel
+  downstream code already uses keeps working instead of failing with `column not
+  found: ""`. A non-empty column name the file does not carry is still the loud
+  configuration error it has been since #94.
+
+- **A checkpoint saved before `fit()` recorded `train_batch_size` as 0.**
+  `Trainer`'s requested-batch-size tracker started at `0`, which
+  `save_train_config` reads as a genuine request, rather than at the `-1` that
+  means "no separate request known" and persists the configured size.
+
+### Added
+
+- `resolve info` prints a **Data Encoding** block: the loading-side
+  `DatasetConfig` the checkpoint implies, which is the one `resolve predict`
+  rebuilds. Driven by the shared field registry, like the Training Configuration
+  block beside it.
+- `resolve_core.effective_selection(config)` reports the selection a dataset
+  built under a config will actually apply.
+
 ## v0.8.0 (2026-08-07)
 
 A sweep of issues #102-#110. The engine is the only implementation, the CLI

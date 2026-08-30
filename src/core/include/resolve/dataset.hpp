@@ -42,6 +42,14 @@ struct DatasetConfig {
     int hash_dim = 32;
     int top_k = 3;
     int top_k_species = 10;  // For embed mode
+    // Which species of a plot survive its per-plot budget. Each encoding takes
+    // its budget from the knob that also fixes its width:
+    //   hash          -> top_k
+    //   embed         -> top_k_species (All is rejected: a fixed number of
+    //                    ranked slots cannot encode every species)
+    //   rank_pool /
+    //   transformer /
+    //   sparse        -> species_budget below, 0 by default = no budget
     SelectionMode selection = SelectionMode::Top;
     RepresentationMode representation = RepresentationMode::Abundance;
     NormalizationMode normalization = NormalizationMode::Raw;
@@ -83,6 +91,30 @@ struct DatasetConfig {
     // (not top-k by abundance); the rank-pool weighting still applies to
     // whatever survives the slice.
     int pool_species_cap = 0;
+
+    // Per-plot species budget for the encodings whose width is not otherwise
+    // fixed: rank_pool, transformer and sparse (issue #113). `selection` picks
+    // which species survive it.
+    //
+    //   0 (default) : no budget. Every species a plot records is encoded,
+    //                 whatever `selection` says -- these encodings have always
+    //                 done this, and leaving the default alone keeps every
+    //                 existing configuration encoding exactly what it did.
+    //   >0          : keep this many species per plot, taken from the end of
+    //                 the abundance ranking `selection` names (up to 2x this
+    //                 many under TopBottom, as everywhere else). This is what
+    //                 makes a top-versus-bottom species ablation reachable on
+    //                 the pooled encoders.
+    //
+    // SelectionMode::All names no rule for picking a subset, so it encodes
+    // every species regardless of the budget. For rank_pool / transformer the
+    // budget narrows the plot BEFORE pool_species_cap slices it, so a cap still
+    // means what it documents: the first `cap` survivors in CSV row order.
+    //
+    // The species vocabulary is fitted over every record, budget or not, so the
+    // integer codes are identical across settings and an ablation's arms stay
+    // comparable.
+    int species_budget = 0;
 };
 
 // Forward declaration: the vocab-carrying loaders take one of these.
@@ -129,8 +161,8 @@ ExternalVocabs external_vocabs_from_schema(const ResolveSchema& schema);
 // (species_encoding, hash_dim, top_k) and are therefore authoritative there;
 // `schema` supplies everything else the dataset loader consumed
 // (top_k_species, selection, representation, normalization, aggregation,
-// track_unknown_fraction, track_unknown_count, use_taxonomy, pool_weighting and
-// the resolved pool_species_cap).
+// track_unknown_fraction, track_unknown_count, use_taxonomy, species_budget,
+// pool_weighting and the resolved pool_species_cap).
 //
 // `use_cuda_hash` is deliberately NOT restored: it swaps the precomputed hash
 // embedding for raw COO species data, which is a training-time compute choice,
@@ -138,6 +170,17 @@ ExternalVocabs external_vocabs_from_schema(const ResolveSchema& schema);
 // DatasetConfig default (false).
 DatasetConfig dataset_config_from_checkpoint(const ResolveSchema& schema,
                                              const ModelConfig& model_config);
+
+// The selection a dataset built under `config` actually applies. Hash and embed
+// always select, because their widths ARE per-plot budgets (top_k and
+// top_k_species). The rank_pool / transformer / sparse encodings select only
+// when species_budget gives them a budget to select down to; with no budget
+// they encode every record, which is SelectionMode::All whatever was asked for.
+//
+// The dataset publishes this, not the requested value, onto its schema, so a
+// checkpoint (and everything that reads one back) cannot report a species
+// selection the run never made (issue #113).
+SelectionMode effective_selection(const DatasetConfig& config);
 
 // Loaded dataset ready for training
 class ResolveDataset {

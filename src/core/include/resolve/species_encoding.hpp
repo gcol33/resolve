@@ -70,6 +70,34 @@ std::vector<std::pair<std::string, float>> apply_selection(
     int k
 );
 
+// Indices into `species` that `mode` keeps, in the order the selection ranks
+// them (idx[0] is the most abundant under Top, the least under Bottom, and the
+// top half precedes the bottom half under TopBottom). All returns every index
+// in original order and ignores k. This is the single definition of the
+// selection rule; apply_selection gathers from it, so the pair-returning and
+// index-returning forms cannot drift.
+std::vector<size_t> selection_indices(
+    const std::vector<std::pair<std::string, float>>& species,
+    SelectionMode mode,
+    int k
+);
+
+// Indices a per-plot species BUDGET keeps, in ascending original (CSV row)
+// order. `budget <= 0` means "no budget": every index is returned whatever
+// `mode` says, which is what the rank-pool / transformer / sparse encodings did
+// before DatasetConfig::species_budget existed. SelectionMode::All also returns
+// everything, since it names no rule for picking a subset.
+//
+// The encodings with a fixed per-plot width (hash's top_k, embed's
+// top_k_species) carry their own budget and use apply_selection directly; this
+// is for the variable-width ones, which encode whatever the plot holds until a
+// budget says otherwise (issue #113).
+std::vector<size_t> species_budget_indices(
+    const std::vector<std::pair<std::string, float>>& species,
+    SelectionMode mode,
+    int budget
+);
+
 // Apply normalization to abundance values
 void apply_normalization(
     std::vector<std::pair<std::string, float>>& species,
@@ -165,7 +193,23 @@ enum class PoolWeighting { Binary, Abundance, Log1p, Norm, Rank };
 
 class RankPoolEncoder {
 public:
-    explicit RankPoolEncoder(PoolWeighting weighting = PoolWeighting::Log1p, int min_frequency = 1);
+    // `selection` + `species_budget` are the per-plot species budget
+    // (DatasetConfig::selection / species_budget, issue #113): each plot's
+    // record list is narrowed to `species_budget` species at the requested end
+    // of the abundance ranking BEFORE weights, taxonomy IDs and the padded
+    // width are computed, so a top-versus-bottom ablation changes what the
+    // pool actually sees. The defaults (All / 0) are "no budget": every record
+    // the plot holds is encoded, which is what this encoder always did.
+    //
+    // Selection narrows; the species cap passed to transform() then slices what
+    // survives, in CSV row order, as it documents. fit() is unaffected -- the
+    // vocabulary is fitted over every record it is given, so the integer codes
+    // are identical across selection settings and an ablation's arms stay
+    // comparable.
+    explicit RankPoolEncoder(PoolWeighting weighting = PoolWeighting::Log1p,
+                             int min_frequency = 1,
+                             SelectionMode selection = SelectionMode::All,
+                             int species_budget = 0);
 
     void fit(const std::vector<SpeciesRecord>& records);
 
@@ -193,6 +237,8 @@ public:
     [[nodiscard]] int64_t n_families_vocab() const noexcept { return taxonomy_vocab_.n_families(); }
     [[nodiscard]] const SpeciesVocab& species_vocab() const noexcept { return species_vocab_; }
     [[nodiscard]] const TaxonomyVocab& taxonomy_vocab() const noexcept { return taxonomy_vocab_; }
+    [[nodiscard]] SelectionMode selection() const noexcept { return selection_; }
+    [[nodiscard]] int species_budget() const noexcept { return species_budget_; }
 
     // Replace the fitted species + taxonomy vocabs with externally-supplied
     // ones. Requires fit() to have been called first (throws otherwise);
@@ -212,6 +258,8 @@ private:
     std::unordered_map<std::string, std::string> species_to_family_;
     PoolWeighting weighting_;
     int min_frequency_;
+    SelectionMode selection_;
+    int species_budget_;
     bool fitted_ = false;
 };
 
@@ -232,6 +280,10 @@ struct EmbeddingEncodedData {
 
 class EmbeddingEncoder {
 public:
+    // `selection` decides which species fill the top_k_species slots: the most
+    // abundant (Top), the least (Bottom), or ceil(k/2) from each end
+    // (TopBottom). SelectionMode::All has no fixed-width encoding and is
+    // rejected by transform() rather than silently treated as Top (issue #113).
     explicit EmbeddingEncoder(
         int top_k_species = 10, int top_k_taxonomy = 3,
         SelectionMode selection = SelectionMode::Top);
@@ -254,6 +306,7 @@ public:
     [[nodiscard]] int64_t n_species_vocab() const noexcept { return species_vocab_.size(); }
     [[nodiscard]] int64_t n_genera_vocab() const noexcept { return taxonomy_vocab_.n_genera(); }
     [[nodiscard]] int64_t n_families_vocab() const noexcept { return taxonomy_vocab_.n_families(); }
+    [[nodiscard]] SelectionMode selection() const noexcept { return selection_; }
 
 private:
     SpeciesVocab species_vocab_;

@@ -15,7 +15,7 @@ namespace resolve {
 // Version and constants
 // =============================================================================
 
-inline constexpr const char* VERSION = "0.8.0";
+inline constexpr const char* VERSION = "0.8.1";
 
 // Training defaults
 constexpr int kDefaultBatchSize = 4096;
@@ -236,7 +236,13 @@ struct ResolveSchema {
     // dataset_config_from_checkpoint() (dataset.hpp), the single place that
     // reassembles a DatasetConfig from a checkpoint.
     int top_k_species = 10;
+    // The selection the run APPLIED, not the one it was configured with: a
+    // rank_pool / transformer / sparse dataset with no species_budget encodes
+    // every record, which is All (issue #113). See effective_selection().
     SelectionMode selection = SelectionMode::Top;
+    // Per-plot species budget for the rank_pool / transformer / sparse
+    // encodings; 0 = no budget. Mirrors DatasetConfig::species_budget.
+    int species_budget = 0;
     RepresentationMode representation = RepresentationMode::Abundance;
     NormalizationMode normalization = NormalizationMode::Raw;
     AggregationMode aggregation = AggregationMode::Abundance;

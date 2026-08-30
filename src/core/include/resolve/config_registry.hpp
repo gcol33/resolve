@@ -361,7 +361,8 @@ inline constexpr const char* kRequiredModelConfigKeys[] = {
     F(use_taxonomy,           "")        \
     F(use_cuda_hash,          "")        \
     F(pool_weighting,         "")        \
-    F(pool_species_cap,       "")
+    F(pool_species_cap,       "")        \
+    F(species_budget,         "")
 
 RESOLVE_DEFINE_FIELD_REGISTRY(DatasetConfig, RESOLVE_DATASET_CONFIG_FIELDS)
 

@@ -48,19 +48,41 @@ struct RoleMapping {
     // Multiple targets
     std::vector<std::string> targets;
 
+    // An optional role is UNSET when it holds no value or when its value is the
+    // empty string. An empty name cannot identify a column, and assigning ""
+    // is how a caller clears a role when its language binding offers no natural
+    // "unset" spelling -- read as a name it makes the loaders reject a
+    // deliberately cleared role with `column not found: ""` (issue #111).
+    //
+    // A non-empty name the file does not carry stays an error, so a typo still
+    // fails loudly instead of silently dropping the feature (issue #94).
+    //
+    // Every consumer reads an optional role through the accessors below rather
+    // than off the field, so "unset" has one definition.
+    static std::optional<std::string> as_column(const std::optional<std::string>& field) {
+        if (!field || field->empty()) return std::nullopt;
+        return field;
+    }
+
+    std::optional<std::string> abundance_column() const { return as_column(abundance); }
+    std::optional<std::string> longitude_column() const { return as_column(longitude); }
+    std::optional<std::string> latitude_column()  const { return as_column(latitude); }
+    std::optional<std::string> genus_column()     const { return as_column(genus); }
+    std::optional<std::string> family_column()    const { return as_column(family); }
+
     // Helper to check if coordinates are available
     bool has_coordinates() const {
-        return longitude.has_value() && latitude.has_value();
+        return longitude_column().has_value() && latitude_column().has_value();
     }
 
     // Helper to check if taxonomy is available
     bool has_taxonomy() const {
-        return genus.has_value() || family.has_value();
+        return genus_column().has_value() || family_column().has_value();
     }
 
     // Helper to check if abundance is available
     bool has_abundance() const {
-        return abundance.has_value();
+        return abundance_column().has_value();
     }
 
     // Helper to check if any categorical covariates were declared

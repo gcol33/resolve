@@ -22,6 +22,33 @@ void bind_config_field(Class& cls, const char* name, T Cfg::*member) {
     }
 }
 
+// Registers one optional RoleMapping column as an `Optional[str]` attribute.
+//
+// The setter takes std::optional<std::string> by value, so nanobind's optional
+// caster is the one in play and None reaches the field as nullopt; the getter
+// hands the field back, so None / "" / a name all read exactly as they were
+// assigned.
+//
+// `nb::arg("value").none()` is what actually makes None work, and it is why
+// def_rw is not enough here. A nanobind function with no argument annotations
+// takes the SIMPLE vectorcall path, which rejects every None argument before
+// any caster runs ("keyword/None arguments unsupported in simple vectorcall",
+// nb_func.cpp) -- so def_rw on an optional member produced a getter that read
+// back None and a setter that refused it, measured on 0.8.0 (issue #111). The
+// annotation both moves the setter onto the complex path and sets the
+// accepts_none flag that path checks.
+template <typename Class>
+void bind_optional_role(Class& cls, const char* name,
+                        std::optional<std::string> resolve::RoleMapping::*member) {
+    cls.def_prop_rw(
+        name,
+        [member](const resolve::RoleMapping& r) { return r.*member; },
+        [member](resolve::RoleMapping& r, std::optional<std::string> value) {
+            r.*member = std::move(value);
+        },
+        nb::arg("value").none());
+}
+
 }  // namespace
 
 // Expands one registry row into a def_rw. `cls` and `Cfg` come from the
@@ -31,22 +58,32 @@ void bind_config_field(Class& cls, const char* name, T Cfg::*member) {
 
 void register_types(nb::module_& m) {
     // Role Mapping and Dataset Configuration
-    nb::class_<resolve::RoleMapping>(m, "RoleMapping")
-        .def(nb::init<>())
-        .def_rw("plot_id", &resolve::RoleMapping::plot_id)
-        .def_rw("species_id", &resolve::RoleMapping::species_id)
-        .def_rw("abundance", &resolve::RoleMapping::abundance)
-        .def_rw("longitude", &resolve::RoleMapping::longitude)
-        .def_rw("latitude", &resolve::RoleMapping::latitude)
-        .def_rw("genus", &resolve::RoleMapping::genus)
-        .def_rw("family", &resolve::RoleMapping::family)
-        .def_rw("covariates", &resolve::RoleMapping::covariates)
-        .def_rw("categoricals", &resolve::RoleMapping::categoricals)
-        .def_rw("targets", &resolve::RoleMapping::targets)
-        .def("has_coordinates", &resolve::RoleMapping::has_coordinates)
-        .def("has_taxonomy", &resolve::RoleMapping::has_taxonomy)
-        .def("has_abundance", &resolve::RoleMapping::has_abundance)
-        .def("has_categoricals", &resolve::RoleMapping::has_categoricals);
+    {
+        auto cls = nb::class_<resolve::RoleMapping>(m, "RoleMapping");
+        cls.def(nb::init<>())
+            .def_rw("plot_id", &resolve::RoleMapping::plot_id)
+            .def_rw("species_id", &resolve::RoleMapping::species_id);
+        // The five optional roles are bound explicitly rather than through
+        // def_rw so the setter takes `str | None` and None genuinely clears the
+        // role. def_rw produced a str-only setter here (measured on 0.8.0:
+        // `roles.latitude = None` raised TypeError while the getter already
+        // read back None), which left callers with no unset path at all and
+        // pushed them onto an empty-string sentinel (issue #111). The engine
+        // reads both spellings as unset -- see RoleMapping::as_column -- so ""
+        // keeps working for code that already uses it.
+        bind_optional_role(cls, "abundance", &resolve::RoleMapping::abundance);
+        bind_optional_role(cls, "longitude", &resolve::RoleMapping::longitude);
+        bind_optional_role(cls, "latitude", &resolve::RoleMapping::latitude);
+        bind_optional_role(cls, "genus", &resolve::RoleMapping::genus);
+        bind_optional_role(cls, "family", &resolve::RoleMapping::family);
+        cls.def_rw("covariates", &resolve::RoleMapping::covariates)
+            .def_rw("categoricals", &resolve::RoleMapping::categoricals)
+            .def_rw("targets", &resolve::RoleMapping::targets)
+            .def("has_coordinates", &resolve::RoleMapping::has_coordinates)
+            .def("has_taxonomy", &resolve::RoleMapping::has_taxonomy)
+            .def("has_abundance", &resolve::RoleMapping::has_abundance)
+            .def("has_categoricals", &resolve::RoleMapping::has_categoricals);
+    }
 
     nb::class_<resolve::TargetSpec>(m, "TargetSpec")
         .def(nb::init<>())
@@ -119,7 +156,11 @@ void register_types(nb::module_& m) {
         // restored pool_weighting only; without these an inference-side
         // DatasetConfig silently reverted to the struct defaults.
         .def_rw("top_k_species", &resolve::ResolveSchema::top_k_species)
+        // The selection the load APPLIED. A rank_pool / transformer / sparse
+        // dataset with no species_budget encodes every record, so it reports
+        // All whatever the config asked for (issue #113).
         .def_rw("selection", &resolve::ResolveSchema::selection)
+        .def_rw("species_budget", &resolve::ResolveSchema::species_budget)
         .def_rw("representation", &resolve::ResolveSchema::representation)
         .def_rw("normalization", &resolve::ResolveSchema::normalization)
         .def_rw("aggregation", &resolve::ResolveSchema::aggregation)

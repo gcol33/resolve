@@ -26,6 +26,10 @@
 #include "resolve/trainer.hpp"
 #include "resolve/predictor.hpp"
 
+#ifdef RESOLVE_HAS_CUDA
+#include <c10/cuda/CUDACachingAllocator.h>
+#endif
+
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -302,4 +306,87 @@ TEST_CASE("Predictor::get_embeddings returns per-plot latent rows",
     REQUIRE(emb.size(0) == 48);
     REQUIRE(emb.size(1) == predictor.model()->latent_dim());
     REQUIRE(torch::isfinite(emb).all().item<bool>());
+}
+
+// =============================================================================
+// 9. Checkpoint deserialization targets the REQUESTED device (issue #112)
+// =============================================================================
+//
+// Trainer::load called InputArchive::load_from(path) with no device, so the
+// unpickler restored every tensor to the device the checkpoint was SAVED on and
+// the model->to(device) that follows never got the chance: loading a
+// GPU-trained checkpoint on a host with no CUDA device threw inside
+// deserialization ("No CUDA GPUs are available").
+//
+// A host that HAS the device cannot observe that failure -- deserialization
+// succeeds onto the GPU and the weights are moved back -- so the observable
+// contract here is that a CPU load of a CUDA-saved checkpoint allocates no CUDA
+// memory at all. That is only measurable on a CUDA build; on a CPU build the
+// case below still pins that a CPU-saved checkpoint round-trips onto the CPU,
+// and the GPU-less repro itself is by construction only reproducible on a
+// GPU-less host.
+
+TEST_CASE("Predictor::load puts the weights on the requested device",
+          "[predictor][device][issue112]") {
+    auto ds = make_synthetic_dataset(/*n_plots=*/32);
+
+    ModelConfig mcfg;
+    mcfg.species_encoding = SpeciesEncodingMode::Hash;
+    mcfg.hash_dim = 4;
+    mcfg.hidden_dims = {8, 4};
+
+    const bool have_cuda = torch::cuda::is_available();
+    const torch::Device save_device = have_cuda ? torch::Device(torch::kCUDA, 0)
+                                                : torch::Device(torch::kCPU);
+
+    ResolveModel model(ds.schema(), mcfg);
+    model->to(save_device);
+
+    TrainConfig tcfg;
+    tcfg.batch_size = 8;
+    tcfg.max_epochs = 1;
+    tcfg.patience = 1;
+    tcfg.device = save_device;
+
+    Trainer trainer(model, tcfg);
+    trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/0);
+
+    TempFile ckpt("", ".pt");
+    trainer.save(ckpt.path());
+
+    auto cpu_predictor = [&] {
+#ifdef RESOLVE_HAS_CUDA
+        if (have_cuda) {
+            // Reading a CUDA-saved checkpoint onto the CPU must not touch the
+            // GPU at all. Before the fix the archive landed on the GPU and the
+            // weights were moved back afterwards, so the result LOOKED right
+            // while the peak allocation was non-zero -- and on a host with no
+            // CUDA device the same code threw instead. Index 0 of the stat
+            // array is the AGGREGATE pool; the enum naming that constant moved
+            // namespace between libtorch 2.6 and 2.9, the index did not.
+            c10::cuda::CUDACachingAllocator::emptyCache();
+            c10::cuda::CUDACachingAllocator::resetPeakStats(/*device=*/0);
+            const int64_t before =
+                c10::cuda::CUDACachingAllocator::getDeviceStats(0).allocated_bytes[0].peak;
+
+            auto loaded = Predictor::load(ckpt.path(), torch::kCPU);
+
+            const int64_t after =
+                c10::cuda::CUDACachingAllocator::getDeviceStats(0).allocated_bytes[0].peak;
+            REQUIRE(after == before);
+            return loaded;
+        }
+#endif
+        return Predictor::load(ckpt.path(), torch::kCPU);
+    }();
+
+    for (const auto& p : cpu_predictor.model()->parameters()) {
+        REQUIRE(p.device().is_cpu());
+    }
+
+    // The scalar-only readers open the same archive and must not need a CUDA
+    // device either: they force the CPU because nothing they return is a tensor.
+    auto cfg = Trainer::load_train_config(ckpt.path());
+    REQUIRE(cfg.batch_size == 8);
+    REQUIRE_NOTHROW(Trainer::load_run_metadata(ckpt.path()));
 }

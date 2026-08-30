@@ -155,6 +155,13 @@ jobs:
           grep -q "Train nca_temperature: 0.45" "$OUT/info.txt"
           grep -q "Train nca_neighbors: 7" "$OUT/info.txt"
           grep -q "Train nca_weight: 0.6" "$OUT/info.txt"
+          # The loading-side DatasetConfig the checkpoint implies, which is the
+          # one predict rebuilds. This run set no --species-budget, so the
+          # rank_pool encoding really did select nothing and the schema says so
+          # rather than reporting the default selection it never applied.
+          grep -q "Dataset species_encoding: rank_pool" "$OUT/info.txt"
+          grep -q "Dataset species_budget: 0" "$OUT/info.txt"
+          grep -q "Dataset selection: all" "$OUT/info.txt"
 
           # No --covariate / --categorical here: predict defaults to the column
           # names the checkpoint's schema carries, so a covariate model is
@@ -237,6 +244,54 @@ jobs:
           echo "parameters with covariate+categorical: $with_cov, without: $without_cov"
           if [ "$with_cov" -le "$without_cov" ]; then
             echo "::error::the covariate did not widen the model ($with_cov <= $without_cov)"
+            exit 1
+          fi
+
+      # DatasetConfig::selection was applied only by the hash encoding, so a
+      # rank_pool run recorded a selection and encoded every species anyway
+      # (issue #113). --species-budget gives the pooled encodings a budget to
+      # select down to; without it they still encode everything, which is what
+      # the "Dataset selection: all" assertion above pins.
+      - name: --species-budget selects on the pooled encoder
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:${LD_LIBRARY_PATH:-}
+          RESOLVE=${{ github.workspace }}/cli/resolve
+          FIXTURES=${{ github.workspace }}/src/core/tests/fixtures
+
+          train_budget () {
+            "$RESOLVE" train \
+              --header "$FIXTURES/cli_header.csv" \
+              --species "$FIXTURES/cli_species.csv" \
+              --plot-id plot_id --species-id species --abundance cover \
+              --lat lat --lon lon --genus genus --family family \
+              --target area:regression \
+              --encoding rank_pool --selection "$2" --species-budget "$3" \
+              --hidden-dims 32 --dropout 0.0 \
+              --batch-size 32 --max-epochs 3 --patience 3 --lr 0.01 \
+              --test-size 0.25 --seed 7 \
+              --output "$OUT/budget_$1.pt" > /dev/null
+            "$RESOLVE" predict \
+              --model "$OUT/budget_$1.pt" \
+              --header "$FIXTURES/cli_header.csv" \
+              --species "$FIXTURES/cli_species.csv" \
+              --plot-id plot_id --species-id species --abundance cover \
+              --lat lat --lon lon --genus genus --family family \
+              --output "$OUT/budget_$1.csv" > /dev/null
+          }
+
+          train_budget top top 2
+          train_budget bottom bottom 2
+
+          "$RESOLVE" info --model "$OUT/budget_top.pt" > "$OUT/info_budget.txt"
+          grep -q "Dataset species_budget: 2" "$OUT/info_budget.txt"
+          grep -q "Dataset selection: top" "$OUT/info_budget.txt"
+
+          # Same seed, same architecture, same data: only which species the pool
+          # sees differs, so identical predictions would mean the budget did
+          # nothing -- which is exactly the defect.
+          if cmp -s "$OUT/budget_top.csv" "$OUT/budget_bottom.csv"; then
+            echo "::error::--selection top and bottom gave identical predictions"
             exit 1
           fi
 
@@ -354,6 +409,7 @@ jobs:
           for flag in --covariate --categorical --seed --weight-decay --lr-scheduler \
                       --checkpoint-dir --band-threshold --encoder-architecture \
                       --cv-folds --cv-spatial --top-k-species --selection \
+                      --species-budget \
                       --representation --normalization --use-cuda-hash \
                       --batch-size-floor; do
             grep -q -- "$flag" /tmp/usage.txt || {

@@ -371,16 +371,16 @@ ColumnIndices ColumnIndices::from_source(const RowSource& source, const RoleMapp
     };
     // abundance / genus / family live in the species source for BOTH the
     // single-table and two-file loaders, so they are always guarded here.
-    idx.abundance = resolve_role(roles.abundance, "abundance");
-    idx.genus = resolve_role(roles.genus, "genus");
-    idx.family = resolve_role(roles.family, "family");
+    idx.abundance = resolve_role(roles.abundance_column(), "abundance");
+    idx.genus = resolve_role(roles.genus_column(), "genus");
+    idx.family = resolve_role(roles.family_column(), "family");
     // Coordinates live in the species source only for the single-table loader
     // (expect_coordinates); in the two-file loader they are header roles that
     // load_header_data already validated, so looking them up in the species
     // source would wrongly reject the normal case. Left unresolved (-1) there.
     if (expect_coordinates) {
-        idx.longitude = resolve_role(roles.longitude, "longitude");
-        idx.latitude = resolve_role(roles.latitude, "latitude");
+        idx.longitude = resolve_role(roles.longitude_column(), "longitude");
+        idx.latitude = resolve_role(roles.latitude_column(), "latitude");
     }
     return idx;
 }
@@ -664,6 +664,7 @@ DatasetConfig dataset_config_from_checkpoint(const ResolveSchema& schema,
     // Everything else the loader consumed, from the schema (issue #102).
     config.top_k_species = schema.top_k_species;
     config.selection = schema.selection;
+    config.species_budget = schema.species_budget;
     config.representation = schema.representation;
     config.normalization = schema.normalization;
     config.aggregation = schema.aggregation;
@@ -676,6 +677,23 @@ DatasetConfig dataset_config_from_checkpoint(const ResolveSchema& schema,
     // (raw COO species data instead of a precomputed hash embedding), and
     // Predictor::predict consumes the precomputed embedding.
     return config;
+}
+
+SelectionMode effective_selection(const DatasetConfig& config) {
+    switch (config.species_encoding) {
+        case SpeciesEncodingMode::Hash:
+        case SpeciesEncodingMode::Embed:
+            // Fixed per-plot width (top_k / top_k_species), so a selection is
+            // always applied.
+            return config.selection;
+        case SpeciesEncodingMode::RankPool:
+        case SpeciesEncodingMode::Transformer:
+        case SpeciesEncodingMode::Sparse:
+        default:
+            // Variable width: without a budget every record is encoded, which
+            // is All however the config is spelled.
+            return config.species_budget > 0 ? config.selection : SelectionMode::All;
+    }
 }
 
 void ResolveDataset::adopt_vocabs(const ExternalVocabs& vocabs) {
@@ -1067,18 +1085,19 @@ void ResolveDataset::load_header_data(
     // A named coordinate column that is absent from the header is a
     // configuration error, not a silent "no coordinates": failing loudly here
     // avoids training a model that quietly dropped the coordinates the user
-    // asked for.
+    // asked for. A role CLEARED with "" is unset, not named (RoleMapping::
+    // as_column, issue #111), so it takes the -1 path without a lookup.
     int lon_col = -1, lat_col = -1;
-    if (roles.longitude) {
-        lon_col = reader.column_index(*roles.longitude);
+    if (const auto lon = roles.longitude_column()) {
+        lon_col = reader.column_index(*lon);
         if (lon_col < 0) {
-            throw std::runtime_error("Longitude column not found in header CSV: " + *roles.longitude);
+            throw std::runtime_error("Longitude column not found in header CSV: " + *lon);
         }
     }
-    if (roles.latitude) {
-        lat_col = reader.column_index(*roles.latitude);
+    if (const auto lat = roles.latitude_column()) {
+        lat_col = reader.column_index(*lat);
         if (lat_col < 0) {
-            throw std::runtime_error("Latitude column not found in header CSV: " + *roles.latitude);
+            throw std::runtime_error("Latitude column not found in header CSV: " + *lat);
         }
     }
 
@@ -1589,7 +1608,13 @@ void ResolveDataset::encode_species(
     // dataset_config_from_checkpoint() so an inference run rebuilds the same
     // DatasetConfig instead of silently reverting to the struct defaults.
     schema_.top_k_species = config_.top_k_species;
-    schema_.selection = config_.selection;
+    // The selection this load APPLIES, which is All for a pooled / sparse
+    // encoding given no species_budget however the config is spelled. Recording
+    // the requested value there would have the checkpoint (and every result
+    // tree built from it) report a species selection the run never made
+    // (issue #113).
+    schema_.selection = effective_selection(config_);
+    schema_.species_budget = config_.species_budget;
     schema_.representation = config_.representation;
     schema_.normalization = config_.normalization;
     schema_.aggregation = config_.aggregation;
@@ -1761,11 +1786,15 @@ void ResolveDataset::encode_species(
         // inference path, where species_to_idx_ / taxonomy_vocab_ are the reused
         // training-set vocabs).
 
-        // top_k_taxonomy = n_taxonomy_slots preserves the fixed-slot width (2*top_k
-        // under TopBottom selection); SelectionMode::Top preserves the embed
-        // contract of encoding the top-k most-abundant species per plot.
+        // top_k_taxonomy = n_taxonomy_slots preserves the fixed-slot width
+        // (2*top_k under TopBottom selection). The species slots take the
+        // configured selection: this branch used to hardcode Top, so Bottom and
+        // TopBottom were accepted, persisted to the schema and silently ignored
+        // (issue #113). The width stays top_k_species -- the encoder halves the
+        // per-side k under TopBottom rather than doubling the row -- so the
+        // model's embed encoder is sized the same as before.
         EmbeddingEncoder emb_encoder(config_.top_k_species, n_taxonomy_slots,
-                                     SelectionMode::Top);
+                                     config_.selection);
         emb_encoder.fit(all_records);  // builds species_to_genus_/_family_ maps
 
         // Hand the freq-ranked species IDs + taxonomy vocab over.
@@ -1804,7 +1833,14 @@ void ResolveDataset::encode_species(
         //   pool_has_cover_   : f32    (n_plots,) 1.0 if plot had real
         //                              abundance values, 0.0 otherwise
 
-        RankPoolEncoder rp_encoder(config_.pool_weighting, /*min_frequency=*/1);
+        // The species budget (issue #113) is the encoder's, not this loop's, so
+        // it lands before the weights, the taxonomy IDs and the padded width are
+        // computed, and so the novelty statistics keep describing the plot's
+        // full record list. min_frequency stays 1: the vocabulary is fitted over
+        // every record whatever the budget, which keeps the integer codes stable
+        // across the arms of a selection ablation.
+        RankPoolEncoder rp_encoder(config_.pool_weighting, /*min_frequency=*/1,
+                                   config_.selection, config_.species_budget);
         rp_encoder.fit(all_records);
         if (use_external_vocabs_) {
             // from_csv_with_schema path: replace the encoder's freshly-fit
@@ -1883,20 +1919,44 @@ void ResolveDataset::encode_species(
         species_vector_ = torch::zeros({n_plots, schema_.n_species_vocab}, torch::kFloat32);
         auto vec_acc = species_vector_.accessor<float, 2>();
 
+        // Whether the per-plot species budget narrows anything at all (issue
+        // #113). A budget of 0 -- the default -- and SelectionMode::All both
+        // mean "write every record", which is what this branch always did, so
+        // the narrowing path is skipped rather than run as an identity over
+        // every plot. The vector's width is the vocabulary either way, which is
+        // fitted over every record, so no column changes meaning.
+        const bool has_budget = config_.species_budget > 0 &&
+                                config_.selection != SelectionMode::All;
+
         for (int64_t i = 0; i < n_plots; ++i) {
             const auto& plot_id = plot_ids_[i];
             auto it = plot_records.find(plot_id);
             if (it == plot_records.end()) continue;
+            const auto& recs = it->second;
 
-            for (const auto& rec : it->second) {
+            const auto write_record = [&](const SpeciesRecord& rec) {
                 auto sp_it = species_to_idx_.find(rec.species_id);
-                if (sp_it != species_to_idx_.end()) {
-                    float value = rec.abundance;
-                    if (config_.representation == RepresentationMode::PresenceAbsence) {
-                        value = 1.0f;
-                    }
-                    vec_acc[i][sp_it->second] = value;
+                if (sp_it == species_to_idx_.end()) return;
+                float value = rec.abundance;
+                if (config_.representation == RepresentationMode::PresenceAbsence) {
+                    value = 1.0f;
                 }
+                vec_acc[i][sp_it->second] = value;
+            };
+
+            if (!has_budget) {
+                for (const auto& rec : recs) write_record(rec);
+                continue;
+            }
+
+            std::vector<std::pair<std::string, float>> species_abd;
+            species_abd.reserve(recs.size());
+            for (const auto& rec : recs) {
+                species_abd.emplace_back(rec.species_id, rec.abundance);
+            }
+            for (size_t s : species_budget_indices(species_abd, config_.selection,
+                                                   config_.species_budget)) {
+                write_record(recs[s]);
             }
         }
     }

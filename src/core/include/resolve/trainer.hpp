@@ -341,8 +341,13 @@ private:
     // The batch size the caller requested at fit() entry, before the CUDA OOM
     // auto-halve retry may have shrunk config_.batch_size. Persisted so a fallback
     // run is detectable (train_effective_batch_size != train_batch_size) and
-    // load_train_config restores the requested value (issue #86). 0 until fit runs.
-    int requested_batch_size_ = 0;
+    // load_train_config restores the requested value (issue #86).
+    //
+    // -1 until fit() runs, which is save_train_config's "no separate request
+    // known" sentinel: it then persists config_.batch_size, the size the trainer
+    // was configured with. A 0 here would be read as a genuine request and a
+    // save() before fit() would record a batch size of zero.
+    int requested_batch_size_ = -1;
 
     // The batch size training is running (or last ran) at, tracked across the
     // OOM auto-halve retries so it survives fit()'s restore of

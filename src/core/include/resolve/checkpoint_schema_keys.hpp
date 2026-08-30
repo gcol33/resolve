@@ -37,6 +37,10 @@ inline constexpr const char* kPoolSpeciesCap    = "schema_pool_species_cap";
 // DatasetConfig defaults, i.e. exactly today's behaviour.
 inline constexpr const char* kTopKSpecies       = "schema_top_k_species";
 inline constexpr const char* kSelection         = "schema_selection";
+// Per-plot species budget for the pooled / sparse encodings (issue #113).
+// Absent on a pre-fix checkpoint, which then keeps the default 0 = no budget --
+// exactly what those encodings did before the knob existed.
+inline constexpr const char* kSpeciesBudget     = "schema_species_budget";
 inline constexpr const char* kRepresentation    = "schema_representation";
 inline constexpr const char* kNormalization     = "schema_normalization";
 inline constexpr const char* kAggregation       = "schema_aggregation";

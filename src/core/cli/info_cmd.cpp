@@ -282,6 +282,14 @@ int info_command(const ParsedArgs& args) {
 
         std::cout << "  Latent dim: " << model->latent_dim() << std::endl;
 
+        // The loading-side DatasetConfig this checkpoint implies -- the same one
+        // `resolve predict` rebuilds to encode new data. Driven by the shared
+        // field registry, so a loader knob added to DatasetConfig is reported
+        // here in the edit that adds it. `selection` is the selection the run
+        // APPLIED, not the one it was configured with (issue #113).
+        std::cout << "\nData Encoding:" << std::endl;
+        print_config_block("Dataset", dataset_config_from_checkpoint(schema, config));
+
         // The training recipe the checkpoint records. Driven by the same field
         // registry as the archive itself, so a hyperparameter added to
         // TrainConfig is reported here in the edit that adds it; only the rows

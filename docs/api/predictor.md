@@ -27,6 +27,10 @@ roughly 12 s on CPU against roughly 1 s on a 16 GiB GPU, and the GPU path can
 run out of memory, so the default leans towards the option that always works.
 Pass `device="cuda"` when the GPU is idle and the test set is known to fit.
 
+`device` is also what the checkpoint is deserialized onto, not just where the
+weights end up, so a GPU-trained checkpoint loads on a machine with no CUDA
+device at all.
+
 A predictor can also be assembled from parts:
 
 ```python

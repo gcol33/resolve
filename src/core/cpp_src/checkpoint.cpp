@@ -640,6 +640,7 @@ void save_schema(
     // the species_ids width in embed mode).
     archive.write(k::kTopKSpecies, torch::tensor(schema.top_k_species));
     archive.write(k::kSelection, torch::tensor(static_cast<int>(schema.selection)));
+    archive.write(k::kSpeciesBudget, torch::tensor(schema.species_budget));
     archive.write(k::kRepresentation, torch::tensor(static_cast<int>(schema.representation)));
     archive.write(k::kNormalization, torch::tensor(static_cast<int>(schema.normalization)));
     archive.write(k::kAggregation, torch::tensor(static_cast<int>(schema.aggregation)));
@@ -808,6 +809,7 @@ ResolveSchema load_schema(
     };
     rd_i32(k::kTopKSpecies, [&](int v) { schema.top_k_species = v; });
     rd_i32(k::kSelection, [&](int v) { schema.selection = static_cast<SelectionMode>(v); });
+    rd_i32(k::kSpeciesBudget, [&](int v) { schema.species_budget = v; });
     rd_i32(k::kRepresentation, [&](int v) { schema.representation = static_cast<RepresentationMode>(v); });
     rd_i32(k::kNormalization, [&](int v) { schema.normalization = static_cast<NormalizationMode>(v); });
     rd_i32(k::kAggregation, [&](int v) { schema.aggregation = static_cast<AggregationMode>(v); });

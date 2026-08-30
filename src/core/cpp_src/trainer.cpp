@@ -1477,10 +1477,16 @@ std::tuple<ResolveModel, Scalers, CategoricalVocab> Trainer::load(
     }
 
     torch::serialize::InputArchive archive;
+    // `device` is passed to the unpickler, which remaps every storage as it is
+    // read. Without it each tensor is restored to the device it was SAVED on,
+    // so loading a GPU-trained checkpoint on a machine with no CUDA device
+    // throws inside deserialization ("No CUDA GPUs are available") and the
+    // model->to(device) below never runs (issue #112).
+    //
     // Retry a transient read fault on flaky storage (issue #20). Note: a
     // mmap-backed load can still fault as an OS structured exception, which is
     // #19's domain (fail fast); this catches the throwing-read failures.
-    io::with_retry([&] { archive.load_from(path); }, "checkpoint load");
+    io::with_retry([&] { archive.load_from(path, device); }, "checkpoint load");
 
     // Load config, schema, and scalers using checkpoint utilities
     ModelConfig config = load_model_config(archive);
@@ -1505,7 +1511,12 @@ std::tuple<ResolveModel, Scalers, CategoricalVocab> Trainer::load(
 
 TrainConfig Trainer::load_train_config(const std::string& path) {
     torch::serialize::InputArchive archive;
-    io::with_retry([&] { archive.load_from(path); }, "checkpoint load (train config)");
+    // Read onto the CPU. Deserialization restores every tensor in the archive,
+    // model weights included, so a GPU-saved checkpoint would need a CUDA
+    // device present just to read back a handful of scalars (issue #112).
+    // Nothing here retains a tensor, so the CPU is always the right target.
+    io::with_retry([&] { archive.load_from(path, torch::kCPU); },
+                   "checkpoint load (train config)");
     // Qualify to the free function (checkpoint.cpp); the unqualified name would
     // resolve to this static member and recurse.
     return resolve::load_train_config(archive);
@@ -1513,7 +1524,9 @@ TrainConfig Trainer::load_train_config(const std::string& path) {
 
 RunMetadata Trainer::load_run_metadata(const std::string& path) {
     torch::serialize::InputArchive archive;
-    io::with_retry([&] { archive.load_from(path); }, "checkpoint load (run metadata)");
+    // CPU for the same reason as load_train_config above: metadata is scalars.
+    io::with_retry([&] { archive.load_from(path, torch::kCPU); },
+                   "checkpoint load (run metadata)");
     return resolve::load_run_metadata(archive);
 }
 
@@ -1594,7 +1607,12 @@ void Trainer::load_state(
     }
 
     torch::serialize::InputArchive archive;
-    io::with_retry([&] { archive.load_from(path); }, "checkpoint load (state)");
+    // Remap storages to `device` while reading, for the same reason as the
+    // static load(): the saved device is otherwise the one deserialization
+    // targets, so a CUDA-saved checkpoint cannot be read at all on a host
+    // without a CUDA device (issue #112).
+    io::with_retry([&] { archive.load_from(path, device); },
+                   "checkpoint load (state)");
 
     // Restore weights into the existing model_ (its architecture must already
     // match the checkpoint), the fitted scalers, and the categorical vocab.

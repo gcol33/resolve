@@ -84,7 +84,8 @@ config = rc.DatasetConfig()
 | `hash_dim` | `int` | `32` | Width of the hashed vector |
 | `top_k` | `int` | `3` | Species kept per plot before hashing, and the number of fixed taxonomy slots |
 | `top_k_species` | `int` | `10` | Species IDs per plot in embed mode |
-| `selection` | `SelectionMode` | `Top` | `Top`, `Bottom`, `TopBottom`, `All` |
+| `selection` | `SelectionMode` | `Top` | `Top`, `Bottom`, `TopBottom`, `All`. Which species survive a plot's budget |
+| `species_budget` | `int` | `0` | Species kept per plot by `selection` under `RankPool` / `Transformer` / `Sparse`; `0` = no budget, encode every species |
 | `representation` | `RepresentationMode` | `Abundance` | `Abundance` or `PresenceAbsence`, used by sparse mode |
 | `normalization` | `NormalizationMode` | `Raw` | `Raw`, `Norm`, `Log1p`, applied before hashing |
 | `aggregation` | `AggregationMode` | `Abundance` | `Abundance` or `Count` |
@@ -227,7 +228,7 @@ Describes a loaded dataset and travels into the checkpoint.
 | `has_coordinates`, `has_abundance`, `has_taxonomy` | `bool` | What the data carried |
 | `track_unknown_fraction`, `track_unknown_count` | `bool` | Loader settings |
 | `species_vocab`, `genus_vocab`, `family_vocab` | `list[str]` | Fitted vocabularies, index equals code, `[0]` is `"<UNK>"` |
-| `top_k_species`, `selection`, `representation`, `normalization`, `aggregation`, `use_taxonomy` | | The `DatasetConfig` knobs the loader consumed |
+| `top_k_species`, `selection`, `species_budget`, `representation`, `normalization`, `aggregation`, `use_taxonomy` | | The `DatasetConfig` knobs the loader consumed. `selection` is the one the load APPLIED: a pooled or sparse dataset with no `species_budget` encodes every record, so it reports `All` |
 | `pool_weighting`, `pool_species_cap` | | Pool settings, so inference recomputes the same weights |
 
 | Method | Returns |
