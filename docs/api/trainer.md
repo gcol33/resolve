@@ -39,6 +39,25 @@ training fold alone, records the categorical vocabulary, and keeps the split
 reachable. It raises when `DatasetConfig.hash_dim` and `ModelConfig.hash_dim`
 disagree.
 
+`seed` governs the SPLIT. It does not cover model weight initialisation, which
+draws from the process-global torch RNG the way any PyTorch module does, so two
+runs with the same `seed` still start from different weights. To reproduce a fit
+end to end, seed that RNG before constructing the model -- which is what the
+CLI's `--seed` does:
+
+```python
+import torch
+
+torch.manual_seed(7)                       # weight initialisation
+model = rc.ResolveModel(dataset.schema, model_config)
+trainer = rc.Trainer(model, train_config)
+trainer.prepare_data(dataset, test_size=0.2, seed=7)   # the split
+```
+
+The same applies to `cross_validate` and `cross_validate_spatial`: their `seed`
+argument selects the folds, and every fold restarts from the trainer's
+as-constructed weights, so seeding before construction fixes those too.
+
 `prepare_data_raw` takes the tensors directly, for callers assembling their own
 inputs:
 
