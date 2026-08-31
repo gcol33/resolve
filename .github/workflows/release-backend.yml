@@ -118,7 +118,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          curl -sSL -o libtorch.zip "https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
+          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o libtorch.zip "https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
           7z x -y libtorch.zip > /dev/null
           echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
 
@@ -306,7 +306,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          curl -sSL -o libtorch.zip "https://download.pytorch.org/libtorch/${{ matrix.config.cuda }}/libtorch-win-shared-with-deps-${TORCH_VER}%2B${{ matrix.config.cuda }}.zip"
+          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o libtorch.zip "https://download.pytorch.org/libtorch/${{ matrix.config.cuda }}/libtorch-win-shared-with-deps-${TORCH_VER}%2B${{ matrix.config.cuda }}.zip"
           7z x -y libtorch.zip > /dev/null
           rm -f libtorch.zip
           echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
