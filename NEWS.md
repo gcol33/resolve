@@ -50,6 +50,40 @@
 
 ### Fixed
 
+- **A malformed target specification was accepted in silence and failed much
+  later as an autograd error.** In R, `targets = list(list(column = "area",
+  task = "regression"))` -- an UNNAMED list -- built a dataset carrying ZERO
+  targets and reported no problem. Training it then died at `loss.backward()`
+  with `element 0 of tensors does not require grad and does not have a
+  grad_fn`, a message that names nothing about targets and sends the reader
+  into autograd rather than to what they typed.
+
+  A target's name is the key the engine reads (and, absent `column`, the name
+  of its column), so an unnamed list carries no targets at all. Three layers
+  each stop discarding what they cannot read:
+
+  - `Trainer::prepare_data` raises when the data carries no targets. Both
+    overloads pass through one body, so this states the invariant once and it
+    holds for the CLI, Python and R alike. Inference is untouched: a
+    target-less dataset is exactly what an inference set is, and
+    `Predictor::predict` never prepares a split.
+  - The C-ABI `parse_targets` raises on a keyless targets tree instead of
+    returning an empty vector, and both it and `parse_roles` now reject an
+    unknown key, naming it and listing the accepted spellings -- so `name` /
+    `type` written for `column` / `task` is reported rather than ignored. An
+    empty target name and a non-map specification are rejected too.
+  - `r_list_to_value_map` on the R client raises when a NON-EMPTY list produces
+    no keys, naming the argument. It previously normalized every non-map value
+    to an empty map to handle the zero-length case, which silently discarded
+    populated unnamed lists along with it; only NULL and a zero-length list
+    normalize now.
+
+  On the R side `resolve.dataset.csv()` / `resolve.dataset.frame()` also
+  validate at the front door, where the caller can still see what they wrote:
+  every target must be named and uniquely named, and an unrecognized key in a
+  target specification or in `roles` is rejected with the accepted set in the
+  message.
+
 - **`ResolveModel::get_gate_probs` reported nothing for every non-hash model.**
   It returned an undefined tensor unless the hash-mode MoE encoder was built,
   which was indistinguishable from "MoE is off" even when a mixture was

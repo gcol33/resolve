@@ -16,7 +16,12 @@ import torch
 
 import resolve_core as rc
 
-from conftest import make_model_config, make_train_config
+from conftest import (
+    make_dataset_config,
+    make_model_config,
+    make_roles,
+    make_train_config,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -298,3 +303,36 @@ def test_load_state_rejects_a_mismatched_architecture(
     other.prepare_data(hash_dataset, 0.25, 42)
     with pytest.raises(Exception):
         other.load_state(path, "cpu", 1.0)
+
+
+# ---------------------------------------------------------------------------
+# A fit needs a target
+# ---------------------------------------------------------------------------
+#
+# A target-less dataset is legal to build -- that is an inference set, and
+# ``Predictor.predict`` scores one -- so the guard sits at ``prepare_data``.
+# Without it the empty target map reached the training loop and surfaced as
+# ``element 0 of tensors does not require grad and does not have a grad_fn``,
+# an autograd message that names nothing about targets.
+
+def test_prepare_data_rejects_a_dataset_with_no_targets(plot_csvs):
+    targetless = rc.ResolveDataset.from_csv(
+        plot_csvs.header,
+        plot_csvs.species,
+        make_roles(),
+        [],
+        make_dataset_config(rc.SpeciesEncodingMode.Hash),
+    )
+    assert targetless.targets == {}
+
+    model = rc.ResolveModel(targetless.schema, make_model_config())
+    trainer = rc.Trainer(model, make_train_config(max_epochs=1))
+    with pytest.raises(Exception, match="no targets"):
+        trainer.prepare_data(targetless, 0.25, 42)
+
+
+def test_prepare_data_accepts_a_dataset_that_has_targets(hash_dataset):
+    model = rc.ResolveModel(hash_dataset.schema, make_model_config())
+    trainer = rc.Trainer(model, make_train_config(max_epochs=1))
+    trainer.prepare_data(hash_dataset, 0.25, 42)
+    assert trainer.test_indices().numel() > 0

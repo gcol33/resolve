@@ -9,7 +9,7 @@
 class RTrainer {
 public:
     RTrainer(RResolveModel& model, List config_list) {
-        ValuePtr config(r_list_to_value_map(config_list));
+        ValuePtr config(r_list_to_value_map(config_list, "config"));
         trainer_ = capi_own(resolve_trainer_create(model.handle(), config.get()),
                             resolve_trainer_free);
     }
@@ -68,7 +68,7 @@ public:
 
     void save(std::string path, Nullable<List> metadata = R_NilValue) {
         if (metadata.isNotNull()) {
-            ValuePtr md(r_list_to_value_map(as<List>(metadata)));
+            ValuePtr md(r_list_to_value_map(as<List>(metadata), "metadata"));
             capi_check_status(resolve_trainer_save(trainer_.get(), path.c_str(), md.get()));
         } else {
             capi_check_status(resolve_trainer_save(trainer_.get(), path.c_str(), nullptr));
@@ -120,7 +120,7 @@ public:
         return value_to_r_owned(resolve_trainer_cross_validate(trainer_.get(), n_folds, seed));
     }
     RObject cross_validate_spatial(List spatial_config_list, int n_folds = 5, int seed = 42) {
-        ValuePtr cfg(r_list_to_value_map(spatial_config_list));
+        ValuePtr cfg(r_list_to_value_map(spatial_config_list, "spatialConfig"));
         return value_to_r_owned(resolve_trainer_cross_validate_spatial(
             trainer_.get(), cfg.get(), n_folds, seed));
     }

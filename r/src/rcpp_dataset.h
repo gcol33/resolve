@@ -16,9 +16,9 @@ public:
     static RResolveDataset from_csv(
         std::string header_path, std::string species_path,
         List roles_list, List targets_list, List config_list = List()) {
-        ValuePtr roles(r_list_to_value_map(roles_list));
-        ValuePtr targets(r_list_to_value_map(targets_list));
-        ValuePtr config(r_list_to_value_map(config_list));
+        ValuePtr roles(r_list_to_value_map(roles_list, "roles"));
+        ValuePtr targets(r_list_to_value_map(targets_list, "targets"));
+        ValuePtr config(r_list_to_value_map(config_list, "config"));
         RResolveDataset w;
         w.ds_ = capi_own(resolve_dataset_from_csv(
             header_path.c_str(), species_path.c_str(),
@@ -31,9 +31,9 @@ public:
         List roles_list, List targets_list, RResolveDataset schema_source,
         List config_list = List()) {
         if (!schema_source.ds_) stop("from_csv_with_schema: schema_source is not a loaded dataset");
-        ValuePtr roles(r_list_to_value_map(roles_list));
-        ValuePtr targets(r_list_to_value_map(targets_list));
-        ValuePtr config(r_list_to_value_map(config_list));
+        ValuePtr roles(r_list_to_value_map(roles_list, "roles"));
+        ValuePtr targets(r_list_to_value_map(targets_list, "targets"));
+        ValuePtr config(r_list_to_value_map(config_list, "config"));
         RResolveDataset w;
         w.ds_ = capi_own(resolve_dataset_from_csv_with_schema(
             header_path.c_str(), species_path.c_str(),
@@ -52,10 +52,10 @@ public:
         std::string header_path, std::string species_path,
         List roles_list, List targets_list, List vocabs_list,
         List config_list = List()) {
-        ValuePtr roles(r_list_to_value_map(roles_list));
-        ValuePtr targets(r_list_to_value_map(targets_list));
-        ValuePtr vocabs(r_list_to_value_map(vocabs_list));
-        ValuePtr config(r_list_to_value_map(config_list));
+        ValuePtr roles(r_list_to_value_map(roles_list, "roles"));
+        ValuePtr targets(r_list_to_value_map(targets_list, "targets"));
+        ValuePtr vocabs(r_list_to_value_map(vocabs_list, "vocabs"));
+        ValuePtr config(r_list_to_value_map(config_list, "config"));
         RResolveDataset w;
         w.ds_ = capi_own(resolve_dataset_from_csv_with_vocabs(
             header_path.c_str(), species_path.c_str(),
@@ -67,9 +67,9 @@ public:
     static RResolveDataset from_species_csv(
         std::string species_path, List roles_list, List targets_list,
         List config_list = List()) {
-        ValuePtr roles(r_list_to_value_map(roles_list));
-        ValuePtr targets(r_list_to_value_map(targets_list));
-        ValuePtr config(r_list_to_value_map(config_list));
+        ValuePtr roles(r_list_to_value_map(roles_list, "roles"));
+        ValuePtr targets(r_list_to_value_map(targets_list, "targets"));
+        ValuePtr config(r_list_to_value_map(config_list, "config"));
         RResolveDataset w;
         w.ds_ = capi_own(resolve_dataset_from_species_csv(
             species_path.c_str(), roles.get(), targets.get(), config.get()),
@@ -80,10 +80,10 @@ public:
     static RResolveDataset from_species_csv_with_vocabs(
         std::string species_path, List roles_list, List targets_list,
         List vocabs_list, List config_list = List()) {
-        ValuePtr roles(r_list_to_value_map(roles_list));
-        ValuePtr targets(r_list_to_value_map(targets_list));
-        ValuePtr vocabs(r_list_to_value_map(vocabs_list));
-        ValuePtr config(r_list_to_value_map(config_list));
+        ValuePtr roles(r_list_to_value_map(roles_list, "roles"));
+        ValuePtr targets(r_list_to_value_map(targets_list, "targets"));
+        ValuePtr vocabs(r_list_to_value_map(vocabs_list, "vocabs"));
+        ValuePtr config(r_list_to_value_map(config_list, "config"));
         RResolveDataset w;
         w.ds_ = capi_own(resolve_dataset_from_species_csv_with_vocabs(
             species_path.c_str(), roles.get(), targets.get(),
@@ -100,9 +100,9 @@ public:
         List roles_list, List targets_list, List config_list = List()) {
         ValuePtr header(r_charlist_to_value_map(header_cols));
         ValuePtr species(r_charlist_to_value_map(species_cols));
-        ValuePtr roles(r_list_to_value_map(roles_list));
-        ValuePtr targets(r_list_to_value_map(targets_list));
-        ValuePtr config(r_list_to_value_map(config_list));
+        ValuePtr roles(r_list_to_value_map(roles_list, "roles"));
+        ValuePtr targets(r_list_to_value_map(targets_list, "targets"));
+        ValuePtr config(r_list_to_value_map(config_list, "config"));
         RResolveDataset w;
         w.ds_ = capi_own(resolve_dataset_from_dataframe(
             header.get(), species.get(), roles.get(), targets.get(), config.get()),
@@ -114,9 +114,9 @@ public:
         List header_cols, std::string species_path,
         List roles_list, List targets_list, List config_list = List()) {
         ValuePtr header(r_charlist_to_value_map(header_cols));
-        ValuePtr roles(r_list_to_value_map(roles_list));
-        ValuePtr targets(r_list_to_value_map(targets_list));
-        ValuePtr config(r_list_to_value_map(config_list));
+        ValuePtr roles(r_list_to_value_map(roles_list, "roles"));
+        ValuePtr targets(r_list_to_value_map(targets_list, "targets"));
+        ValuePtr config(r_list_to_value_map(config_list, "config"));
         RResolveDataset w;
         w.ds_ = capi_own(resolve_dataset_from_dataframe_header(
             header.get(), species_path.c_str(),
@@ -129,9 +129,9 @@ public:
         List species_cols, List roles_list, List targets_list,
         List config_list = List()) {
         ValuePtr species(r_charlist_to_value_map(species_cols));
-        ValuePtr roles(r_list_to_value_map(roles_list));
-        ValuePtr targets(r_list_to_value_map(targets_list));
-        ValuePtr config(r_list_to_value_map(config_list));
+        ValuePtr roles(r_list_to_value_map(roles_list, "roles"));
+        ValuePtr targets(r_list_to_value_map(targets_list, "targets"));
+        ValuePtr config(r_list_to_value_map(config_list, "config"));
         RResolveDataset w;
         w.ds_ = capi_own(resolve_dataset_from_species_dataframe(
             species.get(), roles.get(), targets.get(), config.get()),
@@ -146,9 +146,9 @@ public:
         if (!schema_source.ds_) stop("from_dataframe_with_schema: schema_source is not a loaded dataset");
         ValuePtr header(r_charlist_to_value_map(header_cols));
         ValuePtr species(r_charlist_to_value_map(species_cols));
-        ValuePtr roles(r_list_to_value_map(roles_list));
-        ValuePtr targets(r_list_to_value_map(targets_list));
-        ValuePtr config(r_list_to_value_map(config_list));
+        ValuePtr roles(r_list_to_value_map(roles_list, "roles"));
+        ValuePtr targets(r_list_to_value_map(targets_list, "targets"));
+        ValuePtr config(r_list_to_value_map(config_list, "config"));
         RResolveDataset w;
         w.ds_ = capi_own(resolve_dataset_from_dataframe_with_schema(
             header.get(), species.get(), roles.get(), targets.get(),
@@ -163,10 +163,10 @@ public:
         List config_list = List()) {
         ValuePtr header(r_charlist_to_value_map(header_cols));
         ValuePtr species(r_charlist_to_value_map(species_cols));
-        ValuePtr roles(r_list_to_value_map(roles_list));
-        ValuePtr targets(r_list_to_value_map(targets_list));
-        ValuePtr vocabs(r_list_to_value_map(vocabs_list));
-        ValuePtr config(r_list_to_value_map(config_list));
+        ValuePtr roles(r_list_to_value_map(roles_list, "roles"));
+        ValuePtr targets(r_list_to_value_map(targets_list, "targets"));
+        ValuePtr vocabs(r_list_to_value_map(vocabs_list, "vocabs"));
+        ValuePtr config(r_list_to_value_map(config_list, "config"));
         RResolveDataset w;
         w.ds_ = capi_own(resolve_dataset_from_dataframe_with_vocabs(
             header.get(), species.get(), roles.get(), targets.get(),
@@ -179,10 +179,10 @@ public:
         List species_cols, List roles_list, List targets_list,
         List vocabs_list, List config_list = List()) {
         ValuePtr species(r_charlist_to_value_map(species_cols));
-        ValuePtr roles(r_list_to_value_map(roles_list));
-        ValuePtr targets(r_list_to_value_map(targets_list));
-        ValuePtr vocabs(r_list_to_value_map(vocabs_list));
-        ValuePtr config(r_list_to_value_map(config_list));
+        ValuePtr roles(r_list_to_value_map(roles_list, "roles"));
+        ValuePtr targets(r_list_to_value_map(targets_list, "targets"));
+        ValuePtr vocabs(r_list_to_value_map(vocabs_list, "vocabs"));
+        ValuePtr config(r_list_to_value_map(config_list, "config"));
         RResolveDataset w;
         w.ds_ = capi_own(resolve_dataset_from_species_dataframe_with_vocabs(
             species.get(), roles.get(), targets.get(),

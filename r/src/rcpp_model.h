@@ -7,8 +7,8 @@
 class RResolveModel {
 public:
     RResolveModel(List schema_list, List config_list) {
-        ValuePtr schema(r_list_to_value_map(schema_list));
-        ValuePtr config(r_list_to_value_map(config_list));
+        ValuePtr schema(r_list_to_value_map(schema_list, "schema"));
+        ValuePtr config(r_list_to_value_map(config_list, "config"));
         model_ = capi_own(resolve_model_create(schema.get(), config.get()), resolve_model_free);
     }
 

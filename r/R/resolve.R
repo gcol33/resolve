@@ -648,6 +648,35 @@ resolve.dataset.csv <- function(header,
   vocabs
 }
 
+# Role and target-specification keys the engine reads (C-ABI parse_roles /
+# parse_targets). A key outside these sets is a typo the engine would ignore,
+# so both are rejected at the front door with the accepted spelling in hand.
+.resolve_role_keys <- c("plot_id", "species_id", "abundance", "longitude",
+                        "latitude", "genus", "family", "covariates",
+                        "categoricals")
+.resolve_target_keys <- c("column", "task", "transform", "num_classes",
+                          "weight", "class_mapping")
+
+# Reject an entry the reader does not know. Silently ignoring one means a value
+# the caller believed they set never reaches the engine.
+.resolve_check_keys <- function(x, what, known) {
+  keys <- names(x)
+  if (length(x) > 0 && (is.null(keys) || any(is.na(keys)) || !all(nzchar(keys)))) {
+    stop(sprintf("%s must be a named list - every element needs a name.", what),
+         call. = FALSE)
+  }
+  unknown <- setdiff(keys, known)
+  if (length(unknown) > 0) {
+    stop(sprintf("%s: unknown %s %s. Accepted: %s.",
+                 what,
+                 if (length(unknown) == 1) "key" else "keys",
+                 paste0("'", unknown, "'", collapse = ", "),
+                 paste(known, collapse = ", ")),
+         call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
 # Shared roles/targets validation + role defaults for the dataset loaders.
 .resolve_normalize_roles_targets <- function(roles, targets) {
   if (!is.list(roles)) {
@@ -659,11 +688,33 @@ resolve.dataset.csv <- function(header,
   if (length(targets) == 0) {
     stop("targets must not be empty - at least one target is required")
   }
-  for (name in names(targets)) {
+  .resolve_check_keys(roles, "roles", .resolve_role_keys)
+
+  # The element NAME is the target's name, and the key the engine reads; when no
+  # 'column' is given it also names the column. An unnamed element therefore
+  # names nothing and cannot be carried across the C ABI at all -- the loop
+  # below iterates names(targets), so before this check an unnamed list skipped
+  # every validation and then arrived at the engine as zero targets, failing far
+  # away with an autograd error inside fit().
+  names_ <- names(targets)
+  if (is.null(names_) || any(is.na(names_)) || !all(nzchar(names_))) {
+    stop(paste0(
+      "every target must be named, as in targets = list(area = list(column = ",
+      "\"area\", task = \"regression\")). An unnamed target names neither ",
+      "itself nor its column, so nothing in it would reach the engine."),
+      call. = FALSE)
+  }
+  if (anyDuplicated(names_) > 0) {
+    stop(sprintf("duplicate target name(s): %s. Each target needs a distinct name.",
+                 paste0("'", unique(names_[duplicated(names_)]), "'", collapse = ", ")),
+         call. = FALSE)
+  }
+  for (name in names_) {
     tgt <- targets[[name]]
     if (!is.list(tgt)) {
       stop(sprintf("target '%s' must be a list with 'column' and 'task'", name))
     }
+    .resolve_check_keys(tgt, sprintf("target '%s'", name), .resolve_target_keys)
     if (is.null(tgt$column)) {
       stop(sprintf("target '%s' must have 'column' specified", name))
     }

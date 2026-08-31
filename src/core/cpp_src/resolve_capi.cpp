@@ -17,6 +17,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <initializer_list>
+#include <stdexcept>
 #include <limits>
 #include <memory>
 #include <new>
@@ -682,7 +684,36 @@ SpatialBlockConfig parse_spatial_block_config(const resolve_value* c) {
 // Top-level parsers: roles / targets / dataset config / model config / schema
 // ============================================================================
 
+// Reject a structured map carrying a key no parser below reads. An
+// unrecognized key is a caller typo -- `name`/`type` where the parser reads
+// `column`/`task` -- and ignoring it means the value the caller believed they
+// set never reaches the engine. Silence here is how a fully specified target
+// list arrived as zero targets and failed much later inside autograd.
+void reject_unknown_keys(const resolve_value* v,
+                         const std::string& what,
+                         std::initializer_list<const char*> accepted) {
+    if (!v || v->kind != RESOLVE_VALUE_MAP) return;
+    for (const std::string& key : v->keys) {
+        bool known = false;
+        for (const char* a : accepted) {
+            if (key == a) { known = true; break; }
+        }
+        if (known) continue;
+        std::string msg = what + ": unknown key '" + key + "'. Accepted keys: ";
+        bool first = true;
+        for (const char* a : accepted) {
+            if (!first) msg += ", ";
+            msg += a;
+            first = false;
+        }
+        throw std::invalid_argument(msg);
+    }
+}
+
 RoleMapping parse_roles(const resolve_value* r) {
+    reject_unknown_keys(r, "roles", {"plot_id", "species_id", "abundance",
+                                     "longitude", "latitude", "genus", "family",
+                                     "covariates", "categoricals"});
     RoleMapping roles;
     if (vhas(r, "plot_id")) roles.plot_id = vstr(r, "plot_id");
     if (vhas(r, "species_id")) roles.species_id = vstr(r, "species_id");
@@ -702,10 +733,35 @@ RoleMapping parse_roles(const resolve_value* r) {
 // the column directly). One parser covers both call sites.
 std::vector<TargetSpec> parse_targets(const resolve_value* targets) {
     std::vector<TargetSpec> out;
-    if (!targets || targets->kind != RESOLVE_VALUE_MAP) return out;
+    // Absent or explicitly null is legal and means "no targets" (an inference
+    // dataset). Any other non-map kind is a malformed argument: the map's KEYS
+    // are the target names, so a keyless tree carries no targets at all, and
+    // returning an empty vector for it discards everything the caller passed.
+    if (!targets || targets->kind == RESOLVE_VALUE_NULL) return out;
+    if (targets->kind != RESOLVE_VALUE_MAP) {
+        throw std::invalid_argument(
+            "targets must be a map of target name -> specification; got a "
+            "keyless value, which names no targets. Every entry needs a name "
+            "(in R, a named list: list(area = list(column = \"area\", "
+            "task = \"regression\"))).");
+    }
     for (size_t i = 0; i < targets->keys.size(); ++i) {
         const std::string& name = targets->keys[i];
         const resolve_value* spec = targets->vals[i];
+        if (name.empty()) {
+            throw std::invalid_argument(
+                "targets: an entry has an empty name. The name identifies the "
+                "target and, when no \"column\" is given, names its column.");
+        }
+        if (!spec || spec->kind != RESOLVE_VALUE_MAP) {
+            throw std::invalid_argument(
+                "target '" + name + "': the specification must be a map of "
+                "keys (column / task / transform / num_classes / weight / "
+                "class_mapping), not a bare value.");
+        }
+        reject_unknown_keys(spec, "target '" + name + "'",
+                            {"column", "task", "transform", "num_classes",
+                             "weight", "class_mapping"});
         TargetSpec ts;
         ts.target_name = name;
         ts.column_name = vhas(spec, "column") ? vstr(spec, "column") : name;

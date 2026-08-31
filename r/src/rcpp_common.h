@@ -280,13 +280,24 @@ inline resolve_value_t* r_to_value(SEXP x) {
 }
 
 // Build a value MAP from a (possibly empty / R_NilValue) R list argument.
-inline resolve_value_t* r_list_to_value_map(SEXP x) {
-    if (Rf_isNull(x)) return resolve_value_new_map();
+//
+// A named list is the carrier for every structured argument (roles / targets /
+// config / schema / vocabs): each element's NAME is the key the engine reads,
+// so an UNNAMED list carries no keys and names nothing. Only the genuinely
+// empty cases -- NULL and a zero-length list -- normalize to an empty map; a
+// non-empty list that produced no keys is a caller error and says so, naming
+// the argument. Treating that case as "empty" instead discarded the whole
+// argument in silence: a fully specified `targets = list(list(column = "area"))`
+// reached the engine as zero targets and surfaced only much later, as an
+// autograd error inside fit().
+inline resolve_value_t* r_list_to_value_map(SEXP x, const char* what) {
+    if (Rf_isNull(x) || Rf_xlength(x) == 0) return resolve_value_new_map();
     resolve_value_t* v = r_to_value(x);
     if (resolve_value_kind(v) != RESOLVE_VALUE_MAP) {
-        // A zero-length list arrives untyped; normalize to an empty map.
         resolve_value_free(v);
-        return resolve_value_new_map();
+        Rcpp::stop("%s must be a NAMED list -- every element needs a name, "
+                   "which is the key the engine reads. An unnamed list carries "
+                   "no keys, so nothing in it would reach the engine.", what);
     }
     return v;
 }

@@ -352,3 +352,135 @@ test_that("species_budget narrows the pooled encoding (#113)", {
   expect_equal(narrowed$schema()$selection, "bottom")
   expect_equal(narrowed$schema()$species_budget, 2L)
 })
+
+# --- targets / roles specification validation ------------------------------
+#
+# A target's NAME is the key the engine reads, and the C ABI carries a named
+# list as a keyed map. An UNNAMED list carries no keys, so before these guards
+# `targets = list(list(column = "area", task = "regression"))` was accepted,
+# silently produced a dataset with zero targets, and failed far away inside
+# fit() with "element 0 of tensors does not require grad and does not have a
+# grad_fn". Reject it where the caller can still see what they typed.
+
+valid_targets <- function() {
+  list(area = list(column = "area", task = "regression"))
+}
+
+test_that("an unnamed target list is rejected, not silently dropped", {
+  expect_error(
+    resolve:::.resolve_normalize_roles_targets(
+      list(plot_id = "plot_id"),
+      list(list(column = "area", task = "regression"))),
+    "every target must be named")
+})
+
+test_that("a partially named target list is rejected", {
+  expect_error(
+    resolve:::.resolve_normalize_roles_targets(
+      list(plot_id = "plot_id"),
+      list(area = list(column = "area"), list(column = "habitat"))),
+    "every target must be named")
+})
+
+test_that("an unknown key in a target specification is rejected by name", {
+  err <- tryCatch(
+    resolve:::.resolve_normalize_roles_targets(
+      list(plot_id = "plot_id"),
+      list(area = list(name = "area", type = "regression"))),
+    error = function(e) conditionMessage(e))
+  expect_match(err, "target 'area'")
+  expect_match(err, "'name'")
+  expect_match(err, "'type'")
+  # The message must hand back the accepted spelling.
+  expect_match(err, "column")
+  expect_match(err, "task")
+})
+
+test_that("duplicate target names are rejected", {
+  expect_error(
+    resolve:::.resolve_normalize_roles_targets(
+      list(plot_id = "plot_id"),
+      list(area = list(column = "area"), area = list(column = "area2"))),
+    "duplicate target name")
+})
+
+test_that("an unknown role key is rejected by name", {
+  err <- tryCatch(
+    resolve:::.resolve_normalize_roles_targets(
+      list(plot_id = "plot_id", speciesId = "species"),
+      valid_targets()),
+    error = function(e) conditionMessage(e))
+  expect_match(err, "roles")
+  expect_match(err, "'speciesId'")
+  expect_match(err, "species_id")
+})
+
+test_that("an unnamed roles list is rejected", {
+  expect_error(
+    resolve:::.resolve_normalize_roles_targets(list("plot_id"), valid_targets()),
+    "must be a named list")
+})
+
+test_that("a valid specification passes and fills the role defaults", {
+  roles <- resolve:::.resolve_normalize_roles_targets(
+    list(abundance = "cover"), valid_targets())
+  expect_equal(roles$plot_id, "plot_id")
+  expect_equal(roles$species_id, "species_id")
+  expect_equal(roles$abundance, "cover")
+})
+
+test_that("every documented target key is accepted", {
+  expect_silent(resolve:::.resolve_normalize_roles_targets(
+    list(plot_id = "plot_id"),
+    list(habitat = list(column = "habitat", task = "classification",
+                        transform = "none", num_classes = 3L, weight = 1.0,
+                        class_mapping = c(forest = 0L, grass = 1L, bog = 2L)))))
+})
+
+test_that("every documented role key is accepted", {
+  expect_silent(resolve:::.resolve_normalize_roles_targets(
+    list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+         longitude = "lon", latitude = "lat", genus = "genus",
+         family = "family", covariates = c("elevation"),
+         categoricals = c("bedrock")),
+    valid_targets()))
+})
+
+test_that("resolve.dataset.csv rejects a malformed target list at the front door", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  header_file <- tempfile(fileext = ".csv")
+  species_file <- tempfile(fileext = ".csv")
+  on.exit({ unlink(header_file); unlink(species_file) }, add = TRUE)
+
+  n <- 12L
+  write.csv(data.frame(plot_id = paste0("p", seq_len(n)),
+                       area = seq_len(n) * 1.0,
+                       stringsAsFactors = FALSE),
+            header_file, row.names = FALSE)
+  write.csv(data.frame(plot_id = paste0("p", seq_len(n)),
+                       species_id = paste0("sp", seq_len(n) %% 4L),
+                       cover = 1.0,
+                       stringsAsFactors = FALSE),
+            species_file, row.names = FALSE)
+
+  roles <- list(plot_id = "plot_id", species_id = "species_id",
+                abundance = "cover")
+
+  # The shape that motivated the guard: accepted before, zero targets after.
+  expect_error(
+    resolve.dataset.csv(header = header_file, species = species_file,
+                        roles = roles,
+                        targets = list(list(name = "area", type = "regression")),
+                        config = list(species_encoding = "hash")),
+    "every target must be named")
+
+  # The documented shape still loads, and carries the target.
+  ds <- resolve.dataset.csv(header = header_file, species = species_file,
+                            roles = roles, targets = valid_targets(),
+                            config = list(species_encoding = "hash"))
+  expect_equal(ds$n_plots(), n)
+  expect_equal(length(ds$schema()$targets), 1L)
+  expect_equal(names(ds$schema()$targets), "area")
+})

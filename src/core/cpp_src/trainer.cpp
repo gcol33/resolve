@@ -170,6 +170,21 @@ void Trainer::prepare_data(
     // (the dataset overload forwards its seed here, so both paths set it).
     data_seed_ = seed;
 
+    // A fit needs something to fit to. Without this guard an empty target map
+    // reaches the training loop, MultiTaskLoss accumulates over no terms, and
+    // the failure surfaces at loss.backward() as "element 0 of tensors does not
+    // require grad and does not have a grad_fn" -- an autograd message that
+    // points nowhere near the target specification that caused it. Both
+    // overloads pass through here, so this is the single place the invariant
+    // is stated. Inference is unaffected: Predictor::predict never prepares a
+    // split, so a target-less dataset is still a legal thing to score.
+    if (targets.empty()) {
+        throw std::invalid_argument(
+            "Trainer::prepare_data: the data carries no targets, so there is "
+            "nothing to fit. Check the target specification the dataset was "
+            "built with -- at least one target is required to train.");
+    }
+
     // Store raw coordinates for spatial CV (before scaling/concatenation)
     if (coordinates.defined() && coordinates.numel() > 0) {
         coordinates_ = coordinates.clone();

@@ -21,6 +21,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "resolve/dataset.hpp"
 #include "resolve/role_mapping.hpp"
@@ -60,7 +61,11 @@ constexpr int kNumHabClasses = 3;
 // class for global plot i is exactly (i % kNumHabClasses). That deterministic
 // relationship lets the classification test verify actuals against the
 // reported fold indices.
-ResolveDataset make_synthetic_dataset(int64_t n_plots) {
+ResolveDataset make_synthetic_dataset(
+    int64_t n_plots,
+    const std::vector<TargetSpec>& targets = {
+        TargetSpec::regression("y"),
+        TargetSpec::classification("hab", kNumHabClasses)}) {
     std::ostringstream hdr;
     hdr << "plot_id,lat,lon,cov1,cov2,y,hab\n";
     std::ostringstream spc;
@@ -96,10 +101,7 @@ ResolveDataset make_synthetic_dataset(int64_t n_plots) {
     dcfg.track_unknown_count = false;
 
     return ResolveDataset::from_csv(
-        header_csv.path(), species_csv.path(), roles,
-        {TargetSpec::regression("y"),
-         TargetSpec::classification("hab", kNumHabClasses)},
-        dcfg);
+        header_csv.path(), species_csv.path(), roles, targets, dcfg);
 }
 
 ModelConfig make_model_config() {
@@ -644,4 +646,54 @@ TEST_CASE("load_model_config back-compat: missing sub-config keys -> defaults",
     REQUIRE(cfg.encoder_architecture == EncoderArchitecture::MLP);
     REQUIRE(cfg.categorical_embed_dim == ModelConfig{}.categorical_embed_dim);
     REQUIRE(cfg.tabnet.n_steps == TabNetConfig{}.n_steps);
+}
+
+// =============================================================================
+// A fit needs something to fit to: prepare_data rejects target-less data
+// =============================================================================
+//
+// A dataset carrying no targets is legal to BUILD -- that is exactly what an
+// inference set is, and Predictor::predict scores one happily -- so the guard
+// belongs at the point a fit is set up, not at the loader. Before it, an empty
+// target map reached the training loop and failed at loss.backward() with
+// "element 0 of tensors does not require grad and does not have a grad_fn",
+// which names nothing about targets.
+
+TEST_CASE("Trainer::prepare_data rejects data carrying no targets",
+          "[trainer][targets]") {
+    auto ds = make_synthetic_dataset(/*n_plots=*/40, /*targets=*/{});
+    REQUIRE(ds.targets().empty());
+
+    SECTION("the dataset overload throws, naming targets") {
+        ResolveModel model(ds.schema(), make_model_config());
+        Trainer trainer(model, make_train_config());
+        REQUIRE_THROWS_AS(trainer.prepare_data(ds, 0.25f, 7),
+                          std::invalid_argument);
+        REQUIRE_THROWS_WITH(
+            trainer.prepare_data(ds, 0.25f, 7),
+            Catch::Matchers::ContainsSubstring("no targets"));
+    }
+
+    SECTION("the raw-tensor overload is the shared body, so it throws too") {
+        ResolveModel model(ds.schema(), make_model_config());
+        Trainer trainer(model, make_train_config());
+        REQUIRE_THROWS_AS(
+            trainer.prepare_data(
+                ds.coordinates(), ds.covariates(), ds.hash_embedding(),
+                ds.species_ids(), ds.species_vector(), ds.genus_ids(),
+                ds.family_ids(), ds.unknown_fraction(), ds.unknown_count(),
+                /*targets=*/{}, ds.pool_genus_ids(), ds.pool_family_ids(),
+                ds.pool_weights(), ds.pool_mask(), ds.pool_has_cover(),
+                ds.categorical_ids(), 0.25f, 7),
+            std::invalid_argument);
+    }
+
+    SECTION("a dataset that does carry a target still prepares") {
+        auto with_target = make_synthetic_dataset(
+            /*n_plots=*/40, {TargetSpec::regression("y")});
+        REQUIRE(with_target.targets().size() == 1);
+        ResolveModel model(with_target.schema(), make_model_config());
+        Trainer trainer(model, make_train_config());
+        REQUIRE_NOTHROW(trainer.prepare_data(with_target, 0.25f, 7));
+    }
 }
