@@ -1,5 +1,44 @@
 # RESOLVE Changelog
 
+## v0.9.1 (2026-09-01)
+
+### Fixed
+
+- **A structured argument that names nothing is rejected, not discarded.**
+  `targets = list(list(column = "area", task = "regression"))` -- an unnamed R
+  list -- built a dataset carrying zero targets and reported nothing wrong. The
+  run then died at `loss.backward()` with `element 0 of tensors does not require
+  grad and does not have a grad_fn`, an autograd message pointing nowhere near
+  the target specification that caused it. Three layers were each discarding
+  what they could not read, and each now says so.
+
+  - `r_list_to_value_map()`, the R client's boundary, normalized every non-map
+    value to an empty map so that the zero-length case would work, which
+    discarded a populated unnamed list along with it. It now normalizes only
+    `NULL` and a zero-length list, and throws for a non-empty list that produced
+    no keys, naming the argument.
+  - `parse_targets()` in the C ABI returned an empty vector for any tree that
+    was not a map. Absent or `NULL` still means "no targets"; any other keyless
+    kind now throws, as do an empty target name and a non-map specification. A
+    shared `reject_unknown_keys()` also makes `parse_targets()` and
+    `parse_roles()` reject a key they do not read, naming it and listing the
+    accepted spellings, so `name` / `type` written for `column` / `task` is
+    reported rather than ignored.
+  - `Trainer::prepare_data()` throws when the data carries no targets. Both
+    overloads pass through one body, so the invariant is stated once and holds
+    for the CLI, Python and R alike. It sits there rather than at the loader
+    because a target-less dataset is legitimate: that is what an inference set
+    is, and `Predictor::predict()` never prepares a split.
+
+  R validates at the front door as well, where the caller can still see what
+  they typed: `resolve.dataset.csv()` and `resolve.dataset.frame()` require
+  every target to be named and uniquely named, and reject an unrecognized key in
+  a target specification or in `roles`, against the same key sets the C-ABI
+  parsers read.
+
+  No tensor shape, parameter or archive key changed, and every well-formed call
+  behaves exactly as before.
+
 ## v0.9.0 (2026-08-31)
 
 ### Added
