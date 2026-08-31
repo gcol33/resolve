@@ -226,11 +226,19 @@ def canonical_unchecked() -> str:
 
 
 def insert_news_stub(news: str, version: str) -> str:
-    """Open a section for ``version`` above the newest existing one."""
-    stub = f"## v{version} (unreleased)\n\n"
+    """Open a section for ``version`` above the newest existing one.
+
+    The stub is written with whatever line ending the file already uses. read()
+    and write() above deliberately do no newline translation, so a hardcoded
+    "\\n" here would leave two LF lines in an otherwise CRLF NEWS.md -- which is
+    invisible in an editor and turns the next scripted edit of the file into a
+    whole-file diff.
+    """
+    newline = "\r\n" if "\r\n" in news else "\n"
+    stub = f"## v{version} (unreleased){newline}{newline}"
     first = re.search(r"^## ", news, re.MULTILINE)
     if first is None:
-        return news.rstrip("\n") + "\n\n" + stub
+        return news.rstrip("\r\n") + newline + newline + stub
     return news[: first.start()] + stub + news[first.start() :]
 
 

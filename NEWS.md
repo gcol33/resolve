@@ -1,6 +1,9 @@
 # RESOLVE Changelog
 
-## Unreleased
+## v0.8.2 (2026-08-31)
+
+Two fixes that share a root: a guard that was compile-time where it needed to
+be run-time, and a seed that covered less than the tests assumed.
 
 ### Fixed
 
@@ -14,6 +17,29 @@
   path is unchanged and the CPU path is driver-free. The decision is the pure
   `resolve::use_hash_prefetch()` (`gpu.hpp`), unit-tested without a CUDA device
   the way `decide_oom_retry` is.
+
+- **A seeded run now means what the tests assumed (#115).** The seed passed to
+  `prepare_data`, `cross_validate` and `cross_validate_spatial` governs the
+  SPLIT. Model weight initialisation draws from the process-global torch RNG,
+  as any PyTorch module does, and nothing on the library path seeds it -- so two
+  runs with the same seed started from different weights. Measured: six seeded
+  `cross_validate_spatial` runs give six different fold losses at one thread as
+  at twenty-four, while seeding the global RNG first makes five bit-identical.
+  Two test suites were asserting the reproducibility this does not provide and
+  getting it only by luck, which is why CI went red at random on unchanged
+  code.
+
+  The engine is deliberately unchanged: seeding a global stream from inside
+  `fit()` is the side effect issue #107 avoided for pretraining, and weight
+  init following the global RNG is the ordinary PyTorch contract. Instead the
+  contract is documented (`docs/api/trainer.md` shows the two-seed form) and
+  pinned from both sides, and the 17 parameter-recovery cases in
+  `test_recovery.cpp` now fix their starting weights, so a correlation
+  threshold is no longer evaluated on a fresh random draw each run.
+
+**No library behaviour changed by #115** -- it is a test and documentation fix.
+If you rely on reproducible fits, seed `torch.manual_seed()` before
+constructing the model; the CLI's `--seed` already does.
 
 ## v0.8.1 (2026-08-30)
 
