@@ -71,6 +71,17 @@
   `moe_routing = none`, which is every checkpoint anyone has trained through
   the paper pipeline, is untouched.**
 
+- **`resolve info`'s Model Configuration block is registry-driven**, like the
+  Data Encoding and Training Configuration blocks below it. Its rows now carry
+  the field name under a `Model` label (`Model species_encoding: rank_pool`)
+  rather than a curated one, which is what makes a hyperparameter added to
+  `ModelConfig` appear in `info` in the edit that adds it -- `moe_placement`
+  needed a line written by hand. A row is hidden only when another field
+  switches its feature off: the six architecture sub-configs this checkpoint
+  did not select, the mixture's hyperparameters when `moe_routing` is `none`
+  (which now prints as `none` rather than going silent), TabM and the parallel
+  branches when disabled, and the head's shape when it has no hidden layers.
+
 ### Tests
 
 - `src/core/tests/test_moe_placement.cpp` (17 cases): a tail mixture builds,
@@ -84,6 +95,13 @@
   surface, `r/tests/testthat/` (33) the R one, and `tests.yml` gains a CLI
   end-to-end step asserting the flags change the model and the refusal names
   the placement that works.
+
+- `src/core/tests/test_info_report.cpp` (7 cases): every `ModelConfig` field
+  reaches the report unless a rule hides it, every name those rules key on is
+  still a registry row, only the selected architecture's sub-config prints, a
+  nested row is not gated by the outer struct's rules (both `ModelConfig` and
+  `FTTransformerConfig` carry `n_heads`), and each switch -- the mixture, TabM,
+  the parallel branches, the head -- governs its own rows.
 
 ## v0.8.2 (2026-08-31)
 

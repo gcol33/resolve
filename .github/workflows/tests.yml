@@ -142,8 +142,8 @@ jobs:
           test -s "$OUT/model.pt"
 
           "$RESOLVE" info --model "$OUT/model.pt" | tee "$OUT/info.txt"
-          grep -q "Species encoding: rank_pool" "$OUT/info.txt"
-          grep -q "Encoder architecture: mlp" "$OUT/info.txt"
+          grep -q "Model species_encoding: rank_pool" "$OUT/info.txt"
+          grep -q "Model encoder_architecture: mlp" "$OUT/info.txt"
           grep -q "area: regression" "$OUT/info.txt"
           grep -q "habitat: classification (3 classes)" "$OUT/info.txt"
           # The covariate and the categorical reached the model's schema.
@@ -326,10 +326,11 @@ jobs:
           train_moe tail soft tail
           train_moe post soft post
 
-          grep -q "MoE routing: soft" "$OUT/info_moe_tail.txt"
-          grep -q "MoE placement: tail" "$OUT/info_moe_tail.txt"
-          grep -q "MoE placement: post" "$OUT/info_moe_post.txt"
-          if grep -q "MoE routing:" "$OUT/info_moe_none.txt"; then
+          grep -q "Model moe_routing: soft" "$OUT/info_moe_tail.txt"
+          grep -q "Model moe_placement: tail" "$OUT/info_moe_tail.txt"
+          grep -q "Model moe_placement: post" "$OUT/info_moe_post.txt"
+          grep -q "Model moe_routing: none" "$OUT/info_moe_none.txt"
+          if grep -q "Model moe_placement:" "$OUT/info_moe_none.txt"; then
             echo "::error::a model trained without a mixture reports MoE settings"
             exit 1
           fi
