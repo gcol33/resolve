@@ -1,6 +1,6 @@
 Package: resolve
 Title: Predicting Sample Outcomes from Compositional Data
-Version: 0.8.2
+Version: 0.9.0
 Authors@R:
     person("Gilles", "Colling", email = "gilles.colling051@gmail.com",
            role = c("aut", "cre"),

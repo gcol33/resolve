@@ -1,6 +1,6 @@
 # RESOLVE Changelog
 
-## Unreleased
+## v0.9.0 (2026-08-31)
 
 ### Added
 
