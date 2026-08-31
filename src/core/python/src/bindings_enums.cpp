@@ -62,6 +62,11 @@ void register_enums(nb::module_& m) {
         .value("TopK", resolve::MoERoutingType::TopK)
         .export_values();
 
+    nb::enum_<resolve::MoEPlacement>(m, "MoEPlacement")
+        .value("Tail", resolve::MoEPlacement::Tail)
+        .value("Post", resolve::MoEPlacement::Post)
+        .export_values();
+
     nb::enum_<resolve::ActivationType>(m, "ActivationType")
         .value("ReLU", resolve::ActivationType::ReLU)
         .value("LeakyReLU", resolve::ActivationType::LeakyReLU)

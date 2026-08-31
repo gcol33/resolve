@@ -62,7 +62,7 @@ columns, and the hash embedding in hash mode, in that order.
 | `forward_with_aux(...)` | `ModelForwardResult` with `outputs` and `moe_aux_loss` |
 | `forward_single(target, continuous, genus_ids=None, family_ids=None, species_ids=None, species_vector=None, categorical_ids=None)` | `Tensor` for one head; rejects pool encoders |
 | `encode_with_activations(continuous, genus_ids=None, family_ids=None, categorical_ids=None)` | `(latent, [activations])`; activations are non-empty for the hash encoder |
-| `get_gate_probs(continuous, genus_ids=None, family_ids=None)` | `Tensor` of expert gate probabilities, or empty without MoE |
+| `get_gate_probs(continuous, genus_ids=None, family_ids=None)` | `Tensor` of expert gate probabilities, empty without MoE. Covers the encoders whose species signal is already inside `continuous` (hash) or absent (TraitNet, adapter architectures); for an embed / sparse / rank_pool / transformer model it raises, because the signature carries no species input. Read those gates off `forward_with_aux` instead. |
 
 The forward passes release the GIL around the compute, so other Python threads
 run during a long pass.
@@ -150,13 +150,25 @@ config = rc.ModelConfig()
 | Attribute | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `moe_routing` | `MoERoutingType` | `None_` | `None_`, `Soft`, `TopK` |
-| `n_experts` | `int` | `4` | Expert count |
+| `moe_placement` | `MoEPlacement` | `Tail` | `Tail` or `Post`; where the mixture sits |
+| `n_experts` | `int` | `4` | Expert count, at least 2 |
 | `expert_hidden_dims` | `list[int]` | `[256, 128]` | Expert MLP widths |
 | `moe_top_k` | `int` | `2` | Experts per sample under `TopK` |
 | `moe_noise_std` | `float` | `0.1` | Routing noise during training |
 | `moe_aux_loss_weight` | `float` | `0.01` | Weight of the load-balancing loss |
 
-Routing is available in hash mode.
+Routing is available in every species encoding.
+
+`moe_placement` decides what the mixture replaces:
+
+| Placement | What it does | Available to |
+|-----------|--------------|--------------|
+| `Tail` (default) | The experts are the encoder's final stage. `hidden_dims` minus its last two widths becomes the backbone; the mixture projects that to `hidden_dims[-1]`, which is the latent. Capacity moves into the experts rather than being stacked on top. | Every species encoding: `Hash`, `Embed`, `Sparse`, `RankPool`, `Transformer` |
+| `Post` | The encoder produces its latent as usual and the mixture maps that latent to one of the same width. | Any encoder, including the adapter architectures and `TraitNet` |
+
+`Tail` and TabM both claim the encoder's MLP tail, so asking for both raises.
+Asking an adapter architecture or `TraitNet` for `Tail` raises too, naming
+`Post` as the placement that works.
 
 ### Encoder architecture
 
@@ -220,6 +232,7 @@ Returned by `forward_with_aux`.
 | `NormLayerType` | `BatchNorm`, `LayerNorm`, `GroupNorm`, `RMSNorm`, `None_` |
 | `EncoderArchitecture` | `MLP`, `FTTransformer`, `TabNet`, `SAINT`, `TraitNet`, `GNN`, `ExcelFormer`, `HeterogeneousGNN` |
 | `MoERoutingType` | `None_`, `Soft`, `TopK` |
+| `MoEPlacement` | `Tail`, `Post` |
 | `GNNType` | `GCN`, `GAT`, `GraphSAGE` |
 | `GraphConstructionMode` | `Spatial`, `Taxonomic`, `CoOccurrence` |
 | `TraitInteractionMode` | `Bilinear`, `MLP`, `Attention` |

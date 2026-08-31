@@ -217,14 +217,31 @@ cfg.ft_transformer.n_layers = 3
 
 ### Mixture of experts
 
-Expert routing over the shared encoder, available in hash mode:
+Expert routing over the shared encoder, available in every species encoding:
 
 ```python
 cfg.moe_routing        = rc.MoERoutingType.TopK   # or Soft
+cfg.moe_placement      = rc.MoEPlacement.Tail     # or Post
 cfg.n_experts          = 4
 cfg.moe_top_k          = 2
 cfg.expert_hidden_dims = [256, 128]
 ```
+
+Under `Tail`, the default, the experts *are* the encoder's final stage:
+`hidden_dims` minus its last two widths becomes the backbone and the mixture
+projects that to `hidden_dims[-1]`. So with `hidden_dims = [512, 256, 128, 64]`
+the backbone runs 512 to 256 and three experts each map 256 to 64, which stays
+the latent width. Capacity moves into the experts instead of being stacked on
+top of a full-depth encoder.
+
+`Post` runs the mixture over the finished latent instead, preserving its width.
+That is the placement for an encoder with no MLP tail to give up -- the adapter
+architectures and `TraitNet` -- and asking those for `Tail` raises an error
+naming `Post`.
+
+A gate spreads its load with a small auxiliary loss, added to the task loss at
+`moe_aux_loss_weight`. `n_experts` must be at least 2: with one expert the
+soft-routing load-balancing term is a variance over a single value.
 
 ## Training results
 

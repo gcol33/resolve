@@ -65,7 +65,8 @@ PlotEncoderRankPoolImpl::PlotEncoderRankPoolImpl(
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& mlp_config,
     float cover_dropout,
-    const TabMConfig& tabm_config
+    const TabMConfig& tabm_config,
+    const MoETailConfig& moe_config
 ) : cover_dropout_(cover_dropout) {
     // Enable taxonomy when genus OR family has real (non-UNK) entries, matching
     // the encoder's transform gate and keeping family-only datasets' family
@@ -89,13 +90,26 @@ PlotEncoderRankPoolImpl::PlotEncoderRankPoolImpl(
     // MLP input: continuous + pooled embedding + has_cover flag
     int64_t input_dim = n_continuous + embed_dim + 1;
 
-    auto bb = build_and_register_backbone(
-        *this, mlp_, tabm_encoder_, input_dim, hidden_dims, mlp_config, tabm_config);
-    use_tabm_ = bb.use_tabm;
-    latent_dim_ = bb.latent_dim;
+    latent_dim_ = build_encoder_tail(
+        *this, tail_, input_dim, hidden_dims, mlp_config, tabm_config, moe_config);
 }
 
 torch::Tensor PlotEncoderRankPoolImpl::forward(
+    torch::Tensor continuous,
+    torch::Tensor species_ids,
+    torch::Tensor genus_ids,
+    torch::Tensor family_ids,
+    torch::Tensor weights,
+    torch::Tensor mask,
+    torch::Tensor has_cover
+) {
+    return encode(std::move(continuous), std::move(species_ids),
+                  std::move(genus_ids), std::move(family_ids),
+                  std::move(weights), std::move(mask),
+                  std::move(has_cover)).latent;
+}
+
+TailOutput PlotEncoderRankPoolImpl::encode(
     torch::Tensor continuous,
     torch::Tensor species_ids,
     torch::Tensor genus_ids,
@@ -175,11 +189,7 @@ torch::Tensor PlotEncoderRankPoolImpl::forward(
     auto has_cover_col = has_cover.unsqueeze(-1);  // (batch, 1)
     auto x = torch::cat({continuous, pooled, has_cover_col}, /*dim=*/1);
 
-    // MLP forward
-    if (use_tabm_) {
-        return tabm_encoder_->forward(x);
-    }
-    return mlp_->forward(x);
+    return forward_encoder_tail(tail_, x);
 }
 
 torch::Tensor PlotEncoderRankPoolImpl::get_species_weights() const {
@@ -215,7 +225,8 @@ PlotEncoderTransformerImpl::PlotEncoderTransformerImpl(
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& mlp_config,
     float cover_dropout,
-    const TabMConfig& tabm_config
+    const TabMConfig& tabm_config,
+    const MoETailConfig& moe_config
 ) : d_model_(d_model),
     n_attention_layers_(n_attention_layers),
     transformer_pooling_(transformer_pooling),
@@ -303,10 +314,8 @@ PlotEncoderTransformerImpl::PlotEncoderTransformerImpl(
     // MLP input: continuous + pooled (d_model) + has_cover flag
     int64_t input_dim = n_continuous + d_model + 1;
 
-    auto bb = build_and_register_backbone(
-        *this, mlp_, tabm_encoder_, input_dim, hidden_dims, mlp_config, tabm_config);
-    use_tabm_ = bb.use_tabm;
-    latent_dim_ = bb.latent_dim;
+    latent_dim_ = build_encoder_tail(
+        *this, tail_, input_dim, hidden_dims, mlp_config, tabm_config, moe_config);
 }
 
 torch::Tensor PlotEncoderTransformerImpl::build_tokens(
@@ -381,6 +390,22 @@ torch::Tensor PlotEncoderTransformerImpl::forward(
     torch::Tensor has_cover,
     torch::Tensor masked_positions
 ) {
+    return encode(std::move(continuous), std::move(species_ids),
+                  std::move(genus_ids), std::move(family_ids),
+                  std::move(weights), std::move(mask), std::move(has_cover),
+                  std::move(masked_positions)).latent;
+}
+
+TailOutput PlotEncoderTransformerImpl::encode(
+    torch::Tensor continuous,
+    torch::Tensor species_ids,
+    torch::Tensor genus_ids,
+    torch::Tensor family_ids,
+    torch::Tensor weights,
+    torch::Tensor mask,
+    torch::Tensor has_cover,
+    torch::Tensor masked_positions
+) {
     int64_t batch_size = continuous.size(0);
     auto device = continuous.device();
 
@@ -446,14 +471,11 @@ torch::Tensor PlotEncoderTransformerImpl::forward(
         pooled = tokens_with_cls.index({torch::indexing::Slice(), 0});  // (B, d_model)
     }
 
-    // Concatenate and run MLP
+    // Concatenate and run the tail
     auto has_cover_col = has_cover.unsqueeze(-1);
     auto x = torch::cat({continuous, pooled, has_cover_col}, /*dim=*/1);
 
-    if (use_tabm_) {
-        return tabm_encoder_->forward(x);
-    }
-    return mlp_->forward(x);
+    return forward_encoder_tail(tail_, x);
 }
 
 torch::Tensor PlotEncoderTransformerImpl::get_species_weights() const {

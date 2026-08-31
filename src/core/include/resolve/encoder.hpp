@@ -116,6 +116,36 @@ struct MLPBlockConfig {
     }
 };
 
+// Description of the mixture of experts that may stand in for an encoder's MLP
+// tail. Mirrors MLPBlockConfig: a torch-free projection of the MoE knobs on
+// ModelConfig, so an encoder takes one argument rather than five.
+struct MoETailConfig {
+    MoERoutingType routing = MoERoutingType::None;
+    int n_experts = 4;
+    std::vector<int64_t> expert_hidden_dims = {256, 128};
+    int top_k = 2;
+    float noise_std = 0.1f;
+
+    [[nodiscard]] bool enabled() const noexcept {
+        return routing != MoERoutingType::None;
+    }
+
+    // Reads the MoE knobs only when the run asked for them in the tail. A
+    // MoEPlacement::Post run leaves routing at None here and the model builds
+    // the mixture over the finished latent instead, so the placement rule lives
+    // in exactly one place and no encoder has to know about it.
+    static MoETailConfig from_model_config(const ModelConfig& cfg) {
+        MoETailConfig moe;
+        if (cfg.moe_placement != MoEPlacement::Tail) return moe;
+        moe.routing = cfg.moe_routing;
+        moe.n_experts = cfg.n_experts;
+        moe.expert_hidden_dims = cfg.expert_hidden_dims;
+        moe.top_k = cfg.moe_top_k;
+        moe.noise_std = cfg.moe_noise_std;
+        return moe;
+    }
+};
+
 // Result from building a configurable MLP
 struct MLPBuildResult {
     torch::nn::Sequential mlp;
@@ -375,23 +405,54 @@ void embed_per_rank_taxonomy(
     int top_k, bool has_taxonomy
 );
 
-// Build and register MLP or TabM backbone on a module.
-// Returns (latent_dim, activation_indices).
-struct BackboneSetupResult {
-    int64_t latent_dim;
-    std::vector<size_t> activation_indices;
-    bool use_tabm;
+// What an encoder tail produces. aux_loss and gate_probs are undefined unless
+// the tail is a mixture of experts; a caller that only wants the representation
+// reads .latent and ignores the rest.
+struct TailOutput {
+    torch::Tensor latent;
+    torch::Tensor aux_loss;
+    torch::Tensor gate_probs;
 };
 
-BackboneSetupResult build_and_register_backbone(
-    torch::nn::Module& module,
-    torch::nn::Sequential& mlp,
-    TabMEncoder& tabm_encoder,
+// The last stage of every species encoder -- hash, embed, sparse, rank_pool and
+// transformer all end here. It is one of three things: a plain MLP, a TabM
+// ensemble, or a backbone MLP whose final stage is a mixture of experts.
+//
+// The modules are registered onto the OWNING encoder rather than onto a
+// sub-module of their own, so the parameter names stay flat ("mlp", "tabm",
+// "backbone" + "moe") and are the names each configuration has always written.
+// This follows register_per_rank_embeddings above, for the same reason.
+struct EncoderTail {
+    torch::nn::Sequential mlp{nullptr};
+    TabMEncoder tabm{nullptr};
+
+    // MoE tail: backbone MLP feeding the mixture.
+    torch::nn::Sequential backbone{nullptr};
+    MixtureOfExperts moe{nullptr};
+
+    int64_t latent_dim = 0;
+    std::vector<size_t> activation_indices;  // Indices of activation layers (plain MLP only)
+
+    [[nodiscard]] bool has_moe() const noexcept { return static_cast<bool>(moe); }
+    [[nodiscard]] bool has_tabm() const noexcept { return static_cast<bool>(tabm); }
+};
+
+// Build the tail on `owner` and return its latent dimension (also stored on the
+// tail). With a mixture, hidden_dims splits: all but the last two stages become
+// the backbone and the mixture projects to hidden_dims.back(), so the experts
+// take over the encoder's final capacity instead of being stacked on top of it.
+int64_t build_encoder_tail(
+    torch::nn::Module& owner,
+    EncoderTail& tail,
     int64_t input_dim,
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& config,
-    const TabMConfig& tabm_config
+    const TabMConfig& tabm_config,
+    const MoETailConfig& moe_config = MoETailConfig{}
 );
+
+// Run whichever tail was built.
+TailOutput forward_encoder_tail(EncoderTail& tail, torch::Tensor x);
 
 // PlotEncoder: shared encoder for all tasks (hash mode)
 // Architecture: learned taxonomy embeddings + MLP
@@ -407,7 +468,8 @@ public:
         int top_k,
         const std::vector<int64_t>& hidden_dims,
         const MLPBlockConfig& mlp_config,
-        const TabMConfig& tabm_config = TabMConfig{}
+        const TabMConfig& tabm_config = TabMConfig{},
+        const MoETailConfig& moe_config = MoETailConfig{}
     );
 
     // Legacy constructor (backward compatibility)
@@ -427,6 +489,15 @@ public:
     // genus_ids: (batch, top_k) - optional
     // family_ids: (batch, top_k) - optional
     torch::Tensor forward(
+        torch::Tensor continuous,
+        torch::Tensor genus_ids = {},
+        torch::Tensor family_ids = {}
+    );
+
+    // The full tail output. forward() is this with everything but the latent
+    // dropped; a mixture-of-experts tail also reports its load-balancing loss
+    // and gate probabilities here, which is how they reach the trainer.
+    TailOutput encode(
         torch::Tensor continuous,
         torch::Tensor genus_ids = {},
         torch::Tensor family_ids = {}
@@ -464,16 +535,15 @@ private:
     std::vector<torch::nn::Embedding> genus_embeddings_;
     std::vector<torch::nn::Embedding> family_embeddings_;
 
-    // MLP layers (standard or TabM)
-    torch::nn::Sequential mlp_{nullptr};
-    TabMEncoder tabm_encoder_{nullptr};
-    bool use_tabm_ = false;
+    // Final stage: plain MLP, TabM ensemble, or backbone + mixture of experts
+    EncoderTail tail_;
 
     // Helper for constructor implementation
     void init(int64_t n_continuous, int64_t n_genera, int64_t n_families,
               int genus_emb_dim, int family_emb_dim, int top_k,
               const std::vector<int64_t>& hidden_dims, const MLPBlockConfig& config,
-              const TabMConfig& tabm_config = TabMConfig{});
+              const TabMConfig& tabm_config = TabMConfig{},
+              const MoETailConfig& moe_config = MoETailConfig{});
 };
 
 TORCH_MODULE(PlotEncoder);
@@ -496,7 +566,8 @@ public:
         int top_k_taxonomy,
         const std::vector<int64_t>& hidden_dims,
         const MLPBlockConfig& mlp_config,
-        const TabMConfig& tabm_config = TabMConfig{}
+        const TabMConfig& tabm_config = TabMConfig{},
+        const MoETailConfig& moe_config = MoETailConfig{}
     );
 
     // Legacy constructor (backward compatibility)
@@ -526,6 +597,14 @@ public:
         torch::Tensor family_ids = {}
     );
 
+    // The full tail output; see PlotEncoderImpl::encode.
+    TailOutput encode(
+        torch::Tensor continuous,
+        torch::Tensor species_ids,
+        torch::Tensor genus_ids = {},
+        torch::Tensor family_ids = {}
+    );
+
     [[nodiscard]] int64_t latent_dim() const noexcept { return latent_dim_; }
     [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
 
@@ -546,17 +625,16 @@ private:
     FusedPositionalEmbedding fused_genus_{nullptr};
     FusedPositionalEmbedding fused_family_{nullptr};
 
-    // MLP layers (standard or TabM)
-    torch::nn::Sequential mlp_{nullptr};
-    TabMEncoder tabm_encoder_{nullptr};
-    bool use_tabm_ = false;
+    // Final stage: plain MLP, TabM ensemble, or backbone + mixture of experts
+    EncoderTail tail_;
 
     // Helper for constructor implementation
     void init(int64_t n_continuous, int64_t n_species, int64_t n_genera, int64_t n_families,
               int species_embed_dim, int genus_emb_dim, int family_emb_dim,
               int top_k_species, int top_k_taxonomy,
               const std::vector<int64_t>& hidden_dims, const MLPBlockConfig& config,
-              const TabMConfig& tabm_config = TabMConfig{});
+              const TabMConfig& tabm_config = TabMConfig{},
+              const MoETailConfig& moe_config = MoETailConfig{});
 };
 
 TORCH_MODULE(PlotEncoderEmbed);
@@ -578,7 +656,8 @@ public:
         int top_k,
         const std::vector<int64_t>& hidden_dims,
         const MLPBlockConfig& mlp_config,
-        const TabMConfig& tabm_config = TabMConfig{}
+        const TabMConfig& tabm_config = TabMConfig{},
+        const MoETailConfig& moe_config = MoETailConfig{}
     );
 
     // Legacy constructor (backward compatibility)
@@ -607,6 +686,14 @@ public:
         torch::Tensor family_ids = {}
     );
 
+    // The full tail output; see PlotEncoderImpl::encode.
+    TailOutput encode(
+        torch::Tensor continuous,
+        torch::Tensor species_vector,
+        torch::Tensor genus_ids = {},
+        torch::Tensor family_ids = {}
+    );
+
     [[nodiscard]] int64_t latent_dim() const noexcept { return latent_dim_; }
     [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
     [[nodiscard]] int64_t n_species() const noexcept { return n_species_; }
@@ -629,16 +716,15 @@ private:
     std::vector<torch::nn::Embedding> genus_embeddings_;
     std::vector<torch::nn::Embedding> family_embeddings_;
 
-    // MLP layers (standard or TabM)
-    torch::nn::Sequential mlp_{nullptr};
-    TabMEncoder tabm_encoder_{nullptr};
-    bool use_tabm_ = false;
+    // Final stage: plain MLP, TabM ensemble, or backbone + mixture of experts
+    EncoderTail tail_;
 
     // Helper for constructor implementation
     void init(int64_t n_continuous, int64_t n_species, int species_embed_dim,
               int64_t n_genera, int64_t n_families, int genus_emb_dim, int family_emb_dim,
               int top_k, const std::vector<int64_t>& hidden_dims, const MLPBlockConfig& config,
-              const TabMConfig& tabm_config = TabMConfig{});
+              const TabMConfig& tabm_config = TabMConfig{},
+              const MoETailConfig& moe_config = MoETailConfig{});
 };
 
 TORCH_MODULE(PlotEncoderSparse);
@@ -680,7 +766,8 @@ public:
         const std::vector<int64_t>& hidden_dims = {2048, 1024, 512, 256, 128, 64},
         const MLPBlockConfig& mlp_config = MLPBlockConfig{},
         float cover_dropout = 0.0f,
-        const TabMConfig& tabm_config = TabMConfig{}
+        const TabMConfig& tabm_config = TabMConfig{},
+        const MoETailConfig& moe_config = MoETailConfig{}
     );
 
     // Forward pass with weighted mean pooling
@@ -691,6 +778,17 @@ public:
     // mask: (batch, max_species) bool, optional (True=valid)
     // has_cover: (batch,) float, optional (defaults to 1.0)
     torch::Tensor forward(
+        torch::Tensor continuous,
+        torch::Tensor species_ids,
+        torch::Tensor genus_ids = {},
+        torch::Tensor family_ids = {},
+        torch::Tensor weights = {},
+        torch::Tensor mask = {},
+        torch::Tensor has_cover = {}
+    );
+
+    // The full tail output; see PlotEncoderImpl::encode.
+    TailOutput encode(
         torch::Tensor continuous,
         torch::Tensor species_ids,
         torch::Tensor genus_ids = {},
@@ -717,10 +815,8 @@ private:
     torch::nn::Embedding genus_embedding_{nullptr};
     torch::nn::Embedding family_embedding_{nullptr};
 
-    // MLP backbone
-    torch::nn::Sequential mlp_{nullptr};
-    TabMEncoder tabm_encoder_{nullptr};
-    bool use_tabm_ = false;
+    // Final stage: plain MLP, TabM ensemble, or backbone + mixture of experts
+    EncoderTail tail_;
 };
 
 TORCH_MODULE(PlotEncoderRankPool);
@@ -748,11 +844,24 @@ public:
         const std::vector<int64_t>& hidden_dims = {1024, 512},
         const MLPBlockConfig& mlp_config = MLPBlockConfig{},
         float cover_dropout = 0.0f,
-        const TabMConfig& tabm_config = TabMConfig{}
+        const TabMConfig& tabm_config = TabMConfig{},
+        const MoETailConfig& moe_config = MoETailConfig{}
     );
 
     // Forward pass: species tokens → self-attention → pooling → MLP → latent
     torch::Tensor forward(
+        torch::Tensor continuous,
+        torch::Tensor species_ids,
+        torch::Tensor genus_ids = {},
+        torch::Tensor family_ids = {},
+        torch::Tensor weights = {},
+        torch::Tensor mask = {},
+        torch::Tensor has_cover = {},
+        torch::Tensor masked_positions = {}
+    );
+
+    // The full tail output; see PlotEncoderImpl::encode.
+    TailOutput encode(
         torch::Tensor continuous,
         torch::Tensor species_ids,
         torch::Tensor genus_ids = {},
@@ -817,10 +926,8 @@ private:
     // CLS pooling
     torch::Tensor cls_token_;
 
-    // MLP backbone
-    torch::nn::Sequential mlp_{nullptr};
-    TabMEncoder tabm_encoder_{nullptr};
-    bool use_tabm_ = false;
+    // Final stage: plain MLP, TabM ensemble, or backbone + mixture of experts
+    EncoderTail tail_;
 };
 
 TORCH_MODULE(PlotEncoderTransformer);
@@ -875,113 +982,5 @@ private:
 TORCH_MODULE(TaskHead);
 
 
-// =============================================================================
-// MoE-Enabled Encoders
-// =============================================================================
-
-// PlotEncoderMoE: Hash mode encoder with Mixture of Experts
-// Adds MoE layer after the shared MLP backbone
-class PlotEncoderMoEImpl : public torch::nn::Module {
-public:
-    // New constructor with configurable architecture
-    PlotEncoderMoEImpl(
-        int64_t n_continuous,
-        int64_t n_genera,
-        int64_t n_families,
-        int genus_emb_dim,
-        int family_emb_dim,
-        int top_k,
-        const std::vector<int64_t>& hidden_dims,
-        const MLPBlockConfig& mlp_config,
-        // MoE configuration
-        int n_experts,
-        const std::vector<int64_t>& expert_hidden_dims,
-        MoERoutingType moe_routing,
-        int moe_top_k,
-        float moe_noise_std
-    );
-
-    // Legacy constructor (backward compatibility)
-    PlotEncoderMoEImpl(
-        int64_t n_continuous,
-        int64_t n_genera = 0,
-        int64_t n_families = 0,
-        int genus_emb_dim = 8,
-        int family_emb_dim = 8,
-        int top_k = 3,
-        const std::vector<int64_t>& hidden_dims = {2048, 1024, 512, 256, 128, 64},
-        float dropout = 0.3f,
-        // MoE configuration
-        int n_experts = 4,
-        const std::vector<int64_t>& expert_hidden_dims = {256, 128},
-        MoERoutingType moe_routing = MoERoutingType::Soft,
-        int moe_top_k = 2,
-        float moe_noise_std = 0.1f
-    );
-
-    // Forward pass returning latent + auxiliary MoE loss
-    std::pair<torch::Tensor, torch::Tensor> forward(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {}
-    );
-
-    // Forward pass returning only latent (for inference)
-    torch::Tensor forward_simple(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {}
-    );
-
-    // Get gating probabilities for analysis
-    torch::Tensor get_gate_probs(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {}
-    );
-
-    [[nodiscard]] int64_t latent_dim() const noexcept { return latent_dim_; }
-    [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
-    [[nodiscard]] int n_experts() const noexcept { return n_experts_; }
-    [[nodiscard]] MoERoutingType routing_type() const noexcept { return moe_routing_; }
-
-    // Embedding weight extraction (averaged across positions)
-    [[nodiscard]] torch::Tensor get_genus_weights() const;
-    [[nodiscard]] torch::Tensor get_family_weights() const;
-
-private:
-    torch::Tensor encode_input(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids,
-        torch::Tensor family_ids
-    );
-
-    // Helper for constructor implementation
-    void init(int64_t n_continuous, int64_t n_genera, int64_t n_families,
-              int genus_emb_dim, int family_emb_dim, int top_k,
-              const std::vector<int64_t>& hidden_dims, const MLPBlockConfig& config,
-              int n_experts, const std::vector<int64_t>& expert_hidden_dims,
-              MoERoutingType moe_routing, int moe_top_k, float moe_noise_std);
-
-    bool has_taxonomy_;
-    int top_k_;
-    int64_t latent_dim_;
-    int n_experts_;
-    MoERoutingType moe_routing_;
-    MLPBlockConfig mlp_config_;
-
-    // Taxonomy embeddings
-    std::vector<torch::nn::Embedding> genus_embeddings_;
-    std::vector<torch::nn::Embedding> family_embeddings_;
-
-    // Shared backbone MLP (smaller than original, MoE adds capacity)
-    torch::nn::Sequential backbone_{nullptr};
-    int64_t backbone_output_dim_;
-
-    // Mixture of Experts layer
-    MixtureOfExperts moe_{nullptr};
-};
-
-TORCH_MODULE(PlotEncoderMoE);
 
 } // namespace resolve

@@ -149,11 +149,32 @@ public:
 private:
     // Dispatch taxonomy weight extraction to the active encoder
     torch::Tensor get_taxonomy_weights_(
-        torch::Tensor (PlotEncoderMoEImpl::*moe_fn)() const,
         torch::Tensor (PlotEncoderImpl::*hash_fn)() const,
         torch::Tensor (PlotEncoderEmbedImpl::*embed_fn)() const,
         torch::Tensor (PlotEncoderSparseImpl::*sparse_fn)() const
     ) const;
+
+    // The one encoder dispatch. Runs whichever encoder was built and returns
+    // its full tail output: the latent plus, when the mixture of experts sits
+    // in the tail, the load-balancing loss and gate probabilities. encode(),
+    // encode_with_aux() and get_gate_probs() are the three readings of this,
+    // rather than three copies of the same if-else chain. Encoders with no tail
+    // (the adapter architectures and TraitNet) report the latent alone.
+    //
+    // `continuous` here is the value AFTER categorical embeddings have been
+    // concatenated; see fuse_categoricals_().
+    TailOutput encode_all(
+        torch::Tensor continuous,
+        torch::Tensor genus_ids,
+        torch::Tensor family_ids,
+        torch::Tensor species_ids,
+        torch::Tensor species_vector,
+        torch::Tensor pool_genus_ids = {},
+        torch::Tensor pool_family_ids = {},
+        torch::Tensor pool_weights = {},
+        torch::Tensor pool_mask = {},
+        torch::Tensor pool_has_cover = {}
+    );
 
     // Internal forward through encoder based on mode (returns latent only).
     // `continuous` here is the value AFTER categorical embeddings have been
@@ -208,10 +229,9 @@ private:
     // TraitNet encoder (used when encoder_architecture == TraitNet)
     TraitNetEncoder trait_net_encoder_{nullptr};
 
-    // MoE encoder (used when moe_routing != None AND hash encoding)
-    PlotEncoderMoE encoder_moe_{nullptr};
-
-    // Model-level MoE layer (used when moe_routing != None AND embed/sparse encoding)
+    // Mixture of experts over the finished latent, built only for
+    // moe_placement == Post. Under the default (Tail) the mixture lives inside
+    // the encoder instead, as its final stage.
     MixtureOfExperts post_moe_{nullptr};
 
     // Tabular adapter (used when encoder_architecture != MLP)

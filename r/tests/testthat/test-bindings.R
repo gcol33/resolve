@@ -308,6 +308,51 @@ test_that("resolve.train.dataset rejects invalid NCA hyperparameters", {
   expect_error(resolve.train.dataset(fake_ds, ncaWeight = -1), "ncaWeight")
 })
 
+test_that("resolve.train.dataset rejects invalid mixture-of-experts settings", {
+  fake_ds <- structure(list(), class = "Rcpp_ResolveDataset")
+
+  expect_error(resolve.train.dataset(fake_ds, moeRouting = "dense"), "moeRouting")
+  expect_error(resolve.train.dataset(fake_ds, moePlacement = "middle"), "moePlacement")
+
+  # The expert knobs are only read when a mixture is actually requested, so
+  # each check needs routing on.
+  expect_error(
+    resolve.train.dataset(fake_ds, moeRouting = "soft", nExperts = 1),
+    "nExperts"
+  )
+  expect_error(
+    resolve.train.dataset(fake_ds, moeRouting = "topk", moeTopK = 0),
+    "moeTopK"
+  )
+  expect_error(
+    resolve.train.dataset(fake_ds, moeRouting = "soft", moeNoiseStd = -0.1),
+    "moeNoiseStd"
+  )
+  expect_error(
+    resolve.train.dataset(fake_ds, moeRouting = "soft", moeAuxLossWeight = -1),
+    "moeAuxLossWeight"
+  )
+  expect_error(
+    resolve.train.dataset(fake_ds, moeRouting = "soft", expertHiddenDims = integer(0)),
+    "expertHiddenDims"
+  )
+})
+
+test_that("resolve.train.dataset accepts a mixture of experts at either placement", {
+  fake_ds <- structure(list(), class = "Rcpp_ResolveDataset")
+
+  # The fake dataset still fails the call further in; what matters is that the
+  # mixture settings are not what rejected it.
+  for (placement in c("tail", "post")) {
+    msg <- tryCatch(
+      resolve.train.dataset(fake_ds, moeRouting = "soft", moePlacement = placement),
+      error = function(e) conditionMessage(e)
+    )
+    expect_false(grepl("moeRouting", msg, fixed = TRUE))
+    expect_false(grepl("moePlacement", msg, fixed = TRUE))
+  }
+})
+
 
 # --- resolve.predict.dataset ---
 

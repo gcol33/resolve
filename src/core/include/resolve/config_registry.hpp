@@ -298,6 +298,7 @@ inline std::string parallel_branch_prefix(std::size_t i) {
     F(moe_top_k,             "moe_top_k")                   \
     F(moe_noise_std,         "moe_noise_std")               \
     F(moe_aux_loss_weight,   "moe_aux_loss_weight")         \
+    F(moe_placement,         "moe_placement")               \
     F(activation,            "activation")                  \
     F(normalization,         "normalization")               \
     F(norm_groups,           "norm_groups")                 \

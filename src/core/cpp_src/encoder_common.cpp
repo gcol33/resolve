@@ -463,29 +463,88 @@ void embed_per_rank_taxonomy(
     }
 }
 
-BackboneSetupResult build_and_register_backbone(
-    torch::nn::Module& module,
-    torch::nn::Sequential& mlp,
-    TabMEncoder& tabm_encoder,
+namespace {
+// Split hidden_dims into the backbone that feeds the mixture and the width the
+// mixture projects to. All but the final two stages stay in the backbone and
+// the mixture produces hidden_dims.back(); a spec too short to split that way
+// keeps its first stage as the backbone. An empty spec leaves an identity
+// backbone, which build_mlp_configurable already tolerates, and the mixture
+// then maps the encoder's input width to itself.
+std::vector<int64_t> moe_backbone_dims(const std::vector<int64_t>& hidden_dims) {
+    std::vector<int64_t> backbone_dims;
+    if (hidden_dims.size() > 2) {
+        backbone_dims.assign(hidden_dims.begin(), hidden_dims.end() - 2);
+    } else if (!hidden_dims.empty()) {
+        backbone_dims.push_back(hidden_dims.front());
+    }
+    return backbone_dims;
+}
+}  // namespace
+
+int64_t build_encoder_tail(
+    torch::nn::Module& owner,
+    EncoderTail& tail,
     int64_t input_dim,
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& config,
-    const TabMConfig& tabm_config
+    const TabMConfig& tabm_config,
+    const MoETailConfig& moe_config
 ) {
-    BackboneSetupResult result;
-    result.use_tabm = tabm_config.enabled;
+    // TabM and a mixture are both replacements for the same MLP tail, so only
+    // one of them can have it. Requesting both used to drop TabM without a
+    // word, since the MoE encoder took no TabMConfig at all.
+    if (tabm_config.enabled && moe_config.enabled()) {
+        throw std::invalid_argument(
+            "encoder tail: tabm.enabled and moe_routing are both set, but both "
+            "replace the encoder's MLP tail. Choose one: disable TabM, set "
+            "moe_routing=none, or move the mixture off the tail with "
+            "moe_placement=post.");
+    }
+
     if (tabm_config.enabled) {
-        tabm_encoder = module.register_module("tabm", TabMEncoder(
+        tail.tabm = owner.register_module("tabm", TabMEncoder(
             input_dim, hidden_dims, tabm_config.n_ensembles,
             config.dropout, tabm_config.aggregation));
-        result.latent_dim = tabm_encoder->output_dim();
-    } else {
-        auto build = build_mlp_configurable(input_dim, hidden_dims, config);
-        mlp = module.register_module("mlp", build.mlp);
-        result.latent_dim = build.output_dim;
-        result.activation_indices = build.activation_indices;
+        tail.latent_dim = tail.tabm->output_dim();
+        return tail.latent_dim;
     }
-    return result;
+
+    if (moe_config.enabled()) {
+        auto build = build_mlp_configurable(
+            input_dim, moe_backbone_dims(hidden_dims), config);
+        tail.backbone = owner.register_module("backbone", build.mlp);
+
+        const int64_t moe_output_dim =
+            hidden_dims.empty() ? build.output_dim : hidden_dims.back();
+        tail.moe = owner.register_module("moe", MixtureOfExperts(
+            build.output_dim,
+            moe_config.expert_hidden_dims,
+            moe_output_dim,
+            moe_config.n_experts,
+            moe_config.routing,
+            moe_config.top_k,
+            moe_config.noise_std,
+            config.dropout));
+        tail.latent_dim = moe_output_dim;
+        return tail.latent_dim;
+    }
+
+    auto build = build_mlp_configurable(input_dim, hidden_dims, config);
+    tail.mlp = owner.register_module("mlp", build.mlp);
+    tail.latent_dim = build.output_dim;
+    tail.activation_indices = build.activation_indices;
+    return tail.latent_dim;
+}
+
+TailOutput forward_encoder_tail(EncoderTail& tail, torch::Tensor x) {
+    if (tail.has_tabm()) {
+        return {tail.tabm->forward(std::move(x)), {}, {}};
+    }
+    if (tail.has_moe()) {
+        auto result = tail.moe->forward(tail.backbone->forward(std::move(x)));
+        return {result.output, result.aux_loss, result.gate_probs};
+    }
+    return {tail.mlp->forward(std::move(x)), {}, {}};
 }
 
 // =============================================================================

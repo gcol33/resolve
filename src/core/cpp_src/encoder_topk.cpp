@@ -10,10 +10,9 @@ torch::Tensor average_embedding_weights(const std::vector<torch::nn::Embedding>&
 torch::Tensor average_fused_weights(const FusedPositionalEmbedding& fused);
 
 namespace {
-// Per-position taxonomy weight accessor shared by the hash / sparse / MoE
+// Per-position taxonomy weight accessor shared by the hash and sparse
 // encoders: an undefined tensor when taxonomy is disabled, else the position-
-// averaged embedding table. Single source for the three identical bodies
-// (issue #99).
+// averaged embedding table. Single source for the identical bodies (issue #99).
 torch::Tensor taxonomy_weights(bool has_taxonomy,
                                const std::vector<torch::nn::Embedding>& embeddings) {
     if (!has_taxonomy) return torch::Tensor();
@@ -35,10 +34,11 @@ PlotEncoderImpl::PlotEncoderImpl(
     int top_k,
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& mlp_config,
-    const TabMConfig& tabm_config
+    const TabMConfig& tabm_config,
+    const MoETailConfig& moe_config
 ) {
     init(n_continuous, n_genera, n_families, genus_emb_dim, family_emb_dim,
-         top_k, hidden_dims, mlp_config, tabm_config);
+         top_k, hidden_dims, mlp_config, tabm_config, moe_config);
 }
 
 // Legacy constructor (backward compatibility)
@@ -67,7 +67,8 @@ void PlotEncoderImpl::init(
     int top_k,
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& config,
-    const TabMConfig& tabm_config
+    const TabMConfig& tabm_config,
+    const MoETailConfig& moe_config
 ) {
     has_taxonomy_ = (n_genera > 1 || n_families > 1);
     top_k_ = top_k;
@@ -82,14 +83,12 @@ void PlotEncoderImpl::init(
             n_genera, n_families, genus_emb_dim, family_emb_dim, top_k_);
     }
 
-    auto bb = build_and_register_backbone(
-        *this, mlp_, tabm_encoder_, input_dim, hidden_dims, config, tabm_config);
-    use_tabm_ = bb.use_tabm;
-    latent_dim_ = bb.latent_dim;
-    activation_indices_ = bb.activation_indices;
+    latent_dim_ = build_encoder_tail(
+        *this, tail_, input_dim, hidden_dims, config, tabm_config, moe_config);
+    activation_indices_ = tail_.activation_indices;
 }
 
-torch::Tensor PlotEncoderImpl::forward(
+TailOutput PlotEncoderImpl::encode(
     torch::Tensor continuous,
     torch::Tensor genus_ids,
     torch::Tensor family_ids
@@ -99,11 +98,16 @@ torch::Tensor PlotEncoderImpl::forward(
     embed_per_rank_taxonomy(parts, genus_embeddings_, family_embeddings_,
                             genus_ids, family_ids, top_k_, has_taxonomy_);
 
-    auto x = torch::cat(parts, /*dim=*/1);
-    if (use_tabm_) {
-        return tabm_encoder_->forward(x);
-    }
-    return mlp_->forward(x);
+    return forward_encoder_tail(tail_, torch::cat(parts, /*dim=*/1));
+}
+
+torch::Tensor PlotEncoderImpl::forward(
+    torch::Tensor continuous,
+    torch::Tensor genus_ids,
+    torch::Tensor family_ids
+) {
+    return encode(std::move(continuous), std::move(genus_ids),
+                  std::move(family_ids)).latent;
 }
 
 
@@ -120,12 +124,12 @@ std::pair<torch::Tensor, std::vector<torch::Tensor>> PlotEncoderImpl::forward_wi
 
     auto x = torch::cat(parts, /*dim=*/1);
 
-    // Run full MLP forward pass and capture final output
+    // Run the full forward pass and capture the final output.
     // Activation capture requires per-layer iteration which is not supported
     // by libtorch Sequential's type-erased storage. Return the final output
     // with empty activations when using non-standard MLP configurations.
     std::vector<torch::Tensor> activations;
-    x = mlp_->forward(x);
+    x = forward_encoder_tail(tail_, x).latent;
 
     return {x, activations};
 }
@@ -146,11 +150,12 @@ PlotEncoderEmbedImpl::PlotEncoderEmbedImpl(
     int top_k_taxonomy,
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& mlp_config,
-    const TabMConfig& tabm_config
+    const TabMConfig& tabm_config,
+    const MoETailConfig& moe_config
 ) {
     init(n_continuous, n_species, n_genera, n_families, species_embed_dim,
          genus_emb_dim, family_emb_dim, top_k_species, top_k_taxonomy,
-         hidden_dims, mlp_config, tabm_config);
+         hidden_dims, mlp_config, tabm_config, moe_config);
 }
 
 // Legacy constructor (backward compatibility)
@@ -186,7 +191,8 @@ void PlotEncoderEmbedImpl::init(
     int top_k_taxonomy,
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& config,
-    const TabMConfig& tabm_config
+    const TabMConfig& tabm_config,
+    const MoETailConfig& moe_config
 ) {
     // Genus OR family real entries enable taxonomy (matches the transform gate
     // in EmbeddingEncoder), so family-only datasets keep family embeddings.
@@ -219,13 +225,21 @@ void PlotEncoderEmbedImpl::init(
         input_dim += fused_genus_->total_output_dim() + fused_family_->total_output_dim();
     }
 
-    auto bb = build_and_register_backbone(
-        *this, mlp_, tabm_encoder_, input_dim, hidden_dims, config, tabm_config);
-    use_tabm_ = bb.use_tabm;
-    latent_dim_ = bb.latent_dim;
+    latent_dim_ = build_encoder_tail(
+        *this, tail_, input_dim, hidden_dims, config, tabm_config, moe_config);
 }
 
 torch::Tensor PlotEncoderEmbedImpl::forward(
+    torch::Tensor continuous,
+    torch::Tensor species_ids,
+    torch::Tensor genus_ids,
+    torch::Tensor family_ids
+) {
+    return encode(std::move(continuous), std::move(species_ids),
+                  std::move(genus_ids), std::move(family_ids)).latent;
+}
+
+TailOutput PlotEncoderEmbedImpl::encode(
     torch::Tensor continuous,
     torch::Tensor species_ids,
     torch::Tensor genus_ids,
@@ -248,11 +262,7 @@ torch::Tensor PlotEncoderEmbedImpl::forward(
         parts.push_back(fused_family_->forward(family_ids));
     }
 
-    auto x = torch::cat(parts, /*dim=*/1);
-    if (use_tabm_) {
-        return tabm_encoder_->forward(x);
-    }
-    return mlp_->forward(x);
+    return forward_encoder_tail(tail_, torch::cat(parts, /*dim=*/1));
 }
 
 
@@ -270,10 +280,12 @@ PlotEncoderSparseImpl::PlotEncoderSparseImpl(
     int top_k,
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& mlp_config,
-    const TabMConfig& tabm_config
+    const TabMConfig& tabm_config,
+    const MoETailConfig& moe_config
 ) {
     init(n_continuous, n_species, species_embed_dim, n_genera, n_families,
-         genus_emb_dim, family_emb_dim, top_k, hidden_dims, mlp_config, tabm_config);
+         genus_emb_dim, family_emb_dim, top_k, hidden_dims, mlp_config,
+         tabm_config, moe_config);
 }
 
 // Legacy constructor (backward compatibility)
@@ -306,7 +318,8 @@ void PlotEncoderSparseImpl::init(
     int top_k,
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& config,
-    const TabMConfig& tabm_config
+    const TabMConfig& tabm_config,
+    const MoETailConfig& moe_config
 ) {
     has_taxonomy_ = (n_genera > 1 || n_families > 1);
     n_species_ = n_species;
@@ -326,13 +339,21 @@ void PlotEncoderSparseImpl::init(
             n_genera, n_families, genus_emb_dim, family_emb_dim, top_k_);
     }
 
-    auto bb = build_and_register_backbone(
-        *this, mlp_, tabm_encoder_, input_dim, hidden_dims, config, tabm_config);
-    use_tabm_ = bb.use_tabm;
-    latent_dim_ = bb.latent_dim;
+    latent_dim_ = build_encoder_tail(
+        *this, tail_, input_dim, hidden_dims, config, tabm_config, moe_config);
 }
 
 torch::Tensor PlotEncoderSparseImpl::forward(
+    torch::Tensor continuous,
+    torch::Tensor species_vector,
+    torch::Tensor genus_ids,
+    torch::Tensor family_ids
+) {
+    return encode(std::move(continuous), std::move(species_vector),
+                  std::move(genus_ids), std::move(family_ids)).latent;
+}
+
+TailOutput PlotEncoderSparseImpl::encode(
     torch::Tensor continuous,
     torch::Tensor species_vector,
     torch::Tensor genus_ids,
@@ -346,173 +367,12 @@ torch::Tensor PlotEncoderSparseImpl::forward(
     embed_per_rank_taxonomy(parts, genus_embeddings_, family_embeddings_,
                             genus_ids, family_ids, top_k_, has_taxonomy_);
 
-    auto x = torch::cat(parts, /*dim=*/1);
-    if (use_tabm_) {
-        return tabm_encoder_->forward(x);
-    }
-    return mlp_->forward(x);
+    return forward_encoder_tail(tail_, torch::cat(parts, /*dim=*/1));
 }
 
 
 // =============================================================================
-// PlotEncoderMoE Implementation (hash mode with Mixture of Experts)
-// =============================================================================
-
-// New constructor with configurable architecture
-PlotEncoderMoEImpl::PlotEncoderMoEImpl(
-    int64_t n_continuous,
-    int64_t n_genera,
-    int64_t n_families,
-    int genus_emb_dim,
-    int family_emb_dim,
-    int top_k,
-    const std::vector<int64_t>& hidden_dims,
-    const MLPBlockConfig& mlp_config,
-    int n_experts,
-    const std::vector<int64_t>& expert_hidden_dims,
-    MoERoutingType moe_routing,
-    int moe_top_k,
-    float moe_noise_std
-) {
-    init(n_continuous, n_genera, n_families, genus_emb_dim, family_emb_dim,
-         top_k, hidden_dims, mlp_config, n_experts, expert_hidden_dims,
-         moe_routing, moe_top_k, moe_noise_std);
-}
-
-// Legacy constructor (backward compatibility)
-PlotEncoderMoEImpl::PlotEncoderMoEImpl(
-    int64_t n_continuous,
-    int64_t n_genera,
-    int64_t n_families,
-    int genus_emb_dim,
-    int family_emb_dim,
-    int top_k,
-    const std::vector<int64_t>& hidden_dims,
-    float dropout,
-    int n_experts,
-    const std::vector<int64_t>& expert_hidden_dims,
-    MoERoutingType moe_routing,
-    int moe_top_k,
-    float moe_noise_std
-) {
-    MLPBlockConfig config;
-    config.dropout = dropout;
-    init(n_continuous, n_genera, n_families, genus_emb_dim, family_emb_dim,
-         top_k, hidden_dims, config, n_experts, expert_hidden_dims,
-         moe_routing, moe_top_k, moe_noise_std);
-}
-
-void PlotEncoderMoEImpl::init(
-    int64_t n_continuous,
-    int64_t n_genera,
-    int64_t n_families,
-    int genus_emb_dim,
-    int family_emb_dim,
-    int top_k,
-    const std::vector<int64_t>& hidden_dims,
-    const MLPBlockConfig& config,
-    int n_experts,
-    const std::vector<int64_t>& expert_hidden_dims,
-    MoERoutingType moe_routing,
-    int moe_top_k,
-    float moe_noise_std
-) {
-    has_taxonomy_ = (n_genera > 1 || n_families > 1);
-    top_k_ = top_k;
-    n_experts_ = n_experts;
-    moe_routing_ = moe_routing;
-    mlp_config_ = config;
-
-    int64_t input_dim = n_continuous;
-
-    if (has_taxonomy_) {
-        input_dim += register_per_rank_embeddings(
-            *this, genus_embeddings_, family_embeddings_,
-            n_genera, n_families, genus_emb_dim, family_emb_dim, top_k_);
-    }
-
-    // Build backbone MLP (use all but last layer from hidden_dims)
-    // The MoE layer will replace the final layers
-    std::vector<int64_t> backbone_dims;
-    if (hidden_dims.size() > 2) {
-        // Use first N-2 layers as backbone, MoE handles the rest
-        for (size_t i = 0; i < hidden_dims.size() - 2; ++i) {
-            backbone_dims.push_back(hidden_dims[i]);
-        }
-    } else if (!hidden_dims.empty()) {
-        // If hidden_dims is small (but non-empty), use just the first layer as backbone
-        backbone_dims.push_back(hidden_dims[0]);
-    }
-    // else: empty hidden_dims -> identity backbone (backbone_dims stays empty),
-    // matching build_mlp_configurable's tolerance for an empty spec.
-
-    // Build backbone with configurable architecture
-    auto result = build_mlp_configurable(input_dim, backbone_dims, config);
-    backbone_ = register_module("backbone", result.mlp);
-    backbone_output_dim_ = result.output_dim;
-
-    // Determine final output dimension from hidden_dims
-    int64_t moe_output_dim = hidden_dims.empty() ? backbone_output_dim_ : hidden_dims.back();
-    latent_dim_ = moe_output_dim;
-
-    // Create MoE layer
-    moe_ = register_module("moe", MixtureOfExperts(
-        backbone_output_dim_,
-        expert_hidden_dims,
-        moe_output_dim,
-        n_experts,
-        moe_routing,
-        moe_top_k,
-        moe_noise_std,
-        config.dropout
-    ));
-}
-
-torch::Tensor PlotEncoderMoEImpl::encode_input(
-    torch::Tensor continuous,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids
-) {
-    std::vector<torch::Tensor> parts;
-    parts.push_back(continuous);
-    embed_per_rank_taxonomy(parts, genus_embeddings_, family_embeddings_,
-                            genus_ids, family_ids, top_k_, has_taxonomy_);
-
-    auto x = torch::cat(parts, /*dim=*/1);
-    return backbone_->forward(x);
-}
-
-std::pair<torch::Tensor, torch::Tensor> PlotEncoderMoEImpl::forward(
-    torch::Tensor continuous,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids
-) {
-    auto backbone_out = encode_input(continuous, genus_ids, family_ids);
-    auto moe_result = moe_->forward(backbone_out);
-    return {moe_result.output, moe_result.aux_loss};
-}
-
-torch::Tensor PlotEncoderMoEImpl::forward_simple(
-    torch::Tensor continuous,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids
-) {
-    auto backbone_out = encode_input(continuous, genus_ids, family_ids);
-    return moe_->forward_simple(backbone_out);
-}
-
-torch::Tensor PlotEncoderMoEImpl::get_gate_probs(
-    torch::Tensor continuous,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids
-) {
-    auto backbone_out = encode_input(continuous, genus_ids, family_ids);
-    auto moe_result = moe_->forward(backbone_out);
-    return moe_result.gate_probs;
-}
-
-// =============================================================================
-// Weight Extraction for Hash/Embed/Sparse/MoE Encoders
+// Weight Extraction for Hash/Embed/Sparse Encoders
 // =============================================================================
 
 // PlotEncoder (hash mode, per-position)
@@ -545,15 +405,6 @@ torch::Tensor PlotEncoderSparseImpl::get_genus_weights() const {
 }
 
 torch::Tensor PlotEncoderSparseImpl::get_family_weights() const {
-    return taxonomy_weights(has_taxonomy_, family_embeddings_);
-}
-
-// PlotEncoderMoE (MoE mode, per-position)
-torch::Tensor PlotEncoderMoEImpl::get_genus_weights() const {
-    return taxonomy_weights(has_taxonomy_, genus_embeddings_);
-}
-
-torch::Tensor PlotEncoderMoEImpl::get_family_weights() const {
     return taxonomy_weights(has_taxonomy_, family_embeddings_);
 }
 

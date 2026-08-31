@@ -839,6 +839,27 @@ resolve.dataset.frame <- function(header,
 #'   Acts only when `lossConfig = "nca"`.
 #' @param ncaWeight Weight of the NCA term against the cross-entropy it is
 #'   added to (default 0.1). Acts only when `lossConfig = "nca"`.
+#' @param moeRouting Mixture-of-experts routing: `"none"` (default, a single
+#'   dense encoder), `"soft"` (every expert contributes, weighted by the gate)
+#'   or `"topk"` (only the `moeTopK` highest-gated experts run per plot).
+#' @param moePlacement Where the mixture sits: `"tail"` (default) makes it the
+#'   encoder's final stage, so `hiddenDims` minus its last two widths becomes
+#'   the backbone and the experts produce the latent; `"post"` runs it over the
+#'   finished latent instead, preserving the width. `"post"` is the only
+#'   placement open to an encoder with no MLP tail. Acts only when
+#'   `moeRouting` is not `"none"`.
+#' @param nExperts Expert networks in the mixture (default 4, minimum 2).
+#'   Acts only when `moeRouting` is not `"none"`.
+#' @param expertHiddenDims Hidden widths inside each expert (default
+#'   `c(256, 128)`). Acts only when `moeRouting` is not `"none"`.
+#' @param moeTopK Experts activated per plot under `"topk"` routing
+#'   (default 2). Acts only when `moeRouting = "topk"`.
+#' @param moeNoiseStd Standard deviation of the noise added to the gate logits
+#'   during training, which spreads load across experts (default 0.1).
+#'   Acts only when `moeRouting` is not `"none"`.
+#' @param moeAuxLossWeight Weight on the mixture's load-balancing loss, added
+#'   to the task loss (default 0.01). Acts only when `moeRouting` is not
+#'   `"none"`.
 #' @param coverDropout Cover-dropout rate applied to species cover values
 #'   in rank-pool / transformer encoding modes (default 0.0, no dropout).
 #' @param dModel Model dimension for the transformer / rank-pool encoder
@@ -883,6 +904,14 @@ resolve.train.dataset <- function(dataset,
                                   ncaTemperature = 0.1,
                                   ncaNeighbors = 32L,
                                   ncaWeight = 0.1,
+                                  # Mixture of experts
+                                  moeRouting = "none",
+                                  moePlacement = "tail",
+                                  nExperts = 4L,
+                                  expertHiddenDims = c(256L, 128L),
+                                  moeTopK = 2L,
+                                  moeNoiseStd = 0.1,
+                                  moeAuxLossWeight = 0.01,
                                   # RankPool / Transformer options
                                   coverDropout = 0.0,
                                   dModel = 128L,
@@ -926,6 +955,29 @@ resolve.train.dataset <- function(dataset,
   if (!is.numeric(ncaWeight) || ncaWeight < 0) {
     stop("ncaWeight must be a non-negative number")
   }
+  if (!moeRouting %in% c("none", "soft", "topk")) {
+    stop("moeRouting must be 'none', 'soft', or 'topk'")
+  }
+  if (!moePlacement %in% c("tail", "post")) {
+    stop("moePlacement must be 'tail' or 'post'")
+  }
+  if (moeRouting != "none") {
+    if (!is.numeric(nExperts) || nExperts < 2) {
+      stop("nExperts must be at least 2; use moeRouting = 'none' to disable the mixture")
+    }
+    if (!is.numeric(moeTopK) || moeTopK < 1) {
+      stop("moeTopK must be a positive integer")
+    }
+    if (!is.numeric(moeNoiseStd) || moeNoiseStd < 0) {
+      stop("moeNoiseStd must be a non-negative number")
+    }
+    if (!is.numeric(moeAuxLossWeight) || moeAuxLossWeight < 0) {
+      stop("moeAuxLossWeight must be a non-negative number")
+    }
+    if (!is.numeric(expertHiddenDims) || length(expertHiddenDims) < 1) {
+      stop("expertHiddenDims must be a non-empty numeric vector")
+    }
+  }
 
   .resolve_require_backend()
 
@@ -950,6 +1002,13 @@ resolve.train.dataset <- function(dataset,
     top_k_species = datasetConfig$top_k_species,
     hidden_dims = hiddenDims,
     dropout = 0.3,
+    moe_routing = moeRouting,
+    moe_placement = moePlacement,
+    n_experts = as.integer(nExperts),
+    expert_hidden_dims = as.integer(expertHiddenDims),
+    moe_top_k = as.integer(moeTopK),
+    moe_noise_std = moeNoiseStd,
+    moe_aux_loss_weight = moeAuxLossWeight,
     cover_dropout = coverDropout,
     d_model = as.integer(dModel),
     n_heads = as.integer(nHeads),

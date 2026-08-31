@@ -295,6 +295,85 @@ jobs:
             exit 1
           fi
 
+      # moe_routing meant a different architecture depending on the encoding,
+      # and the CLI could not reach it at all. --moe-placement now says which
+      # one the run gets, and the mixture is available to every encoding.
+      - name: A mixture of experts reaches the model at either placement
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:${LD_LIBRARY_PATH:-}
+          RESOLVE=${{ github.workspace }}/cli/resolve
+          FIXTURES=${{ github.workspace }}/src/core/tests/fixtures
+
+          train_moe () {
+            "$RESOLVE" train \
+              --header "$FIXTURES/cli_header.csv" \
+              --species "$FIXTURES/cli_species.csv" \
+              --plot-id plot_id --species-id species --abundance cover \
+              --lat lat --lon lon --genus genus --family family \
+              --target area:regression \
+              --encoding rank_pool \
+              --hidden-dims 64,48,32,16 --dropout 0.0 \
+              --moe-routing "$2" --moe-placement "$3" \
+              --n-experts 3 --expert-hidden-dims 16 \
+              --batch-size 32 --max-epochs 2 --patience 2 --lr 0.01 \
+              --test-size 0.25 --seed 7 \
+              --output "$OUT/moe_$1.pt" > /dev/null
+            "$RESOLVE" info --model "$OUT/moe_$1.pt" > "$OUT/info_moe_$1.txt"
+          }
+
+          train_moe none none tail
+          train_moe tail soft tail
+          train_moe post soft post
+
+          grep -q "MoE routing: soft" "$OUT/info_moe_tail.txt"
+          grep -q "MoE placement: tail" "$OUT/info_moe_tail.txt"
+          grep -q "MoE placement: post" "$OUT/info_moe_post.txt"
+          if grep -q "MoE routing:" "$OUT/info_moe_none.txt"; then
+            echo "::error::a model trained without a mixture reports MoE settings"
+            exit 1
+          fi
+
+          # A tail mixture redistributes the encoder's last stages into the
+          # experts; a post one adds a block on top. Both must differ from a run
+          # with no mixture at all, or the flag did nothing.
+          plain=$(grep "^Total parameters:" "$OUT/info_moe_none.txt" | awk '{print $3}')
+          tail_p=$(grep "^Total parameters:" "$OUT/info_moe_tail.txt" | awk '{print $3}')
+          post_p=$(grep "^Total parameters:" "$OUT/info_moe_post.txt" | awk '{print $3}')
+          echo "parameters -- none: $plain, tail: $tail_p, post: $post_p"
+          if [ "$plain" -eq "$tail_p" ] || [ "$plain" -eq "$post_p" ]; then
+            echo "::error::--moe-routing did not change the model"
+            exit 1
+          fi
+          if [ "$post_p" -le "$plain" ]; then
+            echo "::error::a post mixture should add parameters on top of the encoder"
+            exit 1
+          fi
+
+          # A tail-less architecture cannot take the tail placement, and the
+          # refusal has to name the one it can take.
+          set +e
+          err=$("$RESOLVE" train \
+            --header "$FIXTURES/cli_header.csv" \
+            --species "$FIXTURES/cli_species.csv" \
+            --plot-id plot_id --species-id species --abundance cover \
+            --lat lat --lon lon --genus genus --family family \
+            --target area:regression \
+            --encoding rank_pool --encoder-architecture tabnet \
+            --moe-routing soft --moe-placement tail \
+            --hidden-dims 32 --batch-size 32 --max-epochs 1 \
+            --output "$OUT/moe_reject.pt" 2>&1)
+          status=$?
+          set -e
+          if [ $status -eq 0 ]; then
+            echo "::error::tabnet accepted --moe-placement tail"
+            exit 1
+          fi
+          case "$err" in
+            *moe_placement=post*) ;;
+            *) echo "::error::the refusal did not name moe_placement=post: $err"; exit 1 ;;
+          esac
+
       # --seed feeds torch::manual_seed before the model is constructed AND the
       # train/test split, so the same seed reproduces a run and a different seed
       # does not. Before issue #104 weight init came from an unseeded

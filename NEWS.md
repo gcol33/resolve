@@ -1,5 +1,90 @@
 # RESOLVE Changelog
 
+## Unreleased
+
+### Added
+
+- **A mixture of experts is available to every species encoding, and
+  `moe_routing` means one thing.** The knob used to select two different
+  architectures depending on `species_encoding`: hash built a dedicated encoder
+  whose mixture REPLACED the last MLP stages, embed / sparse / rank_pool /
+  transformer got a dim-preserving mixture bolted onto the finished latent, and
+  the adapter architectures were refused outright. Nothing in any suite
+  constructed a model with routing on, so none of it was observable.
+
+  Placement is now explicit, as **`ModelConfig.moe_placement`**:
+
+  - `tail` (the default) makes the experts the encoder's final stage --
+    `hidden_dims` minus its last two widths becomes the backbone and the
+    mixture projects that to `hidden_dims.back()`, which stays the latent. This
+    is what hash mode always did, and it is now open to all five species
+    encodings.
+  - `post` runs the mixture over the finished latent, preserving its width.
+    This is the placement for an encoder with no MLP tail to give up, so the
+    adapter architectures (FT-Transformer, TabNet, SAINT, GNN, ExcelFormer,
+    HeterogeneousGNN) gain a mixture where they previously got a refusal.
+
+  Asking a tail-less encoder for `tail` now raises an error naming `post`, and
+  asking for TabM and a mixture together raises rather than dropping TabM in
+  silence, which is what the dedicated MoE encoder did (it took no `TabMConfig`
+  at all).
+
+  The mixture reaches every encoding because the encoder tail is now one shared
+  thing (`EncoderTail` in `encoder.hpp`) rather than a per-encoder copy: all
+  five encoders build it through `build_encoder_tail` and run it through
+  `forward_encoder_tail`, so an MLP, a TabM ensemble and a backbone-plus-mixture
+  are three settings of one seam. `PlotEncoderMoE`, which duplicated the hash
+  encoder's featurisation to bolt a mixture on the end, is gone, and the three
+  copies of the encoder-dispatch if-else chain in `model.cpp` collapse into one
+  `encode_all`.
+
+- **`resolve train --moe-routing / --moe-placement / --n-experts /
+  --expert-hidden-dims / --moe-top-k / --moe-noise-std /
+  --moe-aux-loss-weight`.** The CLI could not reach the mixture at all, so a
+  standalone run could not train the architecture the bindings could. `resolve
+  info` prints the placement alongside the routing.
+
+- **R: `resolve.train.dataset(moeRouting =, moePlacement =, nExperts =,
+  expertHiddenDims =, moeTopK =, moeNoiseStd =, moeAuxLossWeight =)`**, and
+  Python `resolve_core.MoEPlacement` with `ModelConfig.moe_placement`.
+
+### Fixed
+
+- **`ResolveModel::get_gate_probs` reported nothing for every non-hash model.**
+  It returned an undefined tensor unless the hash-mode MoE encoder was built,
+  which was indistinguishable from "MoE is off" even when a mixture was
+  actively routing. It now returns the real probabilities for the encoders its
+  three-argument signature can drive (hash, TraitNet, the adapter
+  architectures) at either placement, and raises for embed / sparse /
+  rank_pool / transformer -- whose species inputs that signature does not
+  carry -- pointing at `forward_with_aux`, which does.
+
+### Changed
+
+- **Retrain a mixture-of-experts checkpoint on a non-hash encoding.** Under the
+  `tail` default an embed / sparse / rank_pool / transformer model with
+  `moe_routing` set now puts the experts in the encoder tail (`encoder.backbone`
+  + `encoder.moe`) where it previously appended a block to the latent
+  (`post_moe`). Set `moe_placement = post` to keep the old architecture.
+  **Hash-mode MoE checkpoints are unaffected** -- `tail` is exactly what they
+  already were, down to the parameter names -- and **a checkpoint with
+  `moe_routing = none`, which is every checkpoint anyone has trained through
+  the paper pipeline, is untouched.**
+
+### Tests
+
+- `src/core/tests/test_moe_placement.cpp` (17 cases): a tail mixture builds,
+  runs and trains on all five encodings; the tail's parameters are named
+  `backbone` + `moe` and a plain run still writes `mlp`; the backbone/mixture
+  split follows `hidden_dims`; the load-balancing loss reaches the optimizer
+  (weighting it moves the trained gate); post preserves the latent width and
+  covers the tail-less encoders; both refusals; gate probabilities; and
+  checkpoint round-trips at either placement, including a parameter-by-parameter
+  equality check on reload. `tests/core/test_moe.py` (27) covers the Python
+  surface, `r/tests/testthat/` (33) the R one, and `tests.yml` gains a CLI
+  end-to-end step asserting the flags change the model and the refusal names
+  the placement that works.
+
 ## v0.8.2 (2026-08-31)
 
 Two fixes that share a root: a guard that was compile-time where it needed to

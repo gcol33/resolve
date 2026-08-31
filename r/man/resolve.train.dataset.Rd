@@ -19,6 +19,13 @@ resolve.train.dataset(
   ncaTemperature = 0.1,
   ncaNeighbors = 32L,
   ncaWeight = 0.1,
+  moeRouting = "none",
+  moePlacement = "tail",
+  nExperts = 4L,
+  expertHiddenDims = c(256L, 128L),
+  moeTopK = 2L,
+  moeNoiseStd = 0.1,
+  moeAuxLossWeight = 0.01,
   coverDropout = 0,
   dModel = 128L,
   nHeads = 4L,
@@ -64,6 +71,34 @@ Acts only when \code{lossConfig = "nca"}.}
 
 \item{ncaWeight}{Weight of the NCA term against the cross-entropy it is
 added to (default 0.1). Acts only when \code{lossConfig = "nca"}.}
+
+\item{moeRouting}{Mixture-of-experts routing: \code{"none"} (default, a single
+dense encoder), \code{"soft"} (every expert contributes, weighted by the gate)
+or \code{"topk"} (only the \code{moeTopK} highest-gated experts run per plot).}
+
+\item{moePlacement}{Where the mixture sits: \code{"tail"} (default) makes it the
+encoder's final stage, so \code{hiddenDims} minus its last two widths becomes
+the backbone and the experts produce the latent; \code{"post"} runs it over the
+finished latent instead, preserving the width. \code{"post"} is the only
+placement open to an encoder with no MLP tail. Acts only when
+\code{moeRouting} is not \code{"none"}.}
+
+\item{nExperts}{Expert networks in the mixture (default 4, minimum 2).
+Acts only when \code{moeRouting} is not \code{"none"}.}
+
+\item{expertHiddenDims}{Hidden widths inside each expert (default
+\code{c(256, 128)}). Acts only when \code{moeRouting} is not \code{"none"}.}
+
+\item{moeTopK}{Experts activated per plot under \code{"topk"} routing
+(default 2). Acts only when \code{moeRouting = "topk"}.}
+
+\item{moeNoiseStd}{Standard deviation of the noise added to the gate logits
+during training, which spreads load across experts (default 0.1).
+Acts only when \code{moeRouting} is not \code{"none"}.}
+
+\item{moeAuxLossWeight}{Weight on the mixture's load-balancing loss, added
+to the task loss (default 0.01). Acts only when \code{moeRouting} is not
+\code{"none"}.}
 
 \item{coverDropout}{Cover-dropout rate applied to species cover values
 in rank-pool / transformer encoding modes (default 0.0, no dropout).}

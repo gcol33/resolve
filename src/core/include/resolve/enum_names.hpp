@@ -134,6 +134,11 @@ inline constexpr EnumName<MoERoutingType> kMoERoutingTypeNames[] = {
     {"topk", MoERoutingType::TopK},
 };
 
+inline constexpr EnumName<MoEPlacement> kMoEPlacementNames[] = {
+    {"tail", MoEPlacement::Tail},
+    {"post", MoEPlacement::Post},
+};
+
 inline constexpr EnumName<ActivationType> kActivationTypeNames[] = {
     {"relu", ActivationType::ReLU},
     {"leaky_relu", ActivationType::LeakyReLU},
@@ -273,6 +278,13 @@ inline const char* moe_routing_type_to_string(MoERoutingType m) {
     return enum_name_of(m, kMoERoutingTypeNames, "none");
 }
 
+inline MoEPlacement parse_moe_placement(const std::string& s) {
+    return parse_enum_name(s, kMoEPlacementNames, "MoE placement");
+}
+inline const char* moe_placement_to_string(MoEPlacement m) {
+    return enum_name_of(m, kMoEPlacementNames, "tail");
+}
+
 inline ActivationType parse_activation_type(const std::string& s) {
     return parse_enum_name(s, kActivationTypeNames, "activation type");
 }
@@ -365,6 +377,8 @@ RESOLVE_DECLARE_ENUM_NAMES(LRSchedulerType, kLRSchedulerTypeNames,
                            "LR scheduler type", "none")
 RESOLVE_DECLARE_ENUM_NAMES(MoERoutingType, kMoERoutingTypeNames,
                            "MoE routing type", "none")
+RESOLVE_DECLARE_ENUM_NAMES(MoEPlacement, kMoEPlacementNames,
+                           "MoE placement", "tail")
 RESOLVE_DECLARE_ENUM_NAMES(ActivationType, kActivationTypeNames,
                            "activation type", "gelu")
 RESOLVE_DECLARE_ENUM_NAMES(NormLayerType, kNormLayerTypeNames,

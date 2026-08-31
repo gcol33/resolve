@@ -322,6 +322,35 @@ int train_command(const ParsedArgs& args) {
         }
     }
 
+    // Mixture of experts. Parsing the two enums here turns an unknown spelling
+    // into a CLI error naming the accepted values, rather than an exception out
+    // of the model constructor.
+    try {
+        model_config.moe_routing = parse_moe_routing_type(args.get("--moe-routing"));
+        model_config.moe_placement = parse_moe_placement(args.get("--moe-placement"));
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+    if (model_config.moe_routing != MoERoutingType::None) {
+        model_config.n_experts = args.get_int("--n-experts");
+        model_config.moe_top_k = args.get_int("--moe-top-k");
+        model_config.moe_noise_std = args.get_float("--moe-noise-std");
+        model_config.moe_aux_loss_weight = args.get_float("--moe-aux-loss-weight");
+
+        const auto expert_dims = args.get_list("--expert-hidden-dims");
+        model_config.expert_hidden_dims.clear();
+        for (const auto& width : expert_dims) {
+            try {
+                model_config.expert_hidden_dims.push_back(std::stoll(width));
+            } catch (const std::exception&) {
+                std::cerr << "Error: --expert-hidden-dims expects integers, got '"
+                          << width << "'" << std::endl;
+                return 1;
+            }
+        }
+    }
+
     // Transformer / rank_pool knobs. The transformer encoder rejects
     // pooling='cls' with 0 attention layers (the CLS vector would be constant),
     // so validate here for a clean CLI error instead of an exception.

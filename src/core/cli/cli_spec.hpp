@@ -114,6 +114,23 @@ inline const CommandSpec& train_spec() {
         flags.push_back({"--cover-dropout", Arity::Value, "FLOAT", "0.0",
                          "Probability of dropping a plot's cover values in\n"
                          "the rank_pool / transformer encoders"});
+        flags.push_back({"--moe-routing", Arity::Value, "R", "none",
+                         "Mixture of experts routing: none, soft, topk"});
+        flags.push_back({"--moe-placement", Arity::Value, "P", "tail",
+                         "Where the mixture sits: tail (it replaces the\n"
+                         "encoder's final MLP stage) or post (it runs over\n"
+                         "the finished latent). Only post is available for a\n"
+                         "non-MLP --encoder-architecture."});
+        flags.push_back({"--n-experts", Arity::Value, "N", "4",
+                         "Expert networks in the mixture (>= 2)"});
+        flags.push_back({"--expert-hidden-dims", Arity::Value, "LIST", "256,128",
+                         "Comma-separated hidden widths inside each expert"});
+        flags.push_back({"--moe-top-k", Arity::Value, "N", "2",
+                         "Experts activated per sample under topk routing"});
+        flags.push_back({"--moe-noise-std", Arity::Value, "FLOAT", "0.1",
+                         "Gate-logit noise during training, for load balancing"});
+        flags.push_back({"--moe-aux-loss-weight", Arity::Value, "FLOAT", "0.01",
+                         "Weight on the mixture's load-balancing loss"});
         flags.push_back({"--d-model", Arity::Value, "N", "128",
                          "Transformer token dimension"});
         flags.push_back({"--n-heads", Arity::Value, "N", "4",

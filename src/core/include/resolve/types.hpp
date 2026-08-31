@@ -309,6 +309,24 @@ enum class MoERoutingType {
     TopK        // Sparse routing - only top-k experts activated per sample
 };
 
+// Where the mixture of experts sits relative to the encoder.
+//
+// Tail - the experts ARE the encoder's last layers: the backbone MLP is built
+//        over hidden_dims minus its final stage, and the mixture projects that
+//        backbone output to hidden_dims.back(), which becomes the latent.
+//        Capacity moves into the experts instead of being stacked on top.
+//        Open to every species encoding (hash, embed, sparse, rank_pool,
+//        transformer), all of which end in an MLP tail the mixture can replace.
+// Post - the encoder produces its latent as usual and the mixture maps that
+//        latent to one of the same width. This is the only placement open to an
+//        encoder with no MLP tail to replace: the adapter architectures
+//        (FT-Transformer, TabNet, SAINT, GNN, ExcelFormer, HeterogeneousGNN)
+//        and TraitNet.
+enum class MoEPlacement {
+    Tail,
+    Post
+};
+
 // =============================================================================
 // Advanced Architecture Types (v2.0)
 // =============================================================================
@@ -491,6 +509,7 @@ struct ModelConfig {
     int moe_top_k = 2;                                    // For TopK routing: experts per sample
     float moe_noise_std = 0.1f;                          // Noise for load balancing in training
     float moe_aux_loss_weight = 0.01f;                   // Weight for auxiliary load balancing loss
+    MoEPlacement moe_placement = MoEPlacement::Tail;     // Experts as the encoder tail, or after the latent
 
     // Configurable architecture (activation, normalization, residuals)
     ActivationType activation = ActivationType::GELU;

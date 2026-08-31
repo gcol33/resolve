@@ -1,5 +1,6 @@
 #include "resolve/model.hpp"
 #include "resolve/encoder.hpp"  // For MLPBlockConfig
+#include "resolve/enum_names.hpp"  // Architecture name in the MoE placement error
 #include <algorithm>
 #include <stdexcept>
 
@@ -75,20 +76,29 @@ ResolveModelImpl::ResolveModelImpl(
     // Check if MoE is enabled
     bool use_moe = (config.moe_routing != MoERoutingType::None);
 
-    // MoE is only wired for the hash encoder (encoder_moe_) and the embed/sparse
-    // encoders (post_moe_). The non-MLP adapter architectures build neither, so a
-    // MoE request alongside an adapter arch would be silently discarded (issue
-    // #83). Reject it loudly rather than train a plain adapter with inert MoE knobs.
-    if (use_moe && use_adapter) {
+    // MoEPlacement::Tail asks the mixture to stand in for the encoder's final
+    // MLP stage. The adapter architectures and TraitNet have no such stage to
+    // give up, so the request cannot be honoured there; name the placement that
+    // can be, rather than dropping the knob or refusing MoE outright.
+    const bool has_mlp_tail = !use_adapter &&
+        config.encoder_architecture != EncoderArchitecture::TraitNet;
+    if (use_moe && config.moe_placement == MoEPlacement::Tail && !has_mlp_tail) {
         throw std::invalid_argument(
-            "moe_routing is set but encoder_architecture is a non-MLP adapter "
-            "architecture (FT-Transformer/TabNet/SAINT/GNN/ExcelFormer/"
-            "HeterogeneousGNN); Mixture-of-Experts is not supported for these. "
-            "Use encoder_architecture=MLP, or set moe_routing=None.");
+            std::string("moe_placement=tail asks the mixture of experts to "
+            "replace the encoder's final MLP stage, but encoder_architecture=") +
+            encoder_architecture_to_string(config.encoder_architecture) +
+            " has no MLP tail to replace. Set moe_placement=post to run the "
+            "mixture over the finished latent instead, use "
+            "encoder_architecture=mlp, or set moe_routing=none.");
     }
 
     // Create MLP block config from model config
     MLPBlockConfig mlp_config = MLPBlockConfig::from_model_config(config);
+
+    // Reads the MoE knobs only under MoEPlacement::Tail; a Post run leaves this
+    // inert and the mixture is built over the latent further down. Every
+    // species encoder takes it, so the mixture reaches all five of them.
+    MoETailConfig moe_tail = MoETailConfig::from_model_config(config);
 
     // Create appropriate encoder based on mode and MoE setting (only for MLP mode)
     if (use_adapter) {
@@ -112,37 +122,18 @@ ResolveModelImpl::ResolveModelImpl(
         // Hash mode: continuous includes hash_dim
         int64_t n_continuous = n_continuous_base + config.hash_dim;
 
-        if (use_moe) {
-            // MoE-enabled encoder with configurable architecture
-            encoder_moe_ = register_module("encoder", PlotEncoderMoE(
-                n_continuous,
-                genus_vocab_size,
-                family_vocab_size,
-                config.genus_emb_dim,
-                config.family_emb_dim,
-                config.n_taxonomy_slots,
-                config.hidden_dims,
-                mlp_config,
-                config.n_experts,
-                config.expert_hidden_dims,
-                config.moe_routing,
-                config.moe_top_k,
-                config.moe_noise_std
-            ));
-        } else {
-            // Standard encoder with configurable architecture (+ optional TabM)
-            encoder_hash_ = register_module("encoder", PlotEncoder(
-                n_continuous,
-                genus_vocab_size,
-                family_vocab_size,
-                config.genus_emb_dim,
-                config.family_emb_dim,
-                config.n_taxonomy_slots,
-                config.hidden_dims,
-                mlp_config,
-                config.tabm
-            ));
-        }
+        encoder_hash_ = register_module("encoder", PlotEncoder(
+            n_continuous,
+            genus_vocab_size,
+            family_vocab_size,
+            config.genus_emb_dim,
+            config.family_emb_dim,
+            config.n_taxonomy_slots,
+            config.hidden_dims,
+            mlp_config,
+            config.tabm,
+            moe_tail
+        ));
     }
     else if (config.species_encoding == SpeciesEncodingMode::Embed) {
         // Embed mode: learnable species embeddings
@@ -164,7 +155,8 @@ ResolveModelImpl::ResolveModelImpl(
             config.n_taxonomy_slots,
             config.hidden_dims,
             mlp_config,
-            config.tabm
+            config.tabm,
+            moe_tail
         ));
     }
     else if (config.species_encoding == SpeciesEncodingMode::RankPool) {
@@ -184,7 +176,8 @@ ResolveModelImpl::ResolveModelImpl(
             config.hidden_dims,
             mlp_config,
             config.cover_dropout,
-            config.tabm
+            config.tabm,
+            moe_tail
         ));
     }
     else if (config.species_encoding == SpeciesEncodingMode::Transformer) {
@@ -207,7 +200,8 @@ ResolveModelImpl::ResolveModelImpl(
             config.hidden_dims,
             mlp_config,
             config.cover_dropout,
-            config.tabm
+            config.tabm,
+            moe_tail
         ));
     }
     else {
@@ -229,13 +223,15 @@ ResolveModelImpl::ResolveModelImpl(
             config.n_taxonomy_slots,
             config.hidden_dims,
             mlp_config,
-            config.tabm
+            config.tabm,
+            moe_tail
         ));
     }
 
-    // Create model-level MoE for embed/sparse modes (hash mode uses encoder_moe_ instead)
-    if (use_moe && !encoder_moe_ && !use_adapter) {
-        // Embed or sparse encoder + post-encoder MoE layer
+    // MoEPlacement::Post: the encoder produced its latent already, and the
+    // mixture maps that latent to one of the same width. This is the placement
+    // an encoder with no MLP tail can still use.
+    if (use_moe && config.moe_placement == MoEPlacement::Post) {
         int64_t encoder_out = latent_dim();
         post_moe_ = register_module("post_moe", MixtureOfExperts(
             encoder_out,
@@ -348,8 +344,6 @@ int64_t ResolveModelImpl::latent_dim() const {
         return trait_net_encoder_->output_dim();
     } else if (adapter_) {
         return adapter_->latent_dim();
-    } else if (encoder_moe_) {
-        return encoder_moe_->latent_dim();
     } else if (encoder_rank_pool_) {
         return encoder_rank_pool_->latent_dim();
     } else if (encoder_transformer_) {
@@ -361,6 +355,54 @@ int64_t ResolveModelImpl::latent_dim() const {
     } else {
         return encoder_sparse_->latent_dim();
     }
+}
+
+TailOutput ResolveModelImpl::encode_all(
+    torch::Tensor continuous,
+    torch::Tensor genus_ids,
+    torch::Tensor family_ids,
+    torch::Tensor species_ids,
+    torch::Tensor species_vector,
+    torch::Tensor pool_genus_ids,
+    torch::Tensor pool_family_ids,
+    torch::Tensor pool_weights,
+    torch::Tensor pool_mask,
+    torch::Tensor pool_has_cover
+) {
+    if (trait_net_encoder_) {
+        // TraitNet uses only env features (continuous without hash embedding).
+        // Traits are pre-set via set_traits().
+        return {trait_net_encoder_->forward(std::move(continuous)), {}, {}};
+    }
+    if (adapter_) {
+        return {adapter_->forward(std::move(continuous), std::move(genus_ids),
+                                  std::move(family_ids), std::move(species_ids),
+                                  std::move(species_vector)), {}, {}};
+    }
+    if (encoder_rank_pool_) {
+        return encoder_rank_pool_->encode(
+            std::move(continuous), std::move(species_ids),
+            std::move(pool_genus_ids), std::move(pool_family_ids),
+            std::move(pool_weights), std::move(pool_mask),
+            std::move(pool_has_cover));
+    }
+    if (encoder_transformer_) {
+        return encoder_transformer_->encode(
+            std::move(continuous), std::move(species_ids),
+            std::move(pool_genus_ids), std::move(pool_family_ids),
+            std::move(pool_weights), std::move(pool_mask),
+            std::move(pool_has_cover));
+    }
+    if (encoder_hash_) {
+        return encoder_hash_->encode(std::move(continuous), std::move(genus_ids),
+                                     std::move(family_ids));
+    }
+    if (encoder_embed_) {
+        return encoder_embed_->encode(std::move(continuous), std::move(species_ids),
+                                      std::move(genus_ids), std::move(family_ids));
+    }
+    return encoder_sparse_->encode(std::move(continuous), std::move(species_vector),
+                                   std::move(genus_ids), std::move(family_ids));
 }
 
 torch::Tensor ResolveModelImpl::encode(
@@ -375,30 +417,12 @@ torch::Tensor ResolveModelImpl::encode(
     torch::Tensor pool_mask,
     torch::Tensor pool_has_cover
 ) {
-    torch::Tensor latent;
-    if (trait_net_encoder_) {
-        // TraitNet uses only env features (continuous without hash embedding).
-        // Traits are pre-set via set_traits().
-        latent = trait_net_encoder_->forward(continuous);
-    } else if (adapter_) {
-        latent = adapter_->forward(continuous, genus_ids, family_ids, species_ids, species_vector);
-    } else if (encoder_moe_) {
-        latent = encoder_moe_->forward_simple(continuous, genus_ids, family_ids);
-    } else if (encoder_rank_pool_) {
-        latent = encoder_rank_pool_->forward(
-            continuous, species_ids, pool_genus_ids, pool_family_ids,
-            pool_weights, pool_mask, pool_has_cover);
-    } else if (encoder_transformer_) {
-        latent = encoder_transformer_->forward(
-            continuous, species_ids, pool_genus_ids, pool_family_ids,
-            pool_weights, pool_mask, pool_has_cover);
-    } else if (encoder_hash_) {
-        latent = encoder_hash_->forward(continuous, genus_ids, family_ids);
-    } else if (encoder_embed_) {
-        latent = encoder_embed_->forward(continuous, species_ids, genus_ids, family_ids);
-    } else {
-        latent = encoder_sparse_->forward(continuous, species_vector, genus_ids, family_ids);
-    }
+    auto latent = encode_all(
+        std::move(continuous), std::move(genus_ids), std::move(family_ids),
+        std::move(species_ids), std::move(species_vector),
+        std::move(pool_genus_ids), std::move(pool_family_ids),
+        std::move(pool_weights), std::move(pool_mask),
+        std::move(pool_has_cover)).latent;
 
     if (post_moe_) {
         latent = post_moe_->forward_simple(latent);
@@ -418,49 +442,23 @@ std::pair<torch::Tensor, torch::Tensor> ResolveModelImpl::encode_with_aux(
     torch::Tensor pool_mask,
     torch::Tensor pool_has_cover
 ) {
-    if (trait_net_encoder_) {
-        auto latent = trait_net_encoder_->forward(continuous);
-        // Apply post_moe_ on the training path too. encode() (get_latent) always
-        // runs it; omitting it here left post_moe_ untrained (no gradient) while
-        // get_latent still applied it, so extracted latents diverged from what
-        // the heads trained on.
-        if (post_moe_) {
-            auto moe_result = post_moe_->forward(latent);
-            return {moe_result.output, moe_result.aux_loss};
-        }
-        return {latent, torch::Tensor()};
-    } else if (adapter_) {
-        auto latent = adapter_->forward(continuous, genus_ids, family_ids, species_ids, species_vector);
-        if (post_moe_) {
-            auto moe_result = post_moe_->forward(latent);
-            return {moe_result.output, moe_result.aux_loss};
-        }
-        return {latent, torch::Tensor()};
-    } else if (encoder_moe_) {
-        return encoder_moe_->forward(continuous, genus_ids, family_ids);
-    } else {
-        torch::Tensor latent;
-        if (encoder_rank_pool_) {
-            latent = encoder_rank_pool_->forward(
-                continuous, species_ids, pool_genus_ids, pool_family_ids,
-                pool_weights, pool_mask, pool_has_cover);
-        } else if (encoder_transformer_) {
-            latent = encoder_transformer_->forward(
-                continuous, species_ids, pool_genus_ids, pool_family_ids,
-                pool_weights, pool_mask, pool_has_cover);
-        } else if (encoder_hash_) {
-            latent = encoder_hash_->forward(continuous, genus_ids, family_ids);
-        } else if (encoder_embed_) {
-            latent = encoder_embed_->forward(continuous, species_ids, genus_ids, family_ids);
-        } else {
-            latent = encoder_sparse_->forward(continuous, species_vector, genus_ids, family_ids);
-        }
-        if (post_moe_) {
-            auto moe_result = post_moe_->forward(latent);
-            return {moe_result.output, moe_result.aux_loss};
-        }
-        return {latent, torch::Tensor()};
+    auto encoded = encode_all(
+        std::move(continuous), std::move(genus_ids), std::move(family_ids),
+        std::move(species_ids), std::move(species_vector),
+        std::move(pool_genus_ids), std::move(pool_family_ids),
+        std::move(pool_weights), std::move(pool_mask),
+        std::move(pool_has_cover));
+
+    // post_moe_ runs on the training path as well as in encode(). Omitting it
+    // here once left it untrained -- no gradient reached it -- while get_latent
+    // still applied it, so extracted latents diverged from what the heads
+    // trained on. Only one placement is ever built, so the two auxiliary
+    // losses never both exist.
+    if (post_moe_) {
+        auto moe_result = post_moe_->forward(encoded.latent);
+        return {moe_result.output, moe_result.aux_loss};
     }
+    return {encoded.latent, encoded.aux_loss};
 }
 
 std::unordered_map<std::string, torch::Tensor> ResolveModelImpl::forward(
@@ -593,12 +591,10 @@ std::pair<torch::Tensor, std::vector<torch::Tensor>> ResolveModelImpl::encode_wi
 }
 
 torch::Tensor ResolveModelImpl::get_taxonomy_weights_(
-    torch::Tensor (PlotEncoderMoEImpl::*moe_fn)() const,
     torch::Tensor (PlotEncoderImpl::*hash_fn)() const,
     torch::Tensor (PlotEncoderEmbedImpl::*embed_fn)() const,
     torch::Tensor (PlotEncoderSparseImpl::*sparse_fn)() const
 ) const {
-    if (encoder_moe_) return ((*encoder_moe_).*moe_fn)();
     if (encoder_hash_) return ((*encoder_hash_).*hash_fn)();
     if (encoder_embed_) return ((*encoder_embed_).*embed_fn)();
     if (encoder_sparse_) return ((*encoder_sparse_).*sparse_fn)();
@@ -609,7 +605,6 @@ torch::Tensor ResolveModelImpl::get_genus_weights() const {
     if (encoder_rank_pool_) return encoder_rank_pool_->get_genus_weights();
     if (encoder_transformer_) return encoder_transformer_->get_genus_weights();
     return get_taxonomy_weights_(
-        &PlotEncoderMoEImpl::get_genus_weights,
         &PlotEncoderImpl::get_genus_weights,
         &PlotEncoderEmbedImpl::get_genus_weights,
         &PlotEncoderSparseImpl::get_genus_weights
@@ -620,7 +615,6 @@ torch::Tensor ResolveModelImpl::get_family_weights() const {
     if (encoder_rank_pool_) return encoder_rank_pool_->get_family_weights();
     if (encoder_transformer_) return encoder_transformer_->get_family_weights();
     return get_taxonomy_weights_(
-        &PlotEncoderMoEImpl::get_family_weights,
         &PlotEncoderImpl::get_family_weights,
         &PlotEncoderEmbedImpl::get_family_weights,
         &PlotEncoderSparseImpl::get_family_weights
@@ -639,11 +633,33 @@ torch::Tensor ResolveModelImpl::get_gate_probs(
     torch::Tensor genus_ids,
     torch::Tensor family_ids
 ) {
-    if (encoder_moe_) {
-        return encoder_moe_->get_gate_probs(continuous, genus_ids, family_ids);
+    // A hash-mode model routes through here with the species signal already in
+    // `continuous`, which is why this takes no species argument. Under
+    // MoEPlacement::Post the probabilities come from the mixture over the
+    // latent; under Tail they come back with the encoder's own output. An
+    // encoder that needs species IDs or a species vector cannot be driven from
+    // this signature, so it says so rather than reporting nothing -- the
+    // undefined tensor this used to return for every non-hash model was
+    // indistinguishable from "MoE is off".
+    if (config_.moe_routing == MoERoutingType::None) {
+        return torch::Tensor();
     }
-    // Return empty tensor if MoE not enabled
-    return torch::Tensor();
+    if (!encoder_hash_ && !trait_net_encoder_ && !adapter_) {
+        throw std::invalid_argument(
+            "get_gate_probs(continuous, genus_ids, family_ids) covers only the "
+            "encoders whose species signal is already inside `continuous` "
+            "(hash) or absent (TraitNet, adapter architectures). For an embed / "
+            "sparse / rank_pool / transformer model, read the gate "
+            "probabilities from forward_with_aux, which takes the species "
+            "inputs those encoders need.");
+    }
+
+    continuous = fuse_categoricals_(std::move(continuous), torch::Tensor());
+    auto encoded = encode_all(continuous, genus_ids, family_ids, {}, {});
+    if (post_moe_) {
+        return post_moe_->forward(encoded.latent).gate_probs;
+    }
+    return encoded.gate_probs;
 }
 
 void ResolveModelImpl::set_traits(torch::Tensor traits) {

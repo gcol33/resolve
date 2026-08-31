@@ -157,6 +157,8 @@ void print_architecture_config(const resolve::ModelConfig& config) {
     if (config.moe_routing != MoERoutingType::None) {
         std::cout << "  MoE routing: " << moe_routing_type_to_string(config.moe_routing)
                   << std::endl;
+        std::cout << "  MoE placement: " << moe_placement_to_string(config.moe_placement)
+                  << std::endl;
         std::cout << "  MoE experts: " << config.n_experts << std::endl;
         print_dims("  MoE expert hidden dims: ", config.expert_hidden_dims);
         std::cout << "  MoE top-k: " << config.moe_top_k << std::endl;
