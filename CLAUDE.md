@@ -74,11 +74,17 @@ RESOLVE is a **standalone C++ engine** (libtorch) with thin nanobind/Rcpp langua
 
 ## Paper Project
 
-The research paper using RESOLVE is located at:
-- **Path**: J:/Phd Local/Gilles_paper_resolve/
-- **Title**: Species composition as biotic context: predicting plot area and habitat from assemblages
-- **Data**: ASAAS dataset (~1.9M vegetation plots)
-- **Targets**: Area (regression) + EUNIS habitat (9-class classification)
+The research paper using RESOLVE lives in the experiment repo, not in a paper
+repo of its own:
+- **Path**: C:/GillesC/Documents/code/resolve-2026 (`gcol33/resolve-2026`), manuscript sources under `paper/`, run provenance in `PROVENANCE.md`
+- **Title**: Species composition as ecological memory: decoding environment from 1.9 million European vegetation plots
+- **Data**: European Vegetation Archive (~1.9M plots, ~20M species-plot records)
+- **Targets**: area, altitude, slope, aspect, survey year, geographic location (regression) + EUNIS habitat (classification)
+- **Results tree**: `$RESEARCH_DATA/projects/resolve-2026/results` on E:, mirrored on LiSC
+
+`C:/GillesC/Documents/writing/papers/paper_resolve_2026` is an earlier draft
+under a different title, last written 2026-08-13; the runs it cites now sit under
+`results/_superseded/`. The J: drive it used to live on is retired.
 
 ## Key Directories
 
