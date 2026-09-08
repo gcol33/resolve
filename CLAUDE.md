@@ -96,7 +96,7 @@ drive the paper used to live on is retired.
   - tests/ - Catch2 unit tests and benchmarks
   - tests/fixtures/ - Tiny committed CSVs the CLI end-to-end CI job trains on
 - tests/core/ - pytest suite over `resolve_core` (bindings + held-out recovery fits)
-- r/ - R package, an Rcpp client over the `resolve_c` C ABI
+- r/ - R package `resolveR` (CRAN name; Bioconductor holds RESOLVE), an Rcpp client over the `resolve_c` C ABI
 
 ## Tech Stack Preferences
 

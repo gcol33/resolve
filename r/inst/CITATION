@@ -1,6 +1,6 @@
 bibentry(
   bibtype = "Manual",
-  title   = "resolve: Predicting Sample Outcomes from Compositional Data",
+  title   = "resolveR: Predicting Sample Outcomes from Compositional Data",
   author  = person("Gilles", "Colling"),
   year    = "2026",
   url     = "https://github.com/gcol33/resolve",

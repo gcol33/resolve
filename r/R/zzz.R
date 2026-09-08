@@ -15,7 +15,7 @@
 
 #' @importFrom Rcpp evalCpp
 #' @importFrom methods new
-#' @useDynLib resolve, .registration = TRUE
+#' @useDynLib resolveR, .registration = TRUE
 NULL
 
 # Package state that is filled in at load time: the Rcpp module handle. An
@@ -43,9 +43,9 @@ NULL
   dirs <- character(0)
   home <- Sys.getenv("RESOLVE_C_HOME", "")
   if (nzchar(home)) dirs <- c(dirs, home)
-  data_dir <- tryCatch(tools::R_user_dir("resolve", "data"), error = function(e) "")
+  data_dir <- tryCatch(tools::R_user_dir("resolveR", "data"), error = function(e) "")
   if (nzchar(data_dir)) dirs <- c(dirs, file.path(data_dir, "resolve_c"))
-  pkg_dir <- system.file("resolve_c", package = "resolve")
+  pkg_dir <- system.file("resolve_c", package = "resolveR")
   if (nzchar(pkg_dir)) dirs <- c(dirs, pkg_dir)
   dirs
 }
@@ -295,18 +295,18 @@ NULL
 # or as a workaround (N=1 restores the old single-threaded behaviour) if a
 # specific Windows environment still hits the #18 teardown crash.
 .resolve_harden_process <- function() {
-  try(.Call("_resolve_resolve_install_crash_handler", 0L, PACKAGE = "resolve"),
+  try(.Call("_resolveR_resolve_install_crash_handler", 0L, PACKAGE = "resolveR"),
       silent = TRUE)
   n_threads <- suppressWarnings(as.integer(Sys.getenv("RESOLVE_R_TORCH_THREADS", "")))
   if (!is.na(n_threads) && n_threads >= 1L) {
-    try(.Call("_resolve_resolve_set_thread_pools", n_threads, n_threads,
-              PACKAGE = "resolve"),
+    try(.Call("_resolveR_resolve_set_thread_pools", n_threads, n_threads,
+              PACKAGE = "resolveR"),
         silent = TRUE)
   }
   reg.finalizer(
     .resolve_exit_token,
     function(e) {
-      tryCatch(.Call("_resolve_resolve_signal_work_complete", PACKAGE = "resolve"),
+      tryCatch(.Call("_resolveR_resolve_signal_work_complete", PACKAGE = "resolveR"),
                error = function(...) NULL)
     },
     onexit = TRUE
@@ -320,7 +320,7 @@ NULL
   # Lazy module init: the boot symbol only registers class/method pointers (no
   # engine call), so it is safe with or without the backend; the actual engine
   # work happens when a method is invoked, gated by resolve.available().
-  .resolve_state$module <- Rcpp::Module("resolve_module", PACKAGE = "resolve")
+  .resolve_state$module <- Rcpp::Module("resolve_module", PACKAGE = "resolveR")
   # Hardening is an engine call, so only when the backend is bound.
   if (loaded) .resolve_harden_process()
 }
@@ -372,5 +372,5 @@ NULL
 #' @export
 resolve.version <- function() {
   .resolve_require_backend()
-  .Call("_resolve_resolve_version", PACKAGE = "resolve")
+  .Call("_resolveR_resolve_version", PACKAGE = "resolveR")
 }

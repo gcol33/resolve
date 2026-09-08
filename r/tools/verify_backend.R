@@ -4,7 +4,7 @@
 # libtorch moved aside so a stale absolute rpath cannot satisfy the load), load
 # the installed resolve package and confirm the backend binds and answers. This
 # proves the release zip is self-contained -- every libtorch runtime dependency
-# travels next to resolve_c -- which is exactly the install.packages("resolve")
+# travels next to resolve_c -- which is exactly the install.packages("resolveR")
 # + resolve.install_backend() path a user takes. Run: Rscript r/tools/verify_backend.R
 home <- Sys.getenv("RESOLVE_C_HOME", "")
 if (!nzchar(home)) stop("RESOLVE_C_HOME is not set")
@@ -22,7 +22,7 @@ if (!file.exists(lib)) {
        " at its top level (unzip must place the library flat).")
 }
 
-suppressPackageStartupMessages(library(resolve))
+suppressPackageStartupMessages(library(resolveR))
 
 if (!resolve.available()) {
   err <- tryCatch(resolve:::resolve_capi_load_error(),

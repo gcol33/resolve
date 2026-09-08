@@ -36,8 +36,8 @@ test_that("Trainer can be created with config", {
     lr = 0.001
   )
 
-  model <- new(.resolve_module$ResolveModel, schema, model_config)
-  trainer <- new(.resolve_module$Trainer, model, train_config)
+  model <- new(.resolve_module()$ResolveModel, schema, model_config)
+  trainer <- new(.resolve_module()$Trainer, model, train_config)
 
   # Should not raise
   expect_true(!is.null(trainer))
@@ -78,8 +78,8 @@ test_that("LR scheduler options are accepted", {
     lr_min = 0.0001
   )
 
-  model <- new(.resolve_module$ResolveModel, schema, model_config)
-  trainer <- new(.resolve_module$Trainer, model, train_config)
+  model <- new(.resolve_module()$ResolveModel, schema, model_config)
+  trainer <- new(.resolve_module()$Trainer, model, train_config)
 
   expect_true(!is.null(trainer))
 })
@@ -118,8 +118,8 @@ test_that("Step LR scheduler config is accepted", {
     lr_gamma = 0.5
   )
 
-  model <- new(.resolve_module$ResolveModel, schema, model_config)
-  trainer <- new(.resolve_module$Trainer, model, train_config)
+  model <- new(.resolve_module()$ResolveModel, schema, model_config)
+  trainer <- new(.resolve_module()$Trainer, model, train_config)
 
   expect_true(!is.null(trainer))
 })
@@ -159,7 +159,7 @@ test_that("A mixture of experts builds at either placement", {
   for (placement in c("tail", "post")) {
     model_config <- base_config
     model_config$moe_placement <- placement
-    model <- new(.resolve_module$ResolveModel, schema, model_config)
+    model <- new(.resolve_module()$ResolveModel, schema, model_config)
     expect_equal(model$latent_dim(), 12L)
   }
 })
@@ -196,12 +196,12 @@ test_that("A tail mixture is refused where there is no MLP tail", {
 
   # The message has to name the placement that works.
   expect_error(
-    new(.resolve_module$ResolveModel, schema, model_config),
+    new(.resolve_module()$ResolveModel, schema, model_config),
     "moe_placement=post",
     fixed = TRUE
   )
 
   model_config$moe_placement <- "post"
-  expect_silent(new(.resolve_module$ResolveModel, schema, model_config))
+  expect_silent(new(.resolve_module()$ResolveModel, schema, model_config))
 })
 

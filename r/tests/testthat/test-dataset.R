@@ -368,7 +368,7 @@ valid_targets <- function() {
 
 test_that("an unnamed target list is rejected, not silently dropped", {
   expect_error(
-    resolve:::.resolve_normalize_roles_targets(
+    resolveR:::.resolve_normalize_roles_targets(
       list(plot_id = "plot_id"),
       list(list(column = "area", task = "regression"))),
     "every target must be named")
@@ -376,7 +376,7 @@ test_that("an unnamed target list is rejected, not silently dropped", {
 
 test_that("a partially named target list is rejected", {
   expect_error(
-    resolve:::.resolve_normalize_roles_targets(
+    resolveR:::.resolve_normalize_roles_targets(
       list(plot_id = "plot_id"),
       list(area = list(column = "area"), list(column = "habitat"))),
     "every target must be named")
@@ -384,7 +384,7 @@ test_that("a partially named target list is rejected", {
 
 test_that("an unknown key in a target specification is rejected by name", {
   err <- tryCatch(
-    resolve:::.resolve_normalize_roles_targets(
+    resolveR:::.resolve_normalize_roles_targets(
       list(plot_id = "plot_id"),
       list(area = list(name = "area", type = "regression"))),
     error = function(e) conditionMessage(e))
@@ -398,7 +398,7 @@ test_that("an unknown key in a target specification is rejected by name", {
 
 test_that("duplicate target names are rejected", {
   expect_error(
-    resolve:::.resolve_normalize_roles_targets(
+    resolveR:::.resolve_normalize_roles_targets(
       list(plot_id = "plot_id"),
       list(area = list(column = "area"), area = list(column = "area2"))),
     "duplicate target name")
@@ -406,7 +406,7 @@ test_that("duplicate target names are rejected", {
 
 test_that("an unknown role key is rejected by name", {
   err <- tryCatch(
-    resolve:::.resolve_normalize_roles_targets(
+    resolveR:::.resolve_normalize_roles_targets(
       list(plot_id = "plot_id", speciesId = "species"),
       valid_targets()),
     error = function(e) conditionMessage(e))
@@ -417,12 +417,12 @@ test_that("an unknown role key is rejected by name", {
 
 test_that("an unnamed roles list is rejected", {
   expect_error(
-    resolve:::.resolve_normalize_roles_targets(list("plot_id"), valid_targets()),
+    resolveR:::.resolve_normalize_roles_targets(list("plot_id"), valid_targets()),
     "must be a named list")
 })
 
 test_that("a valid specification passes and fills the role defaults", {
-  roles <- resolve:::.resolve_normalize_roles_targets(
+  roles <- resolveR:::.resolve_normalize_roles_targets(
     list(abundance = "cover"), valid_targets())
   expect_equal(roles$plot_id, "plot_id")
   expect_equal(roles$species_id, "species_id")
@@ -430,7 +430,7 @@ test_that("a valid specification passes and fills the role defaults", {
 })
 
 test_that("every documented target key is accepted", {
-  expect_silent(resolve:::.resolve_normalize_roles_targets(
+  expect_silent(resolveR:::.resolve_normalize_roles_targets(
     list(plot_id = "plot_id"),
     list(habitat = list(column = "habitat", task = "classification",
                         transform = "none", num_classes = 3L, weight = 1.0,
@@ -438,7 +438,7 @@ test_that("every documented target key is accepted", {
 })
 
 test_that("every documented role key is accepted", {
-  expect_silent(resolve:::.resolve_normalize_roles_targets(
+  expect_silent(resolveR:::.resolve_normalize_roles_targets(
     list(plot_id = "plot_id", species_id = "species", abundance = "cover",
          longitude = "lon", latitude = "lat", genus = "genus",
          family = "family", covariates = c("elevation"),

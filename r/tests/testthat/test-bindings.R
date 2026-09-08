@@ -13,7 +13,7 @@
 
 test_that("resolve_module is loaded", {
   skip_on_cran()
-  mod <- tryCatch(resolve:::.resolve_module, error = function(e) NULL)
+  mod <- tryCatch(resolveR:::.resolve_module(), error = function(e) NULL)
   skip_if(is.null(mod), "resolve module not available (needs libtorch)")
 
   # NB: `names(mod)` on an Rcpp `Module` S4 object is NOT the registration
@@ -21,7 +21,7 @@ test_that("resolve_module is loaded", {
   # internals + lazily cached `$` accesses). Use the internal introspection
   # helper that reads `Module__classes_info` / `Module__functions_names`
   # directly off the module pointer.
-  registered <- resolve:::.resolve_module_registered()
+  registered <- resolveR:::.resolve_module_registered()
 
   # Verify core classes are registered. SpeciesEncoder was removed when the
   # unified resolve::SpeciesEncoder C++ class was split into RankPoolEncoder
@@ -35,10 +35,10 @@ test_that("resolve_module is loaded", {
 
 test_that("module factory functions are registered", {
   skip_on_cran()
-  mod <- tryCatch(resolve:::.resolve_module, error = function(e) NULL)
+  mod <- tryCatch(resolveR:::.resolve_module(), error = function(e) NULL)
   skip_if(is.null(mod), "resolve module not available (needs libtorch)")
 
-  registered <- resolve:::.resolve_module_registered()
+  registered <- resolveR:::.resolve_module_registered()
 
   expect_true("ResolveDataset_from_csv" %in% registered)
   expect_true("ResolveDataset_from_species_csv" %in% registered)
@@ -380,7 +380,7 @@ test_that("resolve.predict.dataset rejects invalid dataset type", {
 # =============================================================================
 
 test_that("all exported R wrapper functions exist", {
-  ns <- asNamespace("resolve")
+  ns <- asNamespace("resolveR")
 
   # The pre-engine facades (resolve.encoder / .dataset / .train / .predict)
   # are gone, not stubbed: the package exports only what it implements.
@@ -399,7 +399,7 @@ test_that("all exported R wrapper functions exist", {
 })
 
 test_that("all exported metric functions exist", {
-  ns <- asNamespace("resolve")
+  ns <- asNamespace("resolveR")
 
   expect_true(exists("resolve_mae", envir = ns))
   expect_true(exists("resolve_rmse", envir = ns))
@@ -410,7 +410,7 @@ test_that("all exported metric functions exist", {
 })
 
 test_that("exported functions are actual functions, not stubs", {
-  ns <- asNamespace("resolve")
+  ns <- asNamespace("resolveR")
 
   expect_true(is.function(get("resolve.load", envir = ns)))
   expect_true(is.function(get("resolve.dataset.csv", envir = ns)))

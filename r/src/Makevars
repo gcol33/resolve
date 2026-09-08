@@ -1,4 +1,4 @@
-# Makevars for the resolve R package.
+# Makevars for the resolveR R package.
 #
 # Thin client over the `resolve_c` shared library (a flat C ABI over the
 # engine). No libtorch linkage and no resolve_c linkage: resolve_c is loaded at

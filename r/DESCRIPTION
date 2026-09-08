@@ -1,4 +1,4 @@
-Package: resolve
+Package: resolveR
 Title: Predicting Sample Outcomes from Compositional Data
 Version: 0.10.0
 Authors@R:

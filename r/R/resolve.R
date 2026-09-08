@@ -36,7 +36,7 @@ resolve.available <- function() {
 #' runtime) and load it, so the dataset / training / prediction verbs become
 #' available. This mirrors `torch::install_torch()`: the CRAN package is small
 #' and backend-free, and the heavy binary is fetched on first use into the
-#' user's data directory (`tools::R_user_dir("resolve", "data")`).
+#' user's data directory (`tools::R_user_dir("resolveR", "data")`).
 #'
 #' The default download URL points at a per-platform asset on the package's
 #' GitHub Releases; supply `url` to install from a local or private mirror.
@@ -85,7 +85,7 @@ resolve.install_backend <- function(version = NULL,
          "use variant = 'cpu'.", call. = FALSE)
   }
   if (is.null(dir)) {
-    dir <- file.path(tools::R_user_dir("resolve", "data"), "resolve_c")
+    dir <- file.path(tools::R_user_dir("resolveR", "data"), "resolve_c")
   }
   libname <- .resolve_backend_libname()
   dest_lib <- file.path(dir, libname)
@@ -103,7 +103,7 @@ resolve.install_backend <- function(version = NULL,
 
   # resolve_c itself (small): explicit url override, else the GitHub release asset.
   if (is.null(url)) {
-    if (is.null(version)) version <- as.character(utils::packageVersion("resolve"))
+    if (is.null(version)) version <- as.character(utils::packageVersion("resolveR"))
     url <- sprintf(
       "https://github.com/gcol33/resolve/releases/download/v%s/%s",
       version, entry$github_asset

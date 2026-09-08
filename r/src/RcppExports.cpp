@@ -12,7 +12,7 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 
 // resolve_band_accuracy
 double resolve_band_accuracy(NumericVector pred, NumericVector target, double threshold);
-RcppExport SEXP _resolve_resolve_band_accuracy(SEXP predSEXP, SEXP targetSEXP, SEXP thresholdSEXP) {
+RcppExport SEXP _resolveR_resolve_band_accuracy(SEXP predSEXP, SEXP targetSEXP, SEXP thresholdSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -25,7 +25,7 @@ END_RCPP
 }
 // resolve_mae
 double resolve_mae(NumericVector pred, NumericVector target);
-RcppExport SEXP _resolve_resolve_mae(SEXP predSEXP, SEXP targetSEXP) {
+RcppExport SEXP _resolveR_resolve_mae(SEXP predSEXP, SEXP targetSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -37,7 +37,7 @@ END_RCPP
 }
 // resolve_rmse
 double resolve_rmse(NumericVector pred, NumericVector target);
-RcppExport SEXP _resolve_resolve_rmse(SEXP predSEXP, SEXP targetSEXP) {
+RcppExport SEXP _resolveR_resolve_rmse(SEXP predSEXP, SEXP targetSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -49,7 +49,7 @@ END_RCPP
 }
 // resolve_smape
 double resolve_smape(NumericVector pred, NumericVector target, double eps);
-RcppExport SEXP _resolve_resolve_smape(SEXP predSEXP, SEXP targetSEXP, SEXP epsSEXP) {
+RcppExport SEXP _resolveR_resolve_smape(SEXP predSEXP, SEXP targetSEXP, SEXP epsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -62,7 +62,7 @@ END_RCPP
 }
 // resolve_accuracy
 double resolve_accuracy(NumericVector pred, NumericVector target);
-RcppExport SEXP _resolve_resolve_accuracy(SEXP predSEXP, SEXP targetSEXP) {
+RcppExport SEXP _resolveR_resolve_accuracy(SEXP predSEXP, SEXP targetSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -74,7 +74,7 @@ END_RCPP
 }
 // resolve_r_squared
 double resolve_r_squared(NumericVector pred, NumericVector target);
-RcppExport SEXP _resolve_resolve_r_squared(SEXP predSEXP, SEXP targetSEXP) {
+RcppExport SEXP _resolveR_resolve_r_squared(SEXP predSEXP, SEXP targetSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -86,7 +86,7 @@ END_RCPP
 }
 // resolve_version
 std::string resolve_version();
-RcppExport SEXP _resolve_resolve_version() {
+RcppExport SEXP _resolveR_resolve_version() {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -96,7 +96,7 @@ END_RCPP
 }
 // resolve_set_vram_fraction
 void resolve_set_vram_fraction(double fraction, int device_index);
-RcppExport SEXP _resolve_resolve_set_vram_fraction(SEXP fractionSEXP, SEXP device_indexSEXP) {
+RcppExport SEXP _resolveR_resolve_set_vram_fraction(SEXP fractionSEXP, SEXP device_indexSEXP) {
 BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< double >::type fraction(fractionSEXP);
@@ -107,7 +107,7 @@ END_RCPP
 }
 // resolve_set_thread_pools
 void resolve_set_thread_pools(int intraop_threads, int interop_threads);
-RcppExport SEXP _resolve_resolve_set_thread_pools(SEXP intraop_threadsSEXP, SEXP interop_threadsSEXP) {
+RcppExport SEXP _resolveR_resolve_set_thread_pools(SEXP intraop_threadsSEXP, SEXP interop_threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< int >::type intraop_threads(intraop_threadsSEXP);
@@ -118,7 +118,7 @@ END_RCPP
 }
 // resolve_install_crash_handler
 void resolve_install_crash_handler(int shutdown_exit_code);
-RcppExport SEXP _resolve_resolve_install_crash_handler(SEXP shutdown_exit_codeSEXP) {
+RcppExport SEXP _resolveR_resolve_install_crash_handler(SEXP shutdown_exit_codeSEXP) {
 BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< int >::type shutdown_exit_code(shutdown_exit_codeSEXP);
@@ -128,7 +128,7 @@ END_RCPP
 }
 // resolve_signal_work_complete
 void resolve_signal_work_complete();
-RcppExport SEXP _resolve_resolve_signal_work_complete() {
+RcppExport SEXP _resolveR_resolve_signal_work_complete() {
 BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     resolve_signal_work_complete();
@@ -137,7 +137,7 @@ END_RCPP
 }
 // resolve_configure_cuda_allocator
 std::string resolve_configure_cuda_allocator(bool force);
-RcppExport SEXP _resolve_resolve_configure_cuda_allocator(SEXP forceSEXP) {
+RcppExport SEXP _resolveR_resolve_configure_cuda_allocator(SEXP forceSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -148,7 +148,7 @@ END_RCPP
 }
 // resolve_capi_load_lib
 bool resolve_capi_load_lib(std::string path);
-RcppExport SEXP _resolve_resolve_capi_load_lib(SEXP pathSEXP) {
+RcppExport SEXP _resolveR_resolve_capi_load_lib(SEXP pathSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -159,7 +159,7 @@ END_RCPP
 }
 // resolve_capi_is_available
 bool resolve_capi_is_available();
-RcppExport SEXP _resolve_resolve_capi_is_available() {
+RcppExport SEXP _resolveR_resolve_capi_is_available() {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -169,7 +169,7 @@ END_RCPP
 }
 // resolve_capi_load_error
 std::string resolve_capi_load_error();
-RcppExport SEXP _resolve_resolve_capi_load_error() {
+RcppExport SEXP _resolveR_resolve_capi_load_error() {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -181,26 +181,26 @@ END_RCPP
 RcppExport SEXP _rcpp_module_boot_resolve_module();
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_resolve_resolve_band_accuracy", (DL_FUNC) &_resolve_resolve_band_accuracy, 3},
-    {"_resolve_resolve_mae", (DL_FUNC) &_resolve_resolve_mae, 2},
-    {"_resolve_resolve_rmse", (DL_FUNC) &_resolve_resolve_rmse, 2},
-    {"_resolve_resolve_smape", (DL_FUNC) &_resolve_resolve_smape, 3},
-    {"_resolve_resolve_accuracy", (DL_FUNC) &_resolve_resolve_accuracy, 2},
-    {"_resolve_resolve_r_squared", (DL_FUNC) &_resolve_resolve_r_squared, 2},
-    {"_resolve_resolve_version", (DL_FUNC) &_resolve_resolve_version, 0},
-    {"_resolve_resolve_set_vram_fraction", (DL_FUNC) &_resolve_resolve_set_vram_fraction, 2},
-    {"_resolve_resolve_set_thread_pools", (DL_FUNC) &_resolve_resolve_set_thread_pools, 2},
-    {"_resolve_resolve_install_crash_handler", (DL_FUNC) &_resolve_resolve_install_crash_handler, 1},
-    {"_resolve_resolve_signal_work_complete", (DL_FUNC) &_resolve_resolve_signal_work_complete, 0},
-    {"_resolve_resolve_configure_cuda_allocator", (DL_FUNC) &_resolve_resolve_configure_cuda_allocator, 1},
-    {"_resolve_resolve_capi_load_lib", (DL_FUNC) &_resolve_resolve_capi_load_lib, 1},
-    {"_resolve_resolve_capi_is_available", (DL_FUNC) &_resolve_resolve_capi_is_available, 0},
-    {"_resolve_resolve_capi_load_error", (DL_FUNC) &_resolve_resolve_capi_load_error, 0},
+    {"_resolveR_resolve_band_accuracy", (DL_FUNC) &_resolveR_resolve_band_accuracy, 3},
+    {"_resolveR_resolve_mae", (DL_FUNC) &_resolveR_resolve_mae, 2},
+    {"_resolveR_resolve_rmse", (DL_FUNC) &_resolveR_resolve_rmse, 2},
+    {"_resolveR_resolve_smape", (DL_FUNC) &_resolveR_resolve_smape, 3},
+    {"_resolveR_resolve_accuracy", (DL_FUNC) &_resolveR_resolve_accuracy, 2},
+    {"_resolveR_resolve_r_squared", (DL_FUNC) &_resolveR_resolve_r_squared, 2},
+    {"_resolveR_resolve_version", (DL_FUNC) &_resolveR_resolve_version, 0},
+    {"_resolveR_resolve_set_vram_fraction", (DL_FUNC) &_resolveR_resolve_set_vram_fraction, 2},
+    {"_resolveR_resolve_set_thread_pools", (DL_FUNC) &_resolveR_resolve_set_thread_pools, 2},
+    {"_resolveR_resolve_install_crash_handler", (DL_FUNC) &_resolveR_resolve_install_crash_handler, 1},
+    {"_resolveR_resolve_signal_work_complete", (DL_FUNC) &_resolveR_resolve_signal_work_complete, 0},
+    {"_resolveR_resolve_configure_cuda_allocator", (DL_FUNC) &_resolveR_resolve_configure_cuda_allocator, 1},
+    {"_resolveR_resolve_capi_load_lib", (DL_FUNC) &_resolveR_resolve_capi_load_lib, 1},
+    {"_resolveR_resolve_capi_is_available", (DL_FUNC) &_resolveR_resolve_capi_is_available, 0},
+    {"_resolveR_resolve_capi_load_error", (DL_FUNC) &_resolveR_resolve_capi_load_error, 0},
     {"_rcpp_module_boot_resolve_module", (DL_FUNC) &_rcpp_module_boot_resolve_module, 0},
     {NULL, NULL, 0}
 };
 
-RcppExport void R_init_resolve(DllInfo *dll) {
+RcppExport void R_init_resolveR(DllInfo *dll) {
     R_registerRoutines(dll, NULL, CallEntries, NULL, NULL);
     R_useDynamicSymbols(dll, FALSE);
 }

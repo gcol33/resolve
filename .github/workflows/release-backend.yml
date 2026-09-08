@@ -6,7 +6,7 @@ name: Release resolve_c backend
 # which is exactly the asset resolve.install_backend() downloads:
 #   https://github.com/gcol33/resolve/releases/download/v<version>/resolve_c-<os>-<arch>-cpu.zip
 # (r/R/resolve.R). The tag MUST be v<r/DESCRIPTION Version> because the R side
-# builds the URL from packageVersion("resolve"); the prepare job enforces that.
+# builds the URL from packageVersion("resolveR"); the prepare job enforces that.
 #
 # Build flags mirror .github/workflows/r-cmd-check.yml exactly (CPU libtorch,
 # OpenMP off, only the resolve_c target) -- that is the reviewed, per-PR-tested
@@ -58,7 +58,7 @@ jobs:
           VERSION="$(grep '^Version:' r/DESCRIPTION | awk '{print $2}')"
           echo "Release tag: $TAG   r/DESCRIPTION Version: $VERSION"
           if [ "$TAG" != "v${VERSION}" ]; then
-            echo "::error::tag '$TAG' != 'v${VERSION}'. resolve.install_backend() builds its download URL from packageVersion('resolve'), so the release tag MUST be v<DESCRIPTION Version>. Bump r/DESCRIPTION or retag."
+            echo "::error::tag '$TAG' != 'v${VERSION}'. resolve.install_backend() builds its download URL from packageVersion('resolveR'), so the release tag MUST be v<DESCRIPTION Version>. Bump r/DESCRIPTION or retag."
             exit 1
           fi
           # r/DESCRIPTION agrees with the tag; the rest of the repo (engine
@@ -212,7 +212,7 @@ jobs:
           working-directory: r
           extra-packages: any::Rcpp
 
-      - name: Install resolve (no backend linked)
+      - name: Install resolveR (no backend linked)
         shell: bash
         run: R CMD INSTALL r
 

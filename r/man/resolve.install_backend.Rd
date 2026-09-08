@@ -40,7 +40,7 @@ Fetch a prebuilt \code{resolve_c} shared library (with its bundled libtorch
 runtime) and load it, so the dataset / training / prediction verbs become
 available. This mirrors \code{torch::install_torch()}: the CRAN package is small
 and backend-free, and the heavy binary is fetched on first use into the
-user's data directory (\code{tools::R_user_dir("resolve", "data")}).
+user's data directory (\code{tools::R_user_dir("resolveR", "data")}).
 }
 \details{
 The default download URL points at a per-platform asset on the package's

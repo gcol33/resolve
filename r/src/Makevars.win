@@ -1,4 +1,4 @@
-# Makevars.win for the resolve R package.
+# Makevars.win for the resolveR R package.
 #
 # The package is a thin client over the `resolve_c` shared library (a flat C ABI
 # over the engine). It does NOT compile the engine, link libtorch, or link

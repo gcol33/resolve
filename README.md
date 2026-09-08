@@ -157,7 +157,7 @@ The R package speaks to the same engine through a C ABI, so it needs no libtorch
 headers of its own:
 
 ```r
-library(resolve)
+library(resolveR)
 
 dataset <- resolve.dataset.csv(
   header  = "plots.csv",
@@ -223,7 +223,7 @@ R installs without a backend and fetches one afterwards:
 install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-library(resolve)
+library(resolveR)
 resolve.install_backend()                  # CPU
 resolve.install_backend(variant = "cuda")
 ```

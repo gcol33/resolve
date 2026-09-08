@@ -2,6 +2,19 @@
 
 ## v0.10.0 (2026-09-08)
 
+### Changed
+
+- **The R package is `resolveR`.** Bioconductor already carries a package
+  named RESOLVE, and CRAN checks names case-insensitively across both
+  repositories, so the R client is published as `resolveR`. The functions
+  keep their `resolve.` prefix, the backend stays `resolve_c`, and the
+  install path is `library(resolveR)`. The four exported removal stubs
+  (`resolve.encoder()`, `resolve.dataset()`, `resolve.train()`,
+  `resolve.predict()`) are gone rather than erroring, and the engine's
+  metric functions (`resolve_mae()`, `resolve_rmse()`, `resolve_smape()`,
+  `resolve_r_squared()`, `resolve_band_accuracy()`, `resolve_accuracy()`)
+  are exported and documented.
+
 ### Added
 
 - **Class probabilities from the Predictor (#117).** `Predictor::predict`

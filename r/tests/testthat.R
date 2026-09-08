@@ -1,5 +1,5 @@
 # This file is part of the standard testthat workflow
 library(testthat)
-library(resolve)
+library(resolveR)
 
-test_check("resolve")
+test_check("resolveR")

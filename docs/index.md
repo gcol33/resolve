@@ -75,7 +75,7 @@ Covariates ───────┘
 === "R"
 
     ```r
-    library(resolve)
+    library(resolveR)
 
     dataset <- resolve.dataset.csv(
       header  = "plots.csv",
