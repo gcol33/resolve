@@ -18,8 +18,14 @@
 #' @useDynLib resolve, .registration = TRUE
 NULL
 
-# Rcpp module reference
-.resolve_module <- NULL
+# Package state that is filled in at load time: the Rcpp module handle. An
+# environment, so .onLoad assigns into it instead of rebinding a namespace
+# variable.
+.resolve_state <- new.env(parent = emptyenv())
+.resolve_state$module <- NULL
+
+# The Rcpp module handle bound by .onLoad (NULL before the package is loaded).
+.resolve_module <- function() .resolve_state$module
 
 # Platform file name of the resolve_c shared library.
 .resolve_backend_libname <- function() {
@@ -314,7 +320,7 @@ NULL
   # Lazy module init: the boot symbol only registers class/method pointers (no
   # engine call), so it is safe with or without the backend; the actual engine
   # work happens when a method is invoked, gated by resolve.available().
-  .resolve_module <<- Rcpp::Module("resolve_module", PACKAGE = "resolve")
+  .resolve_state$module <- Rcpp::Module("resolve_module", PACKAGE = "resolve")
   # Hardening is an engine call, so only when the backend is bound.
   if (loaded) .resolve_harden_process()
 }
@@ -347,7 +353,7 @@ NULL
 # `$.Module` operator reads from exactly this env, so using it here makes
 # "is X registered?" identical to "does `mod$X` resolve?".
 .resolve_module_registered <- function() {
-  mod <- .resolve_module
+  mod <- .resolve_module()
   if (is.null(mod)) return(character())
   ready <- tryCatch(
     Rcpp::Module(mod, mustStart = TRUE),

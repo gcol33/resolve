@@ -1,131 +1,3 @@
-#' Create a SpeciesEncoder (removed)
-#'
-#' The standalone `resolve.encoder()` wrapper bound a unified
-#' `resolve::SpeciesEncoder` C++ class that has since been split in the
-#' C++ engine into `resolve::RankPoolEncoder` (variable-length pool
-#' encoding for rank-pool / transformer modes) and
-#' `resolve::EmbeddingEncoder` (fixed top-k IDs for embed mode). Neither
-#' is a drop-in replacement for the old unified API: the hash-embedding
-#' output is gone, save/load is not implemented on the new C++ encoders,
-#' and the `aggregation` / `representation` parameters no longer apply.
-#'
-#' Calling `resolve.encoder()` therefore raises an error. The modern
-#' canonical path is [resolve.dataset.csv()], which dispatches to
-#' `resolve::ResolveDataset::from_csv()` and performs all encoding
-#' inside the C++ engine — no separate fit/transform step is needed.
-#'
-#' @param ... Ignored; preserved for argument compatibility with the
-#'   pre-removal signature so existing call sites surface a clear error
-#'   instead of an "unused argument" message.
-#'
-#' @return Never returns; always errors.
-#'
-#' @export
-resolve.encoder <- function(...) {
-  stop(
-    "resolve.encoder() has been removed.\n",
-    "The unified C++ resolve::SpeciesEncoder class was split into ",
-    "resolve::RankPoolEncoder and resolve::EmbeddingEncoder, and the new ",
-    "C++ encoders do not provide hash_embedding output, save/load, or the ",
-    "aggregation/representation parameters of the old API.\n",
-    "Use resolve.dataset.csv() instead: it calls ResolveDataset::from_csv() ",
-    "in the C++ engine and handles encoding internally."
-  )
-}
-
-
-#' Create a RESOLVE Dataset (removed)
-#'
-#' The legacy `resolve.dataset()` facade ran encoding in R via the unified
-#' `resolve.encoder()` C++ wrapper, which has been removed (see
-#' [resolve.encoder()] for the underlying engine change).
-#'
-#' Calling `resolve.dataset()` therefore raises an error. Use
-#' [resolve.dataset.csv()] instead — it dispatches to the C++
-#' `ResolveDataset::from_csv()` pipeline directly, performs all encoding
-#' inside the engine, and is the input format expected by
-#' [resolve.train.dataset()].
-#'
-#' @param ... Ignored; preserved for argument compatibility with the
-#'   pre-removal signature so existing call sites surface a clear error
-#'   instead of an "unused argument" message.
-#'
-#' @return Never returns; always errors.
-#'
-#' @export
-resolve.dataset <- function(...) {
-  stop(
-    "resolve.dataset() has been removed.\n",
-    "It used resolve.encoder() under the hood, which no longer maps to the ",
-    "current C++ engine (the unified resolve::SpeciesEncoder was split into ",
-    "RankPoolEncoder and EmbeddingEncoder; the new encoders do not expose ",
-    "save/load or a hash_embedding output).\n",
-    "Use resolve.dataset.csv() instead: it calls ResolveDataset::from_csv() ",
-    "in the C++ engine and pairs with resolve.train.dataset() for training."
-  )
-}
-
-
-
-#' Train a RESOLVE Model (legacy facade — removed)
-#'
-#' The legacy `resolve.train()` facade trained from a `resolve.dataset`
-#' object produced by the removed `resolve.dataset()` function, which
-#' depended on the equally removed `resolve.encoder()` (see those
-#' functions' help pages for the underlying engine change).
-#'
-#' Calling `resolve.train()` therefore raises an error. Use
-#' [resolve.train.dataset()] together with [resolve.dataset.csv()] —
-#' that pair uses the C++ engine end-to-end (no R-side encoding step)
-#' and is the supported training path.
-#'
-#' @param ... Ignored; preserved for argument compatibility with the
-#'   pre-removal signature so existing call sites surface a clear error
-#'   instead of an "unused argument" message.
-#'
-#' @return Never returns; always errors.
-#'
-#' @export
-resolve.train <- function(...) {
-  stop(
-    "resolve.train() has been removed.\n",
-    "It consumed the legacy resolve.dataset() output, which is no longer ",
-    "supported (see ?resolve.encoder for the underlying C++ refactor).\n",
-    "Use resolve.dataset.csv() to load and encode in the C++ engine, then ",
-    "train with resolve.train.dataset()."
-  )
-}
-
-
-#' Predict with a RESOLVE Model (legacy facade — removed)
-#'
-#' The legacy `resolve.predict()` facade consumed `resolve.dataset()`
-#' output (a plain R list with `hashEmbedding` / `genusIds` etc.) which
-#' is no longer produced — see [resolve.encoder()] for the underlying
-#' engine change.
-#'
-#' Calling `resolve.predict()` therefore raises an error. Use
-#' [resolve.predict.dataset()] together with [resolve.dataset.csv()]
-#' and a `Predictor` loaded via [resolve.load()].
-#'
-#' @param ... Ignored; preserved for argument compatibility with the
-#'   pre-removal signature so existing call sites surface a clear error
-#'   instead of an "unused argument" message.
-#'
-#' @return Never returns; always errors.
-#'
-#' @export
-resolve.predict <- function(...) {
-  stop(
-    "resolve.predict() has been removed.\n",
-    "It consumed the legacy resolve.dataset() output, which is no longer ",
-    "supported (see ?resolve.encoder for the underlying C++ refactor).\n",
-    "Use resolve.dataset.csv() + resolve.predict.dataset() with a Predictor ",
-    "loaded via resolve.load()."
-  )
-}
-
-
 #' Is the resolve_c backend available?
 #'
 #' The R package is a thin client over the `resolve_c` shared library (the C ABI
@@ -305,12 +177,21 @@ resolve.install_backend <- function(version = NULL,
 #'   loading onto CUDA (default 1.0). Pass a lower value (e.g. 0.80) when sharing
 #'   the GPU with a desktop / GUI to leave headroom.
 #'
-#' @return A Predictor object
+#' @return A `Predictor` object (an Rcpp module class) exposing the loaded
+#'   model. Pass it to [resolve.predict.dataset()] to score a dataset built
+#'   from its vocabularies (`predictor$vocabs()`), or read its `schema()` /
+#'   `dataset_config()` to see what the checkpoint expects.
 #'
 #' @examples
 #' \dontrun{
 #' predictor <- resolve.load("model.pt")
-#' preds <- resolve.predict(predictor, newData)
+#' dataset <- resolve.dataset.csv(
+#'   header = "new_plots.csv", species = "new_species.csv",
+#'   roles = list(plot_id = "plot_id", species_id = "species"),
+#'   targets = list(),
+#'   vocabs = predictor$vocabs(), config = predictor$dataset_config()
+#' )
+#' preds <- resolve.predict.dataset(predictor, dataset)
 #' }
 #'
 #' @export
@@ -331,7 +212,7 @@ resolve.load <- function(path, device = "cpu", vram_fraction = 1.0) {
   }
 
   .resolve_require_backend()
-  .resolve_module$Predictor_load(path, device, vram_fraction)
+  .resolve_module()$Predictor_load(path, device, vram_fraction)
 }
 
 
@@ -362,7 +243,7 @@ resolve.load_train_config <- function(path) {
     stop(sprintf("checkpoint file does not exist: %s", path))
   }
   .resolve_require_backend()
-  .resolve_module$Trainer_load_train_config(path)
+  .resolve_module()$Trainer_load_train_config(path)
 }
 
 
@@ -390,21 +271,26 @@ resolve.load_run_metadata <- function(path) {
     stop(sprintf("checkpoint file does not exist: %s", path))
   }
   .resolve_require_backend()
-  .resolve_module$Trainer_load_run_metadata(path)
+  .resolve_module()$Trainer_load_run_metadata(path)
 }
 
 
 #' Save a Trained RESOLVE Model
 #'
-#' Save model checkpoint.
+#' Write a trained model, its scalers and its vocabularies to a checkpoint
+#' file that [resolve.load()] reads back.
 #'
-#' @param trainer A trained Trainer object (from resolve.train())
-#' @param path Path to save checkpoint
+#' @param trainer The list returned by [resolve.train.dataset()], or the
+#'   `Trainer` object it carries.
+#' @param path Path of the checkpoint file to write.
+#'
+#' @return No return value, called for its side effect of writing the
+#'   checkpoint to `path`.
 #'
 #' @examples
 #' \dontrun{
-#' result <- resolve.train(dataset)
-#' resolve.save(result, "model_checkpoint.pt")
+#' fit <- resolve.train.dataset(dataset)
+#' resolve.save(fit, file.path(tempdir(), "model.pt"))
 #' }
 #'
 #' @export
@@ -417,28 +303,36 @@ resolve.save <- function(trainer, path) {
   } else if (inherits(trainer, "Rcpp_Trainer") || inherits(trainer, "Rcpp_RTrainer")) {
     trainer$save(path, NULL)
   } else {
-    stop("trainer must be a Trainer object or result from resolve.train()")
+    stop("trainer must be a Trainer object or the result of resolve.train.dataset()")
   }
+  invisible(NULL)
 }
 
 
 #' Check Training Progress
 #'
-#' Read progress from a checkpoint directory.
+#' Read the `progress.json` file that a training run with a checkpoint
+#' directory (`checkpointDir` in [resolve.train.dataset()]) updates after
+#' every checkpoint, so a long run can be followed from another R session.
 #'
-#' @param checkpointDir Path to checkpoint directory
+#' @param checkpointDir Path to the checkpoint directory of a training run.
 #'
-#' @return A list with progress information, or NULL if no checkpoint exists
+#' @return A named list with the fields of the progress file (the current
+#'   `epoch`, `maxEpochs`, the percentage `progressPct`, and the latest
+#'   losses), or `NULL` when the directory holds no progress file yet.
 #'
 #' @examples
-#' \dontrun{
-#' progress <- resolve.progress("checkpoints/my_model")
-#' if (!is.null(progress)) {
-#'   cat(sprintf("Epoch %d/%d (%.1f%%)\n",
-#'     progress$epoch, progress$maxEpochs,
-#'     progress$progressPct))
-#' }
-#' }
+#' # No run has written to this directory, so there is no progress to report.
+#' resolve.progress(tempdir())
+#'
+#' # A progress file as a training run writes it.
+#' dir <- file.path(tempdir(), "resolve-progress-example")
+#' dir.create(dir, showWarnings = FALSE)
+#' writeLines('{"epoch": 12, "maxEpochs": 100, "progressPct": 12.0}',
+#'            file.path(dir, "progress.json"))
+#' progress <- resolve.progress(dir)
+#' progress$epoch
+#' unlink(dir, recursive = TRUE)
 #'
 #' @export
 resolve.progress <- function(checkpointDir) {
@@ -589,7 +483,7 @@ resolve.dataset.csv <- function(header,
   # lookup tables are indexed with the right namespace.
   if (!is.null(schemaSource)) {
     .resolve_require_backend()
-    return(.resolve_module$ResolveDataset_from_csv_with_schema(
+    return(.resolve_module()$ResolveDataset_from_csv_with_schema(
       header_path = header,
       species_path = species,
       roles_list = roles,
@@ -602,7 +496,7 @@ resolve.dataset.csv <- function(header,
   # Same reuse, sourced from a checkpoint's vocabularies (issue #102).
   if (!is.null(vocabs)) {
     .resolve_require_backend()
-    return(.resolve_module$ResolveDataset_from_csv_with_vocabs(
+    return(.resolve_module()$ResolveDataset_from_csv_with_vocabs(
       header_path = header,
       species_path = species,
       roles_list = roles,
@@ -614,7 +508,7 @@ resolve.dataset.csv <- function(header,
 
   # Call C++ implementation
   .resolve_require_backend()
-  .resolve_module$ResolveDataset_from_csv(
+  .resolve_module()$ResolveDataset_from_csv(
     header_path = header,
     species_path = species,
     roles_list = roles,
@@ -791,7 +685,7 @@ resolve.dataset.frame <- function(header,
     }
     cols <- .resolve_df_to_columns(header, "header/species frame")
     if (!is.null(vocabs)) {
-      return(.resolve_module$ResolveDataset_from_species_dataframe_with_vocabs(
+      return(.resolve_module()$ResolveDataset_from_species_dataframe_with_vocabs(
         species_cols = cols,
         roles_list = roles,
         targets_list = targets,
@@ -799,7 +693,7 @@ resolve.dataset.frame <- function(header,
         config_list = config
       ))
     }
-    return(.resolve_module$ResolveDataset_from_species_dataframe(
+    return(.resolve_module()$ResolveDataset_from_species_dataframe(
       species_cols = cols,
       roles_list = roles,
       targets_list = targets,
@@ -823,7 +717,7 @@ resolve.dataset.frame <- function(header,
     if (!file.exists(species)) {
       stop(sprintf("species file does not exist: %s", species))
     }
-    return(.resolve_module$ResolveDataset_from_dataframe_header(
+    return(.resolve_module()$ResolveDataset_from_dataframe_header(
       header_cols = header_cols,
       species_path = species,
       roles_list = roles,
@@ -835,7 +729,7 @@ resolve.dataset.frame <- function(header,
   # Both frames in memory.
   species_cols <- .resolve_df_to_columns(species, "species")
   if (!is.null(schemaSource)) {
-    return(.resolve_module$ResolveDataset_from_dataframe_with_schema(
+    return(.resolve_module()$ResolveDataset_from_dataframe_with_schema(
       header_cols = header_cols,
       species_cols = species_cols,
       roles_list = roles,
@@ -845,7 +739,7 @@ resolve.dataset.frame <- function(header,
     ))
   }
   if (!is.null(vocabs)) {
-    return(.resolve_module$ResolveDataset_from_dataframe_with_vocabs(
+    return(.resolve_module()$ResolveDataset_from_dataframe_with_vocabs(
       header_cols = header_cols,
       species_cols = species_cols,
       roles_list = roles,
@@ -854,7 +748,7 @@ resolve.dataset.frame <- function(header,
       config_list = config
     ))
   }
-  .resolve_module$ResolveDataset_from_dataframe(
+  .resolve_module()$ResolveDataset_from_dataframe(
     header_cols = header_cols,
     species_cols = species_cols,
     roles_list = roles,
@@ -1070,7 +964,7 @@ resolve.train.dataset <- function(dataset,
   )
 
   # Create model
-  model <- new(.resolve_module$ResolveModel, schema, modelConfig)
+  model <- new(.resolve_module()$ResolveModel, schema, modelConfig)
 
   # Build train config
   trainConfig <- list(
@@ -1086,7 +980,7 @@ resolve.train.dataset <- function(dataset,
   )
 
   # Create trainer
-  trainer <- new(.resolve_module$Trainer, model, trainConfig)
+  trainer <- new(.resolve_module()$Trainer, model, trainConfig)
 
   # Prepare data from dataset (C++ API)
   trainer$prepare_data_from_dataset(dataset, testSize, as.integer(seed))

@@ -382,14 +382,13 @@ test_that("resolve.predict.dataset rejects invalid dataset type", {
 test_that("all exported R wrapper functions exist", {
   ns <- asNamespace("resolve")
 
-  # Legacy facades retained as stub errors (so explicit "removed" messages
-  # show up at call time, rather than "could not find function").
-  expect_true(exists("resolve.encoder", envir = ns))
-  expect_true(exists("resolve.dataset", envir = ns))
-  expect_true(exists("resolve.train", envir = ns))
-  expect_true(exists("resolve.predict", envir = ns))
+  # The pre-engine facades (resolve.encoder / .dataset / .train / .predict)
+  # are gone, not stubbed: the package exports only what it implements.
+  expect_false(exists("resolve.encoder", envir = ns))
+  expect_false(exists("resolve.dataset", envir = ns))
+  expect_false(exists("resolve.train", envir = ns))
+  expect_false(exists("resolve.predict", envir = ns))
 
-  # Live API.
   expect_true(exists("resolve.load", envir = ns))
   expect_true(exists("resolve.save", envir = ns))
   expect_true(exists("resolve.progress", envir = ns))

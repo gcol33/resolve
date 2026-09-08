@@ -16,7 +16,10 @@ loading onto CUDA (default 1.0). Pass a lower value (e.g. 0.80) when sharing
 the GPU with a desktop / GUI to leave headroom.}
 }
 \value{
-A Predictor object
+A \code{Predictor} object (an Rcpp module class) exposing the loaded
+model. Pass it to \code{\link[=resolve.predict.dataset]{resolve.predict.dataset()}} to score a dataset built
+from its vocabularies (\code{predictor$vocabs()}), or read its \code{schema()} /
+\code{dataset_config()} to see what the checkpoint expects.
 }
 \description{
 Load a model from a saved checkpoint.
@@ -24,7 +27,13 @@ Load a model from a saved checkpoint.
 \examples{
 \dontrun{
 predictor <- resolve.load("model.pt")
-preds <- resolve.predict(predictor, newData)
+dataset <- resolve.dataset.csv(
+  header = "new_plots.csv", species = "new_species.csv",
+  roles = list(plot_id = "plot_id", species_id = "species"),
+  targets = list(),
+  vocabs = predictor$vocabs(), config = predictor$dataset_config()
+)
+preds <- resolve.predict.dataset(predictor, dataset)
 }
 
 }

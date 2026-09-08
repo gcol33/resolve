@@ -7,22 +7,29 @@
 resolve.progress(checkpointDir)
 }
 \arguments{
-\item{checkpointDir}{Path to checkpoint directory}
+\item{checkpointDir}{Path to the checkpoint directory of a training run.}
 }
 \value{
-A list with progress information, or NULL if no checkpoint exists
+A named list with the fields of the progress file (the current
+\code{epoch}, \code{maxEpochs}, the percentage \code{progressPct}, and the latest
+losses), or \code{NULL} when the directory holds no progress file yet.
 }
 \description{
-Read progress from a checkpoint directory.
+Read the \code{progress.json} file that a training run with a checkpoint
+directory (\code{checkpointDir} in \code{\link[=resolve.train.dataset]{resolve.train.dataset()}}) updates after
+every checkpoint, so a long run can be followed from another R session.
 }
 \examples{
-\dontrun{
-progress <- resolve.progress("checkpoints/my_model")
-if (!is.null(progress)) {
-  cat(sprintf("Epoch \%d/\%d (\%.1f\%\%)\n",
-    progress$epoch, progress$maxEpochs,
-    progress$progressPct))
-}
-}
+# No run has written to this directory, so there is no progress to report.
+resolve.progress(tempdir())
+
+# A progress file as a training run writes it.
+dir <- file.path(tempdir(), "resolve-progress-example")
+dir.create(dir, showWarnings = FALSE)
+writeLines('{"epoch": 12, "maxEpochs": 100, "progressPct": 12.0}',
+           file.path(dir, "progress.json"))
+progress <- resolve.progress(dir)
+progress$epoch
+unlink(dir, recursive = TRUE)
 
 }

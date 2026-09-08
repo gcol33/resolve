@@ -31,17 +31,17 @@ package is a thin client over the C++ engine.
 
 ## Installation
 
-The R package itself is small and has no heavy dependencies. Install it, then
-fetch the `resolve_c` backend (the C ABI over the engine, which bundles
-libtorch) once with `resolve.install_backend()` -- the same delayed-binary model
-the `torch` package uses:
+The R package itself is small and has no heavy dependencies. Install it from
+CRAN with `install.packages("resolve")`, then fetch the `resolve_c` backend
+(the C ABI over the engine, which bundles libtorch) once with
+`resolve.install_backend()`, the same delayed-binary model the `torch` package
+uses. The backend is written to the package's user data directory
+(`tools::R_user_dir("resolve", "data")`) and only when you call the function:
 
 ```{r install}
-remotes::install_github("gcol33/resolve", subdir = "r")
-
 library(resolve)
 resolve.install_backend()          # downloads the CPU backend on first use
-# resolve.install_backend(variant = "cuda")   # GPU build, where published
+resolve.install_backend(variant = "cuda")   # or the GPU build, where published
 
 resolve.available()                # TRUE once the backend is loaded
 ```

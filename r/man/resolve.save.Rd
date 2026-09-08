@@ -7,17 +7,23 @@
 resolve.save(trainer, path)
 }
 \arguments{
-\item{trainer}{A trained Trainer object (from resolve.train())}
+\item{trainer}{The list returned by \code{\link[=resolve.train.dataset]{resolve.train.dataset()}}, or the
+\code{Trainer} object it carries.}
 
-\item{path}{Path to save checkpoint}
+\item{path}{Path of the checkpoint file to write.}
+}
+\value{
+No return value, called for its side effect of writing the
+checkpoint to \code{path}.
 }
 \description{
-Save model checkpoint.
+Write a trained model, its scalers and its vocabularies to a checkpoint
+file that \code{\link[=resolve.load]{resolve.load()}} reads back.
 }
 \examples{
 \dontrun{
-result <- resolve.train(dataset)
-resolve.save(result, "model_checkpoint.pt")
+fit <- resolve.train.dataset(dataset)
+resolve.save(fit, file.path(tempdir(), "model.pt"))
 }
 
 }
