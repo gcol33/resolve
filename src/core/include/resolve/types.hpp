@@ -15,7 +15,7 @@ namespace resolve {
 // Version and constants
 // =============================================================================
 
-inline constexpr const char* VERSION = "0.9.1";
+inline constexpr const char* VERSION = "0.10.0";
 
 // Training defaults
 constexpr int kDefaultBatchSize = 4096;
