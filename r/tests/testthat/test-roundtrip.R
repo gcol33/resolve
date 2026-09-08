@@ -91,6 +91,82 @@ test_that("train -> save -> load -> predict round trip recovers a signal", {
   expect_gt(cor(pred_y, y), 0.9)
 })
 
+# A classification target's `probabilities` entry (issue #117) is the softmax
+# row the predicted code was taken from: n_plots x n_classes, rows summing to
+# one, columns named by the class labels in code order, and the row-wise
+# argmax (0-based) equal to `predictions`. A regression target has no entry.
+test_that("predict_dataset returns named class probabilities for a classification target", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  header_file <- tempfile(fileext = ".csv")
+  species_file <- tempfile(fileext = ".csv")
+  model_file <- tempfile(fileext = ".pt")
+  on.exit({
+    unlink(header_file)
+    unlink(species_file)
+    unlink(model_file)
+    unlink(sub("\\.pt$", ".json", model_file))
+  }, add = TRUE)
+
+  n <- 240L
+  c1 <- sin(seq_len(n) * 0.13)
+  labels <- c("forest", "grass", "scrub")
+  hab <- labels[1L + (seq_len(n) %% 3L)]
+
+  write.csv(data.frame(
+    plot_id = paste0("P", seq_len(n)),
+    cov1 = c1,
+    y = 2.0 * c1 + 1.0,
+    hab = hab,
+    stringsAsFactors = FALSE
+  ), header_file, row.names = FALSE)
+  write.csv(data.frame(
+    plot_id = paste0("P", seq_len(n)),
+    species_id = paste0("sp", seq_len(n) %% 6L),
+    cover = 1.0,
+    stringsAsFactors = FALSE
+  ), species_file, row.names = FALSE)
+
+  dataset <- resolve.dataset.csv(
+    header = header_file, species = species_file,
+    roles = list(plot_id = "plot_id", species_id = "species_id",
+                 abundance = "cover", covariates = c("cov1")),
+    targets = list(
+      y = list(column = "y", task = "regression"),
+      hab = list(column = "hab", task = "classification", num_classes = 3)
+    ),
+    config = list(species_encoding = "hash", hash_dim = 4, top_k = 2)
+  )
+
+  resolve.train.dataset(
+    dataset, hiddenDims = c(16L, 8L), maxEpochs = 5L, patience = 5L,
+    lr = 1e-2, batchSize = 32L, testSize = 0.25, seed = 3L,
+    savePath = model_file, verbose = FALSE
+  )
+  predictor <- resolve.load(model_file, device = "cpu")
+
+  for (batch_size in c(-1L, 32L)) {
+    preds <- resolve.predict.dataset(predictor, dataset, batchSize = batch_size)
+
+    expect_equal(names(preds$probabilities), "hab")
+    probs <- preds$probabilities$hab
+    expect_true(is.matrix(probs))
+    expect_equal(dim(probs), c(n, 3L))
+    # The loader factorizes sorted-unique labels, so code k is labels[k + 1].
+    expect_equal(colnames(probs), labels)
+    expect_true(all(probs >= 0 & probs <= 1))
+    expect_equal(rowSums(probs), rep(1, n), tolerance = 1e-5)
+
+    codes <- as.integer(preds$predictions$hab)
+    expect_equal(apply(probs, 1L, which.max) - 1L, codes)
+  }
+
+  one_shot <- resolve.predict.dataset(predictor, dataset, batchSize = -1L)
+  chunked <- resolve.predict.dataset(predictor, dataset, batchSize = 32L)
+  expect_equal(chunked$probabilities$hab, one_shot$probabilities$hab, tolerance = 1e-5)
+})
+
 test_that("load_train_config round-trips the training hyperparameters", {
   skip_if_no_backend()
   skip_on_cran()

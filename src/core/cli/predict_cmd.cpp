@@ -31,6 +31,16 @@ std::string csv_field(const std::string& s) {
     return out;
 }
 
+// The label a class code prints as: the original CSV label when the checkpoint
+// carries the class vocabulary (persisted since #76), otherwise the code
+// itself (a pre-#76 checkpoint, or a column that was already integer-coded).
+std::string class_label(const resolve::TargetConfig& target, int64_t code) {
+    const bool in_vocab =
+        code >= 0 && code < static_cast<int64_t>(target.class_names.size());
+    return in_vocab ? target.class_names[static_cast<size_t>(code)]
+                    : std::to_string(code);
+}
+
 }  // namespace
 
 int predict_command(const ParsedArgs& args) {
@@ -41,6 +51,7 @@ int predict_command(const ParsedArgs& args) {
     const std::string species_path = args.get("--species");
     const std::string output_path = args.get("--output");
     const int64_t predict_batch_size = args.get_int64("--predict-batch-size");
+    const bool write_probabilities = args.has("--probabilities");
 
     // Validate required arguments
     if (model_path.empty()) {
@@ -219,13 +230,24 @@ int predict_command(const ParsedArgs& args) {
     // Emitting the code alone forced every user to reconstruct the mapping by
     // hand; emitting the label alone would lose the code an already-integer
     // column carries.
+    //
+    // With --probabilities a classification target additionally gets one
+    // column per class, '<target>_prob_<class>' in code order, carrying the
+    // softmax row the code was taken from (issue #117).
     out << "plot_id";
     bool wrote_labels = false;
+    bool wrote_probabilities = false;
     for (const auto& target : schema.targets) {
         out << "," << csv_field(target.name);
         if (target.task == TaskType::Classification) {
             out << "," << csv_field(target.name + "_code");
             if (!target.class_names.empty()) wrote_labels = true;
+            if (write_probabilities) {
+                for (int64_t k = 0; k < target.num_classes; ++k) {
+                    out << "," << csv_field(target.name + "_prob_" + class_label(target, k));
+                }
+                wrote_probabilities = true;
+            }
         }
     }
     out << "\n";
@@ -236,19 +258,24 @@ int predict_command(const ParsedArgs& args) {
 
         for (const auto& target : schema.targets) {
             auto it = predictions.predictions.find(target.name);
+            const bool is_classification = target.task == TaskType::Classification;
+            const int64_t n_prob_columns =
+                (is_classification && write_probabilities) ? target.num_classes : 0;
             if (it == predictions.predictions.end()) {
-                out << (target.task == TaskType::Classification ? ",NA,NA" : ",NA");
+                out << (is_classification ? ",NA,NA" : ",NA");
+                for (int64_t k = 0; k < n_prob_columns; ++k) out << ",NA";
                 continue;
             }
-            if (target.task == TaskType::Classification) {
+            if (is_classification) {
                 const int64_t code = it->second[i].item<int64_t>();
-                const bool in_vocab =
-                    code >= 0 &&
-                    code < static_cast<int64_t>(target.class_names.size());
-                out << "," << (in_vocab ? csv_field(target.class_names[
-                                              static_cast<size_t>(code)])
-                                        : std::to_string(code));
+                out << "," << csv_field(class_label(target, code));
                 out << "," << code;
+                if (n_prob_columns > 0) {
+                    const auto& probs = predictions.probabilities.at(target.name);
+                    for (int64_t k = 0; k < n_prob_columns; ++k) {
+                        out << "," << probs[i][k].item<float>();
+                    }
+                }
             } else {
                 out << "," << it->second[i].item<float>();
             }
@@ -262,6 +289,11 @@ int predict_command(const ParsedArgs& args) {
     if (wrote_labels) {
         std::cout << "Classification targets are written as two columns: "
                      "'<target>' (class label) and '<target>_code' (integer code)."
+                  << std::endl;
+    }
+    if (wrote_probabilities) {
+        std::cout << "Class probabilities are written as one column per class: "
+                     "'<target>_prob_<class>', in code order."
                   << std::endl;
     }
 

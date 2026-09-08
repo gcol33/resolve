@@ -1147,13 +1147,22 @@ resolve.train.dataset <- function(dataset,
 #'   positive value chunks the forward and concatenates results on CPU to bound
 #'   peak VRAM. Matches the Python `batch_size` argument.
 #'
-#' @return Named list of prediction arrays
+#' @return A list with \code{predictions} (one numeric vector per target: a
+#'   regression value on the original scale, or a classification target's
+#'   predicted class code), \code{probabilities} (one numeric matrix per
+#'   classification target, \code{n_plots x n_classes}, each row the softmax
+#'   over the classes and summing to one; the columns are named by the class
+#'   labels the checkpoint carries, in code order), \code{targets} (the
+#'   dataset's own target values, when it carried them), \code{plot_ids}, and
+#'   \code{latent} when \code{returnLatent} is \code{TRUE}.
 #'
 #' @examples
 #' \dontrun{
 #' predictor <- resolve.load("model.pt")
 #' dataset <- resolve.dataset.csv(...)
 #' preds <- resolve.predict.dataset(predictor, dataset)
+#' preds$predictions$habitat            # predicted class code per plot
+#' preds$probabilities$habitat[1, ]     # that plot's probability over classes
 #' }
 #'
 #' @export
@@ -1167,5 +1176,16 @@ resolve.predict.dataset <- function(predictor, dataset, returnLatent = FALSE,
   }
 
   .resolve_require_backend()
-  predictor$predict_dataset(dataset, returnLatent, as.integer(batchSize))
+  preds <- predictor$predict_dataset(dataset, returnLatent, as.integer(batchSize))
+
+  # Column j of a probability matrix is P(class code j - 1); name the columns
+  # by the labels the checkpoint carries so a row reads without the schema.
+  schema_targets <- predictor$schema()$targets
+  for (target in names(preds$probabilities)) {
+    labels <- schema_targets[[target]]$class_names
+    if (length(labels) == ncol(preds$probabilities[[target]])) {
+      colnames(preds$probabilities[[target]]) <- labels
+    }
+  }
+  preds
 }

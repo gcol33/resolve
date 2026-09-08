@@ -73,6 +73,13 @@ public:
     // the vocabulary SIZES, so only those can be compared; `load()` warns once
     // in that case.
     //
+    // The result carries one `predictions` entry per target (a regression
+    // value on the original scale, or a classification target's argmax code)
+    // and, for every classification target, a `probabilities` entry holding
+    // the softmax row `(n_plots, n_classes)` the code was taken from, so a
+    // caller can read a per-plot confidence (max probability, margin,
+    // entropy) off a checkpoint scored on any dataset.
+    //
     // `batch_size` controls how the forward pass is chunked along dim 0:
     //   -1  : single forward pass over the whole dataset (legacy behavior).
     //          Maximum throughput, but allocates O(n_plots * hidden) of

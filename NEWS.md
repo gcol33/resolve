@@ -1,5 +1,30 @@
 # RESOLVE Changelog
 
+## v0.10.0 (unreleased)
+
+### Added
+
+- **Class probabilities from the Predictor (#117).** `Predictor::predict`
+  returned a classification target's argmax code and discarded the softmax
+  row behind it, so a checkpoint scored on a separately staged test set had no
+  per-plot confidence; only `Trainer::compute_classification_predictions`
+  exposed probabilities, and only for the trainer's own held-out fold.
+  `ResolvePredictions` now carries `probabilities`: one float
+  `(n_plots, n_classes)` tensor per classification target, each row the
+  softmax over the classes, column `j` = P(class code `j`), row-wise argmax
+  equal to `predictions`. Both the one-shot and the chunked predict path fill
+  it; regression targets have no entry. Surfaces: nanobind
+  `ResolvePredictions.probabilities`; the C-ABI predictions tree gains a
+  `probabilities` map of row-major double matrices; R
+  `resolve.predict.dataset()` returns it under `$probabilities`, with the
+  columns named by the checkpoint's class labels; CLI
+  `resolve predict --probabilities` writes one column per class,
+  `<target>_prob_<class>` in code order, after `<target>_code`. Contract in
+  `tests/test_predictor.cpp`, `tests/core/test_predictor.py`,
+  `r/tests/testthat/test-roundtrip.R`, and a `cli-e2e` step. Not a cutover:
+  no checkpoint field or tensor shape changed, and every existing accessor
+  is unchanged.
+
 ## v0.9.1 (2026-09-01)
 
 ### Fixed

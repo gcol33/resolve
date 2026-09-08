@@ -302,6 +302,7 @@ ResolvePredictions Predictor::predict(
 
     // Per-target lists of CPU chunks to concatenate at the end.
     std::unordered_map<std::string, std::vector<torch::Tensor>> pred_chunks;
+    std::unordered_map<std::string, std::vector<torch::Tensor>> prob_chunks;
     std::vector<torch::Tensor> latent_chunks;
 
     for (int64_t start = 0; start < n; start += batch_size) {
@@ -329,6 +330,9 @@ ResolvePredictions Predictor::predict(
         for (auto& [name, tensor] : chunk.predictions) {
             pred_chunks[name].push_back(tensor.detach().to(torch::kCPU));
         }
+        for (auto& [name, tensor] : chunk.probabilities) {
+            prob_chunks[name].push_back(tensor.detach().to(torch::kCPU));
+        }
         if (return_latent && chunk.latent.defined()) {
             latent_chunks.push_back(chunk.latent.detach().to(torch::kCPU));
         }
@@ -337,6 +341,9 @@ ResolvePredictions Predictor::predict(
     ResolvePredictions result;
     for (auto& [name, chunks] : pred_chunks) {
         result.predictions[name] = torch::cat(chunks, /*dim=*/0);
+    }
+    for (auto& [name, chunks] : prob_chunks) {
+        result.probabilities[name] = torch::cat(chunks, /*dim=*/0);
     }
     if (return_latent && !latent_chunks.empty()) {
         result.latent = torch::cat(latent_chunks, /*dim=*/0);
@@ -434,8 +441,12 @@ ResolvePredictions Predictor::predict(
         auto pred = out_it->second;
 
         if (cfg.task == TaskType::Classification) {
-            // Return class predictions
-            result.predictions[cfg.name] = torch::argmax(pred, /*dim=*/1);
+            // The head emits logits; the softmax row is the per-class
+            // probability and its argmax the predicted code, so the two
+            // outputs agree by construction.
+            auto probs = torch::softmax(pred, /*dim=*/1);
+            result.probabilities[cfg.name] = probs;
+            result.predictions[cfg.name] = torch::argmax(probs, /*dim=*/1);
         } else {
             // Unscale and inverse transform
             pred = pred.squeeze(-1);

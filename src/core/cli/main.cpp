@@ -50,7 +50,9 @@ Pass --help after a subcommand for that command's flags only.
   target gets TWO columns: <target> carries the original class label from the
   checkpoint's class vocabulary (the integer code when the checkpoint has no
   label vocabulary, or the column was already integer-coded) and <target>_code
-  always carries the integer code the model predicted.
+  always carries the integer code the model predicted. With --probabilities it
+  also gets one column per class, <target>_prob_<class> in code order, holding
+  the class probabilities the code was taken from (they sum to one per row).
 
 Examples:
   resolve train --header plots.csv --species occurrences.csv \

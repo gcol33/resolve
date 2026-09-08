@@ -854,7 +854,14 @@ struct RunMetadata {
 
 // Predictions output
 struct ResolvePredictions {
+    // One entry per target. A regression target holds a float `(n)` tensor on
+    // the original scale; a classification target holds the int64 `(n)` argmax
+    // class code.
     std::unordered_map<std::string, torch::Tensor> predictions;
+    // Softmax rows behind each classification target: float `(n, n_classes)`,
+    // each row summing to one, column j = P(class code j). Regression targets
+    // have no entry.
+    std::unordered_map<std::string, torch::Tensor> probabilities;
     std::unordered_map<std::string, torch::Tensor> targets;  // actual target values
     std::vector<std::string> plot_ids;
     torch::Tensor latent;    // optional latent representations

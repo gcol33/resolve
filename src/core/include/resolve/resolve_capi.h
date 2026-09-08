@@ -408,7 +408,10 @@ RESOLVE_CAPI void resolve_predictor_free(resolve_predictor_t* p);
 /* Raw-tensor predict. `inputs` MAP carries coordinates/covariates/
  * hash_embedding + optional species_ids/species_vector/genus_ids/family_ids/
  * unknown_fraction/unknown_count/pool fields/categorical_ids. Returns a MAP
- * with "predictions", "targets", "plot_ids" and (if return_latent) "latent". */
+ * with "predictions" (name -> DOUBLE_ARRAY), "probabilities" (one
+ * DOUBLE_MATRIX `(n_plots, n_classes)` of softmax rows per classification
+ * target; empty MAP when there is none), "targets", "plot_ids" and (if
+ * return_latent) "latent". */
 RESOLVE_CAPI resolve_value_t* resolve_predictor_predict(
     resolve_predictor_t* p, const resolve_value_t* inputs, int return_latent);
 

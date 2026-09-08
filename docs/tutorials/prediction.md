@@ -69,6 +69,18 @@ original class label the model was trained on, and `<target>_code` the integer
 code it predicted. A checkpoint that has no class vocabulary (an
 already-integer-coded column) repeats the code in both.
 
+Pass `--probabilities` to append the class probabilities behind each code, one
+column per class in code order:
+
+```
+plot_id,area,habitat,habitat_code,habitat_prob_Grassland,habitat_prob_Heath,habitat_prob_Forest
+P001,125.3,Forest,2,0.07,0.11,0.82
+P002,340.1,Grassland,0,0.64,0.30,0.06
+```
+
+The columns of one target sum to one per row and the largest is the predicted
+class.
+
 The CLI builds its dataset from the checkpoint's own species, taxonomy, and
 categorical vocabularies, so the codes it feeds the model mean what they meant
 at training time. Building a dataset for inference yourself needs the same:
@@ -86,6 +98,28 @@ freshly-fitted vocabulary assigns different integer codes to the same species
 and the model would read the wrong embedding rows.
 
 ## Prediction Options
+
+### Class Probabilities
+
+Every classification target comes with the softmax row its predicted code was
+taken from, in `predictions.probabilities`:
+
+```python
+predictions = predictor.predict_dataset(dataset)
+
+codes = predictions.predictions["habitat"]          # int64 (n_plots,)
+probs = predictions.probabilities["habitat"]         # float (n_plots, n_classes)
+assert (probs.argmax(dim=1) == codes).all()
+
+confidence = probs.max(dim=1).values                 # max softmax per plot
+reliable = confidence > 0.8
+```
+
+Column `j` is the probability of class code `j`; the matching entry of
+`schema.targets[i].class_names` names it. The
+rows are computed on the dataset being scored, which is what a coverage or
+calibration analysis on a held-out set needs. Regression targets have no
+entry.
 
 ### Include Latent Representations
 

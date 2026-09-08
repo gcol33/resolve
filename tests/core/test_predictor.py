@@ -71,6 +71,56 @@ def test_chunked_prediction_matches_the_one_shot_forward(saved_model, fitted_tra
                 rtol=1e-5,
                 atol=1e-6,
             ), f"{target} differs at batch_size={batch_size}"
+        assert set(chunked.probabilities) == set(one_shot.probabilities)
+        for target in one_shot.probabilities:
+            assert torch.allclose(
+                chunked.probabilities[target],
+                one_shot.probabilities[target],
+                rtol=1e-5,
+                atol=1e-6,
+            ), f"{target} probabilities differ at batch_size={batch_size}"
+
+
+# ---------------------------------------------------------------------------
+# Class probabilities (issue #117)
+# ---------------------------------------------------------------------------
+
+def test_classification_targets_carry_softmax_probabilities(saved_model, fitted_trainer):
+    """A classification target's probabilities are the softmax rows its code
+    was taken from; a regression target has none."""
+    predictor = rc.Predictor.load(saved_model, device="cpu")
+    dataset = fitted_trainer.dataset
+    out = predictor.predict_dataset(dataset, False, 64)
+
+    assert set(out.probabilities) == {"hab"}
+    probs = out.probabilities["hab"]
+    assert probs.dtype == torch.float32
+    assert probs.shape == (dataset.n_plots, 3)
+    assert bool((probs >= 0).all()) and bool((probs <= 1).all())
+    assert torch.allclose(probs.sum(dim=1), torch.ones(dataset.n_plots), atol=1e-5)
+    assert torch.equal(probs.argmax(dim=1), out.predictions["hab"])
+
+
+def test_probabilities_match_the_trainers_own_test_fold(saved_model, fitted_trainer):
+    """The reloaded checkpoint's softmax rows equal the ones the trainer
+    computes for its held-out fold, so the two evaluation surfaces agree."""
+    trainer, dataset = fitted_trainer.trainer, fitted_trainer.dataset
+    reference = trainer.compute_classification_predictions("hab")
+
+    predictor = rc.Predictor.load(saved_model, device="cpu")
+    out = predictor.predict_dataset(dataset, False, 64)
+
+    test_idx = trainer.test_indices().tolist()
+    np.testing.assert_allclose(
+        out.probabilities["hab"].numpy()[test_idx],
+        np.asarray(reference.probabilities),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    np.testing.assert_array_equal(
+        out.predictions["hab"].numpy()[test_idx],
+        np.asarray(reference.predicted_classes),
+    )
 
 
 def test_invalid_batch_size_is_rejected(saved_model, fitted_trainer):

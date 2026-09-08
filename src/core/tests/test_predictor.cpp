@@ -57,12 +57,17 @@ private:
 };
 int TempFile::counter_ = 0;
 
+// The three habitat labels of the synthetic dataset, in the sorted order the
+// loader factorizes them (so label k has class code k).
+const std::vector<std::string> kHabitatLabels = {"forest", "grass", "scrub"};
+
 // Build a synthetic ResolveDataset with `n_plots` rows, two covariates,
-// lat/lon, and a hash species column with one species per plot. Used to
-// exercise the chunked predict path against deterministic data.
+// lat/lon, a hash species column with one species per plot, a regression
+// target `y` and a three-class label target `hab`. Used to exercise the
+// chunked predict path against deterministic data.
 ResolveDataset make_synthetic_dataset(int64_t n_plots) {
     std::ostringstream hdr;
-    hdr << "plot_id,lat,lon,cov1,cov2,y\n";
+    hdr << "plot_id,lat,lon,cov1,cov2,y,hab\n";
     std::ostringstream spc;
     spc << "plot_id,sp,cover\n";
     for (int64_t i = 0; i < n_plots; ++i) {
@@ -74,7 +79,8 @@ ResolveDataset make_synthetic_dataset(int64_t n_plots) {
         double c2 = static_cast<double>(i % 11) * 0.9;
         double y = c1 + c2;
         hdr << "P" << i << "," << lat << "," << lon << ","
-            << c1 << "," << c2 << "," << y << "\n";
+            << c1 << "," << c2 << "," << y << ","
+            << kHabitatLabels[static_cast<size_t>(i % 3)] << "\n";
         // One species per plot, cycling through a small pool. Hash
         // encoding hashes the string so collisions are not a correctness
         // concern.
@@ -101,7 +107,8 @@ ResolveDataset make_synthetic_dataset(int64_t n_plots) {
 
     return ResolveDataset::from_csv(
         header_csv.path(), species_csv.path(), roles,
-        {TargetSpec::regression("y")}, dcfg);
+        {TargetSpec::regression("y"), TargetSpec::classification("hab", 3)},
+        dcfg);
 }
 
 // Build a minimal Predictor over the given dataset. Random model weights
@@ -182,6 +189,17 @@ TEST_CASE("Predictor::predict chunked output matches one-shot output",
             /*rtol=*/1e-5, /*atol=*/1e-6));
     }
     REQUIRE(chunked.plot_ids.size() == 250);
+
+    // The softmax rows are chunked and concatenated by the same path.
+    REQUIRE(one_shot.probabilities.size() == chunked.probabilities.size());
+    for (const auto& [name, one_shot_p] : one_shot.probabilities) {
+        REQUIRE(chunked.probabilities.count(name) == 1);
+        const auto& chunked_p = chunked.probabilities.at(name);
+        REQUIRE(one_shot_p.sizes() == chunked_p.sizes());
+        REQUIRE(torch::allclose(
+            one_shot_p.to(torch::kCPU), chunked_p.to(torch::kCPU),
+            /*rtol=*/1e-5, /*atol=*/1e-6));
+    }
 }
 
 // =============================================================================
@@ -269,6 +287,84 @@ TEST_CASE("Predictor::predict rejects batch_size=0 / negative non-(-1)",
 }
 
 // =============================================================================
+// 6b. class probabilities (issue #117)
+// =============================================================================
+
+// A classification target's `probabilities` entry is the softmax row its
+// predicted code was taken from: shape (n_plots, n_classes), every row on the
+// simplex, and row-wise argmax equal to `predictions`. A regression target
+// has no entry, and `batch_size=1` (one plot per forward) reproduces the
+// one-shot rows like every other path.
+TEST_CASE("Predictor::predict returns per-class probabilities for a classification target",
+          "[predictor][probabilities]") {
+    auto ds = make_synthetic_dataset(/*n_plots=*/90);
+    auto predictor = make_test_predictor(ds);
+
+    for (const int64_t batch_size : {int64_t{-1}, int64_t{32}, int64_t{1}}) {
+        DYNAMIC_SECTION("batch_size=" << batch_size) {
+            auto preds = predictor.predict(ds, /*return_latent=*/false, batch_size);
+
+            REQUIRE(preds.probabilities.size() == 1);
+            REQUIRE(preds.probabilities.count("hab") == 1);
+            REQUIRE(preds.probabilities.count("y") == 0);
+
+            const auto probs = preds.probabilities.at("hab").to(torch::kCPU);
+            REQUIRE(probs.dim() == 2);
+            REQUIRE(probs.size(0) == 90);
+            REQUIRE(probs.size(1) == 3);
+            REQUIRE(probs.scalar_type() == torch::kFloat32);
+
+            REQUIRE(torch::all(probs >= 0.0f).item<bool>());
+            REQUIRE(torch::all(probs <= 1.0f).item<bool>());
+            const auto row_sums = probs.sum(/*dim=*/1);
+            REQUIRE(torch::allclose(row_sums, torch::ones_like(row_sums),
+                                    /*rtol=*/1e-5, /*atol=*/1e-5));
+
+            const auto codes = preds.predictions.at("hab").to(torch::kCPU);
+            REQUIRE(codes.scalar_type() == torch::kInt64);
+            REQUIRE(torch::equal(probs.argmax(/*dim=*/1), codes));
+        }
+    }
+}
+
+TEST_CASE("Predictor::predict class probabilities are the softmax of the model's logits",
+          "[predictor][probabilities]") {
+    auto ds = make_synthetic_dataset(/*n_plots=*/40);
+    auto predictor = make_test_predictor(ds);
+
+    auto preds = predictor.predict(ds, /*return_latent=*/false, /*batch_size=*/-1);
+    const auto probs = preds.probabilities.at("hab").to(torch::kCPU);
+
+    // Independent reference: the model's raw head output through the
+    // predictor's own scaling, softmaxed here. The dataset tracks no unknown
+    // statistics, so continuous = [coordinates, covariates, hash embedding].
+    torch::NoGradGuard no_grad;
+    const auto& scalers = predictor.scalers();
+    auto continuous = torch::cat({ds.coordinates(), ds.covariates(), ds.hash_embedding()}, 1);
+    auto scaled = (continuous - scalers.continuous_mean) / scalers.continuous_scale;
+    auto outputs = predictor.model()->forward(scaled);
+    auto reference = torch::softmax(outputs.at("hab"), /*dim=*/1);
+
+    REQUIRE(torch::allclose(probs, reference, /*rtol=*/1e-5, /*atol=*/1e-6));
+}
+
+TEST_CASE("Predictor::predict raw-tensor overload also returns probabilities",
+          "[predictor][probabilities]") {
+    auto ds = make_synthetic_dataset(/*n_plots=*/24);
+    auto predictor = make_test_predictor(ds);
+
+    auto preds = predictor.predict(
+        ds.coordinates(), ds.covariates(), ds.hash_embedding(),
+        ds.species_ids(), ds.species_vector(), ds.genus_ids(), ds.family_ids(),
+        ds.unknown_fraction(), ds.unknown_count());
+
+    REQUIRE(preds.probabilities.count("hab") == 1);
+    REQUIRE(preds.probabilities.at("hab").sizes() == torch::IntArrayRef({24, 3}));
+    REQUIRE(torch::equal(preds.probabilities.at("hab").argmax(1).to(torch::kCPU),
+                         preds.predictions.at("hab").to(torch::kCPU)));
+}
+
+// =============================================================================
 // 7. optimize_for_inference (Linear+BatchNorm fusion) preserves predictions
 // =============================================================================
 
@@ -286,6 +382,13 @@ TEST_CASE("Predictor::optimize_for_inference preserves predictions",
         REQUIRE(after.predictions.count(name) == 1);
         REQUIRE(torch::allclose(
             t.to(torch::kCPU), after.predictions.at(name).to(torch::kCPU),
+            /*rtol=*/1e-4, /*atol=*/1e-5));
+    }
+    REQUIRE(before.probabilities.size() == after.probabilities.size());
+    for (const auto& [name, t] : before.probabilities) {
+        REQUIRE(after.probabilities.count(name) == 1);
+        REQUIRE(torch::allclose(
+            t.to(torch::kCPU), after.probabilities.at(name).to(torch::kCPU),
             /*rtol=*/1e-4, /*atol=*/1e-5));
     }
 }

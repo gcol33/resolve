@@ -279,6 +279,12 @@ inline const CommandSpec& predict_spec() {
         flags.push_back({"--vram-fraction", Arity::Value, "FLOAT", "1.0",
                          "Fraction of GPU VRAM the PyTorch caching allocator\n"
                          "may use"});
+        flags.push_back({"--probabilities", Arity::Flag, "", "",
+                         "Also write each classification target's class\n"
+                         "probabilities: one column per class,\n"
+                         "'<target>_prob_<class>', after '<target>_code'.\n"
+                         "The columns of one target sum to one per row and\n"
+                         "the largest is the predicted class."});
         return CommandSpec("predict", "Predict Options:", std::move(flags));
     }();
     return spec;

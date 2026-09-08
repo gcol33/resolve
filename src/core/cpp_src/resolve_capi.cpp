@@ -1287,6 +1287,15 @@ resolve_value* target_map_to_value(const std::unordered_map<std::string, torch::
     return g.release();
 }
 
+// classification-probability map -> value map (name -> row-major double
+// matrix `(n_plots, n_classes)`). Used by predictor.predict*.
+resolve_value* probability_map_to_value(const std::unordered_map<std::string, torch::Tensor>& m0) {
+    auto* m = v_map();
+    ValueGuard g(m);
+    for (const auto& [name, tensor] : m0) v_put(m, name, tensor_to_mat(tensor));
+    return g.release();
+}
+
 }  // namespace
 
 // ============================================================================
@@ -1959,6 +1968,7 @@ resolve_value* predictions_to_value(const ResolvePredictions& preds, bool return
     auto* result = v_map();
     ValueGuard g(result);  // frees the partial tree if a conversion throws
     v_put(result, "predictions", target_map_to_value(preds.predictions));
+    v_put(result, "probabilities", probability_map_to_value(preds.probabilities));
     v_put(result, "targets", target_map_to_value(preds.targets));
     if (return_latent && preds.latent.defined()) v_put(result, "latent", tensor_to_mat(preds.latent));
     v_put(result, "plot_ids", v_string_array(preds.plot_ids));

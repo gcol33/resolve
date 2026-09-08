@@ -131,13 +131,28 @@ after loading and before a large prediction run.
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `predictions` | `dict[str, Tensor]` | One entry per target |
+| `probabilities` | `dict[str, Tensor]` | One entry per classification target: float `(n_plots, n_classes)` |
 | `targets` | `dict[str, Tensor]` | Ground truth, when the dataset carried it |
 | `plot_ids` | `list[str]` | Plot identifiers, in row order |
 | `latent` | `Tensor` or `None` | Shape `(n_plots, latent_dim)` when `return_latent=True` |
 
 Regression targets come back on the original scale; a `Log1p` target is inverted
 before it is returned. Classification targets come back as int64 class codes,
-indexing into `schema.targets[i].class_names`.
+indexing into `schema.targets[i].class_names`, and their `probabilities` entry
+holds the softmax row each code was taken from: column `j` is the probability of
+class code `j`, every row sums to one, and the row-wise argmax equals the code in
+`predictions`. Regression targets have no `probabilities` entry. The rows are
+computed on whatever dataset is scored, so a per-plot confidence (maximum
+probability, margin between the top two classes, entropy) is available from a
+checkpoint alone:
+
+```python
+probs = predictions.probabilities["habitat"]          # (n_plots, n_classes)
+confidence = probs.max(dim=1).values                  # max softmax
+top2 = probs.topk(2, dim=1).values
+margin = top2[:, 0] - top2[:, 1]
+entropy = -(probs * probs.clamp_min(1e-12).log()).sum(dim=1)
+```
 
 Writing them out:
 
@@ -147,6 +162,10 @@ import pandas as pd
 frame = pd.DataFrame({"plot_id": list(predictions.plot_ids)})
 for target, values in predictions.predictions.items():
     frame[target] = values.numpy()
+for target, probs in predictions.probabilities.items():
+    names = next(t for t in predictor.schema.targets if t.name == target).class_names
+    for j, name in enumerate(names):
+        frame[f"{target}_prob_{name}"] = probs[:, j].numpy()
 frame.to_csv("predictions.csv", index=False)
 ```
 
@@ -187,12 +206,15 @@ resolve predict --model model.pt \
                 --header new_plots.csv --species new_species.csv \
                 --plot-id plot_id --species-id species --abundance cover \
                 --output predictions.csv \
-                --predict-batch-size 4096
+                --predict-batch-size 4096 \
+                --probabilities
 ```
 
 The CLI rebuilds its `DatasetConfig` and its vocabularies from the checkpoint,
-so its codes mean what they meant at training time. See
-[Making Predictions](../tutorials/prediction.md) for the output layout.
+so its codes mean what they meant at training time. `--probabilities` appends
+one column per class, `<target>_prob_<class>`, after each classification
+target's code column. See [Making Predictions](../tutorials/prediction.md) for
+the output layout.
 
 ---
 

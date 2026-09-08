@@ -211,6 +211,57 @@ jobs:
           print(f"OK: {len(rows)} predictions, columns {header}")
           CHECK
 
+      # --probabilities appends one column per class after the code column
+      # (issue #117): the softmax row the code was taken from, labelled by the
+      # class label in code order, summing to one, with its argmax equal to
+      # the code. The first four columns are byte-identical to the plain run.
+      - name: Predict with class probabilities
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:${LD_LIBRARY_PATH:-}
+          RESOLVE=${{ github.workspace }}/cli/resolve
+          FIXTURES=${{ github.workspace }}/src/core/tests/fixtures
+
+          "$RESOLVE" predict \
+            --model "$OUT/model.pt" \
+            --header "$FIXTURES/cli_header.csv" \
+            --species "$FIXTURES/cli_species.csv" \
+            --plot-id plot_id --species-id species --abundance cover \
+            --lat lat --lon lon --genus genus --family family \
+            --predict-batch-size 64 --probabilities \
+            --output "$OUT/predictions_prob.csv"
+
+          python3 - "$OUT/predictions_prob.csv" "$OUT/predictions.csv" "$FIXTURES/cli_header.csv" <<'CHECK'
+          import csv
+          import sys
+
+          prob_path, plain_path, fixture_path = sys.argv[1:4]
+
+          with open(fixture_path, newline="") as fh:
+              labels = sorted({p["habitat"] for p in csv.DictReader(fh)})
+          with open(plain_path, newline="") as fh:
+              plain = list(csv.reader(fh))
+          with open(prob_path, newline="") as fh:
+              reader = csv.reader(fh)
+              header = next(reader)
+              rows = list(reader)
+
+          prob_columns = [f"habitat_prob_{label}" for label in labels]
+          assert header == ["plot_id", "area", "habitat", "habitat_code"] + prob_columns, header
+          assert len(rows) == len(plain) - 1, f"{len(rows)} rows vs {len(plain) - 1}"
+
+          for row, plain_row in zip(rows, plain[1:]):
+              assert row[:4] == plain_row, f"{row[0]}: prefix differs from the plain run"
+              probs = [float(v) for v in row[4:]]
+              assert all(0.0 <= v <= 1.0 for v in probs), f"{row[0]}: {probs}"
+              assert abs(sum(probs) - 1.0) < 1e-4, f"{row[0]}: sums to {sum(probs)}"
+              assert probs.index(max(probs)) == int(row[3]), (
+                  f"{row[0]}: argmax {probs.index(max(probs))} vs code {row[3]}"
+              )
+
+          print(f"OK: {len(rows)} rows with {len(prob_columns)} probability columns")
+          CHECK
+
       # The covariate is not merely recorded in the schema: it widens the
       # encoder's input, so an otherwise identical model trained without it has
       # strictly fewer parameters.

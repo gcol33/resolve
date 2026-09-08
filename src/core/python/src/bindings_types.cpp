@@ -329,6 +329,10 @@ void register_types(nb::module_& m) {
         .def_prop_ro("predictions", [](const resolve::ResolvePredictions& p) {
             return tensor_map_to_dict(p.predictions);
         })
+        .def_prop_ro("probabilities", [](const resolve::ResolvePredictions& p) {
+            return tensor_map_to_dict(p.probabilities);
+        }, "Softmax rows per classification target: {name: float (n_plots, n_classes)}, "
+           "column j = P(class code j). Regression targets have no entry.")
         .def_prop_ro("targets", [](const resolve::ResolvePredictions& p) {
             return tensor_map_to_dict(p.targets);
         })

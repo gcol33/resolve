@@ -24,7 +24,14 @@ positive value chunks the forward and concatenates results on CPU to bound
 peak VRAM. Matches the Python \code{batch_size} argument.}
 }
 \value{
-Named list of prediction arrays
+A list with \code{predictions} (one numeric vector per target: a
+regression value on the original scale, or a classification target's
+predicted class code), \code{probabilities} (one numeric matrix per
+classification target, \code{n_plots x n_classes}, each row the softmax
+over the classes and summing to one; the columns are named by the class
+labels the checkpoint carries, in code order), \code{targets} (the
+dataset's own target values, when it carried them), \code{plot_ids}, and
+\code{latent} when \code{returnLatent} is \code{TRUE}.
 }
 \description{
 Make predictions on a ResolveDataset using a trained model.
@@ -34,6 +41,8 @@ Make predictions on a ResolveDataset using a trained model.
 predictor <- resolve.load("model.pt")
 dataset <- resolve.dataset.csv(...)
 preds <- resolve.predict.dataset(predictor, dataset)
+preds$predictions$habitat            # predicted class code per plot
+preds$probabilities$habitat[1, ]     # that plot's probability over classes
 }
 
 }
