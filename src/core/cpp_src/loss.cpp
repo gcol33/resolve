@@ -1,4 +1,5 @@
 #include "resolve/loss.hpp"
+#include <algorithm>
 #include <cmath>
 
 namespace resolve {
@@ -175,6 +176,15 @@ MultiTaskLoss::MultiTaskLoss(
 ) : targets_(targets),
     phased_loss_(PhasedLoss::from_config(loss_config, phase_boundaries, band_threshold, nca))
 {}
+
+bool MultiTaskLoss::objective_settled(int epoch, int last_epoch) const {
+    const bool has_regression = std::any_of(targets_.begin(), targets_.end(),
+        [](const TargetConfig& t) { return t.task == TaskType::Regression; });
+    if (!has_regression || !phased_loss_.varies_by_phase()) {
+        return true;
+    }
+    return phased_loss_.get_phase(epoch) == phased_loss_.get_phase(last_epoch);
+}
 
 std::pair<torch::Tensor, std::unordered_map<std::string, torch::Tensor>> MultiTaskLoss::compute(
     const std::unordered_map<std::string, torch::Tensor>& predictions,

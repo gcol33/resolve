@@ -91,6 +91,13 @@ public:
     // Get current phase (1, 2, or 3)
     int get_phase(int epoch) const;
 
+    // Whether the regression loss differs between phases: true when any of the
+    // SMAPE or band terms carries weight. The MAE preset zeroes all three, so
+    // its loss is plain MAE in every phase.
+    [[nodiscard]] bool varies_by_phase() const noexcept {
+        return smape_weight_p2_ != 0.0f || smape_weight_p3_ != 0.0f || band_weight_p3_ != 0.0f;
+    }
+
     // Compute regression loss
     torch::Tensor regression_loss(
         torch::Tensor pred,
@@ -148,6 +155,13 @@ public:
     // MAE/SMAPE modes). Single source of truth for phase-aware training logic
     // in the Trainer (best-model selection / early-stopping gating).
     int phase_for(int epoch) const { return phased_loss_.get_phase(epoch); }
+
+    // Whether the objective at `epoch` is already the one `last_epoch` trains
+    // on, so an epoch without improvement counts toward early stopping. It is
+    // whenever the phases leave the loss unchanged: no regression target (the
+    // classification loss has no phases), or a preset whose phased terms carry
+    // no weight. Otherwise it is from the epoch the final phase begins.
+    [[nodiscard]] bool objective_settled(int epoch, int last_epoch) const;
 
     // Whether the NCA neighbourhood term is active on classification targets
     // (i.e. this loss was built with LossConfigMode::NCA).

@@ -1,5 +1,24 @@
 # RESOLVE Changelog
 
+## v0.10.1 (unreleased)
+
+### Fixed
+
+- **Early stopping no longer waits for a loss phase that changes nothing.**
+  Patience counted only once training reached the phase the last epoch is
+  in, so the SMAPE and band terms of the combined regression loss get to
+  train before a run can stop. That gate applied to every run, including
+  classification-only fits, whose loss has no phases, and so a EUNIS fit at
+  the default phase boundaries trained about 300 epochs before patience could
+  start: one run whose best validation loss came at epoch 12 stopped at epoch
+  349 rather than near epoch 62. `MultiTaskLoss::objective_settled` now
+  decides when patience counts: from the first epoch when there is no
+  regression target or the preset's phased terms carry no weight (MAE,
+  SMAPE), from the final phase otherwise. The kept weights are still the
+  best by validation loss among the epochs run, but such a run now ends
+  `patience` epochs after that best instead of after the curriculum, so a
+  validation loss that would have improved again later is no longer reached.
+
 ## v0.10.0 (2026-09-08)
 
 ### Changed

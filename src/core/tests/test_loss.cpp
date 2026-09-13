@@ -501,3 +501,52 @@ TEST_CASE("MultiTaskLoss::compute seeds a deterministic scalar accumulator",
     REQUIRE(preds["a"].grad().defined());
     REQUIRE(preds["b"].grad().defined());
 }
+
+TEST_CASE("MultiTaskLoss::objective_settled gates patience only where phases change the loss", "[loss]") {
+    auto target = [](const char* name, TaskType task) {
+        TargetConfig t; t.name = name; t.task = task; return t;
+    };
+    const std::vector<TargetConfig> classification = {target("hab", TaskType::Classification)};
+    const std::vector<TargetConfig> regression = {target("y", TaskType::Regression)};
+    const std::vector<TargetConfig> both = {target("y", TaskType::Regression),
+                                            target("hab", TaskType::Classification)};
+    const int last = 499;
+
+    SECTION("a classification-only loss has no phases to wait for") {
+        MultiTaskLoss loss(classification, {100, 300}, LossConfigMode::Combined);
+        REQUIRE(loss.objective_settled(0, last));
+        REQUIRE(loss.objective_settled(150, last));
+    }
+
+    SECTION("the NCA preset adds nothing phased to classification") {
+        MultiTaskLoss loss(classification, {100, 300}, LossConfigMode::NCA);
+        REQUIRE(loss.objective_settled(0, last));
+    }
+
+    SECTION("a combined regression loss settles when its final phase begins") {
+        MultiTaskLoss loss(regression, {100, 300}, LossConfigMode::Combined);
+        REQUIRE_FALSE(loss.objective_settled(0, last));
+        REQUIRE_FALSE(loss.objective_settled(299, last));
+        REQUIRE(loss.objective_settled(300, last));
+    }
+
+    SECTION("one regression target is enough to keep the phases") {
+        MultiTaskLoss loss(both, {100, 300}, LossConfigMode::Combined);
+        REQUIRE_FALSE(loss.objective_settled(0, last));
+        REQUIRE(loss.objective_settled(300, last));
+    }
+
+    SECTION("a schedule shorter than the final phase is settled throughout") {
+        MultiTaskLoss loss(regression, {100, 300}, LossConfigMode::Combined);
+        REQUIRE(loss.objective_settled(0, 49));
+    }
+
+    SECTION("the MAE and SMAPE presets never change across phases") {
+        MultiTaskLoss mae(regression, {100, 300}, LossConfigMode::MAE);
+        MultiTaskLoss smape(regression, {100, 300}, LossConfigMode::SMAPE);
+        REQUIRE(mae.objective_settled(0, last));
+        REQUIRE(smape.objective_settled(0, last));
+        REQUIRE_FALSE(PhasedLoss::from_config(LossConfigMode::MAE).varies_by_phase());
+        REQUIRE(PhasedLoss::from_config(LossConfigMode::Combined).varies_by_phase());
+    }
+}

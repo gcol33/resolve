@@ -697,3 +697,47 @@ TEST_CASE("Trainer::prepare_data rejects data carrying no targets",
         REQUIRE_NOTHROW(trainer.prepare_data(with_target, 0.25f, 7));
     }
 }
+
+// Early stopping counts patience once the objective stops changing. A zero
+// learning rate leaves the weights where epoch 0 put them, and LayerNorm keeps
+// no running statistics for a training epoch to move, so the validation loss is
+// the same every epoch and the epoch the run stops on is fixed: epoch 0 is the
+// best, every later epoch that counts adds one, and the run ends on the epoch
+// whose count reaches `patience`.
+TEST_CASE("Early stopping counts patience from the epoch the objective settles", "[trainer]") {
+    const int patience = 4;
+    auto frozen_config = [&](LossConfigMode mode, std::pair<int, int> boundaries) {
+        TrainConfig cfg = make_train_config();
+        cfg.lr = 0.0f;
+        cfg.lr_scheduler = LRSchedulerType::None;
+        cfg.weight_decay = 0.0f;
+        cfg.max_epochs = 40;
+        cfg.patience = patience;
+        cfg.loss_config = mode;
+        cfg.phase_boundaries = boundaries;
+        return cfg;
+    };
+    auto epochs_run = [](const ResolveDataset& ds, const TrainConfig& cfg) {
+        ModelConfig mcfg = make_model_config();
+        mcfg.normalization = NormLayerType::LayerNorm;
+        ResolveModel model(ds.schema(), mcfg);
+        Trainer trainer(model, cfg);
+        trainer.prepare_data(ds, 0.25f, 3);
+        return static_cast<int>(trainer.fit().train_loss_history.size());
+    };
+
+    SECTION("classification alone stops after patience, not after the phased curriculum") {
+        auto ds = make_synthetic_dataset(48, {TargetSpec::classification("hab", kNumHabClasses)});
+        REQUIRE(epochs_run(ds, frozen_config(LossConfigMode::Combined, {10, 20})) == patience + 1);
+    }
+
+    SECTION("a combined regression loss waits for its final phase") {
+        auto ds = make_synthetic_dataset(48, {TargetSpec::regression("y")});
+        REQUIRE(epochs_run(ds, frozen_config(LossConfigMode::Combined, {10, 20})) == 20 + patience);
+    }
+
+    SECTION("a pure MAE regression loss has no phase to wait for") {
+        auto ds = make_synthetic_dataset(48, {TargetSpec::regression("y")});
+        REQUIRE(epochs_run(ds, frozen_config(LossConfigMode::MAE, {10, 20})) == patience + 1);
+    }
+}

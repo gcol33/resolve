@@ -1162,10 +1162,11 @@ TrainResult Trainer::fit() {
 
         // The phased loss activates later terms (SMAPE, band) only once their
         // phase begins, so early-stopping before the final phase would kill the
-        // curriculum before those objectives ever train. Only count patience
-        // once we are in the phase the last epoch is in; ask the loss for the
-        // phase so MAE/SMAPE mode's remapped boundaries are respected.
-        const int final_phase = loss_fn_.phase_for(std::max(0, config_.max_epochs - 1));
+        // curriculum before those objectives ever train. Patience counts once
+        // the objective is the one the last epoch trains on, which the loss
+        // decides: from the start when its phases change nothing for these
+        // targets, from the final phase otherwise.
+        const int last_epoch = std::max(0, config_.max_epochs - 1);
 
         try {
             for (int epoch = 0; epoch < config_.max_epochs; ++epoch) {
@@ -1179,7 +1180,7 @@ TrainResult Trainer::fit() {
                 result.train_loss_history.push_back(train_loss);
                 result.test_loss_history.push_back(test_loss);
 
-                const bool in_final_phase = loss_fn_.phase_for(epoch) == final_phase;
+                const bool settled = loss_fn_.objective_settled(epoch, last_epoch);
 
                 // Check for improvement. test_loss is the phase-invariant
                 // selection loss (see eval_epoch), so best_loss is comparable
@@ -1202,7 +1203,7 @@ TrainResult Trainer::fit() {
                     if (use_checkpoints) {
                         save(config_.checkpoint_dir + "/best.pt");
                     }
-                } else if (in_final_phase) {
+                } else if (settled) {
                     patience_counter++;
                     if (patience_counter >= config_.patience) {
                         config_.log("Early stopping at epoch " + std::to_string(epoch));
