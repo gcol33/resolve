@@ -27,6 +27,7 @@ resolve.train.dataset(
   moeNoiseStd = 0.1,
   moeAuxLossWeight = 0.01,
   coverDropout = 0,
+  freezeComposition = FALSE,
   dModel = 128L,
   nHeads = 4L,
   nAttentionLayers = 0L,
@@ -102,6 +103,9 @@ to the task loss (default 0.01). Acts only when \code{moeRouting} is not
 
 \item{coverDropout}{Cover-dropout rate applied to species cover values
 in rank-pool / transformer encoding modes (default 0.0, no dropout).}
+
+\item{freezeComposition}{Keep the species, genus and family embedding tables
+at their initialisation instead of learning them (default \code{FALSE}).}
 
 \item{dModel}{Model dimension for the transformer / rank-pool encoder
 (default 128).}
