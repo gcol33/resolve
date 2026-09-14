@@ -128,6 +128,7 @@ public:
     RObject get_genus_weights()    const { return get("genus_weights"); }
     RObject get_family_weights()   const { return get("family_weights"); }
     RObject get_species_weights()  const { return get("species_weights"); }
+    RObject composition_parameters() const { return get("composition_parameters"); }
 
     resolve_model_t* handle() const { return model_.get(); }
 

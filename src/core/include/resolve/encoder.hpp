@@ -523,6 +523,10 @@ public:
     [[nodiscard]] torch::Tensor get_genus_weights() const;
     [[nodiscard]] torch::Tensor get_family_weights() const;
 
+    // The species, genus and family tables this encoder reads a plot's
+    // composition through, as the parameter tensors themselves.
+    [[nodiscard]] std::vector<torch::Tensor> composition_parameters() const;
+
 private:
     bool has_taxonomy_;
     int top_k_;
@@ -613,6 +617,10 @@ public:
     [[nodiscard]] torch::Tensor get_genus_weights() const;
     [[nodiscard]] torch::Tensor get_family_weights() const;
 
+    // The species, genus and family tables this encoder reads a plot's
+    // composition through, as the parameter tensors themselves.
+    [[nodiscard]] std::vector<torch::Tensor> composition_parameters() const;
+
 private:
     bool has_taxonomy_;
     int top_k_species_;
@@ -701,6 +709,10 @@ public:
     // Embedding weight extraction (averaged across positions)
     [[nodiscard]] torch::Tensor get_genus_weights() const;
     [[nodiscard]] torch::Tensor get_family_weights() const;
+
+    // The species, genus and family tables this encoder reads a plot's
+    // composition through, as the parameter tensors themselves.
+    [[nodiscard]] std::vector<torch::Tensor> composition_parameters() const;
 
 private:
     bool has_taxonomy_;
@@ -805,6 +817,10 @@ public:
     [[nodiscard]] torch::Tensor get_genus_weights() const;
     [[nodiscard]] torch::Tensor get_family_weights() const;
 
+    // The species, genus and family tables this encoder reads a plot's
+    // composition through, as the parameter tensors themselves.
+    [[nodiscard]] std::vector<torch::Tensor> composition_parameters() const;
+
 private:
     bool has_taxonomy_;
     float cover_dropout_;
@@ -890,6 +906,10 @@ public:
     [[nodiscard]] torch::Tensor get_species_weights() const;
     [[nodiscard]] torch::Tensor get_genus_weights() const;
     [[nodiscard]] torch::Tensor get_family_weights() const;
+
+    // The species, genus and family tables this encoder reads a plot's
+    // composition through, as the parameter tensors themselves.
+    [[nodiscard]] std::vector<torch::Tensor> composition_parameters() const;
 
 private:
     // Build additive token embeddings from species/genus/family/weights

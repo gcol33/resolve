@@ -205,3 +205,44 @@ test_that("A tail mixture is refused where there is no MLP tail", {
   expect_silent(new(.resolve_module()$ResolveModel, schema, model_config))
 })
 
+
+test_that("freeze_composition fixes the composition tables and is refused without them", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  schema <- list(
+    n_plots = 60L,
+    n_species = 20L,
+    has_coordinates = TRUE,
+    has_abundance = TRUE,
+    has_taxonomy = TRUE,
+    n_genera = 5L,
+    n_families = 3L,
+    n_species_vocab = 21L,
+    n_genera_vocab = 5L,
+    n_families_vocab = 3L,
+    track_unknown_fraction = FALSE,
+    track_unknown_count = FALSE,
+    targets = list(
+      area = list(task = "regression", transform = "none")
+    )
+  )
+  model_config <- list(
+    species_encoding = "rank_pool",
+    hidden_dims = c(16L, 8L),
+    species_embed_dim = 8L,
+    freeze_composition = TRUE
+  )
+
+  model <- new(.resolve_module()$ResolveModel, schema, model_config)
+  tables <- model$composition_parameters()
+  expect_length(tables, 3L)
+  expect_equal(dim(tables[[1]]), c(21L, 8L))
+
+  model_config$encoder_architecture <- "tabnet"
+  expect_error(
+    new(.resolve_module()$ResolveModel, schema, model_config),
+    "freeze_composition",
+    fixed = TRUE
+  )
+})

@@ -138,6 +138,7 @@ config = rc.ModelConfig()
 | Attribute | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `cover_dropout` | `float` | `0.0` | Probability of replacing a plot's pool weights with the presence mask during training |
+| `freeze_composition` | `bool` | `False` | Keep the species, genus and family tables (`ResolveModel.composition_parameters()`) at their initialisation, so the composition representation is fixed rather than learned. Needs `encoder_architecture = MLP` and a species encoding with such a table |
 | `d_model` | `int` | `128` | Token width |
 | `n_heads` | `int` | `4` | Attention heads |
 | `n_attention_layers` | `int` | `0` | Self-attention layers; `0` gives pooling alone |

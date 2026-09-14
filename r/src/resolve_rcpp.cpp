@@ -90,6 +90,8 @@ RCPP_MODULE(resolve_module) {
         .method("get_genus_weights", &RResolveModel::get_genus_weights, "Get genus embedding weights")
         .method("get_family_weights", &RResolveModel::get_family_weights, "Get family embedding weights")
         .method("get_species_weights", &RResolveModel::get_species_weights, "Get species embedding weights")
+        .method("composition_parameters", &RResolveModel::composition_parameters,
+                "Species, genus and family tables the species encoder reads composition through")
         ;
 
     class_<RTrainer>("Trainer")

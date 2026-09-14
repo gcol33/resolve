@@ -2,6 +2,27 @@
 
 ## v0.11.0 (unreleased)
 
+### Added
+
+- **`ModelConfig::freeze_composition` keeps the composition tables at their
+  initialisation.** A fixed-representation control (the pooled encoder with
+  random, untrained species embeddings) previously had to switch gradients off
+  from the calling code, which no checkpoint recorded. The engine now does it:
+  with the knob on, `ResolveModel` stops the gradient of the tables its species
+  encoder reads composition through, and AdamW, which skips a parameter without
+  a gradient, leaves them untouched by weight decay as well. Those tables are
+  the species, genus and family embeddings of the embed, rank_pool and
+  transformer encoders, the species projection and per-rank taxonomy
+  embeddings of the sparse encoder, and the per-rank taxonomy embeddings of
+  the hash encoder; `ResolveModel::composition_parameters()` returns them. A
+  model with none (an adapter architecture, TraitNet, hash without taxonomy)
+  refuses the knob. The field is a config-registry row, so it round-trips
+  through checkpoints, the JSON sidecar, the C-ABI config tree and nanobind;
+  CLI `resolve train --freeze-composition`, R
+  `resolve.train.dataset(freezeComposition = TRUE)`, and
+  `composition_parameters()` on the nanobind model, the C-ABI model getter and
+  the R module.
+
 ### Changed
 
 - **A missing covariate or coordinate is flagged and filled instead of read

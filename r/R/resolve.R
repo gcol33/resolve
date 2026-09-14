@@ -807,6 +807,8 @@ resolve.dataset.frame <- function(header,
 #'   `"none"`.
 #' @param coverDropout Cover-dropout rate applied to species cover values
 #'   in rank-pool / transformer encoding modes (default 0.0, no dropout).
+#' @param freezeComposition Keep the species, genus and family embedding tables
+#'   at their initialisation instead of learning them (default `FALSE`).
 #' @param dModel Model dimension for the transformer / rank-pool encoder
 #'   (default 128).
 #' @param nHeads Number of attention heads in the transformer encoder
@@ -859,6 +861,7 @@ resolve.train.dataset <- function(dataset,
                                   moeAuxLossWeight = 0.01,
                                   # RankPool / Transformer options
                                   coverDropout = 0.0,
+                                  freezeComposition = FALSE,
                                   dModel = 128L,
                                   nHeads = 4L,
                                   nAttentionLayers = 0L,
@@ -955,6 +958,7 @@ resolve.train.dataset <- function(dataset,
     moe_noise_std = moeNoiseStd,
     moe_aux_loss_weight = moeAuxLossWeight,
     cover_dropout = coverDropout,
+    freeze_composition = isTRUE(freezeComposition),
     d_model = as.integer(dModel),
     n_heads = as.integer(nHeads),
     n_attention_layers = as.integer(nAttentionLayers),

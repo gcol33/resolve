@@ -118,6 +118,9 @@ inline const CommandSpec& train_spec() {
         flags.push_back({"--cover-dropout", Arity::Value, "FLOAT", "0.0",
                          "Probability of dropping a plot's cover values in\n"
                          "the rank_pool / transformer encoders"});
+        flags.push_back({"--freeze-composition", Arity::Flag, "", "",
+                         "Keep the species, genus and family tables at their\n"
+                         "initialisation instead of learning them"});
         flags.push_back({"--moe-routing", Arity::Value, "R", "none",
                          "Mixture of experts routing: none, soft, topk"});
         flags.push_back({"--moe-placement", Arity::Value, "P", "tail",

@@ -311,6 +311,15 @@ void register_model(nb::module_& m) {
             if (!t.defined()) return nb::steal(nb::none().release().ptr());
             return nb::steal(THPVariable_Wrap(t));
         })
+        .def("composition_parameters", [](resolve::ResolveModel& self) {
+            nb::list out;
+            for (const auto& t : self->composition_parameters()) {
+                out.append(nb::steal(THPVariable_Wrap(t)));
+            }
+            return out;
+        }, "The species, genus and family tables the species encoder reads a "
+           "plot's composition through, as the parameters themselves; "
+           "ModelConfig.freeze_composition keeps them at their initialisation.")
         .def("forward_with_aux", [](resolve::ResolveModel& self,
                                     nb::object continuous_obj,
                                     nb::object genus_ids_obj,

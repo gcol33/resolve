@@ -319,6 +319,7 @@ inline std::string parallel_branch_prefix(std::size_t i) {
     F(parallel_layers,       "parallel_layers")             \
     F(tabm,                  "tabm")                        \
     F(cover_dropout,         "cover_dropout")               \
+    F(freeze_composition,    "freeze_composition")          \
     F(d_model,               "d_model")                     \
     F(n_heads,               "n_heads")                     \
     F(n_attention_layers,    "n_attention_layers")          \

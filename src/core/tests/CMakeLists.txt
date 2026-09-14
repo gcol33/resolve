@@ -68,6 +68,7 @@ add_executable(resolve_tests
     test_moe_placement.cpp
     test_info_report.cpp
     test_missing_values.cpp
+    test_freeze_composition.cpp
 )
 
 # Add CUDA library directory if CUDA is available

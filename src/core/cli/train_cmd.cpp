@@ -359,6 +359,7 @@ int train_command(const ParsedArgs& args) {
     if (is_pool_encoder) {
         model_config.cover_dropout = args.get_float("--cover-dropout");
     }
+    model_config.freeze_composition = args.has("--freeze-composition");
     if (dataset_config.species_encoding == SpeciesEncodingMode::Transformer) {
         const std::string transformer_pooling = args.get("--transformer-pooling");
         const int n_attention_layers = args.get_int("--n-attention-layers");

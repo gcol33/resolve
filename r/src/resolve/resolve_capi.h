@@ -328,7 +328,9 @@ RESOLVE_CAPI resolve_value_t* resolve_model_call(
 
 /* Zero-arg accessor. `what` is one of: latent_dim species_encoding
  * uses_explicit_vector uses_moe n_experts genus_weights family_weights
- * species_weights. Returns value tree / NULL. */
+ * species_weights composition_parameters (a list of matrices, the species,
+ * genus and family tables the species encoder reads composition through).
+ * Returns value tree / NULL. */
 RESOLVE_CAPI resolve_value_t* resolve_model_get(const resolve_model_t* m, const char* what);
 
 /* State mutations. Return 0 / -1. mode!=0 => train, mode==0 => eval. */

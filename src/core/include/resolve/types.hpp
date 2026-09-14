@@ -567,6 +567,11 @@ struct ModelConfig {
     // RankPool / Transformer shared
     float cover_dropout = 0.0f;
 
+    // Keep the species, genus and family tables at their initialisation, so the
+    // composition representation is fixed rather than learned
+    // (ResolveModelImpl::composition_parameters). Encoder-architecture MLP only.
+    bool freeze_composition = false;
+
     // Transformer-specific
     int d_model = 128;
     int n_heads = 4;

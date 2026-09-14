@@ -408,4 +408,49 @@ torch::Tensor PlotEncoderSparseImpl::get_family_weights() const {
     return taxonomy_weights(has_taxonomy_, family_embeddings_);
 }
 
+
+// =============================================================================
+// Composition tables
+// =============================================================================
+
+namespace {
+
+void append_weights(std::vector<torch::Tensor>& out,
+                    const std::vector<torch::nn::Embedding>& tables) {
+    for (const auto& table : tables) out.push_back(table->weight);
+}
+
+}  // namespace
+
+// Hash mode reads species through a parameter-free hash; only its per-rank
+// taxonomy tables are learned.
+std::vector<torch::Tensor> PlotEncoderImpl::composition_parameters() const {
+    std::vector<torch::Tensor> out;
+    if (has_taxonomy_) {
+        append_weights(out, genus_embeddings_);
+        append_weights(out, family_embeddings_);
+    }
+    return out;
+}
+
+std::vector<torch::Tensor> PlotEncoderEmbedImpl::composition_parameters() const {
+    std::vector<torch::Tensor> out{fused_species_->embedding()->weight};
+    if (has_taxonomy_) {
+        out.push_back(fused_genus_->embedding()->weight);
+        out.push_back(fused_family_->embedding()->weight);
+    }
+    return out;
+}
+
+// The projection of the species vector is the sparse encoding's species table:
+// column j of its weight is species j's vector.
+std::vector<torch::Tensor> PlotEncoderSparseImpl::composition_parameters() const {
+    std::vector<torch::Tensor> out{species_projection_->weight, species_projection_->bias};
+    if (has_taxonomy_) {
+        append_weights(out, genus_embeddings_);
+        append_weights(out, family_embeddings_);
+    }
+    return out;
+}
+
 } // namespace resolve

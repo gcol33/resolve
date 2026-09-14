@@ -1768,6 +1768,13 @@ resolve_value_t* resolve_model_get(const resolve_model_t* m, const char* what) {
         if (w == "genus_weights") return weights_or_null(m->model->get_genus_weights());
         if (w == "family_weights") return weights_or_null(m->model->get_family_weights());
         if (w == "species_weights") return weights_or_null(m->model->get_species_weights());
+        if (w == "composition_parameters") {
+            ValueGuard g(v_list());
+            for (const auto& t : m->model->composition_parameters()) {
+                v_append(g.p, tensor_to_mat(t.detach()));
+            }
+            return g.release();
+        }
         throw std::runtime_error("model_get: unknown accessor '" + w + "'");
     })
 }

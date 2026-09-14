@@ -206,6 +206,15 @@ torch::Tensor PlotEncoderRankPoolImpl::get_family_weights() const {
     return family_embedding_->weight.detach();
 }
 
+std::vector<torch::Tensor> PlotEncoderRankPoolImpl::composition_parameters() const {
+    std::vector<torch::Tensor> out{species_embedding_->weight};
+    if (has_taxonomy_) {
+        out.push_back(genus_embedding_->weight);
+        out.push_back(family_embedding_->weight);
+    }
+    return out;
+}
+
 
 // =============================================================================
 // PlotEncoderTransformer Implementation
@@ -490,6 +499,15 @@ torch::Tensor PlotEncoderTransformerImpl::get_genus_weights() const {
 torch::Tensor PlotEncoderTransformerImpl::get_family_weights() const {
     if (!has_taxonomy_) return torch::Tensor();
     return family_embedding_->weight.detach();
+}
+
+std::vector<torch::Tensor> PlotEncoderTransformerImpl::composition_parameters() const {
+    std::vector<torch::Tensor> out{species_embedding_->weight};
+    if (has_taxonomy_) {
+        out.push_back(genus_embedding_->weight);
+        out.push_back(family_embedding_->weight);
+    }
+    return out;
 }
 
 } // namespace resolve

@@ -246,6 +246,24 @@ ResolveModelImpl::ResolveModelImpl(
         ));
     }
 
+    if (config.freeze_composition) {
+        const auto tables = composition_parameters();
+        if (tables.empty()) {
+            throw std::invalid_argument(
+                std::string("freeze_composition=true fixes the species, genus and "
+                "family tables of a species encoder, but this model has none: "
+                "encoder_architecture=") +
+                encoder_architecture_to_string(config.encoder_architecture) +
+                ", species_encoding=" + species_encoding_to_string(config.species_encoding) +
+                (schema.has_taxonomy ? "" : ", and no taxonomy") +
+                ". Use encoder_architecture=mlp with embed, sparse, rank_pool or "
+                "transformer, or hash with taxonomy.");
+        }
+        // AdamW skips a parameter without a gradient, weight decay included,
+        // so each table keeps its initial values through training.
+        for (const auto& table : tables) table.requires_grad_(false);
+    }
+
     // Create task heads with configurable architecture
     for (const auto& target : schema.targets) {
         TaskHead head = nullptr;  // Initialize as null
@@ -620,6 +638,15 @@ torch::Tensor ResolveModelImpl::get_family_weights() const {
         &PlotEncoderEmbedImpl::get_family_weights,
         &PlotEncoderSparseImpl::get_family_weights
     );
+}
+
+std::vector<torch::Tensor> ResolveModelImpl::composition_parameters() const {
+    if (encoder_hash_) return encoder_hash_->composition_parameters();
+    if (encoder_embed_) return encoder_embed_->composition_parameters();
+    if (encoder_sparse_) return encoder_sparse_->composition_parameters();
+    if (encoder_rank_pool_) return encoder_rank_pool_->composition_parameters();
+    if (encoder_transformer_) return encoder_transformer_->composition_parameters();
+    return {};
 }
 
 torch::Tensor ResolveModelImpl::get_species_weights() const {

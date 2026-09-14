@@ -139,6 +139,12 @@ public:
     [[nodiscard]] torch::Tensor get_family_weights() const;
     [[nodiscard]] torch::Tensor get_species_weights() const;
 
+    // The species, genus and family tables the species encoder reads a plot's
+    // composition through, as the parameters themselves (empty for an adapter
+    // architecture or TraitNet). ModelConfig::freeze_composition stops their
+    // gradient at construction.
+    [[nodiscard]] std::vector<torch::Tensor> composition_parameters() const;
+
     // Set species trait matrix (for TraitNet architecture)
     void set_traits(torch::Tensor traits);
 
