@@ -165,6 +165,10 @@ void register_types(nb::module_& m) {
         .def_rw("normalization", &resolve::ResolveSchema::normalization)
         .def_rw("aggregation", &resolve::ResolveSchema::aggregation)
         .def_rw("use_taxonomy", &resolve::ResolveSchema::use_taxonomy)
+        // How missing covariates and coordinates enter the model; Zero for a
+        // checkpoint written before the policy existed.
+        .def_rw("missing_values", &resolve::ResolveSchema::missing_values)
+        .def("missing_flag_width", &resolve::ResolveSchema::missing_flag_width)
         // Fitted species / genus / family vocabularies, index = integer code,
         // [0] = "<UNK>" (issue #102). Empty on a pre-fix checkpoint.
         .def_rw("species_vocab", &resolve::ResolveSchema::species_vocab)
@@ -352,6 +356,16 @@ void register_types(nb::module_& m) {
         .def_prop_ro("continuous_mean", [](const resolve::Scalers& s) {
             if (s.continuous_mean.defined()) {
                 auto cpu_tensor = s.continuous_mean.detach().cpu().contiguous();
+                return nb::steal(THPVariable_Wrap(cpu_tensor));
+            }
+            return nb::none();
+        })
+        // The value each continuous column's missing cells are filled with
+        // before standardisation; None for a checkpoint written before
+        // missing values were filled.
+        .def_prop_ro("continuous_fill", [](const resolve::Scalers& s) {
+            if (s.continuous_fill.defined()) {
+                auto cpu_tensor = s.continuous_fill.detach().cpu().contiguous();
                 return nb::steal(THPVariable_Wrap(cpu_tensor));
             }
             return nb::none();

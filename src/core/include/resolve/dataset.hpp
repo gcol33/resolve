@@ -115,6 +115,16 @@ struct DatasetConfig {
     // integer codes are identical across settings and an ablation's arms stay
     // comparable.
     int species_budget = 0;
+
+    // How a missing numeric covariate or coordinate enters the model:
+    //
+    //   Indicate (default) : the loader keeps the cell as NaN; the model reads
+    //                        the fitting fold's mean in its place and a 0/1
+    //                        column beside the covariates that marks it (one per
+    //                        covariate, one for the coordinate pair).
+    //   Zero               : the cell is read as 0.0 and nothing marks it, so a
+    //                        recorded 0 and a missing value are one input.
+    MissingValuePolicy missing_values = MissingValuePolicy::Indicate;
 };
 
 // Forward declaration: the vocab-carrying loaders take one of these.
@@ -385,6 +395,11 @@ public:
     const torch::Tensor& family_ids() const { return family_ids_; }
     const torch::Tensor& unknown_fraction() const { return unknown_fraction_; }
     const torch::Tensor& unknown_count() const { return unknown_count_; }
+    // The unstandardised continuous block a model built from this dataset's
+    // schema reads (continuous_block.hpp): coordinates, covariates, their
+    // missingness flags, the unknown-species columns and, when include_hash is
+    // true, the hash embedding. Missing cells are NaN under Indicate.
+    [[nodiscard]] torch::Tensor continuous_block(bool include_hash) const;
     // Categorical covariate codes. Shape (n_plots, n_categoricals) int64,
     // values produced by CategoricalVocab (0 = UNK). Empty (undefined or 0
     // columns) when the schema declares no categoricals.

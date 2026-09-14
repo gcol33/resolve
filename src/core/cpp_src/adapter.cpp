@@ -47,6 +47,7 @@ TabularAdapterImpl::TabularAdapterImpl(
     // the leading columns (silently dropping features) and crashed TabNet/GNN on
     // the shape mismatch.
     int64_t n_continuous_base = n_coords + static_cast<int64_t>(schema.covariate_names.size())
+                                + schema.missing_flag_width()
                                 + n_unknown_features + schema.categorical_embed_width();
 
     // Species features contribute to numerical features
@@ -353,7 +354,9 @@ torch::Tensor TabularAdapterImpl::forward(
         case EncoderArchitecture::GNN: {
             // The first two continuous columns are the plot coordinates ONLY
             // when the dataset carries them (continuous is laid out as
-            // [coordinates | covariates | unknown_* | categorical_embed | ...]).
+            // [coordinates | coordinate flag | covariates | covariate flags |
+            // unknown_* | categorical_embed | ...], see continuous_block.hpp;
+            // the flags are present under MissingValuePolicy::Indicate).
             // Without coordinates those columns are covariates, and building a
             // "spatial" kNN graph from them is meaningless -- refuse rather than
             // silently corrupt the graph (issue #73).

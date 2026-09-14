@@ -24,6 +24,7 @@
 #include "resolve/role_mapping.hpp"
 #include "resolve/model.hpp"
 #include "resolve/trainer.hpp"
+#include "resolve/continuous_block.hpp"
 #include "resolve/predictor.hpp"
 
 #ifdef RESOLVE_HAS_CUDA
@@ -335,13 +336,11 @@ TEST_CASE("Predictor::predict class probabilities are the softmax of the model's
     auto preds = predictor.predict(ds, /*return_latent=*/false, /*batch_size=*/-1);
     const auto probs = preds.probabilities.at("hab").to(torch::kCPU);
 
-    // Independent reference: the model's raw head output through the
-    // predictor's own scaling, softmaxed here. The dataset tracks no unknown
-    // statistics, so continuous = [coordinates, covariates, hash embedding].
+    // Independent reference: the model's raw head output on the dataset's own
+    // continuous block through the predictor's scaling, softmaxed here.
     torch::NoGradGuard no_grad;
-    const auto& scalers = predictor.scalers();
-    auto continuous = torch::cat({ds.coordinates(), ds.covariates(), ds.hash_embedding()}, 1);
-    auto scaled = (continuous - scalers.continuous_mean) / scalers.continuous_scale;
+    auto scaled = standardize_continuous(ds.continuous_block(/*include_hash=*/true),
+                                         predictor.scalers());
     auto outputs = predictor.model()->forward(scaled);
     auto reference = torch::softmax(outputs.at("hab"), /*dim=*/1);
 

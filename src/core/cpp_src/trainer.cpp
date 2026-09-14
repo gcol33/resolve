@@ -3,6 +3,7 @@
 #include "resolve/env.hpp"
 #include "resolve/utils.hpp"
 #include "resolve/checkpoint.hpp"
+#include "resolve/continuous_block.hpp"
 #include "resolve/gpu.hpp"
 #include "resolve/io_retry.hpp"
 
@@ -232,16 +233,8 @@ void Trainer::prepare_data(
     train_indices_ = train_idx.clone();
     test_indices_ = test_idx.clone();
 
-    // Build continuous features based on encoding mode
-    std::vector<torch::Tensor> continuous_parts;
-    push_if_defined(continuous_parts, coordinates);
-    push_if_defined(continuous_parts, covariates);
-    push_if_defined(continuous_parts, unknown_fraction, 1);
-    if (unknown_count.defined() && unknown_count.numel() > 0) {
-        continuous_parts.push_back(unknown_count.to(torch::kFloat32).unsqueeze(1));
-    }
-
-    // For hash mode, include hash embedding in continuous.
+    // The continuous block (continuous_block.hpp); in hash mode the hash
+    // embedding rides along at its end.
     // Why: DatasetConfig.hash_dim and ModelConfig.hash_dim are independent.
     // If they disagree, the model's first linear layer is sized for one
     // value while the trainer concatenates a hash embedding of the other
@@ -260,25 +253,17 @@ void Trainer::prepare_data(
                 );
             }
         }
-        push_if_defined(continuous_parts, hash_embedding);
     }
+    const bool hash_in_block = model_->species_encoding() == SpeciesEncodingMode::Hash &&
+                               !model_->uses_explicit_vector();
+    auto continuous = assemble_continuous(
+        {coordinates, covariates, unknown_fraction, unknown_count,
+         hash_in_block ? hash_embedding : torch::Tensor()},
+        model_->schema().missing_values, n_plots);
 
-    torch::Tensor continuous;
-    if (!continuous_parts.empty()) {
-        continuous = torch::cat(continuous_parts, /*dim=*/1);
-    } else {
-        continuous = torch::zeros({n_plots, 0}, torch::kFloat32);
-    }
-
-    // Compute scalers on training data
-    auto train_continuous = continuous.index_select(0, train_idx);
-    if (train_continuous.size(1) > 0) {
-        scalers_.continuous_mean = train_continuous.mean(0);
-        scalers_.continuous_scale = train_continuous.std(0) + 1e-8f;
-
-        // Scale continuous features
-        continuous = (continuous - scalers_.continuous_mean) / scalers_.continuous_scale;
-    }
+    // Fill and standardise from the fitting rows only.
+    fit_continuous_scalers(scalers_, continuous.index_select(0, train_idx));
+    continuous = standardize_continuous(continuous, scalers_);
 
     // Split data
     train_continuous_ = continuous.index_select(0, train_idx);
@@ -2104,11 +2089,12 @@ ClassificationPredictions Trainer::compute_classification_predictions(
 void Trainer::unscale_continuous_targets(
     torch::Tensor& continuous,
     std::unordered_map<std::string, torch::Tensor>& targets,
-    const Scalers& scalers) {
-    // continuous: x_scaled -> x_raw = x_scaled * scale + mean (per feature).
-    if (continuous.defined() && continuous.size(1) > 0 &&
-        scalers.continuous_mean.defined() && scalers.continuous_scale.defined()) {
-        continuous = continuous * scalers.continuous_scale + scalers.continuous_mean;
+    const Scalers& scalers,
+    const ResolveSchema& schema) {
+    // continuous: x_scaled -> x_raw = x_scaled * scale + mean (per feature),
+    // with the cells the schema's flags mark as missing set back to NaN.
+    if (continuous.defined() && continuous.size(1) > 0) {
+        continuous = unstandardize_continuous(continuous, scalers, schema);
     }
     // Regression targets: only those present in target_scalers were scaled;
     // {mean, scale} stored as {first, second} at fit time.
@@ -2250,7 +2236,8 @@ CrossValidationResult Trainer::run_cross_validation(
 
     // Invert prepare_data's standardization once so each fold recomputes its own
     // scalers from raw values exactly once (see the note in cross-validation).
-    unscale_continuous_targets(all_continuous, all_targets, original_scalers);
+    unscale_continuous_targets(all_continuous, all_targets, original_scalers,
+                               model_->schema());
 
     // Global plot index per concatenated row, for the CUDA-hash path. Row i of
     // all_continuous is global plot all_global_idx[i]; each fold reconstructs
@@ -2322,12 +2309,11 @@ CrossValidationResult Trainer::run_cross_validation(
             test_targets_[name] = tensor.index_select(0, test_idx);
         }
 
-        // Recompute scalers for this fold's training data.
+        // Refit the fill and scalers on this fold's training rows.
         if (train_continuous_.size(1) > 0) {
-            scalers_.continuous_mean = train_continuous_.mean(0);
-            scalers_.continuous_scale = train_continuous_.std(0) + 1e-8f;
-            train_continuous_ = (train_continuous_ - scalers_.continuous_mean) / scalers_.continuous_scale;
-            test_continuous_ = (test_continuous_ - scalers_.continuous_mean) / scalers_.continuous_scale;
+            fit_continuous_scalers(scalers_, train_continuous_);
+            train_continuous_ = standardize_continuous(train_continuous_, scalers_);
+            test_continuous_ = standardize_continuous(test_continuous_, scalers_);
         }
 
         for (const auto& cfg : model_->schema().targets) {
@@ -2452,6 +2438,13 @@ std::vector<std::pair<std::vector<int64_t>, std::vector<int64_t>>>
 SpatialBlockSplitter::split(torch::Tensor coords) const {
     int64_t n = coords.size(0);
     auto coords_cpu = coords.cpu().to(torch::kFloat64);
+    // A plot without coordinates cannot be placed in a block. It trains in
+    // every fold and is never held out, so each test fold holds only plots
+    // whose block is withheld.
+    auto placed = (torch::isfinite(coords_cpu.select(1, 0)) &
+                   torch::isfinite(coords_cpu.select(1, 1))).contiguous();
+    auto placed_ptr = placed.data_ptr<bool>();
+    coords_cpu = torch::nan_to_num(coords_cpu, 0.0, 0.0, 0.0);
     auto lat = coords_cpu.select(1, 0);
     auto lon = coords_cpu.select(1, 1);
 
@@ -2463,6 +2456,14 @@ SpatialBlockSplitter::split(torch::Tensor coords) const {
     // |block_col| < 5e5, which holds for degree-scale grids (lon in [-180, 180]);
     // a sub-4e-4 deg lon_size could alias distinct blocks into one fold.
     auto block_labels = block_row * 1000000 + block_col;
+    // An unplaced plot borrows the label of a placed one so it adds no block of
+    // its own; it never counts toward a block's size or reaches a test fold.
+    if (!placed.any().item<bool>()) {
+        throw std::invalid_argument(
+            "spatial CV needs coordinates, but no plot carries a finite pair");
+    }
+    block_labels = torch::where(placed, block_labels,
+                                block_labels.masked_select(placed)[0]);
 
     // Find unique blocks
     auto unique_result = torch::_unique2(block_labels, /*sorted=*/true, /*return_inverse=*/true);
@@ -2485,12 +2486,12 @@ SpatialBlockSplitter::split(torch::Tensor coords) const {
             "). Use a finer block size or fewer folds.");
     }
 
-    // Count block sizes
+    // Count block sizes over the placed plots.
     auto inverse_cpu = inverse_indices.cpu();
     auto inv_ptr = inverse_cpu.data_ptr<int64_t>();
     std::vector<int64_t> block_sizes(n_blocks, 0);
     for (int64_t i = 0; i < n; ++i) {
-        block_sizes[inv_ptr[i]]++;
+        if (placed_ptr[i]) block_sizes[inv_ptr[i]]++;
     }
 
     // Shuffle block order
@@ -2528,7 +2529,7 @@ SpatialBlockSplitter::split(torch::Tensor coords) const {
     for (int f = 0; f < n_splits_; ++f) {
         std::vector<int64_t> train_idx, test_idx;
         for (int64_t i = 0; i < n; ++i) {
-            if (block_to_fold[inv_ptr[i]] == f) {
+            if (placed_ptr[i] && block_to_fold[inv_ptr[i]] == f) {
                 test_idx.push_back(i);
             } else {
                 train_idx.push_back(i);
@@ -2641,10 +2642,8 @@ std::unordered_map<std::string, torch::Tensor> Trainer::predict(
     // Predictor::predict does. Callers pass raw features; the model was trained
     // on standardized inputs, so skipping this silently biases every prediction.
     torch::Tensor scaled_continuous = continuous;
-    if (scalers_.continuous_mean.defined() && continuous.defined() &&
-        continuous.size(1) > 0) {
-        scaled_continuous =
-            (continuous - scalers_.continuous_mean) / scalers_.continuous_scale;
+    if (continuous.defined() && continuous.size(1) > 0) {
+        scaled_continuous = standardize_continuous(continuous, scalers_);
     }
     scaled_continuous = scaled_continuous.to(config_.device);
 

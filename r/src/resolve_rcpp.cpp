@@ -121,6 +121,8 @@ RCPP_MODULE(resolve_module) {
         .method("predict", &RPredictor::predict, "Make predictions from tensors")
         .method("predict_dataset", &RPredictor::predict_dataset, "Make predictions from ResolveDataset")
         .method("get_embeddings", &RPredictor::get_embeddings, "Get latent embeddings")
+        .method("get_embeddings", &RPredictor::get_embeddings_unknown,
+                "Get latent embeddings, passing the unknown-species fraction and count")
         .method("get_genus_embeddings", &RPredictor::get_genus_embeddings, "Get genus embeddings")
         .method("get_family_embeddings", &RPredictor::get_family_embeddings, "Get family embeddings")
         .method("get_species_embeddings", &RPredictor::get_species_embeddings, "Get species embeddings")

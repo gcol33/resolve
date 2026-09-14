@@ -97,6 +97,11 @@ inline constexpr EnumName<AggregationMode> kAggregationModeNames[] = {
     {"count", AggregationMode::Count},
 };
 
+inline constexpr EnumName<MissingValuePolicy> kMissingValuePolicyNames[] = {
+    {"zero", MissingValuePolicy::Zero},
+    {"indicate", MissingValuePolicy::Indicate},
+};
+
 inline constexpr EnumName<PoolWeighting> kPoolWeightingNames[] = {
     {"binary", PoolWeighting::Binary},
     {"abundance", PoolWeighting::Abundance},
@@ -236,6 +241,13 @@ inline const char* aggregation_mode_to_string(AggregationMode m) {
     return enum_name_of(m, kAggregationModeNames, "abundance");
 }
 
+inline MissingValuePolicy parse_missing_value_policy(const std::string& s) {
+    return parse_enum_name(s, kMissingValuePolicyNames, "missing value policy");
+}
+inline const char* missing_value_policy_to_string(MissingValuePolicy m) {
+    return enum_name_of(m, kMissingValuePolicyNames, "indicate");
+}
+
 inline PoolWeighting parse_pool_weighting(const std::string& s) {
     return parse_enum_name(s, kPoolWeightingNames, "pool weighting");
 }
@@ -365,6 +377,8 @@ RESOLVE_DECLARE_ENUM_NAMES(NormalizationMode, kNormalizationModeNames,
                            "normalization mode", "raw")
 RESOLVE_DECLARE_ENUM_NAMES(AggregationMode, kAggregationModeNames,
                            "aggregation mode", "abundance")
+RESOLVE_DECLARE_ENUM_NAMES(MissingValuePolicy, kMissingValuePolicyNames,
+                           "missing value policy", "indicate")
 RESOLVE_DECLARE_ENUM_NAMES(PoolWeighting, kPoolWeightingNames,
                            "pool weighting", "log1p")
 RESOLVE_DECLARE_ENUM_NAMES(TaskType, kTaskTypeNames,

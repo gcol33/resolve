@@ -90,6 +90,7 @@ config = rc.DatasetConfig()
 | `normalization` | `NormalizationMode` | `Raw` | `Raw`, `Norm`, `Log1p`, applied before hashing |
 | `aggregation` | `AggregationMode` | `Abundance` | `Abundance` or `Count` |
 | `track_unknown_fraction` | `bool` | `True` | Add an input column holding each plot's share of abundance from species outside the vocabulary |
+| `missing_values` | `MissingValuePolicy` | `Indicate` | How a blank covariate or coordinate cell enters the model. `Indicate`: a 0/1 column per covariate (and one for the coordinate pair) marks it, and the value is filled with the mean of that column's recorded values on the fitting rows before standardisation. `Zero`: the cell is read as 0.0 with no flag, so a recorded 0 and a missing value are one input. The loader keeps a missing cell as `NaN` in `coordinates` / `covariates` either way |
 | `track_unknown_count` | `bool` | `False` | Add an input column holding each plot's number of records naming a species outside the vocabulary |
 | `use_taxonomy` | `bool` | `True` | Use genus and family when present |
 | `use_cuda_hash` | `bool` | `False` | Compute hash embeddings on the GPU per batch |
@@ -228,6 +229,7 @@ Describes a loaded dataset and travels into the checkpoint.
 | `has_coordinates`, `has_abundance`, `has_taxonomy` | `bool` | What the data carried |
 | `track_unknown_fraction`, `track_unknown_count` | `bool` | Loader settings |
 | `species_vocab`, `genus_vocab`, `family_vocab` | `list[str]` | Fitted vocabularies, index equals code, `[0]` is `"<UNK>"` |
+| `missing_values` | `MissingValuePolicy` | The missing-value policy the model was built for; `Zero` for a checkpoint written before the policy existed. `missing_flag_width()` gives the number of flag columns it adds |
 | `top_k_species`, `selection`, `species_budget`, `representation`, `normalization`, `aggregation`, `use_taxonomy` | | The `DatasetConfig` knobs the loader consumed. `selection` is the one the load APPLIED: a pooled or sparse dataset with no `species_budget` encodes every record, so it reports `All` |
 | `pool_weighting`, `pool_species_cap` | | Pool settings, so inference recomputes the same weights |
 

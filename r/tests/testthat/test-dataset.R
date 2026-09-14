@@ -484,3 +484,46 @@ test_that("resolve.dataset.csv rejects a malformed target list at the front door
   expect_equal(length(ds$schema()$targets), 1L)
   expect_equal(names(ds$schema()$targets), "area")
 })
+
+test_that("a missing covariate or coordinate is NaN and the policy is recorded", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  header_file <- tempfile(fileext = ".csv")
+  species_file <- tempfile(fileext = ".csv")
+  on.exit({
+    unlink(header_file)
+    unlink(species_file)
+  }, add = TRUE)
+
+  writeLines(c("plot_id,lat,lon,elev,area",
+               "p1,45.1,10.2,300,100",
+               "p2,,,0,200",
+               "p3,45.3,10.4,,150"), header_file)
+  writeLines(c("plot_id,species_id,cover",
+               "p1,sp1,0.5", "p2,sp1,0.8", "p3,sp2,0.4"), species_file)
+
+  load <- function(policy) {
+    resolve.dataset.csv(
+      header = header_file,
+      species = species_file,
+      roles = list(plot_id = "plot_id", species_id = "species_id",
+                   abundance = "cover", latitude = "lat", longitude = "lon",
+                   covariates = "elev"),
+      targets = list(area = list(column = "area", task = "regression")),
+      config = list(species_encoding = "hash", hash_dim = 8,
+                    missing_values = policy)
+    )
+  }
+
+  indicated <- load("indicate")
+  expect_equal(indicated$config()$missing_values, "indicate")
+  expect_equal(indicated$schema()$missing_values, "indicate")
+  expect_true(all(is.nan(indicated$coordinates()[2, ])))
+  covariates <- indicated$covariates()
+  expect_equal(covariates[2, 1], 0)
+  expect_true(is.nan(covariates[3, 1]))
+
+  expect_equal(load("zero")$schema()$missing_values, "zero")
+  expect_error(load("impute"), "missing value policy")
+})

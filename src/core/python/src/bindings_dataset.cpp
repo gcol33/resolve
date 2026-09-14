@@ -282,6 +282,13 @@ void register_dataset(nb::module_& m) {
             const auto& t = self.unknown_count();
             return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
         })
+        .def("continuous_block", [](const resolve::ResolveDataset& self, bool include_hash) {
+            return nb::steal(THPVariable_Wrap(self.continuous_block(include_hash)));
+        }, nb::arg("include_hash"),
+           "The unstandardised continuous block a model built from this dataset's "
+           "schema reads: coordinates, covariates, their missingness flags "
+           "(missing_values = indicate; missing cells stay NaN), the "
+           "unknown-species columns and, with include_hash, the hash embedding.")
         .def_prop_ro("categorical_ids", [](const resolve::ResolveDataset& self) {
             const auto& t = self.categorical_ids();
             return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();

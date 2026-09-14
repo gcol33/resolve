@@ -77,6 +77,10 @@ inline const CommandSpec& train_spec() {
                          "rank_pool / transformer / sparse encodings:\n"
                          "0 = no budget (encode every species). hash uses\n"
                          "--top-k and embed uses --top-k-species instead."});
+        flags.push_back({"--missing-values", Arity::Value, "MODE", "indicate",
+                         "How a missing covariate or coordinate enters the\n"
+                         "model: indicate (fill with the fitting fold's mean\n"
+                         "and add a 0/1 missingness column) or zero."});
         flags.push_back({"--representation", Arity::Value, "MODE", "abundance",
                          "Species values: abundance or presence_absence"});
         flags.push_back({"--normalization", Arity::Value, "MODE", "raw",

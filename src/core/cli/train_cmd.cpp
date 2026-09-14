@@ -230,6 +230,8 @@ int train_command(const ParsedArgs& args) {
     dataset_config.top_k_species = args.get_int("--top-k-species");
     dataset_config.selection = parse_selection_mode(args.get("--selection"));
     dataset_config.species_budget = args.get_int("--species-budget");
+    dataset_config.missing_values =
+        parse_missing_value_policy(args.get("--missing-values"));
     dataset_config.representation =
         parse_representation_mode(args.get("--representation"));
     dataset_config.normalization =

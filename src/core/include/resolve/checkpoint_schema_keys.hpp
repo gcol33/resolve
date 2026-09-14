@@ -45,6 +45,10 @@ inline constexpr const char* kRepresentation    = "schema_representation";
 inline constexpr const char* kNormalization     = "schema_normalization";
 inline constexpr const char* kAggregation       = "schema_aggregation";
 inline constexpr const char* kUseTaxonomy       = "schema_use_taxonomy";
+// How missing covariates and coordinates enter the continuous block. Absent on
+// a checkpoint written before the policy existed, which then reads back as
+// MissingValuePolicy::Zero -- what that model was trained under.
+inline constexpr const char* kMissingValues     = "schema_missing_values";
 
 // Fitted species / genus / family vocabularies (issue #102). Each is one
 // string list written under the shared "<prefix>_lengths" (int64) +

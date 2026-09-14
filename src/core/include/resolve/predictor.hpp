@@ -124,13 +124,17 @@ public:
         bool return_latent = false
     );
 
-    // Get latent embeddings
+    // Get latent embeddings. A missing coordinate or covariate is NaN.
+    // unknown_fraction / unknown_count are required when the model reads them
+    // (ResolveSchema::track_unknown_fraction / track_unknown_count).
     torch::Tensor get_embeddings(
         torch::Tensor coordinates,
         torch::Tensor covariates,
         torch::Tensor hash_embedding,
         torch::Tensor genus_ids,
-        torch::Tensor family_ids
+        torch::Tensor family_ids,
+        torch::Tensor unknown_fraction = {},
+        torch::Tensor unknown_count = {}
     );
 
     // Get learned embedding weights (averaged across positions)

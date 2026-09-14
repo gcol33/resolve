@@ -126,6 +126,11 @@ void register_enums(nb::module_& m) {
         .value("Gated", resolve::ParallelAggregation::Gated)
         .export_values();
 
+    nb::enum_<resolve::MissingValuePolicy>(m, "MissingValuePolicy")
+        .value("Zero", resolve::MissingValuePolicy::Zero)
+        .value("Indicate", resolve::MissingValuePolicy::Indicate)
+        .export_values();
+
     nb::enum_<resolve::PoolWeighting>(m, "PoolWeighting")
         .value("Binary", resolve::PoolWeighting::Binary)
         .value("Abundance", resolve::PoolWeighting::Abundance)

@@ -191,11 +191,10 @@ const char* name_of(SpeciesEncodingMode mode) {
 }
 
 // Width of the continuous block Trainer::prepare_data assembles for this
-// corpus: 2 coordinates + 1 covariate (elev) + 1 unknown_fraction, and for the
-// hash encoding the hash embedding on top.
-int64_t continuous_width(SpeciesEncodingMode mode) {
-    const int64_t base = 2 + 1 + 1;
-    return mode == SpeciesEncodingMode::Hash ? base + 32 : base;
+// dataset: its schema's coordinates, covariates, their missingness flags and
+// unknown fraction, and for the hash encoding the hash embedding on top.
+int64_t continuous_width(const ResolveDataset& ds, SpeciesEncodingMode mode) {
+    return ds.continuous_block(mode == SpeciesEncodingMode::Hash).size(1);
 }
 
 // Run one batch through forward_with_aux, the path the trainer takes. The
@@ -208,7 +207,7 @@ ModelForwardResult forward_batch(ResolveModel& model, const ResolveDataset& ds,
         return (t.defined() && t.numel() > 0) ? t.index_select(0, rows) : t;
     };
     return model->forward_with_aux(
-        torch::randn({n_rows, continuous_width(mode)}),
+        torch::randn({n_rows, continuous_width(ds, mode)}),
         take(ds.genus_ids()), take(ds.family_ids()),
         take(ds.species_ids()), take(ds.species_vector()),
         take(ds.pool_genus_ids()), take(ds.pool_family_ids()),
@@ -489,7 +488,7 @@ TEST_CASE("Gate probabilities come back for the encoders this signature drives",
         return (t.defined() && t.numel() > 0) ? t.index_select(0, rows) : t;
     };
     const auto continuous =
-        torch::randn({8, continuous_width(SpeciesEncodingMode::Hash)});
+        torch::randn({8, continuous_width(ds, SpeciesEncodingMode::Hash)});
 
     for (auto placement : {MoEPlacement::Tail, MoEPlacement::Post}) {
         INFO("placement " << (placement == MoEPlacement::Tail ? "tail" : "post"));
@@ -517,7 +516,7 @@ TEST_CASE("Gate probabilities are still empty when there is no mixture",
 
     ResolveModel model(ds.schema(), base_model(SpeciesEncodingMode::Hash));
     auto probs = model->get_gate_probs(
-        torch::randn({8, continuous_width(SpeciesEncodingMode::Hash)}),
+        torch::randn({8, continuous_width(ds, SpeciesEncodingMode::Hash)}),
         head_rows(ds.genus_ids(), 8), head_rows(ds.family_ids(), 8));
     CHECK_FALSE(probs.defined());
 }
@@ -536,7 +535,7 @@ TEST_CASE("An encoder this signature cannot drive says so", "[moe][gates]") {
         auto ds = build(header.path(), species.path(), mode);
         ResolveModel model(ds.schema(), moe_model(mode, MoEPlacement::Tail));
         REQUIRE_THROWS_AS(
-            model->get_gate_probs(torch::randn({8, continuous_width(mode)}),
+            model->get_gate_probs(torch::randn({8, continuous_width(ds, mode)}),
                                   head_rows(ds.genus_ids(), 8),
                                   head_rows(ds.family_ids(), 8)),
             std::invalid_argument);

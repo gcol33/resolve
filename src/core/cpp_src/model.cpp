@@ -48,6 +48,7 @@ ResolveModelImpl::ResolveModelImpl(
     }
 
     int64_t n_continuous_base = n_coords + schema.covariate_names.size()
+                              + schema.missing_flag_width()
                               + n_unknown_features + n_categorical_embed;
 
     // Pre-compute the taxonomy embedding-table sizes once (single source of

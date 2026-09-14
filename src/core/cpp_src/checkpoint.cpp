@@ -474,6 +474,9 @@ void save_scalers(
     if (has_continuous) {
         archive.write("continuous_mean", scalers.continuous_mean);
         archive.write("continuous_scale", scalers.continuous_scale);
+        if (scalers.continuous_fill.defined()) {
+            archive.write("continuous_fill", scalers.continuous_fill);
+        }
     }
 
     // Save target scalers. Why: the previous format wrote only mean/scale
@@ -511,6 +514,11 @@ Scalers load_scalers(
         // try_read avoids the silent-catch-everything anti-pattern below.
         archive.try_read("continuous_mean", scalers.continuous_mean);
         archive.try_read("continuous_scale", scalers.continuous_scale);
+        // Absent on a checkpoint written before missing values were filled.
+        torch::Tensor fill;
+        if (archive.try_read("continuous_fill", fill)) {
+            scalers.continuous_fill = fill;
+        }
     }
 
     auto read_string_pair = [&](const std::string& prefix) -> std::string {
@@ -645,6 +653,7 @@ void save_schema(
     archive.write(k::kNormalization, torch::tensor(static_cast<int>(schema.normalization)));
     archive.write(k::kAggregation, torch::tensor(static_cast<int>(schema.aggregation)));
     archive.write(k::kUseTaxonomy, torch::tensor(static_cast<int>(schema.use_taxonomy)));
+    archive.write(k::kMissingValues, torch::tensor(static_cast<int>(schema.missing_values)));
 
     // Fitted species / genus / family vocabularies, index = integer code
     // (issue #102). These are what make a checkpoint self-sufficient for
@@ -814,6 +823,9 @@ ResolveSchema load_schema(
     rd_i32(k::kNormalization, [&](int v) { schema.normalization = static_cast<NormalizationMode>(v); });
     rd_i32(k::kAggregation, [&](int v) { schema.aggregation = static_cast<AggregationMode>(v); });
     rd_i32(k::kUseTaxonomy, [&](int v) { schema.use_taxonomy = (v != 0); });
+    // A model trained before the policy existed read every missing value as 0.
+    schema.missing_values = MissingValuePolicy::Zero;
+    rd_i32(k::kMissingValues, [&](int v) { schema.missing_values = static_cast<MissingValuePolicy>(v); });
 
     // Fitted vocabularies (issue #102). Absent on a pre-fix checkpoint: the
     // vectors stay empty, has_species_vocab()/has_taxonomy_vocab() report

@@ -53,12 +53,23 @@ public:
         NumericMatrix coordinates, NumericMatrix covariates, NumericMatrix hash_embedding,
         Nullable<IntegerMatrix> genus_ids = R_NilValue,
         Nullable<IntegerMatrix> family_ids = R_NilValue) {
+        return get_embeddings_unknown(coordinates, covariates, hash_embedding,
+                                      genus_ids, family_ids, R_NilValue, R_NilValue);
+    }
+
+    // The same, for a model that reads the unknown-species fraction or count.
+    RObject get_embeddings_unknown(
+        NumericMatrix coordinates, NumericMatrix covariates, NumericMatrix hash_embedding,
+        Nullable<IntegerMatrix> genus_ids, Nullable<IntegerMatrix> family_ids,
+        Nullable<NumericVector> unknown_fraction, Nullable<NumericVector> unknown_count) {
         ValuePtr in(resolve_value_new_map());
         map_set_num_matrix(in.get(), "coordinates", coordinates);
         map_set_num_matrix(in.get(), "covariates", covariates);
         map_set_num_matrix(in.get(), "hash_embedding", hash_embedding);
         map_set_opt_int_matrix(in.get(), "genus_ids", genus_ids);
         map_set_opt_int_matrix(in.get(), "family_ids", family_ids);
+        map_set_opt_num_vector(in.get(), "unknown_fraction", unknown_fraction);
+        map_set_opt_num_vector(in.get(), "unknown_count", unknown_count);
         return value_to_r_owned(resolve_predictor_get_embeddings(predictor_.get(), in.get()));
     }
 

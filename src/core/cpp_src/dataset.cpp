@@ -1,4 +1,5 @@
 #include "resolve/dataset.hpp"
+#include "resolve/continuous_block.hpp"
 #include "resolve/csv_reader.hpp"
 #include "resolve/csv_utils.hpp"
 #include "resolve/species_encoding.hpp"
@@ -9,6 +10,7 @@
 #include <numeric>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <functional>
 #include <optional>
 #include <unordered_set>
@@ -671,12 +673,20 @@ DatasetConfig dataset_config_from_checkpoint(const ResolveSchema& schema,
     config.track_unknown_fraction = schema.track_unknown_fraction;
     config.track_unknown_count = schema.track_unknown_count;
     config.use_taxonomy = schema.use_taxonomy;
+    config.missing_values = schema.missing_values;
     config.pool_weighting = static_cast<PoolWeighting>(schema.pool_weighting);
     config.pool_species_cap = schema.pool_species_cap;
     // use_cuda_hash stays false by design: it is a training-time compute path
     // (raw COO species data instead of a precomputed hash embedding), and
     // Predictor::predict consumes the precomputed embedding.
     return config;
+}
+
+torch::Tensor ResolveDataset::continuous_block(bool include_hash) const {
+    return assemble_continuous(
+        {coordinates_, covariates_, unknown_fraction_, unknown_count_,
+         include_hash ? hash_embedding_ : torch::Tensor()},
+        schema_.missing_values, schema_.n_plots);
 }
 
 SelectionMode effective_selection(const DatasetConfig& config) {
@@ -832,6 +842,33 @@ static void warn_abundance_coercions(int64_t abundance_coerced) {
     }
 }
 
+// A coordinate or covariate cell the loader could not read. It stays NaN in the
+// dataset's tensors; DatasetConfig::missing_values decides how the model reads it.
+static constexpr float kMissingValue = std::numeric_limits<float>::quiet_NaN();
+
+static const char* missing_value_handling(MissingValuePolicy policy) {
+    return policy == MissingValuePolicy::Zero
+        ? "the model reads it as 0 (missing_values = zero)"
+        : "the model flags it and reads the fitting fold's mean (missing_values = indicate)";
+}
+
+static void report_missing_covariate(const std::string& column, int64_t n_missing,
+                                     MissingValuePolicy policy) {
+    if (n_missing > 0) {
+        std::cerr << "[RESOLVE] covariate column '" << column << "' has " << n_missing
+                  << " missing/unparseable cell(s); " << missing_value_handling(policy)
+                  << std::endl;
+    }
+}
+
+static void report_missing_coordinates(int64_t n_missing, MissingValuePolicy policy) {
+    if (n_missing > 0) {
+        std::cerr << "[RESOLVE] " << n_missing
+                  << " plot(s) have a missing/unparseable coordinate; "
+                  << missing_value_handling(policy) << std::endl;
+    }
+}
+
 ResolveDataset ResolveDataset::from_species_source(
     RowSource& reader,
     const RoleMapping& roles,
@@ -889,7 +926,7 @@ ResolveDataset ResolveDataset::from_species_source(
     std::unordered_map<std::string, std::pair<float, float>> plot_coords;
     std::unordered_map<std::string, std::vector<std::string>> plot_targets;
     std::unordered_set<std::string> seen_plots;
-    int64_t coord_na_count = 0;  // missing/unparseable coords coerced to (0,0)
+    int64_t coord_na_count = 0;  // missing/unparseable coords, kept as NaN
     int64_t abundance_coerced = 0;  // missing/unparseable abundance coerced to 1.0
 
     reader.read_rows([&](size_t, const std::vector<std::string>& row) {
@@ -907,13 +944,14 @@ ResolveDataset ResolveDataset::from_species_source(
             seen_plots.insert(plot_id);
             dataset.plot_ids_.push_back(plot_id);
 
-            // Coordinates. NA-aware parse so a missing/unparseable cell is not
-            // silently read as a real (0, 0) location (issue #46).
+            // Coordinates. NA-aware parse: a missing/unparseable cell is kept
+            // as NaN, never read as a real (0, 0) location (issue #46); the
+            // continuous block decides how the model reads it.
             if (cols.longitude >= 0 && cols.latitude >= 0 &&
                 row.size() > static_cast<size_t>(std::max(cols.longitude, cols.latitude))) {
                 auto lon = parse_regression_target(row[cols.longitude]);
                 auto lat = parse_regression_target(row[cols.latitude]);
-                plot_coords[plot_id] = {lon.value_or(0.0f), lat.value_or(0.0f)};
+                plot_coords[plot_id] = {lon.value_or(kMissingValue), lat.value_or(kMissingValue)};
                 if (!lon.has_value() || !lat.has_value()) {
                     coord_na_count++;
                 }
@@ -938,12 +976,7 @@ ResolveDataset ResolveDataset::from_species_source(
         }
     });
 
-    if (coord_na_count > 0) {
-        std::cerr << "[RESOLVE] warning: " << coord_na_count
-                  << " plot(s) had a missing/unparseable coordinate coerced to "
-                     "(0, 0); spatial models will treat these as a real location"
-                  << std::endl;
-    }
+    report_missing_coordinates(coord_na_count, config.missing_values);
     warn_abundance_coercions(abundance_coerced);
 
     int64_t n_plots = static_cast<int64_t>(dataset.plot_ids_.size());
@@ -951,7 +984,7 @@ ResolveDataset ResolveDataset::from_species_source(
 
     // Build coordinates tensor
     if (!plot_coords.empty()) {
-        dataset.coordinates_ = torch::zeros({n_plots, 2}, torch::kFloat32);
+        dataset.coordinates_ = torch::full({n_plots, 2}, kMissingValue, torch::kFloat32);
         auto coords_acc = dataset.coordinates_.accessor<float, 2>();
 
         for (int64_t i = 0; i < n_plots; ++i) {
@@ -1185,12 +1218,12 @@ void ResolveDataset::load_header_data(
                               ? targets[t].column_name : targets[t].target_name;
     }
 
-    // Per-column count of covariate cells that were missing/unparseable and
-    // coerced to 0.0 during the scan (issue #32); warned about afterwards.
+    // Per-column count of covariate cells that were missing/unparseable during
+    // the scan, kept as NaN (issue #32); reported afterwards.
     std::vector<int64_t> cov_na_counts(covariate_cols.size(), 0);
-    // Count of rows whose longitude/latitude was missing/unparseable and
-    // coerced to 0.0 -- a real location (Gulf of Guinea) that silently corrupts
-    // spatial-graph neighbours. Warned about after the scan.
+    // Count of rows whose longitude/latitude was missing/unparseable, kept as
+    // NaN rather than read as (0, 0), a real location (Gulf of Guinea).
+    // Reported after the scan.
     int64_t coord_na_count = 0;
     // Rows too short to even hold plot_id are skipped during the scan; count them
     // for the post-scan summary (they never enter any buffer).
@@ -1238,30 +1271,29 @@ void ResolveDataset::load_header_data(
         bool row_ok = true;
 
         // Coordinates. Parse with the NA-aware helper so a blank / "NA" /
-        // unparseable cell is not silently read as a real (0, 0) location; count
-        // the coercions and warn after the scan (issue #46). A genuine "0"
-        // parses to 0.0 and is not counted.
+        // unparseable cell is kept as NaN rather than read as a real (0, 0)
+        // location; count them and report after the scan (issue #46). A genuine
+        // "0" parses to 0.0 and is not counted.
         if (has_coords) {
             auto lon = (row.size() > static_cast<size_t>(lon_col))
                            ? parse_regression_target(row[lon_col]) : std::nullopt;
             auto lat = (row.size() > static_cast<size_t>(lat_col))
                            ? parse_regression_target(row[lat_col]) : std::nullopt;
-            coords_buf.push_back(lon.value_or(0.0f));
-            coords_buf.push_back(lat.value_or(0.0f));
+            coords_buf.push_back(lon.value_or(kMissingValue));
+            coords_buf.push_back(lat.value_or(kMissingValue));
             if (!lon.has_value() || !lat.has_value()) {
                 coord_na_count++;
             }
         }
 
         // Covariates. Parse with the NaN-aware helper so a blank / "NA" /
-        // unparseable cell is not silently read as a real 0.0 (which would bias
-        // standardization). We still write a well-defined 0.0 into the slot, but
-        // count the coercions per column and warn after the scan so the missing
-        // values are visible rather than silent (issue #32).
+        // unparseable cell is kept as NaN rather than read as a real 0.0; the
+        // continuous block decides how the model reads it. Counted per column
+        // and reported after the scan (issue #32).
         if (cov_cols > 0) {
             for (size_t i = 0; i < covariate_cols.size(); ++i) {
                 int col = covariate_cols[i];
-                float val = 0.0f;
+                float val = kMissingValue;
                 if (row.size() > static_cast<size_t>(col)) {
                     auto parsed = parse_regression_target(row[col]);
                     if (parsed.has_value()) val = *parsed;
@@ -1346,23 +1378,14 @@ void ResolveDataset::load_header_data(
     }
     schema_.n_plots = n_loaded;
 
-    // Surface covariate missingness: coercing NA/blank cells to 0.0 injects a
-    // real, extreme value into standardization, so make it visible rather than
-    // silent. Rows are NOT dropped here (covariates don't gate row validity the
-    // way targets do); the researcher decides how to handle them upstream.
+    // Report covariate missingness. Rows are NOT dropped here (covariates do not
+    // gate row validity the way targets do); DatasetConfig::missing_values
+    // decides how the model reads a missing cell.
     for (size_t i = 0; i < cov_na_counts.size(); ++i) {
-        if (cov_na_counts[i] > 0) {
-            std::cerr << "[RESOLVE] warning: covariate column '"
-                      << schema_.covariate_names[i] << "' had " << cov_na_counts[i]
-                      << " missing/unparseable cell(s) coerced to 0.0" << std::endl;
-        }
+        report_missing_covariate(schema_.covariate_names[i], cov_na_counts[i],
+                                 config_.missing_values);
     }
-    if (coord_na_count > 0) {
-        std::cerr << "[RESOLVE] warning: " << coord_na_count
-                  << " plot(s) had a missing/unparseable coordinate coerced to "
-                     "(0, 0); spatial models will treat these as a real location"
-                  << std::endl;
-    }
+    report_missing_coordinates(coord_na_count, config_.missing_values);
 
     // ---- Fit + encode classification target columns ----
     // Two passes so every classification vocab is fit from the final surviving-row
@@ -1619,6 +1642,7 @@ void ResolveDataset::encode_species(
     schema_.normalization = config_.normalization;
     schema_.aggregation = config_.aggregation;
     schema_.use_taxonomy = config_.use_taxonomy;
+    schema_.missing_values = config_.missing_values;
 
     // Fit taxonomy vocabulary. Rank-pool / transformer modes rebuild taxonomy
     // from the RankPoolEncoder's own vocab further down (and overwrite these

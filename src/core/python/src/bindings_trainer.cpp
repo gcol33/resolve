@@ -287,18 +287,24 @@ void register_trainer(nb::module_& m) {
                                   nb::object covariates_obj,
                                   nb::object hash_embedding_obj,
                                   nb::object genus_ids_obj,
-                                  nb::object family_ids_obj) {
+                                  nb::object family_ids_obj,
+                                  nb::object unknown_fraction_obj,
+                                  nb::object unknown_count_obj) {
             auto out = self.get_embeddings(unpack_optional_tensor(coordinates_obj),
                                            unpack_optional_tensor(covariates_obj),
                                            unpack_optional_tensor(hash_embedding_obj),
                                            unpack_optional_tensor(genus_ids_obj),
-                                           unpack_optional_tensor(family_ids_obj));
+                                           unpack_optional_tensor(family_ids_obj),
+                                           unpack_optional_tensor(unknown_fraction_obj),
+                                           unpack_optional_tensor(unknown_count_obj));
             return nb::steal(THPVariable_Wrap(out));
         }, nb::arg("coordinates"),
            nb::arg("covariates"),
            nb::arg("hash_embedding"),
            nb::arg("genus_ids"),
-           nb::arg("family_ids"))
+           nb::arg("family_ids"),
+           nb::arg("unknown_fraction").none() = nb::none(),
+           nb::arg("unknown_count").none() = nb::none())
         // Move to CPU (detached) so a CUDA predictor returns a CPU tensor, like
         // the sibling predict/scalers accessors and the C-ABI predictor_get
         // (which always emits a CPU matrix). An undefined tensor (no taxonomy /

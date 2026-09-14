@@ -1,8 +1,49 @@
 # RESOLVE Changelog
 
-## v0.10.1 (unreleased)
+## v0.11.0 (unreleased)
+
+### Changed
+
+- **A missing covariate or coordinate is flagged and filled instead of read
+  as zero.** The loader wrote a blank covariate cell as 0.0 and a blank
+  coordinate as (0, 0), so a model could not tell a recorded 0 from a missing
+  value, and a plot without coordinates sat in the Gulf of Guinea. The loader
+  now keeps such a cell as `NaN` in `coordinates()` / `covariates()`, and
+  `DatasetConfig::missing_values` decides how the model reads it. Under the
+  new default, `MissingValuePolicy::Indicate`, the continuous block carries a
+  0/1 column per covariate and one for the coordinate pair, and the value is
+  filled with the mean of that column's recorded values on the fitting rows
+  before standardisation. `MissingValuePolicy::Zero` keeps the earlier
+  behaviour. The block is assembled, filled and standardised in one module,
+  `continuous_block.{hpp,cpp}`, which the Trainer, the cross-validation
+  folds, `Trainer::predict`, `Predictor::predict` and
+  `Predictor::get_embeddings` all call, so the column layout cannot differ
+  between fitting and scoring. Cross-validation marks a filled cell missing
+  again before each fold refits its fill. `SpatialBlockSplitter` keeps a
+  plot without coordinates in every training fold and out of every test
+  fold. The policy is persisted on `ResolveSchema` (`schema_missing_values`)
+  and the fill on `Scalers` (`continuous_fill`); a checkpoint written before
+  either key existed loads as `Zero` with no fill and predicts exactly as
+  before. Surfaces: `resolve_core.MissingValuePolicy`,
+  `DatasetConfig.missing_values`, `ResolveSchema.missing_values` /
+  `missing_flag_width()`, `Scalers.continuous_fill`,
+  `ResolveDataset.continuous_block(include_hash)`; the C-ABI config and
+  schema trees and the scalers value; R `config = list(missing_values =
+  "indicate")`; CLI `resolve train --missing-values {indicate,zero}`.
+  **Retrain to use it**: a model trained under `Zero` keeps reading missing
+  values as zero.
 
 ### Fixed
+
+- **`Predictor::get_embeddings` assembled its continuous block in a different
+  column order from training** (coordinates, hash embedding, covariates,
+  where the Trainer places the hash last) and never appended the
+  unknown-species columns, so a hash model's embeddings read shuffled inputs
+  and a model tracking unknown species could not be embedded at all. It now
+  calls the shared block assembly and takes `unknown_fraction` /
+  `unknown_count`, which it requires when the model reads them (nanobind
+  keywords, C-ABI keys, and an R method overload with the two extra
+  arguments).
 
 - **Early stopping no longer waits for a loss phase that changes nothing.**
   Patience counted only once training reached the phase the last epoch is

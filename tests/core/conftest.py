@@ -219,26 +219,14 @@ def make_train_config(
 
 
 def trainer_continuous(dataset: "rc.ResolveDataset", model_config: "rc.ModelConfig"):
-    """Assemble ``continuous`` the way ``Trainer::prepare_data`` does.
+    """The continuous block ``Trainer::prepare_data`` builds, before standardisation.
 
     The pretrainers take the encoder's continuous block directly rather than a
-    dataset, so a caller has to concatenate coordinates, covariates, the
-    unknown-mass features, and (in hash mode) the hash embedding in that order.
+    dataset; the engine assembles it, so the column layout cannot drift from
+    what a model built from the same schema reads.
     """
-    import torch
-
-    parts = []
-    for tensor in (dataset.coordinates, dataset.covariates):
-        if tensor is not None and tensor.numel() > 0:
-            parts.append(tensor)
-    for tensor in (dataset.unknown_fraction, dataset.unknown_count):
-        if tensor is not None and tensor.numel() > 0:
-            parts.append(tensor.reshape(-1, 1).to(torch.float32))
-    if model_config.species_encoding == rc.SpeciesEncodingMode.Hash:
-        hashed = dataset.hash_embedding
-        if hashed is not None and hashed.numel() > 0:
-            parts.append(hashed)
-    return torch.cat(parts, dim=1)
+    return dataset.continuous_block(
+        model_config.species_encoding == rc.SpeciesEncodingMode.Hash)
 
 
 # ---------------------------------------------------------------------------

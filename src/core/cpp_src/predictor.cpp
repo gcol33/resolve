@@ -1,5 +1,6 @@
 #include "resolve/predictor.hpp"
 #include "resolve/dataset.hpp"
+#include "resolve/continuous_block.hpp"
 #include "resolve/encoder.hpp"  // Fp32NormImpl (inference-time BN fusion)
 #include "resolve/utils.hpp"
 #include <atomic>
@@ -379,40 +380,21 @@ ResolvePredictions Predictor::predict(
     torch::NoGradGuard no_grad;
     model_->eval();
 
-    // Build continuous features based on encoding mode (must match trainer.cpp)
-    std::vector<torch::Tensor> continuous_parts;
-    push_if_defined(continuous_parts, coordinates);
-    push_if_defined(continuous_parts, covariates);
-    push_if_defined(continuous_parts, unknown_fraction, 1);
-    if (unknown_count.defined() && unknown_count.numel() > 0) {
-        continuous_parts.push_back(unknown_count.to(torch::kFloat32).unsqueeze(1));
-    }
-
-    // For hash mode, include hash embedding in continuous
-    if (model_->species_encoding() == SpeciesEncodingMode::Hash &&
-        !model_->uses_explicit_vector()) {
-        push_if_defined(continuous_parts, hash_embedding);
-    }
-
-    torch::Tensor continuous;
-    if (!continuous_parts.empty()) {
-        continuous = torch::cat(continuous_parts, /*dim=*/1);
-    } else {
-        int64_t n_samples = 0;
-        if (hash_embedding.defined()) n_samples = hash_embedding.size(0);
-        else if (species_ids.defined()) n_samples = species_ids.size(0);
-        else if (species_vector.defined()) n_samples = species_vector.size(0);
-        continuous = torch::zeros({n_samples, 0}, torch::kFloat32);
-    }
-
-    // Scale continuous features
-    torch::Tensor scaled_continuous;
-    if (scalers_.continuous_mean.defined() && continuous.size(1) > 0) {
-        scaled_continuous = (continuous - scalers_.continuous_mean) / scalers_.continuous_scale;
-    } else {
-        scaled_continuous = continuous;
-    }
-    scaled_continuous = scaled_continuous.to(device_);
+    // The continuous block, assembled and standardised exactly as the Trainer
+    // did at fit time (continuous_block.hpp).
+    const bool hash_in_block = model_->species_encoding() == SpeciesEncodingMode::Hash &&
+                               !model_->uses_explicit_vector();
+    // The row count, for a model whose block is empty.
+    int64_t n_rows = 0;
+    if (hash_embedding.defined()) n_rows = hash_embedding.size(0);
+    else if (species_ids.defined()) n_rows = species_ids.size(0);
+    else if (species_vector.defined()) n_rows = species_vector.size(0);
+    else if (pool_weights.defined()) n_rows = pool_weights.size(0);
+    auto continuous = assemble_continuous(
+        {coordinates, covariates, unknown_fraction, unknown_count,
+         hash_in_block ? hash_embedding : torch::Tensor()},
+        model_->schema().missing_values, n_rows);
+    auto scaled_continuous = standardize_continuous(continuous, scalers_).to(device_);
 
     // Move tensors to device
     genus_ids = to_device_if_defined(genus_ids, device_);
@@ -485,35 +467,40 @@ torch::Tensor Predictor::get_embeddings(
     torch::Tensor covariates,
     torch::Tensor hash_embedding,
     torch::Tensor genus_ids,
-    torch::Tensor family_ids
+    torch::Tensor family_ids,
+    torch::Tensor unknown_fraction,
+    torch::Tensor unknown_count
 ) {
     torch::NoGradGuard no_grad;
     model_->eval();
 
-    // Concatenate continuous features (hash_embedding may be empty for non-hash modes)
-    std::vector<torch::Tensor> continuous_parts;
-    if (coordinates.defined() && coordinates.numel() > 0) {
-        continuous_parts.push_back(coordinates);
+    const auto& schema = model_->schema();
+    auto present = [](const torch::Tensor& t) { return t.defined() && t.numel() > 0; };
+    if (schema.track_unknown_fraction && !present(unknown_fraction)) {
+        throw std::invalid_argument(
+            "get_embeddings: the model reads an unknown-species fraction "
+            "(track_unknown_fraction), so pass unknown_fraction");
     }
-    if (hash_embedding.defined() && hash_embedding.numel() > 0) {
-        continuous_parts.push_back(hash_embedding);
+    if (schema.track_unknown_count && !present(unknown_count)) {
+        throw std::invalid_argument(
+            "get_embeddings: the model reads an unknown-species count "
+            "(track_unknown_count), so pass unknown_count");
     }
-    if (covariates.defined() && covariates.size(1) > 0) {
-        continuous_parts.push_back(covariates);
+    const bool hash_in_block = model_->species_encoding() == SpeciesEncodingMode::Hash &&
+                               !model_->uses_explicit_vector();
+    int64_t n_samples = 0;
+    for (const auto& t : {coordinates, covariates, hash_embedding, genus_ids}) {
+        if (present(t)) { n_samples = t.size(0); break; }
     }
-    if (continuous_parts.empty()) {
+    // The same block, in the same column order, that the Trainer fitted.
+    auto continuous = assemble_continuous(
+        {coordinates, covariates, unknown_fraction, unknown_count,
+         hash_in_block ? hash_embedding : torch::Tensor()},
+        schema.missing_values, n_samples);
+    if (continuous.size(1) == 0) {
         throw std::runtime_error("get_embeddings requires at least one non-empty input tensor");
     }
-    auto continuous = torch::cat(continuous_parts, /*dim=*/1);
-
-    // Scale continuous features, guarding an unfit scaler the same way predict()
-    // does (a model whose continuous scalers were never fit leaves these
-    // undefined; subtracting an undefined tensor would throw).
-    auto scaled_continuous = continuous;
-    if (scalers_.continuous_mean.defined() && continuous.size(1) > 0) {
-        scaled_continuous = (continuous - scalers_.continuous_mean) / scalers_.continuous_scale;
-    }
-    scaled_continuous = scaled_continuous.to(device_);
+    auto scaled_continuous = standardize_continuous(continuous, scalers_).to(device_);
 
     genus_ids = to_device_if_defined(genus_ids, device_);
     family_ids = to_device_if_defined(family_ids, device_);

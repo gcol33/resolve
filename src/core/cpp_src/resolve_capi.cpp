@@ -828,6 +828,7 @@ inline constexpr const char* kRepresentation     = "representation";
 inline constexpr const char* kNormalization      = "normalization";
 inline constexpr const char* kAggregation        = "aggregation";
 inline constexpr const char* kUseTaxonomy        = "use_taxonomy";
+inline constexpr const char* kMissingValues      = "missing_values";
 inline constexpr const char* kSpeciesVocab       = "species_vocab";
 inline constexpr const char* kGenusVocab         = "genus_vocab";
 inline constexpr const char* kFamilyVocab        = "family_vocab";
@@ -879,6 +880,7 @@ ResolveSchema parse_schema(const resolve_value* s) {
     if (vhas(s, k::kNormalization)) schema.normalization = parse_normalization_mode(vstr(s, k::kNormalization));
     if (vhas(s, k::kAggregation)) schema.aggregation = parse_aggregation_mode(vstr(s, k::kAggregation));
     if (vhas(s, k::kUseTaxonomy)) schema.use_taxonomy = vbool(s, k::kUseTaxonomy);
+    if (vhas(s, k::kMissingValues)) schema.missing_values = parse_missing_value_policy(vstr(s, k::kMissingValues));
     if (vhas(s, k::kSpeciesVocab)) schema.species_vocab = vstr_vec(s, k::kSpeciesVocab);
     if (vhas(s, k::kGenusVocab)) schema.genus_vocab = vstr_vec(s, k::kGenusVocab);
     if (vhas(s, k::kFamilyVocab)) schema.family_vocab = vstr_vec(s, k::kFamilyVocab);
@@ -1105,6 +1107,7 @@ resolve_value* scalers_to_value(const Scalers& s) {
     ValueGuard g(m);
     if (s.continuous_mean.defined()) v_put(m, "continuous_mean", tensor_to_vec(s.continuous_mean));
     if (s.continuous_scale.defined()) v_put(m, "continuous_scale", tensor_to_vec(s.continuous_scale));
+    if (s.continuous_fill.defined()) v_put(m, "continuous_fill", tensor_to_vec(s.continuous_fill));
     // Per-target regression scaling { name -> {mean, scale} }. save_scalers /
     // load_scalers persist these in the checkpoint, but the accessor marshal
     // previously dropped them, so trainer$get("scalers") / predictor$get("scalers")
@@ -1211,6 +1214,7 @@ resolve_value* schema_to_value(const ResolveSchema& s) {
     v_put(m, k::kNormalization, v_string(normalization_mode_to_string(s.normalization)));
     v_put(m, k::kAggregation, v_string(aggregation_mode_to_string(s.aggregation)));
     v_put(m, k::kUseTaxonomy, v_bool(s.use_taxonomy));
+    v_put(m, k::kMissingValues, v_string(missing_value_policy_to_string(s.missing_values)));
     v_put(m, k::kSpeciesVocab, v_string_array(s.species_vocab));
     v_put(m, k::kGenusVocab, v_string_array(s.genus_vocab));
     v_put(m, k::kFamilyVocab, v_string_array(s.family_vocab));
@@ -2025,7 +2029,11 @@ resolve_value_t* resolve_predictor_get_embeddings(resolve_predictor_t* p, const 
         torch::Tensor hash_embedding = opt_f32(in, "hash_embedding");
         torch::Tensor genus_ids = opt_i64(in, "genus_ids");
         torch::Tensor family_ids = opt_i64(in, "family_ids");
-        torch::Tensor emb = p->predictor.get_embeddings(coordinates, covariates, hash_embedding, genus_ids, family_ids);
+        torch::Tensor unknown_fraction = opt_f32(in, "unknown_fraction");
+        torch::Tensor unknown_count = opt_f32(in, "unknown_count");
+        torch::Tensor emb = p->predictor.get_embeddings(coordinates, covariates, hash_embedding,
+                                                        genus_ids, family_ids,
+                                                        unknown_fraction, unknown_count);
         return tensor_to_mat(emb);
     })
 }

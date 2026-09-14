@@ -18,6 +18,7 @@ set(RESOLVE_CORE_SOURCES
     ${RESOLVE_CORE_DIR}/cpp_src/tabm.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/adapter.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/model.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/continuous_block.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/trainer.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/predictor.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/loss.cpp

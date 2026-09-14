@@ -4,6 +4,7 @@
 #include "resolve/model.hpp"
 #include "resolve/loss.hpp"
 #include "resolve/dataset.hpp"
+#include "resolve/scalers.hpp"
 #include <torch/torch.h>
 #include <chrono>
 
@@ -11,13 +12,6 @@ namespace resolve {
 
 // Forward declaration
 class ResolveDataset;
-
-// Data scalers (mean, scale) per feature/target
-struct Scalers {
-    torch::Tensor continuous_mean;
-    torch::Tensor continuous_scale;
-    std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>> target_scalers;
-};
 
 // =============================================================================
 // Spatial Block Splitter for cross-validation
@@ -316,10 +310,13 @@ private:
     // random and spatial cross-validation routines, which reassemble already-
     // standardized train/test tensors and must recover raw values before each
     // fold recomputes its own scalers (otherwise data is standardized twice).
+    // A cell `schema` flags as missing is NaN again afterwards, so the fold's
+    // fill is fitted on that fold's recorded values alone.
     static void unscale_continuous_targets(
         torch::Tensor& continuous,
         std::unordered_map<std::string, torch::Tensor>& targets,
-        const Scalers& scalers);
+        const Scalers& scalers,
+        const ResolveSchema& schema);
 
     // Copy params + buffers from a checkpoint archive into `model` under a
     // NoGradGuard (freshly-constructed leaf params require it). Single source

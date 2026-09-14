@@ -15,7 +15,7 @@ namespace resolve {
 // Version and constants
 // =============================================================================
 
-inline constexpr const char* VERSION = "0.10.0";
+inline constexpr const char* VERSION = "0.11.0";
 
 // Training defaults
 constexpr int kDefaultBatchSize = 4096;
@@ -139,6 +139,14 @@ enum class AggregationMode {
     Count       // Count species
 };
 
+// How a missing numeric covariate or coordinate enters the model.
+enum class MissingValuePolicy {
+    Zero,     // The value is read as 0.0 and nothing marks it as missing.
+    Indicate  // The value is filled with the fitting fold's mean before
+              // standardisation, and a 0/1 column beside the covariates marks
+              // it: one per covariate, and one for the coordinate pair.
+};
+
 // Activation function type for configurable architecture
 enum class ActivationType {
     ReLU,
@@ -248,6 +256,13 @@ struct ResolveSchema {
     AggregationMode aggregation = AggregationMode::Abundance;
     bool use_taxonomy = true;
 
+    // How missing covariates and coordinates enter the continuous block.
+    // Mirrors DatasetConfig::missing_values, which a dataset load copies here.
+    // Zero for a schema assembled by hand, whose caller lays out the block
+    // itself, and for a checkpoint written before the field existed, which is
+    // what those models were trained under.
+    MissingValuePolicy missing_values = MissingValuePolicy::Zero;
+
     // Ordered species / genus / family vocabularies fitted at training time
     // (issue #102). Element i is the name that encodes to integer code i, and
     // index 0 is always the reserved "<UNK>" slot, so the vector length equals
@@ -296,6 +311,13 @@ struct ResolveSchema {
         return has_categoricals()
             ? static_cast<int64_t>(categorical_vocab_sizes.size()) * categorical_embed_dim
             : 0;
+    }
+    // Helper: how many missingness columns the continuous block carries -- one
+    // for the coordinate pair and one per covariate under Indicate, none under
+    // Zero. Single source of truth for every place that sizes the block.
+    [[nodiscard]] int64_t missing_flag_width() const noexcept {
+        if (missing_values != MissingValuePolicy::Indicate) return 0;
+        return (has_coordinates ? 1 : 0) + static_cast<int64_t>(covariate_names.size());
     }
 };
 

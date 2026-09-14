@@ -476,7 +476,7 @@ TEST_CASE("JEPA target encoder syncs BatchNorm buffers", "[recovery][jepa]") {
 
     JEPAPretrainer pretrainer(model, pcfg);
     // Hash-mode get_latent expects the hash embedding folded into continuous.
-    auto cont = torch::cat({ds.covariates(), ds.hash_embedding()}, /*dim=*/1);
+    auto cont = ds.continuous_block(/*include_hash=*/true);
     pretrainer.pretrain(cont);
 
     // Find a BatchNorm running_mean buffer and compare online vs target.
