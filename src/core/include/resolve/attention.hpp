@@ -69,18 +69,46 @@ private:
 TORCH_MODULE(FeedForward);
 
 // =============================================================================
+// Transformer Block Configuration
+// =============================================================================
+
+// How one transformer block is shaped and where it drops activations. The three
+// rates act at different places -- attention dropout on the attention weights,
+// FFN dropout inside the feed-forward hidden layer, and residual dropout on a
+// sublayer's output before it joins the residual stream -- and FT-Transformer
+// (Gorishniy et al., "Revisiting Deep Learning Models for Tabular Data",
+// NeurIPS 2021, arXiv:2106.11959) tunes them separately. An architecture whose
+// configuration carries one rate builds this with `uniform`.
+struct TransformerBlockConfig {
+    int64_t d_model = 0;
+    int64_t n_heads = 8;
+    int64_t d_ff = 0;  // 0 = 4 * d_model
+    float attention_dropout = 0.1f;
+    float ffn_dropout = 0.1f;
+    float residual_dropout = 0.1f;
+    bool pre_norm = true;  // Pre-LN (more stable) vs Post-LN
+
+    // One rate at all three places.
+    static TransformerBlockConfig uniform(int64_t d_model, int64_t n_heads,
+                                          int64_t d_ff, float dropout,
+                                          bool pre_norm = true) {
+        return {d_model, n_heads, d_ff, dropout, dropout, dropout, pre_norm};
+    }
+
+    // The feed-forward width this block runs at: d_ff, or the standard
+    // 4 * d_model when d_ff is left at 0.
+    [[nodiscard]] int64_t ffn_dim() const {
+        return d_ff == 0 ? 4 * d_model : d_ff;
+    }
+};
+
+// =============================================================================
 // Transformer Encoder Block
 // =============================================================================
 
 class TransformerBlockImpl : public torch::nn::Module {
 public:
-    TransformerBlockImpl(
-        int64_t d_model,
-        int64_t n_heads,
-        int64_t d_ff = 0,  // Default: 4 * d_model
-        float dropout = 0.1f,
-        bool pre_norm = true  // Pre-LN (more stable) vs Post-LN
-    );
+    explicit TransformerBlockImpl(const TransformerBlockConfig& config);
 
     // x: (batch, seq_len, d_model)
     // mask: optional attention mask
@@ -103,14 +131,7 @@ TORCH_MODULE(TransformerBlock);
 
 class TransformerEncoderImpl : public torch::nn::Module {
 public:
-    TransformerEncoderImpl(
-        int64_t d_model,
-        int64_t n_heads,
-        int64_t n_layers,
-        int64_t d_ff = 0,
-        float dropout = 0.1f,
-        bool pre_norm = true
-    );
+    TransformerEncoderImpl(const TransformerBlockConfig& config, int64_t n_layers);
 
     // x: (batch, seq_len, d_model)
     torch::Tensor forward(torch::Tensor x, torch::Tensor mask = {});
@@ -225,13 +246,9 @@ public:
     FTTransformerEncoderImpl(
         int64_t n_numerical,
         std::vector<int64_t> cat_cardinalities,
-        int64_t d_model = 192,
-        int64_t n_heads = 8,
+        const TransformerBlockConfig& block,
         int64_t n_layers = 3,
-        int64_t d_ff = 0,  // Default: 4 * d_model
-        float dropout = 0.1f,
-        bool use_cls_token = true,
-        bool pre_norm = true
+        bool use_cls_token = true
     );
 
     // numerical: (batch, n_numerical)
@@ -262,12 +279,34 @@ TORCH_MODULE(FTTransformerEncoder);
 // GLU block of the TabNet feature transformer: FC -> BN -> GLU.
 // The FC produces 2*out_dim; the gated linear unit halves it back to out_dim
 // (Arik & Pfister, Fig. 4).
+// Ghost batch normalization: normalize each slice of `virtual_batch_size` rows
+// with `bn` independently instead of the whole batch at once (Arik & Pfister,
+// "TabNet: Attentive Interpretable Tabular Learning", AAAI 2021,
+// arXiv:1908.07442, section 3.2, which applies it to every block of the feature
+// and attentive transformers -- the initial input normalization stays
+// full-batch). One module, so the affine parameters and running statistics are
+// shared across the slices and the parameter names are the plain BatchNorm1d
+// ones.
+//
+// A `virtual_batch_size` of 0 (or one no smaller than the batch) normalizes the
+// batch in one piece, i.e. plain batch normalization. In eval mode the running
+// statistics already describe the training distribution, so the split would
+// change nothing and is skipped. A trailing slice of one row would make
+// BatchNorm1d throw ("Expected more than 1 value per channel"), so it is folded
+// into the slice before it.
+torch::Tensor apply_ghost_batch_norm(torch::nn::BatchNorm1d bn,
+                                     torch::Tensor x,
+                                     int64_t virtual_batch_size);
+
 class TabNetGLUBlockImpl : public torch::nn::Module {
 public:
-    TabNetGLUBlockImpl(int64_t in_dim, int64_t out_dim);
+    TabNetGLUBlockImpl(int64_t in_dim, int64_t out_dim,
+                       int64_t virtual_batch_size = 0);
     torch::Tensor forward(torch::Tensor x);
 
 private:
+    int64_t virtual_batch_size_;
+
     torch::nn::Linear fc_{nullptr};
     torch::nn::BatchNorm1d bn_{nullptr};
 };
@@ -286,7 +325,8 @@ public:
         int64_t n_d,            // Decision layer dimension
         int64_t n_a,            // Attention layer dimension
         int64_t n_independent,  // Step-specific feature-transformer GLU blocks
-        bool use_sparsemax = true  // sparsemax (alpha=2) vs 1.5-entmax mask
+        bool use_sparsemax = true,  // sparsemax (alpha=2) vs 1.5-entmax mask
+        int64_t virtual_batch_size = 0  // Ghost batch norm slice; 0 = full batch
     );
 
     // att_prev: (batch, n_a) previous step's attention split.
@@ -306,6 +346,7 @@ private:
     int64_t n_d_;
     int64_t n_a_;
     bool use_sparsemax_;
+    int64_t virtual_batch_size_;
 
     torch::nn::Linear attention_fc_{nullptr};
     torch::nn::BatchNorm1d bn_attention_{nullptr};
@@ -325,7 +366,8 @@ public:
         int64_t n_a = 64,
         float relaxation_factor = 1.5f,
         float sparsity_coefficient = 1e-3f,
-        bool use_sparsemax = true  // TabNetConfig::use_sparsemax
+        bool use_sparsemax = true,  // TabNetConfig::use_sparsemax
+        int64_t virtual_batch_size = 0  // TabNetConfig::virtual_batch_size
     );
 
     // x: (batch, input_dim)
@@ -342,6 +384,12 @@ public:
     // Which simplex mapping every step's attentive transformer applies.
     [[nodiscard]] bool use_sparsemax() const noexcept { return use_sparsemax_; }
 
+    // The ghost batch norm slice every block below the initial normalization
+    // runs at. 0 = plain batch normalization.
+    [[nodiscard]] int64_t virtual_batch_size() const noexcept {
+        return virtual_batch_size_;
+    }
+
 private:
     // Run the shared feature-transformer GLU blocks (input_dim -> n_d + n_a),
     // with sqrt(0.5) residual scaling between blocks after the first.
@@ -354,6 +402,7 @@ private:
     float relaxation_factor_;
     float sparsity_coefficient_;
     bool use_sparsemax_;
+    int64_t virtual_batch_size_;
 
     torch::nn::BatchNorm1d initial_bn_{nullptr};  // Input feature batch norm
     torch::nn::ModuleList shared_{nullptr};       // Shared feature-transformer blocks
@@ -372,13 +421,8 @@ TORCH_MODULE(TabNetEncoder);
 // SAINT block: column attention followed by row attention
 class SAINTBlockImpl : public torch::nn::Module {
 public:
-    SAINTBlockImpl(
-        int64_t d_model,
-        int64_t n_heads,
-        int64_t d_ff = 0,
-        float dropout = 0.1f,
-        bool use_row_attention = true
-    );
+    SAINTBlockImpl(const TransformerBlockConfig& block,
+                   bool use_row_attention = true);
 
     // x: (batch, n_features, d_model)
     torch::Tensor forward(torch::Tensor x);
@@ -399,11 +443,8 @@ public:
     SAINTEncoderImpl(
         int64_t n_numerical,
         std::vector<int64_t> cat_cardinalities,
-        int64_t d_model = 128,
-        int64_t n_heads = 8,
+        const TransformerBlockConfig& block,
         int64_t n_layers = 6,
-        int64_t d_ff = 0,
-        float dropout = 0.1f,
         bool use_row_attention = true,
         bool use_cls_token = true
     );
@@ -624,11 +665,8 @@ public:
     ExcelFormerEncoderImpl(
         int64_t n_numerical,
         std::vector<int64_t> cat_cardinalities,
-        int64_t d_model = 192,
-        int64_t n_heads = 8,
+        const TransformerBlockConfig& block,
         int64_t n_layers = 3,
-        int64_t d_ff = 0,  // Default: 4 * d_model
-        float dropout = 0.1f,
         float importance_threshold = 0.5f,  // Features above this are "informative"
         bool use_cls_token = true
     );
@@ -649,6 +687,7 @@ private:
     int64_t n_tokens_;
     float importance_threshold_;
     bool use_cls_token_;
+    bool pre_norm_;
 
     FeatureTokenizer tokenizer_{nullptr};
 
@@ -785,10 +824,23 @@ private:
 
 TORCH_MODULE(HeterogeneousGNNEncoder);
 
-// Utility: Build k-NN adjacency from coordinates
-// coords: (n_nodes, 2) - spatial coordinates
+// How a k-NN graph measures the distance between two nodes.
+enum class GraphMetric {
+    Euclidean,  // Straight-line distance; the metric for coordinates
+    Cosine      // 1 - cosine similarity; the metric for composition vectors
+};
+
+// Utility: build a k-NN adjacency over node features
+// features: (n_nodes, n_features) - coordinates, or a composition vector
 // k: number of neighbors
-// Returns: (n_nodes, n_nodes) normalized adjacency
-torch::Tensor build_knn_adjacency(torch::Tensor coords, int64_t k);
+// metric: what "near" means for these features
+// weighted: keep each kept edge's similarity as its weight (a Gaussian kernel
+//   of the distance under Euclidean, the cosine similarity itself under
+//   Cosine) instead of a plain 1 -- GNNConfig::use_edge_features
+// Returns: (n_nodes, n_nodes) symmetric, self-looped, degree-normalized
+// adjacency
+torch::Tensor build_knn_adjacency(torch::Tensor features, int64_t k,
+                                  GraphMetric metric = GraphMetric::Euclidean,
+                                  bool weighted = false);
 
 }  // namespace resolve

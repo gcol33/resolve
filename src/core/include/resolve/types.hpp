@@ -372,11 +372,14 @@ enum class GNNType {
     GraphSAGE   // Sample and Aggregate
 };
 
-// Graph construction mode
+// What the plot-level GNN measures neighbourhood by. Every mode builds the same
+// k-nearest-neighbour graph over the plots in the forward pass and differs only
+// in the features it measures distance on. A mode whose features the dataset
+// does not carry is refused at forward time rather than silently substituted.
 enum class GraphConstructionMode {
-    Spatial,        // k-NN based on coordinates
-    Taxonomic,      // Based on taxonomic similarity
-    CoOccurrence    // Based on species co-occurrence
+    Spatial,        // k-NN by Euclidean distance between coordinates
+    Taxonomic,      // k-NN by cosine similarity of genus/family composition
+    CoOccurrence    // k-NN by cosine similarity of the species vector
 };
 
 // Trait-environment interaction mode
@@ -435,6 +438,10 @@ struct GNNConfig {
     int k_neighbors = 10;           // For graph construction
     GraphConstructionMode graph_mode = GraphConstructionMode::Spatial;
     float edge_dropout = 0.1f;
+    // Carry each edge's similarity as its adjacency weight instead of a plain
+    // 1, so message passing weighs a near neighbour above a far one. The
+    // spatial graph weighs by a Gaussian kernel of the distance, the
+    // composition graphs by the cosine similarity itself.
     bool use_edge_features = false;
 };
 

@@ -53,6 +53,17 @@ private:
         torch::Tensor family_ids
     );
 
+    // The per-plot features the GNN measures neighbourhood on, chosen by
+    // GNNConfig::graph_mode: the coordinates, the taxonomic composition, or the
+    // species vector. Refuses a mode the data cannot supply rather than
+    // measuring distance on whatever happens to sit in those columns.
+    torch::Tensor graph_features(
+        const torch::Tensor& continuous,
+        const torch::Tensor& genus_ids,
+        const torch::Tensor& family_ids,
+        const torch::Tensor& species_vector
+    ) const;
+
     EncoderArchitecture architecture_;
     SpeciesEncodingMode species_encoding_;
     int64_t latent_dim_;
@@ -91,6 +102,13 @@ private:
 
     // For GNN: adjacency matrix builder
     int k_neighbors_ = 10;
+    // What the graph is built from, and whether an edge carries its similarity
+    // as a weight (GNNConfig::graph_mode / use_edge_features).
+    GraphConstructionMode graph_mode_ = GraphConstructionMode::Spatial;
+    bool use_edge_features_ = false;
+    // Vocabulary widths for the taxonomic composition vector.
+    int64_t genus_vocab_size_ = 0;
+    int64_t family_vocab_size_ = 0;
     // The GNN builds its spatial graph from the first two continuous columns,
     // which are the coordinates ONLY when the dataset has them. Captured from
     // the schema so forward() can refuse to reinterpret covariates as

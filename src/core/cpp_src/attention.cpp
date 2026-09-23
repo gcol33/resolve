@@ -130,29 +130,23 @@ torch::Tensor FeedForwardImpl::forward(torch::Tensor x) {
 // Transformer Block Implementation
 // =============================================================================
 
-TransformerBlockImpl::TransformerBlockImpl(
-    int64_t d_model,
-    int64_t n_heads,
-    int64_t d_ff,
-    float dropout,
-    bool pre_norm
-) : pre_norm_(pre_norm) {
+TransformerBlockImpl::TransformerBlockImpl(const TransformerBlockConfig& config)
+    : pre_norm_(config.pre_norm) {
 
-    if (d_ff == 0) {
-        d_ff = 4 * d_model;  // Standard transformer multiplier
-    }
+    const int64_t d_model = config.d_model;
 
     attention_ = register_module("attention",
-        MultiHeadAttention(d_model, n_heads, dropout));
+        MultiHeadAttention(d_model, config.n_heads, config.attention_dropout));
     ffn_ = register_module("ffn",
-        FeedForward(d_model, d_ff, dropout));
+        FeedForward(d_model, config.ffn_dim(), config.ffn_dropout));
     norm1_ = register_module("norm1",
         torch::nn::LayerNorm(torch::nn::LayerNormOptions({d_model})));
     norm2_ = register_module("norm2",
         torch::nn::LayerNorm(torch::nn::LayerNormOptions({d_model})));
 
-    if (dropout > 0.0f) {
-        dropout_ = register_module("dropout", torch::nn::Dropout(dropout));
+    if (config.residual_dropout > 0.0f) {
+        dropout_ = register_module("dropout",
+                                   torch::nn::Dropout(config.residual_dropout));
     }
 }
 
@@ -194,23 +188,19 @@ torch::Tensor TransformerBlockImpl::forward(torch::Tensor x, torch::Tensor mask)
 // =============================================================================
 
 TransformerEncoderImpl::TransformerEncoderImpl(
-    int64_t d_model,
-    int64_t n_heads,
-    int64_t n_layers,
-    int64_t d_ff,
-    float dropout,
-    bool pre_norm
-) : pre_norm_(pre_norm) {
+    const TransformerBlockConfig& config,
+    int64_t n_layers
+) : pre_norm_(config.pre_norm) {
 
     layers_ = register_module("layers", torch::nn::ModuleList());
     for (int64_t i = 0; i < n_layers; ++i) {
-        layers_->push_back(TransformerBlock(d_model, n_heads, d_ff, dropout, pre_norm));
+        layers_->push_back(TransformerBlock(config));
     }
 
-    if (pre_norm) {
+    if (config.pre_norm) {
         // Final LayerNorm for pre-norm architecture
         final_norm_ = register_module("final_norm",
-            torch::nn::LayerNorm(torch::nn::LayerNormOptions({d_model})));
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions({config.d_model})));
     }
 }
 
@@ -563,20 +553,15 @@ torch::Tensor RowAttentionImpl::forward(torch::Tensor x) {
 FTTransformerEncoderImpl::FTTransformerEncoderImpl(
     int64_t n_numerical,
     std::vector<int64_t> cat_cardinalities,
-    int64_t d_model,
-    int64_t n_heads,
+    const TransformerBlockConfig& block,
     int64_t n_layers,
-    int64_t d_ff,
-    float dropout,
-    bool use_cls_token,
-    bool pre_norm
-) : d_model_(d_model), use_cls_token_(use_cls_token) {
+    bool use_cls_token
+) : d_model_(block.d_model), use_cls_token_(use_cls_token) {
 
     tokenizer_ = register_module("tokenizer",
-        FeatureTokenizer(n_numerical, cat_cardinalities, d_model, use_cls_token));
+        FeatureTokenizer(n_numerical, cat_cardinalities, block.d_model, use_cls_token));
 
-    encoder_ = register_module("encoder",
-        TransformerEncoder(d_model, n_heads, n_layers, d_ff, dropout, pre_norm));
+    encoder_ = register_module("encoder", TransformerEncoder(block, n_layers));
 }
 
 torch::Tensor FTTransformerEncoderImpl::forward(
@@ -602,20 +587,55 @@ torch::Tensor FTTransformerEncoderImpl::forward(
 // TabNet Step Implementation
 // =============================================================================
 
-TabNetGLUBlockImpl::TabNetGLUBlockImpl(int64_t in_dim, int64_t out_dim) {
+torch::Tensor apply_ghost_batch_norm(torch::nn::BatchNorm1d bn,
+                                     torch::Tensor x,
+                                     int64_t virtual_batch_size) {
+    const int64_t n_rows = x.size(0);
+    if (virtual_batch_size <= 0 || !bn->is_training() ||
+        n_rows <= virtual_batch_size) {
+        return bn->forward(x);
+    }
+
+    // Slice sizes, with a trailing single row folded into the slice before it so
+    // no slice reaches BatchNorm1d with one row.
+    std::vector<int64_t> sizes;
+    for (int64_t start = 0; start < n_rows; start += virtual_batch_size) {
+        sizes.push_back(std::min(virtual_batch_size, n_rows - start));
+    }
+    if (sizes.size() > 1 && sizes.back() == 1) {
+        sizes.pop_back();
+        sizes.back() += 1;
+    }
+
+    std::vector<torch::Tensor> normalized;
+    normalized.reserve(sizes.size());
+    int64_t at = 0;
+    for (int64_t size : sizes) {
+        normalized.push_back(bn->forward(x.narrow(/*dim=*/0, at, size)));
+        at += size;
+    }
+    return torch::cat(normalized, /*dim=*/0);
+}
+
+TabNetGLUBlockImpl::TabNetGLUBlockImpl(int64_t in_dim, int64_t out_dim,
+                                       int64_t virtual_batch_size)
+    : virtual_batch_size_(virtual_batch_size) {
     fc_ = register_module("fc", torch::nn::Linear(in_dim, 2 * out_dim));
     bn_ = register_module("bn", torch::nn::BatchNorm1d(2 * out_dim));
 }
 
 torch::Tensor TabNetGLUBlockImpl::forward(torch::Tensor x) {
     // GLU halves the last dimension: out = a * sigmoid(b) with [a,b] = FC(x).
-    return torch::glu(bn_->forward(fc_->forward(x)), /*dim=*/1);
+    auto normalized = apply_ghost_batch_norm(bn_, fc_->forward(x),
+                                             virtual_batch_size_);
+    return torch::glu(normalized, /*dim=*/1);
 }
 
 TabNetStepImpl::TabNetStepImpl(
     int64_t input_dim, int64_t n_d, int64_t n_a, int64_t n_independent,
-    bool use_sparsemax
-) : input_dim_(input_dim), n_d_(n_d), n_a_(n_a), use_sparsemax_(use_sparsemax) {
+    bool use_sparsemax, int64_t virtual_batch_size
+) : input_dim_(input_dim), n_d_(n_d), n_a_(n_a), use_sparsemax_(use_sparsemax),
+    virtual_batch_size_(virtual_batch_size) {
     // Attentive transformer: maps the previous attention split (n_a) to a
     // per-feature logit (input_dim), batch-normalized, then masked by the prior
     // scale and projected onto the simplex by `attentive_forward`.
@@ -625,14 +645,16 @@ TabNetStepImpl::TabNetStepImpl(
     // Step-specific feature-transformer GLU blocks (dim n_d + n_a throughout).
     independent_ = register_module("independent", torch::nn::ModuleList());
     for (int64_t i = 0; i < n_independent; ++i) {
-        independent_->push_back(TabNetGLUBlock(n_d + n_a, n_d + n_a));
+        independent_->push_back(
+            TabNetGLUBlock(n_d + n_a, n_d + n_a, virtual_batch_size));
     }
 }
 
 torch::Tensor TabNetStepImpl::attentive_forward(
     torch::Tensor att_prev, torch::Tensor prior_scales
 ) {
-    auto logits = bn_attention_->forward(attention_fc_->forward(att_prev));
+    auto logits = apply_ghost_batch_norm(
+        bn_attention_, attention_fc_->forward(att_prev), virtual_batch_size_);
     logits = logits * prior_scales;  // Prior scale down features already used.
     // TabNetConfig::use_sparsemax picks the sparse simplex mapping: sparsemax
     // (alpha = 2, Arik & Pfister's default) or 1.5-entmax, which is strictly
@@ -666,12 +688,15 @@ TabNetEncoderImpl::TabNetEncoderImpl(
     int64_t n_a,
     float relaxation_factor,
     float sparsity_coefficient,
-    bool use_sparsemax
+    bool use_sparsemax,
+    int64_t virtual_batch_size
 ) : input_dim_(input_dim), n_steps_(n_steps), n_d_(n_d), n_a_(n_a),
     relaxation_factor_(relaxation_factor), sparsity_coefficient_(sparsity_coefficient),
-    use_sparsemax_(use_sparsemax) {
+    use_sparsemax_(use_sparsemax), virtual_batch_size_(virtual_batch_size) {
 
-    // Batch-normalize the raw input features (Arik & Pfister, Sec. 3.2).
+    // Batch-normalize the raw input features. This one is full-batch: Arik &
+    // Pfister apply ghost batch normalization to every block BELOW it, and
+    // normalize the input itself over the whole batch (Sec. 3.2).
     initial_bn_ = register_module("initial_bn", torch::nn::BatchNorm1d(input_dim));
 
     // Shared feature-transformer GLU blocks, reused across every step. The first
@@ -679,14 +704,14 @@ TabNetEncoderImpl::TabNetEncoderImpl(
     shared_ = register_module("shared", torch::nn::ModuleList());
     for (int64_t i = 0; i < kTabNetNShared; ++i) {
         int64_t in_dim = (i == 0) ? input_dim : (n_d + n_a);
-        shared_->push_back(TabNetGLUBlock(in_dim, n_d + n_a));
+        shared_->push_back(TabNetGLUBlock(in_dim, n_d + n_a, virtual_batch_size));
     }
 
     // Decision steps (attentive transformer + independent feature-transformer).
     steps_ = register_module("steps", torch::nn::ModuleList());
     for (int64_t i = 0; i < n_steps; ++i) {
-        steps_->push_back(
-            TabNetStep(input_dim, n_d, n_a, kTabNetNIndependent, use_sparsemax));
+        steps_->push_back(TabNetStep(input_dim, n_d, n_a, kTabNetNIndependent,
+                                     use_sparsemax, virtual_batch_size));
     }
 }
 
@@ -753,19 +778,15 @@ std::pair<torch::Tensor, torch::Tensor> TabNetEncoderImpl::forward(torch::Tensor
 // =============================================================================
 
 SAINTBlockImpl::SAINTBlockImpl(
-    int64_t d_model,
-    int64_t n_heads,
-    int64_t d_ff,
-    float dropout,
+    const TransformerBlockConfig& block,
     bool use_row_attention
 ) : use_row_attention_(use_row_attention) {
 
-    col_attention_ = register_module("col_attention",
-        TransformerBlock(d_model, n_heads, d_ff, dropout, /*pre_norm=*/true));
+    col_attention_ = register_module("col_attention", TransformerBlock(block));
 
     if (use_row_attention) {
         row_attention_ = register_module("row_attention",
-            RowAttention(d_model, n_heads, dropout));
+            RowAttention(block.d_model, block.n_heads, block.attention_dropout));
     }
 }
 
@@ -788,25 +809,22 @@ torch::Tensor SAINTBlockImpl::forward(torch::Tensor x) {
 SAINTEncoderImpl::SAINTEncoderImpl(
     int64_t n_numerical,
     std::vector<int64_t> cat_cardinalities,
-    int64_t d_model,
-    int64_t n_heads,
+    const TransformerBlockConfig& block,
     int64_t n_layers,
-    int64_t d_ff,
-    float dropout,
     bool use_row_attention,
     bool use_cls_token
-) : d_model_(d_model), use_cls_token_(use_cls_token) {
+) : d_model_(block.d_model), use_cls_token_(use_cls_token) {
 
     tokenizer_ = register_module("tokenizer",
-        FeatureTokenizer(n_numerical, cat_cardinalities, d_model, use_cls_token));
+        FeatureTokenizer(n_numerical, cat_cardinalities, block.d_model, use_cls_token));
 
     layers_ = register_module("layers", torch::nn::ModuleList());
     for (int64_t i = 0; i < n_layers; ++i) {
-        layers_->push_back(SAINTBlock(d_model, n_heads, d_ff, dropout, use_row_attention));
+        layers_->push_back(SAINTBlock(block, use_row_attention));
     }
 
     final_norm_ = register_module("final_norm",
-        torch::nn::LayerNorm(torch::nn::LayerNormOptions({d_model})));
+        torch::nn::LayerNorm(torch::nn::LayerNormOptions({block.d_model})));
 }
 
 torch::Tensor SAINTEncoderImpl::forward(
@@ -966,20 +984,18 @@ torch::Tensor TraitNetEncoderImpl::forward(
 ExcelFormerEncoderImpl::ExcelFormerEncoderImpl(
     int64_t n_numerical,
     std::vector<int64_t> cat_cardinalities,
-    int64_t d_model,
-    int64_t n_heads,
+    const TransformerBlockConfig& block,
     int64_t n_layers,
-    int64_t d_ff,
-    float dropout,
     float importance_threshold,
     bool use_cls_token
-) : d_model_(d_model),
+) : d_model_(block.d_model),
     importance_threshold_(importance_threshold),
-    use_cls_token_(use_cls_token)
+    use_cls_token_(use_cls_token),
+    pre_norm_(block.pre_norm)
 {
     // Create feature tokenizer
     tokenizer_ = register_module("tokenizer",
-        FeatureTokenizer(n_numerical, cat_cardinalities, d_model, use_cls_token));
+        FeatureTokenizer(n_numerical, cat_cardinalities, block.d_model, use_cls_token));
 
     n_tokens_ = tokenizer_->n_tokens();
 
@@ -987,8 +1003,6 @@ ExcelFormerEncoderImpl::ExcelFormerEncoderImpl(
     importance_logits_ = register_parameter("importance_logits",
         torch::zeros({n_tokens_}));
 
-    // Transformer layers
-    if (d_ff == 0) d_ff = 4 * d_model;
     // Register blocks only through the ModuleList. Wrapping each block in its
     // own register_module("block_i", ...) as well would register it twice (as a
     // child of *this AND of layers_), so named_parameters() would yield every
@@ -996,12 +1010,15 @@ ExcelFormerEncoderImpl::ExcelFormerEncoderImpl(
     // Matches SAINTEncoder / TransformerEncoder above.
     layers_ = register_module("layers", torch::nn::ModuleList());
     for (int64_t i = 0; i < n_layers; ++i) {
-        layers_->push_back(
-            TransformerBlock(d_model, n_heads, d_ff, dropout, /*pre_norm=*/true));
+        layers_->push_back(TransformerBlock(block));
     }
 
-    final_norm_ = register_module("final_norm",
-        torch::nn::LayerNorm(torch::nn::LayerNormOptions({d_model})));
+    // The trailing normalization belongs to the pre-norm arrangement: a
+    // post-norm block already ends in a LayerNorm.
+    if (block.pre_norm) {
+        final_norm_ = register_module("final_norm",
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions({block.d_model})));
+    }
 }
 
 torch::Tensor ExcelFormerEncoderImpl::build_attention_mask() const {
@@ -1049,7 +1066,9 @@ torch::Tensor ExcelFormerEncoderImpl::forward(
         x = layer->as<TransformerBlockImpl>()->forward(x, attn_mask);
     }
 
-    x = final_norm_->forward(x);
+    if (pre_norm_) {
+        x = final_norm_->forward(x);
+    }
 
     // Extract CLS token or mean pool
     if (use_cls_token_) {

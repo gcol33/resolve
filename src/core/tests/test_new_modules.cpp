@@ -356,7 +356,9 @@ TEST_CASE("NCALoss update_references", "[nca]") {
 
 TEST_CASE("ExcelFormerEncoder forward shape", "[excelformer]") {
     std::vector<int64_t> no_cats;
-    ExcelFormerEncoder encoder(10, no_cats, 64, 4, 2, 0, 0.1f, 0.5f, true);
+    ExcelFormerEncoder encoder(
+        10, no_cats, TransformerBlockConfig::uniform(64, 4, 0, 0.1f),
+        /*n_layers=*/2, 0.5f, true);
     auto numerical = torch::randn({8, 10});
     auto out = encoder->forward(numerical);
 
@@ -366,7 +368,9 @@ TEST_CASE("ExcelFormerEncoder forward shape", "[excelformer]") {
 
 TEST_CASE("ExcelFormerEncoder with categoricals", "[excelformer]") {
     std::vector<int64_t> cat_cards = {5, 10};
-    ExcelFormerEncoder encoder(8, cat_cards, 64, 4, 2, 0, 0.1f, 0.5f, true);
+    ExcelFormerEncoder encoder(
+        8, cat_cards, TransformerBlockConfig::uniform(64, 4, 0, 0.1f),
+        /*n_layers=*/2, 0.5f, true);
 
     auto numerical = torch::randn({8, 8});
     std::vector<torch::Tensor> categoricals = {
@@ -381,7 +385,8 @@ TEST_CASE("ExcelFormerEncoder with categoricals", "[excelformer]") {
 
 TEST_CASE("ExcelFormerEncoder feature_importance", "[excelformer]") {
     std::vector<int64_t> no_cats;
-    ExcelFormerEncoder encoder(10, no_cats, 32, 4, 2);
+    ExcelFormerEncoder encoder(
+        10, no_cats, TransformerBlockConfig::uniform(32, 4, 0, 0.1f), /*n_layers=*/2);
     auto importance = encoder->feature_importance();
 
     // Should be sigmoid of learnable logits, so in [0, 1]
@@ -394,7 +399,9 @@ TEST_CASE("ExcelFormerEncoder importance_logits receive gradient", "[excelformer
     // importance parameter actually trains. A hard boolean mask leaves it
     // gradient-dead (importance stuck at its init, mask permanently open).
     std::vector<int64_t> no_cats;
-    ExcelFormerEncoder encoder(10, no_cats, 32, 4, 2, 0, 0.1f, 0.5f, true);
+    ExcelFormerEncoder encoder(
+        10, no_cats, TransformerBlockConfig::uniform(32, 4, 0, 0.1f),
+        /*n_layers=*/2, 0.5f, true);
 
     torch::Tensor importance_logits;
     for (const auto& named : encoder->named_parameters()) {
@@ -422,7 +429,9 @@ TEST_CASE("ExcelFormerEncoder does not double-register block parameters",
     // submodules (unlike Python's remove_duplicate default), so any aliasing
     // surfaces here.
     std::vector<int64_t> no_cats;
-    ExcelFormerEncoder encoder(10, no_cats, 64, 4, /*n_layers=*/2, 0, 0.1f, 0.5f, true);
+    ExcelFormerEncoder encoder(
+        10, no_cats, TransformerBlockConfig::uniform(64, 4, 0, 0.1f),
+        /*n_layers=*/2, 0.5f, true);
 
     std::set<void*> storages;
     for (const auto& named : encoder->named_parameters()) {
@@ -999,7 +1008,9 @@ TEST_CASE("TabularAdapter HeterogeneousGNN forward", "[adapter]") {
 
 TEST_CASE("FTTransformerEncoder forward shape", "[attention]") {
     std::vector<int64_t> no_cats;
-    FTTransformerEncoder encoder(10, no_cats, 64, 4, 2, 0, 0.1f, true, true);
+    FTTransformerEncoder encoder(
+        10, no_cats, TransformerBlockConfig::uniform(64, 4, 0, 0.1f),
+        /*n_layers=*/2, /*use_cls_token=*/true);
     auto numerical = torch::randn({8, 10});
     auto out = encoder->forward(numerical);
 
@@ -1041,7 +1052,9 @@ TEST_CASE("TabNetEncoder forward shape", "[attention]") {
 
 TEST_CASE("SAINTEncoder forward shape", "[attention]") {
     std::vector<int64_t> no_cats;
-    SAINTEncoder encoder(10, no_cats, 64, 4, 2, 0, 0.1f, true, true);
+    SAINTEncoder encoder(
+        10, no_cats, TransformerBlockConfig::uniform(64, 4, 0, 0.1f),
+        /*n_layers=*/2, /*use_row_attention=*/true, /*use_cls_token=*/true);
     auto numerical = torch::randn({8, 10});
     auto out = encoder->forward(numerical);
 

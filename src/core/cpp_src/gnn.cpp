@@ -5,6 +5,13 @@
 
 namespace resolve {
 
+namespace {
+// Floor for a weighted edge: a kept neighbour is an edge, so it never carries
+// exactly zero weight (which would leave a row of the adjacency empty and make
+// GAT's masked softmax read an all -inf row).
+constexpr float kMinEdgeWeight = 1e-6f;
+}  // namespace
+
 // =============================================================================
 // GCN Layer Implementation
 // =============================================================================
@@ -399,8 +406,9 @@ torch::Tensor HeterogeneousGNNEncoderImpl::aggregate_for_plots(
 // Utility: k-NN Adjacency Construction
 // =============================================================================
 
-torch::Tensor build_knn_adjacency(torch::Tensor coords, int64_t k) {
-    auto n_nodes = coords.size(0);
+torch::Tensor build_knn_adjacency(torch::Tensor features, int64_t k,
+                                  GraphMetric metric, bool weighted) {
+    auto n_nodes = features.size(0);
 
     // Cap k at the number of *other* nodes: a batch smaller than k (a short
     // final inference batch, or batch_size=1) would otherwise make topk throw.
@@ -409,28 +417,57 @@ torch::Tensor build_knn_adjacency(torch::Tensor coords, int64_t k) {
         // 0 or 1 node: no neighbours to connect. Return self-loops (identity)
         // rather than zeros so a single-node graph still has a valid, non-empty
         // adjacency row -- an all-zero row makes GAT's masked softmax NaN.
-        return torch::eye(n_nodes, coords.options());
+        return torch::eye(n_nodes, features.options());
     }
 
-    auto diff = coords.unsqueeze(0) - coords.unsqueeze(1);
-    auto dist = diff.pow(2).sum(-1).sqrt();
+    // Pairwise distance under the chosen metric. Cosine distance is
+    // 1 - cos(u, v), which is 0 for identical composition and 1 for disjoint
+    // composition -- the natural reading for a non-negative abundance or
+    // presence vector, where the cosine itself is in [0, 1].
+    torch::Tensor dist;
+    if (metric == GraphMetric::Cosine) {
+        auto normalized = torch::nn::functional::normalize(
+            features, torch::nn::functional::NormalizeFuncOptions().p(2).dim(1));
+        dist = 1.0f - torch::matmul(normalized, normalized.transpose(0, 1));
+    } else {
+        auto diff = features.unsqueeze(0) - features.unsqueeze(1);
+        dist = diff.pow(2).sum(-1).sqrt();
+    }
 
     dist.fill_diagonal_(std::numeric_limits<float>::infinity());
-    auto [_, indices] = dist.topk(k_eff, /*dim=*/1, /*largest=*/false);
+    auto [kept_dist, indices] = dist.topk(k_eff, /*dim=*/1, /*largest=*/false);
 
-    auto adj = torch::zeros({n_nodes, n_nodes}, coords.options());
+    // What a kept edge is worth. Unweighted, every edge counts 1. Weighted, an
+    // edge carries its similarity: the cosine similarity under Cosine, and
+    // under Euclidean a Gaussian kernel exp(-(d/sigma)^2) whose bandwidth is
+    // the mean kept neighbour distance, so the weighting is scale-free in the
+    // units the coordinates happen to be in.
+    torch::Tensor values;
+    if (!weighted) {
+        values = torch::ones_like(kept_dist);
+    } else if (metric == GraphMetric::Cosine) {
+        values = (1.0f - kept_dist).clamp_min(kMinEdgeWeight);
+    } else {
+        auto sigma = kept_dist.mean().clamp_min(kMinEdgeWeight);
+        values = torch::exp(-(kept_dist / sigma).pow(2)).clamp_min(kMinEdgeWeight);
+    }
 
-    auto rows = torch::arange(n_nodes, torch::TensorOptions().dtype(torch::kInt64).device(coords.device()))
+    auto adj = torch::zeros({n_nodes, n_nodes}, features.options());
+
+    auto rows = torch::arange(n_nodes, torch::TensorOptions().dtype(torch::kInt64).device(features.device()))
                      .unsqueeze(1).expand_as(indices);
-    adj.index_put_({rows, indices}, 1.0f);
+    adj.index_put_({rows, indices}, values);
 
-    adj = (adj + adj.transpose(0, 1)).clamp_max(1.0f);
+    // Symmetric: an edge kept from either end is an edge. The larger of the two
+    // weights wins, which for the unweighted case is the old clamp to 1.
+    adj = torch::maximum(adj, adj.transpose(0, 1));
 
     // Self-loops (A + I): standard GCN normalization, and it guarantees every
     // node has at least one non-zero adjacency entry so GAT's per-row softmax
     // over masked(adj==0) scores is never taken over an all -inf row (which
     // would produce NaN for an isolated node).
-    adj = (adj + torch::eye(n_nodes, coords.options())).clamp_max(1.0f);
+    // Self-loops, at full weight.
+    adj = torch::maximum(adj, torch::eye(n_nodes, features.options()));
 
     auto degree = adj.sum(/*dim=*/1);
     auto d_inv_sqrt = torch::pow(degree.clamp_min(1.0f), -0.5f);

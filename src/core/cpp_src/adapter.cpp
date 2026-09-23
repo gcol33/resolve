@@ -24,6 +24,32 @@ GNNEncoderImpl::GNNType to_encoder_gnn_type(GNNType type) {
         "unknown GNNType value: " + std::to_string(static_cast<int>(type)));
 }
 
+// Multi-hot taxonomic composition: column j counts the plot's slots naming
+// genus j, and the family block after it does the same for families. Slot id 0
+// is the reserved <UNK>/padding row and contributes nothing, so a plot with
+// fewer genera than slots is not pulled towards every other short plot.
+torch::Tensor taxonomy_composition(const torch::Tensor& genus_ids,
+                                   const torch::Tensor& family_ids,
+                                   int64_t n_genera, int64_t n_families) {
+    const torch::Tensor& present = genus_ids.defined() && genus_ids.numel() > 0
+                                       ? genus_ids : family_ids;
+    const int64_t n_rows = present.size(0);
+    auto options = torch::TensorOptions().dtype(torch::kFloat32)
+                       .device(present.device());
+    auto composition = torch::zeros({n_rows, n_genera + n_families}, options);
+
+    auto add_block = [&](const torch::Tensor& ids, int64_t offset, int64_t vocab) {
+        if (!ids.defined() || ids.numel() == 0 || vocab <= 0) return;
+        auto slots = ids.to(torch::kLong).clamp(0, vocab - 1);
+        auto counts = (slots > 0).to(torch::kFloat32);
+        auto block = composition.slice(/*dim=*/1, offset, offset + vocab);
+        block.scatter_add_(/*dim=*/1, slots, counts);
+    };
+    add_block(genus_ids, 0, n_genera);
+    add_block(family_ids, n_genera, n_families);
+    return composition;
+}
+
 }  // namespace
 
 TabularAdapterImpl::TabularAdapterImpl(
@@ -128,18 +154,25 @@ TabularAdapterImpl::TabularAdapterImpl(
     switch (architecture_) {
         case EncoderArchitecture::FTTransformer: {
             const auto& cfg = config.ft_transformer;
-            int64_t d_ff = cfg.ffn_multiplier * cfg.d_model;
+            // The two configured rates act where they are named: attention
+            // dropout on the attention weights, FFN dropout inside the
+            // feed-forward hidden layer and on each sublayer's residual branch
+            // (the non-attention dropout of Gorishniy et al. 2021).
+            TransformerBlockConfig block{
+                /*d_model=*/cfg.d_model,
+                /*n_heads=*/cfg.n_heads,
+                /*d_ff=*/cfg.ffn_multiplier * cfg.d_model,
+                /*attention_dropout=*/cfg.attention_dropout,
+                /*ffn_dropout=*/cfg.ffn_dropout,
+                /*residual_dropout=*/cfg.ffn_dropout,
+                /*pre_norm=*/cfg.pre_norm};
             ft_transformer_ = register_module("ft_transformer",
                 FTTransformerEncoder(
                     n_numerical_,
                     cat_cardinalities,
-                    cfg.d_model,
-                    cfg.n_heads,
+                    block,
                     cfg.n_layers,
-                    d_ff,
-                    cfg.attention_dropout,
-                    /*use_cls_token=*/true,
-                    cfg.pre_norm
+                    /*use_cls_token=*/true
                 ));
             setup_output_proj(cfg.d_model);
             break;
@@ -156,7 +189,8 @@ TabularAdapterImpl::TabularAdapterImpl(
                     cfg.n_a,
                     cfg.relaxation_factor,
                     cfg.sparsity_coefficient,
-                    cfg.use_sparsemax
+                    cfg.use_sparsemax,
+                    cfg.virtual_batch_size
                 ));
             latent_dim_ = cfg.n_d;
             break;
@@ -164,16 +198,17 @@ TabularAdapterImpl::TabularAdapterImpl(
 
         case EncoderArchitecture::SAINT: {
             const auto& cfg = config.saint;
-            int64_t d_ff = 4 * cfg.d_model;
+            // SAINT configures one rate, which every dropout in the block runs
+            // at.
+            auto block = TransformerBlockConfig::uniform(
+                cfg.d_model, cfg.n_heads, /*d_ff=*/4 * cfg.d_model,
+                cfg.attention_dropout);
             saint_ = register_module("saint",
                 SAINTEncoder(
                     n_numerical_,
                     cat_cardinalities,
-                    cfg.d_model,
-                    cfg.n_heads,
+                    block,
                     cfg.n_layers,
-                    d_ff,
-                    cfg.attention_dropout,
                     cfg.use_row_attention,
                     /*use_cls_token=*/true
                 ));
@@ -184,6 +219,17 @@ TabularAdapterImpl::TabularAdapterImpl(
         case EncoderArchitecture::GNN: {
             const auto& cfg = config.gnn;
             k_neighbors_ = cfg.k_neighbors;
+            graph_mode_ = cfg.graph_mode;
+            use_edge_features_ = cfg.use_edge_features;
+            // Widths of the taxonomic composition vector under
+            // GraphConstructionMode::Taxonomic. TaxonomyVocab reserves <UNK>=0,
+            // so n_genera already counts it.
+            if (schema.has_taxonomy) {
+                genus_vocab_size_ = schema.n_genera_vocab > 0
+                    ? schema.n_genera_vocab : schema.n_genera;
+                family_vocab_size_ = schema.n_families_vocab > 0
+                    ? schema.n_families_vocab : schema.n_families;
+            }
             const GNNEncoderImpl::GNNType gnn_type = to_encoder_gnn_type(cfg.gnn_type);
             // Embed the taxonomy categoricals into the node-feature matrix instead
             // of concatenating raw integer IDs as continuous magnitudes, which the
@@ -220,16 +266,16 @@ TabularAdapterImpl::TabularAdapterImpl(
 
         case EncoderArchitecture::ExcelFormer: {
             const auto& cfg = config.excelformer;
-            int64_t d_ff = cfg.ffn_multiplier * cfg.d_model;
+            auto block = TransformerBlockConfig::uniform(
+                cfg.d_model, cfg.n_heads,
+                /*d_ff=*/cfg.ffn_multiplier * cfg.d_model,
+                cfg.attention_dropout, cfg.pre_norm);
             excelformer_ = register_module("excelformer",
                 ExcelFormerEncoder(
                     n_numerical_,
                     cat_cardinalities,
-                    cfg.d_model,
-                    cfg.n_heads,
+                    block,
                     cfg.n_layers,
-                    d_ff,
-                    cfg.attention_dropout,
                     cfg.importance_threshold,
                     /*use_cls_token=*/true
                 ));
@@ -295,6 +341,57 @@ torch::Tensor TabularAdapterImpl::prepare_numerical(
     return torch::cat(parts, /*dim=*/1);
 }
 
+torch::Tensor TabularAdapterImpl::graph_features(
+    const torch::Tensor& continuous,
+    const torch::Tensor& genus_ids,
+    const torch::Tensor& family_ids,
+    const torch::Tensor& species_vector
+) const {
+    switch (graph_mode_) {
+        case GraphConstructionMode::Spatial: {
+            // The first two continuous columns are the plot coordinates ONLY
+            // when the dataset carries them (continuous is laid out as
+            // [coordinates | coordinate flag | covariates | covariate flags |
+            // unknown_* | categorical_embed | ...], see continuous_block.hpp;
+            // the flags are present under MissingValuePolicy::Indicate).
+            // Without coordinates those columns are covariates, and building a
+            // "spatial" kNN graph from them is meaningless -- refuse rather
+            // than silently corrupt the graph (issue #73).
+            TORCH_CHECK(has_coordinates_,
+                "GNN encoder requires coordinates to build its spatial graph, "
+                "but the dataset has none. Provide longitude/latitude roles, "
+                "select another GNNConfig::graph_mode, or use a non-GNN encoder "
+                "architecture.");
+            return continuous.slice(/*dim=*/1, 0, 2);
+        }
+        case GraphConstructionMode::Taxonomic: {
+            const bool has_genus = genus_ids.defined() && genus_ids.numel() > 0;
+            const bool has_family = family_ids.defined() && family_ids.numel() > 0;
+            TORCH_CHECK(has_genus || has_family,
+                "GNNConfig::graph_mode = taxonomic builds its graph from the "
+                "genus/family composition of each plot, but this forward "
+                "carries no taxonomy IDs. Provide genus/family roles with "
+                "DatasetConfig::use_taxonomy, or select another graph_mode.");
+            TORCH_CHECK(genus_vocab_size_ > 0 || family_vocab_size_ > 0,
+                "GNNConfig::graph_mode = taxonomic needs a fitted taxonomy "
+                "vocabulary, but the schema reports none.");
+            return taxonomy_composition(genus_ids, family_ids,
+                                        genus_vocab_size_, family_vocab_size_);
+        }
+        case GraphConstructionMode::CoOccurrence: {
+            TORCH_CHECK(species_vector.defined() && species_vector.numel() > 0,
+                "GNNConfig::graph_mode = co_occurrence builds its graph from "
+                "the per-plot species vector, which only the sparse species "
+                "encoding provides. Set DatasetConfig::species_encoding = "
+                "sparse, or select another graph_mode.");
+            return species_vector.to(torch::kFloat32);
+        }
+    }
+    throw std::invalid_argument(
+        "unknown GraphConstructionMode value: " +
+        std::to_string(static_cast<int>(graph_mode_)));
+}
+
 std::vector<torch::Tensor> TabularAdapterImpl::prepare_categoricals(
     torch::Tensor genus_ids,
     torch::Tensor family_ids
@@ -352,27 +449,23 @@ torch::Tensor TabularAdapterImpl::forward(
             break;
 
         case EncoderArchitecture::GNN: {
-            // The first two continuous columns are the plot coordinates ONLY
-            // when the dataset carries them (continuous is laid out as
-            // [coordinates | coordinate flag | covariates | covariate flags |
-            // unknown_* | categorical_embed | ...], see continuous_block.hpp;
-            // the flags are present under MissingValuePolicy::Indicate).
-            // Without coordinates those columns are covariates, and building a
-            // "spatial" kNN graph from them is meaningless -- refuse rather than
-            // silently corrupt the graph (issue #73).
-            TORCH_CHECK(has_coordinates_,
-                "GNN encoder requires coordinates to build its spatial graph, "
-                "but the dataset has none. Provide longitude/latitude roles or "
-                "use a non-GNN encoder architecture.");
-            auto coords = continuous.slice(/*dim=*/1, 0, 2);
             // The kNN graph is built over the plots in the current forward. For
             // this architecture BOTH training and inference forward the full node
             // set in a single batch (ResolveModel::requires_full_batch_training
             // forces full-batch training; Predictor::predict forces a single
-            // full-batch inference forward), so the graph is the global spatial
+            // full-batch inference forward), so the graph is the global
             // structure over all plots -- each plot attends to its true nearest
             // neighbors -- not an arbitrary mini-batch neighborhood (issue #73).
-            auto adj = build_knn_adjacency(coords, k_neighbors_);
+            auto features = graph_features(continuous, genus_ids, family_ids,
+                                           species_vector);
+            // Coordinates are a straight-line distance; a composition vector is
+            // compared by the angle between plots, so that the number of
+            // species recorded does not stand in for their identity.
+            const GraphMetric metric =
+                graph_mode_ == GraphConstructionMode::Spatial
+                    ? GraphMetric::Euclidean : GraphMetric::Cosine;
+            auto adj = build_knn_adjacency(features, k_neighbors_, metric,
+                                           use_edge_features_);
             // Flatten features for GNN: numerical block + embedded taxonomy slots.
             std::vector<torch::Tensor> all_feats;
             all_feats.push_back(numerical);
