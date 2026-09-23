@@ -371,7 +371,7 @@ void Trainer::prepare_data(
             // Compute scaler on training data
             auto train_target = target.index_select(0, train_idx);
             auto target_mean = train_target.mean();
-            auto target_scale = train_target.std() + 1e-8f;
+            auto target_scale = standardization_scale(train_target);
 
             scalers_.target_scalers[cfg.name] = {target_mean, target_scale};
 
@@ -2360,7 +2360,7 @@ CrossValidationResult Trainer::run_cross_validation(
             auto train_it = train_targets_.find(cfg.name);
             if (train_it == train_targets_.end()) continue;
             auto target_mean = train_it->second.mean();
-            auto target_scale = train_it->second.std() + 1e-8f;
+            auto target_scale = standardization_scale(train_it->second);
             scalers_.target_scalers[cfg.name] = {target_mean, target_scale};
             train_targets_[cfg.name] = (train_targets_[cfg.name] - target_mean) / target_scale;
             test_targets_[cfg.name] = (test_targets_[cfg.name] - target_mean) / target_scale;

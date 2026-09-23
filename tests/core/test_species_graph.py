@@ -50,9 +50,11 @@ def test_the_graph_carries_one_edge_type_per_relation(plot_csvs):
     assert graph.edge_type.shape == (graph.n_edges,)
 
     types = set(int(t) for t in graph.edge_type.tolist())
-    assert types <= {int(rc.SpeciesEdgeType.SameGenus),
-                     int(rc.SpeciesEdgeType.SameFamily),
-                     int(rc.SpeciesEdgeType.CoOccurrence)}
+    # The stored value is the index the encoder's edge-type embedding looks up,
+    # so it is the enum's own numbering.
+    assert types <= {rc.SpeciesEdgeType.SameGenus.value,
+                     rc.SpeciesEdgeType.SameFamily.value,
+                     rc.SpeciesEdgeType.CoOccurrence.value}
     # The corpus has several genera, several families and species that share
     # plots, so all three relations are present.
     assert types == {0, 1, 2}

@@ -4,6 +4,27 @@
 
 ### Added
 
+- **Every architecture hyperparameter is now a CLI flag.** `resolve train`
+  could select an encoder architecture and then left every field of its
+  sub-config at the default: no flag existed for any of them, so a standalone
+  run could not train what the bindings could -- the gap issue #104 closed for
+  covariate columns and the mixture, one level down. The rows and the reads
+  come from the same field registry that drives the checkpoint, the C-ABI value
+  tree, nanobind and `resolve info` (`cli/config_flags.hpp`), so a field added
+  to any sub-config gets its flag, its help line and its read in the edit that
+  adds the field. The flag is the field's checkpoint key with dashes --
+  `--ft-d-model`, `--tabnet-virtual-batch-size`, `--gnn-graph-mode`,
+  `--hgnn-k-cooccurrence`, `--trait-interaction`, `--parallel-aggregation` --
+  because that key already carries the struct prefix, and nine sub-configs
+  repeat member names. A boolean is the CLI's usual pair of presence flags
+  (`--tabnet-use-sparsemax` / `--no-tabnet-use-sparsemax`), an enum lists its
+  accepted spellings in the generated help, and every default column shows the
+  value the struct actually carries. The parallel block's branches are
+  variable-length, so they keep a grammar of their own:
+  `--parallel-branch DIMS[:ACTIVATION[:NORMALIZATION[:DROPOUT[:WEIGHT]]]]`,
+  repeated per branch. `--parallel-enabled` with no branch is refused rather
+  than ignored.
+
 - **`heterogeneous_gnn` passes messages on a species graph the engine builds.**
   The architecture reads a typed graph over the species vocabulary, and
   `HeterogeneousGNNConfig` carried four fields describing how to build one --
@@ -98,6 +119,23 @@
   values as zero.
 
 ### Fixed
+
+- **A standardization scale that cannot be estimated is 1, not NaN.** The
+  sample standard deviation of a single row is NaN, and dividing by it
+  standardized every value -- and from there every prediction and every weight
+  -- into NaN in silence. A one-row fitting fold comes out of an ordinary
+  `test_size` on a small dataset. `standardization_scale`
+  (`continuous_block.hpp`) is the one definition, used for the continuous block
+  and for each regression target: the sample standard deviation, offset so a
+  constant column does not divide by zero, and 1 where it cannot be estimated
+  at all.
+
+- **An unknown `transformer_pooling` is refused rather than read as CLS
+  pooling.** The pooled vector is chosen by name and the forward treated
+  anything that is not `"attention"` as CLS, so a misspelling selected a
+  different architecture from the one asked for without a word.
+  `PlotEncoderTransformer` now accepts `"attention"` and `"cls"` and names both
+  when refusing anything else, the way `TabMConfig::aggregation` already did.
 
 - **Fifteen architecture fields that reached no engine code now shape the
   model.** The field registry makes every configuration field round-trip

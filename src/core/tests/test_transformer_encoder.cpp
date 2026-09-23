@@ -183,3 +183,28 @@ TEST_CASE("ResolveModel with Transformer mode constructs and forwards", "[transf
     REQUIRE(outputs.count("area") == 1);
     REQUIRE(outputs["area"].size(0) == 4);
 }
+
+TEST_CASE("An unknown transformer pooling is refused, not read as CLS",
+          "[transformer][pooling]") {
+    auto build = [](const std::string& pooling) {
+        return PlotEncoderTransformer(
+            /*n_continuous=*/10,
+            /*n_species=*/100,
+            /*n_genera=*/0,
+            /*n_families=*/0,
+            /*d_model=*/32,
+            /*n_heads=*/4,
+            /*n_attention_layers=*/1,
+            /*transformer_ff_dim=*/64,
+            pooling);
+    };
+
+    // Both documented values build.
+    REQUIRE_NOTHROW(build("attention"));
+    REQUIRE_NOTHROW(build("cls"));
+    // The forward reads anything that is not "attention" as CLS, so an unknown
+    // spelling used to select CLS pooling in silence -- a different
+    // architecture from the one asked for.
+    CHECK_THROWS_AS(build("mean"), std::invalid_argument);
+    CHECK_THROWS_AS(build(""), std::invalid_argument);
+}

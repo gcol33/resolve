@@ -367,3 +367,54 @@ TEST_CASE("the policy round-trips through a checkpoint's schema",
     CHECK(dataset_config_from_checkpoint(schema, ModelConfig{}).missing_values ==
           MissingValuePolicy::Zero);
 }
+
+// ============================================================================
+// A scale that cannot be estimated is 1, not NaN
+//
+// The sample standard deviation of a single row is NaN, and dividing by it
+// standardizes every value -- and from there every prediction and every weight
+// -- into NaN in silence. A one-row fitting fold is degenerate, but it comes
+// out of an ordinary test_size on a tiny dataset, and the failure it produced
+// said nothing about where it came from.
+// ============================================================================
+
+TEST_CASE("The standardization scale is finite even where it cannot be estimated",
+          "[missing][scalers]") {
+    // Several rows: the ordinary case, the sample standard deviation.
+    auto values = torch::tensor({{1.0f, 5.0f}, {3.0f, 5.0f}, {5.0f, 5.0f}});
+    auto scale = standardization_scale(values, /*dim=*/0);
+    REQUIRE(scale.numel() == 2);
+    CHECK(scale[0].item<float>() > 1.9f);   // std of 1, 3, 5 is 2
+    CHECK(scale[0].item<float>() < 2.1f);
+    // A constant column would divide by zero, so the offset keeps it positive.
+    CHECK(scale[1].item<float>() > 0.0f);
+
+    // One row has no sample standard deviation. torch says NaN; the scale says
+    // 1, so the standardized value is the centred value and nothing becomes
+    // NaN.
+    auto single = torch::tensor({{2.0f, 7.0f}});
+    auto single_scale = standardization_scale(single, /*dim=*/0);
+    CHECK(torch::isnan(single_scale).sum().item<int64_t>() == 0);
+    CHECK(single_scale[0].item<float>() == 1.0f);
+    CHECK(single_scale[1].item<float>() == 1.0f);
+
+    // The whole-tensor form, which each regression target uses.
+    CHECK(standardization_scale(torch::tensor({4.0f})).item<float>() == 1.0f);
+    CHECK(std::isfinite(
+        standardization_scale(torch::tensor({1.0f, 2.0f, 3.0f})).item<float>()));
+}
+
+TEST_CASE("Fitting the continuous scalers on one row leaves nothing NaN",
+          "[missing][scalers]") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    auto block = torch::tensor({{1.0f, nan, 3.0f}});
+
+    Scalers scalers;
+    fit_continuous_scalers(scalers, block);
+    CHECK(torch::isnan(scalers.continuous_fill).sum().item<int64_t>() == 0);
+    CHECK(torch::isnan(scalers.continuous_mean).sum().item<int64_t>() == 0);
+    CHECK(torch::isnan(scalers.continuous_scale).sum().item<int64_t>() == 0);
+
+    auto standardized = standardize_continuous(block, scalers);
+    CHECK(torch::isnan(standardized).sum().item<int64_t>() == 0);
+}

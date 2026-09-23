@@ -213,7 +213,18 @@ cfg.ft_transformer.n_layers = 3
 | `ExcelFormer` | `excelformer` | Semi-permeable attention driven by learned feature importance |
 | `TraitNet` | `trait_net` | Environment and trait interaction; needs traits set on the model |
 | `GNN` | `gnn` | Spatial, taxonomic, or co-occurrence graph; the spatial mode needs coordinates and trains full-batch |
-| `HeterogeneousGNN` | `heterogeneous_gnn` | Taxonomic and co-occurrence edges together |
+| `HeterogeneousGNN` | `heterogeneous_gnn` | Message passing on a graph over the species, built from taxonomy and co-occurrence |
+
+Every field of every sub-config is also a command-line flag, named after the
+field under its struct prefix, so a standalone run reaches the same
+hyperparameters:
+
+```bash
+resolve train --encoder-architecture tabnet   --tabnet-n-steps 5 --tabnet-virtual-batch-size 256 --no-tabnet-use-sparsemax   ...
+```
+
+`resolve help` lists them with their defaults and, for a field that takes a
+name rather than a number, the spellings it accepts.
 
 ### Mixture of experts
 
@@ -242,6 +253,38 @@ naming `Post`.
 A gate spreads its load with a small auxiliary loss, added to the task loss at
 `moe_aux_loss_weight`. `n_experts` must be at least 2: with one expert the
 soft-routing load-balancing term is a variance over a single value.
+
+### Parallel branches
+
+`parallel_layers` runs several MLP branches over the encoder's features and
+aggregates them, in place of the plain MLP tail:
+
+```python
+branch = rc.ParallelBranchConfig()
+branch.hidden_dims = [256, 128]
+wide = rc.ParallelBranchConfig()
+wide.hidden_dims = [256, 128]
+wide.branch_weight = 0.5          # what this branch is worth in the sum
+
+cfg.parallel_layers.enabled     = True
+cfg.parallel_layers.branches    = [branch, wide]
+cfg.parallel_layers.aggregation = rc.ParallelAggregation.Sum
+```
+
+`Concat` adds the branch widths up; `Sum`, `Mean`, `Attention` and `Gated` keep
+one branch width and need every branch the same width. `use_residual` adds the
+block's input to the aggregate, projecting it when the widths differ.
+`branch_weight` scales a branch's output before aggregation, so a weight of 0
+takes it out of the sum without removing its parameters.
+
+TabM, a tail-placed mixture and a parallel block all replace the same MLP tail,
+so at most one may be enabled; `moe_placement = Post` moves the mixture off the
+tail and the two then coexist. On the command line the branches have their own
+repeatable flag:
+
+```bash
+resolve train --parallel-enabled --parallel-aggregation sum   --parallel-branch 256,128 --parallel-branch 256,128:relu:layer_norm:0.1:0.5   ...
+```
 
 ## Training results
 

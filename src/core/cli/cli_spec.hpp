@@ -11,6 +11,7 @@
 // without spawning a process.
 
 #include "arg_parser.hpp"
+#include "config_flags.hpp"
 
 namespace resolve_cli {
 
@@ -151,6 +152,26 @@ inline const CommandSpec& train_spec() {
                          "Transformer pooling: attention or cls"});
         flags.push_back({"--transformer-dropout", Arity::Value, "FLOAT", "0.1",
                          "Dropout inside transformer blocks"});
+
+        // Every field of every architecture sub-config, generated from the
+        // shared field registry (config_flags.hpp) rather than written out
+        // here: the flag is the field's checkpoint key with dashes, so
+        // --tabnet-n-steps, --gnn-graph-mode, --hgnn-k-cooccurrence. Before
+        // this the CLI could reach no architecture hyperparameter at all, so a
+        // standalone run could not train what the bindings could.
+        append_architecture_flags(flags);
+        flags.push_back({"--parallel-branch", Arity::Repeatable, "SPEC", "",
+                         "One branch of the parallel block. Repeat per\n"
+                         "branch; the order is the branch order:\n"
+                         "  DIMS                    widths, e.g. 256,128\n"
+                         "  DIMS:ACTIVATION         gelu, relu, silu, ...\n"
+                         "  DIMS:ACT:NORMALIZATION  batch_norm, layer_norm,\n"
+                         "                          group_norm, rms_norm, none\n"
+                         "  DIMS:ACT:NORM:DROPOUT   rate inside the branch\n"
+                         "  DIMS:ACT:NORM:DROP:WEIGHT  what the branch is\n"
+                         "                          worth in the aggregation\n"
+                         "Needs --parallel-enabled; the block then replaces\n"
+                         "the encoder's MLP tail."});
 
         // Training
         flags.push_back({"--batch-size", Arity::Value, "N", "4096",

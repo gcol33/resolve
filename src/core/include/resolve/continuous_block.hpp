@@ -41,6 +41,15 @@ struct ContinuousInputs {
 // that column's recorded (non-NaN) values, and 0.0 for a column with none.
 [[nodiscard]] torch::Tensor continuous_column_fill(const torch::Tensor& rows);
 
+// The scale to standardize by: the sample standard deviation, offset so a
+// constant column does not divide by zero, and 1.0 where it cannot be
+// estimated at all. A single row has no sample standard deviation -- torch
+// returns NaN -- and dividing by that turns every standardized value, and from
+// there every prediction, into NaN in silence. Used for the continuous block
+// and for each regression target.
+[[nodiscard]] torch::Tensor standardization_scale(const torch::Tensor& values,
+                                                  int64_t dim = -1);
+
 // Replace every missing cell with its column's fill, leaving recorded values
 // untouched. This is the fill fit_continuous_scalers computes, without the
 // standardization -- what a consumer with no fitted scalers needs in order to

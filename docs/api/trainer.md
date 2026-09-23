@@ -39,6 +39,12 @@ training fold alone, records the categorical vocabulary, and keeps the split
 reachable. It raises when `DatasetConfig.hash_dim` and `ModelConfig.hash_dim`
 disagree.
 
+For a `heterogeneous_gnn` model it also builds the species graph the encoder
+passes messages on, from the dataset's taxonomy and co-occurrence as
+`heterogeneous_gnn` asks; `Trainer.save` writes it into the checkpoint, so
+scoring reads the graph the weights were trained on. A graph set by hand
+through `model.set_species_graph` is left alone.
+
 `seed` governs the SPLIT. It does not cover model weight initialisation, which
 draws from the process-global torch RNG the way any PyTorch module does, so two
 runs with the same `seed` still start from different weights. To reproduce a fit

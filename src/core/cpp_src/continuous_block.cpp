@@ -80,6 +80,15 @@ torch::Tensor continuous_column_fill(const torch::Tensor& rows) {
                         torch::zeros_like(total));
 }
 
+torch::Tensor standardization_scale(const torch::Tensor& values, int64_t dim) {
+    auto scale = dim < 0
+        ? values.std()
+        : values.std(/*dim=*/at::IntArrayRef{dim}, /*correction=*/1,
+                     /*keepdim=*/false);
+    scale = scale + 1e-8f;
+    return torch::where(torch::isfinite(scale), scale, torch::ones_like(scale));
+}
+
 torch::Tensor fill_missing_continuous(const torch::Tensor& block) {
     if (!block.defined() || block.size(1) == 0) {
         return block;
@@ -97,7 +106,7 @@ void fit_continuous_scalers(Scalers& scalers, const torch::Tensor& fitting_rows)
     auto filled = torch::where(observed, fitting_rows,
                                scalers.continuous_fill.expand_as(fitting_rows));
     scalers.continuous_mean = filled.mean(/*dim=*/0);
-    scalers.continuous_scale = filled.std(/*dim=*/0) + 1e-8f;
+    scalers.continuous_scale = standardization_scale(filled, /*dim=*/0);
 }
 
 torch::Tensor standardize_continuous(const torch::Tensor& block, const Scalers& scalers) {

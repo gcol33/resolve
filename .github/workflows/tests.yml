@@ -426,6 +426,48 @@ jobs:
             *) echo "::error::the refusal did not name moe_placement=post: $err"; exit 1 ;;
           esac
 
+      # Every field of every architecture sub-config now has a flag, generated
+      # from the field registry. Before this the CLI selected an architecture
+      # and left all of its hyperparameters at the default, so a standalone run
+      # could not train what the bindings could.
+      - name: Architecture sub-config flags reach the model
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:${LD_LIBRARY_PATH:-}
+          RESOLVE=${{ github.workspace }}/cli/resolve
+          FIXTURES=${{ github.workspace }}/src/core/tests/fixtures
+
+          "$RESOLVE" train             --header "$FIXTURES/cli_header.csv"             --species "$FIXTURES/cli_species.csv"             --plot-id plot_id --species-id species --abundance cover             --lat lat --lon lon --genus genus --family family             --target area:regression             --encoding sparse --encoder-architecture tabnet             --tabnet-n-steps 4 --tabnet-n-d 12 --tabnet-n-a 12             --tabnet-virtual-batch-size 16 --no-tabnet-use-sparsemax             --hidden-dims 32 --batch-size 32 --max-epochs 2 --patience 2             --seed 3 --output "$OUT/tabnet.pt"
+          "$RESOLVE" info --model "$OUT/tabnet.pt" | tee "$OUT/info_tabnet.txt"
+          grep -q "Model tabnet:" "$OUT/info_tabnet.txt"
+          grep -q "n_steps: 4" "$OUT/info_tabnet.txt"
+          grep -q "virtual_batch_size: 16" "$OUT/info_tabnet.txt"
+          grep -q "use_sparsemax: no" "$OUT/info_tabnet.txt"
+
+          # The parallel block is the encoder tail, and its branches have their
+          # own repeatable grammar.
+          "$RESOLVE" train             --header "$FIXTURES/cli_header.csv"             --species "$FIXTURES/cli_species.csv"             --plot-id plot_id --species-id species --abundance cover             --lat lat --lon lon --genus genus --family family             --target area:regression             --encoding rank_pool             --parallel-enabled --parallel-aggregation sum             --parallel-branch 24,16 --parallel-branch 24,16:relu:layer_norm:0.1:0.5             --hidden-dims 32 --batch-size 32 --max-epochs 2 --patience 2             --seed 3 --output "$OUT/parallel.pt"
+          "$RESOLVE" info --model "$OUT/parallel.pt" | tee "$OUT/info_parallel.txt"
+          grep -q "Model parallel_layers:" "$OUT/info_parallel.txt"
+          grep -q "branches: 2" "$OUT/info_parallel.txt"
+          grep -q "branch 1:" "$OUT/info_parallel.txt"
+          grep -q "branch_weight: 0.5" "$OUT/info_parallel.txt"
+          grep -q "aggregation: sum" "$OUT/info_parallel.txt"
+
+          # ... and enabling it with no branch is refused rather than ignored.
+          set +e
+          err=$("$RESOLVE" train             --header "$FIXTURES/cli_header.csv"             --species "$FIXTURES/cli_species.csv"             --plot-id plot_id --species-id species --abundance cover             --lat lat --lon lon --genus genus --family family             --target area:regression --encoding rank_pool             --parallel-enabled --hidden-dims 32 --batch-size 32 --max-epochs 1             --output "$OUT/parallel_reject.pt" 2>&1)
+          status=$?
+          set -e
+          if [ $status -eq 0 ]; then
+            echo "::error::--parallel-enabled accepted no branches"
+            exit 1
+          fi
+          case "$err" in
+            *--parallel-branch*) ;;
+            *) echo "::error::the refusal did not name --parallel-branch: $err"; exit 1 ;;
+          esac
+
       # --seed feeds torch::manual_seed before the model is constructed AND the
       # train/test split, so the same seed reproduces a run and a different seed
       # does not. Before issue #104 weight init came from an unseeded

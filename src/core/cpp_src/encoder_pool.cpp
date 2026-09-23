@@ -294,6 +294,16 @@ PlotEncoderTransformerImpl::PlotEncoderTransformerImpl(
             torch::nn::TransformerEncoder(enc_opts));
     }
 
+    // The pooling is chosen by name, and the forward reads anything that is not
+    // "attention" as CLS, so an unknown spelling used to select CLS pooling in
+    // silence -- a different architecture from the one asked for. Two values
+    // exist; say so.
+    if (transformer_pooling != "attention" && transformer_pooling != "cls") {
+        throw std::invalid_argument(
+            "PlotEncoderTransformer: transformer_pooling must be 'attention' or "
+            "'cls', got '" + transformer_pooling + "'.");
+    }
+
     // CLS pooling reads position 0 after the encoder mixes the CLS token with
     // the species tokens; with zero attention layers there is no mixing and the
     // pooled vector collapses to the constant CLS parameter (all species

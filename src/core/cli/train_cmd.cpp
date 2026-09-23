@@ -15,9 +15,12 @@
 #include "resolve/resolve.hpp"
 
 #include "arg_parser.hpp"
+#include "config_flags.hpp"
 
 using resolve_cli::ArgError;
 using resolve_cli::ParsedArgs;
+using resolve_cli::parse_parallel_branch;
+using resolve_cli::read_architecture_flags;
 
 namespace {
 
@@ -351,6 +354,25 @@ int train_command(const ParsedArgs& args) {
                 return 1;
             }
         }
+    }
+
+    // Every architecture sub-config, read back through the same field registry
+    // that declared the flags, so a field added to one of them needs no edit
+    // here. An unusable value (an unknown enum spelling, a non-numeric width)
+    // raises ArgError, which main() reports as a CLI error.
+    read_architecture_flags(model_config, args);
+
+    // The parallel block's branches are variable-length, so they have their own
+    // repeatable grammar rather than a value flag per field.
+    for (const auto& spec : args.get_all("--parallel-branch")) {
+        model_config.parallel_layers.branches.push_back(parse_parallel_branch(spec));
+    }
+    if (model_config.parallel_layers.enabled &&
+        model_config.parallel_layers.branches.empty()) {
+        std::cerr << "Error: --parallel-enabled needs at least one "
+                     "--parallel-branch, e.g. --parallel-branch 256,128"
+                  << std::endl;
+        return 1;
     }
 
     // Transformer / rank_pool knobs. The transformer encoder rejects

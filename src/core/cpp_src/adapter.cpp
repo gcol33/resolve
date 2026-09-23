@@ -380,7 +380,7 @@ torch::Tensor TabularAdapterImpl::graph_features(
         }
         case GraphConstructionMode::CoOccurrence: {
             TORCH_CHECK(species_vector.defined() && species_vector.numel() > 0,
-                "GNNConfig::graph_mode = co_occurrence builds its graph from "
+                "GNNConfig::graph_mode = cooccurrence builds its graph from "
                 "the per-plot species vector, which only the sparse species "
                 "encoding provides. Set DatasetConfig::species_encoding = "
                 "sparse, or select another graph_mode.");
