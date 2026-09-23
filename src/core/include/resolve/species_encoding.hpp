@@ -172,6 +172,33 @@ UnknownSpeciesStats compute_unknown_species_stats(
     const SpeciesVocab& vocab);
 
 // =============================================================================
+// The taxonomy of a species vocabulary
+// =============================================================================
+
+// Which genus and family each species belongs to. A species carrying
+// inconsistent taxonomy across rows resolves to the lexicographically smallest
+// name, so the relation is independent of CSV row order -- the same rule the
+// encoders' own species-to-genus maps follow, and the single definition of it.
+void build_species_taxon_maps(
+    const std::vector<SpeciesRecord>& records,
+    std::unordered_map<std::string, std::string>& species_to_genus,
+    std::unordered_map<std::string, std::string>& species_to_family);
+
+// The same relation resolved to codes: `genus[c]` is the taxonomy-vocab genus
+// of the species whose species code is `c`, and 0 (<UNK>) where the records
+// name none. Both vectors are as long as `species_vocab`, whose index 0 is the
+// reserved <UNK> species and always resolves to 0.
+struct SpeciesTaxonomy {
+    std::vector<int64_t> genus;   // size = species_vocab.size()
+    std::vector<int64_t> family;  // size = species_vocab.size()
+};
+
+SpeciesTaxonomy resolve_species_taxonomy(
+    const std::vector<SpeciesRecord>& records,
+    const std::vector<std::string>& species_vocab,
+    const TaxonomyVocab& taxonomy_vocab);
+
+// =============================================================================
 // RankPoolEncoder — variable-length species lists with weighted pooling
 // =============================================================================
 

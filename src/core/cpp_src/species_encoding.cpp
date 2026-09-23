@@ -355,16 +355,11 @@ UnknownSpeciesStats compute_unknown_species_stats(
 // Shared helper: build taxonomy vocab and species-to-genus/family maps
 // =============================================================================
 
-static void build_taxonomy_maps(
+void build_species_taxon_maps(
     const std::vector<SpeciesRecord>& records,
-    TaxonomyVocab& taxonomy_vocab,
     std::unordered_map<std::string, std::string>& species_to_genus,
     std::unordered_map<std::string, std::string>& species_to_family
 ) {
-    // TaxonomyVocab::fit() builds genus/family maps from records directly
-    taxonomy_vocab = TaxonomyVocab();
-    taxonomy_vocab.fit(records);
-
     // Build species -> genus/family lookup. On the (data-quality) case of a
     // species carrying inconsistent genus/family across rows, keep the
     // lexicographically smallest so the map is independent of CSV row order
@@ -382,6 +377,44 @@ static void build_taxonomy_maps(
         if (!r.genus.empty()) keep_min(species_to_genus, r.species_id, r.genus);
         if (!r.family.empty()) keep_min(species_to_family, r.species_id, r.family);
     }
+}
+
+SpeciesTaxonomy resolve_species_taxonomy(
+    const std::vector<SpeciesRecord>& records,
+    const std::vector<std::string>& species_vocab,
+    const TaxonomyVocab& taxonomy_vocab
+) {
+    std::unordered_map<std::string, std::string> species_to_genus;
+    std::unordered_map<std::string, std::string> species_to_family;
+    build_species_taxon_maps(records, species_to_genus, species_to_family);
+
+    SpeciesTaxonomy taxonomy;
+    taxonomy.genus.assign(species_vocab.size(), 0);
+    taxonomy.family.assign(species_vocab.size(), 0);
+    for (size_t code = 1; code < species_vocab.size(); ++code) {
+        const auto& name = species_vocab[code];
+        auto genus = species_to_genus.find(name);
+        if (genus != species_to_genus.end()) {
+            taxonomy.genus[code] = taxonomy_vocab.encode_genus(genus->second);
+        }
+        auto family = species_to_family.find(name);
+        if (family != species_to_family.end()) {
+            taxonomy.family[code] = taxonomy_vocab.encode_family(family->second);
+        }
+    }
+    return taxonomy;
+}
+
+static void build_taxonomy_maps(
+    const std::vector<SpeciesRecord>& records,
+    TaxonomyVocab& taxonomy_vocab,
+    std::unordered_map<std::string, std::string>& species_to_genus,
+    std::unordered_map<std::string, std::string>& species_to_family
+) {
+    // TaxonomyVocab::fit() builds genus/family maps from records directly
+    taxonomy_vocab = TaxonomyVocab();
+    taxonomy_vocab.fit(records);
+    build_species_taxon_maps(records, species_to_genus, species_to_family);
 }
 
 // =============================================================================

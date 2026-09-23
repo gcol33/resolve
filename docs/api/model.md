@@ -187,7 +187,7 @@ config.tabnet.use_sparsemax = False       # 1.5-entmax instead
 | `MLP` | `hidden_dims` and friends | Default |
 | `FTTransformer` | `ft_transformer` | `d_model`, `n_heads`, `n_layers`, `attention_dropout`, `ffn_dropout`, `ffn_multiplier`, `pre_norm` |
 | `TabNet` | `tabnet` | `n_steps`, `n_d`, `n_a`, `relaxation_factor`, `sparsity_coefficient`, `virtual_batch_size`, `use_sparsemax` |
-| `SAINT` | `saint` | `d_model`, `n_heads`, `n_layers`, `attention_dropout`, `use_row_attention`, `use_contrastive_pretrain`, `mixup_alpha` |
+| `SAINT` | `saint` | `d_model`, `n_heads`, `n_layers`, `attention_dropout`, `use_row_attention` |
 | `ExcelFormer` | `excelformer` | `d_model`, `n_heads`, `n_layers`, `attention_dropout`, `ffn_multiplier`, `importance_threshold`, `pre_norm` |
 | `TraitNet` | `trait_net` | `env_dim`, `trait_dim`, `interaction_dim`, `interaction`, `shared_trait_encoder` |
 | `GNN` | `gnn` | `gnn_type`, `n_layers`, `hidden_dim`, `n_heads`, `k_neighbors`, `graph_mode`, `edge_dropout`, `use_edge_features` |
@@ -197,10 +197,33 @@ config.tabnet.use_sparsemax = False       # 1.5-entmax instead
 (Peters, Niculae & Martins, arXiv:1905.05702, Algorithm 2), which keeps strictly
 more features per step than sparsemax.
 
-`GNN` with `graph_mode = Spatial` needs coordinates and trains full-batch, so
-its k-nearest-neighbour graph spans every plot rather than an arbitrary batch.
+`GNN` builds a k-nearest-neighbour graph over the plots of the forward pass,
+and `graph_mode` is the features it measures neighbourhood on: `Spatial` the
+coordinates (which it then needs, and it trains full-batch so the graph spans
+every plot rather than an arbitrary batch), `Taxonomic` the genus/family
+composition, `CoOccurrence` the species vector. `use_edge_features` carries
+each edge's similarity as its weight instead of a plain 1.
+
+`TabNet.virtual_batch_size` is the ghost batch normalization slice every block
+below the input normalization runs at; 0 normalizes the batch in one piece.
+
+`FTTransformer` reads `attention_dropout` on the attention weights and
+`ffn_dropout` inside the feed-forward layer and on each sublayer's residual
+branch.
 
 `TraitNet` needs a trait matrix supplied through `model.set_traits(traits)`.
+`interaction` is how the environment and a species' traits are combined
+(`Bilinear`, `MLP`, `Attention`), `interaction_dim` the width that combination
+produces, and `shared_trait_encoder = False` gives every species its own trait
+encoder, which costs `n_species` times the parameters.
+
+`HeterogeneousGNN` passes messages on a graph over the species vocabulary.
+`Trainer.prepare_data` builds it from the dataset -- same-genus and same-family
+edges when `use_taxonomic_edges`, co-occurrence edges above
+`cooccurrence_threshold` keeping `k_cooccurrence` partners per species when
+`use_cooccurrence_edges` -- and the checkpoint carries it, so scoring reads the
+graph the weights were trained on. Co-occurrence needs the sparse species
+encoding. See `build_species_graph` in the dataset reference.
 
 ### Parallel branches and TabM
 
@@ -210,7 +233,15 @@ its k-nearest-neighbour graph spans every plot rather than an arbitrary batch.
 | `tabm` | `enabled`, `n_ensembles`, `aggregation` |
 
 `ParallelBranchConfig` carries `hidden_dims`, `activation`, `normalization`,
-`dropout`, and `branch_weight`.
+`dropout`, and `branch_weight`, the last being what the branch contributes to
+the aggregation (1 leaves its output untouched, 0 takes it out of the sum
+without removing its parameters).
+
+`parallel_layers.enabled` makes the block the encoder's tail: the plain MLP is
+not built, so the branches carry the encoder's final capacity. TabM, a
+tail-placed mixture of experts and a parallel block all replace that same MLP,
+so at most one of the three may be enabled; `moe_placement = post` moves the
+mixture off the tail and the two then coexist.
 
 ---
 

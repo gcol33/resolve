@@ -70,6 +70,7 @@ add_executable(resolve_tests
     test_missing_values.cpp
     test_freeze_composition.cpp
     test_architecture_knobs.cpp
+    test_species_graph.cpp
 )
 
 # Add CUDA library directory if CUDA is available

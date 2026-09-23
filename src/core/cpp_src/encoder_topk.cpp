@@ -35,10 +35,12 @@ PlotEncoderImpl::PlotEncoderImpl(
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& mlp_config,
     const TabMConfig& tabm_config,
-    const MoETailConfig& moe_config
+    const MoETailConfig& moe_config,
+    const ParallelLayersConfig& parallel_config
 ) {
     init(n_continuous, n_genera, n_families, genus_emb_dim, family_emb_dim,
-         top_k, hidden_dims, mlp_config, tabm_config, moe_config);
+         top_k, hidden_dims, mlp_config, tabm_config, moe_config,
+         parallel_config);
 }
 
 // Legacy constructor (backward compatibility)
@@ -68,7 +70,8 @@ void PlotEncoderImpl::init(
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& config,
     const TabMConfig& tabm_config,
-    const MoETailConfig& moe_config
+    const MoETailConfig& moe_config,
+    const ParallelLayersConfig& parallel_config
 ) {
     has_taxonomy_ = (n_genera > 1 || n_families > 1);
     top_k_ = top_k;
@@ -84,7 +87,8 @@ void PlotEncoderImpl::init(
     }
 
     latent_dim_ = build_encoder_tail(
-        *this, tail_, input_dim, hidden_dims, config, tabm_config, moe_config);
+        *this, tail_, input_dim, hidden_dims, config, tabm_config, moe_config,
+        parallel_config);
     activation_indices_ = tail_.activation_indices;
 }
 
@@ -151,11 +155,12 @@ PlotEncoderEmbedImpl::PlotEncoderEmbedImpl(
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& mlp_config,
     const TabMConfig& tabm_config,
-    const MoETailConfig& moe_config
+    const MoETailConfig& moe_config,
+    const ParallelLayersConfig& parallel_config
 ) {
     init(n_continuous, n_species, n_genera, n_families, species_embed_dim,
          genus_emb_dim, family_emb_dim, top_k_species, top_k_taxonomy,
-         hidden_dims, mlp_config, tabm_config, moe_config);
+         hidden_dims, mlp_config, tabm_config, moe_config, parallel_config);
 }
 
 // Legacy constructor (backward compatibility)
@@ -192,7 +197,8 @@ void PlotEncoderEmbedImpl::init(
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& config,
     const TabMConfig& tabm_config,
-    const MoETailConfig& moe_config
+    const MoETailConfig& moe_config,
+    const ParallelLayersConfig& parallel_config
 ) {
     // Genus OR family real entries enable taxonomy (matches the transform gate
     // in EmbeddingEncoder), so family-only datasets keep family embeddings.
@@ -226,7 +232,8 @@ void PlotEncoderEmbedImpl::init(
     }
 
     latent_dim_ = build_encoder_tail(
-        *this, tail_, input_dim, hidden_dims, config, tabm_config, moe_config);
+        *this, tail_, input_dim, hidden_dims, config, tabm_config, moe_config,
+        parallel_config);
 }
 
 torch::Tensor PlotEncoderEmbedImpl::forward(
@@ -281,11 +288,12 @@ PlotEncoderSparseImpl::PlotEncoderSparseImpl(
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& mlp_config,
     const TabMConfig& tabm_config,
-    const MoETailConfig& moe_config
+    const MoETailConfig& moe_config,
+    const ParallelLayersConfig& parallel_config
 ) {
     init(n_continuous, n_species, species_embed_dim, n_genera, n_families,
          genus_emb_dim, family_emb_dim, top_k, hidden_dims, mlp_config,
-         tabm_config, moe_config);
+         tabm_config, moe_config, parallel_config);
 }
 
 // Legacy constructor (backward compatibility)
@@ -319,7 +327,8 @@ void PlotEncoderSparseImpl::init(
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& config,
     const TabMConfig& tabm_config,
-    const MoETailConfig& moe_config
+    const MoETailConfig& moe_config,
+    const ParallelLayersConfig& parallel_config
 ) {
     has_taxonomy_ = (n_genera > 1 || n_families > 1);
     n_species_ = n_species;
@@ -340,7 +349,8 @@ void PlotEncoderSparseImpl::init(
     }
 
     latent_dim_ = build_encoder_tail(
-        *this, tail_, input_dim, hidden_dims, config, tabm_config, moe_config);
+        *this, tail_, input_dim, hidden_dims, config, tabm_config, moe_config,
+        parallel_config);
 }
 
 torch::Tensor PlotEncoderSparseImpl::forward(

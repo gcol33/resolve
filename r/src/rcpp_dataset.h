@@ -201,6 +201,10 @@ public:
     RObject species_vector()   const { return get("species_vector"); }
     RObject genus_ids()        const { return get("genus_ids"); }
     RObject family_ids()       const { return get("family_ids"); }
+    // The taxonomy of the VOCABULARY: index = species code, value = its genus
+    // / family code. genus_ids / family_ids above are per-plot slots.
+    RObject species_genus_ids()  const { return get("species_genus_ids"); }
+    RObject species_family_ids() const { return get("species_family_ids"); }
     RObject unknown_fraction() const { return get("unknown_fraction"); }
     RObject unknown_count()    const { return get("unknown_count"); }
     RObject categorical_ids()  const { return get("categorical_ids"); }
@@ -225,6 +229,15 @@ public:
     // Every vocabulary this dataset fitted, in the form the *_with_vocabs
     // loaders take (issue #102).
     RObject vocabs()           const { return get("vocabs"); }
+
+    // The typed species graph a HeterogeneousGNN passes messages on, built
+    // from this dataset's taxonomy and co-occurrence. `config` is a
+    // HeterogeneousGNNConfig list; an empty list takes the defaults.
+    List species_graph(List config) const {
+        ValuePtr cfg(r_list_to_value_map(config, "config"));
+        return as<List>(
+            value_to_r_owned(resolve_build_species_graph(ds_.get(), cfg.get())));
+    }
 
     // Per-column vocabulary: named list of named integer vectors.
     List categorical_vocab() const {

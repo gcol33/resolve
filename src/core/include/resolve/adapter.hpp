@@ -125,6 +125,12 @@ public:
     // Must be called before forward() when using HeterogeneousGNN architecture
     void set_species_graph(torch::Tensor edge_index, torch::Tensor edge_type);
     [[nodiscard]] bool has_species_graph() const noexcept { return hetero_graph_set_; }
+    [[nodiscard]] const torch::Tensor& species_graph_edge_index() const noexcept {
+        return hetero_edge_index_;
+    }
+    [[nodiscard]] const torch::Tensor& species_graph_edge_type() const noexcept {
+        return hetero_edge_type_;
+    }
 };
 
 TORCH_MODULE(TabularAdapter);

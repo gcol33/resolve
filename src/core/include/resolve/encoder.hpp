@@ -245,10 +245,14 @@ public:
     torch::Tensor forward(torch::Tensor x);
 
     [[nodiscard]] int64_t output_dim() const noexcept { return output_dim_; }
+    // What this branch is worth in the aggregation
+    // (ParallelBranchConfig::branch_weight).
+    [[nodiscard]] float branch_weight() const noexcept { return branch_weight_; }
 
 private:
     torch::nn::Sequential mlp_{nullptr};
     int64_t output_dim_;
+    float branch_weight_ = 1.0f;
 };
 
 TORCH_MODULE(ParallelBranch);
@@ -415,8 +419,9 @@ struct TailOutput {
 };
 
 // The last stage of every species encoder -- hash, embed, sparse, rank_pool and
-// transformer all end here. It is one of three things: a plain MLP, a TabM
-// ensemble, or a backbone MLP whose final stage is a mixture of experts.
+// transformer all end here. It is one of four things: a plain MLP, a TabM
+// ensemble, a backbone MLP whose final stage is a mixture of experts, or a
+// parallel block of MLP branches (ParallelLayersConfig::enabled).
 //
 // The modules are registered onto the OWNING encoder rather than onto a
 // sub-module of their own, so the parameter names stay flat ("mlp", "tabm",
@@ -425,6 +430,9 @@ struct TailOutput {
 struct EncoderTail {
     torch::nn::Sequential mlp{nullptr};
     TabMEncoder tabm{nullptr};
+
+    // Parallel tail: several MLP branches over the same input, aggregated.
+    ParallelBlock parallel{nullptr};
 
     // MoE tail: backbone MLP feeding the mixture.
     torch::nn::Sequential backbone{nullptr};
@@ -435,6 +443,9 @@ struct EncoderTail {
 
     [[nodiscard]] bool has_moe() const noexcept { return static_cast<bool>(moe); }
     [[nodiscard]] bool has_tabm() const noexcept { return static_cast<bool>(tabm); }
+    [[nodiscard]] bool has_parallel() const noexcept {
+        return static_cast<bool>(parallel);
+    }
 };
 
 // Build the tail on `owner` and return its latent dimension (also stored on the
@@ -448,7 +459,8 @@ int64_t build_encoder_tail(
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& config,
     const TabMConfig& tabm_config,
-    const MoETailConfig& moe_config = MoETailConfig{}
+    const MoETailConfig& moe_config = MoETailConfig{},
+    const ParallelLayersConfig& parallel_config = ParallelLayersConfig{}
 );
 
 // Run whichever tail was built.
@@ -469,7 +481,8 @@ public:
         const std::vector<int64_t>& hidden_dims,
         const MLPBlockConfig& mlp_config,
         const TabMConfig& tabm_config = TabMConfig{},
-        const MoETailConfig& moe_config = MoETailConfig{}
+        const MoETailConfig& moe_config = MoETailConfig{},
+        const ParallelLayersConfig& parallel_config = ParallelLayersConfig{}
     );
 
     // Legacy constructor (backward compatibility)
@@ -539,7 +552,8 @@ private:
     std::vector<torch::nn::Embedding> genus_embeddings_;
     std::vector<torch::nn::Embedding> family_embeddings_;
 
-    // Final stage: plain MLP, TabM ensemble, or backbone + mixture of experts
+    // Final stage: plain MLP, TabM ensemble, backbone + mixture of experts, or
+    // a parallel block of branches
     EncoderTail tail_;
 
     // Helper for constructor implementation
@@ -547,7 +561,8 @@ private:
               int genus_emb_dim, int family_emb_dim, int top_k,
               const std::vector<int64_t>& hidden_dims, const MLPBlockConfig& config,
               const TabMConfig& tabm_config = TabMConfig{},
-              const MoETailConfig& moe_config = MoETailConfig{});
+              const MoETailConfig& moe_config = MoETailConfig{},
+              const ParallelLayersConfig& parallel_config = ParallelLayersConfig{});
 };
 
 TORCH_MODULE(PlotEncoder);
@@ -571,7 +586,8 @@ public:
         const std::vector<int64_t>& hidden_dims,
         const MLPBlockConfig& mlp_config,
         const TabMConfig& tabm_config = TabMConfig{},
-        const MoETailConfig& moe_config = MoETailConfig{}
+        const MoETailConfig& moe_config = MoETailConfig{},
+        const ParallelLayersConfig& parallel_config = ParallelLayersConfig{}
     );
 
     // Legacy constructor (backward compatibility)
@@ -633,7 +649,8 @@ private:
     FusedPositionalEmbedding fused_genus_{nullptr};
     FusedPositionalEmbedding fused_family_{nullptr};
 
-    // Final stage: plain MLP, TabM ensemble, or backbone + mixture of experts
+    // Final stage: plain MLP, TabM ensemble, backbone + mixture of experts, or
+    // a parallel block of branches
     EncoderTail tail_;
 
     // Helper for constructor implementation
@@ -642,7 +659,8 @@ private:
               int top_k_species, int top_k_taxonomy,
               const std::vector<int64_t>& hidden_dims, const MLPBlockConfig& config,
               const TabMConfig& tabm_config = TabMConfig{},
-              const MoETailConfig& moe_config = MoETailConfig{});
+              const MoETailConfig& moe_config = MoETailConfig{},
+              const ParallelLayersConfig& parallel_config = ParallelLayersConfig{});
 };
 
 TORCH_MODULE(PlotEncoderEmbed);
@@ -665,7 +683,8 @@ public:
         const std::vector<int64_t>& hidden_dims,
         const MLPBlockConfig& mlp_config,
         const TabMConfig& tabm_config = TabMConfig{},
-        const MoETailConfig& moe_config = MoETailConfig{}
+        const MoETailConfig& moe_config = MoETailConfig{},
+        const ParallelLayersConfig& parallel_config = ParallelLayersConfig{}
     );
 
     // Legacy constructor (backward compatibility)
@@ -728,7 +747,8 @@ private:
     std::vector<torch::nn::Embedding> genus_embeddings_;
     std::vector<torch::nn::Embedding> family_embeddings_;
 
-    // Final stage: plain MLP, TabM ensemble, or backbone + mixture of experts
+    // Final stage: plain MLP, TabM ensemble, backbone + mixture of experts, or
+    // a parallel block of branches
     EncoderTail tail_;
 
     // Helper for constructor implementation
@@ -736,7 +756,8 @@ private:
               int64_t n_genera, int64_t n_families, int genus_emb_dim, int family_emb_dim,
               int top_k, const std::vector<int64_t>& hidden_dims, const MLPBlockConfig& config,
               const TabMConfig& tabm_config = TabMConfig{},
-              const MoETailConfig& moe_config = MoETailConfig{});
+              const MoETailConfig& moe_config = MoETailConfig{},
+              const ParallelLayersConfig& parallel_config = ParallelLayersConfig{});
 };
 
 TORCH_MODULE(PlotEncoderSparse);
@@ -779,7 +800,8 @@ public:
         const MLPBlockConfig& mlp_config = MLPBlockConfig{},
         float cover_dropout = 0.0f,
         const TabMConfig& tabm_config = TabMConfig{},
-        const MoETailConfig& moe_config = MoETailConfig{}
+        const MoETailConfig& moe_config = MoETailConfig{},
+        const ParallelLayersConfig& parallel_config = ParallelLayersConfig{}
     );
 
     // Forward pass with weighted mean pooling
@@ -831,7 +853,8 @@ private:
     torch::nn::Embedding genus_embedding_{nullptr};
     torch::nn::Embedding family_embedding_{nullptr};
 
-    // Final stage: plain MLP, TabM ensemble, or backbone + mixture of experts
+    // Final stage: plain MLP, TabM ensemble, backbone + mixture of experts, or
+    // a parallel block of branches
     EncoderTail tail_;
 };
 
@@ -861,7 +884,8 @@ public:
         const MLPBlockConfig& mlp_config = MLPBlockConfig{},
         float cover_dropout = 0.0f,
         const TabMConfig& tabm_config = TabMConfig{},
-        const MoETailConfig& moe_config = MoETailConfig{}
+        const MoETailConfig& moe_config = MoETailConfig{},
+        const ParallelLayersConfig& parallel_config = ParallelLayersConfig{}
     );
 
     // Forward pass: species tokens → self-attention → pooling → MLP → latent
@@ -946,7 +970,8 @@ private:
     // CLS pooling
     torch::Tensor cls_token_;
 
-    // Final stage: plain MLP, TabM ensemble, or backbone + mixture of experts
+    // Final stage: plain MLP, TabM ensemble, backbone + mixture of experts, or
+    // a parallel block of branches
     EncoderTail tail_;
 };
 

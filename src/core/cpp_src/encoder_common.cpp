@@ -488,17 +488,44 @@ int64_t build_encoder_tail(
     const std::vector<int64_t>& hidden_dims,
     const MLPBlockConfig& config,
     const TabMConfig& tabm_config,
-    const MoETailConfig& moe_config
+    const MoETailConfig& moe_config,
+    const ParallelLayersConfig& parallel_config
 ) {
-    // TabM and a mixture are both replacements for the same MLP tail, so only
-    // one of them can have it. Requesting both used to drop TabM without a
-    // word, since the MoE encoder took no TabMConfig at all.
+    // TabM, a mixture and a parallel block are all replacements for the same
+    // MLP tail, so only one of them can have it. Requesting TabM and a mixture
+    // together used to drop TabM without a word, since the MoE encoder took no
+    // TabMConfig at all.
     if (tabm_config.enabled && moe_config.enabled()) {
         throw std::invalid_argument(
             "encoder tail: tabm.enabled and moe_routing are both set, but both "
             "replace the encoder's MLP tail. Choose one: disable TabM, set "
             "moe_routing=none, or move the mixture off the tail with "
             "moe_placement=post.");
+    }
+    if (parallel_config.enabled && (tabm_config.enabled || moe_config.enabled())) {
+        throw std::invalid_argument(
+            "encoder tail: parallel_layers.enabled is set together with " +
+            std::string(tabm_config.enabled ? "tabm.enabled" : "moe_routing") +
+            ", but both replace the encoder's MLP tail. Choose one, or move the "
+            "mixture off the tail with moe_placement=post.");
+    }
+
+    if (parallel_config.enabled) {
+        // Branches over the encoder's finished features, aggregated as
+        // ParallelLayersConfig::aggregation says. The block is the tail: the
+        // plain MLP is not built at all, so the branches carry the encoder's
+        // final capacity rather than sitting on top of a full-depth stack --
+        // the same rule the mixture follows.
+        if (parallel_config.branches.empty()) {
+            throw std::invalid_argument(
+                "encoder tail: parallel_layers.enabled is set but carries no "
+                "branches. Add at least one ParallelBranchConfig, or leave "
+                "parallel_layers disabled.");
+        }
+        tail.parallel = owner.register_module("parallel",
+                                              ParallelBlock(input_dim, parallel_config));
+        tail.latent_dim = tail.parallel->output_dim();
+        return tail.latent_dim;
     }
 
     if (tabm_config.enabled) {
@@ -537,6 +564,9 @@ int64_t build_encoder_tail(
 }
 
 TailOutput forward_encoder_tail(EncoderTail& tail, torch::Tensor x) {
+    if (tail.has_parallel()) {
+        return {tail.parallel->forward(std::move(x)), {}, {}};
+    }
     if (tail.has_tabm()) {
         return {tail.tabm->forward(std::move(x)), {}, {}};
     }
@@ -585,7 +615,7 @@ torch::Tensor average_fused_weights(
 ParallelBranchImpl::ParallelBranchImpl(
     int64_t input_dim,
     const ParallelBranchConfig& config
-) {
+) : branch_weight_(config.branch_weight) {
     // Build MLP for this branch
     MLPBlockConfig mlp_config;
     mlp_config.activation = config.activation;
@@ -598,7 +628,15 @@ ParallelBranchImpl::ParallelBranchImpl(
 }
 
 torch::Tensor ParallelBranchImpl::forward(torch::Tensor x) {
-    return mlp_->forward(x);
+    auto out = mlp_->forward(x);
+    // What this branch is worth in the aggregation
+    // (ParallelBranchConfig::branch_weight). A weight of 1 -- the default --
+    // leaves the output untouched, and 0 takes the branch out of the sum
+    // without removing its parameters. Applied here rather than in the
+    // aggregation so every mode weighs a branch the same way, the learned ones
+    // included: attention and gating then see a branch scaled by what the
+    // configuration says it is worth.
+    return branch_weight_ == 1.0f ? out : out * branch_weight_;
 }
 
 // =============================================================================

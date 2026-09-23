@@ -1625,6 +1625,10 @@ resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* wh
         if (w == "raw_species_ids") return ivec_or_null(d.raw_species_ids());
         if (w == "raw_weights") return vec_or_null(d.raw_weights());
         if (w == "plot_offsets") return ivec_or_null(d.plot_offsets());
+        // The taxonomy of the vocabulary: index = species code, value = its
+        // genus / family code (species_graph.hpp builds its edges from these).
+        if (w == "species_genus_ids") return ivec_or_null(d.species_genus_ids());
+        if (w == "species_family_ids") return ivec_or_null(d.species_family_ids());
 
         if (w == "taxonomy_vocab") {
             const auto& tv = d.taxonomy_vocab();
@@ -1775,6 +1779,19 @@ resolve_value_t* resolve_model_get(const resolve_model_t* m, const char* what) {
             }
             return g.release();
         }
+        // The species graph a HeterogeneousGNN passes messages on.
+        if (w == "requires_species_graph") {
+            return v_bool(m->model->requires_species_graph());
+        }
+        if (w == "has_species_graph") return v_bool(m->model->has_species_graph());
+        if (w == "species_graph_edge_index") {
+            auto t = m->model->species_graph_edge_index();
+            return t.defined() ? tensor_to_imat(t) : v_null();
+        }
+        if (w == "species_graph_edge_type") {
+            auto t = m->model->species_graph_edge_type();
+            return t.defined() ? tensor_to_ivec(t) : v_null();
+        }
         throw std::runtime_error("model_get: unknown accessor '" + w + "'");
     })
 }
@@ -1799,6 +1816,33 @@ int resolve_model_set_traits(resolve_model_t* m, const resolve_value_t* traits) 
         if (!m) throw std::runtime_error("model_set_traits: null handle");
         m->model->set_traits(value_to_f32(traits));
         return 0;
+    })
+}
+int resolve_model_set_species_graph(resolve_model_t* m,
+                                    const resolve_value_t* edge_index,
+                                    const resolve_value_t* edge_type) {
+    CAPI_BODY_INT({
+        if (!m) throw std::runtime_error("model_set_species_graph: null handle");
+        m->model->set_species_graph(value_to_i64(edge_index),
+                                    value_to_i64(edge_type).reshape({-1}));
+        return 0;
+    })
+}
+resolve_value_t* resolve_build_species_graph(const resolve_dataset_t* ds,
+                                             const resolve_value_t* config) {
+    CAPI_BODY_PTR({
+        if (!ds) throw std::runtime_error("build_species_graph: null handle");
+        HeterogeneousGNNConfig cfg;
+        if (config && config->kind == RESOLVE_VALUE_MAP) {
+            for_each_field(cfg, ValueFieldReader{config});
+        }
+        auto graph = build_species_graph(ds->ds, cfg);
+        auto* m = v_map();
+        v_put(m, "edge_index", tensor_to_imat(graph.edge_index));
+        v_put(m, "edge_type", tensor_to_ivec(graph.edge_type));
+        v_put(m, "n_species", v_int(graph.n_species));
+        v_put(m, "n_edges", v_int(graph.n_edges()));
+        return m;
     })
 }
 

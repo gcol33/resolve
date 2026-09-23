@@ -1,7 +1,12 @@
 #pragma once
 
+// TraitInteractionMode and the other configuration enums the encoders below
+// take as constructor arguments.
+#include "resolve/types.hpp"
+
 #include <torch/torch.h>
 #include <cmath>
+#include <vector>
 
 namespace resolve {
 
@@ -498,6 +503,39 @@ private:
 TORCH_MODULE(BilinearTraitInteraction);
 
 // Complete Trait-based network for multi-species modeling
+// A trait encoder with its own weights for every species: one
+// (trait_dim, hidden_dim) matrix and bias per species per layer, applied with
+// an einsum, where the shared encoder applies one matrix to every species. This
+// is what TraitNetConfig::shared_trait_encoder = false asks for, and it costs
+// n_species times the parameters, so it suits a small species pool rather than
+// a whole regional vocabulary.
+class PerSpeciesTraitEncoderImpl : public torch::nn::Module {
+public:
+    PerSpeciesTraitEncoderImpl(
+        int64_t n_species,
+        int64_t trait_dim,
+        int64_t hidden_dim,
+        int64_t n_layers = 2,
+        float dropout = 0.1f
+    );
+
+    // traits: (n_species, trait_dim) -> (n_species, hidden_dim)
+    torch::Tensor forward(torch::Tensor traits);
+
+private:
+    int64_t n_species_;
+    int64_t trait_dim_;
+
+    // Per layer: weight (n_species, in_dim, hidden_dim), bias (n_species,
+    // hidden_dim), plus a normalization shared across species.
+    std::vector<torch::Tensor> weights_;
+    std::vector<torch::Tensor> biases_;
+    torch::nn::ModuleList norms_{nullptr};
+    torch::nn::Dropout dropout_{nullptr};
+};
+
+TORCH_MODULE(PerSpeciesTraitEncoder);
+
 class TraitNetEncoderImpl : public torch::nn::Module {
 public:
     TraitNetEncoderImpl(
@@ -506,7 +544,15 @@ public:
         int64_t n_species,         // Number of species
         int64_t hidden_dim = 128,
         int64_t n_layers = 2,
-        float dropout = 0.1f
+        float dropout = 0.1f,
+        // TraitNetConfig::interaction_dim: the width the environment-trait
+        // combination produces, which the head then reads.
+        int64_t interaction_dim = 0,  // 0 = hidden_dim
+        // TraitNetConfig::interaction: how the two are combined.
+        TraitInteractionMode interaction = TraitInteractionMode::Bilinear,
+        // TraitNetConfig::shared_trait_encoder: one trait encoder for every
+        // species, or one per species.
+        bool shared_trait_encoder = true
     );
 
     // env: (batch, env_dim) - environmental features
@@ -531,11 +577,24 @@ private:
     // Environment encoder
     torch::nn::Sequential env_encoder_{nullptr};
 
-    // Trait encoder
+    // Trait encoder: one of the two, by shared_trait_encoder.
     torch::nn::Sequential trait_encoder_{nullptr};
+    PerSpeciesTraitEncoder per_species_trait_encoder_{nullptr};
+
+    // How the environment and a species' traits are combined, and which of the
+    // three below is built.
+    TraitInteractionMode interaction_mode_;
+    int64_t interaction_dim_;
 
     // Bilinear interaction
     BilinearTraitInteraction interaction_{nullptr};
+    // MLP interaction: the two representations concatenated and projected.
+    torch::nn::Linear interaction_mlp_{nullptr};
+    // Attention interaction: the environment queries each species' traits and
+    // scales that species' value vector by the attention it receives.
+    torch::nn::Linear interaction_query_{nullptr};
+    torch::nn::Linear interaction_key_{nullptr};
+    torch::nn::Linear interaction_value_{nullptr};
 
     // Output projection
     torch::nn::Linear output_proj_{nullptr};

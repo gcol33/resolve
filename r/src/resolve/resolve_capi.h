@@ -329,7 +329,9 @@ RESOLVE_CAPI resolve_value_t* resolve_model_call(
 /* Zero-arg accessor. `what` is one of: latent_dim species_encoding
  * uses_explicit_vector uses_moe n_experts genus_weights family_weights
  * species_weights composition_parameters (a list of matrices, the species,
- * genus and family tables the species encoder reads composition through).
+ * genus and family tables the species encoder reads composition through)
+ * requires_species_graph has_species_graph species_graph_edge_index
+ * species_graph_edge_type.
  * Returns value tree / NULL. */
 RESOLVE_CAPI resolve_value_t* resolve_model_get(const resolve_model_t* m, const char* what);
 
@@ -337,6 +339,20 @@ RESOLVE_CAPI resolve_value_t* resolve_model_get(const resolve_model_t* m, const 
 RESOLVE_CAPI int resolve_model_set_train(resolve_model_t* m, int mode);
 RESOLVE_CAPI int resolve_model_to_device(resolve_model_t* m, const char* device);
 RESOLVE_CAPI int resolve_model_set_traits(resolve_model_t* m, const resolve_value_t* traits);
+/* The species graph a HeterogeneousGNN passes messages on. `edge_index` is a
+ * (2, n_edges) INT_MATRIX (row 0 source, row 1 target), `edge_type` an
+ * INT_ARRAY of the same length. Trainer::prepare_data builds and sets this from
+ * the dataset, and a checkpoint carries it, so a caller only needs it to supply
+ * a graph of its own. */
+RESOLVE_CAPI int resolve_model_set_species_graph(resolve_model_t* m,
+                                                const resolve_value_t* edge_index,
+                                                const resolve_value_t* edge_type);
+
+/* Build the species graph from a dataset's taxonomy and co-occurrence, the way
+ * a HeterogeneousGNNConfig MAP (`config`, or NULL for the defaults) asks for.
+ * Returns a MAP of edge_index / edge_type / n_species / n_edges. */
+RESOLVE_CAPI resolve_value_t* resolve_build_species_graph(
+    const resolve_dataset_t* ds, const resolve_value_t* config);
 
 /* ========================================================================== */
 /* Trainer                                                                    */

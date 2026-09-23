@@ -120,6 +120,28 @@ public:
         capi_check_status(resolve_model_set_traits(model_.get(), t.get()));
     }
 
+    // The species graph a HeterogeneousGNN passes messages on. edge_index is
+    // (2, n_edges): row 1 source, row 2 target, in R's 1-based row numbering.
+    void set_species_graph(IntegerMatrix edge_index, IntegerVector edge_type) {
+        int nr = edge_index.nrow(), nc = edge_index.ncol();
+        std::vector<int64_t> edges(static_cast<size_t>(nr) * nc);
+        for (int i = 0; i < nr; ++i)
+            for (int j = 0; j < nc; ++j)
+                edges[static_cast<size_t>(i) * nc + j] = edge_index(i, j);
+        std::vector<int64_t> types(edge_type.size());
+        for (int i = 0; i < edge_type.size(); ++i) types[i] = edge_type[i];
+        ValuePtr ei(resolve_value_new_int_matrix(edges.data(), nr, nc));
+        ValuePtr et(resolve_value_new_int_array(types.data(),
+                                                static_cast<int64_t>(types.size())));
+        capi_check_status(
+            resolve_model_set_species_graph(model_.get(), ei.get(), et.get()));
+    }
+
+    RObject requires_species_graph() const { return get("requires_species_graph"); }
+    RObject has_species_graph()      const { return get("has_species_graph"); }
+    RObject species_graph_edge_index() const { return get("species_graph_edge_index"); }
+    RObject species_graph_edge_type()  const { return get("species_graph_edge_type"); }
+
     RObject latent_dim()           const { return get("latent_dim"); }
     RObject species_encoding()     const { return get("species_encoding"); }
     RObject uses_explicit_vector() const { return get("uses_explicit_vector"); }

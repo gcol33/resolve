@@ -382,11 +382,12 @@ enum class GraphConstructionMode {
     CoOccurrence    // k-NN by cosine similarity of the species vector
 };
 
-// Trait-environment interaction mode
+// How TraitNet combines the environment encoding with a species' trait
+// encoding into the per-species representation its head reads.
 enum class TraitInteractionMode {
-    Bilinear,   // Bilinear interaction
-    MLP,        // MLP-based interaction
-    Attention   // Attention-based interaction
+    Bilinear,   // A learned bilinear form of the two
+    MLP,        // The two side by side, projected once
+    Attention   // The environment queries the species, scaling its value vector
 };
 
 // FT-Transformer configuration
@@ -425,8 +426,12 @@ struct SAINTConfig {
     int n_layers = 6;
     float attention_dropout = 0.1f;
     bool use_row_attention = true;  // Enable inter-sample attention
-    bool use_contrastive_pretrain = false;
-    float mixup_alpha = 0.4f;       // For MixUp augmentation
+    // The two fields that used to sit here -- use_contrastive_pretrain and
+    // mixup_alpha -- described SAINT self-supervised pre-training, which a
+    // model configuration cannot run: a pretext task is a training stage, and
+    // the engine runs those through the pretraining API (SCARFPretrainer and
+    // its siblings). Nothing read either field. The mixup augmentation they
+    // named is now PretrainConfig::mixup_alpha, where it acts.
 };
 
 // GNN configuration
@@ -449,8 +454,14 @@ struct GNNConfig {
 struct TraitNetConfig {
     int env_dim = 128;              // Environment encoding dimension
     int trait_dim = 64;             // Trait encoding dimension
-    int interaction_dim = 256;      // Interaction layer dimension
+    // Width of the environment-trait combination the head reads. 0 takes the
+    // environment encoding's own width.
+    int interaction_dim = 256;
+    // How the environment and a species' traits are combined.
     TraitInteractionMode interaction = TraitInteractionMode::Bilinear;
+    // One trait encoder applied to every species, or one set of weights per
+    // species -- which costs n_species times the trait-encoder parameters, so
+    // it suits a small species pool rather than a regional vocabulary.
     bool shared_trait_encoder = true;
 };
 

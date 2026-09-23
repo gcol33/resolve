@@ -34,6 +34,12 @@ RCPP_MODULE(resolve_module) {
         .method("species_vector", &RResolveDataset::species_vector, "Get explicit species vector")
         .method("genus_ids", &RResolveDataset::genus_ids, "Get genus IDs matrix")
         .method("family_ids", &RResolveDataset::family_ids, "Get family IDs matrix")
+        .method("species_genus_ids", &RResolveDataset::species_genus_ids,
+                "Genus code of each species in the vocabulary")
+        .method("species_family_ids", &RResolveDataset::species_family_ids,
+                "Family code of each species in the vocabulary")
+        .method("species_graph", &RResolveDataset::species_graph,
+                "Build the species graph a HeterogeneousGNN passes messages on")
         .method("categorical_ids", &RResolveDataset::categorical_ids, "Get categorical covariate codes matrix")
         .method("pool_genus_ids", &RResolveDataset::pool_genus_ids, "Get rank-pool genus IDs matrix")
         .method("pool_family_ids", &RResolveDataset::pool_family_ids, "Get rank-pool family IDs matrix")
@@ -92,6 +98,16 @@ RCPP_MODULE(resolve_module) {
         .method("get_species_weights", &RResolveModel::get_species_weights, "Get species embedding weights")
         .method("composition_parameters", &RResolveModel::composition_parameters,
                 "Species, genus and family tables the species encoder reads composition through")
+        .method("set_species_graph", &RResolveModel::set_species_graph,
+                "Set the species graph a HeterogeneousGNN passes messages on")
+        .method("requires_species_graph", &RResolveModel::requires_species_graph,
+                "Whether this architecture reads a species graph")
+        .method("has_species_graph", &RResolveModel::has_species_graph,
+                "Whether a species graph has been set")
+        .method("species_graph_edge_index", &RResolveModel::species_graph_edge_index,
+                "Edge endpoints of the species graph, (2, n_edges)")
+        .method("species_graph_edge_type", &RResolveModel::species_graph_edge_type,
+                "Relation of each species-graph edge")
         ;
 
     class_<RTrainer>("Trainer")

@@ -1,5 +1,6 @@
 #include "bindings_common.hpp"
 #include "resolve/species_encoding.hpp"
+#include "resolve/species_graph.hpp"
 
 void register_enums(nb::module_& m) {
     nb::enum_<resolve::TaskType>(m, "TaskType")
@@ -104,6 +105,12 @@ void register_enums(nb::module_& m) {
         .value("GCN", resolve::GNNType::GCN)
         .value("GAT", resolve::GNNType::GAT)
         .value("GraphSAGE", resolve::GNNType::GraphSAGE)
+        .export_values();
+
+    nb::enum_<resolve::SpeciesEdgeType>(m, "SpeciesEdgeType")
+        .value("SameGenus", resolve::SpeciesEdgeType::SameGenus)
+        .value("SameFamily", resolve::SpeciesEdgeType::SameFamily)
+        .value("CoOccurrence", resolve::SpeciesEdgeType::CoOccurrence)
         .export_values();
 
     nb::enum_<resolve::GraphConstructionMode>(m, "GraphConstructionMode")

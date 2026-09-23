@@ -1,5 +1,6 @@
 #include "bindings_common.hpp"
 #include "resolve/species_encoding.hpp"
+#include "resolve/species_graph.hpp"
 #include "resolve/categorical.hpp"
 
 void register_dataset(nb::module_& m) {
@@ -258,6 +259,17 @@ void register_dataset(nb::module_& m) {
             const auto& t = self.hash_embedding();
             return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
         })
+        // The taxonomy of the VOCABULARY: index = species code, value = the
+        // genus / family code that species belongs to. genus_ids /
+        // family_ids below are per-plot slots instead.
+        .def_prop_ro("species_genus_ids", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.species_genus_ids();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("species_family_ids", [](const resolve::ResolveDataset& self) {
+            const auto& t = self.species_family_ids();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
         .def_prop_ro("species_ids", [](const resolve::ResolveDataset& self) {
             const auto& t = self.species_ids();
             return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
@@ -472,6 +484,29 @@ void register_dataset(nb::module_& m) {
           "with. species_encoding / hash_dim / top_k come from the ModelConfig "
           "(they size the model); everything else the loader consumed comes "
           "from the schema. use_cuda_hash is deliberately not restored.");
+
+    nb::class_<resolve::SpeciesGraph>(m, "SpeciesGraph")
+        .def(nb::init<>())
+        .def_prop_ro("edge_index", [](const resolve::SpeciesGraph& self) {
+            return self.edge_index.defined()
+                ? nb::steal(THPVariable_Wrap(self.edge_index)) : nb::none();
+        })
+        .def_prop_ro("edge_type", [](const resolve::SpeciesGraph& self) {
+            return self.edge_type.defined()
+                ? nb::steal(THPVariable_Wrap(self.edge_type)) : nb::none();
+        })
+        .def_ro("n_species", &resolve::SpeciesGraph::n_species)
+        .def_prop_ro("n_edges", &resolve::SpeciesGraph::n_edges);
+
+    m.def("build_species_graph", &resolve::build_species_graph,
+          nb::arg("dataset"), nb::arg("config"),
+          nb::call_guard<nb::gil_scoped_release>(),
+          "Build the typed species graph a HeterogeneousGNN passes messages "
+          "on: same-genus and same-family edges from the dataset's taxonomy, "
+          "co-occurrence edges from how often two species share a plot, as "
+          "HeterogeneousGNNConfig asks. Trainer.prepare_data does this itself "
+          "and the checkpoint carries the result, so call it directly only to "
+          "inspect the graph or to build a variant by hand.");
 
     m.def("effective_selection", &resolve::effective_selection, nb::arg("config"),
           "The species selection a dataset built under this config actually "

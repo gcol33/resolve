@@ -1096,4 +1096,37 @@ void write_metadata_json(
     file << "}\n";
 }
 
+// ============================================================================
+// Species graph
+// ============================================================================
+
+namespace {
+constexpr const char* kSpeciesGraphEdgeIndexKey = "species_graph_edge_index";
+constexpr const char* kSpeciesGraphEdgeTypeKey = "species_graph_edge_type";
+}  // namespace
+
+void save_species_graph(torch::serialize::OutputArchive& archive,
+                        const torch::Tensor& edge_index,
+                        const torch::Tensor& edge_type) {
+    if (!edge_index.defined() || !edge_type.defined()) return;
+    archive.write(kSpeciesGraphEdgeIndexKey, edge_index.to(torch::kCPU));
+    archive.write(kSpeciesGraphEdgeTypeKey, edge_type.to(torch::kCPU));
+}
+
+std::pair<torch::Tensor, torch::Tensor> load_species_graph(
+    torch::serialize::InputArchive& archive) {
+    // Fresh tensors per read: InputArchive::read copies into the tensor it is
+    // given, so reusing one across reads of different shape trips a setStorage
+    // size mismatch.
+    torch::Tensor edge_index;
+    torch::Tensor edge_type;
+    if (!archive.try_read(kSpeciesGraphEdgeIndexKey, edge_index)) {
+        return {torch::Tensor(), torch::Tensor()};
+    }
+    if (!archive.try_read(kSpeciesGraphEdgeTypeKey, edge_type)) {
+        return {torch::Tensor(), torch::Tensor()};
+    }
+    return {edge_index, edge_type};
+}
+
 } // namespace resolve

@@ -391,6 +391,14 @@ public:
     const torch::Tensor& hash_embedding() const { return hash_embedding_; }
     const torch::Tensor& species_ids() const { return species_ids_; }
     const torch::Tensor& species_vector() const { return species_vector_; }
+
+    // The taxonomy of the species VOCABULARY (not of a plot): index = species
+    // code, value = the genus / family code that species belongs to, 0 where
+    // the records name none. Empty when the dataset carries no taxonomy. This
+    // is the species-to-species relation a HeterogeneousGNN builds its graph
+    // from; genus_ids() / family_ids() above are per-plot slots instead.
+    const torch::Tensor& species_genus_ids() const { return species_genus_ids_; }
+    const torch::Tensor& species_family_ids() const { return species_family_ids_; }
     const torch::Tensor& genus_ids() const { return genus_ids_; }
     const torch::Tensor& family_ids() const { return family_ids_; }
     const torch::Tensor& unknown_fraction() const { return unknown_fraction_; }
@@ -583,6 +591,10 @@ private:
     DatasetConfig config_;
     std::vector<std::string> plot_ids_;
     std::vector<std::string> species_vocab_;
+    // Taxonomy of the vocabulary: (n_species_vocab,) int64 each, index =
+    // species code.
+    torch::Tensor species_genus_ids_;
+    torch::Tensor species_family_ids_;
     std::unordered_map<std::string, int64_t> species_to_idx_;
     TaxonomyVocab taxonomy_vocab_;
 

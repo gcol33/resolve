@@ -116,7 +116,10 @@ ResolveModelImpl::ResolveModelImpl(
             /*n_species=*/schema.n_species_vocab > 0 ? schema.n_species_vocab : schema.n_species,
             /*hidden_dim=*/tc.env_dim,
             /*n_layers=*/2,
-            /*dropout=*/config.dropout
+            /*dropout=*/config.dropout,
+            /*interaction_dim=*/tc.interaction_dim,
+            /*interaction=*/tc.interaction,
+            /*shared_trait_encoder=*/tc.shared_trait_encoder
         ));
     }
     else if (config.species_encoding == SpeciesEncodingMode::Hash && !config.uses_explicit_vector) {
@@ -133,7 +136,8 @@ ResolveModelImpl::ResolveModelImpl(
             config.hidden_dims,
             mlp_config,
             config.tabm,
-            moe_tail
+            moe_tail,
+            config.parallel_layers
         ));
     }
     else if (config.species_encoding == SpeciesEncodingMode::Embed) {
@@ -157,7 +161,8 @@ ResolveModelImpl::ResolveModelImpl(
             config.hidden_dims,
             mlp_config,
             config.tabm,
-            moe_tail
+            moe_tail,
+            config.parallel_layers
         ));
     }
     else if (config.species_encoding == SpeciesEncodingMode::RankPool) {
@@ -178,7 +183,8 @@ ResolveModelImpl::ResolveModelImpl(
             mlp_config,
             config.cover_dropout,
             config.tabm,
-            moe_tail
+            moe_tail,
+            config.parallel_layers
         ));
     }
     else if (config.species_encoding == SpeciesEncodingMode::Transformer) {
@@ -202,7 +208,8 @@ ResolveModelImpl::ResolveModelImpl(
             mlp_config,
             config.cover_dropout,
             config.tabm,
-            moe_tail
+            moe_tail,
+            config.parallel_layers
         ));
     }
     else {
@@ -225,7 +232,8 @@ ResolveModelImpl::ResolveModelImpl(
             config.hidden_dims,
             mlp_config,
             config.tabm,
-            moe_tail
+            moe_tail,
+            config.parallel_layers
         ));
     }
 
@@ -696,6 +704,31 @@ void ResolveModelImpl::set_traits(torch::Tensor traits) {
             "set_traits() is only valid when encoder_architecture is TraitNet");
     }
     trait_net_encoder_->set_traits(std::move(traits));
+}
+
+void ResolveModelImpl::set_species_graph(torch::Tensor edge_index,
+                                        torch::Tensor edge_type) {
+    if (!adapter_ || !requires_species_graph()) {
+        throw std::invalid_argument(
+            "set_species_graph() is only valid when encoder_architecture is "
+            "heterogeneous_gnn; this model is built with " +
+            std::string(enum_to_name(config_.encoder_architecture)) + ".");
+    }
+    adapter_->set_species_graph(std::move(edge_index), std::move(edge_type));
+}
+
+bool ResolveModelImpl::has_species_graph() const noexcept {
+    return adapter_ && requires_species_graph() && adapter_->has_species_graph();
+}
+
+torch::Tensor ResolveModelImpl::species_graph_edge_index() const {
+    return has_species_graph() ? adapter_->species_graph_edge_index()
+                               : torch::Tensor();
+}
+
+torch::Tensor ResolveModelImpl::species_graph_edge_type() const {
+    return has_species_graph() ? adapter_->species_graph_edge_type()
+                               : torch::Tensor();
 }
 
 } // namespace resolve

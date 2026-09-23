@@ -148,6 +148,24 @@ public:
     // Set species trait matrix (for TraitNet architecture)
     void set_traits(torch::Tensor traits);
 
+    // The species graph a HeterogeneousGNN passes messages on (species_graph.hpp).
+    // It is built from the training data once and is part of the trained model,
+    // so Trainer::prepare_data builds and sets it, Trainer::save writes it into
+    // the checkpoint and a load restores it -- until this reached the model,
+    // the graph could only be handed to the adapter, which no public surface
+    // exposed, and every HeterogeneousGNN forward threw "Species graph not
+    // set".
+    void set_species_graph(torch::Tensor edge_index, torch::Tensor edge_type);
+    [[nodiscard]] bool has_species_graph() const noexcept;
+    [[nodiscard]] torch::Tensor species_graph_edge_index() const;
+    [[nodiscard]] torch::Tensor species_graph_edge_type() const;
+
+    // Whether this model needs one: the architecture that reads a species
+    // graph, and the only one that accepts one.
+    [[nodiscard]] bool requires_species_graph() const noexcept {
+        return config_.encoder_architecture == EncoderArchitecture::HeterogeneousGNN;
+    }
+
     // Get task head by name
     [[nodiscard]] TaskHead& head(const std::string& name);
     [[nodiscard]] const TaskHead& head(const std::string& name) const;

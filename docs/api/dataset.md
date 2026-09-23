@@ -198,7 +198,25 @@ produce it.
 | `pool_mask` | `(n_plots, max_species)` | `RankPool`, `Transformer` |
 | `pool_has_cover` | `(n_plots,)` | `RankPool`, `Transformer` |
 | `unknown_fraction`, `unknown_count` | `(n_plots,)` | Tracking enabled |
+| `species_genus_ids`, `species_family_ids` | `(n_species_vocab,)` | With taxonomy |
 | `raw_species_ids`, `raw_weights`, `plot_offsets` | flat COO | `use_cuda_hash=True` |
+
+`species_genus_ids` and `species_family_ids` are the taxonomy of the
+VOCABULARY, not of a plot: index by a species code and read the genus or family
+code that species belongs to, `0` where the records name none. `genus_ids` /
+`family_ids` above are per-plot slots instead. `build_species_graph` joins
+species through these, and `heterogeneous_gnn` passes messages on the result.
+
+```python
+graph = rc.build_species_graph(dataset, model_config.heterogeneous_gnn)
+graph.n_edges, graph.edge_index.shape, set(graph.edge_type.tolist())
+# same genus is 0, same family 1, co-occurrence 2
+```
+
+`Trainer.prepare_data` builds this itself for a heterogeneous-GNN model and the
+checkpoint carries the result, so calling it directly is for inspecting the
+graph or building a variant by hand (`model.set_species_graph(edge_index,
+edge_type)`).
 
 ### Methods
 

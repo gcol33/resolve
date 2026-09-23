@@ -275,6 +275,52 @@ resolve.load_run_metadata <- function(path) {
 }
 
 
+#' Build the Species Graph a Heterogeneous GNN Passes Messages On
+#'
+#' Joins the species of a dataset's vocabulary by the relations
+#' `heterogeneous_gnn` reads: a same-genus and a same-family edge for species
+#' sharing a taxon, and a co-occurrence edge between species recorded in the
+#' same plot often enough. `resolve.train.dataset()` builds this itself for a
+#' heterogeneous-GNN model and the checkpoint carries the result, so call it
+#' directly only to inspect the graph or to build a variant by hand.
+#'
+#' @param dataset A `ResolveDataset`, as returned by [resolve.dataset.csv()].
+#'   Co-occurrence edges need the per-plot species vector, so
+#'   `speciesEncoding = "sparse"`; taxonomic edges need genus/family roles.
+#' @param kCooccurrence How many co-occurrence partners to keep per species.
+#' @param cooccurrenceThreshold Smallest share of plots two species must share
+#'   for a co-occurrence edge.
+#' @param taxonomicEdges Join species sharing a genus or a family.
+#' @param cooccurrenceEdges Join species recorded together.
+#'
+#' @return A list with `edge_index` (a 2-row matrix of edge endpoints, source
+#'   in row 1 and target in row 2, as 0-based species codes), `edge_type` (0
+#'   same genus, 1 same family, 2 co-occurrence), `n_species` and `n_edges`.
+#'
+#' @examples
+#' \dontrun{
+#' ds <- resolve.dataset.csv(header, species, roles, targets,
+#'                           config = list(species_encoding = "sparse"))
+#' graph <- resolve.species_graph(ds)
+#' graph$n_edges
+#' }
+#'
+#' @export
+resolve.species_graph <- function(dataset,
+                                  kCooccurrence = 20L,
+                                  cooccurrenceThreshold = 0.01,
+                                  taxonomicEdges = TRUE,
+                                  cooccurrenceEdges = TRUE) {
+  .resolve_require_backend()
+  dataset$species_graph(list(
+    k_cooccurrence = as.integer(kCooccurrence),
+    cooccurrence_threshold = as.numeric(cooccurrenceThreshold),
+    use_taxonomic_edges = isTRUE(taxonomicEdges),
+    use_cooccurrence_edges = isTRUE(cooccurrenceEdges)
+  ))
+}
+
+
 #' Save a Trained RESOLVE Model
 #'
 #' Write a trained model, its scalers and its vocabularies to a checkpoint

@@ -360,7 +360,11 @@ TEST_CASE("Every config struct's registry covers every member", "[config][regist
     // reviewer sees an intended addition in the diff.
     CHECK(field_registry_size(static_cast<const FTTransformerConfig*>(nullptr)) == 7);
     CHECK(field_registry_size(static_cast<const TabNetConfig*>(nullptr)) == 7);
-    CHECK(field_registry_size(static_cast<const SAINTConfig*>(nullptr)) == 7);
+    // SAINT lost use_contrastive_pretrain and mixup_alpha: both described a
+    // self-supervised pre-training stage, which a model configuration cannot
+    // run, and neither was read. The augmentation moved to
+    // PretrainConfig::mixup_alpha.
+    CHECK(field_registry_size(static_cast<const SAINTConfig*>(nullptr)) == 5);
     CHECK(field_registry_size(static_cast<const GNNConfig*>(nullptr)) == 8);
     CHECK(field_registry_size(static_cast<const TraitNetConfig*>(nullptr)) == 5);
     CHECK(field_registry_size(static_cast<const ExcelFormerConfig*>(nullptr)) == 7);
@@ -533,7 +537,7 @@ TEST_CASE("Checkpoint keys keep the spellings earlier releases wrote",
              "transformer_pooling",
              "ft_d_model", "ft_pre_norm",
              "tabnet_n_steps", "tabnet_use_sparsemax",
-             "saint_use_contrastive_pretrain",
+             "saint_use_row_attention",
              "gnn_type", "gnn_graph_mode",
              "trait_trait_dim", "trait_shared_trait_encoder",
              "excel_importance_threshold", "excel_pre_norm",

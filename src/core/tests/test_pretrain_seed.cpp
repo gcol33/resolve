@@ -3,9 +3,11 @@
 
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
+#include "resolve/continuous_block.hpp"
 #include "resolve/pretraining.hpp"
 #include "resolve/vae.hpp"
 #include "resolve/encoder.hpp"
@@ -640,4 +642,173 @@ TEST_CASE("run_pretrain_loop fires its hooks in order", "[pretraining][loop]") {
     REQUIRE(steps == 6);
     REQUIRE(begin_epochs == expected_epochs);
     REQUIRE(result.loss_history.size() == 3);
+}
+
+// =============================================================================
+// The mixup augmentation on the contrastive view
+//
+// SAINTConfig carried `mixup_alpha` and `use_contrastive_pretrain`, two fields
+// describing a self-supervised pre-training stage, and no engine code read
+// either: a model configuration cannot run a training stage. The augmentation
+// they named now lives on PretrainConfig, where the contrastive task can use
+// it, and is covered here for what it does and for the seeding contract every
+// other pretraining draw holds to.
+// =============================================================================
+
+namespace {
+
+std::vector<float> run_scarf_mixup(const EmbedInputs& in, int seed, int epochs,
+                                   float mixup_alpha) {
+    torch::manual_seed(kFixtureSeed);
+    ResolveModel model(embed_schema(), embed_model_config());
+    PretrainConfig cfg = base_pretrain_config();
+    cfg.seed = seed;
+    cfg.pretrain_epochs = epochs;
+    cfg.mixup_alpha = mixup_alpha;
+    SCARFPretrainer pretrainer(model, cfg);
+    return pretrainer.pretrain(in.continuous, in.genus, in.family, in.species, {})
+        .loss_history;
+}
+
+}  // namespace
+
+TEST_CASE("Beta draws are weights in [0, 1] and follow the seed",
+          "[pretrain][mixup]") {
+    auto options = torch::TensorOptions().dtype(torch::kFloat32);
+
+    PretrainRng first(7);
+    PretrainRng second(7);
+    auto a = first.beta_symmetric({256, 1}, 1.0, options);
+    auto b = second.beta_symmetric({256, 1}, 1.0, options);
+    REQUIRE(a.sizes() == std::vector<int64_t>{256, 1});
+    CHECK(torch::equal(a, b));
+    CHECK(a.min().item<float>() >= 0.0f);
+    CHECK(a.max().item<float>() <= 1.0f);
+
+    // A different seed draws differently.
+    PretrainRng other(8);
+    CHECK_FALSE(torch::equal(a, other.beta_symmetric({256, 1}, 1.0, options)));
+
+    // Beta(a, a) concentrates on one half as a grows, and spreads to the ends
+    // as it shrinks: the alpha the caller sets is the alpha of the draw.
+    PretrainRng tight(11);
+    PretrainRng loose(11);
+    auto concentrated = tight.beta_symmetric({4096, 1}, 50.0, options);
+    auto spread = loose.beta_symmetric({4096, 1}, 0.2, options);
+    CHECK(concentrated.std().item<float>() < spread.std().item<float>());
+    CHECK(std::abs(concentrated.mean().item<float>() - 0.5f) < 0.05f);
+}
+
+TEST_CASE("mixup_alpha changes the contrastive objective", "[pretrain][mixup]") {
+    auto in = make_embed_inputs(128);
+
+    auto plain = run_scarf_mixup(in, /*seed=*/5, /*epochs=*/2, /*mixup_alpha=*/0.0f);
+    auto mixed = run_scarf_mixup(in, /*seed=*/5, /*epochs=*/2, /*mixup_alpha=*/1.0f);
+    REQUIRE(plain.size() == mixed.size());
+    REQUIRE(plain.size() == 2);
+
+    // Same seed, same fixture, same corruption: the augmentation is the only
+    // difference, and it has to show in the loss.
+    bool differs = false;
+    for (size_t i = 0; i < plain.size(); ++i) {
+        if (plain[i] != mixed[i]) differs = true;
+        CHECK(std::isfinite(plain[i]));
+        CHECK(std::isfinite(mixed[i]));
+    }
+    CHECK(differs);
+}
+
+TEST_CASE("A mixed contrastive run still reproduces from its seed",
+          "[pretrain][mixup]") {
+    auto in = make_embed_inputs(128);
+
+    auto first = run_scarf_mixup(in, /*seed=*/13, /*epochs=*/2, 0.8f);
+    auto again = run_scarf_mixup(in, /*seed=*/13, /*epochs=*/2, 0.8f);
+    auto other = run_scarf_mixup(in, /*seed=*/14, /*epochs=*/2, 0.8f);
+
+    REQUIRE(first.size() == again.size());
+    for (size_t i = 0; i < first.size(); ++i) {
+        CHECK(first[i] == again[i]);
+    }
+    bool differs = false;
+    for (size_t i = 0; i < first.size(); ++i) {
+        if (first[i] != other[i]) differs = true;
+    }
+    CHECK(differs);
+}
+
+TEST_CASE("A negative mixup_alpha is refused", "[pretrain][mixup]") {
+    PretrainConfig cfg = base_pretrain_config();
+    cfg.mixup_alpha = -0.5f;
+    CHECK_THROWS_AS(cfg.validate(), std::invalid_argument);
+    cfg.mixup_alpha = 0.0f;
+    CHECK_NOTHROW(cfg.validate());
+}
+
+// =============================================================================
+// A missing cell does not reach a pretext task as NaN
+//
+// A loader keeps a missing covariate or coordinate as NaN
+// (MissingValuePolicy::Indicate, the default) and Trainer::prepare_data fills
+// it from the fitting rows before any forward. A pretrainer takes the
+// continuous block straight from the dataset and has no fitted scalers, so an
+// unfilled block put NaN through the objective and from there into every
+// weight -- no error, no warning, and a checkpoint of NaN.
+// =============================================================================
+
+TEST_CASE("The column fill is the mean of a column's recorded values",
+          "[pretrain][missing]") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    auto block = torch::tensor({{1.0f, nan, 5.0f},
+                                {3.0f, nan, nan},
+                                {nan, nan, 7.0f}});
+
+    auto fill = continuous_column_fill(block);
+    REQUIRE(fill.numel() == 3);
+    CHECK(fill[0].item<float>() == 2.0f);   // (1 + 3) / 2
+    CHECK(fill[1].item<float>() == 0.0f);   // nothing recorded
+    CHECK(fill[2].item<float>() == 6.0f);   // (5 + 7) / 2
+
+    auto filled = fill_missing_continuous(block);
+    CHECK(torch::isnan(filled).sum().item<int64_t>() == 0);
+    // Recorded values are left alone.
+    CHECK(filled[0][0].item<float>() == 1.0f);
+    CHECK(filled[2][2].item<float>() == 7.0f);
+    // Missing ones read their column fill.
+    CHECK(filled[2][0].item<float>() == 2.0f);
+    CHECK(filled[1][1].item<float>() == 0.0f);
+    // A block with nothing missing comes back unchanged.
+    auto complete = torch::randn({4, 3});
+    CHECK(torch::allclose(fill_missing_continuous(complete), complete));
+}
+
+TEST_CASE("A pretext task trains through a block with missing cells",
+          "[pretrain][missing]") {
+    auto in = make_embed_inputs(128);
+    // One in five plots has no elevation, as a loader would leave it.
+    auto with_gaps = in.continuous.clone();
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    for (int64_t row = 0; row < with_gaps.size(0); row += 5) {
+        with_gaps[row][2] = nan;
+    }
+    EmbedInputs gapped = in;
+    gapped.continuous = with_gaps;
+
+    torch::manual_seed(kFixtureSeed);
+    ResolveModel model(embed_schema(), embed_model_config());
+    PretrainConfig cfg = base_pretrain_config();
+    cfg.pretrain_epochs = 2;
+    SCARFPretrainer pretrainer(model, cfg);
+    auto history = pretrainer.pretrain(gapped.continuous, gapped.genus,
+                                       gapped.family, gapped.species, {})
+                       .loss_history;
+
+    REQUIRE(history.size() == 2);
+    for (float loss : history) {
+        CHECK(std::isfinite(loss));
+    }
+    // And the weights survive: a NaN loss takes every parameter with it.
+    for (const auto& parameter : model->parameters()) {
+        REQUIRE(torch::isnan(parameter).sum().item<int64_t>() == 0);
+    }
 }

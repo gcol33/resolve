@@ -425,7 +425,31 @@ void register_model(nb::module_& m) {
         .def("set_traits", [](resolve::ResolveModel& self, nb::object traits_obj) {
             at::Tensor traits = unpack_required_tensor(traits_obj, "traits");
             self->set_traits(traits);
-        }, nb::arg("traits"));
+        }, nb::arg("traits"))
+        // The species graph a HeterogeneousGNN passes messages on. Trainer
+        // .prepare_data builds it from the dataset and a checkpoint carries
+        // it, so setting one by hand is for a graph of the caller's own.
+        .def("set_species_graph", [](resolve::ResolveModel& self,
+                                     nb::object edge_index_obj,
+                                     nb::object edge_type_obj) {
+            at::Tensor edge_index = unpack_required_tensor(edge_index_obj, "edge_index");
+            at::Tensor edge_type = unpack_required_tensor(edge_type_obj, "edge_type");
+            self->set_species_graph(edge_index, edge_type);
+        }, nb::arg("edge_index"), nb::arg("edge_type"))
+        .def_prop_ro("requires_species_graph", [](resolve::ResolveModel& self) {
+            return self->requires_species_graph();
+        })
+        .def_prop_ro("has_species_graph", [](resolve::ResolveModel& self) {
+            return self->has_species_graph();
+        })
+        .def_prop_ro("species_graph_edge_index", [](resolve::ResolveModel& self) {
+            auto t = self->species_graph_edge_index();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        })
+        .def_prop_ro("species_graph_edge_type", [](resolve::ResolveModel& self) {
+            auto t = self->species_graph_edge_type();
+            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+        });
 
     m.attr("SpaccModel") = m.attr("ResolveModel");
 }

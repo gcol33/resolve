@@ -65,6 +65,13 @@ public:
     [[nodiscard]] torch::Tensor rand_like(const torch::Tensor& other);
     [[nodiscard]] torch::Tensor randn_like(const torch::Tensor& other);
 
+    // Beta(alpha, alpha) draws, the mixing weights of a mixup augmentation.
+    // ATen has no Beta sampler that takes a generator, so this is built from
+    // two Gamma draws: Beta(a, b) = G1 / (G1 + G2) with G1 ~ Gamma(a) and
+    // G2 ~ Gamma(b). Spelled out once here, like rand_like above.
+    [[nodiscard]] torch::Tensor beta_symmetric(
+        at::IntArrayRef size, double alpha, const torch::TensorOptions& options);
+
     // Uniform integers in [low, high).
     [[nodiscard]] torch::Tensor randint(
         int64_t low, int64_t high, at::IntArrayRef size,
@@ -127,9 +134,17 @@ struct PretrainConfig {
     float corruption_rate = 0.6f;             // Fraction of features to corrupt
     float temperature = 0.1f;                 // InfoNCE temperature
     int projection_dim = 128;                 // Projection head output dimension
+    // Strength of the mixup augmentation on the contrastive view: the second
+    // view of a row is mixed with another row of the batch at a weight drawn
+    // from Beta(alpha, alpha), the augmentation SAINT pairs with feature
+    // corruption (Somepalli et al., "SAINT: Improved Neural Networks for
+    // Tabular Data", arXiv:2106.01342). 0 switches it off, which is what SCARF
+    // alone does. No label is involved -- a pretext task has none -- so the row
+    // keeps the larger share of itself and stays the positive pair of view 1.
+    float mixup_alpha = 0.0f;
 
     // Throws std::invalid_argument if batch_size < 1, mask_ratio not in (0, 1),
-    // or corruption_rate not in [0, 1]. Only reachable via the C-API/Python
+    // corruption_rate not in [0, 1], or mixup_alpha negative. Only reachable via the C-API/Python
     // bindings (the CLI does not expose pretraining), so guard here rather than
     // at a CLI parse site: batch_size == 0 divides by zero when computing steps,
     // and mask_ratio >= 1 makes the Block strategy's randint bound <= 0 (throws).

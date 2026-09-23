@@ -37,6 +37,16 @@ struct ContinuousInputs {
                                                 MissingValuePolicy policy,
                                                 int64_t n_rows);
 
+// The value each column of a block fills its missing cells with: the mean of
+// that column's recorded (non-NaN) values, and 0.0 for a column with none.
+[[nodiscard]] torch::Tensor continuous_column_fill(const torch::Tensor& rows);
+
+// Replace every missing cell with its column's fill, leaving recorded values
+// untouched. This is the fill fit_continuous_scalers computes, without the
+// standardization -- what a consumer with no fitted scalers needs in order to
+// read a block whose missing cells are NaN, a pretext task above all.
+[[nodiscard]] torch::Tensor fill_missing_continuous(const torch::Tensor& block);
+
 // Fit the fill, mean and scale of every column on `fitting_rows`, a slice of an
 // assembled block. The fill is the mean of a column's recorded (non-NaN) values,
 // 0.0 when it has none; the mean and scale are taken after filling.

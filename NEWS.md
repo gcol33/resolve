@@ -4,6 +4,49 @@
 
 ### Added
 
+- **`heterogeneous_gnn` passes messages on a species graph the engine builds.**
+  The architecture reads a typed graph over the species vocabulary, and
+  `HeterogeneousGNNConfig` carried four fields describing how to build one --
+  `use_taxonomic_edges`, `use_cooccurrence_edges`, `k_cooccurrence`,
+  `cooccurrence_threshold`. No engine code read any of them, and no public
+  surface could hand a graph in either: `set_species_graph` existed on the
+  adapter alone, which nothing exposes, so selecting the architecture built a
+  model whose every forward threw "Species graph not set." `build_species_graph`
+  (`species_graph.hpp`) now joins species by shared genus, by shared family and
+  by co-occurrence, as the configuration asks: a pair standing in two relations
+  gets one edge of each type, and the numbering (same genus 0, same family 1,
+  co-occurrence 2) is the index the encoder's edge-type embedding looks up.
+  Co-occurrence counts how often two species share a plot, as a share of all
+  plots, keeping each species' strongest `k_cooccurrence` partners above
+  `cooccurrence_threshold`; it reads the per-plot species vector, so it needs
+  the sparse encoding, and the count runs in blocks of 512 species so its memory
+  does not grow with the vocabulary. `Trainer::prepare_data` is where the graph
+  comes from -- the one place with both the model and the data -- and
+  `Trainer::save` writes it into the checkpoint, because the graph is part of
+  the trained model and the training data is not around at scoring time. A
+  requested relation the dataset cannot supply, both relations switched off, an
+  edge type numbered past `n_edge_types` and an edge list too large to hold are
+  each refused by name. Along the way `ResolveDataset` gained the taxonomy of
+  its own vocabulary, `species_genus_ids()` / `species_family_ids()` (index by
+  species code, read the genus or family code), which is what the taxonomic
+  relation is built from. Surfaces: `resolve_core.SpeciesGraph`,
+  `SpeciesEdgeType`, `build_species_graph`, `ResolveModel.set_species_graph` /
+  `.has_species_graph` / `.requires_species_graph` / `.species_graph_edge_index`
+  / `.species_graph_edge_type`, the dataset accessors; C-ABI
+  `resolve_build_species_graph`, `resolve_model_set_species_graph` and the
+  matching `resolve_model_get` / `resolve_dataset_get` keys; R
+  `resolve.species_graph()`, `dataset$species_genus_ids()` and the
+  `Model$set_species_graph()` family.
+
+- **`PretrainConfig::mixup_alpha` mixes the contrastive view.** The second view
+  of a row is mixed with another row of the batch at a weight drawn from
+  Beta(alpha, alpha), the augmentation SAINT pairs with feature corruption
+  (Somepalli et al., arXiv:2106.01342). A pretext task has no label to mix, so
+  the row keeps the larger share of itself and stays the positive pair of view
+  1. The draw goes through `PretrainRng::beta_symmetric`, so a mixed run
+  reproduces from its seed like every other pretraining draw. 0, the default,
+  switches it off, which is what SCARF alone does.
+
 - **`ModelConfig::freeze_composition` keeps the composition tables at their
   initialisation.** A fixed-representation control (the pooled encoder with
   random, untrained species embeddings) previously had to switch gradients off
@@ -55,6 +98,83 @@
   values as zero.
 
 ### Fixed
+
+- **Fifteen architecture fields that reached no engine code now shape the
+  model.** The field registry makes every configuration field round-trip
+  through the checkpoint, the C ABI, nanobind, R and `resolve info`
+  automatically; what it cannot check is whether the engine READS the field,
+  and a sweep found fifteen that did not. A run could set one, save it, print
+  it back, and train a model shaped by none of it -- the defect class of
+  `TabNetConfig::use_sparsemax` and of `SelectionMode` outside the hash
+  encoding.
+
+  - `FTTransformerConfig::ffn_dropout` appeared in no source but its own
+    declaration: the adapter passed `attention_dropout` as the block's single
+    dropout rate, so the feed-forward layer and the residual branches ran at
+    the attention rate. `TransformerBlock` now takes a `TransformerBlockConfig`
+    carrying the three rates the transformer literature separates, and
+    FT-Transformer feeds each to the place it names. SAINT and ExcelFormer
+    configure one rate, which `uniform` puts at all three, so they are
+    unchanged.
+  - `TabNetConfig::virtual_batch_size` was documented as the ghost batch norm
+    size with no ghost batch norm behind it. `apply_ghost_batch_norm`
+    normalizes each slice of the batch against its own statistics through the
+    block's own `BatchNorm1d`, so the affine parameters, the running statistics
+    and the parameter names are unchanged, and every block of the feature and
+    attentive transformers runs through it with the input normalization left
+    full-batch as Arik & Pfister have it.
+  - `ExcelFormerConfig::pre_norm` was hardcoded to pre-norm in the encoder,
+    along with the trailing LayerNorm that belongs to that arrangement.
+  - `GNNConfig::graph_mode` selected nothing: every mode built the spatial
+    graph. `build_knn_adjacency` now takes the features and the metric, so
+    `Taxonomic` measures cosine distance between per-plot genus/family
+    composition and `CoOccurrence` between species vectors, and a mode whose
+    input the dataset does not carry is refused by name rather than measuring
+    distance on whatever sits in the first two columns.
+    `GNNConfig::use_edge_features` carries each edge's similarity as its
+    adjacency weight -- a Gaussian kernel of the distance for coordinates, the
+    cosine similarity for composition -- instead of a plain 1.
+  - `TraitNetConfig::interaction_dim` is the width the environment-trait
+    combination produces, which the head reads; it was pinned to the width of
+    the environment encoding. `TraitNetConfig::interaction` selects that
+    combination (`Bilinear`, `MLP`, `Attention`), where bilinear was hardcoded
+    and the enum had no consumer at all.
+    `TraitNetConfig::shared_trait_encoder = false` gives every species its own
+    trait encoder, a grouped matrix per layer, where the shared encoder applies
+    one matrix to every species.
+  - `ModelConfig::parallel_layers` was read by nothing, so `ParallelBlock` --
+    branches, five aggregations, the residual path, all implemented -- was
+    never constructed, and the whole architecture was unreachable while
+    `resolve info` reported its configuration. The block is now the encoder's
+    tail for all five species encodings, and
+    `ParallelBranchConfig::branch_weight` is what a branch contributes to the
+    aggregation. TabM, a tail-placed mixture and a parallel block all replace
+    the same MLP tail, so at most one may be enabled.
+  - `SAINTConfig::use_contrastive_pretrain` and `SAINTConfig::mixup_alpha` are
+    gone. Both described a self-supervised pre-training stage, which a model
+    configuration cannot run: a pretext task is a training stage, and the
+    engine runs those through the pretraining API. The augmentation they named
+    is now `PretrainConfig::mixup_alpha`, where it acts (see Added). A
+    checkpoint carrying the two keys still loads; they are simply not read.
+
+  **Behaviour changes without a shape change, so every checkpoint still
+  loads**: retrain an FT-Transformer model to train at the configured FFN rate,
+  and a TabNet model to train with ghost batch normalization. A TraitNet
+  checkpoint DOES change shape, because its interaction width was the
+  environment width and is now `interaction_dim` -- **retrain a TraitNet
+  model**, or set `interaction_dim = 0` to keep the old width.
+
+- **A missing covariate no longer reaches a pretext task as NaN.** The loaders
+  keep a missing covariate or coordinate as NaN under
+  `MissingValuePolicy::Indicate`, the default, and `Trainer::prepare_data`
+  fills it from the fitting rows before any forward. A pretrainer takes the
+  continuous block straight from the dataset and has no fitted scalers, so an
+  unfilled block put NaN through the objective and from there into every
+  weight, with no error and no warning. `run_pretrain_loop`, the one place all
+  four pretext tasks pass through, now fills each missing cell with its column
+  mean -- the same fill training computes for the same rows, extracted as
+  `continuous_column_fill` / `fill_missing_continuous` so the two cannot drift
+  -- and logs that it did.
 
 - **`Predictor::get_embeddings` assembled its continuous block in a different
   column order from training** (coordinates, hash embedding, covariates,

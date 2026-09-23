@@ -13,6 +13,7 @@
 #include "resolve/model.hpp"
 #include "resolve/trainer.hpp"
 #include "resolve/predictor.hpp"
+#include "resolve/species_graph.hpp"
 #include "resolve/loss.hpp"
 #include "resolve/pretraining.hpp"
 #include "resolve/vae.hpp"

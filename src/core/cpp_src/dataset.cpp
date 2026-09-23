@@ -2058,6 +2058,20 @@ void ResolveDataset::encode_species(
         }
     }
 
+    // The taxonomy of the vocabulary itself: the genus and family each species
+    // CODE belongs to. The per-plot slots above say what a plot contains; this
+    // says how the species relate to each other, which is what a species-level
+    // graph is built from (species_graph.hpp). Computed here, after every
+    // branch: the rank-pool / transformer branch replaces both vocabularies
+    // with the encoder's own, so codes resolved earlier would be the pre-swap
+    // ones.
+    if (schema_.has_taxonomy && species_vocab_.size() > 1) {
+        auto taxonomy = resolve_species_taxonomy(all_records, species_vocab_,
+                                                 taxonomy_vocab_);
+        species_genus_ids_ = torch::tensor(taxonomy.genus, torch::kInt64);
+        species_family_ids_ = torch::tensor(taxonomy.family, torch::kInt64);
+    }
+
     // Mirror the settled vocabularies onto the schema so they travel into the
     // checkpoint (issue #102). Last thing in encode_species: the rank-pool /
     // transformer branch replaces both species_vocab_ and taxonomy_vocab_ with

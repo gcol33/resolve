@@ -104,6 +104,9 @@ try:
         EncoderArchitecture,
         GNNType,
         GraphConstructionMode,
+        SpeciesEdgeType,
+        SpeciesGraph,
+        build_species_graph,
         TraitInteractionMode,
         ParallelAggregation,
         # Config structs
@@ -283,6 +286,9 @@ __all__ = [
     "EncoderArchitecture",
     "GNNType",
     "GraphConstructionMode",
+    "SpeciesEdgeType",
+    "SpeciesGraph",
+    "build_species_graph",
     "TraitInteractionMode",
     "ParallelAggregation",
     # Config structs

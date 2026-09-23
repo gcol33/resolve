@@ -66,7 +66,8 @@ PlotEncoderRankPoolImpl::PlotEncoderRankPoolImpl(
     const MLPBlockConfig& mlp_config,
     float cover_dropout,
     const TabMConfig& tabm_config,
-    const MoETailConfig& moe_config
+    const MoETailConfig& moe_config,
+    const ParallelLayersConfig& parallel_config
 ) : cover_dropout_(cover_dropout) {
     // Enable taxonomy when genus OR family has real (non-UNK) entries, matching
     // the encoder's transform gate and keeping family-only datasets' family
@@ -91,7 +92,8 @@ PlotEncoderRankPoolImpl::PlotEncoderRankPoolImpl(
     int64_t input_dim = n_continuous + embed_dim + 1;
 
     latent_dim_ = build_encoder_tail(
-        *this, tail_, input_dim, hidden_dims, mlp_config, tabm_config, moe_config);
+        *this, tail_, input_dim, hidden_dims, mlp_config, tabm_config, moe_config,
+        parallel_config);
 }
 
 torch::Tensor PlotEncoderRankPoolImpl::forward(
@@ -235,7 +237,8 @@ PlotEncoderTransformerImpl::PlotEncoderTransformerImpl(
     const MLPBlockConfig& mlp_config,
     float cover_dropout,
     const TabMConfig& tabm_config,
-    const MoETailConfig& moe_config
+    const MoETailConfig& moe_config,
+    const ParallelLayersConfig& parallel_config
 ) : d_model_(d_model),
     n_attention_layers_(n_attention_layers),
     transformer_pooling_(transformer_pooling),
@@ -324,7 +327,8 @@ PlotEncoderTransformerImpl::PlotEncoderTransformerImpl(
     int64_t input_dim = n_continuous + d_model + 1;
 
     latent_dim_ = build_encoder_tail(
-        *this, tail_, input_dim, hidden_dims, mlp_config, tabm_config, moe_config);
+        *this, tail_, input_dim, hidden_dims, mlp_config, tabm_config, moe_config,
+        parallel_config);
 }
 
 torch::Tensor PlotEncoderTransformerImpl::build_tokens(

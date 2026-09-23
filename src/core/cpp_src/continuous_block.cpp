@@ -72,16 +72,28 @@ torch::Tensor assemble_continuous(const ContinuousInputs& inputs,
     return torch::cat(parts, /*dim=*/1);
 }
 
+torch::Tensor continuous_column_fill(const torch::Tensor& rows) {
+    auto observed = ~torch::isnan(rows);
+    auto count = observed.sum(/*dim=*/0).to(torch::kFloat32);
+    auto total = torch::where(observed, rows, torch::zeros_like(rows)).sum(/*dim=*/0);
+    return torch::where(count > 0, total / count.clamp_min(1.0),
+                        torch::zeros_like(total));
+}
+
+torch::Tensor fill_missing_continuous(const torch::Tensor& block) {
+    if (!block.defined() || block.size(1) == 0) {
+        return block;
+    }
+    auto fill = continuous_column_fill(block);
+    return torch::where(torch::isnan(block), fill.expand_as(block), block);
+}
+
 void fit_continuous_scalers(Scalers& scalers, const torch::Tensor& fitting_rows) {
     if (!fitting_rows.defined() || fitting_rows.size(1) == 0) {
         return;
     }
     auto observed = ~torch::isnan(fitting_rows);
-    auto count = observed.sum(/*dim=*/0).to(torch::kFloat32);
-    auto total = torch::where(observed, fitting_rows,
-                              torch::zeros_like(fitting_rows)).sum(/*dim=*/0);
-    scalers.continuous_fill = torch::where(count > 0, total / count.clamp_min(1.0),
-                                           torch::zeros_like(total));
+    scalers.continuous_fill = continuous_column_fill(fitting_rows);
     auto filled = torch::where(observed, fitting_rows,
                                scalers.continuous_fill.expand_as(fitting_rows));
     scalers.continuous_mean = filled.mean(/*dim=*/0);

@@ -116,6 +116,8 @@ RESOLVE_SYM(resolve_value_t*, resolve_model_get, (const resolve_model_t* m, cons
 RESOLVE_SYM(int, resolve_model_set_train, (resolve_model_t* m, int mode), (m, mode))
 RESOLVE_SYM(int, resolve_model_to_device, (resolve_model_t* m, const char* device), (m, device))
 RESOLVE_SYM(int, resolve_model_set_traits, (resolve_model_t* m, const resolve_value_t* traits), (m, traits))
+RESOLVE_SYM(int, resolve_model_set_species_graph, (resolve_model_t* m, const resolve_value_t* edge_index, const resolve_value_t* edge_type), (m, edge_index, edge_type))
+RESOLVE_SYM(resolve_value_t*, resolve_build_species_graph, (const resolve_dataset_t* ds, const resolve_value_t* config), (ds, config))
 
 /* ---- Trainer -------------------------------------------------------------- */
 RESOLVE_SYM(resolve_trainer_t*, resolve_trainer_create, (resolve_model_t* model, const resolve_value_t* config), (model, config))

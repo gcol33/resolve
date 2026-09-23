@@ -6,6 +6,7 @@
 #include "resolve/continuous_block.hpp"
 #include "resolve/gpu.hpp"
 #include "resolve/io_retry.hpp"
+#include "resolve/species_graph.hpp"
 
 #ifdef RESOLVE_HAS_CUDA
 #include "resolve/cuda/feature_hash.hpp"
@@ -123,6 +124,21 @@ void Trainer::prepare_data(
     // plots landed in each split. The raw-tensor prepare_data overload below
     // has no plot IDs, so this is the only place plot_ids_ is populated.
     plot_ids_ = dataset.plot_ids();
+
+    // A HeterogeneousGNN passes messages on a graph over the species, which is
+    // built from the dataset's taxonomy and co-occurrence as its config asks
+    // (species_graph.hpp). This is the one place with both the model and the
+    // data, so it is where the graph is built; save() then writes it into the
+    // checkpoint, because it is part of the trained model. A graph a caller
+    // set explicitly is left alone.
+    if (model_->requires_species_graph() && !model_->has_species_graph()) {
+        auto graph = build_species_graph(dataset,
+                                         model_->config().heterogeneous_gnn);
+        config_.log("Species graph: " + std::to_string(graph.n_edges()) +
+                    " edges over " + std::to_string(graph.n_species) +
+                    " species");
+        model_->set_species_graph(graph.edge_index, graph.edge_type);
+    }
 
     // Delegate to the raw tensor API using data from the dataset
     prepare_data(
@@ -1442,6 +1458,13 @@ void Trainer::save(const std::string& path, const RunMetadata* metadata) const {
     save_schema(archive, model_->schema());
     save_scalers(archive, scalers_);
 
+    // The species graph a HeterogeneousGNN was trained on. Scoring has to pass
+    // messages on the same graph, and the training data is not around at
+    // inference time, so it belongs in the checkpoint. Writes nothing for every
+    // other architecture.
+    save_species_graph(archive, model_->species_graph_edge_index(),
+                       model_->species_graph_edge_type());
+
     // Save categorical vocabulary (string -> code maps for each categorical
     // column). Empty vocab writes a count of zero — load() handles that as
     // a no-op for back-compat with pre-categorical-port checkpoints.
@@ -1518,6 +1541,16 @@ std::tuple<ResolveModel, Scalers, CategoricalVocab> Trainer::load(
     // Load model weights into the freshly-constructed model (matching the
     // prefixed save format).
     load_weights_into(archive, model);
+
+    // Restore the species graph a HeterogeneousGNN reads. A checkpoint written
+    // before the graph was persisted carries none, and such a model still needs
+    // one set explicitly before it can forward.
+    if (model->requires_species_graph()) {
+        auto [edge_index, edge_type] = load_species_graph(archive);
+        if (edge_index.defined() && edge_type.defined()) {
+            model->set_species_graph(edge_index, edge_type);
+        }
+    }
 
     model->to(device);
 
@@ -1632,6 +1665,12 @@ void Trainer::load_state(
     // Restore weights into the existing model_ (its architecture must already
     // match the checkpoint), the fitted scalers, and the categorical vocab.
     load_weights_into(archive, model_);
+    if (model_->requires_species_graph()) {
+        auto [edge_index, edge_type] = load_species_graph(archive);
+        if (edge_index.defined() && edge_type.defined()) {
+            model_->set_species_graph(edge_index, edge_type);
+        }
+    }
     model_->to(device);
 
     scalers_ = load_scalers(archive);

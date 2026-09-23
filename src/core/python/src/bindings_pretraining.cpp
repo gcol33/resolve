@@ -29,7 +29,8 @@ void register_pretraining(nb::module_& m) {
         .def_rw("predictor_dropout", &resolve::PretrainConfig::predictor_dropout)
         .def_rw("corruption_rate", &resolve::PretrainConfig::corruption_rate)
         .def_rw("temperature", &resolve::PretrainConfig::temperature)
-        .def_rw("projection_dim", &resolve::PretrainConfig::projection_dim);
+        .def_rw("projection_dim", &resolve::PretrainConfig::projection_dim)
+        .def_rw("mixup_alpha", &resolve::PretrainConfig::mixup_alpha);
 
     // PretrainResult
     nb::class_<resolve::PretrainResult>(m, "PretrainResult")

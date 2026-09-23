@@ -896,14 +896,70 @@ torch::Tensor BilinearTraitInteractionImpl::forward(
 // TraitNet Encoder Implementation
 // =============================================================================
 
+PerSpeciesTraitEncoderImpl::PerSpeciesTraitEncoderImpl(
+    int64_t n_species,
+    int64_t trait_dim,
+    int64_t hidden_dim,
+    int64_t n_layers,
+    float dropout
+) : n_species_(n_species), trait_dim_(trait_dim) {
+    TORCH_CHECK(n_species > 0,
+        "PerSpeciesTraitEncoder needs at least one species, got ", n_species);
+    TORCH_CHECK(n_layers > 0,
+        "PerSpeciesTraitEncoder needs at least one layer, got ", n_layers);
+
+    norms_ = register_module("norms", torch::nn::ModuleList());
+    int64_t current_dim = trait_dim;
+    for (int64_t layer = 0; layer < n_layers; ++layer) {
+        // Kaiming-style scale on the fan-in, as nn::Linear initializes.
+        const double bound = 1.0 / std::sqrt(static_cast<double>(current_dim));
+        weights_.push_back(register_parameter(
+            "weight_" + std::to_string(layer),
+            (torch::rand({n_species, current_dim, hidden_dim}) * 2.0 - 1.0) * bound));
+        biases_.push_back(register_parameter(
+            "bias_" + std::to_string(layer),
+            (torch::rand({n_species, hidden_dim}) * 2.0 - 1.0) * bound));
+        norms_->push_back(
+            torch::nn::LayerNorm(torch::nn::LayerNormOptions({hidden_dim})));
+        current_dim = hidden_dim;
+    }
+    if (dropout > 0) {
+        dropout_ = register_module("dropout", torch::nn::Dropout(dropout));
+    }
+}
+
+torch::Tensor PerSpeciesTraitEncoderImpl::forward(torch::Tensor traits) {
+    TORCH_CHECK(traits.size(0) == n_species_,
+        "PerSpeciesTraitEncoder was built for ", n_species_,
+        " species, got ", traits.size(0));
+    TORCH_CHECK(traits.size(1) == trait_dim_,
+        "PerSpeciesTraitEncoder was built for ", trait_dim_,
+        " trait features, got ", traits.size(1));
+
+    auto h = traits;
+    for (size_t layer = 0; layer < weights_.size(); ++layer) {
+        // Each species reads its own matrix: (species, in) x (species, in, out).
+        h = torch::einsum("si,sio->so", {h, weights_[layer]}) + biases_[layer];
+        h = norms_->ptr(layer)->as<torch::nn::LayerNormImpl>()->forward(h);
+        h = torch::gelu(h);
+        if (dropout_) h = dropout_->forward(h);
+    }
+    return h;
+}
+
 TraitNetEncoderImpl::TraitNetEncoderImpl(
     int64_t env_dim,
     int64_t trait_dim,
     int64_t n_species,
     int64_t hidden_dim,
     int64_t n_layers,
-    float dropout
-) : env_dim_(env_dim), trait_dim_(trait_dim), n_species_(n_species), hidden_dim_(hidden_dim) {
+    float dropout,
+    int64_t interaction_dim,
+    TraitInteractionMode interaction,
+    bool shared_trait_encoder
+) : env_dim_(env_dim), trait_dim_(trait_dim), n_species_(n_species),
+    hidden_dim_(hidden_dim), interaction_mode_(interaction),
+    interaction_dim_(interaction_dim > 0 ? interaction_dim : hidden_dim) {
 
     // Environment encoder
     env_encoder_ = register_module("env_encoder", torch::nn::Sequential());
@@ -918,26 +974,54 @@ TraitNetEncoderImpl::TraitNetEncoderImpl(
         current_dim = hidden_dim;
     }
 
-    // Trait encoder
-    trait_encoder_ = register_module("trait_encoder", torch::nn::Sequential());
-    current_dim = trait_dim;
-    for (int64_t i = 0; i < n_layers; ++i) {
-        trait_encoder_->push_back(torch::nn::Linear(current_dim, hidden_dim));
-        trait_encoder_->push_back(torch::nn::LayerNorm(torch::nn::LayerNormOptions({hidden_dim})));
-        trait_encoder_->push_back(torch::nn::GELU());
-        if (dropout > 0) {
-            trait_encoder_->push_back(torch::nn::Dropout(dropout));
+    // Trait encoder: one set of weights for every species, or one set per
+    // species (TraitNetConfig::shared_trait_encoder).
+    if (shared_trait_encoder) {
+        trait_encoder_ = register_module("trait_encoder", torch::nn::Sequential());
+        current_dim = trait_dim;
+        for (int64_t i = 0; i < n_layers; ++i) {
+            trait_encoder_->push_back(torch::nn::Linear(current_dim, hidden_dim));
+            trait_encoder_->push_back(torch::nn::LayerNorm(torch::nn::LayerNormOptions({hidden_dim})));
+            trait_encoder_->push_back(torch::nn::GELU());
+            if (dropout > 0) {
+                trait_encoder_->push_back(torch::nn::Dropout(dropout));
+            }
+            current_dim = hidden_dim;
         }
-        current_dim = hidden_dim;
+    } else {
+        per_species_trait_encoder_ = register_module("per_species_trait_encoder",
+            PerSpeciesTraitEncoder(n_species, trait_dim, hidden_dim, n_layers,
+                                   dropout));
     }
 
-    // Bilinear interaction
-    interaction_ = register_module("interaction",
-        BilinearTraitInteraction(hidden_dim, hidden_dim, hidden_dim));
+    // How the environment and a species' traits are combined into the
+    // per-species representation the head reads. All three produce
+    // (batch, n_species, interaction_dim).
+    switch (interaction_mode_) {
+        case TraitInteractionMode::Bilinear:
+            interaction_ = register_module("interaction",
+                BilinearTraitInteraction(hidden_dim, hidden_dim, interaction_dim_));
+            break;
+        case TraitInteractionMode::MLP:
+            // The two representations side by side, projected once.
+            interaction_mlp_ = register_module("interaction_mlp",
+                torch::nn::Linear(2 * hidden_dim, interaction_dim_));
+            break;
+        case TraitInteractionMode::Attention:
+            // The environment queries the species: how much attention a
+            // species draws scales its own value vector.
+            interaction_query_ = register_module("interaction_query",
+                torch::nn::Linear(hidden_dim, hidden_dim));
+            interaction_key_ = register_module("interaction_key",
+                torch::nn::Linear(hidden_dim, hidden_dim));
+            interaction_value_ = register_module("interaction_value",
+                torch::nn::Linear(hidden_dim, interaction_dim_));
+            break;
+    }
 
     // Output projection
     output_proj_ = register_module("output_proj",
-        torch::nn::Linear(hidden_dim, 1));
+        torch::nn::Linear(interaction_dim_, 1));
 }
 
 void TraitNetEncoderImpl::set_traits(torch::Tensor traits) {
@@ -962,11 +1046,41 @@ torch::Tensor TraitNetEncoderImpl::forward(
     // Encode environment: (batch, env_dim) -> (batch, hidden_dim)
     auto env_encoded = env_encoder_->forward(env);
 
-    // Encode traits: (n_species, trait_dim) -> (n_species, hidden_dim)
-    auto traits_encoded = trait_encoder_->forward(traits);
+    // Encode traits: (n_species, trait_dim) -> (n_species, hidden_dim), with
+    // one set of weights for all species or one per species.
+    auto traits_encoded = trait_encoder_
+        ? trait_encoder_->forward(traits)
+        : per_species_trait_encoder_->forward(traits);
 
-    // Bilinear interaction: (batch, n_species, hidden_dim)
-    auto interaction = interaction_->forward(env_encoded, traits_encoded);
+    // Combine the two into (batch, n_species, interaction_dim).
+    torch::Tensor interaction;
+    switch (interaction_mode_) {
+        case TraitInteractionMode::Bilinear:
+            interaction = interaction_->forward(env_encoded, traits_encoded);
+            break;
+        case TraitInteractionMode::MLP: {
+            const int64_t batch = env_encoded.size(0);
+            const int64_t n_species = traits_encoded.size(0);
+            auto env_rows = env_encoded.unsqueeze(1).expand(
+                {batch, n_species, env_encoded.size(1)});
+            auto trait_rows = traits_encoded.unsqueeze(0).expand(
+                {batch, n_species, traits_encoded.size(1)});
+            interaction = interaction_mlp_->forward(
+                torch::cat({env_rows, trait_rows}, /*dim=*/2));
+            break;
+        }
+        case TraitInteractionMode::Attention: {
+            // (batch, hidden) x (n_species, hidden) -> (batch, n_species)
+            auto query = interaction_query_->forward(env_encoded);
+            auto key = interaction_key_->forward(traits_encoded);
+            auto value = interaction_value_->forward(traits_encoded);
+            const auto scale = 1.0 / std::sqrt(static_cast<double>(query.size(1)));
+            auto weights = torch::softmax(
+                torch::matmul(query, key.transpose(0, 1)) * scale, /*dim=*/1);
+            interaction = weights.unsqueeze(2) * value.unsqueeze(0);
+            break;
+        }
+    }
 
     // Apply GELU
     interaction = torch::gelu(interaction);

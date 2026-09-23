@@ -6,6 +6,7 @@
 #include <torch/torch.h>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 namespace resolve {
 
@@ -92,6 +93,23 @@ void save_schema(
 
 // Load schema from archive
 ResolveSchema load_schema(
+    torch::serialize::InputArchive& archive
+);
+
+// Save the species graph a HeterogeneousGNN passes messages on. The graph is
+// built from the training data once and is part of the trained model -- scoring
+// has to read the same one -- so it travels in the checkpoint. A model with no
+// graph writes nothing.
+void save_species_graph(
+    torch::serialize::OutputArchive& archive,
+    const torch::Tensor& edge_index,
+    const torch::Tensor& edge_type
+);
+
+// Read the species graph back. Returns two undefined tensors when the archive
+// carries none, which is what every checkpoint written before the graph was
+// persisted looks like.
+std::pair<torch::Tensor, torch::Tensor> load_species_graph(
     torch::serialize::InputArchive& archive
 );
 

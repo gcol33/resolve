@@ -1,4 +1,5 @@
 #include "resolve/pretraining.hpp"
+#include "resolve/continuous_block.hpp"
 #include "resolve/utils.hpp"
 #include <algorithm>
 #include <chrono>
@@ -38,6 +39,22 @@ torch::Tensor PretrainRng::rand(
 
 torch::Tensor PretrainRng::rand_like(const torch::Tensor& other) {
     return rand(other.sizes(), other.options());
+}
+
+torch::Tensor PretrainRng::beta_symmetric(
+    at::IntArrayRef size, double alpha, const torch::TensorOptions& options
+) {
+    auto cpu = options.device(torch::kCPU);
+    auto concentration = torch::full(size, alpha, cpu);
+    // _standard_gamma is the only Gamma sampler in ATen that takes a generator.
+    auto first = torch::_standard_gamma(concentration, gen_);
+    auto second = torch::_standard_gamma(concentration, gen_);
+    // Both draws are 0 only when alpha underflows; fall back to an even mix
+    // rather than dividing by zero.
+    auto total = first + second;
+    auto weights = torch::where(total > 0, first / total,
+                                torch::full_like(total, 0.5));
+    return to_device(weights, options.device());
 }
 
 torch::Tensor PretrainRng::randn_like(const torch::Tensor& other) {
@@ -82,6 +99,12 @@ void PretrainConfig::validate() const {
         throw std::invalid_argument(
             "PretrainConfig.corruption_rate must be in [0, 1] (got " +
             std::to_string(corruption_rate) + ").");
+    }
+    if (!(mixup_alpha >= 0.0f)) {
+        throw std::invalid_argument(
+            "PretrainConfig.mixup_alpha must be >= 0 (got " +
+            std::to_string(mixup_alpha) + "); 0 switches the mixup "
+            "augmentation off.");
     }
 }
 
@@ -326,6 +349,19 @@ PretrainResult run_pretrain_loop(
     }
     for (auto& input : spec.inputs) {
         if (is_present(input)) input = input.to(spec.device);
+    }
+
+    // A loader leaves a missing covariate or coordinate as NaN under
+    // MissingValuePolicy::Indicate, and the Trainer fills it from the fitting
+    // rows before any forward. A pretext task has no fitted scalers, so an
+    // unfilled block would put NaN through the objective and from there into
+    // every weight, silently. Fill from the column means of the rows this task
+    // was given -- the same fill training computes for the same rows -- and say
+    // so, because it is a property of the data the caller handed over.
+    if (torch::isnan(spec.inputs.front()).any().item<bool>()) {
+        spec.inputs.front() = fill_missing_continuous(spec.inputs.front());
+        spec.log("Pretraining: the continuous block carries missing cells; "
+                 "filled each with its column mean");
     }
 
     const int64_t n_samples = spec.inputs.front().size(0);
@@ -703,6 +739,21 @@ PretrainResult SCARFPretrainer::pretrain(
         // hash is inside `continuous` and already corrupted; the species-ID
         // tensors are empty there, so masking is a no-op.)
         auto corrupted_cont = corruptor_->corrupt(batch_cont, rng);
+        if (config_.mixup_alpha > 0.0f) {
+            // Mix each row of the second view with another row of the batch.
+            // The weight is drawn from Beta(alpha, alpha) and then folded to
+            // [0.5, 1] for the row's own share: a pretext task has no label to
+            // mix, so the row has to stay recognizable as the positive pair of
+            // view 1.
+            const auto rows = corrupted_cont.size(0);
+            auto share = rng.beta_symmetric({rows, 1},
+                                            static_cast<double>(config_.mixup_alpha),
+                                            corrupted_cont.options());
+            share = torch::maximum(share, 1.0f - share);
+            auto partner = rng.randperm(rows, corrupted_cont.device());
+            corrupted_cont = share * corrupted_cont +
+                             (1.0f - share) * corrupted_cont.index_select(0, partner);
+        }
         auto masked = mask_species_view(
             batch[1], batch[2], batch[3], batch[4], config_.corruption_rate, rng);
         auto repr_2 = model_->get_latent(
