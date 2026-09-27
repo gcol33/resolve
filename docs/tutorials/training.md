@@ -73,6 +73,7 @@ cfg.device       = "cuda"
 | `batch_size_floor` | `1024` | Smallest batch the OOM retry drops to |
 | `max_epochs` | `500` | Hard upper limit on epochs |
 | `patience` | `50` | Epochs without improvement before stopping |
+| `fixed_epochs` | `0` | Run exactly N epochs and keep the final weights; `0` stops early |
 | `lr` | `1e-3` | AdamW learning rate |
 | `weight_decay` | `1e-4` | AdamW weight decay |
 | `loss_config` | `Combined` | Loss preset, see below |
@@ -93,6 +94,27 @@ cfg.device       = "cuda"
 
 The best epoch's weights are restored when early stopping fires, so a larger
 `patience` never yields a worse model. It costs compute.
+
+### Refitting on every plot for a fixed duration
+
+Early stopping needs a held-out fold. To refit a validated configuration on
+all of the data, fix the duration beforehand, for example the median best
+epoch over the validation seeds, and hold nothing out:
+
+```python
+cfg.max_epochs   = 500   # the schedule the validation runs used
+cfg.fixed_epochs = 431   # epochs to run of it
+trainer = rc.Trainer(model, cfg)
+trainer.prepare_data(dataset, test_size=0.0, seed=42)
+result = trainer.fit()   # no held-out losses or metrics
+```
+
+The learning-rate schedule is still laid out over `max_epochs`, so the refit
+follows the validation runs' trajectory for its first `fixed_epochs` epochs
+rather than a schedule compressed to end there. A `best_epoch` of `e`
+(0-based) corresponds to `fixed_epochs = e + 1`. In R the same knob is
+`fixedEpochs` on `resolve.train.dataset(..., testSize = 0)`; on the command
+line it is `--fixed-epochs N --test-size 0`.
 
 ### Loss presets
 

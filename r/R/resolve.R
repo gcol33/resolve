@@ -813,10 +813,16 @@ resolve.dataset.frame <- function(header,
 #' @param hiddenDims Hidden layer dimensions (default c(2048, 1024, 512, 256, 128, 64))
 #' @param maxEpochs Maximum training epochs (default 500)
 #' @param patience Early stopping patience (default 50)
+#' @param fixedEpochs Train exactly this many epochs of the `maxEpochs`
+#'   schedule, with no early stopping, and keep the final weights (default 0,
+#'   early stopping). The learning-rate schedule is still laid out over
+#'   `maxEpochs`. The only mode that accepts `testSize = 0`, for a refit on
+#'   every plot.
 #' @param lr Learning rate (default 0.001)
 #' @param batchSize Batch size (default 4096)
 #' @param device Device: "cpu" or "cuda" (default "cpu")
-#' @param testSize Fraction of data for testing (default 0.2)
+#' @param testSize Fraction of the data held out for early stopping (default
+#'   0.2). 0 holds nothing out and needs `fixedEpochs`.
 #' @param seed Random seed (default 42)
 #' @param savePath Path to save model checkpoint (optional)
 #' @param lossConfig Loss configuration: "mae", "smape", "combined", or "nca"
@@ -887,6 +893,7 @@ resolve.train.dataset <- function(dataset,
                                   hiddenDims = NULL,
                                   maxEpochs = 500L,
                                   patience = 50L,
+                                  fixedEpochs = 0L,
                                   lr = 1e-3,
                                   batchSize = 4096L,
                                   device = "cpu",
@@ -925,6 +932,9 @@ resolve.train.dataset <- function(dataset,
   if (!is.numeric(patience) || patience < 1) {
     stop("patience must be a positive integer")
   }
+  if (!is.numeric(fixedEpochs) || fixedEpochs < 0 || fixedEpochs > maxEpochs) {
+    stop("fixedEpochs must be 0 (early stopping) or at most maxEpochs")
+  }
   if (!is.numeric(lr) || lr <= 0) {
     stop("lr must be a positive number")
   }
@@ -934,8 +944,11 @@ resolve.train.dataset <- function(dataset,
   if (!device %in% c("cpu", "cuda")) {
     stop("device must be 'cpu' or 'cuda'")
   }
-  if (!is.numeric(testSize) || testSize <= 0 || testSize >= 1) {
-    stop("testSize must be between 0 and 1 (exclusive)")
+  if (!is.numeric(testSize) || testSize < 0 || testSize >= 1) {
+    stop("testSize must be at least 0 and below 1")
+  }
+  if (testSize == 0 && fixedEpochs == 0) {
+    stop("testSize = 0 leaves early stopping nothing to watch; set fixedEpochs")
   }
   if (!lossConfig %in% c("mae", "smape", "combined", "nca")) {
     stop("lossConfig must be 'mae', 'smape', 'combined', or 'nca'")
@@ -1021,6 +1034,7 @@ resolve.train.dataset <- function(dataset,
     batch_size = as.integer(batchSize),
     max_epochs = as.integer(maxEpochs),
     patience = as.integer(patience),
+    fixed_epochs = as.integer(fixedEpochs),
     lr = lr,
     device = device,
     loss_config = lossConfig,

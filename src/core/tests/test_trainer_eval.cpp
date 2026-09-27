@@ -65,11 +65,12 @@ ResolveDataset make_synthetic_dataset(
     int64_t n_plots,
     const std::vector<TargetSpec>& targets = {
         TargetSpec::regression("y"),
-        TargetSpec::classification("hab", kNumHabClasses)}) {
+        TargetSpec::classification("hab", kNumHabClasses)},
+    bool use_taxonomy = false) {
     std::ostringstream hdr;
     hdr << "plot_id,lat,lon,cov1,cov2,y,hab\n";
     std::ostringstream spc;
-    spc << "plot_id,sp,cover\n";
+    spc << "plot_id,sp,cover,genus,family\n";
     for (int64_t i = 0; i < n_plots; ++i) {
         double lat = 40.0 + (static_cast<double>(i) / n_plots) * 10.0;
         double lon = -5.0 + (static_cast<double>(i) / n_plots) * 10.0;
@@ -79,7 +80,8 @@ ResolveDataset make_synthetic_dataset(
         int hab = static_cast<int>(i % kNumHabClasses);
         hdr << "P" << i << "," << lat << "," << lon << ","
             << c1 << "," << c2 << "," << y << "," << hab << "\n";
-        spc << "P" << i << ",sp" << (i % 13) << ",1.0\n";
+        spc << "P" << i << ",sp" << (i % 13) << ",1.0,g" << (i % 5)
+            << ",f" << (i % 3) << "\n";
     }
 
     TempFile header_csv(hdr.str());
@@ -92,11 +94,15 @@ ResolveDataset make_synthetic_dataset(
     roles.latitude = "lat";
     roles.longitude = "lon";
     roles.covariates = {"cov1", "cov2"};
+    if (use_taxonomy) {
+        roles.genus = "genus";
+        roles.family = "family";
+    }
 
     DatasetConfig dcfg;
     dcfg.species_encoding = SpeciesEncodingMode::Hash;
     dcfg.hash_dim = 4;
-    dcfg.use_taxonomy = false;
+    dcfg.use_taxonomy = use_taxonomy;
     dcfg.track_unknown_fraction = false;
     dcfg.track_unknown_count = false;
 
@@ -740,4 +746,144 @@ TEST_CASE("Early stopping counts patience from the epoch the objective settles",
         auto ds = make_synthetic_dataset(48, {TargetSpec::regression("y")});
         REQUIRE(epochs_run(ds, frozen_config(LossConfigMode::MAE, {10, 20})) == patience + 1);
     }
+}
+
+// =============================================================================
+// Fixed-duration training (TrainConfig::fixed_epochs)
+// =============================================================================
+
+namespace {
+
+TrainConfig cosine_config(int max_epochs, int fixed_epochs) {
+    TrainConfig cfg = make_train_config();
+    cfg.lr = 1e-2f;
+    cfg.lr_scheduler = LRSchedulerType::CosineAnnealing;
+    cfg.loss_config = LossConfigMode::MAE;
+    cfg.max_epochs = max_epochs;
+    cfg.patience = max_epochs;
+    cfg.fixed_epochs = fixed_epochs;
+    return cfg;
+}
+
+struct FittedRun {
+    TrainResult result;
+    std::vector<torch::Tensor> parameters;
+    int64_t n_fit_plots;
+    int64_t n_held_out;
+};
+
+FittedRun fit_run(const ResolveDataset& ds, const TrainConfig& cfg, float test_size) {
+    torch::manual_seed(11);
+    ResolveModel model(ds.schema(), make_model_config());
+    Trainer trainer(model, cfg);
+    trainer.prepare_data(ds, test_size, 5);
+    FittedRun run{trainer.fit(), {}, 0, 0};
+    for (const auto& p : trainer.model()->parameters()) {
+        run.parameters.push_back(p.detach().to(torch::kCPU).clone());
+    }
+    run.n_fit_plots = static_cast<int64_t>(trainer.train_plot_ids().size());
+    run.n_held_out = static_cast<int64_t>(trainer.test_plot_ids().size());
+    return run;
+}
+
+}  // namespace
+
+TEST_CASE("fixed_epochs runs that many epochs, whatever early stopping would do",
+          "[trainer][fixed_epochs]") {
+    auto ds = make_synthetic_dataset(48, {TargetSpec::regression("y")});
+    // A frozen model never improves after epoch 0, so early stopping alone
+    // would end the run after patience + 1 epochs.
+    TrainConfig cfg = make_train_config();
+    cfg.lr = 0.0f;
+    cfg.weight_decay = 0.0f;
+    cfg.loss_config = LossConfigMode::MAE;
+    cfg.max_epochs = 40;
+    cfg.patience = 2;
+    cfg.fixed_epochs = 12;
+
+    auto run = fit_run(ds, cfg, 0.25f);
+    REQUIRE(run.result.train_loss_history.size() == 12);
+    REQUIRE(run.result.test_loss_history.size() == 12);
+    REQUIRE(run.result.best_epoch == 11);
+}
+
+TEST_CASE("fixed_epochs follows the full schedule rather than a shortened one",
+          "[trainer][fixed_epochs]") {
+    auto ds = make_synthetic_dataset(48, {TargetSpec::regression("y")});
+    const int n = 6;
+
+    auto cut = fit_run(ds, cosine_config(/*max_epochs=*/20, /*fixed_epochs=*/n), 0.25f);
+    auto full = fit_run(ds, cosine_config(/*max_epochs=*/20, /*fixed_epochs=*/20), 0.25f);
+    auto shortened = fit_run(ds, cosine_config(/*max_epochs=*/n, /*fixed_epochs=*/n), 0.25f);
+
+    REQUIRE(cut.result.train_loss_history.size() == n);
+    for (int e = 0; e < n; ++e) {
+        INFO("epoch " << e);
+        CHECK(cut.result.train_loss_history[e] == full.result.train_loss_history[e]);
+    }
+    // A schedule laid out over n epochs decays faster, so its losses part from
+    // the full-length run's once the learning rates differ.
+    bool parts = false;
+    for (int e = 1; e < n; ++e) {
+        parts = parts ||
+            shortened.result.train_loss_history[e] != full.result.train_loss_history[e];
+    }
+    REQUIRE(parts);
+}
+
+TEST_CASE("fixed_epochs keeps the weights its last epoch left", "[trainer][fixed_epochs]") {
+    auto ds = make_synthetic_dataset(48, {TargetSpec::regression("y")});
+    const int n = 5;
+    const auto dir = std::filesystem::temp_directory_path() / "resolve_fixed_epochs_ckpt";
+    std::filesystem::remove_all(dir);
+
+    TrainConfig cfg = cosine_config(/*max_epochs=*/30, /*fixed_epochs=*/n);
+    cfg.checkpoint_dir = dir.string();
+    cfg.checkpoint_every = n;
+    auto run = fit_run(ds, cfg, 0.25f);
+
+    // checkpoint_<n>.pt is written at the end of the last epoch, before fit()
+    // returns; the model fit() hands back has to be that one.
+    Trainer last = make_prepared_trainer(ds, 5);
+    last.load_state((dir / ("checkpoint_" + std::to_string(n) + ".pt")).string(), torch::kCPU);
+    auto last_params = last.model()->parameters();
+    REQUIRE(last_params.size() == run.parameters.size());
+    for (size_t i = 0; i < last_params.size(); ++i) {
+        REQUIRE(torch::equal(last_params[i].detach().to(torch::kCPU), run.parameters[i]));
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("fixed_epochs trains on every plot when nothing is held out",
+          "[trainer][fixed_epochs]") {
+    auto ds = make_synthetic_dataset(48, {TargetSpec::regression("y"),
+                                          TargetSpec::classification("hab", kNumHabClasses)},
+                                     /*use_taxonomy=*/true);
+
+    SECTION("a fixed duration needs no held-out fold") {
+        auto run = fit_run(ds, cosine_config(/*max_epochs=*/10, /*fixed_epochs=*/4), 0.0f);
+        REQUIRE(run.n_fit_plots == 48);
+        REQUIRE(run.n_held_out == 0);
+        REQUIRE(run.result.train_loss_history.size() == 4);
+        REQUIRE(run.result.test_loss_history.empty());
+        REQUIRE(run.result.final_metrics.empty());
+        REQUIRE(run.result.best_epoch == 3);
+        REQUIRE(run.result.baselines.empty());
+        for (const auto& p : run.parameters) {
+            REQUIRE(torch::isfinite(p).all().item<bool>());
+        }
+    }
+
+    SECTION("early stopping without a held-out fold is refused") {
+        REQUIRE_THROWS_WITH(fit_run(ds, cosine_config(10, 0), 0.0f),
+                            Catch::Matchers::ContainsSubstring("fixed_epochs"));
+    }
+}
+
+TEST_CASE("fixed_epochs has to lie inside the schedule", "[trainer][fixed_epochs]") {
+    auto ds = make_synthetic_dataset(48, {TargetSpec::regression("y")});
+    REQUIRE_THROWS_WITH(fit_run(ds, cosine_config(/*max_epochs=*/10, /*fixed_epochs=*/11), 0.25f),
+                        Catch::Matchers::ContainsSubstring("max_epochs"));
+    REQUIRE_THROWS_WITH(fit_run(ds, cosine_config(/*max_epochs=*/10, /*fixed_epochs=*/-1), 0.25f),
+                        Catch::Matchers::ContainsSubstring("fixed_epochs"));
 }

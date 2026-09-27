@@ -385,6 +385,7 @@ RESOLVE_DEFINE_FIELD_REGISTRY(DatasetConfig, RESOLVE_DATASET_CONFIG_FIELDS)
     F(batch_size,          "train_batch_size")          \
     F(max_epochs,          "train_max_epochs")          \
     F(patience,            "train_patience")            \
+    F(fixed_epochs,        "train_fixed_epochs")        \
     F(lr,                  "train_lr")                  \
     F(weight_decay,        "train_weight_decay")        \
     F(phase_boundaries,    "train_phase_boundary_")     \

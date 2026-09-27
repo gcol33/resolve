@@ -413,6 +413,7 @@ int train_command(const ParsedArgs& args) {
     train_config.batch_size_floor = args.get_int("--batch-size-floor");
     train_config.max_epochs = args.get_int("--max-epochs");
     train_config.patience = args.get_int("--patience");
+    train_config.fixed_epochs = args.get_int("--fixed-epochs");
     train_config.lr = args.get_float("--lr");
     train_config.weight_decay = args.get_float("--weight-decay");
     train_config.loss_config = parse_loss_config_mode(args.get("--loss-config"));

@@ -30,6 +30,7 @@
 #include <filesystem>
 #include <cmath>
 #include <ctime>
+#include <tuple>
 
 namespace resolve {
 
@@ -1074,10 +1075,45 @@ void Trainer::release_training_state() {
 #endif
 }
 
+namespace {
+
+// The number of epochs fit() runs. Early stopping watches the held-out fold,
+// so it needs one; a fixed duration does not, and has to lie inside the
+// schedule it is cut from.
+int epochs_to_run(const TrainConfig& config, bool has_held_out) {
+    if (config.fixed_epochs < 0) {
+        throw std::invalid_argument(
+            "TrainConfig::fixed_epochs is " + std::to_string(config.fixed_epochs) +
+            "; it counts epochs to run, so it is 0 (early stopping) or positive");
+    }
+    if (config.fixed_epochs > config.max_epochs) {
+        throw std::invalid_argument(
+            "TrainConfig::fixed_epochs = " + std::to_string(config.fixed_epochs) +
+            " runs past max_epochs = " + std::to_string(config.max_epochs) +
+            ", the length the learning-rate schedule is laid out over");
+    }
+    if (config.fixed_epochs > 0) {
+        return config.fixed_epochs;
+    }
+    if (!has_held_out) {
+        throw std::invalid_argument(
+            "Trainer::fit: the data was prepared with no held-out fold "
+            "(test_size = 0), so early stopping has nothing to watch. Set "
+            "TrainConfig::fixed_epochs to train for a fixed number of epochs.");
+    }
+    return config.max_epochs;
+}
+
+}  // namespace
+
 TrainResult Trainer::fit() {
     if (!data_prepared_) {
         throw std::runtime_error("Data must be prepared before training");
     }
+
+    const bool has_held_out = test_indices_.defined() && test_indices_.numel() > 0;
+    const bool fixed_duration = config_.fixed_epochs > 0;
+    const int n_epochs = epochs_to_run(config_, has_held_out);
 
     // Apply CUDA performance optimizations and the VRAM cap BEFORE
     // cache_data_to_gpu(), so the allocator limit is in place before any
@@ -1160,6 +1196,7 @@ TrainResult Trainer::fit() {
         result = TrainResult{};
         best_loss = std::numeric_limits<float>::infinity();
         patience_counter = 0;
+        best_model_state_.clear();
 
         // The phased loss activates later terms (SMAPE, band) only once their
         // phase begins, so early-stopping before the final phase would kill the
@@ -1170,23 +1207,35 @@ TrainResult Trainer::fit() {
         const int last_epoch = std::max(0, config_.max_epochs - 1);
 
         try {
-            for (int epoch = 0; epoch < config_.max_epochs; ++epoch) {
-                // Update learning rate based on scheduler
+            for (int epoch = 0; epoch < n_epochs; ++epoch) {
+                // The schedule is laid out over max_epochs whatever n_epochs
+                // is, so a fixed-duration run follows a full run's trajectory.
                 float current_lr = get_learning_rate(epoch);
                 update_learning_rate(current_lr);
 
                 float train_loss = train_epoch(epoch);
-                auto [test_loss, metrics] = eval_epoch(epoch);
-
                 result.train_loss_history.push_back(train_loss);
-                result.test_loss_history.push_back(test_loss);
+
+                float test_loss = std::numeric_limits<float>::quiet_NaN();
+                decltype(result.final_metrics) metrics;
+                if (has_held_out) {
+                    std::tie(test_loss, metrics) = eval_epoch(epoch);
+                    result.test_loss_history.push_back(test_loss);
+                }
 
                 const bool settled = loss_fn_.objective_settled(epoch, last_epoch);
 
-                // Check for improvement. test_loss is the phase-invariant
-                // selection loss (see eval_epoch), so best_loss is comparable
-                // across the whole run and the returned model is the global best.
-                if (test_loss < best_loss) {
+                if (fixed_duration) {
+                    // The returned weights are the last epoch's, whatever the
+                    // held-out loss did, so best_epoch names that epoch and
+                    // final_metrics are its scores (none without a fold).
+                    result.best_epoch = epoch;
+                    result.final_metrics = std::move(metrics);
+                    if (has_held_out) best_loss = test_loss;
+                } else if (test_loss < best_loss) {
+                    // test_loss is the phase-invariant selection loss (see
+                    // eval_epoch), so best_loss is comparable across the whole
+                    // run and the returned model is the global best.
                     best_loss = test_loss;
                     result.best_epoch = epoch;
                     result.final_metrics = metrics;
@@ -1220,16 +1269,18 @@ TrainResult Trainer::fit() {
                 // Write progress file
                 if (use_checkpoints) {
                     write_progress_file(
-                        config_.checkpoint_dir, epoch, config_.max_epochs,
+                        config_.checkpoint_dir, epoch, n_epochs,
                         result.best_epoch, best_loss, patience_counter, result.final_metrics
                     );
                 }
 
-                // Print progress
                 // Print progress using log callback
                 if (epoch % 10 == 0) {
                     std::ostringstream msg;
-                    msg << "Epoch " << epoch << " - Train: " << train_loss << " Test: " << test_loss;
+                    msg << "Epoch " << epoch << " - Train: " << train_loss;
+                    if (has_held_out) {
+                        msg << " Test: " << test_loss;
+                    }
                     if (config_.lr_scheduler != LRSchedulerType::None) {
                         msg << " LR: " << current_lr;
                     }
@@ -1299,7 +1350,8 @@ TrainResult Trainer::fit() {
         }
     }
 
-    // Restore best model state
+    // Restore the best epoch's weights. A fixed-duration run never snapshots
+    // one, so it keeps the weights its last epoch left.
     if (!best_model_state_.empty()) {
         std::istringstream iss(std::string(best_model_state_.begin(), best_model_state_.end()));
         torch::serialize::InputArchive archive;
@@ -1338,6 +1390,12 @@ TrainResult Trainer::fit() {
     // carry the shrink into a subsequent fit() — e.g. later cross-validation
     // folds would otherwise silently train at the reduced batch size.
     config_.batch_size = batch_size_at_entry;
+
+    // Both the baseline comparisons and the network diagnostics score the
+    // held-out fold; a fit prepared with nothing held out returns neither.
+    if (!has_held_out) {
+        return result;
+    }
 
     // Compute baseline comparisons for each target
     {

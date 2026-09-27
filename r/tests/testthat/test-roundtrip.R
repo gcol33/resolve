@@ -217,3 +217,50 @@ test_that("load_train_config round-trips the training hyperparameters", {
   expect_true(is.character(cfg$loss_config))
   expect_true(!is.null(cfg$device))
 })
+
+test_that("fixedEpochs refits on every plot for a fixed duration", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  header_file <- tempfile(fileext = ".csv")
+  species_file <- tempfile(fileext = ".csv")
+  model_file <- tempfile(fileext = ".pt")
+  on.exit({
+    unlink(header_file)
+    unlink(species_file)
+    unlink(model_file)
+    unlink(sub("\\.pt$", ".json", model_file))
+  }, add = TRUE)
+
+  n <- 60L
+  write.csv(data.frame(plot_id = paste0("P", seq_len(n)),
+                       cov1 = sin(seq_len(n) * 0.11),
+                       y = 1.7 * sin(seq_len(n) * 0.11) + 2.0),
+            header_file, row.names = FALSE)
+  write.csv(data.frame(plot_id = paste0("P", seq_len(n)),
+                       species_id = paste0("sp", seq_len(n) %% 6L),
+                       cover = 1.0),
+            species_file, row.names = FALSE)
+  dataset <- resolve.dataset.csv(
+    header = header_file, species = species_file,
+    roles = list(plot_id = "plot_id", species_id = "species_id",
+                 abundance = "cover", covariates = c("cov1")),
+    targets = list(y = list(column = "y", task = "regression")),
+    config = list(species_encoding = "hash", hash_dim = 4, top_k = 2)
+  )
+
+  fit <- resolve.train.dataset(dataset, hiddenDims = c(16L), maxEpochs = 20L,
+                               fixedEpochs = 4L, batchSize = 16L, testSize = 0,
+                               seed = 3L, savePath = model_file, verbose = FALSE)
+  expect_length(fit$result$train_loss, 4L)
+  expect_length(fit$result$test_loss, 0L)
+  expect_equal(fit$result$best_epoch, 3L)
+  expect_equal(resolve.load_train_config(model_file)$fixed_epochs, 4L)
+
+  expect_error(resolve.train.dataset(dataset, maxEpochs = 20L, testSize = 0,
+                                     verbose = FALSE),
+               "fixedEpochs")
+  expect_error(resolve.train.dataset(dataset, maxEpochs = 20L, fixedEpochs = 21L,
+                                     verbose = FALSE),
+               "maxEpochs")
+})

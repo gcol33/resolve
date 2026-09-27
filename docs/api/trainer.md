@@ -31,7 +31,7 @@ trainer.prepare_data(dataset, test_size=0.2, seed=42)
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `dataset` | `ResolveDataset` | required | The loaded dataset |
-| `test_size` | `float` | `0.2` | Fraction held out |
+| `test_size` | `float` | `0.2` | Fraction held out; `0` holds nothing out and needs `fixed_epochs` |
 | `seed` | `int` | `42` | Split seed |
 
 `prepare_data` splits the plots, fits the feature and target scalers on the
@@ -83,7 +83,11 @@ result = trainer.fit()
 ```
 
 Returns a `TrainResult`. Runs to `max_epochs` or until `patience` epochs pass
-without improvement, restoring the best epoch's weights either way. On a CUDA
+without improvement, restoring the best epoch's weights either way. With
+`fixed_epochs > 0` it runs exactly that many epochs of the `max_epochs`
+schedule instead and keeps the final weights; `best_epoch` then names the last
+epoch, and a fit prepared with `test_size=0` returns no held-out losses or
+metrics. On a CUDA
 out-of-memory error it releases its caches, halves `batch_size`, and restarts
 from epoch 0, down to `batch_size_floor`. The GIL is released for the whole fit.
 
@@ -192,6 +196,7 @@ config = rc.TrainConfig()
 | `batch_size_floor` | `int` | `1024` | Smallest batch the OOM retry drops to |
 | `max_epochs` | `int` | `500` | Hard upper limit |
 | `patience` | `int` | `50` | Epochs without improvement before stopping |
+| `fixed_epochs` | `int` | `0` | Run exactly N epochs of the `max_epochs` schedule and keep the final weights; `0` stops early |
 | `lr` | `float` | `1e-3` | AdamW learning rate |
 | `weight_decay` | `float` | `1e-4` | AdamW weight decay |
 | `loss_config` | `LossConfigMode` | `Combined` | `MAE`, `SMAPE`, `Combined`, `NCA` |

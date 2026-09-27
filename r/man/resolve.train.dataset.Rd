@@ -9,6 +9,7 @@ resolve.train.dataset(
   hiddenDims = NULL,
   maxEpochs = 500L,
   patience = 50L,
+  fixedEpochs = 0L,
   lr = 0.001,
   batchSize = 4096L,
   device = "cpu",
@@ -46,13 +47,20 @@ resolve.train.dataset(
 
 \item{patience}{Early stopping patience (default 50)}
 
+\item{fixedEpochs}{Train exactly this many epochs of the \code{maxEpochs}
+schedule, with no early stopping, and keep the final weights (default 0,
+early stopping). The learning-rate schedule is still laid out over
+\code{maxEpochs}. The only mode that accepts \code{testSize = 0}, for a refit on
+every plot.}
+
 \item{lr}{Learning rate (default 0.001)}
 
 \item{batchSize}{Batch size (default 4096)}
 
 \item{device}{Device: "cpu" or "cuda" (default "cpu")}
 
-\item{testSize}{Fraction of data for testing (default 0.2)}
+\item{testSize}{Fraction of the data held out for early stopping (default
+0.2). 0 holds nothing out and needs \code{fixedEpochs}.}
 
 \item{seed}{Random seed (default 42)}
 

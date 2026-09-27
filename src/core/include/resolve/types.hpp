@@ -604,6 +604,15 @@ struct TrainConfig {
     int batch_size = kDefaultBatchSize;
     int max_epochs = kDefaultMaxEpochs;
     int patience = kDefaultPatience;
+    // Epochs to run of the max_epochs schedule. 0 trains under early stopping
+    // on the held-out fold and returns the best epoch's weights. A positive
+    // value runs exactly that many epochs with no early stopping and returns
+    // the final weights; the learning-rate schedule is still laid out over
+    // max_epochs, so the first fixed_epochs epochs follow the trajectory of a
+    // full-length run. It is the one mode that trains without a held-out fold
+    // (test_size = 0), which is how a model is refitted on every labelled plot
+    // for a duration chosen beforehand.
+    int fixed_epochs = 0;
     float lr = kDefaultLearningRate;
     float weight_decay = kDefaultWeightDecay;
     std::pair<int, int> phase_boundaries = {kDefaultPhase1Epoch, kDefaultPhase2Epoch};

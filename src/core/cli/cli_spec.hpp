@@ -189,6 +189,12 @@ inline const CommandSpec& train_spec() {
                          "Maximum epochs"});
         flags.push_back({"--patience", Arity::Value, "N", "50",
                          "Early stopping patience"});
+        flags.push_back({"--fixed-epochs", Arity::Value, "N", "0",
+                         "Train exactly N epochs of the --max-epochs\n"
+                         "schedule, with no early stopping, and keep the\n"
+                         "final weights (0 = early stopping). The only mode\n"
+                         "that accepts --test-size 0, for a refit on every\n"
+                         "plot."});
         flags.push_back({"--lr", Arity::Value, "FLOAT", "0.001",
                          "Learning rate"});
         flags.push_back({"--weight-decay", Arity::Value, "FLOAT", "0.0001",
@@ -241,7 +247,8 @@ inline const CommandSpec& train_spec() {
         flags.push_back({"--no-tf32", Arity::Flag, "", "",
                          "Disable TF32 matmuls on Ampere+ GPUs"});
         flags.push_back({"--test-size", Arity::Value, "FLOAT", "0.2",
-                         "Test split ratio"});
+                         "Held-out fraction early stopping watches. 0 holds\n"
+                         "nothing out and needs --fixed-epochs."});
         flags.push_back({"--seed", Arity::Value, "N", "42",
                          "Random seed. Seeds the global torch RNG before the\n"
                          "model is constructed (weight init) and drives the\n"
