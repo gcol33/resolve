@@ -80,10 +80,13 @@ struct DatasetConfig {
     //   0 (default) : no cap. Pad to the global per-plot max. Matches the
     //                 untrimmed behaviour; the longest plot in the dataset
     //                 dictates the width of every row's pool tensors.
-    //  -1           : auto p99. Compute the 99th percentile of per-plot
-    //                 species counts and truncate longer plots to that
-    //                 length, printing a one-line summary so users see the
-    //                 drop.
+    //  -x           : a percentile cap, read as 100 - x: -1 is the 99th
+    //                 percentile, -5 the 95th; x runs 1..99, and -100 or
+    //                 below is rejected. The percentile of per-plot species
+    //                 counts is computed on the data being loaded and longer
+    //                 plots are truncated to it, printing a one-line summary
+    //                 so users see the drop. It is a cap, not "no cap": that
+    //                 is 0.
     //  >0           : manual cap. Truncate longer plots to this many species,
     //                 kept in original CSV row order.
     //
@@ -125,6 +128,16 @@ struct DatasetConfig {
     //   Zero               : the cell is read as 0.0 and nothing marks it, so a
     //                        recorded 0 and a missing value are one input.
     MissingValuePolicy missing_values = MissingValuePolicy::Indicate;
+
+    // The abundance a record whose recorded abundance is exactly 0 is read at.
+    // Vegetation archives write a record that states presence without a cover
+    // estimate as 0% (EVA converts every cover scale to a percentage), and a
+    // weighting such as log1p then gives the species no weight at all, so a
+    // presence-only survey reaches the model with no species signal. Setting
+    // this to 1.0 reads such a record at the weight a record with a missing
+    // cover already gets. The default 0.0 reads a 0 as 0, i.e. leaves the
+    // recorded value alone. Negative values are rejected at load.
+    float zero_abundance_as = 0.0f;
 };
 
 // Forward declaration: the vocab-carrying loaders take one of these.
@@ -403,6 +416,11 @@ public:
     const torch::Tensor& family_ids() const { return family_ids_; }
     const torch::Tensor& unknown_fraction() const { return unknown_fraction_; }
     const torch::Tensor& unknown_count() const { return unknown_count_; }
+    // How much of each plot's assemblage the dataset's vocabulary recognises
+    // (compute_species_recognition). Filled by the loaders that adopt a
+    // vocabulary fitted elsewhere (*_with_schema / *_with_vocabs); undefined
+    // tensors otherwise, where every species is recognised by construction.
+    const SpeciesRecognition& species_recognition() const { return species_recognition_; }
     // The unstandardised continuous block a model built from this dataset's
     // schema reads (continuous_block.hpp): coordinates, covariates, their
     // missingness flags, the unknown-species columns and, when include_hash is
@@ -562,7 +580,8 @@ private:
     torch::Tensor family_ids_;       // (n_plots, n_taxonomy_slots)
     torch::Tensor unknown_fraction_; // (n_plots,)
     torch::Tensor unknown_count_;    // (n_plots,)
-    torch::Tensor categorical_ids_;  // (n_plots, n_categoricals) int64
+    SpeciesRecognition species_recognition_;
+    torch::Tensor categorical_ids_; // (n_plots, n_categoricals) int64
     CategoricalVocab categorical_vocab_;  // per-column string->code maps
     std::unordered_map<std::string, torch::Tensor> targets_;
 

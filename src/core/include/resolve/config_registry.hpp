@@ -363,7 +363,8 @@ inline constexpr const char* kRequiredModelConfigKeys[] = {
     F(pool_weighting,         "")        \
     F(pool_species_cap,       "")        \
     F(species_budget,         "")        \
-    F(missing_values,         "")
+    F(missing_values,         "")        \
+    F(zero_abundance_as,      "")
 
 RESOLVE_DEFINE_FIELD_REGISTRY(DatasetConfig, RESOLVE_DATASET_CONFIG_FIELDS)
 

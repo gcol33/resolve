@@ -171,6 +171,32 @@ UnknownSpeciesStats compute_unknown_species_stats(
     const std::vector<std::string>& plot_ids,
     const SpeciesVocab& vocab);
 
+// How much of each plot's assemblage a vocabulary recognises, for reporting
+// alongside a prediction (it is not a model input). Measured over the plot's
+// full record list, with the same notion of "unknown" as
+// compute_unknown_species_stats:
+//
+//   n_species[p]       = distinct species names p records (a name recorded in
+//                        several layers counts once)
+//   n_recognised[p]    = how many of those the vocabulary holds
+//   count_share[p]     = n_recognised / n_species;       NaN when p has none
+//   abundance_share[p] = recognised abundance / total;   NaN when the total
+//                        is <= 0, which is 1 - UnknownSpeciesStats::fraction
+//                        wherever that is defined
+//
+// All four are (n_plots,) float32 aligned to `plot_ids`.
+struct SpeciesRecognition {
+    torch::Tensor n_species;
+    torch::Tensor n_recognised;
+    torch::Tensor count_share;
+    torch::Tensor abundance_share;
+};
+
+SpeciesRecognition compute_species_recognition(
+    const std::vector<SpeciesRecord>& records,
+    const std::vector<std::string>& plot_ids,
+    const SpeciesVocab& vocab);
+
 // =============================================================================
 // The taxonomy of a species vocabulary
 // =============================================================================
@@ -242,7 +268,8 @@ public:
 
     // species_cap mirrors DatasetConfig::pool_species_cap exactly:
     //   0  -> no cap (default; pad to global per-plot max).
-    //   -1 -> auto p99 (compute 99th percentile of per-plot species counts).
+    //   -x -> the (100 - x)th percentile of per-plot species counts, x in
+    //         1..99 (-1 = p99, -5 = p95); -100 or below throws.
     //   >0 -> manual cap; per-plot lists are truncated to the first `cap`
     //         records in original CSV order.
     // When the cap kicks in we print a one-line summary so users see the

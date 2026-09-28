@@ -654,6 +654,7 @@ void save_schema(
     archive.write(k::kAggregation, torch::tensor(static_cast<int>(schema.aggregation)));
     archive.write(k::kUseTaxonomy, torch::tensor(static_cast<int>(schema.use_taxonomy)));
     archive.write(k::kMissingValues, torch::tensor(static_cast<int>(schema.missing_values)));
+    archive.write(k::kZeroAbundanceAs, torch::tensor(schema.zero_abundance_as));
 
     // Fitted species / genus / family vocabularies, index = integer code
     // (issue #102). These are what make a checkpoint self-sufficient for
@@ -826,6 +827,10 @@ ResolveSchema load_schema(
     // A model trained before the policy existed read every missing value as 0.
     schema.missing_values = MissingValuePolicy::Zero;
     rd_i32(k::kMissingValues, [&](int v) { schema.missing_values = static_cast<MissingValuePolicy>(v); });
+    {
+        torch::Tensor t;
+        if (archive.try_read(k::kZeroAbundanceAs, t)) schema.zero_abundance_as = t.item<float>();
+    }
 
     // Fitted vocabularies (issue #102). Absent on a pre-fix checkpoint: the
     // vectors stay empty, has_species_vocab()/has_taxonomy_vocab() report

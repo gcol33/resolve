@@ -2,7 +2,8 @@
 // Usage:
 //   resolve train --header h.csv --species s.csv --output model.pt [options]
 //   resolve predict --model model.pt --header h.csv --species s.csv --output predictions.csv
-//   resolve info --model model.pt
+//   resolve predict --suite suite_dir --header h.csv --species s.csv --output predictions.csv
+//   resolve info --model model.pt | --suite suite_dir
 //
 // Flags are declared once per subcommand in cli_spec.hpp. This file only
 // routes: it picks the subcommand's table, hands the remaining tokens to
@@ -54,6 +55,21 @@ Pass --help after a subcommand for that command's flags only.
   also gets one column per class, <target>_prob_<class> in code order, holding
   the class probabilities the code was taken from (they sum to one per row).
 
+Suite prediction output columns (--suite):
+  plot_id, then per suite target in manifest order:
+    a vote (classes):  <target> (label), <target>_code, <target>_agreement
+                       (share of members naming that class), and with
+                       --probabilities <target>_prob_<class> (members' mean)
+    a mean:            <target>, <target>_sd (members' standard deviation)
+    a circular mean:   <target> (bearing), <target>_circular_sd
+    every target:      <target>_n_species, <target>_n_recognised,
+                       <target>_recognised_share and
+                       <target>_recognised_abundance_share (how much of the
+                       plot the target's species vocabulary recognises)
+    with --members:    <target>_seed<N>, each member's own prediction
+  Dispersion and agreement measure how far the members disagree; they are
+  not calibrated intervals. NA marks a value that is undefined for the plot.
+
 Examples:
   resolve train --header plots.csv --species occurrences.csv \
                 --target area:regression:log1p \
@@ -63,6 +79,9 @@ Examples:
                 --seed 42 --output model.pt
 
   resolve predict --model model.pt --header new_plots.csv \
+                  --species new_occurrences.csv --output predictions.csv
+
+  resolve predict --suite eva_context/ --header new_plots.csv \
                   --species new_occurrences.csv --output predictions.csv
 )" << std::endl;
 }

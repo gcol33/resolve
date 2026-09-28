@@ -147,6 +147,19 @@ enum class MissingValuePolicy {
               // it: one per covariate, and one for the coordinate pair.
 };
 
+// How a model suite combines the predictions of a target's members (suite.hpp).
+enum class SuiteCombine {
+    Mean,          // arithmetic mean on the target's own scale
+    Vote,          // majority of the members' classes, ties to the lowest code
+    CircularMean   // mean of the members' bearings as unit vectors
+};
+
+// Whether a suite target is released for general use or with a stated limit.
+enum class SuiteTargetStatus {
+    Released,
+    Experimental
+};
+
 // Activation function type for configurable architecture
 enum class ActivationType {
     ReLU,
@@ -232,7 +245,7 @@ struct ResolveSchema {
     // rank-pool / transformer load the dataset overwrites this with the
     // RESOLVED width, so a checkpoint always carries a concrete >0 cap.
     int pool_weighting = 2;    // PoolWeighting::Log1p
-    int pool_species_cap = 0;  // 0 = no cap, -1 = auto p99, >0 = manual cap
+    int pool_species_cap = 0;  // 0 = no cap, -x = p(100 - x), >0 = manual cap
 
     // Remaining DatasetConfig knobs that shape the encoded tensors but are not
     // recoverable from ModelConfig (issue #102). Persisted so an inference-side
@@ -262,6 +275,11 @@ struct ResolveSchema {
     // itself, and for a checkpoint written before the field existed, which is
     // what those models were trained under.
     MissingValuePolicy missing_values = MissingValuePolicy::Zero;
+
+    // The abundance a recorded 0 was read at. Mirrors
+    // DatasetConfig::zero_abundance_as; 0 (a 0 stays 0) for a checkpoint
+    // written before the field existed, which is what its loader did.
+    float zero_abundance_as = 0.0f;
 
     // Ordered species / genus / family vocabularies fitted at training time
     // (issue #102). Element i is the name that encodes to integer code i, and

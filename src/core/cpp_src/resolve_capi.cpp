@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <filesystem>
 #include <initializer_list>
 #include <stdexcept>
 #include <limits>
@@ -393,11 +394,27 @@ std::vector<float> vfloat_vec(const resolve_value* v) {
 }
 std::vector<float> vfloat_vec(const resolve_value* m, const char* k) { return vfloat_vec(vget(m, k)); }
 
+// A list of names: a string array, a single string, or a list of strings (an R
+// list or a JSON array). Any other kind is refused rather than read as no
+// names, which would drop what the caller passed without a word.
 std::vector<std::string> vstr_vec(const resolve_value* v) {
-    if (v && v->kind == RESOLVE_VALUE_STRING_ARRAY) return v->sarr;
     std::vector<std::string> out;
-    if (v && v->kind == RESOLVE_VALUE_STRING) out.push_back(v->s);
-    return out;
+    if (!v || v->kind == RESOLVE_VALUE_NULL) return out;
+    if (v->kind == RESOLVE_VALUE_STRING_ARRAY) return v->sarr;
+    if (v->kind == RESOLVE_VALUE_STRING) {
+        out.push_back(v->s);
+        return out;
+    }
+    if (v->kind == RESOLVE_VALUE_LIST) {
+        for (const resolve_value* item : v->items) {
+            if (!item || item->kind != RESOLVE_VALUE_STRING) {
+                throw std::invalid_argument("expected a list of strings; an element is not a string");
+            }
+            out.push_back(item->s);
+        }
+        return out;
+    }
+    throw std::invalid_argument("expected a string or an array of strings");
 }
 std::vector<std::string> vstr_vec(const resolve_value* m, const char* k) { return vstr_vec(vget(m, k)); }
 
@@ -829,7 +846,8 @@ inline constexpr const char* kNormalization      = "normalization";
 inline constexpr const char* kAggregation        = "aggregation";
 inline constexpr const char* kUseTaxonomy        = "use_taxonomy";
 inline constexpr const char* kMissingValues      = "missing_values";
-inline constexpr const char* kSpeciesVocab       = "species_vocab";
+inline constexpr const char* kZeroAbundanceAs    = "zero_abundance_as";
+inline constexpr const char* kSpeciesVocab      = "species_vocab";
 inline constexpr const char* kGenusVocab         = "genus_vocab";
 inline constexpr const char* kFamilyVocab        = "family_vocab";
 // Categorical string -> code maps. Not part of ResolveSchema (which carries
@@ -881,6 +899,7 @@ ResolveSchema parse_schema(const resolve_value* s) {
     if (vhas(s, k::kAggregation)) schema.aggregation = parse_aggregation_mode(vstr(s, k::kAggregation));
     if (vhas(s, k::kUseTaxonomy)) schema.use_taxonomy = vbool(s, k::kUseTaxonomy);
     if (vhas(s, k::kMissingValues)) schema.missing_values = parse_missing_value_policy(vstr(s, k::kMissingValues));
+    if (vhas(s, k::kZeroAbundanceAs)) schema.zero_abundance_as = (float)vdbl(s, k::kZeroAbundanceAs);
     if (vhas(s, k::kSpeciesVocab)) schema.species_vocab = vstr_vec(s, k::kSpeciesVocab);
     if (vhas(s, k::kGenusVocab)) schema.genus_vocab = vstr_vec(s, k::kGenusVocab);
     if (vhas(s, k::kFamilyVocab)) schema.family_vocab = vstr_vec(s, k::kFamilyVocab);
@@ -1215,6 +1234,7 @@ resolve_value* schema_to_value(const ResolveSchema& s) {
     v_put(m, k::kAggregation, v_string(aggregation_mode_to_string(s.aggregation)));
     v_put(m, k::kUseTaxonomy, v_bool(s.use_taxonomy));
     v_put(m, k::kMissingValues, v_string(missing_value_policy_to_string(s.missing_values)));
+    v_put(m, k::kZeroAbundanceAs, v_double(s.zero_abundance_as));
     v_put(m, k::kSpeciesVocab, v_string_array(s.species_vocab));
     v_put(m, k::kGenusVocab, v_string_array(s.genus_vocab));
     v_put(m, k::kFamilyVocab, v_string_array(s.family_vocab));
@@ -2130,6 +2150,190 @@ resolve_value_t* resolve_predictor_get(const resolve_predictor_t* p, const char*
         if (w == "family_embeddings") return mat_or_null(pr.get_family_embeddings());
         if (w == "species_embeddings") return mat_or_null(pr.get_species_embeddings());
         throw std::runtime_error("predictor_get: unknown accessor '" + w + "'");
+    })
+}
+
+}  // extern "C"
+
+// ============================================================================
+// Model suite
+// ============================================================================
+
+struct resolve_suite { resolve::SuitePredictor suite; };
+
+namespace {
+
+// A JSON document as a value tree: objects keep their member order.
+resolve_value* json_to_value(const json::Value& j) {
+    switch (j.kind()) {
+        case json::Value::Kind::Null: return v_null();
+        case json::Value::Kind::Bool: return v_bool(j.as_bool());
+        case json::Value::Kind::Number: return v_double(j.as_number());
+        case json::Value::Kind::String: return v_string(j.as_string());
+        case json::Value::Kind::Array: {
+            auto* list = v_list();
+            ValueGuard g(list);
+            for (const auto& item : j.items()) v_append(list, json_to_value(item));
+            return g.release();
+        }
+        case json::Value::Kind::Object: {
+            auto* map = v_map();
+            ValueGuard g(map);
+            for (const auto& [key, value] : j.members()) v_put(map, key, json_to_value(value));
+            return g.release();
+        }
+    }
+    return v_null();
+}
+
+SuiteLoadOptions parse_suite_load_options(const resolve_value* o) {
+    SuiteLoadOptions out;
+    if (!o || o->kind == RESOLVE_VALUE_NULL) return out;
+    reject_unknown_keys(o, "suite load options", {"device", "vram_fraction", "verify", "targets"});
+    if (vhas(o, "device")) {
+        const std::string dev = vstr(o, "device");
+        if (dev != "cpu" && dev != "cuda") {
+            throw std::invalid_argument("suite load options: device must be 'cpu' or 'cuda', not '" +
+                                        dev + "'");
+        }
+        out.device = dev == "cuda" ? torch::kCUDA : torch::kCPU;
+    }
+    if (vhas(o, "vram_fraction")) out.vram_fraction = static_cast<float>(vdbl(o, "vram_fraction"));
+    if (vhas(o, "verify")) out.verify_checksums = vbool(o, "verify");
+    if (vhas(o, "targets")) out.targets = vstr_vec(o, "targets");
+    return out;
+}
+
+SuitePredictOptions parse_suite_predict_options(const resolve_value* o) {
+    SuitePredictOptions out;
+    if (!o || o->kind == RESOLVE_VALUE_NULL) return out;
+    reject_unknown_keys(o, "suite predict options", {"columns", "batch_size", "keep_members"});
+    if (vhas(o, "batch_size")) out.batch_size = vint(o, "batch_size");
+    if (vhas(o, "keep_members")) out.keep_members = vbool(o, "keep_members");
+    const resolve_value* c = vget(o, "columns");
+    if (c && c->kind != RESOLVE_VALUE_NULL) {
+        reject_unknown_keys(c, "suite columns",
+                            {"plot_id", "species_id", "abundance", "longitude", "latitude",
+                             "genus", "family", "covariates", "categoricals"});
+        SuiteColumns& cols = out.columns;
+        if (vhas(c, "plot_id")) cols.plot_id = vstr(c, "plot_id");
+        if (vhas(c, "species_id")) cols.species_id = vstr(c, "species_id");
+        if (vhas(c, "abundance")) cols.abundance = vstr(c, "abundance");
+        if (vhas(c, "longitude")) cols.longitude = vstr(c, "longitude");
+        if (vhas(c, "latitude")) cols.latitude = vstr(c, "latitude");
+        if (vhas(c, "genus")) cols.genus = vstr(c, "genus");
+        if (vhas(c, "family")) cols.family = vstr(c, "family");
+        if (vhas(c, "covariates")) cols.covariates = vstr_vec(c, "covariates");
+        if (vhas(c, "categoricals")) cols.categoricals = vstr_vec(c, "categoricals");
+    }
+    return out;
+}
+
+resolve_value* suite_predictions_to_value(const SuitePredictions& p) {
+    auto vec_or_null = [](const torch::Tensor& t) -> resolve_value* {
+        return t.defined() ? tensor_to_vec(t) : v_null();
+    };
+    auto* result = v_map();
+    ValueGuard g(result);
+    v_put(result, "plot_ids", v_string_array(p.plot_ids));
+    auto* targets = v_map();
+    v_put(result, "targets", targets);
+    for (const auto& t : p.targets) {
+        const bool vote = t.combine == SuiteCombine::Vote;
+        auto* m = v_map();
+        v_put(targets, t.name, m);
+        v_put(m, "name", v_string(t.name));
+        v_put(m, "task", v_string(enum_to_name(t.task)));
+        v_put(m, "combine", v_string(enum_to_name(t.combine)));
+        v_put(m, "status", v_string(enum_to_name(t.status)));
+        v_put(m, "limit", v_string(t.limit));
+        v_put(m, "units", v_string(t.units));
+        v_put(m, "class_names", v_string_array(t.class_names));
+        v_put(m, "member_seeds", v_int_array(t.member_seeds));
+        v_put(m, "value", vote ? tensor_to_ivec(t.value) : tensor_to_vec(t.value));
+        v_put(m, "agreement", vec_or_null(t.agreement));
+        v_put(m, "probabilities", t.probabilities.defined() ? tensor_to_mat(t.probabilities) : v_null());
+        v_put(m, "dispersion", vec_or_null(t.dispersion));
+        v_put(m, "members", !t.members.defined() ? v_null()
+                                : vote ? tensor_to_imat(t.members) : tensor_to_mat(t.members));
+        v_put(m, "n_species", vec_or_null(t.recognition.n_species));
+        v_put(m, "n_recognised", vec_or_null(t.recognition.n_recognised));
+        v_put(m, "recognised_share", vec_or_null(t.recognition.count_share));
+        v_put(m, "recognised_abundance_share", vec_or_null(t.recognition.abundance_share));
+    }
+    return g.release();
+}
+
+}  // namespace
+
+extern "C" {
+
+resolve_suite_t* resolve_suite_load(const char* dir, const resolve_value_t* options) {
+    CAPI_BODY_PTR({
+        if (!dir) throw std::invalid_argument("suite_load: null directory");
+        return new resolve_suite{SuitePredictor::load(dir, parse_suite_load_options(options))};
+    })
+}
+
+void resolve_suite_free(resolve_suite_t* s) { delete s; }
+
+resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const char* what) {
+    CAPI_BODY_PTR({
+        if (!s) throw std::runtime_error("suite_get: null handle");
+        const std::string w = what ? what : "";
+        if (w == "manifest") return json_to_value(s->suite.manifest().to_json());
+        if (w == "targets") return v_string_array(s->suite.target_names());
+        if (w == "n_encodings") return v_int(static_cast<int64_t>(s->suite.n_encodings()));
+        if (w == "directory") return v_string(s->suite.directory());
+        throw std::runtime_error("suite_get: unknown accessor '" + w + "'");
+    })
+}
+
+resolve_value_t* resolve_suite_predict_dataframe(resolve_suite_t* s, const resolve_value_t* header,
+                                                 const resolve_value_t* species,
+                                                 const resolve_value_t* options) {
+    CAPI_BODY_PTR({
+        if (!s) throw std::runtime_error("suite_predict: null handle");
+        const bool has_header = header && header->kind != RESOLVE_VALUE_NULL;
+        ColumnTable h = has_header ? value_to_column_table(header, "header") : ColumnTable();
+        ColumnTable sp = value_to_column_table(species, "species");
+        return suite_predictions_to_value(s->suite.predict(
+            SuiteInput::tables(has_header ? &h : nullptr, sp), parse_suite_predict_options(options)));
+    })
+}
+
+resolve_value_t* resolve_suite_predict_csv(resolve_suite_t* s, const char* header_path,
+                                           const char* species_path,
+                                           const resolve_value_t* options) {
+    CAPI_BODY_PTR({
+        if (!s) throw std::runtime_error("suite_predict: null handle");
+        if (!species_path) throw std::invalid_argument("suite_predict: a species CSV is required");
+        return suite_predictions_to_value(s->suite.predict(
+            SuiteInput::csv(header_path ? header_path : "", species_path),
+            parse_suite_predict_options(options)));
+    })
+}
+
+resolve_value_t* resolve_suite_verify(const char* dir) {
+    CAPI_BODY_PTR({
+        if (!dir) throw std::invalid_argument("suite_verify: null directory");
+        const SuiteManifest manifest = SuiteManifest::read(dir);
+        auto* result = v_map();
+        ValueGuard g(result);
+        v_put(result, "manifest", json_to_value(manifest.to_json()));
+        v_put(result, "problems", v_string_array(manifest.verify(dir)));
+        return g.release();
+    })
+}
+
+resolve_value_t* resolve_suite_seal(const char* dir) {
+    CAPI_BODY_PTR({
+        if (!dir) throw std::invalid_argument("suite_seal: null directory");
+        const std::string path = (std::filesystem::path(dir) / kSuiteManifestFile).string();
+        SuiteManifest manifest = SuiteManifest::from_json(json::read_file(path));
+        manifest.seal(dir);
+        manifest.write(dir);
+        return json_to_value(manifest.to_json());
     })
 }
 

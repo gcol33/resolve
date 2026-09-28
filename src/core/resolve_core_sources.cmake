@@ -21,6 +21,9 @@ set(RESOLVE_CORE_SOURCES
     ${RESOLVE_CORE_DIR}/cpp_src/continuous_block.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/trainer.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/predictor.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/suite.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/json.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/sha256.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/loss.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/dataset.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/species_encoding.cpp

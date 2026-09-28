@@ -246,6 +246,7 @@ int train_command(const ParsedArgs& args) {
     dataset_config.use_cuda_hash = args.has("--use-cuda-hash");
     dataset_config.pool_weighting = parse_pool_weighting(args.get("--pool-weighting"));
     dataset_config.pool_species_cap = args.get_int("--pool-species-cap");
+    dataset_config.zero_abundance_as = args.get_float("--zero-abundance-as");
 
     const bool is_pool_encoder =
         dataset_config.species_encoding == SpeciesEncodingMode::RankPool ||

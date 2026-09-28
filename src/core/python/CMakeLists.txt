@@ -120,6 +120,7 @@ set(BINDING_SOURCES
     src/bindings_metrics.cpp
     src/bindings_pretraining.cpp
     src/bindings_fuzzy.cpp
+    src/bindings_suite.cpp
 )
 nanobind_add_module(_resolve_core ${BINDING_SOURCES})
 

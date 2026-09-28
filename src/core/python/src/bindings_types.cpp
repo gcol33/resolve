@@ -107,7 +107,7 @@ void register_types(nb::module_& m) {
 
     // Loader configuration. Attribute names come from the field registry, so
     // `pool_weighting` (the rank_pool / transformer per-species weight scheme)
-    // and `pool_species_cap` (0 = no cap, -1 = auto p99, >0 = manual) reach
+    // and `pool_species_cap` (0 = no cap, -x = the (100 - x)th percentile, >0 = manual) reach
     // Python the moment they exist on the struct.
     {
         using Cfg = resolve::DatasetConfig;
@@ -168,6 +168,9 @@ void register_types(nb::module_& m) {
         // How missing covariates and coordinates enter the model; Zero for a
         // checkpoint written before the policy existed.
         .def_rw("missing_values", &resolve::ResolveSchema::missing_values)
+        // The abundance a recorded 0 was read at; 0 (left alone) for a
+        // checkpoint written before the knob existed.
+        .def_rw("zero_abundance_as", &resolve::ResolveSchema::zero_abundance_as)
         .def("missing_flag_width", &resolve::ResolveSchema::missing_flag_width)
         // Fitted species / genus / family vocabularies, index = integer code,
         // [0] = "<UNK>" (issue #102). Empty on a pre-fix checkpoint.

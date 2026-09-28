@@ -69,7 +69,8 @@ encoders.
 \item pool_weighting: rank_pool weighting "binary", "abundance", "log1p",
 "norm", or "rank" (default "log1p")
 \item pool_species_cap: rank_pool per-plot species cap; 0 = no cap (default),
--1 = auto p99, >0 = manual cap
+-x = the (100 - x)th percentile of species per plot, computed on the
+data loaded (-1 = p99, -5 = p95; x in 1..99), >0 = manual cap
 }}
 
 \item{schemaSource}{Optional ResolveDataset (from a previous
@@ -87,7 +88,8 @@ encoder indexes an embedding table with a code that is a function of the
 file the vocabulary was fitted on, so a dataset built without the training
 vocabularies looks up the wrong rows and \code{predictor$predict_dataset()}
 rejects it. Pair with \code{config = predictor$dataset_config()}. Mutually
-exclusive with \code{schemaSource}.}
+exclusive with \code{schemaSource}. With either, \code{targets} may be
+empty: plots built to be scored need carry no answer.}
 }
 \value{
 A ResolveDataset object (C++ class) with methods:

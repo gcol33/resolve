@@ -339,6 +339,17 @@ inline const char* trait_interaction_mode_to_string(TraitInteractionMode m) {
     return enum_name_of(m, kTraitInteractionModeNames, "bilinear");
 }
 
+inline constexpr EnumName<SuiteCombine> kSuiteCombineNames[] = {
+    {"mean", SuiteCombine::Mean},
+    {"vote", SuiteCombine::Vote},
+    {"circular_mean", SuiteCombine::CircularMean},
+};
+
+inline constexpr EnumName<SuiteTargetStatus> kSuiteTargetStatusNames[] = {
+    {"released", SuiteTargetStatus::Released},
+    {"experimental", SuiteTargetStatus::Experimental},
+};
+
 inline ParallelAggregation parse_parallel_aggregation(const std::string& s) {
     return parse_enum_name(s, kParallelAggregationNames, "parallel aggregation");
 }
@@ -407,6 +418,10 @@ RESOLVE_DECLARE_ENUM_NAMES(TraitInteractionMode, kTraitInteractionModeNames,
                            "trait interaction mode", "bilinear")
 RESOLVE_DECLARE_ENUM_NAMES(ParallelAggregation, kParallelAggregationNames,
                            "parallel aggregation", "concat")
+RESOLVE_DECLARE_ENUM_NAMES(SuiteCombine, kSuiteCombineNames,
+                           "suite combine rule", "mean")
+RESOLVE_DECLARE_ENUM_NAMES(SuiteTargetStatus, kSuiteTargetStatusNames,
+                           "suite target status", "released")
 
 #undef RESOLVE_DECLARE_ENUM_NAMES
 

@@ -440,7 +440,8 @@ resolve.progress <- function(checkpointDir) {
 #'   - pool_weighting: rank_pool weighting "binary", "abundance", "log1p",
 #'     "norm", or "rank" (default "log1p")
 #'   - pool_species_cap: rank_pool per-plot species cap; 0 = no cap (default),
-#'     -1 = auto p99, >0 = manual cap
+#'     -x = the (100 - x)th percentile of species per plot, computed on the
+#'     data loaded (-1 = p99, -5 = p95; x in 1..99), >0 = manual cap
 #' @param schemaSource Optional ResolveDataset (from a previous
 #'   \code{resolve.dataset.csv()} call). When supplied, this dataset is encoded
 #'   against that dataset's species / taxonomy / categorical vocabularies and
@@ -455,7 +456,8 @@ resolve.progress <- function(checkpointDir) {
 #'   file the vocabulary was fitted on, so a dataset built without the training
 #'   vocabularies looks up the wrong rows and \code{predictor$predict_dataset()}
 #'   rejects it. Pair with \code{config = predictor$dataset_config()}. Mutually
-#'   exclusive with \code{schemaSource}.
+#'   exclusive with \code{schemaSource}. With either, \code{targets} may be
+#'   empty: plots built to be scored need carry no answer.
 #'
 #' @return A ResolveDataset object (C++ class) with methods:
 #'   - coordinates(): Get coordinate matrix
@@ -520,7 +522,8 @@ resolve.dataset.csv <- function(header,
 
   # Shared roles/targets validation + role defaults (single source of truth
   # with resolve.dataset.frame()).
-  roles <- .resolve_normalize_roles_targets(roles, targets)
+  roles <- .resolve_normalize_roles_targets(
+    roles, targets, scoring = !is.null(schemaSource) || !is.null(vocabs))
   vocabs <- .resolve_check_vocab_source(schemaSource, vocabs)
 
   # When schemaSource is supplied, encode this dataset against that dataset's
@@ -618,15 +621,25 @@ resolve.dataset.csv <- function(header,
 }
 
 # Shared roles/targets validation + role defaults for the dataset loaders.
-.resolve_normalize_roles_targets <- function(roles, targets) {
+# `scoring` is TRUE when the dataset is encoded against a trained model's
+# vocabularies to be predicted on: plots to score carry no answer, so no
+# target is required there. A dataset fitted from scratch is for training and
+# needs at least one.
+.resolve_normalize_roles_targets <- function(roles, targets, scoring = FALSE) {
   if (!is.list(roles)) {
     stop("roles must be a named list")
   }
   if (!is.list(targets)) {
     stop("targets must be a named list")
   }
-  if (length(targets) == 0) {
+  if (length(targets) == 0 && !scoring) {
     stop("targets must not be empty - at least one target is required")
+  }
+  if (length(targets) == 0) {
+    .resolve_check_keys(roles, "roles", .resolve_role_keys)
+    if (is.null(roles$plot_id)) roles$plot_id <- "plot_id"
+    if (is.null(roles$species_id)) roles$species_id <- "species_id"
+    return(roles)
   }
   .resolve_check_keys(roles, "roles", .resolve_role_keys)
 
@@ -720,7 +733,8 @@ resolve.dataset.frame <- function(header,
                                   config = list(),
                                   schemaSource = NULL,
                                   vocabs = NULL) {
-  roles <- .resolve_normalize_roles_targets(roles, targets)
+  roles <- .resolve_normalize_roles_targets(
+    roles, targets, scoring = !is.null(schemaSource) || !is.null(vocabs))
   vocabs <- .resolve_check_vocab_source(schemaSource, vocabs)
   .resolve_require_backend()
 

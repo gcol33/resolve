@@ -31,12 +31,22 @@ void print_name_list(const char* label, const std::vector<std::string>& names) {
 
 }  // namespace
 
+int info_suite_command(const ParsedArgs& args);
+
 int info_command(const ParsedArgs& args) {
     using namespace resolve;
 
+    if (args.has("--suite")) {
+        if (args.has("--model")) {
+            std::cerr << "Error: pass --model or --suite, not both" << std::endl;
+            return 1;
+        }
+        return info_suite_command(args);
+    }
+
     const std::string model_path = args.get("--model");
     if (model_path.empty()) {
-        std::cerr << "Error: --model is required" << std::endl;
+        std::cerr << "Error: --model or --suite is required" << std::endl;
         return 1;
     }
 

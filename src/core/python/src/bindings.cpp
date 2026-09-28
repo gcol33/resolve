@@ -7,6 +7,7 @@
 // - bindings_model.cpp: ResolveModel
 // - bindings_trainer.cpp: Trainer and Predictor
 // - bindings_metrics.cpp: Metrics classes
+// - bindings_suite.cpp: model suites, their manifest and results
 
 #include "bindings_common.hpp"
 
@@ -30,6 +31,7 @@ NB_MODULE(_resolve_core, m) {
     register_metrics(m);
     register_pretraining(m);
     register_fuzzy(m);
+    register_suite(m);
 
     // Platform-aware PYTORCH_CUDA_ALLOC_CONF setter. The primary surface is
     // resolve_core.configure_cuda_allocator() in the Python __init__ which

@@ -105,7 +105,14 @@ inline const CommandSpec& train_spec() {
                          "norm, rank. Ignored for hash/embed/sparse."});
         flags.push_back({"--pool-species-cap", Arity::Value, "N", "0",
                          "Species-per-plot cap for the pool encoders:\n"
-                         "0 = no cap, -1 = auto p99, >0 = manual cap"});
+                         "0 = no cap, -x = the (100 - x)th percentile of\n"
+                         "species per plot (-1 = p99, -5 = p95; x in 1..99),\n"
+                         ">0 = manual cap"});
+        flags.push_back({"--zero-abundance-as", Arity::Value, "FLOAT", "0",
+                         "Abundance a recorded 0 is read at. Archives that\n"
+                         "write a presence-only record as 0% cover need a\n"
+                         "positive value here, or a log1p weighting gives\n"
+                         "those species no weight. 0 = leave a 0 alone."});
 
         // Model architecture
         flags.push_back({"--encoder-architecture", Arity::Value, "A", "mlp",
@@ -293,6 +300,23 @@ inline const CommandSpec& predict_spec() {
         std::vector<FlagSpec> flags;
         flags.push_back({"--model", Arity::Value, "PATH", "",
                          "Path to the trained model"});
+        flags.push_back({"--suite", Arity::Value, "DIR", "",
+                         "Directory of a model suite (a manifest.json and\n"
+                         "the weight files it names), scored instead of\n"
+                         "--model. Each target is the combined prediction\n"
+                         "of its members, with their agreement and the\n"
+                         "share of each plot's species the target's\n"
+                         "vocabulary recognises. The manifest names the\n"
+                         "input columns; the role flags below rename them."});
+        flags.push_back({"--target", Arity::Repeatable, "NAME", "",
+                         "With --suite: score only this target. Repeat per\n"
+                         "target; default every target of the suite."});
+        flags.push_back({"--members", Arity::Flag, "", "",
+                         "With --suite: also write every member's own\n"
+                         "prediction, '<target>_seed<N>'."});
+        flags.push_back({"--no-verify", Arity::Flag, "", "",
+                         "With --suite: skip comparing each member's size\n"
+                         "and SHA-256 with the manifest before loading."});
         flags.push_back({"--header", Arity::Value, "PATH", "",
                          "Path to header CSV file"});
         flags.push_back({"--species", Arity::Value, "PATH", "",
@@ -330,6 +354,9 @@ inline const CommandSpec& info_spec() {
         std::vector<FlagSpec> flags;
         flags.push_back({"--model", Arity::Value, "PATH", "",
                          "Path to the trained model"});
+        flags.push_back({"--suite", Arity::Value, "DIR", "",
+                         "Directory of a model suite: print its manifest and\n"
+                         "check every member's size and SHA-256"});
         return CommandSpec("info", "Info Options:", std::move(flags));
     }();
     return spec;

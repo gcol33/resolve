@@ -143,3 +143,12 @@ RESOLVE_SYM(resolve_value_t*, resolve_predictor_predict_dataset, (resolve_predic
 RESOLVE_SYM(resolve_value_t*, resolve_predictor_get_embeddings, (resolve_predictor_t* p, const resolve_value_t* inputs), (p, inputs))
 RESOLVE_SYM(int, resolve_predictor_optimize_for_inference, (resolve_predictor_t* p), (p))
 RESOLVE_SYM(resolve_value_t*, resolve_predictor_get, (const resolve_predictor_t* p, const char* what), (p, what))
+
+/* ---- Model suite ---------------------------------------------------------- */
+RESOLVE_SYM(resolve_suite_t*, resolve_suite_load, (const char* dir, const resolve_value_t* options), (dir, options))
+RESOLVE_SYM_VOID(resolve_suite_free, (resolve_suite_t* s), (s))
+RESOLVE_SYM(resolve_value_t*, resolve_suite_get, (const resolve_suite_t* s, const char* what), (s, what))
+RESOLVE_SYM(resolve_value_t*, resolve_suite_predict_dataframe, (resolve_suite_t* s, const resolve_value_t* header, const resolve_value_t* species, const resolve_value_t* options), (s, header, species, options))
+RESOLVE_SYM(resolve_value_t*, resolve_suite_predict_csv, (resolve_suite_t* s, const char* header_path, const char* species_path, const resolve_value_t* options), (s, header_path, species_path, options))
+RESOLVE_SYM(resolve_value_t*, resolve_suite_verify, (const char* dir), (dir))
+RESOLVE_SYM(resolve_value_t*, resolve_suite_seal, (const char* dir), (dir))

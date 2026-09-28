@@ -138,6 +138,17 @@ void register_enums(nb::module_& m) {
         .value("Indicate", resolve::MissingValuePolicy::Indicate)
         .export_values();
 
+    // Not exported to module scope: "Mean" would collide with other enums'
+    // value names there.
+    nb::enum_<resolve::SuiteCombine>(m, "SuiteCombine")
+        .value("Mean", resolve::SuiteCombine::Mean)
+        .value("Vote", resolve::SuiteCombine::Vote)
+        .value("CircularMean", resolve::SuiteCombine::CircularMean);
+
+    nb::enum_<resolve::SuiteTargetStatus>(m, "SuiteTargetStatus")
+        .value("Released", resolve::SuiteTargetStatus::Released)
+        .value("Experimental", resolve::SuiteTargetStatus::Experimental);
+
     nb::enum_<resolve::PoolWeighting>(m, "PoolWeighting")
         .value("Binary", resolve::PoolWeighting::Binary)
         .value("Abundance", resolve::PoolWeighting::Abundance)

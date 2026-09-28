@@ -12,39 +12,37 @@
 #include "resolve/resolve.hpp"
 
 #include "arg_parser.hpp"
+#include "csv_output.hpp"
 
+using resolve_cli::csv_field;
 using resolve_cli::ParsedArgs;
+
+int predict_suite_command(const ParsedArgs& args);
 
 namespace {
 
-// Quote a CSV field when it carries a comma, quote, or newline. Class labels
-// come from a user's CSV column and may contain any of them; emitting them raw
-// would shift every following column (issue #110 item 5).
-std::string csv_field(const std::string& s) {
-    if (s.find_first_of(",\"\n\r") == std::string::npos) return s;
-    std::string out = "\"";
-    for (char c : s) {
-        if (c == '"') out += '"';
-        out += c;
-    }
-    out += '"';
-    return out;
-}
-
-// The label a class code prints as: the original CSV label when the checkpoint
-// carries the class vocabulary (persisted since #76), otherwise the code
-// itself (a pre-#76 checkpoint, or a column that was already integer-coded).
 std::string class_label(const resolve::TargetConfig& target, int64_t code) {
-    const bool in_vocab =
-        code >= 0 && code < static_cast<int64_t>(target.class_names.size());
-    return in_vocab ? target.class_names[static_cast<size_t>(code)]
-                    : std::to_string(code);
+    return resolve_cli::class_label(target.class_names, code);
 }
 
 }  // namespace
 
 int predict_command(const ParsedArgs& args) {
     using namespace resolve;
+
+    if (args.has("--suite")) {
+        if (args.has("--model")) {
+            std::cerr << "Error: pass --model or --suite, not both" << std::endl;
+            return 1;
+        }
+        return predict_suite_command(args);
+    }
+    for (const char* suite_only : {"--target", "--members", "--no-verify"}) {
+        if (args.has(suite_only)) {
+            std::cerr << "Error: " << suite_only << " applies to --suite only" << std::endl;
+            return 1;
+        }
+    }
 
     const std::string model_path = args.get("--model");
     const std::string header_path = args.get("--header");
@@ -55,7 +53,7 @@ int predict_command(const ParsedArgs& args) {
 
     // Validate required arguments
     if (model_path.empty()) {
-        std::cerr << "Error: --model is required" << std::endl;
+        std::cerr << "Error: --model or --suite is required" << std::endl;
         return 1;
     }
 
@@ -128,17 +126,10 @@ int predict_command(const ParsedArgs& args) {
         return 1;
     }
 
-    // Build target specs from schema (we're not training, so these are just placeholders)
-    std::vector<TargetSpec> targets;
-    for (const auto& target : schema.targets) {
-        TargetSpec spec;
-        spec.column_name = target.name;
-        spec.target_name = target.name;
-        spec.task = target.task;
-        spec.transform = target.transform;
-        spec.num_classes = target.num_classes;
-        targets.push_back(spec);
-    }
+    // The plots to score carry no answer, so the loader is asked for no target:
+    // a target it was asked for would have to be a column of the file, and a
+    // plot missing it would be dropped from the output.
+    const std::vector<TargetSpec> targets;
 
     // Rebuild the loading-side DatasetConfig the checkpoint was trained with.
     // Single source of truth (issue #102): species_encoding / hash_dim / top_k
@@ -273,11 +264,11 @@ int predict_command(const ParsedArgs& args) {
                 if (n_prob_columns > 0) {
                     const auto& probs = predictions.probabilities.at(target.name);
                     for (int64_t k = 0; k < n_prob_columns; ++k) {
-                        out << "," << probs[i][k].item<float>();
+                        out << "," << resolve_cli::csv_number(probs[i][k].item<float>());
                     }
                 }
             } else {
-                out << "," << it->second[i].item<float>();
+                out << "," << resolve_cli::csv_number(it->second[i].item<float>());
             }
         }
         out << "\n";

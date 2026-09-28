@@ -12,6 +12,7 @@
 #include "rcpp_model.h"
 #include "rcpp_trainer.h"
 #include "rcpp_predictor.h"
+#include "rcpp_suite.h"
 
 // =============================================================================
 // Expose module-managed wrapper classes to non-module Rcpp machinery so the
@@ -24,6 +25,7 @@ RCPP_EXPOSED_CLASS_NODECL(RResolveDataset)
 RCPP_EXPOSED_CLASS_NODECL(RResolveModel)
 RCPP_EXPOSED_CLASS_NODECL(RTrainer)
 RCPP_EXPOSED_CLASS_NODECL(RPredictor)
+RCPP_EXPOSED_CLASS_NODECL(RSuite)
 
 RCPP_MODULE(resolve_module) {
     class_<RResolveDataset>("ResolveDataset")
@@ -156,7 +158,21 @@ RCPP_MODULE(resolve_module) {
         .method("dataset_config", &RPredictor::dataset_config, "The DatasetConfig this checkpoint implies")
         ;
 
+    class_<RSuite>("Suite")
+        .method("manifest", &RSuite::manifest, "The suite's manifest as a nested list")
+        .method("targets", &RSuite::targets, "The suite targets loaded, in manifest order")
+        .method("n_encodings", &RSuite::n_encodings, "Distinct input encodings the loaded members need")
+        .method("directory", &RSuite::directory, "The directory the suite was loaded from")
+        .method("predict_frame", &RSuite::predict_frame, "Score in-memory tables")
+        .method("predict_csv", &RSuite::predict_csv, "Score CSV files")
+        ;
+
     function("Predictor_load", &RPredictor::load, "Load predictor from checkpoint");
+    function("Suite_load", &RSuite::load, "Load a model suite from its directory");
+    function("Suite_verify", &RSuite::verify,
+             "Read a suite's manifest and compare every member file with it");
+    function("Suite_seal", &RSuite::seal,
+             "Fill a suite manifest's member checksums and sizes, validate and write it");
     function("Trainer_load_train_config", &RTrainer::load_train_config,
              "Recover the persisted TrainConfig from a checkpoint (as a list)");
     function("Trainer_load_run_metadata", &RTrainer::load_run_metadata,

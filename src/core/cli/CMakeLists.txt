@@ -7,9 +7,11 @@ set(CLI_SOURCES
     main.cpp
     train_cmd.cpp
     predict_cmd.cpp
+    suite_cmd.cpp
     info_cmd.cpp
     arg_parser.hpp
     cli_spec.hpp
+    csv_output.hpp
 )
 
 add_executable(resolve_cli ${CLI_SOURCES})

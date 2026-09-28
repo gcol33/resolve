@@ -49,6 +49,9 @@ inline constexpr const char* kUseTaxonomy       = "schema_use_taxonomy";
 // a checkpoint written before the policy existed, which then reads back as
 // MissingValuePolicy::Zero -- what that model was trained under.
 inline constexpr const char* kMissingValues     = "schema_missing_values";
+// The abundance a recorded 0 was read at. Absent on a checkpoint written before
+// the knob existed, which then reads back as 0 -- its loader left a 0 alone.
+inline constexpr const char* kZeroAbundanceAs   = "schema_zero_abundance_as";
 
 // Fitted species / genus / family vocabularies (issue #102). Each is one
 // string list written under the shared "<prefix>_lengths" (int64) +

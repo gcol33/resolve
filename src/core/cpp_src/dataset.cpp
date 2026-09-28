@@ -674,6 +674,7 @@ DatasetConfig dataset_config_from_checkpoint(const ResolveSchema& schema,
     config.track_unknown_count = schema.track_unknown_count;
     config.use_taxonomy = schema.use_taxonomy;
     config.missing_values = schema.missing_values;
+    config.zero_abundance_as = schema.zero_abundance_as;
     config.pool_weighting = static_cast<PoolWeighting>(schema.pool_weighting);
     config.pool_species_cap = schema.pool_species_cap;
     // use_cuda_hash stays false by design: it is a training-time compute path
@@ -805,8 +806,11 @@ ResolveDataset ResolveDataset::from_species_csv_impl(
 // weight defaults to 1.0 and *abundance_coerced (if given) is incremented so the
 // caller can warn -- mirroring the loud coordinate/covariate coercion warnings,
 // rather than silently conflating missing cover with a real presence (issue #94).
+// A parsed abundance of exactly 0 is read as `zero_abundance_as`
+// (DatasetConfig::zero_abundance_as; 0 leaves it alone).
 static SpeciesRecord make_species_record(const std::vector<std::string>& row,
                                          const ColumnIndices& cols,
+                                         float zero_abundance_as,
                                          int64_t* abundance_coerced = nullptr) {
     SpeciesRecord record;
     record.plot_id = row[cols.plot];
@@ -814,7 +818,7 @@ static SpeciesRecord make_species_record(const std::vector<std::string>& row,
     if (cols.abundance >= 0 && row.size() > static_cast<size_t>(cols.abundance)) {
         auto parsed = parse_regression_target(row[cols.abundance]);
         if (parsed.has_value()) {
-            record.abundance = *parsed;
+            record.abundance = *parsed == 0.0f ? zero_abundance_as : *parsed;
         } else {
             record.abundance = 1.0f;
             if (abundance_coerced) (*abundance_coerced)++;
@@ -829,6 +833,16 @@ static SpeciesRecord make_species_record(const std::vector<std::string>& row,
         record.family = row[cols.family];
     }
     return record;
+}
+
+// Reject a zero-abundance reading no weighting can use. Shared by both species
+// loaders, before any row is read.
+static void require_valid_zero_abundance(float zero_abundance_as) {
+    if (!std::isfinite(zero_abundance_as) || zero_abundance_as < 0.0f) {
+        throw std::invalid_argument(
+            "DatasetConfig.zero_abundance_as must be a finite value >= 0; got " +
+            std::to_string(zero_abundance_as));
+    }
 }
 
 // Emit the abundance-coercion warning shared by both species loaders.
@@ -928,6 +942,7 @@ ResolveDataset ResolveDataset::from_species_source(
     std::unordered_set<std::string> seen_plots;
     int64_t coord_na_count = 0;  // missing/unparseable coords, kept as NaN
     int64_t abundance_coerced = 0;  // missing/unparseable abundance coerced to 1.0
+    require_valid_zero_abundance(config.zero_abundance_as);
 
     reader.read_rows([&](size_t, const std::vector<std::string>& row) {
         if (row.size() <= static_cast<size_t>(std::max({cols.plot, cols.species}))) {
@@ -936,7 +951,8 @@ ResolveDataset ResolveDataset::from_species_source(
 
         std::string plot_id = row[cols.plot];
 
-        SpeciesRecord record = make_species_record(row, cols, &abundance_coerced);
+        SpeciesRecord record =
+            make_species_record(row, cols, config.zero_abundance_as, &abundance_coerced);
         plot_records[plot_id].push_back(record);
 
         // Extract plot-level data from first occurrence
@@ -1511,6 +1527,7 @@ void ResolveDataset::load_species_data(
     // Collect species records by plot
     std::unordered_map<std::string, std::vector<SpeciesRecord>> plot_records;
     int64_t abundance_coerced = 0;
+    require_valid_zero_abundance(config_.zero_abundance_as);
 
     reader.read_rows([&](size_t, const std::vector<std::string>& row) {
         if (row.size() <= static_cast<size_t>(std::max(cols.plot, cols.species))) {
@@ -1518,7 +1535,8 @@ void ResolveDataset::load_species_data(
         }
 
         std::string plot_id = row[cols.plot];
-        plot_records[plot_id].push_back(make_species_record(row, cols, &abundance_coerced));
+        plot_records[plot_id].push_back(
+            make_species_record(row, cols, config_.zero_abundance_as, &abundance_coerced));
     });
     warn_abundance_coercions(abundance_coerced);
 
@@ -1643,6 +1661,7 @@ void ResolveDataset::encode_species(
     schema_.aggregation = config_.aggregation;
     schema_.use_taxonomy = config_.use_taxonomy;
     schema_.missing_values = config_.missing_values;
+    schema_.zero_abundance_as = config_.zero_abundance_as;
 
     // Fit taxonomy vocabulary. Rank-pool / transformer modes rebuild taxonomy
     // from the RankPoolEncoder's own vocab further down (and overwrite these
@@ -2056,6 +2075,15 @@ void ResolveDataset::encode_species(
         if (config_.track_unknown_count) {
             unknown_count_ = unknown_stats.count;
         }
+    }
+
+    // How much of each plot the adopted vocabulary recognises, reported beside
+    // a prediction. Only a vocabulary fitted on other data can miss a species;
+    // one fitted on these records recognises all of them by construction, so a
+    // training load skips the pass.
+    if (use_external_vocabs_) {
+        species_recognition_ = compute_species_recognition(
+            all_records, plot_ids_, active_species_vocab(species_to_idx_));
     }
 
     // The taxonomy of the vocabulary itself: the genus and family each species

@@ -74,6 +74,7 @@ typedef struct resolve_dataset   resolve_dataset_t;
 typedef struct resolve_model     resolve_model_t;
 typedef struct resolve_trainer   resolve_trainer_t;
 typedef struct resolve_predictor resolve_predictor_t;
+typedef struct resolve_suite     resolve_suite_t;
 
 /* Tag returned by resolve_value_kind(). */
 typedef enum {
@@ -452,6 +453,63 @@ RESOLVE_CAPI int resolve_predictor_optimize_for_inference(resolve_predictor_t* p
  * correctly (issue #102): pass the first to a resolve_dataset_from_*_with_vocabs
  * loader and the second as that loader's `config`. */
 RESOLVE_CAPI resolve_value_t* resolve_predictor_get(const resolve_predictor_t* p, const char* what);
+
+/* ========================================================================== */
+/* Model suite                                                                */
+/* ========================================================================== */
+
+/* Load the model suite in directory `dir` (a manifest.json and the weight files
+ * it names). `options` is a MAP or NULL:
+ *   device        STRING  "cpu" (default) or "cuda"
+ *   vram_fraction DOUBLE  default 1.0
+ *   verify        BOOL    compare each member's size and SHA-256 with the
+ *                         manifest before loading (default true)
+ *   targets       STRING_ARRAY  load only these suite targets (default all)
+ * NULL on error, including a checksum mismatch or a member that does not match
+ * the manifest's input contract. */
+RESOLVE_CAPI resolve_suite_t* resolve_suite_load(const char* dir, const resolve_value_t* options);
+
+RESOLVE_CAPI void resolve_suite_free(resolve_suite_t* s);
+
+/* Zero-arg accessor. `what`: manifest (the manifest as a value tree: MAPs,
+ * LISTs, STRINGs, DOUBLEs, BOOLs and NULLs, key order kept), targets
+ * (STRING_ARRAY of the loaded targets), n_encodings (INT), directory (STRING).
+ * Returns value / NULL. */
+RESOLVE_CAPI resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const char* what);
+
+/* Score plots. `header` (may be NULL) and `species` are column tables as for
+ * resolve_dataset_from_dataframe. `options` is a MAP or NULL:
+ *   columns       MAP  renames the manifest's input columns; keys as in a
+ *                      roles tree (plot_id species_id abundance latitude
+ *                      longitude genus family covariates categoricals)
+ *   batch_size    INT  per-member forward chunk (default 4096)
+ *   keep_members  BOOL keep every member's own prediction (default false)
+ * Returns a MAP: "plot_ids" (STRING_ARRAY) and "targets", an ordered MAP of
+ * target name -> MAP with name task combine status limit units class_names
+ * member_seeds value (INT_ARRAY class codes for a vote, DOUBLE_ARRAY
+ * otherwise) agreement probabilities dispersion members n_species n_recognised
+ * recognised_share recognised_abundance_share. A statistic the target's
+ * combine rule does not define is NULL-kind; NaN marks an undefined value. */
+RESOLVE_CAPI resolve_value_t* resolve_suite_predict_dataframe(
+    resolve_suite_t* s, const resolve_value_t* header, const resolve_value_t* species,
+    const resolve_value_t* options);
+
+/* The same over CSV files; `header_path` may be NULL or empty. */
+RESOLVE_CAPI resolve_value_t* resolve_suite_predict_csv(
+    resolve_suite_t* s, const char* header_path, const char* species_path,
+    const resolve_value_t* options);
+
+/* Read and validate the manifest in `dir` without loading any member, then
+ * compare every member file with it. Returns a MAP: "manifest" (value tree as
+ * above) and "problems" (STRING_ARRAY, empty when the suite is intact). NULL
+ * when the manifest itself cannot be read or is invalid. */
+RESOLVE_CAPI resolve_value_t* resolve_suite_verify(const char* dir);
+
+/* Seal a suite being built: read `dir`/manifest.json, whose members may lack
+ * their sha256 and bytes, fill both from the files under `dir`, validate, and
+ * write the manifest back. Returns the sealed manifest (value tree as above) /
+ * NULL. */
+RESOLVE_CAPI resolve_value_t* resolve_suite_seal(const char* dir);
 
 #endif /* !RESOLVE_CAPI_DYNLOAD */
 

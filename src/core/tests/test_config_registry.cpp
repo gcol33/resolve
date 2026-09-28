@@ -373,7 +373,7 @@ TEST_CASE("Every config struct's registry covers every member", "[config][regist
     CHECK(field_registry_size(static_cast<const ParallelBranchConfig*>(nullptr)) == 5);
     CHECK(field_registry_size(static_cast<const ParallelLayersConfig*>(nullptr)) == 5);
     CHECK(field_registry_size(static_cast<const ModelConfig*>(nullptr)) == 46);
-    CHECK(field_registry_size(static_cast<const DatasetConfig*>(nullptr)) == 16);
+    CHECK(field_registry_size(static_cast<const DatasetConfig*>(nullptr)) == 17);
     CHECK(field_registry_size(static_cast<const TrainConfig*>(nullptr)) == 30);
 
     // Same comparison the static_assert makes, spelled out once at runtime.

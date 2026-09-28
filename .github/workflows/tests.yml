@@ -262,6 +262,116 @@ jobs:
           print(f"OK: {len(rows)} rows with {len(prob_columns)} probability columns")
           CHECK
 
+      # A model suite: three seeds of the model above scored as one. The plots
+      # to score carry no target column, which both predict paths must accept.
+      # The suite's vote and mean are recomputed from the members' own
+      # single-model predictions, and a changed weight file is refused.
+      - name: Predict with a model suite
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:${LD_LIBRARY_PATH:-}
+          RESOLVE=${{ github.workspace }}/cli/resolve
+          FIXTURES=${{ github.workspace }}/src/core/tests/fixtures
+          SUITE="$OUT/suite"
+          mkdir -p "$SUITE/seed_7"
+          cp "$OUT/model.pt" "$SUITE/seed_7/model.pt"
+          for seed in 8 9; do
+            mkdir -p "$SUITE/seed_$seed"
+            "$RESOLVE" train \
+              --header "$FIXTURES/cli_header.csv" \
+              --species "$FIXTURES/cli_species.csv" \
+              --plot-id plot_id --species-id species --abundance cover \
+              --lat lat --lon lon --genus genus --family family \
+              --covariate elevation --categorical bedrock \
+              --target area:regression --target habitat:classification:3 \
+              --encoding rank_pool --pool-weighting log1p \
+              --hidden-dims 64,32 --dropout 0.0 \
+              --batch-size 32 --max-epochs 20 --patience 20 --lr 0.01 \
+              --test-size 0.25 --seed "$seed" \
+              --output "$SUITE/seed_$seed/model.pt" > /dev/null
+          done
+
+          python3 - "$SUITE" "$FIXTURES/cli_header.csv" "$OUT/unlabelled.csv" <<'BUILD'
+          import csv, hashlib, json, os, sys
+          suite, header, unlabelled = sys.argv[1:4]
+          def member(seed):
+              path = os.path.join(suite, f"seed_{seed}", "model.pt")
+              digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
+              return {"seed": seed, "file": f"seed_{seed}/model.pt", "sha256": digest,
+                      "bytes": os.path.getsize(path)}
+          members = [member(s) for s in (7, 8, 9)]
+          manifest = {
+              "format": "resolve-suite", "format_version": 1, "name": "ci_suite",
+              "licence": "CC0-1.0", "engine_version": "ci", "taxonomy": "synthetic",
+              "training_scope": "the CLI fixture plots",
+              "inputs": {"plot_id": "plot_id", "species": "species", "abundance": "cover",
+                         "genus": "genus", "family": "family", "latitude": "lat",
+                         "longitude": "lon", "covariates": ["elevation"],
+                         "categoricals": ["bedrock"]},
+              "targets": [
+                  {"name": "habitat", "task": "classification", "combine": "vote",
+                   "outputs": ["habitat"], "status": "released", "members": members},
+                  {"name": "area", "task": "regression", "combine": "mean",
+                   "outputs": ["area"], "units": "m^2", "status": "experimental",
+                   "limit": "CI fixture only", "members": members},
+              ],
+          }
+          json.dump(manifest, open(os.path.join(suite, "manifest.json"), "w"), indent=2)
+          with open(header, newline="") as fh:
+              rows = list(csv.DictReader(fh))
+          with open(unlabelled, "w", newline="") as fh:
+              keep = ["plot_id", "lat", "lon", "elevation", "bedrock"]
+              w = csv.DictWriter(fh, fieldnames=keep)
+              w.writeheader()
+              w.writerows({k: r[k] for k in keep} for r in rows)
+          BUILD
+
+          "$RESOLVE" info --suite "$SUITE" | tee "$OUT/suite_info.txt"
+          grep -q "habitat: vote of 3 member(s), released" "$OUT/suite_info.txt"
+          grep -q "area: mean of 3 member(s), m^2, experimental" "$OUT/suite_info.txt"
+          grep -q "sizes and SHA-256 match the manifest" "$OUT/suite_info.txt"
+
+          "$RESOLVE" predict --suite "$SUITE" \
+            --header "$OUT/unlabelled.csv" --species "$FIXTURES/cli_species.csv" \
+            --members --output "$OUT/suite.csv" | tee "$OUT/suite_predict.txt"
+          grep -q "'area' is released as experimental: CI fixture only" "$OUT/suite_predict.txt"
+          for seed in 7 8 9; do
+            "$RESOLVE" predict --model "$SUITE/seed_$seed/model.pt" \
+              --header "$OUT/unlabelled.csv" --species "$FIXTURES/cli_species.csv" \
+              --plot-id plot_id --species-id species --abundance cover \
+              --lat lat --lon lon --genus genus --family family \
+              --output "$OUT/member_$seed.csv" > /dev/null
+          done
+
+          python3 - "$OUT" <<'CHECK'
+          import csv, statistics, sys
+          out = sys.argv[1]
+          suite = list(csv.DictReader(open(f"{out}/suite.csv", newline="")))
+          members = {s: {r["plot_id"]: r for r in csv.DictReader(open(f"{out}/member_{s}.csv", newline=""))}
+                     for s in (7, 8, 9)}
+          assert len(suite) == len(members[7]), (len(suite), len(members[7]))
+          for row in suite:
+              pid = row["plot_id"]
+              labels = [members[s][pid]["habitat"] for s in (7, 8, 9)]
+              assert [row[f"habitat_seed{s}"] for s in (7, 8, 9)] == labels, pid
+              top = max(labels.count(l) for l in labels)
+              assert abs(float(row["habitat_agreement"]) - top / 3) < 1e-6, pid
+              assert labels.count(row["habitat"]) == top, pid
+              areas = [float(members[s][pid]["area"]) for s in (7, 8, 9)]
+              assert abs(float(row["area"]) - statistics.fmean(areas)) < 1e-3 * (1 + abs(float(row["area"]))), pid
+              assert abs(float(row["area_sd"]) - statistics.stdev(areas)) < 1e-3 * (1 + statistics.stdev(areas)), pid
+              assert row["area_recognised_share"] == "1", pid
+          print(f"OK: {len(suite)} plots, vote and mean match the members")
+          CHECK
+
+          # A changed member is refused before anything is scored.
+          printf 'x' >> "$SUITE/seed_8/model.pt"
+          if "$RESOLVE" predict --suite "$SUITE" --header "$OUT/unlabelled.csv" \
+               --species "$FIXTURES/cli_species.csv" --output "$OUT/tampered.csv" 2> "$OUT/tampered.err"; then
+            echo "a tampered suite was scored"; exit 1
+          fi
+          grep -q "does not match its manifest" "$OUT/tampered.err"
+
       # The covariate is not merely recorded in the schema: it widens the
       # encoder's input, so an otherwise identical model trained without it has
       # strictly fewer parameters.

@@ -72,6 +72,7 @@ add_executable(resolve_tests
     test_architecture_knobs.cpp
     test_species_graph.cpp
     test_cli_config_flags.cpp
+    test_suite.cpp
 )
 
 # Add CUDA library directory if CUDA is available

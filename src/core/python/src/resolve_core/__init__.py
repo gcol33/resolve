@@ -184,6 +184,25 @@ try:
         VAEPretrainer,
         # Native fuzzy-string index submodule (fuzzy.FuzzyIndex, fuzzy.Match)
         fuzzy,
+        # Model suites: a released set of checkpoints scored as one model
+        SuiteCombine,
+        SuiteTargetStatus,
+        SuiteInputContract,
+        SuiteMember,
+        SuiteTarget,
+        SuiteManifest,
+        SuiteColumns,
+        SuitePredictor,
+        SuitePredictions,
+        SuiteTargetPrediction,
+        CombinedPrediction,
+        combine_vote,
+        combine_mean,
+        combine_circular,
+        bearing_from_components,
+        SpeciesRecognition,
+        compute_species_recognition,
+        sha256_file,
     )
 except ImportError as e:
     raise ImportError(
@@ -259,6 +278,11 @@ Predictor.load = staticmethod(_predictor_load)
 # .from_dataframe (issue #22), wrapping the low-level from_columns* bindings.
 from . import _from_pandas as _from_pandas_mod
 _from_pandas_mod.install()
+
+# Attach SuitePredictor.predict (pandas DataFrames or CSV paths) and
+# SuitePredictions.to_pandas over the low-level suite bindings.
+from . import _suite as _suite_mod
+_suite_mod.install()
 
 # Report the version of the engine actually loaded, not a literal that can go
 # stale against the .pyd. bindings.cpp sets this from resolve::VERSION, which
@@ -366,6 +390,25 @@ __all__ = [
     "VAEPretrainer",
     # Native fuzzy-string index submodule
     "fuzzy",
+    # Model suites
+    "SuiteCombine",
+    "SuiteTargetStatus",
+    "SuiteInputContract",
+    "SuiteMember",
+    "SuiteTarget",
+    "SuiteManifest",
+    "SuiteColumns",
+    "SuitePredictor",
+    "SuitePredictions",
+    "SuiteTargetPrediction",
+    "CombinedPrediction",
+    "combine_vote",
+    "combine_mean",
+    "combine_circular",
+    "bearing_from_components",
+    "SpeciesRecognition",
+    "compute_species_recognition",
+    "sha256_file",
     # GPU memory management
     "set_vram_fraction",
     "configure_cuda_allocator",

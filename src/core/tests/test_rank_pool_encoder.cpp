@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "resolve/encoder.hpp"
 #include "resolve/model.hpp"
+#include "resolve/species_encoding.hpp"
 
 using namespace resolve;
 
@@ -276,4 +277,31 @@ TEST_CASE("ResolveModel with RankPool mode constructs and forwards", "[rank_pool
 
     REQUIRE(outputs.count("area") == 1);
     REQUIRE(outputs["area"].size(0) == 4);
+}
+
+TEST_CASE("A negative species cap -x is the (100 - x)th percentile", "[rank_pool][cap]") {
+    // Plot i records i + 1 species, so the lengths are 1..100 and numpy's
+    // int(np.percentile(1..100, q)) is 1 + 0.99 * q truncated: p99 = 99,
+    // p95 = 95, p50 = 50.
+    std::vector<resolve::SpeciesRecord> records;
+    std::vector<std::string> plot_ids;
+    for (int i = 0; i < 100; ++i) {
+        plot_ids.push_back("P" + std::to_string(i));
+        for (int s = 0; s <= i; ++s) {
+            records.push_back({"sp" + std::to_string(s), "", "", 1.0f, plot_ids.back()});
+        }
+    }
+    resolve::RankPoolEncoder encoder;
+    encoder.fit(records);
+    auto width = [&](int cap) {
+        return encoder.transform(records, plot_ids, cap).species_ids.size(1);
+    };
+    REQUIRE(width(0) == 100);   // no cap
+    REQUIRE(width(-1) == 99);   // p99
+    REQUIRE(width(-5) == 95);   // p95
+    REQUIRE(width(-50) == 50);  // p50
+    REQUIRE(width(-99) == 1);   // p1
+    REQUIRE(width(40) == 40);   // manual
+    REQUIRE_THROWS_AS(width(-100), std::invalid_argument);
+    REQUIRE_THROWS_AS(width(-250), std::invalid_argument);
 }

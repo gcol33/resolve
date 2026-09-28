@@ -2,8 +2,10 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <numeric>
 #include <set>
+#include <string_view>
 
 namespace resolve {
 
@@ -305,6 +307,47 @@ SpeciesVocab SpeciesVocab::from_map(std::unordered_map<std::string, int64_t> spe
 // Unknown-species (novelty) statistics
 // =============================================================================
 
+namespace {
+
+// Per-plot abundance totals against a vocabulary: the one pass both the model's
+// novelty features and the recognition report are computed from, so the two
+// cannot disagree about which records count as unknown.
+struct AbundanceTally {
+    std::unordered_map<std::string, int64_t> plot_to_index;
+    // Accumulated in double: a species-rich plot sums thousands of float
+    // abundances, and the ratio is taken at the end.
+    std::vector<double> total;
+    std::vector<double> unknown;
+    std::vector<int64_t> unknown_records;
+};
+
+AbundanceTally tally_abundance(const std::vector<SpeciesRecord>& records,
+                               const std::vector<std::string>& plot_ids,
+                               const SpeciesVocab& vocab) {
+    AbundanceTally t;
+    const size_t n_plots = plot_ids.size();
+    t.total.assign(n_plots, 0.0);
+    t.unknown.assign(n_plots, 0.0);
+    t.unknown_records.assign(n_plots, 0);
+    t.plot_to_index.reserve(n_plots);
+    for (size_t i = 0; i < n_plots; ++i) {
+        t.plot_to_index.emplace(plot_ids[i], static_cast<int64_t>(i));
+    }
+    for (const auto& r : records) {
+        auto it = t.plot_to_index.find(r.plot_id);
+        if (it == t.plot_to_index.end()) continue;
+        const auto p = static_cast<size_t>(it->second);
+        t.total[p] += static_cast<double>(r.abundance);
+        if (vocab.encode(r.species_id) == 0) {
+            t.unknown[p] += static_cast<double>(r.abundance);
+            t.unknown_records[p] += 1;
+        }
+    }
+    return t;
+}
+
+}  // namespace
+
 UnknownSpeciesStats compute_unknown_species_stats(
     const std::vector<SpeciesRecord>& records,
     const std::vector<std::string>& plot_ids,
@@ -317,35 +360,69 @@ UnknownSpeciesStats compute_unknown_species_stats(
     out.count    = torch::zeros({n_plots}, torch::kFloat32);
     if (n_plots == 0) return out;
 
-    std::unordered_map<std::string, int64_t> plot_to_index;
-    plot_to_index.reserve(plot_ids.size());
-    for (int64_t i = 0; i < n_plots; ++i) {
-        plot_to_index.emplace(plot_ids[i], i);
-    }
-
-    // Accumulate in double: a species-rich plot sums thousands of float
-    // abundances, and the ratio is taken at the end.
-    std::vector<double> total(static_cast<size_t>(n_plots), 0.0);
-    std::vector<double> unknown(static_cast<size_t>(n_plots), 0.0);
-
+    const AbundanceTally tally = tally_abundance(records, plot_ids, vocab);
+    auto frac_a = out.fraction.accessor<float, 1>();
     auto count_a = out.count.accessor<float, 1>();
-    for (const auto& r : records) {
-        auto it = plot_to_index.find(r.plot_id);
-        if (it == plot_to_index.end()) continue;
-        const int64_t p = it->second;
-
-        total[static_cast<size_t>(p)] += static_cast<double>(r.abundance);
-        if (vocab.encode(r.species_id) == 0) {
-            unknown[static_cast<size_t>(p)] += static_cast<double>(r.abundance);
-            count_a[p] += 1.0f;
+    for (int64_t p = 0; p < n_plots; ++p) {
+        const auto i = static_cast<size_t>(p);
+        count_a[p] = static_cast<float>(tally.unknown_records[i]);
+        if (tally.total[i] > 0.0) {
+            frac_a[p] = static_cast<float>(tally.unknown[i] / tally.total[i]);
         }
     }
+    return out;
+}
 
-    auto frac_a = out.fraction.accessor<float, 1>();
+SpeciesRecognition compute_species_recognition(
+    const std::vector<SpeciesRecord>& records,
+    const std::vector<std::string>& plot_ids,
+    const SpeciesVocab& vocab
+) {
+    const int64_t n_plots = static_cast<int64_t>(plot_ids.size());
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+
+    SpeciesRecognition out;
+    out.n_species = torch::zeros({n_plots}, torch::kFloat32);
+    out.n_recognised = torch::zeros({n_plots}, torch::kFloat32);
+    out.count_share = torch::full({n_plots}, nan, torch::kFloat32);
+    out.abundance_share = torch::full({n_plots}, nan, torch::kFloat32);
+    if (n_plots == 0) return out;
+
+    const AbundanceTally tally = tally_abundance(records, plot_ids, vocab);
+
+    // Distinct names per plot: a species recorded in several layers is one
+    // species of the assemblage, however many records carry it.
+    std::vector<std::vector<std::string_view>> names(static_cast<size_t>(n_plots));
+    for (const auto& r : records) {
+        auto it = tally.plot_to_index.find(r.plot_id);
+        if (it == tally.plot_to_index.end()) continue;
+        names[static_cast<size_t>(it->second)].emplace_back(r.species_id);
+    }
+
+    auto n_species_a = out.n_species.accessor<float, 1>();
+    auto n_recognised_a = out.n_recognised.accessor<float, 1>();
+    auto count_share_a = out.count_share.accessor<float, 1>();
+    auto abundance_share_a = out.abundance_share.accessor<float, 1>();
+    std::string key;
     for (int64_t p = 0; p < n_plots; ++p) {
-        const double t = total[static_cast<size_t>(p)];
-        if (t > 0.0) {
-            frac_a[p] = static_cast<float>(unknown[static_cast<size_t>(p)] / t);
+        auto& plot_names = names[static_cast<size_t>(p)];
+        std::sort(plot_names.begin(), plot_names.end());
+        plot_names.erase(std::unique(plot_names.begin(), plot_names.end()), plot_names.end());
+        int64_t recognised = 0;
+        for (const auto name : plot_names) {
+            key.assign(name);
+            if (vocab.encode(key) != 0) ++recognised;
+        }
+        const auto n = static_cast<int64_t>(plot_names.size());
+        n_species_a[p] = static_cast<float>(n);
+        n_recognised_a[p] = static_cast<float>(recognised);
+        if (n > 0) {
+            count_share_a[p] = static_cast<float>(recognised) / static_cast<float>(n);
+        }
+        const auto i = static_cast<size_t>(p);
+        if (tally.total[i] > 0.0) {
+            abundance_share_a[p] =
+                static_cast<float>((tally.total[i] - tally.unknown[i]) / tally.total[i]);
         }
     }
     return out;
@@ -616,15 +693,23 @@ RankPoolEncodedData RankPoolEncoder::transform(
     if (max_species == 0) max_species = 1;  // Avoid 0-width tensors
 
     // Resolve species_cap (mirrors DatasetConfig::pool_species_cap):
-    //   0  -> no cap (use the global per-plot max we just computed).
-    //   -1 -> auto p99 over the per-plot species-count distribution.
-    //   >0 -> use the value as-is.
+    //   0        -> no cap (use the global per-plot max we just computed).
+    //   -x       -> the (100 - x)th percentile of the per-plot species counts,
+    //               for x in 1..99 (-1 = p99, -5 = p95).
+    //   >0       -> use the value as-is.
     // Then, if the resolved cap is smaller than max_species, truncate each
     // plot's per-species buffers to the first `cap` entries (matching the
     // first `cap` entries in CSV row order) and shrink max_species. Print a
     // one-line summary so users see the drop in n_padding.
+    if (species_cap <= -100) {
+        throw std::invalid_argument(
+            "pool_species_cap " + std::to_string(species_cap) + " names the " +
+            std::to_string(100 + species_cap) + "th percentile; a negative cap -x "
+            "means the (100 - x)th percentile and takes x in 1..99 (0 = no cap)");
+    }
+    const int percentile = 100 + species_cap;  // meaningful when species_cap < 0
     int64_t resolved_cap = max_species;  // default: no cap
-    if (species_cap == -1) {
+    if (species_cap < 0) {
         // Build a sorted copy of per-plot lengths to compute the percentile.
         // n_plots is in the millions for production datasets but this is a
         // one-shot int64 sort per dataset load (not per epoch), so the cost
@@ -635,14 +720,14 @@ RankPoolEncodedData RankPoolEncoder::transform(
             lengths.push_back(static_cast<int64_t>(pd.sp_ids.size()));
         }
         if (!lengths.empty()) {
-            // p99 matching numpy's int(np.percentile(lengths, 99)): linear
+            // Matching numpy's int(np.percentile(lengths, q)): linear
             // interpolation between the bracketing order statistics, then
             // integer truncation. The earlier floor-rank index took only the
             // lower order statistic with no interpolation, over-truncating
             // skewed length distributions (e.g. sorted [1,5,100] -> 5 here,
-            // 98 in numpy).
+            // 98 in numpy at q = 99).
             resolved_cap = std::max<int64_t>(
-                percentile_linear_trunc(lengths, 99.0), 1);
+                percentile_linear_trunc(lengths, static_cast<double>(percentile)), 1);
         }
     } else if (species_cap > 0) {
         resolved_cap = species_cap;
@@ -662,7 +747,7 @@ RankPoolEncodedData RankPoolEncoder::transform(
         const double saved = 1.0 - static_cast<double>(max_species) /
                                    static_cast<double>(old_max);
         std::cout << "  rank_pool: capping species at "
-                  << (species_cap == -1 ? "p99=" : "cap=")
+                  << (species_cap < 0 ? "p" + std::to_string(percentile) + "=" : "cap=")
                   << resolved_cap
                   << " (max=" << old_max
                   << ", saves " << static_cast<int>(saved * 100.0 + 0.5)
