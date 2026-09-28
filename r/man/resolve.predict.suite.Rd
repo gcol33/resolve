@@ -52,7 +52,8 @@ Per plot and target the result holds the combined prediction and, each on
 its own:
 \itemize{
 \item for a class vote: the share of members naming the winning class
-(\code{agreement}) and the members' mean class probabilities;
+(\code{agreement}) and the members' mean class probabilities (a tie in votes
+goes to the tied class with the higher mean probability);
 \item for a mean: the members' standard deviation (\code{dispersion}), in the
 target's units;
 \item for a circular mean (a bearing): the members' circular standard deviation

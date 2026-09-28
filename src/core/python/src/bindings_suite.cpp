@@ -201,10 +201,14 @@ void register_suite(nb::module_& m) {
         .def_prop_ro("agreement", [](const CombinedPrediction& c) { return tensor_or_none(c.agreement); })
         .def_prop_ro("dispersion", [](const CombinedPrediction& c) { return tensor_or_none(c.dispersion); });
 
-    m.def("combine_vote", [](nb::object codes, int64_t n_classes) {
-              return combine_vote(unpack_required_tensor(codes, "member_codes"), n_classes);
+    m.def("combine_vote", [](nb::object codes, int64_t n_classes, nb::object probabilities) {
+              return combine_vote(unpack_required_tensor(codes, "member_codes"), n_classes,
+                                  unpack_optional_tensor(probabilities));
           }, nb::arg("member_codes"), nb::arg("n_classes"),
-          "Majority class over a (n_members, n_plots) stack, ties to the lowest code.");
+          nb::arg("mean_probabilities") = nb::none(),
+          "Majority class over a (n_members, n_plots) stack. A tie goes to the class with "
+          "the higher mean probability when mean_probabilities (n_plots, n_classes) is "
+          "given, else to the lowest code.");
     m.def("combine_mean", [](nb::object values) {
               return combine_mean(unpack_required_tensor(values, "member_values"));
           }, nb::arg("member_values"),

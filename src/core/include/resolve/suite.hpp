@@ -267,9 +267,13 @@ struct CombinedPrediction {
     torch::Tensor agreement;   // vote only
     torch::Tensor dispersion;  // mean / circular mean only
 };
-// Vote over int64 class codes; ties go to the lowest code.
+// Vote over int64 class codes. A tie between classes with the most votes goes
+// to the one with the highest mean probability when `mean_probabilities`
+// ((n_plots, n_classes), the members' mean class probabilities) is given, and
+// to the lowest code otherwise or where those probabilities tie too.
 [[nodiscard]] CombinedPrediction combine_vote(const torch::Tensor& member_codes,
-                                              int64_t n_classes);
+                                              int64_t n_classes,
+                                              const torch::Tensor& mean_probabilities = {});
 [[nodiscard]] CombinedPrediction combine_mean(const torch::Tensor& member_values);
 // Bearings in [0, period) (any real value is reduced modulo the period).
 [[nodiscard]] CombinedPrediction combine_circular(const torch::Tensor& member_bearings,

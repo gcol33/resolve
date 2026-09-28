@@ -126,7 +126,8 @@ resolve.seal_suite <- function(dir) {
 #' Per plot and target the result holds the combined prediction and, each on
 #' its own:
 #' - for a class vote: the share of members naming the winning class
-#'   (`agreement`) and the members' mean class probabilities;
+#'   (`agreement`) and the members' mean class probabilities (a tie in votes
+#'   goes to the tied class with the higher mean probability);
 #' - for a mean: the members' standard deviation (`dispersion`), in the
 #'   target's units;
 #' - for a circular mean (a bearing): the members' circular standard deviation

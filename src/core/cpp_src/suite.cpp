@@ -547,7 +547,8 @@ constexpr double kTwoPi = 2.0 * std::numbers::pi;
 
 }  // namespace
 
-CombinedPrediction combine_vote(const torch::Tensor& member_codes, int64_t n_classes) {
+CombinedPrediction combine_vote(const torch::Tensor& member_codes, int64_t n_classes,
+                                const torch::Tensor& mean_probabilities) {
     require_stack(member_codes, "combine_vote");
     if (n_classes < 1) throw std::invalid_argument("combine_vote: n_classes must be >= 1");
     const auto codes = member_codes.to(torch::kCPU, torch::kLong);
@@ -556,11 +557,26 @@ CombinedPrediction combine_vote(const torch::Tensor& member_codes, int64_t n_cla
         throw std::invalid_argument("combine_vote: a class code lies outside [0, n_classes)");
     }
     const int64_t n_members = codes.size(0);
-    // (n_plots, n_classes) votes; argmax returns the first maximum, so a tie
-    // goes to the lowest class code.
+    const int64_t n_plots = codes.size(1);
+    // (n_plots, n_classes) votes, and which classes hold the most.
     const auto votes = torch::one_hot(codes, n_classes).sum(0);
+    const auto leading = votes == std::get<0>(votes.max(1, /*keepdim=*/true));
+    // Among the leading classes the highest mean probability wins; argmax
+    // returns the first maximum, so a tie that remains goes to the lowest code.
+    torch::Tensor score = leading.to(torch::kFloat64);
+    if (mean_probabilities.defined()) {
+        if (mean_probabilities.dim() != 2 || mean_probabilities.size(0) != n_plots ||
+            mean_probabilities.size(1) != n_classes) {
+            throw std::invalid_argument(
+                "combine_vote: mean_probabilities must be (n_plots, n_classes) = (" +
+                std::to_string(n_plots) + ", " + std::to_string(n_classes) + ")");
+        }
+        score = mean_probabilities.to(torch::kCPU, torch::kFloat64)
+                    .masked_fill(leading.logical_not(),
+                                 -std::numeric_limits<double>::infinity());
+    }
     CombinedPrediction out;
-    out.value = votes.argmax(1);
+    out.value = score.argmax(1);
     out.agreement = votes.gather(1, out.value.unsqueeze(1)).squeeze(1).to(torch::kFloat32) /
                     static_cast<float>(n_members);
     return out;
@@ -1000,7 +1016,7 @@ SuitePredictions SuitePredictor::predict(const SuiteInput& input,
                 case SuiteCombine::Vote: {
                     const auto probabilities =
                         reorder(torch::stack(member_probabilities, 0).mean(0), perm, 0);
-                    combined = combine_vote(stack, probabilities.size(1));
+                    combined = combine_vote(stack, probabilities.size(1), probabilities);
                     out.probabilities = probabilities.to(torch::kFloat32);
                     break;
                 }

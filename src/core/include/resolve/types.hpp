@@ -150,7 +150,7 @@ enum class MissingValuePolicy {
 // How a model suite combines the predictions of a target's members (suite.hpp).
 enum class SuiteCombine {
     Mean,          // arithmetic mean on the target's own scale
-    Vote,          // majority of the members' classes, ties to the lowest code
+    Vote,          // majority of the members' classes, ties to the higher mean probability
     CircularMean   // mean of the members' bearings as unit vectors
 };
 

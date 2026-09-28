@@ -196,7 +196,7 @@ def test_a_suite_combines_members_by_each_targets_rule(suite_dir, scoring):
                     p.predictions["asp_sin"][order], p.predictions["asp_cos"][order], 360.0))
 
     hab = out.target("hab")
-    vote = rc.combine_vote(torch.stack(stacks["hab"]), 3)
+    vote = rc.combine_vote(torch.stack(stacks["hab"]), 3, torch.stack(stacks["hab_p"]).mean(0))
     assert torch.equal(hab.value, vote.value)
     assert torch.allclose(hab.agreement, vote.agreement)
     assert torch.allclose(hab.probabilities, torch.stack(stacks["hab_p"]).mean(0), atol=1e-6)
@@ -300,6 +300,9 @@ def test_combination_rules_and_recognition():
     vote = rc.combine_vote(torch.tensor([[0, 1, 2], [1, 1, 2], [2, 0, 2]]), 3)
     assert vote.value.tolist() == [0, 1, 2]  # first column is a three-way tie
     assert vote.agreement.tolist() == pytest.approx([1 / 3, 2 / 3, 1.0])
+    probs = torch.tensor([[0.2, 0.3, 0.5], [0.4, 0.4, 0.2], [0.0, 0.0, 1.0]])
+    broken = rc.combine_vote(torch.tensor([[0, 1, 2], [1, 1, 2], [2, 0, 2]]), 3, probs)
+    assert broken.value.tolist() == [2, 1, 2]  # the tie goes to the most probable class
 
     circ = rc.combine_circular(torch.tensor([[350.0], [10.0]]), 360.0)
     assert min(circ.value.item(), 360.0 - circ.value.item()) < 1e-3

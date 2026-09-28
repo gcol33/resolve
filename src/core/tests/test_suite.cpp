@@ -384,20 +384,40 @@ TEST_CASE("SHA-256 matches the FIPS 180-4 test vectors", "[suite][sha256]") {
 // Combination rules
 // =============================================================================
 
-TEST_CASE("a vote takes the majority class, ties to the lowest code", "[suite][combine]") {
+TEST_CASE("a vote takes the majority class, ties to the higher mean probability",
+          "[suite][combine]") {
     // Three members over four plots.
     const auto codes = torch::tensor({2, 1, 0, 3, 2, 1, 1, 3, 0, 2, 2, 3}, torch::kLong)
                            .reshape({3, 4});
     const auto c = combine_vote(codes, 4);
     REQUIRE(c.value[0].item<int64_t>() == 2);  // 2, 2, 0
     REQUIRE(c.value[1].item<int64_t>() == 1);  // 1, 1, 2
-    REQUIRE(c.value[2].item<int64_t>() == 0);  // 0, 1, 2 -- three-way tie
+    REQUIRE(c.value[2].item<int64_t>() == 0);  // 0, 1, 2 -- three-way tie, no probabilities
     REQUIRE(c.value[3].item<int64_t>() == 3);  // unanimous
     REQUIRE_THAT(c.agreement[0].item<double>(), WithinAbs(2.0 / 3.0, 1e-6));
     REQUIRE_THAT(c.agreement[2].item<double>(), WithinAbs(1.0 / 3.0, 1e-6));
     REQUIRE_THAT(c.agreement[3].item<double>(), WithinAbs(1.0, 1e-6));
     REQUIRE_FALSE(c.dispersion.defined());
     REQUIRE_THROWS(combine_vote(codes, 3));  // code 3 outside [0, 3)
+
+    // Plot 2's tie among classes 0, 1 and 2 goes to class 2, the most probable
+    // of them; class 3 is more probable still but holds no vote. Plot 0's
+    // majority stands against a class the probabilities favour.
+    const auto probs = torch::tensor({0.1f, 0.1f, 0.2f, 0.6f,
+                                      0.2f, 0.5f, 0.3f, 0.0f,
+                                      0.2f, 0.2f, 0.3f, 0.3f,
+                                      0.0f, 0.0f, 0.0f, 1.0f}).reshape({4, 4});
+    const auto p = combine_vote(codes, 4, probs);
+    REQUIRE(p.value[0].item<int64_t>() == 2);
+    REQUIRE(p.value[1].item<int64_t>() == 1);
+    REQUIRE(p.value[2].item<int64_t>() == 2);
+    REQUIRE(p.value[3].item<int64_t>() == 3);
+    REQUIRE(torch::equal(p.agreement, c.agreement));
+    // Classes 0 and 1 tie in probability too: the lowest code wins.
+    const auto even = torch::tensor({0.4f, 0.4f, 0.2f, 0.0f}).reshape({1, 4});
+    const auto two = torch::tensor({int64_t{0}, int64_t{1}}, torch::kLong).reshape({2, 1});
+    REQUIRE(combine_vote(two, 4, even).value[0].item<int64_t>() == 0);
+    REQUIRE_THROWS(combine_vote(codes, 4, probs.narrow(0, 0, 3)));
 }
 
 TEST_CASE("a mean reports the members' standard deviation", "[suite][combine]") {
@@ -648,7 +668,7 @@ TEST_CASE("a suite combines its members' predictions by each target's rule",
             }
         }
     }
-    const auto vote = combine_vote(torch::stack(hab_codes), 3);
+    const auto vote = combine_vote(torch::stack(hab_codes), 3, torch::stack(hab_probs).mean(0));
     REQUIRE(torch::equal(hab.value, vote.value));
     REQUIRE(torch::allclose(hab.agreement, vote.agreement));
     REQUIRE(torch::allclose(hab.probabilities, torch::stack(hab_probs).mean(0), 1e-5, 1e-6));
