@@ -120,13 +120,16 @@ test_that("a suite combines its members and reports recognition per target", {
                tolerance = 1e-5)
   expect_true(all(hab$label %in% c("A", "B", "C")))
   expect_equal(colnames(hab$members), paste0("seed", 0:2))
-  # Vote and agreement, recomputed from the members' own labels.
-  votes <- apply(hab$members, 1, function(row) {
-    counts <- table(factor(row, levels = c("A", "B", "C")))
-    c(label = names(counts)[which.max(counts)], agreement = max(counts) / 3)
-  })
-  expect_equal(hab$label, unname(votes["label", ]))
-  expect_equal(hab$agreement, as.numeric(votes["agreement", ]), tolerance = 1e-6)
+  # Vote and agreement, recomputed from the members' own labels: among the
+  # classes holding the most votes, the one with the higher mean probability.
+  votes <- vapply(seq_len(nrow(hab$members)), function(i) {
+    counts <- table(factor(hab$members[i, ], levels = c("A", "B", "C")))
+    leading <- names(counts)[counts == max(counts)]
+    leading[which.max(hab$probabilities[i, leading])]
+  }, character(1))
+  agreement <- apply(hab$members, 1, function(row) max(table(row)) / 3)
+  expect_equal(hab$label, votes)
+  expect_equal(hab$agreement, unname(agreement), tolerance = 1e-6)
 
   # The mean target against its members scored one at a time.
   y <- preds$targets$y
