@@ -633,12 +633,25 @@ ResolveDataset ResolveDataset::from_csv_impl(
 // the two carriers is available: the in-memory training dataset, or a
 // ResolveSchema recovered from a checkpoint.
 
+namespace {
+
+// The species width a schema records as resolved: encode_species overwrites a
+// rank-pool schema's pool_species_cap with the width the data was truncated
+// to, so a positive value is a width; a percentile request (< 0) or no cap (0)
+// that never reached a rank-pool encoder records none.
+int resolved_species_width(const ResolveSchema& schema) {
+    return schema.pool_species_cap > 0 ? schema.pool_species_cap : 0;
+}
+
+}  // namespace
+
 ExternalVocabs ResolveDataset::external_vocabs() const {
     ExternalVocabs v;
     v.species_vocab = species_vocab_;
     v.taxonomy = taxonomy_vocab_;
     v.categorical = categorical_vocab_;
     v.targets = target_configs_;
+    v.pool_species_cap = resolved_species_width(schema_);
     return v;
 }
 
@@ -652,6 +665,7 @@ ExternalVocabs external_vocabs_from_schema(const ResolveSchema& schema) {
     // loader re-fits them and Predictor::predict rejects the dataset rather
     // than scoring it against mismatched codes.
     v.targets = schema.targets;
+    v.pool_species_cap = resolved_species_width(schema);
     return v;
 }
 
@@ -722,6 +736,11 @@ void ResolveDataset::adopt_vocabs(const ExternalVocabs& vocabs) {
     categorical_vocab_ = vocabs.categorical;
     taxonomy_vocab_ = vocabs.taxonomy;
     species_vocab_ = vocabs.species_vocab;
+    // Every vocab-reusing loader sets config_ before adopting, so the source's
+    // resolved width replaces whatever cap the caller's config asked for.
+    if (vocabs.pool_species_cap > 0) {
+        config_.pool_species_cap = vocabs.pool_species_cap;
+    }
 
     // Derive the name -> code map from the ordered vocab, so the two can never
     // disagree. This reproduces build_species_vocab()'s map exactly (it also

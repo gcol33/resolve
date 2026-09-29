@@ -726,6 +726,56 @@ TEST_CASE("The rank-pool resolved species cap survives into the inference config
     REQUIRE(infer.pool_weighting == dcfg.pool_weighting);
 }
 
+TEST_CASE("Data encoded against a training schema is truncated to the training width",
+          "[checkpoint][vocab][config]") {
+    // Every corpus plot holds three species; training truncates them to two.
+    // The held-out file is then encoded with a config asking for no cap at all,
+    // which on its own would keep all three.
+    const auto plots = corpus();
+    TempFile hdr(header_csv(plots));
+    TempFile spc(species_csv(plots));
+
+    DatasetConfig train_cfg = test_dataset_config(SpeciesEncodingMode::RankPool);
+    train_cfg.pool_species_cap = 2;
+    auto train = ResolveDataset::from_csv(hdr.path(), spc.path(), test_roles(),
+                                          {TargetSpec::regression("y")}, train_cfg);
+    REQUIRE(train.pool_weights().size(1) == 2);
+    REQUIRE(train.external_vocabs().pool_species_cap == 2);
+
+    DatasetConfig open_cfg = train_cfg;
+    open_cfg.pool_species_cap = 0;
+
+    SECTION("against the in-memory training dataset") {
+        auto held_out = ResolveDataset::from_csv_with_schema(
+            hdr.path(), spc.path(), test_roles(), {TargetSpec::regression("y")}, train,
+            open_cfg);
+        REQUIRE(held_out.pool_weights().size(1) == 2);
+        REQUIRE(held_out.schema().pool_species_cap == 2);
+    }
+
+    SECTION("against a checkpoint's schema and its predictor") {
+        TempPath ckpt("resolve_vocab_width_");
+        save_checkpoint(train, SpeciesEncodingMode::RankPool, ckpt.path());
+        Predictor predictor = Predictor::load(ckpt.path(), torch::kCPU);
+        REQUIRE(external_vocabs_from_schema(predictor.schema()).pool_species_cap == 2);
+        REQUIRE(predictor.external_vocabs().pool_species_cap == 2);
+
+        auto held_out = ResolveDataset::from_csv_with_schema(
+            hdr.path(), spc.path(), test_roles(), {TargetSpec::regression("y")},
+            predictor.schema(), open_cfg);
+        REQUIRE(held_out.pool_weights().size(1) == 2);
+    }
+
+    SECTION("a source without a resolved width leaves the caller's cap in force") {
+        ExternalVocabs vocabs = train.external_vocabs();
+        vocabs.pool_species_cap = 0;
+        auto held_out = ResolveDataset::from_csv_with_vocabs(
+            hdr.path(), spc.path(), test_roles(), {TargetSpec::regression("y")}, vocabs,
+            open_cfg);
+        REQUIRE(held_out.pool_weights().size(1) == 3);
+    }
+}
+
 // =============================================================================
 // 5. The vocabulary guard on Predictor::predict
 // =============================================================================

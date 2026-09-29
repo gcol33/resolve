@@ -469,7 +469,12 @@ void register_dataset(nb::module_& m) {
         .def_rw("species_vocab", &resolve::ExternalVocabs::species_vocab)
         .def_rw("taxonomy", &resolve::ExternalVocabs::taxonomy)
         .def_rw("categorical", &resolve::ExternalVocabs::categorical)
-        .def_rw("targets", &resolve::ExternalVocabs::targets);
+        .def_rw("targets", &resolve::ExternalVocabs::targets)
+        .def_rw("pool_species_cap", &resolve::ExternalVocabs::pool_species_cap,
+                "The rank-pool width the source's species records were truncated "
+                "to (> 0), or 0 where none was recorded. A dataset encoded against "
+                "these vocabularies is truncated to it in place of the config's "
+                "pool_species_cap.");
 
     m.def("external_vocabs_from_schema", &resolve::external_vocabs_from_schema,
           nb::arg("schema"),

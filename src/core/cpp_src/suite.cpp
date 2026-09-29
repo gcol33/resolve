@@ -695,6 +695,7 @@ std::string encoding_fingerprint(const ExternalVocabs& vocabs, const DatasetConf
             hash.update(std::string_view("\x1f", 1));
         }
     }
+    hash.update("species_width=" + std::to_string(vocabs.pool_species_cap) + ";");
     std::ostringstream fields;
     for_each_field(config, FingerprintWriter{fields});
     hash.update(fields.str());

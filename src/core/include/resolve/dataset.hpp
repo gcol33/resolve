@@ -165,6 +165,13 @@ struct ExternalVocabs {
     // target's class -> code mapping so the new dataset encodes labels the
     // same way (the caller need not populate TargetSpec::class_mapping).
     std::vector<TargetConfig> targets;
+    // The rank-pool width the source's species records were truncated to,
+    // resolved (> 0), or 0 where the source recorded none. A dataset encoded
+    // against these vocabularies is truncated to the same width in place of
+    // the config's pool_species_cap, so a plot keeps the records the model was
+    // trained to read however long the new data's plots run; a percentile cap
+    // re-resolved on the new data would read a different number of them.
+    int pool_species_cap = 0;
 };
 
 // Rebuild the vocabularies a checkpoint's schema carries. `schema.species_vocab`

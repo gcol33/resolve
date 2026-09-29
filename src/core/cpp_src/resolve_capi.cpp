@@ -1250,6 +1250,7 @@ resolve_value* external_vocabs_to_value(const ExternalVocabs& v) {
     s.genus_vocab = v.taxonomy.genus_names();
     s.family_vocab = v.taxonomy.family_names();
     s.targets = v.targets;
+    s.pool_species_cap = v.pool_species_cap;
     auto* m = schema_to_value(s);
     v_put(m, schema_tree_keys::kCategoricalVocab, categorical_vocab_to_value(v.categorical));
     return m;
