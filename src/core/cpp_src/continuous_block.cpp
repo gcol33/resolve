@@ -12,6 +12,11 @@ bool present(const torch::Tensor& t) {
     return t.defined() && t.numel() > 0;
 }
 
+// The offset standardization_scale adds to a standard deviation. A fitted scale
+// no larger than twice it belongs to a column that did not vary in the fitting
+// rows.
+constexpr float kScaleOffset = 1e-8f;
+
 // A row is flagged when any of its value columns is missing.
 torch::Tensor missing_flag(const torch::Tensor& values) {
     auto missing = torch::isnan(values);
@@ -85,7 +90,7 @@ torch::Tensor standardization_scale(const torch::Tensor& values, int64_t dim) {
         ? values.std()
         : values.std(/*dim=*/at::IntArrayRef{dim}, /*correction=*/1,
                      /*keepdim=*/false);
-    scale = scale + 1e-8f;
+    scale = scale + kScaleOffset;
     return torch::where(torch::isfinite(scale), scale, torch::ones_like(scale));
 }
 
@@ -124,8 +129,14 @@ torch::Tensor standardize_continuous(const torch::Tensor& block, const Scalers& 
     if (!scalers.continuous_mean.defined()) {
         return filled;
     }
-    return (filled - scalers.continuous_mean.to(block.device())) /
-           scalers.continuous_scale.to(block.device());
+    auto scale = scalers.continuous_scale.to(block.device());
+    auto standardized = (filled - scalers.continuous_mean.to(block.device())) / scale;
+    // A column that did not vary in the fitting rows gave the weights reading it
+    // nothing to learn from. Divided by the offset, a value other than the
+    // fitted one would enter millions of standard deviations out and decide the
+    // prediction alone; held at the fitted value, it reads as in training.
+    auto constant = scale <= 2.0f * kScaleOffset;
+    return torch::where(constant, torch::zeros_like(standardized), standardized);
 }
 
 std::vector<std::pair<std::vector<int64_t>, int64_t>>

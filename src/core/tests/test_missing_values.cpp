@@ -404,6 +404,38 @@ TEST_CASE("The standardization scale is finite even where it cannot be estimated
         standardization_scale(torch::tensor({1.0f, 2.0f, 3.0f})).item<float>()));
 }
 
+// ============================================================================
+// A column constant in the fitting rows stays at its fitted value
+//
+// The unknown-species fraction is 0 on every fitting row, since the species
+// vocabulary is built from them, so its scale is the offset alone. Dividing a
+// later fraction of 0.01 by that entered the network at 1e6 and sent every
+// plot holding one unseen species to the same prediction (issue #118).
+// ============================================================================
+
+TEST_CASE("A column constant in the fitting rows standardises to zero at any value",
+          "[missing][scalers]") {
+    auto fitting = torch::tensor({{1.0f, 0.0f}, {3.0f, 0.0f}, {5.0f, 0.0f}});
+    Scalers scalers;
+    fit_continuous_scalers(scalers, fitting);
+    REQUIRE(scalers.continuous_scale[1].item<float>() <= 2e-8f);
+
+    auto later = torch::tensor({{3.0f, 0.01f}, {5.0f, 0.5f}, {1.0f, 0.0f}});
+    auto standardized = standardize_continuous(later, scalers);
+    CHECK(torch::equal(standardized.select(1, 1), torch::zeros({3})));
+    CHECK_THAT(standardized[0][0].item<float>(), Catch::Matchers::WithinAbs(0.0, 1e-6));
+    CHECK_THAT(standardized[1][0].item<float>(), Catch::Matchers::WithinRel(1.0, 1e-5));
+
+    // A constant non-zero column, and the fitting rows themselves.
+    auto shifted = torch::tensor({{1.0f, 7.0f}, {2.0f, 7.0f}});
+    Scalers s2;
+    fit_continuous_scalers(s2, shifted);
+    CHECK(torch::equal(standardize_continuous(torch::tensor({{9.0f, -3.0f}}), s2).select(1, 1),
+                       torch::zeros({1})));
+    CHECK(torch::equal(standardize_continuous(fitting, scalers).select(1, 1),
+                       torch::zeros({3})));
+}
+
 TEST_CASE("Fitting the continuous scalers on one row leaves nothing NaN",
           "[missing][scalers]") {
     const float nan = std::numeric_limits<float>::quiet_NaN();

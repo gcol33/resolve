@@ -63,13 +63,17 @@ void fit_continuous_scalers(Scalers& scalers, const torch::Tensor& fitting_rows)
 
 // Fill missing cells and standardise with fitted scalers. A scaler without a
 // fill (a checkpoint written before missing values were filled) reads a NaN as
-// 0.0, which is what such a model was trained on.
+// 0.0, which is what such a model was trained on. A column that did not vary in
+// the fitting rows (the unknown-species fraction, whose vocabulary is built on
+// those rows; a flag whose covariate was never missing there) standardises to
+// 0.0 whatever its value, since the model never saw it take another.
 [[nodiscard]] torch::Tensor standardize_continuous(const torch::Tensor& block,
                                                    const Scalers& scalers);
 
 // Undo standardize_continuous: rescale, then mark every cell whose flag says it
 // was missing as NaN again, so a refit on a different set of rows (a
-// cross-validation fold) fills from that fold's recorded values alone.
+// cross-validation fold) fills from that fold's recorded values alone. A column
+// that did not vary in the fitting rows comes back at its fitted mean.
 [[nodiscard]] torch::Tensor unstandardize_continuous(const torch::Tensor& block,
                                                      const Scalers& scalers,
                                                      const ResolveSchema& schema);
