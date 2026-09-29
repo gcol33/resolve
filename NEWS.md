@@ -1,5 +1,21 @@
 # RESOLVE Changelog
 
+## v0.11.1 (2026-09-29)
+
+### Fixed
+
+- **A column constant in the fitting rows no longer saturates a prediction**
+  (#118). The standardisation scale is the standard deviation plus 1e-8, so a
+  continuous column that never varied in the fitting rows was stored with scale
+  1e-8. The unknown-species fraction is such a column, since the species
+  vocabulary is built on the fitting rows: a plot holding one unseen species at
+  1% cover entered the network at 1e6, and every such plot received the same
+  prediction, in evaluation on test plots as in later prediction. Such a column
+  now standardises to 0, the value it held throughout training, whatever its
+  value. Checkpoints store the scale that identifies it, so models trained by
+  earlier versions are corrected without retraining; predictions change only
+  for plots in which such a column differs from its fitted value.
+
 ## v0.11.0 (2026-09-29)
 
 ### Added
