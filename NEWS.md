@@ -1,8 +1,35 @@
 # RESOLVE Changelog
 
-## v0.11.0 (unreleased)
+## v0.11.0 (2026-09-29)
 
 ### Added
+
+- **Model suites: released weights scored as one ensemble.** A suite is a
+  directory of checkpoints and a `manifest.json` (format `resolve-suite` v1)
+  holding the input contract and, per target, its members with SHA-256 and
+  size, the combine rule (vote, mean, or circular mean from a bearing or a
+  sine-cosine pair), units, released or experimental status with its stated
+  limit, training and validation records, licence and provenance.
+  `SuitePredictor` verifies every checksum, checks each member against the
+  contract, encodes the input once per vocabulary and reports per plot the
+  combined prediction, seed agreement or dispersion, and species recognition
+  by count and by abundance; it reports no combined support level. A tied vote
+  goes to the class with the higher mean probability, and only an exact
+  probability tie to the lowest code. `DatasetConfig::zero_abundance_as` is
+  recorded in the checkpoint so a suite applies the training data's reading of
+  a zero cover. Reached through `resolve predict --suite` / `info --suite`,
+  the C ABI's `resolve_suite_*`, nanobind `SuitePredictor` /
+  `SuitePredictions.to_pandas` and R `resolve.load_suite`,
+  `resolve.predict.suite`, `resolve.verify_suite` and `resolve.seal_suite`.
+
+- **Fixed-duration training with nothing held out.**
+  `TrainConfig::fixed_epochs` runs exactly that many epochs of the
+  `max_epochs` schedule, with no early stopping, and returns the final
+  weights; the learning-rate schedule stays laid out over `max_epochs`. It is
+  the one mode that trains with `test_size = 0`: a validated configuration
+  refitted on every labelled plot for a duration fixed beforehand. `fit()`
+  refuses `test_size = 0` without it, a negative value and a value past
+  `max_epochs`. CLI `--fixed-epochs`, R `fixedEpochs`.
 
 - **Every architecture hyperparameter is now a CLI flag.** `resolve train`
   could select an encoder architecture and then left every field of its
@@ -89,6 +116,20 @@
 
 ### Changed
 
+- **The R package is `resolveR`.** Bioconductor already carries a package
+  named RESOLVE and CRAN checks names case-insensitively across both, so the
+  R client is renamed. The `resolve.` function prefix, the `resolve_c` backend
+  and the release assets are unchanged; the user data directory is now
+  `R_user_dir("resolveR")`. The metric functions (`resolve_mae`,
+  `resolve_rmse`, `resolve_smape`, `resolve_r_squared`,
+  `resolve_band_accuracy`, `resolve_accuracy`) are exported under one help
+  page.
+
+- **Any percentile species cap.** `pool_species_cap = -x` is the
+  (100 - x)th percentile of records per plot for x in 1..99; -100 or below is
+  refused. Before, only -1 (p99) was a percentile and any other negative value
+  silently meant no cap. -1 resolves as it did.
+
 - **A missing covariate or coordinate is flagged and filled instead of read
   as zero.** The loader wrote a blank covariate cell as 0.0 and a blank
   coordinate as (0, 0), so a model could not tell a recorded 0 from a missing
@@ -119,6 +160,25 @@
   values as zero.
 
 ### Fixed
+
+- **Data encoded against a training schema keeps the training species
+  width.** `from_csv_with_schema` and every other loader that reuses a
+  training dataset's or a checkpoint's vocabularies took only the
+  vocabularies, so a percentile `pool_species_cap` was re-resolved on the new
+  data: a held-out half was truncated at its own 99th percentile of records per
+  plot, while checkpoint inference and the suite path truncated at the width
+  the model trained on. The two paths scored the same plots differently
+  wherever the new data's plots ran longer than the training data's. A
+  withheld database whose 99th percentile was 72 records against a training
+  width of 61 scored 180.59 m altitude error one way and 180.32 m the other.
+  `ExternalVocabs` now carries the resolved width and the loader applies it in
+  place of the config's cap; a source that recorded none leaves the caller's
+  cap in force. The width round-trips through the C ABI and is readable from
+  Python as `ExternalVocabs.pool_species_cap`.
+
+- **Unlabelled plots can be scored.** `resolve predict --model` required the
+  target columns and dropped plots without them, the R loaders refused
+  `targets = list()`, and the C ABI read a list of target names as none.
 
 - **A standardization scale that cannot be estimated is 1, not NaN.** The
   sample standard deviation of a single row is NaN, and dividing by it
