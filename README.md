@@ -17,6 +17,30 @@ categorical one from the same latent state. The engine is a standalone C++ libra
 Python, R, and the command line are thin bindings over it, so a model trained from
 one is identical to a model trained from any other.
 
+## Installation
+
+The engine and its Python bindings build from source with CMake and an installed
+PyTorch:
+
+```bash
+git clone https://github.com/gcol33/resolve.git
+cd resolve/src/core/python
+pip install .
+```
+
+R installs without a backend and fetches one afterwards:
+
+```r
+install.packages("pak")
+pak::pak("gcol33/resolve/r")
+
+library(resolveR)
+resolve.install_backend()                  # CPU
+resolve.install_backend(variant = "cuda")
+```
+
+## Quick start
+
 ```python
 import resolve_core as rc
 
@@ -204,28 +228,6 @@ with a desktop, `vram_fraction` leaves headroom for the compositor.
 cfg = rc.TrainConfig()
 cfg.batch_size     = 16384
 cfg.vram_fraction  = 0.80    # sharing the GPU; 1.0 (default) for a dedicated job
-```
-
-## Installation
-
-The engine and its Python bindings build from source with CMake and an installed
-PyTorch:
-
-```bash
-git clone https://github.com/gcol33/resolve.git
-cd resolve/src/core/python
-pip install .
-```
-
-R installs without a backend and fetches one afterwards:
-
-```r
-install.packages("pak")
-pak::pak("gcol33/resolve/r")
-
-library(resolveR)
-resolve.install_backend()                  # CPU
-resolve.install_backend(variant = "cuda")
 ```
 
 ## Documentation
