@@ -485,9 +485,12 @@ RESOLVE_CAPI resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const 
  *   batch_size    INT  per-member forward chunk (default 4096)
  *   keep_members  BOOL keep every member's own prediction (default false)
  * Returns a MAP: "plot_ids" (STRING_ARRAY) and "targets", an ordered MAP of
- * target name -> MAP with name task combine status limit units class_names
- * member_seeds value (INT_ARRAY class codes for a vote, DOUBLE_ARRAY
- * otherwise) agreement probabilities dispersion members n_species n_recognised
+ * target name -> MAP with name task combine status limit units
+ * dispersion_units class_names member_seeds value (INT_ARRAY class codes for a
+ * vote; for a spherical mean a DOUBLE_MATRIX of n_plots rows, latitude and
+ * longitude in degrees; DOUBLE_ARRAY otherwise) agreement probabilities
+ * dispersion members (members x plots; for a spherical mean a MAP of
+ * "latitude" and "longitude", each members x plots) n_species n_recognised
  * recognised_share recognised_abundance_share. A statistic the target's
  * combine rule does not define is NULL-kind; NaN marks an undefined value. */
 RESOLVE_CAPI resolve_value_t* resolve_suite_predict_dataframe(

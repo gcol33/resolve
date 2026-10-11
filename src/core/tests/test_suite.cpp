@@ -455,6 +455,45 @@ TEST_CASE("a circular mean averages across the wrap", "[suite][combine]") {
     REQUIRE_THAT(bearing[3].item<double>(), WithinAbs(45.0, 1e-4));
 }
 
+TEST_CASE("a spherical mean averages points as unit vectors", "[suite][combine]") {
+    // Two members either side of the antimeridian on the equator meet at 180;
+    // an arithmetic mean of the longitudes would say 0. Two members on one
+    // meridian, 2 degrees of latitude apart, meet halfway.
+    const auto c = torch::tensor({0.0, 179.0, 10.0, 5.0,
+                                  0.0, -179.0, 12.0, 5.0}, torch::kFloat64)
+                       .reshape({2, 2, 2});
+    const auto s = combine_spherical(c);
+    REQUIRE(s.value.sizes() == torch::IntArrayRef({2, 2}));
+    REQUIRE_THAT(s.value[0][0].item<double>(), WithinAbs(0.0, 1e-4));
+    REQUIRE_THAT(std::fabs(s.value[0][1].item<double>()), WithinAbs(180.0, 1e-4));
+    REQUIRE_THAT(s.value[1][0].item<double>(), WithinAbs(11.0, 1e-4));
+    REQUIRE_THAT(s.value[1][1].item<double>(), WithinAbs(5.0, 1e-4));
+    // Each member lies one degree of arc from the combined point.
+    const double one_degree_km = kEarthRadiusKm * std::numbers::pi / 180.0;
+    REQUIRE_THAT(s.dispersion[0].item<double>(), WithinAbs(one_degree_km, 1e-2));
+    REQUIRE_THAT(s.dispersion[1].item<double>(), WithinAbs(one_degree_km, 1e-2));
+    REQUIRE_FALSE(s.agreement.defined());
+
+    // The median distance over three members is the middle one.
+    const auto three = torch::tensor({0.0, 0.0, 0.0, 1.0, 0.0, -3.0}, torch::kFloat64)
+                           .reshape({3, 1, 2});
+    const auto m = combine_spherical(three);
+    const double centre = m.value[0][1].item<double>();
+    std::vector<double> d = {std::fabs(0.0 - centre), std::fabs(1.0 - centre),
+                             std::fabs(-3.0 - centre)};
+    std::sort(d.begin(), d.end());
+    REQUIRE_THAT(m.dispersion[0].item<double>(), WithinAbs(d[1] * one_degree_km, 1e-2));
+
+    // One member has no spread; members that cancel name no point.
+    REQUIRE(std::isnan(combine_spherical(c.slice(0, 0, 1)).dispersion[0].item<double>()));
+    const auto opposite = torch::tensor({0.0, 0.0, 0.0, 180.0}, torch::kFloat64).reshape({2, 1, 2});
+    const auto none = combine_spherical(opposite);
+    REQUIRE(std::isnan(none.value[0][0].item<double>()));
+    REQUIRE(std::isnan(none.dispersion[0].item<double>()));
+    REQUIRE_THROWS(combine_spherical(torch::zeros({2, 3})));
+    REQUIRE_THROWS(combine_spherical(torch::zeros({2, 3, 3})));
+}
+
 // =============================================================================
 // Manifest
 // =============================================================================
@@ -515,6 +554,87 @@ TEST_CASE("manifest validation reports every problem at once", "[suite][manifest
             REQUIRE_THAT(msg, ContainsSubstring(expected));
         }
     }
+}
+
+TEST_CASE("per-target inputs and a spherical mean are format 2; a manifest without is 1",
+          "[suite][manifest]") {
+    SuiteManifest m = base_manifest();
+    SuiteTarget y;
+    y.name = "y";
+    y.outputs = {"y"};
+    y.members.push_back({0, "y/m.pt", std::string(64, 'a'), 10});
+    m.targets.push_back(y);
+    REQUIRE(m.format_version() == 1);
+    REQUIRE(m.to_json().at("format_version").as_int() == 1);
+    REQUIRE(m.to_json().at("targets").items()[0].find("inputs") == nullptr);
+    REQUIRE(m.inputs_of(m.targets[0]) ==
+            SuiteTargetInputs{true, {"cov1"}, {}});
+
+    SuiteTarget where;
+    where.name = "where";
+    where.combine = SuiteCombine::SphericalMean;
+    where.outputs = {"lat", "lon"};
+    where.units = "degrees";
+    where.inputs = SuiteTargetInputs{false, {"cov1"}, {}};
+    where.members.push_back({0, "where/m.pt", std::string(64, 'b'), 10});
+    m.targets[0].inputs = SuiteTargetInputs{true, {}, {}};
+    m.targets.push_back(where);
+    REQUIRE_NOTHROW(m.validate());
+    REQUIRE(m.format_version() == 2);
+
+    const SuiteManifest back = SuiteManifest::from_json(json::parse(json::dump(m.to_json())));
+    REQUIRE(back.to_json() == m.to_json());
+    REQUIRE(back.targets[0].inputs == SuiteTargetInputs{true, {}, {}});
+    REQUIRE(back.targets[1].inputs == SuiteTargetInputs{false, {"cov1"}, {}});
+    REQUIRE(back.targets[1].combine == SuiteCombine::SphericalMean);
+
+    // A manifest that states version 1 and uses a version-2 feature is refused.
+    json::Value stated = m.to_json();
+    stated.set("format_version", 1);
+    REQUIRE_THROWS_WITH(SuiteManifest::from_json(stated), ContainsSubstring("need version 2"));
+}
+
+TEST_CASE("per-target inputs are checked against the contract and cover it",
+          "[suite][manifest]") {
+    SuiteManifest m = base_manifest();
+    m.inputs.categoricals = {"hab"};
+    SuiteTarget a;
+    a.name = "a";
+    a.outputs = {"a"};
+    a.inputs = SuiteTargetInputs{true, {"cov1", "nope", "cov1"}, {}};
+    a.members.push_back({0, "a/m.pt", std::string(64, 'a'), 10});
+    SuiteTarget where;
+    where.name = "where";
+    where.combine = SuiteCombine::SphericalMean;
+    where.outputs = {"lat"};
+    where.units = "m";
+    where.inputs = SuiteTargetInputs{true, {}, {}};
+    where.members.push_back({0, "w/m.pt", std::string(64, 'b'), 10});
+    m.targets = {a, where};
+    try {
+        m.validate();
+        FAIL("validate() accepted an invalid manifest");
+    } catch (const std::runtime_error& e) {
+        const std::string msg = e.what();
+        for (const char* expected :
+             {"'nope' is not a column of the input contract", "'cov1' appears twice",
+              "'hab' is read by no target", "reads two outputs", "units must be 'degrees'"}) {
+            INFO(expected);
+            REQUIRE_THAT(msg, ContainsSubstring(expected));
+        }
+    }
+
+    SuiteManifest bare = base_manifest();
+    bare.inputs.latitude.clear();
+    bare.inputs.longitude.clear();
+    a.inputs = SuiteTargetInputs{true, {"cov1"}, {}};
+    bare.targets = {a};
+    REQUIRE_THROWS_WITH(bare.validate(), ContainsSubstring("the input contract names none"));
+
+    SuiteManifest unread = base_manifest();
+    a.inputs = SuiteTargetInputs{false, {"cov1"}, {}};
+    unread.targets = {a};
+    REQUIRE_THROWS_WITH(unread.validate(), ContainsSubstring("names coordinates, but no target"));
 }
 
 TEST_CASE("a manifest with an unknown member or a newer format is refused",
@@ -831,5 +951,195 @@ TEST_CASE("a suite refuses members that do not match its manifest", "[suite][pre
         m.write(dir.path());
         REQUIRE_THROWS_WITH(SuitePredictor::load(dir.path()),
                             ContainsSubstring("encodes its input differently"));
+    }
+}
+
+TEST_CASE("declaring the whole contract per target predicts bit for bit as declaring none",
+          "[suite][predict]") {
+    TempDir dir;
+    const SuiteManifest written = build_suite(dir);
+    const ScoringFiles in = scoring_files(dir);
+    SuitePredictOptions opts;
+    opts.keep_members = true;
+    SuitePredictor implicit = SuitePredictor::load(dir.path());
+    const SuitePredictions a = implicit.predict(SuiteInput::csv(in.header, in.species), opts);
+
+    SuiteManifest m = written;
+    REQUIRE(m.format_version() == 1);
+    for (auto& t : m.targets) t.inputs = m.inputs_of(t);
+    m.write(dir.path());
+    REQUIRE(SuiteManifest::read(dir.path()).format_version() == 2);
+    SuitePredictor declared = SuitePredictor::load(dir.path());
+    REQUIRE(declared.n_encodings() == implicit.n_encodings());
+    const SuitePredictions b = declared.predict(SuiteInput::csv(in.header, in.species), opts);
+
+    REQUIRE(a.plot_ids == b.plot_ids);
+    REQUIRE(a.targets.size() == b.targets.size());
+    auto same = [](const torch::Tensor& x, const torch::Tensor& y) {
+        if (x.defined() != y.defined()) return false;
+        return !x.defined() || (x.dtype() == y.dtype() && torch::equal(x, y));
+    };
+    for (size_t t = 0; t < a.targets.size(); ++t) {
+        INFO(a.targets[t].name);
+        const auto& x = a.targets[t];
+        const auto& y = b.targets[t];
+        REQUIRE(same(x.value, y.value));
+        REQUIRE(same(x.agreement, y.agreement));
+        REQUIRE(same(x.probabilities, y.probabilities));
+        REQUIRE(same(x.dispersion, y.dispersion));
+        REQUIRE(same(x.members, y.members));
+        REQUIRE(same(x.recognition.count_share, y.recognition.count_share));
+        REQUIRE(x.dispersion_units == y.dispersion_units);
+    }
+    REQUIRE(a.target("y").dispersion_units == "m");
+    REQUIRE(a.target("aspect").dispersion_units == "degrees");
+    REQUIRE(a.target("hab").dispersion_units.empty());
+}
+
+namespace {
+
+// A suite whose two targets read different parts of one contract, as a model
+// of the survey year cannot read the year and a model of the location cannot
+// read the coordinates: "y" reads species and coordinates, "where" reads
+// species and cov1 and predicts the plot's latitude / longitude.
+RoleMapping roles_without_covariates() {
+    RoleMapping roles = training_roles();
+    roles.covariates.clear();
+    return roles;
+}
+
+RoleMapping roles_without_coordinates() {
+    RoleMapping roles = training_roles();
+    roles.latitude.reset();
+    roles.longitude.reset();
+    return roles;
+}
+
+SuiteManifest build_split_suite(const TempDir& dir) {
+    const auto plots = corpus();
+    dir.write("train/header.csv", header_csv(plots, true));
+    dir.write("train/species.csv", species_csv(plots));
+    const auto cfg = training_dataset_config();
+    const auto y_ds = ResolveDataset::from_csv(
+        dir.file("train/header.csv"), dir.file("train/species.csv"), roles_without_covariates(),
+        {TargetSpec::regression("y")}, cfg);
+    const auto where_ds = ResolveDataset::from_csv(
+        dir.file("train/header.csv"), dir.file("train/species.csv"), roles_without_coordinates(),
+        {TargetSpec::regression("lat"), TargetSpec::regression("lon")}, cfg);
+
+    SuiteManifest m = base_manifest();
+    SuiteTarget y;
+    y.name = "y";
+    y.outputs = {"y"};
+    y.units = "m";
+    y.inputs = SuiteTargetInputs{true, {}, {}};
+    SuiteTarget where;
+    where.name = "where";
+    where.combine = SuiteCombine::SphericalMean;
+    where.outputs = {"lat", "lon"};
+    where.units = "degrees";
+    where.inputs = SuiteTargetInputs{false, {"cov1"}, {}};
+    for (const int seed : {0, 1}) {
+        const std::string yf = "y/seed_" + std::to_string(seed) + "/model_final.pt";
+        save_member(y_ds, seed, dir.file(yf));
+        y.members.push_back(SuiteMember{seed, yf, "", 0});
+    }
+    for (const int seed : {2, 3, 4}) {
+        const std::string wf = "where/seed_" + std::to_string(seed) + "/model_final.pt";
+        save_member(where_ds, seed, dir.file(wf));
+        where.members.push_back(SuiteMember{seed, wf, "", 0});
+    }
+    m.targets = {y, where};
+    m.seal(dir.path());
+    m.write(dir.path());
+    return m;
+}
+
+ResolvePredictions predict_member_with(const std::string& path, const ScoringFiles& in,
+                                       const RoleMapping& roles) {
+    Predictor p = Predictor::load(path);
+    auto cfg = dataset_config_from_checkpoint(p.schema(), p.model()->config());
+    cfg.zero_abundance_as = 1.0f;
+    const auto ds = ResolveDataset::from_csv_with_vocabs(in.header, in.species, roles, {},
+                                                         p.external_vocabs(), cfg);
+    return p.predict(ds);
+}
+
+}  // namespace
+
+TEST_CASE("each target reads its own part of the contract", "[suite][predict]") {
+    TempDir dir;
+    const SuiteManifest written = build_split_suite(dir);
+    REQUIRE(written.format_version() == 2);
+    const ScoringFiles in = scoring_files(dir);
+
+    SuitePredictor suite = SuitePredictor::load(dir.path());
+    // One vocabulary, two sets of columns read: two encodings.
+    REQUIRE(suite.n_encodings() == 2);
+    SuitePredictOptions opts;
+    opts.keep_members = true;
+    const SuitePredictions out = suite.predict(SuiteInput::csv(in.header, in.species), opts);
+    REQUIRE(out.plot_ids.size() == 31);
+
+    std::vector<torch::Tensor> y_vals, where_points;
+    for (const auto& t : written.targets) {
+        const RoleMapping roles = t.name == "y" ? roles_without_covariates()
+                                                : roles_without_coordinates();
+        for (const auto& member : t.members) {
+            const auto p = predict_member_with(dir.file(member.file), in, roles);
+            const auto idx = index_of(p.plot_ids);
+            std::vector<int64_t> order;
+            for (const auto& id : out.plot_ids) order.push_back(idx.at(id));
+            const auto perm = torch::tensor(order, torch::kLong);
+            if (t.name == "y") {
+                y_vals.push_back(p.predictions.at("y").index_select(0, perm));
+            } else {
+                where_points.push_back(torch::stack({p.predictions.at("lat").index_select(0, perm),
+                                                     p.predictions.at("lon").index_select(0, perm)},
+                                                    1));
+            }
+        }
+    }
+    const auto& y = out.target("y");
+    const auto mean = combine_mean(torch::stack(y_vals));
+    REQUIRE(torch::allclose(y.value, mean.value, 1e-5, 1e-5));
+    REQUIRE(torch::allclose(y.dispersion, mean.dispersion, 1e-5, 1e-5));
+
+    const auto& where = out.target("where");
+    REQUIRE(where.combine == SuiteCombine::SphericalMean);
+    REQUIRE(where.dispersion_units == "km");
+    REQUIRE(where.value.sizes() == torch::IntArrayRef({31, 2}));
+    REQUIRE(where.members.sizes() == torch::IntArrayRef({3, 31, 2}));
+    const auto sphere = combine_spherical(torch::stack(where_points));
+    REQUIRE(torch::allclose(where.value, sphere.value, 1e-4, 1e-4));
+    REQUIRE(torch::allclose(where.dispersion, sphere.dispersion, 1e-3, 1e-3));
+    REQUIRE(torch::allclose(where.members, torch::stack(where_points), 1e-5, 1e-5));
+
+    SECTION("a renamed covariate reaches the target that reads it") {
+        dir.write("renamed/header.csv", [&] {
+            std::ifstream f(in.header);
+            std::string text((std::istreambuf_iterator<char>(f)), {});
+            text.replace(0, text.find('\n'), "plot,lat,lon,COV");
+            return text;
+        }());
+        SuitePredictOptions renamed = opts;
+        renamed.columns.covariates = std::vector<std::string>{"COV"};
+        const auto again = suite.predict(
+            SuiteInput::csv(dir.file("renamed/header.csv"), in.species), renamed);
+        REQUIRE(torch::equal(again.target("where").value, where.value));
+        REQUIRE(torch::equal(again.target("y").value, y.value));
+    }
+
+    SECTION("declared inputs the checkpoint was not trained on are refused") {
+        SuiteManifest m = written;
+        m.targets[0].inputs = SuiteTargetInputs{true, {"cov1"}, {}};
+        m.write(dir.path());
+        REQUIRE_THROWS_WITH(SuitePredictor::load(dir.path()),
+                            ContainsSubstring("the target's declared inputs"));
+        m = written;
+        m.targets[1].inputs = SuiteTargetInputs{true, {"cov1"}, {}};
+        m.write(dir.path());
+        REQUIRE_THROWS_WITH(SuitePredictor::load(dir.path()),
+                            ContainsSubstring("names coordinates, the checkpoint reads none"));
     }
 }

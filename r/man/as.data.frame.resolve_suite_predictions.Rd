@@ -28,7 +28,10 @@ A data.frame with one row per plot.
 \description{
 The same columns \verb{resolve predict --suite} writes: \code{plot_id}, then per target
 the prediction (\verb{<target>}; for a vote also \verb{<target>_code} and
-\verb{<target>_agreement}), its dispersion (\verb{<target>_sd} for a mean,
-\verb{<target>_circular_sd} for a bearing), the four recognition columns, and,
-when present, \verb{<target>_seed<N>} for each member.
+\verb{<target>_agreement}; for a spherical mean \verb{<target>_latitude} and
+\verb{<target>_longitude}), its dispersion (\verb{<target>_sd} for a mean,
+\verb{<target>_circular_sd} for a bearing, \verb{<target>_spread_km} for a spherical
+mean), the four recognition columns, and, when present, \verb{<target>_seed<N>}
+for each member (\verb{<target>_seed<N>_latitude} and \verb{_longitude} for a
+spherical mean).
 }

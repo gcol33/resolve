@@ -151,7 +151,8 @@ enum class MissingValuePolicy {
 enum class SuiteCombine {
     Mean,          // arithmetic mean on the target's own scale
     Vote,          // majority of the members' classes, ties to the higher mean probability
-    CircularMean   // mean of the members' bearings as unit vectors
+    CircularMean,  // mean of the members' bearings as unit vectors
+    SphericalMean  // mean of the members' latitude / longitude as unit vectors on the sphere
 };
 
 // Whether a suite target is released for general use or with a stated limit.

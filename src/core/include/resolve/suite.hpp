@@ -14,9 +14,11 @@
 //     read (the abundance a recorded 0 stands for). Every member checkpoint is
 //     checked against it at load, so a suite cannot claim inputs its models
 //     were not trained on.
-//   * per TARGET: the members (file, seed, SHA-256, size), how their
-//     predictions combine (a class vote, a mean, a circular mean of bearings,
-//     read from one output or from a sine / cosine pair), the output units,
+//   * per TARGET: optionally the part of the contract its members read (a
+//     model of the survey year cannot read the year), the members (file,
+//     seed, SHA-256, size), how their predictions combine (a class vote, a
+//     mean, a circular mean of bearings read from one output or from a sine /
+//     cosine pair, a spherical mean of latitude / longitude), the output units,
 //     whether the target is released or experimental and the limit an
 //     experimental release states, and free-form training and validation
 //     records (the validation metrics by regime the release reports).
@@ -28,8 +30,9 @@
 //
 // Members of one target may be encoded against their own species vocabulary --
 // a target trains on the plots where it is recorded, and the vocabulary is
-// fitted on those -- so the suite encodes the input plots once per distinct
-// vocabulary and data encoding, never once per member.
+// fitted on those -- and may read their own part of the input contract, so the
+// suite encodes the input plots once per distinct vocabulary, data encoding
+// and set of columns read, never once per member.
 //
 // Per plot the suite reports, each on its own:
 //   * the combined prediction;
@@ -38,6 +41,8 @@
 //   * for a mean, the members' standard deviation, in the target's units;
 //   * for a circular mean, the members' circular standard deviation, in the
 //     target's units;
+//   * for a spherical mean, the median great-circle distance of the members
+//     from the combined point, in kilometres;
 //   * how much of the plot's assemblage the target's vocabulary recognises, by
 //     distinct species and by abundance (compute_species_recognition).
 // None of these is combined into a single support level, and none is a
@@ -65,7 +70,12 @@ namespace resolve {
 
 inline constexpr const char* kSuiteManifestFile = "manifest.json";
 inline constexpr const char* kSuiteFormat = "resolve-suite";
-inline constexpr int kSuiteFormatVersion = 1;
+// Version 2 adds per-target inputs and the spherical mean. A manifest that
+// uses neither is written as version 1, so an older engine still reads it.
+inline constexpr int kSuiteFormatVersion = 2;
+
+// The Earth radius a spherical mean measures member spread with, in km.
+inline constexpr double kEarthRadiusKm = 6371.0;
 
 // The columns a suite reads and how their raw values are interpreted. Column
 // names are the defaults a caller's table is read with; a caller whose table
@@ -97,6 +107,17 @@ struct SuiteInputContract {
     }
 };
 
+// The part of the input contract a target's members read. Every column it
+// names is one the contract names, and the contract is the union of what its
+// targets read. A target that declares none reads the whole contract.
+struct SuiteTargetInputs {
+    bool coordinates = false;               // reads the contract's latitude / longitude
+    std::vector<std::string> covariates;    // contract covariates, in the members' order
+    std::vector<std::string> categoricals;  // contract categoricals, in the members' order
+
+    bool operator==(const SuiteTargetInputs&) const = default;
+};
+
 // One weight file of a target.
 struct SuiteMember {
     int64_t seed = 0;
@@ -112,9 +133,12 @@ struct SuiteTarget {
     SuiteCombine combine = SuiteCombine::Mean;
     // The member checkpoint's target head(s) the prediction is read from: one
     // for a vote or a mean; for a circular mean either one (a bearing in the
-    // target's units) or two (its sine and its cosine, in that order).
+    // target's units) or two (its sine and its cosine, in that order); for a
+    // spherical mean two (latitude, then longitude, in degrees).
     std::vector<std::string> outputs;
     std::string units;            // e.g. "m", "degrees", "m^2"; empty for classes
+    // The columns the members read; unset reads the whole input contract.
+    std::optional<SuiteTargetInputs> inputs;
     double period = 0.0;          // circular mean: the length of a full turn
     SuiteTargetStatus status = SuiteTargetStatus::Released;
     std::string limit;            // required for an experimental target
@@ -143,6 +167,13 @@ struct SuiteManifest {
     [[nodiscard]] static SuiteManifest from_json(const json::Value& value);
 
     [[nodiscard]] const SuiteTarget& target(const std::string& name) const;
+
+    // What a target's members read: its declared inputs, or the whole contract.
+    [[nodiscard]] SuiteTargetInputs inputs_of(const SuiteTarget& target) const;
+
+    // The lowest format version that holds this manifest: 2 when a target
+    // declares its inputs or combines by a spherical mean, else 1.
+    [[nodiscard]] int format_version() const;
 
     // Read `<dir>/manifest.json` and validate it.
     [[nodiscard]] static SuiteManifest read(const std::string& dir);
@@ -229,11 +260,16 @@ struct SuiteTargetPrediction {
     SuiteTargetStatus status = SuiteTargetStatus::Released;
     std::string limit;
     std::string units;
+    // The units of `dispersion`: the target's units for a mean or a circular
+    // mean, "km" for a spherical mean, empty for a vote.
+    std::string dispersion_units;
     std::vector<std::string> class_names;  // vote: label of each class code
     std::vector<int64_t> member_seeds;
 
-    // (n_plots,) combined prediction: int64 class code for a vote, float32 in
-    // the target's units otherwise (a bearing in [0, period)).
+    // Combined prediction: (n_plots,) int64 class code for a vote; (n_plots,)
+    // float32 in the target's units for a mean or a circular mean (a bearing
+    // in [0, period)); (n_plots, 2) float32 latitude and longitude in degrees
+    // for a spherical mean.
     torch::Tensor value;
     // Vote: (n_plots,) float32 share of members naming `value`, in (0, 1].
     torch::Tensor agreement;
@@ -242,11 +278,13 @@ struct SuiteTargetPrediction {
     torch::Tensor probabilities;
     // Mean: members' standard deviation (n - 1 denominator; NaN for a single
     // member). Circular mean: circular standard deviation sqrt(-2 ln R) of the
-    // members' bearings, R their mean resultant length. (n_plots,) float32 in
-    // the target's units; undefined for a vote.
+    // members' bearings, R their mean resultant length. Spherical mean: the
+    // median great-circle distance of the members from the combined point
+    // (NaN for a single member). (n_plots,) float32 in `dispersion_units`;
+    // undefined for a vote.
     torch::Tensor dispersion;
-    // With keep_members: (n_members, n_plots), each member's own prediction in
-    // the form of `value`.
+    // With keep_members: (n_members, n_plots) -- (n_members, n_plots, 2) for a
+    // spherical mean -- each member's own prediction in the form of `value`.
     torch::Tensor members;
     // Recognition of each plot by the target's vocabulary.
     SpeciesRecognition recognition;
@@ -265,7 +303,7 @@ struct SuitePredictions {
 struct CombinedPrediction {
     torch::Tensor value;
     torch::Tensor agreement;   // vote only
-    torch::Tensor dispersion;  // mean / circular mean only
+    torch::Tensor dispersion;  // mean / circular / spherical mean only
 };
 // Vote over int64 class codes. A tie between classes with the most votes goes
 // to the one with the highest mean probability when `mean_probabilities`
@@ -278,6 +316,13 @@ struct CombinedPrediction {
 // Bearings in [0, period) (any real value is reduced modulo the period).
 [[nodiscard]] CombinedPrediction combine_circular(const torch::Tensor& member_bearings,
                                                   double period);
+// Points on the sphere: a (n_members, n_plots, 2) stack of latitude and
+// longitude in degrees. The combined point is the members' mean unit vector
+// projected back onto the sphere, as (n_plots, 2) latitude / longitude in
+// degrees; its dispersion is the median great-circle distance of the members
+// from it, in km (NaN for a single member). Where the members' vectors cancel
+// the combined point is undefined and both are NaN.
+[[nodiscard]] CombinedPrediction combine_spherical(const torch::Tensor& member_coordinates);
 // A member's bearing from its sine and cosine outputs, in [0, period). The
 // pair need not have unit length: the network's two outputs are read as a
 // direction.
@@ -313,7 +358,10 @@ private:
 
     SuitePredictor();
 
+    // The caller's columns for the whole contract.
     [[nodiscard]] RoleMapping roles_for(const SuiteColumns& columns) const;
+    // The part of `roles` an encoding's members read.
+    [[nodiscard]] RoleMapping roles_for(const RoleMapping& roles, const Encoding& encoding) const;
 
     std::string dir_;
     SuiteManifest manifest_;

@@ -208,3 +208,105 @@ test_that("the suite front doors reject what the manifest does not allow", {
   expect_error(resolve.load_suite(root), "SHA-256")
   expect_s4_class(resolve.load_suite(root, verify = FALSE, targets = "hab"), "Rcpp_Suite")
 })
+
+# A suite whose targets read different parts of one contract: "y" reads the
+# species and the coordinates, "where" the species and elev, and predicts the
+# plot's latitude / longitude, combined as a spherical mean.
+.build_split_suite <- function(root) {
+  data <- .suite_plots(40L, with_targets = TRUE)
+  coords_only <- .suite_roles[setdiff(names(.suite_roles), "covariates")]
+  elev_only <- .suite_roles[setdiff(names(.suite_roles), c("latitude", "longitude"))]
+  train <- function(roles, targets, seed, file) {
+    ds <- resolve.dataset.frame(data$header, data$species, roles = roles,
+                                targets = targets, config = .suite_config)
+    dir.create(dirname(file), recursive = TRUE, showWarnings = FALSE)
+    resolve.train.dataset(ds, hiddenDims = c(16L, 8L), maxEpochs = 2L, batchSize = 16L,
+                          testSize = 0.25, seed = seed, savePath = file, verbose = FALSE)
+  }
+  member <- function(name, roles, targets, seed) {
+    file <- sprintf("%s/seed_%d/model_final.pt", name, seed)
+    train(roles, targets, seed, file.path(root, file))
+    list(seed = seed, file = file)
+  }
+  manifest <- list(
+    format = "resolve-suite", format_version = 2L, name = "r_split_suite",
+    licence = "CC-BY-4.0", engine_version = resolve.version(), taxonomy = "synthetic",
+    training_scope = "40 synthetic plots",
+    inputs = list(plot_id = "plot", species = "taxon", abundance = "cover",
+                  genus = "genus", family = "family", latitude = "lat", longitude = "lon",
+                  covariates = list("elev"), zero_abundance_as = 1.0),
+    targets = list(
+      list(name = "y", task = "regression", combine = "mean", outputs = list("y"),
+           units = "m", inputs = list(coordinates = TRUE, covariates = list()),
+           status = "released",
+           members = lapply(0:1, function(s) member("y", coords_only,
+             list(y = list(column = "y", task = "regression")), s))),
+      list(name = "where", task = "regression", combine = "spherical_mean",
+           outputs = list("lat", "lon"), units = "degrees",
+           inputs = list(coordinates = FALSE, covariates = list("elev")),
+           status = "released",
+           members = lapply(2:4, function(s) member("where", elev_only,
+             list(lat = list(column = "lat", task = "regression"),
+                  lon = list(column = "lon", task = "regression")), s)))
+    )
+  )
+  jsonlite::write_json(manifest, file.path(root, "manifest.json"), auto_unbox = TRUE,
+                       pretty = TRUE, digits = NA)
+  resolve.seal_suite(root)
+  list(coords_only = coords_only, elev_only = elev_only)
+}
+
+test_that("each target of a suite reads its own columns; a location is a spherical mean", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  root <- tempfile("suite_")
+  dir.create(root)
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  roles <- .build_split_suite(root)
+
+  suite <- resolve.load_suite(root)
+  expect_equal(suite$n_encodings(), 2L)
+  manifest <- suite$manifest()
+  expect_equal(manifest$format_version, 2)
+  expect_false(manifest$targets[[2]]$inputs$coordinates)
+
+  score <- .suite_plots(40L, with_targets = FALSE, extra = TRUE)
+  preds <- resolve.predict.suite(suite, species = score$species, header = score$header,
+                                 keepMembers = TRUE)
+  where <- preds$targets$where
+  expect_equal(colnames(where$value), c("latitude", "longitude"))
+  expect_equal(nrow(where$value), nrow(score$header))
+  expect_equal(where$dispersion_units, "km")
+  expect_equal(names(where$members), c("latitude", "longitude"))
+  expect_equal(colnames(where$members$latitude), paste0("seed", 2:4))
+
+  # The combined point against the members scored one at a time, each through
+  # the columns it was trained on, averaged as unit vectors.
+  members <- lapply(manifest$targets[[2]]$members, function(m) {
+    predictor <- resolve.load(file.path(root, m$file))
+    cfg <- predictor$dataset_config()
+    cfg$zero_abundance_as <- 1.0
+    ds <- resolve.dataset.frame(score$header, score$species, roles = roles$elev_only,
+                                targets = list(), vocabs = predictor$vocabs(), config = cfg)
+    p <- resolve.predict.dataset(predictor, ds)
+    i <- match(preds$plot_ids, p$plot_ids)
+    cbind(p$predictions$lat[i], p$predictions$lon[i])
+  })
+  rad <- pi / 180
+  xyz <- Reduce(`+`, lapply(members, function(m) {
+    cbind(cos(m[, 1] * rad) * cos(m[, 2] * rad), cos(m[, 1] * rad) * sin(m[, 2] * rad),
+          sin(m[, 1] * rad))
+  }))
+  expect_equal(unname(where$value[, "latitude"]),
+               atan2(xyz[, 3], sqrt(xyz[, 1]^2 + xyz[, 2]^2)) / rad, tolerance = 1e-4)
+  expect_equal(unname(where$value[, "longitude"]), atan2(xyz[, 2], xyz[, 1]) / rad,
+               tolerance = 1e-4)
+  expect_equal(unname(where$members$latitude[, "seed3"]), members[[2]][, 1], tolerance = 1e-5)
+
+  flat <- as.data.frame(preds)
+  for (col in c("where_latitude", "where_longitude", "where_spread_km",
+                "where_seed2_latitude", "where_seed4_longitude", "y", "y_sd")) {
+    expect_true(col %in% names(flat), info = col)
+  }
+})

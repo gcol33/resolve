@@ -35,7 +35,12 @@ void write_header(std::ostream& out, const resolve::SuitePredictions& p, bool pr
     out << "plot_id";
     for (const auto& t : p.targets) {
         const std::string n = t.name;
-        out << "," << csv_field(n);
+        const bool spherical = t.combine == SuiteCombine::SphericalMean;
+        if (spherical) {
+            out << "," << csv_field(n + "_latitude") << "," << csv_field(n + "_longitude");
+        } else {
+            out << "," << csv_field(n);
+        }
         switch (t.combine) {
             case SuiteCombine::Vote:
                 out << "," << csv_field(n + "_code") << "," << csv_field(n + "_agreement");
@@ -51,13 +56,21 @@ void write_header(std::ostream& out, const resolve::SuitePredictions& p, bool pr
             case SuiteCombine::CircularMean:
                 out << "," << csv_field(n + "_circular_sd");
                 break;
+            case SuiteCombine::SphericalMean:
+                out << "," << csv_field(n + "_spread_km");
+                break;
         }
         out << "," << csv_field(n + "_n_species") << "," << csv_field(n + "_n_recognised")
             << "," << csv_field(n + "_recognised_share") << ","
             << csv_field(n + "_recognised_abundance_share");
         if (members) {
             for (const int64_t seed : t.member_seeds) {
-                out << "," << csv_field(n + "_seed" + std::to_string(seed));
+                const std::string s = n + "_seed" + std::to_string(seed);
+                if (spherical) {
+                    out << "," << csv_field(s + "_latitude") << "," << csv_field(s + "_longitude");
+                } else {
+                    out << "," << csv_field(s);
+                }
             }
         }
     }
@@ -102,6 +115,10 @@ void write_rows(std::ostream& out, const resolve::SuitePredictions& p, bool prob
                         out << "," << csv_number(c.probabilities[i][k].item<double>());
                     }
                 }
+            } else if (t.combine == SuiteCombine::SphericalMean) {
+                out << "," << csv_number(c.value[i][0].item<double>()) << ","
+                    << csv_number(c.value[i][1].item<double>()) << ","
+                    << csv_number(at(c.dispersion, i));
             } else {
                 out << "," << csv_number(at(c.value, i)) << "," << csv_number(at(c.dispersion, i));
             }
@@ -113,6 +130,9 @@ void write_rows(std::ostream& out, const resolve::SuitePredictions& p, bool prob
                     if (t.combine == SuiteCombine::Vote) {
                         out << "," << csv_field(class_label(t.class_names,
                                                             c.members[m][i].item<int64_t>()));
+                    } else if (t.combine == SuiteCombine::SphericalMean) {
+                        out << "," << csv_number(c.members[m][i][0].item<double>()) << ","
+                            << csv_number(c.members[m][i][1].item<double>());
                     } else {
                         out << "," << csv_number(c.members[m][i].item<double>());
                     }
@@ -257,6 +277,13 @@ int info_suite_command(const ParsedArgs& args) {
                       << t.members.size() << " member(s)";
             if (!t.units.empty()) std::cout << ", " << t.units;
             std::cout << ", " << enum_to_name(t.status) << std::endl;
+            if (t.inputs) {
+                std::cout << "    reads: species";
+                if (t.inputs->coordinates) std::cout << ", coordinates";
+                for (const auto& c : t.inputs->covariates) std::cout << ", " << c;
+                for (const auto& c : t.inputs->categoricals) std::cout << ", " << c;
+                std::cout << std::endl;
+            }
             if (!t.limit.empty()) std::cout << "    limit: " << t.limit << std::endl;
             for (const auto& [regime, metrics] : t.validation.members()) {
                 std::cout << "    validation " << regime << ": " << json::dump(metrics, 0)

@@ -83,6 +83,13 @@ public:
         return out;
     }
 
+    bool boolean(const std::string& key, bool fallback) {
+        const json::Value* v = get(key);
+        if (!v) return fallback;
+        if (!v->is_bool()) fail(key, "must be true or false");
+        return v->as_bool();
+    }
+
     double number(const std::string& key, double fallback) {
         const json::Value* v = get(key);
         if (!v) return fallback;
@@ -212,6 +219,24 @@ SuiteInputContract inputs_from_json(const json::Value& value) {
     return in;
 }
 
+json::Value target_inputs_to_json(const SuiteTargetInputs& in) {
+    json::Value o = json::Value::object();
+    o.set("coordinates", in.coordinates);
+    o.set("covariates", json::Value::array_of(in.covariates));
+    o.set("categoricals", json::Value::array_of(in.categoricals));
+    return o;
+}
+
+SuiteTargetInputs target_inputs_from_json(const json::Value& value, const std::string& where) {
+    ObjectReader r(value, where);
+    SuiteTargetInputs in;
+    in.coordinates = r.boolean("coordinates", false);
+    in.covariates = r.strings("covariates");
+    in.categoricals = r.strings("categoricals");
+    r.finish();
+    return in;
+}
+
 json::Value target_to_json(const SuiteTarget& t) {
     json::Value o = json::Value::object();
     o.set("name", t.name);
@@ -219,6 +244,7 @@ json::Value target_to_json(const SuiteTarget& t) {
     o.set("combine", enum_to_name(t.combine));
     o.set("outputs", json::Value::array_of(t.outputs));
     o.set("units", t.units);
+    if (t.inputs) o.set("inputs", target_inputs_to_json(*t.inputs));
     if (t.combine == SuiteCombine::CircularMean) o.set("period", t.period);
     o.set("status", enum_to_name(t.status));
     if (!t.limit.empty()) o.set("limit", t.limit);
@@ -245,6 +271,9 @@ SuiteTarget target_from_json(const json::Value& value, const std::string& where)
     t.combine = enum_member<SuiteCombine>(r, "combine");
     t.outputs = r.strings("outputs");
     t.units = r.string("units", false);
+    if (const json::Value* in = r.get("inputs")) {
+        t.inputs = target_inputs_from_json(*in, r.path("inputs"));
+    }
     t.period = r.number("period", 0.0);
     t.status = enum_member<SuiteTargetStatus>(r, "status");
     t.limit = r.string("limit", false);
@@ -271,7 +300,7 @@ SuiteTarget target_from_json(const json::Value& value, const std::string& where)
 json::Value SuiteManifest::to_json() const {
     json::Value o = json::Value::object();
     o.set("format", kSuiteFormat);
-    o.set("format_version", kSuiteFormatVersion);
+    o.set("format_version", format_version());
     o.set("name", name);
     o.set("description", description);
     o.set("licence", licence);
@@ -312,7 +341,24 @@ SuiteManifest SuiteManifest::from_json(const json::Value& value) {
             target_from_json(targets.items()[i], "targets[" + std::to_string(i) + "]"));
     }
     r.finish();
+    if (version < m.format_version()) {
+        r.fail("format_version", "is " + std::to_string(version) + ", but the manifest uses "
+               "per-target inputs or a spherical mean, which need version " +
+               std::to_string(m.format_version()));
+    }
     return m;
+}
+
+SuiteTargetInputs SuiteManifest::inputs_of(const SuiteTarget& target) const {
+    if (target.inputs) return *target.inputs;
+    return SuiteTargetInputs{inputs.reads_coordinates(), inputs.covariates, inputs.categoricals};
+}
+
+int SuiteManifest::format_version() const {
+    for (const auto& t : targets) {
+        if (t.inputs || t.combine == SuiteCombine::SphericalMean) return 2;
+    }
+    return 1;
 }
 
 void SuiteManifest::validate() const {
@@ -373,6 +419,20 @@ void SuiteManifest::validate() const {
                     problems.add(where + ".period", "a circular mean needs a positive period");
                 }
                 break;
+            case SuiteCombine::SphericalMean:
+                if (t.task != TaskType::Regression) {
+                    problems.add(where, "a spherical mean combines coordinates; task must be "
+                                 "regression");
+                }
+                if (t.outputs.size() != 2) {
+                    problems.add(where + ".outputs", "a spherical mean reads two outputs "
+                                 "(latitude, then longitude)");
+                }
+                if (t.units != "degrees") {
+                    problems.add(where + ".units", "a spherical mean reads latitude and "
+                                 "longitude in degrees; units must be 'degrees'");
+                }
+                break;
         }
         if (t.combine != SuiteCombine::CircularMean && t.period != 0.0) {
             problems.add(where + ".period", "is read only by a circular mean");
@@ -403,6 +463,54 @@ void SuiteManifest::validate() const {
                              "manifest to fill it)");
             }
             if (m.bytes <= 0) problems.add(mw + ".bytes", "must be positive (seal the manifest)");
+        }
+
+        if (t.inputs) {
+            const SuiteTargetInputs& in = *t.inputs;
+            if (in.coordinates && !inputs.reads_coordinates()) {
+                problems.add(where + ".inputs.coordinates",
+                             "the target reads coordinates, the input contract names none");
+            }
+            auto subset = [&](const char* key, const std::vector<std::string>& read,
+                              const std::vector<std::string>& contract) {
+                std::unordered_set<std::string> seen;
+                for (const auto& column : read) {
+                    if (std::find(contract.begin(), contract.end(), column) == contract.end()) {
+                        problems.add(where + ".inputs." + key, "'" + column +
+                                     "' is not a column of the input contract");
+                    } else if (!seen.insert(column).second) {
+                        problems.add(where + ".inputs." + key, "'" + column + "' appears twice");
+                    }
+                }
+            };
+            subset("covariates", in.covariates, inputs.covariates);
+            subset("categoricals", in.categoricals, inputs.categoricals);
+        }
+    }
+
+    // The contract is the union of what the targets read: a column no target
+    // reads would make a caller supply data no model looks at.
+    if (!targets.empty()) {
+        bool coordinates = false;
+        std::unordered_set<std::string> covariates, categoricals;
+        for (const auto& t : targets) {
+            const SuiteTargetInputs read = inputs_of(t);
+            coordinates = coordinates || read.coordinates;
+            covariates.insert(read.covariates.begin(), read.covariates.end());
+            categoricals.insert(read.categoricals.begin(), read.categoricals.end());
+        }
+        if (inputs.reads_coordinates() && !coordinates) {
+            problems.add("inputs", "names coordinates, but no target reads them");
+        }
+        for (const auto& c : inputs.covariates) {
+            if (!covariates.count(c)) {
+                problems.add("inputs.covariates", "'" + c + "' is read by no target");
+            }
+        }
+        for (const auto& c : inputs.categoricals) {
+            if (!categoricals.count(c)) {
+                problems.add("inputs.categoricals", "'" + c + "' is read by no target");
+            }
         }
     }
 
@@ -612,6 +720,42 @@ CombinedPrediction combine_circular(const torch::Tensor& member_bearings, double
     return out;
 }
 
+CombinedPrediction combine_spherical(const torch::Tensor& member_coordinates) {
+    const torch::Tensor& c = member_coordinates;
+    if (!c.defined() || c.dim() != 3 || c.size(0) < 1 || c.size(2) != 2) {
+        throw std::invalid_argument("combine_spherical: expected a (n_members, n_plots, 2) "
+                                    "tensor of latitude / longitude with at least one member");
+    }
+    constexpr double kRadians = std::numbers::pi / 180.0;
+    const auto degrees = c.to(torch::kCPU, torch::kFloat64);
+    const auto lat = degrees.select(2, 0) * kRadians;
+    const auto lon = degrees.select(2, 1) * kRadians;
+    // (n_members, n_plots, 3) unit vectors.
+    const auto points = torch::stack({lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()}, 2);
+    const auto sum = points.sum(0);
+    const auto norm = sum.norm(2, /*dim=*/{1}, /*keepdim=*/true);
+    // Members whose vectors cancel name no direction: the combined point is
+    // left undefined rather than chosen arbitrarily.
+    const auto centre = torch::where(norm > 1e-12, sum / norm,
+                                     torch::full_like(sum, std::numeric_limits<double>::quiet_NaN()));
+    const auto x = centre.select(1, 0);
+    const auto y = centre.select(1, 1);
+    const auto z = centre.select(1, 2);
+    CombinedPrediction out;
+    out.value = torch::stack({torch::atan2(z, torch::sqrt(x * x + y * y)), torch::atan2(y, x)}, 1)
+                    .div(kRadians)
+                    .to(torch::kFloat32);
+    if (c.size(0) == 1) {
+        out.dispersion = torch::full({c.size(1)}, std::numeric_limits<float>::quiet_NaN());
+        return out;
+    }
+    // Great-circle angle atan2(|a x b|, a . b), well conditioned at small angles.
+    const auto across = torch::linalg_cross(points, centre.unsqueeze(0).expand_as(points), 2);
+    const auto angle = torch::atan2(across.norm(2, /*dim=*/{2}), (points * centre.unsqueeze(0)).sum(2));
+    out.dispersion = (torch::quantile(angle, 0.5, /*dim=*/0) * kEarthRadiusKm).to(torch::kFloat32);
+    return out;
+}
+
 torch::Tensor bearing_from_components(const torch::Tensor& sine, const torch::Tensor& cosine,
                                       double period) {
     if (!(std::isfinite(period) && period > 0.0)) {
@@ -633,6 +777,7 @@ struct SuitePredictor::Member {
 struct SuitePredictor::Encoding {
     ExternalVocabs vocabs;
     DatasetConfig config;
+    SuiteTargetInputs reads;  // the part of the input contract its members read
     std::string fingerprint;
 };
 
@@ -651,8 +796,8 @@ SuitePredictor::~SuitePredictor() = default;
 namespace {
 
 // Everything that decides how a member encodes the input plots: its three
-// vocabularies, its categorical maps, and every loader knob. Two members with
-// equal fingerprints read the same dataset.
+// vocabularies, its categorical maps, every loader knob, and the columns it
+// reads. Two members with equal fingerprints read the same dataset.
 struct FingerprintWriter {
     std::ostringstream& out;
     template <typename T>
@@ -672,7 +817,8 @@ struct FingerprintWriter {
     }
 };
 
-std::string encoding_fingerprint(const ExternalVocabs& vocabs, const DatasetConfig& config) {
+std::string encoding_fingerprint(const ExternalVocabs& vocabs, const DatasetConfig& config,
+                                 const SuiteTargetInputs& reads) {
     Sha256 hash;
     auto list = [&](const char* label, const std::vector<std::string>& names) {
         hash.update(label);
@@ -699,7 +845,16 @@ std::string encoding_fingerprint(const ExternalVocabs& vocabs, const DatasetConf
     std::ostringstream fields;
     for_each_field(config, FingerprintWriter{fields});
     hash.update(fields.str());
+    hash.update(std::string("reads_coordinates=") + (reads.coordinates ? "1" : "0") + ";");
+    list("reads_covariates", reads.covariates);
+    list("reads_categoricals", reads.categoricals);
     return hash.hex_digest();
+}
+
+std::string joined(const std::vector<std::string>& names) {
+    std::string s;
+    for (const auto& n : names) s += (s.empty() ? "" : ", ") + n;
+    return s;
 }
 
 // Check one loaded member against the manifest's contract and target entry.
@@ -707,6 +862,8 @@ void check_member(const SuiteManifest& manifest, const SuiteTarget& target,
                   const SuiteMember& member, const Predictor& predictor) {
     const ResolveSchema& schema = predictor.schema();
     const SuiteInputContract& in = manifest.inputs;
+    const SuiteTargetInputs reads = manifest.inputs_of(target);
+    const std::string source = target.inputs ? "the target's declared inputs" : "the input contract";
     const std::string label = "suite '" + manifest.name + "' target '" + target.name +
                               "' seed " + std::to_string(member.seed) + " (" + member.file + ")";
     auto fail = [&](const std::string& what) { throw std::runtime_error(label + ": " + what); };
@@ -730,20 +887,18 @@ void check_member(const SuiteManifest& manifest, const SuiteTarget& target,
                  "declares " + enum_to_name(target.task));
         }
     }
-    if (schema.covariate_names != in.covariates) {
-        fail("the checkpoint reads covariates [" + [&] {
-            std::string s;
-            for (const auto& c : schema.covariate_names) s += (s.empty() ? "" : ", ") + c;
-            return s;
-        }() + "], which the input contract does not list in that order");
+    if (schema.covariate_names != reads.covariates) {
+        fail("the checkpoint reads covariates [" + joined(schema.covariate_names) + "], which " +
+             source + " does not list in that order");
     }
-    if (schema.categorical_names != in.categoricals) {
-        fail("the checkpoint's categorical columns differ from the input contract's");
+    if (schema.categorical_names != reads.categoricals) {
+        fail("the checkpoint's categorical columns [" + joined(schema.categorical_names) +
+             "] differ from those of " + source);
     }
-    if (schema.has_coordinates != in.reads_coordinates()) {
+    if (schema.has_coordinates != reads.coordinates) {
         fail(schema.has_coordinates
-                 ? "the checkpoint reads coordinates, the input contract names none"
-                 : "the input contract names coordinates, the checkpoint reads none");
+                 ? "the checkpoint reads coordinates, " + source + " names none"
+                 : source + " names coordinates, the checkpoint reads none");
     }
     if (schema.has_taxonomy && in.genus.empty() && in.family.empty()) {
         fail("the checkpoint reads genus / family, the input contract names neither column");
@@ -857,7 +1012,8 @@ SuitePredictor SuitePredictor::load(const std::string& dir, const SuiteLoadOptio
             DatasetConfig config =
                 dataset_config_from_checkpoint(predictor.schema(), predictor.model()->config());
             config.zero_abundance_as = manifest.inputs.zero_abundance_as;
-            const std::string fingerprint = encoding_fingerprint(vocabs, config);
+            SuiteTargetInputs reads = manifest.inputs_of(spec);
+            const std::string fingerprint = encoding_fingerprint(vocabs, config, reads);
 
             std::size_t index = suite.encodings_.size();
             for (std::size_t e = 0; e < suite.encodings_.size(); ++e) {
@@ -867,6 +1023,7 @@ SuitePredictor SuitePredictor::load(const std::string& dir, const SuiteLoadOptio
                 auto enc = std::make_unique<Encoding>();
                 enc->vocabs = std::move(vocabs);
                 enc->config = config;
+                enc->reads = std::move(reads);
                 enc->fingerprint = fingerprint;
                 suite.encodings_.push_back(std::move(enc));
             }
@@ -937,6 +1094,29 @@ RoleMapping SuitePredictor::roles_for(const SuiteColumns& columns) const {
     return roles;
 }
 
+RoleMapping SuitePredictor::roles_for(const RoleMapping& roles, const Encoding& encoding) const {
+    const SuiteInputContract& in = manifest_.inputs;
+    // A contract column is renamed by position, so the caller's name for a
+    // column is the one at the contract column's index.
+    auto renamed = [](const std::vector<std::string>& read, const std::vector<std::string>& contract,
+                      const std::vector<std::string>& caller) {
+        std::vector<std::string> out;
+        for (const auto& column : read) {
+            const auto at = std::find(contract.begin(), contract.end(), column) - contract.begin();
+            out.push_back(caller[static_cast<std::size_t>(at)]);
+        }
+        return out;
+    };
+    RoleMapping out = roles;
+    if (!encoding.reads.coordinates) {
+        out.latitude.reset();
+        out.longitude.reset();
+    }
+    out.covariates = renamed(encoding.reads.covariates, in.covariates, roles.covariates);
+    out.categoricals = renamed(encoding.reads.categoricals, in.categoricals, roles.categoricals);
+    return out;
+}
+
 SuitePredictions SuitePredictor::predict(const SuiteInput& input,
                                          const SuitePredictOptions& options) {
     if (manifest_.inputs.needs_header() && !input.has_header()) {
@@ -960,7 +1140,7 @@ SuitePredictions SuitePredictor::predict(const SuiteInput& input,
         if (users.empty()) continue;
 
         const Encoding& enc = *encodings_[e];
-        const ResolveDataset dataset = input.encode(roles, enc.vocabs, enc.config);
+        const ResolveDataset dataset = input.encode(roles_for(roles, enc), enc.vocabs, enc.config);
 
         torch::Tensor perm;
         if (!have_reference) {
@@ -980,6 +1160,9 @@ SuitePredictions SuitePredictor::predict(const SuiteInput& input,
             out.status = spec.status;
             out.limit = spec.limit;
             out.units = spec.units;
+            out.dispersion_units = spec.combine == SuiteCombine::Vote          ? std::string()
+                                   : spec.combine == SuiteCombine::SphericalMean ? std::string("km")
+                                                                                 : spec.units;
             out.class_names = loaded.class_names;
 
             std::vector<torch::Tensor> member_values;
@@ -1008,6 +1191,11 @@ SuitePredictions SuitePredictor::predict(const SuiteInput& input,
                                 : torch::remainder(head(spec.outputs.front()).to(torch::kFloat64),
                                                    spec.period).to(torch::kFloat32));
                         break;
+                    case SuiteCombine::SphericalMean:
+                        member_values.push_back(torch::stack(
+                            {head(spec.outputs[0]).to(torch::kFloat32),
+                             head(spec.outputs[1]).to(torch::kFloat32)}, 1));
+                        break;
                 }
             }
 
@@ -1026,6 +1214,9 @@ SuitePredictions SuitePredictor::predict(const SuiteInput& input,
                     break;
                 case SuiteCombine::CircularMean:
                     combined = combine_circular(stack, spec.period);
+                    break;
+                case SuiteCombine::SphericalMean:
+                    combined = combine_spherical(stack);
                     break;
             }
             out.value = combined.value;

@@ -36,10 +36,13 @@ among \code{plot_id}, \code{species_id}, \code{abundance}, \code{latitude}, \cod
 \value{
 A \code{resolve_suite_predictions} list: \code{plot_ids}, and \code{targets}, a
 named list with one entry per target holding \code{value} (the combined
-prediction; class codes for a vote, with the class labels in \code{label}),
-\code{agreement}, \code{probabilities}, \code{dispersion}, the recognition columns above,
-\code{members} (plots x members, with \code{keepMembers}), and the target's \code{units},
-\code{status} and \code{limit}. \code{\link[=as.data.frame]{as.data.frame()}} flattens it to one row per plot.
+prediction; class codes for a vote, with the class labels in \code{label}; a
+plots x 2 matrix of \code{latitude} and \code{longitude} in degrees for a spherical
+mean), \code{agreement}, \code{probabilities}, \code{dispersion}, the recognition columns
+above, \code{members} (plots x members, with \code{keepMembers}; for a spherical
+mean a list of \code{latitude} and \code{longitude}, each plots x members), and the
+target's \code{units}, \code{dispersion_units}, \code{status} and \code{limit}.
+\code{\link[=as.data.frame]{as.data.frame()}} flattens it to one row per plot.
 }
 \description{
 Score plots with every loaded target of a suite. The plots are read with
@@ -58,6 +61,8 @@ goes to the tied class with the higher mean probability);
 target's units;
 \item for a circular mean (a bearing): the members' circular standard deviation
 (\code{dispersion}), in the target's units;
+\item for a spherical mean (a location): the median great-circle distance of
+the members from the combined point (\code{dispersion}), in km;
 \item how much of the plot's species list the target's vocabulary recognises:
 \code{n_species}, \code{n_recognised}, \code{recognised_share} (by distinct species) and
 \code{recognised_abundance_share} (by abundance).

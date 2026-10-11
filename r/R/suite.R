@@ -132,6 +132,8 @@ resolve.seal_suite <- function(dir) {
 #'   target's units;
 #' - for a circular mean (a bearing): the members' circular standard deviation
 #'   (`dispersion`), in the target's units;
+#' - for a spherical mean (a location): the median great-circle distance of
+#'   the members from the combined point (`dispersion`), in km;
 #' - how much of the plot's species list the target's vocabulary recognises:
 #'   `n_species`, `n_recognised`, `recognised_share` (by distinct species) and
 #'   `recognised_abundance_share` (by abundance).
@@ -156,10 +158,13 @@ resolve.seal_suite <- function(dir) {
 #'
 #' @return A `resolve_suite_predictions` list: `plot_ids`, and `targets`, a
 #'   named list with one entry per target holding `value` (the combined
-#'   prediction; class codes for a vote, with the class labels in `label`),
-#'   `agreement`, `probabilities`, `dispersion`, the recognition columns above,
-#'   `members` (plots x members, with `keepMembers`), and the target's `units`,
-#'   `status` and `limit`. [as.data.frame()] flattens it to one row per plot.
+#'   prediction; class codes for a vote, with the class labels in `label`; a
+#'   plots x 2 matrix of `latitude` and `longitude` in degrees for a spherical
+#'   mean), `agreement`, `probabilities`, `dispersion`, the recognition columns
+#'   above, `members` (plots x members, with `keepMembers`; for a spherical
+#'   mean a list of `latitude` and `longitude`, each plots x members), and the
+#'   target's `units`, `dispersion_units`, `status` and `limit`.
+#'   [as.data.frame()] flattens it to one row per plot.
 #'
 #' @seealso [resolve.load_suite()]
 #' @examples
@@ -230,6 +235,7 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
       members = NULL,
       combine = t$combine,
       units = t$units,
+      dispersion_units = t$dispersion_units,
       status = t$status,
       limit = t$limit,
       class_names = classes,
@@ -242,14 +248,27 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
         colnames(out$probabilities) <- classes
       }
     }
+    spherical <- identical(t$combine, "spherical_mean")
+    if (spherical) {
+      colnames(out$value) <- c("latitude", "longitude")
+    }
     if (!is.null(t$members)) {
-      members <- t(t$members)
-      colnames(members) <- paste0("seed", seeds)
-      if (identical(t$combine, "vote") && length(classes) > 0) {
-        members <- matrix(classes[members + 1L], nrow = nrow(members),
-                          dimnames = dimnames(members))
+      by_seed <- function(m) {
+        m <- t(m)
+        colnames(m) <- paste0("seed", seeds)
+        m
       }
-      out$members <- members
+      if (spherical) {
+        out$members <- list(latitude = by_seed(t$members$latitude),
+                            longitude = by_seed(t$members$longitude))
+      } else {
+        members <- by_seed(t$members)
+        if (identical(t$combine, "vote") && length(classes) > 0) {
+          members <- matrix(classes[members + 1L], nrow = nrow(members),
+                            dimnames = dimnames(members))
+        }
+        out$members <- members
+      }
     }
     out[!vapply(out, is.null, logical(1))]
   })
@@ -266,9 +285,12 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
 #'
 #' The same columns `resolve predict --suite` writes: `plot_id`, then per target
 #' the prediction (`<target>`; for a vote also `<target>_code` and
-#' `<target>_agreement`), its dispersion (`<target>_sd` for a mean,
-#' `<target>_circular_sd` for a bearing), the four recognition columns, and,
-#' when present, `<target>_seed<N>` for each member.
+#' `<target>_agreement`; for a spherical mean `<target>_latitude` and
+#' `<target>_longitude`), its dispersion (`<target>_sd` for a mean,
+#' `<target>_circular_sd` for a bearing, `<target>_spread_km` for a spherical
+#' mean), the four recognition columns, and, when present, `<target>_seed<N>`
+#' for each member (`<target>_seed<N>_latitude` and `_longitude` for a
+#' spherical mean).
 #'
 #' @param x A `resolve_suite_predictions` object from [resolve.predict.suite()].
 #' @param row.names,optional Ignored; present for the generic's signature.
@@ -282,7 +304,12 @@ as.data.frame.resolve_suite_predictions <- function(x, row.names = NULL, optiona
   out <- data.frame(plot_id = x$plot_ids, stringsAsFactors = FALSE)
   for (name in names(x$targets)) {
     t <- x$targets[[name]]
-    if (identical(t$combine, "vote")) {
+    spherical <- identical(t$combine, "spherical_mean")
+    if (spherical) {
+      out[[paste0(name, "_latitude")]] <- t$value[, "latitude"]
+      out[[paste0(name, "_longitude")]] <- t$value[, "longitude"]
+      out[[paste0(name, "_spread_km")]] <- t$dispersion
+    } else if (identical(t$combine, "vote")) {
       out[[name]] <- t$label
       out[[paste0(name, "_code")]] <- t$value
       out[[paste0(name, "_agreement")]] <- t$agreement
@@ -302,7 +329,13 @@ as.data.frame.resolve_suite_predictions <- function(x, row.names = NULL, optiona
     out[[paste0(name, "_n_recognised")]] <- t$n_recognised
     out[[paste0(name, "_recognised_share")]] <- t$recognised_share
     out[[paste0(name, "_recognised_abundance_share")]] <- t$recognised_abundance_share
-    if (!is.null(t$members)) {
+    if (spherical && !is.null(t$members)) {
+      for (k in seq_len(ncol(t$members$latitude))) {
+        seed <- colnames(t$members$latitude)[k]
+        out[[paste0(name, "_", seed, "_latitude")]] <- t$members$latitude[, k]
+        out[[paste0(name, "_", seed, "_longitude")]] <- t$members$longitude[, k]
+      }
+    } else if (!is.null(t$members)) {
       for (k in seq_len(ncol(t$members))) {
         out[[paste0(name, "_", colnames(t$members)[k])]] <- t$members[, k]
       }

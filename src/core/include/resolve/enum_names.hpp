@@ -343,6 +343,7 @@ inline constexpr EnumName<SuiteCombine> kSuiteCombineNames[] = {
     {"mean", SuiteCombine::Mean},
     {"vote", SuiteCombine::Vote},
     {"circular_mean", SuiteCombine::CircularMean},
+    {"spherical_mean", SuiteCombine::SphericalMean},
 };
 
 inline constexpr EnumName<SuiteTargetStatus> kSuiteTargetStatusNames[] = {

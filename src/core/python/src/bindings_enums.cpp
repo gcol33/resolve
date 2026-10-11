@@ -143,7 +143,8 @@ void register_enums(nb::module_& m) {
     nb::enum_<resolve::SuiteCombine>(m, "SuiteCombine")
         .value("Mean", resolve::SuiteCombine::Mean)
         .value("Vote", resolve::SuiteCombine::Vote)
-        .value("CircularMean", resolve::SuiteCombine::CircularMean);
+        .value("CircularMean", resolve::SuiteCombine::CircularMean)
+        .value("SphericalMean", resolve::SuiteCombine::SphericalMean);
 
     nb::enum_<resolve::SuiteTargetStatus>(m, "SuiteTargetStatus")
         .value("Released", resolve::SuiteTargetStatus::Released)

@@ -2,6 +2,8 @@
 // combination rules and the species recognition report.
 
 #include "bindings_common.hpp"
+
+#include <nanobind/operators.h>
 #include "resolve/json.hpp"
 #include "resolve/sha256.hpp"
 #include "resolve/suite.hpp"
@@ -111,6 +113,21 @@ void register_suite(nb::module_& m) {
         .def("reads_coordinates", &SuiteInputContract::reads_coordinates)
         .def("needs_header", &SuiteInputContract::needs_header);
 
+    nb::class_<SuiteTargetInputs>(m, "SuiteTargetInputs",
+                                  "The part of the input contract a target's members read.")
+        .def("__init__",
+             [](SuiteTargetInputs* self, bool coordinates, std::vector<std::string> covariates,
+                std::vector<std::string> categoricals) {
+                 new (self) SuiteTargetInputs{coordinates, std::move(covariates),
+                                              std::move(categoricals)};
+             },
+             nb::arg("coordinates") = false, nb::arg("covariates") = std::vector<std::string>{},
+             nb::arg("categoricals") = std::vector<std::string>{})
+        .def_rw("coordinates", &SuiteTargetInputs::coordinates)
+        .def_rw("covariates", &SuiteTargetInputs::covariates)
+        .def_rw("categoricals", &SuiteTargetInputs::categoricals)
+        .def(nb::self == nb::self);
+
     nb::class_<SuiteMember>(m, "SuiteMember", "One weight file of a suite target.")
         .def("__init__",
              [](SuiteMember* self, int64_t seed, const std::string& file,
@@ -130,6 +147,9 @@ void register_suite(nb::module_& m) {
         .def_rw("combine", &SuiteTarget::combine)
         .def_rw("outputs", &SuiteTarget::outputs)
         .def_rw("units", &SuiteTarget::units)
+        .def_rw("inputs", &SuiteTarget::inputs,
+                "The columns the members read (SuiteTargetInputs); None reads the whole "
+                "input contract.")
         .def_rw("period", &SuiteTarget::period)
         .def_rw("status", &SuiteTarget::status)
         .def_rw("limit", &SuiteTarget::limit)
@@ -165,6 +185,10 @@ void register_suite(nb::module_& m) {
                     }, nb::arg("text"),
                     "Parse a manifest from JSON text (not validated; call validate()).")
         .def("target", &SuiteManifest::target, nb::arg("name"))
+        .def("inputs_of", &SuiteManifest::inputs_of, nb::arg("target"),
+             "What a target's members read: its declared inputs, or the whole contract.")
+        .def_prop_ro("format_version", &SuiteManifest::format_version,
+                     "The lowest manifest format version that holds this manifest.")
         .def_static("read", &SuiteManifest::read, nb::arg("dir"),
                     "Read and validate <dir>/manifest.json.")
         .def("write", &SuiteManifest::write, nb::arg("dir"),
@@ -217,6 +241,13 @@ void register_suite(nb::module_& m) {
               return combine_circular(unpack_required_tensor(bearings, "member_bearings"), period);
           }, nb::arg("member_bearings"), nb::arg("period"),
           "Circular mean and circular standard deviation over a (n_members, n_plots) stack.");
+    m.def("combine_spherical", [](nb::object coordinates) {
+              return combine_spherical(unpack_required_tensor(coordinates, "member_coordinates"));
+          }, nb::arg("member_coordinates"),
+          "Spherical mean over a (n_members, n_plots, 2) stack of latitude / longitude in "
+          "degrees: the mean unit vector as (n_plots, 2) latitude / longitude, and the "
+          "median great-circle distance of the members from it in km.");
+    m.attr("EARTH_RADIUS_KM") = kEarthRadiusKm;
     m.def("bearing_from_components", [](nb::object sine, nb::object cosine, double period) {
               return tensor_or_none(bearing_from_components(
                   unpack_required_tensor(sine, "sine"), unpack_required_tensor(cosine, "cosine"),
@@ -246,6 +277,7 @@ void register_suite(nb::module_& m) {
         .def_ro("status", &SuiteTargetPrediction::status)
         .def_ro("limit", &SuiteTargetPrediction::limit)
         .def_ro("units", &SuiteTargetPrediction::units)
+        .def_ro("dispersion_units", &SuiteTargetPrediction::dispersion_units)
         .def_ro("class_names", &SuiteTargetPrediction::class_names)
         .def_ro("member_seeds", &SuiteTargetPrediction::member_seeds)
         .def_prop_ro("value", [](const SuiteTargetPrediction& t) { return tensor_or_none(t.value); })

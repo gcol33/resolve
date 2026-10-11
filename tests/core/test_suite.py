@@ -335,3 +335,127 @@ def test_zero_abundance_as_reaches_the_schema(tmp_path):
     assert ds.schema.zero_abundance_as == 1.0
     weights = ds.pool_weights
     assert torch.allclose(weights[0], weights[1])  # a read as 1, like b
+
+
+# ---------------------------------------------------------------------------
+# Targets that read different parts of one contract
+# ---------------------------------------------------------------------------
+
+def _roles_reading(coordinates: bool, covariates: list[str]):
+    roles = _roles()
+    if not coordinates:
+        roles.latitude = None
+        roles.longitude = None
+    roles.covariates = covariates
+    return roles
+
+
+@pytest.fixture
+def split_suite_dir(tmp_path: Path) -> Path:
+    """"y" reads species and coordinates; "where" reads species and elev and
+    predicts the plot's latitude / longitude, combined by a spherical mean."""
+    cols, header, species = _plots(40, with_targets=True)
+    h = write_csv(tmp_path / "train_header.csv", cols, header)
+    s = write_csv(tmp_path / "train_species.csv", ["plot", "taxon", "cover", "genus", "family"],
+                  species)
+    y_ds = rc.ResolveDataset.from_csv(str(h), str(s), _roles_reading(True, []),
+                                      [rc.TargetSpec.regression("y")], _config())
+    where_ds = rc.ResolveDataset.from_csv(str(h), str(s), _roles_reading(False, ["elev"]),
+                                          [rc.TargetSpec.regression("lat"),
+                                           rc.TargetSpec.regression("lon")], _config())
+    root = tmp_path / "split"
+    targets = []
+    for name, combine, outputs, units, inputs, ds, seeds in (
+        ("y", "mean", ["y"], "m", {"coordinates": True, "covariates": []}, y_ds, [0, 1]),
+        ("where", "spherical_mean", ["lat", "lon"], "degrees",
+         {"coordinates": False, "covariates": ["elev"]}, where_ds, [2, 3, 4]),
+    ):
+        members = []
+        for seed in seeds:
+            rel = f"{name}/seed_{seed}/model_final.pt"
+            _save_member(ds, seed, root / rel)
+            members.append({"seed": seed, "file": rel})
+        targets.append({"name": name, "task": "regression", "combine": combine,
+                        "outputs": outputs, "units": units, "inputs": inputs,
+                        "status": "released", "members": members})
+    manifest = {
+        "format": "resolve-suite", "format_version": 2, "name": "split_suite",
+        "licence": "CC-BY-4.0", "engine_version": rc.__version__, "taxonomy": "synthetic",
+        "training_scope": "40 synthetic plots",
+        "inputs": {"plot_id": "plot", "species": "taxon", "abundance": "cover",
+                   "genus": "genus", "family": "family", "latitude": "lat", "longitude": "lon",
+                   "covariates": ["elev"], "zero_abundance_as": 1.0},
+        "targets": targets,
+    }
+    m = rc.SuiteManifest.from_json(json.dumps(manifest))
+    m.seal(str(root))
+    m.write(str(root))
+    return root
+
+
+def test_each_target_reads_its_own_columns(split_suite_dir, scoring):
+    h, s, h_path, s_path = scoring
+    manifest = rc.SuiteManifest.read(str(split_suite_dir))
+    assert manifest.format_version == 2
+    assert manifest.target("y").inputs == rc.SuiteTargetInputs(coordinates=True)
+    assert manifest.target("where").inputs.covariates == ["elev"]
+    assert manifest.inputs_of(manifest.target("where")).coordinates is False
+
+    suite = rc.SuitePredictor.load(str(split_suite_dir))
+    assert suite.n_encodings == 2
+    out = suite.predict(s, header=h, keep_members=True)
+    ids = out.plot_ids
+
+    def member_values(target, roles):
+        stack = []
+        for member in manifest.target(target).members:
+            p = rc.Predictor.load(str(split_suite_dir / member.file))
+            cfg = p.dataset_config
+            cfg.zero_abundance_as = 1.0
+            ds = rc.ResolveDataset.from_csv_with_vocabs(str(h_path), str(s_path), roles, [],
+                                                        p.external_vocabs, cfg)
+            pred = p.predict_dataset(ds)
+            order = [pred.plot_ids.index(i) for i in ids]
+            stack.append({k: v[order] for k, v in pred.predictions.items()})
+        return stack
+
+    ys = member_values("y", _roles_reading(True, []))
+    y = out.target("y")
+    assert torch.allclose(y.value, rc.combine_mean(torch.stack([m["y"] for m in ys])).value,
+                          atol=1e-5)
+
+    wh = member_values("where", _roles_reading(False, ["elev"]))
+    points = torch.stack([torch.stack([m["lat"], m["lon"]], 1) for m in wh])
+    where = out.target("where")
+    sphere = rc.combine_spherical(points)
+    assert where.combine == rc.SuiteCombine.SphericalMean
+    assert where.dispersion_units == "km"
+    assert where.value.shape == (len(ids), 2)
+    assert where.members.shape == (3, len(ids), 2)
+    assert torch.allclose(where.value, sphere.value, atol=1e-4)
+    assert torch.allclose(where.dispersion, sphere.dispersion, atol=1e-3)
+
+    table = out.to_pandas()
+    for col in ("where_latitude", "where_longitude", "where_spread_km",
+                "where_seed2_latitude", "where_seed4_longitude", "y", "y_sd"):
+        assert col in table.columns
+    assert np.allclose(table["where_latitude"], where.value[:, 0].numpy())
+
+
+def test_declared_inputs_are_checked_against_the_contract(split_suite_dir):
+    text = json.loads(rc.SuiteManifest.read(str(split_suite_dir)).to_json())
+    text["targets"][0]["inputs"]["covariates"] = ["slope"]
+    with pytest.raises(Exception, match="'slope' is not a column of the input contract"):
+        rc.SuiteManifest.from_json(json.dumps(text)).validate()
+    text = json.loads(rc.SuiteManifest.read(str(split_suite_dir)).to_json())
+    text["format_version"] = 1
+    with pytest.raises(Exception, match="need version 2"):
+        rc.SuiteManifest.from_json(json.dumps(text))
+
+
+def test_a_spherical_mean_averages_across_the_antimeridian():
+    c = torch.tensor([[[0.0, 179.0]], [[0.0, -179.0]]], dtype=torch.float64)
+    out = rc.combine_spherical(c)
+    assert abs(out.value[0, 0].item()) < 1e-4
+    assert abs(abs(out.value[0, 1].item()) - 180.0) < 1e-4
+    assert out.dispersion[0].item() == pytest.approx(rc.EARTH_RADIUS_KM * math.pi / 180, rel=1e-4)

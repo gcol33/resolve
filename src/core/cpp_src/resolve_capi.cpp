@@ -2241,6 +2241,7 @@ resolve_value* suite_predictions_to_value(const SuitePredictions& p) {
     v_put(result, "targets", targets);
     for (const auto& t : p.targets) {
         const bool vote = t.combine == SuiteCombine::Vote;
+        const bool spherical = t.combine == SuiteCombine::SphericalMean;
         auto* m = v_map();
         v_put(targets, t.name, m);
         v_put(m, "name", v_string(t.name));
@@ -2249,14 +2250,25 @@ resolve_value* suite_predictions_to_value(const SuitePredictions& p) {
         v_put(m, "status", v_string(enum_to_name(t.status)));
         v_put(m, "limit", v_string(t.limit));
         v_put(m, "units", v_string(t.units));
+        v_put(m, "dispersion_units", v_string(t.dispersion_units));
         v_put(m, "class_names", v_string_array(t.class_names));
         v_put(m, "member_seeds", v_int_array(t.member_seeds));
-        v_put(m, "value", vote ? tensor_to_ivec(t.value) : tensor_to_vec(t.value));
+        v_put(m, "value", vote        ? tensor_to_ivec(t.value)
+                          : spherical ? tensor_to_mat(t.value)
+                                      : tensor_to_vec(t.value));
         v_put(m, "agreement", vec_or_null(t.agreement));
         v_put(m, "probabilities", t.probabilities.defined() ? tensor_to_mat(t.probabilities) : v_null());
         v_put(m, "dispersion", vec_or_null(t.dispersion));
-        v_put(m, "members", !t.members.defined() ? v_null()
-                                : vote ? tensor_to_imat(t.members) : tensor_to_mat(t.members));
+        if (!t.members.defined()) {
+            v_put(m, "members", v_null());
+        } else if (spherical) {
+            auto* coords = v_map();
+            v_put(m, "members", coords);
+            v_put(coords, "latitude", tensor_to_mat(t.members.select(2, 0)));
+            v_put(coords, "longitude", tensor_to_mat(t.members.select(2, 1)));
+        } else {
+            v_put(m, "members", vote ? tensor_to_imat(t.members) : tensor_to_mat(t.members));
+        }
         v_put(m, "n_species", vec_or_null(t.recognition.n_species));
         v_put(m, "n_recognised", vec_or_null(t.recognition.n_recognised));
         v_put(m, "recognised_share", vec_or_null(t.recognition.count_share));

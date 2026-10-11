@@ -80,9 +80,12 @@ def to_pandas(self, probabilities=False):
 
     ``plot_id``, then per target the prediction (``<target>``; for a vote also
     ``<target>_code`` and ``<target>_agreement``, and with ``probabilities``
-    ``<target>_prob_<class>``), its dispersion (``<target>_sd`` for a mean,
-    ``<target>_circular_sd`` for a bearing), the four recognition columns, and
-    ``<target>_seed<N>`` per member when the members were kept.
+    ``<target>_prob_<class>``; for a spherical mean ``<target>_latitude`` and
+    ``<target>_longitude``), its dispersion (``<target>_sd`` for a mean,
+    ``<target>_circular_sd`` for a bearing, ``<target>_spread_km`` for a
+    spherical mean), the four recognition columns, and ``<target>_seed<N>``
+    per member when the members were kept (``<target>_seed<N>_latitude`` and
+    ``_longitude`` for a spherical mean).
     """
     import pandas as pd
 
@@ -90,7 +93,13 @@ def to_pandas(self, probabilities=False):
     for t in self.targets:
         name = t.name
         names = list(t.class_names)
-        if t.combine == _core.SuiteCombine.Vote:
+        spherical = t.combine == _core.SuiteCombine.SphericalMean
+        if spherical:
+            value = t.value.numpy()
+            data[f"{name}_latitude"] = value[:, 0]
+            data[f"{name}_longitude"] = value[:, 1]
+            data[f"{name}_spread_km"] = t.dispersion.numpy()
+        elif t.combine == _core.SuiteCombine.Vote:
             codes = t.value.tolist()
             data[name] = [names[c] if 0 <= c < len(names) else str(c) for c in codes]
             data[f"{name}_code"] = codes
@@ -112,6 +121,10 @@ def to_pandas(self, probabilities=False):
         members = t.members
         if members is not None:
             for k, seed in enumerate(t.member_seeds):
+                if spherical:
+                    data[f"{name}_seed{seed}_latitude"] = members[k, :, 0].numpy()
+                    data[f"{name}_seed{seed}_longitude"] = members[k, :, 1].numpy()
+                    continue
                 row = members[k].tolist()
                 if t.combine == _core.SuiteCombine.Vote:
                     row = [names[c] if 0 <= c < len(names) else str(c) for c in row]
