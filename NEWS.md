@@ -1,5 +1,38 @@
 # RESOLVE Changelog
 
+## v0.12.0 (2026-10-11)
+
+### Added
+
+- **Each target of a model suite can read its own part of the input
+  contract.** A suite target may declare `inputs` (`coordinates`,
+  `covariates`, `categoricals`): the columns its members read, a subset of the
+  suite's input contract. A model of the survey year cannot read the year, and
+  a model of the plot location cannot read the coordinates, so a suite reading
+  species, coordinates and date can now release both beside its other
+  targets. The contract must be the union of what the targets read. Members
+  are checked at load against their own target's inputs, and the input plots
+  are encoded once per vocabulary and set of columns read. A target that
+  declares nothing reads the whole contract, as before: the released suites
+  predict bit-identically to 0.11.1.
+- **`spherical_mean` combine rule for a location.** A target predicting
+  latitude and longitude combines its members as the mean of their unit
+  vectors on the sphere (`combine_spherical`), so seeds either side of the
+  antimeridian meet there rather than on the far side of the globe. Its
+  dispersion is the median great-circle distance of the members from the
+  combined point, in km. `value` is a two-column latitude / longitude array;
+  every front door writes `<target>_latitude`, `<target>_longitude` and
+  `<target>_spread_km`. Every suite prediction now names its dispersion's
+  units (`dispersion_units`).
+- `resolve info --suite` lists what each declaring target reads.
+
+### Changed
+
+- **Suite manifest format version 2.** A manifest that declares per-target
+  inputs or uses a spherical mean is written as version 2; any other manifest
+  is still written as version 1 and stays readable by 0.11 engines. A
+  manifest stating version 1 while using a version-2 feature is refused.
+
 ## v0.11.1 (2026-09-29)
 
 ### Fixed
