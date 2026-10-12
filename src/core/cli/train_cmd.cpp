@@ -24,14 +24,17 @@ using resolve_cli::read_architecture_flags;
 
 namespace {
 
-// Parse one --target value: COL[:TYPE[:N][:log1p]].
+// Parse one --target value: COL[:TYPE[:N][:log1p][:mask]].
 //
 //   area                        regression on `area`
 //   area:regression:log1p       regression on log1p(area), inverted on predict
 //   habitat:classification:9    9-class classification
+//   habitat:classification:9:mask
+//                               plots without a habitat label stay in the fit
 //
 // Fields after the type are order-free modifiers: an integer sets the class
-// count, "log1p" selects the target transform.
+// count, "log1p" selects the target transform, and "drop" (the default) or
+// "mask" sets what happens to a plot whose label for this target is missing.
 resolve::TargetSpec parse_target_spec(const std::string& raw) {
     std::vector<std::string> fields;
     size_t start = 0;
@@ -46,7 +49,7 @@ resolve::TargetSpec parse_target_spec(const std::string& raw) {
     }
 
     if (fields.empty() || fields[0].empty()) {
-        throw ArgError("--target expects COL[:TYPE[:N][:log1p]], got '" + raw + "'");
+        throw ArgError("--target expects COL[:TYPE[:N][:log1p][:mask]], got '" + raw + "'");
     }
 
     resolve::TargetSpec spec;
@@ -71,6 +74,10 @@ resolve::TargetSpec parse_target_spec(const std::string& raw) {
             saw_log1p = true;
             continue;
         }
+        if (modifier == "drop" || modifier == "mask") {
+            spec.missing = resolve::parse_target_missing_policy(modifier);
+            continue;
+        }
         try {
             size_t consumed = 0;
             const int value = std::stoi(modifier, &consumed);
@@ -79,7 +86,7 @@ resolve::TargetSpec parse_target_spec(const std::string& raw) {
             saw_classes = true;
         } catch (const std::exception&) {
             throw ArgError("--target " + raw + ": unknown modifier '" + modifier +
-                           "'. Expected a class count or 'log1p'.");
+                           "'. Expected a class count, 'log1p', 'drop' or 'mask'.");
         }
     }
 
@@ -219,6 +226,9 @@ int train_command(const ParsedArgs& args) {
             std::cout << ", " << spec.num_classes << " classes";
         } else if (spec.transform == TransformType::Log1p) {
             std::cout << ", log1p";
+        }
+        if (spec.missing == TargetMissingPolicy::Mask) {
+            std::cout << ", missing labels masked";
         }
         std::cout << ")" << std::endl;
         targets.push_back(std::move(spec));

@@ -25,6 +25,7 @@ set(RESOLVE_CORE_SOURCES
     ${RESOLVE_CORE_DIR}/cpp_src/json.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/sha256.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/loss.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/target_labels.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/dataset.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/species_encoding.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/species_graph.cpp

@@ -233,7 +233,7 @@ Neighbourhood Components Analysis term to every classification target. See
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `best_epoch` | `int` | Epoch with the best test-fold loss |
-| `final_metrics` | `dict[str, dict[str, float]]` | Per target, per metric |
+| `final_metrics` | `dict[str, dict[str, float]]` | Per target, per metric; a target with `missing = Mask` also reports `n_labelled`, the held-out plots it was scored on |
 | `train_loss_history` | `list[float]` | One entry per epoch run |
 | `test_loss_history` | `list[float]` | Same length |
 | `train_time_seconds` | `float` | Wall time |
@@ -281,7 +281,8 @@ inverted first.
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `target_name` | `str` | |
-| `predictions`, `actuals`, `residuals` | `list[float]` | Per held-out plot, original units |
+| `predictions`, `actuals`, `residuals` | `list[float]` | Per held-out plot labelled for the target, original units |
+| `test_rows` | `list[int]` | Position of each row in the test fold (`test_plot_ids()`) |
 | `mean_residual`, `std_residual` | `float` | |
 | `skewness`, `kurtosis` | `float` | |
 | `q05`, `q25`, `q50`, `q75`, `q95` | `float` | Residual quantiles |
@@ -291,9 +292,10 @@ inverted first.
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `target_name` | `str` | |
-| `predicted_classes` | int64 `Tensor` `[n_test]` | |
-| `probabilities` | float `Tensor` `[n_test, n_classes]` | |
-| `actuals` | int64 `Tensor` `[n_test]` | |
+| `predicted_classes` | int64 `Tensor` `[n_labelled]` | |
+| `probabilities` | float `Tensor` `[n_labelled, n_classes]` | |
+| `actuals` | int64 `Tensor` `[n_labelled]` | |
+| `test_rows` | int64 `Tensor` `[n_labelled]` | Position of each row in the test fold (`test_plot_ids()`) |
 | `class_names` | `list[str]` | Index equals code |
 
 ### CalibrationResult

@@ -59,7 +59,9 @@ inline const CommandSpec& train_spec() {
                          "  COL:regression:log1p    fit on log1p(y),\n"
                          "                          predictions inverted\n"
                          "  COL:classification:N    N-class target\n"
-                         "A bare COL means COL:regression."});
+                         "A bare COL means COL:regression. Append :mask to\n"
+                         "keep plots that lack this label: they train the\n"
+                         "other targets only (default :drop leaves them out)."});
 
         // Dataset / encoding
         flags.push_back({"--encoding", Arity::Value, "MODE", "hash",

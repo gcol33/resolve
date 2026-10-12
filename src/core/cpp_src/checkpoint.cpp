@@ -619,6 +619,9 @@ void save_schema(
             archive.write(prefix + k::kTargetClassWeights,
                           torch::tensor(target.class_weights));
         }
+
+        archive.write(prefix + k::kTargetMissing,
+                      torch::tensor(static_cast<int>(target.missing)));
     }
 
     // Categorical covariates: column count + per-column name + per-column
@@ -778,6 +781,13 @@ ResolveSchema load_schema(
                 auto ptr = cw_t.data_ptr<float>();
                 schema.targets[i].class_weights.assign(ptr, ptr + n_cw);
             }
+        }
+
+        // Missing-label policy (back-compat: absent == Drop, what the loader
+        // of a checkpoint written before the field existed did).
+        torch::Tensor missing_t;
+        if (archive.try_read(prefix + k::kTargetMissing, missing_t)) {
+            schema.targets[i].missing = static_cast<TargetMissingPolicy>(missing_t.item<int>());
         }
     }
 
@@ -1078,7 +1088,19 @@ void write_metadata_json(
     file << "    \"n_genera\": " << schema.n_genera << ",\n";
     file << "    \"n_families\": " << schema.n_families << ",\n";
     file << "    \"n_covariates\": " << schema.covariate_names.size() << ",\n";
-    file << "    \"n_targets\": " << schema.targets.size() << "\n";
+    file << "    \"n_targets\": " << schema.targets.size() << ",\n";
+    file << "    \"targets\": [";
+    for (size_t i = 0; i < schema.targets.size(); ++i) {
+        const auto& target = schema.targets[i];
+        file << (i == 0 ? "\n" : ",\n")
+             << "      {\"name\": \"" << json_escape(target.name) << "\""
+             << ", \"task\": \"" << enum_to_name(target.task) << "\""
+             << ", \"transform\": \"" << enum_to_name(target.transform) << "\""
+             << ", \"num_classes\": " << target.num_classes
+             << ", \"weight\": " << target.weight
+             << ", \"missing\": \"" << enum_to_name(target.missing) << "\"}";
+    }
+    file << (schema.targets.empty() ? "]\n" : "\n    ]\n");
     file << "  },\n";
 
     // Final metrics

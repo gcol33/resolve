@@ -43,6 +43,12 @@ have is still an error, so a typo fails loudly.}
 \item transform: "none" or "log1p" (optional, default "none")
 \item num_classes: Number of classes for classification (required for classification)
 \item weight: Loss weight (optional, default 1.0)
+\item missing: "drop" or "mask" (optional, default "drop"). What happens to a
+plot with no label for this target (an empty or NA cell, or a class
+outside \code{class_mapping}). "drop" leaves the plot out of the dataset.
+"mask" keeps it: the plot trains and is scored on the targets it is
+labelled for, and this target's loss, scaler and metrics use only its
+labelled plots. A plot labelled for no target is left out either way.
 }}
 
 \item{config}{Named list of dataset configuration options:

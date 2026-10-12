@@ -97,6 +97,9 @@ void register_types(nb::module_& m) {
         // columns. When empty (default), the loader auto-fits the mapping
         // from the data.
         .def_rw("class_mapping", &resolve::TargetSpec::class_mapping)
+        // Drop (default): a plot missing this label leaves the dataset. Mask:
+        // it stays, and trains and is scored on its other targets only.
+        .def_rw("missing", &resolve::TargetSpec::missing)
         .def_static("regression", &resolve::TargetSpec::regression,
                     nb::arg("column"), nb::arg("transform") = resolve::TransformType::None)
         .def_static("classification", &resolve::TargetSpec::classification,
@@ -129,7 +132,8 @@ void register_types(nb::module_& m) {
         // ResolveDataset.from_csv when the classification target column
         // arrived as strings and the loader factorized it. Empty for
         // regression or for already-integer-encoded classification columns.
-        .def_rw("class_names", &resolve::TargetConfig::class_names);
+        .def_rw("class_names", &resolve::TargetConfig::class_names)
+        .def_rw("missing", &resolve::TargetConfig::missing);
 
     nb::class_<resolve::ResolveSchema>(m, "ResolveSchema")
         .def(nb::init<>())
@@ -417,6 +421,7 @@ void register_types(nb::module_& m) {
         .def_ro("predictions", &resolve::ResidualAnalysis::predictions)
         .def_ro("actuals", &resolve::ResidualAnalysis::actuals)
         .def_ro("residuals", &resolve::ResidualAnalysis::residuals)
+        .def_ro("test_rows", &resolve::ResidualAnalysis::test_rows)
         .def_ro("mean_residual", &resolve::ResidualAnalysis::mean_residual)
         .def_ro("std_residual", &resolve::ResidualAnalysis::std_residual)
         .def_ro("skewness", &resolve::ResidualAnalysis::skewness)
@@ -451,6 +456,13 @@ void register_types(nb::module_& m) {
         .def_prop_ro("actuals", [](const resolve::ClassificationPredictions& c) {
             if (c.actuals.defined()) {
                 auto cpu_tensor = c.actuals.detach().cpu().contiguous();
+                return nb::steal(THPVariable_Wrap(cpu_tensor));
+            }
+            return nb::none();
+        })
+        .def_prop_ro("test_rows", [](const resolve::ClassificationPredictions& c) {
+            if (c.test_rows.defined()) {
+                auto cpu_tensor = c.test_rows.detach().cpu().contiguous();
                 return nb::steal(THPVariable_Wrap(cpu_tensor));
             }
             return nb::none();

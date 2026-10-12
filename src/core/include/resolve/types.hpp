@@ -147,6 +147,15 @@ enum class MissingValuePolicy {
               // it: one per covariate, and one for the coordinate pair.
 };
 
+// What a training run does with a plot that carries no label for a target.
+enum class TargetMissingPolicy {
+    Drop,  // The plot is left out of the whole fit, for every target.
+    Mask   // The plot is kept; it trains and is scored on the targets it is
+           // labelled for and contributes nothing to this one. The dataset
+           // holds the target_labels.hpp sentinel in its place. A plot labelled
+           // for no target at all is still left out, since it trains nothing.
+};
+
 // How a model suite combines the predictions of a target's members (suite.hpp).
 enum class SuiteCombine {
     Mean,          // arithmetic mean on the target's own scale
@@ -202,6 +211,10 @@ struct TargetConfig {
     // that stops after `weight` -- the common form at the call sites -- is not
     // a missing-initializer under -Wextra.
     std::vector<std::string> class_names = {};
+    // What the run did with a plot unlabelled for this target. Persisted in
+    // the checkpoint; a checkpoint written before the field existed loads as
+    // Drop, which is what its loader did.
+    TargetMissingPolicy missing = TargetMissingPolicy::Drop;
 };
 
 // Schema information for a dataset
@@ -880,6 +893,10 @@ struct ResidualAnalysis {
     std::vector<float> predictions;
     std::vector<float> actuals;
     std::vector<float> residuals;
+    // Position of each row in the test fold (Trainer::test_plot_ids()). The
+    // rows are the plots labelled for the target, which is every test plot
+    // unless the target's missing labels are masked.
+    std::vector<int64_t> test_rows;
 
     // Summary statistics
     float mean_residual = 0.0f;
@@ -900,12 +917,15 @@ struct ResidualAnalysis {
 // per-plot outputs (compute_residuals returns empty for them); this is the
 // classification counterpart, so a saved checkpoint can be scored for
 // per-class F1, confusion matrices, and top-k against the trainer's own test
-// split. All tensors live on CPU with length n_test along dim 0.
+// split. All tensors live on CPU with one row per test plot labelled for the
+// target (n_labelled; every test plot unless its missing labels are masked).
 struct ClassificationPredictions {
     std::string target_name;
-    torch::Tensor predicted_classes;  // (n_test,) int64 argmax class codes
-    torch::Tensor probabilities;      // (n_test, n_classes) float32 softmax rows
-    torch::Tensor actuals;            // (n_test,) int64 ground-truth class codes
+    torch::Tensor predicted_classes;  // (n_labelled,) int64 argmax class codes
+    torch::Tensor probabilities;      // (n_labelled, n_classes) float32 softmax rows
+    torch::Tensor actuals;            // (n_labelled,) int64 ground-truth class codes
+    torch::Tensor test_rows;          // (n_labelled,) int64 position in the test fold
+                                      // (Trainer::test_plot_ids()) of each row
     // Ordered class vocabulary mirrored from the target's TargetConfig:
     // class_names[code] is the original CSV string for integer class `code`.
     // Empty when the classification column was already integer-coded.

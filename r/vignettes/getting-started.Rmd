@@ -158,6 +158,19 @@ targets <- list(
 )
 ```
 
+By default a plot missing any one target's label is left out of the fit. A
+target labelled on only part of the plots takes `missing = "mask"`: a plot
+without that label then trains the other targets, and the masked target's
+loss, scaler and metrics use only its labelled plots (`?resolve.dataset.csv`).
+
+```{r multi-task-mask}
+targets <- list(
+  area = list(column = "area", task = "regression", transform = "log1p"),
+  habitat = list(column = "habitat_class", task = "classification",
+                 missing = "mask")
+)
+```
+
 ## Loss configurations
 
 ```{r loss-config}

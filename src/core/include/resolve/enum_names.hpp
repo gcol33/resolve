@@ -120,6 +120,11 @@ inline constexpr EnumName<TransformType> kTransformTypeNames[] = {
     {"log1p", TransformType::Log1p},
 };
 
+inline constexpr EnumName<TargetMissingPolicy> kTargetMissingPolicyNames[] = {
+    {"drop", TargetMissingPolicy::Drop},
+    {"mask", TargetMissingPolicy::Mask},
+};
+
 inline constexpr EnumName<LossConfigMode> kLossConfigModeNames[] = {
     {"mae", LossConfigMode::MAE},
     {"smape", LossConfigMode::SMAPE},
@@ -269,6 +274,13 @@ inline const char* transform_type_to_string(TransformType m) {
     return enum_name_of(m, kTransformTypeNames, "none");
 }
 
+inline TargetMissingPolicy parse_target_missing_policy(const std::string& s) {
+    return parse_enum_name(s, kTargetMissingPolicyNames, "target missing-label policy");
+}
+inline const char* target_missing_policy_to_string(TargetMissingPolicy m) {
+    return enum_name_of(m, kTargetMissingPolicyNames, "drop");
+}
+
 inline LossConfigMode parse_loss_config_mode(const std::string& s) {
     return parse_enum_name(s, kLossConfigModeNames, "loss config mode");
 }
@@ -397,6 +409,8 @@ RESOLVE_DECLARE_ENUM_NAMES(TaskType, kTaskTypeNames,
                            "task type", "regression")
 RESOLVE_DECLARE_ENUM_NAMES(TransformType, kTransformTypeNames,
                            "transform type", "none")
+RESOLVE_DECLARE_ENUM_NAMES(TargetMissingPolicy, kTargetMissingPolicyNames,
+                           "target missing-label policy", "drop")
 RESOLVE_DECLARE_ENUM_NAMES(LossConfigMode, kLossConfigModeNames,
                            "loss config mode", "combined")
 RESOLVE_DECLARE_ENUM_NAMES(LRSchedulerType, kLRSchedulerTypeNames,

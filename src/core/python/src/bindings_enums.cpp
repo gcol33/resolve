@@ -138,6 +138,12 @@ void register_enums(nb::module_& m) {
         .value("Indicate", resolve::MissingValuePolicy::Indicate)
         .export_values();
 
+    // What a fit does with a plot unlabelled for a target (TargetSpec.missing).
+    nb::enum_<resolve::TargetMissingPolicy>(m, "TargetMissingPolicy")
+        .value("Drop", resolve::TargetMissingPolicy::Drop)
+        .value("Mask", resolve::TargetMissingPolicy::Mask)
+        .export_values();
+
     // Not exported to module scope: "Mean" would collide with other enums'
     // value names there.
     nb::enum_<resolve::SuiteCombine>(m, "SuiteCombine")

@@ -85,6 +85,9 @@ inline constexpr const char* kTargetNClassNames  = "n_class_names";
 inline constexpr const char* kTargetClassPrefix  = "class_";        // + j
 inline constexpr const char* kTargetNClassWeights = "n_class_weights";
 inline constexpr const char* kTargetClassWeights = "class_weights";
+// TargetMissingPolicy as int; absent (a checkpoint written before the field
+// existed) reads as Drop.
+inline constexpr const char* kTargetMissing      = "missing";
 
 // Categorical sub-field suffixes (appended to categorical_prefix(i)).
 inline constexpr const char* kCategoricalName      = "name";

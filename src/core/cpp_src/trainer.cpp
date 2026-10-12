@@ -7,6 +7,7 @@
 #include "resolve/gpu.hpp"
 #include "resolve/io_retry.hpp"
 #include "resolve/species_graph.hpp"
+#include "resolve/target_labels.hpp"
 
 #ifdef RESOLVE_HAS_CUDA
 #include "resolve/cuda/feature_hash.hpp"
@@ -76,6 +77,38 @@ void validate_csr_offsets(const torch::Tensor& offsets,
     TORCH_CHECK(a[off.numel() - 1] == n_records,
                 "CUDA hash: plot_offsets[-1] (", a[off.numel() - 1],
                 ") must equal the record count (", n_records, ")");
+}
+
+// A masked target needs at least one labelled plot among the fitting rows:
+// with none, its loss is zero on every batch and its head never trains, and a
+// regression target has no values to fit its scaler to. Checked wherever a
+// split is made (prepare_data and every cross-validation fold).
+void require_labelled_fitting_rows(
+    const std::vector<TargetConfig>& configs,
+    const std::unordered_map<std::string, torch::Tensor>& train_targets
+) {
+    for (const auto& cfg : configs) {
+        if (cfg.missing != TargetMissingPolicy::Mask) continue;
+        auto it = train_targets.find(cfg.name);
+        if (it == train_targets.end()) continue;
+        if (labelled_rows(cfg, it->second).n_labelled == 0) {
+            throw std::invalid_argument(
+                "target '" + cfg.name + "' (missing = mask) is labelled on none "
+                "of the " + std::to_string(it->second.size(0)) + " training "
+                "plots of this split, so its head has nothing to fit to");
+        }
+    }
+}
+
+// The {mean, scale} a regression target is standardized by, fit on the
+// training rows labelled for it: every training row of a Drop target, the
+// labelled ones of a masked target. Standardizing leaves the sentinel (NaN) of
+// an unlabelled row a NaN.
+std::pair<torch::Tensor, torch::Tensor> fit_target_scaler(
+    const TargetConfig& cfg, const torch::Tensor& train_target
+) {
+    const auto fitting = labelled_rows(cfg, train_target).select(train_target);
+    return {fitting.mean(), standardization_scale(fitting)};
 }
 
 }  // namespace
@@ -371,8 +404,7 @@ void Trainer::prepare_data(
 
             // Compute scaler on training data
             auto train_target = target.index_select(0, train_idx);
-            auto target_mean = train_target.mean();
-            auto target_scale = standardization_scale(train_target);
+            auto [target_mean, target_scale] = fit_target_scaler(cfg, train_target);
 
             scalers_.target_scalers[cfg.name] = {target_mean, target_scale};
 
@@ -383,6 +415,7 @@ void Trainer::prepare_data(
         train_targets_[cfg.name] = target.index_select(0, train_idx);
         test_targets_[cfg.name] = target.index_select(0, test_idx);
     }
+    require_labelled_fitting_rows(model_->schema().targets, train_targets_);
 
     data_prepared_ = true;
 }
@@ -875,10 +908,21 @@ Trainer::eval_epoch(int epoch) {
                 sc_mean = scaler_it->second.first;
                 sc_scale = scaler_it->second.second;
             }
-            all_metrics[cfg.name] = Metrics::compute(
-                pred_it->second, target_it->second, cfg.task, cfg.transform,
-                config_.band_thresholds, cfg.num_classes, sc_mean, sc_scale
-            );
+            // Scored on the test plots labelled for the target. A masked
+            // target also reports how many those are, since it differs from
+            // target to target; a fold with none of them reports only that.
+            const auto rows = labelled_rows(cfg, target_it->second);
+            auto& target_metrics = all_metrics[cfg.name];
+            if (rows.n_labelled > 0) {
+                target_metrics = Metrics::compute(
+                    rows.select(pred_it->second), rows.select(target_it->second),
+                    cfg.task, cfg.transform,
+                    config_.band_thresholds, cfg.num_classes, sc_mean, sc_scale
+                );
+            }
+            if (cfg.missing == TargetMissingPolicy::Mask) {
+                target_metrics[kLabelledMetric] = static_cast<float>(rows.n_labelled);
+            }
         }
     }
 
@@ -1441,8 +1485,18 @@ TrainResult Trainer::fit() {
             auto test_target = test_target_it->second.to(config_.device).reshape({-1});
             auto train_target = train_target_it->second.to(config_.device).reshape({-1});
 
+            // Both baselines and the model are scored on the test plots
+            // labelled for the target, and the baseline is fit on the labelled
+            // training plots. A target labelled on no test plot has no entry.
+            const auto test_rows = labelled_rows(cfg, test_target);
+            const auto train_rows = labelled_rows(cfg, train_target);
+            if (test_rows.n_labelled == 0 || train_rows.n_labelled == 0) continue;
+            test_target = test_rows.select(test_target);
+            train_target = train_rows.select(train_target);
+            const auto test_pred = test_rows.select(pred_it->second);
+
             if (cfg.task == TaskType::Regression) {
-                auto pred = pred_it->second.reshape({-1});
+                auto pred = test_pred.reshape({-1});
                 // Training mean (in scaled space for regression)
                 float train_mean = train_target.mean().item<float>();
                 baseline.training_mean = train_mean;
@@ -1481,7 +1535,7 @@ TrainResult Trainer::fit() {
 
                 // Keep the (n_test, n_classes) shape so argmax over classes works
                 // even when n_test == 1 (a squeezed (n_classes,) would misfire).
-                auto pred_logits = pred_it->second;
+                auto pred_logits = test_pred;
                 if (pred_logits.dim() == 1) pred_logits = pred_logits.unsqueeze(0);
                 auto pred_classes = pred_logits.argmax(1);
                 auto model_correct = (pred_classes == test_target.to(torch::kLong)).sum();
@@ -1965,10 +2019,12 @@ CalibrationResult Trainer::compute_calibration(
         return result;
     }
 
-    // Get predicted probabilities (softmax)
-    auto logits = pred_it->second;  // (n_samples, n_classes)
+    // Get predicted probabilities (softmax) on the test plots labelled for the
+    // target.
+    const auto rows = labelled_rows(*target_cfg, target_it->second);
+    auto logits = rows.select(pred_it->second);  // (n_samples, n_classes)
     auto probs = torch::softmax(logits, /*dim=*/1).cpu();
-    auto targets = target_it->second.to(torch::kLong).cpu();  // (n_samples,)
+    auto targets = rows.select(target_it->second).to(torch::kLong).cpu();  // (n_samples,)
 
     int64_t n_samples = probs.size(0);
 
@@ -2060,8 +2116,15 @@ ResidualAnalysis Trainer::compute_residuals(
     // Get predictions and targets. reshape({-1}), not squeeze(): a single-plot
     // test fold has a (1,1) output that squeeze() would collapse to a 0-D
     // scalar, breaking size(0)/accessor and the element-wise subtraction below.
-    auto preds = pred_it->second.reshape({-1}).cpu();
-    auto targets = target_it->second.reshape({-1}).cpu();
+    // Only the test plots labelled for the target have a residual.
+    const auto rows = labelled_rows(*target_cfg, target_it->second);
+    auto preds = rows.select(pred_it->second).reshape({-1}).cpu();
+    auto targets = rows.select(target_it->second).reshape({-1}).cpu();
+    {
+        const auto positions = rows.positions();
+        result.test_rows.assign(positions.data_ptr<int64_t>(),
+                                positions.data_ptr<int64_t>() + positions.numel());
+    }
 
     // Unscale if needed (predictions are in scaled space)
     auto scaler_it = scalers_.target_scalers.find(target_name);
@@ -2088,6 +2151,7 @@ ResidualAnalysis Trainer::compute_residuals(
 
     // Convert to vectors
     int64_t n = residuals.size(0);
+    if (n == 0) return result;
     result.predictions.resize(n);
     result.actuals.resize(n);
     result.residuals.resize(n);
@@ -2170,15 +2234,18 @@ ClassificationPredictions Trainer::compute_classification_predictions(
         return result;
     }
 
-    auto logits = pred_it->second;                 // (n_test, n_classes)
+    // The test plots labelled for the target, with their place in the fold.
+    const auto rows = labelled_rows(*target_cfg, target_it->second);
+    auto logits = rows.select(pred_it->second);    // (n_labelled, n_classes)
     auto probs = torch::softmax(logits, /*dim=*/1);
-    auto predicted = probs.argmax(/*dim=*/1);      // (n_test,)
+    auto predicted = probs.argmax(/*dim=*/1);      // (n_labelled,)
 
     result.probabilities = probs.detach().to(torch::kCPU).contiguous();
     result.predicted_classes =
         predicted.detach().to(torch::kCPU).contiguous().to(torch::kLong);
-    result.actuals =
-        target_it->second.detach().to(torch::kCPU).contiguous().to(torch::kLong);
+    result.actuals = rows.select(target_it->second)
+        .detach().to(torch::kCPU).contiguous().to(torch::kLong);
+    result.test_rows = rows.positions();
 
     return result;
 }
@@ -2413,12 +2480,12 @@ CrossValidationResult Trainer::run_cross_validation(
             test_continuous_ = standardize_continuous(test_continuous_, scalers_);
         }
 
+        require_labelled_fitting_rows(model_->schema().targets, train_targets_);
         for (const auto& cfg : model_->schema().targets) {
             if (cfg.task != TaskType::Regression) continue;
             auto train_it = train_targets_.find(cfg.name);
             if (train_it == train_targets_.end()) continue;
-            auto target_mean = train_it->second.mean();
-            auto target_scale = standardization_scale(train_it->second);
+            auto [target_mean, target_scale] = fit_target_scaler(cfg, train_it->second);
             scalers_.target_scalers[cfg.name] = {target_mean, target_scale};
             train_targets_[cfg.name] = (train_targets_[cfg.name] - target_mean) / target_scale;
             test_targets_[cfg.name] = (test_targets_[cfg.name] - target_mean) / target_scale;

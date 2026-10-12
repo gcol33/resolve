@@ -60,6 +60,10 @@ trainer.prepare_data(dataset, test_size=0.2, seed=42)
 trainer.fit()
 ```
 
+A target labelled on only part of the plots can keep the rest in the fit:
+`missing = Mask` on its `TargetSpec` trains each plot on the targets it has
+([Data Preparation](https://gillescolling.com/resolve/tutorials/data-preparation/)).
+
 ## Set-valued input, not a design matrix
 
 A sample's composition is a variable-length set: this plot holds nine species, the

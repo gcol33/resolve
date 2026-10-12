@@ -110,10 +110,19 @@ struct TargetSpec {
     //   - non-empty: applied verbatim. Values not present in the mapping
     //                are treated as missing (row dropped, same as NA).
     // NA-like strings ("", "NA", "NaN", ".", "-", "None", ...) always become
-    // missing and drive the same row-drop path as a missing regression target.
+    // missing and are handled by `missing`, as a missing regression value is.
     // After load, ResolveDataset's TargetConfig.class_names holds the
     // resulting ordered vocab, and the dataset's target tensor is int64.
     std::unordered_map<std::string, int64_t> class_mapping;
+
+    // What the loader does with a plot whose label for this target is missing
+    // (empty / NA / unparseable, or a class outside an explicit mapping):
+    //   - Drop (default): the plot is dropped from the dataset.
+    //   - Mask: the plot is kept with the sentinel of target_labels.hpp in
+    //           this target's tensor (class code -1, regression NaN), and the
+    //           trainer leaves it out of this target's loss, scalers and
+    //           metrics only. A plot missing every target is still dropped.
+    TargetMissingPolicy missing = TargetMissingPolicy::Drop;
 
     // Convenience constructors
     static TargetSpec regression(const std::string& column, TransformType transform = TransformType::None) {

@@ -154,8 +154,8 @@ you read is in the original units.
 
 | Situation | Result |
 |-----------|--------|
-| Missing or unparseable **target** value | The plot is dropped, and the count is reported |
-| Classification label outside an explicit `class_mapping` | The plot is dropped, and the count is reported |
+| Missing or unparseable **target** value | The plot is dropped, and the count is reported (`missing = Mask` keeps it, see below) |
+| Classification label outside an explicit `class_mapping` | The plot is dropped, and the count is reported (`missing = Mask` keeps it) |
 | Missing **covariate** cell | Coerced to `0.0`, the plot is kept, a per-column warning names the count |
 | Missing **coordinate** | Coerced to `(0, 0)`, the plot is kept, a warning names the count |
 | Missing **categorical** cell | Encoded as code `0`, the reserved unknown slot |
@@ -174,6 +174,51 @@ header = header.dropna(subset=["elevation"])
 Species records belonging to dropped plots are removed before the species and
 taxonomy vocabularies are fitted, so a dropped plot cannot leave unreferenced
 rows in an embedding table.
+
+## Targets labelled on some plots
+
+With several targets, the default drops a plot that lacks any one of their
+labels, so a fit with a habitat head and an alliance head keeps only the plots
+labelled for both. Set `missing` to `Mask` on a target whose labels cover only
+part of the data:
+
+=== "Python"
+
+    ```python
+    alliance = rc.TargetSpec()
+    alliance.column_name = "alliance"
+    alliance.target_name = "alliance"
+    alliance.task = rc.TaskType.Classification
+    alliance.missing = rc.TargetMissingPolicy.Mask
+    ```
+
+=== "R"
+
+    ```r
+    targets <- list(
+      habitat  = list(column = "habitat", task = "classification"),
+      alliance = list(column = "alliance", task = "classification", missing = "mask")
+    )
+    ```
+
+=== "CLI"
+
+    ```bash
+    --target habitat:classification:12 --target alliance:classification:156:mask
+    ```
+
+A plot without an alliance label then stays in the dataset and trains the
+shared encoder through its habitat label. The target tensor holds `-1` there
+(`NaN` for a regression target), and that plot is left out of the alliance
+head's loss, of its class list, of its target scaler, and of its metrics,
+baselines, calibration and residuals. Each masked target reports
+`n_labelled`, the number of held-out plots it was scored on, beside its
+metrics, and `ResidualAnalysis.test_rows` / `ClassificationPredictions.test_rows`
+place each scored row in the test fold. A plot labelled for no target trains
+nothing and is still dropped.
+
+Within a batch, a masked target's loss is the mean over the batch rows that
+carry its label; a batch with none of them adds exactly zero for that target.
 
 ## Loading from DataFrames
 

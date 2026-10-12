@@ -774,11 +774,11 @@ std::vector<TargetSpec> parse_targets(const resolve_value* targets) {
             throw std::invalid_argument(
                 "target '" + name + "': the specification must be a map of "
                 "keys (column / task / transform / num_classes / weight / "
-                "class_mapping), not a bare value.");
+                "class_mapping / missing), not a bare value.");
         }
         reject_unknown_keys(spec, "target '" + name + "'",
                             {"column", "task", "transform", "num_classes",
-                             "weight", "class_mapping"});
+                             "weight", "class_mapping", "missing"});
         TargetSpec ts;
         ts.target_name = name;
         ts.column_name = vhas(spec, "column") ? vstr(spec, "column") : name;
@@ -786,6 +786,7 @@ std::vector<TargetSpec> parse_targets(const resolve_value* targets) {
         if (vhas(spec, "transform")) ts.transform = parse_transform_type(vstr(spec, "transform"));
         if (vhas(spec, "num_classes")) ts.num_classes = (int)vint(spec, "num_classes");
         if (vhas(spec, "weight")) ts.weight = (float)vdbl(spec, "weight");
+        if (vhas(spec, "missing")) ts.missing = parse_target_missing_policy(vstr(spec, "missing"));
         // Optional explicit class -> integer-code mapping (a sub-map of
         // name->int), so a held-out set can be pinned to the same codes as the
         // training set instead of auto-fitting a possibly-different order.
@@ -861,6 +862,7 @@ inline constexpr const char* kTargetNumClasses   = "num_classes";
 inline constexpr const char* kTargetWeight       = "weight";
 inline constexpr const char* kTargetClassWeights = "class_weights";
 inline constexpr const char* kTargetClassNames   = "class_names";
+inline constexpr const char* kTargetMissing      = "missing";
 }  // namespace schema_tree_keys
 
 // Schema map -> ResolveSchema. Reads the full set the dataset's schema()
@@ -916,6 +918,7 @@ ResolveSchema parse_schema(const resolve_value* s) {
             if (vhas(tc_v, k::kTargetWeight)) tc.weight = (float)vdbl(tc_v, k::kTargetWeight);
             if (vhas(tc_v, k::kTargetClassWeights)) tc.class_weights = vfloat_vec(tc_v, k::kTargetClassWeights);
             if (vhas(tc_v, k::kTargetClassNames)) tc.class_names = vstr_vec(tc_v, k::kTargetClassNames);
+            if (vhas(tc_v, k::kTargetMissing)) tc.missing = parse_target_missing_policy(vstr(tc_v, k::kTargetMissing));
             schema.targets.push_back(tc);
         }
     }
@@ -1078,6 +1081,7 @@ resolve_value* residual_analysis_to_value(const ResidualAnalysis& ra) {
     v_put(m, "predictions", v_double_array(ra.predictions));
     v_put(m, "actuals", v_double_array(ra.actuals));
     v_put(m, "residuals", v_double_array(ra.residuals));
+    v_put(m, "test_rows", v_int_array(ra.test_rows));
     v_put(m, "mean_residual", v_double(ra.mean_residual));
     v_put(m, "std_residual", v_double(ra.std_residual));
     v_put(m, "skewness", v_double(ra.skewness));
@@ -1102,6 +1106,9 @@ resolve_value* classification_predictions_to_value(const ClassificationPredictio
     v_put(m, "actuals",
           (cp.actuals.defined() && cp.actuals.numel() > 0)
               ? tensor_to_ivec(cp.actuals) : v_int_array({}));
+    v_put(m, "test_rows",
+          (cp.test_rows.defined() && cp.test_rows.numel() > 0)
+              ? tensor_to_ivec(cp.test_rows) : v_int_array({}));
     if (cp.probabilities.defined() && cp.probabilities.numel() > 0) {
         v_put(m, "probabilities", tensor_to_mat(cp.probabilities));
     } else {
@@ -1203,6 +1210,7 @@ resolve_value* schema_to_value(const ResolveSchema& s) {
         // R callers can recover the code->label mapping like Python's
         // TargetConfig.class_names (issue #76).
         v_put(tm, k::kTargetClassNames, v_string_array(tc.class_names));
+        v_put(tm, k::kTargetMissing, v_string(target_missing_policy_to_string(tc.missing)));
         v_put(targets_m, tc.name, tm);
     }
     auto* m = v_map();

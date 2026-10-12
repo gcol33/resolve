@@ -67,6 +67,7 @@ rc.TargetSpec.classification_with_mapping("habitat", {"forest": 0, "grassland": 
 | `num_classes` | `int` | Classification only |
 | `weight` | `float` | Weight of this target in the multi-task loss |
 | `class_mapping` | `dict[str, int]` | Explicit label to code map; empty means auto-fit alphabetically |
+| `missing` | `TargetMissingPolicy` | What a plot with no label for this target does. `Drop` (default): the plot leaves the dataset. `Mask`: the plot stays, holding `-1` (classification) or `NaN` (regression) for this target, and trains and is scored on its other targets; this target's loss, scaler, metrics and baselines use only its labelled plots. A plot labelled for no target is left out either way |
 
 ---
 
@@ -271,6 +272,7 @@ One entry of `ResolveSchema.targets`.
 | `weight` | `float` | Weight in the multi-task loss |
 | `class_weights` | `list[float]` | Per-class cross-entropy weights; empty means unweighted |
 | `class_names` | `list[str]` | Class vocabulary, index equals code; empty for a regression or already-integer target |
+| `missing` | `TargetMissingPolicy` | The policy the target was loaded and trained under; `Drop` for a checkpoint written before the policy existed |
 
 ---
 
@@ -339,6 +341,7 @@ path.
 | `NormalizationMode` | `Raw`, `Norm`, `Log1p` |
 | `AggregationMode` | `Abundance`, `Count` |
 | `PoolWeighting` | `Binary`, `Abundance`, `Log1p`, `Norm`, `Rank` |
+| `TargetMissingPolicy` | `Drop`, `Mask` |
 
 ---
 

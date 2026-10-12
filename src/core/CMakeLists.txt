@@ -58,6 +58,7 @@ set(RESOLVE_CORE_HEADERS
     include/resolve/trainer.hpp
     include/resolve/predictor.hpp
     include/resolve/loss.hpp
+    include/resolve/target_labels.hpp
     include/resolve/csv_reader.hpp
     include/resolve/csv_utils.hpp
     include/resolve/io_retry.hpp

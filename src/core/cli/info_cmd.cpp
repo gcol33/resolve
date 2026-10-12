@@ -101,6 +101,9 @@ int info_command(const ParsedArgs& args) {
                     std::cout << " [log1p]";
                 }
             }
+            if (target.missing == TargetMissingPolicy::Mask) {
+                std::cout << " [missing labels masked]";
+            }
             std::cout << std::endl;
         }
 

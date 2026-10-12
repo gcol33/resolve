@@ -143,6 +143,10 @@ public:
 
     // Compute combined loss
     // Returns (total_loss, individual_losses)
+    //
+    // A target whose missing labels are masked (TargetConfig::missing) is
+    // scored on the rows of the batch that carry its label (target_labels.hpp);
+    // a batch with none of them gives it a loss of exactly zero.
     std::pair<torch::Tensor, std::unordered_map<std::string, torch::Tensor>> compute(
         const std::unordered_map<std::string, torch::Tensor>& predictions,
         const std::unordered_map<std::string, torch::Tensor>& targets,

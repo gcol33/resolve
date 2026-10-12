@@ -4,6 +4,7 @@
 #include "resolve/csv_utils.hpp"
 #include "resolve/species_encoding.hpp"
 #include "resolve/io_retry.hpp"
+#include "resolve/target_labels.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -211,8 +212,11 @@ void resolve_classification_mapping_kept(
 
 // Single source of truth for encoding one classification target, shared by both
 // the header (from_csv) and species-file (from_species_csv) loaders. Resolves the
-// mapping (fit on kept rows), writes the (n,) int64 code tensor, flips keep[i]=0
-// for NA/unmapped cells, and sets + validates cfg.class_names / cfg.num_classes.
+// mapping (fit on kept rows), writes the (n,) int64 code tensor, and sets +
+// validates cfg.class_names / cfg.num_classes. An NA/unmapped cell flips keep[i]=0
+// under TargetMissingPolicy::Drop; under Mask the row stays and its code is
+// kUnlabelledClass. Either way the cell contributes nothing to the class list,
+// which is therefore fit on the kept rows labelled for this target.
 //
 // num_classes validation (issue #79): the direct-integer path emits the parsed
 // integers verbatim as class codes, so class_names.size() == max_code + 1. The
@@ -232,21 +236,28 @@ torch::Tensor encode_classification_target(
     const bool explicit_mapping = !spec.class_mapping.empty();
     resolve_classification_mapping_kept(spec.class_mapping, raw, keep, mapping, class_names);
 
+    const bool masked = spec.missing == TargetMissingPolicy::Mask;
     const int64_t n = static_cast<int64_t>(raw.size());
     auto tensor = torch::zeros({n}, torch::kLong);
     auto acc = tensor.accessor<int64_t, 1>();
     int64_t n_null = 0;
+    auto mark_missing = [&](int64_t i) {
+        if (masked) {
+            acc[i] = kUnlabelledClass;
+        } else if (i < static_cast<int64_t>(keep.size()) && keep[i]) {
+            keep[i] = 0;
+        }
+        ++n_null;
+    };
     for (int64_t i = 0; i < n; ++i) {
         const std::string& v = raw[static_cast<size_t>(i)];
         if (is_na_string(v)) {
-            if (i < static_cast<int64_t>(keep.size()) && keep[i]) keep[i] = 0;
-            ++n_null;
+            mark_missing(i);
             continue;
         }
         auto it = mapping.find(v);
         if (it == mapping.end()) {
-            if (i < static_cast<int64_t>(keep.size()) && keep[i]) keep[i] = 0;
-            ++n_null;
+            mark_missing(i);
             continue;
         }
         acc[i] = it->second;
@@ -269,7 +280,8 @@ torch::Tensor encode_classification_target(
 
     std::cout << "  Encoded '" << spec.column_name << "' as Int64 ("
               << (explicit_mapping ? "explicit" : "auto") << ", "
-              << mapping.size() << " classes, " << n_null << " null)" << std::endl;
+              << mapping.size() << " classes, " << n_null << " null"
+              << (masked ? ", masked" : "") << ")" << std::endl;
     return tensor;
 }
 
@@ -278,11 +290,13 @@ torch::Tensor encode_classification_target(
 // surviving-row set even when another classification target drives additional
 // drops. Auto-fit maps every non-NA cell in a kept row, so only NA cells drop;
 // an explicit mapping additionally drops non-NA cells absent from the mapping.
+// A target whose missing labels are masked drops nothing.
 void mark_classification_drops(
     const TargetSpec& spec,
     const std::vector<std::string>& raw,
     std::vector<char>& keep
 ) {
+    if (spec.missing == TargetMissingPolicy::Mask) return;
     const bool explicit_mapping = !spec.class_mapping.empty();
     const int64_t n = static_cast<int64_t>(raw.size());
     for (int64_t i = 0; i < n; ++i) {
@@ -291,6 +305,83 @@ void mark_classification_drops(
         if (is_na_string(v)) { keep[i] = 0; continue; }
         if (explicit_mapping && spec.class_mapping.find(v) == spec.class_mapping.end())
             keep[i] = 0;
+    }
+}
+
+// The name a target takes in the model: target_name, or the column when unset.
+std::string target_name_of(const TargetSpec& spec) {
+    return spec.target_name.empty() ? spec.column_name : spec.target_name;
+}
+
+// The TargetConfig a loader starts a target from. Classification class names
+// and num_classes are filled in later by encode_classification_target.
+TargetConfig target_config_of(const TargetSpec& spec) {
+    TargetConfig cfg{target_name_of(spec), spec.task, spec.transform,
+                     spec.num_classes, spec.weight};
+    cfg.missing = spec.missing;
+    return cfg;
+}
+
+// Shared by both loaders, after every target is encoded and before the rows
+// marked in `keep` are compacted away. Only a dataset with a masked target has
+// work here: a Drop target's unlabelled rows are already marked, so every kept
+// row is labelled for every Drop target.
+//
+//   - A kept row labelled for no target is dropped: it would train nothing.
+//   - Each masked target reports the number of kept plots labelled for it, and
+//     a masked target labelled on none of them is an error, since there is
+//     nothing to fit its head to.
+void finalize_masked_labels(
+    const std::vector<TargetSpec>& targets,
+    const std::unordered_map<std::string, torch::Tensor>& tensors,
+    std::vector<char>& keep
+) {
+    const bool any_masked = std::any_of(targets.begin(), targets.end(),
+        [](const TargetSpec& t) { return t.missing == TargetMissingPolicy::Mask; });
+    if (!any_masked || keep.empty()) return;
+
+    const int64_t n = static_cast<int64_t>(keep.size());
+    std::vector<torch::Tensor> labelled(targets.size());
+    std::vector<char> any_label(keep.size(), 0);
+    for (size_t t = 0; t < targets.size(); ++t) {
+        labelled[t] = labelled_mask(tensors.at(target_name_of(targets[t])),
+                                    targets[t].task).contiguous();
+        const auto acc = labelled[t].accessor<bool, 1>();
+        for (int64_t i = 0; i < n; ++i) {
+            if (acc[i]) any_label[static_cast<size_t>(i)] = 1;
+        }
+    }
+
+    int64_t n_unlabelled = 0;
+    for (size_t i = 0; i < keep.size(); ++i) {
+        if (keep[i] && !any_label[i]) {
+            keep[i] = 0;
+            ++n_unlabelled;
+        }
+    }
+    if (n_unlabelled > 0) {
+        std::cout << "  Dropped " << n_unlabelled
+                  << " plots labelled for no target" << std::endl;
+    }
+
+    int64_t n_kept = 0;
+    for (char k : keep) if (k) ++n_kept;
+    for (size_t t = 0; t < targets.size(); ++t) {
+        if (targets[t].missing != TargetMissingPolicy::Mask) continue;
+        const std::string name = target_name_of(targets[t]);
+        const auto acc = labelled[t].accessor<bool, 1>();
+        int64_t n_labelled = 0;
+        for (int64_t i = 0; i < n; ++i) {
+            if (acc[i] && keep[static_cast<size_t>(i)]) ++n_labelled;
+        }
+        std::cout << "  Target '" << name << "' (missing labels masked): labelled on "
+                  << n_labelled << " of " << n_kept << " plots" << std::endl;
+        if (n_labelled == 0 && n_kept > 0) {
+            throw std::invalid_argument(
+                "target '" + name + "' (missing = mask) is labelled on none of the " +
+                std::to_string(n_kept) + " plots kept, so there is nothing to fit "
+                "its head to. Check the column '" + targets[t].column_name + "'.");
+        }
     }
 }
 
@@ -1055,26 +1146,23 @@ ResolveDataset ResolveDataset::from_species_source(
     std::vector<std::vector<std::string>> cls_raw(targets.size());
     for (size_t t = 0; t < targets.size(); ++t) {
         const auto& target_spec = targets[t];
-        std::string name = target_spec.target_name.empty()
-            ? target_spec.column_name : target_spec.target_name;
-
-        dataset.target_configs_.push_back({
-            name,
-            target_spec.task,
-            target_spec.transform,
-            target_spec.num_classes,
-            target_spec.weight
-        });
+        const std::string name = target_name_of(target_spec);
+        dataset.target_configs_.push_back(target_config_of(target_spec));
 
         if (target_spec.task == TaskType::Classification) {
             cls_raw[t].reserve(static_cast<size_t>(n_plots));
             for (int64_t i = 0; i < n_plots; ++i) cls_raw[t].push_back(raw_at(t, i));
         } else {
+            const bool masked = target_spec.missing == TargetMissingPolicy::Mask;
             auto target_tensor = torch::zeros({n_plots}, torch::kFloat32);
             auto acc = target_tensor.accessor<float, 1>();
             for (int64_t i = 0; i < n_plots; ++i) {
                 auto parsed = parse_regression_target(raw_at(t, i));
-                if (!parsed.has_value()) { keep[i] = 0; continue; }
+                if (!parsed.has_value()) {
+                    if (masked) acc[i] = kMissingValue;
+                    else keep[i] = 0;
+                    continue;
+                }
                 acc[i] = *parsed;
             }
             dataset.targets_[name] = target_tensor;
@@ -1089,11 +1177,11 @@ ResolveDataset ResolveDataset::from_species_source(
     // Pass 2: fit each classification vocab on kept rows only, encode, validate.
     for (size_t t = 0; t < targets.size(); ++t) {
         if (targets[t].task != TaskType::Classification) continue;
-        std::string name = targets[t].target_name.empty()
-            ? targets[t].column_name : targets[t].target_name;
+        const std::string name = target_name_of(targets[t]);
         dataset.targets_[name] = encode_classification_target(
             targets[t], cls_raw[t], keep, dataset.target_configs_[t], name);
     }
+    finalize_masked_labels(targets, dataset.targets_, keep);
 
     // Drop plots whose target was missing/unmapped, compacting plot_ids_,
     // coordinates, and every target tensor in lockstep. encode_species (below)
@@ -1223,14 +1311,7 @@ void ResolveDataset::load_header_data(
             throw std::runtime_error("Target column not found in header CSV: " + target.column_name);
         }
         target_cols.push_back(col);
-
-        target_configs_.push_back({
-            target.target_name.empty() ? target.column_name : target.target_name,
-            target.task,
-            target.transform,
-            target.num_classes,
-            target.weight
-        });
+        target_configs_.push_back(target_config_of(target));
     }
 
     // Single streaming pass: accumulate into growable buffers rather than a
@@ -1249,8 +1330,7 @@ void ResolveDataset::load_header_data(
     std::vector<std::vector<float>> reg_bufs(targets.size());
     std::vector<std::string> target_names(targets.size());
     for (size_t t = 0; t < targets.size(); ++t) {
-        target_names[t] = targets[t].target_name.empty()
-                              ? targets[t].column_name : targets[t].target_name;
+        target_names[t] = target_name_of(targets[t]);
     }
 
     // Per-column count of covariate cells that were missing/unparseable during
@@ -1277,10 +1357,11 @@ void ResolveDataset::load_header_data(
     // Regression targets are accumulated into reg_bufs (see the row-scan body).
     std::vector<std::vector<std::string>> classification_raw(targets.size());
 
-    // Per-row keep mask. A row is "kept" iff every requested target column
+    // Per-row keep mask. A row is "kept" iff every requested Drop target
     // produced a usable value (finite numeric for regression, non-missing
-    // string for classification). Rows with any missing target get dropped
-    // after the scan, for classification and regression targets alike.
+    // string for classification). Rows with any missing Drop target get dropped
+    // after the scan, for classification and regression targets alike. A masked
+    // target keeps the row with the sentinel in its place.
     std::vector<char> keep_row;
 
     // Header rows are plot-level: plot_id must be unique. A duplicate would
@@ -1360,24 +1441,25 @@ void ResolveDataset::load_header_data(
             const auto& target = targets[t];
             const int col = target_cols[t];
             const bool have_cell = row.size() > static_cast<size_t>(col);
+            const bool masked = target.missing == TargetMissingPolicy::Mask;
 
             if (target.task == TaskType::Classification) {
                 // Defer string->int encoding until post-scan so the auto-fit
                 // path sees the full distribution of values. A short row pushes
-                // "" (missing) and drops the row.
+                // "" (missing), which drops the row unless the target is masked.
                 if (have_cell) {
                     classification_raw[t].push_back(row[col]);
                 } else {
                     classification_raw[t].emplace_back();
-                    row_ok = false;
+                    if (!masked) row_ok = false;
                 }
             } else {
-                float val = 0.0f;
+                float val = masked ? kMissingValue : 0.0f;
                 if (have_cell) {
                     auto parsed = parse_regression_target(row[col]);
                     if (parsed.has_value()) val = *parsed;
-                    else row_ok = false;
-                } else {
+                    else if (!masked) row_ok = false;
+                } else if (!masked) {
                     row_ok = false;
                 }
                 reg_bufs[t].push_back(val);
@@ -1436,11 +1518,12 @@ void ResolveDataset::load_header_data(
     for (size_t t = 0; t < targets.size(); ++t) {
         const auto& target = targets[t];
         if (target.task != TaskType::Classification) continue;
-        std::string name = target.target_name.empty() ? target.column_name : target.target_name;
+        const std::string name = target_name_of(target);
         targets_[name] = encode_classification_target(
             target, classification_raw[t], keep_row, target_configs_[t], name);
     }
     schema_.targets = target_configs_;
+    finalize_masked_labels(targets, targets_, keep_row);
 
     // ---- Filter rows with missing targets ----
     // Compact every per-plot buffer (plot_ids, coords, covariates,
@@ -1496,7 +1579,7 @@ void ResolveDataset::load_header_data(
         if (n_target_dropped > 0) {
             std::cout << n_target_dropped << " dropped for missing/NaN target ";
             // List the target column names so the user knows which target drove
-            // the drop. Multiple targets => any-missing semantics.
+            // the drop: a Drop target missing, or no target labelled at all.
             bool first = true;
             std::cout << "[";
             for (const auto& target : targets) {

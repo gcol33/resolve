@@ -417,6 +417,12 @@ resolve.progress <- function(checkpointDir) {
 #'   - transform: "none" or "log1p" (optional, default "none")
 #'   - num_classes: Number of classes for classification (required for classification)
 #'   - weight: Loss weight (optional, default 1.0)
+#'   - missing: "drop" or "mask" (optional, default "drop"). What happens to a
+#'     plot with no label for this target (an empty or NA cell, or a class
+#'     outside `class_mapping`). "drop" leaves the plot out of the dataset.
+#'     "mask" keeps it: the plot trains and is scored on the targets it is
+#'     labelled for, and this target's loss, scaler and metrics use only its
+#'     labelled plots. A plot labelled for no target is left out either way.
 #' @param config Named list of dataset configuration options:
 #'   - species_encoding: "hash" (default), "embed", or "sparse"
 #'   - hash_dim: Hash dimension (default 32)
@@ -598,7 +604,7 @@ resolve.dataset.csv <- function(header,
                         "latitude", "genus", "family", "covariates",
                         "categoricals")
 .resolve_target_keys <- c("column", "task", "transform", "num_classes",
-                          "weight", "class_mapping")
+                          "weight", "class_mapping", "missing")
 
 # Reject an entry the reader does not know. Silently ignoring one means a value
 # the caller believed they set never reaches the engine.

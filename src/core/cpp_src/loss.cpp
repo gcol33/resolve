@@ -1,4 +1,5 @@
 #include "resolve/loss.hpp"
+#include "resolve/target_labels.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -214,6 +215,21 @@ std::pair<torch::Tensor, std::unordered_map<std::string, torch::Tensor>> MultiTa
             continue;
         }
 
+        // A masked target is scored on the rows of this batch that carry its
+        // label: every term below is then the same mean as for a Drop target,
+        // taken over those rows (cross-entropy weighted by class weight, as
+        // torch normalises it; NCA over the labelled rows' neighbourhoods).
+        // With no labelled row the target adds an exact zero and no gradient,
+        // where the mean over an empty set would be NaN. The batch's other
+        // targets, their weights and the phase schedule are untouched.
+        const auto rows = labelled_rows(cfg, target_it->second);
+        if (rows.n_labelled == 0) {
+            losses[cfg.name] = torch::zeros({}, total_loss.options());
+            continue;
+        }
+        const torch::Tensor pred = rows.select(pred_it->second);
+        const torch::Tensor target = rows.select(target_it->second);
+
         torch::Tensor loss;
         if (cfg.task == TaskType::Regression) {
             torch::Tensor scaler_mean, scaler_scale;
@@ -223,7 +239,7 @@ std::pair<torch::Tensor, std::unordered_map<std::string, torch::Tensor>> MultiTa
                 scaler_scale = scaler_it->second.second;
             }
             loss = phased_loss_.regression_loss(
-                pred_it->second, target_it->second, epoch,
+                pred, target, epoch,
                 scaler_mean, scaler_scale, cfg.transform
             );
         } else {
@@ -234,9 +250,9 @@ std::pair<torch::Tensor, std::unordered_map<std::string, torch::Tensor>> MultiTa
                     const_cast<float*>(cfg.class_weights.data()),
                     {static_cast<int64_t>(cfg.class_weights.size())},
                     torch::kFloat32
-                ).clone().to(pred_it->second.device());
+                ).clone().to(pred.device());
             }
-            loss = phased_loss_.classification_loss(pred_it->second, target_it->second, class_weights_tensor);
+            loss = phased_loss_.classification_loss(pred, target, class_weights_tensor);
         }
 
         losses[cfg.name] = loss;
