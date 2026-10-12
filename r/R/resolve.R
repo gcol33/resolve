@@ -897,7 +897,12 @@ resolve.dataset.frame <- function(header,
 #' @param verbose Print training progress (default TRUE)
 #'
 #' @return A list with `trainer`, `result`, and `dataset`. `result` carries
-#'   `best_epoch`, `train_time_seconds`, `final_metrics`, the loss histories,
+#'   `best_epoch`, `train_time_seconds`, `final_metrics`, the loss histories
+#'   `train_loss` and `test_loss` (one value per epoch), their split by target
+#'   `train_loss_by_target` and `test_loss_by_target` (named lists of per-epoch
+#'   vectors: each target's weighted term of the total, so per epoch they add
+#'   up to it), `train_moe_aux_loss` (the mixture-of-experts load-balancing
+#'   term of `train_loss`, which belongs to no target; empty without one),
 #'   the per-target `baselines`, `diagnostics`, and `effective_batch_size` --
 #'   the batch size the run actually trained at, which is smaller than
 #'   `batchSize` when the CUDA auto-halve-on-OOM retry fired.

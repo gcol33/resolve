@@ -1040,12 +1040,21 @@ resolve_value* nested_metrics_to_value(
     }
     return result;
 }
+resolve_value* histories_by_target_to_value(
+    const std::unordered_map<std::string, std::vector<float>>& histories) {
+    auto* result = v_map();
+    for (const auto& [target, history] : histories) v_put(result, target, v_double_array(history));
+    return result;
+}
 resolve_value* train_result_to_value(const TrainResult& tr) {
     auto* m = v_map();
     v_put(m, "best_epoch", v_int(tr.best_epoch));
     v_put(m, "final_metrics", nested_metrics_to_value(tr.final_metrics));
     v_put(m, "train_loss", v_double_array(tr.train_loss_history));
     v_put(m, "test_loss", v_double_array(tr.test_loss_history));
+    v_put(m, "train_loss_by_target", histories_by_target_to_value(tr.train_loss_history_by_target));
+    v_put(m, "test_loss_by_target", histories_by_target_to_value(tr.test_loss_history_by_target));
+    v_put(m, "train_moe_aux_loss", v_double_array(tr.train_moe_aux_loss_history));
     v_put(m, "train_time_seconds", v_double(tr.train_time_seconds));
     v_put(m, "resumed_from_epoch", v_int(tr.resumed_from_epoch));
     v_put(m, "effective_batch_size", v_int(tr.effective_batch_size));

@@ -719,3 +719,205 @@ TEST_CASE("Cross-validation keeps masked targets consistent across folds",
     // The pre-CV split is restored, sentinels included.
     REQUIRE(torch::equal(trainer.compute_classification_predictions("cls").actuals, before));
 }
+
+// =============================================================================
+// The loss history split by target
+// =============================================================================
+
+namespace {
+
+// Per epoch, the per-target terms of `names` -- plus `moe_aux`, the term that
+// belongs to no target, when given -- add up to `total`.
+void require_decomposes(const std::unordered_map<std::string, std::vector<float>>& by_target,
+                        const std::vector<float>& total,
+                        const std::vector<std::string>& names,
+                        const std::vector<float>* moe_aux = nullptr) {
+    REQUIRE(by_target.size() == names.size());
+    for (const auto& name : names) {
+        INFO("target " << name);
+        REQUIRE(by_target.count(name) == 1);
+        REQUIRE(by_target.at(name).size() == total.size());
+    }
+    if (moe_aux) REQUIRE(moe_aux->size() == total.size());
+    for (size_t e = 0; e < total.size(); ++e) {
+        double sum = moe_aux ? static_cast<double>((*moe_aux)[e]) : 0.0;
+        for (const auto& name : names) sum += by_target.at(name)[e];
+        INFO("epoch " << e << ": terms " << sum << ", total " << total[e]);
+        REQUIRE(std::isfinite(total[e]));
+        REQUIRE(sum == Catch::Approx(total[e]).epsilon(1e-5).margin(1e-6));
+    }
+}
+
+}  // namespace
+
+TEST_CASE("The per-target loss history adds up to the total, batches without a label included",
+          "[masking][loss_history]") {
+    // One plot in ten carries a class label and a batch holds four plots, so
+    // the masked target has fewer labelled training plots than the epoch has
+    // batches: some batches hold none of its labels and add 0 for it.
+    const auto plots = make_plots(240, 1.0, 0.1, 21);
+    const auto files = write_csvs(plots);
+    const auto ds = load(files, {y_spec(TargetMissingPolicy::Drop),
+                                 cls_spec(TargetMissingPolicy::Mask)});
+    auto tcfg = train_config(/*fixed_epochs=*/5);
+    tcfg.batch_size = 4;
+    auto fit = seeded_fit(ds, tcfg);
+    const auto& r = fit.result;
+
+    const auto cls_train = ds.targets().at("cls").index_select(0, fit.trainer->train_indices());
+    const int64_t n_cls_labelled = (cls_train >= 0).sum().item<int64_t>();
+    const int64_t n_batches = (cls_train.size(0) + tcfg.batch_size - 1) / tcfg.batch_size;
+    REQUIRE(n_cls_labelled > 0);
+    REQUIRE(n_cls_labelled < n_batches);
+
+    REQUIRE(r.train_loss_history.size() == 5);
+    REQUIRE(r.test_loss_history.size() == 5);
+    require_decomposes(r.train_loss_history_by_target, r.train_loss_history, {"y", "cls"});
+    require_decomposes(r.test_loss_history_by_target, r.test_loss_history, {"y", "cls"});
+    REQUIRE(r.train_moe_aux_loss_history.empty());
+
+    for (size_t e = 0; e < r.train_loss_history.size(); ++e) {
+        INFO("epoch " << e);
+        CHECK(r.train_loss_history_by_target.at("cls")[e] > 0.0f);
+        CHECK(r.train_loss_history_by_target.at("y")[e] > 0.0f);
+        CHECK(r.test_loss_history_by_target.at("cls")[e] >= 0.0f);
+    }
+}
+
+TEST_CASE("A target's weight scales its term of the loss history",
+          "[masking][loss_history]") {
+    const auto plots = make_plots(200, 1.0, 1.0, 22);
+    const auto files = write_csvs(plots);
+    auto y = y_spec(TargetMissingPolicy::Drop);
+    y.weight = 3.0f;
+    const auto ds = load(files, {y, cls_spec(TargetMissingPolicy::Drop)});
+    auto fit = seeded_fit(ds, train_config(/*fixed_epochs=*/3));
+    require_decomposes(fit.result.train_loss_history_by_target,
+                       fit.result.train_loss_history, {"y", "cls"});
+    require_decomposes(fit.result.test_loss_history_by_target,
+                       fit.result.test_loss_history, {"y", "cls"});
+}
+
+TEST_CASE("A single target's loss history is the total history",
+          "[masking][loss_history]") {
+    const auto plots = make_plots(200, 0.8, 0.8, 23);
+    const auto files = write_csvs(plots);
+
+    SECTION("regression") {
+        const auto ds = load(files, {y_spec(TargetMissingPolicy::Drop)});
+        auto fit = seeded_fit(ds, train_config(/*fixed_epochs=*/4));
+        REQUIRE(fit.result.train_loss_history_by_target.size() == 1);
+        REQUIRE(fit.result.train_loss_history_by_target.at("y") == fit.result.train_loss_history);
+        REQUIRE(fit.result.test_loss_history_by_target.at("y") == fit.result.test_loss_history);
+    }
+    SECTION("masked classification") {
+        const auto ds = load(files, {cls_spec(TargetMissingPolicy::Mask)});
+        auto fit = seeded_fit(ds, train_config(/*fixed_epochs=*/4));
+        REQUIRE(fit.result.train_loss_history_by_target.size() == 1);
+        REQUIRE(fit.result.train_loss_history_by_target.at("cls") == fit.result.train_loss_history);
+        REQUIRE(fit.result.test_loss_history_by_target.at("cls") == fit.result.test_loss_history);
+    }
+    SECTION("early stopping") {
+        const auto ds = load(files, {y_spec(TargetMissingPolicy::Drop)});
+        auto fit = seeded_fit(ds, train_config(/*fixed_epochs=*/0, /*max_epochs=*/6));
+        REQUIRE_FALSE(fit.result.train_loss_history.empty());
+        REQUIRE(fit.result.train_loss_history_by_target.at("y") == fit.result.train_loss_history);
+        REQUIRE(fit.result.test_loss_history_by_target.at("y") == fit.result.test_loss_history);
+    }
+}
+
+TEST_CASE("Nothing held out leaves the per-target test history empty",
+          "[masking][loss_history]") {
+    const auto plots = make_plots(160, 1.0, 0.5, 24);
+    const auto files = write_csvs(plots);
+    const auto ds = load(files, {y_spec(TargetMissingPolicy::Drop),
+                                 cls_spec(TargetMissingPolicy::Mask)});
+    auto fit = seeded_fit(ds, train_config(/*fixed_epochs=*/3), /*test_size=*/0.0f);
+    REQUIRE(fit.result.train_loss_history.size() == 3);
+    REQUIRE(fit.result.test_loss_history.empty());
+    REQUIRE(fit.result.test_loss_history_by_target.empty());
+    require_decomposes(fit.result.train_loss_history_by_target,
+                       fit.result.train_loss_history, {"y", "cls"});
+}
+
+TEST_CASE("The MoE load-balancing term is recorded beside the targets' terms",
+          "[masking][loss_history][moe]") {
+    const auto plots = make_plots(200, 1.0, 0.6, 25);
+    const auto files = write_csvs(plots);
+    const auto ds = load(files, {y_spec(TargetMissingPolicy::Drop),
+                                 cls_spec(TargetMissingPolicy::Mask)});
+
+    torch::manual_seed(20261012);
+    auto mcfg = model_config();
+    mcfg.moe_routing = MoERoutingType::Soft;
+    mcfg.moe_aux_loss_weight = 0.5f;
+    ResolveModel model(ds.schema(), mcfg);
+    REQUIRE(model->uses_moe());
+    Trainer trainer(model, train_config(/*fixed_epochs=*/3));
+    trainer.prepare_data(ds, 0.25f, 11);
+    const auto r = trainer.fit();
+
+    REQUIRE(r.train_moe_aux_loss_history.size() == 3);
+    for (float aux : r.train_moe_aux_loss_history) CHECK(aux > 0.0f);
+    require_decomposes(r.train_loss_history_by_target, r.train_loss_history, {"y", "cls"},
+                       &r.train_moe_aux_loss_history);
+    // The held-out selection loss carries no load-balancing term.
+    require_decomposes(r.test_loss_history_by_target, r.test_loss_history, {"y", "cls"});
+}
+
+TEST_CASE("Each cross-validation fold carries its own per-target loss history",
+          "[masking][loss_history][cv]") {
+    const auto plots = make_plots(240, 0.7, 0.7, 26);
+    const auto files = write_csvs(plots);
+    const auto ds = load(files, {y_spec(TargetMissingPolicy::Mask),
+                                 cls_spec(TargetMissingPolicy::Mask)});
+
+    torch::manual_seed(6);
+    ResolveModel model(ds.schema(), model_config());
+    Trainer trainer(model, train_config(/*fixed_epochs=*/3));
+    trainer.prepare_data(ds, 0.2f, 11);
+    const auto cv = trainer.cross_validate(3, 13);
+    REQUIRE(cv.fold_results.size() == 3);
+    for (const auto& fold : cv.fold_results) {
+        REQUIRE(fold.train_loss_history.size() == 3);
+        require_decomposes(fold.train_loss_history_by_target, fold.train_loss_history,
+                           {"y", "cls"});
+        require_decomposes(fold.test_loss_history_by_target, fold.test_loss_history,
+                           {"y", "cls"});
+    }
+}
+
+TEST_CASE("MultiTaskLoss::contributions are the weighted terms compute() sums",
+          "[masking][loss_history][loss]") {
+    torch::manual_seed(7);
+    const int64_t batch = 10;
+    auto y_cfg = target_config("y", TaskType::Regression, TargetMissingPolicy::Mask);
+    y_cfg.weight = 2.5f;
+    const auto c_cfg = target_config("c", TaskType::Classification, TargetMissingPolicy::Mask, 3);
+    const MultiTaskLoss loss_fn({y_cfg, c_cfg}, {100, 300}, LossConfigMode::Combined);
+
+    const auto pred_y = torch::randn({batch, 1});
+    const auto pred_c = torch::randn({batch, 3});
+    const auto y = torch::randn({batch});
+    const auto c_none = torch::full({batch}, kUnlabelledClass, torch::kInt64);
+
+    for (int epoch : {0, 150, 400}) {
+        INFO("epoch " << epoch);
+        auto [total, parts] = loss_fn.compute({{"y", pred_y}, {"c", pred_c}},
+                                              {{"y", y}, {"c", c_none}}, epoch);
+        const auto terms = loss_fn.contributions(parts);
+        REQUIRE(terms.sizes() == torch::IntArrayRef{2});
+        REQUIRE(terms.dtype() == torch::kFloat32);
+        REQUIRE_FALSE(terms.requires_grad());
+        // targets() order: y, then c with no labelled row, which adds exactly 0.
+        REQUIRE(terms[0].item<float>() == (2.5f * parts.at("y")).item<float>());
+        REQUIRE(terms[1].item<float>() == 0.0f);
+        REQUIRE(terms.sum().item<float>() == total.item<float>());
+    }
+
+    // A target compute() could not score holds 0.
+    auto [total, parts] = loss_fn.compute({{"y", pred_y}}, {{"y", y}}, 0);
+    const auto terms = loss_fn.contributions(parts);
+    REQUIRE(terms[1].item<float>() == 0.0f);
+    REQUIRE(terms[0].item<float>() == total.item<float>());
+}

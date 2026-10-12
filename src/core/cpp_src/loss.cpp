@@ -19,6 +19,14 @@ inline torch::Tensor smape_terms(const torch::Tensor& pred, const torch::Tensor&
     return numerator / denominator;
 }
 
+// The term target `cfg` adds to the multi-task total for its loss `loss`.
+// Shared by MultiTaskLoss::compute, which sums it, and
+// MultiTaskLoss::contributions, which reports it, so the reported terms are
+// the summed ones bit for bit.
+inline torch::Tensor weighted_term(const TargetConfig& cfg, const torch::Tensor& loss) {
+    return cfg.weight * loss;
+}
+
 }  // namespace
 
 // PhasedLoss implementation
@@ -256,10 +264,35 @@ std::pair<torch::Tensor, std::unordered_map<std::string, torch::Tensor>> MultiTa
         }
 
         losses[cfg.name] = loss;
-        total_loss = total_loss + cfg.weight * loss;
+        total_loss = total_loss + weighted_term(cfg, loss);
     }
 
     return {total_loss, losses};
+}
+
+torch::Tensor MultiTaskLoss::contributions(
+    const std::unordered_map<std::string, torch::Tensor>& losses) const {
+    torch::NoGradGuard no_grad;
+
+    torch::Device device = torch::kCPU;
+    for (const auto& cfg : targets_) {
+        auto it = losses.find(cfg.name);
+        if (it != losses.end()) { device = it->second.device(); break; }
+    }
+    const auto options = torch::TensorOptions().dtype(torch::kFloat32).device(device);
+
+    std::vector<torch::Tensor> terms;
+    terms.reserve(targets_.size());
+    for (const auto& cfg : targets_) {
+        auto it = losses.find(cfg.name);
+        terms.push_back(it == losses.end()
+            ? torch::zeros({}, options)
+            : weighted_term(cfg, it->second.detach()).to(torch::kFloat32));
+    }
+    if (terms.empty()) {
+        return torch::zeros({0}, options);
+    }
+    return torch::stack(terms);
 }
 
 // Metrics implementation

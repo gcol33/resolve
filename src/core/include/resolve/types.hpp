@@ -833,6 +833,23 @@ struct TrainResult {
     std::unordered_map<std::string, std::unordered_map<std::string, float>> final_metrics;
     std::vector<float> train_loss_history;
     std::vector<float> test_loss_history;
+
+    // The two histories above split by target. Per epoch, a target's entry is
+    // the term it adds to that epoch's total: its weighted loss, averaged over
+    // the epoch's batches the way the total is (a batch with no labelled row
+    // for a masked target adds 0), and on the held-out fold its weighted loss
+    // under the phase-invariant selection objective. Keyed by target name, one
+    // value per epoch; the test map is empty when nothing is held out.
+    //
+    // The MoE load-balancing term belongs to no target and is recorded in
+    // train_moe_aux_loss_history (empty without MoE; the held-out loss never
+    // carries it). Per epoch, the train entries plus that term add up to
+    // train_loss_history, and the test entries to test_loss_history, within
+    // float rounding.
+    std::unordered_map<std::string, std::vector<float>> train_loss_history_by_target;
+    std::unordered_map<std::string, std::vector<float>> test_loss_history_by_target;
+    std::vector<float> train_moe_aux_loss_history;
+
     float train_time_seconds = 0.0f;
     int resumed_from_epoch = 0;
 

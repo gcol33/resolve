@@ -106,3 +106,47 @@ test_that("a masked fit reports per-target counts and keeps the policy in the ch
   expect_equal(length(preds$predictions$y), dataset$n_plots())
   expect_true(all(is.finite(preds$predictions$y)))
 })
+
+expect_decomposes <- function(byTarget, total, targets, moeAux = NULL) {
+  expect_setequal(names(byTarget), targets)
+  for (target in targets) expect_length(byTarget[[target]], length(total))
+  terms <- Reduce(`+`, byTarget[targets])
+  if (!is.null(moeAux)) terms <- terms + moeAux
+  expect_equal(terms, total, tolerance = 1e-5)
+}
+
+test_that("the loss histories split by target and add up to the totals", {
+  skip_if_no_backend()
+  skip_on_cran()
+  files <- masking_files()
+  on.exit(unlink(c(files$header, files$species)), add = TRUE)
+
+  dataset <- masking_dataset(files, "mask")
+  fit <- resolve.train.dataset(
+    dataset, hiddenDims = c(16L, 8L), maxEpochs = 4L, patience = 4L,
+    lr = 1e-2, batchSize = 4L, testSize = 0.25, seed = 3L, verbose = FALSE
+  )
+  result <- fit$result
+  expect_length(result$train_loss, 4L)
+  expect_decomposes(result$train_loss_by_target, result$train_loss, c("y", "cls"))
+  expect_decomposes(result$test_loss_by_target, result$test_loss, c("y", "cls"))
+  expect_length(result$train_moe_aux_loss, 0L)
+
+  moe <- resolve.train.dataset(
+    dataset, hiddenDims = c(16L, 8L), maxEpochs = 3L, patience = 3L,
+    lr = 1e-2, batchSize = 16L, testSize = 0.25, seed = 3L,
+    moeRouting = "soft", verbose = FALSE
+  )$result
+  expect_length(moe$train_moe_aux_loss, 3L)
+  expect_decomposes(moe$train_loss_by_target, moe$train_loss, c("y", "cls"),
+                    moeAux = moe$train_moe_aux_loss)
+  expect_decomposes(moe$test_loss_by_target, moe$test_loss, c("y", "cls"))
+
+  refit <- resolve.train.dataset(
+    dataset, hiddenDims = c(16L, 8L), maxEpochs = 3L, fixedEpochs = 3L,
+    lr = 1e-2, batchSize = 16L, testSize = 0, seed = 3L, verbose = FALSE
+  )$result
+  expect_length(refit$test_loss, 0L)
+  expect_length(refit$test_loss_by_target, 0L)
+  expect_decomposes(refit$train_loss_by_target, refit$train_loss, c("y", "cls"))
+})

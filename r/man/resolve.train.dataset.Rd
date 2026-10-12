@@ -138,7 +138,12 @@ blocks (default 0.1).}
 }
 \value{
 A list with \code{trainer}, \code{result}, and \code{dataset}. \code{result} carries
-\code{best_epoch}, \code{train_time_seconds}, \code{final_metrics}, the loss histories,
+\code{best_epoch}, \code{train_time_seconds}, \code{final_metrics}, the loss histories
+\code{train_loss} and \code{test_loss} (one value per epoch), their split by target
+\code{train_loss_by_target} and \code{test_loss_by_target} (named lists of per-epoch
+vectors: each target's weighted term of the total, so per epoch they add
+up to it), \code{train_moe_aux_loss} (the mixture-of-experts load-balancing
+term of \code{train_loss}, which belongs to no target; empty without one),
 the per-target \code{baselines}, \code{diagnostics}, and \code{effective_batch_size} --
 the batch size the run actually trained at, which is smaller than
 \code{batchSize} when the CUDA auto-halve-on-OOM retry fired.

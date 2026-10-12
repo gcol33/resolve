@@ -255,11 +255,21 @@ public:
     );
 
 private:
+    // One epoch's loss: the value the total history records, and its split
+    // into the term each target adds (loss_fn_.targets() order) plus the MoE
+    // load-balancing term, which belongs to no target (0 without MoE, and
+    // always 0 on the held-out fold).
+    struct EpochLoss {
+        float total = 0.0f;
+        std::vector<float> by_target;
+        float moe_aux = 0.0f;
+    };
+
     // Train one epoch
-    float train_epoch(int epoch);
+    EpochLoss train_epoch(int epoch);
 
     // Evaluate on test set
-    std::pair<float, std::unordered_map<std::string, std::unordered_map<std::string, float>>>
+    std::pair<EpochLoss, std::unordered_map<std::string, std::unordered_map<std::string, float>>>
     eval_epoch(int epoch);
 
     // Compute learning rate for given epoch based on scheduler config

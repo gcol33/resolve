@@ -325,6 +325,25 @@ for target, metrics in result.final_metrics.items():
         print(f"  {name}: {value:.4f}")
 ```
 
+### Loss by target
+
+A fit with several targets trains them through one shared loss, the weighted
+sum of their losses. `train_loss_history_by_target` and
+`test_loss_history_by_target` split the two loss histories into the term each
+target contributes, one value per epoch, so they show which head drives the
+objective and the held-out loss that early stopping watches:
+
+```python
+for target, history in result.test_loss_history_by_target.items():
+    print(f"{target}: {history[0]:.4f} -> {history[-1]:.4f}")
+```
+
+Per epoch the terms add up to the total. A model with a mixture of experts adds
+a load-balancing term to the training loss that belongs to no target; it is in
+`train_moe_aux_loss_history`, and the training terms add up to the total with
+it. A batch with no labelled plot for a target with `missing = Mask`
+contributes 0 for that target, averaged in like any batch.
+
 ### Metrics
 
 Regression targets are scored in their original units; a `Log1p` target is

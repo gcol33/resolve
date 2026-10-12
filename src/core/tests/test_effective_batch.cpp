@@ -200,9 +200,14 @@ TEST_CASE("An OOM-halved fit reports the halved batch size, config the requested
     CHECK(result.effective_batch_size != trainer.config().batch_size);
 
     // The restart re-ran the whole schedule from epoch 0, so the histories
-    // belong to the halved attempt alone.
+    // belong to the halved attempt alone, the per-target ones included: the
+    // failed attempt had already recorded its epoch 0 when the OOM fired.
     CHECK(result.train_loss_history.size() == 2);
     CHECK(result.test_loss_history.size() == 2);
+    REQUIRE(result.train_loss_history_by_target.size() == 1);
+    REQUIRE(result.test_loss_history_by_target.size() == 1);
+    CHECK(result.train_loss_history_by_target.at("y") == result.train_loss_history);
+    CHECK(result.test_loss_history_by_target.at("y") == result.test_loss_history);
 }
 
 TEST_CASE("A checkpoint saved after an OOM-halved fit records both batch sizes",

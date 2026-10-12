@@ -420,7 +420,7 @@ void Trainer::prepare_data(
     data_prepared_ = true;
 }
 
-float Trainer::train_epoch(int epoch) {
+Trainer::EpochLoss Trainer::train_epoch(int epoch) {
     model_->train();
 
     // Use GPU-cached data if available, otherwise fallback to CPU tensors
@@ -476,6 +476,14 @@ float Trainer::train_epoch(int epoch) {
     // Check if MoE is enabled for aux loss handling
     bool use_moe = model_->uses_moe();
     float moe_aux_weight = model_->config().moe_aux_loss_weight;
+
+    // Running sums of the terms of each counted batch's loss: one slot per
+    // target in loss_fn_.targets() order, then the MoE term. Kept on the
+    // device and read back once per epoch, so the split adds no host sync per
+    // batch; the float32 sums run in the same order as total_loss's.
+    const auto n_loss_targets = static_cast<int64_t>(loss_fn_.targets().size());
+    torch::Tensor term_sums = torch::zeros(
+        {n_loss_targets + 1}, torch::TensorOptions().dtype(torch::kFloat32).device(config_.device));
 
     // Async prefetching setup for CUDA hash computation
 #ifdef RESOLVE_HAS_CUDA
@@ -623,6 +631,7 @@ float Trainer::train_epoch(int epoch) {
         std::unordered_map<std::string, torch::Tensor> predictions;
         torch::Tensor moe_aux_loss;
         torch::Tensor loss;
+        torch::Tensor batch_terms;
 
         // RAII autocast scope covering the forward and loss. The nesting
         // counter and enabled flag must unwind even if forward()/compute()
@@ -686,14 +695,29 @@ float Trainer::train_epoch(int epoch) {
                 }
             }
 
-            auto [loss_val, _] = loss_fn_.compute(predictions, batch_targets, epoch, batch_scalers);
+            auto [loss_val, target_losses] = loss_fn_.compute(predictions, batch_targets, epoch, batch_scalers);
             loss = loss_val;
 
             // Add MoE auxiliary loss for load balancing
+            torch::Tensor moe_term;
             if (use_moe && moe_aux_loss.defined()) {
-                loss = loss + moe_aux_weight * moe_aux_loss;
+                moe_term = moe_aux_weight * moe_aux_loss;
+                loss = loss + moe_term;
             }
+
+            batch_terms = torch::cat({
+                loss_fn_.contributions(target_losses).to(term_sums.device()),
+                moe_term.defined()
+                    ? moe_term.detach().to(term_sums.options()).reshape({1})
+                    : torch::zeros({1}, term_sums.options())});
         }  // autocast disabled here (also on exception unwind) before backward
+
+        // A batch counts toward the epoch mean once its optimizer step runs.
+        auto count_batch = [&]() {
+            total_loss += loss.item<float>();
+            term_sums.add_(batch_terms);
+            n_batches++;
+        };
 
         // Backward pass with gradient scaling for AMP
         if (amp_enabled_) {
@@ -740,8 +764,7 @@ float Trainer::train_epoch(int epoch) {
                     amp_growth_tracker_ = 0;
                 }
 
-                total_loss += loss.item<float>();
-                n_batches++;
+                count_batch();
             }
         } else {
             // Standard backward pass without AMP
@@ -752,15 +775,28 @@ float Trainer::train_epoch(int epoch) {
 
             optimizer_->step();
 
-            total_loss += loss.item<float>();
-            n_batches++;
+            count_batch();
         }
     }
 
-    return n_batches > 0 ? total_loss / n_batches : 0.0f;
+    // Every reported value is the mean over the counted batches, formed the
+    // same way.
+    auto epoch_mean = [n_batches](float sum) {
+        return n_batches > 0 ? sum / n_batches : 0.0f;
+    };
+    EpochLoss out;
+    out.total = epoch_mean(total_loss);
+    const auto sums = term_sums.to(torch::kCPU);
+    const auto s = sums.accessor<float, 1>();
+    out.by_target.reserve(static_cast<size_t>(n_loss_targets));
+    for (int64_t i = 0; i < n_loss_targets; ++i) {
+        out.by_target.push_back(epoch_mean(s[i]));
+    }
+    out.moe_aux = epoch_mean(s[n_loss_targets]);
+    return out;
 }
 
-std::pair<float, std::unordered_map<std::string, std::unordered_map<std::string, float>>>
+std::pair<Trainer::EpochLoss, std::unordered_map<std::string, std::unordered_map<std::string, float>>>
 Trainer::eval_epoch(int epoch) {
     model_->eval();
     torch::NoGradGuard no_grad;
@@ -832,7 +868,7 @@ Trainer::eval_epoch(int epoch) {
     // Scoring every epoch on the final-phase objective gives one consistent
     // scale, so best_loss is comparable across the whole run.
     const int sel_epoch = std::max(0, config_.max_epochs - 1);
-    auto [loss, _] = loss_fn_.compute(predictions, test_targets, sel_epoch, batch_scalers);
+    auto [loss, target_losses] = loss_fn_.compute(predictions, test_targets, sel_epoch, batch_scalers);
 
     // AMP regression diagnostic (gcol33/resolve#21). Gated by RESOLVE_AMP_DEBUG.
     // Compares the eval-mode test loss (BatchNorm running stats) against the
@@ -926,7 +962,17 @@ Trainer::eval_epoch(int epoch) {
         }
     }
 
-    return {loss.item<float>(), all_metrics};
+    // The held-out forward carries no MoE term, so the targets' terms make up
+    // the whole selection loss.
+    EpochLoss out;
+    out.total = loss.item<float>();
+    const auto terms = loss_fn_.contributions(target_losses).to(torch::kCPU);
+    const auto t = terms.accessor<float, 1>();
+    out.by_target.reserve(static_cast<size_t>(terms.size(0)));
+    for (int64_t i = 0; i < terms.size(0); ++i) {
+        out.by_target.push_back(t[i]);
+    }
+    return {std::move(out), all_metrics};
 }
 
 float Trainer::get_learning_rate(int epoch) const {
@@ -1148,6 +1194,35 @@ int epochs_to_run(const TrainConfig& config, bool has_held_out) {
     return config.max_epochs;
 }
 
+// Appends one epoch's per-target terms (in `targets` order) to `history`,
+// keyed by target name.
+void append_by_target(std::unordered_map<std::string, std::vector<float>>& history,
+                      const std::vector<TargetConfig>& targets,
+                      const std::vector<float>& terms) {
+    for (size_t i = 0; i < targets.size(); ++i) {
+        history[targets[i].name].push_back(terms[i]);
+    }
+}
+
+// The progress-line suffix that splits a multi-target epoch's loss by target:
+// " | by target (train/test): a 0.12/0.15, b 0.40/0.52", followed by
+// "; moe_aux 0.001" when the model has a mixture of experts. `test_terms` is
+// null when nothing is held out, and each entry then shows its train term only.
+std::string by_target_suffix(const std::vector<TargetConfig>& targets,
+                             const std::vector<float>& train_terms,
+                             const std::vector<float>* test_terms,
+                             const float* moe_aux) {
+    std::ostringstream msg;
+    msg << " | by target (" << (test_terms ? "train/test" : "train") << "): ";
+    for (size_t i = 0; i < targets.size(); ++i) {
+        if (i > 0) msg << ", ";
+        msg << targets[i].name << " " << train_terms[i];
+        if (test_terms) msg << "/" << (*test_terms)[i];
+    }
+    if (moe_aux) msg << "; moe_aux " << *moe_aux;
+    return msg.str();
+}
+
 }  // namespace
 
 TrainResult Trainer::fit() {
@@ -1158,6 +1233,8 @@ TrainResult Trainer::fit() {
     const bool has_held_out = test_indices_.defined() && test_indices_.numel() > 0;
     const bool fixed_duration = config_.fixed_epochs > 0;
     const int n_epochs = epochs_to_run(config_, has_held_out);
+    const auto& loss_targets = loss_fn_.targets();
+    const bool uses_moe = model_->uses_moe();
 
     // Apply CUDA performance optimizations and the VRAM cap BEFORE
     // cache_data_to_gpu(), so the allocator limit is in place before any
@@ -1257,14 +1334,22 @@ TrainResult Trainer::fit() {
                 float current_lr = get_learning_rate(epoch);
                 update_learning_rate(current_lr);
 
-                float train_loss = train_epoch(epoch);
+                const EpochLoss train = train_epoch(epoch);
+                const float train_loss = train.total;
                 result.train_loss_history.push_back(train_loss);
+                append_by_target(result.train_loss_history_by_target, loss_targets, train.by_target);
+                if (uses_moe) {
+                    result.train_moe_aux_loss_history.push_back(train.moe_aux);
+                }
 
                 float test_loss = std::numeric_limits<float>::quiet_NaN();
+                EpochLoss test;
                 decltype(result.final_metrics) metrics;
                 if (has_held_out) {
-                    std::tie(test_loss, metrics) = eval_epoch(epoch);
+                    std::tie(test, metrics) = eval_epoch(epoch);
+                    test_loss = test.total;
                     result.test_loss_history.push_back(test_loss);
+                    append_by_target(result.test_loss_history_by_target, loss_targets, test.by_target);
                 }
 
                 const bool settled = loss_fn_.objective_settled(epoch, last_epoch);
@@ -1327,6 +1412,11 @@ TrainResult Trainer::fit() {
                     }
                     if (config_.lr_scheduler != LRSchedulerType::None) {
                         msg << " LR: " << current_lr;
+                    }
+                    if (loss_targets.size() > 1) {
+                        msg << by_target_suffix(loss_targets, train.by_target,
+                                                has_held_out ? &test.by_target : nullptr,
+                                                uses_moe ? &train.moe_aux : nullptr);
                     }
                     config_.log(msg.str());
                 }

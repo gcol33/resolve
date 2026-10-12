@@ -235,7 +235,10 @@ Neighbourhood Components Analysis term to every classification target. See
 | `best_epoch` | `int` | Epoch with the best test-fold loss |
 | `final_metrics` | `dict[str, dict[str, float]]` | Per target, per metric; a target with `missing = Mask` also reports `n_labelled`, the held-out plots it was scored on |
 | `train_loss_history` | `list[float]` | One entry per epoch run |
-| `test_loss_history` | `list[float]` | Same length |
+| `test_loss_history` | `list[float]` | Same length; empty when nothing is held out |
+| `train_loss_history_by_target` | `dict[str, list[float]]` | `train_loss_history` split by target: per epoch, the term each target adds to the total (its weighted loss, averaged over the epoch's batches like the total; a batch with no labelled row for a masked target adds 0) |
+| `test_loss_history_by_target` | `dict[str, list[float]]` | `test_loss_history` split by target: each target's weighted term of the phase-invariant selection loss; empty when nothing is held out |
+| `train_moe_aux_loss_history` | `list[float]` | The mixture-of-experts load-balancing term of `train_loss_history`, which belongs to no target; empty without MoE. Per epoch the train terms plus this add up to the total, and the test terms add up to the test total, within float rounding |
 | `train_time_seconds` | `float` | Wall time |
 | `resumed_from_epoch` | `int` | Non-zero when the fit resumed from a checkpoint |
 | `baselines` | `dict[str, BaselineMetrics]` | Naive baseline per target |

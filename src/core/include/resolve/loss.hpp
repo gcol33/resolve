@@ -154,6 +154,20 @@ public:
         const std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>>& scalers = {}
     ) const;
 
+    // The term each target adds to the total compute() returns, given the
+    // per-target losses compute() returned with it: a (targets().size(),)
+    // float32 tensor in targets() order, without gradient. Entry i is the
+    // weighted loss compute() summed for target i, so the entries add up to the
+    // total. A target compute() did not score (no prediction or no label tensor
+    // for it) holds 0, as does a masked target with no labelled row, whose loss
+    // is already exactly 0.
+    [[nodiscard]] torch::Tensor contributions(
+        const std::unordered_map<std::string, torch::Tensor>& losses) const;
+
+    // The targets this loss scores, in the order compute() sums them and
+    // contributions() reports them.
+    [[nodiscard]] const std::vector<TargetConfig>& targets() const noexcept { return targets_; }
+
     // Phase (1/2/3) the regression loss is in at `epoch`, using the effective
     // phase boundaries this loss was built with (which from_config remaps for
     // MAE/SMAPE modes). Single source of truth for phase-aware training logic
