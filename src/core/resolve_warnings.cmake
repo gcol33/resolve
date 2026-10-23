@@ -2,9 +2,9 @@
 # with, exposed as the INTERFACE library `resolve_warnings`.
 #
 # include()d by the engine build (src/core/CMakeLists.txt) and by the Python
-# extension build (src/core/python/CMakeLists.txt), which is also the sdist root
-# and configures standalone -- hence the guard: both may include this in a
-# single configure of the engine tree.
+# extension build (src/core/python/CMakeLists.txt), which also configures
+# standalone for the wheel and sdist builds -- hence the guard: both may include
+# this in a single configure of the engine tree.
 #
 # Only RESOLVE's own targets link it; the FetchContent'd third-party targets
 # (Catch2, nanobind) keep their own flags. Third-party HEADERS stay quiet by

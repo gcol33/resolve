@@ -129,10 +129,9 @@ jobs:
           OUT=$(mktemp -d)
           echo "OUT=$OUT" >> "$GITHUB_ENV"
 
-          # elevation is a continuous covariate and bedrock a categorical one.
-          # Before issue #104 the CLI had no flag for either, so both columns
-          # were silently dropped and a CLI-trained model was structurally
-          # different from the same configuration trained through resolve_core.
+          # elevation is a continuous covariate and bedrock a categorical one;
+          # both must reach the model, so a CLI-trained model is structurally the
+          # same as the same configuration trained through resolve_core.
           "$RESOLVE" train \
             --header "$FIXTURES/cli_header.csv" \
             --species "$FIXTURES/cli_species.csv" \
@@ -160,7 +159,7 @@ jobs:
           grep -q "covariates: \[elevation\]" "$OUT/info.txt"
           grep -q -- "- name: bedrock" "$OUT/info.txt"
           # The training recipe the checkpoint records, including the NCA
-          # hyperparameters, which were constants no caller could set.
+          # hyperparameters.
           grep -q "Train loss_config: nca" "$OUT/info.txt"
           grep -q "Train nca_temperature: 0.45" "$OUT/info.txt"
           grep -q "Train nca_neighbors: 7" "$OUT/info.txt"
@@ -221,8 +220,8 @@ jobs:
           print(f"OK: {len(rows)} predictions, columns {header}")
           CHECK
 
-      # --probabilities appends one column per class after the code column
-      # (issue #117): the softmax row the code was taken from, labelled by the
+      # --probabilities appends one column per class after the code column:
+      # the softmax row the code was taken from, labelled by the
       # class label in code order, summing to one, with its argmax equal to
       # the code. The first four columns are byte-identical to the plain run.
       - name: Predict with class probabilities
@@ -457,11 +456,10 @@ jobs:
             exit 1
           fi
 
-      # DatasetConfig::selection was applied only by the hash encoding, so a
-      # rank_pool run recorded a selection and encoded every species anyway
-      # (issue #113). --species-budget gives the pooled encodings a budget to
-      # select down to; without it they still encode everything, which is what
-      # the "Dataset selection: all" assertion above pins.
+      # DatasetConfig::selection applies to the pooled encodings too:
+      # --species-budget gives them a budget to select down to; without it they
+      # encode everything, which is what the "Dataset selection: all"
+      # assertion above pins.
       - name: --species-budget selects on the pooled encoder
         run: |
           set -euo pipefail
@@ -505,9 +503,8 @@ jobs:
             exit 1
           fi
 
-      # moe_routing meant a different architecture depending on the encoding,
-      # and the CLI could not reach it at all. --moe-placement now says which
-      # one the run gets, and the mixture is available to every encoding.
+      # --moe-placement says which mixture-of-experts architecture the run
+      # gets, and the mixture is available to every encoding.
       - name: A mixture of experts reaches the model at either placement
         run: |
           set -euo pipefail
@@ -515,7 +512,11 @@ jobs:
           RESOLVE=${{ github.workspace }}/cli/resolve
           FIXTURES=${{ github.workspace }}/src/core/tests/fixtures
 
+          # The expert flags apply only to a mixture; the CLI refuses them
+          # under --moe-routing none.
           train_moe () {
+            local experts=()
+            if [ "$2" != none ]; then experts=(--n-experts 3 --expert-hidden-dims 16); fi
             "$RESOLVE" train \
               --header "$FIXTURES/cli_header.csv" \
               --species "$FIXTURES/cli_species.csv" \
@@ -524,8 +525,7 @@ jobs:
               --target area:regression \
               --encoding rank_pool \
               --hidden-dims 64,48,32,16 --dropout 0.0 \
-              --moe-routing "$2" --moe-placement "$3" \
-              --n-experts 3 --expert-hidden-dims 16 \
+              --moe-routing "$2" --moe-placement "$3" "${experts[@]}" \
               --batch-size 32 --max-epochs 2 --patience 2 --lr 0.01 \
               --test-size 0.25 --seed 7 \
               --output "$OUT/moe_$1.pt" > /dev/null
@@ -585,10 +585,8 @@ jobs:
             *) echo "::error::the refusal did not name moe_placement=post: $err"; exit 1 ;;
           esac
 
-      # Every field of every architecture sub-config now has a flag, generated
-      # from the field registry. Before this the CLI selected an architecture
-      # and left all of its hyperparameters at the default, so a standalone run
-      # could not train what the bindings could.
+      # Every field of every architecture sub-config has a flag, generated from
+      # the field registry, so a standalone run can train what the bindings can.
       - name: Architecture sub-config flags reach the model
         run: |
           set -euo pipefail
@@ -628,8 +626,7 @@ jobs:
 
       # --seed feeds torch::manual_seed before the model is constructed AND the
       # train/test split, so the same seed reproduces a run and a different seed
-      # does not. Before issue #104 weight init came from an unseeded
-      # process-global RNG and two identical invocations gave different models.
+      # does not.
       - name: --seed makes a run reproducible
         run: |
           set -euo pipefail
@@ -673,8 +670,8 @@ jobs:
             exit 1
           fi
 
-      # Every one of these used to be accepted and ignored, which for a research
-      # CLI is a wrong run that looks fine.
+      # Accepting and ignoring any of these would be, for a research CLI, a
+      # wrong run that looks fine.
       - name: Reject bad flags and values instead of silently defaulting
         run: |
           set -euo pipefail
@@ -812,15 +809,10 @@ jobs:
       - name: Import smoke (built engine reports VERSION)
         run: python tools/version.py --check-built
 
-      # The from_pandas == from_csv equivalence this step used to run as a
-      # standalone script is tests/core/test_dataset.py::test_from_pandas_matches_from_csv
-      # below. The script lived under src/core/dev_notes/, which is not tracked,
-      # so the step could only ever fail once it was reached.
-
       # Dataset / trainer / predictor / categorical / spatial / pretraining
       # bindings, plus the held-out recovery fits in tests/core/test_recovery.py.
-      # --cov measures the resolve_core Python shims (the allocator config, the
-      # I/O retry wrapper, from_pandas); the engine under them is C++ and is
+      # --cov measures the resolve_core Python modules (the allocator config,
+      # from_pandas, the suite wrapper); the engine under them is C++ and is
       # covered by the Catch2 suite.
       - name: Run the resolve_core test suite
         run: pytest tests/core -v --tb=short --cov=resolve_core --cov-report=xml
@@ -853,8 +845,8 @@ jobs:
 
   # CUDA compile-only check. Manual-dispatch until validated on a CUDA runner:
   # USE_CUDA=ON needs a CUDA-enabled libtorch and the toolkit, so it is not part
-  # of the push/PR gate. Catches .cu / cuda_toolchain.cmake / CUDAPrefetcher
-  # compile-rot without needing a GPU at runtime.
+  # of the push/PR gate. Catches compile-rot in the .cu kernels, the CUDA
+  # benchmarks and the CUDA-only engine paths without needing a GPU at runtime.
   cuda-compile:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -883,6 +875,7 @@ jobs:
         run: |
           cd src/core
           cmake -B build-cuda -DBUILD_TESTS=ON -DBUILD_PYTHON=OFF -DBUILD_CLI=ON -DUSE_CUDA=ON \
+                -DRESOLVE_BUILD_BENCHMARKS=ON \
                 -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
                 -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache \
                 -DTorch_DIR=${{ github.workspace }}/libtorch/share/cmake/Torch

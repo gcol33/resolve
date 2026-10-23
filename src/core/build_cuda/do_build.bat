@@ -24,6 +24,11 @@ set "MSVC_BIN=C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSV
 set "SDK_BIN=C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64"
 set "CUDA_BIN=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\bin"
 set "CUDA_NVVM=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\nvvm\bin"
+set "CUDACXX=%CUDA_BIN%\nvcc.exe"
+rem GPU target for libtorch's CUDA flags. Torch's Caffe2 cmake reads
+rem TORCH_CUDA_ARCH_LIST and ignores CMAKE_CUDA_ARCHITECTURES. 12.0 = Blackwell
+rem (RTX 5080); 8.9 = Ada, 9.0 = Hopper.
+if not defined TORCH_CUDA_ARCH_LIST set "TORCH_CUDA_ARCH_LIST=12.0"
 
 rem Set minimal PATH with native backslashes. The cmake toolchain does NOT
 rem set PATH because forward slashes break nvcc's cudafe++ subprocess resolution.
@@ -60,6 +65,7 @@ echo === Configuring ===
     -DBUILD_TESTS=ON ^
     -DRESOLVE_BUILD_BENCHMARKS=ON ^
     -DUSE_CUDA=ON ^
+    -DTORCH_CUDA_ARCH_LIST="%TORCH_CUDA_ARCH_LIST%" ^
     -DTorch_DIR="%TORCH_DIR%" ^
     -DPython_EXECUTABLE="%PYTHON_EXE%"
 

@@ -1,17 +1,17 @@
-// crash_smoke - end-to-end verification of the Windows crash handler
-// (issues #18 / #19). Not a Catch2 test: it deliberately faults, so it must run
-// as its own short-lived process and be checked from outside via its exit code.
-// Driven by src/core/dev_notes/crash_smoke_drive.ps1.
+// crash_smoke - end-to-end verification of the Windows crash handler.
+// Not a Catch2 test: it deliberately faults, so it must run as its own
+// short-lived process and be checked from outside via its exit code.
+// Driven by tools/crash_smoke_drive.ps1.
 //
 // Modes (argv[1]):
 //   clean          - install handler, exit 0 normally (no fault).
 //   fault-midrun   - install handler, do NOT signal work complete, then trigger
 //                    an access violation. The handler must TerminateProcess with
 //                    the fault's NTSTATUS (0xC0000005) -- fast, no JIT-debugger
-//                    hang (issue #19).
+//                    hang.
 //   fault-teardown - install handler, signal work complete, then trigger an
 //                    access violation. The handler must TerminateProcess with
-//                    the shutdown code 0 -- the benign teardown path (issue #18).
+//                    the shutdown code 0 -- the benign teardown path.
 
 #include "resolve/process.hpp"
 

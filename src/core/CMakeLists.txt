@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.18)
 
 # Options (must be set before project() for CUDA)
 option(BUILD_PYTHON "Build Python bindings" ON)
-option(BUILD_R "Build R bindings" OFF)
 option(BUILD_CLI "Build CLI application" ON)
 option(BUILD_TESTS "Build tests" ON)
 option(USE_CUDA "Enable CUDA support" ON)
@@ -43,59 +42,11 @@ find_package(Torch REQUIRED)
 # resolve_warnings. Shared with the Python extension build so both agree.
 include(${CMAKE_CURRENT_SOURCE_DIR}/resolve_warnings.cmake)
 
-# Core library sources -- single source of truth shared with the Python
-# extension build (src/core/python/CMakeLists.txt) via resolve_core_sources.cmake
-# so the two lists never drift.
+# Core library sources and public headers -- single source of truth shared
+# with the Python extension build (src/core/python/CMakeLists.txt) via
+# resolve_core_sources.cmake so the lists never drift.
 set(RESOLVE_CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 include(${CMAKE_CURRENT_SOURCE_DIR}/resolve_core_sources.cmake)
-
-set(RESOLVE_CORE_HEADERS
-    include/resolve/resolve.hpp
-    include/resolve/types.hpp
-    include/resolve/encoder.hpp
-    include/resolve/mlp_block.hpp
-    include/resolve/species_encoder.hpp
-    include/resolve/species_pool.hpp
-    include/resolve/plot_encoder_hash.hpp
-    include/resolve/plot_encoder_embed.hpp
-    include/resolve/plot_encoder_sparse.hpp
-    include/resolve/plot_encoder_rank_pool.hpp
-    include/resolve/plot_encoder_transformer.hpp
-    include/resolve/task_head.hpp
-    include/resolve/ft_transformer.hpp
-    include/resolve/tabnet.hpp
-    include/resolve/saint.hpp
-    include/resolve/excelformer.hpp
-    include/resolve/traitnet.hpp
-    include/resolve/gnn.hpp
-    include/resolve/hetero_gnn.hpp
-    include/resolve/adapter.hpp
-    include/resolve/aux_loss.hpp
-    include/resolve/ln_mlp.hpp
-    include/resolve/model.hpp
-    include/resolve/trainer.hpp
-    include/resolve/lr_schedule.hpp
-    include/resolve/predictor.hpp
-    include/resolve/loss.hpp
-    include/resolve/target_labels.hpp
-    include/resolve/csv_reader.hpp
-    include/resolve/csv_utils.hpp
-    include/resolve/io_retry.hpp
-    include/resolve/role_mapping.hpp
-    include/resolve/dataset.hpp
-    include/resolve/species_encoding.hpp
-    include/resolve/checkpoint.hpp
-    include/resolve/categorical.hpp
-
-    include/resolve/tabm.hpp
-    include/resolve/pretraining.hpp
-    include/resolve/vae.hpp
-
-    include/resolve/fuzzy.hpp
-
-    include/resolve/gpu.hpp
-    include/resolve/process.hpp
-)
 
 # Build core library (C++ only)
 add_library(resolve_core STATIC ${RESOLVE_CORE_SOURCES} ${RESOLVE_CORE_HEADERS})
@@ -137,26 +88,9 @@ endif()
 target_link_libraries(resolve_core PUBLIC ${TORCH_LIBRARIES})
 target_link_libraries(resolve_core PRIVATE resolve_warnings)
 
-# OpenMP for fuzzy::FuzzyIndex::query_batch. Optional: serial fallback if absent.
-#
-# RESOLVE_USE_OPENMP=OFF drops the OpenMP runtime entirely. The R package's
-# resolve_c build sets this: the package does not expose fuzzy::query_batch, and
-# stacking a third OpenMP runtime (MSVC vcomp) on top of libtorch's libiomp5md
-# and R's own libgomp inside a single mingw R process crashes on the first
-# parallel op. Dropping vcomp removes that conflict; query_batch falls back to
-# its serial path (unused from R anyway).
-option(RESOLVE_USE_OPENMP "Link OpenMP into resolve_core (fuzzy::query_batch)" ON)
-if(RESOLVE_USE_OPENMP)
-    find_package(OpenMP QUIET)
-    if(OpenMP_CXX_FOUND)
-        target_link_libraries(resolve_core PUBLIC OpenMP::OpenMP_CXX)
-        message(STATUS "OpenMP enabled for resolve_core")
-    else()
-        message(STATUS "OpenMP not found; fuzzy::query_batch will run serially")
-    endif()
-else()
-    message(STATUS "OpenMP disabled (RESOLVE_USE_OPENMP=OFF); fuzzy::query_batch serial")
-endif()
+# OpenMP for fuzzy::FuzzyIndex::query_batch, behind RESOLVE_USE_OPENMP.
+# Shared with the standalone Python extension build via resolve_openmp.cmake.
+include(${CMAKE_CURRENT_SOURCE_DIR}/resolve_openmp.cmake)
 
 # Ensure ABI compatibility (matches CMAKE_CXX_STANDARD above)
 set_property(TARGET resolve_core PROPERTY CXX_STANDARD 20)
@@ -174,18 +108,17 @@ install(TARGETS resolve_core resolve_warnings
 install(DIRECTORY include/resolve DESTINATION include)
 
 # ----------------------------------------------------------------------------
-# resolve_c: flat C ABI facade shared library (issue #17)
+# resolve_c: flat C ABI facade shared library
 #
 # A single extern "C" DLL/so wrapping the engine so non-MSVC clients (the R
 # package's Rtools mingw build on Windows) can call it without ever touching
 # libtorch's C++ ABI. libtorch only ships an MSVC build on Windows, and MSVC
 # and mingw C++ ABIs do not cross; a C ABI does. Built on every platform so the
-# C-client path is identical everywhere (not a Windows-only branch). See
-# include/resolve/resolve_capi.h and dev_notes/issue17_c_abi_facade_design.md.
+# C-client path is identical everywhere. See include/resolve/resolve_capi.h.
 # ----------------------------------------------------------------------------
 option(BUILD_R_CAPI "Build the resolve_c C ABI shared library" ON)
 if(BUILD_R_CAPI)
-    add_library(resolve_c SHARED cpp_src/resolve_capi.cpp)
+    add_library(resolve_c SHARED cpp_src/resolve_capi.cpp ${RESOLVE_CAPI_HEADERS})
     target_link_libraries(resolve_c PRIVATE resolve_core ${TORCH_LIBRARIES} resolve_warnings)
     target_include_directories(resolve_c PRIVATE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -193,8 +126,8 @@ if(BUILD_R_CAPI)
     # Activate __declspec(dllexport) / visibility("default") on the C API.
     target_compile_definitions(resolve_c PRIVATE RESOLVE_CAPI_BUILD=1)
     # Relocatable RPATH so the shipped library finds its sibling libtorch
-    # runtimes wherever the release zip is unzipped (issue #17 packaging flattens
-    # resolve_c + libtorch into one dir). libc10.so is a direct DT_NEEDED of
+    # runtimes wherever the release zip is unzipped (the release packaging
+    # flattens resolve_c + libtorch into one dir). libc10.so is a direct DT_NEEDED of
     # libresolve_c.so, so $ORIGIN must be in this library's own DT_RUNPATH --
     # a build-tree absolute RPATH to libtorch/lib alone leaves a relocated
     # bundle unable to resolve it. macOS gets @loader_path via install_name_tool
@@ -225,11 +158,6 @@ endif()
 # Python bindings
 if(BUILD_PYTHON)
     add_subdirectory(python)
-endif()
-
-# R bindings
-if(BUILD_R)
-    add_subdirectory(r)
 endif()
 
 # CLI application

@@ -14,12 +14,11 @@ on:
       - 'src/core/**'
   workflow_dispatch:
 
-# Issue #17: the R package is a thin client over the prebuilt `resolve_c` C ABI
-# shared library; it never compiles the engine or links libtorch directly. Every
+# The R package is a thin client over the prebuilt `resolve_c` C ABI shared
+# library; it never compiles the engine or links libtorch directly. Every
 # platform builds resolve_c the same way (CPU libtorch, OpenMP off) and links
 # it -- a single C-client path, including Windows, where mingw consumes the
-# MSVC-built import library. This is the acceptance test for the issue: a green
-# Windows R-CMD-check.
+# MSVC-built import library.
 jobs:
   # The R package vendors the pure-C facade files under r/src/resolve/ (file.copy
   # from the canonical src/core/include/resolve/, done by r/tools/vendor.R):

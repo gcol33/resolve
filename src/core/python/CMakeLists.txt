@@ -6,8 +6,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # No VERSION here: the wheel's version comes from pyproject.toml, the
     # engine's from resolve::VERSION, and both are kept in sync with the
     # repo-root VERSION file by tools/version.py. Nothing consumes
-    # PROJECT_VERSION, and this directory is also the sdist root, which does
-    # not carry the repo-root file.
+    # PROJECT_VERSION, and the sdist (rooted at src/core) does not carry the
+    # repo-root file.
     project(resolve_python LANGUAGES CXX)
 
     # CPU by default: the PyPI wheels link the CPU libtorch the user's `torch`
@@ -61,14 +61,13 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # Find libtorch (will skip CUDA if the CPU-only vars above are set)
     find_package(Torch REQUIRED)
 
-    # Core library sources: single source of truth shared with the main engine
-    # build via resolve_core_sources.cmake (no drift -- this is why the wheel
-    # previously failed to link set_vram_fraction / install_crash_handler).
+    # Core library sources and headers: single source of truth shared with the
+    # main engine build via resolve_core_sources.cmake.
     set(RESOLVE_CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
     include(${RESOLVE_CORE_DIR}/resolve_warnings.cmake)
     include(${RESOLVE_CORE_DIR}/resolve_core_sources.cmake)
 
-    add_library(resolve_core STATIC ${RESOLVE_CORE_SOURCES})
+    add_library(resolve_core STATIC ${RESOLVE_CORE_SOURCES} ${RESOLVE_CORE_HEADERS})
     target_include_directories(resolve_core PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
     )
@@ -80,20 +79,14 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # hash kernels are actually compiled in; a no-op on the default CPU wheel.
     include(${RESOLVE_CORE_DIR}/resolve_cuda_kernels.cmake)
 
-    # OpenMP for fuzzy::query_batch (optional).
-    find_package(OpenMP QUIET)
-    if(OpenMP_CXX_FOUND)
-        target_link_libraries(resolve_core PUBLIC OpenMP::OpenMP_CXX)
-        message(STATUS "OpenMP enabled for resolve_core (standalone Python build)")
-    else()
-        message(STATUS "OpenMP not found; fuzzy::query_batch will run serially")
-    endif()
+    # OpenMP for fuzzy::query_batch, shared with the engine build.
+    include(${RESOLVE_CORE_DIR}/resolve_openmp.cmake)
 
     set_property(TARGET resolve_core PROPERTY CXX_STANDARD 20)
 endif()
 
 # Warning flags for RESOLVE's own targets. Already included by the branch above
-# when this directory configures standalone (the sdist root) and by
+# when this directory configures standalone (the wheel and sdist builds) and by
 # src/core/CMakeLists.txt when it is a subdirectory; the file guards itself.
 include(${CMAKE_CURRENT_SOURCE_DIR}/../resolve_warnings.cmake)
 
