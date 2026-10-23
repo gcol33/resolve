@@ -21,8 +21,7 @@ struct VAEConfig {
     float kl_anneal_epochs = 20;       // Epochs to linearly anneal KL weight from 0 to kl_weight
     int pretrain_epochs = 100;
     float pretrain_lr = 1e-3f;
-    // AdamW decoupled weight decay. The value is AdamWOptions' own default,
-    // which the pretraining loop used implicitly before the knob existed.
+    // AdamW decoupled weight decay; the default is AdamWOptions' own.
     float pretrain_weight_decay = 1e-2f;
     int batch_size = 4096;
     torch::Device device = torch::kCPU;
@@ -76,8 +75,7 @@ public:
     // Gaussian KL divergence D_KL(q(z|x) || N(0, I)) for a diagonal posterior:
     //   -0.5 * sum_j (1 + log_var_j - mu_j^2 - exp(log_var_j))
     // summed over the latent dimension (dim=1) and meaned over the batch, giving
-    // the true per-sample ELBO KL. Single source of truth for vae_loss and the
-    // pretraining loop so the two cannot drift (issue #96).
+    // the true per-sample ELBO KL. Shared by vae_loss and the pretraining loop.
     [[nodiscard]] static torch::Tensor kl_divergence(
         torch::Tensor mu, torch::Tensor log_var);
 
@@ -96,8 +94,7 @@ public:
     // n_species) in nn::Linear (out, in) convention. This directly initializes a
     // Linear(n_species, species_embed_dim) species projection when
     // species_embed_dim == encoder_dims[0]; the caller is responsible for that
-    // shape match (issue #85 — the prior doc claimed a transposed (input_dim,
-    // latent_dim) shape the implementation never returned).
+    // shape match.
     [[nodiscard]] torch::Tensor get_projection_weights() const;
 
     // Accessors
@@ -135,8 +132,12 @@ public:
         const VAEConfig& config = VAEConfig{}
     );
 
-    // Train VAE on species abundance vectors (unsupervised)
-    VAEPretrainResult pretrain(torch::Tensor species_vectors);
+    // Train the VAE on the plots' species vectors (unsupervised). Takes the
+    // plots' model inputs and reads inputs.species_vector, the
+    // (n_plots, n_species) vectors it reconstructs (required); the other
+    // fields are accepted and left alone, since the VAE reads composition
+    // alone.
+    VAEPretrainResult pretrain(const PlotInputs& inputs);
 
     // Get the trained VAE
     [[nodiscard]] SpeciesVAE& vae() noexcept { return vae_; }

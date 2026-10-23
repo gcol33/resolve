@@ -863,6 +863,20 @@ resolve.dataset.frame <- function(header,
 #'   combined with `testSize`.
 #' @param seed Random seed (default 42)
 #' @param savePath Path to save model checkpoint (optional)
+#' @param checkpointDir Directory the run writes checkpoints to while it
+#'   trains (optional): `best.pt` at every new best epoch,
+#'   `checkpoint_<N>.pt` every `checkpointEvery` epochs, `progress.json`
+#'   after every epoch (see [resolve.progress()]) and `checkpoint.pt` at the
+#'   end. `best.pt` and `checkpoint_<N>.pt` carry the run's progress, so
+#'   `resumeFrom` can continue from them.
+#' @param checkpointEvery Also write `checkpoint_<N>.pt` every this many
+#'   epochs (default 0, `best.pt` only). Needs `checkpointDir`.
+#' @param resumeFrom A `best.pt` or `checkpoint_<N>.pt` an interrupted run
+#'   wrote (optional). The run continues at the epoch after it, with its
+#'   optimizer, early-stopping and random-number state, as if it had never
+#'   stopped; `result$resumed_from_epoch` names that epoch. Pass the
+#'   interrupted run's dataset, model and training arguments and `seed`, so
+#'   the split and recipe are the ones it trained on.
 #' @param lossConfig Loss configuration: "mae", "smape", "combined", or "nca"
 #'   (default "mae"). "nca" takes the "combined" regression schedule and adds
 #'   the Neighbourhood Components Analysis term to classification targets.
@@ -921,9 +935,11 @@ resolve.dataset.frame <- function(header,
 #'   vectors: each target's weighted term of the total, so per epoch they add
 #'   up to it), `train_moe_aux_loss` (the mixture-of-experts load-balancing
 #'   term of `train_loss`, which belongs to no target; empty without one),
-#'   the per-target `baselines`, `diagnostics`, and `effective_batch_size` --
-#'   the batch size the run actually trained at, which is smaller than
-#'   `batchSize` when the CUDA auto-halve-on-OOM retry fired.
+#'   the per-target `baselines` (the model against the training mean or mode,
+#'   regression values in original units), `diagnostics`, `effective_batch_size`
+#'   -- the batch size the run actually trained at, which is smaller than
+#'   `batchSize` when the CUDA auto-halve-on-OOM retry fired -- and
+#'   `resumed_from_epoch` (0 unless `resumeFrom` continued the run).
 #'
 #' @examples
 #' \dontrun{
@@ -944,6 +960,9 @@ resolve.train.dataset <- function(dataset,
                                   stoppingPlots = NULL,
                                   seed = 42L,
                                   savePath = NULL,
+                                  checkpointDir = NULL,
+                                  checkpointEvery = 0L,
+                                  resumeFrom = NULL,
                                   lossConfig = "mae",
                                   ncaTemperature = 0.1,
                                   ncaNeighbors = 32L,
@@ -987,6 +1006,15 @@ resolve.train.dataset <- function(dataset,
   }
   if (!device %in% c("cpu", "cuda")) {
     stop("device must be 'cpu' or 'cuda'")
+  }
+  if (!is.numeric(checkpointEvery) || checkpointEvery < 0) {
+    stop("checkpointEvery must be 0 or a positive integer")
+  }
+  if (checkpointEvery > 0 && is.null(checkpointDir)) {
+    stop("checkpointEvery needs checkpointDir")
+  }
+  if (!is.null(resumeFrom) && (!is.character(resumeFrom) || length(resumeFrom) != 1)) {
+    stop("resumeFrom must be the path of one checkpoint")
   }
   if (!is.null(stoppingPlots)) {
     if (!missing(testSize)) {
@@ -1094,8 +1122,12 @@ resolve.train.dataset <- function(dataset,
     loss_config = lossConfig,
     nca_temperature = ncaTemperature,
     nca_neighbors = as.integer(ncaNeighbors),
-    nca_weight = ncaWeight
+    nca_weight = ncaWeight,
+    checkpoint_every = as.integer(checkpointEvery)
   )
+  if (!is.null(checkpointDir)) {
+    trainConfig$checkpoint_dir <- checkpointDir
+  }
 
   # Create trainer
   trainer <- new(.resolve_module()$Trainer, model, trainConfig)
@@ -1107,12 +1139,18 @@ resolve.train.dataset <- function(dataset,
     trainer$prepare_data_stopping_fold(dataset, stoppingPlots, as.integer(seed))
   }
 
-  # Train
-  if (verbose) {
-    cat("Training RESOLVE model...\n")
+  # Train, or continue the run resumeFrom stopped
+  if (is.null(resumeFrom)) {
+    if (verbose) {
+      cat("Training RESOLVE model...\n")
+    }
+    result <- trainer$fit()
+  } else {
+    if (verbose) {
+      cat(sprintf("Resuming RESOLVE run from %s...\n", resumeFrom))
+    }
+    result <- trainer$resume(resumeFrom)
   }
-
-  result <- trainer$fit()
 
   if (verbose) {
     cat(sprintf("Training complete. Best epoch: %d\n", result$best_epoch))

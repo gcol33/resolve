@@ -81,7 +81,7 @@ public:
     );
 
     // Factory method to create loss from config mode. band_threshold sets the
-    // phase-3 band-penalty tolerance (issue #99); the MAE/SMAPE modes zero the
+    // phase-3 band-penalty tolerance; the MAE/SMAPE modes zero the
     // band weight so the threshold is inert there. LossConfigMode::NCA takes the
     // Combined regression schedule and enables the NCA classification term with
     // `nca`'s hyperparameters; the other modes carry `nca` disabled.
@@ -116,9 +116,6 @@ public:
         torch::Tensor target,
         torch::Tensor class_weights = {}
     ) const;
-
-    // Whether the NCA neighbourhood term is part of classification_loss.
-    [[nodiscard]] bool uses_nca() const noexcept { return nca_.enabled; }
 
 private:
     std::pair<int, int> phase_boundaries_;
@@ -168,12 +165,6 @@ public:
     // contributions() reports them.
     [[nodiscard]] const std::vector<TargetConfig>& targets() const noexcept { return targets_; }
 
-    // Phase (1/2/3) the regression loss is in at `epoch`, using the effective
-    // phase boundaries this loss was built with (which from_config remaps for
-    // MAE/SMAPE modes). Single source of truth for phase-aware training logic
-    // in the Trainer (best-model selection / early-stopping gating).
-    int phase_for(int epoch) const { return phased_loss_.get_phase(epoch); }
-
     // Whether the objective at `epoch` is already the one `last_epoch` trains
     // on, so an epoch without improvement counts toward early stopping. It is
     // whenever the phases leave the loss unchanged: no regression target (the
@@ -181,56 +172,17 @@ public:
     // no weight. Otherwise it is from the epoch the final phase begins.
     [[nodiscard]] bool objective_settled(int epoch, int last_epoch) const;
 
-    // Whether the NCA neighbourhood term is active on classification targets
-    // (i.e. this loss was built with LossConfigMode::NCA).
-    [[nodiscard]] bool uses_nca() const noexcept { return phased_loss_.uses_nca(); }
-
 private:
+    // The class weights of target i (targets_ order) on `device`: undefined for
+    // a target without class weights. Built once per target and device, so a
+    // batch does not rebuild and upload them.
+    [[nodiscard]] const torch::Tensor& class_weights_on(size_t i, torch::Device device) const;
+
     std::vector<TargetConfig> targets_;
     PhasedLoss phased_loss_;
+    // Per target, its class weights on the device they were last asked for.
+    mutable std::vector<torch::Tensor> class_weights_;
 };
-
-// Module wrapper around nca_objective that also carries the reference set the
-// paper's stochastic-neighbour classification rule needs at inference: class
-// probabilities are the neighbour probability mass per class (eq. 2) taken
-// against stored reference embeddings rather than the current batch.
-//
-// The module owns no learnable parameters -- the transformation NCA learns is
-// whatever network produces `latent` -- so `forward` is exactly nca_objective.
-class NCALossImpl : public torch::nn::Module {
-public:
-    NCALossImpl(
-        int64_t latent_dim,
-        int64_t n_classes,
-        float temperature = kNCATemperature,
-        int n_neighbors = kNCANeighbors  // truncated neighbour set per sample
-    );
-
-    // Compute NCA loss from latent representations and targets
-    // latent: (batch, latent_dim) - encoder output
-    // targets: (batch,) - class labels
-    [[nodiscard]] torch::Tensor forward(
-        torch::Tensor latent,
-        torch::Tensor targets
-    );
-
-    // Get predicted class probabilities via NCA (for inference)
-    [[nodiscard]] torch::Tensor predict(torch::Tensor latent);
-
-    // Update reference set from training batch
-    void update_references(torch::Tensor latent, torch::Tensor targets);
-
-private:
-    int64_t n_classes_;
-    float temperature_;
-    int n_neighbors_;
-
-    // Reference embeddings and labels (maintained from training batches)
-    torch::Tensor ref_embeddings_;  // (n_ref, latent_dim)
-    torch::Tensor ref_labels_;      // (n_ref,)
-};
-
-TORCH_MODULE(NCALoss);
 
 // Classification metrics result
 struct ClassificationMetrics {
@@ -244,7 +196,7 @@ struct ClassificationMetrics {
     torch::Tensor confusion_matrix;          // (num_classes, num_classes)
 };
 
-// Confidence threshold metrics result (for Exp 5)
+// Confidence threshold metrics result
 struct ConfidenceMetrics {
     float accuracy;      // Accuracy on samples above threshold
     float coverage;      // Fraction of samples above threshold (0-1)
@@ -257,6 +209,7 @@ struct Metrics {
     // Regression metrics
     static float band_accuracy(torch::Tensor pred, torch::Tensor target, float threshold);
     static float mae(torch::Tensor pred, torch::Tensor target);
+    static float mse(torch::Tensor pred, torch::Tensor target);
     static float rmse(torch::Tensor pred, torch::Tensor target);
     // Symmetric MAPE, standard definition |p-t| / ((|p|+|t|)/2 + eps), range
     // [0, 2] (multiply by 100 for the [0, 200%] convention). Matches sklearn.
@@ -291,10 +244,9 @@ struct Metrics {
     //                  metric names will be "band_25", "band_50", etc. (threshold * 100)
     // num_classes: required for classification tasks to compute per-class F1
     // scaler_mean/scaler_scale: when defined, regression pred/target are mapped
-    //   back to original units via x*scale + mean before any transform inversion,
-    //   so every reported regression metric is in original units. Mirrors the
-    //   unscale convention in PhasedLoss::regression_loss. Omit (undefined) to
-    //   report in whatever space pred/target are already in.
+    //   to original units by to_original_units (target_transform.hpp), so every
+    //   reported regression metric is in original units. Omit (undefined) to
+    //   report in the space pred/target are in, with only `transform` inverted.
     static std::unordered_map<std::string, float> compute(
         torch::Tensor pred,
         torch::Tensor target,

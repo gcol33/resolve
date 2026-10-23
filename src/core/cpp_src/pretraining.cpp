@@ -5,7 +5,6 @@
 #include <chrono>
 #include <cmath>
 #include <sstream>
-#include <random>
 #include <stdexcept>
 #include <utility>
 
@@ -151,62 +150,47 @@ torch::Tensor FeatureMaskerImpl::create_mask(
     int64_t batch_size, PretrainRng rng
 ) const {
     const auto opts = mask_token_.options();
-    // 1 = keep, 0 = mask. Assigned by every branch below; Block and Structured
-    // carve their zeros out of an all-visible buffer, Random draws it directly.
-    torch::Tensor mask;
+    const auto index_opts = torch::TensorOptions().dtype(torch::kLong).device(opts.device());
 
     switch (strategy_) {
         case MaskStrategy::Random:
-            // Simple random masking
-            mask = (rng.rand({batch_size, n_features_}, opts) > mask_ratio_)
+            return (rng.rand({batch_size, n_features_}, opts) > mask_ratio_)
                 .to(torch::kFloat32);
-            break;
 
         case MaskStrategy::Block: {
-            // Block masking: mask contiguous blocks of features
-            // Determine block size from mask_ratio
+            // One contiguous block of mask_ratio * n_features features per
+            // row, starting at a uniform position.
             const int64_t block_size = std::max(static_cast<int64_t>(1),
                 static_cast<int64_t>(n_features_ * mask_ratio_));
-            mask = torch::ones({batch_size, n_features_}, opts);
-
-            // Random start position for each sample. Kept on CPU: it is read
-            // back element by element below, and a device round-trip would make
-            // every read a synchronization point.
-            auto starts = rng.randint(0, n_features_ - block_size + 1, {batch_size},
-                torch::TensorOptions().dtype(torch::kLong));
-            for (int64_t i = 0; i < batch_size; ++i) {
-                const int64_t start = starts[i].item<int64_t>();
-                mask[i].slice(0, start, start + block_size).fill_(0.0f);
-            }
-            break;
+            const auto starts = rng.randint(0, n_features_ - block_size + 1,
+                                            {batch_size, 1}, index_opts);
+            const auto column = torch::arange(n_features_, index_opts).unsqueeze(0);
+            const auto masked = (column >= starts) & (column < starts + block_size);
+            return masked.logical_not().to(opts.dtype());
         }
 
         case MaskStrategy::Structured: {
-            // Structured masking: mask contiguous feature groups as whole blocks.
-            // Groups approximate RESOLVE's feature layout: coords (2), species embedding,
-            // covariates. Each sample randomly selects groups to mask.
-            // Target ~4 features per group (at least one group).
-            mask = torch::ones({batch_size, n_features_}, opts);
+            // Whole contiguous feature groups, ~4 features each (at least one
+            // group, the last absorbing the remainder), approximating the
+            // block's layout of coordinates, species signal and covariates.
+            // Each row masks n_mask groups drawn uniformly without
+            // replacement: the groups with the n_mask smallest uniform keys.
             constexpr int64_t group_target_size = 4;
             const int64_t n_groups = std::max(int64_t(1), n_features_ / group_target_size);
             const int64_t group_size = n_features_ / n_groups;
             const int64_t n_mask = std::max(int64_t(1),
                 static_cast<int64_t>(n_groups * mask_ratio_));
-            for (int64_t i = 0; i < batch_size; ++i) {
-                // Random permutation of group indices, mask first n_mask groups
-                auto perm = rng.randperm(n_groups, torch::kCPU);
-                for (int64_t g = 0; g < n_mask; ++g) {
-                    const int64_t gid = perm[g].item<int64_t>();
-                    const int64_t start = gid * group_size;
-                    const int64_t end = (gid == n_groups - 1) ? n_features_ : start + group_size;
-                    mask[i].slice(0, start, end).fill_(0.0f);
-                }
-            }
-            break;
+            const auto keys = rng.rand({batch_size, n_groups}, opts);
+            const auto chosen = std::get<1>(keys.sort(/*dim=*/1)).slice(/*dim=*/1, 0, n_mask);
+            const auto masked_group = torch::zeros({batch_size, n_groups}, opts)
+                .scatter_(1, chosen, 1.0f);
+            const auto group_of_feature = torch::clamp_max(
+                torch::arange(n_features_, index_opts).div(group_size, "floor"),
+                n_groups - 1);
+            return 1.0f - masked_group.index_select(1, group_of_feature);
         }
     }
-
-    return mask;
+    throw std::logic_error("FeatureMasker: unknown mask strategy");
 }
 
 torch::Tensor FeatureMaskerImpl::apply_mask(torch::Tensor features, torch::Tensor mask) const {
@@ -254,6 +238,18 @@ torch::Tensor JEPAPredictorImpl::forward(torch::Tensor context_repr) {
 // SCARFCorruptor
 // =============================================================================
 
+namespace {
+
+// `values` with each column permuted across the rows independently: column j
+// is reordered by the argsort of its own column of uniform keys.
+torch::Tensor shuffle_columns(const torch::Tensor& values, PretrainRng& rng) {
+    const auto keys = rng.rand(values.sizes(),
+                               values.options().dtype(torch::kFloat32));
+    return values.gather(0, std::get<1>(keys.sort(/*dim=*/0)));
+}
+
+}  // namespace
+
 SCARFCorruptorImpl::SCARFCorruptorImpl(
     int64_t n_features,
     float corruption_rate
@@ -267,21 +263,22 @@ torch::Tensor SCARFCorruptorImpl::corrupt(
 ) const {
     const auto batch_size = features.size(0);
 
-    // Create corruption mask: 1 = corrupt, 0 = keep
-    auto corruption_mask =
+    // 1 = corrupt, 0 = keep; a corrupted cell takes its column's value in
+    // another row of the batch.
+    const auto corruption_mask =
         (rng.rand({batch_size, n_features_}, features.options()) < corruption_rate_)
             .to(torch::kFloat32);
-
-    // Generate replacement values by shuffling within each feature column
-    // For each feature, draw values from other samples in the batch
-    auto shuffled = torch::empty_like(features);
-    for (int64_t j = 0; j < n_features_; ++j) {
-        auto perm = rng.randperm(batch_size, features.device());
-        shuffled.select(1, j) = features.select(1, j).index_select(0, perm);
-    }
-
-    // Apply corruption: replace selected positions with shuffled values
+    const auto shuffled = shuffle_columns(features, rng);
     return features * (1.0f - corruption_mask) + shuffled * corruption_mask;
+}
+
+torch::Tensor SCARFCorruptorImpl::corrupt_categoricals(
+    const torch::Tensor& codes, PretrainRng rng
+) const {
+    if (!codes.defined() || codes.numel() == 0) return codes;
+    const auto corrupted =
+        rng.rand(codes.sizes(), codes.options().dtype(torch::kFloat32)) < corruption_rate_;
+    return torch::where(corrupted, shuffle_columns(codes, rng), codes);
 }
 
 // =============================================================================
@@ -307,18 +304,56 @@ torch::Tensor ProjectionHeadImpl::forward(torch::Tensor x) {
 }
 
 // =============================================================================
-// Shared pretraining loop
+// Pretext views
 // =============================================================================
 
-namespace {
-
-// A row-aligned input is "present" when it is defined and non-empty; anything
-// else is forwarded to the objective undefined rather than index_select'ed.
-[[nodiscard]] bool is_present(const torch::Tensor& t) {
-    return t.defined() && t.numel() > 0;
+torch::Tensor mask_codes(const torch::Tensor& codes, float ratio, PretrainRng& rng) {
+    if (!codes.defined() || codes.numel() == 0) return codes;
+    const auto dropped =
+        (codes != 0) &
+        (rng.rand(codes.sizes(), codes.options().dtype(torch::kFloat32)) < ratio);
+    return codes.masked_fill(dropped, 0);
 }
 
-}  // namespace
+PlotInputs mask_species_view(const PlotInputs& inputs, float ratio, PretrainRng& rng) {
+    PlotInputs view = inputs;
+
+    if (inputs.pool_mask.defined() && inputs.pool_mask.numel() > 0) {
+        // A pooled species leaves the pool as a whole: one decision per slot,
+        // applied to every pool tensor aligned with species_ids.
+        const auto valid = inputs.pool_mask.to(torch::kBool);
+        const auto dropped =
+            valid & (rng.rand(valid.sizes(), torch::TensorOptions()
+                                                 .dtype(torch::kFloat32)
+                                                 .device(valid.device())) < ratio);
+        auto drop_slots = [&](const torch::Tensor& t) {
+            return t.defined() && t.numel() > 0 ? t.masked_fill(dropped, 0) : t;
+        };
+        view.species_ids = drop_slots(inputs.species_ids);
+        view.pool_genus_ids = drop_slots(inputs.pool_genus_ids);
+        view.pool_family_ids = drop_slots(inputs.pool_family_ids);
+        view.pool_weights = drop_slots(inputs.pool_weights);
+        view.pool_mask = inputs.pool_mask.masked_fill(dropped, 0);
+    } else {
+        view.species_ids = mask_codes(inputs.species_ids, ratio, rng);
+    }
+
+    // The taxonomy slots have their own count, so each is drawn from its own
+    // shape.
+    view.genus_ids = mask_codes(inputs.genus_ids, ratio, rng);
+    view.family_ids = mask_codes(inputs.family_ids, ratio, rng);
+
+    if (inputs.species_vector.defined() && inputs.species_vector.numel() > 0) {
+        const auto keep =
+            (rng.rand_like(inputs.species_vector) >= ratio).to(inputs.species_vector.dtype());
+        view.species_vector = inputs.species_vector * keep;
+    }
+    return view;
+}
+
+// =============================================================================
+// Shared pretraining loop
+// =============================================================================
 
 PretrainResult run_pretrain_loop(
     PretrainLoopSpec spec,
@@ -331,25 +366,25 @@ PretrainResult run_pretrain_loop(
             std::to_string(spec.batch_size) + "); a batch_size of 0 divides by "
             "zero when computing the step count.");
     }
-    if (spec.inputs.empty() || !is_present(spec.inputs.front())) {
+    spec.inputs = spec.inputs.without_empty();
+    const int64_t n_samples = spec.inputs.n_plots();
+    if (n_samples == 0) {
         throw std::invalid_argument(
-            "run_pretrain_loop: inputs[0] must be a defined, non-empty tensor "
-            "(it supplies the sample count for the shuffle).");
+            "run_pretrain_loop: the inputs carry no defined, non-empty field "
+            "(one supplies the sample count for the shuffle).");
     }
     if (!batch_fn) {
         throw std::invalid_argument(
             "run_pretrain_loop: batch_fn must be callable (it is the objective).");
     }
 
-    const auto start_time = std::chrono::high_resolution_clock::now();
+    const auto start_time = std::chrono::steady_clock::now();
     PretrainResult result;
 
     for (const auto& module : spec.modules) {
         if (module) module->to(spec.device);
     }
-    for (auto& input : spec.inputs) {
-        if (is_present(input)) input = input.to(spec.device);
-    }
+    spec.inputs = spec.inputs.to(spec.device);
 
     // A loader leaves a missing covariate or coordinate as NaN under
     // MissingValuePolicy::Indicate, and the Trainer fills it from the fitting
@@ -358,19 +393,19 @@ PretrainResult run_pretrain_loop(
     // every weight, silently. Fill from the column means of the rows this task
     // was given -- the same fill training computes for the same rows -- and say
     // so, because it is a property of the data the caller handed over.
-    if (torch::isnan(spec.inputs.front()).any().item<bool>()) {
-        spec.inputs.front() = fill_missing_continuous(spec.inputs.front());
+    auto& continuous = spec.inputs.continuous;
+    if (continuous.defined() && torch::isnan(continuous).any().item<bool>()) {
+        continuous = fill_missing_continuous(continuous);
         spec.log("Pretraining: the continuous block carries missing cells; "
                  "filled each with its column mean");
     }
-
-    const int64_t n_samples = spec.inputs.front().size(0);
 
     torch::optim::AdamW optimizer(
         spec.params,
         torch::optim::AdamWOptions(spec.lr).weight_decay(spec.weight_decay));
 
     PretrainRng rng(spec.seed);
+    const auto sum_options = torch::TensorOptions().dtype(torch::kFloat32).device(spec.device);
 
     for (int epoch = 0; epoch < spec.epochs; ++epoch) {
         rng.seed_epoch(epoch);
@@ -380,7 +415,9 @@ PretrainResult run_pretrain_loop(
         }
         if (hooks.on_epoch_begin) hooks.on_epoch_begin(epoch);
 
-        float epoch_loss = 0.0f;
+        // Summed on the device and read back once per epoch, so a batch adds
+        // no host sync.
+        auto epoch_loss = torch::zeros({}, sum_options);
         int n_batches = 0;
 
         auto perm = rng.randperm(n_samples, spec.device);
@@ -388,14 +425,7 @@ PretrainResult run_pretrain_loop(
         for (int64_t start = 0; start < n_samples; start += spec.batch_size) {
             const int64_t end = std::min(
                 start + static_cast<int64_t>(spec.batch_size), n_samples);
-            auto idx = perm.slice(0, start, end);
-
-            PretrainBatch batch;
-            batch.reserve(spec.inputs.size());
-            for (const auto& input : spec.inputs) {
-                batch.push_back(is_present(input) ? input.index_select(0, idx)
-                                                  : torch::Tensor());
-            }
+            const PretrainBatch batch = spec.inputs.index_select(perm.slice(0, start, end));
 
             auto loss = batch_fn(batch, rng);
             if (!loss.defined()) continue;  // the task opted out of this batch
@@ -409,14 +439,14 @@ PretrainResult run_pretrain_loop(
 
             if (hooks.on_step_end) hooks.on_step_end();
 
-            epoch_loss += loss.item<float>();
+            epoch_loss.add_(loss.detach().to(sum_options).reshape({}));
             ++n_batches;
         }
 
         // Guard an empty (or fully skipped) pretraining set so the history
         // records 0 rather than NaN from a divide-by-zero.
         const float avg_loss = (n_batches > 0)
-            ? epoch_loss / static_cast<float>(n_batches) : 0.0f;
+            ? epoch_loss.item<float>() / static_cast<float>(n_batches) : 0.0f;
         result.loss_history.push_back(avg_loss);
 
         if (hooks.on_epoch_end) hooks.on_epoch_end(epoch, avg_loss);
@@ -431,13 +461,48 @@ PretrainResult run_pretrain_loop(
     }
 
     result.epochs_completed = spec.epochs;
-
-    const auto end_time = std::chrono::high_resolution_clock::now();
-    result.total_time_seconds =
-        std::chrono::duration<float>(end_time - start_time).count();
+    result.total_time_seconds = std::chrono::duration<float>(
+        std::chrono::steady_clock::now() - start_time).count();
 
     return result;
 }
+
+namespace {
+
+// `inputs` must carry the continuous block a JEPA / SCARF task masks.
+void require_continuous(const PlotInputs& inputs, const char* task) {
+    if (!inputs.continuous.defined() || inputs.continuous.dim() != 2) {
+        throw std::invalid_argument(
+            std::string(task) + " pretraining needs inputs.continuous, the "
+            "(n_plots, n_features) continuous block it masks");
+    }
+}
+
+// The (online, target) tensors of two modules of one architecture, matched by
+// name in a single walk over both ordered lists.
+std::vector<std::pair<torch::Tensor, torch::Tensor>> paired_by_name(
+    const torch::OrderedDict<std::string, torch::Tensor>& online,
+    const torch::OrderedDict<std::string, torch::Tensor>& target
+) {
+    if (online.size() != target.size()) {
+        throw std::logic_error("JEPA: the target encoder holds " +
+                               std::to_string(target.size()) + " tensors where the "
+                               "online encoder holds " + std::to_string(online.size()));
+    }
+    std::vector<std::pair<torch::Tensor, torch::Tensor>> pairs;
+    pairs.reserve(online.size());
+    auto t = target.begin();
+    for (auto o = online.begin(); o != online.end(); ++o, ++t) {
+        if (o->key() != t->key()) {
+            throw std::logic_error("JEPA: online tensor '" + o->key() +
+                                   "' meets target tensor '" + t->key() + "'");
+        }
+        pairs.emplace_back(o->value(), t->value());
+    }
+    return pairs;
+}
+
+}  // namespace
 
 // =============================================================================
 // JEPAPretrainer
@@ -452,7 +517,6 @@ JEPAPretrainer::JEPAPretrainer(
     config_.validate();
     int64_t latent = context_encoder_->latent_dim();
 
-    // Create predictor
     predictor_ = JEPAPredictor(
         latent,
         config.predictor_hidden_dim,
@@ -460,40 +524,21 @@ JEPAPretrainer::JEPAPretrainer(
         config.predictor_dropout
     );
 
-    // masker_ is (re)built in pretrain() from the actual runtime feature count
-    // (continuous.size(1)); a schema-derived construction here would be a dead,
-    // and for hash mode inconsistent, first build.
+    // masker_ is built in pretrain() from the actual runtime feature count
+    // (inputs.continuous.size(1)).
 
-    // Create target encoder as a deep copy (EMA copy)
-    // We copy weights from context encoder after the first forward pass
+    // The target encoder is a copy of the online one that follows it by EMA
+    // and takes no gradient.
     target_encoder_ = ResolveModel(context_encoder_->schema(), context_encoder_->config());
-
-    // Copy weights from context to target
+    ema_parameters_ = paired_by_name(context_encoder_->named_parameters(),
+                                     target_encoder_->named_parameters());
+    ema_buffers_ = paired_by_name(context_encoder_->named_buffers(),
+                                  target_encoder_->named_buffers());
     {
         torch::NoGradGuard no_grad;
-        auto context_params = context_encoder_->named_parameters();
-        auto target_params = target_encoder_->named_parameters();
-        for (const auto& pair : context_params) {
-            for (const auto& t_pair : target_params) {
-                if (pair.key() == t_pair.key()) {
-                    t_pair.value().copy_(pair.value());
-                    break;
-                }
-            }
-        }
-        auto context_bufs = context_encoder_->named_buffers();
-        auto target_bufs = target_encoder_->named_buffers();
-        for (const auto& pair : context_bufs) {
-            for (const auto& t_pair : target_bufs) {
-                if (pair.key() == t_pair.key()) {
-                    t_pair.value().copy_(pair.value());
-                    break;
-                }
-            }
-        }
+        for (auto& [online, target] : ema_parameters_) target.copy_(online);
+        for (auto& [online, target] : ema_buffers_) target.copy_(online);
     }
-
-    // Target encoder does not require gradients
     for (auto& p : target_encoder_->parameters()) {
         p.set_requires_grad(false);
     }
@@ -501,33 +546,17 @@ JEPAPretrainer::JEPAPretrainer(
 
 void JEPAPretrainer::update_target_encoder(float decay) {
     torch::NoGradGuard no_grad;
-    auto context_params = context_encoder_->named_parameters();
-    auto target_params = target_encoder_->named_parameters();
-
-    for (const auto& pair : context_params) {
-        for (const auto& t_pair : target_params) {
-            if (pair.key() == t_pair.key()) {
-                t_pair.value().mul_(decay).add_(pair.value(), 1.0f - decay);
-                break;
-            }
-        }
+    for (auto& [online, target] : ema_parameters_) {
+        target.mul_(decay).add_(online, 1.0f - decay);
     }
-
-    // Buffers (BatchNorm running_mean/running_var/num_batches_tracked) are NOT
-    // gradient-tracked and are not updated by the parameter EMA above. Without
-    // this the target encoder — always run in eval() — would normalize with the
-    // construction-time init stats (mean 0, var 1) for the entire run, breaking
-    // the "target is a slow copy of the online encoder" invariant.
-    // BYOL/JEPA copy buffers from the online encoder rather than EMA-ing them.
-    auto context_bufs = context_encoder_->named_buffers();
-    auto target_bufs = target_encoder_->named_buffers();
-    for (const auto& pair : context_bufs) {
-        for (const auto& t_pair : target_bufs) {
-            if (pair.key() == t_pair.key()) {
-                t_pair.value().copy_(pair.value());
-                break;
-            }
-        }
+    // Buffers (BatchNorm running_mean/running_var/num_batches_tracked) take no
+    // gradient and are not touched by the parameter EMA. Without copying them
+    // the target encoder -- always run in eval() -- would normalize with the
+    // construction-time init stats for the entire run, breaking the "target
+    // is a slow copy of the online encoder" invariant. BYOL/JEPA copy buffers
+    // from the online encoder rather than EMA-ing them.
+    for (auto& [online, target] : ema_buffers_) {
+        target.copy_(online);
     }
 }
 
@@ -538,79 +567,13 @@ float JEPAPretrainer::get_ema_decay(int step, int total_steps) const {
     return config_.ema_decay_end - (config_.ema_decay_end - config_.ema_decay) * cosine;
 }
 
-namespace {
+PretrainResult JEPAPretrainer::pretrain(const PlotInputs& inputs) {
+    require_continuous(inputs, "JEPA");
+    const int64_t n_samples = inputs.continuous.size(0);
+    const int64_t n_features = inputs.continuous.size(1);
 
-// Mask the species side of a JEPA context view. FeatureMasker only masks the
-// continuous block; for hash-mode encoders the species signal lives there and
-// is masked, but embed / rank / sparse encoders read composition from the
-// species-ID / explicit-vector tensors, which would otherwise pass through the
-// context encoder unmasked and let the pretext task read the answer. Dropping a
-// `ratio` fraction of species tokens (id -> 0 padding, and the same rows on
-// genus/family) and of explicit-vector entries restores a non-trivial task.
-struct MaskedSpeciesView {
-    torch::Tensor genus, family, species, vector;
-};
-
-MaskedSpeciesView mask_species_view(
-    const torch::Tensor& genus_ids,
-    const torch::Tensor& family_ids,
-    const torch::Tensor& species_ids,
-    const torch::Tensor& species_vector,
-    float ratio,
-    PretrainRng& rng
-) {
-    MaskedSpeciesView v{genus_ids, family_ids, species_ids, species_vector};
-
-    // Drop a `ratio` fraction of valid (non-padding) id tokens to 0. Each id
-    // tensor is masked from its OWN shape rather than a single mask derived from
-    // species_ids: in embed mode species_ids is [batch, top_k_species] while
-    // genus/family are [batch, n_taxonomy_slots], so those column counts need
-    // not match and a shared mask would shape-error when indexing genus/family.
-    // Never flip existing padding (id == 0) into a "kept" state.
-    auto mask_ids = [ratio, &rng](const torch::Tensor& ids) -> torch::Tensor {
-        if (!ids.defined() || ids.numel() == 0) return ids;
-        auto keep =
-            (rng.rand(ids.sizes(), ids.options().dtype(torch::kFloat32)) >= ratio);
-        auto valid = (ids != 0);
-        auto drop = valid & ~keep;
-        auto out = ids.clone();
-        out.index_put_({drop}, 0);
-        return out;
-    };
-
-    v.species = mask_ids(species_ids);
-    v.genus = mask_ids(genus_ids);
-    v.family = mask_ids(family_ids);
-
-    if (species_vector.defined() && species_vector.numel() > 0) {
-        auto keep = (rng.rand_like(species_vector) >= ratio).to(species_vector.dtype());
-        v.vector = species_vector * keep;
-    }
-
-    return v;
-}
-
-// The model inputs of one JEPA / SCARF batch, whose loop inputs are
-// {continuous, genus_ids, family_ids, species_ids, species_vector}.
-PlotInputs plot_inputs_of(const PretrainBatch& batch) {
-    return {.continuous = batch[0], .genus_ids = batch[1], .family_ids = batch[2],
-            .species_ids = batch[3], .species_vector = batch[4]};
-}
-
-}  // namespace
-
-PretrainResult JEPAPretrainer::pretrain(
-    torch::Tensor continuous,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids,
-    torch::Tensor species_ids,
-    torch::Tensor species_vector
-) {
-    const int64_t n_samples = continuous.size(0);
-    const int64_t n_features = continuous.size(1);
-
-    // Recreate masker with correct feature dimension. Its mask-token init draws
-    // from the pretraining RNG, not the global stream.
+    // Masker at the runtime feature count. Its mask-token init draws from the
+    // pretraining RNG, not the global stream.
     masker_ = FeatureMasker(n_features, config_.mask_ratio, config_.mask_strategy,
                             PretrainRng(config_.seed));
 
@@ -623,7 +586,7 @@ PretrainResult JEPAPretrainer::pretrain(
     for (auto& p : context_encoder_->parameters()) spec.params.push_back(p);
     for (auto& p : predictor_->parameters()) spec.params.push_back(p);
     for (auto& p : masker_->parameters()) spec.params.push_back(p);
-    spec.inputs = {continuous, genus_ids, family_ids, species_ids, species_vector};
+    spec.inputs = inputs;
     spec.epochs = config_.pretrain_epochs;
     spec.batch_size = config_.batch_size;
     spec.lr = config_.pretrain_lr;
@@ -638,18 +601,12 @@ PretrainResult JEPAPretrainer::pretrain(
     int global_step = 0;
 
     auto batch_fn = [this](const PretrainBatch& batch, PretrainRng& rng) {
-        const auto& batch_cont = batch[0];
-
-        // Masked view -> context encoder. Mask the continuous block AND the
-        // species-ID / explicit-vector inputs so embed/rank/sparse encoders
-        // cannot read the composition straight from an unmasked input.
-        auto mask = masker_->create_mask(batch_cont.size(0), rng);
-        auto masked_cont = masker_->apply_mask(batch_cont, mask);
-        auto sv = mask_species_view(
-            batch[1], batch[2], batch[3], batch[4], config_.mask_ratio, rng);
-        auto context_repr = context_encoder_->get_latent({
-            .continuous = masked_cont, .genus_ids = sv.genus, .family_ids = sv.family,
-            .species_ids = sv.species, .species_vector = sv.vector});
+        // The context view: every input masked (see "Pretext views").
+        const auto mask = masker_->create_mask(batch.continuous.size(0), rng);
+        PlotInputs context = mask_species_view(batch, config_.mask_ratio, rng);
+        context.continuous = masker_->apply_mask(batch.continuous, mask);
+        context.categorical_ids = mask_codes(batch.categorical_ids, config_.mask_ratio, rng);
+        auto context_repr = context_encoder_->get_latent(context);
 
         // Predict target representation from context
         auto predicted_repr = predictor_->forward(context_repr);
@@ -659,11 +616,11 @@ PretrainResult JEPAPretrainer::pretrain(
         {
             torch::NoGradGuard no_grad;
             target_encoder_->eval();
-            target_repr = target_encoder_->get_latent(plot_inputs_of(batch));
+            target_repr = target_encoder_->get_latent(batch);
         }
 
-        // L2 loss between predicted and target representations
-        // Normalize representations before computing loss (cosine similarity variant)
+        // L2 loss between the normalized predicted and target representations
+        // (the cosine-similarity form).
         auto pred_norm = torch::nn::functional::normalize(predicted_repr,
             torch::nn::functional::NormalizeFuncOptions().dim(1));
         auto target_norm = torch::nn::functional::normalize(target_repr,
@@ -695,30 +652,22 @@ SCARFPretrainer::SCARFPretrainer(
     config_.validate();
     int64_t latent = model_->latent_dim();
 
-    // Corruptor will be recreated with correct n_features in pretrain()
+    // Corruptor is rebuilt with the runtime feature count in pretrain()
     corruptor_ = SCARFCorruptor(1, config.corruption_rate);
 
     // Projection head: maps latent -> contrastive space
     projection_head_ = ProjectionHead(latent, config.projection_dim);
 }
 
-PretrainResult SCARFPretrainer::pretrain(
-    torch::Tensor continuous,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids,
-    torch::Tensor species_ids,
-    torch::Tensor species_vector
-) {
-    const int64_t n_features = continuous.size(1);
-
-    // Recreate corruptor with correct feature dimension
-    corruptor_ = SCARFCorruptor(n_features, config_.corruption_rate);
+PretrainResult SCARFPretrainer::pretrain(const PlotInputs& inputs) {
+    require_continuous(inputs, "SCARF");
+    corruptor_ = SCARFCorruptor(inputs.continuous.size(1), config_.corruption_rate);
 
     PretrainLoopSpec spec;
     spec.modules = {model_.ptr(), projection_head_.ptr()};
     for (auto& p : model_->parameters()) spec.params.push_back(p);
     for (auto& p : projection_head_->parameters()) spec.params.push_back(p);
-    spec.inputs = {continuous, genus_ids, family_ids, species_ids, species_vector};
+    spec.inputs = inputs;
     spec.epochs = config_.pretrain_epochs;
     spec.batch_size = config_.batch_size;
     spec.lr = config_.pretrain_lr;
@@ -729,22 +678,15 @@ PretrainResult SCARFPretrainer::pretrain(
     spec.task_name = "SCARF";
 
     auto batch_fn = [this](const PretrainBatch& batch, PretrainRng& rng) {
-        const auto& batch_cont = batch[0];
-
-        // View 1: original features -> encoder -> projection
-        auto repr_1 = model_->get_latent(plot_inputs_of(batch));
+        // View 1: the plot's own inputs -> encoder -> projection
+        auto repr_1 = model_->get_latent(batch);
         auto z_1 = projection_head_->forward(repr_1);
 
-        // View 2: corrupted features -> encoder -> projection. The species
-        // side is masked too: for non-hash encoders the species
-        // composition lives in the ID / explicit-vector tensors, not in
-        // `continuous`, so feeding both views identical species tensors
-        // makes the InfoNCE positive pair matchable by species identity
-        // alone and the encoder degenerates to passing species through.
-        // Same masking as the JEPA context view. (For hash mode the species
-        // hash is inside `continuous` and already corrupted; the species-ID
-        // tensors are empty there, so masking is a no-op.)
-        auto corrupted_cont = corruptor_->corrupt(batch_cont, rng);
+        // View 2: every input corrupted (see "Pretext views"). Feeding both
+        // views identical species tensors would make the positive pair
+        // matchable by species identity alone, and the encoder would
+        // degenerate to passing species through.
+        auto corrupted_cont = corruptor_->corrupt(batch.continuous, rng);
         if (config_.mixup_alpha > 0.0f) {
             // Mix each row of the second view with another row of the batch.
             // The weight is drawn from Beta(alpha, alpha) and then folded to
@@ -760,12 +702,10 @@ PretrainResult SCARFPretrainer::pretrain(
             corrupted_cont = share * corrupted_cont +
                              (1.0f - share) * corrupted_cont.index_select(0, partner);
         }
-        auto masked = mask_species_view(
-            batch[1], batch[2], batch[3], batch[4], config_.corruption_rate, rng);
-        auto repr_2 = model_->get_latent({
-            .continuous = corrupted_cont, .genus_ids = masked.genus,
-            .family_ids = masked.family, .species_ids = masked.species,
-            .species_vector = masked.vector});
+        PlotInputs corrupted = mask_species_view(batch, config_.corruption_rate, rng);
+        corrupted.continuous = corrupted_cont;
+        corrupted.categorical_ids = corruptor_->corrupt_categoricals(batch.categorical_ids, rng);
+        auto repr_2 = model_->get_latent(corrupted);
         auto z_2 = projection_head_->forward(repr_2);
 
         // Normalize projections
@@ -779,8 +719,8 @@ PretrainResult SCARFPretrainer::pretrain(
         auto sim = torch::mm(z_1, z_2.t()) / config_.temperature;
 
         // Labels: diagonal (positive pairs)
-        auto labels = torch::arange(batch_cont.size(0),
-            torch::TensorOptions().dtype(torch::kLong).device(batch_cont.device()));
+        auto labels = torch::arange(batch.continuous.size(0),
+            torch::TensorOptions().dtype(torch::kLong).device(batch.continuous.device()));
 
         // Symmetric loss: both directions
         auto loss_12 = torch::nn::functional::cross_entropy(sim, labels);
@@ -830,12 +770,9 @@ mask_species_batch(
     // embedding, nullifying the 80/10/10 split entirely).
     auto mask_token_positions = torch::zeros_like(mlm_mask);
 
-    // BERT-style 80/10/10 split, fully vectorized. The prior
-    // per-token loop called .item() twice per masked position, forcing a
-    // GPU->CPU sync thousands of times per batch and serializing the MLM hot
-    // loop on CUDA. Here we draw one action value per masked slot, scatter the
-    // 80%/10% decisions back onto the (B, S) grid in mlm_mask's row-major order,
-    // and apply them with tensor ops (no host sync inside the split).
+    // BERT-style 80/10/10 split, vectorized: one action value per masked slot,
+    // scattered back onto the (B, S) grid in mlm_mask's row-major order and
+    // applied with tensor ops, so the split adds no host sync.
     auto n_masked = mlm_mask.sum().item<int64_t>();  // single sync (empty-case guard)
     if (n_masked > 0) {
         auto action_rand = rng.rand({n_masked}, torch::TensorOptions().device(device));
@@ -880,18 +817,31 @@ MaskedSpeciesPretrainer::MaskedSpeciesPretrainer(
     mlm_head_ = MaskedSpeciesHead(encoder_->d_model(), n_species);
 }
 
-std::vector<float> MaskedSpeciesPretrainer::pretrain(
-    torch::Tensor species_ids,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids,
-    torch::Tensor weights,
-    torch::Tensor valid_mask
-) {
+MaskedSpeciesPretrainer::MaskedSpeciesPretrainer(
+    ResolveModel model,
+    const MLMPretrainConfig& config
+) : MaskedSpeciesPretrainer(model->transformer_encoder(),
+                            model->schema().n_species_vocab, config)
+{
+}
+
+PretrainResult MaskedSpeciesPretrainer::pretrain(const PlotInputs& inputs) {
+    const auto present = [](const torch::Tensor& t) { return t.defined() && t.numel() > 0; };
+    if (!present(inputs.species_ids) || !present(inputs.pool_mask)) {
+        throw std::invalid_argument(
+            "masked-species pretraining needs inputs.species_ids and "
+            "inputs.pool_mask, the plot's species tokens and which of them are real");
+    }
+
     PretrainLoopSpec spec;
     spec.modules = {encoder_.ptr(), mlm_head_.ptr()};
     for (auto& p : encoder_->parameters()) spec.params.push_back(p);
     for (auto& p : mlm_head_->parameters()) spec.params.push_back(p);
-    spec.inputs = {species_ids, genus_ids, family_ids, weights, valid_mask};
+    spec.inputs = {.species_ids = inputs.species_ids,
+                   .pool_genus_ids = inputs.pool_genus_ids,
+                   .pool_family_ids = inputs.pool_family_ids,
+                   .pool_weights = inputs.pool_weights,
+                   .pool_mask = inputs.pool_mask.to(torch::kBool)};
     spec.epochs = config_.pretrain_epochs;
     spec.batch_size = config_.batch_size;
     spec.lr = config_.pretrain_lr;
@@ -906,25 +856,20 @@ std::vector<float> MaskedSpeciesPretrainer::pretrain(
 
     auto batch_fn = [this](const PretrainBatch& batch,
                            PretrainRng& rng) -> torch::Tensor {
-        const auto& batch_sp = batch[0];
-        const auto& batch_g = batch[1];
-        const auto& batch_f = batch[2];
-        const auto& batch_w = batch[3];
-        const auto& batch_mask = batch[4];
-
-        // Apply BERT masking
         auto [masked_ids, mlm_mask, mlm_targets, mask_token_positions] =
-            mask_species_batch(batch_sp, batch_mask, n_species_, config_.mask_prob, rng);
+            mask_species_batch(batch.species_ids, batch.pool_mask, n_species_,
+                               config_.mask_prob, rng);
 
         // Nothing was selected for masking in this batch, so there is no target
         // to learn from; an undefined loss tells the loop to move on.
         if (mlm_targets.numel() == 0) return {};
 
-        // Get pre-pooling token embeddings. Only the 80% mask-token subset
-        // is replaced with the mask embedding; the 10%-random and 10%-keep
-        // ids reach the encoder through masked_ids.
+        // Pre-pooling token embeddings. Only the 80% mask-token subset is
+        // replaced with the mask embedding; the 10%-random and 10%-keep ids
+        // reach the encoder through masked_ids.
         auto tokens = encoder_->forward_tokens(
-            masked_ids, batch_g, batch_f, batch_w, batch_mask, mask_token_positions);
+            masked_ids, batch.pool_genus_ids, batch.pool_family_ids, batch.pool_weights,
+            batch.pool_mask, mask_token_positions);
 
         // Extract masked positions and project to species logits
         auto masked_tokens = tokens.index({mlm_mask});  // (N_masked, d_model)
@@ -936,7 +881,7 @@ std::vector<float> MaskedSpeciesPretrainer::pretrain(
             torch::nn::functional::CrossEntropyFuncOptions().ignore_index(0));
     };
 
-    return run_pretrain_loop(std::move(spec), batch_fn).loss_history;
+    return run_pretrain_loop(std::move(spec), batch_fn);
 }
 
 } // namespace resolve

@@ -1,6 +1,45 @@
 #include "bindings_common.hpp"
+#include "bindings_plot_inputs.hpp"
 #include "resolve/pretraining.hpp"
 #include "resolve/vae.hpp"
+
+namespace {
+
+// Every PlotInputs field the call passed, all of them optional: the bundle a
+// pretext task that reads a subset of the fields takes.
+resolve::PlotInputs optional_plot_inputs(CallArgs& call) {
+    resolve::PlotInputs inputs = call.plot_inputs(/*with_continuous=*/false);
+    nb::object continuous = call.take("continuous");
+    if (!continuous.is_none()) {
+        inputs.continuous = unpack_required_tensor(continuous, "continuous");
+    }
+    return inputs;
+}
+
+// The pretrain() method of a pretrainer whose objective masks the continuous
+// block: the model inputs in PlotInputs field order (continuous required) or
+// by keyword. The GIL is released around the multi-epoch loop.
+template <typename Pretrainer>
+auto continuous_pretrain() {
+    return [](Pretrainer& self, nb::args args, nb::kwargs kwargs) {
+        CallArgs call("pretrain", args, kwargs, plot_input_names());
+        const auto inputs = call.plot_inputs(/*with_continuous=*/true);
+        call.finish();
+        nb::gil_scoped_release nogil;
+        return self.pretrain(inputs);
+    };
+}
+
+const char* continuous_pretrain_doc() {
+    return persistent_doc(
+        "pretrain(" + argument_list(plot_input_names(), 1) + ") -> PretrainResult\n\n"
+        "Pretrain on the plots' model inputs, positional in this order or by "
+        "keyword; continuous is required. Every input the encoder reads is "
+        "corrupted in the pretext view, the species-ID, pool and categorical "
+        "inputs included.");
+}
+
+}  // namespace
 
 void register_pretraining(nb::module_& m) {
     // MaskStrategy enum
@@ -20,7 +59,7 @@ void register_pretraining(nb::module_& m) {
         .def_rw("pretrain_weight_decay", &resolve::PretrainConfig::pretrain_weight_decay)
         .def_rw("batch_size", &resolve::PretrainConfig::batch_size)
         // Seeds the dedicated pretraining RNG: a fixed value reproduces the run
-        // and leaves the global torch RNG stream untouched (issue #107).
+        // and leaves the global torch RNG stream untouched.
         .def_rw("seed", &resolve::PretrainConfig::seed)
         .def_rw("ema_decay", &resolve::PretrainConfig::ema_decay)
         .def_rw("ema_decay_end", &resolve::PretrainConfig::ema_decay_end)
@@ -42,50 +81,44 @@ void register_pretraining(nb::module_& m) {
     nb::class_<resolve::JEPAPretrainer>(m, "JEPAPretrainer")
         .def(nb::init<resolve::ResolveModel, const resolve::PretrainConfig&>(),
              nb::arg("model"), nb::arg("config") = resolve::PretrainConfig{})
-        .def("pretrain", [](resolve::JEPAPretrainer& self,
-                           nb::object continuous_obj,
-                           nb::object genus_ids_obj,
-                           nb::object family_ids_obj,
-                           nb::object species_ids_obj,
-                           nb::object species_vector_obj) {
-            // Guard the unpack (THPVariable_Unpack on None/non-tensor is UB) and
-            // release the GIL around the multi-epoch loop so other Python
-            // threads run, matching Trainer.fit / Model.forward.
-            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
-            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
-            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
-            at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
-            at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
-            nb::gil_scoped_release release;
-            return self.pretrain(continuous, genus_ids, family_ids, species_ids, species_vector);
-        }, nb::arg("continuous"),
-           nb::arg("genus_ids") = nb::none(),
-           nb::arg("family_ids") = nb::none(),
-           nb::arg("species_ids") = nb::none(),
-           nb::arg("species_vector") = nb::none());
+        .def("pretrain", continuous_pretrain<resolve::JEPAPretrainer>(),
+             continuous_pretrain_doc());
 
     // SCARFPretrainer
     nb::class_<resolve::SCARFPretrainer>(m, "SCARFPretrainer")
         .def(nb::init<resolve::ResolveModel, const resolve::PretrainConfig&>(),
              nb::arg("model"), nb::arg("config") = resolve::PretrainConfig{})
-        .def("pretrain", [](resolve::SCARFPretrainer& self,
-                           nb::object continuous_obj,
-                           nb::object genus_ids_obj,
-                           nb::object family_ids_obj,
-                           nb::object species_ids_obj,
-                           nb::object species_vector_obj) {
-            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
-            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
-            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
-            at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
-            at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
-            nb::gil_scoped_release release;
-            return self.pretrain(continuous, genus_ids, family_ids, species_ids, species_vector);
-        }, nb::arg("continuous"),
-           nb::arg("genus_ids") = nb::none(),
-           nb::arg("family_ids") = nb::none(),
-           nb::arg("species_ids") = nb::none(),
-           nb::arg("species_vector") = nb::none());
+        .def("pretrain", continuous_pretrain<resolve::SCARFPretrainer>(),
+             continuous_pretrain_doc());
+
+    // Masked-species (MLM) pretraining of a transformer-encoded model
+    nb::class_<resolve::MLMPretrainConfig>(m, "MLMPretrainConfig")
+        .def(nb::init<>())
+        .def_rw("mask_prob", &resolve::MLMPretrainConfig::mask_prob)
+        .def_rw("pretrain_epochs", &resolve::MLMPretrainConfig::pretrain_epochs)
+        .def_rw("pretrain_lr", &resolve::MLMPretrainConfig::pretrain_lr)
+        .def_rw("pretrain_weight_decay", &resolve::MLMPretrainConfig::pretrain_weight_decay)
+        .def_rw("batch_size", &resolve::MLMPretrainConfig::batch_size)
+        .def_rw("seed", &resolve::MLMPretrainConfig::seed);
+
+    nb::class_<resolve::MaskedSpeciesPretrainer>(m, "MaskedSpeciesPretrainer")
+        .def(nb::init<resolve::ResolveModel, const resolve::MLMPretrainConfig&>(),
+             nb::arg("model"), nb::arg("config") = resolve::MLMPretrainConfig{},
+             "Masked-species pretraining of a species_encoding = transformer "
+             "model's species encoder, in place.")
+        .def("pretrain",
+             [](resolve::MaskedSpeciesPretrainer& self, nb::args args, nb::kwargs kwargs) {
+                 CallArgs call("pretrain", args, kwargs, {});
+                 const auto inputs = optional_plot_inputs(call);
+                 call.finish();
+                 nb::gil_scoped_release nogil;
+                 return self.pretrain(inputs);
+             },
+             persistent_doc(
+                 "pretrain(*, " + argument_list(plot_input_names()) + ") -> PretrainResult\n\n"
+                 "Pretrain on the plots' model inputs, by keyword. Reads species_ids "
+                 "and pool_mask (required), pool_genus_ids, pool_family_ids and "
+                 "pool_weights; the other fields are accepted and unused."));
 
     // =========================================================================
     // VAE Module
@@ -120,13 +153,20 @@ void register_pretraining(nb::module_& m) {
     nb::class_<resolve::VAEPretrainer>(m, "VAEPretrainer")
         .def(nb::init<int64_t, const resolve::VAEConfig&>(),
              nb::arg("n_species"), nb::arg("config") = resolve::VAEConfig{})
-        .def("pretrain", [](resolve::VAEPretrainer& self,
-                           nb::object species_vectors_obj) {
-            at::Tensor species_vectors =
-                unpack_required_tensor(species_vectors_obj, "species_vectors");
-            nb::gil_scoped_release release;
-            return self.pretrain(species_vectors);
-        }, nb::arg("species_vectors"))
+        .def("pretrain",
+             [](resolve::VAEPretrainer& self, nb::args args, nb::kwargs kwargs) {
+                 CallArgs call("pretrain", args, kwargs, {"species_vector"});
+                 const auto inputs = optional_plot_inputs(call);
+                 call.finish();
+                 nb::gil_scoped_release nogil;
+                 return self.pretrain(inputs);
+             },
+             persistent_doc(
+                 "pretrain(species_vector, *, " +
+                 argument_list(plot_input_names()) + ") -> VAEPretrainResult\n\n"
+                 "Pretrain the VAE on the plots' species vectors (species_vector, "
+                 "positional or by keyword, required). The other model inputs are "
+                 "accepted and unused."))
         .def("get_projection_weights", [](resolve::VAEPretrainer& self) {
             auto weights = self.vae()->get_projection_weights();
             return nb::steal(THPVariable_Wrap(weights));

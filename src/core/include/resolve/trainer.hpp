@@ -7,12 +7,11 @@
 #include "resolve/scalers.hpp"
 #include <torch/torch.h>
 #include <chrono>
+#include <limits>
 #include <span>
+#include <string>
 
 namespace resolve {
-
-// Forward declaration
-class ResolveDataset;
 
 // =============================================================================
 // Spatial Block Splitter for cross-validation
@@ -58,6 +57,10 @@ public:
         const TrainConfig& config = TrainConfig{}
     );
 
+    // Every prepare_data overload replaces the whole prepared state: the split,
+    // the scalers, the plot IDs, the categorical vocabulary and the device
+    // copies of an earlier call, so a later fit() trains on this split alone.
+
     // Prepare data from a ResolveDataset (preferred API). A seeded random
     // `test_size` fraction of the plots is held out for early stopping.
     void prepare_data(
@@ -89,6 +92,8 @@ public:
     // model inputs (`inputs.continuous` stays empty; an empty field is an
     // input the data does not carry). `targets` maps each target name to its
     // (n_plots,) values. A seeded random `test_size` fraction is held out.
+    // Tensors carry no plot IDs and no categorical vocabulary, so both are
+    // empty afterwards.
     void prepare_data(
         const ContinuousInputs& parts,
         const PlotInputs& inputs,
@@ -99,6 +104,24 @@ public:
 
     // Train the model
     TrainResult fit();
+
+    // Continue a run from a checkpoint fit() wrote while it trained: best.pt
+    // or checkpoint_<N>.pt under TrainConfig::checkpoint_dir. Those carry the
+    // run's progress -- the epochs done, the loss histories, the best epoch's
+    // loss, weights and metrics, the early-stopping patience, the optimizer and
+    // AMP state, the batch size the run had reached and the RNG streams -- and
+    // resume() picks the run up at the epoch after the checkpoint's, as if it
+    // had never stopped. The result covers the whole run;
+    // TrainResult::resumed_from_epoch is the epoch it continued from.
+    //
+    // The trainer must hold the same model architecture and training recipe
+    // (Trainer::load_train_config(path) recovers the recipe) and must already
+    // be prepared on the interrupted run's data with its seed, so the split is
+    // the one the run trained on. Throws std::invalid_argument when the
+    // checkpoint carries no progress (a final checkpoint, or one save()
+    // wrote), when the prepared split or its scalers differ from the run's,
+    // and std::runtime_error when nothing is prepared.
+    TrainResult resume(const std::string& checkpoint_path);
 
     // Save model and state (optionally with run metadata for final checkpoint)
     void save(const std::string& path, const RunMetadata* metadata = nullptr) const;
@@ -196,8 +219,10 @@ public:
     // compute_residuals / compute_calibration /
     // compute_classification_predictions score the loaded weights against the
     // trainer's own test fold; call prepare_data() with the training seed
-    // first to reconstruct that split. vram_fraction caps the CUDA allocator
-    // before upload, matching fit() and the static load(); ignored on CPU.
+    // first to reconstruct that split. A prepared split is re-expressed in the
+    // loaded scalers, and the device copies and optimizer of an earlier fit()
+    // are released. vram_fraction caps the CUDA allocator before upload,
+    // matching fit() and the static load(); ignored on CPU.
     void load_state(
         const std::string& path,
         torch::Device device = torch::kCPU,
@@ -243,6 +268,12 @@ public:
     // come back in original units, classification outputs as logits.
     [[nodiscard]] TensorMap predict(const PlotInputs& inputs);
 
+    // Plots per chunk the held-out forward starts each fit() at, when the
+    // training batch is smaller. The forward runs without gradients, so a
+    // chunk this size costs far less memory than a training batch of it; an
+    // out-of-memory error halves the chunk (decide_eval_chunk_retry).
+    static constexpr int64_t kHeldOutChunk = 4096;
+
 private:
     // Model inputs and targets of a set of plots, with the row operations
     // every split, batch, device mirror and cross-validation fold goes
@@ -263,6 +294,9 @@ private:
         [[nodiscard]] int64_t n_plots() const { return inputs.n_plots(); }
     };
 
+    // The {mean, scale} of each regression target, keyed by target name.
+    using TargetScalers = std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>>;
+
     // The held-out fold a prepare_data call asks for: a `test_size` fraction
     // drawn by the seeded shuffle (Random), or the caller's plot indices
     // (Explicit), which must outlive the call.
@@ -272,15 +306,22 @@ private:
         std::span<const int64_t> stopping_indices;
     };
 
+    // Forget everything a prepare_data call sets -- the split and its indices,
+    // the scalers, coordinates, plot IDs, categorical vocabulary, the CUDA-hash
+    // CSR and the run metadata -- and release the device copies and optimizer.
+    // Both prepare paths start here, so no member of an earlier call survives.
+    void reset_prepared_state();
+
     // The dataset half of both ResolveDataset overloads: captures what the
     // trainer keeps from the dataset, then hands its tensors to prepare_split.
     void prepare_from_dataset(const ResolveDataset& dataset,
                               const HoldOutRequest& hold_out, int seed);
 
-    // The one split-application path behind every prepare_data overload:
-    // validates the inputs, picks the fold (hold_out_indices), fits the
-    // scalers on the fitting rows, splits every tensor and records the split
-    // in run_metadata_. Arguments as for the tensor prepare_data.
+    // The tensor half behind every prepare_data overload: validates the
+    // inputs, picks the fold (hold_out_indices), assembles the continuous
+    // block, transforms the regression targets, hands the plots to
+    // apply_split and records the split in run_metadata_. Arguments as for
+    // the tensor prepare_data.
     void prepare_split(
         const ContinuousInputs& parts,
         const PlotInputs& inputs,
@@ -298,6 +339,28 @@ private:
         const HoldOutRequest& hold_out, int64_t n_plots, int seed,
         const std::unordered_map<std::string, torch::Tensor>& targets) const;
 
+    // The one split step behind prepare_data and every cross-validation fold.
+    // `plots` holds the raw values: the continuous block unstandardised (a
+    // missing cell NaN) and each regression target transformed but unscaled.
+    // Rows `fit_rows` become the fitting rows and `held_rows` the held-out
+    // fold. Refuses a split with no fitting row and a masked target with no
+    // labelled fitting row before fitting anything, then fits the fill and
+    // scalers on the fitting rows, standardises every row, replaces train_ /
+    // test_ / scalers_ and releases the device copies. `global_index` maps a
+    // row of `plots` to its plot index (undefined: row i is plot i), which is
+    // what train_indices_ / test_indices_ record.
+    void apply_split(const LabelledPlots& plots, const torch::Tensor& fit_rows,
+                     const torch::Tensor& held_rows, const torch::Tensor& global_index);
+
+    // `plots` standardised by `scalers`: the continuous block filled and
+    // standardised, each regression target with a scaler standardised.
+    [[nodiscard]] LabelledPlots standardized(LabelledPlots plots, const Scalers& scalers) const;
+
+    // The inverse: `plots`, standardised by `scalers`, in raw values again,
+    // with a continuous cell the schema flags as missing NaN once more, so a
+    // refit fills it from its own fitting rows.
+    [[nodiscard]] LabelledPlots unstandardized(LabelledPlots plots, const Scalers& scalers) const;
+
     // One epoch's loss: the value the total history records, and its split
     // into the term each target adds (loss_fn_.targets() order) plus the MoE
     // load-balancing term, which belongs to no target (0 without MoE, and
@@ -308,12 +371,25 @@ private:
         float moe_aux = 0.0f;
     };
 
+    using MetricMap = std::unordered_map<std::string, std::unordered_map<std::string, float>>;
+
     // Train one epoch
     EpochLoss train_epoch(int epoch);
 
-    // Evaluate on test set
-    std::pair<EpochLoss, std::unordered_map<std::string, std::unordered_map<std::string, float>>>
-    eval_epoch(int epoch);
+    // The held-out loss under the selection objective and the metrics of
+    // every target.
+    std::pair<EpochLoss, MetricMap> eval_epoch();
+
+    // The metrics of target `cfg` over the rows of the held-out `target`
+    // labelled for it, regression metrics in original units, plus the
+    // labelled-row count of a masked target. eval_epoch and the baselines
+    // read their model scores here, so the two agree.
+    [[nodiscard]] std::unordered_map<std::string, float> held_out_metrics(
+        const TargetConfig& cfg, const torch::Tensor& pred, const torch::Tensor& target,
+        const TargetScalers& scalers) const;
+
+    // The target scalers on the training device: the GPU mirror when cached.
+    [[nodiscard]] TargetScalers device_target_scalers() const;
 
     // Compute learning rate for given epoch based on scheduler config
     float get_learning_rate(int epoch) const;
@@ -324,12 +400,10 @@ private:
     // Pre-load all data to GPU for faster training
     void cache_data_to_gpu();
 
-    // Release per-attempt training state on the way out of an OOM retry.
-    // Drops optimizer, AMP scaler, best-model snapshot, prefetch buffers,
-    // and all GPU-cached tensors, then asks the CUDA caching allocator to
-    // return free blocks to the device. After this returns the trainer is
-    // back in the pre-fit configuration (data_prepared_ stays true) and
-    // a fresh fit_attempt() can be made with a different batch_size.
+    // Release per-attempt training state: the optimizer, the AMP scaler and
+    // every GPU-cached tensor, then ask the CUDA caching allocator to return
+    // free blocks to the device. The host split stays, so a fresh attempt can
+    // be made with a different batch size.
     void release_training_state();
 
     // Compute the CUDA hash embedding for the given global plot indices and
@@ -340,38 +414,125 @@ private:
     [[nodiscard]] torch::Tensor append_cuda_hash(
         torch::Tensor continuous, torch::Tensor plot_idx, bool use_cache) const;
 
-    // The held-out fold's model inputs on the training device, CUDA hash
-    // appended: the GPU mirror when `use_cache` (cache_data_to_gpu ran),
-    // otherwise a copy of the host split.
-    [[nodiscard]] PlotInputs held_out_inputs(bool use_cache) const;
+    // Rows [start, end) of the held-out fold's model inputs on the training
+    // device, CUDA hash appended: sliced from the GPU mirror when `use_cache`
+    // (cache_data_to_gpu ran), otherwise copied from the host split.
+    [[nodiscard]] PlotInputs held_out_chunk(int64_t start, int64_t end, bool use_cache) const;
 
-    // Run the model in eval mode over the held-out test fold and return the
-    // per-target prediction map (regression: scaled outputs; classification:
-    // logits). The one test-fold forward behind the baselines,
-    // compute_residuals, compute_calibration and
-    // compute_classification_predictions.
+    // The model's outputs over the held-out fold, in fold order, on the
+    // training device (regression: scaled outputs; classification: logits).
+    // The one held-out forward behind eval_epoch, the baselines and the
+    // test-fold evaluators: it runs in chunks of eval_chunk_ plots, or the
+    // whole fold at once for a model that requires_full_batch_training(), and
+    // an out-of-memory error shrinks the chunk (decide_eval_chunk_retry) or,
+    // when it cannot, is thrown as std::runtime_error -- never as the
+    // c10::Error fit() answers by halving the training batch.
+    [[nodiscard]] TensorMap forward_held_out(bool use_cache);
+
+    // forward_held_out in eval mode without gradients, for the evaluators.
     [[nodiscard]] TensorMap forward_test_fold();
+
+    // The schema's config of target `name`, or nullptr when there is none.
+    [[nodiscard]] const TargetConfig* find_target(const std::string& name) const;
 
     // Map global plot indices to their plot-ID strings via plot_ids_. Returns
     // empty when plot_ids_ is empty (the raw-tensor prepare_data path).
     [[nodiscard]] std::vector<std::string> select_plot_ids(const torch::Tensor& indices) const;
 
-    // Invert a prior standardization on continuous features and regression
-    // targets in place, using `scalers`. Single source of truth shared by the
-    // random and spatial cross-validation routines, which reassemble already-
-    // standardized train/test tensors and must recover raw values before each
-    // fold recomputes its own scalers (otherwise data is standardized twice).
-    // A cell `schema` flags as missing is NaN again afterwards, so the fold's
-    // fill is fitted on that fold's recorded values alone.
-    static void unscale_continuous_targets(
-        torch::Tensor& continuous,
-        std::unordered_map<std::string, torch::Tensor>& targets,
-        const Scalers& scalers,
-        const ResolveSchema& schema);
+    // A run's state between epochs: everything the epoch loop reads and
+    // writes, and what a checkpoint written during fit() carries so resume()
+    // can continue the run.
+    struct RunProgress {
+        int next_epoch = 0;                 // first epoch still to run
+        float best_loss = std::numeric_limits<float>::infinity();
+        int patience_counter = 0;
+        TrainResult result;                 // histories, best_epoch, final_metrics so far
+        std::string best_weights;           // snapshot_weights() of the best epoch; empty: none
+        std::string optimizer_state;        // snapshot_optimizer() to start from; empty: fresh
+        bool has_amp_state = false;
+        float amp_scale = 0.0f;
+        int amp_growth_tracker = 0;
+        double elapsed_seconds = 0.0;       // training time spent so far
+        std::string created_at;             // when the run started
+        int requested_batch_size = 0;
+        int effective_batch_size = 0;
+        // Serialised states of the global CPU and CUDA generators (dropout,
+        // cover dropout) to start from; undefined: leave them as they are.
+        torch::Tensor cpu_rng_state;
+        torch::Tensor cuda_rng_state;
+    };
+
+    // What one call to train() runs: the epoch range end, whether a held-out
+    // fold exists, the stopping mode, whether checkpoints are written, and the
+    // clock the progress' elapsed time is kept on.
+    struct RunPlan {
+        int n_epochs = 0;
+        bool has_held_out = false;
+        bool fixed_duration = false;
+        bool use_checkpoints = false;
+        double elapsed_before = 0.0;
+        std::chrono::steady_clock::time_point started;
+    };
+
+    // The run behind fit() (from scratch) and resume() (from `resume_from`):
+    // device setup, the auto-halve-on-OOM retry around run_epochs, the best
+    // weights restored, the run metadata and final checkpoint, the baselines
+    // and diagnostics.
+    TrainResult train(const RunProgress* resume_from);
+
+    // Epochs progress.next_epoch .. plan.n_epochs - 1 (or until early
+    // stopping), advancing `progress`, writing best / periodic checkpoints and
+    // the progress file.
+    void run_epochs(RunProgress& progress, const RunPlan& plan);
+
+    // The held-out fold scored against the naive baselines, per target. The
+    // model's scores are held_out_metrics' (so model_mae equals
+    // final_metrics[t]["mae"] for the weights fit() returns), and every
+    // regression value is in original units.
+    [[nodiscard]] std::unordered_map<std::string, BaselineMetrics> compute_baselines();
+
+    // The model's parameters and buffers serialised, and their restore.
+    [[nodiscard]] std::string snapshot_weights() const;
+    void restore_weights(const std::string& snapshot);
+
+    // The optimizer's state serialised, and its restore into optimizer_.
+    [[nodiscard]] std::string snapshot_optimizer() const;
+    void restore_optimizer(const std::string& snapshot);
+
+    // Set the global CPU generator (and the training device's CUDA generator)
+    // to the states `progress` carries; leaves a generator alone when its
+    // state is undefined.
+    void restore_rng_states(const RunProgress& progress) const;
+
+    // save() with, when `progress` is given, the run's progress beside the
+    // model (what resume() reads).
+    void save_checkpoint(const std::string& path, const RunMetadata* metadata,
+                         const RunProgress* progress) const;
+
+    // The run progress a checkpoint carries; throws std::invalid_argument
+    // naming `path` when it carries none.
+    [[nodiscard]] RunProgress read_progress(torch::serialize::InputArchive& archive,
+                                            const std::string& path) const;
+    void write_progress(torch::serialize::OutputArchive& archive,
+                        const RunProgress& progress) const;
+
+    // A checkpoint read onto `device`, with the VRAM cap applied first on a
+    // CUDA device and a transient read fault retried. The one way every load
+    // path opens a checkpoint.
+    static torch::serialize::InputArchive open_checkpoint(
+        const std::string& path, torch::Device device, float vram_fraction,
+        const LogCallback& log);
+
+    // The trained model a checkpoint holds, put into `model` (whose
+    // architecture must match): weights, the species graph of a
+    // HeterogeneousGNN, then a move to `device`. Shared by the static load(),
+    // load_state() and resume().
+    static void restore_model_state(torch::serialize::InputArchive& archive,
+                                    ResolveModel& model, torch::Device device);
 
     // Copy params + buffers from a checkpoint archive into `model` under a
-    // NoGradGuard (freshly-constructed leaf params require it). Single source
-    // of truth for the static load() and the instance load_state().
+    // NoGradGuard (freshly-constructed leaf params require it), refusing a
+    // checkpoint whose tensors do not match the model's one for one.
     static void load_weights_into(torch::serialize::InputArchive& archive, ResolveModel& model);
 
     ResolveModel model_;
@@ -402,8 +563,7 @@ private:
     // config_.batch_size. Read by effective_batch_size(), copied onto
     // TrainResult, and written to the checkpoint by save() -- which is called
     // both inside fit() (best / periodic checkpoints) and after it returns, so
-    // the value cannot come from config_.batch_size. 0 until fit
-    // runs.
+    // the value cannot come from config_.batch_size. 0 until fit runs.
     int effective_batch_size_ = 0;
 
     // Copy of the categorical vocabulary captured at prepare_data time so
@@ -430,31 +590,33 @@ private:
     LabelledPlots train_;
     LabelledPlots test_;
 
-    // Snapshot of the split plus the scalers and fold indices.
-    // cross_validate / cross_validate_spatial overwrite these per fold;
+    // Snapshot of the split, its scalers and fold indices, and the run record
+    // fit() leaves (run metadata, start time, requested and effective batch
+    // size). cross_validate / cross_validate_spatial overwrite these per fold;
     // capturing at entry and restoring at exit keeps the trainer's post-CV state
-    // consistent so the checkpoint evaluators (compute_residuals /
-    // compute_classification_predictions / test_plot_ids) run against the
-    // original split rather than the last fold. Restore also invalidates the GPU
-    // cache since the cached tensors no longer match the restored split.
+    // consistent, so the checkpoint evaluators run against the original split
+    // and a save() after CV records the trainer's own run rather than the last
+    // fold's. Restore also releases the GPU cache, whose tensors no longer
+    // match the restored split.
     struct SplitState {
         LabelledPlots train, test;
         torch::Tensor train_indices, test_indices;
         Scalers scalers;
+        RunMetadata run_metadata;
+        std::string created_at;
+        int requested_batch_size = -1;
+        int effective_batch_size = 0;
     };
     SplitState capture_split_state() const;
     void restore_split_state(const SplitState& s);
 
     // Shared engine for cross_validate / cross_validate_spatial: given the fold
     // (train_idx, test_idx) index lists into the concatenated train++test rows,
-    // runs every fold (per-fold model reset, split, scaler recompute, fit,
-    // metric aggregation) and restores the pre-CV split. The two public entry
-    // points differ only in how they generate `folds`.
+    // runs every fold (per-fold model reset, apply_split, fit, metric
+    // aggregation) and restores the pre-CV split. The two public entry points
+    // differ only in how they generate `folds`.
     CrossValidationResult run_cross_validation(
         const std::vector<std::pair<std::vector<int64_t>, std::vector<int64_t>>>& folds);
-
-    // Best model state for restoring
-    std::vector<char> best_model_state_;
 
     // Optimizer
     std::unique_ptr<torch::optim::AdamW> optimizer_;
@@ -469,7 +631,7 @@ private:
     bool gpu_data_cached_ = false;
     LabelledPlots gpu_train_;
     LabelledPlots gpu_test_;
-    std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>> gpu_scalers_;
+    TargetScalers gpu_scalers_;
 
     // AMP (Automatic Mixed Precision) state
     bool amp_enabled_ = false;         // Whether AMP is actually enabled (CUDA only)
@@ -481,18 +643,21 @@ private:
     // fixed seed reproduces the run. Defaults to the prepare_data default.
     int data_seed_ = 42;
 
-    // CUDA hash computation: raw species data for on-the-fly batch hashing
+    // Plots per held-out forward chunk; see forward_held_out. Starts each
+    // train() at max(batch_size, kHeldOutChunk) and keeps a shrink an
+    // out-of-memory error forced for the rest of the run and the evaluators.
+    int64_t eval_chunk_ = kHeldOutChunk;
+
+    // CUDA hash computation: the full dataset's species records as a CSR over
+    // plots, hashed per batch by global plot index.
     bool use_cuda_hash_ = false;       // Whether to use CUDA hash computation
     int32_t hash_dim_ = 0;             // Hash embedding dimension
     torch::Tensor raw_species_ids_;    // (n_records,) int64 - pre-hashed species IDs
     torch::Tensor raw_weights_;        // (n_records,) float32 - species weights
     torch::Tensor plot_offsets_;       // (n_plots+1,) int64 - CSR offsets for each plot
-    // The on-the-fly CUDA hash path uses the full-dataset CSR above and remaps
-    // train-local shuffle positions to global plot indices per batch (see
-    // train_epoch), so no train/test-local CSR copies are kept.
-    torch::Tensor gpu_train_raw_species_ids_;  // GPU-cached training species IDs
-    torch::Tensor gpu_train_raw_weights_;      // GPU-cached training weights
-    torch::Tensor gpu_train_plot_offsets_;     // GPU-cached training offsets
+    torch::Tensor gpu_raw_species_ids_;  // GPU copies of the three above
+    torch::Tensor gpu_raw_weights_;
+    torch::Tensor gpu_plot_offsets_;
 
     // Original plot indices for train/test (needed for CUDA hash with CSR offsets)
     torch::Tensor train_indices_;             // Global plot indices for training set

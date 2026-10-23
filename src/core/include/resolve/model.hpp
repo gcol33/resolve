@@ -117,6 +117,11 @@ public:
         return config_.encoder_architecture == EncoderArchitecture::HeterogeneousGNN;
     }
 
+    // The transformer species encoder of a species_encoding == Transformer
+    // model, which masked-species pretraining trains; throws
+    // std::invalid_argument for any other model.
+    [[nodiscard]] PlotEncoderTransformer transformer_encoder() const;
+
     // Get task head by name
     [[nodiscard]] TaskHead& head(const std::string& name);
     [[nodiscard]] const TaskHead& head(const std::string& name) const;

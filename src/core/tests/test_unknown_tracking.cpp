@@ -516,31 +516,50 @@ TEST_CASE("nca_objective excludes samples with no same-class neighbour",
     REQUIRE(std::isfinite(actual));
 }
 
-TEST_CASE("NCALoss::forward is the shared objective", "[loss][nca]") {
-    torch::manual_seed(13);
-    auto latent = torch::randn({12, 6});
-    auto labels = torch::tensor({0, 1, 0, 1, 2, 2, 0, 1, 2, 0, 1, 2}, torch::kInt64);
+namespace {
 
-    NCALoss module(/*latent_dim=*/6, /*n_classes=*/3, /*temperature=*/0.2f,
-                   /*n_neighbors=*/5);
-    const double from_module = module->forward(latent, labels).item<double>();
-    const double from_free = nca_objective(latent, labels, 0.2f, 5).item<double>();
-    REQUIRE_THAT(from_module, WithinRel(from_free, 1e-9));
+// Whether `loss` adds the NCA term to its classification loss: on a fixed
+// batch, the loss differs from plain cross-entropy.
+bool adds_nca_term(const PhasedLoss& loss) {
+    torch::manual_seed(13);
+    const auto logits = torch::randn({12, 3});
+    const auto labels =
+        torch::tensor({0, 1, 0, 1, 2, 2, 0, 1, 2, 0, 1, 2}, torch::kInt64);
+    const double ce =
+        torch::nn::functional::cross_entropy(logits, labels).item<double>();
+    return std::abs(loss.classification_loss(logits, labels).item<double>() - ce) > 1e-6;
 }
 
+// The same through the multi-task combiner the trainer holds.
+bool adds_nca_term(const MultiTaskLoss& loss) {
+    torch::manual_seed(13);
+    const auto configs = classification_target_configs();
+    std::unordered_map<std::string, torch::Tensor> predictions, targets;
+    for (const auto& cfg : configs) {
+        predictions[cfg.name] = torch::randn({12, cfg.num_classes});
+        targets[cfg.name] = torch::randint(0, cfg.num_classes, {12}, torch::kInt64);
+    }
+    double ce = 0.0;
+    for (const auto& cfg : configs) {
+        ce += cfg.weight * torch::nn::functional::cross_entropy(
+                               predictions[cfg.name], targets[cfg.name]).item<double>();
+    }
+    return std::abs(loss.compute(predictions, targets, 0).first.item<double>() - ce) > 1e-6;
+}
+
+}  // namespace
+
 TEST_CASE("LossConfigMode::NCA selects the NCA term", "[loss][nca]") {
-    REQUIRE(PhasedLoss::from_config(LossConfigMode::NCA).uses_nca());
-    REQUIRE_FALSE(PhasedLoss::from_config(LossConfigMode::Combined).uses_nca());
-    REQUIRE_FALSE(PhasedLoss::from_config(LossConfigMode::MAE).uses_nca());
-    REQUIRE_FALSE(PhasedLoss::from_config(LossConfigMode::SMAPE).uses_nca());
+    REQUIRE(adds_nca_term(PhasedLoss::from_config(LossConfigMode::NCA)));
+    REQUIRE_FALSE(adds_nca_term(PhasedLoss::from_config(LossConfigMode::Combined)));
+    REQUIRE_FALSE(adds_nca_term(PhasedLoss::from_config(LossConfigMode::MAE)));
+    REQUIRE_FALSE(adds_nca_term(PhasedLoss::from_config(LossConfigMode::SMAPE)));
 
     // And it reaches the multi-task combiner the trainer actually holds.
-    REQUIRE(MultiTaskLoss(classification_target_configs(), {100, 300},
-                          LossConfigMode::NCA)
-                .uses_nca());
-    REQUIRE_FALSE(MultiTaskLoss(classification_target_configs(), {100, 300},
-                                LossConfigMode::Combined)
-                      .uses_nca());
+    REQUIRE(adds_nca_term(MultiTaskLoss(classification_target_configs(), {100, 300},
+                                        LossConfigMode::NCA)));
+    REQUIRE_FALSE(adds_nca_term(MultiTaskLoss(classification_target_configs(), {100, 300},
+                                              LossConfigMode::Combined)));
 }
 
 TEST_CASE("The NCA knob changes the computed classification loss", "[loss][nca]") {
@@ -648,7 +667,7 @@ TEST_CASE("loss_config = NCA survives the checkpoint round-trip",
 
     auto loaded = Trainer::load_train_config(path);
     REQUIRE(loaded.loss_config == LossConfigMode::NCA);
-    REQUIRE(PhasedLoss::from_config(loaded.loss_config).uses_nca());
+    REQUIRE(adds_nca_term(PhasedLoss::from_config(loaded.loss_config)));
 }
 
 TEST_CASE("The NCA hyperparameters are configurable and round-trip",

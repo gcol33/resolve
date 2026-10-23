@@ -159,3 +159,45 @@ test_that("freeze_composition fixes the composition tables and is refused withou
     fixed = TRUE
   )
 })
+
+test_that("a run resumed from a periodic checkpoint is the uninterrupted run", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  tables <- signal_tables(60L)
+  dataset <- load_tables(tables, signal_roles(), regression_target())
+  dir <- local_dir()
+  train <- function(...) {
+    resolve.train.dataset(dataset, hiddenDims = c(16L, 8L), maxEpochs = 6L,
+                          patience = 50L, batchSize = 8L, seed = 17L,
+                          checkpointDir = dir, checkpointEvery = 2L,
+                          verbose = FALSE, ...)
+  }
+
+  full <- train()$result
+  resumed <- train(resumeFrom = file.path(dir, "checkpoint_4.pt"))$result
+
+  expect_equal(full$resumed_from_epoch, 0L)
+  expect_equal(resumed$resumed_from_epoch, 4L)
+  expect_equal(resumed$train_loss, full$train_loss)
+  expect_equal(resumed$test_loss, full$test_loss)
+  expect_equal(resumed$best_epoch, full$best_epoch)
+  expect_equal(resumed$final_metrics, full$final_metrics)
+})
+
+test_that("resume refuses a checkpoint without run progress", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  tables <- signal_tables(40L)
+  dataset <- load_tables(tables, signal_roles(), regression_target())
+  dir <- local_dir()
+  resolve.train.dataset(dataset, hiddenDims = c(8L), maxEpochs = 2L, batchSize = 8L,
+                        checkpointDir = dir, verbose = FALSE)
+  expect_error(
+    resolve.train.dataset(dataset, hiddenDims = c(8L), maxEpochs = 2L, batchSize = 8L,
+                          resumeFrom = file.path(dir, "checkpoint.pt"), verbose = FALSE),
+    "no run progress"
+  )
+  expect_error(resolve.train.dataset(dataset, checkpointEvery = 2L), "checkpointDir")
+})

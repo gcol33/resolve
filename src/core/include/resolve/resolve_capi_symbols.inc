@@ -126,6 +126,7 @@ RESOLVE_SYM(int, resolve_trainer_prepare_data, (resolve_trainer_t* t, const reso
 RESOLVE_SYM(int, resolve_trainer_prepare_data_from_dataset, (resolve_trainer_t* t, const resolve_dataset_t* ds, double test_size, int seed), (t, ds, test_size, seed))
 RESOLVE_SYM(int, resolve_trainer_prepare_data_stopping_fold, (resolve_trainer_t* t, const resolve_dataset_t* ds, const resolve_value_t* stopping, int seed), (t, ds, stopping, seed))
 RESOLVE_SYM(resolve_value_t*, resolve_trainer_fit, (resolve_trainer_t* t), (t))
+RESOLVE_SYM(resolve_value_t*, resolve_trainer_resume, (resolve_trainer_t* t, const char* checkpoint_path), (t, checkpoint_path))
 RESOLVE_SYM(int, resolve_trainer_save, (resolve_trainer_t* t, const char* path, const resolve_value_t* metadata), (t, path, metadata))
 RESOLVE_SYM(int, resolve_trainer_load_state, (resolve_trainer_t* t, const char* path, const char* device, double vram_fraction), (t, path, device, vram_fraction))
 RESOLVE_SYM(resolve_value_t*, resolve_trainer_get, (const resolve_trainer_t* t, const char* what), (t, what))

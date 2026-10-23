@@ -89,11 +89,48 @@ cfg.device       = "cuda"
 | `allow_tf32` | `True` | TF32 matmuls on Ampere and later |
 | `vram_fraction` | `1.0` | Cap on the CUDA caching allocator |
 | `device` | `"cpu"` | `"cpu"` or `"cuda"` |
-| `checkpoint_dir` | `""` | Directory for periodic checkpoints; empty disables them |
-| `checkpoint_every` | `0` | Write every N epochs; `0` writes only the best |
+| `checkpoint_dir` | `""` | Directory for `best.pt`, `checkpoint_<N>.pt`, `progress.json` and the final `checkpoint.pt`; empty disables them |
+| `checkpoint_every` | `0` | Write `checkpoint_<N>.pt` every N epochs; `0` writes only `best.pt` |
 
 The best epoch's weights are restored when early stopping fires, so a larger
 `patience` never yields a worse model. It costs compute.
+
+### Resuming an interrupted run
+
+A run with a `checkpoint_dir` can be continued after it stops: `best.pt` and
+every `checkpoint_<N>.pt` carry the run's progress (epochs done, loss
+histories, the best epoch so far, early-stopping patience, optimizer and
+random-number state). Rebuild the trainer with the run's model, recipe and
+split, and resume from the latest checkpoint; the run continues at the next
+epoch as if it had never stopped.
+
+=== "Python"
+
+    ```python
+    config = rc.Trainer.load_train_config("ckpt/checkpoint_200.pt")
+    config.checkpoint_dir, config.checkpoint_every = "ckpt", 50
+    trainer = rc.Trainer(rc.ResolveModel(dataset.schema, model_config), config)
+    trainer.prepare_data(dataset, test_size=0.2, seed=42)
+    result = trainer.resume("ckpt/checkpoint_200.pt")
+    result.resumed_from_epoch                   # 200
+    ```
+
+=== "R"
+
+    ```r
+    fit <- resolve.train.dataset(dataset, seed = 42L, checkpointDir = "ckpt",
+                                 checkpointEvery = 50L,
+                                 resumeFrom = "ckpt/checkpoint_200.pt")
+    ```
+
+=== "Command line"
+
+    ```bash
+    resolve train ... --checkpoint-dir ckpt --checkpoint-every 50 \
+                      --resume ckpt/checkpoint_200.pt --output model.pt
+    ```
+
+    Pass the interrupted run's own data, model and training flags and `--seed`.
 
 ### Refitting on every plot for a fixed duration
 
@@ -406,7 +443,8 @@ Classification targets:
 
 `fit` also scores a naive baseline per target, so a metric can be read against
 something: the training mean for regression, the training mode for
-classification.
+classification. Regression baselines are in the target's original units, and
+the model's side of each comparison is the score `final_metrics` reports.
 
 ```python
 for target, baseline in result.baselines.items():

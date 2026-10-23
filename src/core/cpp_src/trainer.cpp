@@ -1,34 +1,28 @@
 #include "resolve/trainer.hpp"
 #include "resolve/dataset.hpp"
-#include "resolve/env.hpp"
 #include "resolve/utils.hpp"
 #include "resolve/checkpoint.hpp"
 #include "resolve/continuous_block.hpp"
 #include "resolve/gpu.hpp"
-#include "resolve/io_retry.hpp"
 #include "resolve/species_graph.hpp"
 #include "resolve/target_labels.hpp"
+#include "resolve/target_transform.hpp"
 
 #ifdef RESOLVE_HAS_CUDA
 #include "resolve/cuda/feature_hash.hpp"
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
 #endif
 
 #include <c10/util/Exception.h>
 #include <ATen/autocast_mode.h>
 #include <algorithm>
-#include <fstream>
+#include <filesystem>
 #include <numeric>
 #include <optional>
-#include <cstdlib>
-#include <sstream>
 #include <random>
-#include <iostream>
 #include <sstream>
-#include <filesystem>
 #include <cmath>
 #include <ctime>
 #include <tuple>
@@ -54,11 +48,10 @@ std::string iso8601_now() {
 }
 
 // One-time structural validation of the CSR plot offsets that feed the CUDA
-// hash kernels. The kernels (cuda/kernels.cu) guard against malformed ranges
-// per thread but only bump a device-side error flag that no host code reads,
-// so a corrupt CSR would silently drop species records. The offsets are fixed
-// for the whole run and live on the host at capture time, so validate them once
-// here (no per-batch sync) and fail loudly on a malformed CSR instead.
+// hash kernels. A kernel skips a plot whose offset range is malformed, so a
+// corrupt CSR would silently drop species records. The offsets are fixed for
+// the whole run and live on the host at capture time, so they are validated
+// once here (no per-batch sync) and a malformed CSR fails loudly.
 void validate_csr_offsets(const torch::Tensor& offsets,
                           int64_t n_records, int64_t n_weights) {
     TORCH_CHECK(offsets.defined() && offsets.dim() == 1 && offsets.numel() >= 1,
@@ -81,8 +74,7 @@ void validate_csr_offsets(const torch::Tensor& offsets,
 
 // A masked target needs at least one labelled plot among the fitting rows:
 // with none, its loss is zero on every batch and its head never trains, and a
-// regression target has no values to fit its scaler to. Checked wherever a
-// split is made (prepare_data and every cross-validation fold).
+// regression target has no values to fit its scaler to.
 void require_labelled_fitting_rows(
     const std::vector<TargetConfig>& configs,
     const std::unordered_map<std::string, torch::Tensor>& train_targets
@@ -111,6 +103,116 @@ std::pair<torch::Tensor, torch::Tensor> fit_target_scaler(
     return {fitting.mean(), standardization_scale(fitting)};
 }
 
+// RAII autocast scope covering a training step's forward and loss. The
+// nesting counter and enabled flag unwind even if forward() or the loss throws
+// -- the expected throw is the c10::OutOfMemoryError train() catches to halve
+// the batch and retry -- so an OOM mid-forward neither leaks the incremented
+// nesting (its cache is cleared only when nesting returns to 0) nor leaves
+// autocast enabled across the retried epochs.
+struct AutocastScope {
+    bool active;
+    explicit AutocastScope(bool a) : active(a) {
+        if (active) {
+            at::autocast::set_autocast_enabled(at::kCUDA, true);
+            at::autocast::increment_nesting();
+        }
+    }
+    ~AutocastScope() {
+        if (active) {
+            at::autocast::decrement_nesting();
+            at::autocast::set_autocast_enabled(at::kCUDA, false);
+        }
+    }
+    AutocastScope(const AutocastScope&) = delete;
+    AutocastScope& operator=(const AutocastScope&) = delete;
+};
+
+// Puts config.batch_size back to its value at construction on every way out
+// of a run, so neither a halved retry nor a resumed run's batch size carries
+// into the next fit().
+struct BatchSizeRestorer {
+    int& batch_size;
+    int saved;
+    explicit BatchSizeRestorer(int& b) : batch_size(b), saved(b) {}
+    ~BatchSizeRestorer() { batch_size = saved; }
+    BatchSizeRestorer(const BatchSizeRestorer&) = delete;
+    BatchSizeRestorer& operator=(const BatchSizeRestorer&) = delete;
+};
+
+// Silences per-fold checkpoint writes during cross-validation: fit() otherwise
+// overwrites the user's checkpoint.pt / best.pt with each fold's subset model,
+// leaving the on-disk artifact describing the last fold rather than the
+// full-data model the user trained before CV. Clears checkpoint_dir
+// on construction and restores it on any exit path (exception-safe).
+struct CheckpointDirSilencer {
+    std::string& dir;
+    std::string saved;
+    explicit CheckpointDirSilencer(std::string& d) : dir(d), saved(d) { d.clear(); }
+    ~CheckpointDirSilencer() { dir = saved; }
+    CheckpointDirSilencer(const CheckpointDirSilencer&) = delete;
+    CheckpointDirSilencer& operator=(const CheckpointDirSilencer&) = delete;
+};
+
+// The number of epochs fit() runs. Early stopping watches the held-out fold,
+// so it needs one; a fixed duration does not, and has to lie inside the
+// schedule it is cut from.
+int epochs_to_run(const TrainConfig& config, bool has_held_out) {
+    if (config.fixed_epochs < 0) {
+        throw std::invalid_argument(
+            "TrainConfig::fixed_epochs is " + std::to_string(config.fixed_epochs) +
+            "; it counts epochs to run, so it is 0 (early stopping) or positive");
+    }
+    if (config.fixed_epochs > config.max_epochs) {
+        throw std::invalid_argument(
+            "TrainConfig::fixed_epochs = " + std::to_string(config.fixed_epochs) +
+            " runs past max_epochs = " + std::to_string(config.max_epochs) +
+            ", the length the learning-rate schedule is laid out over");
+    }
+    if (config.fixed_epochs > 0) {
+        return config.fixed_epochs;
+    }
+    if (!has_held_out) {
+        throw std::invalid_argument(
+            "Trainer::fit: the data was prepared with no held-out fold "
+            "(test_size = 0), so early stopping has nothing to watch. Set "
+            "TrainConfig::fixed_epochs to train for a fixed number of epochs.");
+    }
+    return config.max_epochs;
+}
+
+// Appends one epoch's per-target terms (in `targets` order) to `history`,
+// keyed by target name.
+void append_by_target(std::unordered_map<std::string, std::vector<float>>& history,
+                      const std::vector<TargetConfig>& targets,
+                      const std::vector<float>& terms) {
+    for (size_t i = 0; i < targets.size(); ++i) {
+        history[targets[i].name].push_back(terms[i]);
+    }
+}
+
+// The progress-line suffix that splits a multi-target epoch's loss by target:
+// " | by target (train/test): a 0.12/0.15, b 0.40/0.52", followed by
+// "; moe_aux 0.001" when the model has a mixture of experts. `test_terms` is
+// null when nothing is held out, and each entry then shows its train term only.
+std::string by_target_suffix(const std::vector<TargetConfig>& targets,
+                             const std::vector<float>& train_terms,
+                             const std::vector<float>* test_terms,
+                             const float* moe_aux) {
+    std::ostringstream msg;
+    msg << " | by target (" << (test_terms ? "train/test" : "train") << "): ";
+    for (size_t i = 0; i < targets.size(); ++i) {
+        if (i > 0) msg << ", ";
+        msg << targets[i].name << " " << train_terms[i];
+        if (test_terms) msg << "/" << (*test_terms)[i];
+    }
+    if (moe_aux) msg << "; moe_aux " << *moe_aux;
+    return msg.str();
+}
+
+double seconds_since(std::chrono::steady_clock::time_point start) {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
 }  // namespace
 
 Trainer::Trainer(
@@ -124,14 +226,12 @@ Trainer::Trainer(
 
     // Snapshot the as-constructed weights so cross_validate can reset each fold
     // to a fresh init even when run after fit().
-    std::ostringstream pristine_stream;
-    {
-        torch::serialize::OutputArchive archive;
-        model_->save(archive);
-        archive.save_to(pristine_stream);
-    }
-    pristine_model_state_ = pristine_stream.str();
+    pristine_model_state_ = snapshot_weights();
 }
+
+// =============================================================================
+// Preparing the split
+// =============================================================================
 
 void Trainer::prepare_data(
     const ResolveDataset& dataset,
@@ -149,12 +249,45 @@ void Trainer::prepare_data(
     prepare_from_dataset(dataset, {HoldOutMode::Explicit, 0.0f, stopping_indices}, seed);
 }
 
+void Trainer::prepare_data(
+    const ContinuousInputs& parts,
+    const PlotInputs& inputs,
+    const TensorMap& targets,
+    float test_size,
+    int seed
+) {
+    reset_prepared_state();
+    prepare_split(parts, inputs, targets, {HoldOutMode::Random, test_size, {}}, seed);
+}
+
+void Trainer::reset_prepared_state() {
+    release_training_state();
+    data_prepared_ = false;
+    train_ = {};
+    test_ = {};
+    train_indices_ = torch::Tensor();
+    test_indices_ = torch::Tensor();
+    scalers_ = {};
+    coordinates_ = torch::Tensor();
+    plot_ids_.clear();
+    categorical_vocab_ = CategoricalVocab{};
+    use_cuda_hash_ = false;
+    hash_dim_ = 0;
+    raw_species_ids_ = torch::Tensor();
+    raw_weights_ = torch::Tensor();
+    plot_offsets_ = torch::Tensor();
+    run_metadata_ = RunMetadata{};
+}
+
 void Trainer::prepare_from_dataset(
     const ResolveDataset& dataset,
     const HoldOutRequest& hold_out,
     int seed
 ) {
-    // Check if dataset has raw species data for CUDA hash computation
+    reset_prepared_state();
+
+    // The dataset's species records as a CSR, when its encoding hashes them on
+    // the device per batch.
     if (dataset.has_raw_species_data()) {
         use_cuda_hash_ = true;
         hash_dim_ = dataset.config().hash_dim;
@@ -194,16 +327,6 @@ void Trainer::prepare_from_dataset(
                   hold_out, seed);
 }
 
-void Trainer::prepare_data(
-    const ContinuousInputs& parts,
-    const PlotInputs& inputs,
-    const TensorMap& targets,
-    float test_size,
-    int seed
-) {
-    prepare_split(parts, inputs, targets, {HoldOutMode::Random, test_size, {}}, seed);
-}
-
 std::pair<torch::Tensor, torch::Tensor> Trainer::hold_out_indices(
     const HoldOutRequest& hold_out,
     int64_t n_plots,
@@ -229,8 +352,10 @@ std::pair<torch::Tensor, torch::Tensor> Trainer::hold_out_indices(
                 " yields an empty test fold for " + std::to_string(n_plots) +
                 " plots; increase test_size or provide more data");
         }
-        return {torch::tensor(std::vector<int64_t>(order.begin(), order.begin() + n_train)),
-                torch::tensor(std::vector<int64_t>(order.begin() + n_train, order.end()))};
+        return {torch::tensor(std::vector<int64_t>(order.begin(), order.begin() + n_train),
+                              torch::kInt64),
+                torch::tensor(std::vector<int64_t>(order.begin() + n_train, order.end()),
+                              torch::kInt64)};
     }
 
     // A plot index as a message names it: with its plot ID when the dataset
@@ -272,7 +397,8 @@ std::pair<torch::Tensor, torch::Tensor> Trainer::hold_out_indices(
             " plots, which leaves none to fit");
     }
 
-    auto test_idx = torch::tensor(std::vector<int64_t>(fold.begin(), fold.end()));
+    auto test_idx = torch::tensor(std::vector<int64_t>(fold.begin(), fold.end()),
+                                  torch::kInt64);
 
     // A masked target scored on a fold with none of its labels has no metric
     // and adds nothing to the stopping loss, so the fold could not select an
@@ -296,7 +422,7 @@ std::pair<torch::Tensor, torch::Tensor> Trainer::hold_out_indices(
     for (const int64_t index : order) {
         if (!held[static_cast<size_t>(index)]) train.push_back(index);
     }
-    return {torch::tensor(train), test_idx};
+    return {torch::tensor(train, torch::kInt64), test_idx};
 }
 
 void Trainer::prepare_split(
@@ -310,10 +436,9 @@ void Trainer::prepare_split(
     // reaches the training loop, MultiTaskLoss accumulates over no terms, and
     // the failure surfaces at loss.backward() as "element 0 of tensors does not
     // require grad and does not have a grad_fn" -- an autograd message that
-    // points nowhere near the target specification that caused it. Both
-    // overloads pass through here, so this is the single place the invariant
-    // is stated. Inference is unaffected: Predictor::predict never prepares a
-    // split, so a target-less dataset is still a legal thing to score.
+    // points nowhere near the target specification that caused it. Inference
+    // is unaffected: Predictor::predict never prepares a split, so a
+    // target-less dataset is still a legal thing to score.
     if (targets.empty()) {
         throw std::invalid_argument(
             "Trainer::prepare_data: the data carries no targets, so there is "
@@ -333,38 +458,10 @@ void Trainer::prepare_split(
         throw std::runtime_error("No valid input tensors provided");
     }
 
-    auto fold_indices = hold_out_indices(hold_out, n_plots, seed, targets);
-    const torch::Tensor train_idx = std::move(fold_indices.first);
-    const torch::Tensor test_idx = std::move(fold_indices.second);
-
-    // Capture the seed so the per-epoch training shuffle is reproducible.
-    data_seed_ = seed;
-
-    // Store raw coordinates for spatial CV (before scaling/concatenation)
-    if (parts.coordinates.defined() && parts.coordinates.numel() > 0) {
-        coordinates_ = parts.coordinates.clone();
-    }
-
-    // Store indices for CUDA hash computation
-    train_indices_ = train_idx.clone();
-    test_indices_ = test_idx.clone();
-
-    // How the plots were split, for run_metadata() and the checkpoint.
-    run_metadata_ = RunMetadata{};
-    run_metadata_.n_plots_train = train_indices_.numel();
-    run_metadata_.n_plots_test = test_indices_.numel();
-    run_metadata_.hold_out = hold_out.mode;
-    run_metadata_.test_size =
-        hold_out.mode == HoldOutMode::Random ? hold_out.test_size : 0.0f;
-    run_metadata_.split_seed = seed;
-
-    // The continuous block (continuous_block.hpp); in hash mode the hash
-    // embedding rides along at its end.
-    // Why: DatasetConfig.hash_dim and ModelConfig.hash_dim are independent.
-    // If they disagree, the model's first linear layer is sized for one
-    // value while the trainer concatenates a hash embedding of the other
-    // width, and fit() blows up later with an opaque matmul shape error.
-    // Validate at prepare_data so the failure points at the actual mismatch.
+    // DatasetConfig.hash_dim and ModelConfig.hash_dim are independent. If they
+    // disagree, the model's first linear layer is sized for one value while the
+    // block carries a hash embedding of the other width, and fit() fails later
+    // with an opaque matmul shape error; the mismatch is named here instead.
     const torch::Tensor& hash_embedding = parts.hash_embedding;
     if (model_->hash_in_continuous() &&
         hash_embedding.defined() && hash_embedding.numel() > 0) {
@@ -378,18 +475,10 @@ void Trainer::prepare_split(
             );
         }
     }
-    ContinuousInputs block_parts = parts;
-    if (!model_->hash_in_continuous()) block_parts.hash_embedding = torch::Tensor();
-    auto continuous = assemble_continuous(block_parts, model_->schema().missing_values, n_plots);
 
-    // Fill and standardise from the fitting rows only.
-    fit_continuous_scalers(scalers_, continuous.index_select(0, train_idx));
-    all.continuous = standardize_continuous(continuous, scalers_);
-
-    // ---- Categorical covariates ----
-    // Validate caller intent: if the model was constructed for K categorical
-    // columns, the caller must pass a (n_plots, K) tensor. If the model has
-    // no categorical columns, the caller must pass an empty tensor.
+    // If the model was constructed for K categorical columns, the caller must
+    // pass a (n_plots, K) tensor; a model without categorical columns takes
+    // none.
     {
         const int64_t model_cat_cols = model_->schema().n_categoricals();
         const torch::Tensor& categorical_ids = all.categorical_ids;
@@ -424,40 +513,123 @@ void Trainer::prepare_split(
         }
     }
 
-    // Scale targets
-    TensorMap scaled_targets;
+    auto [fit_rows, held_rows] = hold_out_indices(hold_out, n_plots, seed, targets);
+
+    // The continuous block (continuous_block.hpp), raw; in hash mode the hash
+    // embedding rides along at its end.
+    ContinuousInputs block_parts = parts;
+    if (!model_->hash_in_continuous()) block_parts.hash_embedding = torch::Tensor();
+    all.continuous = assemble_continuous(block_parts, model_->schema().missing_values, n_plots);
+
+    // Each target the schema names, a regression target transformed.
+    TensorMap raw_targets;
     for (const auto& cfg : model_->schema().targets) {
         auto target_it = targets.find(cfg.name);
         if (target_it == targets.end()) continue;
-
-        auto target = target_it->second.clone();
-
-        // Only apply transforms and scaling for regression targets
-        if (cfg.task == TaskType::Regression) {
-            // Apply transform if needed
-            if (cfg.transform == TransformType::Log1p) {
-                target = torch::log1p(target);
-            }
-
-            // Compute scaler on training data
-            auto train_target = target.index_select(0, train_idx);
-            auto [target_mean, target_scale] = fit_target_scaler(cfg, train_target);
-
-            scalers_.target_scalers[cfg.name] = {target_mean, target_scale};
-
-            // Apply scaling
-            target = (target - target_mean) / target_scale;
+        auto target = target_it->second;
+        if (cfg.task == TaskType::Regression && cfg.transform == TransformType::Log1p) {
+            target = torch::log1p(target);
         }
-
-        scaled_targets[cfg.name] = std::move(target);
+        raw_targets[cfg.name] = target;
     }
 
-    const LabelledPlots plots{std::move(all), std::move(scaled_targets)};
-    train_ = plots.index_select(train_idx);
-    test_ = plots.index_select(test_idx);
-    require_labelled_fitting_rows(model_->schema().targets, train_.targets);
+    apply_split({std::move(all), std::move(raw_targets)}, fit_rows, held_rows,
+                /*global_index=*/torch::Tensor());
 
+    // Capture the seed so the per-epoch training shuffle is reproducible.
+    data_seed_ = seed;
+
+    // Raw coordinates in plot order, for spatial CV.
+    if (parts.coordinates.defined() && parts.coordinates.numel() > 0) {
+        coordinates_ = parts.coordinates.clone();
+    }
+
+    // How the plots were split, for run_metadata() and the checkpoint.
+    run_metadata_ = RunMetadata{};
+    run_metadata_.n_plots_train = train_indices_.numel();
+    run_metadata_.n_plots_test = test_indices_.numel();
+    run_metadata_.hold_out = hold_out.mode;
+    run_metadata_.test_size =
+        hold_out.mode == HoldOutMode::Random ? hold_out.test_size : 0.0f;
+    run_metadata_.split_seed = seed;
+}
+
+void Trainer::apply_split(
+    const LabelledPlots& plots,
+    const torch::Tensor& fit_rows,
+    const torch::Tensor& held_rows,
+    const torch::Tensor& global_index
+) {
+    if (fit_rows.numel() == 0) {
+        throw std::invalid_argument(
+            "Trainer: the split leaves no fitting rows (" +
+            std::to_string(held_rows.numel()) + " plots held out of " +
+            std::to_string(fit_rows.numel() + held_rows.numel()) +
+            "); hold out fewer plots");
+    }
+
+    // Validated before anything is fitted on the fitting rows.
+    const LabelledPlots fitting = plots.index_select(fit_rows);
+    require_labelled_fitting_rows(model_->schema().targets, fitting.targets);
+
+    // The fill and scalers come from the fitting rows alone.
+    Scalers scalers;
+    fit_continuous_scalers(scalers, fitting.inputs.continuous);
+    for (const auto& cfg : model_->schema().targets) {
+        if (cfg.task != TaskType::Regression) continue;
+        auto it = fitting.targets.find(cfg.name);
+        if (it == fitting.targets.end()) continue;
+        scalers.target_scalers[cfg.name] = fit_target_scaler(cfg, it->second);
+    }
+
+    const LabelledPlots scaled = standardized(plots, scalers);
+    release_training_state();
+    scalers_ = std::move(scalers);
+    train_ = scaled.index_select(fit_rows);
+    test_ = scaled.index_select(held_rows);
+    train_indices_ = global_index.defined() ? global_index.index_select(0, fit_rows)
+                                            : fit_rows.clone();
+    test_indices_ = global_index.defined() ? global_index.index_select(0, held_rows)
+                                           : held_rows.clone();
     data_prepared_ = true;
+}
+
+Trainer::LabelledPlots Trainer::standardized(LabelledPlots plots, const Scalers& scalers) const {
+    if (plots.inputs.continuous.defined()) {
+        plots.inputs.continuous = standardize_continuous(plots.inputs.continuous, scalers);
+    }
+    for (const auto& [name, mean_scale] : scalers.target_scalers) {
+        auto it = plots.targets.find(name);
+        if (it == plots.targets.end() || !it->second.defined()) continue;
+        it->second = (it->second - mean_scale.first) / mean_scale.second;
+    }
+    return plots;
+}
+
+Trainer::LabelledPlots Trainer::unstandardized(LabelledPlots plots, const Scalers& scalers) const {
+    if (plots.inputs.continuous.defined()) {
+        plots.inputs.continuous =
+            unstandardize_continuous(plots.inputs.continuous, scalers, model_->schema());
+    }
+    for (const auto& [name, mean_scale] : scalers.target_scalers) {
+        auto it = plots.targets.find(name);
+        if (it == plots.targets.end() || !it->second.defined()) continue;
+        it->second = it->second * mean_scale.second + mean_scale.first;
+    }
+    return plots;
+}
+
+// =============================================================================
+// Epochs
+// =============================================================================
+
+Trainer::TargetScalers Trainer::device_target_scalers() const {
+    if (gpu_data_cached_) return gpu_scalers_;
+    TargetScalers out;
+    for (const auto& [name, scaler] : scalers_.target_scalers) {
+        out[name] = {scaler.first.to(config_.device), scaler.second.to(config_.device)};
+    }
+    return out;
 }
 
 Trainer::EpochLoss Trainer::train_epoch(int epoch) {
@@ -465,12 +637,7 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
 
     // Use GPU-cached data if available, otherwise fallback to CPU tensors
     const LabelledPlots& src = gpu_data_cached_ ? gpu_train_ : train_;
-    // The CPU path has no scaler cache, so the alternative is an empty map.
-    // Both alternatives are lvalues, so the reference aliases the member
-    // rather than a copy of it.
-    static const std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>>
-        kNoScalers;
-    const auto& scalers_src = gpu_data_cached_ ? gpu_scalers_ : kNoScalers;
+    const TargetScalers scalers = device_target_scalers();
 
     int64_t n_train = src.n_plots();
     // The coordinate-kNN GNN must see the whole train set in one forward so its
@@ -492,20 +659,19 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
         perm = perm.to(src.inputs.continuous.device());
     }
 
-    float total_loss = 0.0f;
     int n_batches = 0;
 
     // Check if MoE is enabled for aux loss handling
     bool use_moe = model_->uses_moe();
     float moe_aux_weight = model_->config().moe_aux_loss_weight;
 
-    // Running sums of the terms of each counted batch's loss: one slot per
-    // target in loss_fn_.targets() order, then the MoE term. Kept on the
-    // device and read back once per epoch, so the split adds no host sync per
-    // batch; the float32 sums run in the same order as total_loss's.
+    // Running sums over the counted batches, kept on the device and read back
+    // once per epoch so the loop adds no host sync per batch: slot 0 the total
+    // loss, then one slot per target in loss_fn_.targets() order, then the MoE
+    // term.
     const auto n_loss_targets = static_cast<int64_t>(loss_fn_.targets().size());
-    torch::Tensor term_sums = torch::zeros(
-        {n_loss_targets + 1}, torch::TensorOptions().dtype(torch::kFloat32).device(config_.device));
+    torch::Tensor sums = torch::zeros(
+        {n_loss_targets + 2}, torch::TensorOptions().dtype(torch::kFloat32).device(config_.device));
 
     // Async prefetching setup for CUDA hash computation
 #ifdef RESOLVE_HAS_CUDA
@@ -523,20 +689,18 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
         default_stream = at::cuda::getCurrentCUDAStream();
     }
     torch::Tensor prefetched_hash;
-    torch::Tensor prefetched_continuous;
     bool prefetch_ready = false;
 
     // Get source data pointers for hash computation
-    const auto& hash_species_src = gpu_data_cached_ ? gpu_train_raw_species_ids_ : raw_species_ids_;
-    const auto& hash_weights_src = gpu_data_cached_ ? gpu_train_raw_weights_ : raw_weights_;
-    const auto& hash_offsets_src = gpu_data_cached_ ? gpu_train_plot_offsets_ : plot_offsets_;
+    const auto& hash_species_src = gpu_data_cached_ ? gpu_raw_species_ids_ : raw_species_ids_;
+    const auto& hash_weights_src = gpu_data_cached_ ? gpu_raw_weights_ : raw_weights_;
+    const auto& hash_offsets_src = gpu_data_cached_ ? gpu_plot_offsets_ : plot_offsets_;
 
-    // Map train-local shuffle positions to GLOBAL plot indices before hashing.
-    // train_ row k is global plot train_indices_[k], but the CSR
-    // offsets used for the on-the-fly hash are full-dataset, so the hash must be
-    // looked up by global plot index (matching eval_epoch / the baseline paths).
-    // Without this remap, a batch row's species-hash comes from a different plot
-    // than its covariates and target.
+    // Train-local shuffle positions map to GLOBAL plot indices before hashing:
+    // train_ row k is plot train_indices_[k], and the CSR offsets are over the
+    // full dataset, so a batch row's hash is looked up by its global index
+    // (as the held-out forward does). Otherwise a row's species hash would
+    // come from a different plot than its covariates and target.
     torch::Tensor hash_index_map;
     if (use_cuda_hash_ && config_.device.is_cuda()) {
         hash_index_map = train_indices_.to(perm.device());
@@ -559,8 +723,8 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
             torch::Tensor batch_hash;
 
             if (prefetch_ready) {
-                // Use prefetched hash from previous iteration
-                // Wait for prefetch stream to complete on default stream.
+                // The previous iteration launched this batch's hash on the
+                // prefetch stream; wait for it on the default stream.
                 // prefetch_ready only ever becomes true under use_prefetch, so
                 // the streams are engaged here.
                 at::cuda::CUDAEvent prefetch_done;
@@ -617,38 +781,12 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
         std::unordered_map<std::string, torch::Tensor> predictions;
         torch::Tensor moe_aux_loss;
         torch::Tensor loss;
-        torch::Tensor batch_terms;
-
-        // RAII autocast scope covering the forward and loss. The nesting
-        // counter and enabled flag must unwind even if forward()/compute()
-        // throw — the expected throw is the c10::OutOfMemoryError that fit()
-        // catches to halve the batch and retry. Without RAII, an OOM mid-
-        // forward would leak the incremented nesting (its cache is cleared
-        // only when nesting returns to 0) and leave autocast enabled across
-        // every retried epoch.
-        struct AutocastScope {
-            bool active;
-            explicit AutocastScope(bool a) : active(a) {
-                if (active) {
-                    at::autocast::set_autocast_enabled(at::kCUDA, true);
-                    at::autocast::increment_nesting();
-                }
-            }
-            ~AutocastScope() {
-                if (active) {
-                    at::autocast::decrement_nesting();
-                    at::autocast::set_autocast_enabled(at::kCUDA, false);
-                }
-            }
-            AutocastScope(const AutocastScope&) = delete;
-            AutocastScope& operator=(const AutocastScope&) = delete;
-        };
+        torch::Tensor batch_sums;
 
         {
             AutocastScope amp_scope(amp_enabled_);
 
             if (use_moe) {
-                // Use forward_with_aux to get MoE auxiliary loss
                 auto result = model_->forward_with_aux(batch.inputs);
                 predictions = std::move(result.outputs);
                 moe_aux_loss = result.moe_aux_loss;
@@ -656,20 +794,7 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
                 predictions = model_->forward(batch.inputs);
             }
 
-            // Compute loss - use cached scalers if available
-            std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>> batch_scalers;
-            if (gpu_data_cached_) {
-                batch_scalers = scalers_src;
-            } else {
-                for (const auto& [name, scaler] : scalers_.target_scalers) {
-                    batch_scalers[name] = {
-                        scaler.first.to(config_.device),
-                        scaler.second.to(config_.device)
-                    };
-                }
-            }
-
-            auto [loss_val, target_losses] = loss_fn_.compute(predictions, batch.targets, epoch, batch_scalers);
+            auto [loss_val, target_losses] = loss_fn_.compute(predictions, batch.targets, epoch, scalers);
             loss = loss_val;
 
             // Add MoE auxiliary loss for load balancing
@@ -679,17 +804,17 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
                 loss = loss + moe_term;
             }
 
-            batch_terms = torch::cat({
-                loss_fn_.contributions(target_losses).to(term_sums.device()),
+            batch_sums = torch::cat({
+                loss.detach().to(sums.options()).reshape({1}),
+                loss_fn_.contributions(target_losses).to(sums.device()),
                 moe_term.defined()
-                    ? moe_term.detach().to(term_sums.options()).reshape({1})
-                    : torch::zeros({1}, term_sums.options())});
+                    ? moe_term.detach().to(sums.options()).reshape({1})
+                    : torch::zeros({1}, sums.options())});
         }  // autocast disabled here (also on exception unwind) before backward
 
         // A batch counts toward the epoch mean once its optimizer step runs.
         auto count_batch = [&]() {
-            total_loss += loss.item<float>();
-            term_sums.add_(batch_terms);
+            sums.add_(batch_sums);
             n_batches++;
         };
 
@@ -756,43 +881,56 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
     auto epoch_mean = [n_batches](float sum) {
         return n_batches > 0 ? sum / n_batches : 0.0f;
     };
+    const auto host_sums = sums.to(torch::kCPU);
+    const auto s = host_sums.accessor<float, 1>();
     EpochLoss out;
-    out.total = epoch_mean(total_loss);
-    const auto sums = term_sums.to(torch::kCPU);
-    const auto s = sums.accessor<float, 1>();
+    out.total = epoch_mean(s[0]);
     out.by_target.reserve(static_cast<size_t>(n_loss_targets));
     for (int64_t i = 0; i < n_loss_targets; ++i) {
-        out.by_target.push_back(epoch_mean(s[i]));
+        out.by_target.push_back(epoch_mean(s[i + 1]));
     }
-    out.moe_aux = epoch_mean(s[n_loss_targets]);
+    out.moe_aux = epoch_mean(s[n_loss_targets + 1]);
     return out;
 }
 
-std::pair<Trainer::EpochLoss, std::unordered_map<std::string, std::unordered_map<std::string, float>>>
-Trainer::eval_epoch(int epoch) {
-    model_->eval();
-    torch::NoGradGuard no_grad;
+std::unordered_map<std::string, float> Trainer::held_out_metrics(
+    const TargetConfig& cfg,
+    const torch::Tensor& pred,
+    const torch::Tensor& target,
+    const TargetScalers& scalers
+) const {
+    // Regression metrics are reported in original units through the target's
+    // scaler; a classification target has none, so its tensors stay undefined.
+    torch::Tensor mean, scale;
+    auto scaler_it = scalers.find(cfg.name);
+    if (scaler_it != scalers.end()) {
+        std::tie(mean, scale) = scaler_it->second;
+    }
+    // Scored on the held-out plots labelled for the target. A masked target
+    // also reports how many those are, since it differs from target to
+    // target; a fold with none of them reports only that.
+    const auto rows = labelled_rows(cfg, target);
+    std::unordered_map<std::string, float> metrics;
+    if (rows.n_labelled > 0) {
+        metrics = Metrics::compute(rows.select(pred), rows.select(target), cfg.task,
+                                   cfg.transform, config_.band_thresholds,
+                                   cfg.num_classes, mean, scale);
+    }
+    if (cfg.missing == TargetMissingPolicy::Mask) {
+        metrics[kLabelledMetric] = static_cast<float>(rows.n_labelled);
+    }
+    return metrics;
+}
 
+std::pair<Trainer::EpochLoss, Trainer::MetricMap> Trainer::eval_epoch() {
     // eval_epoch runs inside the training loop, so it reads the GPU mirror
     // (and the GPU-resident CSR buffers for the hash) when the data is cached.
-    const PlotInputs test_inputs = held_out_inputs(/*use_cache=*/gpu_data_cached_);
-    TensorMap test_targets;
-    std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>> batch_scalers;
-    if (gpu_data_cached_) {
-        test_targets = gpu_test_.targets;
-        batch_scalers = gpu_scalers_;
-    } else {
-        test_targets = to_device(test_.targets, config_.device);
-        for (const auto& [name, scaler] : scalers_.target_scalers) {
-            batch_scalers[name] = {
-                scaler.first.to(config_.device),
-                scaler.second.to(config_.device)
-            };
-        }
-    }
+    const TensorMap predictions = forward_held_out(/*use_cache=*/gpu_data_cached_);
+    const TensorMap test_targets =
+        gpu_data_cached_ ? gpu_test_.targets : to_device(test_.targets, config_.device);
+    const TargetScalers scalers = device_target_scalers();
 
-    // Forward pass
-    auto predictions = model_->forward(test_inputs);
+    torch::NoGradGuard no_grad;
 
     // Evaluate the validation loss at a phase-INVARIANT reference epoch (the
     // last training epoch's phase) rather than the current epoch. The phased
@@ -803,93 +941,14 @@ Trainer::eval_epoch(int epoch) {
     // Scoring every epoch on the final-phase objective gives one consistent
     // scale, so best_loss is comparable across the whole run.
     const int sel_epoch = std::max(0, config_.max_epochs - 1);
-    auto [loss, target_losses] = loss_fn_.compute(predictions, test_targets, sel_epoch, batch_scalers);
+    auto [loss, target_losses] = loss_fn_.compute(predictions, test_targets, sel_epoch, scalers);
 
-    // AMP regression diagnostic. Gated by RESOLVE_AMP_DEBUG.
-    // Compares the eval-mode test loss (BatchNorm running stats) against the
-    // train-mode test loss on the SAME inputs (BatchNorm batch stats), with
-    // running-stat save/restore so the probe does not pollute eval state, and
-    // scans BatchNorm running statistics for divergence. If trainmode_test is
-    // low while eval_test rises, the running statistics are the culprit.
-    static const bool amp_dbg = env_flag_enabled("RESOLVE_AMP_DEBUG");
-    if (amp_dbg) {
-        double max_mean = 0.0, max_var = 0.0, min_var = 1e30;
-        bool nonfinite = false;
-        std::vector<std::shared_ptr<torch::nn::BatchNorm1dImpl>> bns;
-        std::vector<std::pair<torch::Tensor, torch::Tensor>> saved;
-        std::vector<torch::Tensor> saved_nbt;  // num_batches_tracked
-        for (auto& m : model_->modules(/*include_self=*/false)) {
-            if (auto bn = std::dynamic_pointer_cast<torch::nn::BatchNorm1dImpl>(m)) {
-                if (bn->running_mean.defined() && bn->running_var.defined()) {
-                    max_mean = std::max(max_mean, bn->running_mean.abs().max().item<double>());
-                    max_var = std::max(max_var, bn->running_var.max().item<double>());
-                    min_var = std::min(min_var, bn->running_var.min().item<double>());
-                    if (!torch::isfinite(bn->running_mean).all().item<bool>() ||
-                        !torch::isfinite(bn->running_var).all().item<bool>()) {
-                        nonfinite = true;
-                    }
-                    bns.push_back(bn);
-                    saved.emplace_back(bn->running_mean.clone(), bn->running_var.clone());
-                    saved_nbt.push_back(bn->num_batches_tracked.defined()
-                        ? bn->num_batches_tracked.clone() : torch::Tensor());
-                }
-            }
-        }
-        model_->train();
-        auto tm_preds = model_->forward(test_inputs);
-        auto [tm_loss, tm_ignored] = loss_fn_.compute(tm_preds, test_targets, sel_epoch, batch_scalers);
-        for (size_t i = 0; i < bns.size(); ++i) {
-            bns[i]->running_mean.copy_(saved[i].first);
-            bns[i]->running_var.copy_(saved[i].second);
-            if (saved_nbt[i].defined() && bns[i]->num_batches_tracked.defined()) {
-                bns[i]->num_batches_tracked.copy_(saved_nbt[i]);
-            }
-        }
-        model_->eval();
-        std::ostringstream dbg;
-        dbg << "  [amp_dbg ep" << epoch << "] eval_test=" << loss.item<float>()
-            << " trainmode_test=" << tm_loss.item<float>()
-            << " | BN n=" << bns.size() << " max|mean|=" << max_mean
-            << " max_var=" << max_var << " min_var=" << min_var
-            << " nonfinite=" << (nonfinite ? "Y" : "N");
-        config_.log(dbg.str());
-    }
-
-    // Compute metrics per target
-    std::unordered_map<std::string, std::unordered_map<std::string, float>> all_metrics;
-
+    MetricMap all_metrics;
     for (const auto& cfg : model_->schema().targets) {
         auto pred_it = predictions.find(cfg.name);
         auto target_it = test_targets.find(cfg.name);
-
-        if (pred_it != predictions.end() && target_it != test_targets.end()) {
-            // Pass the target scalers so regression metrics are reported in
-            // original units (the model and test_targets are both in
-            // standardized(-log) space here). Classification targets have no
-            // scaler entry -> undefined tensors -> Metrics::compute skips the
-            // unscale, as intended.
-            torch::Tensor sc_mean, sc_scale;
-            auto scaler_it = batch_scalers.find(cfg.name);
-            if (scaler_it != batch_scalers.end()) {
-                sc_mean = scaler_it->second.first;
-                sc_scale = scaler_it->second.second;
-            }
-            // Scored on the test plots labelled for the target. A masked
-            // target also reports how many those are, since it differs from
-            // target to target; a fold with none of them reports only that.
-            const auto rows = labelled_rows(cfg, target_it->second);
-            auto& target_metrics = all_metrics[cfg.name];
-            if (rows.n_labelled > 0) {
-                target_metrics = Metrics::compute(
-                    rows.select(pred_it->second), rows.select(target_it->second),
-                    cfg.task, cfg.transform,
-                    config_.band_thresholds, cfg.num_classes, sc_mean, sc_scale
-                );
-            }
-            if (cfg.missing == TargetMissingPolicy::Mask) {
-                target_metrics[kLabelledMetric] = static_cast<float>(rows.n_labelled);
-            }
-        }
+        if (pred_it == predictions.end() || target_it == test_targets.end()) continue;
+        all_metrics[cfg.name] = held_out_metrics(cfg, pred_it->second, target_it->second, scalers);
     }
 
     // The held-out forward carries no MoE term, so the targets' terms make up
@@ -902,7 +961,7 @@ Trainer::eval_epoch(int epoch) {
     for (int64_t i = 0; i < terms.size(0); ++i) {
         out.by_target.push_back(t[i]);
     }
-    return {std::move(out), all_metrics};
+    return {std::move(out), std::move(all_metrics)};
 }
 
 float Trainer::get_learning_rate(int epoch) const {
@@ -915,8 +974,7 @@ float Trainer::get_learning_rate(int epoch) const {
         case LRSchedulerType::CosineAnnealing: {
             // Cosine annealing from lr (epoch 0) to lr_min (final epoch). Divide
             // by (max_epochs - 1) so progress reaches 1.0 on the last epoch and
-            // the schedule actually lands on lr_min; dividing by max_epochs
-            // leaves the endpoint a step short of lr_min.
+            // the schedule actually lands on lr_min.
             float progress = config_.max_epochs > 1
                 ? static_cast<float>(epoch) / static_cast<float>(config_.max_epochs - 1)
                 : 1.0f;
@@ -940,13 +998,9 @@ void Trainer::cache_data_to_gpu() {
         return;  // Already cached or not using CUDA
     }
 
-    // cuDNN benchmark policy is set once from config_.cudnn_benchmark in fit(),
-    // not here, so cudnn_benchmark=false is honoured.
-
     gpu_train_ = train_.to(config_.device);
     gpu_test_ = test_.to(config_.device);
 
-    // Cache scalers on GPU
     for (const auto& [name, scaler] : scalers_.target_scalers) {
         gpu_scalers_[name] = {
             scaler.first.to(config_.device),
@@ -954,21 +1008,11 @@ void Trainer::cache_data_to_gpu() {
         };
     }
 
-    // Cache raw species data for CUDA hash computation
     if (use_cuda_hash_) {
-        if (raw_species_ids_.defined()) {
-            gpu_train_raw_species_ids_ = raw_species_ids_.to(config_.device);
-        }
-        if (raw_weights_.defined()) {
-            gpu_train_raw_weights_ = raw_weights_.to(config_.device);
-        }
-        if (plot_offsets_.defined()) {
-            gpu_train_plot_offsets_ = plot_offsets_.to(config_.device);
-        }
-        // Cache test indices for computing test hash embedding
-        if (test_indices_.defined()) {
-            gpu_test_indices_ = test_indices_.to(config_.device);
-        }
+        gpu_raw_species_ids_ = raw_species_ids_.to(config_.device);
+        gpu_raw_weights_ = raw_weights_.to(config_.device);
+        gpu_plot_offsets_ = plot_offsets_.to(config_.device);
+        gpu_test_indices_ = test_indices_.to(config_.device);
     }
 
     gpu_data_cached_ = true;
@@ -980,110 +1024,49 @@ void Trainer::release_training_state() {
     // empty its cache.
     optimizer_.reset();
 
-    // Forget best-model snapshot; the retry will compute a new one.
-    best_model_state_.clear();
-    best_model_state_.shrink_to_fit();
-
     // Reset AMP runtime state. The actual config knobs (init_scale,
     // growth_factor, etc.) live on config_ and are re-read on retry.
     amp_enabled_ = false;
     amp_scale_ = config_.amp_init_scale;
     amp_growth_tracker_ = 0;
 
-    // Release every GPU-cached tensor. We don't drop the host-side train_*
-    // / test_* tensors because prepare_data_ semantics promise to keep them
-    // alive across fit() calls; only the GPU mirrors are torn down so the
-    // next cache_data_to_gpu() call can rebuild them.
+    // Release every GPU-cached tensor; the host split stays, and the next
+    // cache_data_to_gpu() call rebuilds the mirrors from it.
     gpu_data_cached_ = false;
     gpu_train_ = {};
     gpu_test_ = {};
     gpu_scalers_.clear();
-    gpu_train_raw_species_ids_ = torch::Tensor();
-    gpu_train_raw_weights_ = torch::Tensor();
-    gpu_train_plot_offsets_ = torch::Tensor();
+    gpu_raw_species_ids_ = torch::Tensor();
+    gpu_raw_weights_ = torch::Tensor();
+    gpu_plot_offsets_ = torch::Tensor();
     gpu_test_indices_ = torch::Tensor();
 
-#ifdef RESOLVE_HAS_CUDA
     // Return free blocks to the device so the allocator's reserved pool
-    // shrinks before the next attempt. This is the bridge that makes the
-    // halved batch_size actually have more headroom: without it the
-    // previous attempt's reserved-but-unallocated blocks stay parked.
-    if (config_.device.is_cuda()) {
-        c10::cuda::CUDACachingAllocator::emptyCache();
-    }
-#endif
+    // shrinks before the next attempt: without it the previous attempt's
+    // reserved-but-unallocated blocks stay parked and a halved batch size
+    // gains no headroom.
+    release_cached_device_memory(config_.device);
 }
 
-namespace {
-
-// The number of epochs fit() runs. Early stopping watches the held-out fold,
-// so it needs one; a fixed duration does not, and has to lie inside the
-// schedule it is cut from.
-int epochs_to_run(const TrainConfig& config, bool has_held_out) {
-    if (config.fixed_epochs < 0) {
-        throw std::invalid_argument(
-            "TrainConfig::fixed_epochs is " + std::to_string(config.fixed_epochs) +
-            "; it counts epochs to run, so it is 0 (early stopping) or positive");
-    }
-    if (config.fixed_epochs > config.max_epochs) {
-        throw std::invalid_argument(
-            "TrainConfig::fixed_epochs = " + std::to_string(config.fixed_epochs) +
-            " runs past max_epochs = " + std::to_string(config.max_epochs) +
-            ", the length the learning-rate schedule is laid out over");
-    }
-    if (config.fixed_epochs > 0) {
-        return config.fixed_epochs;
-    }
-    if (!has_held_out) {
-        throw std::invalid_argument(
-            "Trainer::fit: the data was prepared with no held-out fold "
-            "(test_size = 0), so early stopping has nothing to watch. Set "
-            "TrainConfig::fixed_epochs to train for a fixed number of epochs.");
-    }
-    return config.max_epochs;
-}
-
-// Appends one epoch's per-target terms (in `targets` order) to `history`,
-// keyed by target name.
-void append_by_target(std::unordered_map<std::string, std::vector<float>>& history,
-                      const std::vector<TargetConfig>& targets,
-                      const std::vector<float>& terms) {
-    for (size_t i = 0; i < targets.size(); ++i) {
-        history[targets[i].name].push_back(terms[i]);
-    }
-}
-
-// The progress-line suffix that splits a multi-target epoch's loss by target:
-// " | by target (train/test): a 0.12/0.15, b 0.40/0.52", followed by
-// "; moe_aux 0.001" when the model has a mixture of experts. `test_terms` is
-// null when nothing is held out, and each entry then shows its train term only.
-std::string by_target_suffix(const std::vector<TargetConfig>& targets,
-                             const std::vector<float>& train_terms,
-                             const std::vector<float>* test_terms,
-                             const float* moe_aux) {
-    std::ostringstream msg;
-    msg << " | by target (" << (test_terms ? "train/test" : "train") << "): ";
-    for (size_t i = 0; i < targets.size(); ++i) {
-        if (i > 0) msg << ", ";
-        msg << targets[i].name << " " << train_terms[i];
-        if (test_terms) msg << "/" << (*test_terms)[i];
-    }
-    if (moe_aux) msg << "; moe_aux " << *moe_aux;
-    return msg.str();
-}
-
-}  // namespace
+// =============================================================================
+// The run
+// =============================================================================
 
 TrainResult Trainer::fit() {
+    return train(nullptr);
+}
+
+TrainResult Trainer::train(const RunProgress* resume_from) {
     if (!data_prepared_) {
         throw std::runtime_error("Data must be prepared before training");
     }
 
-    const bool has_held_out = test_indices_.defined() && test_indices_.numel() > 0;
-    const bool fixed_duration = config_.fixed_epochs > 0;
-    const int n_epochs = epochs_to_run(config_, has_held_out);
-    const auto& loss_targets = loss_fn_.targets();
-    const bool uses_moe = model_->uses_moe();
+    RunPlan plan;
+    plan.started = std::chrono::steady_clock::now();
+    plan.has_held_out = test_indices_.defined() && test_indices_.numel() > 0;
+    plan.fixed_duration = config_.fixed_epochs > 0;
+    plan.n_epochs = epochs_to_run(config_, plan.has_held_out);
+    plan.use_checkpoints = !config_.checkpoint_dir.empty();
 
     // Apply CUDA performance optimizations and the VRAM cap BEFORE
     // cache_data_to_gpu(), so the allocator limit is in place before any
@@ -1101,208 +1084,83 @@ TrainResult Trainer::fit() {
         // First batch is slower due to tuning, subsequent batches are faster
         at::globalContext().setBenchmarkCuDNN(config_.cudnn_benchmark);
 
-        // TF32 (TensorFloat-32): faster matmuls on Ampere+ GPUs (RTX 30xx, A100, etc.)
-        // Trades ~0.1% precision for ~3x speedup on tensor cores
-        // Only affects float32 operations, not float16/bfloat16
+        // TF32 (TensorFloat-32): faster matmuls on Ampere+ GPUs. Affects
+        // float32 operations only, not float16/bfloat16.
         at::globalContext().setAllowTF32CuBLAS(config_.allow_tf32);
         at::globalContext().setAllowTF32CuDNN(config_.allow_tf32);
     }
 
-    // Snapshot the freshly-initialized model weights once. If a CUDA OOM
-    // halves the batch size and forces a retry, training restarts from
-    // epoch 0 against this same starting point — restarting from a
-    // partially-trained model under a different batch size mixes
-    // optimizer-state assumptions and is fragile.
-    std::vector<char> initial_model_state;
-    {
-        torch::serialize::OutputArchive snap;
-        model_->save(snap);
-        std::ostringstream oss;
-        snap.save_to(oss);
-        auto str = oss.str();
-        initial_model_state.assign(str.begin(), str.end());
+    // The state the run starts from: nothing done yet, or the progress a
+    // checkpoint carried.
+    RunProgress start;
+    if (resume_from != nullptr) {
+        start = *resume_from;
+    } else {
+        start.created_at = iso8601_now();
+        start.requested_batch_size = config_.batch_size;
+        start.effective_batch_size = config_.batch_size;
     }
+    plan.elapsed_before = start.elapsed_seconds;
+    created_at_ = start.created_at;
+    requested_batch_size_ = start.requested_batch_size;
+    effective_batch_size_ = start.effective_batch_size;
 
-    const int batch_size_at_entry = config_.batch_size;
-    requested_batch_size_ = batch_size_at_entry;  // persisted distinct from effective
-    effective_batch_size_ = batch_size_at_entry;  // tracks the halves below
-    auto start_time = std::chrono::high_resolution_clock::now();
-    created_at_ = iso8601_now();
+    BatchSizeRestorer batch_size_restorer(config_.batch_size);
+    config_.batch_size = effective_batch_size_;
+    eval_chunk_ = std::max<int64_t>(config_.batch_size, kHeldOutChunk);
 
-    // Create checkpoint directory if specified
-    bool use_checkpoints = !config_.checkpoint_dir.empty();
-    if (use_checkpoints) {
+    if (plan.use_checkpoints) {
         std::filesystem::create_directories(config_.checkpoint_dir);
     }
 
-    TrainResult result;
-    float best_loss = std::numeric_limits<float>::infinity();
-    int patience_counter = 0;
-    bool training_complete = false;
+    // If a CUDA OOM halves the batch size and forces a retry, training
+    // restarts from `start` against these same weights -- restarting from a
+    // partially-trained model under a different batch size mixes
+    // optimizer-state assumptions and is fragile.
+    const std::string start_weights = snapshot_weights();
 
-    while (!training_complete) {
+    RunProgress progress;
+    for (;;) {
         // Pre-cache all data on GPU for faster training (post-cap so it
-        // respects the allocator fraction). May be a no-op on a fresh attempt
-        // (cleared by release_training_state on retry).
+        // respects the allocator fraction).
         cache_data_to_gpu();
 
         // Initialize AMP (only enabled on CUDA devices)
         amp_enabled_ = config_.use_amp && config_.device.is_cuda();
+        amp_scale_ = start.has_amp_state ? start.amp_scale : config_.amp_init_scale;
+        amp_growth_tracker_ = start.has_amp_state ? start.amp_growth_tracker : 0;
         if (amp_enabled_) {
-            amp_scale_ = config_.amp_init_scale;
-            amp_growth_tracker_ = 0;
-            // Set autocast dtype to float16 for CUDA
             at::autocast::set_autocast_dtype(at::kCUDA, at::kHalf);
         }
 
-        // Create optimizer
         optimizer_ = std::make_unique<torch::optim::AdamW>(
             model_->parameters(),
             torch::optim::AdamWOptions(config_.lr).weight_decay(config_.weight_decay)
         );
+        if (!start.optimizer_state.empty()) {
+            restore_optimizer(start.optimizer_state);
+        }
+        restore_rng_states(start);
 
-        // Reset per-attempt accumulators. If a retry kicks in below, these
-        // are wiped along with the optimizer.
-        result = TrainResult{};
-        best_loss = std::numeric_limits<float>::infinity();
-        patience_counter = 0;
-        best_model_state_.clear();
-
-        // The phased loss activates later terms (SMAPE, band) only once their
-        // phase begins, so early-stopping before the final phase would kill the
-        // curriculum before those objectives ever train. Patience counts once
-        // the objective is the one the last epoch trains on, which the loss
-        // decides: from the start when its phases change nothing for these
-        // targets, from the final phase otherwise.
-        const int last_epoch = std::max(0, config_.max_epochs - 1);
-
+        progress = start;
         try {
-            for (int epoch = 0; epoch < n_epochs; ++epoch) {
-                // The schedule is laid out over max_epochs whatever n_epochs
-                // is, so a fixed-duration run follows a full run's trajectory.
-                float current_lr = get_learning_rate(epoch);
-                update_learning_rate(current_lr);
-
-                const EpochLoss train = train_epoch(epoch);
-                const float train_loss = train.total;
-                result.train_loss_history.push_back(train_loss);
-                append_by_target(result.train_loss_history_by_target, loss_targets, train.by_target);
-                if (uses_moe) {
-                    result.train_moe_aux_loss_history.push_back(train.moe_aux);
-                }
-
-                float test_loss = std::numeric_limits<float>::quiet_NaN();
-                EpochLoss test;
-                decltype(result.final_metrics) metrics;
-                if (has_held_out) {
-                    std::tie(test, metrics) = eval_epoch(epoch);
-                    test_loss = test.total;
-                    result.test_loss_history.push_back(test_loss);
-                    append_by_target(result.test_loss_history_by_target, loss_targets, test.by_target);
-                }
-
-                const bool settled = loss_fn_.objective_settled(epoch, last_epoch);
-
-                if (fixed_duration) {
-                    // The returned weights are the last epoch's, whatever the
-                    // held-out loss did, so best_epoch names that epoch and
-                    // final_metrics are its scores (none without a fold).
-                    result.best_epoch = epoch;
-                    result.final_metrics = std::move(metrics);
-                    if (has_held_out) best_loss = test_loss;
-                } else if (test_loss < best_loss) {
-                    // test_loss is the phase-invariant selection loss (see
-                    // eval_epoch), so best_loss is comparable across the whole
-                    // run and the returned model is the global best.
-                    best_loss = test_loss;
-                    result.best_epoch = epoch;
-                    result.final_metrics = metrics;
-                    patience_counter = 0;
-
-                    // Save best model state to memory
-                    std::ostringstream oss;
-                    torch::serialize::OutputArchive archive;
-                    model_->save(archive);
-                    archive.save_to(oss);
-                    auto str = oss.str();
-                    best_model_state_.assign(str.begin(), str.end());
-
-                    // Save best checkpoint
-                    if (use_checkpoints) {
-                        save(config_.checkpoint_dir + "/best.pt");
-                    }
-                } else if (settled) {
-                    patience_counter++;
-                    if (patience_counter >= config_.patience) {
-                        config_.log("Early stopping at epoch " + std::to_string(epoch));
-                        break;
-                    }
-                }
-
-                // Periodic checkpoint saving
-                if (use_checkpoints && config_.checkpoint_every > 0 && (epoch + 1) % config_.checkpoint_every == 0) {
-                    save(config_.checkpoint_dir + "/checkpoint_" + std::to_string(epoch + 1) + ".pt");
-                }
-
-                // Write progress file
-                if (use_checkpoints) {
-                    write_progress_file(
-                        config_.checkpoint_dir, epoch, n_epochs,
-                        result.best_epoch, best_loss, patience_counter, result.final_metrics
-                    );
-                }
-
-                // Print progress using log callback
-                if (epoch % 10 == 0) {
-                    std::ostringstream msg;
-                    msg << "Epoch " << epoch << " - Train: " << train_loss;
-                    if (has_held_out) {
-                        msg << " Test: " << test_loss;
-                    }
-                    if (config_.lr_scheduler != LRSchedulerType::None) {
-                        msg << " LR: " << current_lr;
-                    }
-                    if (loss_targets.size() > 1) {
-                        msg << by_target_suffix(loss_targets, train.by_target,
-                                                has_held_out ? &test.by_target : nullptr,
-                                                uses_moe ? &train.moe_aux : nullptr);
-                    }
-                    config_.log(msg.str());
-                }
-            }
-            training_complete = true;
-        } catch (const c10::Error& cerr) {
-            // Two CUDA out-of-memory paths to catch:
-            //   - c10::OutOfMemoryError raised by the caching allocator
-            //     when its reserved cap is hit but cudaMalloc would succeed.
-            //   - c10::AcceleratorError carrying cudaErrorMemoryAllocation
-            //     when the allocator already released free blocks back to
-            //     the driver and a fresh cudaMalloc fails outright. This is
-            //     the terminal failure mode on near-cap workloads: the
-            //     cascade descends through several OutOfMemoryError catches
-            //     and eventually trips an AcceleratorError when even the
-            //     bare malloc can't be satisfied.
-            // We treat both as "retry with a halved batch", and let any
-            // other c10::Error propagate unchanged.
-            const std::string what_str = cerr.what();
-            const bool is_oom_err =
-                dynamic_cast<const c10::OutOfMemoryError*>(&cerr) != nullptr;
-            const bool is_cuda_oom =
-                what_str.find("out of memory") != std::string::npos
-                || what_str.find("cudaErrorMemoryAllocation") != std::string::npos;
-            if (!is_oom_err && !is_cuda_oom) {
+            run_epochs(progress, plan);
+            break;
+        } catch (const c10::Error& error) {
+            // Only a CUDA out-of-memory error is answered by halving the
+            // batch; every other c10::Error propagates unchanged.
+            if (!is_out_of_memory(error)) {
                 throw;
             }
 
-            const int prev_bs = config_.batch_size;
-            int new_bs = prev_bs;
+            int new_bs = config_.batch_size;
             std::string log_msg;
             std::string err_msg;
             const bool retry = decide_oom_retry(
-                prev_bs,
+                config_.batch_size,
                 config_.batch_size_floor,
-                batch_size_at_entry,
-                cerr.what(),
+                requested_batch_size_,
+                error.what(),
                 new_bs,
                 log_msg,
                 err_msg
@@ -1319,31 +1177,21 @@ TrainResult Trainer::fit() {
             config_.log(log_msg);
             config_.batch_size = new_bs;
             effective_batch_size_ = new_bs;
-
-            // Restore the original model state so the retry sees the same
-            // initial conditions, not a half-trained model.
-            {
-                std::istringstream iss(std::string(initial_model_state.begin(),
-                                                   initial_model_state.end()));
-                torch::serialize::InputArchive archive;
-                archive.load_from(iss);
-                model_->load(archive);
-            }
-            // Fall through and loop.
+            restore_weights(start_weights);
         }
     }
 
+    TrainResult result = std::move(progress.result);
+    result.resumed_from_epoch = start.next_epoch;
+
     // Restore the best epoch's weights. A fixed-duration run never snapshots
     // one, so it keeps the weights its last epoch left.
-    if (!best_model_state_.empty()) {
-        std::istringstream iss(std::string(best_model_state_.begin(), best_model_state_.end()));
-        torch::serialize::InputArchive archive;
-        archive.load_from(iss);
-        model_->load(archive);
+    if (!progress.best_weights.empty()) {
+        restore_weights(progress.best_weights);
     }
 
-    auto end_time = std::chrono::high_resolution_clock::now();
-    result.train_time_seconds = std::chrono::duration<float>(end_time - start_time).count();
+    result.train_time_seconds =
+        static_cast<float>(plan.elapsed_before + seconds_since(plan.started));
 
     // Complete the run metadata prepare_split started with the split, and save
     // the final checkpoint WITH it, so a saved checkpoint records its own
@@ -1356,360 +1204,206 @@ TrainResult Trainer::fit() {
     run_metadata_.best_epoch = result.best_epoch;
     run_metadata_.total_epochs = static_cast<int>(result.train_loss_history.size());
     run_metadata_.final_metrics = result.final_metrics;
-    if (use_checkpoints) {
+    if (plan.use_checkpoints) {
         save(config_.checkpoint_dir + "/checkpoint.pt", &run_metadata_);
     }
 
-    // Report the batch size that actually trained the model before restoring
-    // the requested one below; nothing downstream can recover it from the
-    // config afterwards.
+    // The batch size that actually trained the model, which config_ no longer
+    // shows once batch_size_restorer has put the requested one back.
     result.effective_batch_size = effective_batch_size_;
-
-    // Restore the requested batch size. fit() may have shrunk config_.batch_size
-    // in place via the OOM auto-halve loop; the checkpoint above intentionally
-    // recorded the effective (shrunk) value, but the in-memory config must not
-    // carry the shrink into a subsequent fit() — e.g. later cross-validation
-    // folds would otherwise silently train at the reduced batch size.
-    config_.batch_size = batch_size_at_entry;
 
     // Both the baseline comparisons and the network diagnostics score the
     // held-out fold; a fit prepared with nothing held out returns neither.
-    if (!has_held_out) {
+    if (!plan.has_held_out) {
         return result;
     }
 
-    // Compute baseline comparisons for each target
-    {
-        torch::NoGradGuard no_grad;
-
-        // Final predictions on the test set
-        auto predictions = forward_test_fold();
-
-        for (const auto& cfg : model_->schema().targets) {
-            BaselineMetrics baseline;
-
-            auto pred_it = predictions.find(cfg.name);
-            auto test_target_it = test_.targets.find(cfg.name);
-            auto train_target_it = train_.targets.find(cfg.name);
-
-            if (pred_it == predictions.end() || test_target_it == test_.targets.end() ||
-                train_target_it == train_.targets.end()) {
-                continue;
-            }
-
-            // reshape({-1}) instead of squeeze() so a single-sample test fold
-            // (n_test == 1) keeps a 1-D batch dimension instead of collapsing to
-            // a 0-D scalar (which would break .size(0) / argmax below).
-            auto test_target = test_target_it->second.to(config_.device).reshape({-1});
-            auto train_target = train_target_it->second.to(config_.device).reshape({-1});
-
-            // Both baselines and the model are scored on the test plots
-            // labelled for the target, and the baseline is fit on the labelled
-            // training plots. A target labelled on no test plot has no entry.
-            const auto test_rows = labelled_rows(cfg, test_target);
-            const auto train_rows = labelled_rows(cfg, train_target);
-            if (test_rows.n_labelled == 0 || train_rows.n_labelled == 0) continue;
-            test_target = test_rows.select(test_target);
-            train_target = train_rows.select(train_target);
-            const auto test_pred = test_rows.select(pred_it->second);
-
-            if (cfg.task == TaskType::Regression) {
-                auto pred = test_pred.reshape({-1});
-                // Training mean (in scaled space for regression)
-                float train_mean = train_target.mean().item<float>();
-                baseline.training_mean = train_mean;
-
-                // Create baseline predictions (all equal to training mean)
-                auto baseline_pred = torch::full_like(test_target, train_mean);
-
-                // Compute MSE for baseline and model (both should be 1D)
-                baseline.baseline_mse = torch::mse_loss(baseline_pred, test_target).item<float>();
-                baseline.model_mse = torch::mse_loss(pred, test_target).item<float>();
-
-                // Compute MAE for baseline and model
-                baseline.baseline_mae = torch::mean(torch::abs(baseline_pred - test_target)).item<float>();
-                baseline.model_mae = torch::mean(torch::abs(pred - test_target)).item<float>();
-
-                // Skill score: 1 - (model_mse / baseline_mse)
-                if (baseline.baseline_mse > kEpsilon) {
-                    baseline.skill_score = 1.0f - (baseline.model_mse / baseline.baseline_mse);
-                }
-
-                // R-squared: 1 - (SS_res / SS_tot)
-                auto test_mean = test_target.mean();
-                auto ss_tot = torch::sum(torch::pow(test_target - test_mean, 2));
-                auto ss_res = torch::sum(torch::pow(test_target - pred, 2));
-                if (ss_tot.item<float>() > kEpsilon) {
-                    baseline.r_squared = 1.0f - (ss_res.item<float>() / ss_tot.item<float>());
-                }
-            } else {
-                // Classification: mode baseline
-                auto mode_result = torch::mode(train_target.to(torch::kLong));
-                int mode_class = std::get<0>(mode_result).item<int>();
-                baseline.training_mode = mode_class;
-
-                auto baseline_correct = (test_target.to(torch::kLong) == mode_class).sum();
-                baseline.baseline_accuracy = baseline_correct.item<float>() / test_target.size(0);
-
-                // Keep the (n_test, n_classes) shape so argmax over classes works
-                // even when n_test == 1 (a squeezed (n_classes,) would misfire).
-                auto pred_logits = test_pred;
-                if (pred_logits.dim() == 1) pred_logits = pred_logits.unsqueeze(0);
-                auto pred_classes = pred_logits.argmax(1);
-                auto model_correct = (pred_classes == test_target.to(torch::kLong)).sum();
-                baseline.model_accuracy = model_correct.item<float>() / test_target.size(0);
-                baseline.accuracy_lift = baseline.model_accuracy - baseline.baseline_accuracy;
-            }
-
-            result.baselines[cfg.name] = baseline;
-        }
-    }
-
-    // Compute network diagnostics
+    result.baselines = compute_baselines();
     result.diagnostics = compute_diagnostics();
 
     return result;
 }
 
-void Trainer::save(const std::string& path, const RunMetadata* metadata) const {
-    torch::serialize::OutputArchive archive;
+void Trainer::run_epochs(RunProgress& progress, const RunPlan& plan) {
+    const auto& loss_targets = loss_fn_.targets();
+    const bool uses_moe = model_->uses_moe();
+    TrainResult& result = progress.result;
 
-    // Save model parameters manually (NOT using model_->save() which does TorchScript
-    // export and ignores our custom metadata). Use prefixed keys to avoid collisions.
-    for (const auto& pair : model_->named_parameters()) {
-        archive.write("param_" + pair.key(), pair.value());
-    }
-    for (const auto& pair : model_->named_buffers()) {
-        archive.write("buffer_" + pair.key(), pair.value());
-    }
+    // The phased loss activates later terms (SMAPE, band) only once their
+    // phase begins, so early-stopping before the final phase would kill the
+    // curriculum before those objectives ever train. Patience counts once
+    // the objective is the one the last epoch trains on, which the loss
+    // decides: from the start when its phases change nothing for these
+    // targets, from the final phase otherwise.
+    const int last_epoch = std::max(0, config_.max_epochs - 1);
 
-    // Save config, schema, and scalers using checkpoint utilities
-    save_model_config(archive, model_->config());
-    save_schema(archive, model_->schema());
-    save_scalers(archive, scalers_);
+    for (int epoch = progress.next_epoch; epoch < plan.n_epochs; ++epoch) {
+        // The schedule is laid out over max_epochs whatever n_epochs is, so a
+        // fixed-duration run follows a full run's trajectory.
+        float current_lr = get_learning_rate(epoch);
+        update_learning_rate(current_lr);
 
-    // The species graph a HeterogeneousGNN was trained on. Scoring has to pass
-    // messages on the same graph, and the training data is not around at
-    // inference time, so it belongs in the checkpoint. Writes nothing for every
-    // other architecture.
-    save_species_graph(archive, model_->species_graph_edge_index(),
-                       model_->species_graph_edge_type());
+        const EpochLoss train = train_epoch(epoch);
+        const float train_loss = train.total;
+        result.train_loss_history.push_back(train_loss);
+        append_by_target(result.train_loss_history_by_target, loss_targets, train.by_target);
+        if (uses_moe) {
+            result.train_moe_aux_loss_history.push_back(train.moe_aux);
+        }
 
-    // Save categorical vocabulary (string -> code maps for each categorical
-    // column). An empty vocab writes a count of zero, which load() reads back
-    // as an empty vocabulary.
-    categorical_vocab_.save(archive, "trainer_categorical_");
+        float test_loss = std::numeric_limits<float>::quiet_NaN();
+        EpochLoss test;
+        MetricMap metrics;
+        if (plan.has_held_out) {
+            std::tie(test, metrics) = eval_epoch();
+            test_loss = test.total;
+            result.test_loss_history.push_back(test_loss);
+            append_by_target(result.test_loss_history_by_target, loss_targets, test.by_target);
+        }
 
-    // Save training configuration for reproducibility. save_train_config writes
-    // the REQUESTED batch size (passed explicitly) and the EFFECTIVE
-    // one it reads off the config. fit() restores config_.batch_size to the
-    // requested value before returning, so a save() called after fit() -- what
-    // the CLI and most callers do -- would otherwise record effective ==
-    // requested and lose the OOM fallback the run used. Hand it a copy carrying
-    // the tracked effective value instead.
-    TrainConfig persisted_config = config_;
-    if (effective_batch_size_ > 0) {
-        persisted_config.batch_size = effective_batch_size_;
-    }
-    save_train_config(archive, persisted_config, requested_batch_size_);
+        progress.next_epoch = epoch + 1;
+        progress.elapsed_seconds = plan.elapsed_before + seconds_since(plan.started);
 
-    // Save run metadata if provided (final checkpoint only)
-    if (metadata != nullptr) {
-        save_run_metadata(archive, *metadata);
-    }
+        const bool settled = loss_fn_.objective_settled(epoch, last_epoch);
 
-    // Retry a transient write fault on flaky storage; a small
-    // checkpoint re-write is cheap, so any failure is retried.
-    io::with_retry([&] { archive.save_to(path); }, "checkpoint save");
+        if (plan.fixed_duration) {
+            // The returned weights are the last epoch's, whatever the
+            // held-out loss did, so best_epoch names that epoch and
+            // final_metrics are its scores (none without a fold).
+            result.best_epoch = epoch;
+            result.final_metrics = std::move(metrics);
+            if (plan.has_held_out) progress.best_loss = test_loss;
+        } else if (test_loss < progress.best_loss) {
+            // test_loss is the phase-invariant selection loss (see
+            // eval_epoch), so best_loss is comparable across the whole run and
+            // the returned model is the global best.
+            progress.best_loss = test_loss;
+            result.best_epoch = epoch;
+            result.final_metrics = std::move(metrics);
+            progress.patience_counter = 0;
+            progress.best_weights = snapshot_weights();
 
-    // Write human-readable JSON metadata alongside checkpoint
-    if (metadata != nullptr) {
-        write_metadata_json(path, model_->config(), persisted_config, *metadata,
-                            model_->schema(), requested_batch_size_);
-    }
-}
+            if (plan.use_checkpoints) {
+                save_checkpoint(config_.checkpoint_dir + "/best.pt", nullptr, &progress);
+            }
+        } else if (settled) {
+            progress.patience_counter++;
+            if (progress.patience_counter >= config_.patience) {
+                config_.log("Early stopping at epoch " + std::to_string(epoch));
+                break;
+            }
+        }
 
-std::tuple<ResolveModel, Scalers, CategoricalVocab> Trainer::load(
-    const std::string& path,
-    torch::Device device,
-    float vram_fraction
-) {
-    // Apply VRAM cap BEFORE any device allocation so model weights and
-    // buffers respect the limit on first upload. Matches the cap applied
-    // in Trainer::fit; no-ops on CPU or fraction >= 1.0.
-    if (device.is_cuda()) {
-        set_vram_fraction(
-            static_cast<double>(vram_fraction),
-            device.index()
-        );
-    }
+        if (plan.use_checkpoints && config_.checkpoint_every > 0 &&
+            (epoch + 1) % config_.checkpoint_every == 0) {
+            save_checkpoint(config_.checkpoint_dir + "/checkpoint_" +
+                                std::to_string(epoch + 1) + ".pt",
+                            nullptr, &progress);
+        }
 
-    torch::serialize::InputArchive archive;
-    // `device` is passed to the unpickler, which remaps every storage as it is
-    // read. Without it each tensor is restored to the device it was SAVED on,
-    // so loading a GPU-trained checkpoint on a machine with no CUDA device
-    // throws inside deserialization ("No CUDA GPUs are available") and the
-    // model->to(device) below never runs.
-    //
-    // Retry a transient read fault on flaky storage. A mmap-backed load can
-    // still fault as an OS structured exception, which the crash handler
-    // reports (process.hpp); this catches the throwing-read failures.
-    io::with_retry([&] { archive.load_from(path, device); }, "checkpoint load");
+        if (plan.use_checkpoints) {
+            write_progress_file(
+                config_.checkpoint_dir, epoch, plan.n_epochs,
+                result.best_epoch, progress.best_loss, progress.patience_counter,
+                result.final_metrics
+            );
+        }
 
-    // Load config, schema, and scalers using checkpoint utilities
-    ModelConfig config = load_model_config(archive);
-    ResolveSchema schema = load_schema(archive);
-    Scalers scalers = load_scalers(archive);
-
-    // Load the categorical vocabulary; a checkpoint without categorical
-    // columns yields an empty one (CategoricalVocab::load).
-    CategoricalVocab vocab = CategoricalVocab::load(archive, "trainer_categorical_");
-
-    // Create model with loaded schema
-    ResolveModel model(schema, config);
-
-    // Load model weights into the freshly-constructed model (matching the
-    // prefixed save format).
-    load_weights_into(archive, model);
-
-    // Restore the species graph a HeterogeneousGNN reads. A checkpoint written
-    // before the graph was persisted carries none, and such a model still needs
-    // one set explicitly before it can forward.
-    if (model->requires_species_graph()) {
-        auto [edge_index, edge_type] = load_species_graph(archive);
-        if (edge_index.defined() && edge_type.defined()) {
-            model->set_species_graph(edge_index, edge_type);
+        if (epoch % 10 == 0) {
+            std::ostringstream msg;
+            msg << "Epoch " << epoch << " - Train: " << train_loss;
+            if (plan.has_held_out) {
+                msg << " Test: " << test_loss;
+            }
+            if (config_.lr_scheduler != LRSchedulerType::None) {
+                msg << " LR: " << current_lr;
+            }
+            if (loss_targets.size() > 1) {
+                msg << by_target_suffix(loss_targets, train.by_target,
+                                        plan.has_held_out ? &test.by_target : nullptr,
+                                        uses_moe ? &train.moe_aux : nullptr);
+            }
+            config_.log(msg.str());
         }
     }
-
-    model->to(device);
-
-    return {model, scalers, vocab};
 }
 
-TrainConfig Trainer::load_train_config(const std::string& path) {
-    torch::serialize::InputArchive archive;
-    // Read onto the CPU. Deserialization restores every tensor in the archive,
-    // model weights included, so a GPU-saved checkpoint would need a CUDA
-    // device present just to read back a handful of scalars.
-    // Nothing here retains a tensor, so the CPU is always the right target.
-    io::with_retry([&] { archive.load_from(path, torch::kCPU); },
-                   "checkpoint load (train config)");
-    // Qualify to the free function (checkpoint.cpp); the unqualified name would
-    // resolve to this static member and recurse.
-    return resolve::load_train_config(archive);
-}
-
-RunMetadata Trainer::load_run_metadata(const std::string& path) {
-    torch::serialize::InputArchive archive;
-    // CPU for the same reason as load_train_config above: metadata is scalars.
-    io::with_retry([&] { archive.load_from(path, torch::kCPU); },
-                   "checkpoint load (run metadata)");
-    return resolve::load_run_metadata(archive);
-}
-
-void Trainer::load_weights_into(torch::serialize::InputArchive& archive, ResolveModel& model) {
-    // Freshly-constructed model parameters are leaf tensors with
-    // requires_grad=true. Calling .copy_() on them directly trips autograd's
-    // check_inplace ("a leaf Variable that requires grad is being used in an
-    // in-place operation"). Mirror PyTorch's copy-inside-torch.no_grad().
+std::unordered_map<std::string, BaselineMetrics> Trainer::compute_baselines() {
     torch::NoGradGuard no_grad;
-    int64_t n_expected = 0, n_loaded = 0;
-    std::string first_missing;
-    auto note_missing = [&](const std::string& key) {
-        if (first_missing.empty()) first_missing = key;
-    };
-    for (const auto& pair : model->named_parameters()) {
-        ++n_expected;
-        torch::Tensor t;
-        if (archive.try_read("param_" + pair.key(), t)) {
-            pair.value().copy_(t);
-            ++n_loaded;
+
+    const TensorMap predictions = forward_test_fold();
+    const TargetScalers scalers = device_target_scalers();
+
+    std::unordered_map<std::string, BaselineMetrics> out;
+    for (const auto& cfg : model_->schema().targets) {
+        auto pred_it = predictions.find(cfg.name);
+        auto test_target_it = test_.targets.find(cfg.name);
+        auto train_target_it = train_.targets.find(cfg.name);
+        if (pred_it == predictions.end() || test_target_it == test_.targets.end() ||
+            train_target_it == train_.targets.end()) {
+            continue;
+        }
+
+        // reshape({-1}) keeps a single-plot fold one-dimensional.
+        const torch::Device device = pred_it->second.device();
+        const auto test_target = test_target_it->second.to(device).reshape({-1});
+        const auto train_target = train_target_it->second.to(device).reshape({-1});
+
+        // Both baselines and the model are scored on the test plots labelled
+        // for the target, and the baseline is fit on the labelled training
+        // plots. A target labelled on no test plot has no entry.
+        const auto test_rows = labelled_rows(cfg, test_target);
+        const auto train_rows = labelled_rows(cfg, train_target);
+        if (test_rows.n_labelled == 0 || train_rows.n_labelled == 0) continue;
+
+        const auto model_metrics =
+            held_out_metrics(cfg, pred_it->second, test_target, scalers);
+        const auto test_y = test_rows.select(test_target);
+        const auto train_y = train_rows.select(train_target);
+
+        BaselineMetrics baseline;
+        if (cfg.task == TaskType::Regression) {
+            torch::Tensor mean, scale;
+            auto scaler_it = scalers.find(cfg.name);
+            if (scaler_it != scalers.end()) {
+                std::tie(mean, scale) = scaler_it->second;
+            }
+            const auto test_orig = to_original_units(test_y, cfg.transform, mean, scale);
+            const auto train_orig = to_original_units(train_y, cfg.transform, mean, scale);
+            auto pred = test_rows.select(pred_it->second).reshape({-1});
+            const auto pred_orig = to_original_units(pred, cfg.transform, mean, scale);
+
+            // The constant that minimises squared error in original units:
+            // the training mean of the original values.
+            const float train_mean = train_orig.mean().item<float>();
+            const auto baseline_pred = torch::full_like(test_orig, train_mean);
+            baseline.training_mean = train_mean;
+            baseline.baseline_mse = Metrics::mse(baseline_pred, test_orig);
+            baseline.baseline_mae = Metrics::mae(baseline_pred, test_orig);
+            baseline.model_mse = Metrics::mse(pred_orig, test_orig);
+            baseline.model_mae = model_metrics.at("mae");
+            baseline.r_squared = model_metrics.at("r2");
+            if (baseline.baseline_mse > kEpsilon) {
+                baseline.skill_score = 1.0f - (baseline.model_mse / baseline.baseline_mse);
+            }
         } else {
-            note_missing("param_" + pair.key());
+            const auto train_classes = train_y.to(torch::kLong);
+            const int mode_class = std::get<0>(torch::mode(train_classes)).item<int>();
+            baseline.training_mode = mode_class;
+            baseline.baseline_accuracy =
+                (test_y.to(torch::kLong) == mode_class).to(torch::kFloat32).mean().item<float>();
+            baseline.model_accuracy = model_metrics.at("accuracy");
+            baseline.accuracy_lift = baseline.model_accuracy - baseline.baseline_accuracy;
         }
+
+        out[cfg.name] = baseline;
     }
-    for (const auto& pair : model->named_buffers()) {
-        ++n_expected;
-        torch::Tensor t;
-        if (archive.try_read("buffer_" + pair.key(), t)) {
-            pair.value().copy_(t);
-            ++n_loaded;
-        } else {
-            note_missing("buffer_" + pair.key());
-        }
-    }
-    // A silent skip leaves those tensors at fresh random init, so a mismatched
-    // architecture would load as a partly-untrained model. Fail loudly instead
-    // (this is what makes an encoder_architecture / sub-config drift visible).
-    if (n_loaded != n_expected) {
-        std::ostringstream msg;
-        msg << "load_weights_into: checkpoint is missing " << (n_expected - n_loaded)
-            << " of " << n_expected << " model tensors, so the loaded model would "
-               "keep randomly-initialized weights. The model architecture likely "
-               "does not match the checkpoint (e.g. a different encoder_architecture "
-               "or architecture sub-config). First missing tensor: " << first_missing;
-        throw std::runtime_error(msg.str());
-    }
-    // The missing-tensor check above catches a subset model loaded from a subset
-    // checkpoint, but not the reverse: a checkpoint from a SUPERSET architecture
-    // whose overlapping tensor names + shapes match a smaller model loads a
-    // silent partial subset (copy_ shape-checks miss same-name/same-shape drift).
-    // Count the checkpoint's own weight tensors and reject a mismatch loudly.
-    int64_t n_ckpt_weights = 0;
-    for (const auto& key : archive.keys()) {
-        if (key.rfind("param_", 0) == 0 || key.rfind("buffer_", 0) == 0) {
-            ++n_ckpt_weights;
-        }
-    }
-    if (n_ckpt_weights != n_expected) {
-        std::ostringstream msg;
-        msg << "load_weights_into: checkpoint holds " << n_ckpt_weights
-            << " weight tensors but the model has " << n_expected
-            << ". The architecture does not match the checkpoint (a superset "
-               "checkpoint would load only its overlapping tensors, silently "
-               "leaving the extra checkpoint weights unused).";
-        throw std::runtime_error(msg.str());
-    }
+    return out;
 }
 
-void Trainer::load_state(
-    const std::string& path,
-    torch::Device device,
-    float vram_fraction
-) {
-    // Apply the VRAM cap before any device allocation, matching fit() and the
-    // static load(); no-op on CPU or fraction >= 1.0.
-    if (device.is_cuda()) {
-        set_vram_fraction(static_cast<double>(vram_fraction), device.index());
-    }
-
-    torch::serialize::InputArchive archive;
-    // Remap storages to `device` while reading, for the same reason as the
-    // static load(): the saved device is otherwise the one deserialization
-    // targets, so a CUDA-saved checkpoint cannot be read at all on a host
-    // without a CUDA device.
-    io::with_retry([&] { archive.load_from(path, device); },
-                   "checkpoint load (state)");
-
-    // Restore weights into the existing model_ (its architecture must already
-    // match the checkpoint), the fitted scalers, and the categorical vocab.
-    load_weights_into(archive, model_);
-    if (model_->requires_species_graph()) {
-        auto [edge_index, edge_type] = load_species_graph(archive);
-        if (edge_index.defined() && edge_type.defined()) {
-            model_->set_species_graph(edge_index, edge_type);
-        }
-    }
-    model_->to(device);
-
-    scalers_ = load_scalers(archive);
-    categorical_vocab_ = CategoricalVocab::load(archive, "trainer_categorical_");
-
-    // Keep config_.device coherent with where the weights now live so the
-    // eval helpers move test tensors to the matching device.
-    config_.device = device;
-}
+// =============================================================================
+// The held-out fold
+// =============================================================================
 
 std::vector<std::string> Trainer::select_plot_ids(const torch::Tensor& indices) const {
     std::vector<std::string> out;
@@ -1740,15 +1434,15 @@ torch::Tensor Trainer::append_cuda_hash(
     torch::Tensor continuous, torch::Tensor plot_idx, bool use_cache) const {
 #ifdef RESOLVE_HAS_CUDA
     if (use_cuda_hash_ && config_.device.is_cuda()) {
-        torch::Tensor species_src = use_cache ? gpu_train_raw_species_ids_
+        torch::Tensor species_src = use_cache ? gpu_raw_species_ids_
                                               : raw_species_ids_.to(config_.device);
-        torch::Tensor weights_src = use_cache ? gpu_train_raw_weights_
+        torch::Tensor weights_src = use_cache ? gpu_raw_weights_
                                               : raw_weights_.to(config_.device);
-        torch::Tensor offsets_src = use_cache ? gpu_train_plot_offsets_
+        torch::Tensor offsets_src = use_cache ? gpu_plot_offsets_
                                               : plot_offsets_.to(config_.device);
         auto hash = cuda::compute_batch_hash_embedding_cuda(
             plot_idx.to(config_.device),
-            torch::Tensor(),  // raw_plot_indices not needed with CSR offsets
+            torch::Tensor(),
             species_src, weights_src, offsets_src, hash_dim_);
         return torch::cat({continuous, hash}, /*dim=*/1);
     }
@@ -1759,19 +1453,72 @@ torch::Tensor Trainer::append_cuda_hash(
     return continuous;
 }
 
-PlotInputs Trainer::held_out_inputs(bool use_cache) const {
-    PlotInputs inputs = use_cache ? gpu_test_.inputs : test_.inputs.to(config_.device);
+PlotInputs Trainer::held_out_chunk(int64_t start, int64_t end, bool use_cache) const {
+    PlotInputs inputs = use_cache ? gpu_test_.inputs.slice(start, end)
+                                  : test_.inputs.slice(start, end).to(config_.device);
     // CUDA hash mode computes the hash embedding on the fly; other encodings
     // already fold their species representation into the continuous block.
-    inputs.continuous = append_cuda_hash(
-        inputs.continuous, use_cache ? gpu_test_indices_ : test_indices_, use_cache);
+    if (use_cuda_hash_) {
+        const torch::Tensor& indices = use_cache ? gpu_test_indices_ : test_indices_;
+        inputs.continuous = append_cuda_hash(
+            inputs.continuous, indices.slice(0, start, end), use_cache);
+    }
     return inputs;
 }
 
-TensorMap Trainer::forward_test_fold() {
+TensorMap Trainer::forward_held_out(bool use_cache) {
     model_->eval();
     torch::NoGradGuard no_grad;
-    return model_->forward(held_out_inputs(/*use_cache=*/false));
+
+    const int64_t n = test_.n_plots();
+    const bool full_batch = model_->requires_full_batch_training();
+    int64_t chunk = full_batch ? std::max<int64_t>(n, 1) : std::max<int64_t>(eval_chunk_, 1);
+
+    std::unordered_map<std::string, std::vector<torch::Tensor>> parts;
+    // At least one forward runs, so an empty fold still yields every output
+    // with zero rows.
+    int64_t start = 0;
+    do {
+        const int64_t end = std::min(start + chunk, n);
+        try {
+            const auto outputs = model_->forward(held_out_chunk(start, end, use_cache));
+            for (const auto& [name, output] : outputs) parts[name].push_back(output);
+            start = end;
+        } catch (const c10::Error& error) {
+            if (!is_out_of_memory(error)) {
+                throw;
+            }
+            int64_t new_chunk = chunk;
+            std::string log_msg;
+            std::string err_msg;
+            const bool retry = decide_eval_chunk_retry(
+                chunk, full_batch, error.what(), new_chunk, log_msg, err_msg);
+            release_cached_device_memory(config_.device);
+            if (!retry) {
+                throw std::runtime_error(err_msg);
+            }
+            config_.log(log_msg);
+            chunk = new_chunk;
+            eval_chunk_ = new_chunk;
+        }
+    } while (start < n);
+
+    TensorMap out;
+    for (auto& [name, pieces] : parts) {
+        out[name] = pieces.size() == 1 ? pieces.front() : torch::cat(pieces, /*dim=*/0);
+    }
+    return out;
+}
+
+TensorMap Trainer::forward_test_fold() {
+    return forward_held_out(/*use_cache=*/gpu_data_cached_);
+}
+
+const TargetConfig* Trainer::find_target(const std::string& name) const {
+    for (const auto& cfg : model_->schema().targets) {
+        if (cfg.name == name) return &cfg;
+    }
+    return nullptr;
 }
 
 NetworkDiagnostics Trainer::compute_diagnostics() {
@@ -1887,24 +1634,12 @@ CalibrationResult Trainer::compute_calibration(
     CalibrationResult result;
     result.target_name = target_name;
 
-    torch::NoGradGuard no_grad;
-    model_->eval();
-
-    // Find target config
-    const TargetConfig* target_cfg = nullptr;
-    for (const auto& cfg : model_->schema().targets) {
-        if (cfg.name == target_name) {
-            target_cfg = &cfg;
-            break;
-        }
-    }
-
+    const TargetConfig* target_cfg = find_target(target_name);
     if (!target_cfg || target_cfg->task != TaskType::Classification) {
-        result.bins.clear();
         return result;
     }
 
-    // Get test predictions (shared single-source test-fold forward).
+    torch::NoGradGuard no_grad;
     auto predictions = forward_test_fold();
 
     auto pred_it = predictions.find(target_name);
@@ -1922,9 +1657,8 @@ CalibrationResult Trainer::compute_calibration(
 
     int64_t n_samples = probs.size(0);
 
-    // For each class, compute calibration (here we do class 0 as example for binary,
-    // or the most common class for multiclass)
-    // Using the max probability and whether prediction was correct
+    // Top-label calibration: each plot's highest class probability against
+    // whether that class is the true one, binned by the probability.
     auto max_probs = std::get<0>(probs.max(1));  // (n_samples,)
     auto pred_classes = probs.argmax(1);         // (n_samples,)
     auto correct = (pred_classes == targets);    // (n_samples,)
@@ -1982,23 +1716,12 @@ ResidualAnalysis Trainer::compute_residuals(
     ResidualAnalysis result;
     result.target_name = target_name;
 
-    torch::NoGradGuard no_grad;
-    model_->eval();
-
-    // Find target config
-    const TargetConfig* target_cfg = nullptr;
-    for (const auto& cfg : model_->schema().targets) {
-        if (cfg.name == target_name) {
-            target_cfg = &cfg;
-            break;
-        }
-    }
-
+    const TargetConfig* target_cfg = find_target(target_name);
     if (!target_cfg || target_cfg->task != TaskType::Regression) {
         return result;
     }
 
-    // Get test predictions (shared single-source test-fold forward).
+    torch::NoGradGuard no_grad;
     auto predictions = forward_test_fold();
 
     auto pred_it = predictions.find(target_name);
@@ -2007,10 +1730,9 @@ ResidualAnalysis Trainer::compute_residuals(
         return result;
     }
 
-    // Get predictions and targets. reshape({-1}), not squeeze(): a single-plot
-    // test fold has a (1,1) output that squeeze() would collapse to a 0-D
-    // scalar, breaking size(0)/accessor and the element-wise subtraction below.
-    // Only the test plots labelled for the target have a residual.
+    // reshape({-1}), not squeeze(): a single-plot test fold has a (1,1) output
+    // that squeeze() would collapse to a 0-D scalar. Only the test plots
+    // labelled for the target have a residual.
     const auto rows = labelled_rows(*target_cfg, target_it->second);
     auto preds = rows.select(pred_it->second).reshape({-1}).cpu();
     auto targets = rows.select(target_it->second).reshape({-1}).cpu();
@@ -2020,25 +1742,14 @@ ResidualAnalysis Trainer::compute_residuals(
                                 positions.data_ptr<int64_t>() + positions.numel());
     }
 
-    // Unscale if needed (predictions are in scaled space)
+    // Residuals in original units.
+    torch::Tensor mean, scale;
     auto scaler_it = scalers_.target_scalers.find(target_name);
     if (scaler_it != scalers_.target_scalers.end()) {
-        auto [mean, scale] = scaler_it->second;
-        preds = preds * scale + mean;
-        targets = targets * scale + mean;
+        std::tie(mean, scale) = scaler_it->second;
     }
-
-    // Apply inverse transform if needed. Clamp the exponent to [kExpClampMin,
-    // kExpClampMax] before expm1, matching every other Log1p inverse in the
-    // engine (PhasedLoss::regression_loss, Metrics::compute, predict(),
-    // TaskHeadImpl::inverse_transform): a single wild prediction would otherwise
-    // overflow to inf and poison mean/std/skewness/kurtosis of the residuals.
-    // Targets are real log1p(area) and cannot overflow, so only the
-    // predictions need the guard.
-    if (target_cfg->transform == TransformType::Log1p) {
-        preds = torch::expm1(torch::clamp(preds, kExpClampMin, kExpClampMax));
-        targets = torch::expm1(targets);
-    }
+    preds = to_original_units(preds, target_cfg->transform, mean, scale);
+    targets = to_original_units(targets, target_cfg->transform, mean, scale);
 
     // Compute residuals
     auto residuals = targets - preds;
@@ -2104,22 +1815,15 @@ ClassificationPredictions Trainer::compute_classification_predictions(
             "compute_classification_predictions requires prepare_data() first");
     }
 
-    // Locate the target and confirm it is a classification head. Non-matching
-    // or regression targets return empty tensors (parallels compute_residuals
-    // returning empty for classification targets).
-    const TargetConfig* target_cfg = nullptr;
-    for (const auto& cfg : model_->schema().targets) {
-        if (cfg.name == target_name) {
-            target_cfg = &cfg;
-            break;
-        }
-    }
+    // Non-matching or regression targets return empty tensors (parallels
+    // compute_residuals returning empty for classification targets).
+    const TargetConfig* target_cfg = find_target(target_name);
     if (!target_cfg || target_cfg->task != TaskType::Classification) {
         return result;
     }
     result.class_names = target_cfg->class_names;
 
-    // Shared single-source test-fold forward.
+    torch::NoGradGuard no_grad;
     auto predictions = forward_test_fold();
 
     auto pred_it = predictions.find(target_name);
@@ -2144,98 +1848,49 @@ ClassificationPredictions Trainer::compute_classification_predictions(
     return result;
 }
 
-void Trainer::unscale_continuous_targets(
-    torch::Tensor& continuous,
-    std::unordered_map<std::string, torch::Tensor>& targets,
-    const Scalers& scalers,
-    const ResolveSchema& schema) {
-    // continuous: x_scaled -> x_raw = x_scaled * scale + mean (per feature),
-    // with the cells the schema's flags mark as missing set back to NaN.
-    if (continuous.defined() && continuous.size(1) > 0) {
-        continuous = unstandardize_continuous(continuous, scalers, schema);
-    }
-    // Regression targets: only those present in target_scalers were scaled;
-    // {mean, scale} stored as {first, second} at fit time.
-    for (const auto& [name, ms] : scalers.target_scalers) {
-        auto it = targets.find(name);
-        if (it != targets.end() && it->second.defined()) {
-            it->second = it->second * ms.second + ms.first;
-        }
-    }
-}
-
-namespace {
-// Silences per-fold checkpoint writes during cross-validation: fit() otherwise
-// overwrites the user's checkpoint.pt / best.pt with each fold's subset model,
-// leaving the on-disk artifact describing the last fold rather than the
-// full-data model the user trained before CV. Clears checkpoint_dir
-// on construction and restores it on any exit path (exception-safe).
-struct CheckpointDirSilencer {
-    std::string& dir;
-    std::string saved;
-    explicit CheckpointDirSilencer(std::string& d) : dir(d), saved(d) { d.clear(); }
-    ~CheckpointDirSilencer() { dir = saved; }
-    CheckpointDirSilencer(const CheckpointDirSilencer&) = delete;
-    CheckpointDirSilencer& operator=(const CheckpointDirSilencer&) = delete;
-};
-}  // namespace
+// =============================================================================
+// Cross-validation
+// =============================================================================
 
 Trainer::SplitState Trainer::capture_split_state() const {
-    return {train_, test_, train_indices_, test_indices_, scalers_};
+    return {train_, test_, train_indices_, test_indices_, scalers_, run_metadata_,
+            created_at_, requested_batch_size_, effective_batch_size_};
 }
 
 void Trainer::restore_split_state(const SplitState& s) {
+    release_training_state();
     train_ = s.train;
     test_ = s.test;
     train_indices_ = s.train_indices;
     test_indices_ = s.test_indices;
     scalers_ = s.scalers;
-    // The per-fold loop cached fold data on the GPU; those tensors no longer
-    // match the restored split, so force a re-cache on the next fit().
-    gpu_data_cached_ = false;
+    run_metadata_ = s.run_metadata;
+    created_at_ = s.created_at;
+    requested_batch_size_ = s.requested_batch_size;
+    effective_batch_size_ = s.effective_batch_size;
 }
 
 CrossValidationResult Trainer::run_cross_validation(
     const std::vector<std::pair<std::vector<int64_t>, std::vector<int64_t>>>& folds
 ) {
-    auto start_time = std::chrono::high_resolution_clock::now();
+    const auto start_time = std::chrono::steady_clock::now();
 
     CrossValidationResult cv_result;
     cv_result.n_folds = static_cast<int>(folds.size());
 
-    // Concatenate the prepared train/test rows so each fold re-splits them.
-    LabelledPlots all = LabelledPlots::cat(train_, test_);
-
-    // Snapshot original model weights + scalers + the full split for restoration.
-    std::ostringstream original_state_stream;
-    {
-        torch::serialize::OutputArchive archive;
-        model_->save(archive);
-        archive.save_to(original_state_stream);
-    }
-    std::string original_state = original_state_stream.str();
-    Scalers original_scalers = scalers_;
-    SplitState split_snapshot = capture_split_state();
-    // Each fold's fit() rewrites the run metadata; the trainer's own run is
-    // the one it reports afterwards.
-    const RunMetadata original_run_metadata = run_metadata_;
+    // The trainer's own weights, split and run record, restored after the
+    // folds.
+    const std::string original_weights = snapshot_weights();
+    const SplitState split_snapshot = capture_split_state();
 
     // Don't let per-fold fit() calls clobber the user's on-disk checkpoint.
     CheckpointDirSilencer ckpt_silencer(config_.checkpoint_dir);
 
-    // Invert prepare_data's standardization once so each fold recomputes its own
-    // scalers from raw values exactly once (see the note in cross-validation).
-    unscale_continuous_targets(all.inputs.continuous, all.targets, original_scalers,
-                               model_->schema());
-
-    // Global plot index per concatenated row, for the CUDA-hash path. Row i of
-    // all is global plot all_global_idx[i]; each fold reconstructs
-    // train_indices_ / test_indices_ from it so on-the-fly GPU hashing indexes
-    // the correct plots.
-    torch::Tensor all_global_idx;
-    if (train_indices_.defined() && test_indices_.defined()) {
-        all_global_idx = torch::cat({train_indices_, test_indices_}, 0);
-    }
+    // The prepared rows in raw values, so each fold fits its own scalers on
+    // its own fitting rows. Row i of `all` is plot all_global_idx[i], which
+    // each fold records as its train / test indices.
+    const LabelledPlots all = unstandardized(LabelledPlots::cat(train_, test_), scalers_);
+    const torch::Tensor all_global_idx = torch::cat({train_indices_, test_indices_}, 0);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::vector<float>>> metric_values;
 
@@ -2248,54 +1903,15 @@ CrossValidationResult Trainer::run_cross_validation(
         // current weights are already trained on rows that fall in this fold's
         // held-out test set; warm-starting from them yields optimistically
         // biased CV metrics.
-        {
-            std::istringstream iss(pristine_model_state_);
-            torch::serialize::InputArchive archive;
-            archive.load_from(iss);
-            model_->load(archive);
-        }
+        restore_weights(pristine_model_state_);
 
         const auto& train_index = folds[fold].first;
         const auto& test_index = folds[fold].second;
-        auto train_idx = torch::tensor(train_index, torch::kInt64);
-        auto test_idx = torch::tensor(test_index, torch::kInt64);
-
         config_.log("  Train: " + std::to_string(train_index.size()) +
                     " plots, Test: " + std::to_string(test_index.size()) + " plots");
 
-        // Reconstruct this fold's global plot indices for the CUDA-hash path and
-        // invalidate the GPU cache so fit() re-uploads THIS fold's split
-        // (cache_data_to_gpu early-returns while gpu_data_cached_ is set, so
-        // without this every fold after the first would reuse fold 0's data).
-        if (all_global_idx.defined()) {
-            train_indices_ = all_global_idx.index_select(0, train_idx);
-            test_indices_ = all_global_idx.index_select(0, test_idx);
-        }
-        gpu_data_cached_ = false;
-
-        train_ = all.index_select(train_idx);
-        test_ = all.index_select(test_idx);
-
-        // Refit the fill and scalers on this fold's training rows.
-        torch::Tensor& train_continuous = train_.inputs.continuous;
-        torch::Tensor& test_continuous = test_.inputs.continuous;
-        if (train_continuous.size(1) > 0) {
-            fit_continuous_scalers(scalers_, train_continuous);
-            train_continuous = standardize_continuous(train_continuous, scalers_);
-            test_continuous = standardize_continuous(test_continuous, scalers_);
-        }
-
-        require_labelled_fitting_rows(model_->schema().targets, train_.targets);
-        for (const auto& cfg : model_->schema().targets) {
-            if (cfg.task != TaskType::Regression) continue;
-            auto train_it = train_.targets.find(cfg.name);
-            if (train_it == train_.targets.end()) continue;
-            auto [target_mean, target_scale] = fit_target_scaler(cfg, train_it->second);
-            scalers_.target_scalers[cfg.name] = {target_mean, target_scale};
-            train_it->second = (train_it->second - target_mean) / target_scale;
-            auto& test_target = test_.targets.at(cfg.name);
-            test_target = (test_target - target_mean) / target_scale;
-        }
+        apply_split(all, torch::tensor(train_index, torch::kInt64),
+                    torch::tensor(test_index, torch::kInt64), all_global_idx);
 
         TrainResult fold_result = fit();
         cv_result.fold_results.push_back(fold_result);
@@ -2321,19 +1937,10 @@ CrossValidationResult Trainer::run_cross_validation(
         }
     }
 
-    // Restore the original model weights and the pre-CV split (tensors, indices,
-    // scalers) so post-CV evaluators run against the original split.
-    {
-        std::istringstream iss(original_state);
-        torch::serialize::InputArchive archive;
-        archive.load_from(iss);
-        model_->load(archive);
-    }
+    restore_weights(original_weights);
     restore_split_state(split_snapshot);
-    run_metadata_ = original_run_metadata;
 
-    auto end_time = std::chrono::high_resolution_clock::now();
-    cv_result.total_time_seconds = std::chrono::duration<float>(end_time - start_time).count();
+    cv_result.total_time_seconds = static_cast<float>(seconds_since(start_time));
     return cv_result;
 }
 
@@ -2552,12 +2159,9 @@ CrossValidationResult Trainer::cross_validate_spatial(
     // fold index i lands on the plot whose coordinates produced it; otherwise
     // the block assignment is paired with a different plot's features and the
     // spatial split degenerates into a geographically-scrambled split.
-    torch::Tensor split_order_coords = coordinates_;
-    if (train_indices_.defined() && test_indices_.defined()) {
-        auto all_global_idx = torch::cat({train_indices_, test_indices_}, 0);
-        split_order_coords = coordinates_.index_select(
-            0, all_global_idx.to(coordinates_.device()));
-    }
+    const auto all_global_idx = torch::cat({train_indices_, test_indices_}, 0);
+    const auto split_order_coords =
+        coordinates_.index_select(0, all_global_idx.to(coordinates_.device()));
 
     auto folds = splitter.split(split_order_coords);
 
@@ -2587,25 +2191,20 @@ TensorMap Trainer::predict(const PlotInputs& inputs) {
 
     auto outputs = model_->forward(scaled.to(config_.device));
 
-    // Inverse-transform regression outputs back to original units (un-scale +
-    // log1p inverse), mirroring Predictor::predict. Classification outputs are
-    // returned as raw logits (this map is the low-level surface; argmax /
-    // softmax is the caller's choice).
+    // Regression outputs in original units, as Predictor::predict returns
+    // them. Classification outputs stay raw logits (this map is the low-level
+    // surface; argmax / softmax is the caller's choice).
     for (const auto& cfg : model_->schema().targets) {
         if (cfg.task != TaskType::Regression) continue;
         auto it = outputs.find(cfg.name);
         if (it == outputs.end()) continue;
 
-        auto pred = it->second.squeeze(-1);
+        torch::Tensor mean, scale;
         auto scaler_it = scalers_.target_scalers.find(cfg.name);
         if (scaler_it != scalers_.target_scalers.end()) {
-            pred = pred * scaler_it->second.second.to(pred.device()) +
-                   scaler_it->second.first.to(pred.device());
+            std::tie(mean, scale) = scaler_it->second;
         }
-        if (cfg.transform == TransformType::Log1p) {
-            pred = torch::expm1(torch::clamp(pred, kExpClampMin, kExpClampMax));
-        }
-        it->second = pred;
+        it->second = to_original_units(it->second.squeeze(-1), cfg.transform, mean, scale);
     }
 
     return outputs;

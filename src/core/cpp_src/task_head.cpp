@@ -1,4 +1,5 @@
 #include "resolve/encoder.hpp"
+#include "resolve/target_transform.hpp"
 #include <cmath>
 #include <stdexcept>
 
@@ -14,7 +15,7 @@ void TaskHeadImpl::init_output_layer(int64_t input_dim, int num_classes) {
     output_ = register_module("output", torch::nn::Linear(input_dim, out_features));
 }
 
-// Legacy constructor (single linear layer)
+// A single linear layer from the latent to the output
 TaskHeadImpl::TaskHeadImpl(
     int64_t latent_dim,
     TaskType task,
@@ -25,7 +26,7 @@ TaskHeadImpl::TaskHeadImpl(
     init_output_layer(latent_dim, num_classes);
 }
 
-// New constructor with configurable hidden layers
+// Hidden layers of the given widths, then the output layer
 TaskHeadImpl::TaskHeadImpl(
     int64_t latent_dim,
     TaskType task,
@@ -79,10 +80,7 @@ torch::Tensor TaskHeadImpl::predict(torch::Tensor latent) {
 }
 
 torch::Tensor TaskHeadImpl::inverse_transform(torch::Tensor predictions) {
-    if (transform_ == TransformType::Log1p) {
-        return torch::expm1(torch::clamp(predictions, kExpClampMin, kExpClampMax));
-    }
-    return predictions;
+    return to_original_units(std::move(predictions), transform_);
 }
 
 } // namespace resolve

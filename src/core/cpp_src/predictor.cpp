@@ -2,12 +2,14 @@
 #include "resolve/dataset.hpp"
 #include "resolve/continuous_block.hpp"
 #include "resolve/encoder.hpp"  // Fp32NormImpl (inference-time BN fusion)
+#include "resolve/target_transform.hpp"
 #include <algorithm>
 #include <atomic>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 
 namespace resolve {
 
@@ -336,17 +338,14 @@ ResolvePredictions Predictor::run_inference(
                         torch::argmax(probs, /*dim=*/1).to(torch::kCPU));
                     prob_chunks[cfg.name].push_back(probs.to(torch::kCPU));
                 } else {
-                    // Unscale and inverse transform
-                    pred = pred.squeeze(-1);
+                    torch::Tensor mean, scale;
                     auto scaler_it = scalers_.target_scalers.find(cfg.name);
                     if (scaler_it != scalers_.target_scalers.end()) {
-                        pred = pred * scaler_it->second.second.to(device_) +
-                               scaler_it->second.first.to(device_);
+                        std::tie(mean, scale) = scaler_it->second;
                     }
-                    if (cfg.transform == TransformType::Log1p) {
-                        pred = torch::expm1(torch::clamp(pred, kExpClampMin, kExpClampMax));
-                    }
-                    pred_chunks[cfg.name].push_back(pred.to(torch::kCPU));
+                    pred_chunks[cfg.name].push_back(
+                        to_original_units(pred.squeeze(-1), cfg.transform, mean, scale)
+                            .to(torch::kCPU));
                 }
             }
         }

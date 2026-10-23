@@ -261,6 +261,36 @@ def test_fit_writes_run_metadata_into_its_checkpoint(tmp_path, hash_dataset):
     assert meta.completed_at != ""
 
 
+def test_resume_continues_the_run_a_checkpoint_stopped(tmp_path, hash_dataset):
+    """A run resumed from a periodic checkpoint is the uninterrupted run."""
+    config = make_train_config(max_epochs=6)
+    config.patience = 50
+    config.checkpoint_dir = str(tmp_path / "ckpt")
+    config.checkpoint_every = 2
+
+    def trainer(seed: int) -> "rc.Trainer":
+        torch.manual_seed(seed)
+        t = rc.Trainer(rc.ResolveModel(hash_dataset.schema, make_model_config()), config)
+        t.prepare_data(hash_dataset, 0.25, 42)
+        return t
+
+    full = trainer(1).fit()
+    resumed = trainer(2).resume(str(tmp_path / "ckpt" / "checkpoint_4.pt"))
+
+    assert full.resumed_from_epoch == 0
+    assert resumed.resumed_from_epoch == 4
+    assert resumed.train_loss_history == full.train_loss_history
+    assert resumed.test_loss_history == full.test_loss_history
+    assert resumed.best_epoch == full.best_epoch
+
+
+def test_resume_refuses_a_checkpoint_without_run_progress(tmp_path, fitted_trainer):
+    path = str(tmp_path / "final.pt")
+    fitted_trainer.trainer.save(path)
+    with pytest.raises(ValueError, match="no run progress"):
+        fitted_trainer.trainer.resume(path)
+
+
 def test_load_state_restores_weights_in_place(tmp_path, hash_dataset, fitted_trainer):
     """``load_state`` is the first-class way to score a saved checkpoint.
 

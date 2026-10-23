@@ -119,6 +119,7 @@ RCPP_MODULE(resolve_module) {
         .method("prepare_data_from_dataset", &RTrainer::prepare_data_from_dataset, "Prepare training data from ResolveDataset")
         .method("prepare_data_stopping_fold", &RTrainer::prepare_data_stopping_fold, "Prepare training data from ResolveDataset, holding out the named plots for early stopping")
         .method("fit", &RTrainer::fit, "Train the model")
+        .method("resume", &RTrainer::resume, "Continue a run from a checkpoint fit() wrote while training")
         .method("save", &RTrainer::save, "Save model checkpoint")
         .method("get_scalers", &RTrainer::get_scalers, "Get fitted scalers")
         .method("get_config", &RTrainer::get_config, "Get training configuration")

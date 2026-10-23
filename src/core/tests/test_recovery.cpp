@@ -366,7 +366,7 @@ TEST_CASE("JEPA target encoder syncs BatchNorm buffers", "[recovery][jepa]") {
     JEPAPretrainer pretrainer(model, pcfg);
     // Hash-mode get_latent expects the hash embedding folded into continuous.
     auto cont = ds.continuous_block(/*include_hash=*/true);
-    pretrainer.pretrain(cont);
+    pretrainer.pretrain({.continuous = cont});
 
     // Find a BatchNorm running_mean buffer and compare online vs target.
     auto ctx_bufs = pretrainer.model()->named_buffers();
@@ -916,7 +916,7 @@ TEST_CASE("VAE pretraining reduces reconstruction loss", "[recovery][pretrain][v
     vcfg.device = torch::kCPU;
 
     VAEPretrainer pretrainer(vocab, vcfg);
-    auto result = pretrainer.pretrain(ds.species_vector());
+    auto result = pretrainer.pretrain(ds.plot_inputs());
     REQUIRE(result.recon_loss_history.size() >= 2);
     const float first = result.recon_loss_history.front();
     const float last = result.recon_loss_history.back();

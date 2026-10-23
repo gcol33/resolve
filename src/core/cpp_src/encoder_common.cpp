@@ -2,7 +2,6 @@
 #include "resolve/env.hpp"
 #include <cmath>
 #include <stdexcept>
-#include <cstdio>
 #include <ATen/autocast_mode.h>
 
 namespace resolve {
@@ -40,16 +39,6 @@ torch::Tensor run_norm_fp32(
 ) {
 #ifdef RESOLVE_HAS_CUDA
     if (fp32_norm_enabled() && at::autocast::is_autocast_enabled(at::kCUDA)) {
-        // One-time confirmation that the fp32 branch is actually reached under a
-        // live autocast region (diagnostic for gcol33/resolve#21).
-        static const bool amp_dbg = env_flag_enabled("RESOLVE_AMP_DEBUG");
-        static bool announced = false;
-        if (amp_dbg && !announced) {
-            announced = true;
-            std::fprintf(stderr, "[amp_dbg] run_norm_fp32: fp32 branch active "
-                                 "(autocast enabled during forward)\n");
-            std::fflush(stderr);
-        }
         // Locally disable autocast so the normalization (and, for BatchNorm, its
         // running-statistic update) runs in fp32. The guard re-enables autocast
         // even if norm_fwd throws; the autocast cast cache is keyed by nesting

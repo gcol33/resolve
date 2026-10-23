@@ -1,13 +1,16 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 #include "resolve/types.hpp"
 
+#include <c10/util/Exception.h>
+
 namespace resolve {
 
 // The default PYTORCH_CUDA_ALLOC_CONF value RESOLVE sets to tame WDDM
-// fragmentation. Single source for the two C++ callers (the nanobind
+// fragmentation, for the two C++ callers (the nanobind
 // configure_cuda_allocator entry point and the C-ABI native shim); the Python
 // package keeps its own copy in resolve_core/__init__.py because it must set the
 // env var BEFORE `import torch`, i.e. before this library is loaded. Includes
@@ -22,27 +25,25 @@ std::string default_cuda_alloc_conf();
 // allocator tuning is never overwritten silently. Late-bound: once the CUDA
 // caching allocator has initialized, changing the variable no longer affects
 // it, which is why resolve_core/__init__.py sets the same value before
-// `import torch`. Single source for the nanobind and C-ABI entry points, which
-// each carried a copy of this branch.
+// `import torch`. Shared by the nanobind and C-ABI entry points.
 std::string configure_cuda_allocator(bool force);
 
 // Limit the fraction of GPU VRAM that the PyTorch caching allocator may use
 // on the given CUDA device. Wraps
 // c10::cuda::CUDACachingAllocator::setMemoryFraction.
 //
-// fraction must be in (0, 1]; 1.0 is treated as "uncapped" and skips the call.
-// device_index = -1 (default) uses the current CUDA device.
+// fraction must be in (0, 1]; 1.0 means uncapped and leaves the allocator
+// alone. device_index = -1 (default) uses the current CUDA device.
 //
 // On Windows the WDDM driver spills allocations beyond device VRAM into shared
-// system memory, which causes the whole desktop to hang under load. Defaulting
-// to a fraction < 1.0 keeps headroom for the desktop compositor and other GPU
-// apps so the system stays usable while RESOLVE is training. On a dedicated
-// training server set this to 1.0 to use all available VRAM.
+// system memory, which hangs the whole desktop under load. A fraction < 1.0
+// keeps headroom for the desktop compositor and other GPU apps while RESOLVE
+// trains; a dedicated training server keeps the default 1.0.
 //
-// Silently no-ops when the library was built without CUDA support
-// (RESOLVE_HAS_CUDA undefined), when no CUDA devices are present at runtime,
-// or when fraction >= 1.0. Throws std::invalid_argument for fraction <= 0
-// or fraction > 1.
+// Changes nothing, and says so through `log`, when fraction == 1.0, when the
+// library was built without CUDA support (RESOLVE_HAS_CUDA undefined), or when
+// no CUDA device is present at runtime. Throws std::invalid_argument for
+// fraction <= 0 or fraction > 1, and for a device_index past the last device.
 void set_vram_fraction(
     double fraction,
     int device_index = -1,
@@ -61,8 +62,7 @@ void set_vram_fraction(
 // `out_new_batch_size` and retry. Returns false and fills `out_err_msg`
 // with a diagnostic that the caller must throw as std::runtime_error.
 //
-// Extracted into a free function so it can be unit-tested without needing
-// to actually exhaust CUDA VRAM.
+// A free function so it is testable without exhausting CUDA VRAM.
 bool decide_oom_retry(
     int prev_bs,
     int floor,
@@ -73,6 +73,38 @@ bool decide_oom_retry(
     std::string& out_err_msg
 );
 
+// Decision helper for an out-of-memory error in the trainer's held-out
+// forward (the per-epoch evaluation, the baselines and the test-fold
+// evaluators), which runs the fold in chunks of `prev_chunk` plots.
+//
+// An evaluation OOM shrinks the evaluation chunk and never the training batch:
+// the forward runs without gradients, so its memory is set by the chunk alone.
+// Returns true and fills `out_log_msg` when the caller should retry the failed
+// chunk at `out_new_chunk` = prev_chunk / 2. Returns false and fills
+// `out_err_msg` (for the caller to throw as std::runtime_error) when the chunk
+// is already one plot, or when `full_batch_required`: an architecture whose
+// forward must see the whole fold at once (Trainer's coordinate-kNN GNN) has
+// no chunk to shrink.
+bool decide_eval_chunk_retry(
+    int64_t prev_chunk,
+    bool full_batch_required,
+    const char* oom_what,
+    int64_t& out_new_chunk,
+    std::string& out_log_msg,
+    std::string& out_err_msg
+);
+
+// Whether `error` is a CUDA out-of-memory failure: the caching allocator's
+// c10::OutOfMemoryError (its reserved cap is hit), or a c10 error carrying
+// cudaErrorMemoryAllocation (a fresh cudaMalloc failed outright once the
+// allocator had already returned its free blocks to the driver).
+[[nodiscard]] bool is_out_of_memory(const c10::Error& error);
+
+// Return the CUDA caching allocator's free blocks to the device, so a retry
+// after an out-of-memory error has the headroom it is retried for. Does
+// nothing for a CPU device or a build without CUDA.
+void release_cached_device_memory(const torch::Device& device);
+
 // Whether Trainer::train_epoch runs the side-stream CUDA-hash prefetch, and so
 // whether it acquires the two CUDA streams that path needs.
 //
@@ -81,10 +113,9 @@ bool decide_oom_retry(
 // matters here: RESOLVE_HAS_CUDA is a COMPILE-time guard, so a CUDA-enabled
 // build reaches the prefetch setup on a device="cpu" run too, and acquiring the
 // streams there initializes the CUDA runtime -- which throws on a host with no
-// usable driver, a CPU queue node or CI runner (issue #114).
+// usable driver, a CPU queue node or CI runner.
 //
-// Pure logic, no torch dependency, so the decision is testable without a CUDA
-// device -- the same reason decide_oom_retry above is a free function.
+// Pure logic, so the decision is testable without a CUDA device.
 bool use_hash_prefetch(
     bool use_cuda_hash,
     bool device_is_cuda,

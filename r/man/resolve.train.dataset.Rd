@@ -17,6 +17,9 @@ resolve.train.dataset(
   stoppingPlots = NULL,
   seed = 42L,
   savePath = NULL,
+  checkpointDir = NULL,
+  checkpointEvery = 0L,
+  resumeFrom = NULL,
   lossConfig = "mae",
   ncaTemperature = 0.1,
   ncaNeighbors = 32L,
@@ -76,6 +79,23 @@ combined with \code{testSize}.}
 \item{seed}{Random seed (default 42)}
 
 \item{savePath}{Path to save model checkpoint (optional)}
+
+\item{checkpointDir}{Directory the run writes checkpoints to while it
+trains (optional): \code{best.pt} at every new best epoch,
+\verb{checkpoint_<N>.pt} every \code{checkpointEvery} epochs, \code{progress.json}
+after every epoch (see \code{\link[=resolve.progress]{resolve.progress()}}) and \code{checkpoint.pt} at the
+end. \code{best.pt} and \verb{checkpoint_<N>.pt} carry the run's progress, so
+\code{resumeFrom} can continue from them.}
+
+\item{checkpointEvery}{Also write \verb{checkpoint_<N>.pt} every this many
+epochs (default 0, \code{best.pt} only). Needs \code{checkpointDir}.}
+
+\item{resumeFrom}{A \code{best.pt} or \verb{checkpoint_<N>.pt} an interrupted run
+wrote (optional). The run continues at the epoch after it, with its
+optimizer, early-stopping and random-number state, as if it had never
+stopped; \code{result$resumed_from_epoch} names that epoch. Pass the
+interrupted run's dataset, model and training arguments and \code{seed}, so
+the split and recipe are the ones it trained on.}
 
 \item{lossConfig}{Loss configuration: "mae", "smape", "combined", or "nca"
 (default "mae"). "nca" takes the "combined" regression schedule and adds
@@ -155,9 +175,11 @@ A list with \code{trainer}, \code{result}, and \code{dataset}. \code{result} car
 vectors: each target's weighted term of the total, so per epoch they add
 up to it), \code{train_moe_aux_loss} (the mixture-of-experts load-balancing
 term of \code{train_loss}, which belongs to no target; empty without one),
-the per-target \code{baselines}, \code{diagnostics}, and \code{effective_batch_size} --
-the batch size the run actually trained at, which is smaller than
-\code{batchSize} when the CUDA auto-halve-on-OOM retry fired.
+the per-target \code{baselines} (the model against the training mean or mode,
+regression values in original units), \code{diagnostics}, \code{effective_batch_size}
+-- the batch size the run actually trained at, which is smaller than
+\code{batchSize} when the CUDA auto-halve-on-OOM retry fired -- and
+\code{resumed_from_epoch} (0 unless \code{resumeFrom} continued the run).
 }
 \description{
 Train a model using a ResolveDataset object loaded via resolve.dataset.csv().

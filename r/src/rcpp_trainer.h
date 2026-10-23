@@ -87,6 +87,10 @@ public:
 
     RObject fit() { return value_to_r_owned(resolve_trainer_fit(trainer_.get())); }
 
+    RObject resume(std::string checkpoint_path) {
+        return value_to_r_owned(resolve_trainer_resume(trainer_.get(), checkpoint_path.c_str()));
+    }
+
     void save(std::string path, Nullable<List> metadata = R_NilValue) {
         if (metadata.isNotNull()) {
             ValuePtr md(r_list_to_value_map(as<List>(metadata), "metadata"));

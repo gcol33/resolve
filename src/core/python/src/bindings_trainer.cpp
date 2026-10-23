@@ -53,6 +53,16 @@ void register_trainer(nb::module_& m) {
                "(dict name -> (n_plots,) tensor). A seeded random test_size "
                "fraction is held out."))
         .def("fit", &resolve::Trainer::fit, nb::call_guard<nb::gil_scoped_release>())
+        .def("resume", &resolve::Trainer::resume, nb::arg("checkpoint_path"),
+             nb::call_guard<nb::gil_scoped_release>(),
+             "Continue a run from a checkpoint fit() wrote while training (best.pt "
+             "or checkpoint_<N>.pt under TrainConfig.checkpoint_dir) at the epoch "
+             "after it, with its optimizer, early-stopping, AMP and RNG state, and "
+             "return the result of the whole run (resumed_from_epoch names where it "
+             "continued). The trainer must hold the run's model architecture and "
+             "recipe (Trainer.load_train_config) and be prepared on the run's data "
+             "with its seed. Raises ValueError for a checkpoint without run "
+             "progress or a split that differs from the run's.")
         .def("save", [](const resolve::Trainer& self, const std::string& path, nb::object metadata_obj) {
             if (metadata_obj.is_none()) {
                 self.save(path);
@@ -201,7 +211,7 @@ void register_trainer(nb::module_& m) {
            nb::call_guard<nb::gil_scoped_release>(),
            "Predict on a ResolveDataset. batch_size controls how the forward "
            "pass is chunked along dim 0: -1 = single forward over the whole "
-           "dataset (legacy, can OOM on >150k plots at typical hidden sizes); "
+           "dataset (can OOM on >150k plots at typical hidden sizes); "
            ">0 = chunked forward with results concatenated on CPU. Default "
            "4096 keeps peak VRAM bounded on 16 GiB-class GPUs.")
         .def("get_embeddings", [](resolve::Predictor& self, nb::args args, nb::kwargs kwargs) {

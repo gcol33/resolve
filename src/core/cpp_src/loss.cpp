@@ -1,5 +1,6 @@
 #include "resolve/loss.hpp"
 #include "resolve/target_labels.hpp"
+#include "resolve/target_transform.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -10,9 +11,8 @@ namespace {
 // Elementwise symmetric mean absolute percentage error, standard definition:
 //   |pred - target| / ((|pred| + |target|) / 2 + eps)
 // The /2 in the denominator gives the conventional [0, 2] range that sklearn and
-// the SMAPE literature use; omitting it halves every value (issue #95). Single
-// source of truth for the reported Metrics::smape and the phased-loss SMAPE term
-// so the two cannot drift apart.
+// the SMAPE literature use. Shared by the reported Metrics::smape and the
+// phased-loss SMAPE term.
 inline torch::Tensor smape_terms(const torch::Tensor& pred, const torch::Tensor& target, float eps) {
     auto numerator = torch::abs(pred - target);
     auto denominator = (torch::abs(pred) + torch::abs(target)) * 0.5f + eps;
@@ -105,22 +105,9 @@ torch::Tensor PhasedLoss::regression_loss(
         return mae;
     }
 
-    // For phases 2 and 3, we need original scale values
-    torch::Tensor pred_orig, target_orig;
-
-    if (scaler_mean.defined() && scaler_scale.defined()) {
-        pred_orig = pred * scaler_scale + scaler_mean;
-        target_orig = target * scaler_scale + scaler_mean;
-    } else {
-        pred_orig = pred;
-        target_orig = target;
-    }
-
-    // Apply inverse transform if log1p was used
-    if (transform == TransformType::Log1p) {
-        pred_orig = torch::expm1(torch::clamp(pred_orig, /*min=*/-88.0f, /*max=*/88.0f));
-        target_orig = torch::expm1(target_orig);
-    }
+    // Phases 2 and 3 score the values in original units.
+    const auto pred_orig = to_original_units(pred, transform, scaler_mean, scaler_scale);
+    const auto target_orig = to_original_units(target, transform, scaler_mean, scaler_scale);
 
     // SMAPE loss (standard symmetric form, shared with Metrics::smape)
     auto smape = smape_terms(pred_orig, target_orig, eps_).mean();
@@ -183,8 +170,23 @@ MultiTaskLoss::MultiTaskLoss(
     float band_threshold,
     NCATerm nca
 ) : targets_(targets),
-    phased_loss_(PhasedLoss::from_config(loss_config, phase_boundaries, band_threshold, nca))
-{}
+    phased_loss_(PhasedLoss::from_config(loss_config, phase_boundaries, band_threshold, nca)),
+    class_weights_(targets.size())
+{
+    for (size_t i = 0; i < targets_.size(); ++i) {
+        const auto& weights = targets_[i].class_weights;
+        if (weights.empty()) continue;
+        class_weights_[i] = torch::tensor(weights, torch::kFloat32);
+    }
+}
+
+const torch::Tensor& MultiTaskLoss::class_weights_on(size_t i, torch::Device device) const {
+    auto& weights = class_weights_[i];
+    if (weights.defined() && weights.device() != device) {
+        weights = weights.to(device);
+    }
+    return weights;
+}
 
 bool MultiTaskLoss::objective_settled(int epoch, int last_epoch) const {
     const bool has_regression = std::any_of(targets_.begin(), targets_.end(),
@@ -215,7 +217,8 @@ std::pair<torch::Tensor, std::unordered_map<std::string, torch::Tensor>> MultiTa
     torch::Tensor total_loss = torch::zeros(
         {}, torch::TensorOptions().dtype(torch::kFloat32).device(acc_device));
 
-    for (const auto& cfg : targets_) {
+    for (size_t i = 0; i < targets_.size(); ++i) {
+        const auto& cfg = targets_[i];
         auto pred_it = predictions.find(cfg.name);
         auto target_it = targets.find(cfg.name);
 
@@ -251,16 +254,8 @@ std::pair<torch::Tensor, std::unordered_map<std::string, torch::Tensor>> MultiTa
                 scaler_mean, scaler_scale, cfg.transform
             );
         } else {
-            // Convert class_weights vector to tensor if provided
-            torch::Tensor class_weights_tensor;
-            if (!cfg.class_weights.empty()) {
-                class_weights_tensor = torch::from_blob(
-                    const_cast<float*>(cfg.class_weights.data()),
-                    {static_cast<int64_t>(cfg.class_weights.size())},
-                    torch::kFloat32
-                ).clone().to(pred.device());
-            }
-            loss = phased_loss_.classification_loss(pred, target, class_weights_tensor);
+            loss = phased_loss_.classification_loss(pred, target,
+                                                    class_weights_on(i, pred.device()));
         }
 
         losses[cfg.name] = loss;
@@ -307,6 +302,10 @@ float Metrics::mae(torch::Tensor pred, torch::Tensor target) {
     return torch::abs(pred - target).mean().item<float>();
 }
 
+float Metrics::mse(torch::Tensor pred, torch::Tensor target) {
+    return torch::pow(pred - target, 2).mean().item<float>();
+}
+
 float Metrics::rmse(torch::Tensor pred, torch::Tensor target) {
     return torch::sqrt(torch::pow(pred - target, 2).mean()).item<float>();
 }
@@ -321,8 +320,6 @@ float Metrics::r_squared(torch::Tensor pred, torch::Tensor target) {
     // Constant target: R^2 is undefined (no variance to explain). Report a
     // perfect fit only when the predictions also match the constant; otherwise
     // there is no explained variance, so report 0 rather than a spurious 1.0.
-    // (Matches fit()'s baseline-R^2 path, which leaves R^2 at its default when
-    // ss_tot ~ 0 instead of asserting a perfect fit.)
     if (ss_tot.item<float>() < 1e-10f) {
         return (ss_res.item<float>() < 1e-10f) ? 1.0f : 0.0f;
     }
@@ -335,25 +332,17 @@ float Metrics::accuracy(torch::Tensor pred, torch::Tensor target) {
 }
 
 torch::Tensor Metrics::confusion_matrix(torch::Tensor pred, torch::Tensor target, int num_classes) {
-    auto pred_classes = torch::argmax(pred, /*dim=*/1);
-    auto cm = torch::zeros({num_classes, num_classes}, torch::kInt64);
-
-    auto pred_cpu = pred_classes.to(torch::kCPU);
-    auto target_cpu = target.to(torch::kCPU);
-
-    auto pred_accessor = pred_cpu.accessor<int64_t, 1>();
-    auto target_accessor = target_cpu.accessor<int64_t, 1>();
-
-    for (int64_t i = 0; i < pred_cpu.size(0); ++i) {
-        int64_t true_class = target_accessor[i];
-        int64_t pred_class = pred_accessor[i];
-        if (true_class >= 0 && true_class < num_classes &&
-            pred_class >= 0 && pred_class < num_classes) {
-            cm[true_class][pred_class] += 1;
-        }
-    }
-
-    return cm;
+    // Cell (true, predicted) counts the rows with that pair; a row whose code
+    // lies outside [0, num_classes) is not counted.
+    const auto pred_classes = torch::argmax(pred, /*dim=*/1).to(torch::kLong);
+    const auto true_classes = target.to(pred_classes.device()).to(torch::kLong).reshape({-1});
+    const auto in_range = (true_classes >= 0) & (true_classes < num_classes) &
+                          (pred_classes >= 0) & (pred_classes < num_classes);
+    const auto cell = (true_classes * num_classes + pred_classes).masked_select(in_range);
+    const int64_t n_cells = static_cast<int64_t>(num_classes) * num_classes;
+    return torch::bincount(cell, /*weights=*/{}, n_cells)
+        .reshape({num_classes, num_classes})
+        .to(torch::kCPU);
 }
 
 ClassificationMetrics Metrics::classification_metrics(torch::Tensor pred, torch::Tensor target, int num_classes) {
@@ -407,10 +396,8 @@ ClassificationMetrics Metrics::classification_metrics(torch::Tensor pred, torch:
         // per-class P/R are imbalanced). Average per_class_f1 directly over ALL
         // labels: a class with no support in this fold contributes f1=0 (its
         // recall is 0), matching sklearn f1_score(average='macro',
-        // labels=range(num_classes)). Excluding zero-support classes would read
-        // systematically higher and diverge from the reported convention
-        // (issue #75). Weighted-F1 weights by support, so an absent class adds
-        // zero and needs no special case.
+        // labels=range(num_classes)). Weighted-F1 weights by support, so an
+        // absent class adds zero and needs no special case.
         macro_f1_sum += f1;
         weighted_f1_sum += f1 * support;
     }
@@ -502,25 +489,11 @@ std::unordered_map<std::string, float> Metrics::compute(
             pred = pred.squeeze(1);
         }
 
-        // Map back to original units so every reported metric is in the same,
-        // interpretable space. Training stores regression targets standardized
-        // ((x - mean) / scale) and, for Log1p targets, log1p-transformed first;
-        // the model therefore predicts in standardized(-log) space. Undo the
-        // standardization, then the transform, matching PhasedLoss. Without the
-        // scalers, mae/rmse were reported in standardized units and smape/band
-        // took ratios of values straddling zero -- both meaningless.
-        torch::Tensor pred_orig = pred;
-        torch::Tensor target_orig = target;
-
-        if (scaler_mean.defined() && scaler_scale.defined()) {
-            pred_orig = pred_orig * scaler_scale + scaler_mean;
-            target_orig = target_orig * scaler_scale + scaler_mean;
-        }
-
-        if (transform == TransformType::Log1p) {
-            pred_orig = torch::expm1(torch::clamp(pred_orig, /*min=*/-88.0f, /*max=*/88.0f));
-            target_orig = torch::expm1(target_orig);
-        }
+        // Every reported metric is in original units: the model predicts in
+        // standardised(-log1p) space, and SMAPE / band take ratios that are
+        // meaningless on values standardised around zero.
+        const auto pred_orig = to_original_units(pred, transform, scaler_mean, scaler_scale);
+        const auto target_orig = to_original_units(target, transform, scaler_mean, scaler_scale);
 
         metrics["mae"] = mae(pred_orig, target_orig);
         metrics["rmse"] = rmse(pred_orig, target_orig);
@@ -538,7 +511,7 @@ std::unordered_map<std::string, float> Metrics::compute(
 }
 
 // =============================================================================
-// NCA Loss implementation
+// NCA objective
 // =============================================================================
 
 torch::Tensor nca_objective(
@@ -592,73 +565,13 @@ torch::Tensor nca_objective(
     auto log_prob_correct = torch::logsumexp(masked_log_probs, /*dim=*/1);  // (batch,)
 
     // Negated eq. (6) objective. Samples with no same-class neighbour in the
-    // batch contribute 0 and are excluded from the denominator (issue #90);
-    // dividing by batch_size instead diluted the loss/gradient scale by the
-    // fraction of samples lacking an in-batch same-class neighbour, making the
-    // magnitude depend on class rarity within the batch.
+    // batch contribute 0 and are excluded from the denominator, so the scale
+    // does not depend on how many samples lack an in-batch partner.
     auto has_neighbor = same_class.sum(1) > 0;
     auto nca_loss = -log_prob_correct * has_neighbor.to(torch::kFloat32);
 
     auto n_contrib = has_neighbor.to(torch::kFloat32).sum().clamp_min(1.0f);
     return nca_loss.sum() / n_contrib;
-}
-
-NCALossImpl::NCALossImpl(
-    int64_t latent_dim,
-    int64_t n_classes,
-    float temperature,
-    int n_neighbors
-) : n_classes_(n_classes),
-    temperature_(temperature),
-    n_neighbors_(n_neighbors)
-{
-    // Initialize reference set as empty
-    ref_embeddings_ = register_buffer("ref_embeddings",
-        torch::empty({0, latent_dim}));
-    ref_labels_ = register_buffer("ref_labels",
-        torch::empty({0}, torch::kLong));
-}
-
-torch::Tensor NCALossImpl::forward(
-    torch::Tensor latent,
-    torch::Tensor targets
-) {
-    return nca_objective(std::move(latent), std::move(targets),
-                         temperature_, n_neighbors_);
-}
-
-torch::Tensor NCALossImpl::predict(torch::Tensor latent) {
-    if (ref_embeddings_.size(0) == 0) {
-        throw std::runtime_error(
-            "NCALoss::predict requires reference set. Call update_references() first.");
-    }
-
-    // Normalize
-    auto latent_norm = torch::nn::functional::normalize(latent,
-        torch::nn::functional::NormalizeFuncOptions().dim(1));
-    auto ref_norm = torch::nn::functional::normalize(ref_embeddings_,
-        torch::nn::functional::NormalizeFuncOptions().dim(1));
-
-    // Similarity to reference set: (n_query, n_ref)
-    auto sim = torch::mm(latent_norm, ref_norm.t()) / temperature_;
-    auto probs = torch::softmax(sim, /*dim=*/1);  // (n_query, n_ref)
-
-    // Aggregate probabilities by class -- the paper's eq. (2) p_i, evaluated
-    // against the stored reference set instead of the training batch, which is
-    // the stochastic-neighbour classification rule NCA is trained for.
-    auto class_probs = torch::zeros({latent.size(0), n_classes_}, latent.options());
-    for (int64_t c = 0; c < n_classes_; ++c) {
-        auto class_mask = (ref_labels_ == c).to(torch::kFloat32);  // (n_ref,)
-        class_probs.select(1, c) = torch::mv(probs, class_mask);
-    }
-
-    return class_probs;  // (n_query, n_classes)
-}
-
-void NCALossImpl::update_references(torch::Tensor latent, torch::Tensor targets) {
-    torch::NoGradGuard no_grad;
-    ref_embeddings_ = latent.detach().clone();
-    ref_labels_ = targets.detach().clone();
 }
 
 } // namespace resolve

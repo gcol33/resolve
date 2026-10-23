@@ -680,7 +680,11 @@ struct TrainConfig {
     int nca_neighbors = kNCANeighbors;
     float nca_weight = kNCAWeight;
 
-    // Checkpointing
+    // Checkpointing. With a directory, fit() writes best.pt at every new best
+    // epoch, checkpoint_<N>.pt every checkpoint_every epochs (0 = best only),
+    // progress.json after every epoch and checkpoint.pt at the end. best.pt and
+    // checkpoint_<N>.pt carry the run's progress, which Trainer::resume
+    // continues from.
     std::string checkpoint_dir;   // Directory for checkpoints (empty = disabled)
     int checkpoint_every = 0;     // Save checkpoint every N epochs (0 = only best)
 
@@ -719,12 +723,16 @@ struct TrainConfig {
     int batch_size_floor = 1024;
 };
 
-// Baseline comparison metrics for a single target
-// Allows users to understand if the model is actually learning vs naive baselines
+// The held-out fold scored against a naive baseline, for a single target:
+// whether the model learns more than the training mean (regression) or the
+// training mode (classification). Regression values are in the target's
+// original units, and the model's scores are the ones final_metrics reports
+// (model_mae == final_metrics[target]["mae"], r_squared == ["r2"],
+// model_accuracy == ["accuracy"]).
 struct BaselineMetrics {
     // Regression baselines
-    float baseline_mse = 0.0f;        // MSE if predicting global training mean
-    float baseline_mae = 0.0f;        // MAE if predicting global training mean
+    float baseline_mse = 0.0f;        // MSE if predicting the training mean
+    float baseline_mae = 0.0f;        // MAE if predicting the training mean
     float model_mse = 0.0f;           // Model's test MSE
     float model_mae = 0.0f;           // Model's test MAE
     float skill_score = 0.0f;         // 1 - (model_mse / baseline_mse), higher is better
@@ -736,7 +744,7 @@ struct BaselineMetrics {
     float accuracy_lift = 0.0f;       // model_accuracy - baseline_accuracy
 
     // Common
-    float training_mean = 0.0f;       // Mean of training targets (for regression)
+    float training_mean = 0.0f;       // Mean of the training targets, original units (regression)
     int training_mode = -1;           // Mode class (for classification)
 };
 
@@ -788,7 +796,10 @@ struct TrainResult {
     std::unordered_map<std::string, std::vector<float>> test_loss_history_by_target;
     std::vector<float> train_moe_aux_loss_history;
 
+    // Training time of the whole run, a resumed run's earlier epochs included.
     float train_time_seconds = 0.0f;
+    // The epoch a Trainer::resume continued the run from (its histories hold
+    // the earlier epochs too); 0 for a run fit() trained from the start.
     int resumed_from_epoch = 0;
 
     // The batch size this run actually trained at, i.e. the value after any

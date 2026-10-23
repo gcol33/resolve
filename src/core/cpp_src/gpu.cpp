@@ -121,6 +121,61 @@ bool decide_oom_retry(
     return true;
 }
 
+bool decide_eval_chunk_retry(
+    int64_t prev_chunk,
+    bool full_batch_required,
+    const char* oom_what,
+    int64_t& out_new_chunk,
+    std::string& out_log_msg,
+    std::string& out_err_msg
+) {
+    const char* what = oom_what == nullptr ? "<null>" : oom_what;
+    const int64_t new_chunk = prev_chunk / 2;
+    if (full_batch_required || new_chunk < 1) {
+        out_new_chunk = prev_chunk;
+        std::ostringstream err;
+        err << "CUDA out of memory in the held-out forward over " << prev_chunk
+            << " plot(s)";
+        if (full_batch_required) {
+            err << "; this architecture forwards the whole held-out fold at once, "
+                   "so there is no chunk to shrink. Hold out fewer plots, reduce "
+                   "the model size, or raise vram_fraction (if a cap is in effect).";
+        } else {
+            err << ", already one plot per chunk. Reduce the model size or raise "
+                   "vram_fraction (if a cap is in effect).";
+        }
+        err << " Original OOM: " << what;
+        out_err_msg = err.str();
+        out_log_msg.clear();
+        return false;
+    }
+
+    out_new_chunk = new_chunk;
+    std::ostringstream msg;
+    msg << "OOM in the held-out forward at " << prev_chunk
+        << " plots per chunk; retrying at " << new_chunk;
+    out_log_msg = msg.str();
+    out_err_msg.clear();
+    return true;
+}
+
+bool is_out_of_memory(const c10::Error& error) {
+    if (dynamic_cast<const c10::OutOfMemoryError*>(&error) != nullptr) return true;
+    const std::string what = error.what();
+    return what.find("out of memory") != std::string::npos ||
+           what.find("cudaErrorMemoryAllocation") != std::string::npos;
+}
+
+void release_cached_device_memory(const torch::Device& device) {
+#ifdef RESOLVE_HAS_CUDA
+    if (device.is_cuda()) {
+        c10::cuda::CUDACachingAllocator::emptyCache();
+    }
+#else
+    (void)device;
+#endif
+}
+
 bool use_hash_prefetch(bool use_cuda_hash, bool device_is_cuda,
                        int64_t n_train, int64_t batch_size) {
     return use_cuda_hash && device_is_cuda && n_train > batch_size;

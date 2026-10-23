@@ -157,7 +157,7 @@ TEST_CASE("VAEPretrainer pretrain runs", "[vae]") {
     VAEPretrainer pretrainer(20, config);
     auto species = torch::randn({32, 20}).abs();
 
-    auto result = pretrainer.pretrain(species);
+    auto result = pretrainer.pretrain({.species_vector = species});
 
     REQUIRE(result.epochs_completed == 2);
     REQUIRE(result.loss_history.size() == 2);

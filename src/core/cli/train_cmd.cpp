@@ -508,10 +508,17 @@ int train_command(const ParsedArgs& args) {
         trainer.prepare_data(dataset, args.get_float("--test-size"), seed);
     }
 
+    std::string resume_path;
+    const bool resume = args.get_if_present("--resume", resume_path);
+
     // Cross-validation runs first and restores the trainer's weights and split
     // when it finishes, so the model saved below is the same one a run without
     // --cv-folds produces.
     const int cv_folds = args.get_int("--cv-folds");
+    if (resume && cv_folds > 0) {
+        std::cerr << "Error: pass --resume or --cv-folds, not both" << std::endl;
+        return 1;
+    }
     if (cv_folds > 0) {
         std::cout << "\nCross-validating..." << std::endl;
         try {
@@ -536,8 +543,20 @@ int train_command(const ParsedArgs& args) {
         }
     }
 
-    std::cout << "\nTraining..." << std::endl;
-    auto result = trainer.fit();
+    TrainResult result;
+    if (resume) {
+        std::cout << "\nResuming from " << resume_path << "..." << std::endl;
+        try {
+            result = trainer.resume(resume_path);
+        } catch (const std::invalid_argument& e) {
+            std::cerr << "Error: --resume: " << e.what() << std::endl;
+            return 1;
+        }
+        std::cout << "Resumed at epoch " << result.resumed_from_epoch << std::endl;
+    } else {
+        std::cout << "\nTraining..." << std::endl;
+        result = trainer.fit();
+    }
 
     // ------------------------------------------------------------- report
     std::cout << "\n================" << std::endl;
@@ -546,7 +565,7 @@ int train_command(const ParsedArgs& args) {
     std::cout << "Training time: " << result.train_time_seconds << "s" << std::endl;
     // The batch size the run actually trained at. fit() restores
     // config().batch_size to the requested value before returning, so the
-    // effective value is the one the result carries (issue #105).
+    // effective value is the one the result carries.
     std::cout << "Effective batch size: " << result.effective_batch_size;
     if (result.effective_batch_size != requested_batch_size) {
         std::cout << " (requested " << requested_batch_size

@@ -148,20 +148,24 @@ encoder on composition alone, then hand the weights to a supervised fit:
 
 ```python
 # `continuous` is the encoder's continuous block: coordinates, covariates, the
-# unknown-mass columns, and the hash embedding in hash mode, concatenated.
+# unknown-mass columns, and the hash embedding in hash mode, concatenated. The
+# other model inputs (species IDs, pool tensors, categoricals) go by keyword.
 jepa = rc.JEPAPretrainer(model, rc.PretrainConfig())    # joint-embedding prediction
 jepa.pretrain(continuous,
               genus_ids=dataset.genus_ids,
               family_ids=dataset.family_ids,
-              species_ids=dataset.species_ids)
+              species_ids=dataset.species_ids,
+              categorical_ids=dataset.categorical_ids)
 
 scarf = rc.SCARFPretrainer(model, rc.PretrainConfig())  # contrastive corruption
 vae   = rc.VAEPretrainer(dataset.species_vector.shape[1], rc.VAEConfig())
 vae.pretrain(dataset.species_vector)                    # variational reconstruction
 ```
 
-Masked-entity modelling is available alongside them, masking entity identities so the
-pretext task cannot read its own answer.
+Every pretext view corrupts every input the encoder reads, the species IDs, pool
+tensors and categorical covariates included, so no task can read its own answer.
+Masked-entity modelling (`rc.MaskedSpeciesPretrainer(model)`) trains a transformer
+encoder by predicting masked species from the rest of the plot.
 
 ## From the command line
 

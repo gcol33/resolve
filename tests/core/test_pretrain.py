@@ -1,4 +1,4 @@
-"""Self-supervised pretraining surface (SCARF, JEPA, VAE).
+"""Self-supervised pretraining surface (SCARF, JEPA, masked species, VAE).
 
 Coverage kind: structure / plumbing plus config validation. The pretrainers run
 for a couple of epochs and are checked for a populated loss history and for
@@ -7,9 +7,9 @@ copy would report losses while leaving the model untouched. Whether the
 pretext task *helps* downstream is not asserted; that is a research question,
 not a contract.
 
-The masking semantics (BERT-style 80/10/10, JEPA context masking, SCARF's
-species-side view) are pinned by Catch2 in ``src/core/tests/test_mlm_pretrain.cpp``
-and ``test_new_modules.cpp``.
+The masking semantics (BERT-style 80/10/10, the JEPA context view and the SCARF
+corrupted view over every model input) are pinned by Catch2 in
+``src/core/tests/test_mlm_pretrain.cpp`` and ``test_pretrain_inputs.cpp``.
 """
 
 from __future__ import annotations
@@ -82,6 +82,73 @@ def test_pretraining_updates_the_encoder_weights(pretrain_inputs, name, cls):
     assert not torch.allclose(before, after)
 
 
+@pytest.mark.parametrize(
+    ("name", "cls"),
+    [("scarf", rc.SCARFPretrainer), ("jepa", rc.JEPAPretrainer)],
+)
+def test_pretraining_reads_the_pool_inputs(pool_dataset, name, cls):
+    """The pool tensors reach the rank-pool encoder, so its species table trains."""
+    config = make_model_config(rc.SpeciesEncodingMode.RankPool)
+    model = rc.ResolveModel(pool_dataset.schema, config)
+    species_before = model.named_parameters()
+    keys = [key for key in species_before if "species" in key]
+    assert keys
+    before = {key: species_before[key].detach().clone() for key in keys}
+
+    cls(model, _pretrain_config(2)).pretrain(
+        trainer_continuous(pool_dataset, config),
+        genus_ids=pool_dataset.genus_ids,
+        family_ids=pool_dataset.family_ids,
+        species_ids=pool_dataset.species_ids,
+        pool_genus_ids=pool_dataset.pool_genus_ids,
+        pool_family_ids=pool_dataset.pool_family_ids,
+        pool_weights=pool_dataset.pool_weights,
+        pool_mask=pool_dataset.pool_mask,
+        pool_has_cover=pool_dataset.pool_has_cover,
+    )
+
+    after = model.named_parameters()
+    assert any(not torch.allclose(before[key], after[key]) for key in keys)
+
+
+def test_pretrain_rejects_an_unknown_input(pretrain_inputs):
+    model, continuous, _, _ = pretrain_inputs
+    with pytest.raises(TypeError, match="speciess_ids"):
+        rc.JEPAPretrainer(model, _pretrain_config(1)).pretrain(
+            continuous, speciess_ids=continuous)
+
+
+def test_masked_species_pretraining_trains_a_transformer_model(pool_dataset):
+    config = make_model_config(rc.SpeciesEncodingMode.Transformer)
+    config.d_model = 16
+    config.n_heads = 2
+    config.n_attention_layers = 1
+    model = rc.ResolveModel(pool_dataset.schema, config)
+    before = _flat_weights(model).clone()
+
+    mlm = rc.MLMPretrainConfig()
+    mlm.pretrain_epochs = 2
+    mlm.batch_size = 16
+    mlm.mask_prob = 0.5
+    result = rc.MaskedSpeciesPretrainer(model, mlm).pretrain(
+        species_ids=pool_dataset.species_ids,
+        pool_genus_ids=pool_dataset.pool_genus_ids,
+        pool_family_ids=pool_dataset.pool_family_ids,
+        pool_weights=pool_dataset.pool_weights,
+        pool_mask=pool_dataset.pool_mask,
+    )
+
+    assert result.epochs_completed == 2
+    assert len(result.loss_history) == 2
+    assert not torch.allclose(before, _flat_weights(model))
+
+
+def test_masked_species_pretraining_needs_a_transformer_model(pretrain_inputs):
+    model, _, _, _ = pretrain_inputs
+    with pytest.raises(ValueError, match="transformer"):
+        rc.MaskedSpeciesPretrainer(model)
+
+
 def test_omitted_taxonomy_is_read_as_absent_not_as_a_tensor(pretrain_inputs):
     """The optional args must be genuinely omittable.
 
@@ -134,6 +201,8 @@ def test_vae_pretrainer_runs_over_a_species_matrix(hash_dataset):
     pretrainer = rc.VAEPretrainer(n_species, config)
     vectors = torch.rand(hash_dataset.n_plots, n_species)
     result = pretrainer.pretrain(vectors)
+    by_keyword = pretrainer.pretrain(species_vector=vectors)
+    assert len(by_keyword.loss_history) == 2
 
     assert result.epochs_completed == 2
     assert len(result.loss_history) == 2

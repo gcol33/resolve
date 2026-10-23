@@ -159,7 +159,8 @@ TEST_CASE("SCARF pretrain runs on embed encoder with masked species views",
     auto genus_ids = torch::randint(1, 25, {64, 3});
     auto family_ids = torch::randint(1, 15, {64, 3});
 
-    auto result = pretrainer.pretrain(continuous, genus_ids, family_ids, species_ids, {});
+    auto result = pretrainer.pretrain({.continuous = continuous, .genus_ids = genus_ids,
+                                       .family_ids = family_ids, .species_ids = species_ids});
 
     REQUIRE(result.epochs_completed == 2);
     REQUIRE(result.loss_history.size() == 2);

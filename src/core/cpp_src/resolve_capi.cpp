@@ -1941,6 +1941,14 @@ resolve_value_t* resolve_trainer_fit(resolve_trainer_t* t) {
     })
 }
 
+resolve_value_t* resolve_trainer_resume(resolve_trainer_t* t, const char* checkpoint_path) {
+    CAPI_BODY_PTR({
+        if (!t) throw std::runtime_error("resume: null handle");
+        if (!checkpoint_path) throw std::runtime_error("resume: null checkpoint path");
+        return train_result_to_value(t->trainer->resume(checkpoint_path));
+    })
+}
+
 int resolve_trainer_save(resolve_trainer_t* t, const char* path, const resolve_value_t* metadata) {
     CAPI_BODY_INT({
         if (!t) throw std::runtime_error("save: null handle");

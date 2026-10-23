@@ -175,13 +175,15 @@ try:
         TargetSpec,
         # Dataset
         ResolveDataset,
-        # Pretraining (v3.0)
+        # Pretraining
         MaskStrategy,
         PretrainConfig,
         PretrainResult,
         JEPAPretrainer,
         SCARFPretrainer,
-        # VAE (v3.0)
+        MLMPretrainConfig,
+        MaskedSpeciesPretrainer,
+        # VAE
         VAEConfig,
         VAEPretrainResult,
         VAEPretrainer,
@@ -387,13 +389,15 @@ __all__ = [
     "TargetSpec",
     # Dataset
     "ResolveDataset",
-    # Pretraining (v3.0)
+    # Pretraining
     "MaskStrategy",
     "PretrainConfig",
     "PretrainResult",
     "JEPAPretrainer",
     "SCARFPretrainer",
-    # VAE (v3.0)
+    "MLMPretrainConfig",
+    "MaskedSpeciesPretrainer",
+    # VAE
     "VAEConfig",
     "VAEPretrainResult",
     "VAEPretrainer",

@@ -575,53 +575,16 @@ TEST_CASE("macro_f1 includes zero-support classes", "[metrics][classification]")
 }
 
 // ============================================================================
-// NCALoss
+// NCA objective
 // ============================================================================
 
-TEST_CASE("NCALoss forward returns scalar", "[nca]") {
-    NCALoss nca(32, 5, 0.1f, 16);
-
+TEST_CASE("nca_objective returns a positive scalar", "[nca]") {
     auto latent = torch::randn({16, 32});
     auto targets = torch::randint(0, 5, {16});
 
-    // Must first populate reference set
-    nca->update_references(latent, targets);
-
-    auto loss = nca->forward(latent, targets);
+    auto loss = nca_objective(latent, targets, 0.1f, 16);
     REQUIRE(loss.dim() == 0);  // Scalar
     REQUIRE(loss.item<float>() > 0.0f);
-}
-
-TEST_CASE("NCALoss predict returns class probabilities", "[nca]") {
-    NCALoss nca(32, 5, 0.1f, 16);
-
-    auto ref_latent = torch::randn({32, 32});
-    auto ref_targets = torch::randint(0, 5, {32});
-    nca->update_references(ref_latent, ref_targets);
-
-    auto query = torch::randn({8, 32});
-    auto probs = nca->predict(query);
-
-    REQUIRE(probs.size(0) == 8);
-    REQUIRE(probs.size(1) == 5);
-
-    // Probabilities should sum to ~1
-    auto sums = probs.sum(1);
-    for (int i = 0; i < 8; ++i) {
-        REQUIRE_THAT(sums[i].item<float>(), WithinAbs(1.0f, 1e-4f));
-    }
-}
-
-TEST_CASE("NCALoss update_references", "[nca]") {
-    NCALoss nca(16, 3, 0.1f, 8);
-
-    auto latent1 = torch::randn({10, 16});
-    auto targets1 = torch::randint(0, 3, {10});
-    nca->update_references(latent1, targets1);
-
-    // Should not crash on forward after update
-    auto loss = nca->forward(latent1, targets1);
-    REQUIRE(loss.item<float>() >= 0.0f);
 }
 
 TEST_CASE("NCA loss averages over contributing samples only", "[loss][nca]") {
@@ -630,9 +593,6 @@ TEST_CASE("NCA loss averages over contributing samples only", "[loss][nca]") {
     // negligible influence on the others' softmax at temperature 0.1) contributes
     // 0 to the loss. Dividing by the number of contributing samples keeps the
     // loss ~unchanged; a batch-size divisor would shrink it by a factor 4/5.
-    NCALoss nca(/*latent_dim=*/4, /*n_classes=*/3, /*temperature=*/0.1f, /*n_neighbors=*/0);
-    nca->eval();
-
     auto base = torch::tensor({
         {1.0f, 0.0f, 0.0f, 0.0f},
         {0.98f, 0.20f, 0.0f, 0.0f},   // ~ class-0 neighbor of row 0
@@ -645,8 +605,9 @@ TEST_CASE("NCA loss averages over contributing samples only", "[loss][nca]") {
     auto with_extra = torch::cat({base, extra}, 0);
     auto with_extra_tgt = torch::cat({base_tgt, torch::tensor({2}, torch::kLong)}, 0);
 
-    float loss_base = nca->forward(base, base_tgt).item<float>();
-    float loss_extra = nca->forward(with_extra, with_extra_tgt).item<float>();
+    float loss_base = nca_objective(base, base_tgt, 0.1f, /*n_neighbors=*/0).item<float>();
+    float loss_extra =
+        nca_objective(with_extra, with_extra_tgt, 0.1f, /*n_neighbors=*/0).item<float>();
 
     REQUIRE(std::isfinite(loss_base));
     REQUIRE(std::isfinite(loss_extra));

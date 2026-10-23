@@ -108,6 +108,9 @@ add_executable(resolve_tests
     test_target_masking.cpp
     test_stopping_fold.cpp
     test_plot_inputs.cpp
+    test_trainer_runs.cpp
+    test_resume.cpp
+    test_pretrain_inputs.cpp
 )
 
 resolve_link_cuda_dirs(resolve_tests)

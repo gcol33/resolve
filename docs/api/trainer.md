@@ -36,8 +36,10 @@ trainer.prepare_data(dataset, test_size=0.2, seed=42)
 
 `prepare_data` splits the plots, fits the feature and target scalers on the
 training fold alone, records the categorical vocabulary, and keeps the split
-reachable. It raises when `DatasetConfig.hash_dim` and `ModelConfig.hash_dim`
-disagree.
+reachable. Each call replaces everything an earlier one set (the split, the
+scalers, the plot IDs, the vocabulary and the GPU copies), so a later `fit`
+trains on the latest split alone. It raises when `DatasetConfig.hash_dim` and
+`ModelConfig.hash_dim` disagree, and when the split leaves no plot to fit.
 
 To hold out a fold of your choosing instead of a random fraction, such as a
 withheld spatial block or database, or the fold a published protocol selects
@@ -114,7 +116,34 @@ schedule instead and keeps the final weights; `best_epoch` then names the last
 epoch, and a fit prepared with `test_size=0` returns no held-out losses or
 metrics. On a CUDA
 out-of-memory error it releases its caches, halves `batch_size`, and restarts
-from epoch 0, down to `batch_size_floor`. The GIL is released for the whole fit.
+from epoch 0, down to `batch_size_floor`. The held-out fold is evaluated in
+chunks of at least 4096 plots (the whole fold at once for a `gnn` encoder,
+whose graph spans it); an out-of-memory error there halves the chunk instead
+and never the training batch. The GIL is released for the whole fit.
+
+### Resuming a run
+
+```python
+config = rc.Trainer.load_train_config("ckpt/checkpoint_200.pt")
+config.checkpoint_dir = "ckpt"
+config.checkpoint_every = 50
+trainer = rc.Trainer(rc.ResolveModel(dataset.schema, model_config), config)
+trainer.prepare_data(dataset, test_size=0.2, seed=42)   # the run's own split
+result = trainer.resume("ckpt/checkpoint_200.pt")
+```
+
+With a `checkpoint_dir`, `fit` writes `best.pt` at every new best epoch and
+`checkpoint_<N>.pt` every `checkpoint_every` epochs. Both carry the run's
+progress: the epochs done, the loss histories, the best epoch's loss, weights
+and metrics, the early-stopping patience, the optimizer and mixed-precision
+state, the batch size the run had reached and the random-number streams.
+`resume` picks the run up at the epoch after the checkpoint's, as if it had
+never stopped, and returns the result of the whole run; on the CPU it is the
+uninterrupted run exactly. `resumed_from_epoch` names the epoch it continued
+from. The trainer needs the run's model architecture and recipe and the run's
+split: prepare the same data with the same hold-out and seed. `resume` raises
+`ValueError` for a checkpoint without run progress (the final `checkpoint.pt`,
+or one `save` wrote) and for a split or scalers that differ from the run's.
 
 ### Properties
 
@@ -246,8 +275,8 @@ config = rc.TrainConfig()
 | `cudnn_benchmark` | `bool` | `True` | Auto-tune cuDNN algorithms |
 | `allow_tf32` | `bool` | `True` | TF32 matmuls on Ampere and later |
 | `vram_fraction` | `float` | `1.0` | Cap on the CUDA caching allocator |
-| `checkpoint_dir` | `str` | `""` | Periodic checkpoint directory; empty disables |
-| `checkpoint_every` | `int` | `0` | Write every N epochs; `0` writes only the best |
+| `checkpoint_dir` | `str` | `""` | Directory for `best.pt`, `checkpoint_<N>.pt`, `progress.json` and the final `checkpoint.pt`; empty disables |
+| `checkpoint_every` | `int` | `0` | Write `checkpoint_<N>.pt` every N epochs; `0` writes only `best.pt` |
 | `device` | `str` | `"cpu"` | `"cpu"` or `"cuda"` |
 
 `LossConfigMode.NCA` keeps the `Combined` regression schedule and adds the
@@ -267,8 +296,8 @@ Neighbourhood Components Analysis term to every classification target. See
 | `train_loss_history_by_target` | `dict[str, list[float]]` | `train_loss_history` split by target: per epoch, the term each target adds to the total (its weighted loss, averaged over the epoch's batches like the total; a batch with no labelled row for a masked target adds 0) |
 | `test_loss_history_by_target` | `dict[str, list[float]]` | `test_loss_history` split by target: each target's weighted term of the phase-invariant selection loss; empty when nothing is held out |
 | `train_moe_aux_loss_history` | `list[float]` | The mixture-of-experts load-balancing term of `train_loss_history`, which belongs to no target; empty without MoE. Per epoch the train terms plus this add up to the total, and the test terms add up to the test total, within float rounding |
-| `train_time_seconds` | `float` | Wall time |
-| `resumed_from_epoch` | `int` | Non-zero when the fit resumed from a checkpoint |
+| `train_time_seconds` | `float` | Wall time of the whole run, a resumed run's earlier epochs included |
+| `resumed_from_epoch` | `int` | The epoch `resume` continued the run from; `0` for a run `fit` trained from the start |
 | `baselines` | `dict[str, BaselineMetrics]` | Naive baseline per target |
 | `diagnostics` | `NetworkDiagnostics` | Network health at the end of the fit |
 
@@ -294,11 +323,16 @@ inverted first.
 
 ### BaselineMetrics
 
+Regression values are in the target's original units, like the metric keys,
+and the model's scores are the ones `final_metrics` reports for the returned
+weights: `model_mae` is `final_metrics[t]["mae"]`, `r_squared` is
+`final_metrics[t]["r2"]`, `model_accuracy` is `final_metrics[t]["accuracy"]`.
+
 | Attribute | Description |
 |-----------|-------------|
 | `baseline_mse`, `baseline_mae` | Predicting the training mean |
 | `model_mse`, `model_mae` | The fitted model |
-| `skill_score` | Improvement over the mean baseline |
+| `skill_score` | `1 - model_mse / baseline_mse` |
 | `r_squared` | Coefficient of determination |
 | `baseline_accuracy`, `model_accuracy`, `accuracy_lift` | Classification, against the training mode |
 | `training_mean`, `training_mode` | The baseline values themselves |

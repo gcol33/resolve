@@ -123,7 +123,8 @@ TEST_CASE("MaskedSpeciesPretrainer single epoch runs", "[mlm]") {
     auto species_ids = torch::randint(1, 50, {32, 15}, torch::kInt64);
     auto valid_mask = (species_ids != 0);
 
-    auto losses = pretrainer.pretrain(species_ids, {}, {}, {}, valid_mask);
+    auto losses = pretrainer.pretrain({.species_ids = species_ids, .pool_mask = valid_mask})
+                      .loss_history;
 
     REQUIRE(losses.size() == 1);
     REQUIRE(std::isfinite(losses[0]));
@@ -131,8 +132,8 @@ TEST_CASE("MaskedSpeciesPretrainer single epoch runs", "[mlm]") {
 }
 
 TEST_CASE("MLMPretrainConfig::validate rejects bad values", "[mlm][validation]") {
-    // Issue #100 item 4: guard batch_size / mask_prob before they reach the
-    // divide/step and masking paths. The pretrainer constructor calls validate().
+    // batch_size / mask_prob are guarded before they reach the divide/step and
+    // masking paths. The pretrainer constructor calls validate().
     PlotEncoderTransformer encoder(
         /*n_continuous=*/5, /*n_species=*/50, /*n_genera=*/0, /*n_families=*/0,
         /*d_model=*/32, /*n_heads=*/2, /*n_attention_layers=*/1);
@@ -183,7 +184,7 @@ TEST_CASE("MaskedSpeciesPretrainer encoder weights change after training", "[mlm
     auto species_ids = torch::randint(1, 50, {64, 15}, torch::kInt64);
     auto valid_mask = (species_ids != 0);
 
-    pretrainer.pretrain(species_ids, {}, {}, {}, valid_mask);
+    pretrainer.pretrain({.species_ids = species_ids, .pool_mask = valid_mask});
 
     // Weights should have changed
     auto final_weights = pretrainer.encoder()->get_species_weights();

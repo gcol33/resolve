@@ -1,6 +1,6 @@
 #include "resolve/vae.hpp"
-#include <chrono>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
 
 namespace resolve {
@@ -84,7 +84,7 @@ torch::Tensor SpeciesVAEImpl::reparameterize(
 torch::Tensor SpeciesVAEImpl::kl_divergence(torch::Tensor mu, torch::Tensor log_var) {
     // -0.5 * sum(1 + log_var - mu^2 - exp(log_var)) over the latent dim, meaned
     // over the batch. Summing over latents (not meaning) matches the textbook
-    // ELBO so kl_weight = 1 is beta = 1 (issue #96).
+    // ELBO so kl_weight = 1 is beta = 1.
     return (-0.5f * (1.0f + log_var - mu.pow(2) - log_var.exp()).sum(/*dim=*/1)).mean();
 }
 
@@ -105,7 +105,7 @@ torch::Tensor SpeciesVAEImpl::get_projection_weights() const {
     // First encoder linear weight, shape (encoder_dims[0], input_dim) in the
     // nn::Linear (out_features, in_features) convention. Warm-starts a
     // Linear(n_species, species_embed_dim) species projection when
-    // species_embed_dim == encoder_dims[0] (see header contract, issue #85).
+    // species_embed_dim == encoder_dims[0] (see the header contract).
     for (const auto& module : encoder_->children()) {
         auto linear = module->as<torch::nn::LinearImpl>();
         if (linear) {
@@ -127,20 +127,28 @@ VAEPretrainer::VAEPretrainer(
     vae_ = SpeciesVAE(n_species, config);
 }
 
-VAEPretrainResult VAEPretrainer::pretrain(torch::Tensor species_vectors) {
+VAEPretrainResult VAEPretrainer::pretrain(const PlotInputs& inputs) {
+    if (!inputs.species_vector.defined() || inputs.species_vector.numel() == 0) {
+        throw std::invalid_argument(
+            "VAE pretraining needs inputs.species_vector, the (n_plots, n_species) "
+            "species vectors it reconstructs");
+    }
+
     VAEPretrainResult result;
 
-    // Per-epoch accumulators for the ELBO's two components, which the shared
-    // loop does not track (it only knows the scalar it backpropagates).
-    float epoch_recon = 0.0f;
-    float epoch_kl = 0.0f;
+    // Per-epoch sums of the ELBO's two components, which the shared loop does
+    // not track (it only knows the scalar it backpropagates). Kept on the
+    // device and read back once per epoch.
+    const auto sum_options =
+        torch::TensorOptions().dtype(torch::kFloat32).device(config_.device);
+    torch::Tensor epoch_components = torch::zeros({2}, sum_options);
     int epoch_batches = 0;
     float kl_w = config_.kl_weight;
 
     PretrainLoopSpec spec;
     spec.modules = {vae_.ptr()};
     spec.params = vae_->parameters();
-    spec.inputs = {species_vectors};
+    spec.inputs = {.species_vector = inputs.species_vector};
     spec.epochs = config_.pretrain_epochs;
     spec.batch_size = config_.batch_size;
     spec.lr = config_.pretrain_lr;
@@ -151,15 +159,14 @@ VAEPretrainResult VAEPretrainer::pretrain(torch::Tensor species_vectors) {
     spec.task_name = "VAE";
 
     auto batch_fn = [&](const PretrainBatch& batch, PretrainRng& rng) {
-        const auto& x = batch[0];
+        const auto& x = batch.species_vector;
         auto [recon, mu, log_var] = vae_->forward(x, rng);
 
-        // Track the components separately for the per-epoch histories.
         auto recon_loss = torch::mse_loss(recon, x, torch::Reduction::Mean);
         auto kl_loss = SpeciesVAEImpl::kl_divergence(mu, log_var);
 
-        epoch_recon += recon_loss.item<float>();
-        epoch_kl += kl_loss.item<float>();
+        epoch_components.add_(
+            torch::stack({recon_loss.detach(), kl_loss.detach()}).to(sum_options));
         ++epoch_batches;
 
         return recon_loss + kl_w * kl_loss;
@@ -167,8 +174,7 @@ VAEPretrainResult VAEPretrainer::pretrain(torch::Tensor species_vectors) {
 
     PretrainLoopHooks hooks;
     hooks.on_epoch_begin = [&](int epoch) {
-        epoch_recon = 0.0f;
-        epoch_kl = 0.0f;
+        epoch_components.zero_();
         epoch_batches = 0;
 
         // KL annealing: linearly increase from 0 to kl_weight
@@ -181,8 +187,9 @@ VAEPretrainResult VAEPretrainer::pretrain(torch::Tensor species_vectors) {
         // histories record 0 rather than NaN from a divide-by-zero.
         const float inv_nb = epoch_batches > 0
             ? 1.0f / static_cast<float>(epoch_batches) : 0.0f;
-        result.recon_loss_history.push_back(epoch_recon * inv_nb);
-        result.kl_loss_history.push_back(epoch_kl * inv_nb);
+        const auto sums = epoch_components.to(torch::kCPU);
+        result.recon_loss_history.push_back(sums[0].item<float>() * inv_nb);
+        result.kl_loss_history.push_back(sums[1].item<float>() * inv_nb);
     };
     hooks.epoch_detail = [&](int /*epoch*/) {
         std::ostringstream detail;

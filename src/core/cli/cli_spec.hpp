@@ -245,6 +245,13 @@ inline const CommandSpec& train_spec() {
         flags.push_back({"--checkpoint-every", Arity::Value, "N", "0",
                          "Also checkpoint every N epochs (0 = best only).\n"
                          "Requires --checkpoint-dir."});
+        flags.push_back({"--resume", Arity::Value, "PATH", "",
+                         "Continue the run that wrote PATH (best.pt or\n"
+                         "checkpoint_<N>.pt under its --checkpoint-dir) at\n"
+                         "the epoch after it. Pass the run's own data,\n"
+                         "model and training flags and --seed, so the split\n"
+                         "and recipe are the ones it trained on. Not\n"
+                         "combined with --cv-folds."});
         flags.push_back({"--amp", Arity::Flag, "", "",
                          "Enable CUDA automatic mixed precision (off by\n"
                          "default; helps transformer encoders, rarely MLPs)"});

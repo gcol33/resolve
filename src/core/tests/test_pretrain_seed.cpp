@@ -16,7 +16,7 @@ using namespace resolve;
 using namespace Catch::Matchers;
 
 // =============================================================================
-// Issue #107: reproducible pretraining + the shared pretrain loop
+// Reproducible pretraining + the shared pretrain loop
 //
 // Two contracts are pinned here, for each of the four pretext tasks:
 //   (1) a fixed PretrainConfig / MLMPretrainConfig / VAEConfig seed reproduces
@@ -29,7 +29,7 @@ using namespace Catch::Matchers;
 // no generator argument, so a module dropout mask is the one draw in the
 // pretraining path that CANNOT be moved off the global stream; a dropout-bearing
 // configuration therefore does still advance it. Setting the dropout knobs to 0
-// isolates exactly what the seeding fix owns: shuffles, feature masks,
+// isolates exactly what the seeded generator covers: shuffles, feature masks,
 // species-view masks, SCARF corruption, the BERT 80/10/10 split, the mask-token
 // init and the VAE reparameterization noise.
 // =============================================================================
@@ -81,6 +81,12 @@ struct EmbedInputs {
     torch::Tensor species;
 };
 
+// The model inputs of an embed fixture.
+PlotInputs plot_inputs_of(const EmbedInputs& in) {
+    return {.continuous = in.continuous, .genus_ids = in.genus, .family_ids = in.family,
+            .species_ids = in.species};
+}
+
 EmbedInputs make_embed_inputs(int64_t n_plots) {
     torch::manual_seed(kFixtureSeed);
     EmbedInputs in;
@@ -109,8 +115,7 @@ std::vector<float> run_jepa(const EmbedInputs& in, int seed, int epochs) {
     cfg.seed = seed;
     cfg.pretrain_epochs = epochs;
     JEPAPretrainer pretrainer(model, cfg);
-    return pretrainer.pretrain(in.continuous, in.genus, in.family, in.species, {})
-        .loss_history;
+    return pretrainer.pretrain(plot_inputs_of(in)).loss_history;
 }
 
 std::vector<float> run_scarf(const EmbedInputs& in, int seed, int epochs) {
@@ -120,8 +125,7 @@ std::vector<float> run_scarf(const EmbedInputs& in, int seed, int epochs) {
     cfg.seed = seed;
     cfg.pretrain_epochs = epochs;
     SCARFPretrainer pretrainer(model, cfg);
-    return pretrainer.pretrain(in.continuous, in.genus, in.family, in.species, {})
-        .loss_history;
+    return pretrainer.pretrain(plot_inputs_of(in)).loss_history;
 }
 
 // -----------------------------------------------------------------------------
@@ -177,7 +181,8 @@ std::vector<float> run_mlm(const MLMInputs& in, int seed, int epochs) {
     cfg.seed = seed;
     cfg.pretrain_epochs = epochs;
     MaskedSpeciesPretrainer pretrainer(encoder, 60, cfg);
-    return pretrainer.pretrain(in.species, {}, {}, {}, in.valid);
+    return pretrainer.pretrain({.species_ids = in.species, .pool_mask = in.valid})
+        .loss_history;
 }
 
 // -----------------------------------------------------------------------------
@@ -213,7 +218,7 @@ VAEPretrainResult run_vae(const torch::Tensor& vectors, int64_t vocab,
     cfg.seed = seed;
     cfg.pretrain_epochs = epochs;
     VAEPretrainer pretrainer(vocab, cfg);
-    return pretrainer.pretrain(vectors);
+    return pretrainer.pretrain({.species_vector = vectors});
 }
 
 // -----------------------------------------------------------------------------
@@ -385,9 +390,7 @@ TEST_CASE("JEPA pretraining leaves the global RNG stream untouched",
     JEPAPretrainer pretrainer(model, cfg);
 
     auto baseline = global_draw_after([] {});
-    auto after = global_draw_after([&] {
-        pretrainer.pretrain(in.continuous, in.genus, in.family, in.species, {});
-    });
+    auto after = global_draw_after([&] { pretrainer.pretrain(plot_inputs_of(in)); });
 
     REQUIRE(torch::equal(baseline, after));
 }
@@ -428,9 +431,7 @@ TEST_CASE("SCARF pretraining leaves the global RNG stream untouched",
     SCARFPretrainer pretrainer(model, base_pretrain_config());
 
     auto baseline = global_draw_after([] {});
-    auto after = global_draw_after([&] {
-        pretrainer.pretrain(in.continuous, in.genus, in.family, in.species, {});
-    });
+    auto after = global_draw_after([&] { pretrainer.pretrain(plot_inputs_of(in)); });
 
     REQUIRE(torch::equal(baseline, after));
 }
@@ -472,7 +473,7 @@ TEST_CASE("MLM pretraining leaves the global RNG stream untouched",
 
     auto baseline = global_draw_after([] {});
     auto after = global_draw_after([&] {
-        pretrainer.pretrain(in.species, {}, {}, {}, in.valid);
+        pretrainer.pretrain({.species_ids = in.species, .pool_mask = in.valid});
     });
 
     REQUIRE(torch::equal(baseline, after));
@@ -517,7 +518,7 @@ TEST_CASE("VAE pretraining leaves the global RNG stream untouched",
     VAEPretrainer pretrainer(vocab, base_vae_config());
 
     auto baseline = global_draw_after([] {});
-    auto after = global_draw_after([&] { pretrainer.pretrain(vectors); });
+    auto after = global_draw_after([&] { pretrainer.pretrain({.species_vector = vectors}); });
 
     REQUIRE(torch::equal(baseline, after));
 }
@@ -545,7 +546,7 @@ TEST_CASE("run_pretrain_loop rejects an unusable spec", "[pretraining][loop]") {
 
     SECTION("batch_size < 1") {
         PretrainLoopSpec spec;
-        spec.inputs = {torch::randn({4, 2})};
+        spec.inputs.continuous = torch::randn({4, 2});
         spec.batch_size = 0;
         REQUIRE_THROWS_AS(run_pretrain_loop(spec, noop), std::invalid_argument);
     }
@@ -553,14 +554,15 @@ TEST_CASE("run_pretrain_loop rejects an unusable spec", "[pretraining][loop]") {
         PretrainLoopSpec spec;
         REQUIRE_THROWS_AS(run_pretrain_loop(spec, noop), std::invalid_argument);
     }
-    SECTION("undefined leading input") {
+    SECTION("only empty inputs") {
         PretrainLoopSpec spec;
-        spec.inputs = {torch::Tensor(), torch::randn({4, 2})};
+        spec.inputs.continuous = torch::empty({0, 2});
+        spec.inputs.species_ids = torch::empty({0}, torch::kInt64);
         REQUIRE_THROWS_AS(run_pretrain_loop(spec, noop), std::invalid_argument);
     }
     SECTION("empty objective") {
         PretrainLoopSpec spec;
-        spec.inputs = {torch::randn({4, 2})};
+        spec.inputs.continuous = torch::randn({4, 2});
         REQUIRE_THROWS_AS(run_pretrain_loop(spec, PretrainBatchFn{}),
                           std::invalid_argument);
     }
@@ -568,13 +570,14 @@ TEST_CASE("run_pretrain_loop rejects an unusable spec", "[pretraining][loop]") {
 
 TEST_CASE("run_pretrain_loop slices every input and honours skipped batches",
           "[pretraining][loop]") {
-    // The loop passes each row-aligned input through in order, leaves absent
-    // ones undefined, and treats an undefined loss as "skip this batch".
+    // The loop slices every defined field of the inputs, leaves absent ones
+    // undefined, and treats an undefined loss as "skip this batch".
     auto weight = torch::zeros({1, 3}, torch::requires_grad(true));
 
     PretrainLoopSpec spec;  // no modules: the objective owns the only parameter
     spec.params = {weight};
-    spec.inputs = {torch::randn({10, 3}), torch::Tensor(), torch::randn({10, 2})};
+    spec.inputs.continuous = torch::randn({10, 3});
+    spec.inputs.categorical_ids = torch::randint(1, 4, {10, 2});
     spec.epochs = 2;
     spec.batch_size = 4;   // 10 rows -> batches of 4, 4, 2
     spec.log = [](const std::string&) {};
@@ -582,16 +585,15 @@ TEST_CASE("run_pretrain_loop slices every input and honours skipped batches",
     int calls = 0;
     std::vector<int64_t> batch_rows;
     auto batch_fn = [&](const PretrainBatch& batch, PretrainRng&) -> torch::Tensor {
-        REQUIRE(batch.size() == 3);
-        REQUIRE(batch[0].defined());
-        REQUIRE_FALSE(batch[1].defined());   // undefined inputs stay undefined
-        REQUIRE(batch[2].defined());
-        REQUIRE(batch[0].size(0) == batch[2].size(0));
-        batch_rows.push_back(batch[0].size(0));
+        REQUIRE(batch.continuous.defined());
+        REQUIRE_FALSE(batch.species_ids.defined());   // undefined inputs stay undefined
+        REQUIRE(batch.categorical_ids.defined());
+        REQUIRE(batch.continuous.size(0) == batch.categorical_ids.size(0));
+        batch_rows.push_back(batch.continuous.size(0));
         ++calls;
         // Skip the middle batch of every epoch.
         if (calls % 3 == 2) return {};
-        return (batch[0] * weight).sum();
+        return (batch.continuous * weight).sum();
     };
 
     auto result = run_pretrain_loop(spec, batch_fn);
@@ -609,7 +611,7 @@ TEST_CASE("run_pretrain_loop fires its hooks in order", "[pretraining][loop]") {
 
     PretrainLoopSpec spec;
     spec.params = {weight};
-    spec.inputs = {torch::randn({8, 2})};
+    spec.inputs.continuous = torch::randn({8, 2});
     spec.epochs = 3;
     spec.batch_size = 4;   // 2 batches per epoch
     spec.log_every = 0;    // silence the progress line
@@ -632,7 +634,7 @@ TEST_CASE("run_pretrain_loop fires its hooks in order", "[pretraining][loop]") {
     auto result = run_pretrain_loop(
         spec,
         [&](const PretrainBatch& batch, PretrainRng&) {
-            return (batch[0] * weight).sum();
+            return (batch.continuous * weight).sum();
         },
         hooks);
 
@@ -645,14 +647,8 @@ TEST_CASE("run_pretrain_loop fires its hooks in order", "[pretraining][loop]") {
 }
 
 // =============================================================================
-// The mixup augmentation on the contrastive view
-//
-// SAINTConfig carried `mixup_alpha` and `use_contrastive_pretrain`, two fields
-// describing a self-supervised pre-training stage, and no engine code read
-// either: a model configuration cannot run a training stage. The augmentation
-// they named now lives on PretrainConfig, where the contrastive task can use
-// it, and is covered here for what it does and for the seeding contract every
-// other pretraining draw holds to.
+// The mixup augmentation on the contrastive view: what it does, and the
+// seeding contract every other pretraining draw holds to.
 // =============================================================================
 
 namespace {
@@ -666,8 +662,7 @@ std::vector<float> run_scarf_mixup(const EmbedInputs& in, int seed, int epochs,
     cfg.pretrain_epochs = epochs;
     cfg.mixup_alpha = mixup_alpha;
     SCARFPretrainer pretrainer(model, cfg);
-    return pretrainer.pretrain(in.continuous, in.genus, in.family, in.species, {})
-        .loss_history;
+    return pretrainer.pretrain(plot_inputs_of(in)).loss_history;
 }
 
 }  // namespace
@@ -799,9 +794,7 @@ TEST_CASE("A pretext task trains through a block with missing cells",
     PretrainConfig cfg = base_pretrain_config();
     cfg.pretrain_epochs = 2;
     SCARFPretrainer pretrainer(model, cfg);
-    auto history = pretrainer.pretrain(gapped.continuous, gapped.genus,
-                                       gapped.family, gapped.species, {})
-                       .loss_history;
+    auto history = pretrainer.pretrain(plot_inputs_of(gapped)).loss_history;
 
     REQUIRE(history.size() == 2);
     for (float loss : history) {

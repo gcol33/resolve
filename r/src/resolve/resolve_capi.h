@@ -389,6 +389,14 @@ RESOLVE_CAPI int resolve_trainer_prepare_data_stopping_fold(
 /* Train. Returns a MAP value tree (TrainResult) / NULL. */
 RESOLVE_CAPI resolve_value_t* resolve_trainer_fit(resolve_trainer_t* t);
 
+/* Continue a run from a checkpoint fit() wrote while training (best.pt or
+ * checkpoint_<N>.pt under the checkpoint directory) at the epoch after it.
+ * The trainer must hold the run's architecture and recipe and be prepared on
+ * the run's data with its seed. Returns the whole run's TrainResult MAP, its
+ * resumed_from_epoch naming where it continued / NULL. */
+RESOLVE_CAPI resolve_value_t* resolve_trainer_resume(
+    resolve_trainer_t* t, const char* checkpoint_path);
+
 /* Save checkpoint. `metadata` may be NULL (or a NULL-kind value). 0 / -1. */
 RESOLVE_CAPI int resolve_trainer_save(
     resolve_trainer_t* t, const char* path, const resolve_value_t* metadata);

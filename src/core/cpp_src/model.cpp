@@ -469,6 +469,18 @@ torch::Tensor ResolveModelImpl::get_latent(const PlotInputs& inputs) {
     return encode(fuse_categoricals_(inputs));
 }
 
+PlotEncoderTransformer ResolveModelImpl::transformer_encoder() const {
+    if (!encoder_transformer_) {
+        throw std::invalid_argument(
+            std::string("ResolveModel::transformer_encoder: the model has no "
+                        "transformer species encoder (species_encoding = ") +
+            species_encoding_to_string(config_.species_encoding) +
+            ", encoder_architecture = " +
+            encoder_architecture_to_string(config_.encoder_architecture) + ")");
+    }
+    return encoder_transformer_;
+}
+
 TaskHead& ResolveModelImpl::head(const std::string& name) {
     auto it = heads_.find(name);
     if (it == heads_.end()) {

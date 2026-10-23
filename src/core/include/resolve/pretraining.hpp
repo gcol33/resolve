@@ -2,6 +2,7 @@
 
 #include "resolve/types.hpp"
 #include "resolve/model.hpp"
+#include "resolve/plot_inputs.hpp"
 #include <torch/torch.h>
 #include <functional>
 #include <memory>
@@ -94,8 +95,8 @@ private:
 // =============================================================================
 
 // Masking strategy for feature corruption. All three operate on the continuous
-// feature vector; none is species/taxonomy-aware (that masking is done
-// separately by mask_species_view for the ID/vector inputs).
+// feature vector; none is species/taxonomy-aware (the species inputs are
+// masked by mask_species_view).
 enum class MaskStrategy {
     Random,     // Mask random individual features uniformly
     Block,      // Mask one contiguous feature range per sample
@@ -116,8 +117,8 @@ struct PretrainConfig {
 
     // Seed for the dedicated pretraining RNG. Every stochastic draw the pretext
     // task makes is taken from a private generator seeded from this value, so a
-    // fixed seed reproduces the run and the global RNG stream is left untouched
-    // (issue #107). Matches the Trainer / prepare_data seed default. Module
+    // fixed seed reproduces the run and the global RNG stream is left untouched.
+    // Matches the Trainer / prepare_data seed default. Module
     // dropout is the one draw outside this generator -- torch::nn::Dropout has
     // no generator argument -- so a pretrainer configured with dropout > 0 still
     // advances the global stream through its dropout masks.
@@ -144,12 +145,11 @@ struct PretrainConfig {
     float mixup_alpha = 0.0f;
 
     // Throws std::invalid_argument if batch_size < 1, mask_ratio not in (0, 1),
-    // corruption_rate not in [0, 1], or mixup_alpha negative. Only reachable via the C-API/Python
-    // bindings (the CLI does not expose pretraining), so guard here rather than
-    // at a CLI parse site: batch_size == 0 divides by zero when computing steps,
-    // and mask_ratio >= 1 makes the Block strategy's randint bound <= 0 (throws).
-    // `seed` is unconstrained: every int, negative ones included, is a usable
-    // generator seed once converted to uint64.
+    // corruption_rate not in [0, 1], or mixup_alpha negative: batch_size == 0
+    // divides by zero when computing steps, and mask_ratio >= 1 makes the
+    // Block strategy's randint bound <= 0. `seed` is unconstrained: every int,
+    // negative ones included, is a usable generator seed once converted to
+    // uint64.
     void validate() const;
 };
 
@@ -234,6 +234,13 @@ public:
     [[nodiscard]] torch::Tensor corrupt(
         torch::Tensor features, PretrainRng rng = PretrainRng{}) const;
 
+    // The same corruption for categorical covariates: each cell of the
+    // (batch, n_categoricals) codes is, with probability corruption_rate,
+    // replaced by its column's code in another plot of the batch, so a
+    // corrupted cell keeps the column's empirical distribution.
+    [[nodiscard]] torch::Tensor corrupt_categoricals(
+        const torch::Tensor& codes, PretrainRng rng = PretrainRng{}) const;
+
     // Accessors
     [[nodiscard]] int64_t n_features() const noexcept { return n_features_; }
     [[nodiscard]] float corruption_rate() const noexcept { return corruption_rate_; }
@@ -265,6 +272,39 @@ private:
 TORCH_MODULE(ProjectionHead);
 
 // =============================================================================
+// Pretext views of a plot's inputs
+// =============================================================================
+
+// Each pretext task corrupts every input the encoder reads, so no input hands
+// the answer through untouched:
+//
+//   - the continuous block: masked by FeatureMasker (JEPA) or corrupted by
+//     SCARFCorruptor (SCARF). In hash mode the species hash is part of it.
+//   - the species inputs (mask_species_view): each species token a plot
+//     records is dropped with probability `ratio`. An embed slot's species code
+//     and a taxonomy slot's genus / family code become 0 (padding), each tensor
+//     drawn from its own shape since their slot counts differ; an
+//     explicit-vector entry becomes 0; a pooled species (rank_pool /
+//     transformer) leaves the pool, with one decision per slot across the
+//     aligned pool tensors: its species, genus and family codes become 0, its
+//     weight 0 and its mask entry false. pool_has_cover is a property of the
+//     plot and is kept.
+//   - the categorical covariates: JEPA masks a cell to the unknown code 0
+//     (mask_codes), as its mask token replaces a continuous feature; SCARF
+//     replaces a cell with the column's code in another plot of the batch
+//     (SCARFCorruptor::corrupt_categoricals), as it does a continuous feature.
+
+// `codes` with each nonzero code replaced by 0 with probability `ratio`; a 0
+// (padding, or the unknown category) stays 0.
+[[nodiscard]] torch::Tensor mask_codes(const torch::Tensor& codes, float ratio,
+                                       PretrainRng& rng);
+
+// `inputs` with its species inputs masked as described above; the continuous
+// block and the categorical codes are left as they are.
+[[nodiscard]] PlotInputs mask_species_view(const PlotInputs& inputs, float ratio,
+                                           PretrainRng& rng);
+
+// =============================================================================
 // Pretraining result
 // =============================================================================
 
@@ -278,9 +318,9 @@ struct PretrainResult {
 // Shared pretraining loop
 // =============================================================================
 
-// Row-sliced views of the tensors handed to run_pretrain_loop, in the same
-// order and count; entries that were undefined (or empty) stay undefined.
-using PretrainBatch = std::vector<torch::Tensor>;
+// The rows of one batch of the inputs handed to run_pretrain_loop; a field
+// that was undefined (or empty) stays undefined.
+using PretrainBatch = PlotInputs;
 
 // The one thing a pretext task supplies: its per-batch objective. Returns the
 // scalar loss to backpropagate, or an UNDEFINED tensor to skip the batch
@@ -322,10 +362,10 @@ struct PretrainLoopSpec {
     // set_data(), so these handles follow their module onto the device.
     std::vector<torch::Tensor> params;
 
-    // Row-aligned inputs. inputs[0] is required and supplies the sample count;
-    // undefined / empty entries are forwarded to batch_fn undefined rather than
-    // sliced.
-    std::vector<torch::Tensor> inputs;
+    // The plots to pretrain on. At least one field must be defined and
+    // non-empty; it supplies the sample count. Empty fields reach batch_fn
+    // undefined.
+    PlotInputs inputs;
 
     int epochs = 1;
     int batch_size = 4096;
@@ -344,10 +384,13 @@ struct PretrainLoopSpec {
 
 // The single epoch/shuffle/optimizer scaffold behind every pretext task: device
 // move, AdamW over `params`, per-epoch reseed and shuffle, batch slicing of
-// every input, zero_grad / backward / clip / step, loss accumulation, progress
-// logging, and the timing + epoch count on the returned result. JEPA, SCARF,
-// MLM and the VAE differ only in their batch_fn (and, for JEPA and the VAE, a
-// hook), so adding a fifth pretext task is one loss lambda.
+// every input, zero_grad / backward / clip / step, loss accumulation on the
+// device (read back once per epoch), progress logging, and the timing + epoch
+// count on the returned result. JEPA, SCARF, MLM and the VAE differ only in
+// their batch_fn (and, for JEPA and the VAE, a hook), so adding a fifth
+// pretext task is one loss lambda. A missing continuous cell (NaN) is filled
+// with its column mean over the given plots, the fill training would compute
+// for the same rows.
 PretrainResult run_pretrain_loop(
     PretrainLoopSpec spec,
     const PretrainBatchFn& batch_fn,
@@ -365,21 +408,17 @@ public:
         const PretrainConfig& config = PretrainConfig{}
     );
 
-    // Run pretraining on continuous features (self-supervised, no labels needed)
-    // continuous: (n_samples, n_features) - all available data
-    // genus_ids, family_ids, species_ids, species_vector: optional auxiliary inputs
-    PretrainResult pretrain(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {},
-        torch::Tensor species_ids = {},
-        torch::Tensor species_vector = {}
-    );
+    // Self-supervised pretraining on the plots' model inputs (no labels): the
+    // model's whole input bundle, `inputs.continuous` required (its width sets
+    // the feature mask). The context encoder reads a masked view (see
+    // "Pretext views" above) and learns to predict the EMA target encoder's
+    // latent of the unmasked plot.
+    PretrainResult pretrain(const PlotInputs& inputs);
 
     // Accessors
     [[nodiscard]] ResolveModel& model() noexcept { return context_encoder_; }
     // The slow EMA target encoder (no gradients). Exposed so callers can inspect
-    // or export it, and so the buffer-sync invariant is testable (issue #81).
+    // or export it, and so the buffer-sync invariant is testable.
     [[nodiscard]] const ResolveModel& target_encoder() const noexcept { return target_encoder_; }
     [[nodiscard]] const PretrainConfig& config() const noexcept { return config_; }
 
@@ -392,6 +431,10 @@ private:
 
     ResolveModel context_encoder_{nullptr};    // Online encoder (gets gradients)
     ResolveModel target_encoder_{nullptr};     // EMA copy (no gradients)
+    // (online, target) tensor pairs, matched by name once at construction:
+    // parameters follow the online encoder by EMA, buffers are copied.
+    std::vector<std::pair<torch::Tensor, torch::Tensor>> ema_parameters_;
+    std::vector<std::pair<torch::Tensor, torch::Tensor>> ema_buffers_;
     JEPAPredictor predictor_{nullptr};
     FeatureMasker masker_{nullptr};
     PretrainConfig config_;
@@ -408,14 +451,11 @@ public:
         const PretrainConfig& config = PretrainConfig{}
     );
 
-    // Run contrastive pretraining
-    PretrainResult pretrain(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {},
-        torch::Tensor species_ids = {},
-        torch::Tensor species_vector = {}
-    );
+    // Contrastive pretraining on the plots' model inputs (no labels): the
+    // model's whole input bundle, `inputs.continuous` required (its width sets
+    // the corruption). Each plot's unmodified inputs and a corrupted view (see
+    // "Pretext views" above) form the positive pair of an InfoNCE objective.
+    PretrainResult pretrain(const PlotInputs& inputs);
 
     // Accessors
     [[nodiscard]] ResolveModel& model() noexcept { return model_; }
@@ -491,14 +531,21 @@ public:
         const MLMPretrainConfig& config = MLMPretrainConfig{}
     );
 
-    // Run MLM pretraining. Returns per-epoch loss history.
-    std::vector<float> pretrain(
-        torch::Tensor species_ids,
-        torch::Tensor genus_ids,
-        torch::Tensor family_ids,
-        torch::Tensor weights,
-        torch::Tensor valid_mask
+    // The transformer species encoder of `model` (species_encoding ==
+    // Transformer), predicting over its schema's species vocabulary. The
+    // pretrainer shares the encoder, so pretraining trains the model's own
+    // weights.
+    explicit MaskedSpeciesPretrainer(
+        ResolveModel model,
+        const MLMPretrainConfig& config = MLMPretrainConfig{}
     );
+
+    // MLM pretraining on the plots' model inputs. The transformer reads a
+    // plot's species tokens, so the pretext task uses the pool fields:
+    // species_ids and pool_mask (required), pool_genus_ids, pool_family_ids
+    // and pool_weights; the other fields, which the token encoder does not
+    // read, are accepted and left alone.
+    PretrainResult pretrain(const PlotInputs& inputs);
 
     // Access encoder after pretraining
     PlotEncoderTransformer& encoder() { return encoder_; }
