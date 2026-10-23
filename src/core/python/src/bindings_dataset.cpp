@@ -306,8 +306,8 @@ void register_dataset(nb::module_& m) {
             return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
         })
         // Pool-style encoder tensors (rank_pool / transformer modes). Wrap
-        // via THPVariable_Wrap inside a lambda — see pitfall #6.1 in
-        // port.md (def_prop_ro(&accessor) fails for at::Tensor returns).
+        // via THPVariable_Wrap inside a lambda: nanobind has no caster for
+        // at::Tensor, so def_prop_ro(&accessor) fails to convert the return.
         .def_prop_ro("pool_genus_ids", [](const resolve::ResolveDataset& self) {
             const auto& t = self.pool_genus_ids();
             return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
