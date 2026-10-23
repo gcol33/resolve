@@ -4,6 +4,7 @@
 #include <iostream>
 #include <limits>
 #include <numeric>
+#include <set>
 #include <stdexcept>
 #include <string_view>
 
@@ -15,115 +16,193 @@ namespace resolve {
 
 namespace {
 
-// Keeps the lexicographically smallest non-empty name seen for a species.
-void keep_smallest(std::string& current, const std::string& candidate) {
-    if (candidate.empty()) return;
-    if (current.empty() || candidate < current) current = candidate;
+// Keeps the code of the lexicographically smallest name seen (-1 = none yet).
+void keep_smallest(int32_t& current, int32_t candidate, const NamePool& names) {
+    if (candidate < 0 || candidate == current) return;
+    if (current < 0 || names.name(candidate) < names.name(current)) current = candidate;
+}
+
+// rank[c] = the position of name c in the lexicographic order of the pool.
+std::vector<int32_t> name_ranks(const NamePool& names) {
+    std::vector<int32_t> order(static_cast<size_t>(names.size()));
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(),
+              [&](int32_t a, int32_t b) { return names.name(a) < names.name(b); });
+    std::vector<int32_t> rank(order.size());
+    for (size_t i = 0; i < order.size(); ++i) rank[static_cast<size_t>(order[i])] = static_cast<int32_t>(i);
+    return rank;
+}
+
+template <typename T>
+void release(std::vector<T>& v) {
+    std::vector<T>().swap(v);
 }
 
 }  // namespace
 
-PlotAssemblages PlotAssemblages::build(std::vector<SpeciesRecord> records,
-                                       const std::vector<std::string>& plot_ids,
-                                       RepresentationMode representation) {
+void PlotAssemblages::Builder::add(int32_t plot, std::string_view species, float abundance,
+                                   std::string_view genus, std::string_view family) {
+    plot_.push_back(plot);
+    species_.push_back(species_names_.intern(species));
+    genus_.push_back(genus.empty() ? -1 : genus_names_.intern(genus));
+    family_.push_back(family.empty() ? -1 : family_names_.intern(family));
+    abundance_.push_back(abundance);
+}
+
+PlotAssemblages PlotAssemblages::Builder::finish(int64_t n_plots,
+                                                 std::span<const int32_t> plot_of,
+                                                 RepresentationMode representation) && {
     PlotAssemblages out;
-    out.plot_ids_ = plot_ids;
     out.representation_ = representation;
-    const auto n_plots = static_cast<int64_t>(plot_ids.size());
+    const size_t n_records = species_.size();
+    const auto n_species = static_cast<size_t>(species_names_.size());
+    auto destination = [&](size_t r) -> int64_t {
+        const int32_t code = plot_[r];
+        if (code < 0 || static_cast<size_t>(code) >= plot_of.size()) return -1;
+        const int32_t p = plot_of[static_cast<size_t>(code)];
+        return p >= 0 && p < n_plots ? p : -1;
+    };
 
-    std::unordered_map<std::string_view, int64_t> plot_index;
-    plot_index.reserve(plot_ids.size());
-    for (int64_t p = 0; p < n_plots; ++p) {
-        plot_index.emplace(out.plot_ids_[static_cast<size_t>(p)], p);
+    // Every species' taxonomy, resolved over the records of kept plots.
+    out.genus_of_.assign(n_species, -1);
+    out.family_of_.assign(n_species, -1);
+    for (size_t r = 0; r < n_records; ++r) {
+        if (destination(r) < 0) continue;
+        const auto s = static_cast<size_t>(species_[r]);
+        keep_smallest(out.genus_of_[s], genus_[r], genus_names_);
+        keep_smallest(out.family_of_[s], family_[r], family_names_);
     }
+    release(genus_);
+    release(family_);
 
-    // The plot each record belongs to (-1: not one of plot_ids), and every
-    // species' taxonomy resolved over all kept records.
-    std::vector<int64_t> record_plot(records.size(), -1);
-    std::vector<int64_t> counts(static_cast<size_t>(n_plots), 0);
-    std::unordered_map<std::string, std::pair<std::string, std::string>> taxa;
-    size_t n_kept = 0;
-    for (size_t r = 0; r < records.size(); ++r) {
-        auto it = plot_index.find(records[r].plot_id);
-        if (it == plot_index.end()) continue;
-        record_plot[r] = it->second;
-        ++counts[static_cast<size_t>(it->second)];
-        ++n_kept;
-        auto& [genus, family] = taxa[records[r].species_id];
-        keep_smallest(genus, records[r].genus);
-        keep_smallest(family, records[r].family);
+    // The kept records bucketed by plot, the order they were added kept
+    // within a plot.
+    std::vector<int64_t> starts(static_cast<size_t>(n_plots) + 1, 0);
+    for (size_t r = 0; r < n_records; ++r) {
+        const int64_t p = destination(r);
+        if (p >= 0) ++starts[static_cast<size_t>(p) + 1];
     }
-
-    // Record indices bucketed by plot, file order kept within a plot.
-    std::vector<size_t> starts(static_cast<size_t>(n_plots) + 1, 0);
-    for (size_t p = 0; p < static_cast<size_t>(n_plots); ++p) {
-        starts[p + 1] = starts[p] + static_cast<size_t>(counts[p]);
-    }
-    std::vector<size_t> by_plot(n_kept);
+    for (size_t p = 0; p < static_cast<size_t>(n_plots); ++p) starts[p + 1] += starts[p];
+    const auto n_kept = static_cast<size_t>(starts.back());
+    std::vector<int32_t> by_plot_species(n_kept);
+    std::vector<float> by_plot_abundance(n_kept);
     {
-        std::vector<size_t> cursor(starts.begin(), starts.end() - 1);
-        for (size_t r = 0; r < records.size(); ++r) {
-            if (record_plot[r] < 0) continue;
-            by_plot[cursor[static_cast<size_t>(record_plot[r])]++] = r;
+        std::vector<int64_t> cursor(starts.begin(), starts.end() - 1);
+        for (size_t r = 0; r < n_records; ++r) {
+            const int64_t p = destination(r);
+            if (p < 0) continue;
+            const auto i = static_cast<size_t>(cursor[static_cast<size_t>(p)]++);
+            by_plot_species[i] = species_[r];
+            by_plot_abundance[i] = abundance_[r];
         }
     }
+    release(plot_);
+    release(species_);
+    release(abundance_);
 
-    // The entries are reserved up front so they never move: `position` keys
-    // view their species names.
-    out.entries_.reserve(n_kept);
-    out.ranking_.reserve(n_kept);
+    // One entry per species per plot, where its first record stood, carrying
+    // the sum of its records' abundances (summed in record order).
+    std::vector<int64_t> stamp(n_species, -1);
+    std::vector<size_t> position(n_species, 0);
+    out.offsets_.assign(1, 0);
     out.offsets_.reserve(static_cast<size_t>(n_plots) + 1);
-    std::unordered_map<std::string_view, size_t> position;
+    out.species_.reserve(n_kept);
+    out.ranking_.reserve(n_kept);
     for (size_t p = 0; p < static_cast<size_t>(n_plots); ++p) {
-        position.clear();
-        for (size_t i = starts[p]; i < starts[p + 1]; ++i) {
-            SpeciesRecord& record = records[by_plot[i]];
-            auto found = position.find(record.species_id);
-            if (found != position.end()) {
-                out.ranking_[found->second] += record.abundance;
+        for (auto i = static_cast<size_t>(starts[p]); i < static_cast<size_t>(starts[p + 1]); ++i) {
+            const auto s = static_cast<size_t>(by_plot_species[i]);
+            if (stamp[s] == static_cast<int64_t>(p)) {
+                out.ranking_[position[s]] += by_plot_abundance[i];
                 continue;
             }
-            const auto& taxon = taxa.at(record.species_id);
-            out.ranking_.push_back(record.abundance);
-            out.entries_.push_back(std::move(record));
-            SpeciesRecord& entry = out.entries_.back();
-            entry.genus = taxon.first;
-            entry.family = taxon.second;
-            entry.plot_id = out.plot_ids_[p];
-            position.emplace(entry.species_id, out.entries_.size() - 1);
+            stamp[s] = static_cast<int64_t>(p);
+            position[s] = out.species_.size();
+            out.species_.push_back(by_plot_species[i]);
+            out.ranking_.push_back(by_plot_abundance[i]);
         }
-        out.offsets_.push_back(static_cast<int64_t>(out.entries_.size()));
+        out.offsets_.push_back(static_cast<int64_t>(out.species_.size()));
+    }
+    out.species_.shrink_to_fit();
+    out.ranking_.shrink_to_fit();
+
+    out.plots_per_species_.assign(n_species, 0);
+    for (int32_t s : out.species_) ++out.plots_per_species_[static_cast<size_t>(s)];
+    for (size_t s = 0; s < n_species; ++s) {
+        if (out.plots_per_species_[s] > 0 && (out.genus_of_[s] >= 0 || out.family_of_[s] >= 0)) {
+            out.names_taxa_ = true;
+            break;
+        }
     }
 
-    for (size_t e = 0; e < out.entries_.size(); ++e) {
-        out.entries_[e].abundance =
-            representation == RepresentationMode::PresenceAbsence ? 1.0f : out.ranking_[e];
-    }
+    out.species_names_ = std::move(species_names_);
+    out.genus_names_ = std::move(genus_names_);
+    out.family_names_ = std::move(family_names_);
+    out.species_rank_ = name_ranks(out.species_names_);
+    out.genus_rank_ = name_ranks(out.genus_names_);
+    out.family_rank_ = name_ranks(out.family_names_);
     return out;
 }
 
-PlotAssemblages PlotAssemblages::build(std::vector<SpeciesRecord> records,
+PlotAssemblages PlotAssemblages::build(const std::vector<SpeciesRecord>& records,
+                                       const std::vector<std::string>& plot_ids,
                                        RepresentationMode representation) {
-    std::vector<std::string> plot_ids;
-    {
-        std::unordered_map<std::string_view, char> seen;
-        for (const auto& record : records) {
-            if (seen.emplace(record.plot_id, 0).second) plot_ids.push_back(record.plot_id);
+    // A plot ID listed twice keeps its first position; the later one holds no
+    // entries.
+    NamePool plots;
+    std::vector<int32_t> plot_of;
+    for (size_t p = 0; p < plot_ids.size(); ++p) {
+        if (plots.insert(plot_ids[p]).second) plot_of.push_back(static_cast<int32_t>(p));
+    }
+    Builder builder;
+    for (const auto& record : records) {
+        const int32_t code = plots.find(record.plot_id);
+        if (code >= 0) {
+            builder.add(code, record.species_id, record.abundance, record.genus, record.family);
         }
     }
-    return build(std::move(records), plot_ids, representation);
+    return std::move(builder).finish(static_cast<int64_t>(plot_ids.size()), plot_of,
+                                     representation);
 }
 
-std::span<const SpeciesRecord> PlotAssemblages::plot(int64_t p) const {
-    const auto begin = static_cast<size_t>(offsets_.at(static_cast<size_t>(p)));
-    const auto end = static_cast<size_t>(offsets_.at(static_cast<size_t>(p) + 1));
-    return std::span<const SpeciesRecord>(entries_).subspan(begin, end - begin);
+PlotAssemblages PlotAssemblages::build(const std::vector<SpeciesRecord>& records,
+                                       RepresentationMode representation) {
+    NamePool plots;
+    Builder builder;
+    for (const auto& record : records) {
+        builder.add(plots.intern(record.plot_id), record.species_id, record.abundance,
+                    record.genus, record.family);
+    }
+    std::vector<int32_t> plot_of(static_cast<size_t>(plots.size()));
+    std::iota(plot_of.begin(), plot_of.end(), 0);
+    return std::move(builder).finish(plots.size(), plot_of, representation);
+}
+
+std::span<const int32_t> PlotAssemblages::species(int64_t p) const {
+    const auto begin = static_cast<size_t>(offset(p));
+    return std::span<const int32_t>(species_).subspan(begin, static_cast<size_t>(plot_size(p)));
 }
 
 std::span<const float> PlotAssemblages::ranking(int64_t p) const {
-    const auto begin = static_cast<size_t>(offsets_.at(static_cast<size_t>(p)));
-    const auto end = static_cast<size_t>(offsets_.at(static_cast<size_t>(p) + 1));
-    return std::span<const float>(ranking_).subspan(begin, end - begin);
+    const auto begin = static_cast<size_t>(offset(p));
+    return std::span<const float>(ranking_).subspan(begin, static_cast<size_t>(plot_size(p)));
+}
+
+std::vector<int64_t> PlotAssemblages::species_codes(const SpeciesVocab& vocab) const {
+    std::vector<int64_t> codes(static_cast<size_t>(n_species()));
+    for (int32_t s = 0; s < n_species(); ++s) codes[static_cast<size_t>(s)] = vocab.encode(species_name(s));
+    return codes;
+}
+
+std::vector<int64_t> PlotAssemblages::genus_codes(const TaxonomyVocab& taxonomy) const {
+    std::vector<int64_t> codes(static_cast<size_t>(n_genera()));
+    for (int32_t g = 0; g < n_genera(); ++g) codes[static_cast<size_t>(g)] = taxonomy.encode_genus(genus_name(g));
+    return codes;
+}
+
+std::vector<int64_t> PlotAssemblages::family_codes(const TaxonomyVocab& taxonomy) const {
+    std::vector<int64_t> codes(static_cast<size_t>(n_families()));
+    for (int32_t f = 0; f < n_families(); ++f) codes[static_cast<size_t>(f)] = taxonomy.encode_family(family_name(f));
+    return codes;
 }
 
 // =============================================================================
@@ -138,18 +217,19 @@ std::vector<size_t> all_indices(size_t n) {
     return idx;
 }
 
-// The plot's entries ranked by `key` (descending or ascending), ties by
-// species name, truncated to the first k when there are more.
-std::vector<size_t> ranked_indices(std::span<const SpeciesRecord> plot,
-                                   std::span<const float> key,
-                                   int k,
+// Plot p's entries ranked by their summed abundance (descending or
+// ascending), ties by species name, truncated to the first k when there are
+// more.
+std::vector<size_t> ranked_indices(const PlotAssemblages& assemblages, int64_t p, int k,
                                    bool descending) {
-    std::vector<size_t> idx = all_indices(plot.size());
+    const auto species = assemblages.species(p);
+    const auto key = assemblages.ranking(p);
+    std::vector<size_t> idx = all_indices(species.size());
     const size_t keep = k < 0 ? idx.size() : std::min(idx.size(), static_cast<size_t>(k));
     std::partial_sort(idx.begin(), idx.begin() + static_cast<std::ptrdiff_t>(keep), idx.end(),
         [&](size_t a, size_t b) {
             if (key[a] != key[b]) return descending ? key[a] > key[b] : key[a] < key[b];
-            return plot[a].species_id < plot[b].species_id;
+            return assemblages.species_rank(species[a]) < assemblages.species_rank(species[b]);
         });
     idx.resize(keep);
     return idx;
@@ -159,18 +239,16 @@ std::vector<size_t> ranked_indices(std::span<const SpeciesRecord> plot,
 
 std::vector<size_t> selection_indices(const PlotAssemblages& assemblages, int64_t p,
                                       SelectionMode mode, int k) {
-    const auto plot = assemblages.plot(p);
-    const auto key = assemblages.ranking(p);
     switch (mode) {
         case SelectionMode::Top:
-            return ranked_indices(plot, key, k, /*descending=*/true);
+            return ranked_indices(assemblages, p, k, /*descending=*/true);
         case SelectionMode::Bottom:
-            return ranked_indices(plot, key, k, /*descending=*/false);
+            return ranked_indices(assemblages, p, k, /*descending=*/false);
         case SelectionMode::TopBottom: {
-            auto out = ranked_indices(plot, key, k, /*descending=*/true);
-            std::vector<char> taken(plot.size(), 0);
+            auto out = ranked_indices(assemblages, p, k, /*descending=*/true);
+            std::vector<char> taken(static_cast<size_t>(assemblages.plot_size(p)), 0);
             for (size_t i : out) taken[i] = 1;
-            for (size_t i : ranked_indices(plot, key, k, /*descending=*/false)) {
+            for (size_t i : ranked_indices(assemblages, p, k, /*descending=*/false)) {
                 if (!taken[i]) out.push_back(i);
             }
             return out;
@@ -178,13 +256,13 @@ std::vector<size_t> selection_indices(const PlotAssemblages& assemblages, int64_
         case SelectionMode::All:
             break;
     }
-    return all_indices(plot.size());
+    return all_indices(static_cast<size_t>(assemblages.plot_size(p)));
 }
 
 std::vector<size_t> species_budget_indices(const PlotAssemblages& assemblages, int64_t p,
                                            SelectionMode mode, int budget) {
     if (budget <= 0 || mode == SelectionMode::All) {
-        return all_indices(assemblages.plot(p).size());
+        return all_indices(static_cast<size_t>(assemblages.plot_size(p)));
     }
     auto idx = selection_indices(assemblages, p, mode, budget);
     std::sort(idx.begin(), idx.end());
@@ -194,10 +272,10 @@ std::vector<size_t> species_budget_indices(const PlotAssemblages& assemblages, i
 std::vector<float> normalized_values(const PlotAssemblages& assemblages, int64_t p,
                                      const std::vector<size_t>& selected,
                                      NormalizationMode mode) {
-    const auto plot = assemblages.plot(p);
+    const auto ranking = assemblages.ranking(p);
     std::vector<float> values;
     values.reserve(selected.size());
-    for (size_t i : selected) values.push_back(plot[i].abundance);
+    for (size_t i : selected) values.push_back(assemblages.value(ranking[i]));
     switch (mode) {
         case NormalizationMode::Norm: {
             float total = 0.0f;
@@ -214,12 +292,6 @@ std::vector<float> normalized_values(const PlotAssemblages& assemblages, int64_t
             break;
     }
     return values;
-}
-
-void accumulate_feature_hash(std::string_view species, float weight, float* embedding,
-                             int hash_dim) {
-    const HashBucketSign slot = feature_hash_bucket_sign(species, static_cast<int32_t>(hash_dim));
-    embedding[slot.bucket] += slot.sign * weight;
 }
 
 int64_t percentile_linear_trunc(std::vector<int64_t>& values, double q) {
@@ -265,23 +337,24 @@ SpeciesVocab::SpeciesVocab(std::vector<std::string> names) : names_(std::move(na
 }
 
 SpeciesVocab SpeciesVocab::fit(const PlotAssemblages& assemblages, int min_count) {
-    // A plot lists each species once, so an entry count is a plot count.
-    std::unordered_map<std::string_view, int64_t> plots_with;
-    for (const auto& entry : assemblages.entries()) ++plots_with[entry.species_id];
-
-    std::vector<std::pair<std::string_view, int64_t>> ranked;
-    ranked.reserve(plots_with.size());
-    for (const auto& [name, count] : plots_with) {
-        if (count >= min_count) ranked.emplace_back(name, count);
+    // A plot lists each species once, so the number of plots a species is
+    // recorded in is its entry count.
+    const auto& plots_with = assemblages.plots_per_species();
+    std::vector<int32_t> ranked;
+    for (int32_t s = 0; s < assemblages.n_species(); ++s) {
+        const int64_t count = plots_with[static_cast<size_t>(s)];
+        if (count > 0 && count >= min_count) ranked.push_back(s);
     }
-    std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
-        return a.second != b.second ? a.second > b.second : a.first < b.first;
+    std::sort(ranked.begin(), ranked.end(), [&](int32_t a, int32_t b) {
+        const int64_t ca = plots_with[static_cast<size_t>(a)];
+        const int64_t cb = plots_with[static_cast<size_t>(b)];
+        return ca != cb ? ca > cb : assemblages.species_rank(a) < assemblages.species_rank(b);
     });
 
     std::vector<std::string> names;
     names.reserve(ranked.size() + 1);
     names.emplace_back(kUnknownName);
-    for (const auto& item : ranked) names.emplace_back(item.first);
+    for (int32_t s : ranked) names.push_back(assemblages.species_name(s));
     return SpeciesVocab(std::move(names));
 }
 
@@ -303,7 +376,17 @@ EncodingVocab EncodingVocab::fit(const PlotAssemblages& assemblages, int min_cou
                                  bool with_taxonomy) {
     EncodingVocab vocab;
     vocab.species = SpeciesVocab::fit(assemblages, min_count);
-    if (with_taxonomy) vocab.taxonomy.fit(assemblages.entries());
+    if (with_taxonomy) {
+        // The genera and families of the species the plots record.
+        std::set<std::string> genera;
+        std::set<std::string> families;
+        for (int32_t s = 0; s < assemblages.n_species(); ++s) {
+            if (assemblages.plots_per_species()[static_cast<size_t>(s)] == 0) continue;
+            if (assemblages.genus_of(s) >= 0) genera.insert(assemblages.genus_name(assemblages.genus_of(s)));
+            if (assemblages.family_of(s) >= 0) families.insert(assemblages.family_name(assemblages.family_of(s)));
+        }
+        vocab.taxonomy.fit(genera, families);
+    }
     return vocab;
 }
 
@@ -325,17 +408,20 @@ struct NoveltyTally {
 
 NoveltyTally tally_novelty(const PlotAssemblages& assemblages, const SpeciesVocab& vocab) {
     const auto n_plots = static_cast<size_t>(assemblages.n_plots());
+    const std::vector<int64_t> codes = assemblages.species_codes(vocab);
     NoveltyTally t;
     t.total.assign(n_plots, 0.0);
     t.unknown.assign(n_plots, 0.0);
     t.n_species.assign(n_plots, 0);
     t.n_unknown.assign(n_plots, 0);
     for (size_t p = 0; p < n_plots; ++p) {
-        for (const auto& entry : assemblages.plot(static_cast<int64_t>(p))) {
-            const double value = static_cast<double>(entry.abundance);
+        const auto species = assemblages.species(static_cast<int64_t>(p));
+        const auto ranking = assemblages.ranking(static_cast<int64_t>(p));
+        for (size_t i = 0; i < species.size(); ++i) {
+            const double value = static_cast<double>(assemblages.value(ranking[i]));
             t.total[p] += value;
             ++t.n_species[p];
-            if (vocab.encode(entry.species_id) == 0) {
+            if (codes[static_cast<size_t>(species[i])] == 0) {
                 t.unknown[p] += value;
                 ++t.n_unknown[p];
             }
@@ -404,6 +490,15 @@ SpeciesRecognition compute_species_recognition(const PlotAssemblages& assemblage
 // Taxonomy
 // =============================================================================
 
+namespace {
+
+// The code `codes` gives taxon t of a species (taxon_of), 0 for none.
+int64_t taxon_code(int32_t taxon, const std::vector<int64_t>& codes) {
+    return taxon >= 0 ? codes[static_cast<size_t>(taxon)] : 0;
+}
+
+}  // namespace
+
 SpeciesTaxonomy resolve_species_taxonomy(const PlotAssemblages& assemblages,
                                          const SpeciesVocab& species_vocab,
                                          const TaxonomyVocab& taxonomy_vocab) {
@@ -411,32 +506,61 @@ SpeciesTaxonomy resolve_species_taxonomy(const PlotAssemblages& assemblages,
     const auto n_codes = static_cast<size_t>(species_vocab.size());
     taxonomy.genus.assign(n_codes, 0);
     taxonomy.family.assign(n_codes, 0);
-    // Every entry of a species carries the same resolved taxonomy, so any one
-    // of them answers for the species.
-    for (const auto& entry : assemblages.entries()) {
-        const int64_t code = species_vocab.encode(entry.species_id);
-        if (code == 0) continue;
-        taxonomy.genus[static_cast<size_t>(code)] = taxonomy_vocab.encode_genus(entry.genus);
-        taxonomy.family[static_cast<size_t>(code)] = taxonomy_vocab.encode_family(entry.family);
+    const std::vector<int64_t> codes = assemblages.species_codes(species_vocab);
+    const std::vector<int64_t> genus_codes = assemblages.genus_codes(taxonomy_vocab);
+    const std::vector<int64_t> family_codes = assemblages.family_codes(taxonomy_vocab);
+    for (int32_t s = 0; s < assemblages.n_species(); ++s) {
+        const int64_t code = codes[static_cast<size_t>(s)];
+        if (code == 0 || assemblages.plots_per_species()[static_cast<size_t>(s)] == 0) continue;
+        taxonomy.genus[static_cast<size_t>(code)] = taxon_code(assemblages.genus_of(s), genus_codes);
+        taxonomy.family[static_cast<size_t>(code)] = taxon_code(assemblages.family_of(s), family_codes);
     }
     return taxonomy;
 }
 
 namespace {
 
-// The first k names by descending weight, ties by name.
-std::vector<std::string_view> top_k_by_weight(
-    const std::unordered_map<std::string_view, float>& weight, int k) {
-    std::vector<std::pair<std::string_view, float>> items(weight.begin(), weight.end());
-    std::sort(items.begin(), items.end(), [](const auto& a, const auto& b) {
-        return a.second != b.second ? a.second > b.second : a.first < b.first;
-    });
-    const size_t n = std::min(items.size(), static_cast<size_t>(std::max(k, 0)));
-    std::vector<std::string_view> out;
-    out.reserve(n);
-    for (size_t i = 0; i < n; ++i) out.push_back(items[i].first);
-    return out;
-}
+// The weight of each distinct taxon of one plot, in the order the plot first
+// names it, ranked and cut to the first k slots.
+class TaxonTally {
+public:
+    explicit TaxonTally(int32_t n_taxa) : slot_(static_cast<size_t>(n_taxa), -1) {}
+
+    void add(int32_t taxon, float weight) {
+        if (taxon < 0) return;
+        int32_t& slot = slot_[static_cast<size_t>(taxon)];
+        if (slot < 0) {
+            slot = static_cast<int32_t>(taxa_.size());
+            taxa_.push_back(taxon);
+            weights_.push_back(0.0f);
+        }
+        weights_[static_cast<size_t>(slot)] += weight;
+    }
+
+    // The first k taxa by descending weight, ties by `rank` (name order);
+    // resets the tally.
+    template <typename Rank>
+    std::vector<int32_t> top_k(int k, Rank rank) {
+        std::vector<size_t> order = all_indices(taxa_.size());
+        std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+            if (weights_[a] != weights_[b]) return weights_[a] > weights_[b];
+            return rank(taxa_[a]) < rank(taxa_[b]);
+        });
+        const size_t n = std::min(order.size(), static_cast<size_t>(std::max(k, 0)));
+        std::vector<int32_t> out;
+        out.reserve(n);
+        for (size_t i = 0; i < n; ++i) out.push_back(taxa_[order[i]]);
+        for (int32_t taxon : taxa_) slot_[static_cast<size_t>(taxon)] = -1;
+        taxa_.clear();
+        weights_.clear();
+        return out;
+    }
+
+private:
+    std::vector<int32_t> slot_;
+    std::vector<int32_t> taxa_;
+    std::vector<float> weights_;
+};
 
 }  // namespace
 
@@ -452,26 +576,28 @@ TaxonomySlots encode_taxonomy_slots(const PlotAssemblages& assemblages,
     auto genus_acc = slots.genus_ids.accessor<int64_t, 2>();
     auto family_acc = slots.family_ids.accessor<int64_t, 2>();
 
-    std::unordered_map<std::string_view, float> genus_weight;
-    std::unordered_map<std::string_view, float> family_weight;
-    std::string name;
+    const std::vector<int64_t> genus_codes = assemblages.genus_codes(taxonomy);
+    const std::vector<int64_t> family_codes = assemblages.family_codes(taxonomy);
+    TaxonTally genera(assemblages.n_genera());
+    TaxonTally families(assemblages.n_families());
     for (int64_t p = 0; p < n_plots; ++p) {
-        genus_weight.clear();
-        family_weight.clear();
-        for (const auto& entry : assemblages.plot(p)) {
-            const float w = aggregation == AggregationMode::Count ? 1.0f : entry.abundance;
-            if (!entry.genus.empty()) genus_weight[entry.genus] += w;
-            if (!entry.family.empty()) family_weight[entry.family] += w;
+        const auto species = assemblages.species(p);
+        const auto ranking = assemblages.ranking(p);
+        for (size_t i = 0; i < species.size(); ++i) {
+            const float w = aggregation == AggregationMode::Count ? 1.0f
+                                                                  : assemblages.value(ranking[i]);
+            genera.add(assemblages.genus_of(species[i]), w);
+            families.add(assemblages.family_of(species[i]), w);
         }
-        const auto genera = top_k_by_weight(genus_weight, n_slots);
-        for (size_t s = 0; s < genera.size(); ++s) {
-            name.assign(genera[s]);
-            genus_acc[p][static_cast<int64_t>(s)] = taxonomy.encode_genus(name);
+        const auto top_genera =
+            genera.top_k(n_slots, [&](int32_t g) { return assemblages.genus_rank(g); });
+        for (size_t s = 0; s < top_genera.size(); ++s) {
+            genus_acc[p][static_cast<int64_t>(s)] = genus_codes[static_cast<size_t>(top_genera[s])];
         }
-        const auto families = top_k_by_weight(family_weight, n_slots);
-        for (size_t s = 0; s < families.size(); ++s) {
-            name.assign(families[s]);
-            family_acc[p][static_cast<int64_t>(s)] = taxonomy.encode_family(name);
+        const auto top_families =
+            families.top_k(n_slots, [&](int32_t f) { return assemblages.family_rank(f); });
+        for (size_t s = 0; s < top_families.size(); ++s) {
+            family_acc[p][static_cast<int64_t>(s)] = family_codes[static_cast<size_t>(top_families[s])];
         }
     }
     return slots;
@@ -576,30 +702,25 @@ RankPoolEncodedData RankPoolEncoder::transform(const PlotAssemblages& assemblage
                                                bool has_abundance_column) const {
     require_vocab("RankPoolEncoder");
     const int64_t n_plots = assemblages.n_plots();
+    const std::vector<int64_t> species_codes = assemblages.species_codes(vocab_.species);
+    const std::vector<int64_t> genus_codes = assemblages.genus_codes(vocab_.taxonomy);
+    const std::vector<int64_t> family_codes = assemblages.family_codes(vocab_.taxonomy);
 
-    struct PlotSlots {
-        std::vector<int64_t> species, genus, family;
-        std::vector<float> weights;
-    };
-    std::vector<PlotSlots> slots(static_cast<size_t>(n_plots));
+    // Each plot's kept entries as indices into its plot, with their weights.
+    std::vector<std::vector<size_t>> kept(static_cast<size_t>(n_plots));
+    std::vector<std::vector<float>> weights(static_cast<size_t>(n_plots));
     std::vector<int64_t> lengths(static_cast<size_t>(n_plots), 0);
     int64_t widest = 0;
     for (int64_t p = 0; p < n_plots; ++p) {
-        const auto plot = assemblages.plot(p);
-        const auto kept = species_budget_indices(assemblages, p, selection_, species_budget_);
-        auto& s = slots[static_cast<size_t>(p)];
+        const auto pi = static_cast<size_t>(p);
+        kept[pi] = species_budget_indices(assemblages, p, selection_, species_budget_);
+        const auto ranking = assemblages.ranking(p);
         std::vector<float> values;
-        values.reserve(kept.size());
-        for (size_t i : kept) {
-            const auto& entry = plot[i];
-            s.species.push_back(vocab_.species.encode(entry.species_id));
-            s.genus.push_back(vocab_.taxonomy.encode_genus(entry.genus));
-            s.family.push_back(vocab_.taxonomy.encode_family(entry.family));
-            values.push_back(entry.abundance);
-        }
-        s.weights = pool_weights(std::move(values), weighting_);
-        lengths[static_cast<size_t>(p)] = static_cast<int64_t>(kept.size());
-        widest = std::max(widest, static_cast<int64_t>(kept.size()));
+        values.reserve(kept[pi].size());
+        for (size_t i : kept[pi]) values.push_back(assemblages.value(ranking[i]));
+        weights[pi] = pool_weights(std::move(values), weighting_);
+        lengths[pi] = static_cast<int64_t>(kept[pi].size());
+        widest = std::max(widest, lengths[pi]);
     }
     widest = std::max<int64_t>(widest, 1);
 
@@ -628,17 +749,19 @@ RankPoolEncodedData RankPoolEncoder::transform(const PlotAssemblages& assemblage
     auto species = out.species_ids.accessor<int64_t, 2>();
     auto genus = out.genus_ids.accessor<int64_t, 2>();
     auto family = out.family_ids.accessor<int64_t, 2>();
-    auto weights = out.weights.accessor<float, 2>();
+    auto weight = out.weights.accessor<float, 2>();
     auto mask = out.mask.accessor<bool, 2>();
     for (int64_t p = 0; p < n_plots; ++p) {
-        const auto& s = slots[static_cast<size_t>(p)];
-        const int64_t n = std::min(static_cast<int64_t>(s.species.size()), width);
+        const auto pi = static_cast<size_t>(p);
+        const auto plot_species = assemblages.species(p);
+        const int64_t n = std::min(lengths[pi], width);
         for (int64_t j = 0; j < n; ++j) {
             const auto jj = static_cast<size_t>(j);
-            species[p][j] = s.species[jj];
-            genus[p][j] = s.genus[jj];
-            family[p][j] = s.family[jj];
-            weights[p][j] = s.weights[jj];
+            const int32_t s = plot_species[kept[pi][jj]];
+            species[p][j] = species_codes[static_cast<size_t>(s)];
+            genus[p][j] = taxon_code(assemblages.genus_of(s), genus_codes);
+            family[p][j] = taxon_code(assemblages.family_of(s), family_codes);
+            weight[p][j] = weights[pi][jj];
             mask[p][j] = true;
         }
     }
@@ -683,15 +806,17 @@ EmbeddingEncodedData EmbeddingEncoder::transform(const PlotAssemblages& assembla
                                : top_k_species_;
 
     const int64_t n_plots = assemblages.n_plots();
+    const std::vector<int64_t> species_codes = assemblages.species_codes(vocab_.species);
     EmbeddingEncodedData out;
     out.species_ids = torch::zeros({n_plots, static_cast<int64_t>(top_k_species_)}, torch::kInt64);
     auto species = out.species_ids.accessor<int64_t, 2>();
     for (int64_t p = 0; p < n_plots; ++p) {
-        const auto plot = assemblages.plot(p);
+        const auto plot_species = assemblages.species(p);
         const auto selected = selection_indices(assemblages, p, selection_, per_side_k);
         const size_t n = std::min(selected.size(), static_cast<size_t>(top_k_species_));
         for (size_t j = 0; j < n; ++j) {
-            species[p][static_cast<int64_t>(j)] = vocab_.species.encode(plot[selected[j]].species_id);
+            species[p][static_cast<int64_t>(j)] =
+                species_codes[static_cast<size_t>(plot_species[selected[j]])];
         }
     }
 

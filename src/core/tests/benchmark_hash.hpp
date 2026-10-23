@@ -98,7 +98,7 @@ inline CudaHashRecords to_cuda(const HashRecords& r) {
 inline torch::Tensor run_hash_kernel(HashKernel kind, const CudaHashRecords& r) {
     if (kind == HashKernel::Csr) {
         return resolve::cuda::compute_batch_hash_embedding_cuda(
-            r.csr_batch, torch::Tensor(), r.csr_species_ids, r.csr_weights,
+            r.csr_batch, r.csr_species_ids, r.csr_weights,
             r.csr_offsets, r.hash_dim);
     }
 

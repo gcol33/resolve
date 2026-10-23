@@ -201,7 +201,7 @@ produce it.
 | `categorical_ids` | `(n_plots, n_categoricals)` | Categoricals declared |
 | `hash_embedding` | `(n_plots, hash_dim)` | `Hash`, with `use_cuda_hash=False` |
 | `species_ids` | `(n_plots, top_k_species)` or `(n_plots, max_species)` | `Embed`, `RankPool`, `Transformer` |
-| `species_vector` | `(n_plots, n_species_vocab)` | `Sparse` |
+| `species_vector` | `(n_plots, n_species_vocab)`, sparse CSR | `Sparse` |
 | `genus_ids`, `family_ids` | `(n_plots, n_taxonomy_slots)` | `Hash`, `Sparse`, `Embed`, with taxonomy |
 | `pool_genus_ids`, `pool_family_ids` | `(n_plots, max_species)` | `RankPool`, `Transformer` |
 | `pool_weights` | `(n_plots, max_species)` | `RankPool`, `Transformer` |
@@ -209,13 +209,30 @@ produce it.
 | `pool_has_cover` | `(n_plots,)` | `RankPool`, `Transformer` |
 | `unknown_fraction`, `unknown_count` | `(n_plots,)` | Tracking enabled |
 | `species_genus_ids`, `species_family_ids` | `(n_species_vocab,)` | With taxonomy |
-| `raw_species_ids`, `raw_weights`, `plot_offsets` | flat COO | `use_cuda_hash=True` |
+| `raw_species_ids`, `raw_weights`, `plot_offsets` | flat CSR: plot `p` holds entries `plot_offsets[p]` to `plot_offsets[p + 1]` | `use_cuda_hash=True` |
+
+`species_vector` is a torch sparse CSR tensor: a plot records tens of species
+out of a vocabulary of tens of thousands, so only each plot's species are
+stored. `crow_indices()` delimits the plots, `col_indices()` holds each plot's
+species codes in increasing order and `values()` the values they carry (a
+species the vocabulary does not hold, or a value of 0, stores nothing).
+`species_vector.to_dense()` gives the matrix. The model inputs take either
+form: a dense matrix passed as `species_vector` is converted to sparse rows.
+R's `dataset$species_vector()` returns the same parts as a list
+(`row_offsets`, `species`, `values`, `n_species`, 0-based) and
+`dataset$species_vector_dense()` the matrix.
 
 `species_genus_ids` and `species_family_ids` are the taxonomy of the
 VOCABULARY, not of a plot: index by a species code and read the genus or family
 code that species belongs to, `0` where the records name none. `genus_ids` /
 `family_ids` above are per-plot slots instead. `build_species_graph` joins
 species through these, and `heterogeneous_gnn` passes messages on the result.
+Its co-occurrence edges are counted from the plots' species lists in
+`species_vector` (sparse encoding): a species keeps the `k_cooccurrence`
+partners it shares most plots with, among those sharing at least one plot and
+at least `cooccurrence_threshold` of all plots, ties to the lower species code.
+The count runs in time and memory linear in the records, so it covers a full
+archive.
 
 ```python
 graph = rc.build_species_graph(dataset, model_config.heterogeneous_gnn)

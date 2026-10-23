@@ -10,6 +10,7 @@
 // when the two disagree.
 
 #include "resolve/aggregate_arity.hpp"
+#include "resolve/sparse_rows.hpp"
 
 #include <torch/torch.h>
 
@@ -23,26 +24,46 @@
 
 namespace resolve {
 
+// How a field stores its rows: a dense tensor, or sparse rows
+// (sparse_rows.hpp), the layout of a matrix that is almost entirely zeros.
+enum class FieldLayout { Dense, SparseRows };
+
 // One row of the field list: the member name, which is also the keyword the
-// bindings and the C ABI value map use, and the dtype the model expects.
+// bindings and the C ABI value map use, and the dtype and layout the model
+// expects.
 struct PlotInputField {
     const char* name;
     torch::ScalarType dtype;
+    FieldLayout layout;
 };
 
 // Order is the positional order of the Python model methods.
-#define RESOLVE_PLOT_INPUT_FIELDS(F)       \
-    F(continuous,      torch::kFloat32)    \
-    F(genus_ids,       torch::kInt64)      \
-    F(family_ids,      torch::kInt64)      \
-    F(species_ids,     torch::kInt64)      \
-    F(species_vector,  torch::kFloat32)    \
-    F(pool_genus_ids,  torch::kInt64)      \
-    F(pool_family_ids, torch::kInt64)      \
-    F(pool_weights,    torch::kFloat32)    \
-    F(pool_mask,       torch::kBool)       \
-    F(pool_has_cover,  torch::kFloat32)    \
-    F(categorical_ids, torch::kInt64)
+#define RESOLVE_PLOT_INPUT_FIELDS(F)                \
+    F(continuous,      torch::kFloat32, Dense)      \
+    F(genus_ids,       torch::kInt64,   Dense)      \
+    F(family_ids,      torch::kInt64,   Dense)      \
+    F(species_ids,     torch::kInt64,   Dense)      \
+    F(species_vector,  torch::kFloat32, SparseRows) \
+    F(pool_genus_ids,  torch::kInt64,   Dense)      \
+    F(pool_family_ids, torch::kInt64,   Dense)      \
+    F(pool_weights,    torch::kFloat32, Dense)      \
+    F(pool_mask,       torch::kBool,    Dense)      \
+    F(pool_has_cover,  torch::kFloat32, Dense)      \
+    F(categorical_ids, torch::kInt64,   Dense)
+
+// `t` in the dtype and layout of `field`: a dense matrix given for a
+// sparse-rows field converts to sparse rows. An undefined tensor, and a dense
+// one with no elements (the loaders' and bindings' "absent"), keep their
+// layout.
+[[nodiscard]] inline torch::Tensor conform_to_field(const PlotInputField& field,
+                                                    const torch::Tensor& t) {
+    if (!t.defined()) return t;
+    torch::Tensor out = t;
+    if (field.layout == FieldLayout::SparseRows && !is_sparse_rows(out) && out.numel() > 0) {
+        out = to_sparse_rows(out);
+    }
+    return out.scalar_type() == field.dtype ? out : out.to(field.dtype);
+}
 
 // Row i of every defined field belongs to plot i. A field the model does not
 // read for its encoding stays undefined, and every operation below carries an
@@ -57,7 +78,8 @@ struct PlotInputs {
     // (n, k) species codes, 0 = padding: the top_k_species slots of embed
     // mode, or one entry per pooled species for rank_pool / transformer.
     torch::Tensor species_ids;
-    // (n, n_species) explicit species vector (sparse mode).
+    // (n, n_species_vocab) explicit species vector of the sparse encoding, as
+    // sparse rows: each plot's species codes and values.
     torch::Tensor species_vector;
     // rank_pool / transformer, aligned with species_ids: (n, max_species)
     // genus and family code, weight and validity of each pooled species, and
@@ -92,15 +114,13 @@ struct PlotInputs {
 
     // The rows `rows` (int64 indices, on any device) of every field.
     [[nodiscard]] PlotInputs index_select(const torch::Tensor& rows) const {
-        return map([&](const torch::Tensor& t) {
-            return t.index_select(0, rows.to(t.device()));
-        });
+        return map([&](const torch::Tensor& t) { return select_rows(t, rows); });
     }
 
     // Rows [start, end) of every field.
     [[nodiscard]] PlotInputs slice(int64_t start, int64_t end) const {
         return map([&](const torch::Tensor& t) {
-            return t.dim() == 0 ? t : t.slice(/*dim=*/0, start, end);
+            return t.dim() == 0 ? t : slice_rows(t, start, end);
         });
     }
 
@@ -133,7 +153,17 @@ struct PlotInputs {
                     "' is defined in " + std::to_string(pieces.size()) + " of " +
                     std::to_string(parts.size()) + " parts");
             }
-            dst = torch::cat(pieces, /*dim=*/0);
+            dst = concat_rows(pieces);
+        });
+        return out;
+    }
+
+    // A copy with every defined field in its field's dtype and layout
+    // (conform_to_field): the bundle a binding builds from caller tensors.
+    [[nodiscard]] PlotInputs conformed() const {
+        PlotInputs out = *this;
+        out.for_each([](const PlotInputField& field, torch::Tensor& t) {
+            t = conform_to_field(field, t);
         });
         return out;
     }
@@ -160,14 +190,15 @@ struct PlotInputs {
 private:
     template <typename Self, typename F>
     static void visit(Self& self, F& f) {
-#define RESOLVE_PLOT_INPUT_VISIT(member, dtype) \
-        f(PlotInputField{#member, dtype}, self.member);
+#define RESOLVE_PLOT_INPUT_VISIT(member, dtype, layout) \
+        f(PlotInputField{#member, dtype, FieldLayout::layout}, self.member);
         RESOLVE_PLOT_INPUT_FIELDS(RESOLVE_PLOT_INPUT_VISIT)
 #undef RESOLVE_PLOT_INPUT_VISIT
     }
 };
 
-#define RESOLVE_PLOT_INPUT_ROW(member, dtype) PlotInputField{#member, dtype},
+#define RESOLVE_PLOT_INPUT_ROW(member, dtype, layout) \
+    PlotInputField{#member, dtype, FieldLayout::layout},
 inline constexpr std::array kPlotInputFields{
     RESOLVE_PLOT_INPUT_FIELDS(RESOLVE_PLOT_INPUT_ROW)
 };

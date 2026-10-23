@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "resolve/dataset.hpp"
 #include "resolve/species_encoding.hpp"
+#include "resolve/sparse_rows.hpp"
 #include "test_support.hpp"
 
 #include <algorithm>
@@ -31,8 +32,34 @@ std::vector<SpeciesRecord> make_test_records() {
 
 std::vector<std::string> plot_species(const PlotAssemblages& plots, int64_t p) {
     std::vector<std::string> out;
-    for (const auto& entry : plots.plot(p)) out.push_back(entry.species_id);
+    for (int32_t s : plots.species(p)) out.push_back(plots.species_name(s));
     return out;
+}
+
+// The genus / family name of the species of entry i of plot p, "" for none.
+std::string entry_genus(const PlotAssemblages& plots, int64_t p, size_t i) {
+    const int32_t g = plots.genus_of(plots.species(p)[i]);
+    return g >= 0 ? plots.genus_name(g) : std::string();
+}
+std::string entry_family(const PlotAssemblages& plots, int64_t p, size_t i) {
+    const int32_t f = plots.family_of(plots.species(p)[i]);
+    return f >= 0 ? plots.family_name(f) : std::string();
+}
+
+// The value entry i of plot p carries into the encodings.
+float entry_value(const PlotAssemblages& plots, int64_t p, size_t i) {
+    return plots.value(plots.ranking(p)[i]);
+}
+
+// Adds `weight` at the feature-hash slot of `name` in `row`.
+void add_hashed(std::vector<float>& row, std::string_view name, float weight) {
+    const HashBucketSign slot = feature_hash_bucket_sign(name, static_cast<int32_t>(row.size()));
+    row[static_cast<size_t>(slot.bucket)] += slot.sign * weight;
+}
+
+// The dense row of plot p of a dataset's sparse species vector.
+torch::Tensor species_row(const ResolveDataset& ds, int64_t p) {
+    return sparse_rows_to_dense(ds.species_vector())[p];
 }
 
 using Names = std::vector<std::string>;
@@ -48,14 +75,48 @@ TEST_CASE("PlotAssemblages groups records by plot in the order asked for",
     const auto plots = PlotAssemblages::build(make_test_records(), {"P3", "P9", "P1"});
     REQUIRE(plots.n_plots() == 3);
     REQUIRE(plot_species(plots, 0) == Names{"sp_b", "sp_c", "sp_e"});
-    REQUIRE(plots.plot(1).empty());                    // no records
+    REQUIRE(plots.species(1).empty());                 // no records
     REQUIRE(plot_species(plots, 2) == Names{"sp_a", "sp_b", "sp_c"});
-    for (const auto& entry : plots.plot(2)) REQUIRE(entry.plot_id == "P1");
     // P2 is not asked for, so its records are dropped.
-    REQUIRE(plots.entries().size() == 6);
+    REQUIRE(plots.n_entries() == 6);
+    REQUIRE(plots.plots_per_species()[static_cast<size_t>(plots.species(0)[0])] == 2);
 
+    // In the order the plots first appear: P1, P2, P3.
     const auto by_appearance = PlotAssemblages::build(make_test_records());
-    REQUIRE(by_appearance.plot_ids() == Names{"P1", "P2", "P3"});
+    REQUIRE(by_appearance.n_plots() == 3);
+    REQUIRE(plot_species(by_appearance, 0) == Names{"sp_a", "sp_b", "sp_c"});
+    REQUIRE(plot_species(by_appearance, 1) == Names{"sp_a", "sp_d"});
+    REQUIRE(plot_species(by_appearance, 2) == Names{"sp_b", "sp_c", "sp_e"});
+}
+
+TEST_CASE("PlotAssemblages::Builder groups coded records and drops unmapped plots",
+          "[assemblages]") {
+    PlotAssemblages::Builder builder;
+    builder.add(0, "sp_a", 1.0f, "gen_z", "");
+    builder.add(2, "sp_b", 2.0f, "gen_b", "fam_b");
+    builder.add(1, "sp_a", 4.0f, "gen_a", "fam_a");  // code 1 is dropped below
+    builder.add(0, "sp_c", 3.0f, "", "");
+    builder.add(2, "sp_b", 5.0f, "", "");
+    REQUIRE(builder.n_records() == 5);
+    // Code 0 is plot 1, code 2 is plot 0, code 1 is dropped.
+    const std::vector<int32_t> plot_of = {1, -1, 0};
+    const auto plots = std::move(builder).finish(2, plot_of, RepresentationMode::Abundance);
+
+    REQUIRE(plots.n_plots() == 2);
+    REQUIRE(plot_species(plots, 0) == Names{"sp_b"});
+    REQUIRE(plots.ranking(0)[0] == 7.0f);
+    REQUIRE(plot_species(plots, 1) == Names{"sp_a", "sp_c"});
+    // The dropped plot's record names no taxonomy: sp_a keeps gen_z, not gen_a.
+    REQUIRE(entry_genus(plots, 1, 0) == "gen_z");
+    REQUIRE(entry_family(plots, 1, 0).empty());
+    REQUIRE(entry_genus(plots, 0, 0) == "gen_b");
+    REQUIRE(plots.names_taxa());
+    // Name order for ties: sp_a < sp_b < sp_c.
+    const int32_t a = plots.species(1)[0];
+    const int32_t c = plots.species(1)[1];
+    const int32_t b = plots.species(0)[0];
+    REQUIRE(plots.species_rank(a) < plots.species_rank(b));
+    REQUIRE(plots.species_rank(b) < plots.species_rank(c));
 }
 
 TEST_CASE("PlotAssemblages merges a species' records within a plot", "[assemblages][duplicates]") {
@@ -72,21 +133,21 @@ TEST_CASE("PlotAssemblages merges a species' records within a plot", "[assemblag
         REQUIRE(plot_species(plots, 0) == Names{"sp_x", "sp_y"});
     }
     SECTION("the abundance is the sum over the species' records") {
-        REQUIRE(plots.plot(0)[0].abundance == 5.0f);
+        REQUIRE(entry_value(plots, 0, 0) == 5.0f);
         REQUIRE(plots.ranking(0)[0] == 5.0f);
-        REQUIRE(plots.plot(0)[1].abundance == 4.0f);
+        REQUIRE(entry_value(plots, 0, 1) == 4.0f);
     }
     SECTION("every entry of a species carries the smallest genus and family named anywhere") {
-        REQUIRE(plots.plot(0)[0].genus == "gen_a");
-        REQUIRE(plots.plot(0)[0].family == "fam_a");
-        REQUIRE(plots.plot(1)[0].genus == "gen_a");
-        REQUIRE(plots.plot(1)[0].family == "fam_a");
+        REQUIRE(entry_genus(plots, 0, 0) == "gen_a");
+        REQUIRE(entry_family(plots, 0, 0) == "fam_a");
+        REQUIRE(entry_genus(plots, 1, 0) == "gen_a");
+        REQUIRE(entry_family(plots, 1, 0) == "fam_a");
     }
     SECTION("presence/absence carries 1.0 and keeps the summed ranking") {
         const auto presence =
             PlotAssemblages::build(records, {"P1", "P2"}, RepresentationMode::PresenceAbsence);
-        REQUIRE(presence.plot(0)[0].abundance == 1.0f);
-        REQUIRE(presence.plot(0)[1].abundance == 1.0f);
+        REQUIRE(entry_value(presence, 0, 0) == 1.0f);
+        REQUIRE(entry_value(presence, 0, 1) == 1.0f);
         REQUIRE(presence.ranking(0)[0] == 5.0f);
         REQUIRE(presence.representation() == RepresentationMode::PresenceAbsence);
     }
@@ -96,16 +157,24 @@ TEST_CASE("PlotAssemblages merges a species' records within a plot", "[assemblag
 // Feature-hash aggregation
 // ============================================================================
 
-TEST_CASE("accumulate_feature_hash adds each species at its hash_bucket_sign slot",
+TEST_CASE("The hash encoding adds each species at its hash_bucket_sign slot",
           "[hash][parity]") {
     const int hash_dim = 64;
     const std::vector<std::pair<std::string, float>> sp = {
         {"Quercus robur", 3.0f}, {"Fagus sylvatica", 2.0f}, {"Picea abies", 5.0f},
         {"Ranunculus acris", 1.5f}
     };
-
-    std::vector<float> emb(hash_dim, 0.0f);
-    for (const auto& [name, abd] : sp) accumulate_feature_hash(name, abd, emb.data(), hash_dim);
+    std::string species_csv = "plot_id,sp,cover\n";
+    for (const auto& [name, abd] : sp) species_csv += "P1," + name + "," + std::to_string(abd) + "\n";
+    TempFile header("plot_id,y\nP1,1\n");
+    TempFile species(species_csv);
+    DatasetConfig cfg;
+    cfg.hash_dim = hash_dim;
+    cfg.selection = SelectionMode::All;
+    cfg.track_unknown_fraction = false;
+    const auto ds = ResolveDataset::from_csv(header.path(), species.path(), Roles(),
+                                             {TargetSpec::regression("y")}, cfg);
+    const auto emb = ds.hash_embedding()[0].contiguous();
 
     std::vector<float> expected(hash_dim, 0.0f);
     bool finalizer_moves_a_bucket = false;
@@ -118,7 +187,7 @@ TEST_CASE("accumulate_feature_hash adds each species at its hash_bucket_sign slo
         if (unfinalized != slot.bucket) finalizer_moves_a_bucket = true;
     }
     for (int i = 0; i < hash_dim; ++i) {
-        REQUIRE(emb[i] == expected[i]);
+        REQUIRE(emb[i].item<float>() == expected[static_cast<size_t>(i)]);
     }
     REQUIRE(finalizer_moves_a_bucket);
 }
@@ -178,7 +247,7 @@ TEST_CASE("encode_taxonomy_slots ranks taxa by abundance or by species count",
     };
     const auto plots = PlotAssemblages::build(records, {"P"});
     TaxonomyVocab taxonomy;
-    taxonomy.fit(plots.entries());
+    taxonomy.fit(records);
 
     const auto by_abundance =
         encode_taxonomy_slots(plots, taxonomy, AggregationMode::Abundance, 1);
@@ -438,18 +507,16 @@ TEST_CASE("Every encoding reads a species' layers as one summed entry",
         auto ds = load_layered(cfg);
         // log1p of the summed cover, not log1p(2) + log1p(3).
         std::vector<float> row(64, 0.0f);
-        accumulate_feature_hash("sp_a", std::log1p(5.0f), row.data(), 64);
-        accumulate_feature_hash("sp_b", std::log1p(4.0f), row.data(), 64);
-        for (const char* s : {"s1", "s2", "s3"}) {
-            accumulate_feature_hash(s, std::log1p(1.0f), row.data(), 64);
-        }
+        add_hashed(row, "sp_a", std::log1p(5.0f));
+        add_hashed(row, "sp_b", std::log1p(4.0f));
+        for (const char* s : {"s1", "s2", "s3"}) add_hashed(row, s, std::log1p(1.0f));
         for (int i = 0; i < 64; ++i) {
             REQUIRE_THAT(ds.hash_embedding()[0][i].item<float>(), WithinAbs(row[static_cast<size_t>(i)], 1e-5));
         }
     }
     SECTION("sparse writes the summed cover") {
         auto ds = load_layered(encoding(SpeciesEncodingMode::Sparse));
-        REQUIRE(ds.species_vector()[0][code_of(ds, "sp_a")].item<float>() == 5.0f);
+        REQUIRE(species_row(ds, 0)[code_of(ds, "sp_a")].item<float>() == 5.0f);
     }
     SECTION("rank_pool gives the species one slot") {
         auto ds = load_layered(encoding(SpeciesEncodingMode::RankPool));
@@ -478,17 +545,15 @@ TEST_CASE("PresenceAbsence reaches every encoding", "[dataset][representation]")
         cfg.hash_dim = 64;
         auto ds = load_layered(cfg);
         std::vector<float> row(64, 0.0f);
-        for (const char* s : {"sp_a", "sp_b", "s1", "s2", "s3"}) {
-            accumulate_feature_hash(s, 1.0f, row.data(), 64);
-        }
+        for (const char* s : {"sp_a", "sp_b", "s1", "s2", "s3"}) add_hashed(row, s, 1.0f);
         for (int i = 0; i < 64; ++i) {
             REQUIRE(ds.hash_embedding()[0][i].item<float>() == row[static_cast<size_t>(i)]);
         }
     }
     SECTION("sparse writes 1.0") {
         auto ds = load_layered(presence(SpeciesEncodingMode::Sparse));
-        REQUIRE(ds.species_vector()[0][code_of(ds, "sp_a")].item<float>() == 1.0f);
-        REQUIRE(ds.species_vector()[0][code_of(ds, "sp_b")].item<float>() == 1.0f);
+        REQUIRE(species_row(ds, 0)[code_of(ds, "sp_a")].item<float>() == 1.0f);
+        REQUIRE(species_row(ds, 0)[code_of(ds, "sp_b")].item<float>() == 1.0f);
     }
     SECTION("rank_pool and transformer weigh species alike and report no cover") {
         for (auto mode : {SpeciesEncodingMode::RankPool, SpeciesEncodingMode::Transformer}) {

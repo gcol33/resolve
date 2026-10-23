@@ -1,4 +1,7 @@
 #include "resolve/species_graph.hpp"
+#include "resolve/sparse_rows.hpp"
+
+#include <ATen/Parallel.h>
 
 #include <algorithm>
 #include <map>
@@ -9,11 +12,6 @@
 namespace resolve {
 
 namespace {
-
-// Species rows processed per pass of the co-occurrence count. The pass holds a
-// (block, n_species) count matrix, so this bounds its memory independently of
-// how large the vocabulary is.
-constexpr int64_t kCooccurrenceBlock = 512;
 
 // The directed edges of one relation, collected as source/target pairs.
 struct EdgeList {
@@ -72,52 +70,109 @@ void add_group_pairs(const torch::Tensor& group_of_species, EdgeList& edges,
 // The strongest co-occurrence partners of every species, as a symmetric
 // relation: a pair kept from either end is an edge, so the k-per-species cut
 // does not depend on which of the two ran first.
+//
+// Counted from the plots' species lists rather than a plots x species matrix:
+// species a meets species b once for every plot listing both, so walking the
+// plots of a (an inverted index) and the species of each of those plots counts
+// every partner of a in work proportional to the records touched, and memory
+// stays O(records + edges). A partner is any species sharing at least one plot
+// whose share of all plots reaches `threshold`; the k with the most shared
+// plots are kept, ties to the lower species code.
 EdgeList cooccurrence_pairs(const torch::Tensor& species_vector, int64_t k,
                             float threshold) {
     const int64_t n_plots = species_vector.size(0);
     const int64_t n_species = species_vector.size(1);
     EdgeList edges;
     if (n_plots == 0 || n_species <= 1) return edges;
-
-    // Presence, not abundance: the relation is "recorded in the same plot".
-    auto presence = (species_vector.to(torch::kCPU) > 0).to(torch::kFloat32);
     const int64_t k_eff = std::min<int64_t>(std::max<int64_t>(k, 0), n_species - 1);
     if (k_eff == 0) return edges;
 
-    // (from, to) pairs, deduplicated through a sorted key list at the end.
-    std::vector<int64_t> keys;
-    for (int64_t start = 0; start < n_species; start += kCooccurrenceBlock) {
-        const int64_t rows = std::min(kCooccurrenceBlock, n_species - start);
-        auto block = presence.narrow(/*dim=*/1, start, rows);
-        // (rows, n_species): how many plots hold both species, as a share of
-        // all plots.
-        auto shared = torch::matmul(block.transpose(0, 1), presence) /
-                      static_cast<float>(n_plots);
-        // A species neither co-occurs with itself nor with <UNK>.
-        for (int64_t row = 0; row < rows; ++row) {
-            shared[row][start + row] = 0.0f;
-        }
-        shared.select(/*dim=*/1, 0).zero_();
-        if (start == 0) shared.select(/*dim=*/0, 0).zero_();
-
-        auto [values, indices] = shared.topk(k_eff, /*dim=*/1);
-        auto kept = values >= threshold;
-        auto values_acc = kept.accessor<bool, 2>();
-        auto index_acc = indices.accessor<int64_t, 2>();
-        for (int64_t row = 0; row < rows; ++row) {
-            const int64_t from = start + row;
-            if (from == 0) continue;
-            for (int64_t slot = 0; slot < k_eff; ++slot) {
-                if (!values_acc[row][slot]) continue;
-                const int64_t to = index_acc[row][slot];
-                if (to == from || to == 0) continue;
-                keys.push_back(from * n_species + to);
-                keys.push_back(to * n_species + from);  // symmetric
+    // Presence, not abundance: the relation is "recorded in the same plot".
+    // plot p lists species plot_species[plot_start[p] .. plot_start[p + 1]).
+    const auto rows = species_vector.to(torch::kCPU);
+    const auto crow = rows.crow_indices().contiguous();
+    const auto col = rows.col_indices().contiguous();
+    const auto val = rows.values().contiguous().to(torch::kFloat32);
+    const auto* crow_p = crow.data_ptr<int64_t>();
+    const auto* col_p = col.data_ptr<int64_t>();
+    const auto* val_p = val.data_ptr<float>();
+    std::vector<int64_t> plot_start(static_cast<size_t>(n_plots) + 1, 0);
+    std::vector<int32_t> plot_species;
+    plot_species.reserve(static_cast<size_t>(col.numel()));
+    for (int64_t p = 0; p < n_plots; ++p) {
+        for (int64_t i = crow_p[p]; i < crow_p[p + 1]; ++i) {
+            if (val_p[i] > 0.0f && col_p[i] > 0) {
+                plot_species.push_back(static_cast<int32_t>(col_p[i]));
             }
+        }
+        plot_start[static_cast<size_t>(p) + 1] = static_cast<int64_t>(plot_species.size());
+    }
+
+    // species a is listed in plots species_plots[species_start[a] .. species_start[a + 1]).
+    std::vector<int64_t> species_start(static_cast<size_t>(n_species) + 1, 0);
+    for (int32_t s : plot_species) ++species_start[static_cast<size_t>(s) + 1];
+    for (size_t s = 0; s < static_cast<size_t>(n_species); ++s) {
+        species_start[s + 1] += species_start[s];
+    }
+    std::vector<int32_t> species_plots(plot_species.size());
+    {
+        std::vector<int64_t> cursor(species_start.begin(), species_start.end() - 1);
+        for (int64_t p = 0; p < n_plots; ++p) {
+            for (int64_t i = plot_start[static_cast<size_t>(p)];
+                 i < plot_start[static_cast<size_t>(p) + 1]; ++i) {
+                const auto s = static_cast<size_t>(plot_species[static_cast<size_t>(i)]);
+                species_plots[static_cast<size_t>(cursor[s]++)] = static_cast<int32_t>(p);
+            }
+        }
+    }
+
+    // Each species' kept partners, filled independently per species.
+    std::vector<std::vector<int32_t>> partners(static_cast<size_t>(n_species));
+    at::parallel_for(1, n_species, /*grain_size=*/64, [&](int64_t begin, int64_t end) {
+        std::vector<int64_t> shared(static_cast<size_t>(n_species), 0);
+        std::vector<int32_t> touched;
+        std::vector<int32_t> candidates;
+        for (int64_t a = begin; a < end; ++a) {
+            touched.clear();
+            for (int64_t j = species_start[static_cast<size_t>(a)];
+                 j < species_start[static_cast<size_t>(a) + 1]; ++j) {
+                const auto p = static_cast<size_t>(species_plots[static_cast<size_t>(j)]);
+                for (int64_t i = plot_start[p]; i < plot_start[p + 1]; ++i) {
+                    const int32_t b = plot_species[static_cast<size_t>(i)];
+                    if (b == a) continue;
+                    if (shared[static_cast<size_t>(b)]++ == 0) touched.push_back(b);
+                }
+            }
+            candidates.clear();
+            for (int32_t b : touched) {
+                const float share = static_cast<float>(shared[static_cast<size_t>(b)]) /
+                                    static_cast<float>(n_plots);
+                if (share >= threshold) candidates.push_back(b);
+            }
+            const auto keep = std::min<size_t>(candidates.size(), static_cast<size_t>(k_eff));
+            std::partial_sort(candidates.begin(),
+                              candidates.begin() + static_cast<std::ptrdiff_t>(keep),
+                              candidates.end(), [&](int32_t x, int32_t y) {
+                                  const int64_t cx = shared[static_cast<size_t>(x)];
+                                  const int64_t cy = shared[static_cast<size_t>(y)];
+                                  return cx != cy ? cx > cy : x < y;
+                              });
+            partners[static_cast<size_t>(a)].assign(
+                candidates.begin(), candidates.begin() + static_cast<std::ptrdiff_t>(keep));
+            for (int32_t b : touched) shared[static_cast<size_t>(b)] = 0;
+        }
+    });
+
+    // (from, to) pairs in both directions, deduplicated through a sorted key
+    // list.
+    std::vector<int64_t> keys;
+    for (int64_t from = 1; from < n_species; ++from) {
+        for (int32_t to : partners[static_cast<size_t>(from)]) {
+            keys.push_back(from * n_species + to);
+            keys.push_back(static_cast<int64_t>(to) * n_species + from);
         }
         check_edge_budget(keys.size(), "co-occurrence");
     }
-
     std::sort(keys.begin(), keys.end());
     keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
     for (int64_t key : keys) {
@@ -164,8 +219,7 @@ SpeciesGraph build_species_graph(const ResolveDataset& dataset,
     EdgeList cooccurrence_edges;
     if (config.use_cooccurrence_edges) {
         const auto& species_vector = dataset.species_vector();
-        if (!species_vector.defined() || species_vector.numel() == 0 ||
-            species_vector.dim() != 2) {
+        if (!is_sparse_rows(species_vector) || species_vector.size(0) == 0) {
             throw std::runtime_error(
                 "build_species_graph: use_cooccurrence_edges counts how often "
                 "two species share a plot, which needs the per-plot species "

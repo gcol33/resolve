@@ -955,17 +955,22 @@ public:
     // process) reads the same genus/family embedding rows. Index 0 is
     // reserved for unknown.
     void fit(const std::vector<SpeciesRecord>& records) {
+        std::set<std::string> genera, families;
+        for (const auto& rec : records) {
+            if (!rec.genus.empty())  genera.insert(rec.genus);
+            if (!rec.family.empty()) families.insert(rec.family);
+        }
+        fit(genera, families);
+    }
+
+    // Fit from the sets of genus and family names (empty names excluded).
+    void fit(const std::set<std::string>& genera, const std::set<std::string>& families) {
         genus_to_idx_.clear();
         family_to_idx_.clear();
 
         genus_to_idx_["<UNK>"] = 0;
         family_to_idx_["<UNK>"] = 0;
 
-        std::set<std::string> genera, families;
-        for (const auto& rec : records) {
-            if (!rec.genus.empty())  genera.insert(rec.genus);
-            if (!rec.family.empty()) families.insert(rec.family);
-        }
         for (const auto& g : genera) {
             genus_to_idx_[g] = static_cast<int64_t>(genus_to_idx_.size());
         }

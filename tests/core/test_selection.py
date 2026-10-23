@@ -91,7 +91,7 @@ def _encoded_names(ds, row: int) -> set[str]:
             if bool(mask[c].item()) and (n := name_of(int(ids[c].item()))) is not None
         }
     if filled(ds.species_vector):
-        row_t = ds.species_vector[row]
+        row_t = ds.species_vector.to_dense()[row]
         return {
             n
             for c in range(row_t.size(0))

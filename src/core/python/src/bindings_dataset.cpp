@@ -274,6 +274,8 @@ void register_dataset(nb::module_& m) {
             const auto& t = self.species_ids();
             return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
         })
+        // A torch sparse CSR tensor (n_plots, n_species_vocab): each plot's
+        // species codes (col_indices) and values; .to_dense() for the matrix.
         .def_prop_ro("species_vector", [](const resolve::ResolveDataset& self) {
             const auto& t = self.species_vector();
             return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
@@ -371,7 +373,10 @@ void register_dataset(nb::module_& m) {
     // Species Encoding helpers
     nb::class_<resolve::TaxonomyVocab>(m, "TaxonomyVocab")
         .def(nb::init<>())
-        .def("fit", &resolve::TaxonomyVocab::fit)
+        .def("fit",
+             static_cast<void (resolve::TaxonomyVocab::*)(const std::vector<resolve::SpeciesRecord>&)>(
+                 &resolve::TaxonomyVocab::fit),
+             nb::arg("records"))
         .def("encode_genus", &resolve::TaxonomyVocab::encode_genus)
         .def("encode_family", &resolve::TaxonomyVocab::encode_family)
         .def("n_genera", &resolve::TaxonomyVocab::n_genera)

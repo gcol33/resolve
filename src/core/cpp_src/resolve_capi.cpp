@@ -1637,7 +1637,24 @@ resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* wh
         if (w == "covariates") return mat_or_null(d.covariates());
         if (w == "hash_embedding") return mat_or_null(d.hash_embedding());
         if (w == "species_ids") return imat_or_null(d.species_ids());
-        if (w == "species_vector") return mat_or_null(d.species_vector());
+        // The sparse encoding's species vector as its sparse rows: plot p's
+        // species codes are species[row_offsets[p] .. row_offsets[p + 1]),
+        // each with its value. The dense matrix only on request.
+        if (w == "species_vector") {
+            const auto& rows = d.species_vector();
+            if (!is_sparse_rows(rows)) return v_null();
+            auto* m = v_map();
+            ValueGuard g(m);
+            v_put(m, "row_offsets", tensor_to_ivec(rows.crow_indices()));
+            v_put(m, "species", tensor_to_ivec(rows.col_indices()));
+            v_put(m, "values", tensor_to_vec(rows.values()));
+            v_put(m, "n_species", v_int(rows.size(1)));
+            return g.release();
+        }
+        if (w == "species_vector_dense") {
+            const auto& rows = d.species_vector();
+            return is_sparse_rows(rows) ? tensor_to_mat(sparse_rows_to_dense(rows)) : v_null();
+        }
         if (w == "genus_ids") return imat_or_null(d.genus_ids());
         if (w == "family_ids") return imat_or_null(d.family_ids());
         if (w == "unknown_fraction") return vec_or_null(d.unknown_fraction());
@@ -1695,14 +1712,14 @@ resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* wh
 namespace {
 
 // The PlotInputs fields an input map carries, each under its field name, read
-// in the field's dtype: a float field as float32, an integer or boolean field
-// through int64 (the value tree has no boolean matrix).
+// as float32 for a float field and through int64 for an integer or boolean one
+// (the value tree has no boolean matrix), then put in the field's dtype and
+// layout (a dense species_vector matrix becomes sparse rows).
 PlotInputs extract_model_inputs(const resolve_value* in) {
     PlotInputs x;
     x.for_each([&](const PlotInputField& field, torch::Tensor& t) {
-        t = field.dtype == torch::kFloat32 ? opt_f32(in, field.name)
-                                           : opt_i64(in, field.name);
-        if (t.defined() && t.scalar_type() != field.dtype) t = t.to(field.dtype);
+        t = conform_to_field(field, field.dtype == torch::kFloat32 ? opt_f32(in, field.name)
+                                                                   : opt_i64(in, field.name));
     });
     return x;
 }

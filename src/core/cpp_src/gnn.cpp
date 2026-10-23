@@ -1,5 +1,6 @@
 #include "resolve/attention.hpp"
 #include "resolve/types.hpp"
+#include "resolve/sparse_rows.hpp"
 #include <algorithm>
 #include <limits>
 
@@ -398,8 +399,8 @@ torch::Tensor HeterogeneousGNNEncoderImpl::aggregate_for_plots(
     torch::Tensor species_embeddings,
     torch::Tensor species_vector
 ) {
-    auto weights = species_vector / (species_vector.sum(/*dim=*/1, /*keepdim=*/true) + kEpsilon);
-    return torch::matmul(weights, species_embeddings);
+    return sparse_rows_matmul(sparse_rows_normalized(species_vector, kEpsilon),
+                              species_embeddings);
 }
 
 // =============================================================================

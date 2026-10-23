@@ -134,7 +134,8 @@ public:
 
     // Train the VAE on the plots' species vectors (unsupervised). Takes the
     // plots' model inputs and reads inputs.species_vector, the
-    // (n_plots, n_species) vectors it reconstructs (required); the other
+    // (n_plots, n_species) sparse rows it reconstructs (required; each batch
+    // is reconstructed as its dense matrix); the other
     // fields are accepted and left alone, since the VAE reads composition
     // alone.
     VAEPretrainResult pretrain(const PlotInputs& inputs);

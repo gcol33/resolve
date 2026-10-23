@@ -234,6 +234,73 @@ TEST_CASE("k_cooccurrence caps how many partners a species keeps",
     CHECK(build_species_graph(dataset, cooccurrence_only(0.4f, 0)).n_edges() == 0);
 }
 
+namespace {
+
+// The co-occurrence edges counted from the dense plots x species presence
+// matrix: shared[a][b] = plots holding both, kept when the share of plots
+// reaches the threshold and the pair shares a plot, the k partners with most
+// shared plots per species (ties to the lower code), symmetrized.
+std::set<std::pair<int64_t, int64_t>> dense_cooccurrence(const ResolveDataset& dataset,
+                                                         float threshold, int64_t k) {
+    const auto presence = (sparse_rows_to_dense(dataset.species_vector()) > 0).to(torch::kFloat32);
+    const int64_t n_plots = presence.size(0);
+    const int64_t n_species = presence.size(1);
+    const auto shared = torch::matmul(presence.t(), presence).to(torch::kLong);
+    const auto acc = shared.accessor<int64_t, 2>();
+    std::set<std::pair<int64_t, int64_t>> edges;
+    for (int64_t a = 1; a < n_species; ++a) {
+        std::vector<int64_t> partners;
+        for (int64_t b = 1; b < n_species; ++b) {
+            if (b == a || acc[a][b] == 0) continue;
+            const float share = static_cast<float>(acc[a][b]) / static_cast<float>(n_plots);
+            if (share >= threshold) partners.push_back(b);
+        }
+        std::stable_sort(partners.begin(), partners.end(),
+                         [&](int64_t x, int64_t y) { return acc[a][x] > acc[a][y]; });
+        if (static_cast<int64_t>(partners.size()) > k) partners.resize(static_cast<size_t>(k));
+        for (int64_t b : partners) {
+            edges.insert({a, b});
+            edges.insert({b, a});
+        }
+    }
+    return edges;
+}
+
+}  // namespace
+
+TEST_CASE("Co-occurrence counted from the plots' species lists equals the dense count",
+          "[species_graph][cooccurrence]") {
+    // 150 plots drawing from 40 species with skewed frequencies, so counts
+    // range widely, ties occur and some species never meet.
+    std::ostringstream species;
+    species << "plot_id,sp,cover,genus,family\n";
+    uint64_t state = 12345;
+    auto next = [&]() {
+        state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+        return static_cast<uint32_t>(state >> 33);
+    };
+    const int n_plots = 150;
+    for (int p = 0; p < n_plots; ++p) {
+        const int n = 1 + static_cast<int>(next() % 9);
+        for (int j = 0; j < n; ++j) {
+            const uint32_t r = next() % 1000;
+            const int s = static_cast<int>((r * r) / 25000);  // 0..39, skewed to low codes
+            species << "p" << p << ",sp_" << s << "," << (1 + next() % 5) << ",g_" << s / 4
+                    << ",f_" << s / 10 << "\n";
+        }
+    }
+    TempFile header(line_header_csv({n_plots, 9.0, 0.3, 46.0, 0.3, 150.0, 11.0, 1.0, 0.2}));
+    TempFile species_file(species.str());
+    auto dataset = build_dataset(header.path(), species_file.path());
+
+    for (const auto& [threshold, k] : std::vector<std::pair<float, int>>{
+             {0.0f, 3}, {0.01f, 5}, {0.05f, 2}, {0.02f, 40}, {0.2f, 4}}) {
+        const auto graph = build_species_graph(dataset, cooccurrence_only(threshold, k));
+        CHECK(edges_of_type(graph, SpeciesEdgeType::CoOccurrence) ==
+              dense_cooccurrence(dataset, threshold, k));
+    }
+}
+
 TEST_CASE("Both relations together carry one edge each", "[species_graph]") {
     TempFile header(header_csv());
     TempFile species(species_csv());

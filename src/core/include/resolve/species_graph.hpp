@@ -41,10 +41,14 @@ struct SpeciesGraph {
 //                           SameFamily edge. Read from the dataset's
 //                           species_genus_ids() / species_family_ids().
 //   use_cooccurrence_edges  two species recorded in the same plot in at least
-//                           `cooccurrence_threshold` of the plots are joined by
-//                           a CoOccurrence edge, keeping each species' strongest
-//                           `k_cooccurrence` partners. Read from the dataset's
-//                           species_vector(), so the sparse species encoding.
+//                           `cooccurrence_threshold` of the plots (and in at
+//                           least one) are joined by a CoOccurrence edge,
+//                           keeping each species' `k_cooccurrence` partners
+//                           with the most shared plots, ties to the lower
+//                           species code. Counted from the plots' species
+//                           lists in the dataset's species_vector() (sparse
+//                           rows, so the sparse species encoding), in time and
+//                           memory linear in the records.
 //
 // A pair that stands in two relations gets one edge of each type. The graph is
 // built once from the training data and travels in the checkpoint, so scoring

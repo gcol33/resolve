@@ -1,4 +1,5 @@
 #include "resolve/encoder.hpp"
+#include "resolve/sparse_rows.hpp"
 #include <cmath>
 #include <set>
 #include <stdexcept>
@@ -369,7 +370,9 @@ TailOutput PlotEncoderSparseImpl::encode(
     torch::Tensor genus_ids,
     torch::Tensor family_ids
 ) {
-    auto species_emb = species_projection_->forward(species_vector);
+    require_sparse_rows(species_vector, "PlotEncoderSparse: species_vector");
+    auto species_emb = sparse_rows_linear(species_vector, species_projection_->weight,
+                                          species_projection_->bias);
 
     std::vector<torch::Tensor> parts;
     parts.push_back(continuous);

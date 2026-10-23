@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "resolve/dataset.hpp"
 #include "resolve/row_source.hpp"
+#include "resolve/sparse_rows.hpp"
 #include "resolve/role_mapping.hpp"
 #include "test_support.hpp"
 #include <string>
@@ -54,6 +55,13 @@ void require_tensor_eq(const torch::Tensor& a, const torch::Tensor& b) {
     if (!a.defined()) return;
     REQUIRE(a.sizes() == b.sizes());
     REQUIRE(a.dtype() == b.dtype());
+    REQUIRE(is_sparse_rows(a) == is_sparse_rows(b));
+    if (is_sparse_rows(a)) {
+        REQUIRE(torch::equal(a.crow_indices(), b.crow_indices()));
+        REQUIRE(torch::equal(a.col_indices(), b.col_indices()));
+        REQUIRE(torch::equal(a.values(), b.values()));
+        return;
+    }
     REQUIRE(torch::equal(a, b));
 }
 
@@ -252,9 +260,9 @@ TEST_CASE("InMemoryRowSource yields rows in order", "[dataset][dataframe]") {
     REQUIRE(src.column_index("absent") == -1);
 
     std::vector<std::vector<std::string>> seen;
-    src.read_rows([&](size_t i, const std::vector<std::string>& row) {
+    src.read_rows([&](size_t i, RowFields row) {
         REQUIRE(i == seen.size());
-        seen.push_back(row);
+        seen.emplace_back(row.begin(), row.end());
     });
     REQUIRE(seen == kSpeciesRows);
 }

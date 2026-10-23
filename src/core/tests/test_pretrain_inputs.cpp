@@ -186,11 +186,20 @@ TEST_CASE("Embed slots and taxonomy slots are masked from their own shapes",
 
 TEST_CASE("The explicit species vector is masked entry by entry", "[pretraining][views]") {
     PlotInputs in;
-    in.species_vector = torch::rand({6, 10}) + 0.1f;
+    const auto dense = torch::rand({6, 10}) + 0.1f;
+    in.species_vector = to_sparse_rows(dense);
     PretrainRng rng(5);
-    REQUIRE(torch::equal(mask_species_view(in, 1.0f, rng).species_vector,
-                         torch::zeros_like(in.species_vector)));
-    REQUIRE(torch::equal(mask_species_view(in, 0.0f, rng).species_vector, in.species_vector));
+    const auto all = mask_species_view(in, 1.0f, rng).species_vector;
+    REQUIRE(is_sparse_rows(all));
+    REQUIRE(torch::equal(sparse_rows_to_dense(all), torch::zeros_like(dense)));
+    REQUIRE(torch::equal(sparse_rows_to_dense(mask_species_view(in, 0.0f, rng).species_vector),
+                         dense));
+    // A partial ratio drops some entries and keeps the others' values.
+    const auto half = sparse_rows_to_dense(mask_species_view(in, 0.5f, rng).species_vector);
+    const auto kept = half != 0;
+    REQUIRE(kept.any().item<bool>());
+    REQUIRE_FALSE(kept.all().item<bool>());
+    REQUIRE(torch::equal(half.masked_select(kept), dense.masked_select(kept)));
 }
 
 TEST_CASE("SCARF corrupts categorical cells from their column's marginal",

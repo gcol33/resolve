@@ -1,9 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include "resolve/csv_utils.hpp"
 #include "resolve/csv_reader.hpp"
 #include "test_support.hpp"
+#include <cstdint>
 #include <string>
+#include <vector>
 
 using namespace resolve;
 using namespace resolve::test;
@@ -83,4 +86,130 @@ TEST_CASE("CSVReader throws on duplicate header column names",
     // bind to the last occurrence.
     const TempFile f = binary_csv("id,area,id\np1,100,p1\n");
     REQUIRE_THROWS_AS(CSVReader(f.path()), std::runtime_error);
+}
+
+// ============================================================================
+// Number parsing: whole-cell, locale-free
+// ============================================================================
+
+TEST_CASE("parse_float_strict takes signs, exponents and a bare fraction",
+          "[csv_utils][parse]") {
+    REQUIRE(*parse_float_strict("+1.5") == 1.5f);
+    REQUIRE(*parse_float_strict(".5") == 0.5f);
+    REQUIRE(*parse_float_strict("5.") == 5.0f);
+    REQUIRE(*parse_float_strict("-1e-3") == -1e-3f);
+    REQUIRE(*parse_float_strict("2.5E+2") == 250.0f);
+    REQUIRE(*parse_float_strict("\t7\r") == 7.0f);
+    // The correctly rounded float, as the C library reads the same text.
+    REQUIRE(*parse_float_strict("0.1") == 0.1f);
+    REQUIRE(*parse_float_strict("3.4028234e38") == 3.4028234e38f);
+}
+
+TEST_CASE("parse_float_strict rejects what is not a plain decimal number",
+          "[csv_utils][parse]") {
+    for (const char* text : {"+-1", "--1", "+", "-", ".", "1e", "1.2.3", "0x10", "inf",
+                             "-inf", "nan", "NaN", "infinity", "1 2", "1e999", "1e-999"}) {
+        INFO(text);
+        REQUIRE(parse_float_strict(text) == std::nullopt);
+    }
+}
+
+TEST_CASE("parse_int64_strict reads whole base-10 integers", "[csv_utils][parse]") {
+    REQUIRE(*parse_int64_strict("42") == 42);
+    REQUIRE(*parse_int64_strict("-7") == -7);
+    REQUIRE(*parse_int64_strict("+3") == 3);
+    REQUIRE(*parse_int64_strict("  12") == 12);
+    REQUIRE(*parse_int64_strict("9223372036854775807") == INT64_MAX);
+    for (const char* text : {"", " ", "12 ", "1.0", "1e3", "+-1", "abc", "0x1F",
+                             "9223372036854775808"}) {
+        INFO(text);
+        REQUIRE(parse_int64_strict(text) == std::nullopt);
+    }
+}
+
+// ============================================================================
+// CSVReader: one record stream for the header and the rows
+// ============================================================================
+
+namespace {
+
+std::vector<std::vector<std::string>> read_all(CSVReader& reader) {
+    std::vector<std::vector<std::string>> rows;
+    reader.read_rows([&](size_t i, RowFields row) {
+        REQUIRE(i == rows.size());
+        rows.emplace_back(row.begin(), row.end());
+    });
+    return rows;
+}
+
+using Rows = std::vector<std::vector<std::string>>;
+
+}  // namespace
+
+TEST_CASE("CSVReader keeps a newline inside a quoted field and drops carriage returns",
+          "[csv_utils][csv_reader]") {
+    const TempFile f = binary_csv(
+        "id,\"note\r\nline\"\r\n"
+        "a,\"two\r\nlines\"\r\n"
+        "\r\n"
+        "b,\"\"\"quoted\"\" and, comma\"\r\n"
+        "c,trailing,\r\n"
+        "d,last");
+    CSVReader reader(f.path());
+    REQUIRE(reader.columns() == std::vector<std::string>{"id", "note\nline"});
+    const Rows rows = read_all(reader);
+    REQUIRE(rows == Rows{{"a", "two\nlines"},
+                         {"b", "\"quoted\" and, comma"},
+                         {"c", "trailing", ""},
+                         {"d", "last"}});
+    // Every call streams the rows from the start.
+    REQUIRE(read_all(reader) == rows);
+}
+
+TEST_CASE("CSVReader reads records across its buffer boundary", "[csv_utils][csv_reader]") {
+    // 1 MiB is the initial buffer: rows run well past it, and one field alone
+    // is larger than it.
+    std::string content = "id,payload\n";
+    const std::string big(3 << 20, 'x');
+    const int n_rows = 60000;
+    for (int i = 0; i < n_rows; ++i) {
+        content += "r" + std::to_string(i) + ",\"v," + std::to_string(i) + "\"\n";
+        if (i == 30000) content += "big," + big + "\n";
+    }
+    const TempFile f = binary_csv(content);
+    CSVReader reader(f.path());
+    size_t n = 0;
+    bool saw_big = false;
+    reader.read_rows([&](size_t, RowFields row) {
+        REQUIRE(row.size() == 2);
+        if (row[0] == "big") {
+            saw_big = true;
+            REQUIRE(row[1].size() == big.size());
+            return;
+        }
+        REQUIRE(row[0] == "r" + std::to_string(n));
+        REQUIRE(row[1] == "v," + std::to_string(n));
+        ++n;
+    });
+    REQUIRE(n == static_cast<size_t>(n_rows));
+    REQUIRE(saw_big);
+}
+
+TEST_CASE("CSVReader refuses a file that ends inside a quoted field",
+          "[csv_utils][csv_reader]") {
+    const TempFile f = binary_csv("id,note\na,\"open\nb,c\n");
+    CSVReader reader(f.path());
+    REQUIRE_THROWS_WITH(read_all(reader), ContainsSubstring("Unbalanced quote"));
+}
+
+TEST_CASE("CSVReader reports an empty file and a missing one", "[csv_utils][csv_reader]") {
+    const TempFile empty = binary_csv("");
+    REQUIRE_THROWS_WITH(CSVReader(empty.path()), ContainsSubstring("Empty CSV file"));
+    REQUIRE_THROWS_AS(CSVReader("no/such/file.csv"), io::IOError);
+}
+
+TEST_CASE("CSVReader takes another delimiter", "[csv_utils][csv_reader]") {
+    const TempFile f = binary_csv("a;b\n1,5;\"x;y\"\n");
+    CSVReader reader(f.path(), ';');
+    REQUIRE(read_all(reader) == Rows{{"1,5", "x;y"}});
 }

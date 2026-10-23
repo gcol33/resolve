@@ -159,3 +159,26 @@ test_that("only a heterogeneous GNN reads a species graph", {
   expect_false(mlp$requires_species_graph())
   expect_error(mlp$set_species_graph(graph$edge_index, graph$edge_type))
 })
+
+test_that("a sparse dataset returns its species vector as sparse rows", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  dataset <- graph_dataset(graph_csvs())
+  rows <- dataset$species_vector()
+  expect_setequal(names(rows), c("row_offsets", "species", "values", "n_species"))
+  n_plots <- dataset$n_plots()
+  expect_equal(length(rows$row_offsets), n_plots + 1)
+  expect_equal(rows$n_species, dataset$schema()$n_species_vocab)
+  # Every plot records three species.
+  expect_equal(diff(rows$row_offsets), rep(3, n_plots))
+
+  dense <- dataset$species_vector_dense()
+  expect_equal(dim(dense), c(n_plots, rows$n_species))
+  rebuilt <- matrix(0, n_plots, rows$n_species)
+  for (p in seq_len(n_plots)) {
+    idx <- seq.int(rows$row_offsets[p] + 1, rows$row_offsets[p + 1])
+    rebuilt[p, rows$species[idx] + 1] <- rows$values[idx]
+  }
+  expect_equal(dense, rebuilt)
+})

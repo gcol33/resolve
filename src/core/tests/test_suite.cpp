@@ -790,8 +790,8 @@ TEST_CASE("a suite combines its members' predictions by each target's rule",
         auto table = [](const std::string& path) {
             CSVReader reader(path);
             std::vector<std::vector<std::string>> columns(reader.columns().size());
-            reader.read_rows([&](size_t, const std::vector<std::string>& r) {
-                for (size_t c = 0; c < r.size(); ++c) columns[c].push_back(r[c]);
+            reader.read_rows([&](size_t, RowFields r) {
+                for (size_t c = 0; c < r.size(); ++c) columns[c].emplace_back(r[c]);
             });
             return ColumnTable(reader.columns(), std::move(columns));
         };

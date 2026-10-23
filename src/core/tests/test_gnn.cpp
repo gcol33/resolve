@@ -5,6 +5,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "resolve/attention.hpp"
+#include "resolve/sparse_rows.hpp"
+#include "resolve/types.hpp"
 
 #include <torch/torch.h>
 
@@ -223,10 +225,13 @@ TEST_CASE("HeterogeneousGNNEncoder aggregate_for_plots", "[hetero_gnn]") {
     auto species_vector = torch::randn({batch_size, n_species}).abs();  // Positive abundances
 
     auto plot_features = HeterogeneousGNNEncoderImpl::aggregate_for_plots(
-        species_emb, species_vector);
+        species_emb, to_sparse_rows(species_vector));
 
     REQUIRE(plot_features.size(0) == batch_size);
     REQUIRE(plot_features.size(1) == output_dim);
+    // The value-weighted mean of each plot's species embeddings.
+    const auto weights = species_vector / (species_vector.sum(1, true) + kEpsilon);
+    REQUIRE(torch::allclose(plot_features, torch::matmul(weights, species_emb), 1e-5, 1e-6));
 }
 
 TEST_CASE("HeterogeneousGNNEncoder accessors", "[hetero_gnn]") {

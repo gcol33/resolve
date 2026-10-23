@@ -21,7 +21,7 @@ namespace resolve {
 // in the engine: the target and covariate loaders and the categorical
 // factorizer all call it, so a raw cell such as "NAN" is missing whatever role
 // its column carries.
-bool is_na_string(const std::string& s) noexcept {
+bool is_na_string(std::string_view s) noexcept {
     if (s.empty() || s == "." || s == "-") return true;
     auto eq_ci = [&](const char* tok) noexcept {
         const size_t n = std::strlen(tok);

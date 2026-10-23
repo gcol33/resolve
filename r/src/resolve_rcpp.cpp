@@ -33,7 +33,10 @@ RCPP_MODULE(resolve_module) {
         .method("covariates", &RResolveDataset::covariates, "Get covariate matrix")
         .method("hash_embedding", &RResolveDataset::hash_embedding, "Get hash embedding matrix")
         .method("species_ids", &RResolveDataset::species_ids, "Get species IDs matrix")
-        .method("species_vector", &RResolveDataset::species_vector, "Get explicit species vector")
+        .method("species_vector", &RResolveDataset::species_vector,
+                "Explicit species vector as sparse rows (row_offsets, species, values, n_species)")
+        .method("species_vector_dense", &RResolveDataset::species_vector_dense,
+                "Explicit species vector as a dense matrix")
         .method("genus_ids", &RResolveDataset::genus_ids, "Get genus IDs matrix")
         .method("family_ids", &RResolveDataset::family_ids, "Get family IDs matrix")
         .method("species_genus_ids", &RResolveDataset::species_genus_ids,

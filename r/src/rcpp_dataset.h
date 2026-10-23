@@ -198,7 +198,12 @@ public:
     RObject covariates()       const { return get("covariates"); }
     RObject hash_embedding()   const { return get("hash_embedding"); }
     RObject species_ids()      const { return get("species_ids"); }
+    // The sparse encoding's species vector as its sparse rows: a list of
+    // row_offsets, species, values and n_species (plot p holds
+    // species[row_offsets[p] .. row_offsets[p + 1]) with their values, 0-based).
     RObject species_vector()   const { return get("species_vector"); }
+    // The same as the dense (n_plots, n_species) matrix.
+    RObject species_vector_dense() const { return get("species_vector_dense"); }
     RObject genus_ids()        const { return get("genus_ids"); }
     RObject family_ids()       const { return get("family_ids"); }
     // The taxonomy of the VOCABULARY: index = species code, value = its genus

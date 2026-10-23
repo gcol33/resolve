@@ -1,6 +1,7 @@
 #pragma once
 
 #include "resolve/hash_core.hpp"
+#include "resolve/name_pool.hpp"
 #include "resolve/types.hpp"
 #include <torch/torch.h>
 #include <span>
@@ -11,6 +12,8 @@
 
 namespace resolve {
 
+class SpeciesVocab;
+
 // =============================================================================
 // PlotAssemblages: the species records every encoding reads
 // =============================================================================
@@ -18,7 +21,13 @@ namespace resolve {
 // The species records of a set of plots, grouped by plot and merged so that a
 // plot lists each species once. Every species encoding, the vocabulary fit,
 // the unknown-species statistics and the recognition report read this one
-// view, so they all agree on what a plot contains.
+// table, so they all agree on what a plot contains.
+//
+// Storage is one CSR table: plot p owns entries [offset(p), offset(p + 1)) of
+// two flat arrays, the species of each entry as an interned code
+// (species_name() spells it) and its summed abundance. Genus and family are
+// properties of a species, held once per interned species. A table over
+// millions of plots costs two numbers per entry plus the distinct names.
 //
 // Records of one species in one plot (an archive records a species once per
 // vegetation layer) become one entry, placed where the species' first record
@@ -27,9 +36,9 @@ namespace resolve {
 //   abundance  the sum of the records' abundances, the species' total cover
 //              across layers;
 //   genus,     the lexicographically smallest genus and family any record of
-//   family     the species names, over all plots. Every entry of a species
-//              therefore carries the same taxonomy, whatever order the rows
-//              arrive in.
+//   family     the species names, over the records of all kept plots. Every
+//              entry of a species therefore carries the same taxonomy,
+//              whatever order the rows arrive in.
 //
 // Representation then sets the value each entry carries into the encodings:
 // the summed abundance under RepresentationMode::Abundance, 1.0 under
@@ -38,34 +47,112 @@ namespace resolve {
 // presence/absence with Top still keeps the dominant species.
 class PlotAssemblages {
 public:
+    // Accumulates species records as they are read, each naming its plot by
+    // a caller's integer code, and groups them into a PlotAssemblages. Names
+    // are interned on arrival, so a record costs a few integers.
+    class Builder {
+    public:
+        // One record of the plot coded `plot` (>= 0). An empty genus or family
+        // names none.
+        void add(int32_t plot, std::string_view species, float abundance,
+                 std::string_view genus, std::string_view family);
+
+        // The table over `n_plots` plots: plot p holds the records of every
+        // plot code c with plot_of[c] == p, in the order they were added. A
+        // record whose code maps to -1, or lies past the end of `plot_of`, is
+        // dropped and names no taxonomy. The builder is consumed.
+        [[nodiscard]] PlotAssemblages finish(int64_t n_plots, std::span<const int32_t> plot_of,
+                                             RepresentationMode representation) &&;
+
+        [[nodiscard]] size_t n_records() const noexcept { return species_.size(); }
+
+    private:
+        NamePool species_names_;
+        NamePool genus_names_;
+        NamePool family_names_;
+        std::vector<int32_t> plot_;
+        std::vector<int32_t> species_;
+        std::vector<int32_t> genus_;   // -1: none named
+        std::vector<int32_t> family_;  // -1: none named
+        std::vector<float> abundance_;
+    };
+
     PlotAssemblages() = default;
 
     // Plots in the order of `plot_ids`. A record naming a plot outside
     // `plot_ids` is dropped; a plot without records holds no entries.
-    static PlotAssemblages build(std::vector<SpeciesRecord> records,
+    static PlotAssemblages build(const std::vector<SpeciesRecord>& records,
                                  const std::vector<std::string>& plot_ids,
                                  RepresentationMode representation = RepresentationMode::Abundance);
 
     // Plots in the order their first record appears.
-    static PlotAssemblages build(std::vector<SpeciesRecord> records,
+    static PlotAssemblages build(const std::vector<SpeciesRecord>& records,
                                  RepresentationMode representation = RepresentationMode::Abundance);
 
     [[nodiscard]] int64_t n_plots() const noexcept {
-        return static_cast<int64_t>(plot_ids_.size());
+        return static_cast<int64_t>(offsets_.size()) - 1;
     }
-    [[nodiscard]] const std::vector<std::string>& plot_ids() const noexcept { return plot_ids_; }
-    // Every entry, plot after plot.
-    [[nodiscard]] const std::vector<SpeciesRecord>& entries() const noexcept { return entries_; }
-    // The entries of plot `p`; each carries its plot's ID.
-    [[nodiscard]] std::span<const SpeciesRecord> plot(int64_t p) const;
-    // The summed recorded abundances of plot `p`'s entries, parallel to plot(p).
+    [[nodiscard]] int64_t n_entries() const noexcept {
+        return static_cast<int64_t>(species_.size());
+    }
+    // Plot p owns entries [offset(p), offset(p + 1)).
+    [[nodiscard]] int64_t offset(int64_t p) const { return offsets_.at(static_cast<size_t>(p)); }
+    [[nodiscard]] int64_t plot_size(int64_t p) const { return offset(p + 1) - offset(p); }
+    // The interned species of plot p's entries.
+    [[nodiscard]] std::span<const int32_t> species(int64_t p) const;
+    // The summed recorded abundances of plot p's entries, parallel to species(p).
     [[nodiscard]] std::span<const float> ranking(int64_t p) const;
+    // The value an entry with summed abundance `ranking` carries into the
+    // encodings under this table's representation.
+    [[nodiscard]] float value(float ranking) const noexcept {
+        return representation_ == RepresentationMode::PresenceAbsence ? 1.0f : ranking;
+    }
     [[nodiscard]] RepresentationMode representation() const noexcept { return representation_; }
 
+    // Interned species, genera and families, coded 0 .. n-1. A species may be
+    // interned without entries (all its records fell in dropped plots).
+    [[nodiscard]] int32_t n_species() const noexcept { return species_names_.size(); }
+    [[nodiscard]] const std::string& species_name(int32_t s) const { return species_names_.name(s); }
+    // The position of species s in the lexicographic order of the names: the
+    // tie-break every ranking of species uses.
+    [[nodiscard]] int32_t species_rank(int32_t s) const { return species_rank_[static_cast<size_t>(s)]; }
+    // The genus / family of species s as a code into genus_name() /
+    // family_name(), -1 when its records name none.
+    [[nodiscard]] int32_t genus_of(int32_t s) const { return genus_of_[static_cast<size_t>(s)]; }
+    [[nodiscard]] int32_t family_of(int32_t s) const { return family_of_[static_cast<size_t>(s)]; }
+    [[nodiscard]] int32_t n_genera() const noexcept { return genus_names_.size(); }
+    [[nodiscard]] int32_t n_families() const noexcept { return family_names_.size(); }
+    [[nodiscard]] const std::string& genus_name(int32_t g) const { return genus_names_.name(g); }
+    [[nodiscard]] const std::string& family_name(int32_t f) const { return family_names_.name(f); }
+    [[nodiscard]] int32_t genus_rank(int32_t g) const { return genus_rank_[static_cast<size_t>(g)]; }
+    [[nodiscard]] int32_t family_rank(int32_t f) const { return family_rank_[static_cast<size_t>(f)]; }
+    // The number of plots each species is recorded in (a plot lists a species
+    // once), indexed by the interned code.
+    [[nodiscard]] const std::vector<int64_t>& plots_per_species() const noexcept {
+        return plots_per_species_;
+    }
+    // Whether any species with entries names a genus or a family.
+    [[nodiscard]] bool names_taxa() const noexcept { return names_taxa_; }
+
+    // The code `vocab` gives each interned species, genus or family (0 for a
+    // name it does not hold), indexed by the interned code.
+    [[nodiscard]] std::vector<int64_t> species_codes(const SpeciesVocab& vocab) const;
+    [[nodiscard]] std::vector<int64_t> genus_codes(const TaxonomyVocab& taxonomy) const;
+    [[nodiscard]] std::vector<int64_t> family_codes(const TaxonomyVocab& taxonomy) const;
+
 private:
-    std::vector<std::string> plot_ids_;
+    NamePool species_names_;
+    NamePool genus_names_;
+    NamePool family_names_;
+    std::vector<int32_t> species_rank_;
+    std::vector<int32_t> genus_of_;
+    std::vector<int32_t> family_of_;
+    std::vector<int32_t> genus_rank_;
+    std::vector<int32_t> family_rank_;
+    std::vector<int64_t> plots_per_species_;
+    bool names_taxa_ = false;
     std::vector<int64_t> offsets_{0};  // plot p owns entries [offsets_[p], offsets_[p + 1])
-    std::vector<SpeciesRecord> entries_;
+    std::vector<int32_t> species_;
     std::vector<float> ranking_;
     RepresentationMode representation_ = RepresentationMode::Abundance;
 };
@@ -96,11 +183,6 @@ std::vector<size_t> species_budget_indices(const PlotAssemblages& assemblages, i
 std::vector<float> normalized_values(const PlotAssemblages& assemblages, int64_t p,
                                      const std::vector<size_t>& selected,
                                      NormalizationMode mode);
-
-// Adds `weight` at the feature-hash slot of `species` in the hash_dim-wide
-// `embedding` row.
-void accumulate_feature_hash(std::string_view species, float weight, float* embedding,
-                             int hash_dim);
 
 // Integer percentile matching numpy's `int(np.percentile(values, q,
 // interpolation="linear"))`: linear interpolation between the two bracketing

@@ -20,6 +20,7 @@
 #include "resolve/model.hpp"
 #include "resolve/predictor.hpp"
 #include "resolve/role_mapping.hpp"
+#include "resolve/sparse_rows.hpp"
 #include "resolve/species_encoding.hpp"
 #include "resolve/trainer.hpp"
 #include "test_support.hpp"
@@ -120,7 +121,7 @@ std::set<std::string> encoded_species(const ResolveDataset& ds, int64_t plot_row
         return out;
     }
     if (ds.species_vector().defined() && ds.species_vector().numel() > 0) {
-        auto row = ds.species_vector()[plot_row];
+        auto row = sparse_rows_to_dense(ds.species_vector())[plot_row];
         for (int64_t c = 0; c < row.size(0); ++c) {
             if (row[c].item<float>() == 0.0f) continue;
             auto name = name_of(c);
@@ -161,7 +162,7 @@ PlotAssemblages one_plot(const std::vector<std::pair<std::string, float>>& speci
 std::vector<std::string> names_at(const PlotAssemblages& plots,
                                   const std::vector<size_t>& idx) {
     std::vector<std::string> out;
-    for (size_t i : idx) out.push_back(plots.plot(0)[i].species_id);
+    for (size_t i : idx) out.push_back(plots.species_name(plots.species(0)[i]));
     return out;
 }
 
@@ -243,7 +244,7 @@ TEST_CASE("selection ranks by recorded abundance under presence/absence",
         {"a", "", "", 3.0f, "p"}, {"b", "", "", 1.0f, "p"}, {"c", "", "", 5.0f, "p"}};
     const auto plots =
         PlotAssemblages::build(records, {"p"}, RepresentationMode::PresenceAbsence);
-    for (const auto& entry : plots.plot(0)) REQUIRE(entry.abundance == 1.0f);
+    for (float ranking : plots.ranking(0)) REQUIRE(plots.value(ranking) == 1.0f);
     REQUIRE(names_at(plots, selection_indices(plots, 0, SelectionMode::Top, 2)) ==
             Names{"c", "a"});
 }

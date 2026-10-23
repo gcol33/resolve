@@ -198,7 +198,7 @@ TEST_CASE("CUDA hash kernel writes the CPU buckets and signs", "[hash][cuda]") {
                 acc[i][slot.bucket] = slot.sign;
             }
             auto got = cuda::compute_batch_hash_embedding_cuda(
-                batch, torch::Tensor(), species, weights, offsets, hash_dim).to(torch::kCPU);
+                batch, species, weights, offsets, hash_dim).to(torch::kCPU);
             REQUIRE(torch::equal(got, expected));
         }
     }
@@ -229,7 +229,7 @@ TEST_CASE("CUDA hash kernel writes the CPU buckets and signs", "[hash][cuda]") {
         }
 
         auto got = cuda::compute_batch_hash_embedding_cuda(
-            torch::arange(n_plots, torch::kInt64).to(gpu), torch::Tensor(),
+            torch::arange(n_plots, torch::kInt64).to(gpu),
             torch::tensor(keys, torch::kInt64), torch::tensor(weights_v, torch::kFloat32),
             torch::tensor(offsets_v, torch::kInt64), hash_dim).to(torch::kCPU);
         REQUIRE(torch::equal(got, expected));

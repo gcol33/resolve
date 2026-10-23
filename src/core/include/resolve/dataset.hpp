@@ -385,6 +385,10 @@ public:
     const torch::Tensor& covariates() const { return covariates_; }
     const torch::Tensor& hash_embedding() const { return hash_embedding_; }
     const torch::Tensor& species_ids() const { return species_ids_; }
+    // The sparse encoding's explicit species vector, (n_plots, n_species_vocab)
+    // as sparse rows (sparse_rows.hpp): each plot's species codes in
+    // increasing order and the values they carry. sparse_rows_to_dense gives
+    // the dense matrix.
     const torch::Tensor& species_vector() const { return species_vector_; }
 
     // The taxonomy of the species VOCABULARY (not of a plot): index = species
@@ -433,11 +437,10 @@ public:
     bool has_pool_data() const { return pool_mask_.defined() && pool_mask_.numel() > 0; }
 
     // Accessors for raw species data (CUDA hash computation)
-    const torch::Tensor& raw_plot_indices() const { return raw_plot_indices_; }
     const torch::Tensor& raw_species_ids() const { return raw_species_ids_; }
     const torch::Tensor& raw_weights() const { return raw_weights_; }
     const torch::Tensor& plot_offsets() const { return plot_offsets_; }
-    bool has_raw_species_data() const { return raw_plot_indices_.defined() && raw_plot_indices_.numel() > 0; }
+    bool has_raw_species_data() const { return plot_offsets_.defined() && plot_offsets_.numel() > 0; }
 
     // Schema information
     const ResolveSchema& schema() const { return schema_; }
@@ -475,8 +478,10 @@ public:
     ResolveDataset() = default;
 
 private:
-    // The plot-level columns of a table (dataset.cpp).
+    // The plot-level columns of a table, and the reader of its species
+    // records (dataset.cpp).
     struct PlotColumns;
+    class SpeciesRows;
 
     // The one loader body behind every two-table verb (header rows are plots,
     // species rows are records) and every single-table verb (each plot's first
@@ -521,13 +526,18 @@ private:
 
     // Turn the plot-level columns into tensors: targets encoded, plots
     // without a usable label dropped, categoricals fitted / encoded.
-    // `n_skipped` counts table rows too short to name their plot.
-    void absorb_plot_columns(PlotColumns&& columns, int64_t n_skipped);
+    // `n_skipped` counts table rows too short to name their plot. Returns the
+    // plot codes kept, in order: plot i of the dataset is code kept[i].
+    std::vector<int64_t> absorb_plot_columns(PlotColumns& columns, int64_t n_skipped);
 
-    // Group the records into PlotAssemblages, fit or adopt the vocabulary, run
-    // the configured encoding, then publish the unknown-species statistics,
-    // the recognition report, the vocabulary's taxonomy and the vocabularies.
-    void encode_species(std::vector<SpeciesRecord> records);
+    // Group the species records into the kept plots' assemblages, encode them
+    // and take the kept plots' IDs.
+    void finish_load(SpeciesRows& rows, PlotColumns& columns, const std::vector<int64_t>& kept);
+
+    // Fit or adopt the vocabulary, run the configured encoding, then publish
+    // the unknown-species statistics, the recognition report, the
+    // vocabulary's taxonomy and the vocabularies.
+    void encode_species(const PlotAssemblages& assemblages);
     void record_encoding_settings();
     void fit_vocab(const PlotAssemblages& assemblages);
     void encode_hash(const PlotAssemblages& assemblages);
@@ -545,7 +555,7 @@ private:
     torch::Tensor covariates_;       // (n_plots, n_covariates)
     torch::Tensor hash_embedding_;   // (n_plots, hash_dim) for hash mode
     torch::Tensor species_ids_;      // (n_plots, top_k_species) embed, (n_plots, max_species) pool
-    torch::Tensor species_vector_;   // (n_plots, n_species_vocab) for sparse mode
+    torch::Tensor species_vector_;   // (n_plots, n_species_vocab) sparse rows, sparse mode
     torch::Tensor genus_ids_;        // (n_plots, n_taxonomy_slots)
     torch::Tensor family_ids_;       // (n_plots, n_taxonomy_slots)
     torch::Tensor unknown_fraction_; // (n_plots,)
@@ -569,10 +579,10 @@ private:
     bool has_abundance_column_ = false;
 
     // Raw species data in CSR form for CUDA hash computation, stored when
-    // use_cuda_hash=true in config.
-    torch::Tensor raw_plot_indices_;   // (n_records,) int64 - which plot each record belongs to
-    torch::Tensor raw_species_ids_;    // (n_records,) int64 - feature_hash_key of the species name
-    torch::Tensor raw_weights_;        // (n_records,) float32 - abundance/weight values
+    // use_cuda_hash=true in config: plot p's selected species are entries
+    // plot_offsets_[p] .. plot_offsets_[p + 1].
+    torch::Tensor raw_species_ids_;    // (n_entries,) int64 - feature_hash_key of the species name
+    torch::Tensor raw_weights_;        // (n_entries,) float32 - normalized weight
     torch::Tensor plot_offsets_;       // (n_plots+1,) int64 - CSR offsets for batch slicing
 
     // Metadata

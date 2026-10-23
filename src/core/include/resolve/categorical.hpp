@@ -31,6 +31,7 @@
 #include <torch/torch.h>
 
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -39,7 +40,7 @@ namespace resolve {
 // Strings treated as NA when factorizing a categorical column. The single
 // matcher every loader shares, so one raw cell is classified the same way
 // whatever role its column carries.
-[[nodiscard]] bool is_na_string(const std::string& s) noexcept;
+[[nodiscard]] bool is_na_string(std::string_view s) noexcept;
 
 // =============================================================================
 // CategoricalVocab

@@ -158,7 +158,8 @@ TEST_CASE("PlotEncoderSparse forward", "[encoder]") {
     auto genus_ids = torch::randint(0, 20, {4, 3});
     auto family_ids = torch::randint(0, 10, {4, 3});
 
-    auto output = encoder->forward(continuous, species_vector, genus_ids, family_ids);
+    auto output = encoder->forward(continuous, to_sparse_rows(species_vector), genus_ids,
+                                   family_ids);
 
     REQUIRE(output.size(0) == 4);
     REQUIRE(output.size(1) == 16);
@@ -305,7 +306,8 @@ TEST_CASE("ResolveModel sparse mode forward", "[model]") {
     auto continuous = torch::randn({8, 4});
     auto species_vector = torch::randn({8, 50});
 
-    auto outputs = model->forward({.continuous = continuous, .species_vector = species_vector});
+    auto outputs = model->forward(
+        {.continuous = continuous, .species_vector = to_sparse_rows(species_vector)});
 
     REQUIRE(outputs.count("biomass") > 0);
     REQUIRE(outputs["biomass"].size(0) == 8);

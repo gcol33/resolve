@@ -703,7 +703,9 @@ public:
 
     // Forward pass
     // continuous: (batch, n_continuous) - coords + covariates
-    // species_vector: (batch, n_species) - abundance or presence/absence vector
+    // species_vector: (batch, n_species) sparse rows (sparse_rows.hpp) - the
+    //                 value each species carries; projected as a sparse x dense
+    //                 product, the same as a dense Linear over the matrix
     // genus_ids: (batch, top_k) - optional
     // family_ids: (batch, top_k) - optional
     torch::Tensor forward(

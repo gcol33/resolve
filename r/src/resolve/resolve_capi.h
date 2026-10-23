@@ -299,11 +299,16 @@ RESOLVE_CAPI void resolve_dataset_free(resolve_dataset_t* ds);
 /* String-dispatched accessor. Returns a freshly-allocated value tree (caller
  * frees), or NULL on error. `what` is one of:
  *   coordinates covariates hash_embedding species_ids species_vector
- *   genus_ids family_ids unknown_fraction unknown_count categorical_ids
+ *   species_vector_dense genus_ids family_ids unknown_fraction
+ *   unknown_count categorical_ids
  *   categorical_vocab targets schema vocabs plot_ids species_vocab n_plots
  *   config has_raw_species_data raw_species_ids raw_weights plot_offsets
  *   taxonomy_vocab pool_genus_ids pool_family_ids pool_weights pool_mask
  *   pool_has_cover has_pool_data
+ * species_vector is a MAP of the sparse rows {row_offsets, species,
+ * values, n_species}: plot p holds species[row_offsets[p] ..
+ * row_offsets[p + 1]) with their values; species_vector_dense is the
+ * (n_plots, n_species) matrix.
  * Optional-tensor accessors return a NULL-kind value when the tensor is
  * undefined/empty. */
 RESOLVE_CAPI resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* what);

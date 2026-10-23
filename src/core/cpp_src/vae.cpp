@@ -133,6 +133,7 @@ VAEPretrainResult VAEPretrainer::pretrain(const PlotInputs& inputs) {
             "VAE pretraining needs inputs.species_vector, the (n_plots, n_species) "
             "species vectors it reconstructs");
     }
+    require_sparse_rows(inputs.species_vector, "VAE pretraining: species_vector");
 
     VAEPretrainResult result;
 
@@ -158,8 +159,10 @@ VAEPretrainResult VAEPretrainer::pretrain(const PlotInputs& inputs) {
     spec.log = config_.log;
     spec.task_name = "VAE";
 
+    // The species vectors stay sparse rows; each batch is reconstructed as
+    // its dense matrix, the shape the decoder outputs.
     auto batch_fn = [&](const PretrainBatch& batch, PretrainRng& rng) {
-        const auto& x = batch.species_vector;
+        const auto x = sparse_rows_to_dense(batch.species_vector);
         auto [recon, mu, log_var] = vae_->forward(x, rng);
 
         auto recon_loss = torch::mse_loss(recon, x, torch::Reduction::Mean);

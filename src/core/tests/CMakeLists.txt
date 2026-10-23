@@ -111,6 +111,8 @@ add_executable(resolve_tests
     test_trainer_runs.cpp
     test_resume.cpp
     test_pretrain_inputs.cpp
+    test_sparse_rows.cpp
+    test_load_scale.cpp
 )
 
 resolve_link_cuda_dirs(resolve_tests)

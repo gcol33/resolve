@@ -19,8 +19,8 @@ namespace {
 // Every data row the reader streams, in order.
 std::vector<std::vector<std::string>> all_rows(CSVReader& reader) {
     std::vector<std::vector<std::string>> rows;
-    reader.read_rows([&rows](size_t, const std::vector<std::string>& row) {
-        rows.push_back(row);
+    reader.read_rows([&rows](size_t, RowFields row) {
+        rows.emplace_back(row.begin(), row.end());
     });
     return rows;
 }
@@ -443,11 +443,11 @@ TEST_CASE("ResolveDataset sparse mode", "[dataset]") {
         csv.path(), roles, targets, config
     );
 
-    SECTION("species vector is generated") {
+    SECTION("species vector is generated as sparse rows over the vocabulary") {
         auto& species_vec = dataset.species_vector();
-        REQUIRE(species_vec.defined());
+        REQUIRE(is_sparse_rows(species_vec));
         REQUIRE(species_vec.size(0) == 2);
-        // Size(1) should be vocab size
+        REQUIRE(species_vec.size(1) == dataset.schema().n_species_vocab);
     }
 }
 

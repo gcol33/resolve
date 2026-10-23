@@ -15,7 +15,6 @@ namespace cuda {
 
 torch::Tensor compute_batch_hash_embedding_cuda(
     torch::Tensor batch_indices,
-    torch::Tensor /*raw_plot_indices*/,
     torch::Tensor raw_species_ids,
     torch::Tensor raw_weights,
     torch::Tensor plot_offsets,

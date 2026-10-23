@@ -1,4 +1,5 @@
 #include "resolve/adapter.hpp"
+#include "resolve/sparse_rows.hpp"
 #include <stdexcept>
 #include <string>
 
@@ -328,7 +329,8 @@ torch::Tensor TabularAdapterImpl::prepare_numerical(
     }
     else if (species_encoding_ == SpeciesEncodingMode::Sparse && species_projection_) {
         // Sparse mode: project species vector
-        auto species_emb = species_projection_->forward(species_vector);
+        auto species_emb = sparse_rows_linear(species_vector, species_projection_->weight,
+                                              species_projection_->bias);
         parts.push_back(species_emb);
     }
     // Hash mode: hash embedding is already in continuous
@@ -379,7 +381,7 @@ torch::Tensor TabularAdapterImpl::graph_features(
                 "the per-plot species vector, which only the sparse species "
                 "encoding provides. Set DatasetConfig::species_encoding = "
                 "sparse, or select another graph_mode.");
-            return species_vector.to(torch::kFloat32);
+            return sparse_rows_to_dense(species_vector).to(torch::kFloat32);
         }
     }
     throw std::invalid_argument(

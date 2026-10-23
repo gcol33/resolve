@@ -1,36 +1,109 @@
 #pragma once
 
-#include <string>
+#include <cerrno>
+#include <charconv>
+#include <cstdint>
 #include <optional>
-#include <sstream>
-#include <locale>
+#include <string>
+#include <string_view>
+#include <system_error>
+
+#if !(defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L)
+#include <clocale>
+#include <cstdlib>
+#if defined(__APPLE__)
+#include <xlocale.h>
+#else
+#include <locale.h>
+#endif
+#endif
 
 namespace resolve {
 
-// Locale-independent strict float parse. Returns nullopt on empty input,
-// unparseable text, OR trailing non-whitespace characters, so "12abc" and
-// "1,234" are rejected rather than silently truncated to 12 / 1 (the
-// leading-prefix behavior of std::stof). The stream is imbued with the
-// classic ("C") locale, so a process LC_NUMERIC using a comma decimal
-// separator (common on European Windows) cannot change how coordinates,
-// abundances, covariates, or regression targets parse: the decimal point is
-// always '.', and a comma is treated as trailing garbage.
-//
-// std::from_chars for floating point would be faster, but libc++ (the macOS
-// CI toolchain) only gained floating-point from_chars very recently; the
-// classic-locale stream is available on every supported compiler and yields
-// identical results across platforms, so there is a single parse path rather
-// than a Linux/macOS split.
-inline std::optional<float> parse_float_strict(const std::string& s) {
+namespace detail {
+
+inline bool is_c_space(char c) noexcept {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
+}
+
+inline bool is_digit(char c) noexcept { return c >= '0' && c <= '9'; }
+
+inline std::string_view trim_c_space(std::string_view s) noexcept {
+    while (!s.empty() && is_c_space(s.front())) s.remove_prefix(1);
+    while (!s.empty() && is_c_space(s.back())) s.remove_suffix(1);
+    return s;
+}
+
+// The correctly rounded float nearest to the decimal number `text`, which
+// parse_float_strict has already checked is an optional '-' followed by
+// digits, at most one '.' and an optional exponent. False when the text does
+// not convert as a whole or the value is outside the float range. The
+// conversion is std::from_chars where the standard library has it for
+// floating point; otherwise the C library's strtof under a "C" locale object,
+// which is the same correctly rounded conversion and is not affected by the
+// process locale either.
+inline bool decimal_to_float(std::string_view text, float& value) {
+#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
+    const char* end = text.data() + text.size();
+    const auto [ptr, ec] = std::from_chars(text.data(), end, value);
+    return ec == std::errc() && ptr == end;
+#else
+    static const locale_t c_locale = newlocale(LC_ALL_MASK, "C", static_cast<locale_t>(0));
+    const std::string buffer(text);
+    char* end = nullptr;
+    errno = 0;
+    value = strtof_l(buffer.c_str(), &end, c_locale);
+    return errno != ERANGE && end == buffer.c_str() + buffer.size();
+#endif
+}
+
+}  // namespace detail
+
+// Strict, locale-independent float parse of a whole cell. Surrounding
+// whitespace is ignored and a leading '+' accepted; anything else that is not
+// a decimal number (digits with an optional '.', an optional exponent, an
+// optional sign) is rejected rather than read up to the first bad character:
+// "12abc" and "1,234" give nullopt, not 12 and 1. The decimal point is always
+// '.', so a process LC_NUMERIC using a comma decimal separator (common on
+// European Windows) cannot change how coordinates, abundances, covariates or
+// regression targets parse. Spelled-out infinities and NaNs, hexadecimal
+// numbers and values outside the float range are rejected as well; the empty
+// cell is nullopt.
+inline std::optional<float> parse_float_strict(std::string_view s) {
+    s = detail::trim_c_space(s);
+    if (!s.empty() && s.front() == '+') {
+        s.remove_prefix(1);
+        if (!s.empty() && (s.front() == '-' || s.front() == '+')) return std::nullopt;
+    }
+    const size_t magnitude = !s.empty() && s.front() == '-' ? 1 : 0;
+    if (magnitude >= s.size()) return std::nullopt;
+    if (!detail::is_digit(s[magnitude]) && s[magnitude] != '.') return std::nullopt;
+    for (size_t i = magnitude; i < s.size(); ++i) {
+        const char c = s[i];
+        if (!detail::is_digit(c) && c != '.' && c != 'e' && c != 'E' && c != '+' && c != '-') {
+            return std::nullopt;
+        }
+    }
+    float value = 0.0f;
+    if (!detail::decimal_to_float(s, value)) return std::nullopt;
+    return value;
+}
+
+// Strict base-10 int64 parse of a whole cell: optional leading whitespace, an
+// optional sign, digits, and nothing after them (trailing whitespace
+// included). nullopt for anything else and on overflow.
+inline std::optional<int64_t> parse_int64_strict(std::string_view s) {
+    while (!s.empty() && detail::is_c_space(s.front())) s.remove_prefix(1);
+    if (!s.empty() && s.front() == '+') {
+        s.remove_prefix(1);
+        if (s.empty() || !detail::is_digit(s.front())) return std::nullopt;
+    }
     if (s.empty()) return std::nullopt;
-    std::istringstream iss(s);
-    iss.imbue(std::locale::classic());
-    float v;
-    iss >> v;
-    if (iss.fail()) return std::nullopt;
-    char extra;
-    if (iss >> extra) return std::nullopt;  // trailing non-whitespace
-    return v;
+    int64_t value = 0;
+    const char* end = s.data() + s.size();
+    const auto [ptr, ec] = std::from_chars(s.data(), end, value);
+    if (ec != std::errc() || ptr != end) return std::nullopt;
+    return value;
 }
 
 } // namespace resolve

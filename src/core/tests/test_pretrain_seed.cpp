@@ -190,7 +190,7 @@ std::vector<float> run_mlm(const MLMInputs& in, int seed, int epochs) {
 torch::Tensor make_species_vectors(int64_t n_plots, int64_t vocab) {
     torch::manual_seed(kFixtureSeed);
     auto presence = (torch::rand({n_plots, vocab}) < 0.2).to(torch::kFloat32);
-    return presence * torch::rand({n_plots, vocab});
+    return to_sparse_rows(presence * torch::rand({n_plots, vocab}));
 }
 
 VAEConfig base_vae_config() {

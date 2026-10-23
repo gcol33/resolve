@@ -1,12 +1,19 @@
 #pragma once
 
-#include <string>
-#include <vector>
 #include <functional>
-#include <unordered_map>
+#include <span>
 #include <stdexcept>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
 
 namespace resolve {
+
+// The fields of one data row, one per column in header order (a short row
+// holds fewer). The views are valid only for the duration of the row callback:
+// a source reuses the storage behind them for the next row.
+using RowFields = std::span<const std::string_view>;
 
 // Abstract tabular row source consumed by the dataset loaders. Both CSVReader
 // (streaming a file from disk) and InMemoryRowSource (a column-oriented frame
@@ -23,10 +30,8 @@ public:
     // Index of a named column, or -1 if absent.
     virtual int column_index(const std::string& name) const = 0;
 
-    // Invoke cb(row_idx, fields) for each data row. fields holds one string per
-    // column, in header order (matching CSVReader's row callback exactly).
-    virtual void read_rows(
-        const std::function<void(size_t, const std::vector<std::string>&)>& cb) = 0;
+    // Invoke cb(row_idx, fields) for each data row.
+    virtual void read_rows(const std::function<void(size_t, RowFields)>& cb) = 0;
 };
 
 // Column-oriented in-memory table: the cross-binding carrier for an in-memory
@@ -80,9 +85,9 @@ private:
     std::unordered_map<std::string, int> index_;
 };
 
-// Adapts a ColumnTable to the RowSource interface, materializing a row vector
-// per row index on demand (column-major storage -> row-major view). Holds the
-// table by reference; the table must outlive the source.
+// Adapts a ColumnTable to the RowSource interface: each row is a set of views
+// onto the table's cells (column-major storage -> row-major view), no cell is
+// copied. Holds the table by reference; the table must outlive the source.
 class InMemoryRowSource : public RowSource {
 public:
     explicit InMemoryRowSource(const ColumnTable& table) : table_(table) {}
@@ -93,12 +98,11 @@ public:
         return table_.column_index(name);
     }
 
-    void read_rows(
-        const std::function<void(size_t, const std::vector<std::string>&)>& cb) override {
+    void read_rows(const std::function<void(size_t, RowFields)>& cb) override {
         const size_t n_cols = table_.num_cols();
         const size_t n_rows = table_.num_rows();
         const auto& cols = table_.columns();
-        std::vector<std::string> row(n_cols);
+        std::vector<std::string_view> row(n_cols);
         for (size_t r = 0; r < n_rows; ++r) {
             for (size_t c = 0; c < n_cols; ++c) {
                 row[c] = cols[c][r];

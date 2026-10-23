@@ -737,7 +737,6 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
                 // First batch: compute synchronously. Hash by global plot index.
                 batch_hash = cuda::compute_batch_hash_embedding_cuda(
                     hash_index_map.index_select(0, batch_idx),
-                    torch::Tensor(),
                     hash_species_src,
                     hash_weights_src,
                     hash_offsets_src,
@@ -764,7 +763,6 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
                 c10::cuda::CUDAStreamGuard guard(*prefetch_stream);
                 prefetched_hash = cuda::compute_batch_hash_embedding_cuda(
                     hash_index_map.index_select(0, next_batch_idx),
-                    torch::Tensor(),
                     hash_species_src,
                     hash_weights_src,
                     hash_offsets_src,
@@ -1442,7 +1440,6 @@ torch::Tensor Trainer::append_cuda_hash(
                                               : plot_offsets_.to(config_.device);
         auto hash = cuda::compute_batch_hash_embedding_cuda(
             plot_idx.to(config_.device),
-            torch::Tensor(),
             species_src, weights_src, offsets_src, hash_dim_);
         return torch::cat({continuous, hash}, /*dim=*/1);
     }

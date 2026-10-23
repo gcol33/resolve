@@ -114,8 +114,9 @@ public:
         return nb::cast<T>(obj);
     }
 
-    // The PlotInputs fields the call passed. `continuous` is read only when
-    // `with_continuous`, and is then required.
+    // The PlotInputs fields the call passed, in each field's dtype and layout
+    // (a dense species_vector becomes sparse rows). `continuous` is read only
+    // when `with_continuous`, and is then required.
     resolve::PlotInputs plot_inputs(bool with_continuous) {
         resolve::PlotInputs inputs;
         inputs.for_each([&](const resolve::PlotInputField& field, torch::Tensor& t) {
@@ -126,7 +127,7 @@ public:
                 t = optional_tensor(name);
             }
         });
-        return inputs;
+        return inputs.conformed();
     }
 
     // The ContinuousInputs parts the call passed.

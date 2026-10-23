@@ -16,7 +16,6 @@ namespace cuda {
  * contiguous. The kernel runs on the current CUDA stream.
  *
  * @param batch_indices    (batch_size,) int64 plot indices of the batch
- * @param raw_plot_indices not read
  * @param raw_species_ids  (n_total_records,) int64 species keys
  * @param raw_weights      (n_total_records,) float32 species weights
  * @param plot_offsets     (n_plots + 1,) int64 CSR offsets
@@ -26,7 +25,6 @@ namespace cuda {
  */
 torch::Tensor compute_batch_hash_embedding_cuda(
     torch::Tensor batch_indices,
-    torch::Tensor raw_plot_indices,
     torch::Tensor raw_species_ids,
     torch::Tensor raw_weights,
     torch::Tensor plot_offsets,

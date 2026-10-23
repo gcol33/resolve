@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "resolve/adapter.hpp"
+#include "resolve/sparse_rows.hpp"
 
 #include <torch/torch.h>
 
@@ -205,7 +206,7 @@ TEST_CASE("TabularAdapter HeterogeneousGNN forward", "[adapter]") {
     auto continuous = torch::randn({8, 3});
     auto genus_ids = torch::randint(0, 20, {8, 3});   // valid ids 0..n_genera-1
     auto family_ids = torch::randint(0, 10, {8, 3});  // valid ids 0..n_families-1
-    auto species_vector = torch::rand({8, 50});  // Required for HeterogeneousGNN
+    auto species_vector = to_sparse_rows(torch::rand({8, 50}));  // Required for HeterogeneousGNN
 
     auto out = adapter->forward(continuous, genus_ids, family_ids, {}, species_vector);
 

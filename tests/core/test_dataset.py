@@ -17,6 +17,7 @@ import resolve_core as rc
 
 from conftest import (
     make_dataset_config,
+    make_model_config,
     make_plot_csvs,
     make_roles,
     make_targets,
@@ -154,9 +155,39 @@ def test_sparse_mode_builds_a_species_vector(plot_csvs):
     )
     vector = dataset.species_vector
     assert vector is not None
+    # Sparse rows: each plot's species codes (col_indices) and values.
+    assert vector.layout == torch.sparse_csr
     assert vector.shape == (dataset.n_plots, dataset.schema.n_species_vocab)
+    assert vector.crow_indices().shape == (dataset.n_plots + 1,)
     # Three species per plot, so each row is sparse but non-empty.
-    assert float(vector.sum()) > 0.0
+    counts = vector.crow_indices().diff()
+    assert bool((counts > 0).all())
+    assert bool((vector.values() > 0).all())
+    assert float(vector.to_dense().sum()) == pytest.approx(float(vector.values().sum()))
+
+
+def test_a_dense_species_vector_reaches_the_model_as_sparse_rows(plot_csvs):
+    """The bindings conform a dense matrix to the field's sparse-rows layout,
+    so a caller's dense species vector scores like the dataset's own."""
+    dataset = rc.ResolveDataset.from_csv(
+        plot_csvs.header,
+        plot_csvs.species,
+        make_roles(),
+        make_targets(),
+        make_dataset_config(rc.SpeciesEncodingMode.Sparse),
+    )
+    config = make_model_config(rc.SpeciesEncodingMode.Sparse)
+    model = rc.ResolveModel(dataset.schema, config)
+    model.eval()
+    continuous = dataset.continuous_block(False)
+    continuous = torch.nan_to_num(continuous)
+    kwargs = dict(continuous=continuous, genus_ids=dataset.genus_ids,
+                  family_ids=dataset.family_ids)
+    with torch.no_grad():
+        sparse_out = model.forward(species_vector=dataset.species_vector, **kwargs)
+        dense_out = model.forward(species_vector=dataset.species_vector.to_dense(), **kwargs)
+    for name in sparse_out:
+        assert torch.equal(sparse_out[name], dense_out[name])
 
 
 # ---------------------------------------------------------------------------

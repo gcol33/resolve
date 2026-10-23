@@ -1,5 +1,6 @@
 #include "resolve/pretraining.hpp"
 #include "resolve/continuous_block.hpp"
+#include "resolve/sparse_rows.hpp"
 #include "resolve/utils.hpp"
 #include <algorithm>
 #include <chrono>
@@ -343,10 +344,13 @@ PlotInputs mask_species_view(const PlotInputs& inputs, float ratio, PretrainRng&
     view.genus_ids = mask_codes(inputs.genus_ids, ratio, rng);
     view.family_ids = mask_codes(inputs.family_ids, ratio, rng);
 
+    // An explicit species vector drops each recorded species (each stored
+    // entry of its sparse rows) with probability `ratio`.
     if (inputs.species_vector.defined() && inputs.species_vector.numel() > 0) {
-        const auto keep =
-            (rng.rand_like(inputs.species_vector) >= ratio).to(inputs.species_vector.dtype());
-        view.species_vector = inputs.species_vector * keep;
+        require_sparse_rows(inputs.species_vector, "mask_species_view: species_vector");
+        const auto values = inputs.species_vector.values();
+        const auto keep = (rng.rand_like(values) >= ratio).to(values.dtype());
+        view.species_vector = sparse_rows_with_values(inputs.species_vector, values * keep);
     }
     return view;
 }
