@@ -1,13 +1,9 @@
 [files]
+# Patterns are fnmatch-style over repo-relative file paths, where `*` also
+# matches `/`. unrot already leaves out caches, egg-info and build/.
 exclude = [
+    # Every CMake build tree, including the sources FetchContent puts in _deps/.
     "src/core/build*",
-    "src/core/build*/*",
-    "*/_deps/*",
-    "*_deps*",
-    "prototype/*",
-    "*.egg-info/*",
-    "__pycache__/*",
-    "todo/*",
-    "paper/*",
-    "dev_notes/*",
+    # Local, untracked working notes and smoke scripts (repo root and src/core).
+    "*dev_notes/*",
 ]

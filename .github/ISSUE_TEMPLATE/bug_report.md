@@ -10,7 +10,7 @@ assignees: ''
 A clear and concise description of what the bug is.
 
 **Which interface**
-Python (`resolve_core`), R (`resolve`), or the `resolve` command line.
+Python (`resolve_core`), R (`resolveR`), or the `resolve` command line.
 
 **To Reproduce**
 Minimal code to reproduce the behavior:

@@ -1,5 +1,5 @@
-url: https://gillescolling.com/resolve
-destination: ../docs
+url: https://gillescolling.com/resolve/r/
+destination: docs
 
 template:
   bootstrap: 5
@@ -12,10 +12,13 @@ figures:
   bg: "#F5F6F8"
 
 home:
-  title: "RESOLVE: Predicting Sample Outcomes from Compositional Data"
+  title: "resolveR: Predicting Sample Outcomes from Compositional Data"
   description: >
-    R interface to the RESOLVE Python package for predicting sample attributes
-    from compositional data using linear compositional pooling.
+    R client for the RESOLVE C++ engine. It calls the engine through its C ABI
+    (the resolve_c shared library, fetched by resolve.install_backend()) to
+    load compositional data, train multi-task models on a learned
+    representation of each sample's composition, and predict with single
+    models or released model suites.
 
 authors:
   Gilles Colling:
@@ -28,23 +31,58 @@ navbar:
   components:
     intro:
       text: Get Started
-      href: articles/quickstart.html
+      href: articles/getting-started.html
     articles:
       text: Articles
       menu:
-        - text: "Quick Start"
-          href: articles/quickstart.html
+        - text: "Getting Started with RESOLVE"
+          href: articles/getting-started.html
     github:
       icon: fab fa-github
       href: https://github.com/gcol33/resolve
       aria-label: GitHub
 
 reference:
-  - title: "Core Functions"
-    desc: "Main interface to RESOLVE"
+  - title: "Backend"
+    desc: "Install and inspect the resolve_c engine library the package calls."
     contents:
-      - resolve
-      - resolve-package
+      - resolve.install_backend
+      - resolve.available
+      - resolve.version
+  - title: "Data"
+    desc: "Load plots and their species records into an engine dataset."
+    contents:
+      - resolve.dataset.csv
+      - resolve.dataset.frame
+      - resolve.species_graph
+  - title: "Training"
+    desc: "Fit a model and follow its progress."
+    contents:
+      - resolve.train.dataset
+      - resolve.progress
+  - title: "Models"
+    desc: "Save, load and inspect trained checkpoints."
+    contents:
+      - resolve.save
+      - resolve.load
+      - resolve.load_train_config
+      - resolve.load_run_metadata
+  - title: "Prediction"
+    desc: "Predict targets for new plots."
+    contents:
+      - resolve.predict.dataset
+  - title: "Model suites"
+    desc: "Released sets of models scored as one."
+    contents:
+      - resolve.load_suite
+      - resolve.verify_suite
+      - resolve.seal_suite
+      - resolve.predict.suite
+      - as.data.frame.resolve_suite_predictions
+  - title: "Metrics"
+    desc: "Score predictions against observed values."
+    contents:
+      - resolve_metrics
 
 footer:
   structure:

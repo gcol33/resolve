@@ -121,17 +121,23 @@ src/core/build*/*
 # CMake test files
 *.cmd
 
-# Vendored C facade header for the R package (issue #17). Only resolve_capi.h
-# lives here now and it is a tracked, load-bearing source file (the package's
-# only engine header); track it but ignore any other copied headers.
+# Vendored C facade for the R package, copied from src/core/include/resolve/ by
+# r/tools/vendor.R: the header and the X-macro symbol list (.inc) are tracked,
+# load-bearing sources (the vendor-drift CI job diffs them against the
+# canonical copies); any other copied file is ignored. The .inc negation is a
+# pattern, so a new vendored symbol list is tracked rather than silently
+# dropped.
 r/src/resolve/*
 !r/src/resolve/resolve_capi.h
+!r/src/resolve/*.inc
 benchmarks/results_*.json
 
 # Load-bearing tracked files inside otherwise-ignored locations.
-# do_build.bat: build script referenced from progress.md (MSVC fix history).
-# launch_build.ps1: documented build entry point in port.md and global CLAUDE.md.
-# fuzzy_index_plan.md: plan implemented by FuzzyIndex C++ + bindings_fuzzy.cpp.
+# launch_build.ps1 + do_build.bat: the local Windows CUDA build entry point
+# (launch_build.ps1 calls do_build.bat for the MSVC environment and Ninja).
+# crash_smoke_drive.ps1: runs resolve_crash_smoke and checks its exit codes.
+# fuzzy_index_plan.md: design of FuzzyIndex (fuzzy*.cpp, bindings_fuzzy.cpp).
 !src/core/build_cuda/do_build.bat
 !src/core/build_cuda/launch_build.ps1
+!tools/crash_smoke_drive.ps1
 !dev_notes/fuzzy_index_plan.md

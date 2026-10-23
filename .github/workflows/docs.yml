@@ -25,12 +25,31 @@ jobs:
         with:
           python-version: "3.11"
 
+      # mkdocs 2 drops the plugin and theme system Material for MkDocs is
+      # built on.
       - name: Install dependencies
         run: |
-          pip install mkdocs mkdocs-material pymdown-extensions
+          pip install "mkdocs>=1.6,<2" mkdocs-material pymdown-extensions
 
+      # The R package's pkgdown reference is published under the MkDocs site
+      # at r/. Building it needs the package's R dependencies, not the engine:
+      # its examples and vignette code are not run.
+      - uses: r-lib/actions/setup-pandoc@v2
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: r
+          extra-packages: any::pkgdown, local::.
+          needs: website
+
+      # --strict fails the build on any MkDocs warning (a broken link, a page
+      # missing from the nav); --r adds the pkgdown site at site/r/.
       - name: Build docs
-        run: mkdocs build --site-dir site
+        run: python build_docs.py --r
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

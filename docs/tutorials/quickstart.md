@@ -81,7 +81,7 @@ A single long table also works, with the targets carried inline; see
 === "R"
 
     ```r
-    library(resolve)
+    library(resolveR)
 
     dataset <- resolve.dataset.csv(
       header  = "plots.csv",

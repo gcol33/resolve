@@ -18,7 +18,7 @@ Description: Predict sample-level outcomes from compositional data (species
     build into the user data directory on request, with optional graphics
     processing unit (GPU) acceleration through 'CUDA'.
 License: MIT + file LICENSE
-URL: https://github.com/gcol33/resolve
+URL: https://github.com/gcol33/resolve, https://gillescolling.com/resolve/r/
 BugReports: https://github.com/gcol33/resolve/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
