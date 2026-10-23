@@ -71,26 +71,26 @@ struct PlotInputField {
 struct PlotInputs {
     // (n, n_continuous): the standardised continuous block
     // (continuous_block.hpp). In hash mode the hash embedding is its tail.
-    torch::Tensor continuous;
+    torch::Tensor continuous{};
     // (n, n_taxonomy_slots) genus / family codes of the fixed taxonomy slots.
-    torch::Tensor genus_ids;
-    torch::Tensor family_ids;
+    torch::Tensor genus_ids{};
+    torch::Tensor family_ids{};
     // (n, k) species codes, 0 = padding: the top_k_species slots of embed
     // mode, or one entry per pooled species for rank_pool / transformer.
-    torch::Tensor species_ids;
+    torch::Tensor species_ids{};
     // (n, n_species_vocab) explicit species vector of the sparse encoding, as
     // sparse rows: each plot's species codes and values.
-    torch::Tensor species_vector;
+    torch::Tensor species_vector{};
     // rank_pool / transformer, aligned with species_ids: (n, max_species)
     // genus and family code, weight and validity of each pooled species, and
     // (n,) whether the plot records cover at all.
-    torch::Tensor pool_genus_ids;
-    torch::Tensor pool_family_ids;
-    torch::Tensor pool_weights;
-    torch::Tensor pool_mask;
-    torch::Tensor pool_has_cover;
+    torch::Tensor pool_genus_ids{};
+    torch::Tensor pool_family_ids{};
+    torch::Tensor pool_weights{};
+    torch::Tensor pool_mask{};
+    torch::Tensor pool_has_cover{};
     // (n, n_categoricals) codes from CategoricalVocab, 0 = UNK.
-    torch::Tensor categorical_ids;
+    torch::Tensor categorical_ids{};
 
     // Calls f(const PlotInputField&, tensor) for every field in list order.
     template <typename F>

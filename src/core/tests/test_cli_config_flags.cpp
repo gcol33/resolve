@@ -261,7 +261,7 @@ void check_every_field_has_its_flag(const std::set<std::string>& declared) {
             const std::string flag = naming.flag_of(name, key);
             INFO("field " << name << " -> " << (flag.empty() ? "(no flag)" : flag));
             const FieldFlag* row = naming.find(name);
-            if (row != nullptr && row->flag == kNoFlag) {
+            if (row != nullptr && row->flag != nullptr && std::string(row->flag) == kNoFlag) {
                 CHECK(flag.empty());
             } else {
                 CHECK(declared.count(flag) == 1);
