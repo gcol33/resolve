@@ -142,7 +142,7 @@ Standing facts that bind new work:
 | Phase | Status | Description |
 |-------|--------|-------------|
 | A: Fused Embeddings | **DONE** | `FusedPositionalEmbedding` in the encoder — single lookup with offset indexing |
-| B: CUDA Kernels | **DONE** | Hash kernels (5 variants + auto-select in `cuda/kernels.cu`) |
+| B: CUDA Kernels | **DONE** | CSR hash kernel in `cuda/kernels.cu`; bucket/sign from the one `__host__ __device__` `hash_core.hpp` the CPU encoder also uses; alternative kernels only in the benchmarks |
 | C: JIT Inference | **DONE** | BN fusion in `Predictor::optimize_for_inference()` |
 | D: Async Pipeline | **DONE** | CUDA-hash prefetch on a side stream in `Trainer::train_epoch`, overlapping the next batch's hash with the current forward |
 

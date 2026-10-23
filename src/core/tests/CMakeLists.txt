@@ -63,6 +63,7 @@ add_executable(resolve_tests
     test_mlm_pretrain.cpp
     test_spatial_cv.cpp
     test_species_encoders.cpp
+    test_hash_core.cpp
     test_fuzzy.cpp
     test_categorical.cpp
     test_gpu.cpp
@@ -129,6 +130,20 @@ if(RESOLVE_BUILD_BENCHMARKS)
             resolve_warnings
     )
 
+    # Alternative hash-aggregation kernels the benchmarks time against the
+    # production CSR kernel. Built only here, never linked into resolve_core.
+    if(TARGET resolve_cuda_kernels)
+        add_library(resolve_benchmark_kernels STATIC benchmark_kernels.cu)
+        target_include_directories(resolve_benchmark_kernels
+            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+            PRIVATE ${RESOLVE_CORE_DIR}/cuda ${RESOLVE_CORE_DIR}/include)
+        set_target_properties(resolve_benchmark_kernels PROPERTIES
+            CUDA_STANDARD 17
+            CUDA_ARCHITECTURES "${RESOLVE_CUDA_ARCHITECTURES}")
+        target_link_libraries(resolve_benchmark_kernels PRIVATE resolve_warnings)
+        set(RESOLVE_BENCHMARK_KERNELS resolve_benchmark_kernels)
+    endif()
+
     # Benchmark executable (standalone, no Catch2)
     add_executable(resolve_benchmark
         benchmark_cuda.cpp
@@ -137,6 +152,7 @@ if(RESOLVE_BUILD_BENCHMARKS)
     target_link_libraries(resolve_benchmark
         PRIVATE
             resolve_core
+            ${RESOLVE_BENCHMARK_KERNELS}
             ${TORCH_LIBRARIES}
             resolve_warnings
     )
@@ -149,6 +165,7 @@ if(RESOLVE_BUILD_BENCHMARKS)
     target_link_libraries(resolve_benchmark_catch2
         PRIVATE
             resolve_core
+            ${RESOLVE_BENCHMARK_KERNELS}
             ${TORCH_LIBRARIES}
             Catch2::Catch2WithMain
             resolve_warnings

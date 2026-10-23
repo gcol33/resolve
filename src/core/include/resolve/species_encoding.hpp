@@ -1,5 +1,6 @@
 #pragma once
 
+#include "resolve/hash_core.hpp"
 #include "resolve/types.hpp"
 #include <torch/torch.h>
 #include <string>
@@ -15,16 +16,9 @@ namespace resolve {
 // cross-platform stability (see the unsigned-char cast in the impl).
 uint32_t feature_hash(const std::string& key, uint32_t seed = 0);
 
-// Resolved feature-hash slot for one species: signed-feature-hashing bucket
-// and sign. The scheme mirrors the CUDA kernel (cuda/kernels.cu) exactly so the
-// CPU-aggregated embedding matches the GPU kernel output for the same data.
-struct HashBucketSign {
-    int bucket;
-    float sign;
-};
-
-// Compute the (bucket, sign) for a species under the canonical feature-hash
-// scheme shared by the CPU and CUDA paths. Single definition of the contract.
+// Feature-hash slot of a species name: hash_bucket_sign (hash_core.hpp) of the
+// key feature_hash(species, 0). The CUDA hash path stores the same key per
+// record and its kernel calls the same hash_bucket_sign.
 HashBucketSign feature_hash_bucket_sign(const std::string& species, int hash_dim);
 
 // Integer percentile matching numpy's `int(np.percentile(values, q,

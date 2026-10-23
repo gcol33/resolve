@@ -7,47 +7,7 @@
 #include <iostream>
 #include <iomanip>
 
-#ifdef RESOLVE_HAS_CUDA
-#include "resolve/cuda/feature_hash.hpp"
-#include <ATen/cuda/CUDAContext.h>
-#include <cuda_runtime.h>
-#endif
-
-// Simple CPU implementation for comparison
-torch::Tensor compute_hash_embedding_cpu(
-    torch::Tensor plot_indices,
-    torch::Tensor species_ids,
-    torch::Tensor weights,
-    int64_t n_plots,
-    int32_t hash_dim
-) {
-    auto output = torch::zeros({n_plots, hash_dim}, torch::kFloat32);
-    auto plot_acc = plot_indices.accessor<int64_t, 1>();
-    auto species_acc = species_ids.accessor<int64_t, 1>();
-    auto weight_acc = weights.accessor<float, 1>();
-    auto out_acc = output.accessor<float, 2>();
-
-    for (int64_t i = 0; i < plot_indices.size(0); ++i) {
-        int64_t plot_idx = plot_acc[i];
-        int64_t species_id = species_acc[i];
-
-        // MurmurHash3-style mixing
-        uint64_t h = static_cast<uint64_t>(species_id);
-        h ^= h >> 33;
-        h *= 0xff51afd7ed558ccdULL;
-        h ^= h >> 33;
-        h *= 0xc4ceb9fe1a85ec53ULL;
-        h ^= h >> 33;
-        int32_t hash = static_cast<int32_t>(h);
-
-        int32_t hash_idx = (hash < 0 ? -hash : hash) % hash_dim;
-        float sign = (hash >= 0) ? 1.0f : -1.0f;
-
-        out_acc[plot_idx][hash_idx] += sign * weight_acc[i];
-    }
-
-    return output;
-}
+#include "benchmark_hash.hpp"
 
 template<typename Func>
 double benchmark(Func&& fn, int warmup = 3, int iterations = 10) {
@@ -74,103 +34,35 @@ double benchmark(Func&& fn, int warmup = 3, int iterations = 10) {
     return duration.count() / 1000.0 / iterations;  // ms per iteration
 }
 
-#ifdef RESOLVE_HAS_CUDA
-// Extern declarations for kernel launchers
-extern "C" {
-cudaError_t resolve_launch_hash_and_aggregate(const int64_t*, const int64_t*, const float*, float*, int64_t, int64_t, int32_t, void*);
-cudaError_t resolve_launch_hash_and_aggregate_shared(const int64_t*, const int64_t*, const float*, float*, int64_t, int64_t, int32_t, void*);
-cudaError_t resolve_launch_hash_and_aggregate_chunked(const int64_t*, const int64_t*, const float*, float*, int64_t, int64_t, int32_t, int64_t, void*);
-cudaError_t resolve_launch_hash_and_aggregate_auto(const int64_t*, const int64_t*, const float*, float*, int64_t, int64_t, int32_t, void*);
-}
-#endif
-
 void run_hash_embedding_benchmark(int64_t n_rows, int64_t n_plots, int32_t hash_dim) {
     std::cout << "\n=== Hash Embedding Benchmark ===" << std::endl;
     std::cout << "n_rows: " << n_rows << ", n_plots: " << n_plots << ", hash_dim: " << hash_dim << std::endl;
 
-    // Generate random test data
-    auto plot_indices = torch::randint(0, n_plots, {n_rows}, torch::kInt64);
-    auto species_ids = torch::randint(0, 100000, {n_rows}, torch::kInt64);
-    auto weights = torch::rand({n_rows}, torch::kFloat32);
+    const auto records = resolve::bench::random_hash_records(n_rows, n_plots, hash_dim);
+    const auto cpu_result = resolve::bench::hash_embedding_cpu(records);
 
-    // CPU benchmark
     double cpu_time = benchmark([&]() {
-        auto result = compute_hash_embedding_cpu(plot_indices, species_ids, weights, n_plots, hash_dim);
+        auto result = resolve::bench::hash_embedding_cpu(records);
     });
-    std::cout << "CPU:        " << std::fixed << std::setprecision(3) << cpu_time << " ms" << std::endl;
+    std::cout << std::left << std::setw(18) << "CPU" << std::fixed << std::setprecision(3)
+              << cpu_time << " ms" << std::endl;
 
 #ifdef RESOLVE_HAS_CUDA
     if (torch::cuda::is_available()) {
-        // Move data to GPU
-        auto plot_indices_cuda = plot_indices.to(torch::kCUDA);
-        auto species_ids_cuda = species_ids.to(torch::kCUDA);
-        auto weights_cuda = weights.to(torch::kCUDA);
+        const auto cuda_records = resolve::bench::to_cuda(records);
 
-        cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+        for (const auto& kernel : resolve::bench::kHashKernels) {
+            const auto result = resolve::bench::run_hash_kernel(kernel.kind, cuda_records);
+            const float diff = (cpu_result - result.to(torch::kCPU)).abs().max().item<float>();
 
-        // Benchmark all kernel variants
-        auto options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
-
-        // Basic kernel
-        double gpu_basic_time = benchmark([&]() {
-            auto output = torch::zeros({n_plots, hash_dim}, options);
-            resolve_launch_hash_and_aggregate(
-                plot_indices_cuda.data_ptr<int64_t>(),
-                species_ids_cuda.data_ptr<int64_t>(),
-                weights_cuda.data_ptr<float>(),
-                output.data_ptr<float>(),
-                n_rows, n_plots, hash_dim, stream);
-        });
-        std::cout << "GPU basic:  " << std::fixed << std::setprecision(3) << gpu_basic_time << " ms"
-                  << " (" << std::setprecision(1) << (cpu_time / gpu_basic_time) << "x)" << std::endl;
-
-        // Shared memory kernel (only if n_plots <= 65535 for grid limit)
-        if (n_plots <= 65535) {
-            double gpu_shared_time = benchmark([&]() {
-                auto output = torch::zeros({n_plots, hash_dim}, options);
-                resolve_launch_hash_and_aggregate_shared(
-                    plot_indices_cuda.data_ptr<int64_t>(),
-                    species_ids_cuda.data_ptr<int64_t>(),
-                    weights_cuda.data_ptr<float>(),
-                    output.data_ptr<float>(),
-                    n_rows, n_plots, hash_dim, stream);
+            double gpu_time = benchmark([&]() {
+                auto output = resolve::bench::run_hash_kernel(kernel.kind, cuda_records);
             });
-            std::cout << "GPU shared: " << std::fixed << std::setprecision(3) << gpu_shared_time << " ms"
-                      << " (" << std::setprecision(1) << (cpu_time / gpu_shared_time) << "x)" << std::endl;
+            std::cout << std::left << std::setw(18) << kernel.label << std::fixed
+                      << std::setprecision(3) << gpu_time << " ms"
+                      << " (" << std::setprecision(1) << (cpu_time / gpu_time) << "x)"
+                      << (diff < 1e-3f ? "" : "  MISMATCH vs CPU") << std::endl;
         }
-
-        // Chunked kernel
-        double gpu_chunked_time = benchmark([&]() {
-            auto output = torch::zeros({n_plots, hash_dim}, options);
-            resolve_launch_hash_and_aggregate_chunked(
-                plot_indices_cuda.data_ptr<int64_t>(),
-                species_ids_cuda.data_ptr<int64_t>(),
-                weights_cuda.data_ptr<float>(),
-                output.data_ptr<float>(),
-                n_rows, n_plots, hash_dim, 4096, stream);
-        });
-        std::cout << "GPU chunked:" << std::fixed << std::setprecision(3) << gpu_chunked_time << " ms"
-                  << " (" << std::setprecision(1) << (cpu_time / gpu_chunked_time) << "x)" << std::endl;
-
-        // Auto-select kernel
-        double gpu_auto_time = benchmark([&]() {
-            auto output = torch::zeros({n_plots, hash_dim}, options);
-            resolve_launch_hash_and_aggregate_auto(
-                plot_indices_cuda.data_ptr<int64_t>(),
-                species_ids_cuda.data_ptr<int64_t>(),
-                weights_cuda.data_ptr<float>(),
-                output.data_ptr<float>(),
-                n_rows, n_plots, hash_dim, stream);
-        });
-        std::cout << "GPU auto:   " << std::fixed << std::setprecision(3) << gpu_auto_time << " ms"
-                  << " (" << std::setprecision(1) << (cpu_time / gpu_auto_time) << "x)" << std::endl;
-
-        // Verify results match (using basic kernel as reference)
-        auto cpu_result = compute_hash_embedding_cpu(plot_indices, species_ids, weights, n_plots, hash_dim);
-        auto gpu_result = resolve::cuda::compute_hash_embedding_cuda(
-            plot_indices_cuda, species_ids_cuda, weights_cuda, n_plots, hash_dim);
-        auto diff = (cpu_result - gpu_result.to(torch::kCPU)).abs().max().item<float>();
-        std::cout << "Verify: " << (diff < 1e-5 ? "OK" : "MISMATCH!") << std::endl;
     } else {
         std::cout << "GPU:  N/A (CUDA not available)" << std::endl;
     }

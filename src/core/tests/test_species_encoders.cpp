@@ -18,70 +18,35 @@ static std::vector<SpeciesRecord> make_test_records() {
 }
 
 // ============================================================================
-// Feature-hash CPU/CUDA parity
+// Feature-hash aggregation
 // ============================================================================
 
-// Independent reimplementation of the device hash (cuda/kernels.cu:
-// murmur_hash32 applied to (int64)feature_hash(species, 0)). If hash_species or
-// feature_hash_bucket_sign ever diverges from the kernel scheme (the original
-// bug: CPU used a single string hash for the bucket and a second string hash's
-// parity for the sign, while the kernel double-hashes), this fails.
-static void kernel_hash_formula(const std::string& s, int hash_dim,
-                                int& bucket_out, float& sign_out) {
-    uint64_t h = static_cast<uint64_t>(static_cast<int64_t>(resolve::feature_hash(s, 0)));
-    h ^= h >> 33;
-    h *= 0xff51afd7ed558ccdULL;
-    h ^= h >> 33;
-    h *= 0xc4ceb9fe1a85ec53ULL;
-    h ^= h >> 33;
-    int32_t hi = static_cast<int32_t>(h);
-    bucket_out = static_cast<int>(
-        static_cast<uint32_t>(hi < 0 ? -hi : hi) % static_cast<uint32_t>(hash_dim));
-    sign_out = (hi >= 0) ? 1.0f : -1.0f;
-}
-
-TEST_CASE("feature_hash_bucket_sign matches the CUDA kernel hash formula", "[hash][parity]") {
-    const int hash_dim = 64;
-    const std::vector<std::string> species = {
-        "Quercus robur", "Fagus sylvatica", "Picea abies", "sp_a", "x", ""
-    };
-    for (const auto& s : species) {
-        int k_bucket; float k_sign;
-        kernel_hash_formula(s, hash_dim, k_bucket, k_sign);
-        auto bs = resolve::feature_hash_bucket_sign(s, hash_dim);
-        REQUIRE(bs.bucket == k_bucket);
-        REQUIRE(bs.sign == k_sign);
-        REQUIRE(bs.bucket >= 0);
-        REQUIRE(bs.bucket < hash_dim);
-    }
-}
-
-TEST_CASE("hash_species aggregates into the CUDA-parity buckets", "[hash][parity]") {
+TEST_CASE("hash_species aggregates each species into its hash_bucket_sign slot", "[hash][parity]") {
     const int hash_dim = 64;
     std::vector<std::pair<std::string, float>> sp = {
-        {"Quercus robur", 3.0f}, {"Fagus sylvatica", 2.0f}, {"Picea abies", 5.0f}
+        {"Quercus robur", 3.0f}, {"Fagus sylvatica", 2.0f}, {"Picea abies", 5.0f},
+        {"Ranunculus acris", 1.5f}
     };
 
     std::vector<float> emb(hash_dim, 0.0f);
     hash_species(sp, emb.data(), hash_dim);
 
-    // Reconstruct the expected embedding from the kernel formula.
     std::vector<float> expected(hash_dim, 0.0f);
-    bool uses_finalizer_distinct_from_single_hash = false;
+    bool finalizer_moves_a_bucket = false;
     for (const auto& [name, abd] : sp) {
-        int bucket; float sign;
-        kernel_hash_formula(name, hash_dim, bucket, sign);
-        expected[bucket] += sign * abd;
-        // The old (buggy) CPU bucket was feature_hash(name,0) % hash_dim; confirm
-        // the finalizer actually changes at least one bucket so this test would
-        // have failed against the pre-fix implementation.
-        int old_bucket = static_cast<int>(resolve::feature_hash(name, 0) % static_cast<uint32_t>(hash_dim));
-        if (old_bucket != bucket) uses_finalizer_distinct_from_single_hash = true;
+        const int64_t key = static_cast<int64_t>(resolve::feature_hash(name, 0));
+        const HashBucketSign slot = resolve::hash_bucket_sign(key, hash_dim);
+        expected[slot.bucket] += slot.sign * abd;
+        // The bucket comes from the finalized key, not from the string hash
+        // modulo hash_dim.
+        const int unfinalized = static_cast<int>(
+            resolve::feature_hash(name, 0) % static_cast<uint32_t>(hash_dim));
+        if (unfinalized != slot.bucket) finalizer_moves_a_bucket = true;
     }
     for (int i = 0; i < hash_dim; ++i) {
         REQUIRE(emb[i] == expected[i]);
     }
-    REQUIRE(uses_finalizer_distinct_from_single_hash);
+    REQUIRE(finalizer_moves_a_bucket);
 }
 
 // ============================================================================

@@ -16,136 +16,48 @@
 #include "resolve/trainer.hpp"
 #include "resolve/types.hpp"
 
-#ifdef RESOLVE_HAS_CUDA
-#include "resolve/cuda/feature_hash.hpp"
-#include <ATen/cuda/CUDAContext.h>
-#endif
+#include "benchmark_hash.hpp"
 
 using namespace resolve;
-
-// ============================================================================
-// CPU Hash Embedding (baseline for comparison)
-// ============================================================================
-
-torch::Tensor compute_hash_embedding_cpu(
-    torch::Tensor plot_indices,
-    torch::Tensor species_ids,
-    torch::Tensor weights,
-    int64_t n_plots,
-    int32_t hash_dim
-) {
-    auto output = torch::zeros({n_plots, hash_dim}, torch::kFloat32);
-    auto plot_acc = plot_indices.accessor<int64_t, 1>();
-    auto species_acc = species_ids.accessor<int64_t, 1>();
-    auto weight_acc = weights.accessor<float, 1>();
-    auto out_acc = output.accessor<float, 2>();
-
-    for (int64_t i = 0; i < plot_indices.size(0); ++i) {
-        int64_t plot_idx = plot_acc[i];
-        int64_t species_id = species_acc[i];
-
-        // MurmurHash3-style mixing
-        uint64_t h = static_cast<uint64_t>(species_id);
-        h ^= h >> 33;
-        h *= 0xff51afd7ed558ccdULL;
-        h ^= h >> 33;
-        h *= 0xc4ceb9fe1a85ec53ULL;
-        h ^= h >> 33;
-        int32_t hash = static_cast<int32_t>(h);
-
-        int32_t hash_idx = (hash < 0 ? -hash : hash) % hash_dim;
-        float sign = (hash >= 0) ? 1.0f : -1.0f;
-
-        out_acc[plot_idx][hash_idx] += sign * weight_acc[i];
-    }
-
-    return output;
-}
 
 // ============================================================================
 // Hash Embedding Benchmarks
 // ============================================================================
 
-TEST_CASE("Hash Embedding Benchmarks", "[benchmark][hash]") {
-    SECTION("Small: 10K rows, 100 plots, hash_dim=256") {
-        const int64_t n_rows = 10000;
-        const int64_t n_plots = 100;
-        const int32_t hash_dim = 256;
+namespace {
 
-        auto plot_indices = torch::randint(0, n_plots, {n_rows}, torch::kInt64);
-        auto species_ids = torch::randint(0, 100000, {n_rows}, torch::kInt64);
-        auto weights = torch::rand({n_rows}, torch::kFloat32);
+void benchmark_hash_embedding(int64_t n_rows, int64_t n_plots, int32_t hash_dim) {
+    const auto records = bench::random_hash_records(n_rows, n_plots, hash_dim);
 
-        BENCHMARK("CPU") {
-            return compute_hash_embedding_cpu(plot_indices, species_ids, weights, n_plots, hash_dim);
-        };
+    BENCHMARK("CPU") {
+        return bench::hash_embedding_cpu(records);
+    };
 
 #ifdef RESOLVE_HAS_CUDA
-        if (torch::cuda::is_available()) {
-            auto plot_cuda = plot_indices.to(torch::kCUDA);
-            auto species_cuda = species_ids.to(torch::kCUDA);
-            auto weights_cuda = weights.to(torch::kCUDA);
-
-            BENCHMARK("GPU (CUDA)") {
-                return cuda::compute_hash_embedding_cuda(
-                    plot_cuda, species_cuda, weights_cuda, n_plots, hash_dim);
-            };
-        }
+    if (torch::cuda::is_available()) {
+        const auto cuda_records = bench::to_cuda(records);
+        BENCHMARK("GPU (CUDA, production CSR kernel)") {
+            auto result = bench::run_hash_kernel(bench::HashKernel::Csr, cuda_records);
+            torch::cuda::synchronize();
+            return result;
+        };
+    }
 #endif
+}
+
+}  // namespace
+
+TEST_CASE("Hash Embedding Benchmarks", "[benchmark][hash]") {
+    SECTION("Small: 10K rows, 100 plots, hash_dim=256") {
+        benchmark_hash_embedding(10000, 100, 256);
     }
 
     SECTION("Medium: 100K rows, 1K plots, hash_dim=512") {
-        const int64_t n_rows = 100000;
-        const int64_t n_plots = 1000;
-        const int32_t hash_dim = 512;
-
-        auto plot_indices = torch::randint(0, n_plots, {n_rows}, torch::kInt64);
-        auto species_ids = torch::randint(0, 100000, {n_rows}, torch::kInt64);
-        auto weights = torch::rand({n_rows}, torch::kFloat32);
-
-        BENCHMARK("CPU") {
-            return compute_hash_embedding_cpu(plot_indices, species_ids, weights, n_plots, hash_dim);
-        };
-
-#ifdef RESOLVE_HAS_CUDA
-        if (torch::cuda::is_available()) {
-            auto plot_cuda = plot_indices.to(torch::kCUDA);
-            auto species_cuda = species_ids.to(torch::kCUDA);
-            auto weights_cuda = weights.to(torch::kCUDA);
-
-            BENCHMARK("GPU (CUDA)") {
-                return cuda::compute_hash_embedding_cuda(
-                    plot_cuda, species_cuda, weights_cuda, n_plots, hash_dim);
-            };
-        }
-#endif
+        benchmark_hash_embedding(100000, 1000, 512);
     }
 
     SECTION("Large: 1M rows, 10K plots, hash_dim=1024") {
-        const int64_t n_rows = 1000000;
-        const int64_t n_plots = 10000;
-        const int32_t hash_dim = 1024;
-
-        auto plot_indices = torch::randint(0, n_plots, {n_rows}, torch::kInt64);
-        auto species_ids = torch::randint(0, 100000, {n_rows}, torch::kInt64);
-        auto weights = torch::rand({n_rows}, torch::kFloat32);
-
-        BENCHMARK("CPU") {
-            return compute_hash_embedding_cpu(plot_indices, species_ids, weights, n_plots, hash_dim);
-        };
-
-#ifdef RESOLVE_HAS_CUDA
-        if (torch::cuda::is_available()) {
-            auto plot_cuda = plot_indices.to(torch::kCUDA);
-            auto species_cuda = species_ids.to(torch::kCUDA);
-            auto weights_cuda = weights.to(torch::kCUDA);
-
-            BENCHMARK("GPU (CUDA)") {
-                return cuda::compute_hash_embedding_cuda(
-                    plot_cuda, species_cuda, weights_cuda, n_plots, hash_dim);
-            };
-        }
-#endif
+        benchmark_hash_embedding(1000000, 10000, 1024);
     }
 }
 
