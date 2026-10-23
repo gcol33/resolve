@@ -259,6 +259,7 @@ CategoricalVocab CategoricalVocab::load(torch::serialize::InputArchive& archive,
         torch::Tensor n_values_t, codes_t;
         archive.read(col_prefix + "n_values", n_values_t);
         archive.read(col_prefix + "codes", codes_t);
+        codes_t = codes_t.to(torch::kCPU).to(torch::kInt64).contiguous();
 
         auto values = read_string_list(archive, col_prefix + "value");
         const int64_t n_values = n_values_t.item<int64_t>();

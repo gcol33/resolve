@@ -72,8 +72,6 @@ TEST_CASE("Hash+taxonomy embedding tables sized to n_genera (no +1 over-alloc)",
     schema.has_taxonomy = true;
     schema.n_genera = 20;          // dataset convention: count includes <UNK>=0
     schema.n_families = 10;
-    schema.n_genera_vocab = 20;
-    schema.n_families_vocab = 10;
     schema.track_unknown_fraction = true;
     schema.targets.push_back({"area", TaskType::Regression, TransformType::None, 0, 1.0f});
 
@@ -256,10 +254,8 @@ TEST_CASE("ResolveModel embed mode forward", "[model]") {
     schema.has_coordinates = true;
     schema.has_abundance = true;
     schema.has_taxonomy = true;
-    schema.n_genera = 20;
-    schema.n_families = 10;
-    schema.n_genera_vocab = 25;
-    schema.n_families_vocab = 15;
+    schema.n_genera = 25;
+    schema.n_families = 15;
     schema.covariate_names = {};
     schema.track_unknown_fraction = true;
     schema.targets.push_back({"area", TaskType::Regression, TransformType::None, 0, 1.0f});

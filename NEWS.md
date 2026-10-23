@@ -41,6 +41,9 @@
   adopt a vocabulary with `set_vocab` and no longer return unknown-species
   statistics (call `compute_unknown_species_stats`, which takes a
   `representation`).
+- `ResolveSchema.n_genera_vocab` / `n_families_vocab` are removed: they always
+  equalled `n_genera` / `n_families`, which size the taxonomy tables (also in
+  the C ABI / R schema list).
 
 ### Fixed
 
@@ -64,6 +67,8 @@
   them.
 - `RankPoolEncodedData`, `EmbeddingEncodedData` and `UnknownSpeciesStats`
   tensor fields raised a conversion error in Python.
+- Loading a checkpoint onto a CUDA device read its strings, class weights and
+  categorical codes from device memory and crashed.
 - `Predictor.get_embeddings` read only the coordinates, covariates, hash
   embedding and taxonomy slots, so it threw or returned a wrong latent for the
   embed, sparse, rank_pool and transformer encoders and ignored categorical

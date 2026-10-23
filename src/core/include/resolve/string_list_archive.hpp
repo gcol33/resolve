@@ -57,8 +57,10 @@ inline bool try_read_string_list(torch::serialize::InputArchive& archive,
         throw std::runtime_error("string list '" + key + "' is corrupt: its lengths "
                                  "and bytes must be one-dimensional");
     }
-    lengths_t = lengths_t.to(torch::kLong).contiguous();
-    bytes_t = bytes_t.to(torch::kUInt8).contiguous();
+    // An archive loaded onto a device holds its tensors there; the accessors
+    // below read host memory.
+    lengths_t = lengths_t.to(torch::kCPU).to(torch::kLong).contiguous();
+    bytes_t = bytes_t.to(torch::kCPU).to(torch::kUInt8).contiguous();
     const auto lengths = lengths_t.accessor<int64_t, 1>();
     const auto* data = bytes_t.numel() > 0 ? bytes_t.data_ptr<uint8_t>() : nullptr;
     const int64_t n_bytes = bytes_t.numel();

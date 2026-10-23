@@ -142,6 +142,7 @@ static bool try_read_string_from_archive(
     if (len <= 0) return false;
     torch::Tensor bytes_t;
     if (!archive.try_read(prefix, bytes_t)) return false;
+    bytes_t = bytes_t.to(torch::kCPU).contiguous();
     out.assign(reinterpret_cast<const char*>(bytes_t.data_ptr<uint8_t>()),
                static_cast<std::size_t>(len));
     return true;
@@ -460,6 +461,7 @@ Scalers load_scalers(
         if (len <= 0) return std::string();
         torch::Tensor t;
         if (!archive.try_read(prefix, t)) return std::string();
+        t = t.to(torch::kCPU).contiguous();
         auto ptr = t.data_ptr<uint8_t>();
         return std::string(reinterpret_cast<const char*>(ptr), len);
     };
@@ -505,8 +507,6 @@ void save_schema(
     archive.write(k::kHasTaxonomy, torch::tensor(static_cast<int>(schema.has_taxonomy)));
     archive.write(k::kNGenera, torch::tensor(schema.n_genera));
     archive.write(k::kNFamilies, torch::tensor(schema.n_families));
-    archive.write(k::kNGeneraVocab, torch::tensor(schema.n_genera_vocab));
-    archive.write(k::kNFamiliesVocab, torch::tensor(schema.n_families_vocab));
     archive.write(k::kTrackUnknownFrac, torch::tensor(static_cast<int>(schema.track_unknown_fraction)));
     archive.write(k::kTrackUnknownCount, torch::tensor(static_cast<int>(schema.track_unknown_count)));
     archive.write(k::kNCovariates, torch::tensor(static_cast<int64_t>(schema.covariate_names.size())));
@@ -633,6 +633,7 @@ ResolveSchema load_schema(
         if (len <= 0) return std::string();
         torch::Tensor t;
         archive.read(prefix, t);
+        t = t.to(torch::kCPU).contiguous();
         auto ptr = t.data_ptr<uint8_t>();
         return std::string(reinterpret_cast<const char*>(ptr), len);
     };
@@ -647,8 +648,6 @@ ResolveSchema load_schema(
     schema.has_taxonomy = read_bool(k::kHasTaxonomy);
     schema.n_genera = read_i64(k::kNGenera);
     schema.n_families = read_i64(k::kNFamilies);
-    schema.n_genera_vocab = read_i64(k::kNGeneraVocab);
-    schema.n_families_vocab = read_i64(k::kNFamiliesVocab);
     schema.track_unknown_fraction = read_bool(k::kTrackUnknownFrac);
     schema.track_unknown_count = read_bool(k::kTrackUnknownCount);
     int64_t n_covariates = read_i64(k::kNCovariates);
@@ -665,6 +664,7 @@ ResolveSchema load_schema(
             if (len > 0) {
                 torch::Tensor name_t;
                 archive.read(k::covariate(i), name_t);
+                name_t = name_t.to(torch::kCPU).contiguous();
                 auto ptr = name_t.data_ptr<uint8_t>();
                 schema.covariate_names[i] = std::string(reinterpret_cast<const char*>(ptr), len);
             }
@@ -709,7 +709,7 @@ ResolveSchema load_schema(
             if (n_cw > 0) {
                 torch::Tensor cw_t;
                 archive.read(prefix + k::kTargetClassWeights, cw_t);
-                cw_t = cw_t.to(torch::kFloat32).contiguous();
+                cw_t = cw_t.to(torch::kCPU).to(torch::kFloat32).contiguous();
                 auto ptr = cw_t.data_ptr<float>();
                 schema.targets[i].class_weights.assign(ptr, ptr + n_cw);
             }

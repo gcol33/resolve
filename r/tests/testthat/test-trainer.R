@@ -136,9 +136,7 @@ test_that("freeze_composition fixes the composition tables and is refused withou
     has_taxonomy = TRUE,
     n_genera = 5L,
     n_families = 3L,
-    n_species_vocab = 21L,
-    n_genera_vocab = 5L,
-    n_families_vocab = 3L
+    n_species_vocab = 21L
   )
   model_config <- list(
     species_encoding = "rank_pool",

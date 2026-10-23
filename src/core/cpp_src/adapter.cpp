@@ -117,12 +117,9 @@ TabularAdapterImpl::TabularAdapterImpl(
     if (schema.has_taxonomy) {
         // Each taxonomy slot is a categorical feature. n_genera()/n_families()
         // already count the reserved <UNK>=0 slot (ids run 0..n_genera-1), so the
-        // cardinality is n_genera, not n_genera + 1 -- the old +1 over-allocated
-        // one unused category per slot and disagreed with the model.cpp encoder
-        // sizing (issue #99). n_*_vocab (== n_* on dataset-built schemas) is
-        // preferred, mirroring model.cpp's single-source sizing.
-        const int64_t genus_card = schema.n_genera_vocab > 0 ? schema.n_genera_vocab : schema.n_genera;
-        const int64_t family_card = schema.n_families_vocab > 0 ? schema.n_families_vocab : schema.n_families;
+        // cardinality is n_genera, the height of the model's taxonomy tables.
+        const int64_t genus_card = schema.n_genera;
+        const int64_t family_card = schema.n_families;
         int n_slots = config.n_taxonomy_slots;
         for (int k = 0; k < n_slots; ++k) {
             cat_cardinalities.push_back(genus_card);
@@ -225,10 +222,8 @@ TabularAdapterImpl::TabularAdapterImpl(
             // GraphConstructionMode::Taxonomic. TaxonomyVocab reserves <UNK>=0,
             // so n_genera already counts it.
             if (schema.has_taxonomy) {
-                genus_vocab_size_ = schema.n_genera_vocab > 0
-                    ? schema.n_genera_vocab : schema.n_genera;
-                family_vocab_size_ = schema.n_families_vocab > 0
-                    ? schema.n_families_vocab : schema.n_families;
+                genus_vocab_size_ = schema.n_genera;
+                family_vocab_size_ = schema.n_families;
             }
             const GNNEncoderImpl::GNNType gnn_type = to_encoder_gnn_type(cfg.gnn_type);
             // Embed the taxonomy categoricals into the node-feature matrix instead

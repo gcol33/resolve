@@ -826,8 +826,6 @@ inline constexpr const char* kHasAbundance       = "has_abundance";
 inline constexpr const char* kHasTaxonomy        = "has_taxonomy";
 inline constexpr const char* kNGenera            = "n_genera";
 inline constexpr const char* kNFamilies          = "n_families";
-inline constexpr const char* kNGeneraVocab       = "n_genera_vocab";
-inline constexpr const char* kNFamiliesVocab     = "n_families_vocab";
 inline constexpr const char* kCovariateNames     = "covariate_names";
 inline constexpr const char* kTargets            = "targets";
 inline constexpr const char* kTrackUnknownFrac   = "track_unknown_fraction";
@@ -879,8 +877,6 @@ ResolveSchema parse_schema(const resolve_value* s) {
     if (vhas(s, k::kHasTaxonomy)) schema.has_taxonomy = vbool(s, k::kHasTaxonomy);
     if (vhas(s, k::kNGenera)) schema.n_genera = vint(s, k::kNGenera);
     if (vhas(s, k::kNFamilies)) schema.n_families = vint(s, k::kNFamilies);
-    if (vhas(s, k::kNGeneraVocab)) schema.n_genera_vocab = vint(s, k::kNGeneraVocab);
-    if (vhas(s, k::kNFamiliesVocab)) schema.n_families_vocab = vint(s, k::kNFamiliesVocab);
     if (vhas(s, k::kCovariateNames)) schema.covariate_names = vstr_vec(s, k::kCovariateNames);
     if (vhas(s, k::kTrackUnknownFrac)) schema.track_unknown_fraction = vbool(s, k::kTrackUnknownFrac);
     if (vhas(s, k::kTrackUnknownCount)) schema.track_unknown_count = vbool(s, k::kTrackUnknownCount);
@@ -1233,8 +1229,6 @@ resolve_value* schema_to_value(const ResolveSchema& s) {
     v_put(m, k::kHasTaxonomy, v_bool(s.has_taxonomy));
     v_put(m, k::kNGenera, v_int(s.n_genera));
     v_put(m, k::kNFamilies, v_int(s.n_families));
-    v_put(m, k::kNGeneraVocab, v_int(s.n_genera_vocab));
-    v_put(m, k::kNFamiliesVocab, v_int(s.n_families_vocab));
     v_put(m, k::kCovariateNames, v_string_array(s.covariate_names));
     v_put(m, k::kTargets, targets_m);
     v_put(m, k::kTrackUnknownFrac, v_bool(s.track_unknown_fraction));

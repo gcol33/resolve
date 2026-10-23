@@ -55,12 +55,8 @@ ResolveModelImpl::ResolveModelImpl(
     // truth for every encoder family). TaxonomyVocab::fit reserves <UNK>=0, so
     // n_genera()/n_families() already count the UNK slot (max id = n_genera - 1)
     // and the correct table size is exactly n_genera, NOT n_genera + 1.
-    // n_*_vocab (set by the dataset alongside n_*) is preferred; the bare-n_*
-    // fallback covers a hand-built schema that left n_*_vocab at 0.
-    auto genus_vocab_size = schema.has_taxonomy
-        ? (schema.n_genera_vocab > 0 ? schema.n_genera_vocab : schema.n_genera) : 0;
-    auto family_vocab_size = schema.has_taxonomy
-        ? (schema.n_families_vocab > 0 ? schema.n_families_vocab : schema.n_families) : 0;
+    auto genus_vocab_size = schema.has_taxonomy ? schema.n_genera : 0;
+    auto family_vocab_size = schema.has_taxonomy ? schema.n_families : 0;
 
     // Check if using advanced architecture (non-MLP)
     bool use_adapter = (config.encoder_architecture != EncoderArchitecture::MLP &&

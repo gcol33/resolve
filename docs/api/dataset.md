@@ -247,8 +247,7 @@ Describes a loaded dataset and travels into the checkpoint.
 | `n_plots` | `int` | Plots after target-driven drops |
 | `n_species` | `int` | Distinct species, excluding the unknown slot |
 | `n_species_vocab` | `int` | Species vocabulary size, including `"<UNK>"` |
-| `n_genera`, `n_families` | `int` | Taxonomy vocabulary sizes |
-| `n_genera_vocab`, `n_families_vocab` | `int` | Same, as embedded table heights |
+| `n_genera`, `n_families` | `int` | Taxonomy vocabulary sizes including `"<UNK>"`: the taxonomy embedding table heights |
 | `covariate_names` | `list[str]` | Numeric covariate columns, in order |
 | `categorical_names` | `list[str]` | Categorical columns, in order |
 | `categorical_vocab_sizes` | `list[int]` | Code count per categorical column |

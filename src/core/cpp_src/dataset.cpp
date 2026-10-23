@@ -1235,8 +1235,6 @@ void ResolveDataset::fit_vocab(const PlotAssemblages& assemblages) {
     if (schema_.has_taxonomy) {
         schema_.n_genera = vocab_.taxonomy.n_genera();
         schema_.n_families = vocab_.taxonomy.n_families();
-        schema_.n_genera_vocab = vocab_.taxonomy.n_genera();
-        schema_.n_families_vocab = vocab_.taxonomy.n_families();
     }
 }
 

@@ -141,8 +141,6 @@ void register_types(nb::module_& m) {
         .def_rw("has_taxonomy", &resolve::ResolveSchema::has_taxonomy)
         .def_rw("n_genera", &resolve::ResolveSchema::n_genera)
         .def_rw("n_families", &resolve::ResolveSchema::n_families)
-        .def_rw("n_genera_vocab", &resolve::ResolveSchema::n_genera_vocab)
-        .def_rw("n_families_vocab", &resolve::ResolveSchema::n_families_vocab)
         .def_rw("covariate_names", &resolve::ResolveSchema::covariate_names)
         .def_rw("targets", &resolve::ResolveSchema::targets)
         .def_rw("track_unknown_fraction", &resolve::ResolveSchema::track_unknown_fraction)

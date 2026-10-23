@@ -246,9 +246,7 @@ TEST_CASE("ResolveModel with RankPool mode constructs and forwards", "[rank_pool
     schema.has_coordinates = true;
     schema.has_taxonomy = true;
     schema.n_genera = 50;
-    schema.n_genera_vocab = 50;
     schema.n_families = 20;
-    schema.n_families_vocab = 20;
     schema.track_unknown_fraction = false;
     schema.targets.push_back({"area", TaskType::Regression, TransformType::None, 0});
 

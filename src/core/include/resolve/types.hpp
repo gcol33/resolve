@@ -234,10 +234,10 @@ struct ResolveSchema {
     bool has_coordinates = false;   // Default false, set true when coords found
     bool has_abundance = false;
     bool has_taxonomy = false;
+    // Genus / family vocabulary sizes, the reserved <UNK> code 0 included: the
+    // heights of the taxonomy embedding tables. 0 without taxonomy.
     int64_t n_genera = 0;
     int64_t n_families = 0;
-    int64_t n_genera_vocab = 0;     // Vocab size for embed mode
-    int64_t n_families_vocab = 0;   // Vocab size for embed mode
     std::vector<std::string> covariate_names;
     std::vector<TargetConfig> targets;
     bool track_unknown_fraction = true;
@@ -307,7 +307,7 @@ struct ResolveSchema {
     // Ordered species / genus / family vocabularies fitted at training time.
     // Element i is the name that encodes to integer code i, and
     // index 0 is always the reserved "<UNK>" slot, so the vector length equals
-    // n_species_vocab / n_genera_vocab / n_families_vocab respectively.
+    // n_species_vocab / n_genera / n_families respectively.
     //
     // Every non-hash encoder indexes an embedding table with a code that is a
     // function of the FILE the dataset was built from: the species vocab is

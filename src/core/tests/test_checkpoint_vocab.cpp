@@ -236,10 +236,8 @@ TEST_CASE("Scoring a subset from a checkpoint alone matches scoring the full fil
                 REQUIRE(ds_sub.species_vocab() == predictor.species_vocab());
                 REQUIRE(ds_sub.schema().n_species_vocab ==
                         predictor.schema().n_species_vocab);
-                REQUIRE(ds_sub.schema().n_genera_vocab ==
-                        predictor.schema().n_genera_vocab);
-                REQUIRE(ds_sub.schema().n_families_vocab ==
-                        predictor.schema().n_families_vocab);
+                REQUIRE(ds_sub.schema().n_genera == predictor.schema().n_genera);
+                REQUIRE(ds_sub.schema().n_families == predictor.schema().n_families);
 
                 auto preds_sub = predictor.predict(ds_sub, /*return_latent=*/false, -1);
                 REQUIRE(preds_sub.plot_ids.size() == c.plots->size());
@@ -405,8 +403,6 @@ TEST_CASE("save_schema/load_schema round-trip the species and taxonomy vocabular
     schema.has_taxonomy = true;
     schema.n_genera = 3;
     schema.n_families = 2;
-    schema.n_genera_vocab = 3;
-    schema.n_families_vocab = 2;
     schema.species_vocab = {"<UNK>", "sp_b", "sp_a", "sp_c"};
     schema.genus_vocab = {"<UNK>", "gen_a", "gen_b"};
     schema.family_vocab = {"<UNK>", "fam_x"};
@@ -480,8 +476,6 @@ TEST_CASE("A checkpoint written before the vocab block still loads",
         archive.write(k::kHasTaxonomy, torch::tensor(0));
         archive.write(k::kNGenera, torch::tensor(static_cast<int64_t>(0)));
         archive.write(k::kNFamilies, torch::tensor(static_cast<int64_t>(0)));
-        archive.write(k::kNGeneraVocab, torch::tensor(static_cast<int64_t>(0)));
-        archive.write(k::kNFamiliesVocab, torch::tensor(static_cast<int64_t>(0)));
         archive.write(k::kTrackUnknownFrac, torch::tensor(1));
         archive.write(k::kTrackUnknownCount, torch::tensor(0));
         archive.write(k::kNCovariates, torch::tensor(static_cast<int64_t>(0)));
@@ -925,4 +919,46 @@ TEST_CASE("ExternalVocabs from a dataset and from a schema describe the same nam
         ResolveDataset::from_csv_with_vocabs(hdr.path(), spc.path(), test_roles(),
                                              {TargetSpec::regression("y")}, empty, dcfg),
         std::runtime_error);
+}
+
+// An archive loaded onto a CUDA device holds its tensors there, the string
+// lists included; reading them must not dereference device memory.
+TEST_CASE("A checkpoint's string lists load onto a CUDA device",
+          "[checkpoint][vocab][cuda]") {
+    if (!torch::cuda::is_available()) {
+        SKIP("needs a CUDA device");
+    }
+
+    SECTION("the serialiser") {
+        const TempPath path(".pt");
+        const std::vector<std::string> names = {"<UNK>", "Quercus robur", "", "Fagus"};
+        CategoricalVocab regions;
+        regions.fit_column("region", {"north", "south", "NA", "east"});
+        {
+            torch::serialize::OutputArchive out;
+            write_string_list(out, "names", names);
+            regions.save(out);
+            out.save_to(path.path());
+        }
+        torch::serialize::InputArchive in;
+        in.load_from(path.path(), torch::Device(torch::kCUDA));
+        REQUIRE(read_string_list(in, "names") == names);
+        const auto loaded = CategoricalVocab::load(in);
+        REQUIRE(loaded.column_map("region") == regions.column_map("region"));
+    }
+
+    SECTION("a whole checkpoint through Predictor::load") {
+        const auto plots = corpus();
+        TempFile hdr(header_csv(plots));
+        TempFile spc(species_csv(plots));
+        const auto dcfg = test_dataset_config(SpeciesEncodingMode::Embed);
+        auto ds = ResolveDataset::from_csv(hdr.path(), spc.path(), test_roles(),
+                                           {TargetSpec::regression("y")}, dcfg);
+        const TempPath ckpt(".pt");
+        save_checkpoint(ds, SpeciesEncodingMode::Embed, ckpt.path());
+
+        Predictor predictor = Predictor::load(ckpt.path(), torch::kCUDA);
+        REQUIRE(predictor.species_vocab() == ds.species_vocab());
+        REQUIRE(predictor.schema().genus_vocab == ds.taxonomy_vocab().genus_names());
+    }
 }

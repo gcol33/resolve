@@ -235,10 +235,8 @@ TEST_CASE("ResolveModel Forward Benchmarks", "[benchmark][model]") {
     schema.n_species = 5000;
     schema.has_coordinates = true;
     schema.has_taxonomy = true;
-    schema.n_genera = 500;
-    schema.n_families = 100;
-    schema.n_genera_vocab = 501;
-    schema.n_families_vocab = 101;
+    schema.n_genera = 501;
+    schema.n_families = 101;
     schema.targets.push_back({
         "area",
         TaskType::Regression,
@@ -352,10 +350,8 @@ TEST_CASE("End-to-End Training Benchmark Production", "[benchmark][training-prod
     schema.n_species = 150000;  // Realistic species count
     schema.has_coordinates = true;
     schema.has_taxonomy = true;
-    schema.n_genera = 10000;
-    schema.n_families = 500;
-    schema.n_genera_vocab = 10001;
-    schema.n_families_vocab = 501;
+    schema.n_genera = 10001;
+    schema.n_families = 501;
 
     // Regression target: area prediction
     schema.targets.push_back({
@@ -453,10 +449,8 @@ TEST_CASE("End-to-End Training Benchmark Large", "[benchmark][training-large]") 
     schema.n_species = 50000;
     schema.has_coordinates = true;
     schema.has_taxonomy = true;
-    schema.n_genera = 2000;
-    schema.n_families = 200;
-    schema.n_genera_vocab = 2001;
-    schema.n_families_vocab = 201;
+    schema.n_genera = 2001;
+    schema.n_families = 201;
     schema.targets.push_back({
         "area",
         TaskType::Regression,
@@ -557,10 +551,8 @@ TEST_CASE("End-to-End Training Benchmark", "[benchmark][training]") {
     schema.n_species = 1000;
     schema.has_coordinates = true;
     schema.has_taxonomy = true;
-    schema.n_genera = 100;
-    schema.n_families = 20;
-    schema.n_genera_vocab = 101;
-    schema.n_families_vocab = 21;
+    schema.n_genera = 101;
+    schema.n_families = 21;
     schema.targets.push_back({
         "area",
         TaskType::Regression,
@@ -664,10 +656,8 @@ TEST_CASE("Training Components Benchmark", "[benchmark][components]") {
     schema.n_species = 5000;
     schema.has_coordinates = true;
     schema.has_taxonomy = true;
-    schema.n_genera = 500;
-    schema.n_families = 100;
-    schema.n_genera_vocab = 501;
-    schema.n_families_vocab = 101;
+    schema.n_genera = 501;
+    schema.n_families = 101;
     schema.targets.push_back({"area", TaskType::Regression, TransformType::Log1p, 0, 1.0f});
 
     ModelConfig config;

@@ -155,13 +155,13 @@ void Predictor::validate_dataset_vocabs(const ResolveDataset& dataset) const {
     // embedding lookups even though its species features are not).
     if (model_schema.has_taxonomy) {
         require_matching_vocab("genus",
-                               model_schema.n_genera_vocab,
-                               data_schema.n_genera_vocab,
+                               model_schema.n_genera,
+                               data_schema.n_genera,
                                model_schema.genus_vocab,
                                data_schema.genus_vocab);
         require_matching_vocab("family",
-                               model_schema.n_families_vocab,
-                               data_schema.n_families_vocab,
+                               model_schema.n_families,
+                               data_schema.n_families,
                                model_schema.family_vocab,
                                data_schema.family_vocab);
     }

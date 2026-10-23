@@ -72,8 +72,8 @@ int info_command(const ParsedArgs& args) {
         std::cout << "  Has taxonomy: " << (schema.has_taxonomy ? "yes" : "no") << std::endl;
 
         if (schema.has_taxonomy) {
-            std::cout << "  Genera: " << schema.n_genera << " (vocab: " << schema.n_genera_vocab << ")" << std::endl;
-            std::cout << "  Families: " << schema.n_families << " (vocab: " << schema.n_families_vocab << ")" << std::endl;
+            std::cout << "  Genera: " << schema.n_genera << std::endl;
+            std::cout << "  Families: " << schema.n_families << std::endl;
         }
 
         print_name_list("  Covariates: ", schema.covariate_names);
