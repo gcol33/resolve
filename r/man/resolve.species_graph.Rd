@@ -6,16 +6,16 @@
 \usage{
 resolve.species_graph(
   dataset,
-  kCooccurrence = 20L,
-  cooccurrenceThreshold = 0.01,
-  taxonomicEdges = TRUE,
-  cooccurrenceEdges = TRUE
+  kCooccurrence = NULL,
+  cooccurrenceThreshold = NULL,
+  taxonomicEdges = NULL,
+  cooccurrenceEdges = NULL
 )
 }
 \arguments{
 \item{dataset}{A \code{ResolveDataset}, as returned by \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}}.
 Co-occurrence edges need the per-plot species vector, so
-\code{speciesEncoding = "sparse"}; taxonomic edges need genus/family roles.}
+\code{species_encoding = "sparse"}; taxonomic edges need genus/family roles.}
 
 \item{kCooccurrence}{How many co-occurrence partners to keep per species.}
 
@@ -36,7 +36,7 @@ Joins the species of a dataset's vocabulary by the relations
 \code{heterogeneous_gnn} reads: a same-genus and a same-family edge for species
 sharing a taxon, and a co-occurrence edge between species recorded in the
 same plot often enough. \code{resolve.train.dataset()} builds this itself for a
-heterogeneous-GNN model and the checkpoint carries the result, so call it
+heterogeneous-GNN model (\code{modelConfig = list(encoder_architecture = "heterogeneous_gnn")}) and the checkpoint carries the result, so call it
 directly only to inspect the graph or to build a variant by hand.
 }
 \examples{

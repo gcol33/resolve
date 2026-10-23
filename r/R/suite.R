@@ -12,7 +12,7 @@
 #' mismatch stops the load.
 #'
 #' @param dir Path to the suite directory.
-#' @param device `"cpu"` (default) or `"cuda"`.
+#' @param device `"cpu"` (default), `"cuda"` or `"cuda:N"`.
 #' @param vramFraction Fraction of GPU memory the caching allocator may use when
 #'   loading onto CUDA (default 1.0).
 #' @param verify Compare every member's size and SHA-256 with the manifest
@@ -37,9 +37,6 @@ resolve.load_suite <- function(dir, device = "cpu", vramFraction = 1.0, verify =
   }
   if (!dir.exists(dir)) {
     stop(sprintf("suite directory does not exist: %s", dir))
-  }
-  if (!device %in% c("cpu", "cuda")) {
-    stop("device must be 'cpu' or 'cuda'")
   }
   if (!is.numeric(vramFraction) || length(vramFraction) != 1 ||
       vramFraction <= 0 || vramFraction > 1) {
@@ -111,11 +108,6 @@ resolve.seal_suite <- function(dir) {
 }
 
 
-.resolve_suite_column_keys <- c("plot_id", "species_id", "abundance", "latitude",
-                                "longitude", "genus", "family", "covariates",
-                                "categoricals")
-
-
 #' Predict With a Model Suite
 #'
 #' Score plots with every loaded target of a suite. The plots are read with
@@ -151,7 +143,8 @@ resolve.seal_suite <- function(dir) {
 #'   Must be the same kind (data.frame or path) as `species`.
 #' @param columns Named list renaming the manifest's input columns, with keys
 #'   among `plot_id`, `species_id`, `abundance`, `latitude`, `longitude`,
-#'   `genus`, `family`, `covariates`, `categoricals`.
+#'   `genus`, `family`, `covariates`, `categoricals` (another key is an
+#'   error).
 #' @param batchSize Forward-pass chunk size per member (default 4096).
 #' @param keepMembers Also return every member's own prediction (default
 #'   `FALSE`).
@@ -190,12 +183,6 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
   options <- list(batch_size = as.integer(batchSize), keep_members = keepMembers)
   if (!is.null(columns)) {
     if (!is.list(columns)) stop("columns must be a named list")
-    .resolve_check_keys(columns, "columns", .resolve_suite_column_keys)
-    for (key in names(columns)) {
-      if (!is.character(columns[[key]])) {
-        stop(sprintf("columns$%s must be a character vector", key))
-      }
-    }
     options$columns <- columns
   }
 

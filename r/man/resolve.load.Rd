@@ -9,7 +9,8 @@ resolve.load(path, device = "cpu", vram_fraction = 1)
 \arguments{
 \item{path}{Path to checkpoint file}
 
-\item{device}{Device: "cpu" or "cuda" (default "cpu")}
+\item{device}{Device to load the model onto: \code{"cpu"} (default), \code{"cuda"}
+(the current CUDA device) or \code{"cuda:N"} (CUDA device N).}
 
 \item{vram_fraction}{Fraction of GPU VRAM the caching allocator may use when
 loading onto CUDA (default 1.0). Pass a lower value (e.g. 0.80) when sharing

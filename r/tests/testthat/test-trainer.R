@@ -112,7 +112,7 @@ test_that("a plateau decays the rate on the held-out loss and needs a fold", {
                           verbose = FALSE),
     "no held-out fold"
   )
-  expect_error(resolve.train.dataset(dataset, lrScheduler = "exponential"), "lrScheduler")
+  expect_error(resolve.train.dataset(dataset, lrScheduler = "exponential"), "lr_scheduler")
 })
 
 test_that("A mixture of experts builds at either placement", {

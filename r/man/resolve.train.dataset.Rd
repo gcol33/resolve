@@ -2,107 +2,107 @@
 % Please edit documentation in R/resolve.R
 \name{resolve.train.dataset}
 \alias{resolve.train.dataset}
-\title{Train with Dataset (C++ API)}
+\title{Train a Model on a Dataset}
 \usage{
 resolve.train.dataset(
   dataset,
   hiddenDims = NULL,
-  maxEpochs = 500L,
-  patience = 50L,
-  fixedEpochs = 0L,
-  lr = 0.001,
-  lrScheduler = "none",
-  lrStepSize = 100L,
-  lrGamma = 0.1,
-  lrMin = 1e-06,
-  lrPlateauFactor = 0.1,
-  lrPlateauPatience = 10L,
-  lrPlateauThreshold = 0,
-  lrPlateauCooldown = 0L,
-  batchSize = 4096L,
-  device = "cpu",
+  maxEpochs = NULL,
+  patience = NULL,
+  fixedEpochs = NULL,
+  lr = NULL,
+  lrScheduler = NULL,
+  lrStepSize = NULL,
+  lrGamma = NULL,
+  lrMin = NULL,
+  lrPlateauFactor = NULL,
+  lrPlateauPatience = NULL,
+  lrPlateauThreshold = NULL,
+  lrPlateauCooldown = NULL,
+  batchSize = NULL,
+  device = NULL,
   testSize = 0.2,
   stoppingPlots = NULL,
   seed = 42L,
   savePath = NULL,
   checkpointDir = NULL,
-  checkpointEvery = 0L,
+  checkpointEvery = NULL,
   resumeFrom = NULL,
-  lossConfig = "mae",
-  ncaTemperature = 0.1,
-  ncaNeighbors = 32L,
-  ncaWeight = 0.1,
-  moeRouting = "none",
-  moePlacement = "tail",
-  nExperts = 4L,
-  expertHiddenDims = c(256L, 128L),
-  moeTopK = 2L,
-  moeNoiseStd = 0.1,
-  moeAuxLossWeight = 0.01,
-  coverDropout = 0,
-  freezeComposition = FALSE,
-  dModel = 128L,
-  nHeads = 4L,
-  nAttentionLayers = 0L,
-  transformerFfDim = 256L,
-  transformerPooling = "attention",
-  transformerDropout = 0.1,
+  lossConfig = NULL,
+  ncaTemperature = NULL,
+  ncaNeighbors = NULL,
+  ncaWeight = NULL,
+  moeRouting = NULL,
+  moePlacement = NULL,
+  nExperts = NULL,
+  expertHiddenDims = NULL,
+  moeTopK = NULL,
+  moeNoiseStd = NULL,
+  moeAuxLossWeight = NULL,
+  coverDropout = NULL,
+  freezeComposition = NULL,
+  dModel = NULL,
+  nHeads = NULL,
+  nAttentionLayers = NULL,
+  transformerFfDim = NULL,
+  transformerPooling = NULL,
+  transformerDropout = NULL,
+  modelConfig = list(),
+  trainConfig = list(),
+  pretrain = NULL,
   verbose = TRUE
 )
 }
 \arguments{
 \item{dataset}{A ResolveDataset object from resolve.dataset.csv()}
 
-\item{hiddenDims}{Hidden layer dimensions (default c(2048, 1024, 512, 256, 128, 64))}
+\item{hiddenDims}{Hidden layer widths of the encoder MLP.}
 
-\item{maxEpochs}{Maximum training epochs (default 500)}
+\item{maxEpochs}{Maximum training epochs.}
 
-\item{patience}{Early stopping patience (default 50)}
+\item{patience}{Early stopping patience in epochs.}
 
 \item{fixedEpochs}{Train exactly this many epochs of the \code{maxEpochs}
-schedule, with no early stopping, and keep the final weights (default 0,
-early stopping). The learning-rate schedule is still laid out over
-\code{maxEpochs}. The only mode that accepts \code{testSize = 0}, for a refit on
-every plot.}
+schedule, with no early stopping, and keep the final weights (0, the
+default, is early stopping). The learning-rate schedule is still laid out
+over \code{maxEpochs}. The only mode that accepts \code{testSize = 0}, for a refit
+on every plot.}
 
-\item{lr}{Learning rate (default 0.001)}
+\item{lr}{Learning rate.}
 
-\item{lrScheduler}{Learning-rate schedule (default \code{"none"}, constant):
-\code{"step"} multiplies the rate by \code{lrGamma} every \code{lrStepSize} epochs,
-\code{"cosine"} anneals it from \code{lr} to \code{lrMin} over \code{maxEpochs}, and
-\code{"plateau"} multiplies it by \code{lrPlateauFactor} when the held-out loss
-that drives early stopping has not improved for more than
-\code{lrPlateauPatience} epochs (PyTorch's \code{ReduceLROnPlateau} in mode
-\code{"min"}). \code{"plateau"} needs a held-out fold, so it is refused with
-\code{testSize = 0}.}
+\item{lrScheduler}{Learning-rate schedule: \code{"none"} (constant), \code{"step"}
+multiplies the rate by \code{lrGamma} every \code{lrStepSize} epochs, \code{"cosine"}
+anneals it from \code{lr} to \code{lrMin} over \code{maxEpochs}, and \code{"plateau"}
+multiplies it by \code{lrPlateauFactor} when the held-out loss that drives
+early stopping has not improved for more than \code{lrPlateauPatience} epochs
+(PyTorch's \code{ReduceLROnPlateau} in mode \code{"min"}). \code{"plateau"} needs a
+held-out fold, so it is refused with \code{testSize = 0}.}
 
-\item{lrStepSize}{Epochs between decays under \code{lrScheduler = "step"}
-(default 100).}
+\item{lrStepSize}{Epochs between decays under \code{lrScheduler = "step"}.}
 
-\item{lrGamma}{Factor of each decay under \code{lrScheduler = "step"}
-(default 0.1).}
+\item{lrGamma}{Factor of each decay under \code{lrScheduler = "step"}.}
 
 \item{lrMin}{The rate the cosine schedule ends at, and the floor a plateau
-never decays below (default 1e-6).}
+never decays below.}
 
-\item{lrPlateauFactor}{Factor a plateau multiplies the rate by, in (0, 1)
-(default 0.1).}
+\item{lrPlateauFactor}{Factor a plateau multiplies the rate by, in (0, 1).}
 
 \item{lrPlateauPatience}{Epochs without improvement of the held-out loss a
-plateau allows; the next one decays the rate (default 10). Like
-\code{patience}, an epoch counts only once the loss objective has reached its
-final phase.}
+plateau allows; the next one decays the rate. Like \code{patience}, an epoch
+counts only once the loss objective has reached its final phase.}
 
 \item{lrPlateauThreshold}{Relative improvement on the best held-out loss
-an epoch must make to count as one, in [0, 1) (default 0: any decrease,
-the rule early stopping and \code{best_epoch} use; PyTorch's default is 1e-4).}
+an epoch must make to count as one, in [0, 1) (the default 0 is any
+decrease, the rule early stopping and \code{best_epoch} use; PyTorch's default
+is 1e-4).}
 
 \item{lrPlateauCooldown}{Epochs after a decay during which no epoch counts
-against the rate (default 0).}
+against the rate.}
 
-\item{batchSize}{Batch size (default 4096)}
+\item{batchSize}{Batch size.}
 
-\item{device}{Device: "cpu" or "cuda" (default "cpu")}
+\item{device}{Device to train on: \code{"cpu"}, \code{"cuda"} (the current CUDA
+device) or \code{"cuda:N"}.}
 
 \item{testSize}{Fraction of the data held out for early stopping (default
 0.2), drawn at random with \code{seed}. 0 holds nothing out and needs
@@ -117,7 +117,7 @@ these plots; every other plot trains. Each ID must be a plot of
 a masked target, the fold needs at least one plot labelled for it. Not
 combined with \code{testSize}.}
 
-\item{seed}{Random seed (default 42)}
+\item{seed}{Random seed of the split and the epoch shuffle (default 42).}
 
 \item{savePath}{Path to save model checkpoint (optional)}
 
@@ -129,7 +129,7 @@ end. \code{best.pt} and \verb{checkpoint_<N>.pt} carry the run's progress, so
 \code{resumeFrom} can continue from them.}
 
 \item{checkpointEvery}{Also write \verb{checkpoint_<N>.pt} every this many
-epochs (default 0, \code{best.pt} only). Needs \code{checkpointDir}.}
+epochs (0, the default, writes \code{best.pt} only). Needs \code{checkpointDir}.}
 
 \item{resumeFrom}{A \code{best.pt} or \verb{checkpoint_<N>.pt} an interrupted run
 wrote (optional). The run continues at the epoch after it, with its
@@ -138,101 +138,123 @@ stopped; \code{result$resumed_from_epoch} names that epoch. Pass the
 interrupted run's dataset, model and training arguments and \code{seed}, so
 the split and recipe are the ones it trained on.}
 
-\item{lossConfig}{Loss configuration: "mae", "smape", "combined", or "nca"
-(default "mae"). "nca" takes the "combined" regression schedule and adds
-the Neighbourhood Components Analysis term to classification targets.}
+\item{lossConfig}{Loss configuration: "mae", "smape", "combined" (the
+default: MAE, then MAE and SMAPE, then the band penalty, by phase), or
+"nca", which takes the "combined" regression schedule and adds the
+Neighbourhood Components Analysis term to classification targets.}
 
 \item{ncaTemperature}{Scale of the stochastic-neighbour softmax in the NCA
-term, i.e. the effective number of neighbours each sample spreads over
-(default 0.1). Acts only when \code{lossConfig = "nca"}.}
-
-\item{ncaNeighbors}{Neighbours per sample the NCA term sums over, its most
-similar in-batch samples (default 32). Zero or less keeps the whole batch.
+term, i.e. the effective number of neighbours each sample spreads over.
 Acts only when \code{lossConfig = "nca"}.}
 
+\item{ncaNeighbors}{Neighbours per sample the NCA term sums over, its most
+similar in-batch samples. Zero or less keeps the whole batch. Acts only
+when \code{lossConfig = "nca"}.}
+
 \item{ncaWeight}{Weight of the NCA term against the cross-entropy it is
-added to (default 0.1). Acts only when \code{lossConfig = "nca"}.}
+added to. Acts only when \code{lossConfig = "nca"}.}
 
-\item{moeRouting}{Mixture-of-experts routing: \code{"none"} (default, a single
-dense encoder), \code{"soft"} (every expert contributes, weighted by the gate)
-or \code{"topk"} (only the \code{moeTopK} highest-gated experts run per plot).}
+\item{moeRouting}{Mixture-of-experts routing: \code{"none"} (a single dense
+encoder), \code{"soft"} (every expert contributes, weighted by the gate) or
+\code{"topk"} (only the \code{moeTopK} highest-gated experts run per plot).}
 
-\item{moePlacement}{Where the mixture sits: \code{"tail"} (default) makes it the
-encoder's final stage, so \code{hiddenDims} minus its last two widths becomes
-the backbone and the experts produce the latent; \code{"post"} runs it over the
+\item{moePlacement}{Where the mixture sits: \code{"tail"} makes it the encoder's
+final stage, so \code{hiddenDims} minus its last two widths becomes the
+backbone and the experts produce the latent; \code{"post"} runs it over the
 finished latent instead, preserving the width. \code{"post"} is the only
 placement open to an encoder with no MLP tail. Acts only when
 \code{moeRouting} is not \code{"none"}.}
 
-\item{nExperts}{Expert networks in the mixture (default 4, minimum 2).
-Acts only when \code{moeRouting} is not \code{"none"}.}
+\item{nExperts}{Expert networks in the mixture (at least 2).}
 
-\item{expertHiddenDims}{Hidden widths inside each expert (default
-\code{c(256, 128)}). Acts only when \code{moeRouting} is not \code{"none"}.}
+\item{expertHiddenDims}{Hidden widths inside each expert.}
 
-\item{moeTopK}{Experts activated per plot under \code{"topk"} routing
-(default 2). Acts only when \code{moeRouting = "topk"}.}
+\item{moeTopK}{Experts activated per plot under \code{"topk"} routing.}
 
 \item{moeNoiseStd}{Standard deviation of the noise added to the gate logits
-during training, which spreads load across experts (default 0.1).
-Acts only when \code{moeRouting} is not \code{"none"}.}
+during training, which spreads load across experts.}
 
 \item{moeAuxLossWeight}{Weight on the mixture's load-balancing loss, added
-to the task loss (default 0.01). Acts only when \code{moeRouting} is not
-\code{"none"}.}
+to the task loss.}
 
 \item{coverDropout}{Cover-dropout rate applied to species cover values
-in rank-pool / transformer encoding modes (default 0.0, no dropout).}
+in rank-pool / transformer encoding modes.}
 
 \item{freezeComposition}{Keep the species, genus and family embedding tables
-at their initialisation instead of learning them (default \code{FALSE}).}
+at their initialisation instead of learning them.}
 
-\item{dModel}{Model dimension for the transformer / rank-pool encoder
-(default 128).}
+\item{dModel}{Model dimension for the transformer / rank-pool encoder.}
 
-\item{nHeads}{Number of attention heads in the transformer encoder
-(default 4). Ignored unless \code{nAttentionLayers > 0}.}
+\item{nHeads}{Number of attention heads in the transformer encoder.
+Ignored unless \code{nAttentionLayers > 0}.}
 
 \item{nAttentionLayers}{Number of self-attention layers in the
-transformer encoder (default 0, i.e. rank-pool mean-only path).}
+transformer encoder (0 pools the token embeddings without attention).}
 
 \item{transformerFfDim}{Feed-forward hidden dimension inside each
-transformer block (default 256).}
+transformer block.}
 
 \item{transformerPooling}{Pooling strategy used to collapse the per-
-species token sequence into a plot embedding: \code{"attention"} or
-\code{"cls"} (default \code{"attention"}).}
+species token sequence into a plot embedding: \code{"attention"} or \code{"cls"}.}
 
-\item{transformerDropout}{Dropout rate applied inside transformer
-blocks (default 0.1).}
+\item{transformerDropout}{Dropout rate applied inside transformer blocks.}
+
+\item{modelConfig}{Named list of any further \code{ModelConfig} fields, for
+example \code{list(encoder_architecture = "ft_transformer", dropout = 0.1)}
+or \code{list(encoder_architecture = "heterogeneous_gnn", heterogeneous_gnn = list(k_cooccurrence = 10))} (the species graph is built from the dataset).}
+
+\item{trainConfig}{Named list of any further \code{TrainConfig} fields, for
+example \code{list(weight_decay = 1e-4, use_amp = TRUE)}.}
+
+\item{pretrain}{Self-supervised pretraining of the encoder on the
+dataset's plots before training (optional): a list with \code{method},
+\code{"jepa"}, \code{"scarf"} or \code{"masked_species"} (a transformer-encoded model),
+and any of that method's settings (\code{\link[=resolve.default_config]{resolve.default_config()}}
+\code{"pretrain"}, or \code{"masked_species"}), e.g. \code{list(method = "scarf", pretrain_epochs = 20)}.}
 
 \item{verbose}{Print training progress (default TRUE)}
 }
 \value{
-A list with \code{trainer}, \code{result}, and \code{dataset}. \code{result} carries
-\code{best_epoch}, \code{train_time_seconds}, \code{final_metrics}, the loss histories
-\code{train_loss} and \code{test_loss} (one value per epoch), the learning rate
-each epoch trained at \code{lr}, the loss histories' split by target
-\code{train_loss_by_target} and \code{test_loss_by_target} (named lists of per-epoch
-vectors: each target's weighted term of the total, so per epoch they add
-up to it), \code{train_aux_loss} (a named list of the auxiliary terms of
-\code{train_loss}, which belong to no target, each already weighted: \code{moe},
-the mixture-of-experts load balancing, and \code{tabnet_sparsity}, TabNet's
-feature-mask sparsity; empty for a model with neither),
-the per-target \code{baselines} (the model against the training mean or mode,
-regression values in original units), \code{diagnostics}, \code{effective_batch_size}
--- the batch size the run actually trained at, which is smaller than
-\code{batchSize} when the CUDA auto-halve-on-OOM retry fired -- and
-\code{resumed_from_epoch} (0 unless \code{resumeFrom} continued the run).
+A list with \code{trainer}, \code{result}, \code{dataset} and, with \code{pretrain},
+\code{pretrain} (the pretraining's \code{loss_history}, \code{total_time_seconds} and
+\code{epochs_completed}). \code{result} carries \code{best_epoch}, \code{train_time_seconds},
+\code{final_metrics}, the loss histories \code{train_loss} and \code{test_loss} (one
+value per epoch), the learning rate each epoch trained at \code{lr}, the loss
+histories' split by target \code{train_loss_by_target} and
+\code{test_loss_by_target} (named lists of per-epoch vectors: each target's
+weighted term of the total, so per epoch they add up to it),
+\code{train_aux_loss} (a named list of the auxiliary terms of \code{train_loss},
+which belong to no target, each already weighted: \code{moe}, the
+mixture-of-experts load balancing, and \code{tabnet_sparsity}, TabNet's
+feature-mask sparsity; empty for a model with neither), the per-target
+\code{baselines} (the model against the training mean or mode, regression
+values in original units), \code{diagnostics}, \code{effective_batch_size} -- the
+batch size the run actually trained at, which is smaller than \code{batchSize}
+when the CUDA auto-halve-on-OOM retry fired -- and \code{resumed_from_epoch}
+(0 unless \code{resumeFrom} continued the run).
 }
 \description{
-Train a model using a ResolveDataset object loaded via resolve.dataset.csv().
-This provides the cleanest API matching Python exactly.
+Build a model for a dataset loaded with \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}}, hold out a
+fold of its plots for early stopping, and train.
+}
+\details{
+Every model and training setting has the engine's default
+(\code{\link[=resolve.default_config]{resolve.default_config()}} \code{"model"} / \code{"train"}). The named arguments below
+set the common ones; \code{modelConfig} and \code{trainConfig} reach every field of
+the engine's \code{ModelConfig} and \code{TrainConfig}, nested architecture configs
+included (\code{encoder_architecture}, \code{ft_transformer}, \code{tabnet}, \code{saint}, \code{gnn},
+\code{trait_net}, \code{excelformer}, \code{heterogeneous_gnn}, \code{tabm}, \code{parallel_layers},
+and the activation, normalization and head settings). A key the engine does
+not know is an error, and so is a field set both by a named argument and in
+the list. The fields that size a model to its data (the species encoding,
+hash width, \code{top_k} and the taxonomy slots) come from the dataset.
 }
 \examples{
 \dontrun{
 dataset <- resolve.dataset.csv(...)
 result <- resolve.train.dataset(dataset, maxEpochs = 100)
+ft <- resolve.train.dataset(dataset,
+                            modelConfig = list(encoder_architecture = "ft_transformer"))
 }
 
 }

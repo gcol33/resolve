@@ -17,7 +17,8 @@ resolve.dataset.frame(
 \arguments{
 \item{header}{A data.frame of header data (one row per plot). In single-table
 mode (\code{species = NULL}) this is instead the long-format species frame,
-matching \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}}'s single-file behaviour.}
+whose first row of each plot carries the plot's coordinates and targets
+(covariates need a header).}
 
 \item{species}{A data.frame of species data (long format), a single file path
 string (the large species table is then read once from disk while the
@@ -31,24 +32,19 @@ header stays in memory), or \code{NULL} for single-table mode.}
 \item{config}{Named list of dataset configuration options.}
 
 \item{schemaSource}{Optional ResolveDataset whose vocabularies / class
-mappings are reused (the in-memory analog of \code{schemaSource} in
-\code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}}). Only valid when \code{species} is a data.frame.}
+mappings are reused (see \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}}).}
 
-\item{vocabs}{Optional vocabulary list from \code{predictor$vocabs()} (the
-in-memory analog of \code{vocabs} in \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}}). Supported in
-single-table mode and with both frames in memory; not with a species CSV
-path (use \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}} there). Mutually exclusive with
-\code{schemaSource}.}
+\item{vocabs}{Optional vocabulary list from \code{predictor$vocabs()} (see
+\code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}}). Mutually exclusive with \code{schemaSource}.}
 }
 \value{
 A ResolveDataset object.
 }
 \description{
-In-memory analog of \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}} (issue #22). Builds and encodes a
-dataset directly from data frames already in R, eliminating the
-write-to-temp-CSV / re-read round-trip that the file-based loader forces when
-the header must be filtered or subset before a fit. The result is identical to
-\code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}} on the equivalent CSV; only the disk I/O is elided.
+In-memory analog of \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}}. Builds and encodes a dataset
+directly from data frames already in R, without writing them to a CSV
+first, for a header filtered or subset before a fit. The result is identical
+to \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}} on the equivalent CSV.
 }
 \seealso{
 \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}}

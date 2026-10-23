@@ -1,23 +1,24 @@
-// rcpp_common.h - R <-> C ABI marshaling for the resolve package.
+// rcpp_common.h - R <-> C ABI marshaling for the resolveR package.
 //
-// Issue #17: the R package no longer touches libtorch's C++ ABI. It reaches the
-// `resolve_c` shared library through the flat C facade in resolve/resolve_capi.h
-// and marshals everything across the boundary as a `resolve_value_t` tree. This
-// is the ONLY engine header included under r/src/; there is no `#include
-// <torch/...>` anywhere in the package sources.
+// The R package reaches the engine through the flat C ABI in
+// resolve/resolve_capi.h and marshals everything across the boundary as a
+// `resolve_value_t` tree. This is the ONLY engine header included under r/src/;
+// there is no `#include <torch/...>` anywhere in the package sources.
 //
 // resolve_c is bound at RUNTIME (resolve_capi_dynload.h), not linked at build
 // time, so the package installs and R CMD checks with no backend present (the
-// mlverse/torch model). The dynload header supplies the same `resolve_*` symbols
-// as forwarders, so every call site below is unchanged; a call made before the
-// backend is loaded would hit a NULL forwarder, so engine entry points guard
-// with capi_require_loaded() first (the R verbs also gate on resolve.available()).
+// mlverse/torch model). The dynload header supplies the `resolve_*` symbols as
+// forwarders; a call made before the backend is loaded would hit a NULL
+// forwarder, so every constructor and factory reaching one first calls
+// capi_require_loaded().
 #ifndef RCPP_COMMON_H
 #define RCPP_COMMON_H
 
 #include <Rcpp.h>
 #include "resolve_capi_dynload.h"
 
+#include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <string>
@@ -30,8 +31,7 @@ using namespace Rcpp;
 // =============================================================================
 
 // Raise a clean R error (never a NULL-pointer call) when the resolve_c backend
-// has not been loaded. Call at the top of any function that reaches a forwarder
-// without going through an R verb that already gated on resolve.available().
+// has not been loaded.
 inline void capi_require_loaded() {
     if (!resolve_capi_available()) {
         stop("The resolve_c backend is not installed. Install it with "
@@ -60,13 +60,35 @@ public:
     ValuePtr& operator=(const ValuePtr&) = delete;
     ValuePtr(ValuePtr&& o) noexcept : v_(o.v_) { o.v_ = nullptr; }
     resolve_value_t* get() const { return v_; }
+    // Hand the tree over (to a map or list that takes ownership, or to a
+    // caller), leaving this empty.
+    resolve_value_t* release() {
+        resolve_value_t* v = v_;
+        v_ = nullptr;
+        return v;
+    }
 private:
     resolve_value_t* v_;
 };
 
-// Custom-deleter shared handle factory: mirrors the old shared_ptr<engine>
-// ownership so Rcpp's value-returning factories and module storage can copy a
-// wrapper without double-freeing the underlying C handle.
+// A freshly built value node, owned; stops with the engine's message when the
+// builder failed.
+inline ValuePtr owned_value(resolve_value_t* v) {
+    capi_check(v);
+    return ValuePtr(v);
+}
+
+// Put `child` into `map` under `key`, or append it to `list`; the container
+// takes ownership whatever happens.
+inline void map_put(resolve_value_t* map, const std::string& key, ValuePtr child) {
+    capi_check_status(resolve_map_set_value(map, key.c_str(), child.release()));
+}
+inline void list_put(resolve_value_t* list, ValuePtr child) {
+    capi_check_status(resolve_list_append_value(list, child.release()));
+}
+
+// Custom-deleter shared handle factory, so Rcpp's value-returning factories and
+// module storage can copy a wrapper without double-freeing the C handle.
 template <typename T>
 inline std::shared_ptr<T> capi_own(T* handle, void (*deleter)(T*)) {
     capi_check(handle);
@@ -74,32 +96,51 @@ inline std::shared_ptr<T> capi_own(T* handle, void (*deleter)(T*)) {
 }
 
 // =============================================================================
-// value tree -> R object (recursive). Single source of truth for every result
-// accessor: each C op returns a resolve_value_t and this turns it into the same
-// R shape the old Rcpp converters produced.
+// value tree -> R object (recursive). Every result accessor goes through this.
 // =============================================================================
 
 inline RObject value_to_r(const resolve_value_t* v);
 
-// int64 scalar -> R integer when it fits, else double (R has no native int64).
-inline RObject int_scalar_to_r(int64_t x) {
-    if (x > std::numeric_limits<int>::max() || x < std::numeric_limits<int>::min()) {
-        return wrap(static_cast<double>(x));
-    }
-    return wrap(static_cast<int>(x));
+// An int64 value as R stores integers: R's int, whose smallest value is NA.
+inline bool fits_r_integer(int64_t x) {
+    return x > std::numeric_limits<int>::min() && x <= std::numeric_limits<int>::max();
 }
 
-inline IntegerVector int_array_to_r(const int64_t* data, int64_t n) {
-    IntegerVector out(n);
+// Integers past 2^53 have no exact double.
+constexpr int64_t kExactDoubleLimit = int64_t{1} << 53;
+
+// An int64 array or row-major matrix as an R integer vector / matrix when
+// every value fits R's integer range, and as a double vector / matrix
+// otherwise (exact up to 2^53: hash keys and record offsets keep their
+// values). One warning, not one per element, when a value is past 2^53.
+inline RObject int64_to_r(const int64_t* data, int64_t nrow, int64_t ncol, bool matrix) {
+    const int64_t n = matrix ? nrow * ncol : nrow;
+    bool fits = true;
+    int64_t inexact = 0;
     for (int64_t i = 0; i < n; ++i) {
-        const int64_t x = data ? data[i] : 0;
-        if (x > std::numeric_limits<int>::max() || x < std::numeric_limits<int>::min()) {
-            Rcpp::warning("resolve: int64 value out of int range, narrowed: %lld",
-                          static_cast<long long>(x));
-        }
-        out[i] = static_cast<int>(x);
+        if (!fits_r_integer(data[i])) fits = false;
+        if (data[i] > kExactDoubleLimit || data[i] < -kExactDoubleLimit) ++inexact;
     }
-    return out;
+    if (inexact > 0) {
+        Rcpp::warning("resolve: %lld integer value(s) beyond 2^53 are rounded as doubles",
+                      static_cast<long long>(inexact));
+    }
+    auto fill = [&](auto out) {
+        for (int64_t i = 0; i < nrow; ++i) {
+            for (int64_t j = 0; j < (matrix ? ncol : 1); ++j) {
+                const int64_t source = matrix ? i * ncol + j : i;
+                const R_xlen_t target = static_cast<R_xlen_t>(matrix ? j * nrow + i : i);
+                out[target] = static_cast<typename decltype(out)::stored_type>(data[source]);
+            }
+        }
+        return RObject(out);
+    };
+    if (matrix) {
+        return fits ? fill(IntegerMatrix(static_cast<int>(nrow), static_cast<int>(ncol)))
+                    : fill(NumericMatrix(static_cast<int>(nrow), static_cast<int>(ncol)));
+    }
+    return fits ? fill(IntegerVector(static_cast<R_xlen_t>(n)))
+                : fill(NumericVector(static_cast<R_xlen_t>(n)));
 }
 
 inline RObject value_to_r(const resolve_value_t* v) {
@@ -109,8 +150,10 @@ inline RObject value_to_r(const resolve_value_t* v) {
             return R_NilValue;
         case RESOLVE_VALUE_BOOL:
             return wrap(static_cast<bool>(resolve_value_as_bool(v)));
-        case RESOLVE_VALUE_INT:
-            return int_scalar_to_r(resolve_value_as_int(v));
+        case RESOLVE_VALUE_INT: {
+            const int64_t x = resolve_value_as_int(v);
+            return int64_to_r(&x, 1, 1, false);
+        }
         case RESOLVE_VALUE_DOUBLE:
             return wrap(resolve_value_as_double(v));
         case RESOLVE_VALUE_STRING:
@@ -118,7 +161,7 @@ inline RObject value_to_r(const resolve_value_t* v) {
         case RESOLVE_VALUE_INT_ARRAY: {
             int64_t n = 0;
             const int64_t* d = resolve_value_as_int_array(v, &n);
-            return int_array_to_r(d, n);
+            return int64_to_r(d, n, 1, false);
         }
         case RESOLVE_VALUE_DOUBLE_ARRAY: {
             int64_t n = 0;
@@ -136,24 +179,13 @@ inline RObject value_to_r(const resolve_value_t* v) {
             const double* d = resolve_value_as_double_matrix(v, &nr, &nc);
             NumericMatrix out(nr, nc);
             for (int64_t i = 0; i < nr; ++i)
-                for (int64_t j = 0; j < nc; ++j)
-                    out(i, j) = d ? d[i * nc + j] : 0.0;
+                for (int64_t j = 0; j < nc; ++j) out(i, j) = d[i * nc + j];
             return out;
         }
         case RESOLVE_VALUE_INT_MATRIX: {
             int64_t nr = 0, nc = 0;
             const int64_t* d = resolve_value_as_int_matrix(v, &nr, &nc);
-            IntegerMatrix out(nr, nc);
-            for (int64_t i = 0; i < nr; ++i)
-                for (int64_t j = 0; j < nc; ++j) {
-                    const int64_t x = d ? d[i * nc + j] : 0;
-                    if (x > std::numeric_limits<int>::max() || x < std::numeric_limits<int>::min()) {
-                        Rcpp::warning("resolve: int64 value out of int range, narrowed: %lld",
-                                      static_cast<long long>(x));
-                    }
-                    out(i, j) = static_cast<int>(x);
-                }
-            return out;
+            return int64_to_r(d, nr, nc, true);
         }
         case RESOLVE_VALUE_MAP: {
             int64_t n = resolve_map_size(v);
@@ -178,100 +210,92 @@ inline RObject value_to_r(const resolve_value_t* v) {
 
 // Take ownership of a C-returned value tree: stop on NULL (error), convert, free.
 inline RObject value_to_r_owned(resolve_value_t* v) {
-    capi_check(v);
-    ValuePtr guard(v);
-    return value_to_r(v);
+    const ValuePtr guard = owned_value(v);
+    return value_to_r(guard.get());
 }
 
 // =============================================================================
-// R object -> value tree (recursive). Used for config / roles / targets /
-// schema lists. Matrices never appear inside these, so only scalars / atomic
-// vectors / (named) lists are handled; method-argument matrices are set
-// explicitly via the matrix helpers below.
+// R object -> value tree (recursive), for config / roles / targets / schema
+// lists. Every node is owned until it is handed to its parent, so an R error
+// part-way (an unsupported element type) frees what was built.
 // =============================================================================
+
+inline std::string r_string(SEXP s) {
+    return s == NA_STRING ? std::string() : std::string(CHAR(s));
+}
+
+// A numeric, logical or character element of an atomic vector as a scalar node.
+inline ValuePtr r_element_to_value(SEXP x, R_xlen_t i) {
+    switch (TYPEOF(x)) {
+        case INTSXP: return owned_value(resolve_value_new_int(INTEGER(x)[i]));
+        case REALSXP: return owned_value(resolve_value_new_double(REAL(x)[i]));
+        case LGLSXP: return owned_value(resolve_value_new_bool(LOGICAL(x)[i] == TRUE ? 1 : 0));
+        default: return owned_value(resolve_value_new_string(r_string(STRING_ELT(x, i)).c_str()));
+    }
+}
 
 inline resolve_value_t* r_to_value(SEXP x) {
     if (Rf_isNull(x)) return resolve_value_new_null();
 
-    // A NAMED atomic vector (e.g. a classification class_mapping written as
-    // c(forest = 0L, grass = 1L)) is semantically a map. Promote it to a map so
-    // the C-ABI parsers that only read maps (parse_targets' class_mapping)
-    // receive the names instead of silently getting a nameless array -- which
-    // would drop the mapping and let the loader re-factorize with a different
-    // code order.
+    // A NAMED atomic vector (a classification class_mapping written as
+    // c(forest = 0L, grass = 1L)) is semantically a map: the C-ABI parsers
+    // read a mapping from a map, so it travels as one.
     const int atype = TYPEOF(x);
     if (atype == INTSXP || atype == REALSXP || atype == STRSXP || atype == LGLSXP) {
         SEXP nm = Rf_getAttrib(x, R_NamesSymbol);
         if (nm != R_NilValue && Rf_xlength(x) > 0) {
-            resolve_value_t* map = resolve_value_new_map();
+            ValuePtr map = owned_value(resolve_value_new_map());
             for (R_xlen_t i = 0; i < Rf_xlength(x); ++i) {
-                SEXP nm_i = STRING_ELT(nm, i);
-                std::string key = (nm_i == NA_STRING) ? std::string() : std::string(CHAR(nm_i));
-                resolve_value_t* val;
-                switch (atype) {
-                    case INTSXP:  val = resolve_value_new_int(INTEGER(x)[i]); break;
-                    case REALSXP: val = resolve_value_new_double(REAL(x)[i]); break;
-                    case LGLSXP:  val = resolve_value_new_bool(LOGICAL(x)[i] == TRUE ? 1 : 0); break;
-                    default: {
-                        SEXP e = STRING_ELT(x, i);
-                        val = resolve_value_new_string(e == NA_STRING ? "" : CHAR(e));
-                    }
-                }
-                resolve_map_set_value(map, key.c_str(), val);
+                map_put(map.get(), r_string(STRING_ELT(nm, i)), r_element_to_value(x, i));
             }
-            return map;
+            return map.release();
         }
     }
 
-    switch (TYPEOF(x)) {
+    switch (atype) {
         case LGLSXP: {
             LogicalVector v(x);
             if (v.size() == 1) return resolve_value_new_bool(v[0] == TRUE ? 1 : 0);
             std::vector<int64_t> a(v.size());
             for (R_xlen_t i = 0; i < v.size(); ++i) a[i] = (v[i] == TRUE) ? 1 : 0;
-            return resolve_value_new_int_array(a.data(), a.size());
+            return resolve_value_new_int_array(a.data(), static_cast<int64_t>(a.size()));
         }
         case INTSXP: {
             IntegerVector v(x);
             if (v.size() == 1) return resolve_value_new_int(v[0]);
             std::vector<int64_t> a(v.begin(), v.end());
-            return resolve_value_new_int_array(a.data(), a.size());
+            return resolve_value_new_int_array(a.data(), static_cast<int64_t>(a.size()));
         }
         case REALSXP: {
             NumericVector v(x);
             if (v.size() == 1) return resolve_value_new_double(v[0]);
             std::vector<double> a(v.begin(), v.end());
-            return resolve_value_new_double_array(a.data(), a.size());
+            return resolve_value_new_double_array(a.data(), static_cast<int64_t>(a.size()));
         }
         case STRSXP: {
             CharacterVector v(x);
-            if (v.size() == 1) return resolve_value_new_string(
-                v[0] == NA_STRING ? "" : (const char*)CHAR(v[0]));
+            if (v.size() == 1) return resolve_value_new_string(r_string(v[0]).c_str());
             std::vector<std::string> s(v.size());
             std::vector<const char*> p(v.size());
             for (R_xlen_t i = 0; i < v.size(); ++i) {
-                s[i] = (v[i] == NA_STRING) ? "" : std::string(CHAR(v[i]));
+                s[i] = r_string(v[i]);
                 p[i] = s[i].c_str();
             }
-            return resolve_value_new_string_array(p.data(), p.size());
+            return resolve_value_new_string_array(p.data(), static_cast<int64_t>(p.size()));
         }
         case VECSXP: {
             List v(x);
-            bool named = v.hasAttribute("names");
-            if (named) {
-                resolve_value_t* map = resolve_value_new_map();
+            if (v.hasAttribute("names")) {
+                ValuePtr map = owned_value(resolve_value_new_map());
                 CharacterVector names = v.names();
                 for (R_xlen_t i = 0; i < v.size(); ++i) {
-                    std::string key = (names[i] == NA_STRING) ? std::string()
-                                                              : std::string(CHAR(names[i]));
-                    resolve_map_set_value(map, key.c_str(), r_to_value(v[i]));
+                    map_put(map.get(), r_string(names[i]), owned_value(r_to_value(v[i])));
                 }
-                return map;
+                return map.release();
             }
-            resolve_value_t* lst = resolve_value_new_list();
-            for (R_xlen_t i = 0; i < v.size(); ++i)
-                resolve_list_append_value(lst, r_to_value(v[i]));
-            return lst;
+            ValuePtr list = owned_value(resolve_value_new_list());
+            for (R_xlen_t i = 0; i < v.size(); ++i) list_put(list.get(), owned_value(r_to_value(v[i])));
+            return list.release();
         }
         default:
             stop("r_to_value: unsupported R type (SEXPTYPE %d)", TYPEOF(x));
@@ -286,70 +310,75 @@ inline resolve_value_t* r_to_value(SEXP x) {
 // so an UNNAMED list carries no keys and names nothing. Only the genuinely
 // empty cases -- NULL and a zero-length list -- normalize to an empty map; a
 // non-empty list that produced no keys is a caller error and says so, naming
-// the argument. Treating that case as "empty" instead discarded the whole
-// argument in silence: a fully specified `targets = list(list(column = "area"))`
-// reached the engine as zero targets and surfaced only much later, as an
-// autograd error inside fit().
+// the argument, rather than reaching the engine as nothing.
 inline resolve_value_t* r_list_to_value_map(SEXP x, const char* what) {
     if (Rf_isNull(x) || Rf_xlength(x) == 0) return resolve_value_new_map();
-    resolve_value_t* v = r_to_value(x);
-    if (resolve_value_kind(v) != RESOLVE_VALUE_MAP) {
-        resolve_value_free(v);
+    ValuePtr v = owned_value(r_to_value(x));
+    if (resolve_value_kind(v.get()) != RESOLVE_VALUE_MAP) {
         Rcpp::stop("%s must be a NAMED list -- every element needs a name, "
                    "which is the key the engine reads. An unnamed list carries "
                    "no keys, so nothing in it would reach the engine.", what);
     }
-    return v;
+    return v.release();
 }
 
-// Build a value MAP carrying an in-memory DataFrame (issue #22): an ordered
-// (column name -> STRING_ARRAY) mapping. `cols` is a named list of character
-// vectors (the caller coerces every column to character with NA -> "" so the
-// cell semantics match a CSV). Unlike r_to_value, a length-1 column still
-// becomes a STRING_ARRAY (never a STRING scalar), which ColumnTable requires.
-inline resolve_value_t* r_charlist_to_value_map(List cols) {
-    resolve_value_t* map = resolve_value_new_map();
+// A table argument of the dataset loader: NULL (none), a single string (the
+// path of a CSV file), or a named list of character vectors (an in-memory
+// table, every cell a string with NA -> "", the cell semantics of a CSV).
+inline resolve_value_t* r_table_to_value(SEXP x, const char* what) {
+    if (Rf_isNull(x)) return resolve_value_new_null();
+    if (TYPEOF(x) == STRSXP && Rf_xlength(x) == 1) {
+        return resolve_value_new_string(r_string(STRING_ELT(x, 0)).c_str());
+    }
+    if (TYPEOF(x) != VECSXP) {
+        Rcpp::stop("%s must be a CSV path or a list of character columns", what);
+    }
+    List cols(x);
     CharacterVector names = cols.names();
+    ValuePtr map = owned_value(resolve_value_new_map());
     for (R_xlen_t c = 0; c < cols.size(); ++c) {
         CharacterVector col = as<CharacterVector>(cols[c]);
         std::vector<std::string> s(static_cast<size_t>(col.size()));
         std::vector<const char*> p(static_cast<size_t>(col.size()));
         for (R_xlen_t i = 0; i < col.size(); ++i) {
-            s[static_cast<size_t>(i)] =
-                (col[i] == NA_STRING) ? std::string() : std::string(CHAR(col[i]));
+            s[static_cast<size_t>(i)] = r_string(col[i]);
             p[static_cast<size_t>(i)] = s[static_cast<size_t>(i)].c_str();
         }
-        std::string key = (names.size() > c && names[c] != NA_STRING)
-            ? std::string(CHAR(names[c])) : std::string();
-        resolve_map_set_string_array(map, key.c_str(), p.data(),
-                                     static_cast<int64_t>(p.size()));
+        const std::string key = names.size() > c ? r_string(names[c]) : std::string();
+        capi_check_status(resolve_map_set_string_array(map.get(), key.c_str(), p.data(),
+                                                       static_cast<int64_t>(p.size())));
     }
-    return map;
+    return map.release();
 }
 
 // =============================================================================
-// Method-argument tensor helpers: set R matrices / vectors into an input map.
-// Float tensors are passed as double matrices/arrays (the engine casts to
-// float32); integer id tensors as int64 matrices/arrays.
+// Method-argument tensors: R matrices / vectors into an input map. Float
+// tensors travel as double matrices / arrays (the engine casts to float32),
+// integer ids as int64 matrices / arrays.
 // =============================================================================
+
+// An R matrix as a row-major buffer of `Elem`.
+template <typename Elem, typename RMatrix>
+std::vector<Elem> row_major(const RMatrix& x) {
+    const int nr = x.nrow(), nc = x.ncol();
+    std::vector<Elem> buf(static_cast<size_t>(nr) * nc);
+    for (int i = 0; i < nr; ++i)
+        for (int j = 0; j < nc; ++j) buf[static_cast<size_t>(i) * nc + j] = static_cast<Elem>(x(i, j));
+    return buf;
+}
 
 inline void map_set_num_matrix(resolve_value_t* map, const char* key, NumericMatrix x) {
-    int nr = x.nrow(), nc = x.ncol();
-    std::vector<double> buf(static_cast<size_t>(nr) * nc);
-    for (int i = 0; i < nr; ++i)
-        for (int j = 0; j < nc; ++j) buf[static_cast<size_t>(i) * nc + j] = x(i, j);
-    resolve_map_set_double_matrix(map, key, buf.data(), nr, nc);
+    const std::vector<double> buf = row_major<double>(x);
+    capi_check_status(resolve_map_set_double_matrix(map, key, buf.data(), x.nrow(), x.ncol()));
 }
 inline void map_set_int_matrix(resolve_value_t* map, const char* key, IntegerMatrix x) {
-    int nr = x.nrow(), nc = x.ncol();
-    std::vector<int64_t> buf(static_cast<size_t>(nr) * nc);
-    for (int i = 0; i < nr; ++i)
-        for (int j = 0; j < nc; ++j) buf[static_cast<size_t>(i) * nc + j] = x(i, j);
-    resolve_map_set_int_matrix(map, key, buf.data(), nr, nc);
+    const std::vector<int64_t> buf = row_major<int64_t>(x);
+    capi_check_status(resolve_map_set_int_matrix(map, key, buf.data(), x.nrow(), x.ncol()));
 }
 inline void map_set_num_vector(resolve_value_t* map, const char* key, NumericVector x) {
     std::vector<double> buf(x.begin(), x.end());
-    resolve_map_set_double_array(map, key, buf.data(), static_cast<int64_t>(buf.size()));
+    capi_check_status(resolve_map_set_double_array(map, key, buf.data(),
+                                                   static_cast<int64_t>(buf.size())));
 }
 
 // Optional-argument variants: only set the key when the argument is non-null.
@@ -389,8 +418,8 @@ inline void fill_forward_inputs(
 
 // =============================================================================
 // categorical_vocab: the C facade returns a MAP { column -> MAP{string->int} }.
-// Reshape each inner map into a NAMED IntegerVector (codes named by the source
-// string), matching the old accessor's return shape.
+// Each inner map becomes a NAMED IntegerVector (codes named by the source
+// string).
 // =============================================================================
 
 inline List categorical_vocab_value_to_r(const resolve_value_t* v) {

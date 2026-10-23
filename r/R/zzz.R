@@ -273,27 +273,25 @@ NULL
 # whole session and its finalizer runs during R's shutdown.
 .resolve_exit_token <- new.env(parent = emptyenv())
 
-# Issue #18 / #19: harden the process against a native fault becoming a hang or
-# a launcher teardown crash. Only called once the backend is bound, since the
-# handlers are engine (resolve_c) calls.
+# Harden the process against a native fault becoming a hang or a launcher
+# teardown crash. Only called once the backend is bound, since the handlers are
+# engine (resolve_c) calls.
 #
 #   * install_crash_handler() (no-op off Windows, no throughput cost): converts
 #     an otherwise-unhandled native fault into an immediate TerminateProcess
-#     instead of a Windows JIT-debugger hang (issue #19) or a teardown access
-#     violation that crashes the Rscript.exe launcher (issue #18).
+#     instead of a Windows JIT-debugger hang or a teardown access violation
+#     that crashes the Rscript.exe launcher.
 #   * An on-exit finalizer marks work complete so a teardown fault after a
 #     finished session is treated as benign (exit code 0).
 #
 # libtorch thread pools are left at libtorch's own default (all cores) so
 # training and prediction are multi-threaded -- that is where the CPU throughput
-# comes from. Issue #18 previously pinned Windows to a single thread as a
-# teardown-crash mitigation (no worker threads to join at process exit), but the
-# crash handler installed above already turns a teardown fault into an immediate
-# TerminateProcess, which never joins the pools, so full threading is safe by
-# default. Set RESOLVE_R_TORCH_THREADS=N (a positive integer) to pin both the
-# intra- and inter-op pools to N threads -- to cap CPU use on a shared machine,
-# or as a workaround (N=1 restores the old single-threaded behaviour) if a
-# specific Windows environment still hits the #18 teardown crash.
+# comes from. The crash handler turns a teardown fault into an immediate
+# TerminateProcess, which never joins the pools, so full threading is safe.
+# Set RESOLVE_R_TORCH_THREADS=N (a positive integer) to pin both the intra- and
+# inter-op pools to N threads: to cap CPU use on a shared machine, or (N = 1,
+# no worker threads to join at exit) where a Windows environment still crashes
+# on teardown.
 .resolve_harden_process <- function() {
   try(.Call("_resolveR_resolve_install_crash_handler", 0L, PACKAGE = "resolveR"),
       silent = TRUE)

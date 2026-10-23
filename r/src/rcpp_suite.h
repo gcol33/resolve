@@ -7,7 +7,8 @@
 class RSuite {
 public:
     static RSuite load(std::string dir, List options) {
-        ValuePtr opts(r_list_to_value_map(options, "options"));
+        capi_require_loaded();
+        ValuePtr opts = owned_value(r_list_to_value_map(options, "options"));
         RSuite s;
         s.suite_ = capi_own(resolve_suite_load(dir.c_str(), opts.get()), resolve_suite_free);
         return s;
@@ -20,25 +21,27 @@ public:
 
     // `header_cols` may be an empty list when the suite reads no header column.
     RObject predict_frame(List header_cols, List species_cols, List options) {
-        ValuePtr species(r_charlist_to_value_map(species_cols));
-        ValuePtr header(header_cols.size() > 0 ? r_charlist_to_value_map(header_cols)
-                                               : resolve_value_new_null());
-        ValuePtr opts(r_list_to_value_map(options, "options"));
+        ValuePtr species = owned_value(r_table_to_value(species_cols, "species"));
+        ValuePtr header = owned_value(header_cols.size() > 0 ? r_table_to_value(header_cols, "header")
+                                                             : resolve_value_new_null());
+        ValuePtr opts = owned_value(r_list_to_value_map(options, "options"));
         return value_to_r_owned(resolve_suite_predict_dataframe(
             suite_.get(), header.get(), species.get(), opts.get()));
     }
 
     RObject predict_csv(std::string header_path, std::string species_path, List options) {
-        ValuePtr opts(r_list_to_value_map(options, "options"));
+        ValuePtr opts = owned_value(r_list_to_value_map(options, "options"));
         return value_to_r_owned(resolve_suite_predict_csv(
             suite_.get(), header_path.c_str(), species_path.c_str(), opts.get()));
     }
 
     static RObject verify(std::string dir) {
+        capi_require_loaded();
         return value_to_r_owned(resolve_suite_verify(dir.c_str()));
     }
 
     static RObject seal(std::string dir) {
+        capi_require_loaded();
         return value_to_r_owned(resolve_suite_seal(dir.c_str()));
     }
 

@@ -1,12 +1,12 @@
-/* resolve_capi.h - Flat C ABI facade over the RESOLVE C++ engine.
+/* resolve_capi.h - Flat C ABI over the RESOLVE C++ engine.
  *
- * Purpose: let the R package build on Windows. R packages there are
- * compiled with Rtools mingw-w64; the only Windows libtorch is MSVC-built, and
- * the two C++ ABIs do not cross. A C ABI does. This header exposes the engine
- * through opaque handles and primitive types ONLY -- no torch::Tensor, no
- * std::string, no STL, no Rcpp in any signature -- so a mingw client can call an
- * MSVC-built `resolve_c` shared library. This is the "lantern" pattern used by
- * the mlverse/torch R package.
+ * The R package is compiled with whatever C++ toolchain R uses (Rtools
+ * mingw-w64 on Windows), while libtorch, and so the engine, is built with
+ * another (MSVC on Windows); the two C++ ABIs do not cross. A C ABI does. This
+ * header exposes the engine through opaque handles and primitive types ONLY --
+ * no torch::Tensor, no std::string, no STL, no Rcpp in any signature -- so such
+ * a client can call the `resolve_c` shared library. This is the "lantern"
+ * pattern of the mlverse/torch R package.
  *
  * Marshaling primitive: `resolve_value_t`, a heap tagged tree (scalars, arrays,
  * row-major double/int matrices, ordered maps, lists). It carries BOTH
@@ -21,10 +21,21 @@
  *     never frees caller memory.
  * No foreign `free()` crosses the C runtime boundary.
  *
- * Errors: functions returning a pointer return NULL on failure; functions
- * returning `int` return 0 on success and -1 on failure. In both cases a
- * human-readable message is available from `resolve_last_error()` (thread-local).
- * C++ exceptions never cross the boundary.
+ * Errors: functions returning a pointer return NULL on failure (an allocation
+ * failure included); functions returning `int` return 0 on success and -1 on
+ * failure. In both cases a human-readable message is available from
+ * `resolve_last_error()` (thread-local). C++ exceptions never cross the
+ * boundary.
+ *
+ * Configuration maps (a DatasetConfig, ModelConfig, TrainConfig and the
+ * per-call settings below) are read strictly: every key is a field name of the
+ * struct, at every level of nesting, and a key that is not -- a misspelling --
+ * fails the call naming the accepted keys. A value of the wrong kind (a string
+ * where a number is read) fails too. An absent key keeps the engine's default,
+ * which resolve_default_config() reports.
+ *
+ * Devices are named as libtorch spells them: "cpu", "cuda" (the current CUDA
+ * device) or "cuda:N"; anything else fails.
  *
  * Runtime binding (the CRAN R package): a client that defines
  * RESOLVE_CAPI_DYNLOAD before including this header gets ONLY the opaque handle
@@ -75,6 +86,7 @@ typedef struct resolve_model     resolve_model_t;
 typedef struct resolve_trainer   resolve_trainer_t;
 typedef struct resolve_predictor resolve_predictor_t;
 typedef struct resolve_suite     resolve_suite_t;
+typedef struct resolve_fuzzy     resolve_fuzzy_t;
 
 /* Tag returned by resolve_value_kind(). */
 typedef enum {
@@ -114,9 +126,10 @@ RESOLVE_CAPI resolve_value_t* resolve_value_new_list(void);
 RESOLVE_CAPI void resolve_value_free(resolve_value_t* v);
 
 /* Standalone scalar / array / matrix node factories. Arrays and matrices copy
- * their input. Returned node is owned by the caller until appended to a list
- * (resolve_list_append_value) or set into a map (resolve_map_set_value), which
- * transfer ownership. */
+ * their input (NULL data is accepted only for zero elements). Returned node is
+ * owned by the caller until appended to a list (resolve_list_append_value) or
+ * set into a map (resolve_map_set_value), which transfer ownership. NULL on
+ * failure. */
 RESOLVE_CAPI resolve_value_t* resolve_value_new_bool  (int v);
 RESOLVE_CAPI resolve_value_t* resolve_value_new_int   (int64_t v);
 RESOLVE_CAPI resolve_value_t* resolve_value_new_double(double v);
@@ -127,23 +140,27 @@ RESOLVE_CAPI resolve_value_t* resolve_value_new_string_array(const char* const* 
 RESOLVE_CAPI resolve_value_t* resolve_value_new_double_matrix(const double*  v, int64_t nrow, int64_t ncol);
 RESOLVE_CAPI resolve_value_t* resolve_value_new_int_matrix   (const int64_t* v, int64_t nrow, int64_t ncol);
 
-/* ---- map setters (key is copied; arrays/matrices are copied) -------------- */
-RESOLVE_CAPI void resolve_map_set_null   (resolve_value_t* map, const char* key);
-RESOLVE_CAPI void resolve_map_set_bool   (resolve_value_t* map, const char* key, int v);
-RESOLVE_CAPI void resolve_map_set_int    (resolve_value_t* map, const char* key, int64_t v);
-RESOLVE_CAPI void resolve_map_set_double (resolve_value_t* map, const char* key, double v);
-RESOLVE_CAPI void resolve_map_set_string (resolve_value_t* map, const char* key, const char* v);
-RESOLVE_CAPI void resolve_map_set_int_array   (resolve_value_t* map, const char* key, const int64_t* v, int64_t n);
-RESOLVE_CAPI void resolve_map_set_double_array(resolve_value_t* map, const char* key, const double*  v, int64_t n);
-RESOLVE_CAPI void resolve_map_set_string_array(resolve_value_t* map, const char* key, const char* const* v, int64_t n);
-RESOLVE_CAPI void resolve_map_set_double_matrix(resolve_value_t* map, const char* key, const double*  v, int64_t nrow, int64_t ncol);
-RESOLVE_CAPI void resolve_map_set_int_matrix   (resolve_value_t* map, const char* key, const int64_t* v, int64_t nrow, int64_t ncol);
-/* Transfers ownership of `child` into `map` under `key`; do not free `child`. */
-RESOLVE_CAPI void resolve_map_set_value  (resolve_value_t* map, const char* key, resolve_value_t* child);
+/* ---- map setters (key is copied; arrays/matrices are copied) --------------
+ * Return 0, or -1 for a NULL or non-map `map`, a NULL key, NULL data for a
+ * non-empty array or an allocation failure (message in resolve_last_error()). */
+RESOLVE_CAPI int resolve_map_set_null   (resolve_value_t* map, const char* key);
+RESOLVE_CAPI int resolve_map_set_bool   (resolve_value_t* map, const char* key, int v);
+RESOLVE_CAPI int resolve_map_set_int    (resolve_value_t* map, const char* key, int64_t v);
+RESOLVE_CAPI int resolve_map_set_double (resolve_value_t* map, const char* key, double v);
+RESOLVE_CAPI int resolve_map_set_string (resolve_value_t* map, const char* key, const char* v);
+RESOLVE_CAPI int resolve_map_set_int_array   (resolve_value_t* map, const char* key, const int64_t* v, int64_t n);
+RESOLVE_CAPI int resolve_map_set_double_array(resolve_value_t* map, const char* key, const double*  v, int64_t n);
+RESOLVE_CAPI int resolve_map_set_string_array(resolve_value_t* map, const char* key, const char* const* v, int64_t n);
+RESOLVE_CAPI int resolve_map_set_double_matrix(resolve_value_t* map, const char* key, const double*  v, int64_t nrow, int64_t ncol);
+RESOLVE_CAPI int resolve_map_set_int_matrix   (resolve_value_t* map, const char* key, const int64_t* v, int64_t nrow, int64_t ncol);
+/* Transfers ownership of `child` into `map` under `key`; do not free `child`,
+ * even on failure (it is freed then). 0 / -1. */
+RESOLVE_CAPI int resolve_map_set_value  (resolve_value_t* map, const char* key, resolve_value_t* child);
 
 /* ---- list builders -------------------------------------------------------- */
-/* Transfers ownership of `child` into `list`; do not free `child`. */
-RESOLVE_CAPI void resolve_list_append_value(resolve_value_t* list, resolve_value_t* child);
+/* Transfers ownership of `child` into `list`; do not free `child`, even on
+ * failure (it is freed then). 0 / -1. */
+RESOLVE_CAPI int resolve_list_append_value(resolve_value_t* list, resolve_value_t* child);
 
 /* ---- readers -------------------------------------------------------------- */
 RESOLVE_CAPI resolve_value_kind_t resolve_value_kind(const resolve_value_t* v);
@@ -188,6 +205,11 @@ RESOLVE_CAPI int resolve_capi_set_vram_fraction(double fraction, int device_inde
  * resulting value as a freshly-allocated value tree (STRING kind). */
 RESOLVE_CAPI resolve_value_t* resolve_capi_configure_cuda_allocator(int force);
 
+/* The default of every field of a configuration struct, as the MAP its reader
+ * takes. `which`: dataset model train spatial_block retrieval pretrain
+ * masked_species vae. NULL for an unknown name. */
+RESOLVE_CAPI resolve_value_t* resolve_default_config(const char* which);
+
 /* Pin libtorch's intra-op / inter-op thread pools (<=0 keeps the default).
  * Best-effort: removes the worker threads whose teardown join crashes the
  * Rscript.exe launcher on Windows. Call at startup. */
@@ -220,79 +242,25 @@ RESOLVE_CAPI int resolve_metric_r_squared    (const double* pred, const double* 
 /* Dataset                                                                    */
 /* ========================================================================== */
 
-/* `roles`, `targets`, `config` are MAP value trees (see r/src marshaling).
- * Return NULL on error. */
-RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_csv(
-    const char* header_path, const char* species_path,
-    const resolve_value_t* roles, const resolve_value_t* targets,
-    const resolve_value_t* config);
-
-RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_csv_with_schema(
-    const char* header_path, const char* species_path,
-    const resolve_value_t* roles, const resolve_value_t* targets,
-    const resolve_dataset_t* schema_source, const resolve_value_t* config);
-
-/* Vocabulary-reusing loaders. `vocabs` is a MAP value tree: a
- * schema tree (species_vocab / genus_vocab / family_vocab / targets, as emitted
- * by resolve_predictor_get(p, "vocabs") or resolve_dataset_get(ds, "vocabs"))
- * plus an optional "categorical_vocab" sub-map of {column -> {name -> code}}.
- *
- * The resulting dataset is encoded in the TRAINING model's integer-code
- * namespace: every non-hash encoder indexes an embedding table by a code that
- * is a function of the file its vocab was fitted on, so a plain from_csv on new
- * data looks up the wrong rows and predicts wrongly with no error. NULL on
- * error, including when `vocabs` carries no species vocabulary (a checkpoint
- * that stores only the vocabulary sizes). */
-RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_csv_with_vocabs(
-    const char* header_path, const char* species_path,
-    const resolve_value_t* roles, const resolve_value_t* targets,
-    const resolve_value_t* vocabs, const resolve_value_t* config);
-
-RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_species_csv(
-    const char* species_path,
-    const resolve_value_t* roles, const resolve_value_t* targets,
-    const resolve_value_t* config);
-
-RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_species_csv_with_vocabs(
-    const char* species_path,
-    const resolve_value_t* roles, const resolve_value_t* targets,
-    const resolve_value_t* vocabs, const resolve_value_t* config);
-
-/* In-memory (DataFrame) loaders. `header` / `species` are MAP value
- * trees: an ordered (column name -> STRING_ARRAY) mapping, i.e. a data.frame
- * with every cell stringified (missing value = empty string). Identical result
- * to the from_csv* verbs on the equivalent CSV; no disk round-trip. NULL on
- * error. */
-RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_dataframe(
+/* Load a dataset. `species` (required) and `header` (NULL for a single table,
+ * where each plot's plot-level columns are read from its first species row)
+ * are each a STRING, the path of a CSV file, or a MAP of column name ->
+ * STRING_ARRAY, an in-memory table with every cell a string (missing = "").
+ * `roles`, `targets` and `config` are MAP value trees. A vocabulary source
+ * encodes the dataset in a trained model's integer-code namespace instead of
+ * fitting its own: `schema_source`, another dataset, or `vocabs`, the tree
+ * resolve_predictor_get(p, "vocabs") or resolve_dataset_get(ds, "vocabs")
+ * returns (a schema tree plus a "categorical_vocab" map of {column -> {name ->
+ * code}}); at most one. Every non-hash encoder indexes an embedding table by a
+ * code that is a function of the file its vocab was fitted on, so data scored
+ * by a trained model must be loaded with its vocabularies. NULL on error,
+ * including when `vocabs` carries no species vocabulary (a checkpoint that
+ * stores only the vocabulary sizes). */
+RESOLVE_CAPI resolve_dataset_t* resolve_dataset_load(
     const resolve_value_t* header, const resolve_value_t* species,
     const resolve_value_t* roles, const resolve_value_t* targets,
-    const resolve_value_t* config);
-
-RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_dataframe_header(
-    const resolve_value_t* header, const char* species_path,
-    const resolve_value_t* roles, const resolve_value_t* targets,
-    const resolve_value_t* config);
-
-RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_species_dataframe(
-    const resolve_value_t* species,
-    const resolve_value_t* roles, const resolve_value_t* targets,
-    const resolve_value_t* config);
-
-RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_dataframe_with_schema(
-    const resolve_value_t* header, const resolve_value_t* species,
-    const resolve_value_t* roles, const resolve_value_t* targets,
-    const resolve_dataset_t* schema_source, const resolve_value_t* config);
-
-/* In-memory counterparts of the vocabulary-reusing CSV loaders above. */
-RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_dataframe_with_vocabs(
-    const resolve_value_t* header, const resolve_value_t* species,
-    const resolve_value_t* roles, const resolve_value_t* targets,
-    const resolve_value_t* vocabs, const resolve_value_t* config);
-
-RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_species_dataframe_with_vocabs(
-    const resolve_value_t* species,
-    const resolve_value_t* roles, const resolve_value_t* targets,
-    const resolve_value_t* vocabs, const resolve_value_t* config);
+    const resolve_value_t* config,
+    const resolve_dataset_t* schema_source, const resolve_value_t* vocabs);
 
 RESOLVE_CAPI void resolve_dataset_free(resolve_dataset_t* ds);
 
@@ -321,6 +289,13 @@ RESOLVE_CAPI resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, c
 RESOLVE_CAPI resolve_model_t* resolve_model_create(
     const resolve_value_t* schema, const resolve_value_t* config);
 
+/* A model for the plots of `ds`: its schema, and `config` (a ModelConfig MAP)
+ * with the fields that size a model to the data -- species_encoding, hash_dim,
+ * top_k, top_k_species and the taxonomy slot count -- taken from the dataset.
+ * NULL on error. */
+RESOLVE_CAPI resolve_model_t* resolve_model_create_for_dataset(
+    const resolve_dataset_t* ds, const resolve_value_t* config);
+
 RESOLVE_CAPI void resolve_model_free(resolve_model_t* m);
 
 /* Input-taking methods. `inputs` is a MAP carrying the relevant tensors
@@ -332,7 +307,7 @@ RESOLVE_CAPI void resolve_model_free(resolve_model_t* m);
 RESOLVE_CAPI resolve_value_t* resolve_model_call(
     resolve_model_t* m, const char* method, const resolve_value_t* inputs);
 
-/* Zero-arg accessor. `what` is one of: latent_dim species_encoding
+/* Zero-arg accessor. `what` is one of: latent_dim species_encoding config
  * uses_explicit_vector uses_moe n_experts genus_weights family_weights
  * species_weights composition_parameters (a list of matrices, the species,
  * genus and family tables the species encoder reads composition through)
@@ -360,6 +335,24 @@ RESOLVE_CAPI int resolve_model_set_species_graph(resolve_model_t* m,
  * a HeterogeneousGNNConfig MAP (`config`, or NULL for the defaults) asks for.
  * Returns a MAP of edge_index / edge_type / n_species / n_edges. */
 RESOLVE_CAPI resolve_value_t* resolve_build_species_graph(
+    const resolve_dataset_t* ds, const resolve_value_t* config);
+
+/* Self-supervised pretraining of the model's encoder, in place, on the plots
+ * of `ds` (their model inputs, the continuous block unstandardised). `method`:
+ * "jepa" or "scarf" (`config` a PretrainConfig MAP) or "masked_species" (a
+ * MLMPretrainConfig MAP; a transformer-encoded model). NULL `config` takes the
+ * defaults. Returns a MAP of loss_history / total_time_seconds /
+ * epochs_completed, NULL on error. */
+RESOLVE_CAPI resolve_value_t* resolve_model_pretrain(
+    resolve_model_t* m, const char* method, const resolve_dataset_t* ds,
+    const resolve_value_t* config);
+
+/* Train a variational autoencoder on the species vectors of `ds` (a dataset
+ * loaded with species_encoding "sparse"); `config` a VAEConfig MAP or NULL.
+ * Returns a MAP of loss_history / recon_loss_history / kl_loss_history /
+ * total_time_seconds / epochs_completed / latent_dim and projection_weights,
+ * the encoder's first layer (DOUBLE_MATRIX), NULL on error. */
+RESOLVE_CAPI resolve_value_t* resolve_vae_pretrain(
     const resolve_dataset_t* ds, const resolve_value_t* config);
 
 /* ========================================================================== */
@@ -429,7 +422,7 @@ RESOLVE_CAPI resolve_value_t* resolve_trainer_compute(
 RESOLVE_CAPI resolve_value_t* resolve_trainer_cross_validate(
     resolve_trainer_t* t, int n_folds, int seed);
 
-/* `spatial_cfg` MAP carries lat_size/lon_size/balance. */
+/* `spatial_cfg` is a SpatialBlockConfig MAP (lat_size / lon_size / balance). */
 RESOLVE_CAPI resolve_value_t* resolve_trainer_cross_validate_spatial(
     resolve_trainer_t* t, const resolve_value_t* spatial_cfg, int n_folds, int seed);
 
@@ -473,13 +466,27 @@ RESOLVE_CAPI resolve_value_t* resolve_predictor_get_embeddings(
 
 RESOLVE_CAPI int resolve_predictor_optimize_for_inference(resolve_predictor_t* p);
 
+/* Retrieval augmentation (TabR): encode the plots of `reference` (built in the
+ * model's namespace, carrying every target's labels, normally the training
+ * plots) in chunks of `batch_size`, and from then on blend every prediction
+ * with the labels of the plot's nearest reference plots in latent space.
+ * `config` is a RetrievalConfig MAP (k_neighbors / alpha / temperature) or
+ * NULL. 0 / -1. */
+RESOLVE_CAPI int resolve_predictor_set_retrieval(
+    resolve_predictor_t* p, const resolve_dataset_t* reference,
+    const resolve_value_t* config, int64_t batch_size);
+
+/* Back to the model's own predictions. 0 / -1. */
+RESOLVE_CAPI int resolve_predictor_clear_retrieval(resolve_predictor_t* p);
+
 /* Zero-arg accessor. `what`: device scalers categorical_vocab genus_embeddings
  * family_embeddings species_embeddings schema vocabs species_vocab genus_vocab
- * family_vocab dataset_config. Returns value / NULL.
+ * family_vocab dataset_config model_config retrieval (the RetrievalConfig MAP
+ * plus n_reference, NULL-kind when none is set). Returns value / NULL.
  *
  * "vocabs" + "dataset_config" are what a caller needs to score new data
- * correctly: pass the first to a resolve_dataset_from_*_with_vocabs
- * loader and the second as that loader's `config`. */
+ * correctly: pass the first to resolve_dataset_load as `vocabs` and the
+ * second as its `config`. */
 RESOLVE_CAPI resolve_value_t* resolve_predictor_get(const resolve_predictor_t* p, const char* what);
 
 /* ========================================================================== */
@@ -488,7 +495,7 @@ RESOLVE_CAPI resolve_value_t* resolve_predictor_get(const resolve_predictor_t* p
 
 /* Load the model suite in directory `dir` (a manifest.json and the weight files
  * it names). `options` is a MAP or NULL:
- *   device        STRING  "cpu" (default) or "cuda"
+ *   device        STRING  "cpu" (default), "cuda" or "cuda:N"
  *   vram_fraction DOUBLE  default 1.0
  *   verify        BOOL    compare each member's size and SHA-256 with the
  *                         manifest before loading (default true)
@@ -506,7 +513,7 @@ RESOLVE_CAPI void resolve_suite_free(resolve_suite_t* s);
 RESOLVE_CAPI resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const char* what);
 
 /* Score plots. `header` (may be NULL) and `species` are column tables as for
- * resolve_dataset_from_dataframe. `options` is a MAP or NULL:
+ * resolve_dataset_load. `options` is a MAP or NULL:
  *   columns       MAP  renames the manifest's input columns; keys as in a
  *                      roles tree (plot_id species_id abundance latitude
  *                      longitude genus family covariates categoricals)
@@ -546,6 +553,34 @@ RESOLVE_CAPI resolve_value_t* resolve_suite_verify(const char* dir);
  * write the manifest back. Returns the sealed manifest (value tree as above) /
  * NULL. */
 RESOLVE_CAPI resolve_value_t* resolve_suite_seal(const char* dir);
+
+/* ========================================================================== */
+/* Fuzzy string index                                                         */
+/* ========================================================================== */
+
+/* A Damerau-Levenshtein index over `entries` (a STRING_ARRAY). `options` is a
+ * MAP or NULL: max_edit_distance (INT, the largest a query may ask for),
+ * case_insensitive (BOOL), damerau (BOOL, transpositions cost 1), buckets
+ * (STRING_ARRAY, one bucket per entry, which a query's hint searches first).
+ * NULL on error. */
+RESOLVE_CAPI resolve_fuzzy_t* resolve_fuzzy_build(const resolve_value_t* entries,
+                                                  const resolve_value_t* options);
+
+RESOLVE_CAPI void resolve_fuzzy_free(resolve_fuzzy_t* f);
+
+/* The best matches of each of `needles` (a STRING_ARRAY). `options` is a MAP
+ * or NULL: max_edit_distance (INT), top_n (INT), bucket_hint (STRING, for
+ * every needle) or bucket_hints (STRING_ARRAY, one per needle). Returns a MAP
+ * of equal-length arrays, one row per match, by needle then distance: query
+ * (INT_ARRAY, the needle's 0-based position), entry (STRING_ARRAY), id
+ * (INT_ARRAY, the entry's 0-based position) and distance (INT_ARRAY); NULL on
+ * error. */
+RESOLVE_CAPI resolve_value_t* resolve_fuzzy_query(const resolve_fuzzy_t* f,
+                                                  const resolve_value_t* needles,
+                                                  const resolve_value_t* options);
+
+/* Zero-arg accessor. `what`: size bucket_count max_supported_distance. */
+RESOLVE_CAPI resolve_value_t* resolve_fuzzy_get(const resolve_fuzzy_t* f, const char* what);
 
 #endif /* !RESOLVE_CAPI_DYNLOAD */
 

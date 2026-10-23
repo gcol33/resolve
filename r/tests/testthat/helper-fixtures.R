@@ -123,9 +123,10 @@ signal_roles <- function(covariates = c("cov1", "cov2"), ...) {
          covariates = covariates), list(...))
 }
 
-# The small hashed encoding the training tests fit quickly.
+# The small hashed encoding the training tests fit quickly; settings in `...`
+# replace or add fields.
 small_hash_config <- function(...) {
-  c(list(species_encoding = "hash", hash_dim = 4, top_k = 2), list(...))
+  utils::modifyList(list(species_encoding = "hash", hash_dim = 4, top_k = 2), list(...))
 }
 
 # Writes `tables` (from `signal_tables()` or a variant) to CSVs that live as

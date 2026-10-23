@@ -31,7 +31,9 @@ classification target, \code{n_plots x n_classes}, each row the softmax
 over the classes and summing to one; the columns are named by the class
 labels the checkpoint carries, in code order), \code{targets} (the
 dataset's own target values, when it carried them), \code{plot_ids}, and
-\code{latent} when \code{returnLatent} is \code{TRUE}.
+\code{latent} when \code{returnLatent} is \code{TRUE}. With a retrieval
+set (\code{\link[=resolve.retrieval]{resolve.retrieval()}}) the predictions and probabilities are the
+blend.
 }
 \description{
 Make predictions on a ResolveDataset using a trained model.

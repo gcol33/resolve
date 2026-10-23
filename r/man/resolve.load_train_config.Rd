@@ -11,8 +11,9 @@ resolve.load_train_config(path)
 training run.}
 }
 \value{
-A named list of training-configuration fields. \code{loss_config} and
-\code{lr_scheduler} are integer enum codes.
+A named list of training-configuration fields, the keys and
+spellings \code{trainConfig} in \code{\link[=resolve.train.dataset]{resolve.train.dataset()}} takes (enums such as
+\code{loss_config} and \code{lr_scheduler} by name).
 }
 \description{
 Reads back the training hyperparameters that were persisted in a RESOLVE

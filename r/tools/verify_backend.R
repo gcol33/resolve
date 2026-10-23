@@ -2,7 +2,7 @@
 #
 # With RESOLVE_C_HOME pointing at an unzipped backend bundle (and the build-tree
 # libtorch moved aside so a stale absolute rpath cannot satisfy the load), load
-# the installed resolve package and confirm the backend binds and answers. This
+# the installed resolveR package and confirm the backend binds and answers. This
 # proves the release zip is self-contained -- every libtorch runtime dependency
 # travels next to resolve_c -- which is exactly the install.packages("resolveR")
 # + resolve.install_backend() path a user takes. Run: Rscript r/tools/verify_backend.R
@@ -25,7 +25,7 @@ if (!file.exists(lib)) {
 suppressPackageStartupMessages(library(resolveR))
 
 if (!resolve.available()) {
-  err <- tryCatch(resolve:::resolve_capi_load_error(),
+  err <- tryCatch(resolveR:::resolve_capi_load_error(),
                   error = function(e) "<no load-error accessor>")
   stop("resolve_c backend failed to load from ", home, ": ", err)
 }

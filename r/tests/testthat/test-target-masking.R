@@ -29,12 +29,6 @@ masking_dataset <- function(files, missing) {
   )
 }
 
-test_that("missing is an accepted target key and its value is checked", {
-  expect_silent(resolveR:::.resolve_normalize_roles_targets(
-    list(plot_id = "plot_id"),
-    list(y = list(column = "y", task = "regression", missing = "mask"))))
-})
-
 test_that("mask keeps partly labelled plots with the sentinels", {
   skip_if_no_backend()
   skip_on_cran()

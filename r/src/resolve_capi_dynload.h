@@ -1,16 +1,15 @@
 // resolve_capi_dynload.h - runtime binding of the resolve_c C ABI.
 //
-// The R package used to LINK the resolve_c import library at build time
-// (Makevars: -lresolve_c). That makes resolve.dll/.so hard-depend on resolve_c
-// + libtorch at load time, so the package cannot build or load where those
-// binaries are absent -- which is exactly CRAN's check machines. This header
-// removes the link-time dependency: it declares a function-pointer table over
-// every resolve_c symbol, and identically-named `static inline` forwarders that
-// dispatch through the table. `resolve_capi_load()` binds the table at runtime
-// via LoadLibrary/dlopen (the "lantern" pattern the mlverse/torch R package
-// uses for libtorch). Every existing call site in rcpp_common.h / rcpp_*.h stays
-// byte-identical: `resolve_value_new_map()` still compiles and now resolves to
-// the forwarder instead of an imported symbol.
+// Linking the resolve_c import library at build time would make the package's
+// DLL hard-depend on resolve_c + libtorch at load time, so the package could
+// not build or load where those binaries are absent -- which is exactly CRAN's
+// check machines. This header has no link-time dependency: it declares a
+// function-pointer table over every resolve_c symbol, and identically-named
+// `static inline` forwarders that dispatch through the table.
+// `resolve_capi_load()` binds the table at runtime via LoadLibrary/dlopen (the
+// "lantern" pattern the mlverse/torch R package uses for libtorch). A call site
+// in rcpp_common.h / rcpp_*.h calls `resolve_value_new_map()` as if it were the
+// C ABI function and reaches the forwarder.
 //
 // Contract: `resolve_capi_load()` MUST run (once) before any forwarder is
 // called. The R package calls it from .onLoad (zzz.R) after locating the

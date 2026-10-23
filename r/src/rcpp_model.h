@@ -3,13 +3,34 @@
 #define RCPP_MODEL_H
 
 #include "rcpp_common.h"
+#include "rcpp_dataset.h"
 
 class RResolveModel {
 public:
     RResolveModel(List schema_list, List config_list) {
-        ValuePtr schema(r_list_to_value_map(schema_list, "schema"));
-        ValuePtr config(r_list_to_value_map(config_list, "config"));
+        capi_require_loaded();
+        ValuePtr schema = owned_value(r_list_to_value_map(schema_list, "schema"));
+        ValuePtr config = owned_value(r_list_to_value_map(config_list, "config"));
         model_ = capi_own(resolve_model_create(schema.get(), config.get()), resolve_model_free);
+    }
+
+    // A model for the plots of `dataset`: its schema, and `config` with the
+    // fields that size a model to the data taken from the dataset.
+    static RResolveModel for_dataset(RResolveDataset& dataset, List config_list) {
+        capi_require_loaded();
+        ValuePtr config = owned_value(r_list_to_value_map(config_list, "config"));
+        RResolveModel m;
+        m.model_ = capi_own(resolve_model_create_for_dataset(dataset.handle(), config.get()),
+                            resolve_model_free);
+        return m;
+    }
+
+    // Self-supervised pretraining of the encoder, in place, on the plots of
+    // `dataset`: "jepa", "scarf" or "masked_species".
+    RObject pretrain(std::string method, RResolveDataset& dataset, List config_list) {
+        ValuePtr config = owned_value(r_list_to_value_map(config_list, "config"));
+        return value_to_r_owned(
+            resolve_model_pretrain(model_.get(), method.c_str(), dataset.handle(), config.get()));
     }
 
     RObject forward(
@@ -71,8 +92,8 @@ public:
         Nullable<IntegerMatrix> species_ids = R_NilValue,
         Nullable<NumericMatrix> species_vector = R_NilValue,
         Nullable<IntegerMatrix> categorical_ids = R_NilValue) {
-        ValuePtr in(resolve_value_new_map());
-        resolve_map_set_string(in.get(), "target", target.c_str());
+        ValuePtr in = owned_value(resolve_value_new_map());
+        capi_check_status(resolve_map_set_string(in.get(), "target", target.c_str()));
         map_set_num_matrix(in.get(), "continuous", continuous);
         map_set_opt_int_matrix(in.get(), "genus_ids", genus_ids);
         map_set_opt_int_matrix(in.get(), "family_ids", family_ids);
@@ -87,7 +108,7 @@ public:
         Nullable<IntegerMatrix> genus_ids = R_NilValue,
         Nullable<IntegerMatrix> family_ids = R_NilValue,
         Nullable<IntegerMatrix> categorical_ids = R_NilValue) {
-        ValuePtr in(resolve_value_new_map());
+        ValuePtr in = owned_value(resolve_value_new_map());
         map_set_num_matrix(in.get(), "continuous", continuous);
         map_set_opt_int_matrix(in.get(), "genus_ids", genus_ids);
         map_set_opt_int_matrix(in.get(), "family_ids", family_ids);
@@ -99,7 +120,7 @@ public:
         NumericMatrix continuous,
         Nullable<IntegerMatrix> genus_ids = R_NilValue,
         Nullable<IntegerMatrix> family_ids = R_NilValue) {
-        ValuePtr in(resolve_value_new_map());
+        ValuePtr in = owned_value(resolve_value_new_map());
         map_set_num_matrix(in.get(), "continuous", continuous);
         map_set_opt_int_matrix(in.get(), "genus_ids", genus_ids);
         map_set_opt_int_matrix(in.get(), "family_ids", family_ids);
@@ -112,27 +133,20 @@ public:
         capi_check_status(resolve_model_to_device(model_.get(), device.c_str()));
     }
     void set_traits(NumericMatrix traits) {
-        int nr = traits.nrow(), nc = traits.ncol();
-        std::vector<double> buf(static_cast<size_t>(nr) * nc);
-        for (int i = 0; i < nr; ++i)
-            for (int j = 0; j < nc; ++j) buf[static_cast<size_t>(i) * nc + j] = traits(i, j);
-        ValuePtr t(resolve_value_new_double_matrix(buf.data(), nr, nc));
+        const std::vector<double> buf = row_major<double>(traits);
+        ValuePtr t = owned_value(resolve_value_new_double_matrix(buf.data(), traits.nrow(), traits.ncol()));
         capi_check_status(resolve_model_set_traits(model_.get(), t.get()));
     }
 
     // The species graph a HeterogeneousGNN passes messages on. edge_index is
     // (2, n_edges): row 1 source, row 2 target, in R's 1-based row numbering.
     void set_species_graph(IntegerMatrix edge_index, IntegerVector edge_type) {
-        int nr = edge_index.nrow(), nc = edge_index.ncol();
-        std::vector<int64_t> edges(static_cast<size_t>(nr) * nc);
-        for (int i = 0; i < nr; ++i)
-            for (int j = 0; j < nc; ++j)
-                edges[static_cast<size_t>(i) * nc + j] = edge_index(i, j);
-        std::vector<int64_t> types(edge_type.size());
-        for (int i = 0; i < edge_type.size(); ++i) types[i] = edge_type[i];
-        ValuePtr ei(resolve_value_new_int_matrix(edges.data(), nr, nc));
-        ValuePtr et(resolve_value_new_int_array(types.data(),
-                                                static_cast<int64_t>(types.size())));
+        const std::vector<int64_t> edges = row_major<int64_t>(edge_index);
+        const std::vector<int64_t> types(edge_type.begin(), edge_type.end());
+        ValuePtr ei = owned_value(
+            resolve_value_new_int_matrix(edges.data(), edge_index.nrow(), edge_index.ncol()));
+        ValuePtr et = owned_value(
+            resolve_value_new_int_array(types.data(), static_cast<int64_t>(types.size())));
         capi_check_status(
             resolve_model_set_species_graph(model_.get(), ei.get(), et.get()));
     }
@@ -151,10 +165,12 @@ public:
     RObject get_family_weights()   const { return get("family_weights"); }
     RObject get_species_weights()  const { return get("species_weights"); }
     RObject composition_parameters() const { return get("composition_parameters"); }
+    RObject config()               const { return get("config"); }
 
     resolve_model_t* handle() const { return model_.get(); }
 
 private:
+    RResolveModel() = default;
     RObject get(const char* what) const {
         return value_to_r_owned(resolve_model_get(model_.get(), what));
     }
@@ -165,7 +181,7 @@ private:
         Nullable<IntegerMatrix> pool_genus_ids, Nullable<IntegerMatrix> pool_family_ids,
         Nullable<NumericMatrix> pool_weights, Nullable<IntegerMatrix> pool_mask,
         Nullable<NumericVector> pool_has_cover, Nullable<IntegerMatrix> categorical_ids) {
-        ValuePtr in(resolve_value_new_map());
+        ValuePtr in = owned_value(resolve_value_new_map());
         fill_forward_inputs(in.get(), continuous, genus_ids, family_ids, species_ids, species_vector,
                             pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
                             categorical_ids);

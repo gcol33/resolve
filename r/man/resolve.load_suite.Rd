@@ -15,7 +15,7 @@ resolve.load_suite(
 \arguments{
 \item{dir}{Path to the suite directory.}
 
-\item{device}{\code{"cpu"} (default) or \code{"cuda"}.}
+\item{device}{\code{"cpu"} (default), \code{"cuda"} or \code{"cuda:N"}.}
 
 \item{vramFraction}{Fraction of GPU memory the caching allocator may use when
 loading onto CUDA (default 1.0).}

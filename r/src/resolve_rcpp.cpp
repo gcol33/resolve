@@ -1,14 +1,13 @@
 // resolve_rcpp.cpp - Module registration + free functions.
 //
-// Issue #17: the R bindings are now a thin client over the `resolve_c` C ABI
-// (resolve/resolve_capi.h). No libtorch C++ header is included anywhere under
-// r/src/. The Rcpp module surface (class / method / free-function names and R
-// argument types) is identical to the libtorch-linked version, so R/resolve.R
-// and the testthat suite are unchanged.
+// The R bindings are a thin client over the `resolve_c` C ABI
+// (resolve/resolve_capi.h); no libtorch C++ header is included anywhere under
+// r/src/.
 // [[Rcpp::plugins(cpp17)]]
 
 #include "rcpp_common.h"
 #include "rcpp_dataset.h"
+#include "rcpp_fuzzy.h"
 #include "rcpp_model.h"
 #include "rcpp_trainer.h"
 #include "rcpp_predictor.h"
@@ -16,16 +15,29 @@
 
 // =============================================================================
 // Expose module-managed wrapper classes to non-module Rcpp machinery so the
-// factory-style free functions (from_csv, load, ...) can return wrappers by
-// value. See the previous implementation's note: RCPP_EXPOSED_CLASS_NODECL
-// emits the wrap()/as() traits routing through the module's S4 representation.
+// factory-style free functions (load, for_dataset, ...) can return wrappers by
+// value: RCPP_EXPOSED_CLASS_NODECL emits the wrap()/as() traits routing through
+// the module's S4 representation. RResolveDataset's are declared in
+// rcpp_dataset.h, where the loader first converts one.
 // =============================================================================
 
-RCPP_EXPOSED_CLASS_NODECL(RResolveDataset)
 RCPP_EXPOSED_CLASS_NODECL(RResolveModel)
 RCPP_EXPOSED_CLASS_NODECL(RTrainer)
 RCPP_EXPOSED_CLASS_NODECL(RPredictor)
 RCPP_EXPOSED_CLASS_NODECL(RSuite)
+RCPP_EXPOSED_CLASS_NODECL(RFuzzyIndex)
+
+namespace {
+
+// The default of every field of a configuration struct, as the list its
+// reader takes: "dataset", "model", "train", "spatial_block", "retrieval",
+// "pretrain", "masked_species" or "vae".
+List default_config(std::string which) {
+    capi_require_loaded();
+    return as<List>(value_to_r_owned(resolve_default_config(which.c_str())));
+}
+
+}  // namespace
 
 RCPP_MODULE(resolve_module) {
     class_<RResolveDataset>("ResolveDataset")
@@ -66,20 +78,17 @@ RCPP_MODULE(resolve_module) {
         .method("plot_offsets", &RResolveDataset::plot_offsets, "Get plot offsets for raw data")
         .method("taxonomy_vocab", &RResolveDataset::taxonomy_vocab, "Get taxonomy vocabulary info")
         .method("categorical_vocab", &RResolveDataset::categorical_vocab, "Get categorical covariate vocabulary (per-column code maps)")
-        .method("vocabs", &RResolveDataset::vocabs, "Get every fitted vocabulary, for the *_with_vocabs loaders")
+        .method("vocabs", &RResolveDataset::vocabs, "Get every fitted vocabulary, for the loader's vocabs")
+        .method("pretrain_vae", &RResolveDataset::pretrain_vae,
+                "Train a variational autoencoder on the dataset's species vectors")
         ;
 
-    function("ResolveDataset_from_csv", &RResolveDataset::from_csv, "Load dataset from CSV files");
-    function("ResolveDataset_from_species_csv", &RResolveDataset::from_species_csv, "Load dataset from single species CSV");
-    function("ResolveDataset_from_csv_with_schema", &RResolveDataset::from_csv_with_schema, "Load dataset reusing another dataset's vocabularies and class mappings");
-    function("ResolveDataset_from_dataframe", &RResolveDataset::from_dataframe, "Load dataset from in-memory header + species column lists");
-    function("ResolveDataset_from_dataframe_header", &RResolveDataset::from_dataframe_header, "Load dataset from in-memory header columns + species CSV path");
-    function("ResolveDataset_from_species_dataframe", &RResolveDataset::from_species_dataframe, "Load dataset from a single in-memory long-format column list");
-    function("ResolveDataset_from_dataframe_with_schema", &RResolveDataset::from_dataframe_with_schema, "In-memory analog of from_csv_with_schema");
-    function("ResolveDataset_from_csv_with_vocabs", &RResolveDataset::from_csv_with_vocabs, "Load dataset from CSV files reusing a checkpoint's vocabularies");
-    function("ResolveDataset_from_species_csv_with_vocabs", &RResolveDataset::from_species_csv_with_vocabs, "Load dataset from a single species CSV reusing a checkpoint's vocabularies");
-    function("ResolveDataset_from_dataframe_with_vocabs", &RResolveDataset::from_dataframe_with_vocabs, "In-memory analog of from_csv_with_vocabs");
-    function("ResolveDataset_from_species_dataframe_with_vocabs", &RResolveDataset::from_species_dataframe_with_vocabs, "In-memory analog of from_species_csv_with_vocabs");
+    function("ResolveDataset_load", &RResolveDataset::load,
+             "Load a dataset from CSV paths or in-memory column lists");
+    function("ResolveModel_for_dataset", &RResolveModel::for_dataset,
+             "A model sized for a dataset's plots");
+    function("default_config", &default_config,
+             "The default of every field of a configuration struct");
 
     class_<RResolveModel>("ResolveModel")
         .constructor<List, List>("Create a ResolveModel")
@@ -103,6 +112,9 @@ RCPP_MODULE(resolve_module) {
         .method("get_species_weights", &RResolveModel::get_species_weights, "Get species embedding weights")
         .method("composition_parameters", &RResolveModel::composition_parameters,
                 "Species, genus and family tables the species encoder reads composition through")
+        .method("config", &RResolveModel::config, "The model's configuration")
+        .method("pretrain", &RResolveModel::pretrain,
+                "Self-supervised pretraining of the encoder on a dataset's plots")
         .method("set_species_graph", &RResolveModel::set_species_graph,
                 "Set the species graph a HeterogeneousGNN passes messages on")
         .method("requires_species_graph", &RResolveModel::requires_species_graph,
@@ -162,7 +174,21 @@ RCPP_MODULE(resolve_module) {
         .method("genus_vocab", &RPredictor::genus_vocab, "Ordered genus vocabulary the model was trained with")
         .method("family_vocab", &RPredictor::family_vocab, "Ordered family vocabulary the model was trained with")
         .method("dataset_config", &RPredictor::dataset_config, "The DatasetConfig this checkpoint implies")
+        .method("model_config", &RPredictor::model_config, "The checkpoint's ModelConfig")
+        .method("set_retrieval", &RPredictor::set_retrieval,
+                "Blend predictions with the labels of the nearest reference plots")
+        .method("clear_retrieval", &RPredictor::clear_retrieval, "Back to the model's own predictions")
+        .method("retrieval", &RPredictor::retrieval, "The retrieval settings, or NULL")
         ;
+
+    class_<RFuzzyIndex>("FuzzyIndex")
+        .method("query", &RFuzzyIndex::query, "Best matches of each needle")
+        .method("size", &RFuzzyIndex::size, "Number of indexed entries")
+        .method("bucket_count", &RFuzzyIndex::bucket_count, "Buckets, the global one included")
+        .method("max_supported_distance", &RFuzzyIndex::max_supported_distance,
+                "The largest edit distance a query may ask for")
+        ;
+    function("FuzzyIndex_build", &RFuzzyIndex::build, "Build a fuzzy string index");
 
     class_<RSuite>("Suite")
         .method("manifest", &RSuite::manifest, "The suite's manifest as a nested list")
@@ -179,10 +205,8 @@ RCPP_MODULE(resolve_module) {
              "Read a suite's manifest and compare every member file with it");
     function("Suite_seal", &RSuite::seal,
              "Fill a suite manifest's member checksums and sizes, validate and write it");
-    function("Trainer_load_train_config", &RTrainer::load_train_config,
-             "Recover the persisted TrainConfig from a checkpoint (as a list)");
-    function("Trainer_load_run_metadata", &RTrainer::load_run_metadata,
-             "Recover the persisted run metadata from a checkpoint (as a list)");
+    function("Trainer_read_checkpoint", &RTrainer::read_checkpoint,
+             "Recover a checkpoint's persisted train config or run metadata (as a list)");
 }
 
 // =============================================================================
@@ -204,10 +228,10 @@ void resolve_set_vram_fraction(double fraction, int device_index = -1) {
     capi_check_status(resolve_capi_set_vram_fraction(fraction, device_index));
 }
 
-// Pin libtorch's intra-op / inter-op thread pools (issue #18). intraop /
-// interop <= 0 keep libtorch's default. Best-effort; call at load before the
-// first op. Removes the worker threads whose teardown join crashes the
-// Rscript.exe launcher on Windows.
+// Pin libtorch's intra-op / inter-op thread pools. intraop / interop <= 0 keep
+// libtorch's default. Best-effort; call at load before the first op. Removes
+// the worker threads whose teardown join crashes the Rscript.exe launcher on
+// Windows.
 // [[Rcpp::export]]
 void resolve_set_thread_pools(int intraop_threads, int interop_threads = -1) {
     capi_require_loaded();
@@ -215,8 +239,8 @@ void resolve_set_thread_pools(int intraop_threads, int interop_threads = -1) {
 }
 
 // Install the Windows crash handler: turn an unhandled native fault into an
-// immediate TerminateProcess instead of a JIT-debugger hang (issue #19) or a
-// teardown access violation under Rscript.exe (issue #18). No-op off Windows.
+// immediate TerminateProcess instead of a JIT-debugger hang or a teardown
+// access violation under Rscript.exe. No-op off Windows.
 // [[Rcpp::export]]
 void resolve_install_crash_handler(int shutdown_exit_code = 0) {
     capi_require_loaded();
@@ -224,8 +248,8 @@ void resolve_install_crash_handler(int shutdown_exit_code = 0) {
 }
 
 // Mark all engine work complete so a subsequent native fault during process
-// teardown exits with the shutdown code rather than a crash code (issue #18).
-// Registered as an on-exit finalizer in zzz.R.
+// teardown exits with the shutdown code rather than a crash code. Registered as
+// an on-exit finalizer in zzz.R.
 // [[Rcpp::export]]
 void resolve_signal_work_complete() {
     capi_require_loaded();
@@ -247,10 +271,8 @@ void resolve_signal_work_complete() {
 // [[Rcpp::export]]
 std::string resolve_configure_cuda_allocator(bool force = false) {
     capi_require_loaded();
-    resolve_value_t* v = resolve_capi_configure_cuda_allocator(force ? 1 : 0);
-    capi_check(v);
-    ValuePtr guard(v);
-    return std::string(resolve_value_as_string(v));
+    const ValuePtr value = owned_value(resolve_capi_configure_cuda_allocator(force ? 1 : 0));
+    return std::string(resolve_value_as_string(value.get()));
 }
 
 // =============================================================================

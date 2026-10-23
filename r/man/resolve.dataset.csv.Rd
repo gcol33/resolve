@@ -2,7 +2,7 @@
 % Please edit documentation in R/resolve.R
 \name{resolve.dataset.csv}
 \alias{resolve.dataset.csv}
-\title{Load Dataset from CSV Files (C++ Implementation)}
+\title{Load a Dataset From CSV Files}
 \usage{
 resolve.dataset.csv(
   header,
@@ -15,9 +15,10 @@ resolve.dataset.csv(
 )
 }
 \arguments{
-\item{header}{Path to header CSV file (one row per plot with targets)}
+\item{header}{Path to the header CSV file (one row per plot, with the
+targets).}
 
-\item{species}{Path to species CSV file (one row per species-plot occurrence)}
+\item{species}{Path to the species CSV file (one row per species record).}
 
 \item{roles}{Named list mapping column roles:
 \itemize{
@@ -29,61 +30,82 @@ resolve.dataset.csv(
 \item genus: Column name for genus (optional)
 \item family: Column name for family (optional)
 \item covariates: Vector of covariate column names (optional)
+\item categoricals: Vector of categorical covariate column names (optional)
 }
 
 An optional role is unset by omitting it, or by giving it the empty
 string, which is the spelling to use when a role has to be cleared from a
 list that already carries it. A non-empty column name the file does not
-have is still an error, so a typo fails loudly.}
+have is an error, so a typo fails loudly, and so is a key outside this
+list.}
 
-\item{targets}{Named list of target configurations. Each target should have:
+\item{targets}{Named list of target specifications, the name naming the
+target. Each is a list of:
 \itemize{
-\item column: Column name in header file
-\item task: "regression" or "classification"
-\item transform: "none" or "log1p" (optional, default "none")
-\item num_classes: Number of classes for classification (required for classification)
-\item weight: Loss weight (optional, default 1.0)
-\item missing: "drop" or "mask" (optional, default "drop"). What happens to a
-plot with no label for this target (an empty or NA cell, or a class
-outside \code{class_mapping}). "drop" leaves the plot out of the dataset.
-"mask" keeps it: the plot trains and is scored on the targets it is
-labelled for, and this target's loss, scaler and metrics use only its
-labelled plots. A plot labelled for no target is left out either way.
-}}
+\item column: Column name in the header file (default: the target's name)
+\item task: "regression" (default) or "classification"
+\item transform: "none" (default) or "log1p"
+\item num_classes: Number of classes for classification
+\item weight: Loss weight (default 1.0)
+\item class_mapping: Named integer vector pinning each class label to its code
+(default: codes fitted from the data, labels in sorted order)
+\item missing: "drop" (default) or "mask". What happens to a plot with no
+label for this target (an empty or NA cell, or a class outside
+\code{class_mapping}). "drop" leaves the plot out of the dataset. "mask"
+keeps it: the plot trains and is scored on the targets it is labelled
+for, and this target's loss, scaler and metrics use only its labelled
+plots. A plot labelled for no target is left out either way.
+}
 
-\item{config}{Named list of dataset configuration options:
+A key outside this list, two targets with one name, or an unnamed target
+is an error. A dataset for training needs at least one target; one built
+to be scored needs none.}
+
+\item{config}{Named list of dataset configuration options; a field left out
+takes the engine's default (\code{resolve.default_config("dataset")}), and a key
+outside these fields is an error:
 \itemize{
-\item species_encoding: "hash" (default), "embed", or "sparse"
-\item hash_dim: Hash dimension (default 32)
-\item top_k: Species hashed per plot and fixed genus/family slots (default 3)
-\item top_k_species: Top-k species for embed mode (default 10)
-\item selection: "top", "bottom", "top_bottom", or "all" (default "top").
-Which species of a plot survive its per-plot budget: \code{top_k} for the
-hash encoding, \code{top_k_species} for embed (which rejects "all", having a
-fixed number of ranked slots), and \code{species_budget} for rank_pool,
-transformer and sparse.
+\item species_encoding: "hash", "embed", "sparse", "rank_pool" or
+"transformer". hash folds each plot's species into a fixed-width vector
+of \code{hash_dim} buckets; embed gives each of the plot's \code{top_k_species}
+ranked species slots a learned embedding; sparse is the plot's full
+species-by-abundance vector; rank_pool pools learned species, genus and
+family embeddings over every species the plot records; transformer
+attends over them.
+\item hash_dim: Hash buckets of the hash encoding
+\item top_k: Species hashed per plot and fixed genus/family slots
+\item top_k_species: Ranked species slots of the embed encoding
+\item selection: "top", "bottom", "top_bottom", or "all". Which species of a
+plot survive its per-plot budget: \code{top_k} for the hash encoding,
+\code{top_k_species} for embed (which rejects "all", having a fixed number of
+ranked slots), and \code{species_budget} for rank_pool, transformer and
+sparse.
 \item species_budget: species kept per plot by \code{selection} for the rank_pool,
-transformer and sparse encodings; 0 = no budget (default), so every
-species a plot records is encoded and \code{selection} has nothing to narrow.
-Set it to run a top-versus-bottom species ablation on the pooled
-encoders.
-\item representation: "abundance" or "presence_absence" (default
-"abundance"). The value each species carries into every encoding:
-its abundance, or 1 under "presence_absence" (a pooled dataset then
-reports no cover). The selection still ranks by recorded abundance.
-\item aggregation: "abundance" or "count" (default "abundance"). How the
-fixed genus/family slots of the hash, sparse and embed encodings rank a
-plot's taxa: by the summed value of their species, or by how many of
-the plot's species they hold. rank_pool and transformer reject "count".
-\item normalization: "raw", "norm", or "log1p" (default "raw")
-\item track_unknown_fraction: Track unknown species fraction (default TRUE)
-\item track_unknown_count: Track unknown species count (default FALSE)
-\item use_taxonomy: Use taxonomy embeddings (default TRUE if genus/family provided)
+transformer and sparse encodings; 0 = no budget, so every species a plot
+records is encoded and \code{selection} has nothing to narrow.
+\item representation: "abundance" or "presence_absence". The value each
+species carries into every encoding: its abundance, or 1 under
+"presence_absence" (a pooled dataset then reports no cover). The
+selection still ranks by recorded abundance.
+\item aggregation: "abundance" or "count". How the fixed genus/family slots
+of the hash, sparse and embed encodings rank a plot's taxa: by the
+summed value of their species, or by how many of the plot's species
+they hold. rank_pool and transformer pool each species' genus and family
+embeddings with the species weights, or under "count" with one weight
+per species.
+\item normalization: "raw", "norm", or "log1p": the abundance values as read,
+scaled to sum to one per plot, or log1p-transformed
+\item track_unknown_fraction, track_unknown_count: add the share and the
+number of a plot's species the vocabulary does not know as columns
+\item use_taxonomy: encode the genus/family roles
 \item pool_weighting: rank_pool weighting "binary", "abundance", "log1p",
-"norm", or "rank" (default "log1p")
-\item pool_species_cap: rank_pool per-plot species cap; 0 = no cap (default),
--x = the (100 - x)th percentile of species per plot, computed on the
-data loaded (-1 = p99, -5 = p95; x in 1..99), >0 = manual cap
+"norm", or "rank"
+\item pool_species_cap: rank_pool per-plot species cap; 0 = no cap, -x = the
+(100 - x)th percentile of species per plot, computed on the data loaded
+(-1 = p99, -5 = p95; x in 1..99), >0 = manual cap
+\item missing_values: "indicate" or "zero": a missing covariate or coordinate
+cell is flagged and filled with the fitting fold's mean, or read as 0
+\item zero_abundance_as: the abundance a recorded 0 is read at
 }}
 
 \item{schemaSource}{Optional ResolveDataset (from a previous
@@ -101,11 +123,12 @@ encoder indexes an embedding table with a code that is a function of the
 file the vocabulary was fitted on, so a dataset built without the training
 vocabularies looks up the wrong rows and \code{predictor$predict_dataset()}
 rejects it. Pair with \code{config = predictor$dataset_config()}. Mutually
-exclusive with \code{schemaSource}. With either, \code{targets} may be
-empty: plots built to be scored need carry no answer.}
+exclusive with \code{schemaSource}. A vocabulary list without a species
+vocabulary (a checkpoint that stores only the vocabulary sizes) is
+refused.}
 }
 \value{
-A ResolveDataset object (C++ class) with methods:
+A ResolveDataset object (an Rcpp module class) with methods:
 \itemize{
 \item coordinates(): Get coordinate matrix
 \item covariates(): Get covariate matrix
@@ -118,12 +141,13 @@ A ResolveDataset object (C++ class) with methods:
 }
 }
 \description{
-Load a dataset directly using the C++ ResolveDataset class.
-This mirrors the Python \code{ResolveDataset.from_csv()} API exactly.
+Read plots and their species records from CSV files and encode them for a
+model: the plot-level columns (coordinates, covariates, categorical
+covariates, targets) of a header file, one row per plot, and the species
+records of a species file, one row per record.
 }
 \examples{
 \dontrun{
-# Load dataset using C++ implementation
 dataset <- resolve.dataset.csv(
   header = "plots.csv",
   species = "species.csv",
@@ -145,7 +169,6 @@ dataset <- resolve.dataset.csv(
   )
 )
 
-# Access data
 print(dataset$schema())
 print(dataset$n_plots())
 }

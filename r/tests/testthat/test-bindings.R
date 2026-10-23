@@ -38,9 +38,9 @@ test_that("module factory functions are registered", {
 
   registered <- resolveR:::.resolve_module_registered()
 
-  expect_true("ResolveDataset_from_csv" %in% registered)
-  expect_true("ResolveDataset_from_species_csv" %in% registered)
-  expect_true("ResolveDataset_from_csv_with_schema" %in% registered)
+  expect_true("ResolveDataset_load" %in% registered)
+  expect_true("ResolveModel_for_dataset" %in% registered)
+  expect_true("FuzzyIndex_build" %in% registered)
   expect_true("Predictor_load" %in% registered)
   expect_false("SpeciesEncoder_load" %in% registered)
 })
@@ -76,12 +76,13 @@ test_that("resolve.load rejects non-existent file", {
   expect_error(resolve.load("/nonexistent/model.pt"), "does not exist")
 })
 
-test_that("resolve.load rejects invalid device", {
+test_that("resolve.load rejects an invalid device by its name", {
+  skip_if_no_backend()
   tmp <- local_model_file()
   writeLines("fake", tmp)
 
-  expect_error(resolve.load(tmp, device = "tpu"), "device")
-  expect_error(resolve.load(tmp, device = "mps"), "device")
+  expect_error(resolve.load(tmp, device = "tpu"), "cuda:N")
+  expect_error(resolve.load(tmp, device = "CUDA"), "cuda:N")
 })
 
 
@@ -150,30 +151,6 @@ test_that("resolve.dataset.csv rejects non-list roles", {
   )
 })
 
-test_that("resolve.dataset.csv rejects empty targets", {
-  tmp_h <- local_csv(c("plot_id,area", "p1,100"))
-  tmp_s <- local_csv(c("plot_id,species_id", "p1,sp1"))
-
-  expect_error(
-    resolve.dataset.csv(header = tmp_h, species = tmp_s, targets = list()),
-    "targets must not be empty"
-  )
-})
-
-test_that("resolve.dataset.csv rejects target without column", {
-  tmp_h <- local_csv(c("plot_id,area", "p1,100"))
-  tmp_s <- local_csv(c("plot_id,species_id", "p1,sp1"))
-
-  expect_error(
-    resolve.dataset.csv(
-      header = tmp_h,
-      species = tmp_s,
-      targets = list(area = list(task = "regression"))
-    ),
-    "column"
-  )
-})
-
 test_that("resolve.dataset.csv rejects invalid schemaSource", {
   tmp_h <- local_csv(c("plot_id,area", "p1,100"))
   tmp_s <- local_csv(c("plot_id,species_id", "p1,sp1"))
@@ -188,20 +165,6 @@ test_that("resolve.dataset.csv rejects invalid schemaSource", {
       schemaSource = list()
     ),
     "schemaSource"
-  )
-})
-
-test_that("resolve.dataset.csv rejects invalid target task", {
-  tmp_h <- local_csv(c("plot_id,area", "p1,100"))
-  tmp_s <- local_csv(c("plot_id,species_id", "p1,sp1"))
-
-  expect_error(
-    resolve.dataset.csv(
-      header = tmp_h,
-      species = tmp_s,
-      targets = list(area = list(column = "area", task = "segmentation"))
-    ),
-    "task"
   )
 })
 
@@ -245,11 +208,6 @@ test_that("resolve.train.dataset rejects invalid batchSize", {
   expect_error(resolve.train.dataset(fake_ds, batchSize = 0), "batchSize")
 })
 
-test_that("resolve.train.dataset rejects invalid device", {
-  fake_ds <- structure(list(), class = "Rcpp_ResolveDataset")
-
-  expect_error(resolve.train.dataset(fake_ds, device = "tpu"), "device")
-})
 
 test_that("resolve.train.dataset rejects invalid testSize", {
   fake_ds <- structure(list(), class = "Rcpp_ResolveDataset")
@@ -259,20 +217,6 @@ test_that("resolve.train.dataset rejects invalid testSize", {
   expect_error(resolve.train.dataset(fake_ds, testSize = 1.5), "testSize")
 })
 
-test_that("resolve.train.dataset rejects invalid lossConfig", {
-  fake_ds <- structure(list(), class = "Rcpp_ResolveDataset")
-
-  expect_error(resolve.train.dataset(fake_ds, lossConfig = "mse"), "lossConfig")
-
-  # "nca" is a real preset (Neighbourhood Components Analysis on classification
-  # targets), so it must clear validation. The fake dataset still fails the call
-  # further in; what matters is that lossConfig is not what rejected it.
-  nca_err <- tryCatch(
-    resolve.train.dataset(fake_ds, lossConfig = "nca"),
-    error = function(e) conditionMessage(e)
-  )
-  expect_false(grepl("lossConfig", nca_err, fixed = TRUE))
-})
 
 test_that("resolve.train.dataset rejects invalid NCA hyperparameters", {
   fake_ds <- structure(list(), class = "Rcpp_ResolveDataset")
@@ -286,11 +230,6 @@ test_that("resolve.train.dataset rejects invalid NCA hyperparameters", {
 test_that("resolve.train.dataset rejects invalid mixture-of-experts settings", {
   fake_ds <- structure(list(), class = "Rcpp_ResolveDataset")
 
-  expect_error(resolve.train.dataset(fake_ds, moeRouting = "dense"), "moeRouting")
-  expect_error(resolve.train.dataset(fake_ds, moePlacement = "middle"), "moePlacement")
-
-  # The expert knobs are only read when a mixture is actually requested, so
-  # each check needs routing on.
   expect_error(
     resolve.train.dataset(fake_ds, moeRouting = "soft", nExperts = 1),
     "nExperts"

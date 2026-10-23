@@ -4,7 +4,7 @@
 # Usage: Rscript tools/build_cran.R
 #
 # Steps:
-# 1. Vendor C++ core files
+# 1. Vendor the C ABI header and its symbol list (tools/vendor.R)
 # 2. Run devtools::document()
 # 3. Run R CMD check
 # 4. Build source tarball
@@ -12,7 +12,7 @@
 build_cran <- function() {
   pkg_root <- here::here()
 
-  message("=== Step 1: Vendor C++ core ===")
+  message("=== Step 1: Vendor the C ABI header ===")
   source(file.path(pkg_root, "tools", "vendor.R"))
   vendor(pkg_root)
 

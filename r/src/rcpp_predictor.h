@@ -8,6 +8,7 @@
 class RPredictor {
 public:
     static RPredictor load(std::string path, std::string device = "cpu", double vram_fraction = 1.0) {
+        capi_require_loaded();
         RPredictor p;
         p.predictor_ = capi_own(resolve_predictor_load(
             path.c_str(), device.c_str(), vram_fraction), resolve_predictor_free);
@@ -29,7 +30,7 @@ public:
         Nullable<NumericVector> pool_has_cover = R_NilValue,
         Nullable<IntegerMatrix> categorical_ids = R_NilValue,
         bool return_latent = false) {
-        ValuePtr in(resolve_value_new_map());
+        ValuePtr in = owned_value(resolve_value_new_map());
         map_set_num_matrix(in.get(), "coordinates", coordinates);
         map_set_num_matrix(in.get(), "covariates", covariates);
         map_set_num_matrix(in.get(), "hash_embedding", hash_embedding);
@@ -62,7 +63,7 @@ public:
         NumericMatrix coordinates, NumericMatrix covariates, NumericMatrix hash_embedding,
         Nullable<IntegerMatrix> genus_ids, Nullable<IntegerMatrix> family_ids,
         Nullable<NumericVector> unknown_fraction, Nullable<NumericVector> unknown_count) {
-        ValuePtr in(resolve_value_new_map());
+        ValuePtr in = owned_value(resolve_value_new_map());
         map_set_num_matrix(in.get(), "coordinates", coordinates);
         map_set_num_matrix(in.get(), "covariates", covariates);
         map_set_num_matrix(in.get(), "hash_embedding", hash_embedding);
@@ -81,24 +82,36 @@ public:
         capi_check_status(resolve_predictor_optimize_for_inference(predictor_.get()));
     }
 
+    // Retrieval augmentation: blend every prediction with the labels of the
+    // plot's nearest `reference` plots (a RetrievalConfig list).
+    void set_retrieval(RResolveDataset& reference, List config_list, double batch_size) {
+        ValuePtr config = owned_value(r_list_to_value_map(config_list, "config"));
+        capi_check_status(resolve_predictor_set_retrieval(
+            predictor_.get(), reference.handle(), config.get(), static_cast<int64_t>(batch_size)));
+    }
+    void clear_retrieval() {
+        capi_check_status(resolve_predictor_clear_retrieval(predictor_.get()));
+    }
+    RObject retrieval() const { return get("retrieval"); }
+
     RObject device()      const { return get("device"); }
     RObject get_scalers() const { return get("scalers"); }
 
-    // Issue #102: everything needed to build an inference dataset in this
-    // model's integer-code namespace. `vocabs()` goes to a *_with_vocabs
-    // loader, `dataset_config()` is that loader's config, and `schema()`
-    // exposes the checkpoint's full data description (including the fitted
-    // species / genus / family vocabularies).
+    // Everything needed to build an inference dataset in this model's
+    // integer-code namespace: `vocabs()` goes to the loader's `vocabs`,
+    // `dataset_config()` is its config, and `schema()` exposes the
+    // checkpoint's full data description (including the fitted species /
+    // genus / family vocabularies).
     RObject schema()         const { return get("schema"); }
     RObject vocabs()         const { return get("vocabs"); }
     RObject species_vocab()  const { return get("species_vocab"); }
     RObject genus_vocab()    const { return get("genus_vocab"); }
     RObject family_vocab()   const { return get("family_vocab"); }
     RObject dataset_config() const { return get("dataset_config"); }
+    RObject model_config()   const { return get("model_config"); }
 
     List categorical_vocab() const {
-        ValuePtr v(resolve_predictor_get(predictor_.get(), "categorical_vocab"));
-        capi_check(v.get());
+        ValuePtr v = owned_value(resolve_predictor_get(predictor_.get(), "categorical_vocab"));
         return categorical_vocab_value_to_r(v.get());
     }
 

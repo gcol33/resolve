@@ -215,129 +215,114 @@ test_that("species_budget narrows the pooled encoding", {
   expect_equal(narrowed$schema()$dataset_config$species_budget, 2L)
 })
 
-# --- targets / roles specification validation ------------------------------
+# --- targets / roles / config specification validation ---------------------
 #
 # A target's NAME is the key the engine reads, and the C ABI carries a named
-# list as a keyed map. An UNNAMED list carries no keys, so
-# `targets = list(list(column = "area", task = "regression"))` would build a
-# dataset with zero targets that fails far away inside fit() with "element 0 of
-# tensors does not require grad and does not have a grad_fn". The front door
-# rejects it where the caller can still see what they typed.
+# list as a keyed map. The engine reads every structured argument strictly: an
+# unnamed list, an unknown key or a repeated name is refused where the caller
+# can still see what they typed, never dropped.
 
 valid_targets <- function() {
   list(area = list(column = "area", task = "regression"))
 }
 
-test_that("an unnamed target list is rejected, not silently dropped", {
-  expect_error(
-    resolveR:::.resolve_normalize_roles_targets(
-      list(plot_id = "plot_id"),
-      list(list(column = "area", task = "regression"))),
-    "every target must be named")
-})
-
-test_that("a partially named target list is rejected", {
-  expect_error(
-    resolveR:::.resolve_normalize_roles_targets(
-      list(plot_id = "plot_id"),
-      list(area = list(column = "area"), list(column = "habitat"))),
-    "every target must be named")
-})
-
-test_that("an unknown key in a target specification is rejected by name", {
-  err <- tryCatch(
-    resolveR:::.resolve_normalize_roles_targets(
-      list(plot_id = "plot_id"),
-      list(area = list(name = "area", type = "regression"))),
-    error = function(e) conditionMessage(e))
-  expect_match(err, "target 'area'")
-  expect_match(err, "'name'")
-  expect_match(err, "'type'")
-  # The message must hand back the accepted spelling.
-  expect_match(err, "column")
-  expect_match(err, "task")
-})
-
-test_that("duplicate target names are rejected", {
-  expect_error(
-    resolveR:::.resolve_normalize_roles_targets(
-      list(plot_id = "plot_id"),
-      list(area = list(column = "area"), area = list(column = "area2"))),
-    "duplicate target name")
-})
-
-test_that("an unknown role key is rejected by name", {
-  err <- tryCatch(
-    resolveR:::.resolve_normalize_roles_targets(
-      list(plot_id = "plot_id", speciesId = "species"),
-      valid_targets()),
-    error = function(e) conditionMessage(e))
-  expect_match(err, "roles")
-  expect_match(err, "'speciesId'")
-  expect_match(err, "species_id")
-})
-
-test_that("an unnamed roles list is rejected", {
-  expect_error(
-    resolveR:::.resolve_normalize_roles_targets(list("plot_id"), valid_targets()),
-    "must be a named list")
-})
-
-test_that("a valid specification passes and fills the role defaults", {
-  roles <- resolveR:::.resolve_normalize_roles_targets(
-    list(abundance = "cover"), valid_targets())
-  expect_equal(roles$plot_id, "plot_id")
-  expect_equal(roles$species_id, "species_id")
-  expect_equal(roles$abundance, "cover")
-})
-
-test_that("every documented target key is accepted", {
-  expect_silent(resolveR:::.resolve_normalize_roles_targets(
-    list(plot_id = "plot_id"),
-    list(habitat = list(column = "habitat", task = "classification",
-                        transform = "none", num_classes = 3L, weight = 1.0,
-                        class_mapping = c(forest = 0L, grass = 1L, bog = 2L)))))
-})
-
-test_that("every documented role key is accepted", {
-  expect_silent(resolveR:::.resolve_normalize_roles_targets(
-    list(plot_id = "plot_id", species_id = "species", abundance = "cover",
-         longitude = "lon", latitude = "lat", genus = "genus",
-         family = "family", covariates = c("elevation"),
-         categoricals = c("bedrock")),
-    valid_targets()))
-})
-
-test_that("resolve.dataset.csv rejects a malformed target list at the front door", {
-  skip_if_no_backend()
-  skip_on_cran()
-
+# A twelve-plot dataset loaded with the given roles, targets and config.
+spec_load <- function(roles = list(abundance = "cover"), targets = valid_targets(),
+                      config = list(species_encoding = "hash")) {
   n <- 12L
   files <- local_csv_pair(
-    data.frame(plot_id = paste0("p", seq_len(n)), area = seq_len(n) * 1.0),
+    data.frame(plot_id = paste0("p", seq_len(n)), area = seq_len(n) * 1.0,
+               habitat = rep(c("forest", "grass", "bog"), 4L)),
     data.frame(plot_id = paste0("p", seq_len(n)),
                species_id = paste0("sp", seq_len(n) %% 4L),
                cover = 1.0)
   )
+  resolve.dataset.csv(header = files$header, species = files$species,
+                      roles = roles, targets = targets, config = config)
+}
 
-  roles <- list(plot_id = "plot_id", species_id = "species_id",
-                abundance = "cover")
+spec_error <- function(...) {
+  tryCatch({
+    spec_load(...)
+    ""
+  }, error = function(e) conditionMessage(e))
+}
 
-  # The shape that motivated the guard: accepted before, zero targets after.
-  expect_error(
-    resolve.dataset.csv(header = files$header, species = files$species,
-                        roles = roles,
-                        targets = list(list(name = "area", type = "regression")),
-                        config = list(species_encoding = "hash")),
-    "every target must be named")
+test_that("an unnamed or partially named target list is rejected, not dropped", {
+  skip_if_no_backend()
+  expect_match(spec_error(targets = list(list(column = "area", task = "regression"))),
+               "NAMED list")
+  expect_match(spec_error(targets = list(area = list(column = "area"),
+                                         list(column = "habitat"))),
+               "empty name")
+})
 
-  # The documented shape still loads, and carries the target.
-  ds <- resolve.dataset.csv(header = files$header, species = files$species,
-                            roles = roles, targets = valid_targets(),
-                            config = list(species_encoding = "hash"))
-  expect_equal(ds$n_plots(), n)
-  expect_equal(length(ds$schema()$targets), 1L)
+test_that("an unknown key in a target specification is rejected by name", {
+  skip_if_no_backend()
+  err <- spec_error(targets = list(area = list(name = "area", type = "regression")))
+  expect_match(err, "target 'area'")
+  expect_match(err, "'name'")
+  # The message hands back the accepted spellings.
+  expect_match(err, "column")
+  expect_match(err, "task")
+})
+
+test_that("a target named twice is rejected", {
+  skip_if_no_backend()
+  expect_match(spec_error(targets = list(area = list(column = "area"),
+                                         area = list(column = "habitat"))),
+               "given twice")
+})
+
+test_that("an unknown role key or an unnamed roles list is rejected", {
+  skip_if_no_backend()
+  err <- spec_error(roles = list(abundance = "cover", speciesId = "species"))
+  expect_match(err, "roles")
+  expect_match(err, "'speciesId'")
+  expect_match(err, "species_id")
+  expect_match(spec_error(roles = list("plot_id")), "roles: unknown key")
+})
+
+test_that("an unknown config key is rejected, not trained with the default", {
+  skip_if_no_backend()
+  err <- spec_error(config = list(species_encodng = "embed"))
+  expect_match(err, "dataset config")
+  expect_match(err, "'species_encodng'")
+  expect_match(err, "species_encoding")
+  expect_match(spec_error(config = list(hash_dim = "64")), "hash_dim")
+  expect_match(spec_error(config = list(species_encoding = "hashing")), "species_encoding")
+})
+
+test_that("a target without a column reads the column of its name", {
+  skip_if_no_backend()
+  ds <- spec_load(targets = list(area = list(task = "regression")))
   expect_equal(names(ds$schema()$targets), "area")
+  expect_equal(ds$targets()$area, seq_len(12L) * 1.0)
+})
+
+test_that("an invalid target task names the field", {
+  skip_if_no_backend()
+  expect_match(spec_error(targets = list(area = list(task = "segmentation"))), "task")
+})
+
+test_that("every documented target and role key is accepted, and the role defaults apply", {
+  skip_if_no_backend()
+  ds <- spec_load(
+    roles = list(abundance = "cover", longitude = "", latitude = "", genus = "",
+                 family = "", covariates = character(0), categoricals = character(0)),
+    targets = list(habitat = list(column = "habitat", task = "classification",
+                                  transform = "none", num_classes = 3L, weight = 1.0,
+                                  class_mapping = c(forest = 0L, grass = 1L, bog = 2L),
+                                  missing = "mask")))
+  expect_equal(ds$n_plots(), 12L)
+  expect_equal(ds$schema()$targets$habitat$class_names, c("forest", "grass", "bog"))
+})
+
+test_that("a dataset without targets loads for scoring and is refused for training", {
+  skip_if_no_backend()
+  ds <- spec_load(targets = list())
+  expect_equal(ds$n_plots(), 12L)
+  expect_error(resolve.train.dataset(ds, maxEpochs = 1L, verbose = FALSE), "target")
 })
 
 test_that("a missing covariate or coordinate is NaN and the policy is recorded", {

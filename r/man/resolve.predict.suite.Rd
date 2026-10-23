@@ -26,7 +26,8 @@ Must be the same kind (data.frame or path) as \code{species}.}
 
 \item{columns}{Named list renaming the manifest's input columns, with keys
 among \code{plot_id}, \code{species_id}, \code{abundance}, \code{latitude}, \code{longitude},
-\code{genus}, \code{family}, \code{covariates}, \code{categoricals}.}
+\code{genus}, \code{family}, \code{covariates}, \code{categoricals} (another key is an
+error).}
 
 \item{batchSize}{Forward-pass chunk size per member (default 4096).}
 
