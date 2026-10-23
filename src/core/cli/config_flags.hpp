@@ -339,7 +339,7 @@ inline constexpr FieldFlag kDatasetConfigFlags[] = {
      "The value each species carries into every\nencoding (presence_absence: 1.0)"},
     {"normalization", nullptr, "Abundance normalization of the hash weights"},
     {"aggregation", nullptr,
-     "How the fixed genus/family slots rank a plot's\ntaxa: by summed abundance or by species held"},
+     "How a plot's taxa are weighed: the fixed genus/family\nslots rank them by summed abundance or by species\nheld; rank_pool / transformer pool them by species\nweight or once per species"},
     {"track_unknown_fraction", "--unknown-fraction", "The unknown-species-fraction feature"},
     {"track_unknown_count", "--unknown-count", "The unknown-species-count feature"},
     {"use_taxonomy", "--taxonomy", "Read the genus/family columns when present"},
