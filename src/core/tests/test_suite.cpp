@@ -626,14 +626,15 @@ TEST_CASE("a manifest with an unknown member or a newer format is refused",
 
 TEST_CASE("species recognition counts distinct names and recognised abundance",
           "[suite][recognition]") {
-    const auto vocab = SpeciesVocab::from_map({{"sp_a", 1}, {"sp_b", 2}});
+    const auto vocab = SpeciesVocab::from_ordered({"<UNK>", "sp_a", "sp_b"});
     const std::vector<SpeciesRecord> records = {
         {"sp_a", "", "", 2.0f, "p1"}, {"sp_a", "", "", 1.0f, "p1"},  // two layers, one species
         {"sp_x", "", "", 1.0f, "p1"},
         {"sp_b", "", "", 4.0f, "p2"},
         {"sp_y", "", "", 0.0f, "p4"},
     };
-    const auto r = compute_species_recognition(records, {"p1", "p2", "p3", "p4"}, vocab);
+    const auto r = compute_species_recognition(
+        PlotAssemblages::build(records, {"p1", "p2", "p3", "p4"}), vocab);
     REQUIRE(r.n_species[0].item<float>() == 2.0f);
     REQUIRE(r.n_recognised[0].item<float>() == 1.0f);
     REQUIRE_THAT(r.count_share[0].item<double>(), WithinAbs(0.5, 1e-6));
@@ -649,7 +650,8 @@ TEST_CASE("species recognition counts distinct names and recognised abundance",
     REQUIRE(std::isnan(r.abundance_share[3].item<float>()));
 
     // The abundance share is the complement of the model's unknown fraction.
-    const auto u = compute_unknown_species_stats(records, {"p1", "p2"}, vocab);
+    const auto u = compute_unknown_species_stats(PlotAssemblages::build(records, {"p1", "p2"}),
+                                                 vocab);
     REQUIRE_THAT(u.fraction[0].item<double>(), WithinAbs(1.0 - 0.75, 1e-6));
 }
 

@@ -12,8 +12,8 @@
 //
 //   The definition (compute_unknown_species_stats, species_encoding.hpp):
 //     fraction[p] = unknown abundance in p / total abundance in p
-//     count[p]    = number of records in p naming an unknown species
-//   over the plot's FULL record list, before top-k selection or a pool cap.
+//     count[p]    = number of unknown species in p
+//   over the plot's full assemblage, before top-k selection or a pool cap.
 //
 // Part 2 -- LossConfigMode::NCA
 //
@@ -62,7 +62,7 @@ namespace {
 //     expected count    = k
 //     expected fraction = k / (4 + k)     -> 0, 0.2, 1/3
 //
-// The abundance-weighted fraction and the record count therefore disagree for
+// The abundance-weighted fraction and the species count therefore disagree for
 // every k > 0, which a test that only checked "non-zero" would not catch.
 
 struct SpeciesEntry {
@@ -311,13 +311,9 @@ TEST_CASE("The dataset columns match the standalone helper", "[dataset][unknown]
         }
     }
 
-    std::unordered_map<std::string, int64_t> id_map;
-    const auto& ordered = pair.train.species_vocab();
-    for (size_t i = 1; i < ordered.size(); ++i) {  // [0] is "<UNK>"
-        id_map.emplace(ordered[i], static_cast<int64_t>(i));
-    }
     const auto stats = compute_unknown_species_stats(
-        records, plot_ids, SpeciesVocab::from_map(id_map));
+        PlotAssemblages::build(records, plot_ids),
+        SpeciesVocab::from_ordered(pair.train.species_vocab()));
 
     const auto dataset_fraction = to_vector(pair.score.unknown_fraction());
     const auto helper_fraction = to_vector(stats.fraction);
@@ -330,7 +326,7 @@ TEST_CASE("The dataset columns match the standalone helper", "[dataset][unknown]
     }
 }
 
-TEST_CASE("The standalone encoders carry the same statistics",
+TEST_CASE("An encoder's adopted vocabulary reports the same novelty",
           "[species_encoders][unknown]") {
     std::vector<SpeciesRecord> train_records;
     for (int i = 0; i < 6; ++i) {
@@ -361,46 +357,45 @@ TEST_CASE("The standalone encoders carry the same statistics",
         }
     }
 
-    SECTION("rank pool") {
-        RankPoolEncoder encoder(PoolWeighting::Log1p, /*min_frequency=*/1);
-        encoder.fit(train_records);
-        auto trained_vocab = encoder.species_vocab();
-        auto trained_taxonomy = encoder.taxonomy_vocab();
-
-        RankPoolEncoder scorer(PoolWeighting::Log1p, /*min_frequency=*/1);
-        scorer.fit(score_records);
-        scorer.set_vocabs(trained_vocab, trained_taxonomy);
-
-        auto encoded = scorer.transform(score_records, score_plots);
-        const auto fraction = to_vector(encoded.unknown_fraction);
-        const auto count = to_vector(encoded.unknown_count);
+    const auto scored = PlotAssemblages::build(score_records, score_plots);
+    const auto require_expected_novelty = [&](const SpeciesVocab& vocab) {
+        const auto stats = compute_unknown_species_stats(scored, vocab);
+        const auto fraction = to_vector(stats.fraction);
+        const auto count = to_vector(stats.count);
         for (int i = 0; i < kScorePlots; ++i) {
             REQUIRE_THAT(fraction[static_cast<size_t>(i)],
                          WithinAbs(static_cast<float>(expected_fraction(i)), 1e-6f));
             REQUIRE_THAT(count[static_cast<size_t>(i)],
                          WithinAbs(static_cast<float>(novel_count(i)), 1e-6f));
+        }
+    };
+
+    SECTION("rank pool") {
+        RankPoolEncoder encoder(PoolWeighting::Log1p, /*min_frequency=*/1);
+        encoder.fit(train_records);
+        RankPoolEncoder scorer(PoolWeighting::Log1p, /*min_frequency=*/1);
+        scorer.set_vocab(encoder.vocab());
+        require_expected_novelty(scorer.species_vocab());
+
+        // A novel species occupies a slot under the unknown code 0.
+        auto encoded = scorer.transform(scored);
+        auto ids = encoded.species_ids.accessor<int64_t, 2>();
+        auto mask = encoded.mask.accessor<bool, 2>();
+        for (int i = 0; i < kScorePlots; ++i) {
+            int unknown_slots = 0;
+            for (int64_t j = 0; j < encoded.species_ids.size(1); ++j) {
+                if (mask[i][j] && ids[i][j] == 0) ++unknown_slots;
+            }
+            REQUIRE(unknown_slots == novel_count(i));
         }
     }
 
     SECTION("embedding") {
         EmbeddingEncoder encoder(/*top_k_species=*/3, /*top_k_taxonomy=*/2);
         encoder.fit(train_records);
-        auto trained_vocab = encoder.species_vocab();
-        auto trained_taxonomy = encoder.taxonomy_vocab();
-
         EmbeddingEncoder scorer(/*top_k_species=*/3, /*top_k_taxonomy=*/2);
-        scorer.fit(score_records);
-        scorer.set_vocabs(trained_vocab, trained_taxonomy);
-
-        auto encoded = scorer.transform(score_records, score_plots);
-        const auto fraction = to_vector(encoded.unknown_fraction);
-        const auto count = to_vector(encoded.unknown_count);
-        for (int i = 0; i < kScorePlots; ++i) {
-            REQUIRE_THAT(fraction[static_cast<size_t>(i)],
-                         WithinAbs(static_cast<float>(expected_fraction(i)), 1e-6f));
-            REQUIRE_THAT(count[static_cast<size_t>(i)],
-                         WithinAbs(static_cast<float>(novel_count(i)), 1e-6f));
-        }
+        scorer.set_vocab(encoder.vocab());
+        require_expected_novelty(scorer.species_vocab());
     }
 }
 

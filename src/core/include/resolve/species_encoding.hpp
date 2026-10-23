@@ -3,182 +3,207 @@
 #include "resolve/hash_core.hpp"
 #include "resolve/types.hpp"
 #include <torch/torch.h>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <unordered_map>
-#include <utility>
 
 namespace resolve {
 
-// Per-byte string mixer producing a 32-bit feature-hash seed. Not MurmurHash2/3
-// (that name is reserved for the genuine 64->32 finalizer applied downstream);
-// this is an ad-hoc multiply-xor mixer whose only contract is determinism +
-// cross-platform stability (see the unsigned-char cast in the impl).
-uint32_t feature_hash(const std::string& key, uint32_t seed = 0);
+// =============================================================================
+// PlotAssemblages: the species records every encoding reads
+// =============================================================================
 
-// Feature-hash slot of a species name: hash_bucket_sign (hash_core.hpp) of the
-// key feature_hash(species, 0). The CUDA hash path stores the same key per
-// record and its kernel calls the same hash_bucket_sign.
-HashBucketSign feature_hash_bucket_sign(const std::string& species, int hash_dim);
+// The species records of a set of plots, grouped by plot and merged so that a
+// plot lists each species once. Every species encoding, the vocabulary fit,
+// the unknown-species statistics and the recognition report read this one
+// view, so they all agree on what a plot contains.
+//
+// Records of one species in one plot (an archive records a species once per
+// vegetation layer) become one entry, placed where the species' first record
+// in the plot stood:
+//
+//   abundance  the sum of the records' abundances, the species' total cover
+//              across layers;
+//   genus,     the lexicographically smallest genus and family any record of
+//   family     the species names, over all plots. Every entry of a species
+//              therefore carries the same taxonomy, whatever order the rows
+//              arrive in.
+//
+// Representation then sets the value each entry carries into the encodings:
+// the summed abundance under RepresentationMode::Abundance, 1.0 under
+// PresenceAbsence. The summed abundance stays available as the plot's ranking,
+// which is what the species selection orders by in either mode, so
+// presence/absence with Top still keeps the dominant species.
+class PlotAssemblages {
+public:
+    PlotAssemblages() = default;
+
+    // Plots in the order of `plot_ids`. A record naming a plot outside
+    // `plot_ids` is dropped; a plot without records holds no entries.
+    static PlotAssemblages build(std::vector<SpeciesRecord> records,
+                                 const std::vector<std::string>& plot_ids,
+                                 RepresentationMode representation = RepresentationMode::Abundance);
+
+    // Plots in the order their first record appears.
+    static PlotAssemblages build(std::vector<SpeciesRecord> records,
+                                 RepresentationMode representation = RepresentationMode::Abundance);
+
+    [[nodiscard]] int64_t n_plots() const noexcept {
+        return static_cast<int64_t>(plot_ids_.size());
+    }
+    [[nodiscard]] const std::vector<std::string>& plot_ids() const noexcept { return plot_ids_; }
+    // Every entry, plot after plot.
+    [[nodiscard]] const std::vector<SpeciesRecord>& entries() const noexcept { return entries_; }
+    // The entries of plot `p`; each carries its plot's ID.
+    [[nodiscard]] std::span<const SpeciesRecord> plot(int64_t p) const;
+    // The summed recorded abundances of plot `p`'s entries, parallel to plot(p).
+    [[nodiscard]] std::span<const float> ranking(int64_t p) const;
+    [[nodiscard]] RepresentationMode representation() const noexcept { return representation_; }
+
+private:
+    std::vector<std::string> plot_ids_;
+    std::vector<int64_t> offsets_{0};  // plot p owns entries [offsets_[p], offsets_[p + 1])
+    std::vector<SpeciesRecord> entries_;
+    std::vector<float> ranking_;
+    RepresentationMode representation_ = RepresentationMode::Abundance;
+};
+
+// =============================================================================
+// Species selection
+// =============================================================================
+
+// Indices into plot(p) that `mode` keeps, in the order the selection ranks
+// them: idx[0] is the most abundant under Top and the least abundant under
+// Bottom; TopBottom lists the top k, most abundant first, then the bottom k,
+// least abundant first, skipping any species already taken. Abundance ties
+// break by species name, so the order is independent of row order. A plot is
+// ranked whatever its size and truncated only when it holds more than k
+// species. All returns every index in plot order and ignores k.
+std::vector<size_t> selection_indices(const PlotAssemblages& assemblages, int64_t p,
+                                      SelectionMode mode, int k);
+
+// Indices a per-plot species BUDGET keeps, in plot order. `budget <= 0` and
+// SelectionMode::All both mean "no budget" and return every index. For the
+// variable-width encodings (rank_pool, transformer, sparse); hash and embed
+// carry their budget in their width and rank with selection_indices.
+std::vector<size_t> species_budget_indices(const PlotAssemblages& assemblages, int64_t p,
+                                           SelectionMode mode, int budget);
+
+// The values the `selected` entries of plot(p) carry, then normalized: Norm
+// divides by their sum, Log1p takes log(1 + value), Raw leaves them.
+std::vector<float> normalized_values(const PlotAssemblages& assemblages, int64_t p,
+                                     const std::vector<size_t>& selected,
+                                     NormalizationMode mode);
+
+// Adds `weight` at the feature-hash slot of `species` in the hash_dim-wide
+// `embedding` row.
+void accumulate_feature_hash(std::string_view species, float weight, float* embedding,
+                             int hash_dim);
 
 // Integer percentile matching numpy's `int(np.percentile(values, q,
 // interpolation="linear"))`: linear interpolation between the two bracketing
 // order statistics, then truncation toward zero. `values` is partially sorted
 // in place (nth_element); empty input returns 0. q is a percentage in [0, 100].
-// Used by RankPoolEncoder::transform for the auto (p99) species cap, where the
-// previous floor-rank index (no interpolation) over-truncated skewed per-plot
-// length distributions relative to numpy's int(np.percentile(...)).
 int64_t percentile_linear_trunc(std::vector<int64_t>& values, double q);
 
-// Top-k distinct names by descending aggregated abundance, ties broken by name
-// ascending (deterministic; the previous ad-hoc sorts relied on unordered_map
-// iteration order for ties). Single source for embed-mode taxonomy slot
-// selection, shared by the dataset loader (encode_species) and EmbeddingEncoder
-// so both produce identical genus/family slots.
-std::vector<std::string> topk_by_abundance(
-    const std::unordered_map<std::string, float>& name_to_abundance, int k);
-
-// Feature hashing for species
-void hash_species(
-    const std::vector<std::pair<std::string, float>>& species_abundances,
-    float* embedding,
-    int hash_dim
-);
-
-// Select top-k species by abundance
-std::vector<std::pair<std::string, float>> select_top_k(
-    std::vector<std::pair<std::string, float>> species,
-    int k
-);
-
-// Select bottom-k species by abundance
-std::vector<std::pair<std::string, float>> select_bottom_k(
-    std::vector<std::pair<std::string, float>> species,
-    int k
-);
-
-// Apply selection mode to species list
-std::vector<std::pair<std::string, float>> apply_selection(
-    std::vector<std::pair<std::string, float>> species,
-    SelectionMode mode,
-    int k
-);
-
-// Indices into `species` that `mode` keeps, in the order the selection ranks
-// them (idx[0] is the most abundant under Top, the least under Bottom, and the
-// top half precedes the bottom half under TopBottom). All returns every index
-// in original order and ignores k. This is the single definition of the
-// selection rule; apply_selection gathers from it, so the pair-returning and
-// index-returning forms cannot drift.
-std::vector<size_t> selection_indices(
-    const std::vector<std::pair<std::string, float>>& species,
-    SelectionMode mode,
-    int k
-);
-
-// Indices a per-plot species BUDGET keeps, in ascending original (CSV row)
-// order. `budget <= 0` means "no budget": every index is returned whatever
-// `mode` says, which is what the rank-pool / transformer / sparse encodings did
-// before DatasetConfig::species_budget existed. SelectionMode::All also returns
-// everything, since it names no rule for picking a subset.
-//
-// The encodings with a fixed per-plot width (hash's top_k, embed's
-// top_k_species) carry their own budget and use apply_selection directly; this
-// is for the variable-width ones, which encode whatever the plot holds until a
-// budget says otherwise (issue #113).
-std::vector<size_t> species_budget_indices(
-    const std::vector<std::pair<std::string, float>>& species,
-    SelectionMode mode,
-    int budget
-);
-
-// Apply normalization to abundance values
-void apply_normalization(
-    std::vector<std::pair<std::string, float>>& species,
-    NormalizationMode mode
-);
-
 // =============================================================================
-// SpeciesVocab — maps species names to integer IDs (1-indexed, 0 = unknown)
+// SpeciesVocab: species name -> integer code, 0 = unknown
 // =============================================================================
 
 class SpeciesVocab {
 public:
-    SpeciesVocab() = default;
+    // An empty vocabulary: only the reserved "<UNK>" code 0.
+    SpeciesVocab();
 
-    // Build from species records, filtering by min_count
-    static SpeciesVocab from_records(
-        const std::vector<SpeciesRecord>& records, int min_count = 1);
+    // The vocabulary policy of the engine: species recorded in at least
+    // `min_count` plots, by descending plot count, ties by name, coded 1..K.
+    static SpeciesVocab fit(const PlotAssemblages& assemblages, int min_count = 1);
 
-    // Build from a pre-fit string->id map (1-indexed; UNK at code 0 is
-    // implicit). Used when reusing a training-set vocab on a held-out test
-    // set (see RankPoolEncoder::set_vocabs and ResolveDataset::from_csv_with_schema).
-    static SpeciesVocab from_map(std::unordered_map<std::string, int64_t> species_to_id);
+    // fit() over records grouped by their own plot IDs.
+    static SpeciesVocab from_records(const std::vector<SpeciesRecord>& records,
+                                     int min_count = 1);
+
+    // A vocabulary fitted elsewhere, as its ordered names: names[c] encodes to
+    // c, and names[0] is the reserved "<UNK>".
+    static SpeciesVocab from_ordered(std::vector<std::string> names);
 
     [[nodiscard]] int64_t encode(const std::string& species) const;
-    [[nodiscard]] int64_t size() const noexcept { return static_cast<int64_t>(species_to_id_.size()) + 1; }
-    [[nodiscard]] bool empty() const noexcept { return species_to_id_.empty(); }
-    [[nodiscard]] const std::unordered_map<std::string, int64_t>& species_to_id() const noexcept { return species_to_id_; }
+    // Number of codes, "<UNK>" included.
+    [[nodiscard]] int64_t size() const noexcept { return static_cast<int64_t>(names_.size()); }
+    // True when the vocabulary holds no species besides "<UNK>".
+    [[nodiscard]] bool empty() const noexcept { return names_.size() <= 1; }
+    [[nodiscard]] const std::vector<std::string>& names() const noexcept { return names_; }
+    // Name -> code of every species, "<UNK>" excluded.
+    [[nodiscard]] const std::unordered_map<std::string, int64_t>& species_to_id() const noexcept {
+        return species_to_id_;
+    }
 
 private:
-    std::unordered_map<std::string, int64_t> species_to_id_;  // 1-indexed, 0=unknown
+    explicit SpeciesVocab(std::vector<std::string> names);
+
+    std::vector<std::string> names_;
+    std::unordered_map<std::string, int64_t> species_to_id_;
+};
+
+// The species and taxonomy vocabularies an encoding codes a plot with. Fitted
+// once per dataset and handed to every encoder, or adopted from a checkpoint.
+struct EncodingVocab {
+    SpeciesVocab species;
+    TaxonomyVocab taxonomy;
+
+    // SpeciesVocab::fit, plus the taxonomy vocabulary of the entries' genus and
+    // family names when `with_taxonomy` is set (an empty one otherwise).
+    static EncodingVocab fit(const PlotAssemblages& assemblages, int min_count = 1,
+                             bool with_taxonomy = true);
+
+    // Whether the taxonomy holds a genus or a family besides "<UNK>". A
+    // family-only dataset has taxonomy.
+    [[nodiscard]] bool has_taxonomy() const noexcept {
+        return taxonomy.n_genera() > 1 || taxonomy.n_families() > 1;
+    }
 };
 
 // =============================================================================
-// Unknown-species (novelty) statistics
+// Unknown-species statistics and recognition
 // =============================================================================
 
-// Per-plot novelty of an assemblage, measured against a fitted vocabulary.
-// A record whose species name is absent from `vocab` encodes to the reserved
-// UNK code 0 and counts as unknown:
+// Per-plot novelty of an assemblage, measured against a vocabulary. An entry
+// whose species the vocabulary lacks encodes to the reserved UNK code 0 and is
+// unknown:
 //
-//   fraction[p] = sum(abundance of p's unknown records) / sum(abundance in p)
-//   count[p]    = number of unknown records in p
+//   fraction[p] = sum(value of p's unknown entries) / sum(value of p's entries)
+//   count[p]    = number of unknown species in p
 //
-// Both are over the plot's FULL record list, before any top-k selection or
-// pool-cap truncation, so the value describes the assemblage rather than the
-// slice a particular encoder consumed.
+// "value" is the entry's abundance, or 1 under presence/absence, so the
+// fraction is the unknown share of what the encodings read. Both describe the
+// plot's full assemblage, before any selection or species cap. A plot with no
+// entries, or whose values sum to <= 0, reports 0 for both.
+//
+// Non-zero only where the vocabulary was fitted on other data: the
+// vocab-reusing loaders (ResolveDataset::from_*_with_schema / _with_vocabs) and
+// encoders fitted on one split and applied to another.
 struct UnknownSpeciesStats {
     torch::Tensor fraction;  // (n_plots,) float32, in [0, 1]
     torch::Tensor count;     // (n_plots,) float32, whole numbers
 };
 
-// Compute the per-plot unknown fraction and count. Results are aligned to
-// `plot_ids` by SpeciesRecord::plot_id; a record naming a plot outside
-// `plot_ids` is ignored, and a plot with no records (or whose abundances sum to
-// <= 0) reports 0 for both. Abundances accumulate in double so a long
-// species list does not lose the tail of the sum before the division.
-//
-// This is the single definition of "unknown species" in the engine, shared by
-// RankPoolEncoder::transform, EmbeddingEncoder::transform and
-// ResolveDataset::encode_species, so the dataset's unknown-mass feature columns
-// and the standalone encoders' cannot drift apart.
-//
-// The measurement is only non-zero when `vocab` was fitted on OTHER data: a
-// vocabulary fitted on the same records covers every name in them by
-// construction. The live cases are the vocab-reusing loaders
-// (ResolveDataset::from_*_with_schema / _with_vocabs, which adopt a training
-// checkpoint's vocabulary) and any caller that fits an encoder on one split and
-// transforms another.
-UnknownSpeciesStats compute_unknown_species_stats(
-    const std::vector<SpeciesRecord>& records,
-    const std::vector<std::string>& plot_ids,
-    const SpeciesVocab& vocab);
+UnknownSpeciesStats compute_unknown_species_stats(const PlotAssemblages& assemblages,
+                                                  const SpeciesVocab& vocab);
 
-// How much of each plot's assemblage a vocabulary recognises, for reporting
-// alongside a prediction (it is not a model input). Measured over the plot's
-// full record list, with the same notion of "unknown" as
+// How much of each plot's assemblage a vocabulary recognises, reported beside
+// a prediction (not a model input). Same notion of "unknown" as
 // compute_unknown_species_stats:
 //
-//   n_species[p]       = distinct species names p records (a name recorded in
-//                        several layers counts once)
+//   n_species[p]       = species p records
 //   n_recognised[p]    = how many of those the vocabulary holds
 //   count_share[p]     = n_recognised / n_species;       NaN when p has none
-//   abundance_share[p] = recognised abundance / total;   NaN when the total
+//   abundance_share[p] = recognised value / total value; NaN when the total
 //                        is <= 0, which is 1 - UnknownSpeciesStats::fraction
 //                        wherever that is defined
 //
-// All four are (n_plots,) float32 aligned to `plot_ids`.
+// All four are (n_plots,) float32.
 struct SpeciesRecognition {
     torch::Tensor n_species;
     torch::Tensor n_recognised;
@@ -186,185 +211,170 @@ struct SpeciesRecognition {
     torch::Tensor abundance_share;
 };
 
-SpeciesRecognition compute_species_recognition(
-    const std::vector<SpeciesRecord>& records,
-    const std::vector<std::string>& plot_ids,
-    const SpeciesVocab& vocab);
+SpeciesRecognition compute_species_recognition(const PlotAssemblages& assemblages,
+                                               const SpeciesVocab& vocab);
 
 // =============================================================================
-// The taxonomy of a species vocabulary
+// Taxonomy
 // =============================================================================
 
-// Which genus and family each species belongs to. A species carrying
-// inconsistent taxonomy across rows resolves to the lexicographically smallest
-// name, so the relation is independent of CSV row order -- the same rule the
-// encoders' own species-to-genus maps follow, and the single definition of it.
-void build_species_taxon_maps(
-    const std::vector<SpeciesRecord>& records,
-    std::unordered_map<std::string, std::string>& species_to_genus,
-    std::unordered_map<std::string, std::string>& species_to_family);
-
-// The same relation resolved to codes: `genus[c]` is the taxonomy-vocab genus
-// of the species whose species code is `c`, and 0 (<UNK>) where the records
-// name none. Both vectors are as long as `species_vocab`, whose index 0 is the
-// reserved <UNK> species and always resolves to 0.
+// The taxonomy of a species vocabulary: `genus[c]` is the taxonomy-vocab genus
+// of the species coded c, 0 (<UNK>) where no entry names one. Both vectors are
+// as long as the species vocabulary; code 0 resolves to 0.
 struct SpeciesTaxonomy {
-    std::vector<int64_t> genus;   // size = species_vocab.size()
-    std::vector<int64_t> family;  // size = species_vocab.size()
+    std::vector<int64_t> genus;
+    std::vector<int64_t> family;
 };
 
-SpeciesTaxonomy resolve_species_taxonomy(
-    const std::vector<SpeciesRecord>& records,
-    const std::vector<std::string>& species_vocab,
-    const TaxonomyVocab& taxonomy_vocab);
+SpeciesTaxonomy resolve_species_taxonomy(const PlotAssemblages& assemblages,
+                                         const SpeciesVocab& species_vocab,
+                                         const TaxonomyVocab& taxonomy_vocab);
+
+// The fixed genus and family slots of every plot: the plot's distinct genera
+// (families) ranked by `aggregation` and coded through `taxonomy`, the first
+// `n_slots` of them, 0 past the end. AggregationMode::Abundance ranks a genus
+// by the summed value of its species in the plot, Count by how many of the
+// plot's species belong to it; ties break by name. The one taxonomy block of
+// the fixed-width encodings (hash, sparse, embed).
+struct TaxonomySlots {
+    torch::Tensor genus_ids;   // (n_plots, n_slots) int64
+    torch::Tensor family_ids;  // (n_plots, n_slots) int64
+};
+
+TaxonomySlots encode_taxonomy_slots(const PlotAssemblages& assemblages,
+                                    const TaxonomyVocab& taxonomy,
+                                    AggregationMode aggregation,
+                                    int n_slots);
 
 // =============================================================================
-// RankPoolEncoder — variable-length species lists with weighted pooling
+// Encoders over a shared vocabulary
+// =============================================================================
+
+// The vocabulary half the rank-pool and embedding encoders share: fit or adopt
+// an EncodingVocab, report its sizes.
+class SpeciesVocabEncoder {
+public:
+    // Fit the vocabulary on records grouped by their own plot IDs.
+    void fit(const std::vector<SpeciesRecord>& records);
+    void fit(const PlotAssemblages& assemblages);
+    // Adopt a vocabulary fitted elsewhere (a training split, a checkpoint).
+    void set_vocab(EncodingVocab vocab);
+
+    [[nodiscard]] bool is_fitted() const noexcept { return fitted_; }
+    [[nodiscard]] const EncodingVocab& vocab() const noexcept { return vocab_; }
+    [[nodiscard]] const SpeciesVocab& species_vocab() const noexcept { return vocab_.species; }
+    [[nodiscard]] const TaxonomyVocab& taxonomy_vocab() const noexcept { return vocab_.taxonomy; }
+    [[nodiscard]] int64_t n_species_vocab() const noexcept { return vocab_.species.size(); }
+    [[nodiscard]] int64_t n_genera() const noexcept { return vocab_.taxonomy.n_genera(); }
+    [[nodiscard]] int64_t n_families() const noexcept { return vocab_.taxonomy.n_families(); }
+
+protected:
+    explicit SpeciesVocabEncoder(int min_frequency) : min_frequency_(min_frequency) {}
+    void require_vocab(const char* encoder) const;
+
+    EncodingVocab vocab_;
+    int min_frequency_;
+    bool fitted_ = false;
+};
+
+// =============================================================================
+// RankPoolEncoder: every species of a plot, weighted, padded
 // =============================================================================
 
 struct RankPoolEncodedData {
-    torch::Tensor species_ids;       // (n_plots, max_species) int64
-    torch::Tensor genus_ids;         // (n_plots, max_species) int64
-    torch::Tensor family_ids;        // (n_plots, max_species) int64
-    torch::Tensor weights;           // (n_plots, max_species) float32
-    torch::Tensor mask;              // (n_plots, max_species) bool
-    torch::Tensor has_cover;         // (n_plots,) float32
-    torch::Tensor unknown_fraction;  // (n_plots,) float32
-    torch::Tensor unknown_count;     // (n_plots,) float32
-    int64_t n_species_vocab = 0;
-    int64_t n_genera_vocab = 0;
-    int64_t n_families_vocab = 0;
+    torch::Tensor species_ids;  // (n_plots, max_species) int64
+    torch::Tensor genus_ids;    // (n_plots, max_species) int64
+    torch::Tensor family_ids;   // (n_plots, max_species) int64
+    torch::Tensor weights;      // (n_plots, max_species) float32
+    torch::Tensor mask;         // (n_plots, max_species) bool
+    torch::Tensor has_cover;    // (n_plots,) float32
 };
 
 enum class PoolWeighting { Binary, Abundance, Log1p, Norm, Rank };
 
-class RankPoolEncoder {
+class RankPoolEncoder : public SpeciesVocabEncoder {
 public:
     // `selection` + `species_budget` are the per-plot species budget
-    // (DatasetConfig::selection / species_budget, issue #113): each plot's
-    // record list is narrowed to `species_budget` species at the requested end
-    // of the abundance ranking BEFORE weights, taxonomy IDs and the padded
-    // width are computed, so a top-versus-bottom ablation changes what the
-    // pool actually sees. The defaults (All / 0) are "no budget": every record
-    // the plot holds is encoded, which is what this encoder always did.
-    //
-    // Selection narrows; the species cap passed to transform() then slices what
-    // survives, in CSV row order, as it documents. fit() is unaffected -- the
-    // vocabulary is fitted over every record it is given, so the integer codes
-    // are identical across selection settings and an ablation's arms stay
-    // comparable.
+    // (DatasetConfig::selection / species_budget): each plot is narrowed to
+    // `species_budget` species at the requested end of the abundance ranking
+    // before weights, taxonomy IDs and the padded width are computed. The
+    // defaults (All / 0) encode every species. The species cap passed to
+    // transform() then slices what survives, in plot order.
     explicit RankPoolEncoder(PoolWeighting weighting = PoolWeighting::Log1p,
                              int min_frequency = 1,
                              SelectionMode selection = SelectionMode::All,
                              int species_budget = 0);
 
-    void fit(const std::vector<SpeciesRecord>& records);
-
-    // species_cap mirrors DatasetConfig::pool_species_cap exactly:
-    //   0  -> no cap (default; pad to global per-plot max).
+    // species_cap mirrors DatasetConfig::pool_species_cap:
+    //   0  -> no cap (pad to the widest plot).
     //   -x -> the (100 - x)th percentile of per-plot species counts, x in
     //         1..99 (-1 = p99, -5 = p95); -100 or below throws.
-    //   >0 -> manual cap; per-plot lists are truncated to the first `cap`
-    //         records in original CSV order.
-    // When the cap kicks in we print a one-line summary so users see the
-    // drop ("rank_pool: capping species at p99=X (max=Y, saves Z% padding)").
-    // has_abundance_column follows RoleMapping::has_abundance: has_cover is
-    // 1 for every plot when an abundance/cover column was mapped, else 0. It is
-    // a column-presence flag, NOT inferred from values (a plot whose covers are
-    // all exactly 1.0 still has cover data), so pass whether the dataset mapped
-    // an abundance column rather than letting the encoder guess.
+    //   >0 -> manual cap; each plot keeps its first `cap` species in plot order.
+    // A cap that bites prints a one-line summary of the padding it saves.
+    //
+    // has_cover is 1 for every plot when an abundance column was mapped
+    // (RoleMapping::has_abundance) and the assemblages carry abundances, 0
+    // under presence/absence or without an abundance column: a column-presence
+    // flag, never inferred from the values.
+    [[nodiscard]] RankPoolEncodedData transform(const PlotAssemblages& assemblages,
+                                                int species_cap = 0,
+                                                bool has_abundance_column = false) const;
+
+    // transform() over `records` grouped in `plot_ids` order.
     [[nodiscard]] RankPoolEncodedData transform(
         const std::vector<SpeciesRecord>& records,
         const std::vector<std::string>& plot_ids,
         int species_cap = 0,
-        bool has_abundance_column = false) const;
+        bool has_abundance_column = false,
+        RepresentationMode representation = RepresentationMode::Abundance) const;
 
-    [[nodiscard]] bool is_fitted() const noexcept { return fitted_; }
-    [[nodiscard]] int64_t n_species_vocab() const noexcept { return species_vocab_.size(); }
-    [[nodiscard]] int64_t n_genera_vocab() const noexcept { return taxonomy_vocab_.n_genera(); }
-    [[nodiscard]] int64_t n_families_vocab() const noexcept { return taxonomy_vocab_.n_families(); }
-    [[nodiscard]] const SpeciesVocab& species_vocab() const noexcept { return species_vocab_; }
-    [[nodiscard]] const TaxonomyVocab& taxonomy_vocab() const noexcept { return taxonomy_vocab_; }
+    [[nodiscard]] PoolWeighting weighting() const noexcept { return weighting_; }
     [[nodiscard]] SelectionMode selection() const noexcept { return selection_; }
     [[nodiscard]] int species_budget() const noexcept { return species_budget_; }
 
-    // Replace the fitted species + taxonomy vocabs with externally-supplied
-    // ones. Requires fit() to have been called first (throws otherwise);
-    // leaves species_to_genus_/species_to_family_ as whatever fit() last set
-    // so transform() can still look up each species's genus/family string
-    // and resolve it through the supplied taxonomy_vocab. Used by
-    // ResolveDataset::from_csv_with_schema for cross-split evaluation.
-    // Does NOT toggle fitted_ — that flag tracks "fit() ran on real records"
-    // and must not be set by a vocab swap (an empty external vocab would
-    // otherwise leave the encoder silently fitted-with-nothing).
-    void set_vocabs(SpeciesVocab species_vocab, TaxonomyVocab taxonomy_vocab);
-
 private:
-    SpeciesVocab species_vocab_;
-    TaxonomyVocab taxonomy_vocab_;
-    std::unordered_map<std::string, std::string> species_to_genus_;
-    std::unordered_map<std::string, std::string> species_to_family_;
     PoolWeighting weighting_;
-    int min_frequency_;
     SelectionMode selection_;
     int species_budget_;
-    bool fitted_ = false;
 };
 
 // =============================================================================
-// EmbeddingEncoder — fixed-size top-k species/taxonomy ID encoding
+// EmbeddingEncoder: fixed ranked species slots plus fixed taxonomy slots
 // =============================================================================
 
 struct EmbeddingEncodedData {
-    torch::Tensor species_ids;       // (n_plots, top_k_species) int64
-    torch::Tensor genus_ids;         // (n_plots, top_k_taxonomy) int64
-    torch::Tensor family_ids;        // (n_plots, top_k_taxonomy) int64
-    torch::Tensor unknown_fraction;  // (n_plots,) float32
-    torch::Tensor unknown_count;     // (n_plots,) float32
-    int64_t n_species_vocab = 0;
-    int64_t n_genera_vocab = 0;
-    int64_t n_families_vocab = 0;
+    torch::Tensor species_ids;  // (n_plots, top_k_species) int64
+    torch::Tensor genus_ids;    // (n_plots, top_k_taxonomy) int64
+    torch::Tensor family_ids;   // (n_plots, top_k_taxonomy) int64
 };
 
-class EmbeddingEncoder {
+class EmbeddingEncoder : public SpeciesVocabEncoder {
 public:
-    // `selection` decides which species fill the top_k_species slots: the most
-    // abundant (Top), the least (Bottom), or ceil(k/2) from each end
-    // (TopBottom). SelectionMode::All has no fixed-width encoding and is
-    // rejected by transform() rather than silently treated as Top (issue #113).
-    explicit EmbeddingEncoder(
-        int top_k_species = 10, int top_k_taxonomy = 3,
-        SelectionMode selection = SelectionMode::Top);
+    // `selection` decides which species fill the top_k_species slots, in the
+    // order selection_indices ranks them: the most abundant first (Top), the
+    // least abundant first (Bottom), or ceil(k/2) from each end (TopBottom).
+    // SelectionMode::All has no fixed-width encoding and transform() rejects
+    // it. `aggregation` ranks the taxonomy slots (encode_taxonomy_slots).
+    explicit EmbeddingEncoder(int top_k_species = 10, int top_k_taxonomy = 3,
+                              SelectionMode selection = SelectionMode::Top,
+                              AggregationMode aggregation = AggregationMode::Abundance);
 
-    void fit(const std::vector<SpeciesRecord>& records);
+    [[nodiscard]] EmbeddingEncodedData transform(const PlotAssemblages& assemblages) const;
 
+    // transform() over `records` grouped in `plot_ids` order.
     [[nodiscard]] EmbeddingEncodedData transform(
         const std::vector<SpeciesRecord>& records,
-        const std::vector<std::string>& plot_ids) const;
+        const std::vector<std::string>& plot_ids,
+        RepresentationMode representation = RepresentationMode::Abundance) const;
 
-    // Swap the fitted species + taxonomy vocab for externally-supplied ones
-    // (the from_csv_with_schema inference path: fit() first so transform() can
-    // look up each species's genus/family string, then adopt the training-set
-    // vocabs). Mirrors RankPoolEncoder::set_vocabs; throws if called before fit().
-    void set_vocabs(SpeciesVocab species_vocab, TaxonomyVocab taxonomy_vocab);
-
-    [[nodiscard]] bool is_fitted() const noexcept { return fitted_; }
-    [[nodiscard]] const SpeciesVocab& species_vocab() const noexcept { return species_vocab_; }
-    [[nodiscard]] const TaxonomyVocab& taxonomy_vocab() const noexcept { return taxonomy_vocab_; }
-    [[nodiscard]] int64_t n_species_vocab() const noexcept { return species_vocab_.size(); }
-    [[nodiscard]] int64_t n_genera_vocab() const noexcept { return taxonomy_vocab_.n_genera(); }
-    [[nodiscard]] int64_t n_families_vocab() const noexcept { return taxonomy_vocab_.n_families(); }
     [[nodiscard]] SelectionMode selection() const noexcept { return selection_; }
+    [[nodiscard]] AggregationMode aggregation() const noexcept { return aggregation_; }
 
 private:
-    SpeciesVocab species_vocab_;
-    TaxonomyVocab taxonomy_vocab_;
-    std::unordered_map<std::string, std::string> species_to_genus_;
-    std::unordered_map<std::string, std::string> species_to_family_;
     int top_k_species_;
     int top_k_taxonomy_;
     SelectionMode selection_;
-    bool fitted_ = false;
+    AggregationMode aggregation_;
 };
 
 } // namespace resolve

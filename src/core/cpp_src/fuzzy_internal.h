@@ -6,9 +6,11 @@
 #include "resolve/fuzzy.hpp"
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace resolve::fuzzy::detail {
@@ -17,11 +19,19 @@ namespace resolve::fuzzy::detail {
 // Malformed sequences yield U+FFFD and resync.
 std::vector<uint32_t> utf8_to_codepoints(std::string_view s);
 
-// Lowercase a single code point (ASCII A-Z + Latin-1 uppercase C0-DE, excl. D7).
+// Lowercase a single code point: ASCII A-Z, Latin-1 uppercase C0-DE (except
+// the multiplication sign D7) and the Latin Extended-A block 0100-017F.
 uint32_t to_lower_cp(uint32_t cp);
 
 // Lowercase all code points in-place.
 void to_lower_inplace(std::vector<uint32_t>& cps);
+
+// Encode code points back to UTF-8.
+std::string codepoints_to_utf8(const std::vector<uint32_t>& cps);
+
+// A UTF-8 string with every code point lowercased by to_lower_cp: the one case
+// fold applied to entries, needles and bucket keys.
+std::string lower_utf8(std::string_view s);
 
 // Damerau-Levenshtein automaton driven by row-state DP.
 //
@@ -72,7 +82,12 @@ struct TrieNode {
     uint32_t c = 0;          // Code point on the edge into this node.
     int32_t first_child = -1;
     int32_t next_sibling = -1;
-    int32_t entry_id = -1;   // >= 0 if this node terminates an indexed entry.
+    // The entries this node terminates: entry_ids_[first_entry, first_entry +
+    // n_entries) of its trie. Several entries end at one node when they fold to
+    // the same key (case-insensitive "Quercus" and "quercus", or a repeated
+    // entry).
+    int32_t first_entry = -1;
+    int32_t n_entries = 0;
 };
 
 class Trie {
@@ -84,6 +99,12 @@ public:
     int root() const noexcept { return 0; }
     const TrieNode& node(int idx) const { return nodes_[idx]; }
     std::size_t node_count() const noexcept { return nodes_.size(); }
+    // The entry IDs `node` terminates, ascending.
+    std::span<const int32_t> entries(const TrieNode& node) const {
+        if (node.n_entries == 0) return {};
+        return std::span<const int32_t>(entry_ids_).subspan(
+            static_cast<std::size_t>(node.first_entry), static_cast<std::size_t>(node.n_entries));
+    }
 
 private:
     int find_or_create_child(int parent, uint32_t c);
@@ -92,6 +113,10 @@ private:
     // Build-time child maps: nodes_[i]'s children mapped by codepoint -> node index.
     // Cleared in finalize() to reclaim memory.
     std::vector<std::vector<std::pair<uint32_t, int32_t>>> child_lists_;
+    // Build-time (terminal node, entry ID) pairs, flattened into entry_ids_ by
+    // finalize().
+    std::vector<std::pair<int32_t, int32_t>> terminals_;
+    std::vector<int32_t> entry_ids_;
     bool finalized_ = false;
 };
 

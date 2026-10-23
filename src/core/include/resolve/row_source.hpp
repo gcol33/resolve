@@ -10,11 +10,9 @@ namespace resolve {
 
 // Abstract tabular row source consumed by the dataset loaders. Both CSVReader
 // (streaming a file from disk) and InMemoryRowSource (a column-oriented frame
-// held in RAM, e.g. a pandas DataFrame or an R data.frame) implement it, so the
-// loader bodies (load_header_data / load_species_data / from_species_source)
-// are a single source of truth across the on-disk and in-memory paths and a
-// dataset built from a frame is identical to one built from the equivalent CSV
-// (issue #22).
+// held in RAM, e.g. a pandas DataFrame or an R data.frame) implement it, so one
+// loader body serves the on-disk and in-memory paths and a dataset built from a
+// frame is identical to one built from the equivalent CSV.
 class RowSource {
 public:
     virtual ~RowSource() = default;
@@ -24,9 +22,6 @@ public:
 
     // Index of a named column, or -1 if absent.
     virtual int column_index(const std::string& name) const = 0;
-
-    // Number of data rows (excludes the header).
-    virtual size_t num_rows() const = 0;
 
     // Invoke cb(row_idx, fields) for each data row. fields holds one string per
     // column, in header order (matching CSVReader's row callback exactly).
@@ -97,8 +92,6 @@ public:
     int column_index(const std::string& name) const override {
         return table_.column_index(name);
     }
-
-    size_t num_rows() const override { return table_.num_rows(); }
 
     void read_rows(
         const std::function<void(size_t, const std::vector<std::string>&)>& cb) override {

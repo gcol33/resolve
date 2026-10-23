@@ -428,7 +428,7 @@ resolve.progress <- function(checkpointDir) {
 #' @param config Named list of dataset configuration options:
 #'   - species_encoding: "hash" (default), "embed", or "sparse"
 #'   - hash_dim: Hash dimension (default 32)
-#'   - top_k: Top-k genera/families (default 5)
+#'   - top_k: Species hashed per plot and fixed genus/family slots (default 3)
 #'   - top_k_species: Top-k species for embed mode (default 10)
 #'   - selection: "top", "bottom", "top_bottom", or "all" (default "top").
 #'     Which species of a plot survive its per-plot budget: `top_k` for the
@@ -440,8 +440,15 @@ resolve.progress <- function(checkpointDir) {
 #'     species a plot records is encoded and `selection` has nothing to narrow.
 #'     Set it to run a top-versus-bottom species ablation on the pooled
 #'     encoders.
-#'   - representation: "abundance" or "presence_absence" (default "abundance")
-#'   - normalization: "raw", "norm", or "log1p" (default "norm")
+#'   - representation: "abundance" or "presence_absence" (default
+#'     "abundance"). The value each species carries into every encoding:
+#'     its abundance, or 1 under "presence_absence" (a pooled dataset then
+#'     reports no cover). The selection still ranks by recorded abundance.
+#'   - aggregation: "abundance" or "count" (default "abundance"). How the
+#'     fixed genus/family slots of the hash, sparse and embed encodings rank a
+#'     plot's taxa: by the summed value of their species, or by how many of
+#'     the plot's species they hold. rank_pool and transformer reject "count".
+#'   - normalization: "raw", "norm", or "log1p" (default "raw")
 #'   - track_unknown_fraction: Track unknown species fraction (default TRUE)
 #'   - track_unknown_count: Track unknown species count (default FALSE)
 #'   - use_taxonomy: Use taxonomy embeddings (default TRUE if genus/family provided)

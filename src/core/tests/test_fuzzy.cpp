@@ -8,6 +8,7 @@
 //   - case_insensitive round-trip
 //   - damerau=true vs damerau=false distinguishes "abc" <-> "bac"
 //   - Recovery test: noisy queries recall the true target in top-5
+//   - Entries that fold to one key are all returned
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -544,4 +545,43 @@ TEST_CASE("Fuzzy case-insensitive match folds Latin Extended-A", "[fuzzy]") {
     REQUIRE(!matches.empty());
     REQUIRE(matches[0].distance == 0);
     REQUIRE(matches[0].entry == entries[0]);
+}
+
+TEST_CASE("FuzzyIndex returns every entry that folds to the matched key", "[fuzzy][duplicates]") {
+    const std::vector<std::string> entries = {"Quercus", "Fagus", "quercus", "Quercus"};
+
+    resolve::fuzzy::QueryOptions qopts;
+    qopts.max_edit_distance = 0;
+    qopts.top_n = 10;
+
+    SECTION("case-insensitive: the three spellings of Quercus") {
+        auto index = resolve::fuzzy::FuzzyIndex::build(entries);
+        auto matches = index.query("QUERCUS", qopts);
+        REQUIRE(matches.size() == 3);
+        std::vector<int> ids;
+        for (const auto& m : matches) {
+            REQUIRE(m.distance == 0);
+            REQUIRE(m.entry == entries[static_cast<std::size_t>(m.id)]);
+            ids.push_back(m.id);
+        }
+        REQUIRE(ids == std::vector<int>{0, 2, 3});
+    }
+
+    SECTION("case-sensitive: the exact repeats only") {
+        resolve::fuzzy::BuildOptions bopts;
+        bopts.case_insensitive = false;
+        auto index = resolve::fuzzy::FuzzyIndex::build(entries, bopts);
+        auto matches = index.query("Quercus", qopts);
+        REQUIRE(matches.size() == 2);
+        REQUIRE(matches[0].id == 0);
+        REQUIRE(matches[1].id == 3);
+    }
+
+    SECTION("bucketed tries keep the repeats too") {
+        resolve::fuzzy::BuildOptions bopts;
+        bopts.bucket_fn = [](std::string_view s) { return std::string(s.substr(0, 1)); };
+        auto index = resolve::fuzzy::FuzzyIndex::build(entries, bopts);
+        qopts.bucket_hint = "Q";
+        REQUIRE(index.query("quercus", qopts).size() == 3);
+    }
 }

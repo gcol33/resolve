@@ -147,6 +147,7 @@ try:
         TaxonomyVocab,
         CategoricalVocab,
         SpeciesVocab,
+        EncodingVocab,
         SpeciesRecord,
         RankPoolEncoder,
         RankPoolEncodedData,
@@ -154,7 +155,7 @@ try:
         EmbeddingEncodedData,
         UnknownSpeciesStats,
         compute_unknown_species_stats,
-        # Training-time vocabularies + checkpoint -> DatasetConfig (issue #102)
+        # Training-time vocabularies + checkpoint -> DatasetConfig
         ExternalVocabs,
         external_vocabs_from_schema,
         dataset_config_from_checkpoint,
@@ -358,6 +359,7 @@ __all__ = [
     "TaxonomyVocab",
     "CategoricalVocab",
     "SpeciesVocab",
+    "EncodingVocab",
     "SpeciesRecord",
     "RankPoolEncoder",
     "RankPoolEncodedData",
@@ -365,7 +367,7 @@ __all__ = [
     "EmbeddingEncodedData",
     "UnknownSpeciesStats",
     "compute_unknown_species_stats",
-    # Training-time vocabularies + checkpoint -> DatasetConfig (issue #102)
+    # Training-time vocabularies + checkpoint -> DatasetConfig
     "ExternalVocabs",
     "external_vocabs_from_schema",
     "dataset_config_from_checkpoint",

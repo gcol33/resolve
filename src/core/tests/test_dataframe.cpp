@@ -247,7 +247,6 @@ TEST_CASE("ColumnTable validates shape and names", "[dataset][dataframe]") {
 TEST_CASE("InMemoryRowSource yields rows in order", "[dataset][dataframe]") {
     auto tbl = to_table(kSpeciesNames, kSpeciesRows);
     InMemoryRowSource src(tbl);
-    REQUIRE(src.num_rows() == kSpeciesRows.size());
     REQUIRE(src.columns() == kSpeciesNames);
     REQUIRE(src.column_index("cover") == 2);
     REQUIRE(src.column_index("absent") == -1);

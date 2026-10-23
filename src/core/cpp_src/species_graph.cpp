@@ -130,10 +130,7 @@ EdgeList cooccurrence_pairs(const torch::Tensor& species_vector, int64_t k,
 
 SpeciesGraph build_species_graph(const ResolveDataset& dataset,
                                  const HeterogeneousGNNConfig& config) {
-    const auto& schema = dataset.schema();
-    const int64_t n_species = schema.n_species_vocab > 0
-                                  ? schema.n_species_vocab
-                                  : schema.n_species;
+    const int64_t n_species = dataset.schema().n_species_vocab;
     if (n_species <= 0) {
         throw std::runtime_error(
             "build_species_graph: the dataset carries no species vocabulary, so "

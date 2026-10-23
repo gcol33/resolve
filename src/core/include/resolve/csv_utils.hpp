@@ -33,27 +33,4 @@ inline std::optional<float> parse_float_strict(const std::string& s) {
     return v;
 }
 
-// Parse float safely with default value. Uses parse_float_strict, so failures
-// (empty, unparseable, trailing garbage) map to default_val instead of a
-// silently-truncated leading prefix.
-inline float safe_stof(const std::string& s, float default_val = 0.0f) {
-    auto v = parse_float_strict(s);
-    return v ? *v : default_val;
-}
-
-// Parse int safely with default value. Integer parsing is unaffected by
-// LC_NUMERIC (no decimal separator), but trailing garbage is rejected so a
-// value like "12abc" maps to default_val rather than 12.
-inline int safe_stoi(const std::string& s, int default_val = 0) {
-    if (s.empty()) return default_val;
-    try {
-        size_t pos = 0;
-        int v = std::stoi(s, &pos);
-        if (pos != s.size()) return default_val;  // trailing garbage
-        return v;
-    } catch (...) {
-        return default_val;
-    }
-}
-
 } // namespace resolve

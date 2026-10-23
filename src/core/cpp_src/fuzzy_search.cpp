@@ -90,10 +90,10 @@ void dfs_trie(const detail::Trie& trie,
 
     // Empty entry: the root itself terminates the empty string. Check it
     // against the initial row before descending.
-    if (root.entry_id >= 0) {
+    if (root.n_entries > 0) {
         int dist = 0;
         if (aut.accepts(rows[0], dist)) {
-            collector.offer(dist, root.entry_id);
+            for (int32_t id : trie.entries(root)) collector.offer(dist, id);
         }
     }
 
@@ -131,10 +131,10 @@ void dfs_trie(const detail::Trie& trie,
                               rows[static_cast<std::size_t>(f.depth)]);
         chars[static_cast<std::size_t>(f.depth)] = tn.c;
 
-        if (alive && tn.entry_id >= 0) {
+        if (alive && tn.n_entries > 0) {
             int dist = 0;
             if (aut.accepts(rows[static_cast<std::size_t>(f.depth)], dist)) {
-                collector.offer(dist, tn.entry_id);
+                for (int32_t id : trie.entries(tn)) collector.offer(dist, id);
             }
         }
 
@@ -149,32 +149,6 @@ void dfs_trie(const detail::Trie& trie,
             stack.push_back({tn.first_child, f.depth + 1});
         }
     }
-}
-
-// Lowercase a UTF-8 string and produce its codepoint sequence.
-std::string lower_to_utf8(std::string_view s) {
-    auto cps = detail::utf8_to_codepoints(s);
-    detail::to_lower_inplace(cps);
-    std::string out;
-    out.reserve(s.size());
-    for (uint32_t cp : cps) {
-        if (cp < 0x80u) {
-            out.push_back(static_cast<char>(cp));
-        } else if (cp < 0x800u) {
-            out.push_back(static_cast<char>(0xC0u | (cp >> 6)));
-            out.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
-        } else if (cp < 0x10000u) {
-            out.push_back(static_cast<char>(0xE0u | (cp >> 12)));
-            out.push_back(static_cast<char>(0x80u | ((cp >> 6) & 0x3Fu)));
-            out.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
-        } else {
-            out.push_back(static_cast<char>(0xF0u | (cp >> 18)));
-            out.push_back(static_cast<char>(0x80u | ((cp >> 12) & 0x3Fu)));
-            out.push_back(static_cast<char>(0x80u | ((cp >> 6) & 0x3Fu)));
-            out.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
-        }
-    }
-    return out;
 }
 
 } // namespace
@@ -211,7 +185,7 @@ std::vector<Match> FuzzyIndex::query(std::string_view needle, QueryOptions opts)
     // the misspelled-genus case.
     if (opts.bucket_hint && !impl.buckets.empty()) {
         std::string key = *opts.bucket_hint;
-        if (impl.opts.case_insensitive) key = lower_to_utf8(key);
+        if (impl.opts.case_insensitive) key = detail::lower_utf8(key);
         auto it = impl.buckets.find(key);
         if (it != impl.buckets.end()) {
             dfs_trie(it->second, aut, collector);

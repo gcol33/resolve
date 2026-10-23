@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/torch.h>
+#include "resolve/string_list_archive.hpp"
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -977,13 +978,8 @@ public:
     [[nodiscard]] int64_t n_genera() const noexcept { return static_cast<int64_t>(genus_to_idx_.size()); }
     [[nodiscard]] int64_t n_families() const noexcept { return static_cast<int64_t>(family_to_idx_.size()); }
 
-    // Accessors for serialization
     [[nodiscard]] const std::unordered_map<std::string, int64_t>& genus_map() const noexcept { return genus_to_idx_; }
     [[nodiscard]] const std::unordered_map<std::string, int64_t>& family_map() const noexcept { return family_to_idx_; }
-
-    // Set from loaded data
-    void set_genus_map(const std::unordered_map<std::string, int64_t>& m) { genus_to_idx_ = m; }
-    void set_family_map(const std::unordered_map<std::string, int64_t>& m) { family_to_idx_ = m; }
 
     // Ordered views of the two maps: element i is the name that encodes to
     // integer code i, with index 0 the reserved "<UNK>" slot. This is the
@@ -1014,85 +1010,22 @@ public:
         return vocab;
     }
 
-    // Save vocabulary to archive (strings serialized as concatenated bytes with lengths)
+    // Writes the two ordered name lists (index = code) under
+    // "<prefix>genus" / "<prefix>family" (string_list_archive.hpp).
     void save(torch::serialize::OutputArchive& archive, const std::string& prefix = "taxonomy_") const {
-        // Ordered lists (index = code); same source of truth as genus_names()
-        // / family_names() so the archive layout and the schema vectors cannot
-        // drift apart.
-        const std::vector<std::string> genera = genus_names();
-        const std::vector<std::string> families = family_names();
-
-        // Serialize genus vocab: lengths tensor + concatenated bytes tensor
-        std::vector<int64_t> genus_lengths;
-        std::vector<uint8_t> genus_bytes;
-        for (const auto& s : genera) {
-            genus_lengths.push_back(static_cast<int64_t>(s.size()));
-            genus_bytes.insert(genus_bytes.end(), s.begin(), s.end());
-        }
-        archive.write(prefix + "genus_lengths", torch::tensor(genus_lengths));
-        if (!genus_bytes.empty()) {
-            archive.write(prefix + "genus_bytes", torch::from_blob(
-                genus_bytes.data(), {static_cast<int64_t>(genus_bytes.size())}, torch::kUInt8).clone());
-        } else {
-            archive.write(prefix + "genus_bytes", torch::empty({0}, torch::kUInt8));
-        }
-
-        // Serialize family vocab
-        std::vector<int64_t> family_lengths;
-        std::vector<uint8_t> family_bytes;
-        for (const auto& s : families) {
-            family_lengths.push_back(static_cast<int64_t>(s.size()));
-            family_bytes.insert(family_bytes.end(), s.begin(), s.end());
-        }
-        archive.write(prefix + "family_lengths", torch::tensor(family_lengths));
-        if (!family_bytes.empty()) {
-            archive.write(prefix + "family_bytes", torch::from_blob(
-                family_bytes.data(), {static_cast<int64_t>(family_bytes.size())}, torch::kUInt8).clone());
-        } else {
-            archive.write(prefix + "family_bytes", torch::empty({0}, torch::kUInt8));
-        }
+        write_string_list(archive, prefix + "genus", genus_names());
+        write_string_list(archive, prefix + "family", family_names());
     }
 
-    // Load vocabulary from archive
     static TaxonomyVocab load(torch::serialize::InputArchive& archive, const std::string& prefix = "taxonomy_") {
-        TaxonomyVocab vocab;
-
-        // Load genus vocab
-        torch::Tensor genus_lengths_t, genus_bytes_t;
-        archive.read(prefix + "genus_lengths", genus_lengths_t);
-        archive.read(prefix + "genus_bytes", genus_bytes_t);
-
-        auto genus_lengths = genus_lengths_t.accessor<int64_t, 1>();
-        auto genus_bytes_ptr = genus_bytes_t.data_ptr<uint8_t>();
-        int64_t offset = 0;
-        for (int64_t i = 0; i < genus_lengths_t.size(0); ++i) {
-            std::string name(reinterpret_cast<const char*>(genus_bytes_ptr + offset), genus_lengths[i]);
-            vocab.genus_to_idx_[name] = i;
-            offset += genus_lengths[i];
-        }
-
-        // Load family vocab
-        torch::Tensor family_lengths_t, family_bytes_t;
-        archive.read(prefix + "family_lengths", family_lengths_t);
-        archive.read(prefix + "family_bytes", family_bytes_t);
-
-        auto family_lengths = family_lengths_t.accessor<int64_t, 1>();
-        auto family_bytes_ptr = family_bytes_t.data_ptr<uint8_t>();
-        offset = 0;
-        for (int64_t i = 0; i < family_lengths_t.size(0); ++i) {
-            std::string name(reinterpret_cast<const char*>(family_bytes_ptr + offset), family_lengths[i]);
-            vocab.family_to_idx_[name] = i;
-            offset += family_lengths[i];
-        }
-
-        return vocab;
+        return from_ordered(read_string_list(archive, prefix + "genus"),
+                            read_string_list(archive, prefix + "family"));
     }
 
 private:
     // Invert a {name -> code} map into a code-indexed name list. Codes are
     // dense 0..N-1 by construction (fit / from_ordered / load all assign them
-    // that way); a sparse map would leave holes as empty strings rather than
-    // throwing, matching the pre-existing save() behaviour.
+    // that way); a sparse map would leave holes as empty strings.
     [[nodiscard]] static std::vector<std::string> ordered_names(
         const std::unordered_map<std::string, int64_t>& to_idx
     ) {

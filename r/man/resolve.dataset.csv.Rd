@@ -55,7 +55,7 @@ labelled plots. A plot labelled for no target is left out either way.
 \itemize{
 \item species_encoding: "hash" (default), "embed", or "sparse"
 \item hash_dim: Hash dimension (default 32)
-\item top_k: Top-k genera/families (default 5)
+\item top_k: Species hashed per plot and fixed genus/family slots (default 3)
 \item top_k_species: Top-k species for embed mode (default 10)
 \item selection: "top", "bottom", "top_bottom", or "all" (default "top").
 Which species of a plot survive its per-plot budget: \code{top_k} for the
@@ -67,8 +67,15 @@ transformer and sparse encodings; 0 = no budget (default), so every
 species a plot records is encoded and \code{selection} has nothing to narrow.
 Set it to run a top-versus-bottom species ablation on the pooled
 encoders.
-\item representation: "abundance" or "presence_absence" (default "abundance")
-\item normalization: "raw", "norm", or "log1p" (default "norm")
+\item representation: "abundance" or "presence_absence" (default
+"abundance"). The value each species carries into every encoding:
+its abundance, or 1 under "presence_absence" (a pooled dataset then
+reports no cover). The selection still ranks by recorded abundance.
+\item aggregation: "abundance" or "count" (default "abundance"). How the
+fixed genus/family slots of the hash, sparse and embed encodings rank a
+plot's taxa: by the summed value of their species, or by how many of
+the plot's species they hold. rank_pool and transformer reject "count".
+\item normalization: "raw", "norm", or "log1p" (default "raw")
 \item track_unknown_fraction: Track unknown species fraction (default TRUE)
 \item track_unknown_count: Track unknown species count (default FALSE)
 \item use_taxonomy: Use taxonomy embeddings (default TRUE if genus/family provided)

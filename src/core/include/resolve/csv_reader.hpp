@@ -33,15 +33,6 @@ public:
     void read_rows(
         const std::function<void(size_t, const std::vector<std::string>&)>& callback) override;
 
-    // Number of data rows (RowSource interface; reads the entire file).
-    size_t num_rows() const override { return count_rows(); }
-
-    // Read all rows into memory
-    std::vector<std::vector<std::string>> read_all();
-
-    // Get number of rows (requires reading entire file)
-    size_t count_rows() const;
-
 private:
     void parse_header();
     std::vector<std::string> parse_line(const std::string& line);
@@ -172,8 +163,7 @@ inline void CSVReader::read_rows(
         }
         // A quoted field may span multiple physical lines; keep accumulating
         // until the quotes balance so the field's embedded newline is preserved
-        // rather than splitting the record (which would corrupt the row and
-        // desync count_rows from read_rows).
+        // rather than splitting the record.
         if (csv_has_open_quote(record)) continue;
 
         if (!record.empty() && !(record.size() == 1 && record[0] == '\r')) {
@@ -193,53 +183,10 @@ inline void CSVReader::read_rows(
         }
     }
     // badbit (as opposed to a clean EOF) means the stream errored mid-read --
-    // a transient storage fault the caller can retry (issue #20).
+    // a transient storage fault the caller can retry.
     if (file.bad()) {
         throw io::IOError("Read error while streaming rows of: " + filename_);
     }
-}
-
-inline std::vector<std::vector<std::string>> CSVReader::read_all() {
-    std::vector<std::vector<std::string>> result;
-    read_rows([&result](size_t, const std::vector<std::string>& row) {
-        result.push_back(row);
-    });
-    return result;
-}
-
-inline size_t CSVReader::count_rows() const {
-    std::ifstream file(filename_);
-    if (!file.is_open()) {
-        throw io::IOError("Cannot open file: " + filename_);
-    }
-
-    size_t count = 0;
-    std::string line;
-    // Skip header
-    std::getline(file, line);
-
-    std::string record;  // must match read_rows' multi-line record accumulation
-    while (std::getline(file, line)) {
-        if (record.empty()) {
-            record = line;
-        } else {
-            record += '\n';
-            record += line;
-        }
-        if (csv_has_open_quote(record)) continue;  // quoted field spans lines
-        if (!record.empty() && !(record.size() == 1 && record[0] == '\r')) {
-            ++count;
-        }
-        record.clear();
-    }
-    // A trailing record (file did not end in a newline) still counts if present.
-    if (!record.empty() && !(record.size() == 1 && record[0] == '\r')) {
-        ++count;
-    }
-    if (file.bad()) {
-        throw io::IOError("Read error while counting rows of: " + filename_);
-    }
-    return count;
 }
 
 } // namespace resolve

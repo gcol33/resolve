@@ -87,20 +87,29 @@ config = rc.DatasetConfig()
 | `top_k_species` | `int` | `10` | Species IDs per plot in embed mode |
 | `selection` | `SelectionMode` | `Top` | `Top`, `Bottom`, `TopBottom`, `All`. Which species survive a plot's budget |
 | `species_budget` | `int` | `0` | Species kept per plot by `selection` under `RankPool` / `Transformer` / `Sparse`; `0` = no budget, encode every species |
-| `representation` | `RepresentationMode` | `Abundance` | `Abundance` or `PresenceAbsence`, used by sparse mode |
-| `normalization` | `NormalizationMode` | `Raw` | `Raw`, `Norm`, `Log1p`, applied before hashing |
-| `aggregation` | `AggregationMode` | `Abundance` | `Abundance` or `Count` |
+| `representation` | `RepresentationMode` | `Abundance` | The value each species carries into the encoding: its abundance, or `1.0` under `PresenceAbsence`. Applies to every encoding (hash weights, sparse vector, pool weights, abundance-ranked taxonomy slots, unknown fraction); a pooled dataset then reports `has_cover = 0`. The selection still ranks by recorded abundance |
+| `normalization` | `NormalizationMode` | `Raw` | `Raw`, `Norm`, `Log1p`, applied to the selected species' values before hashing |
+| `aggregation` | `AggregationMode` | `Abundance` | How the fixed genus / family slots of `Hash`, `Sparse` and `Embed` rank a plot's taxa: `Abundance` by the summed value of their species, `Count` by how many of the plot's species they hold. `RankPool` / `Transformer` carry each species' own taxonomy and reject `Count` |
 | `track_unknown_fraction` | `bool` | `True` | Add an input column holding each plot's share of abundance from species outside the vocabulary |
 | `missing_values` | `MissingValuePolicy` | `Indicate` | How a blank covariate or coordinate cell enters the model. `Indicate`: a 0/1 column per covariate (and one for the coordinate pair) marks it, and the value is filled with the mean of that column's recorded values on the fitting rows before standardisation. `Zero`: the cell is read as 0.0 with no flag, so a recorded 0 and a missing value are one input. The loader keeps a missing cell as `NaN` in `coordinates` / `covariates` either way |
-| `track_unknown_count` | `bool` | `False` | Add an input column holding each plot's number of records naming a species outside the vocabulary |
+| `track_unknown_count` | `bool` | `False` | Add an input column holding each plot's number of species outside the vocabulary |
 | `use_taxonomy` | `bool` | `True` | Use genus and family when present |
 | `use_cuda_hash` | `bool` | `False` | Compute hash embeddings on the GPU per batch |
 | `pool_weighting` | `PoolWeighting` | `Log1p` | `Binary`, `Abundance`, `Log1p`, `Norm`, `Rank`, used by pool modes |
 | `pool_species_cap` | `int` | `0` | `0` no cap, `-1` auto p99, `>0` manual cap |
 
+!!! note "One entry per species and plot"
+    A species recorded several times in one plot (once per vegetation layer)
+    is one entry of that plot: its abundances are summed, it sits where its
+    first record stood, and every entry of a species carries the
+    alphabetically first genus and family any of its records names. Every
+    encoding, the vocabulary, the unknown-species columns and the recognition
+    report read these entries. The species vocabulary ranks species by the
+    number of plots recording them, ties by name.
+
 !!! note "Unknown-mass columns"
     Both columns are measured against the species vocabulary the dataset
-    encodes with, over each plot's full record list (before any top-k
+    encodes with, over each plot's full assemblage (before any top-k
     selection or pool cap). `from_csv` fits that vocabulary from the file it
     is reading, which covers every name in it, so a plain training load reads
     0.0 for every plot. The columns become informative on the vocabulary-reusing

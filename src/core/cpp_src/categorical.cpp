@@ -2,6 +2,7 @@
 // See include/resolve/categorical.hpp for design notes.
 
 #include "resolve/categorical.hpp"
+#include "resolve/string_list_archive.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -16,13 +17,10 @@ namespace resolve {
 // is_na_string
 // =============================================================================
 //
-// Matches the conventional NA spellings, case-insensitively. Single source of
-// truth for NA/missing-cell detection across the whole engine: the dataset
-// target/covariate loaders and the
-// categorical factorizer both call this, so the same raw cell is classified
-// identically regardless of the column's role (previously the target path used
-// a case-insensitive matcher and the categorical path an exact set, so e.g.
-// "NAN" was missing in a target column but a real category in a covariate).
+// Matches the conventional NA spellings, case-insensitively. The one NA test
+// in the engine: the target and covariate loaders and the categorical
+// factorizer all call it, so a raw cell such as "NAN" is missing whatever role
+// its column carries.
 bool is_na_string(const std::string& s) noexcept {
     if (s.empty() || s == "." || s == "-") return true;
     auto eq_ci = [&](const char* tok) noexcept {
@@ -190,84 +188,16 @@ void CategoricalVocab::set_column_map(
 //     {prefix}col_{i}_value_bytes          : uint8[sum(value_lengths)]
 //     {prefix}col_{i}_codes                : int64[K_i]  (assigned codes 1..K_i)
 //
-// Codes are written explicitly (not derived from sort order at load time)
-// because future versions may relax the sort invariant; explicit codes make
-// the format self-describing.
-
-namespace {
-
-torch::Tensor strings_to_lengths_tensor(const std::vector<std::string>& strs) {
-    std::vector<int64_t> lengths;
-    lengths.reserve(strs.size());
-    for (const auto& s : strs) {
-        lengths.push_back(static_cast<int64_t>(s.size()));
-    }
-    if (lengths.empty()) {
-        return torch::empty({0}, torch::kInt64);
-    }
-    return torch::tensor(lengths, torch::kInt64);
-}
-
-torch::Tensor strings_to_bytes_tensor(const std::vector<std::string>& strs) {
-    std::vector<uint8_t> bytes;
-    size_t total = 0;
-    for (const auto& s : strs) total += s.size();
-    bytes.reserve(total);
-    for (const auto& s : strs) {
-        bytes.insert(bytes.end(), s.begin(), s.end());
-    }
-    if (bytes.empty()) {
-        return torch::empty({0}, torch::kUInt8);
-    }
-    // from_blob view; clone to detach from local storage.
-    return torch::from_blob(bytes.data(),
-                            {static_cast<int64_t>(bytes.size())},
-                            torch::kUInt8)
-        .clone();
-}
-
-std::vector<std::string> split_bytes_by_lengths(
-    const torch::Tensor& lengths_t, const torch::Tensor& bytes_t) {
-    std::vector<std::string> out;
-    if (lengths_t.numel() == 0) return out;
-
-    auto lengths_acc = lengths_t.accessor<int64_t, 1>();
-    auto bytes_ptr = bytes_t.numel() > 0 ? bytes_t.data_ptr<uint8_t>() : nullptr;
-    const int64_t n_bytes = bytes_t.numel();
-    int64_t offset = 0;
-    out.reserve(lengths_t.size(0));
-    for (int64_t i = 0; i < lengths_t.size(0); ++i) {
-        const int64_t len = lengths_acc[i];
-        if (len > 0 && bytes_ptr == nullptr) {
-            throw std::runtime_error(
-                "CategoricalVocab::load: byte tensor is empty but lengths "
-                "report a non-zero string — corrupt archive");
-        }
-        // Bound the read against the byte buffer: a truncated/corrupt archive
-        // whose lengths sum past the buffer must throw, not read out of bounds.
-        if (len < 0 || offset + len > n_bytes) {
-            throw std::runtime_error(
-                "CategoricalVocab::load: string lengths exceed the byte buffer "
-                "— corrupt archive");
-        }
-        out.emplace_back(reinterpret_cast<const char*>(bytes_ptr + offset),
-                         static_cast<size_t>(len));
-        offset += len;
-    }
-    return out;
-}
-
-}  // namespace
+// Codes are written explicitly rather than derived from the sort order at load
+// time, so the format describes itself. The string lists go through
+// string_list_archive.hpp.
 
 void CategoricalVocab::save(torch::serialize::OutputArchive& archive,
                             const std::string& prefix) const {
     const int64_t n_cols = static_cast<int64_t>(column_order_.size());
     archive.write(prefix + "n_columns", torch::tensor(n_cols, torch::kInt64));
 
-    archive.write(prefix + "column_name_lengths",
-                  strings_to_lengths_tensor(column_order_));
-    archive.write(prefix + "column_name_bytes",
-                  strings_to_bytes_tensor(column_order_));
+    write_string_list(archive, prefix + "column_name", column_order_);
 
     for (int64_t i = 0; i < n_cols; ++i) {
         const auto& col_name = column_order_[i];
@@ -295,10 +225,7 @@ void CategoricalVocab::save(torch::serialize::OutputArchive& archive,
         archive.write(col_prefix + "n_values",
                       torch::tensor(static_cast<int64_t>(values.size()),
                                     torch::kInt64));
-        archive.write(col_prefix + "value_lengths",
-                      strings_to_lengths_tensor(values));
-        archive.write(col_prefix + "value_bytes",
-                      strings_to_bytes_tensor(values));
+        write_string_list(archive, col_prefix + "value", values);
         archive.write(col_prefix + "codes",
                       codes.empty() ? torch::empty({0}, torch::kInt64)
                                     : torch::tensor(codes, torch::kInt64));
@@ -309,12 +236,9 @@ CategoricalVocab CategoricalVocab::load(torch::serialize::InputArchive& archive,
                                         const std::string& prefix) {
     CategoricalVocab vocab;
 
-    // Back-compat: if the archive predates categorical support, the key
-    // won't exist. Treat that as an empty vocab.
+    // An archive written without categorical covariates holds no key.
     torch::Tensor n_cols_t;
-    try {
-        archive.read(prefix + "n_columns", n_cols_t);
-    } catch (const std::exception&) {
+    if (!archive.try_read(prefix + "n_columns", n_cols_t)) {
         return vocab;
     }
     const int64_t n_cols = n_cols_t.item<int64_t>();
@@ -322,10 +246,7 @@ CategoricalVocab CategoricalVocab::load(torch::serialize::InputArchive& archive,
         return vocab;
     }
 
-    torch::Tensor name_lengths, name_bytes;
-    archive.read(prefix + "column_name_lengths", name_lengths);
-    archive.read(prefix + "column_name_bytes", name_bytes);
-    auto column_names = split_bytes_by_lengths(name_lengths, name_bytes);
+    auto column_names = read_string_list(archive, prefix + "column_name");
     if (static_cast<int64_t>(column_names.size()) != n_cols) {
         throw std::runtime_error(
             "CategoricalVocab::load: column_name count mismatch with "
@@ -335,13 +256,11 @@ CategoricalVocab CategoricalVocab::load(torch::serialize::InputArchive& archive,
     for (int64_t i = 0; i < n_cols; ++i) {
         const std::string col_prefix = prefix + "col_" + std::to_string(i) + "_";
 
-        torch::Tensor n_values_t, value_lengths, value_bytes, codes_t;
+        torch::Tensor n_values_t, codes_t;
         archive.read(col_prefix + "n_values", n_values_t);
-        archive.read(col_prefix + "value_lengths", value_lengths);
-        archive.read(col_prefix + "value_bytes", value_bytes);
         archive.read(col_prefix + "codes", codes_t);
 
-        auto values = split_bytes_by_lengths(value_lengths, value_bytes);
+        auto values = read_string_list(archive, col_prefix + "value");
         const int64_t n_values = n_values_t.item<int64_t>();
         if (static_cast<int64_t>(values.size()) != n_values) {
             throw std::runtime_error(

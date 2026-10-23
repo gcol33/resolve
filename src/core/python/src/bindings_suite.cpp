@@ -15,12 +15,6 @@ namespace {
 // 2^53: integral JSON numbers below it come back to Python as int.
 constexpr double kExactIntegerLimit = 9007199254740992.0;
 
-nb::object tensor_or_none(const torch::Tensor& t) {
-    if (!t.defined()) return nb::none();
-    auto cpu = t.detach().cpu().contiguous();
-    return nb::steal(THPVariable_Wrap(cpu));
-}
-
 // JSON <-> Python: objects to dicts (member order kept), arrays to lists, and
 // an integral number to int so a seed or an epoch count reads as one.
 nb::object json_to_py(const resolve::json::Value& v) {
@@ -215,7 +209,12 @@ void register_suite(nb::module_& m) {
         .def_prop_ro("abundance_share",
                      [](const SpeciesRecognition& r) { return tensor_or_none(r.abundance_share); });
 
-    m.def("compute_species_recognition", &compute_species_recognition,
+    m.def("compute_species_recognition",
+          [](std::vector<SpeciesRecord> records, const std::vector<std::string>& plot_ids,
+             const SpeciesVocab& vocab) {
+              return compute_species_recognition(
+                  PlotAssemblages::build(std::move(records), plot_ids), vocab);
+          },
           nb::arg("records"), nb::arg("plot_ids"), nb::arg("vocab"),
           "Per-plot distinct species, how many the vocab recognises, and the recognised "
           "share by count and by abundance (NaN where undefined).");

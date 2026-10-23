@@ -7,6 +7,7 @@
 // reverse) reads the same bucket and sign for every species.
 
 #include <cstdint>
+#include <string_view>
 
 #if defined(__CUDACC__)
 #define RESOLVE_HASH_INLINE __host__ __device__ __forceinline__
@@ -45,6 +46,31 @@ RESOLVE_HASH_INLINE HashBucketSign hash_bucket_sign(int64_t key, int32_t hash_di
     out.bucket = static_cast<int32_t>(magnitude % static_cast<uint32_t>(hash_dim));
     out.sign = (h >= 0) ? 1.0f : -1.0f;
     return out;
+}
+
+// Per-byte multiply-xor mixer turning a species name into a 32-bit seed. Its
+// only contract is determinism across platforms: every byte is read as
+// unsigned, so a name with bytes >= 0x80 (accented or hybrid names) hashes the
+// same where char is signed (x86) and where it is unsigned (ARM). Host only.
+inline uint32_t feature_hash(std::string_view name, uint32_t seed = 0) {
+    uint32_t h = seed;
+    for (char c : name) {
+        h ^= static_cast<uint32_t>(static_cast<unsigned char>(c));
+        h *= 0x5bd1e995u;
+        h ^= h >> 15;
+    }
+    return h;
+}
+
+// The int64 key a species name is hashed under: what the CPU encoder passes to
+// hash_bucket_sign and what the CUDA path stores per record for its kernel.
+inline int64_t feature_hash_key(std::string_view species) {
+    return static_cast<int64_t>(feature_hash(species));
+}
+
+// Feature-hash slot of a species name.
+inline HashBucketSign feature_hash_bucket_sign(std::string_view species, int32_t hash_dim) {
+    return hash_bucket_sign(feature_hash_key(species), hash_dim);
 }
 
 }  // namespace resolve

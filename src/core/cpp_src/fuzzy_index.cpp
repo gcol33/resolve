@@ -48,11 +48,9 @@ void Trie::insert(const std::vector<uint32_t>& cps, int entry_id) {
     for (uint32_t c : cps) {
         cur = find_or_create_child(cur, c);
     }
-    // First entry to land here wins the terminal slot; duplicates are tolerated
-    // (the bucket layer carries the full set if callers need it).
-    if (nodes_[static_cast<std::size_t>(cur)].entry_id < 0) {
-        nodes_[static_cast<std::size_t>(cur)].entry_id = entry_id;
-    }
+    // Every entry ending here is kept, so entries that fold to one key are all
+    // returned by a query that reaches the node.
+    terminals_.emplace_back(cur, entry_id);
 }
 
 void Trie::finalize() {
@@ -77,6 +75,17 @@ void Trie::finalize() {
     }
     child_lists_.clear();
     child_lists_.shrink_to_fit();
+
+    std::sort(terminals_.begin(), terminals_.end());
+    entry_ids_.reserve(terminals_.size());
+    for (const auto& [node, entry] : terminals_) {
+        auto& n = nodes_[static_cast<std::size_t>(node)];
+        if (n.n_entries == 0) n.first_entry = static_cast<int32_t>(entry_ids_.size());
+        ++n.n_entries;
+        entry_ids_.push_back(entry);
+    }
+    terminals_.clear();
+    terminals_.shrink_to_fit();
     finalized_ = true;
 }
 
@@ -120,35 +129,9 @@ FuzzyIndex FuzzyIndex::build(const std::vector<std::string>& entries,
 
         if (use_buckets) {
             std::string key = impl.opts.bucket_fn(raw);
-            // Bucket keys are also case-folded if requested.
-            if (ci) {
-                auto key_cps = detail::utf8_to_codepoints(key);
-                detail::to_lower_inplace(key_cps);
-                // Re-encode lowered codepoints back to UTF-8 for the map key.
-                std::string lowered;
-                lowered.reserve(key.size());
-                for (uint32_t cp : key_cps) {
-                    if (cp < 0x80u) {
-                        lowered.push_back(static_cast<char>(cp));
-                    } else if (cp < 0x800u) {
-                        lowered.push_back(static_cast<char>(0xC0u | (cp >> 6)));
-                        lowered.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
-                    } else if (cp < 0x10000u) {
-                        lowered.push_back(static_cast<char>(0xE0u | (cp >> 12)));
-                        lowered.push_back(static_cast<char>(0x80u | ((cp >> 6) & 0x3Fu)));
-                        lowered.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
-                    } else {
-                        lowered.push_back(static_cast<char>(0xF0u | (cp >> 18)));
-                        lowered.push_back(static_cast<char>(0x80u | ((cp >> 12) & 0x3Fu)));
-                        lowered.push_back(static_cast<char>(0x80u | ((cp >> 6) & 0x3Fu)));
-                        lowered.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
-                    }
-                }
-                key = std::move(lowered);
-            }
-            auto& bt = impl.buckets[key];
-            // Lazy-init trie root for newly inserted bucket key.
-            bt.insert(cps, static_cast<int>(id));
+            // Bucket keys fold the same way the entries do.
+            if (ci) key = detail::lower_utf8(key);
+            impl.buckets[key].insert(cps, static_cast<int>(id));
         }
     }
 

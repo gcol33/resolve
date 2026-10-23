@@ -15,6 +15,15 @@
 
 namespace nb = nanobind;
 
+// A tensor member as a detached CPU torch.Tensor, or None when undefined.
+// nanobind has no caster for at::Tensor, so a def_ro / def_prop_ro over a
+// tensor member goes through this.
+inline nb::object tensor_or_none(const torch::Tensor& t) {
+    if (!t.defined()) return nb::none();
+    auto cpu = t.detach().cpu().contiguous();
+    return nb::steal(THPVariable_Wrap(cpu));
+}
+
 // Unpack an optional tensor argument. Returns an undefined tensor for None;
 // THPVariable_Unpack on Py_None reinterprets the None singleton as a
 // THPVariable and reads out of bounds (UB), so callers passing None for an

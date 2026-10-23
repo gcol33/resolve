@@ -1,6 +1,7 @@
 #include "resolve/checkpoint.hpp"
 #include "resolve/checkpoint_schema_keys.hpp"
 #include "resolve/config_registry.hpp"
+#include "resolve/string_list_archive.hpp"
 #include <fstream>
 #include <filesystem>
 #include <algorithm>
@@ -389,74 +390,6 @@ ModelConfig load_model_config(
     ModelConfig config;
     for_each_field(config, ArchiveFieldReader{archive, std::string()});
     return config;
-}
-
-// Why: a vocabulary is a LIST of strings, and the per-string
-// write_string_to_archive pattern above costs two archive entries per element
-// -- a 30k-species vocab would become 60k zip members. Serialize the whole list
-// as two tensors instead: an int64 lengths vector plus the concatenated UTF-8
-// bytes. Same layout TaxonomyVocab::save / CategoricalVocab::save already use,
-// so this is the proven round-trip, factored out once (issue #102).
-static void write_string_list(
-    torch::serialize::OutputArchive& archive,
-    const std::string& prefix,
-    const std::vector<std::string>& values
-) {
-    std::vector<int64_t> lengths;
-    lengths.reserve(values.size());
-    std::vector<uint8_t> bytes;
-    for (const auto& s : values) {
-        lengths.push_back(static_cast<int64_t>(s.size()));
-        bytes.insert(bytes.end(), s.begin(), s.end());
-    }
-    archive.write(prefix + "_lengths", torch::tensor(lengths));
-    if (!bytes.empty()) {
-        archive.write(prefix + "_bytes", torch::from_blob(
-            bytes.data(), {static_cast<int64_t>(bytes.size())}, torch::kUInt8).clone());
-    } else {
-        archive.write(prefix + "_bytes", torch::empty({0}, torch::kUInt8));
-    }
-}
-
-// Inverse of write_string_list. Returns false (leaving `out` untouched) when the
-// key is absent, which is how a pre-issue-#102 checkpoint is detected.
-static bool try_read_string_list(
-    torch::serialize::InputArchive& archive,
-    const std::string& prefix,
-    std::vector<std::string>& out
-) {
-    torch::Tensor lengths_t;
-    if (!archive.try_read(prefix + "_lengths", lengths_t)) return false;
-    torch::Tensor bytes_t;
-    if (!archive.try_read(prefix + "_bytes", bytes_t)) return false;
-
-    lengths_t = lengths_t.to(torch::kLong).contiguous();
-    bytes_t = bytes_t.to(torch::kUInt8).contiguous();
-    const auto lengths = lengths_t.accessor<int64_t, 1>();
-    const auto* ptr = bytes_t.data_ptr<uint8_t>();
-    const int64_t n_bytes = bytes_t.numel();
-
-    out.clear();
-    out.reserve(static_cast<size_t>(lengths_t.size(0)));
-    int64_t offset = 0;
-    for (int64_t i = 0; i < lengths_t.size(0); ++i) {
-        const int64_t len = lengths[i];
-        if (len < 0 || offset + len > n_bytes) {
-            throw std::runtime_error(
-                "checkpoint string list '" + prefix + "' is corrupt: entry " +
-                std::to_string(i) + " runs past the byte buffer");
-        }
-        if (len == 0) {
-            // ptr can legitimately be null for a 0-numel byte tensor, so never
-            // form std::string(nullptr, 0) even though the length is zero.
-            out.emplace_back();
-        } else {
-            out.emplace_back(reinterpret_cast<const char*>(ptr + offset),
-                             static_cast<size_t>(len));
-        }
-        offset += len;
-    }
-    return true;
 }
 
 void save_scalers(

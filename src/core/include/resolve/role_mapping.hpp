@@ -8,20 +8,6 @@
 
 namespace resolve {
 
-// Column roles for CSV data
-enum class ColumnRole {
-    PlotId,         // Unique identifier for plots
-    SpeciesId,      // Species identifier (name or code)
-    Abundance,      // Species abundance value
-    Longitude,      // X coordinate
-    Latitude,       // Y coordinate
-    Genus,          // Genus name for taxonomy
-    Family,         // Family name for taxonomy
-    Covariate,      // Additional covariates
-    Target,         // Prediction target (area, habitat, etc.)
-    Ignore          // Ignore this column
-};
-
 // Mapping between column names and their roles
 struct RoleMapping {
     // Required columns

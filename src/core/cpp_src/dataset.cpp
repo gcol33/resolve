@@ -6,13 +6,9 @@
 #include "resolve/io_retry.hpp"
 #include "resolve/target_labels.hpp"
 #include <algorithm>
-#include <cctype>
-#include <cstring>
-#include <numeric>
 #include <cmath>
 #include <iostream>
 #include <limits>
-#include <functional>
 #include <optional>
 #include <unordered_set>
 
@@ -20,14 +16,14 @@ namespace resolve {
 
 namespace {
 
-// Missing-cell detection is the single canonical `resolve::is_na_string`
-// (declared in categorical.hpp), so target / covariate / categorical columns
-// all classify the same raw cell identically.
+// A coordinate, covariate or masked regression cell the loader could not read.
+// It stays NaN in the dataset's tensors; DatasetConfig::missing_values decides
+// how the model reads a coordinate or covariate.
+constexpr float kMissingValue = std::numeric_limits<float>::quiet_NaN();
 
-// Parse a regression target string. Returns nullopt for empty / NA marker /
-// unparseable / non-finite values. Distinct from `safe_stof`, which silently
-// maps every failure to 0.0f and would conflate "missing" with "actual zero".
-std::optional<float> parse_regression_target(const std::string& s) {
+// Parse a numeric cell. Returns nullopt for empty / NA marker / unparseable /
+// non-finite values, so "missing" is never conflated with an actual zero.
+std::optional<float> parse_numeric_cell(const std::string& s) {
     if (is_na_string(s)) return std::nullopt;
     auto v = parse_float_strict(s);  // locale-free, rejects trailing garbage
     if (!v || !std::isfinite(*v)) return std::nullopt;
@@ -38,8 +34,8 @@ std::optional<float> parse_regression_target(const std::string& s) {
 // failure (empty, non-numeric chars, overflow, leading/trailing spaces, ...).
 // Used by the classification auto-fit path: if every unique non-NA value of
 // a classification column parses as an int, those parsed ints are used as
-// codes directly. Keeps already-integer-encoded columns (e.g. "0".."8")
-// byte-stable across load/save.
+// codes directly, so already-integer-encoded columns (e.g. "0".."8") keep
+// their codes across load/save.
 std::optional<int64_t> parse_strict_int64(const std::string& s) {
     if (s.empty()) return std::nullopt;
     try {
@@ -52,6 +48,12 @@ std::optional<int64_t> parse_strict_int64(const std::string& s) {
     }
 }
 
+// Upper bound on a directly-used integer class code. A code at or above this
+// would size class_names to ~that many entries (unbounded allocation / OOM) for
+// only a handful of classes; a code beyond it falls back to a compact
+// factorization (auto path) or is rejected (explicit path).
+constexpr int64_t kMaxDirectClassCode = 1 << 20;  // 1,048,575
+
 // Auto-fit a string->int class mapping over the raw cells of one classification
 // column:
 //   - NA-like cells contribute nothing to the mapping.
@@ -59,15 +61,7 @@ std::optional<int64_t> parse_strict_int64(const std::string& s) {
 //     integers are used as the codes (preserves "0".."8" encodings exactly).
 //   - Otherwise the sorted-unique non-NA values are factorized to 0..K-1
 //     (sorting is lexicographic on the raw strings).
-// Returns:
-//   - mapping_out : string -> int64 code
-//   - class_names : ordered vocab (class_names[code] == original string)
-// Upper bound on a directly-used integer class code. A code at or above this
-// would size class_names to ~that many entries (unbounded allocation / OOM) for
-// only a handful of classes; a code beyond it falls back to a compact
-// factorization (auto path) or is rejected (explicit path).
-constexpr int64_t kMaxDirectClassCode = 1 << 20;  // 1,048,575
-
+// mapping_out is string -> code; class_names[code] is the original string.
 void fit_classification_mapping(
     const std::vector<std::string>& raw,
     std::unordered_map<std::string, int64_t>& mapping_out,
@@ -89,7 +83,6 @@ void fit_classification_mapping(
 
     std::sort(uniques.begin(), uniques.end());
 
-    // Try strict-int path first.
     std::vector<int64_t> parsed;
     parsed.reserve(uniques.size());
     bool all_int = true;
@@ -99,12 +92,10 @@ void fit_classification_mapping(
         parsed.push_back(*p);
     }
 
-    // Use the parsed integers directly as class codes ONLY when they are
-    // non-negative and reasonably dense. A negative label would index
-    // class_names_out at static_cast<size_t>(negative) == a huge value (OOB
-    // heap write); a very large label (e.g. an ID like 9999999999) would size
-    // class_names_out to ~that value (unbounded allocation / OOM) even for a
-    // handful of classes. In either case fall back to a compact 0..K-1
+    // Parsed integers serve as class codes only when they are non-negative and
+    // reasonably dense: a negative label would index class_names out of
+    // bounds, and an ID-like label (9999999999) would size class_names to ~that
+    // value for a handful of classes. Either falls back to a compact 0..K-1
     // factorization of the sorted unique labels.
     bool use_direct_codes = false;
     if (all_int) {
@@ -114,9 +105,8 @@ void fit_classification_mapping(
     }
 
     if (use_direct_codes) {
-        // Use parsed ints as codes. class_names is ordered by code (so the
-        // vocab round-trips through save/load), which means we need to sort
-        // (code, name) pairs by code and dedupe to a dense vector.
+        // class_names is ordered by code so the vocab round-trips through
+        // save/load; codes that are not dense (e.g. {0, 2, 5}) leave empty gaps.
         std::vector<std::pair<int64_t, std::string>> pairs;
         pairs.reserve(uniques.size());
         for (size_t i = 0; i < uniques.size(); ++i) {
@@ -125,8 +115,6 @@ void fit_classification_mapping(
         }
         std::sort(pairs.begin(), pairs.end(),
                   [](const auto& a, const auto& b) { return a.first < b.first; });
-        // class_names is sized so that class_names[code] == original string.
-        // When codes aren't dense (e.g. {0, 2, 5}), the gaps stay empty.
         int64_t max_code = pairs.back().first;
         class_names_out.resize(static_cast<size_t>(max_code + 1));
         for (const auto& [c, n] : pairs) {
@@ -140,90 +128,67 @@ void fit_classification_mapping(
     }
 }
 
-// Resolve a classification target's (mapping, class_names): use the caller's
-// explicit class_mapping if non-empty (class_names indexed by code, with gaps
-// for sparse codes), otherwise fit from the raw string labels. Single source
-// for both the single-table and header+species loaders.
+// Resolve a classification target's (mapping, class_names) from the caller's
+// explicit class_mapping (class_names indexed by code, gaps for sparse codes),
+// or, when there is none, fit it on the raw labels of the rows `keep` marks.
+// A class value occurring only in rows dropped because a different target is
+// missing never enters class_names: it would inflate num_classes with a
+// zero-example class and shift every later code of the lexicographic
+// factorization.
 void resolve_classification_mapping(
-    const std::unordered_map<std::string, int64_t>& explicit_mapping,
-    const std::vector<std::string>& raw_labels,
-    std::unordered_map<std::string, int64_t>& mapping_out,
-    std::vector<std::string>& class_names_out
-) {
-    if (!explicit_mapping.empty()) {
-        mapping_out = explicit_mapping;
-        int64_t max_code = -1;
-        for (const auto& [name, c] : mapping_out) {
-            // A negative code is written verbatim into the int64 target tensor
-            // and later indexes the classification head out of bounds
-            // (static_cast<size_t> of a negative -> huge). Reject it here rather
-            // than only skipping it for class_names.
-            if (c < 0) {
-                throw std::invalid_argument(
-                    "class_mapping code for '" + name + "' is negative (" +
-                    std::to_string(c) + "); class codes must be >= 0");
-            }
-            if (c > max_code) max_code = c;
-        }
-        // Bound the allocation exactly like the auto path: an ID-like code
-        // (e.g. 9999999999) would size class_names to ~10^10 entries -> OOM.
-        if (max_code >= kMaxDirectClassCode) {
-            throw std::invalid_argument(
-                "class_mapping code " + std::to_string(max_code) +
-                " exceeds the maximum direct class code (" +
-                std::to_string(kMaxDirectClassCode) +
-                "); use dense codes 0..K-1");
-        }
-        if (max_code >= 0) {
-            class_names_out.assign(static_cast<size_t>(max_code + 1), std::string{});
-            for (const auto& [k, c] : mapping_out)
-                class_names_out[static_cast<size_t>(c)] = k;
-        }
-    } else {
-        fit_classification_mapping(raw_labels, mapping_out, class_names_out);
-    }
-}
-
-// Like resolve_classification_mapping, but for the auto-fit branch it fits the
-// vocabulary from KEPT rows only: a class value that occurs solely in
-// rows that will be dropped because a *different* target is missing must not enter
-// class_names, since that both inflates num_classes with a zero-example class and
-// (for the lexicographic factorization) shifts every other code. Explicit mappings
-// are caller-fixed and therefore unaffected. `keep` is parallel to `raw_labels`.
-void resolve_classification_mapping_kept(
     const std::unordered_map<std::string, int64_t>& explicit_mapping,
     const std::vector<std::string>& raw_labels,
     const std::vector<char>& keep,
     std::unordered_map<std::string, int64_t>& mapping_out,
     std::vector<std::string>& class_names_out
 ) {
-    if (!explicit_mapping.empty()) {
-        resolve_classification_mapping(explicit_mapping, raw_labels, mapping_out, class_names_out);
+    if (explicit_mapping.empty()) {
+        std::vector<std::string> kept;
+        kept.reserve(raw_labels.size());
+        for (size_t i = 0; i < raw_labels.size(); ++i) {
+            if (i < keep.size() && !keep[i]) continue;
+            kept.push_back(raw_labels[i]);
+        }
+        fit_classification_mapping(kept, mapping_out, class_names_out);
         return;
     }
-    std::vector<std::string> kept;
-    kept.reserve(raw_labels.size());
-    for (size_t i = 0; i < raw_labels.size(); ++i) {
-        if (i < keep.size() && !keep[i]) continue;
-        kept.push_back(raw_labels[i]);
+    mapping_out = explicit_mapping;
+    int64_t max_code = -1;
+    for (const auto& [name, c] : mapping_out) {
+        // A negative code would be written into the int64 target tensor and
+        // index the classification head out of bounds.
+        if (c < 0) {
+            throw std::invalid_argument(
+                "class_mapping code for '" + name + "' is negative (" +
+                std::to_string(c) + "); class codes must be >= 0");
+        }
+        if (c > max_code) max_code = c;
     }
-    fit_classification_mapping(kept, mapping_out, class_names_out);
+    if (max_code >= kMaxDirectClassCode) {
+        throw std::invalid_argument(
+            "class_mapping code " + std::to_string(max_code) +
+            " exceeds the maximum direct class code (" +
+            std::to_string(kMaxDirectClassCode) +
+            "); use dense codes 0..K-1");
+    }
+    if (max_code >= 0) {
+        class_names_out.assign(static_cast<size_t>(max_code + 1), std::string{});
+        for (const auto& [k, c] : mapping_out)
+            class_names_out[static_cast<size_t>(c)] = k;
+    }
 }
 
-// Single source of truth for encoding one classification target, shared by both
-// the header (from_csv) and species-file (from_species_csv) loaders. Resolves the
-// mapping (fit on kept rows), writes the (n,) int64 code tensor, and sets +
-// validates cfg.class_names / cfg.num_classes. An NA/unmapped cell flips keep[i]=0
-// under TargetMissingPolicy::Drop; under Mask the row stays and its code is
-// kUnlabelledClass. Either way the cell contributes nothing to the class list,
-// which is therefore fit on the kept rows labelled for this target.
+// Encode one classification target: resolve the mapping (fit on kept rows),
+// write the (n,) int64 code tensor, and set + validate cfg.class_names /
+// cfg.num_classes. An NA/unmapped cell flips keep[i]=0 under
+// TargetMissingPolicy::Drop; under Mask the row stays and its code is
+// kUnlabelledClass. Either way the cell contributes nothing to the class list.
 //
-// num_classes validation: the direct-integer path emits the parsed
-// integers verbatim as class codes, so class_names.size() == max_code + 1. The
-// classification head is sized from num_classes, so a caller-supplied num_classes
-// smaller than class_names.size() (e.g. a 1-indexed column 1..9 built with
-// num_classes=9) would let a target code index the head out of bounds. Fill it
-// when the caller passed 0; reject a positive-but-too-small value loudly.
+// The direct-integer path emits the parsed integers verbatim as class codes, so
+// class_names.size() == max_code + 1. The classification head is sized from
+// num_classes, so a caller-supplied num_classes smaller than that (a 1-indexed
+// column 1..9 built with num_classes=9) would let a code index the head out of
+// bounds: it is filled when the caller passed 0 and rejected when too small.
 torch::Tensor encode_classification_target(
     const TargetSpec& spec,
     const std::vector<std::string>& raw,
@@ -234,7 +199,7 @@ torch::Tensor encode_classification_target(
     std::unordered_map<std::string, int64_t> mapping;
     std::vector<std::string> class_names;
     const bool explicit_mapping = !spec.class_mapping.empty();
-    resolve_classification_mapping_kept(spec.class_mapping, raw, keep, mapping, class_names);
+    resolve_classification_mapping(spec.class_mapping, raw, keep, mapping, class_names);
 
     const bool masked = spec.missing == TargetMissingPolicy::Mask;
     const int64_t n = static_cast<int64_t>(raw.size());
@@ -285,12 +250,12 @@ torch::Tensor encode_classification_target(
     return tensor;
 }
 
-// Finalize the keep flags for a classification target WITHOUT fitting the vocab:
-// so that every classification vocab is fit against the final
-// surviving-row set even when another classification target drives additional
-// drops. Auto-fit maps every non-NA cell in a kept row, so only NA cells drop;
-// an explicit mapping additionally drops non-NA cells absent from the mapping.
-// A target whose missing labels are masked drops nothing.
+// Finalize the keep flags for a classification target WITHOUT fitting the
+// vocab, so every classification vocab is fit against the final surviving-row
+// set even when another classification target drives additional drops.
+// Auto-fit maps every non-NA cell in a kept row, so only NA cells drop; an
+// explicit mapping additionally drops non-NA cells absent from the mapping. A
+// target whose missing labels are masked drops nothing.
 void mark_classification_drops(
     const TargetSpec& spec,
     const std::vector<std::string>& raw,
@@ -322,10 +287,10 @@ TargetConfig target_config_of(const TargetSpec& spec) {
     return cfg;
 }
 
-// Shared by both loaders, after every target is encoded and before the rows
-// marked in `keep` are compacted away. Only a dataset with a masked target has
-// work here: a Drop target's unlabelled rows are already marked, so every kept
-// row is labelled for every Drop target.
+// After every target is encoded and before the rows marked in `keep` are
+// compacted away. Only a dataset with a masked target has work here: a Drop
+// target's unlabelled rows are already marked, so every kept row is labelled
+// for every Drop target.
 //
 //   - A kept row labelled for no target is dropped: it would train nothing.
 //   - Each masked target reports the number of kept plots labelled for it, and
@@ -385,105 +350,482 @@ void finalize_masked_labels(
     }
 }
 
-// Drop species records for plots that were removed (missing/NA target) so the
-// species / taxonomy vocab is built only from surviving plots:
-// species occurring solely in dropped plots must not inflate the embedding
-// tables with never-referenced rows. `kept_ids` is the compacted plot_ids_.
-void filter_records_to_plots(
-    std::unordered_map<std::string, std::vector<SpeciesRecord>>& plot_records,
-    const std::vector<std::string>& kept_ids
-) {
-    // Filter by set membership, not a size comparison: plot_records (keyed from
-    // the species file) and kept_ids (surviving header plots) are independent
-    // key sets, so a size guard like `plot_records.size() <= kept_ids.size()`
-    // wrongly skips filtering when the species file references a plot absent
-    // from the kept set while staying within the count (e.g. one phantom plot,
-    // no header plots dropped) -- that plot's species then inflate and shift the
-    // frequency-sorted vocab.
-    std::unordered_set<std::string> kept(kept_ids.begin(), kept_ids.end());
-    if (plot_records.size() == kept.size()) {
-        // Same count: a full pass is only skippable when every key is kept.
-        bool all_kept = true;
-        for (const auto& [id, _] : plot_records) {
-            if (kept.find(id) == kept.end()) { all_kept = false; break; }
-        }
-        if (all_kept) return;
+// The index of a named role column in `source`. A named column the source
+// lacks is a configuration error (typically a typo'd role name), never a
+// silent "no such feature": it would otherwise train a model without the input
+// the caller asked for and bake the wrong feature count into the checkpoint.
+int require_column(const RowSource& source, const std::string& name, const char* role,
+                   const char* table) {
+    const int col = source.column_index(name);
+    if (col < 0) {
+        throw std::runtime_error(std::string(role) + " column '" + name +
+                                 "' not found in the " + table + " table");
     }
-    for (auto it = plot_records.begin(); it != plot_records.end();) {
-        if (kept.find(it->first) == kept.end()) it = plot_records.erase(it);
-        else ++it;
+    return col;
+}
+
+// Index of an optional role, -1 when the role is unset.
+int optional_column(const RowSource& source, const std::optional<std::string>& name,
+                    const char* role, const char* table) {
+    return name ? require_column(source, *name, role, table) : -1;
+}
+
+// The cell of `row` at `col`, or null when the row is too short to hold it.
+const std::string* cell_at(const std::vector<std::string>& row, int col) {
+    return col >= 0 && row.size() > static_cast<size_t>(col)
+        ? &row[static_cast<size_t>(col)] : nullptr;
+}
+
+std::optional<float> parse_cell_at(const std::vector<std::string>& row, int col) {
+    const std::string* cell = cell_at(row, col);
+    return cell ? parse_numeric_cell(*cell) : std::nullopt;
+}
+
+const char* missing_value_handling(MissingValuePolicy policy) {
+    return policy == MissingValuePolicy::Zero
+        ? "the model reads it as 0 (missing_values = zero)"
+        : "the model flags it and reads the fitting fold's mean (missing_values = indicate)";
+}
+
+void report_missing_covariate(const std::string& column, int64_t n_missing,
+                              MissingValuePolicy policy) {
+    if (n_missing > 0) {
+        std::cerr << "[RESOLVE] covariate column '" << column << "' has " << n_missing
+                  << " missing/unparseable cell(s); " << missing_value_handling(policy)
+                  << std::endl;
     }
 }
 
-// The dataset's active species vocabulary in the form the standalone encoders
-// and compute_unknown_species_stats take. `species_to_idx_` carries a literal
-// "<UNK>" -> 0 sentinel; SpeciesVocab is the 1-indexed map with an implicit UNK
-// at code 0, so the sentinel is stripped -- keeping it would inflate
-// n_species_vocab by one (the encoder reports species_to_id_.size() + 1) and
-// desync a held-out split from the split it was fitted on.
-SpeciesVocab active_species_vocab(
-    const std::unordered_map<std::string, int64_t>& species_to_idx
-) {
-    std::unordered_map<std::string, int64_t> sp_map;
-    sp_map.reserve(species_to_idx.size());
-    for (const auto& [name, id] : species_to_idx) {
-        if (name == "<UNK>" || id == 0) continue;
-        sp_map.emplace(name, id);
+void report_missing_coordinates(int64_t n_missing, MissingValuePolicy policy) {
+    if (n_missing > 0) {
+        std::cerr << "[RESOLVE] " << n_missing
+                  << " plot(s) have a missing/unparseable coordinate; "
+                  << missing_value_handling(policy) << std::endl;
     }
-    return SpeciesVocab::from_map(std::move(sp_map));
 }
 
-}  // namespace
-
-
-// ColumnIndices implementation
-ColumnIndices ColumnIndices::from_source(const RowSource& source, const RoleMapping& roles,
-                                         bool expect_coordinates) {
-    ColumnIndices idx;
-    idx.plot = source.column_index(roles.plot_id);
-    idx.species = source.column_index(roles.species_id);
-
-    // A named optional-role column that the source cannot resolve is a
-    // configuration error (typically a typo'd role name), not a silent "no such
-    // feature". The header loader (load_header_data) already throws loudly for
-    // an absent covariate/coordinate/target column; without the same guard here
-    // a species-table role typo (roles.genus = "genuss") would flip
-    // has_taxonomy/has_coordinates to false with no signal and bake the wrong
-    // feature count into the checkpoint. A role left unset
-    // (nullopt) still resolves to -1 without throwing.
-    auto resolve_role = [&source](const std::optional<std::string>& name,
-                                  const char* role) -> int {
-        if (!name) return -1;
-        int col = source.column_index(*name);
-        if (col < 0) {
-            throw std::runtime_error(
-                std::string("Role column not found in species CSV: ") + role +
-                " = \"" + *name + "\"");
-        }
-        return col;
-    };
-    // abundance / genus / family live in the species source for BOTH the
-    // single-table and two-file loaders, so they are always guarded here.
-    idx.abundance = resolve_role(roles.abundance_column(), "abundance");
-    idx.genus = resolve_role(roles.genus_column(), "genus");
-    idx.family = resolve_role(roles.family_column(), "family");
-    // Coordinates live in the species source only for the single-table loader
-    // (expect_coordinates); in the two-file loader they are header roles that
-    // load_header_data already validated, so looking them up in the species
-    // source would wrongly reject the normal case. Left unresolved (-1) there.
-    if (expect_coordinates) {
-        idx.longitude = resolve_role(roles.longitude_column(), "longitude");
-        idx.latitude = resolve_role(roles.latitude_column(), "latitude");
+// Positions of the kept rows.
+std::vector<int64_t> kept_indices(const std::vector<char>& keep) {
+    std::vector<int64_t> idx;
+    for (size_t i = 0; i < keep.size(); ++i) {
+        if (keep[i]) idx.push_back(static_cast<int64_t>(i));
     }
     return idx;
 }
 
+// Reduce `values` to the positions `idx` lists, in that order.
+template <typename T>
+void keep_rows(std::vector<T>& values, const std::vector<int64_t>& idx) {
+    std::vector<T> kept;
+    kept.reserve(idx.size());
+    for (int64_t i : idx) kept.push_back(std::move(values[static_cast<size_t>(i)]));
+    values = std::move(kept);
+}
 
-// --- Public loader verbs: thin io::with_retry<io::IOError> wrappers over the
-// single-attempt *_impl bodies. A transient storage read fault is
-// retried with backoff into a fresh dataset; a parse/logic error (not
-// io::IOError) propagates on the first try, so a permanent fault never re-reads
-// a multi-GB file. ---
+torch::Tensor rows_to_tensor(std::vector<float>& buffer, int64_t n_rows, int64_t width) {
+    if (n_rows == 0) {
+        return width > 0 ? torch::zeros({0, width}, torch::kFloat32)
+                         : torch::zeros({0}, torch::kFloat32);
+    }
+    if (width > 0) {
+        return torch::from_blob(buffer.data(), {n_rows, width}, torch::kFloat32).clone();
+    }
+    return torch::from_blob(buffer.data(), {n_rows}, torch::kFloat32).clone();
+}
+
+// The species-table columns a record is read from. plot_id and species_id are
+// required; a named abundance / genus / family role must resolve.
+struct ColumnIndices {
+    int plot = -1;
+    int species = -1;
+    int abundance = -1;
+    int genus = -1;
+    int family = -1;
+
+    ColumnIndices(const RowSource& source, const RoleMapping& roles)
+        : plot(require_column(source, roles.plot_id, "plot_id", "species")),
+          species(require_column(source, roles.species_id, "species_id", "species")),
+          abundance(optional_column(source, roles.abundance_column(), "abundance", "species")),
+          genus(optional_column(source, roles.genus_column(), "genus", "species")),
+          family(optional_column(source, roles.family_column(), "family", "species")) {}
+};
+
+// Reads species records from the rows of a species table. A missing / NA /
+// unparseable abundance cell is read as 1.0, a presence, and counted so the
+// loader warns about it; a parsed abundance of exactly 0 is read as
+// DatasetConfig::zero_abundance_as.
+class SpeciesRows {
+public:
+    SpeciesRows(const RowSource& source, const RoleMapping& roles, float zero_abundance_as)
+        : cols_(source, roles),
+          zero_abundance_as_(zero_abundance_as),
+          min_width_(static_cast<size_t>(std::max(cols_.plot, cols_.species)) + 1) {}
+
+    // Appends the record `row` holds and returns it, or null for a row too
+    // short to name its plot and species.
+    const SpeciesRecord* read(const std::vector<std::string>& row) {
+        if (row.size() < min_width_) return nullptr;
+        SpeciesRecord record;
+        record.plot_id = row[static_cast<size_t>(cols_.plot)];
+        record.species_id = row[static_cast<size_t>(cols_.species)];
+        record.abundance = 1.0f;
+        if (cols_.abundance >= 0) {
+            if (auto parsed = parse_cell_at(row, cols_.abundance)) {
+                record.abundance = *parsed == 0.0f ? zero_abundance_as_ : *parsed;
+            } else {
+                ++n_coerced_;
+            }
+        }
+        if (const std::string* genus = cell_at(row, cols_.genus)) record.genus = *genus;
+        if (const std::string* family = cell_at(row, cols_.family)) record.family = *family;
+        records_.push_back(std::move(record));
+        return &records_.back();
+    }
+
+    [[nodiscard]] bool has_abundance_column() const noexcept { return cols_.abundance >= 0; }
+
+    // The records read, after warning about coerced abundance cells.
+    std::vector<SpeciesRecord> finish() {
+        if (n_coerced_ > 0) {
+            std::cerr << "[RESOLVE] warning: " << n_coerced_
+                      << " abundance cell(s) were missing/NA/unparseable and "
+                         "defaulted to weight 1.0; these are treated as real "
+                         "presences, not missing cover"
+                      << std::endl;
+        }
+        return std::move(records_);
+    }
+
+private:
+    ColumnIndices cols_;
+    float zero_abundance_as_;
+    size_t min_width_;
+    int64_t n_coerced_ = 0;
+    std::vector<SpeciesRecord> records_;
+};
+
+// Reject a zero-abundance reading no weighting can use, before any row is read.
+void require_valid_zero_abundance(float zero_abundance_as) {
+    if (!std::isfinite(zero_abundance_as) || zero_abundance_as < 0.0f) {
+        throw std::invalid_argument(
+            "DatasetConfig.zero_abundance_as must be a finite value >= 0; got " +
+            std::to_string(zero_abundance_as));
+    }
+}
+
+// Fixed genus/family slots of the hash and sparse encodings, also the
+// embedding encoder's taxonomy width: top_k, doubled under TopBottom.
+int taxonomy_slot_count(const DatasetConfig& config) {
+    return config.selection == SelectionMode::TopBottom ? 2 * config.top_k : config.top_k;
+}
+
+bool is_pool_encoding(SpeciesEncodingMode mode) {
+    return mode == SpeciesEncodingMode::RankPool || mode == SpeciesEncodingMode::Transformer;
+}
+
+// The species width a schema records as resolved: encode_species overwrites a
+// rank-pool schema's pool_species_cap with the width the data was truncated
+// to, so a positive value is a width; a percentile request (< 0) or no cap (0)
+// that never reached a rank-pool encoder records none.
+int resolved_species_width(const ResolveSchema& schema) {
+    return schema.pool_species_cap > 0 ? schema.pool_species_cap : 0;
+}
+
+}  // namespace
+
+// =============================================================================
+// Plot-level columns
+// =============================================================================
+
+// The plot-level columns of a table, one row per plot: coordinates, numeric
+// and categorical covariates, and targets. The two-file loader adds every
+// header row, the single-table loader the first row of each plot, and
+// absorb_plot_columns turns both into the same tensors.
+struct ResolveDataset::PlotColumns {
+    PlotColumns(const RowSource& source, const RoleMapping& roles,
+                const std::vector<TargetSpec>& target_specs, bool read_covariates,
+                const char* table)
+        : targets(target_specs) {
+        lon_col = optional_column(source, roles.longitude_column(), "longitude", table);
+        lat_col = optional_column(source, roles.latitude_column(), "latitude", table);
+        has_coordinates = lon_col >= 0 && lat_col >= 0;
+
+        if (read_covariates) {
+            const std::unordered_set<std::string> numeric(roles.covariates.begin(),
+                                                          roles.covariates.end());
+            for (const auto& name : roles.categoricals) {
+                if (numeric.count(name)) {
+                    throw std::runtime_error(
+                        "Column '" + name + "' is listed in both roles.covariates "
+                        "and roles.categoricals; pick one role");
+                }
+            }
+            for (const auto& name : roles.covariates) {
+                covariate_cols.push_back(require_column(source, name, "covariate", table));
+                covariate_names.push_back(name);
+            }
+            for (const auto& name : roles.categoricals) {
+                categorical_cols.push_back(require_column(source, name, "categorical", table));
+                categorical_names.push_back(name);
+            }
+        }
+        covariate_missing.assign(covariate_cols.size(), 0);
+        categorical_raw.resize(categorical_cols.size());
+
+        for (const auto& target : targets) {
+            target_cols.push_back(require_column(source, target.column_name, "target", table));
+        }
+        regression.resize(targets.size());
+        classification.resize(targets.size());
+    }
+
+    // Append the plot `row` describes. Every buffer grows by exactly one entry
+    // (NaN / "" for a missing cell), so the buffers stay aligned row for row;
+    // keep marks a row whose Drop target is missing or unparseable.
+    void add(const std::vector<std::string>& row, const std::string& plot_id) {
+        plot_ids.push_back(plot_id);
+        bool row_ok = true;
+
+        // A blank / NA / unparseable coordinate stays NaN rather than reading
+        // as (0, 0), a real location in the Gulf of Guinea.
+        if (has_coordinates) {
+            const auto lon = parse_cell_at(row, lon_col);
+            const auto lat = parse_cell_at(row, lat_col);
+            coordinates.push_back(lon.value_or(kMissingValue));
+            coordinates.push_back(lat.value_or(kMissingValue));
+            if (!lon || !lat) ++coordinates_missing;
+        }
+        for (size_t i = 0; i < covariate_cols.size(); ++i) {
+            const auto value = parse_cell_at(row, covariate_cols[i]);
+            covariates.push_back(value.value_or(kMissingValue));
+            if (!value) ++covariate_missing[i];
+        }
+        for (size_t c = 0; c < categorical_cols.size(); ++c) {
+            const std::string* cell = cell_at(row, categorical_cols[c]);
+            categorical_raw[c].push_back(cell ? *cell : std::string());
+        }
+        // Classification cells are encoded once the whole column is known, so
+        // the auto-fit sees every value; an NA cell drops the row then.
+        for (size_t t = 0; t < targets.size(); ++t) {
+            const bool masked = targets[t].missing == TargetMissingPolicy::Mask;
+            const std::string* cell = cell_at(row, target_cols[t]);
+            if (targets[t].task == TaskType::Classification) {
+                classification[t].push_back(cell ? *cell : std::string());
+                if (!cell && !masked) row_ok = false;
+            } else {
+                const auto value = cell ? parse_numeric_cell(*cell) : std::nullopt;
+                regression[t].push_back(value.value_or(masked ? kMissingValue : 0.0f));
+                if (!value && !masked) row_ok = false;
+            }
+        }
+        keep.push_back(row_ok ? 1 : 0);
+    }
+
+    const std::vector<TargetSpec>& targets;
+    int lon_col = -1;
+    int lat_col = -1;
+    std::vector<int> covariate_cols;
+    std::vector<int> categorical_cols;
+    std::vector<int> target_cols;
+
+    std::vector<std::string> plot_ids;
+    bool has_coordinates = false;
+    std::vector<float> coordinates;  // (lon, lat) per row
+    int64_t coordinates_missing = 0;
+    std::vector<std::string> covariate_names;
+    std::vector<float> covariates;  // covariate_cols.size() values per row
+    std::vector<int64_t> covariate_missing;
+    std::vector<std::string> categorical_names;
+    std::vector<std::vector<std::string>> categorical_raw;
+    std::vector<std::vector<float>> regression;            // per target, empty for classification
+    std::vector<std::vector<std::string>> classification;  // per target, empty for regression
+    std::vector<char> keep;
+};
+
+void ResolveDataset::absorb_plot_columns(PlotColumns&& columns, int64_t n_skipped) {
+    const auto& targets = columns.targets;
+    plot_ids_ = std::move(columns.plot_ids);
+    const auto n_loaded = static_cast<int64_t>(plot_ids_.size());
+
+    if (columns.has_coordinates) {
+        coordinates_ = rows_to_tensor(columns.coordinates, n_loaded, 2);
+        schema_.has_coordinates = true;
+    }
+    schema_.covariate_names = columns.covariate_names;
+    const auto n_covariates = static_cast<int64_t>(columns.covariate_names.size());
+    if (n_covariates > 0) {
+        covariates_ = rows_to_tensor(columns.covariates, n_loaded, n_covariates);
+    }
+    for (size_t i = 0; i < columns.covariate_missing.size(); ++i) {
+        report_missing_covariate(columns.covariate_names[i], columns.covariate_missing[i],
+                                 config_.missing_values);
+    }
+    report_missing_coordinates(columns.coordinates_missing, config_.missing_values);
+
+    // Regression tensors as read; classification in two passes, so every
+    // classification vocab is fit on the final surviving-row set: the first
+    // finalizes keep (adding NA / explicit-unmapped drops), the second fits
+    // and encodes on the kept rows.
+    target_configs_.clear();
+    for (size_t t = 0; t < targets.size(); ++t) {
+        target_configs_.push_back(target_config_of(targets[t]));
+        if (targets[t].task != TaskType::Classification) {
+            targets_[target_name_of(targets[t])] =
+                rows_to_tensor(columns.regression[t], n_loaded, 0);
+        }
+    }
+    for (size_t t = 0; t < targets.size(); ++t) {
+        if (targets[t].task != TaskType::Classification) continue;
+        mark_classification_drops(targets[t], columns.classification[t], columns.keep);
+    }
+    for (size_t t = 0; t < targets.size(); ++t) {
+        if (targets[t].task != TaskType::Classification) continue;
+        const std::string name = target_name_of(targets[t]);
+        targets_[name] = encode_classification_target(
+            targets[t], columns.classification[t], columns.keep, target_configs_[t], name);
+    }
+    finalize_masked_labels(targets, targets_, columns.keep);
+
+    // Compact every per-plot buffer to the kept rows, and say how many went.
+    const std::vector<int64_t> kept = kept_indices(columns.keep);
+    const auto n_keep = static_cast<int64_t>(kept.size());
+    if (n_keep < n_loaded) {
+        keep_rows(plot_ids_, kept);
+        const auto idx = torch::tensor(kept, torch::kInt64);
+        if (coordinates_.defined()) coordinates_ = coordinates_.index_select(0, idx);
+        if (covariates_.defined()) covariates_ = covariates_.index_select(0, idx);
+        for (auto& [name, tensor] : targets_) tensor = tensor.index_select(0, idx);
+        for (auto& raw : columns.categorical_raw) keep_rows(raw, kept);
+    }
+    const int64_t n_dropped = n_loaded - n_keep;
+    if (n_dropped > 0 || n_skipped > 0) {
+        std::cout << "  Kept " << n_keep << " of " << (n_loaded + n_skipped) << " plots (";
+        if (n_dropped > 0) {
+            std::cout << n_dropped << " dropped for missing/NaN target [";
+            for (size_t t = 0; t < targets.size(); ++t) {
+                std::cout << (t ? ", " : "") << "'" << targets[t].column_name << "'";
+            }
+            std::cout << "]";
+        }
+        if (n_skipped > 0) {
+            if (n_dropped > 0) std::cout << "; ";
+            std::cout << n_skipped << " skipped as too short to contain plot_id";
+        }
+        std::cout << ")" << std::endl;
+    }
+
+    // Categorical covariates: each column's vocab (sorted-unique non-NA ->
+    // codes 1..K) fitted on the kept rows, unless adopted, and encoded into a
+    // (n_plots, n_categoricals) int64 tensor. schema_.categorical_embed_dim is
+    // left at its default; the model overwrites it from ModelConfig.
+    if (!columns.categorical_names.empty()) {
+        if (!use_external_vocabs_) {
+            categorical_vocab_.fit(columns.categorical_names, columns.categorical_raw);
+        }
+        categorical_ids_ = categorical_vocab_.encode_batch(columns.categorical_names,
+                                                           columns.categorical_raw);
+        schema_.categorical_names = columns.categorical_names;
+        schema_.categorical_vocab_sizes = categorical_vocab_.vocab_sizes();
+    }
+
+    schema_.targets = target_configs_;
+    schema_.n_plots = static_cast<int64_t>(plot_ids_.size());
+}
+
+// =============================================================================
+// Loaders
+// =============================================================================
+
+std::vector<TargetSpec> ResolveDataset::begin_load(const std::vector<TargetSpec>& targets,
+                                                   const ExternalVocabs* vocabs) {
+    require_valid_zero_abundance(config_.zero_abundance_as);
+    if (vocabs == nullptr) return targets;
+    adopt_vocabs(*vocabs);
+    return replay_class_mappings(targets, vocabs->targets);
+}
+
+ResolveDataset ResolveDataset::load_tables(
+    RowSource& header,
+    RowSource& species,
+    const RoleMapping& roles,
+    const std::vector<TargetSpec>& targets,
+    const DatasetConfig& config,
+    const ExternalVocabs* vocabs
+) {
+    ResolveDataset dataset;
+    dataset.config_ = config;
+    const std::vector<TargetSpec> specs = dataset.begin_load(targets, vocabs);
+
+    // Header rows are plots: a duplicate plot_id would give two plot slots
+    // the same species records, so it is rejected.
+    const int plot_col = require_column(header, roles.plot_id, "plot_id", "header");
+    PlotColumns plots(header, roles, specs, /*read_covariates=*/true, "header");
+    std::unordered_set<std::string> seen;
+    int64_t n_skipped = 0;
+    header.read_rows([&](size_t, const std::vector<std::string>& row) {
+        const std::string* plot_id = cell_at(row, plot_col);
+        if (plot_id == nullptr) {
+            ++n_skipped;
+            return;
+        }
+        if (!seen.insert(*plot_id).second) {
+            throw std::runtime_error(
+                "Duplicate plot_id '" + *plot_id + "' in header data. Plot IDs must "
+                "be unique (each header row is one plot).");
+        }
+        plots.add(row, *plot_id);
+    });
+    dataset.absorb_plot_columns(std::move(plots), n_skipped);
+
+    SpeciesRows rows(species, roles, config.zero_abundance_as);
+    species.read_rows([&](size_t, const std::vector<std::string>& row) { rows.read(row); });
+    dataset.has_abundance_column_ = rows.has_abundance_column();
+    dataset.encode_species(rows.finish());
+    return dataset;
+}
+
+ResolveDataset ResolveDataset::load_table(
+    RowSource& source,
+    const RoleMapping& roles,
+    const std::vector<TargetSpec>& targets,
+    const DatasetConfig& config,
+    const ExternalVocabs* vocabs
+) {
+    ResolveDataset dataset;
+    dataset.config_ = config;
+    const std::vector<TargetSpec> specs = dataset.begin_load(targets, vocabs);
+
+    // The single table carries plot-level coordinates and targets on each
+    // plot's first row; covariates belong in a header table. A RoleMapping
+    // shared with the two-file loader is a legitimate pattern, so this warns.
+    if (!roles.covariates.empty() || !roles.categoricals.empty()) {
+        std::cerr << "[RESOLVE] warning: single-table (species-only) loading "
+                     "ignores roles.covariates ("
+                  << roles.covariates.size() << ") and roles.categoricals ("
+                  << roles.categoricals.size()
+                  << "); use the header+species loader for plot-level covariates"
+                  << std::endl;
+    }
+
+    SpeciesRows rows(source, roles, config.zero_abundance_as);
+    PlotColumns plots(source, roles, specs, /*read_covariates=*/false, "species");
+    std::unordered_set<std::string> seen;
+    source.read_rows([&](size_t, const std::vector<std::string>& row) {
+        const SpeciesRecord* record = rows.read(row);
+        if (record != nullptr && seen.insert(record->plot_id).second) {
+            plots.add(row, record->plot_id);
+        }
+    });
+    dataset.absorb_plot_columns(std::move(plots), /*n_skipped=*/0);
+    dataset.has_abundance_column_ = rows.has_abundance_column();
+    dataset.encode_species(rows.finish());
+    return dataset;
+}
+
+// Public verbs. A CSV read is wrapped in io::with_retry<io::IOError>, so a
+// transient storage fault re-runs the whole load into a fresh dataset; a
+// parse/logic error propagates on the first try. A fully in-memory load does
+// no I/O and is not retried.
 
 ResolveDataset ResolveDataset::from_csv(
     const std::string& header_path,
@@ -493,7 +835,11 @@ ResolveDataset ResolveDataset::from_csv(
     const DatasetConfig& config
 ) {
     return io::with_retry<io::IOError>(
-        [&] { return from_csv_impl(header_path, species_path, roles, targets, config); },
+        [&] {
+            CSVReader header(header_path);
+            CSVReader species(species_path);
+            return load_tables(header, species, roles, targets, config, nullptr);
+        },
         "dataset CSV load");
 }
 
@@ -531,10 +877,9 @@ ResolveDataset ResolveDataset::from_csv_with_vocabs(
 ) {
     return io::with_retry<io::IOError>(
         [&] {
-            CSVReader header_reader(header_path);
-            CSVReader species_reader(species_path);
-            return load_with_vocabs(
-                header_reader, species_reader, roles, targets, vocabs, config);
+            CSVReader header(header_path);
+            CSVReader species(species_path);
+            return load_tables(header, species, roles, targets, config, &vocabs);
         },
         "dataset CSV load (schema)");
 }
@@ -546,7 +891,10 @@ ResolveDataset ResolveDataset::from_species_csv(
     const DatasetConfig& config
 ) {
     return io::with_retry<io::IOError>(
-        [&] { return from_species_csv_impl(species_path, roles, targets, config); },
+        [&] {
+            CSVReader reader(species_path);
+            return load_table(reader, roles, targets, config, nullptr);
+        },
         "species CSV load");
 }
 
@@ -571,16 +919,10 @@ ResolveDataset ResolveDataset::from_species_csv_with_vocabs(
     return io::with_retry<io::IOError>(
         [&] {
             CSVReader reader(species_path);
-            return from_species_source(reader, roles, targets, config, &vocabs);
+            return load_table(reader, roles, targets, config, &vocabs);
         },
         "species CSV load (schema)");
 }
-
-// --- In-memory (DataFrame) loaders. These share the exact loader
-// bodies as the CSV verbs via the RowSource seam; the only difference is the row
-// provider (InMemoryRowSource over a ColumnTable instead of a CSVReader). A
-// fully in-memory load does no I/O, so it needs no io::with_retry; the mixed
-// header-frame + species-CSV verb retries only the CSV read. ---
 
 ResolveDataset ResolveDataset::from_dataframe(
     const ColumnTable& header,
@@ -589,16 +931,9 @@ ResolveDataset ResolveDataset::from_dataframe(
     const std::vector<TargetSpec>& targets,
     const DatasetConfig& config
 ) {
-    ResolveDataset dataset;
-    dataset.config_ = config;
-
     InMemoryRowSource header_source(header);
-    dataset.load_header_data(header_source, roles, targets);
-
     InMemoryRowSource species_source(species);
-    dataset.load_species_data(species_source, roles);
-
-    return dataset;
+    return load_tables(header_source, species_source, roles, targets, config, nullptr);
 }
 
 ResolveDataset ResolveDataset::from_dataframe_header(
@@ -610,16 +945,9 @@ ResolveDataset ResolveDataset::from_dataframe_header(
 ) {
     return io::with_retry<io::IOError>(
         [&] {
-            ResolveDataset dataset;
-            dataset.config_ = config;
-
             InMemoryRowSource header_source(header);
-            dataset.load_header_data(header_source, roles, targets);
-
-            CSVReader species_reader(species_path);
-            dataset.load_species_data(species_reader, roles);
-
-            return dataset;
+            CSVReader species(species_path);
+            return load_tables(header_source, species, roles, targets, config, nullptr);
         },
         "dataset load (DataFrame header + species CSV)");
 }
@@ -636,18 +964,6 @@ ResolveDataset ResolveDataset::from_dataframe_with_schema(
         header, species, roles, targets, schema_source.external_vocabs(), config);
 }
 
-ResolveDataset ResolveDataset::from_dataframe_with_schema(
-    const ColumnTable& header,
-    const ColumnTable& species,
-    const RoleMapping& roles,
-    const std::vector<TargetSpec>& targets,
-    const ResolveSchema& schema,
-    const DatasetConfig& config
-) {
-    return from_dataframe_with_vocabs(
-        header, species, roles, targets, external_vocabs_from_schema(schema), config);
-}
-
 ResolveDataset ResolveDataset::from_dataframe_with_vocabs(
     const ColumnTable& header,
     const ColumnTable& species,
@@ -658,8 +974,7 @@ ResolveDataset ResolveDataset::from_dataframe_with_vocabs(
 ) {
     InMemoryRowSource header_source(header);
     InMemoryRowSource species_source(species);
-    return load_with_vocabs(
-        header_source, species_source, roles, targets, vocabs, config);
+    return load_tables(header_source, species_source, roles, targets, config, &vocabs);
 }
 
 ResolveDataset ResolveDataset::from_species_dataframe(
@@ -669,18 +984,7 @@ ResolveDataset ResolveDataset::from_species_dataframe(
     const DatasetConfig& config
 ) {
     InMemoryRowSource source(species);
-    return from_species_source(source, roles, targets, config);
-}
-
-ResolveDataset ResolveDataset::from_species_dataframe_with_schema(
-    const ColumnTable& species,
-    const RoleMapping& roles,
-    const std::vector<TargetSpec>& targets,
-    const ResolveSchema& schema,
-    const DatasetConfig& config
-) {
-    return from_species_dataframe_with_vocabs(
-        species, roles, targets, external_vocabs_from_schema(schema), config);
+    return load_table(source, roles, targets, config, nullptr);
 }
 
 ResolveDataset ResolveDataset::from_species_dataframe_with_vocabs(
@@ -691,55 +995,24 @@ ResolveDataset ResolveDataset::from_species_dataframe_with_vocabs(
     const DatasetConfig& config
 ) {
     InMemoryRowSource source(species);
-    return from_species_source(source, roles, targets, config, &vocabs);
+    return load_table(source, roles, targets, config, &vocabs);
 }
 
-ResolveDataset ResolveDataset::from_csv_impl(
-    const std::string& header_path,
-    const std::string& species_path,
-    const RoleMapping& roles,
-    const std::vector<TargetSpec>& targets,
-    const DatasetConfig& config
-) {
-    ResolveDataset dataset;
-    dataset.config_ = config;
-
-    // Load header data (coordinates, covariates, targets)
-    CSVReader header_reader(header_path);
-    dataset.load_header_data(header_reader, roles, targets);
-
-    // Load species data
-    CSVReader species_reader(species_path);
-    dataset.load_species_data(species_reader, roles);
-
-    return dataset;
-}
-
-// --- Vocabulary reuse -----------------------------------------
+// =============================================================================
+// Vocabulary reuse
+// =============================================================================
 //
 // Every non-hash encoder indexes an embedding table by a code that is a
-// function of the file its vocab was fitted on (the species vocab is
-// frequency-ranked; the taxonomy vocab is a function of the name set). Scoring
-// new data therefore has to reuse the TRAINING vocabularies, from whichever of
-// the two carriers is available: the in-memory training dataset, or a
+// function of the data its vocab was fitted on (the species vocab is ranked by
+// plot count; the taxonomy vocab is a function of the name set). Scoring new
+// data therefore has to reuse the TRAINING vocabularies, from whichever of the
+// two carriers is available: the in-memory training dataset, or a
 // ResolveSchema recovered from a checkpoint.
-
-namespace {
-
-// The species width a schema records as resolved: encode_species overwrites a
-// rank-pool schema's pool_species_cap with the width the data was truncated
-// to, so a positive value is a width; a percentile request (< 0) or no cap (0)
-// that never reached a rank-pool encoder records none.
-int resolved_species_width(const ResolveSchema& schema) {
-    return schema.pool_species_cap > 0 ? schema.pool_species_cap : 0;
-}
-
-}  // namespace
 
 ExternalVocabs ResolveDataset::external_vocabs() const {
     ExternalVocabs v;
-    v.species_vocab = species_vocab_;
-    v.taxonomy = taxonomy_vocab_;
+    v.species_vocab = vocab_.species.names();
+    v.taxonomy = vocab_.taxonomy;
     v.categorical = categorical_vocab_;
     v.targets = target_configs_;
     v.pool_species_cap = resolved_species_width(schema_);
@@ -823,11 +1096,11 @@ SelectionMode effective_selection(const DatasetConfig& config) {
         case SpeciesEncodingMode::RankPool:
         case SpeciesEncodingMode::Transformer:
         case SpeciesEncodingMode::Sparse:
-        default:
-            // Variable width: without a budget every record is encoded, which
-            // is All however the config is spelled.
-            return config.species_budget > 0 ? config.selection : SelectionMode::All;
+            break;
     }
+    // Variable width: without a budget every species is encoded, which is All
+    // however the config is spelled.
+    return config.species_budget > 0 ? config.selection : SelectionMode::All;
 }
 
 void ResolveDataset::adopt_vocabs(const ExternalVocabs& vocabs) {
@@ -835,31 +1108,19 @@ void ResolveDataset::adopt_vocabs(const ExternalVocabs& vocabs) {
         throw std::runtime_error(
             "ResolveDataset: the supplied vocabularies carry no species vocab, so "
             "the dataset would re-fit its own species codes and index the model's "
-            "embedding tables with the wrong rows. A checkpoint written before "
-            "gcol33/resolve#102 stores only the vocabulary SIZES; retrain or "
-            "re-save the model with a current build, or pass the training "
-            "ResolveDataset to from_csv_with_schema instead.");
+            "embedding tables with the wrong rows. A checkpoint that stores only "
+            "the vocabulary SIZES cannot be scored this way; retrain or re-save the "
+            "model with a current build, or pass the training ResolveDataset to "
+            "from_csv_with_schema instead.");
     }
-
     use_external_vocabs_ = true;
     categorical_vocab_ = vocabs.categorical;
-    taxonomy_vocab_ = vocabs.taxonomy;
-    species_vocab_ = vocabs.species_vocab;
-    // Every vocab-reusing loader sets config_ before adopting, so the source's
-    // resolved width replaces whatever cap the caller's config asked for.
+    vocab_.species = SpeciesVocab::from_ordered(vocabs.species_vocab);
+    vocab_.taxonomy = vocabs.taxonomy;
+    // The source's resolved width replaces whatever cap the caller's config
+    // asked for, so a plot keeps the species the model was trained to read.
     if (vocabs.pool_species_cap > 0) {
         config_.pool_species_cap = vocabs.pool_species_cap;
-    }
-
-    // Derive the name -> code map from the ordered vocab, so the two can never
-    // disagree. This reproduces build_species_vocab()'s map exactly (it also
-    // stores "<UNK>" -> 0); the rank-pool / embed encoders strip the "<UNK>"
-    // sentinel before handing the map to SpeciesVocab, which is 1-indexed with
-    // an implicit UNK.
-    species_to_idx_.clear();
-    species_to_idx_.reserve(species_vocab_.size());
-    for (size_t i = 0; i < species_vocab_.size(); ++i) {
-        species_to_idx_[species_vocab_[i]] = static_cast<int64_t>(i);
     }
 }
 
@@ -867,18 +1128,15 @@ std::vector<TargetSpec> ResolveDataset::replay_class_mappings(
     const std::vector<TargetSpec>& targets,
     const std::vector<TargetConfig>& source_configs
 ) {
-    // Classification targets need their class mappings replayed from the
-    // source's class_names so the explicit-mapping branch in load_header_data
-    // is taken (instead of fit_classification_mapping, which would factorize
-    // the new file's own value distribution into different codes). The caller
-    // is not required to populate TargetSpec::class_mapping.
+    // A classification target takes its class mapping from the source's
+    // class_names, so labels encode to the training codes instead of a
+    // factorization of the new data's own values. A spec that already carries
+    // a mapping keeps it.
     std::vector<TargetSpec> out = targets;
     for (auto& spec : out) {
         if (spec.task != TaskType::Classification) continue;
-        if (!spec.class_mapping.empty()) continue;  // caller already set one
-        const std::string name = spec.target_name.empty()
-            ? spec.column_name
-            : spec.target_name;
+        if (!spec.class_mapping.empty()) continue;
+        const std::string name = target_name_of(spec);
         for (const auto& src_cfg : source_configs) {
             if (src_cfg.name != name) continue;
             for (size_t i = 0; i < src_cfg.class_names.size(); ++i) {
@@ -893,885 +1151,62 @@ std::vector<TargetSpec> ResolveDataset::replay_class_mappings(
     return out;
 }
 
-ResolveDataset ResolveDataset::load_with_vocabs(
-    RowSource& header,
-    RowSource& species,
-    const RoleMapping& roles,
-    const std::vector<TargetSpec>& targets,
-    const ExternalVocabs& vocabs,
-    const DatasetConfig& config
-) {
-    ResolveDataset dataset;
-    dataset.config_ = config;
-    // The load_*/encode_species paths see use_external_vocabs_=true and skip
-    // their own fit calls, encoding against these instead. Any value not in the
-    // supplied vocab encodes as 0 (UNK) via the existing encode paths
-    // (CategoricalVocab::encode_batch, TaxonomyVocab::encode_genus/_family,
-    // species_to_idx_ fallback).
-    dataset.adopt_vocabs(vocabs);
+// =============================================================================
+// Species encoding
+// =============================================================================
 
-    dataset.load_header_data(
-        header, roles, replay_class_mappings(targets, vocabs.targets));
-    dataset.load_species_data(species, roles);
+void ResolveDataset::encode_species(std::vector<SpeciesRecord> records) {
+    const PlotAssemblages assemblages =
+        PlotAssemblages::build(std::move(records), plot_ids_, config_.representation);
+    record_encoding_settings();
+    fit_vocab(assemblages);
 
-    return dataset;
-}
-
-ResolveDataset ResolveDataset::from_species_csv_impl(
-    const std::string& species_path,
-    const RoleMapping& roles,
-    const std::vector<TargetSpec>& targets,
-    const DatasetConfig& config
-) {
-    CSVReader reader(species_path);
-    return from_species_source(reader, roles, targets, config);
-}
-
-// Build a SpeciesRecord from one table row using the resolved column indices.
-// Single source of truth shared by from_species_source and load_species_data.
-// The caller must have bounds-checked the plot and species columns already.
-// When an abundance column is present but a cell is missing/NA/unparseable, the
-// weight defaults to 1.0 and *abundance_coerced (if given) is incremented so the
-// caller can warn -- mirroring the loud coordinate/covariate coercion warnings,
-// rather than silently conflating missing cover with a real presence.
-// A parsed abundance of exactly 0 is read as `zero_abundance_as`
-// (DatasetConfig::zero_abundance_as; 0 leaves it alone).
-static SpeciesRecord make_species_record(const std::vector<std::string>& row,
-                                         const ColumnIndices& cols,
-                                         float zero_abundance_as,
-                                         int64_t* abundance_coerced = nullptr) {
-    SpeciesRecord record;
-    record.plot_id = row[cols.plot];
-    record.species_id = row[cols.species];
-    if (cols.abundance >= 0 && row.size() > static_cast<size_t>(cols.abundance)) {
-        auto parsed = parse_regression_target(row[cols.abundance]);
-        if (parsed.has_value()) {
-            record.abundance = *parsed == 0.0f ? zero_abundance_as : *parsed;
-        } else {
-            record.abundance = 1.0f;
-            if (abundance_coerced) (*abundance_coerced)++;
-        }
-    } else {
-        record.abundance = 1.0f;
-    }
-    if (cols.genus >= 0 && row.size() > static_cast<size_t>(cols.genus)) {
-        record.genus = row[cols.genus];
-    }
-    if (cols.family >= 0 && row.size() > static_cast<size_t>(cols.family)) {
-        record.family = row[cols.family];
-    }
-    return record;
-}
-
-// Reject a zero-abundance reading no weighting can use. Shared by both species
-// loaders, before any row is read.
-static void require_valid_zero_abundance(float zero_abundance_as) {
-    if (!std::isfinite(zero_abundance_as) || zero_abundance_as < 0.0f) {
-        throw std::invalid_argument(
-            "DatasetConfig.zero_abundance_as must be a finite value >= 0; got " +
-            std::to_string(zero_abundance_as));
-    }
-}
-
-// Emit the abundance-coercion warning shared by both species loaders.
-static void warn_abundance_coercions(int64_t abundance_coerced) {
-    if (abundance_coerced > 0) {
-        std::cerr << "[RESOLVE] warning: " << abundance_coerced
-                  << " abundance cell(s) were missing/NA/unparseable and "
-                     "defaulted to weight 1.0; these are treated as real "
-                     "presences, not missing cover"
-                  << std::endl;
-    }
-}
-
-// A coordinate or covariate cell the loader could not read. It stays NaN in the
-// dataset's tensors; DatasetConfig::missing_values decides how the model reads it.
-static constexpr float kMissingValue = std::numeric_limits<float>::quiet_NaN();
-
-static const char* missing_value_handling(MissingValuePolicy policy) {
-    return policy == MissingValuePolicy::Zero
-        ? "the model reads it as 0 (missing_values = zero)"
-        : "the model flags it and reads the fitting fold's mean (missing_values = indicate)";
-}
-
-static void report_missing_covariate(const std::string& column, int64_t n_missing,
-                                     MissingValuePolicy policy) {
-    if (n_missing > 0) {
-        std::cerr << "[RESOLVE] covariate column '" << column << "' has " << n_missing
-                  << " missing/unparseable cell(s); " << missing_value_handling(policy)
-                  << std::endl;
-    }
-}
-
-static void report_missing_coordinates(int64_t n_missing, MissingValuePolicy policy) {
-    if (n_missing > 0) {
-        std::cerr << "[RESOLVE] " << n_missing
-                  << " plot(s) have a missing/unparseable coordinate; "
-                  << missing_value_handling(policy) << std::endl;
-    }
-}
-
-ResolveDataset ResolveDataset::from_species_source(
-    RowSource& reader,
-    const RoleMapping& roles,
-    const std::vector<TargetSpec>& in_targets,
-    const DatasetConfig& config,
-    const ExternalVocabs* vocabs
-) {
-    ResolveDataset dataset;
-    dataset.config_ = config;
-
-    // Vocab-reusing single-table load: adopt the training
-    // vocabularies and replay each classification target's class -> code
-    // mapping, exactly as load_with_vocabs does for the two-file path.
-    std::vector<TargetSpec> targets = in_targets;
-    if (vocabs != nullptr) {
-        dataset.adopt_vocabs(*vocabs);
-        targets = replay_class_mappings(in_targets, vocabs->targets);
-    }
-
-    // Find column indices. The single-table loader reads coordinates from the
-    // species source, so a named longitude/latitude role must resolve here too.
-    auto cols = ColumnIndices::from_source(reader, roles, /*expect_coordinates=*/true);
-    if (cols.plot < 0 || cols.species < 0) {
-        throw std::runtime_error("Required columns not found: plot_id or species_id");
-    }
-
-    // The single-long-table loader reads only plot-level coordinates/targets
-    // from each plot's first occurrence; it does not populate covariates or
-    // categorical covariates. Warn rather than silently discard requested roles
-    // (a shared RoleMapping reused from the two-file loader is a legitimate
-    // pattern, so this is a warning, not an error). Use from_csv (separate
-    // header + species tables) when plot-level covariates are needed.
-    if (!roles.covariates.empty() || !roles.categoricals.empty()) {
-        std::cerr << "[RESOLVE] warning: single-table (species-only) loading "
-                     "ignores roles.covariates ("
-                  << roles.covariates.size() << ") and roles.categoricals ("
-                  << roles.categoricals.size()
-                  << "); use the header+species loader for plot-level covariates"
-                  << std::endl;
-    }
-
-    // Find target columns. A missing target column must fail loudly here too;
-    // col == -1 would otherwise silently drop every plot's target value.
-    std::vector<int> target_cols;
-    for (const auto& target : targets) {
-        int col = reader.column_index(target.column_name);
-        if (col < 0) {
-            throw std::runtime_error("Target column not found: " + target.column_name);
-        }
-        target_cols.push_back(col);
-    }
-
-    // First pass: collect all unique plots and their species
-    std::unordered_map<std::string, std::vector<SpeciesRecord>> plot_records;
-    std::unordered_map<std::string, std::pair<float, float>> plot_coords;
-    std::unordered_map<std::string, std::vector<std::string>> plot_targets;
-    std::unordered_set<std::string> seen_plots;
-    int64_t coord_na_count = 0;  // missing/unparseable coords, kept as NaN
-    int64_t abundance_coerced = 0;  // missing/unparseable abundance coerced to 1.0
-    require_valid_zero_abundance(config.zero_abundance_as);
-
-    reader.read_rows([&](size_t, const std::vector<std::string>& row) {
-        if (row.size() <= static_cast<size_t>(std::max({cols.plot, cols.species}))) {
-            return;  // Skip malformed rows
-        }
-
-        std::string plot_id = row[cols.plot];
-
-        SpeciesRecord record =
-            make_species_record(row, cols, config.zero_abundance_as, &abundance_coerced);
-        plot_records[plot_id].push_back(record);
-
-        // Extract plot-level data from first occurrence
-        if (seen_plots.find(plot_id) == seen_plots.end()) {
-            seen_plots.insert(plot_id);
-            dataset.plot_ids_.push_back(plot_id);
-
-            // Coordinates. NA-aware parse: a missing/unparseable cell is kept
-            // as NaN, never read as a real (0, 0) location; the
-            // continuous block decides how the model reads it.
-            if (cols.longitude >= 0 && cols.latitude >= 0 &&
-                row.size() > static_cast<size_t>(std::max(cols.longitude, cols.latitude))) {
-                auto lon = parse_regression_target(row[cols.longitude]);
-                auto lat = parse_regression_target(row[cols.latitude]);
-                plot_coords[plot_id] = {lon.value_or(kMissingValue), lat.value_or(kMissingValue)};
-                if (!lon.has_value() || !lat.has_value()) {
-                    coord_na_count++;
-                }
-            }
-
-            // Targets — stash the raw cell strings; classification
-            // factorization and regression NaN-parsing happen post-scan
-            // (mirrors load_header_data) so string-coded classes are encoded
-            // against the full value distribution instead of collapsing to 0.
-            std::vector<std::string> target_values;
-            target_values.reserve(target_cols.size());
-            for (int col : target_cols) {
-                // target_cols entries are validated >= 0 (throw above), so the
-                // only miss here is a row too short to hold the column.
-                if (row.size() > static_cast<size_t>(col)) {
-                    target_values.push_back(row[col]);
-                } else {
-                    target_values.emplace_back();  // missing -> dropped post-scan
-                }
-            }
-            plot_targets[plot_id] = std::move(target_values);
-        }
-    });
-
-    report_missing_coordinates(coord_na_count, config.missing_values);
-    warn_abundance_coercions(abundance_coerced);
-
-    int64_t n_plots = static_cast<int64_t>(dataset.plot_ids_.size());
-    dataset.schema_.n_plots = n_plots;
-
-    // Build coordinates tensor
-    if (!plot_coords.empty()) {
-        dataset.coordinates_ = torch::full({n_plots, 2}, kMissingValue, torch::kFloat32);
-        auto coords_acc = dataset.coordinates_.accessor<float, 2>();
-
-        for (int64_t i = 0; i < n_plots; ++i) {
-            const auto& plot_id = dataset.plot_ids_[i];
-            auto it = plot_coords.find(plot_id);
-            if (it != plot_coords.end()) {
-                coords_acc[i][0] = it->second.first;
-                coords_acc[i][1] = it->second.second;
-            }
-        }
-        dataset.schema_.has_coordinates = true;
-    }
-
-    // Build target tensors with the same semantics as load_header_data:
-    // classification targets are factorized against the full value distribution
-    // (explicit class_mapping or auto-fit -> codes + class_names), regression
-    // targets are NaN-parsed, and any plot whose target is missing/unmapped is
-    // dropped post-build (any-target semantics).
-    std::vector<char> keep(static_cast<size_t>(n_plots), 1);
-
-    // Raw cell for target t at plot i, in plot order.
-    auto raw_at = [&](size_t t, int64_t i) -> const std::string& {
-        static const std::string kEmpty;
-        const auto& vals = plot_targets[dataset.plot_ids_[i]];
-        return t < vals.size() ? vals[t] : kEmpty;
+    using EncodeFn = void (ResolveDataset::*)(const PlotAssemblages&);
+    struct Encoder {
+        SpeciesEncodingMode mode;
+        EncodeFn encode;
     };
-
-    // Build target configs (in target order) + regression tensors; collect the
-    // raw classification cells. Classification encoding is deferred to a second
-    // pass so every vocab is fit from the final surviving-row set,
-    // through the same encode_classification_target used by the header loader
-    // (single source of truth + num_classes validation).
-    std::vector<std::vector<std::string>> cls_raw(targets.size());
-    for (size_t t = 0; t < targets.size(); ++t) {
-        const auto& target_spec = targets[t];
-        const std::string name = target_name_of(target_spec);
-        dataset.target_configs_.push_back(target_config_of(target_spec));
-
-        if (target_spec.task == TaskType::Classification) {
-            cls_raw[t].reserve(static_cast<size_t>(n_plots));
-            for (int64_t i = 0; i < n_plots; ++i) cls_raw[t].push_back(raw_at(t, i));
-        } else {
-            const bool masked = target_spec.missing == TargetMissingPolicy::Mask;
-            auto target_tensor = torch::zeros({n_plots}, torch::kFloat32);
-            auto acc = target_tensor.accessor<float, 1>();
-            for (int64_t i = 0; i < n_plots; ++i) {
-                auto parsed = parse_regression_target(raw_at(t, i));
-                if (!parsed.has_value()) {
-                    if (masked) acc[i] = kMissingValue;
-                    else keep[i] = 0;
-                    continue;
-                }
-                acc[i] = *parsed;
-            }
-            dataset.targets_[name] = target_tensor;
-        }
+    static constexpr Encoder kEncoders[] = {
+        {SpeciesEncodingMode::Hash, &ResolveDataset::encode_hash},
+        {SpeciesEncodingMode::Embed, &ResolveDataset::encode_embed},
+        {SpeciesEncodingMode::Sparse, &ResolveDataset::encode_sparse},
+        {SpeciesEncodingMode::RankPool, &ResolveDataset::encode_pool},
+        {SpeciesEncodingMode::Transformer, &ResolveDataset::encode_pool},
+    };
+    const auto* encoder = std::find_if(std::begin(kEncoders), std::end(kEncoders),
+        [&](const Encoder& e) { return e.mode == config_.species_encoding; });
+    if (encoder == std::end(kEncoders)) {
+        throw std::invalid_argument("ResolveDataset: unsupported species encoding");
     }
+    (this->*(encoder->encode))(assemblages);
 
-    // Pass 1: finalize keep for classification NA / explicit-unmapped drops.
-    for (size_t t = 0; t < targets.size(); ++t) {
-        if (targets[t].task != TaskType::Classification) continue;
-        mark_classification_drops(targets[t], cls_raw[t], keep);
-    }
-    // Pass 2: fit each classification vocab on kept rows only, encode, validate.
-    for (size_t t = 0; t < targets.size(); ++t) {
-        if (targets[t].task != TaskType::Classification) continue;
-        const std::string name = target_name_of(targets[t]);
-        dataset.targets_[name] = encode_classification_target(
-            targets[t], cls_raw[t], keep, dataset.target_configs_[t], name);
-    }
-    finalize_masked_labels(targets, dataset.targets_, keep);
-
-    // Drop plots whose target was missing/unmapped, compacting plot_ids_,
-    // coordinates, and every target tensor in lockstep. encode_species (below)
-    // derives n_plots from plot_ids_, so dropping here is sufficient.
-    {
-        int64_t n_keep = 0;
-        for (char k : keep) if (k) ++n_keep;
-        if (n_keep < n_plots) {
-            std::vector<int64_t> keep_idx;
-            keep_idx.reserve(static_cast<size_t>(n_keep));
-            for (int64_t i = 0; i < n_plots; ++i) if (keep[i]) keep_idx.push_back(i);
-
-            std::vector<std::string> new_pids;
-            new_pids.reserve(static_cast<size_t>(n_keep));
-            for (int64_t i : keep_idx) new_pids.push_back(std::move(dataset.plot_ids_[i]));
-            dataset.plot_ids_ = std::move(new_pids);
-
-            auto idx_t = torch::tensor(keep_idx, torch::kInt64);
-            if (dataset.coordinates_.defined())
-                dataset.coordinates_ = dataset.coordinates_.index_select(0, idx_t);
-            for (auto& [nm, tensor] : dataset.targets_)
-                tensor = tensor.index_select(0, idx_t);
-
-            const int64_t n_dropped = n_plots - n_keep;
-            n_plots = n_keep;
-            dataset.schema_.n_plots = n_plots;
-            std::cout << "  Dropped " << n_dropped
-                      << " plots with missing/NaN target (" << n_keep
-                      << " of " << (n_keep + n_dropped) << " kept)" << std::endl;
-        }
-    }
-
-    dataset.schema_.targets = dataset.target_configs_;
-
-    dataset.has_abundance_column_ = (cols.abundance >= 0);
-
-    // Build the vocab only from kept plots.
-    filter_records_to_plots(plot_records, dataset.plot_ids_);
-
-    // Encode species data
-    dataset.encode_species(plot_records);
-
-    return dataset;
+    publish_species_statistics(assemblages);
+    publish_vocabs_to_schema();
 }
 
-void ResolveDataset::load_header_data(
-    RowSource& reader,
-    const RoleMapping& roles,
-    const std::vector<TargetSpec>& targets
-) {
-    // Find column indices
-    int plot_col = reader.column_index(roles.plot_id);
-    if (plot_col < 0) {
-        throw std::runtime_error("Plot ID column not found: " + roles.plot_id);
+void ResolveDataset::record_encoding_settings() {
+    if (config_.aggregation == AggregationMode::Count &&
+        is_pool_encoding(config_.species_encoding)) {
+        throw std::invalid_argument(
+            "DatasetConfig.aggregation = count ranks the fixed genus / family slots "
+            "of the hash, sparse and embed encodings. The rank_pool and transformer "
+            "encodings have no such slots: every species carries its own genus and "
+            "family, pooled with the species weights, so pool_weighting = binary is "
+            "what counts species per genus there.");
     }
 
-    // A named coordinate column that is absent from the header is a
-    // configuration error, not a silent "no coordinates": failing loudly here
-    // avoids training a model that quietly dropped the coordinates the user
-    // asked for. A role CLEARED with "" is unset, not named (RoleMapping::
-    // as_column), so it takes the -1 path without a lookup.
-    int lon_col = -1, lat_col = -1;
-    if (const auto lon = roles.longitude_column()) {
-        lon_col = reader.column_index(*lon);
-        if (lon_col < 0) {
-            throw std::runtime_error("Longitude column not found in header CSV: " + *lon);
-        }
-    }
-    if (const auto lat = roles.latitude_column()) {
-        lat_col = reader.column_index(*lat);
-        if (lat_col < 0) {
-            throw std::runtime_error("Latitude column not found in header CSV: " + *lat);
-        }
-    }
-
-    // A missing covariate column must fail loudly, not be silently dropped: a
-    // typo'd name would otherwise train a model with fewer features than the
-    // user requested and bake the wrong feature count into the checkpoint.
-    std::vector<int> covariate_cols;
-    for (const auto& cov : roles.covariates) {
-        int col = reader.column_index(cov);
-        if (col < 0) {
-            throw std::runtime_error("Covariate column not found in header CSV: " + cov);
-        }
-        covariate_cols.push_back(col);
-        schema_.covariate_names.push_back(cov);
-    }
-
-    // ---- Categorical covariates ----
-    // Each column listed in roles.categoricals must (a) exist in the header
-    // CSV, (b) be disjoint from roles.covariates so the user can't double-
-    // count the same column. We collect raw strings during the row scan
-    // below, then fit the vocab + encode after the count_rows pass so the
-    // tensor allocation matches the actual filtered row count.
-    {
-        std::unordered_set<std::string> cov_set(roles.covariates.begin(),
-                                                roles.covariates.end());
-        for (const auto& cat : roles.categoricals) {
-            if (cov_set.count(cat)) {
-                throw std::runtime_error(
-                    "Column '" + cat + "' is listed in both roles.covariates "
-                    "and roles.categoricals; pick one role");
-            }
-        }
-    }
-    std::vector<int> categorical_cols;
-    std::vector<std::string> categorical_names_resolved;
-    categorical_cols.reserve(roles.categoricals.size());
-    categorical_names_resolved.reserve(roles.categoricals.size());
-    for (const auto& cat : roles.categoricals) {
-        int col = reader.column_index(cat);
-        if (col < 0) {
-            throw std::runtime_error(
-                "Categorical column not found in header CSV: " + cat);
-        }
-        categorical_cols.push_back(col);
-        categorical_names_resolved.push_back(cat);
-    }
-
-    // A missing target column must fail loudly. Left unchecked, col == -1 makes
-    // every row fail row_ok below -> "Kept 0 of N plots" with no exception, i.e.
-    // the entire dataset is silently discarded far from the actual cause.
-    std::vector<int> target_cols;
-    for (const auto& target : targets) {
-        int col = reader.column_index(target.column_name);
-        if (col < 0) {
-            throw std::runtime_error("Target column not found in header CSV: " + target.column_name);
-        }
-        target_cols.push_back(col);
-        target_configs_.push_back(target_config_of(target));
-    }
-
-    // Single streaming pass: accumulate into growable buffers rather than a
-    // count_rows() prepass followed by preallocated tensors written by row index.
-    // The old two-pass approach read the whole (~1.9M-row) header file twice; here
-    // the file is read exactly once and tensors are materialized from the buffers
-    // afterward, at the true loaded-row count.
-    const bool has_coords = (lon_col >= 0 && lat_col >= 0);
-    if (has_coords) schema_.has_coordinates = true;
-    const int64_t cov_cols = static_cast<int64_t>(covariate_cols.size());
-
-    std::vector<float> coords_buf;   // 2 values per loaded row (lon, lat)
-    std::vector<float> cov_buf;      // cov_cols values per loaded row
-    // One growable float buffer per regression target (classification targets are
-    // built post-scan by encode_classification_target from classification_raw).
-    std::vector<std::vector<float>> reg_bufs(targets.size());
-    std::vector<std::string> target_names(targets.size());
-    for (size_t t = 0; t < targets.size(); ++t) {
-        target_names[t] = target_name_of(targets[t]);
-    }
-
-    // Per-column count of covariate cells that were missing/unparseable during
-    // the scan, kept as NaN; reported afterwards.
-    std::vector<int64_t> cov_na_counts(covariate_cols.size(), 0);
-    // Count of rows whose longitude/latitude was missing/unparseable, kept as
-    // NaN rather than read as (0, 0), a real location (Gulf of Guinea).
-    // Reported after the scan.
-    int64_t coord_na_count = 0;
-    // Rows too short to even hold plot_id are skipped during the scan; count them
-    // for the post-scan summary (they never enter any buffer).
-    int64_t n_ragged_skipped = 0;
-
-    schema_.targets = target_configs_;
-
-    // Raw string buffer for each categorical column. Grows via push_back during
-    // the single scan (no count prepass to reserve against); filled with "" (NA)
-    // when a row is too short to hold the column.
-    std::vector<std::vector<std::string>> categorical_raw(categorical_cols.size());
-
-    // Raw string buffer for each classification target column. Same layout as
-    // `categorical_raw` — we collect strings during the scan and factorize them
-    // post-scan into int64 codes that get written into targets_[name].
-    // Regression targets are accumulated into reg_bufs (see the row-scan body).
-    std::vector<std::vector<std::string>> classification_raw(targets.size());
-
-    // Per-row keep mask. A row is "kept" iff every requested Drop target
-    // produced a usable value (finite numeric for regression, non-missing
-    // string for classification). Rows with any missing Drop target get dropped
-    // after the scan, for classification and regression targets alike. A masked
-    // target keeps the row with the sentinel in its place.
-    std::vector<char> keep_row;
-
-    // Header rows are plot-level: plot_id must be unique. A duplicate would
-    // create two plot slots that both look up the same species records, so
-    // reject it (consistent with the strictness applied to duplicate columns).
-    std::unordered_set<std::string> seen_plot_ids;
-
-    int64_t row_idx = 0;
-    reader.read_rows([&](size_t, const std::vector<std::string>& row) {
-        if (row.size() <= static_cast<size_t>(plot_col)) {
-            ++n_ragged_skipped;
-            return;
-        }
-
-        const std::string& pid = row[plot_col];
-        if (!seen_plot_ids.insert(pid).second) {
-            throw std::runtime_error(
-                "Duplicate plot_id '" + pid + "' in header data. Plot IDs must "
-                "be unique (each header row is one plot).");
-        }
-
-        plot_ids_.push_back(pid);
-        bool row_ok = true;
-
-        // Coordinates. Parse with the NA-aware helper so a blank / "NA" /
-        // unparseable cell is kept as NaN rather than read as a real (0, 0)
-        // location; count them and report after the scan. A genuine
-        // "0" parses to 0.0 and is not counted.
-        if (has_coords) {
-            auto lon = (row.size() > static_cast<size_t>(lon_col))
-                           ? parse_regression_target(row[lon_col]) : std::nullopt;
-            auto lat = (row.size() > static_cast<size_t>(lat_col))
-                           ? parse_regression_target(row[lat_col]) : std::nullopt;
-            coords_buf.push_back(lon.value_or(kMissingValue));
-            coords_buf.push_back(lat.value_or(kMissingValue));
-            if (!lon.has_value() || !lat.has_value()) {
-                coord_na_count++;
-            }
-        }
-
-        // Covariates. Parse with the NaN-aware helper so a blank / "NA" /
-        // unparseable cell is kept as NaN rather than read as a real 0.0; the
-        // continuous block decides how the model reads it. Counted per column
-        // and reported after the scan.
-        if (cov_cols > 0) {
-            for (size_t i = 0; i < covariate_cols.size(); ++i) {
-                int col = covariate_cols[i];
-                float val = kMissingValue;
-                if (row.size() > static_cast<size_t>(col)) {
-                    auto parsed = parse_regression_target(row[col]);
-                    if (parsed.has_value()) val = *parsed;
-                    else cov_na_counts[i]++;
-                } else {
-                    cov_na_counts[i]++;
-                }
-                cov_buf.push_back(val);
-            }
-        }
-
-        // Categorical covariates (raw strings; factorized post-loop)
-        for (size_t c = 0; c < categorical_cols.size(); ++c) {
-            int col = categorical_cols[c];
-            if (row.size() > static_cast<size_t>(col)) {
-                categorical_raw[c].push_back(row[col]);
-            } else {
-                categorical_raw[c].emplace_back();  // treated as NA -> code 0
-            }
-        }
-
-        // Targets — parse with NaN-aware helpers and mark the row for drop if
-        // any target is missing/non-finite/out-of-range. Every scanned row pushes
-        // exactly one value per target (a sentinel for missing) so the per-target
-        // buffers stay aligned with row_idx; the post-scan compaction drops the
-        // marked rows. target_cols entries are validated >= 0 above, so the only
-        // miss here is a row too short to hold the column.
-        for (size_t t = 0; t < targets.size(); ++t) {
-            const auto& target = targets[t];
-            const int col = target_cols[t];
-            const bool have_cell = row.size() > static_cast<size_t>(col);
-            const bool masked = target.missing == TargetMissingPolicy::Mask;
-
-            if (target.task == TaskType::Classification) {
-                // Defer string->int encoding until post-scan so the auto-fit
-                // path sees the full distribution of values. A short row pushes
-                // "" (missing), which drops the row unless the target is masked.
-                if (have_cell) {
-                    classification_raw[t].push_back(row[col]);
-                } else {
-                    classification_raw[t].emplace_back();
-                    if (!masked) row_ok = false;
-                }
-            } else {
-                float val = masked ? kMissingValue : 0.0f;
-                if (have_cell) {
-                    auto parsed = parse_regression_target(row[col]);
-                    if (parsed.has_value()) val = *parsed;
-                    else if (!masked) row_ok = false;
-                } else if (!masked) {
-                    row_ok = false;
-                }
-                reg_bufs[t].push_back(val);
-            }
-        }
-
-        keep_row.push_back(row_ok ? 1 : 0);
-        row_idx++;
-    });
-
-    const int64_t n_loaded = row_idx;   // rows actually appended during the scan
-
-    // Materialize tensors from the streaming buffers at the true loaded-row count.
-    // from_blob + clone copies out of the std::vector storage into tensor-owned
-    // memory before the buffers go out of scope. Ragged rows were never appended,
-    // so there are no trailing phantom zero rows to compact away.
-    if (has_coords) {
-        coordinates_ = (n_loaded > 0)
-            ? torch::from_blob(coords_buf.data(), {n_loaded, 2}, torch::kFloat32).clone()
-            : torch::zeros({0, 2}, torch::kFloat32);
-    }
-    if (cov_cols > 0) {
-        covariates_ = (n_loaded > 0)
-            ? torch::from_blob(cov_buf.data(), {n_loaded, cov_cols}, torch::kFloat32).clone()
-            : torch::zeros({0, cov_cols}, torch::kFloat32);
-    }
-    for (size_t t = 0; t < targets.size(); ++t) {
-        if (targets[t].task == TaskType::Classification) continue;
-        targets_[target_names[t]] = (n_loaded > 0)
-            ? torch::from_blob(reg_bufs[t].data(), {n_loaded}, torch::kFloat32).clone()
-            : torch::zeros({0}, torch::kFloat32);
-    }
-    schema_.n_plots = n_loaded;
-
-    // Report covariate missingness. Rows are NOT dropped here (covariates do not
-    // gate row validity the way targets do); DatasetConfig::missing_values
-    // decides how the model reads a missing cell.
-    for (size_t i = 0; i < cov_na_counts.size(); ++i) {
-        report_missing_covariate(schema_.covariate_names[i], cov_na_counts[i],
-                                 config_.missing_values);
-    }
-    report_missing_coordinates(coord_na_count, config_.missing_values);
-
-    // ---- Fit + encode classification target columns ----
-    // Two passes so every classification vocab is fit from the final surviving-row
-    // set: pass 1 finalizes keep_row (regression drops are already in
-    // it from the scan; here we add classification NA / explicit-unmapped drops),
-    // pass 2 fits each vocab on kept rows only and encodes. The shared
-    // encode_classification_target also validates num_classes and is
-    // the single source of truth with the from_species_csv loader.
-    for (size_t t = 0; t < targets.size(); ++t) {
-        if (targets[t].task != TaskType::Classification) continue;
-        mark_classification_drops(targets[t], classification_raw[t], keep_row);
-    }
-    for (size_t t = 0; t < targets.size(); ++t) {
-        const auto& target = targets[t];
-        if (target.task != TaskType::Classification) continue;
-        const std::string name = target_name_of(target);
-        targets_[name] = encode_classification_target(
-            target, classification_raw[t], keep_row, target_configs_[t], name);
-    }
-    schema_.targets = target_configs_;
-    finalize_masked_labels(targets, targets_, keep_row);
-
-    // ---- Filter rows with missing targets ----
-    // Compact every per-plot buffer (plot_ids, coords, covariates,
-    // categorical_raw, targets) to the rows where every target produced a usable
-    // value. With the single streaming pass the tensors are already sized to
-    // n_loaded (ragged rows were never appended), so only target-dropped rows
-    // (n_keep < n_loaded) need index_select. The loud one-line summary lets users
-    // see the plot-count drop instead of wondering where their plots went.
-    int64_t n_keep = 0;
-    for (char k : keep_row) if (k) ++n_keep;
-    const int64_t n_target_dropped = n_loaded - n_keep;
-    const int64_t n_total = n_loaded + n_ragged_skipped;   // physical data rows
-
-    if (n_keep < n_loaded) {
-        std::vector<int64_t> keep_idx;
-        keep_idx.reserve(static_cast<size_t>(n_keep));
-        for (int64_t i = 0; i < n_loaded; ++i) {
-            if (keep_row[i]) keep_idx.push_back(i);
-        }
-
-        // Compact plot_ids_ in place via gather.
-        std::vector<std::string> new_pids;
-        new_pids.reserve(static_cast<size_t>(n_keep));
-        for (int64_t i : keep_idx) new_pids.push_back(std::move(plot_ids_[i]));
-        plot_ids_ = std::move(new_pids);
-
-        // Compact tensors via index_select. index_select returns a new
-        // contiguous tensor — the original buffer is released when the
-        // member is overwritten, so the working set drops immediately.
-        auto idx_t = torch::tensor(keep_idx, torch::kInt64);
-        if (coordinates_.defined()) coordinates_ = coordinates_.index_select(0, idx_t);
-        if (covariates_.defined())  covariates_  = covariates_.index_select(0, idx_t);
-        for (auto& [name, tensor] : targets_) {
-            tensor = tensor.index_select(0, idx_t);
-        }
-
-        // Compact categorical raw-string buffers (factorization runs below).
-        for (auto& buf : categorical_raw) {
-            std::vector<std::string> new_buf;
-            new_buf.reserve(static_cast<size_t>(n_keep));
-            for (int64_t i : keep_idx) new_buf.push_back(std::move(buf[i]));
-            buf = std::move(new_buf);
-        }
-
-        schema_.n_plots = n_keep;
-    }
-
-    // Report any physical row that was dropped (missing target) or skipped
-    // (ragged) so the plot-count change is never silent.
-    if (n_target_dropped > 0 || n_ragged_skipped > 0) {
-        std::cout << "  Kept " << n_keep << " of " << n_total << " plots (";
-        bool need_sep = false;
-        if (n_target_dropped > 0) {
-            std::cout << n_target_dropped << " dropped for missing/NaN target ";
-            // List the target column names so the user knows which target drove
-            // the drop: a Drop target missing, or no target labelled at all.
-            bool first = true;
-            std::cout << "[";
-            for (const auto& target : targets) {
-                if (!first) std::cout << ", ";
-                std::cout << "'" << target.column_name << "'";
-                first = false;
-            }
-            std::cout << "]";
-            need_sep = true;
-        }
-        if (n_ragged_skipped > 0) {
-            if (need_sep) std::cout << "; ";
-            std::cout << n_ragged_skipped << " skipped as too short to contain plot_id";
-        }
-        std::cout << ")" << std::endl;
-    }
-
-    // ---- Fit + encode categorical covariates ----
-    // After the scan completes we have the full raw-string buffers. Fit each
-    // column's vocab (sorted-unique non-NA -> codes 1..K) and encode into a
-    // (n_plots, n_categoricals) int64 tensor stored on the dataset. The
-    // vocab itself lives on the dataset for save/load.
-    if (!categorical_names_resolved.empty()) {
-        if (!use_external_vocabs_) {
-            categorical_vocab_.fit(categorical_names_resolved, categorical_raw);
-        }
-        categorical_ids_ = categorical_vocab_.encode_batch(
-            categorical_names_resolved, categorical_raw);
-        schema_.categorical_names = categorical_names_resolved;
-        schema_.categorical_vocab_sizes = categorical_vocab_.vocab_sizes();
-        // schema_.categorical_embed_dim is left at its default here; the
-        // model constructor will overwrite it from ModelConfig and the
-        // updated value is what gets persisted in the checkpoint.
-    }
-}
-
-void ResolveDataset::load_species_data(
-    RowSource& reader,
-    const RoleMapping& roles
-) {
-    // Find column indices
-    auto cols = ColumnIndices::from_source(reader, roles);
-    if (cols.plot < 0 || cols.species < 0) {
-        throw std::runtime_error("Required columns not found: plot_id or species_id");
-    }
-
-    // Collect species records by plot
-    std::unordered_map<std::string, std::vector<SpeciesRecord>> plot_records;
-    int64_t abundance_coerced = 0;
-    require_valid_zero_abundance(config_.zero_abundance_as);
-
-    reader.read_rows([&](size_t, const std::vector<std::string>& row) {
-        if (row.size() <= static_cast<size_t>(std::max(cols.plot, cols.species))) {
-            return;
-        }
-
-        std::string plot_id = row[cols.plot];
-        plot_records[plot_id].push_back(
-            make_species_record(row, cols, config_.zero_abundance_as, &abundance_coerced));
-    });
-    warn_abundance_coercions(abundance_coerced);
-
-    has_abundance_column_ = (cols.abundance >= 0);
-
-    // Build the vocab only from kept plots: load_header_data has
-    // already dropped missing-target plots and compacted plot_ids_.
-    filter_records_to_plots(plot_records, plot_ids_);
-
-    // Encode species
-    encode_species(plot_records);
-}
-
-void ResolveDataset::build_species_vocab(
-    const std::unordered_map<std::string, std::vector<std::pair<std::string, float>>>& plot_species
-) {
-    // Count species frequencies
-    std::unordered_map<std::string, int> species_counts;
-
-    for (const auto& [plot_id, species] : plot_species) {
-        for (const auto& [sp, abundance] : species) {
-            species_counts[sp]++;
-        }
-    }
-
-    // Sort by frequency
-    std::vector<std::pair<std::string, int>> sorted_species(
-        species_counts.begin(), species_counts.end()
-    );
-    // Sort by frequency descending, breaking ties by species name ascending so
-    // the ID assignment is a pure function of the data (independent of
-    // unordered_map iteration order). Without the name tie-break, tied-frequency
-    // species get IDs in nondeterministic hash order, so a checkpoint and a
-    // separately-rebuilt dataset can disagree on embedding rows (TaxonomyVocab and
-    // SpeciesVocab::from_records sort by name too).
-    std::sort(sorted_species.begin(), sorted_species.end(),
-        [](const auto& a, const auto& b) {
-            return a.second != b.second ? a.second > b.second : a.first < b.first;
-        }
-    );
-
-    // Build vocabulary
-    species_vocab_.clear();
-    species_vocab_.push_back("<UNK>");  // Index 0 for unknown
-    species_to_idx_.clear();
-    species_to_idx_["<UNK>"] = 0;
-
-    for (const auto& [sp, count] : sorted_species) {
-        species_to_idx_[sp] = static_cast<int64_t>(species_vocab_.size());
-        species_vocab_.push_back(sp);
-    }
-
-    schema_.n_species = static_cast<int64_t>(species_counts.size());
-    schema_.n_species_vocab = static_cast<int64_t>(species_vocab_.size());
-}
-
-void ResolveDataset::encode_species(
-    const std::unordered_map<std::string, std::vector<SpeciesRecord>>& plot_records
-) {
-    int64_t n_plots = static_cast<int64_t>(plot_ids_.size());
-
-    // Flatten the per-plot records once, in plot_ids_ order, and guarantee every
-    // record carries its plot_id. Everything downstream that needs a flat record
-    // list groups by SpeciesRecord::plot_id (the taxonomy fit, the embedding and
-    // rank-pool encoders, the unknown-species statistics), so a record whose
-    // plot_id was left empty by its producer would otherwise land in a phantom
-    // plot. Within a plot the CSV row order is preserved, which the rank-pool
-    // species cap relies on (it slices the first `cap` entries).
-    std::vector<SpeciesRecord> all_records;
-    {
-        size_t n_records = 0;
-        for (const auto& [plot_id, records] : plot_records) n_records += records.size();
-        all_records.reserve(n_records);
-    }
-    for (int64_t i = 0; i < n_plots; ++i) {
-        const auto& plot_id = plot_ids_[i];
-        auto it = plot_records.find(plot_id);
-        if (it == plot_records.end()) continue;
-        for (const auto& rec : it->second) {
-            SpeciesRecord r = rec;
-            if (r.plot_id.empty()) r.plot_id = plot_id;
-            all_records.push_back(std::move(r));
-        }
-    }
-
-    // Check if we have taxonomy data
-    bool has_genus = false;
-    bool has_family = false;
-    for (const auto& rec : all_records) {
-        if (!rec.genus.empty()) has_genus = true;
-        if (!rec.family.empty()) has_family = true;
-        if (has_genus && has_family) break;
-    }
-
-    schema_.has_taxonomy = (has_genus || has_family) && config_.use_taxonomy;
-    schema_.has_abundance = true;  // We always have abundance (even if defaulted to 1.0)
-
-    // Copy tracking flags from config to schema
+    // The loader knobs that shape the encoded tensors and are not recoverable
+    // from ModelConfig, read back by dataset_config_from_checkpoint() so an
+    // inference run rebuilds the same DatasetConfig. pool_species_cap is
+    // refined to the resolved width by the rank-pool encoding.
     schema_.track_unknown_fraction = config_.track_unknown_fraction;
     schema_.track_unknown_count = config_.track_unknown_count;
-
-    // Record the pool weighting scheme so a checkpoint can rebuild the matching
-    // inference-side DatasetConfig. pool_species_cap is refined to
-    // the resolved max-species width in the rank_pool block below.
     schema_.pool_weighting = static_cast<int>(config_.pool_weighting);
     schema_.pool_species_cap = config_.pool_species_cap;
-
-    // The remaining loader knobs that shape the encoded tensors and are not
-    // recoverable from ModelConfig. Read back through
-    // dataset_config_from_checkpoint() so an inference run rebuilds the same
-    // DatasetConfig instead of silently reverting to the struct defaults.
     schema_.top_k_species = config_.top_k_species;
-    // The selection this load APPLIES, which is All for a pooled / sparse
-    // encoding given no species_budget however the config is spelled. Recording
-    // the requested value there would have the checkpoint (and every result
-    // tree built from it) report a species selection the run never made.
+    // The selection this load APPLIES (All for a pooled / sparse encoding
+    // without a species_budget), so a checkpoint never reports a selection the
+    // run did not make.
     schema_.selection = effective_selection(config_);
     schema_.species_budget = config_.species_budget;
     schema_.representation = config_.representation;
@@ -1780,452 +1215,165 @@ void ResolveDataset::encode_species(
     schema_.use_taxonomy = config_.use_taxonomy;
     schema_.missing_values = config_.missing_values;
     schema_.zero_abundance_as = config_.zero_abundance_as;
+}
 
-    // Fit taxonomy vocabulary. Rank-pool / transformer modes rebuild taxonomy
-    // from the RankPoolEncoder's own vocab further down (and overwrite these
-    // schema fields), so skip the O(n_records) fit here for them.
-    const bool pool_taxonomy_mode =
-        (config_.species_encoding == SpeciesEncodingMode::RankPool ||
-         config_.species_encoding == SpeciesEncodingMode::Transformer);
-    if (schema_.has_taxonomy && !pool_taxonomy_mode) {
-        if (!use_external_vocabs_) {
-            taxonomy_vocab_.fit(all_records);
-        }
-        schema_.n_genera = taxonomy_vocab_.n_genera();
-        schema_.n_families = taxonomy_vocab_.n_families();
-        schema_.n_genera_vocab = taxonomy_vocab_.n_genera();
-        schema_.n_families_vocab = taxonomy_vocab_.n_families();
-    }
-
-    // Build species vocabulary for embed/sparse modes
-    std::unordered_map<std::string, std::vector<std::pair<std::string, float>>> plot_species;
-    for (const auto& [plot_id, records] : plot_records) {
-        for (const auto& rec : records) {
-            plot_species[plot_id].push_back({rec.species_id, rec.abundance});
-        }
-    }
+void ResolveDataset::fit_vocab(const PlotAssemblages& assemblages) {
+    // One vocabulary per dataset, fitted here or adopted before the load, and
+    // handed to whichever encoding runs. Taxonomy is fitted only when the
+    // records name a genus or family and the config asks for it.
     if (!use_external_vocabs_) {
-        build_species_vocab(plot_species);
+        const bool records_name_taxa = std::any_of(
+            assemblages.entries().begin(), assemblages.entries().end(),
+            [](const SpeciesRecord& e) { return !e.genus.empty() || !e.family.empty(); });
+        vocab_ = EncodingVocab::fit(assemblages, /*min_count=*/1,
+                                    records_name_taxa && config_.use_taxonomy);
+    }
+    schema_.has_abundance = true;
+    schema_.n_species = vocab_.species.size() - 1;
+    schema_.n_species_vocab = vocab_.species.size();
+    schema_.has_taxonomy = config_.use_taxonomy && vocab_.has_taxonomy();
+    if (schema_.has_taxonomy) {
+        schema_.n_genera = vocab_.taxonomy.n_genera();
+        schema_.n_families = vocab_.taxonomy.n_families();
+        schema_.n_genera_vocab = vocab_.taxonomy.n_genera();
+        schema_.n_families_vocab = vocab_.taxonomy.n_families();
+    }
+}
+
+void ResolveDataset::encode_hash(const PlotAssemblages& assemblages) {
+    const int64_t n_plots = assemblages.n_plots();
+    if (config_.use_cuda_hash) {
+        // Raw species data in CSR form for the per-batch GPU hash: plot p's
+        // selected species are rows plot_offsets_[p] .. plot_offsets_[p + 1].
+        std::vector<int64_t> offsets{0};
+        std::vector<int64_t> plot_index;
+        std::vector<int64_t> keys;
+        std::vector<float> weights;
+        for (int64_t p = 0; p < n_plots; ++p) {
+            const auto plot = assemblages.plot(p);
+            const auto selected = selection_indices(assemblages, p, config_.selection, config_.top_k);
+            const auto values = normalized_values(assemblages, p, selected, config_.normalization);
+            for (size_t j = 0; j < selected.size(); ++j) {
+                plot_index.push_back(p);
+                keys.push_back(feature_hash_key(plot[selected[j]].species_id));
+                weights.push_back(values[j]);
+            }
+            offsets.push_back(static_cast<int64_t>(keys.size()));
+        }
+        plot_offsets_ = torch::tensor(offsets, torch::kInt64);
+        raw_plot_indices_ = torch::tensor(plot_index, torch::kInt64);
+        raw_species_ids_ = torch::tensor(keys, torch::kInt64);
+        raw_weights_ = torch::tensor(weights, torch::kFloat32);
+        hash_embedding_ = torch::Tensor();
     } else {
-        // Vocab pre-populated by from_csv_with_schema; just publish sizes
-        // to the schema so downstream model construction reads the right
-        // values. n_species reports the count of fitted species (excluding
-        // the UNK slot at index 0), matching build_species_vocab() which
-        // assigns schema_.n_species = species_counts.size() (also excluding
-        // UNK). n_species_vocab includes UNK.
-        schema_.n_species = static_cast<int64_t>(species_vocab_.size()) - 1;
-        if (schema_.n_species < 0) schema_.n_species = 0;
-        schema_.n_species_vocab = static_cast<int64_t>(species_vocab_.size());
-    }
-
-    // Determine n_taxonomy_slots
-    int n_taxonomy_slots = config_.top_k;
-    if (config_.selection == SelectionMode::TopBottom) {
-        n_taxonomy_slots = 2 * config_.top_k;
-    }
-
-    // Per-plot novelty against the active species vocabulary. The embed and
-    // rank_pool/transformer branches get it for free from their encoder (which
-    // holds this dataset's vocab); hash and sparse have no encoder object, so
-    // the shared helper runs for them after the branch. Left undefined here so
-    // the post-branch block can tell the two cases apart.
-    UnknownSpeciesStats unknown_stats;
-
-    // Encode based on mode
-    if (config_.species_encoding == SpeciesEncodingMode::Hash) {
-        if (config_.use_cuda_hash) {
-            // CUDA hash mode: store raw species data in COO format for GPU computation
-            // This enables on-the-fly hash embedding computation per batch on GPU
-
-            // First pass: count total records and build plot index mapping
-            std::unordered_map<std::string, int64_t> plot_id_to_idx;
-            for (int64_t i = 0; i < n_plots; ++i) {
-                plot_id_to_idx[plot_ids_[i]] = i;
-            }
-
-            // Count records per plot after selection
-            std::vector<int64_t> records_per_plot(n_plots, 0);
-            int64_t total_records = 0;
-
-            for (int64_t i = 0; i < n_plots; ++i) {
-                const auto& plot_id = plot_ids_[i];
-                auto it = plot_records.find(plot_id);
-                if (it == plot_records.end()) continue;
-
-                // Convert to species-abundance pairs
-                std::vector<std::pair<std::string, float>> species;
-                for (const auto& rec : it->second) {
-                    species.push_back({rec.species_id, rec.abundance});
-                }
-
-                // Apply selection (but not normalization yet - done at batch time)
-                auto selected = apply_selection(std::move(species), config_.selection, config_.top_k);
-                records_per_plot[i] = static_cast<int64_t>(selected.size());
-                total_records += static_cast<int64_t>(selected.size());
-            }
-
-            // Build CSR-style offsets
-            plot_offsets_ = torch::zeros({n_plots + 1}, torch::kLong);
-            auto offset_acc = plot_offsets_.accessor<int64_t, 1>();
-            offset_acc[0] = 0;
-            for (int64_t i = 0; i < n_plots; ++i) {
-                offset_acc[i + 1] = offset_acc[i] + records_per_plot[i];
-            }
-
-            // Allocate COO tensors
-            raw_plot_indices_ = torch::zeros({total_records}, torch::kLong);
-            raw_species_ids_ = torch::zeros({total_records}, torch::kLong);
-            raw_weights_ = torch::zeros({total_records}, torch::kFloat32);
-
-            auto plot_idx_acc = raw_plot_indices_.accessor<int64_t, 1>();
-            auto species_id_acc = raw_species_ids_.accessor<int64_t, 1>();
-            auto weight_acc = raw_weights_.accessor<float, 1>();
-
-            // Second pass: fill COO data
-            int64_t record_idx = 0;
-            for (int64_t i = 0; i < n_plots; ++i) {
-                const auto& plot_id = plot_ids_[i];
-                auto it = plot_records.find(plot_id);
-                if (it == plot_records.end()) continue;
-
-                std::vector<std::pair<std::string, float>> species;
-                for (const auto& rec : it->second) {
-                    species.push_back({rec.species_id, rec.abundance});
-                }
-
-                auto selected = apply_selection(std::move(species), config_.selection, config_.top_k);
-                apply_normalization(selected, config_.normalization);
-
-                for (const auto& [sp_name, weight] : selected) {
-                    plot_idx_acc[record_idx] = i;
-                    // Feature-hash the species name to an int64 seed; the GPU
-                    // kernel applies the MurmurHash3 finalizer to this per batch.
-                    species_id_acc[record_idx] = static_cast<int64_t>(feature_hash(sp_name));
-                    weight_acc[record_idx] = weight;
-                    record_idx++;
-                }
-            }
-
-            // Still create empty hash_embedding tensor to indicate hash mode (but it won't be used)
-            // The actual hash embedding is computed on-the-fly during training
-            hash_embedding_ = torch::Tensor();
-
-        } else {
-            // Standard CPU hash mode: pre-compute hash embeddings
-            hash_embedding_ = torch::zeros({n_plots, config_.hash_dim}, torch::kFloat32);
-            auto hash_acc = hash_embedding_.accessor<float, 2>();
-
-            for (int64_t i = 0; i < n_plots; ++i) {
-                const auto& plot_id = plot_ids_[i];
-                auto it = plot_records.find(plot_id);
-                if (it == plot_records.end()) continue;
-
-                // Convert to species-abundance pairs
-                std::vector<std::pair<std::string, float>> species;
-                for (const auto& rec : it->second) {
-                    species.push_back({rec.species_id, rec.abundance});
-                }
-
-                // Apply selection and normalization
-                auto selected = apply_selection(std::move(species), config_.selection, config_.top_k);
-                apply_normalization(selected, config_.normalization);
-
-                // Hash
-                hash_species(selected, &hash_acc[i][0], config_.hash_dim);
-            }
-        }
-
-    } else if (config_.species_encoding == SpeciesEncodingMode::Embed) {
-        // Learnable embeddings for top-k species + fixed-slot taxonomy. Route
-        // through the standalone EmbeddingEncoder (single source of truth for the
-        // top-k species selection and the top-k-by-abundance taxonomy selection),
-        // mirroring how RankPool/Transformer route through RankPoolEncoder so the
-        // two copies cannot diverge. The encoder adopts the dataset's own species
-        // vocab (frequency-ranked, built by build_species_vocab above) and
-        // taxonomy vocab via set_vocabs, so the emitted IDs match the tables the
-        // model is sized against (both for training and the from_csv_with_schema
-        // inference path, where species_to_idx_ / taxonomy_vocab_ are the reused
-        // training-set vocabs).
-
-        // top_k_taxonomy = n_taxonomy_slots preserves the fixed-slot width
-        // (2*top_k under TopBottom selection). The species slots take the
-        // configured selection, Bottom and TopBottom included. The width stays
-        // top_k_species -- the encoder halves the per-side k under TopBottom
-        // rather than doubling the row -- so the model's embed encoder is sized
-        // by top_k_species alone.
-        EmbeddingEncoder emb_encoder(config_.top_k_species, n_taxonomy_slots,
-                                     config_.selection);
-        emb_encoder.fit(all_records);  // builds species_to_genus_/_family_ maps
-
-        // Hand the freq-ranked species IDs + taxonomy vocab over.
-        emb_encoder.set_vocabs(active_species_vocab(species_to_idx_), taxonomy_vocab_);
-
-        auto encoded = emb_encoder.transform(all_records, plot_ids_);
-        species_ids_ = encoded.species_ids;
-        // The encoder's vocab IS this dataset's vocab (set_vocabs above), so its
-        // novelty statistics are exactly what the shared helper would produce
-        // from species_to_idx_; take them instead of re-scanning every record.
-        unknown_stats = {encoded.unknown_fraction, encoded.unknown_count};
-        // Taxonomy fixed slots come from the encoder here; the shared fixed-slot
-        // block below is skipped for embed mode. Only publish when the schema
-        // reports taxonomy (matches the prior fixed-slot gate).
-        if (schema_.has_taxonomy) {
-            genus_ids_ = encoded.genus_ids;
-            family_ids_ = encoded.family_ids;
-        }
-
-    } else if (config_.species_encoding == SpeciesEncodingMode::RankPool ||
-               config_.species_encoding == SpeciesEncodingMode::Transformer) {
-        // Pool-style encoding: per-species taxonomy IDs + per-species species
-        // IDs, weights, and masks, produced by the standalone RankPoolEncoder
-        // (single source of truth for PoolWeighting semantics, vocab build,
-        // padding, has_cover flag).
-        //
-        // Output tensors (all (n_plots, max_species) except has_cover):
-        //   species_ids_      : int64  per-species vocab index (lookup into
-        //                              PlotEncoderRankPool::species_embedding)
-        //   pool_genus_ids_   : int64  per-species genus index
-        //   pool_family_ids_  : int64  per-species family index
-        //   pool_weights_     : f32    per-species weight (binary/abundance/
-        //                              log1p/norm/rank — see PoolWeighting)
-        //   pool_mask_        : bool   true where a real species sits, false
-        //                              in the padding region
-        //   pool_has_cover_   : f32    (n_plots,) 1.0 if plot had real
-        //                              abundance values, 0.0 otherwise
-
-        // The species budget is the encoder's, not this loop's, so
-        // it lands before the weights, the taxonomy IDs and the padded width are
-        // computed, and so the novelty statistics keep describing the plot's
-        // full record list. min_frequency stays 1: the vocabulary is fitted over
-        // every record whatever the budget, which keeps the integer codes stable
-        // across the arms of a selection ablation.
-        RankPoolEncoder rp_encoder(config_.pool_weighting, /*min_frequency=*/1,
-                                   config_.selection, config_.species_budget);
-        rp_encoder.fit(all_records);
-        if (use_external_vocabs_) {
-            // from_csv_with_schema path: replace the encoder's freshly-fit
-            // species + taxonomy vocabs with the training-set vocabs that
-            // were copied onto this dataset before load. fit() above is
-            // still useful — it builds species_to_genus_/species_to_family_
-            // from the test records so transform() can look up each species's
-            // genus/family string. Test-only species map to UNK=0 via the
-            // reused species_vocab, which is the correct behaviour at
-            // inference time.
-            rp_encoder.set_vocabs(active_species_vocab(species_to_idx_), taxonomy_vocab_);
-        }
-        auto encoded = rp_encoder.transform(all_records, plot_ids_,
-                                            config_.pool_species_cap,
-                                            has_abundance_column_);
-
-        species_ids_ = encoded.species_ids;
-        // Whether the encoder kept its own fitted vocab (training) or adopted
-        // this dataset's (inference), it is the vocab species_to_idx_ ends up
-        // holding a few lines below -- so its novelty statistics are the shared
-        // helper's result for this dataset, without a second record scan.
-        unknown_stats = {encoded.unknown_fraction, encoded.unknown_count};
-        pool_genus_ids_ = encoded.genus_ids;
-        pool_family_ids_ = encoded.family_ids;
-        pool_weights_ = encoded.weights;
-        pool_mask_ = encoded.mask;
-        // Record the resolved species-cap width so inference truncates each plot
-        // to the same max-species the model was trained on, even when the cap
-        // was auto (p99) and would resolve differently on the inference data.
-        schema_.pool_species_cap = static_cast<int>(encoded.species_ids.size(1));
-        // Encoder returns float32 has_cover; downstream APIs accept either,
-        // but we expose it as float32 so PlotEncoderRankPool's "default to
-        // ones" path (which yields float32) stays consistent.
-        pool_has_cover_ = encoded.has_cover;
-
-        // The rank-pool encoder owns its own species vocab. Sync it back
-        // onto the dataset so the schema reports the right vocab size for
-        // ResolveModel's PlotEncoderRankPool::species_embedding sizing
-        // (which must allocate (n_species_vocab, species_embed_dim)).
-        const auto& sp_vocab = rp_encoder.species_vocab();
-        species_to_idx_ = sp_vocab.species_to_id();
-        species_vocab_.clear();
-        species_vocab_.push_back("<UNK>");
-        // Rebuild ordered vocab from the id map (codes 1..K, sorted by code).
-        std::vector<std::pair<std::string, int64_t>> sp_items(
-            species_to_idx_.begin(), species_to_idx_.end());
-        std::sort(sp_items.begin(), sp_items.end(),
-                  [](const auto& a, const auto& b) { return a.second < b.second; });
-        for (const auto& [name, _id] : sp_items) {
-            species_vocab_.push_back(name);
-        }
-        schema_.n_species = static_cast<int64_t>(sp_items.size());
-        schema_.n_species_vocab = encoded.n_species_vocab;
-        // Refresh taxonomy schema fields from the encoder's own vocab so the
-        // rank-pool encoder lookup tables match what the model is sized for.
-        // Gate on genus OR family having real (non-UNK) entries so a family-only
-        // dataset keeps its family embeddings, matching the encoder's own gate
-        // (species_encoding.cpp: n_genera() > 1 || n_families() > 1) and the
-        // coarse loader gate at load_header_data. Genus-only vocab is 1 (UNK).
-        schema_.has_taxonomy =
-            (encoded.n_genera_vocab > 1 || encoded.n_families_vocab > 1)
-            && config_.use_taxonomy;
-        if (schema_.has_taxonomy) {
-            schema_.n_genera = encoded.n_genera_vocab;
-            schema_.n_families = encoded.n_families_vocab;
-            schema_.n_genera_vocab = encoded.n_genera_vocab;
-            schema_.n_families_vocab = encoded.n_families_vocab;
-            // Replace the dataset's TaxonomyVocab with the encoder's so
-            // downstream code that reads taxonomy_vocab() gets the right
-            // string-to-id maps.
-            taxonomy_vocab_ = rp_encoder.taxonomy_vocab();
-        }
-
-    } else {
-        // Sparse/explicit vector mode
-        species_vector_ = torch::zeros({n_plots, schema_.n_species_vocab}, torch::kFloat32);
-        auto vec_acc = species_vector_.accessor<float, 2>();
-
-        // Whether the per-plot species budget narrows anything at all. A
-        // budget of 0 -- the default -- and SelectionMode::All both mean "write
-        // every record", so the narrowing path is skipped rather than run as an
-        // identity over every plot. The vector's width is the vocabulary either way, which is
-        // fitted over every record, so no column changes meaning.
-        const bool has_budget = config_.species_budget > 0 &&
-                                config_.selection != SelectionMode::All;
-
-        for (int64_t i = 0; i < n_plots; ++i) {
-            const auto& plot_id = plot_ids_[i];
-            auto it = plot_records.find(plot_id);
-            if (it == plot_records.end()) continue;
-            const auto& recs = it->second;
-
-            const auto write_record = [&](const SpeciesRecord& rec) {
-                auto sp_it = species_to_idx_.find(rec.species_id);
-                if (sp_it == species_to_idx_.end()) return;
-                float value = rec.abundance;
-                if (config_.representation == RepresentationMode::PresenceAbsence) {
-                    value = 1.0f;
-                }
-                vec_acc[i][sp_it->second] = value;
-            };
-
-            if (!has_budget) {
-                for (const auto& rec : recs) write_record(rec);
-                continue;
-            }
-
-            std::vector<std::pair<std::string, float>> species_abd;
-            species_abd.reserve(recs.size());
-            for (const auto& rec : recs) {
-                species_abd.emplace_back(rec.species_id, rec.abundance);
-            }
-            for (size_t s : species_budget_indices(species_abd, config_.selection,
-                                                   config_.species_budget)) {
-                write_record(recs[s]);
+        hash_embedding_ = torch::zeros({n_plots, config_.hash_dim}, torch::kFloat32);
+        auto rows = hash_embedding_.accessor<float, 2>();
+        for (int64_t p = 0; p < n_plots; ++p) {
+            const auto plot = assemblages.plot(p);
+            const auto selected = selection_indices(assemblages, p, config_.selection, config_.top_k);
+            const auto values = normalized_values(assemblages, p, selected, config_.normalization);
+            for (size_t j = 0; j < selected.size(); ++j) {
+                accumulate_feature_hash(plot[selected[j]].species_id, values[j],
+                                        &rows[p][0], config_.hash_dim);
             }
         }
     }
+    encode_fixed_taxonomy(assemblages);
+}
 
-    // Encode taxonomy into fixed slots for hash / sparse modes. Skipped for
-    // rank_pool / transformer (which consume the per-species pool_genus_ids_ /
-    // pool_family_ids_ populated above) and for embed (whose fixed-slot taxonomy
-    // is produced by the EmbeddingEncoder above); allocating + per-plot sorting
-    // them again would be wasted work and a second copy of the same selection.
-    const bool fixed_slot_taxonomy =
-        config_.species_encoding != SpeciesEncodingMode::RankPool &&
-        config_.species_encoding != SpeciesEncodingMode::Transformer &&
-        config_.species_encoding != SpeciesEncodingMode::Embed;
-    if (schema_.has_taxonomy && fixed_slot_taxonomy) {
-        genus_ids_ = torch::zeros({n_plots, n_taxonomy_slots}, torch::kLong);
-        family_ids_ = torch::zeros({n_plots, n_taxonomy_slots}, torch::kLong);
-        auto genus_acc = genus_ids_.accessor<int64_t, 2>();
-        auto family_acc = family_ids_.accessor<int64_t, 2>();
-
-        for (int64_t i = 0; i < n_plots; ++i) {
-            const auto& plot_id = plot_ids_[i];
-            auto it = plot_records.find(plot_id);
-            if (it == plot_records.end()) continue;
-
-            // Canonical embed-mode taxonomy: aggregate abundance per DISTINCT
-            // genus and per DISTINCT family, then take the top-k of each
-            // independently (shared topk_by_abundance; matches EmbeddingEncoder).
-            std::unordered_map<std::string, float> genus_abd, family_abd;
-            for (const auto& rec : it->second) {
-                if (!rec.genus.empty())  genus_abd[rec.genus]   += rec.abundance;
-                if (!rec.family.empty()) family_abd[rec.family] += rec.abundance;
-            }
-
-            auto top_genera = topk_by_abundance(genus_abd, n_taxonomy_slots);
-            for (size_t slot = 0; slot < top_genera.size(); ++slot) {
-                genus_acc[i][static_cast<int64_t>(slot)] =
-                    taxonomy_vocab_.encode_genus(top_genera[slot]);
-            }
-            auto top_families = topk_by_abundance(family_abd, n_taxonomy_slots);
-            for (size_t slot = 0; slot < top_families.size(); ++slot) {
-                family_acc[i][static_cast<int64_t>(slot)] =
-                    taxonomy_vocab_.encode_family(top_families[slot]);
-            }
+void ResolveDataset::encode_sparse(const PlotAssemblages& assemblages) {
+    const int64_t n_plots = assemblages.n_plots();
+    species_vector_ = torch::zeros({n_plots, vocab_.species.size()}, torch::kFloat32);
+    auto rows = species_vector_.accessor<float, 2>();
+    for (int64_t p = 0; p < n_plots; ++p) {
+        const auto plot = assemblages.plot(p);
+        for (size_t i : species_budget_indices(assemblages, p, config_.selection,
+                                               config_.species_budget)) {
+            const int64_t code = vocab_.species.encode(plot[i].species_id);
+            if (code > 0) rows[p][code] = plot[i].abundance;
         }
     }
+    encode_fixed_taxonomy(assemblages);
+}
 
-    // Unknown-species (novelty) feature columns. Both are measured against the
-    // species vocabulary this dataset encodes with -- the freshly-fit one for a
-    // plain from_csv load, the training checkpoint's for a *_with_schema /
-    // *_with_vocabs load -- and are concatenated into the encoder's continuous
-    // block by Trainer::prepare_data / Predictor::predict, in this order, when
-    // the corresponding schema flag is set.
-    //
-    // A vocabulary fitted on the same records covers every name in them, so a
-    // plain training load reports 0 everywhere: that is the correct value, not a
-    // placeholder. The columns become informative exactly when the vocabulary
-    // came from elsewhere, which is the case they exist for.
-    //
-    // Hash mode is content-derived (a novel species gets its own bucket rather
-    // than colliding with UNK), so novelty does not change how it encodes -- but
-    // the dataset still fits/adopts a species vocabulary in every mode, so the
-    // question "was this name in the training data" is answerable there too and
-    // is answered, rather than being silently reported as zero.
+void ResolveDataset::encode_embed(const PlotAssemblages& assemblages) {
+    // The species slots take top_k_species under the configured selection;
+    // the taxonomy slots match the hash / sparse width.
+    EmbeddingEncoder encoder(config_.top_k_species, taxonomy_slot_count(config_),
+                             config_.selection, config_.aggregation);
+    encoder.set_vocab(vocab_);
+    auto encoded = encoder.transform(assemblages);
+    species_ids_ = std::move(encoded.species_ids);
+    if (schema_.has_taxonomy) {
+        genus_ids_ = std::move(encoded.genus_ids);
+        family_ids_ = std::move(encoded.family_ids);
+    }
+}
+
+void ResolveDataset::encode_pool(const PlotAssemblages& assemblages) {
+    // Per-species IDs, genus / family IDs, weights and mask, padded to the
+    // widest plot or the species cap:
+    //   species_ids_     int64 (n_plots, max_species)
+    //   pool_genus_ids_  int64 (n_plots, max_species)
+    //   pool_family_ids_ int64 (n_plots, max_species)
+    //   pool_weights_    f32   (n_plots, max_species), see PoolWeighting
+    //   pool_mask_       bool  (n_plots, max_species), true where a species sits
+    //   pool_has_cover_  f32   (n_plots,)
+    RankPoolEncoder encoder(config_.pool_weighting, /*min_frequency=*/1,
+                            config_.selection, config_.species_budget);
+    encoder.set_vocab(vocab_);
+    auto encoded = encoder.transform(assemblages, config_.pool_species_cap,
+                                     has_abundance_column_);
+    species_ids_ = std::move(encoded.species_ids);
+    pool_genus_ids_ = std::move(encoded.genus_ids);
+    pool_family_ids_ = std::move(encoded.family_ids);
+    pool_weights_ = std::move(encoded.weights);
+    pool_mask_ = std::move(encoded.mask);
+    pool_has_cover_ = std::move(encoded.has_cover);
+    // The resolved width, so inference truncates every plot to the width the
+    // model was trained on even when the cap was a percentile.
+    schema_.pool_species_cap = static_cast<int>(species_ids_.size(1));
+}
+
+void ResolveDataset::encode_fixed_taxonomy(const PlotAssemblages& assemblages) {
+    if (!schema_.has_taxonomy) return;
+    auto slots = encode_taxonomy_slots(assemblages, vocab_.taxonomy, config_.aggregation,
+                                       taxonomy_slot_count(config_));
+    genus_ids_ = std::move(slots.genus_ids);
+    family_ids_ = std::move(slots.family_ids);
+}
+
+void ResolveDataset::publish_species_statistics(const PlotAssemblages& assemblages) {
+    // Unknown-species feature columns, measured against the vocabulary this
+    // dataset encodes with, in every encoding. A vocabulary fitted on these
+    // records covers every name in them, so a training load reports 0: the
+    // columns become informative when the vocabulary came from elsewhere.
     if (config_.track_unknown_fraction || config_.track_unknown_count) {
-        if (!unknown_stats.fraction.defined()) {
-            unknown_stats = compute_unknown_species_stats(
-                all_records, plot_ids_, active_species_vocab(species_to_idx_));
-        }
-        if (config_.track_unknown_fraction) {
-            unknown_fraction_ = unknown_stats.fraction;
-        }
-        if (config_.track_unknown_count) {
-            unknown_count_ = unknown_stats.count;
-        }
+        auto stats = compute_unknown_species_stats(assemblages, vocab_.species);
+        if (config_.track_unknown_fraction) unknown_fraction_ = std::move(stats.fraction);
+        if (config_.track_unknown_count) unknown_count_ = std::move(stats.count);
     }
 
-    // How much of each plot the adopted vocabulary recognises, reported beside
-    // a prediction. Only a vocabulary fitted on other data can miss a species;
-    // one fitted on these records recognises all of them by construction, so a
-    // training load skips the pass.
+    // How much of each plot an adopted vocabulary recognises, reported beside
+    // a prediction; a vocabulary fitted on these records recognises them all.
     if (use_external_vocabs_) {
-        species_recognition_ = compute_species_recognition(
-            all_records, plot_ids_, active_species_vocab(species_to_idx_));
+        species_recognition_ = compute_species_recognition(assemblages, vocab_.species);
     }
 
-    // The taxonomy of the vocabulary itself: the genus and family each species
-    // CODE belongs to. The per-plot slots above say what a plot contains; this
-    // says how the species relate to each other, which is what a species-level
-    // graph is built from (species_graph.hpp). Computed here, after every
-    // branch: the rank-pool / transformer branch replaces both vocabularies
-    // with the encoder's own, so codes resolved earlier would be the pre-swap
-    // ones.
-    if (schema_.has_taxonomy && species_vocab_.size() > 1) {
-        auto taxonomy = resolve_species_taxonomy(all_records, species_vocab_,
-                                                 taxonomy_vocab_);
+    // The genus and family each species CODE belongs to: how the species
+    // relate to each other, which a species-level graph is built from
+    // (species_graph.hpp).
+    if (schema_.has_taxonomy && vocab_.species.size() > 1) {
+        auto taxonomy = resolve_species_taxonomy(assemblages, vocab_.species, vocab_.taxonomy);
         species_genus_ids_ = torch::tensor(taxonomy.genus, torch::kInt64);
         species_family_ids_ = torch::tensor(taxonomy.family, torch::kInt64);
     }
-
-    // Mirror the settled vocabularies onto the schema so they travel into the
-    // checkpoint. Last thing in encode_species: the rank-pool /
-    // transformer branch replaces both species_vocab_ and taxonomy_vocab_ with
-    // the encoder's own, so an earlier copy would capture the pre-swap maps.
-    publish_vocabs_to_schema();
 }
 
 void ResolveDataset::publish_vocabs_to_schema() {
-    schema_.species_vocab = species_vocab_;
-    schema_.genus_vocab = taxonomy_vocab_.genus_names();
-    schema_.family_vocab = taxonomy_vocab_.family_names();
+    schema_.species_vocab = vocab_.species.names();
+    schema_.genus_vocab = vocab_.taxonomy.genus_names();
+    schema_.family_vocab = vocab_.taxonomy.family_names();
 }
 
 std::vector<int64_t> ResolveDataset::plot_indices(const std::vector<std::string>& ids) const {

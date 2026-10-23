@@ -23,8 +23,7 @@
 //   * NA-string detection goes through is_na_string (categorical.cpp), the
 //     same matcher the target and covariate loaders use, so a raw cell is
 //     classified identically whatever role its column carries.
-//   * Embedding dim is shared across all columns. It could be made per-column
-//     if that becomes a tuning lever.
+//   * Embedding dim is shared across all columns.
 //   * No public copy/move ctors on CategoricalEmbedder beyond what
 //     torch::nn::Module gives us — clone/serialize via state_dict like any
 //     other Module.
@@ -113,15 +112,13 @@ public:
     // Parallel list of vocab sizes (K + 1 per column) in column_names() order.
     [[nodiscard]] std::vector<int64_t> vocab_sizes() const;
 
-    // Serialize the entire vocab to `archive` under `prefix`. Layout mirrors
-    // TaxonomyVocab (length-prefixed UInt8 byte arrays) so it survives the
-    // LibTorch archive roundtrip on Windows + Linux.
+    // Serialize the entire vocab to `archive` under `prefix`; the column and
+    // value names travel as string lists (string_list_archive.hpp).
     void save(torch::serialize::OutputArchive& archive,
               const std::string& prefix = "categorical_") const;
 
     // Inverse of save. The same prefix must be used. Returns an empty
-    // vocab if no entries were saved (back-compat with checkpoints written
-    // before categorical support landed).
+    // vocab when the archive holds none (a model without categoricals).
     [[nodiscard]] static CategoricalVocab load(
         torch::serialize::InputArchive& archive,
         const std::string& prefix = "categorical_");
@@ -137,8 +134,8 @@ public:
     // RESTORING a persisted vocabulary rather than fitting one: the codes come
     // from the checkpoint and must be reproduced exactly, whereas fit_column
     // re-derives them from the sorted unique values. Used by the C-ABI
-    // ExternalVocabs carrier (issue #102). Code 0 stays reserved for UNK and
-    // must not appear in `map`.
+    // ExternalVocabs carrier. Code 0 stays reserved for UNK and must not
+    // appear in `map`.
     void set_column_map(const std::string& column_name,
                         const std::unordered_map<std::string, int64_t>& map);
 

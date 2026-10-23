@@ -14,6 +14,19 @@
 using namespace resolve;
 using namespace resolve::test;
 
+namespace {
+
+// Every data row the reader streams, in order.
+std::vector<std::vector<std::string>> all_rows(CSVReader& reader) {
+    std::vector<std::vector<std::string>> rows;
+    reader.read_rows([&rows](size_t, const std::vector<std::string>& row) {
+        rows.push_back(row);
+    });
+    return rows;
+}
+
+}  // namespace
+
 // ============================================================================
 // CSV Reader Tests
 // ============================================================================
@@ -42,12 +55,8 @@ TEST_CASE("CSVReader basic parsing", "[csv]") {
         REQUIRE(reader.column_index("nonexistent") == -1);
     }
 
-    SECTION("row count is correct") {
-        REQUIRE(reader.count_rows() == 3);
-    }
-
-    SECTION("read_all returns all rows") {
-        auto rows = reader.read_all();
+    SECTION("every row is streamed") {
+        auto rows = all_rows(reader);
         REQUIRE(rows.size() == 3);
         REQUIRE(rows[0][0] == "a");
         REQUIRE(rows[1][1] == "2");
@@ -63,7 +72,7 @@ TEST_CASE("CSVReader handles quoted fields", "[csv]") {
     );
 
     CSVReader reader(csv.path());
-    auto rows = reader.read_all();
+    auto rows = all_rows(reader);
 
     REQUIRE(rows.size() == 2);
     REQUIRE(rows[0][1] == "contains, comma");
@@ -78,7 +87,7 @@ TEST_CASE("CSVReader handles empty fields", "[csv]") {
     );
 
     CSVReader reader(csv.path());
-    auto rows = reader.read_all();
+    auto rows = all_rows(reader);
 
     REQUIRE(rows.size() == 2);
     REQUIRE(rows[0][1] == "");
@@ -250,10 +259,9 @@ TEST_CASE("ResolveDataset from_species_csv basic loading", "[dataset]") {
 }
 
 TEST_CASE("ResolveDataset from_species_csv factorizes string classification targets", "[dataset]") {
-    // from_species_csv factorizes a string-coded class column: pushing every
-    // target cell through safe_stof and an int64 cast would collapse the
-    // classes (e.g. "Forest"/"Grassland") to class 0 with no class_names and
-    // no NA drop.
+    // from_species_csv factorizes a string-coded class column: a numeric parse
+    // and an int64 cast would collapse the classes (e.g. "Forest"/"Grassland")
+    // to class 0 with no class_names and no NA drop.
     TempFile csv(
         "plot_id,species,cover,habitat\n"
         "p1,sp1,0.5,Forest\n"

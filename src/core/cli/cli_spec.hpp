@@ -85,11 +85,13 @@ inline const CommandSpec& train_spec() {
                          "model: indicate (fill with the fitting fold's mean\n"
                          "and add a 0/1 missingness column) or zero."});
         flags.push_back({"--representation", Arity::Value, "MODE", "abundance",
-                         "Species values: abundance or presence_absence"});
+                         "The value each species carries into every\n"
+                         "encoding: abundance or presence_absence (1.0)"});
         flags.push_back({"--normalization", Arity::Value, "MODE", "raw",
                          "Abundance normalization: raw, norm, log1p"});
         flags.push_back({"--aggregation", Arity::Value, "MODE", "abundance",
-                         "Taxonomy aggregation: abundance or count"});
+                         "How the fixed genus/family slots rank a plot's\n"
+                         "taxa: abundance (summed) or count (species held)"});
         flags.push_back({"--no-taxonomy", Arity::Flag, "", "",
                          "Ignore the genus/family columns even when present"});
         flags.push_back({"--no-unknown-fraction", Arity::Flag, "", "",

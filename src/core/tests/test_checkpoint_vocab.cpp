@@ -62,14 +62,12 @@ namespace {
 //
 //   REORDER (P16..P23) -- all four species still present, so the vocabulary
 //     SIZE is unchanged, but the frequencies become b=8, d=8, a=4, c=4 against
-//     b=24, a=20, c=16, d=12 over the whole file. The dataset's own
-//     frequency-ranked vocab (build_species_vocab, used by embed and sparse)
-//     therefore permutes: b,a,c,d -> b,d,a,c. This is the silent case a
-//     size-only checkpoint could not detect.
+//     b=24, a=20, c=16, d=12 over the whole file. The plot-count-ranked vocab
+//     every encoding fits (SpeciesVocab::fit) therefore permutes: b,a,c,d ->
+//     b,d,a,c. This is the silent case a size-only checkpoint could not detect.
 //
-//   DROP (P12..P19) -- sp_c never occurs, so the species SET shrinks. That
-//     moves the name-sorted vocab too (SpeciesVocab::from_records, used by the
-//     rank_pool / transformer encoders), and changes the size.
+//   DROP (P12..P19) -- sp_c never occurs, so the species SET shrinks and the
+//     vocabulary changes size.
 
 struct Plot {
     std::string id;
@@ -259,9 +257,9 @@ TEST_CASE("Scoring a subset from a checkpoint alone matches scoring the full fil
     }
 }
 
-// A vocabulary re-fit that leaves the SIZE unchanged is the silent case: the
-// old size-only checkpoint had nothing to compare. Both frequency-ranked
-// encoders (embed, sparse) permute their codes on the reordered subset.
+// A vocabulary re-fit that leaves the SIZE unchanged is the silent case: a
+// size-only checkpoint has nothing to compare. Every species-indexing encoding
+// permutes its codes on the reordered subset.
 TEST_CASE("A re-fitted species vocabulary is caught even when its size is unchanged",
           "[checkpoint][vocab][guard]") {
     const auto all_plots = corpus();
@@ -275,7 +273,8 @@ TEST_CASE("A re-fitted species vocabulary is caught even when its size is unchan
     const auto roles = test_roles();
     const std::vector<TargetSpec> targets = {TargetSpec::regression("y")};
 
-    for (auto mode : {SpeciesEncodingMode::Embed, SpeciesEncodingMode::Sparse}) {
+    for (auto mode : {SpeciesEncodingMode::Embed, SpeciesEncodingMode::Sparse,
+                      SpeciesEncodingMode::RankPool, SpeciesEncodingMode::Transformer}) {
         DYNAMIC_SECTION("encoder = " << species_encoding_to_string(mode)) {
             const auto dcfg = test_dataset_config(mode);
             auto ds_a = ResolveDataset::from_csv(

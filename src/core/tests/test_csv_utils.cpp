@@ -20,7 +20,7 @@ TempFile binary_csv(const std::string& content) {
 }  // namespace
 
 // ============================================================================
-// parse_float_strict / safe_stof — locale-free, trailing-garbage-rejecting
+// parse_float_strict — locale-free, trailing-garbage-rejecting
 // ============================================================================
 
 TEST_CASE("parse_float_strict parses plain decimals", "[csv_utils][parse]") {
@@ -48,20 +48,6 @@ TEST_CASE("parse_float_strict is locale-free: comma is not a decimal point",
     // and the value is rejected rather than silently mis-parsed.
     REQUIRE(parse_float_strict("1,234") == std::nullopt);
     REQUIRE(parse_float_strict("3,14") == std::nullopt);
-}
-
-TEST_CASE("safe_stof returns default on failure, value on success",
-          "[csv_utils][parse]") {
-    REQUIRE_THAT(safe_stof("2.75"), WithinAbs(2.75f, 1e-6));
-    REQUIRE_THAT(safe_stof("12abc", -1.0f), WithinAbs(-1.0f, 1e-6));
-    REQUIRE_THAT(safe_stof("", 7.0f), WithinAbs(7.0f, 1e-6));
-    REQUIRE_THAT(safe_stof("1,5", 9.0f), WithinAbs(9.0f, 1e-6));
-}
-
-TEST_CASE("safe_stoi rejects trailing garbage", "[csv_utils][parse]") {
-    REQUIRE(safe_stoi("42") == 42);
-    REQUIRE(safe_stoi("42abc", -1) == -1);
-    REQUIRE(safe_stoi("", 5) == 5);
 }
 
 // ============================================================================

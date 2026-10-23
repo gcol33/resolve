@@ -40,8 +40,9 @@ model_config.species_encoding = rc.SpeciesEncodingMode.Hash
 model_config.hash_dim         = 64
 ```
 
-Before hashing, the loader applies `selection` with `top_k` and then
-`normalization`:
+A species recorded more than once in a plot (once per vegetation layer) enters
+every encoding once, at its summed abundance. Before hashing, the loader applies
+`selection` with `top_k` and then `normalization`:
 
 | `selection` | Species kept per plot |
 |-------------|-----------------------|
@@ -70,10 +71,23 @@ data_config.species_budget   = 20     # the 20 least abundant species per plot
 
 Embed writes a fixed number of ranked slots, so `All` has no encoding there and
 is rejected rather than quietly treated as `Top`; under `TopBottom` it takes
-half its slots from each end.
+half its slots from each end. The slots follow the ranking in every plot, short
+ones included: slot 0 holds the most abundant species under `Top` and the least
+abundant under `Bottom`.
 
 `normalization` rescales the weights: `Raw` uses abundance as recorded, `Norm`
 divides by the plot total, `Log1p` compresses the range.
+
+`representation = PresenceAbsence` replaces every species' abundance with `1.0`
+in all encodings: the hash and sparse values, the pool weights (a pooled
+dataset then reports `has_cover = 0`), the abundance-ranked taxonomy slots and
+the unknown-species fraction. The selection still ranks by recorded abundance,
+so presence/absence with `Top` keeps the dominant species.
+
+The fixed genus and family slots of `Hash`, `Sparse` and `Embed` hold a plot's
+leading taxa: `aggregation = Abundance` (default) ranks them by the summed
+abundance of their species, `Count` by how many of the plot's species they
+hold.
 
 **Strengths.** No embedding table, so memory is flat in vocabulary size. A
 species the model never saw still lands in a bucket, so the representation
@@ -90,8 +104,9 @@ hyperparameter search where iteration speed matters.
 
 ## Embed
 
-The `top_k_species` most abundant species in a plot are looked up in a
-frequency-ranked vocabulary, and their embeddings are concatenated. Genus and
+The `top_k_species` most abundant species in a plot are looked up in the
+species vocabulary (ranked by the number of plots recording each species), and
+their embeddings are concatenated. Genus and
 family go into `n_taxonomy_slots` fixed slots, filled with the most abundant
 distinct genera and families.
 
@@ -131,7 +146,8 @@ model_config.species_encoding = rc.SpeciesEncodingMode.Sparse
 ```
 
 `RepresentationMode.PresenceAbsence` writes `1.0` for every present species
-instead of its abundance.
+instead of its abundance; a species recorded in several layers of a plot is
+written once, at its summed abundance.
 
 **Strengths.** Nothing is discarded and nothing collides; the first layer sees
 the exact community matrix, which is the representation classical vegetation

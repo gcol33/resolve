@@ -63,12 +63,12 @@ uint32_t to_lower_cp(uint32_t cp) {
     if (cp >= 'A' && cp <= 'Z') return cp + 32u;
     // Latin-1 Supplement: C0-DE -> E0-FE, excluding multiplication sign (D7).
     if (cp >= 0x00C0u && cp <= 0x00DEu && cp != 0x00D7u) return cp + 0x20u;
-    // Latin Extended-A (0100-017F): simple lowercase mapping (issue #90). Common
-    // Central-European letters live here (Č/č, Š/š, Ž/ž, Ł/ł, Ć/ć, Ř/ř, Ő/ő, ...),
-    // so case-insensitive matching missed them entirely before. Letters come in
-    // upper/lower pairs one code point apart, but the parity of which is uppercase
-    // flips across three subranges, so the offset is range-dependent
-    // (per UnicodeData.txt). A handful of code points break the pattern.
+    // Latin Extended-A (0100-017F): simple lowercase mapping. Common
+    // Central-European letters live here (Č/č, Š/š, Ž/ž, Ł/ł, Ć/ć, Ř/ř, Ő/ő, ...).
+    // Letters come in upper/lower pairs one code point apart, but the parity of
+    // which is uppercase flips across three subranges, so the offset is
+    // range-dependent (per UnicodeData.txt). A handful of code points break the
+    // pattern.
     if (cp >= 0x0100u && cp <= 0x017Fu) {
         if (cp == 0x0130u) return 0x0069u;  // I with dot above -> 'i'
         if (cp == 0x0178u) return 0x00FFu;  // Y with diaeresis -> y with diaeresis
@@ -83,6 +83,35 @@ uint32_t to_lower_cp(uint32_t cp) {
 
 void to_lower_inplace(std::vector<uint32_t>& cps) {
     for (auto& c : cps) c = to_lower_cp(c);
+}
+
+std::string codepoints_to_utf8(const std::vector<uint32_t>& cps) {
+    std::string out;
+    out.reserve(cps.size());
+    for (uint32_t cp : cps) {
+        if (cp < 0x80u) {
+            out.push_back(static_cast<char>(cp));
+        } else if (cp < 0x800u) {
+            out.push_back(static_cast<char>(0xC0u | (cp >> 6)));
+            out.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
+        } else if (cp < 0x10000u) {
+            out.push_back(static_cast<char>(0xE0u | (cp >> 12)));
+            out.push_back(static_cast<char>(0x80u | ((cp >> 6) & 0x3Fu)));
+            out.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
+        } else {
+            out.push_back(static_cast<char>(0xF0u | (cp >> 18)));
+            out.push_back(static_cast<char>(0x80u | ((cp >> 12) & 0x3Fu)));
+            out.push_back(static_cast<char>(0x80u | ((cp >> 6) & 0x3Fu)));
+            out.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
+        }
+    }
+    return out;
+}
+
+std::string lower_utf8(std::string_view s) {
+    auto cps = utf8_to_codepoints(s);
+    to_lower_inplace(cps);
+    return codepoints_to_utf8(cps);
 }
 
 // ---------------------------------------------------------------------------

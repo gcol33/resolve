@@ -149,102 +149,103 @@ ResolveDataset build(const std::string& header_path, const std::string& species_
 // The shared selection core
 // ===========================================================================
 
+namespace {
+
+// One plot holding `species`, in the order given.
+PlotAssemblages one_plot(const std::vector<std::pair<std::string, float>>& species) {
+    std::vector<SpeciesRecord> records;
+    for (const auto& [name, cover] : species) records.push_back({name, "", "", cover, "p"});
+    return PlotAssemblages::build(records, {"p"});
+}
+
+std::vector<std::string> names_at(const PlotAssemblages& plots,
+                                  const std::vector<size_t>& idx) {
+    std::vector<std::string> out;
+    for (size_t i : idx) out.push_back(plots.plot(0)[i].species_id);
+    return out;
+}
+
+using Names = std::vector<std::string>;
+
+}  // namespace
+
 TEST_CASE("selection_indices ranks and truncates", "[selection]") {
-    const std::vector<std::pair<std::string, float>> species = {
-        {"a", 3.0f}, {"b", 1.0f}, {"c", 5.0f}, {"d", 2.0f}};
+    const auto plots = one_plot({{"a", 3.0f}, {"b", 1.0f}, {"c", 5.0f}, {"d", 2.0f}});
 
     SECTION("Top returns the k most abundant, most abundant first") {
-        const auto idx = selection_indices(species, SelectionMode::Top, 2);
-        REQUIRE(idx.size() == 2);
-        REQUIRE(species[idx[0]].first == "c");  // 5.0
-        REQUIRE(species[idx[1]].first == "a");  // 3.0
+        REQUIRE(names_at(plots, selection_indices(plots, 0, SelectionMode::Top, 2)) ==
+                Names{"c", "a"});
     }
 
     SECTION("Bottom returns the k least abundant, least abundant first") {
-        const auto idx = selection_indices(species, SelectionMode::Bottom, 2);
-        REQUIRE(idx.size() == 2);
-        REQUIRE(species[idx[0]].first == "b");  // 1.0
-        REQUIRE(species[idx[1]].first == "d");  // 2.0
+        REQUIRE(names_at(plots, selection_indices(plots, 0, SelectionMode::Bottom, 2)) ==
+                Names{"b", "d"});
     }
 
-    SECTION("TopBottom concatenates both ends without repeating a species") {
-        const auto idx = selection_indices(species, SelectionMode::TopBottom, 2);
-        REQUIRE(idx.size() == 4);
-        std::set<std::string> names;
-        for (size_t i : idx) names.insert(species[i].first);
-        REQUIRE(names.size() == 4);  // every entry distinct
+    SECTION("TopBottom lists the top end, then the bottom end") {
+        REQUIRE(names_at(plots, selection_indices(plots, 0, SelectionMode::TopBottom, 2)) ==
+                Names{"c", "a", "b", "d"});
     }
 
     SECTION("TopBottom over a short list keeps each species once") {
-        // 4 species, k = 3 per end: the two ends overlap and the dedup has to
-        // fire, or a species occupies two slots.
-        const auto idx = selection_indices(species, SelectionMode::TopBottom, 3);
-        std::set<size_t> unique(idx.begin(), idx.end());
-        REQUIRE(unique.size() == idx.size());
-        REQUIRE(idx.size() == species.size());
+        // 4 species, k = 3 per end: the two ends overlap and a species must
+        // not occupy two slots.
+        REQUIRE(names_at(plots, selection_indices(plots, 0, SelectionMode::TopBottom, 3)) ==
+                Names{"c", "a", "d", "b"});
     }
 
-    SECTION("All ignores k and keeps original order") {
-        const auto idx = selection_indices(species, SelectionMode::All, 2);
-        REQUIRE(idx.size() == species.size());
-        for (size_t i = 0; i < idx.size(); ++i) REQUIRE(idx[i] == i);
+    SECTION("All ignores k and keeps plot order") {
+        REQUIRE(names_at(plots, selection_indices(plots, 0, SelectionMode::All, 2)) ==
+                Names{"a", "b", "c", "d"});
     }
 }
 
-TEST_CASE("apply_selection still gathers what it always did", "[selection]") {
-    // Regression guard on the refactor onto selection_indices: the pair-
-    // returning form is what the hash branch and the embed encoder consume, and
-    // its ORDER carries meaning (slot 0 of an embed row is the top species).
-    const std::vector<std::pair<std::string, float>> species = {
-        {"a", 3.0f}, {"b", 1.0f}, {"c", 5.0f}, {"d", 2.0f}};
-
-    auto top = apply_selection(species, SelectionMode::Top, 2);
-    REQUIRE(top.size() == 2);
-    REQUIRE(top[0].first == "c");
-    REQUIRE(top[0].second == 5.0f);
-    REQUIRE(top[1].first == "a");
-
-    auto bottom = apply_selection(species, SelectionMode::Bottom, 2);
-    REQUIRE(bottom[0].first == "b");
-    REQUIRE(bottom[1].first == "d");
-
-    auto all = apply_selection(species, SelectionMode::All, 2);
-    REQUIRE(all == species);
-
-    // Fewer entries than k: everything survives, untruncated.
-    auto short_top = apply_selection(species, SelectionMode::Top, 10);
-    REQUIRE(short_top.size() == species.size());
+TEST_CASE("selection_indices ranks a plot holding no more than k species",
+          "[selection]") {
+    // A plot shorter than the budget is still ranked: the slot order of the
+    // fixed-width encodings means "most abundant first" in every plot.
+    const auto plots = one_plot({{"a", 3.0f}, {"b", 1.0f}, {"c", 5.0f}});
+    REQUIRE(names_at(plots, selection_indices(plots, 0, SelectionMode::Top, 10)) ==
+            Names{"c", "a", "b"});
+    REQUIRE(names_at(plots, selection_indices(plots, 0, SelectionMode::Top, 3)) ==
+            Names{"c", "a", "b"});
+    REQUIRE(names_at(plots, selection_indices(plots, 0, SelectionMode::Bottom, 10)) ==
+            Names{"b", "a", "c"});
 }
 
 TEST_CASE("species_budget_indices is a no-op without a budget", "[selection][budget]") {
-    const std::vector<std::pair<std::string, float>> species = {
-        {"a", 3.0f}, {"b", 1.0f}, {"c", 5.0f}, {"d", 2.0f}};
+    const auto plots = one_plot({{"a", 3.0f}, {"b", 1.0f}, {"c", 5.0f}, {"d", 2.0f}});
 
     for (auto mode : {SelectionMode::Top, SelectionMode::Bottom,
                       SelectionMode::TopBottom, SelectionMode::All}) {
         for (int budget : {0, -1, -7}) {
-            const auto idx = species_budget_indices(species, mode, budget);
-            REQUIRE(idx.size() == species.size());
-            for (size_t i = 0; i < idx.size(); ++i) REQUIRE(idx[i] == i);
+            const auto idx = species_budget_indices(plots, 0, mode, budget);
+            REQUIRE(idx == std::vector<size_t>{0, 1, 2, 3});
         }
     }
 
     // All names no rule for picking a subset, so a budget does not narrow it.
-    REQUIRE(species_budget_indices(species, SelectionMode::All, 2).size() == species.size());
+    REQUIRE(species_budget_indices(plots, 0, SelectionMode::All, 2).size() == 4);
 }
 
-TEST_CASE("species_budget_indices returns CSV order", "[selection][budget]") {
-    // The rank-pool species cap documents itself as a slice of CSV row order,
-    // so the budget must hand back the survivors in that order rather than in
-    // the abundance ranking.
-    const std::vector<std::pair<std::string, float>> species = {
-        {"a", 3.0f}, {"b", 1.0f}, {"c", 5.0f}, {"d", 2.0f}};
+TEST_CASE("species_budget_indices returns plot order", "[selection][budget]") {
+    // The rank-pool species cap documents itself as a slice of plot order, so
+    // the budget hands back the survivors in that order rather than in the
+    // abundance ranking.
+    const auto plots = one_plot({{"a", 3.0f}, {"b", 1.0f}, {"c", 5.0f}, {"d", 2.0f}});
+    REQUIRE(species_budget_indices(plots, 0, SelectionMode::Top, 2) ==
+            std::vector<size_t>{0, 2});
+}
 
-    const auto idx = species_budget_indices(species, SelectionMode::Top, 2);
-    REQUIRE(idx.size() == 2);
-    REQUIRE(idx[0] == 0);  // "a", CSV position 0
-    REQUIRE(idx[1] == 2);  // "c", CSV position 2
-    REQUIRE(std::is_sorted(idx.begin(), idx.end()));
+TEST_CASE("selection ranks by recorded abundance under presence/absence",
+          "[selection][representation]") {
+    std::vector<SpeciesRecord> records = {
+        {"a", "", "", 3.0f, "p"}, {"b", "", "", 1.0f, "p"}, {"c", "", "", 5.0f, "p"}};
+    const auto plots =
+        PlotAssemblages::build(records, {"p"}, RepresentationMode::PresenceAbsence);
+    for (const auto& entry : plots.plot(0)) REQUIRE(entry.abundance == 1.0f);
+    REQUIRE(names_at(plots, selection_indices(plots, 0, SelectionMode::Top, 2)) ==
+            Names{"c", "a"});
 }
 
 // ===========================================================================
@@ -588,40 +589,27 @@ TEST_CASE("a checkpoint without the budget key reads back as no budget",
 }
 
 // ============================================================================
-// select_top_k tie-breaking
+// Tie-breaking
 // ============================================================================
 
 // Abundance ties break by name, so the selected set does not depend on input
 // (CSV row) order.
-TEST_CASE("select_top_k is order-independent on abundance ties", "[species_selection][determinism]") {
+TEST_CASE("selection is order-independent on abundance ties", "[species_selection][determinism]") {
     // Five species, all equal abundance (presence/absence data): the top-3 must
     // be the three alphabetically-first names regardless of input order.
-    std::vector<std::pair<std::string, float>> a = {
-        {"zeta", 1.0f}, {"alpha", 1.0f}, {"gamma", 1.0f}, {"beta", 1.0f}, {"delta", 1.0f}};
-    std::vector<std::pair<std::string, float>> b = {
-        {"delta", 1.0f}, {"gamma", 1.0f}, {"beta", 1.0f}, {"alpha", 1.0f}, {"zeta", 1.0f}};
+    const auto a = one_plot(
+        {{"zeta", 1.0f}, {"alpha", 1.0f}, {"gamma", 1.0f}, {"beta", 1.0f}, {"delta", 1.0f}});
+    const auto b = one_plot(
+        {{"delta", 1.0f}, {"gamma", 1.0f}, {"beta", 1.0f}, {"alpha", 1.0f}, {"zeta", 1.0f}});
 
-    auto sa = select_top_k(a, 3);
-    auto sb = select_top_k(b, 3);
-
-    std::vector<std::string> na, nb;
-    for (auto& p : sa) na.push_back(p.first);
-    for (auto& p : sb) nb.push_back(p.first);
-    std::sort(na.begin(), na.end());
-    std::sort(nb.begin(), nb.end());
-
-    REQUIRE(na == nb);
-    const std::vector<std::string> expected = {"alpha", "beta", "delta"};
-    REQUIRE(na == expected);
+    const Names expected = {"alpha", "beta", "delta"};
+    REQUIRE(names_at(a, selection_indices(a, 0, SelectionMode::Top, 3)) == expected);
+    REQUIRE(names_at(b, selection_indices(b, 0, SelectionMode::Top, 3)) == expected);
 }
 
 // Mixed abundances still rank by abundance first; only genuine ties use the name.
-TEST_CASE("select_top_k ranks by abundance, name only on ties", "[species_selection][determinism]") {
-    std::vector<std::pair<std::string, float>> in = {
-        {"low", 0.1f}, {"tieB", 2.0f}, {"tieA", 2.0f}, {"high", 5.0f}};
-    auto s = select_top_k(in, 3);
-    REQUIRE(s.size() == 3);
-    REQUIRE(s[0].first == "high");   // strictly largest
-    REQUIRE(s[1].first == "tieA");   // tie at 2.0 -> name ascending
-    REQUIRE(s[2].first == "tieB");
+TEST_CASE("selection ranks by abundance, name only on ties", "[species_selection][determinism]") {
+    const auto plots = one_plot({{"low", 0.1f}, {"tieB", 2.0f}, {"tieA", 2.0f}, {"high", 5.0f}});
+    REQUIRE(names_at(plots, selection_indices(plots, 0, SelectionMode::Top, 3)) ==
+            Names{"high", "tieA", "tieB"});
 }

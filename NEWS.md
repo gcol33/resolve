@@ -26,9 +26,44 @@
 - `Predictor.predict` on tensors chunks the forward like `predict_dataset`
   (`batch_size`, default 4096) and, like it, returns CPU tensors whatever the
   device; a one-chunk prediction on CUDA used to return device tensors.
+- **A species recorded several times in one plot is one entry.** Its records
+  (one per vegetation layer) are merged before any encoding: abundances
+  summed, placed where the first record stood, and every entry of a species
+  carries the alphabetically first genus and family its records name. Every
+  encoding, the vocabulary, the unknown-species columns (the count is now of
+  species) and the recognition report read the merged entries. Retrain before
+  comparing numbers on data with such records.
+- **One species vocabulary policy.** Every encoding fits its species codes by
+  the number of plots recording a species, ties by name; rank_pool and
+  transformer used to rank by name. Saved checkpoints keep scoring, since
+  their vocabularies travel by name. `SpeciesVocab.from_ordered`,
+  `SpeciesVocab.names` and `EncodingVocab` are new; the standalone encoders
+  adopt a vocabulary with `set_vocab` and no longer return unknown-species
+  statistics (call `compute_unknown_species_stats`, which takes a
+  `representation`).
 
 ### Fixed
 
+- `representation = presence_absence` was honoured by the sparse encoding
+  only. It now sets every species' value to 1.0 in every encoding (hash
+  weights, pool weights with `has_cover` 0, the abundance-ranked taxonomy
+  slots, the unknown fraction), while the selection still ranks by recorded
+  abundance.
+- `aggregation` was stored and never read. It now ranks the fixed genus /
+  family slots of the hash, sparse and embed encodings (`abundance`: summed
+  value of a taxon's species, `count`: how many species it holds); rank_pool
+  and transformer reject `count`.
+- Embed filled the slots of a plot holding no more than `top_k_species`
+  species in file order; the slots now follow the abundance ranking in every
+  plot. Retrain embed models before comparing numbers.
+- The hash and sparse taxonomy slots aggregated by each record's own genus
+  rather than the species' resolved genus the embed slots and the vocabulary
+  use.
+- A fuzzy index returned only the first of several entries that fold to the
+  same key (case-insensitive duplicates, repeated entries); it returns all of
+  them.
+- `RankPoolEncodedData`, `EmbeddingEncodedData` and `UnknownSpeciesStats`
+  tensor fields raised a conversion error in Python.
 - `Predictor.get_embeddings` read only the coordinates, covariates, hash
   embedding and taxonomy slots, so it threw or returned a wrong latent for the
   embed, sparse, rank_pool and transformer encoders and ignored categorical

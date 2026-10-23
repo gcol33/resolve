@@ -72,11 +72,11 @@ void register_dataset(nb::module_& m) {
                     nb::arg("schema"),
                     nb::arg("config") = resolve::DatasetConfig{},
                     "Load dataset reusing the vocabularies a CHECKPOINT's schema "
-                    "carries (issue #102), so the training CSVs need not exist. "
-                    "Raises when the schema has no species vocabulary (a "
-                    "pre-#102 checkpoint). Pass predictor.external_vocabs to "
-                    "from_csv_with_vocabs instead when the model has "
-                    "categorical covariates.")
+                    "carries, so the training CSVs need not exist. Raises when "
+                    "the schema has no species vocabulary (a checkpoint that "
+                    "stores only the vocabulary sizes). Pass "
+                    "predictor.external_vocabs to from_csv_with_vocabs instead "
+                    "when the model has categorical covariates.")
         .def_static("from_csv_with_vocabs",
                     &resolve::ResolveDataset::from_csv_with_vocabs,
                     nb::arg("header_path"),
@@ -112,7 +112,7 @@ void register_dataset(nb::module_& m) {
                     nb::arg("vocabs"),
                     nb::arg("config") = resolve::DatasetConfig{},
                     "Single-table counterpart of from_csv_with_vocabs.")
-        // --- In-memory (DataFrame) loaders (issue #22) ---
+        // --- In-memory (DataFrame) loaders ---
         // Low-level column entry points: each frame arrives as (names, columns)
         // with every cell already a string (column-major), so the result is
         // identical to loading the equivalent CSV. The high-level `from_pandas`
@@ -224,7 +224,7 @@ void register_dataset(nb::module_& m) {
                     nb::arg("vocabs"),
                     nb::arg("config") = resolve::DatasetConfig{},
                     nb::call_guard<nb::gil_scoped_release>(),
-                    "In-memory analog of from_csv_with_vocabs (issue #102).")
+                    "In-memory analog of from_csv_with_vocabs.")
         .def_static("from_species_columns_with_vocabs",
                     [](std::vector<std::string> species_names,
                        std::vector<std::vector<std::string>> species_columns,
@@ -242,7 +242,7 @@ void register_dataset(nb::module_& m) {
                     nb::arg("vocabs"),
                     nb::arg("config") = resolve::DatasetConfig{},
                     nb::call_guard<nb::gil_scoped_release>(),
-                    "In-memory analog of from_species_csv_with_vocabs (issue #102).")
+                    "In-memory analog of from_species_csv_with_vocabs.")
         // Tensor accessors must be wrapped via THPVariable_Wrap; nanobind
         // has no built-in caster for at::Tensor (would produce
         // "Unable to convert function return value to a Python type").
@@ -363,7 +363,7 @@ void register_dataset(nb::module_& m) {
             return self.taxonomy_vocab();
         })
         // Every vocabulary this dataset fitted, in the carrier the
-        // *_with_vocabs loaders take (issue #102). Equivalent to passing the
+        // *_with_vocabs loaders take. Equivalent to passing the
         // dataset itself to from_csv_with_schema, but usable after its source
         // files are gone.
         .def("external_vocabs", &resolve::ResolveDataset::external_vocabs);
@@ -390,81 +390,113 @@ void register_dataset(nb::module_& m) {
     nb::class_<resolve::SpeciesVocab>(m, "SpeciesVocab")
         .def(nb::init<>())
         .def_static("from_records", &resolve::SpeciesVocab::from_records,
-                    nb::arg("records"), nb::arg("min_count") = 1)
+                    nb::arg("records"), nb::arg("min_count") = 1,
+                    "Species recorded in at least min_count plots, by descending "
+                    "plot count, ties by name, coded 1..K (0 = unknown).")
+        .def_static("from_ordered", &resolve::SpeciesVocab::from_ordered,
+                    nb::arg("names"),
+                    "A vocabulary fitted elsewhere, as its ordered names; "
+                    "names[0] is the reserved <UNK>.")
         .def("encode", &resolve::SpeciesVocab::encode)
         .def("size", &resolve::SpeciesVocab::size)
         .def("empty", &resolve::SpeciesVocab::empty)
+        .def_prop_ro("names", &resolve::SpeciesVocab::names)
         .def_prop_ro("species_to_id", &resolve::SpeciesVocab::species_to_id);
+
+    nb::class_<resolve::EncodingVocab>(m, "EncodingVocab")
+        .def(nb::init<>())
+        .def_rw("species", &resolve::EncodingVocab::species)
+        .def_rw("taxonomy", &resolve::EncodingVocab::taxonomy)
+        .def("has_taxonomy", &resolve::EncodingVocab::has_taxonomy);
 
     // Per-plot novelty of an assemblage against a fitted vocabulary. Same
     // definition the dataset's unknown_fraction / unknown_count columns use.
     nb::class_<resolve::UnknownSpeciesStats>(m, "UnknownSpeciesStats")
         .def(nb::init<>())
-        .def_ro("fraction", &resolve::UnknownSpeciesStats::fraction)
-        .def_ro("count", &resolve::UnknownSpeciesStats::count);
+        .def_prop_ro("fraction", [](const resolve::UnknownSpeciesStats& s) { return tensor_or_none(s.fraction); })
+        .def_prop_ro("count", [](const resolve::UnknownSpeciesStats& s) { return tensor_or_none(s.count); });
 
-    m.def("compute_unknown_species_stats", &resolve::compute_unknown_species_stats,
+    m.def("compute_unknown_species_stats",
+          [](std::vector<resolve::SpeciesRecord> records,
+             const std::vector<std::string>& plot_ids,
+             const resolve::SpeciesVocab& vocab,
+             resolve::RepresentationMode representation) {
+              return resolve::compute_unknown_species_stats(
+                  resolve::PlotAssemblages::build(std::move(records), plot_ids, representation),
+                  vocab);
+          },
           nb::arg("records"), nb::arg("plot_ids"), nb::arg("vocab"),
-          "Per-plot unknown-species fraction (abundance-weighted) and count, "
-          "measured against a fitted SpeciesVocab. Non-zero only where the vocab "
-          "was fitted on other data; a vocab fitted on these records covers every "
-          "name in them.");
+          nb::arg("representation") = resolve::RepresentationMode::Abundance,
+          "Per-plot unknown-species fraction (abundance-weighted, or a species "
+          "share under presence/absence) and count of unknown species, measured "
+          "against a fitted SpeciesVocab. A species' records within a plot are "
+          "merged first. Non-zero only where the vocab was fitted on other data.");
 
     nb::class_<resolve::RankPoolEncodedData>(m, "RankPoolEncodedData")
         .def(nb::init<>())
-        .def_ro("species_ids", &resolve::RankPoolEncodedData::species_ids)
-        .def_ro("genus_ids", &resolve::RankPoolEncodedData::genus_ids)
-        .def_ro("family_ids", &resolve::RankPoolEncodedData::family_ids)
-        .def_ro("weights", &resolve::RankPoolEncodedData::weights)
-        .def_ro("mask", &resolve::RankPoolEncodedData::mask)
-        .def_ro("has_cover", &resolve::RankPoolEncodedData::has_cover)
-        .def_ro("unknown_fraction", &resolve::RankPoolEncodedData::unknown_fraction)
-        .def_ro("unknown_count", &resolve::RankPoolEncodedData::unknown_count)
-        .def_ro("n_species_vocab", &resolve::RankPoolEncodedData::n_species_vocab)
-        .def_ro("n_genera_vocab", &resolve::RankPoolEncodedData::n_genera_vocab)
-        .def_ro("n_families_vocab", &resolve::RankPoolEncodedData::n_families_vocab);
+        .def_prop_ro("species_ids", [](const resolve::RankPoolEncodedData& d) { return tensor_or_none(d.species_ids); })
+        .def_prop_ro("genus_ids", [](const resolve::RankPoolEncodedData& d) { return tensor_or_none(d.genus_ids); })
+        .def_prop_ro("family_ids", [](const resolve::RankPoolEncodedData& d) { return tensor_or_none(d.family_ids); })
+        .def_prop_ro("weights", [](const resolve::RankPoolEncodedData& d) { return tensor_or_none(d.weights); })
+        .def_prop_ro("mask", [](const resolve::RankPoolEncodedData& d) { return tensor_or_none(d.mask); })
+        .def_prop_ro("has_cover", [](const resolve::RankPoolEncodedData& d) { return tensor_or_none(d.has_cover); });
 
+    using VocabFit = void (resolve::SpeciesVocabEncoder::*)(
+        const std::vector<resolve::SpeciesRecord>&);
+    using RankPoolTransform = resolve::RankPoolEncodedData (resolve::RankPoolEncoder::*)(
+        const std::vector<resolve::SpeciesRecord>&, const std::vector<std::string>&,
+        int, bool, resolve::RepresentationMode) const;
     nb::class_<resolve::RankPoolEncoder>(m, "RankPoolEncoder")
-        .def(nb::init<resolve::PoolWeighting, int>(),
+        .def(nb::init<resolve::PoolWeighting, int, resolve::SelectionMode, int>(),
              nb::arg("weighting") = resolve::PoolWeighting::Log1p,
-             nb::arg("min_frequency") = 1)
-        .def("fit", &resolve::RankPoolEncoder::fit)
-        .def("transform", &resolve::RankPoolEncoder::transform,
+             nb::arg("min_frequency") = 1,
+             nb::arg("selection") = resolve::SelectionMode::All,
+             nb::arg("species_budget") = 0)
+        .def("fit", static_cast<VocabFit>(&resolve::RankPoolEncoder::fit), nb::arg("records"))
+        .def("set_vocab", &resolve::RankPoolEncoder::set_vocab, nb::arg("vocab"))
+        .def("transform", static_cast<RankPoolTransform>(&resolve::RankPoolEncoder::transform),
              nb::arg("records"), nb::arg("plot_ids"),
              nb::arg("species_cap") = 0,
-             nb::arg("has_abundance_column") = false)
+             nb::arg("has_abundance_column") = false,
+             nb::arg("representation") = resolve::RepresentationMode::Abundance)
         .def("is_fitted", &resolve::RankPoolEncoder::is_fitted)
         .def("n_species_vocab", &resolve::RankPoolEncoder::n_species_vocab)
-        .def("n_genera_vocab", &resolve::RankPoolEncoder::n_genera_vocab)
-        .def("n_families_vocab", &resolve::RankPoolEncoder::n_families_vocab)
+        .def("n_genera", &resolve::RankPoolEncoder::n_genera)
+        .def("n_families", &resolve::RankPoolEncoder::n_families)
+        .def_prop_ro("vocab", &resolve::RankPoolEncoder::vocab)
         .def_prop_ro("species_vocab", &resolve::RankPoolEncoder::species_vocab)
         .def_prop_ro("taxonomy_vocab", &resolve::RankPoolEncoder::taxonomy_vocab);
 
     nb::class_<resolve::EmbeddingEncodedData>(m, "EmbeddingEncodedData")
         .def(nb::init<>())
-        .def_ro("species_ids", &resolve::EmbeddingEncodedData::species_ids)
-        .def_ro("genus_ids", &resolve::EmbeddingEncodedData::genus_ids)
-        .def_ro("family_ids", &resolve::EmbeddingEncodedData::family_ids)
-        .def_ro("unknown_fraction", &resolve::EmbeddingEncodedData::unknown_fraction)
-        .def_ro("unknown_count", &resolve::EmbeddingEncodedData::unknown_count)
-        .def_ro("n_species_vocab", &resolve::EmbeddingEncodedData::n_species_vocab)
-        .def_ro("n_genera_vocab", &resolve::EmbeddingEncodedData::n_genera_vocab)
-        .def_ro("n_families_vocab", &resolve::EmbeddingEncodedData::n_families_vocab);
+        .def_prop_ro("species_ids", [](const resolve::EmbeddingEncodedData& d) { return tensor_or_none(d.species_ids); })
+        .def_prop_ro("genus_ids", [](const resolve::EmbeddingEncodedData& d) { return tensor_or_none(d.genus_ids); })
+        .def_prop_ro("family_ids", [](const resolve::EmbeddingEncodedData& d) { return tensor_or_none(d.family_ids); });
 
+    using EmbeddingTransform = resolve::EmbeddingEncodedData (resolve::EmbeddingEncoder::*)(
+        const std::vector<resolve::SpeciesRecord>&, const std::vector<std::string>&,
+        resolve::RepresentationMode) const;
     nb::class_<resolve::EmbeddingEncoder>(m, "EmbeddingEncoder")
-        .def(nb::init<int, int, resolve::SelectionMode>(),
+        .def(nb::init<int, int, resolve::SelectionMode, resolve::AggregationMode>(),
              nb::arg("top_k_species") = 10,
              nb::arg("top_k_taxonomy") = 3,
-             nb::arg("selection") = resolve::SelectionMode::Top)
-        .def("fit", &resolve::EmbeddingEncoder::fit)
-        .def("transform", &resolve::EmbeddingEncoder::transform)
+             nb::arg("selection") = resolve::SelectionMode::Top,
+             nb::arg("aggregation") = resolve::AggregationMode::Abundance)
+        .def("fit", static_cast<VocabFit>(&resolve::EmbeddingEncoder::fit), nb::arg("records"))
+        .def("set_vocab", &resolve::EmbeddingEncoder::set_vocab, nb::arg("vocab"))
+        .def("transform", static_cast<EmbeddingTransform>(&resolve::EmbeddingEncoder::transform),
+             nb::arg("records"), nb::arg("plot_ids"),
+             nb::arg("representation") = resolve::RepresentationMode::Abundance)
         .def("is_fitted", &resolve::EmbeddingEncoder::is_fitted)
         .def("n_species_vocab", &resolve::EmbeddingEncoder::n_species_vocab)
-        .def("n_genera_vocab", &resolve::EmbeddingEncoder::n_genera_vocab)
-        .def("n_families_vocab", &resolve::EmbeddingEncoder::n_families_vocab);
+        .def("n_genera", &resolve::EmbeddingEncoder::n_genera)
+        .def("n_families", &resolve::EmbeddingEncoder::n_families)
+        .def_prop_ro("vocab", &resolve::EmbeddingEncoder::vocab)
+        .def_prop_ro("species_vocab", &resolve::EmbeddingEncoder::species_vocab)
+        .def_prop_ro("taxonomy_vocab", &resolve::EmbeddingEncoder::taxonomy_vocab);
 
     // Vocabularies fitted at training time, in the form the ResolveDataset
-    // *_with_vocabs loaders accept (issue #102). Get one from
+    // *_with_vocabs loaders accept. Get one from
     // `predictor.external_vocabs` (complete, including the categorical maps) or
     // `dataset.external_vocabs()`. Registered here, after the TaxonomyVocab /
     // CategoricalVocab classes it holds.

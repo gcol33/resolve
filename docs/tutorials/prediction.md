@@ -168,7 +168,7 @@ ds = rc.ResolveDataset.from_csv_with_schema(
     header, species, roles, targets, predictor.schema, cfg)
 
 ds.unknown_fraction    # (n_plots,) share of abundance from species outside the vocabulary
-ds.unknown_count       # (n_plots,) records naming a species outside the vocabulary
+ds.unknown_count       # (n_plots,) species outside the vocabulary
 ```
 
 Both are computed over each plot's full record list, before top-k selection or a
