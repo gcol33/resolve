@@ -3,6 +3,8 @@
 *predicting what a sample is from what's in it*
 
 [![Tests](https://github.com/gcol33/resolve/actions/workflows/tests.yml/badge.svg)](https://github.com/gcol33/resolve/actions/workflows/tests.yml)
+[![PyPI downloads](https://static.pepy.tech/badge/resolve-core)](https://pepy.tech/projects/resolve-core)
+[![Monthly downloads](https://static.pepy.tech/badge/resolve-core/month)](https://pepy.tech/projects/resolve-core)
 [![R-CMD-check](https://github.com/gcol33/resolve/actions/workflows/r-cmd-check.yml/badge.svg)](https://github.com/gcol33/resolve/actions/workflows/r-cmd-check.yml)
 [![Documentation](https://img.shields.io/badge/docs-online-blue)](https://gillescolling.com/resolve)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
