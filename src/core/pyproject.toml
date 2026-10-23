@@ -1,16 +1,16 @@
 [build-system]
 # torch is a build requirement: the extension links libtorch, located via the
 # installed torch package's CMake prefix (src/core/python/CMakeLists.txt).
-requires = ["scikit-build-core>=0.4.3", "nanobind>=2.0.0", "torch>=2.0"]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.0.0", "torch>=2.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
 name = "resolve-core"
 version = "0.12.0"
 description = "RESOLVE C++ engine: predict sample outcomes from compositional data via learned representations"
-readme = "README.md"
+readme = "python/README.md"
 license = {text = "MIT"}
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [
     {name = "Gilles Colling", email = "gilles.colling051@gmail.com"}
 ]
@@ -19,10 +19,10 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: C++",
     "Topic :: Scientific/Engineering",
 ]
@@ -45,12 +45,24 @@ Homepage = "https://github.com/gcol33/resolve"
 Repository = "https://github.com/gcol33/resolve"
 
 [tool.scikit-build]
-# cmake.version, not cmake.minimum-version: scikit-build-core >= 0.8 rejects the
-# old key outright, which fails metadata generation before any build starts.
+# The project root is src/core, so the sdist carries the engine sources the
+# extension compiles (cpp_src/, include/, cuda/, the resolve_*.cmake lists) next
+# to the bindings; CMake configures from python/.
+minimum-version = "build-system.requires"
 cmake.version = ">=3.18"
 cmake.build-type = "Release"
-wheel.packages = ["src/resolve_core"]
-
-[tool.scikit-build.cmake.define]
-BUILD_PYTHON = "ON"
-BUILD_TESTS = "OFF"
+cmake.source-dir = "python"
+wheel.packages = ["python/src/resolve_core"]
+sdist.exclude = [
+    "/build*/",
+    "/cli/",
+    "/tests/",
+    "/dev_notes/",
+    "/CMakeLists.txt",
+    "/cuda_toolchain.cmake",
+    "__pycache__/",
+    "*.pyd",
+    "*.so",
+    "*.dll",
+    "*.lib",
+]

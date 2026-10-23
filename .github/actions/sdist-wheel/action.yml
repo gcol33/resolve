@@ -1,0 +1,63 @@
+name: Build and check the resolve-core sdist
+description: >
+  Build the resolve-core source distribution into dist/, then build a wheel
+  from that archive alone (pip unpacks it outside the repository, so a file
+  the build reads from outside the sdist fails it), install the wheel and
+  check that the compiled engine imports and reports the repo-root VERSION.
+  Expects Python set up by the caller; Linux runners.
+
+inputs:
+  cache-key:
+    description: ccache key for the wheel's C++ compile
+    required: true
+
+outputs:
+  sdist:
+    description: Path of the built sdist
+    value: ${{ steps.sdist.outputs.path }}
+
+runs:
+  using: composite
+  steps:
+    # CPU torch: the extension links the libtorch the installed torch ships,
+    # and the default PyPI torch on Linux is the much larger CUDA build.
+    - name: Install build dependencies and CPU torch
+      shell: bash
+      run: |
+        set -euo pipefail
+        python -m pip install --upgrade pip
+        pip install "torch>=2.0" --index-url https://download.pytorch.org/whl/cpu
+        pip install build "scikit-build-core>=0.10" "nanobind>=2.0.0" cmake ninja
+
+    - name: Build the sdist
+      id: sdist
+      shell: bash
+      run: |
+        set -euo pipefail
+        python -m build --sdist --no-isolation --outdir dist src/core
+        path=$(ls dist/*.tar.gz)
+        echo "Built $path:"
+        tar -tzf "$path"
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+
+    - name: Compiler cache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: ${{ inputs.cache-key }}
+
+    - name: Build a wheel from the sdist
+      shell: bash
+      env:
+        CMAKE_GENERATOR: Ninja
+        CMAKE_ARGS: -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      run: |
+        set -euo pipefail
+        pip wheel "${{ steps.sdist.outputs.path }}" --no-build-isolation --no-deps \
+          -w "$RUNNER_TEMP/wheel-from-sdist"
+
+    - name: Install the wheel and import the engine
+      shell: bash
+      run: |
+        set -euo pipefail
+        pip install "$RUNNER_TEMP"/wheel-from-sdist/*.whl
+        python tools/version.py --check-built

@@ -10,28 +10,42 @@ repos:
       - id: check-merge-conflict
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.9
+    rev: v0.16.1
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
       - id: ruff-format
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.8.0
+    rev: v1.20.2
     hooks:
       - id: mypy
-        additional_dependencies: [types-all]
+        # Stubs for the third-party packages the checked code imports: numpy
+        # and pytest ship their own annotations, pandas has pandas-stubs. torch
+        # (also self-annotated) is left out for its size and resolves as Any
+        # under --ignore-missing-imports, like the compiled extension.
+        additional_dependencies:
+          - numpy==2.5.4
+          - pandas-stubs==3.0.5.260914
+          - pytest==9.1.1
         args: [--ignore-missing-imports]
         # Every directory holding maintained Python: the resolve_core shims over
         # the compiled extension, the repo tooling, the benchmark harness, and
         # the pytest suite that exercises the bindings.
         files: ^(src/core/python/src/resolve_core/|tools/|benchmarks/|tests/core/)
 
+  # Formats the lines a commit changes in the engine, binding and Rcpp sources
+  # with the repo-root .clang-format, leaving untouched code as it is. A commit
+  # whose staged lines are not formatted fails with the files reformatted in
+  # the working tree; stage them and commit again. The vendored C ABI copies
+  # under r/src/resolve/ follow their canonical files, and RcppExports.cpp is
+  # generated.
   - repo: local
     hooks:
-      - id: check-cpp-format
-        name: Check C++ formatting
-        entry: bash -c 'if command -v clang-format &> /dev/null; then find src/core -name "*.cpp" -o -name "*.hpp" | head -5 | xargs clang-format --dry-run --Werror 2>/dev/null || echo "C++ formatting check skipped"; fi'
-        language: system
-        pass_filenames: false
-        files: \.(cpp|hpp)$
+      - id: clang-format
+        name: clang-format (staged lines)
+        language: python
+        additional_dependencies: ["clang-format==22.1.8"]
+        entry: git-clang-format --staged --
+        files: ^(src/core/(cpp_src|include|cli|python/src|tests|cuda)|r/src)/.*\.(c|cc|cpp|cxx|h|hpp|cu|cuh)$
+        exclude: ^r/src/(resolve/|RcppExports\.cpp$)

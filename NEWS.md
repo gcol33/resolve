@@ -1,5 +1,19 @@
 # RESOLVE Changelog
 
+## Unreleased
+
+### Changed
+
+- **The `resolve-core` project root is `src/core`.** Build from a checkout
+  with `pip install ./src/core` (was `./src/core/python`). The published sdist
+  now carries the engine sources the extension compiles, so `pip install
+  resolve-core` builds from it on platforms without a wheel; CI builds a wheel
+  from the sdist on every push. `requires-python` is `>=3.10`, matching the
+  wheels (CPython 3.10 to 3.13).
+- The R package's pkgdown reference is published at
+  <https://gillescolling.com/resolve/r/>, under the documentation site, and the
+  site build (`build_docs.py`, `r/build_site.R`) lives in the repository.
+
 ## v0.12.0 (2026-10-11)
 
 ### Added

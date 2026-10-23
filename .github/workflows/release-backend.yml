@@ -77,7 +77,7 @@ jobs:
             echo "Release $TAG already exists; assets will be uploaded with --clobber."
           else
             gh release create "$TAG" --verify-tag --title "$TAG" \
-              --notes "Prebuilt \`resolve_c\` backends for the R package. After \`install.packages(\"resolve\")\`, call \`resolve.install_backend()\` to fetch the asset matching the host OS/arch."
+              --notes "Prebuilt \`resolve_c\` backends for the R package. After \`install.packages(\"resolveR\")\`, call \`resolve.install_backend()\` to fetch the asset matching the host OS/arch."
           fi
 
   build:
@@ -98,29 +98,16 @@ jobs:
       - uses: actions/checkout@v4
 
       # ---- libtorch (CPU) -- same artifacts as r-cmd-check.yml ------------
-      - name: Download libtorch (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          wget -q "https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
-          unzip -q "libtorch-cxx11-abi-shared-with-deps-${LIBTORCH_VERSION}+cpu.zip"
-          echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
+      - name: Install libtorch
+        uses: ./.github/actions/libtorch
+        with:
+          version: ${{ env.LIBTORCH_VERSION }}
 
-      - name: Download libtorch (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          wget -q "https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-${LIBTORCH_VERSION}.zip"
-          unzip -q "libtorch-macos-arm64-${LIBTORCH_VERSION}.zip"
-          echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
-
-      - name: Download libtorch (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o libtorch.zip "https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
-          7z x -y libtorch.zip > /dev/null
-          echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
+      - name: Compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: release-resolve_c-${{ runner.os }}-libtorch-${{ env.LIBTORCH_VERSION }}
+          variant: ${{ runner.os == 'Windows' && 'sccache' || 'ccache' }}
 
       # ---- build resolve_c -- same flags as r-cmd-check.yml ---------------
       - name: Build resolve_c (Unix)
@@ -129,6 +116,7 @@ jobs:
         run: |
           cmake -S src/core -B build_c \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DBUILD_PYTHON=OFF -DBUILD_CLI=OFF -DBUILD_TESTS=OFF \
             -DBUILD_R_CAPI=ON -DUSE_CUDA=OFF -DRESOLVE_USE_OPENMP=OFF \
             -DTorch_DIR="$LIBTORCH/share/cmake/Torch"
@@ -149,6 +137,7 @@ jobs:
           cmake -S src/core -B build_c -G Ninja ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ^
             -DBUILD_PYTHON=OFF -DBUILD_CLI=OFF -DBUILD_TESTS=OFF ^
             -DBUILD_R_CAPI=ON -DUSE_CUDA=OFF -DRESOLVE_USE_OPENMP=OFF ^
             -DTorch_DIR="%LIBTORCH%/share/cmake/Torch"
@@ -302,23 +291,20 @@ jobs:
           sub-packages: ${{ matrix.config.subpkgs }}
           log-file-suffix: '${{ matrix.config.os_name }}-${{ matrix.config.cuda }}.txt'
 
-      - name: Download libtorch (Windows CUDA)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors -o libtorch.zip "https://download.pytorch.org/libtorch/${{ matrix.config.cuda }}/libtorch-win-shared-with-deps-${TORCH_VER}%2B${{ matrix.config.cuda }}.zip"
-          7z x -y libtorch.zip > /dev/null
-          rm -f libtorch.zip
-          echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
+      # Not cached: these archives are 1.8-3.7 GB each (see the action).
+      - name: Install CUDA libtorch
+        uses: ./.github/actions/libtorch
+        with:
+          version: ${{ env.TORCH_VER }}
+          variant: ${{ matrix.config.cuda }}
+          linux-cxx11-abi-name: 'false'
+          cache: 'false'
 
-      - name: Download libtorch (Linux CUDA, pre-cxx11)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          wget -q "https://download.pytorch.org/libtorch/${{ matrix.config.cuda }}/libtorch-shared-with-deps-${TORCH_VER}%2B${{ matrix.config.cuda }}.zip" -O libtorch.zip
-          unzip -q libtorch.zip
-          rm -f libtorch.zip
-          echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
+      - name: Compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: release-resolve_c-${{ runner.os }}-${{ matrix.config.cuda }}-libtorch-${{ env.TORCH_VER }}
+          variant: ${{ runner.os == 'Windows' && 'sccache' || 'ccache' }}
 
       - name: Set up MSVC (Windows)
         if: runner.os == 'Windows'
@@ -343,6 +329,7 @@ jobs:
           cmake -S src/core -B build_c -G Ninja ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DCMAKE_CXX_COMPILER=cl ^
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ^
             -DBUILD_PYTHON=OFF -DBUILD_CLI=OFF -DBUILD_TESTS=OFF ^
             -DBUILD_R_CAPI=ON -DUSE_CUDA=ON -DRESOLVE_USE_OPENMP=OFF ^
             -DTORCH_CUDA_ARCH_LIST="%TORCH_CUDA_ARCH_LIST%" ^
@@ -359,6 +346,8 @@ jobs:
         run: |
           cmake -S src/core -B build_c \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache \
             -DBUILD_PYTHON=OFF -DBUILD_CLI=OFF -DBUILD_TESTS=OFF \
             -DBUILD_R_CAPI=ON -DUSE_CUDA=ON -DRESOLVE_USE_OPENMP=OFF \
             -DTORCH_CUDA_ARCH_LIST="$TORCH_CUDA_ARCH_LIST" \

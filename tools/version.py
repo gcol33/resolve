@@ -21,7 +21,7 @@ or run time and therefore cannot drift.
   pyproject.toml (repo root)      tool configuration only; declares no package
 
 The R package version doubles as the release-tag version: resolve.install_backend()
-builds its download URL from packageVersion("resolve"), so a bump here is only
+builds its download URL from packageVersion("resolveR"), so a bump here is only
 usable once a matching v<VERSION> release carries the backend assets.
 
 Usage
@@ -66,7 +66,7 @@ SITES: tuple[Site, ...] = (
         "C++ engine constant resolve::VERSION",
     ),
     Site(
-        "src/core/python/pyproject.toml",
+        "src/core/pyproject.toml",
         r'^version = "([^"]+)"',
         "resolve-core wheel (PyPI)",
     ),

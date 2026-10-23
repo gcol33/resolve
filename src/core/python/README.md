@@ -10,9 +10,9 @@ pip install resolve-core
 
 ## Requirements
 
-- Python >= 3.9
-- PyTorch/libtorch
-- CMake >= 3.18
+- Python >= 3.10
+- PyTorch >= 2.0 (the extension links the libtorch that ships with it)
+- To build from the sdist: CMake >= 3.18 and a C++20 compiler
 
 ## Usage
 

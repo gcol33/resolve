@@ -1,6 +1,6 @@
 # Installation
 
-RESOLVE is a C++ engine on libtorch. Python (`resolve_core`), R (`resolve`), and
+RESOLVE is a C++ engine on libtorch. Python (`resolve_core`), R (`resolveR`), and
 the `resolve` command line are bindings over the same library, so a model
 trained from one loads in any other.
 
@@ -8,7 +8,7 @@ trained from one loads in any other.
 
 - Python >= 3.10
 - PyTorch >= 2.0 (the extension links the libtorch that ships with it)
-- CMake >= 3.18 and a C++17 compiler
+- CMake >= 3.18 and a C++20 compiler
 - pandas and numpy for the in-memory (`from_pandas`) loaders
 
 ## Python
@@ -17,14 +17,14 @@ The engine builds from source against the PyTorch you already have installed:
 
 ```bash
 git clone https://github.com/gcol33/resolve.git
-cd resolve/src/core/python
+cd resolve/src/core
 pip install .
 ```
 
 To iterate on the C++ sources, build in place instead:
 
 ```bash
-pip install "scikit-build-core>=0.4.3" "nanobind>=2.0.0" cmake ninja
+pip install "scikit-build-core>=0.10" "nanobind>=2.0.0" cmake ninja
 pip install . --no-build-isolation
 ```
 
@@ -38,7 +38,7 @@ pak::pak("gcol33/resolve/r")
 The R package loads the engine at runtime from a prebuilt backend library:
 
 ```r
-library(resolve)
+library(resolveR)
 resolve.install_backend()          # CPU
 resolve.install_backend(variant = "cuda")
 ```
@@ -67,7 +67,7 @@ print(rc.TrainConfig().batch_size)
 it reports the version of the binary actually loaded.
 
 ```r
-library(resolve)
+library(resolveR)
 resolve.version()
 ```
 

@@ -78,41 +78,30 @@ jobs:
           use-public-rspm: true
 
       # ---- libtorch (CPU) -------------------------------------------------
-      - name: Download libtorch (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          wget -q https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.6.0%2Bcpu.zip
-          unzip -q libtorch-cxx11-abi-shared-with-deps-2.6.0+cpu.zip
-          echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
+      - name: Install libtorch
+        uses: ./.github/actions/libtorch
+        with:
+          version: '2.6.0'
 
-      - name: Download libtorch (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          wget -q https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.6.0.zip
-          unzip -q libtorch-macos-arm64-2.6.0.zip
-          echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
-
-      - name: Download libtorch (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          curl -sSL -o libtorch.zip https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-2.6.0%2Bcpu.zip
-          7z x -y libtorch.zip > /dev/null
-          echo "LIBTORCH=${{ github.workspace }}/libtorch" >> $GITHUB_ENV
+      # Both ubuntu legs compile the same resolve_c, so they share one key.
+      - name: Compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: resolve_c-${{ runner.os }}-libtorch-2.6.0
+          variant: ${{ runner.os == 'Windows' && 'sccache' || 'ccache' }}
 
       # ---- build the resolve_c C ABI shared library -----------------------
       # Same flags on every platform: CPU libtorch, OpenMP off, only the
       # resolve_c target. The R bindings never call fuzzy::query_batch (the only
       # OpenMP user), and a CUDA/OpenMP-heavy DLL is unstable inside the R
-      # process -- see dev_notes/issue17_c_abi_facade_design.md.
+      # process.
       - name: Build resolve_c (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           cmake -S src/core -B build_c \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DBUILD_PYTHON=OFF -DBUILD_CLI=OFF -DBUILD_TESTS=OFF \
             -DBUILD_R_CAPI=ON -DUSE_CUDA=OFF -DRESOLVE_USE_OPENMP=OFF \
             -DTorch_DIR="$LIBTORCH/share/cmake/Torch"
@@ -139,6 +128,7 @@ jobs:
           cmake -S src/core -B build_c -G Ninja ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ^
             -DBUILD_PYTHON=OFF -DBUILD_CLI=OFF -DBUILD_TESTS=OFF ^
             -DBUILD_R_CAPI=ON -DUSE_CUDA=OFF -DRESOLVE_USE_OPENMP=OFF ^
             -DTorch_DIR="%LIBTORCH%/share/cmake/Torch"

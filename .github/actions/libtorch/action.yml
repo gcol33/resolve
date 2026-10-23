@@ -1,0 +1,92 @@
+name: Install libtorch
+description: >
+  Download a libtorch release from download.pytorch.org, through the Actions
+  cache, and unpack it into the workspace as libtorch/. Exports LIBTORCH (its
+  absolute path).
+
+inputs:
+  version:
+    description: libtorch version, e.g. 2.6.0
+    required: true
+  variant:
+    description: cpu, or a CUDA build tag such as cu124 / cu128 / cu130 (Linux and Windows only)
+    required: false
+    default: cpu
+  linux-cxx11-abi-name:
+    description: >
+      Linux only. 'true' for the archive named libtorch-cxx11-abi-shared-with-deps
+      (CPU builds up to 2.6), 'false' for libtorch-shared-with-deps.
+    required: false
+    default: 'true'
+  cache:
+    description: >
+      Keep the archive in the Actions cache. The CPU archives are 62-179 MB;
+      the CUDA ones are 1.8-3.7 GB each, so four of them would fill the
+      repository's 10 GB cache and evict every other entry. Pass 'false' for
+      those, which also deletes the archive once it is unpacked.
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve the archive URL
+      id: archive
+      shell: bash
+      run: |
+        set -euo pipefail
+        v="${{ inputs.version }}"
+        var="${{ inputs.variant }}"
+        case "${{ runner.os }}" in
+          Linux)
+            if [ "${{ inputs.linux-cxx11-abi-name }}" = "true" ]; then
+              stem="libtorch-cxx11-abi-shared-with-deps"
+            else
+              stem="libtorch-shared-with-deps"
+            fi
+            url="https://download.pytorch.org/libtorch/${var}/${stem}-${v}%2B${var}.zip"
+            ;;
+          macOS)
+            if [ "$var" != "cpu" ]; then
+              echo "::error::PyTorch publishes macOS libtorch for CPU only (variant '$var')"
+              exit 1
+            fi
+            url="https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-${v}.zip"
+            ;;
+          Windows)
+            url="https://download.pytorch.org/libtorch/${var}/libtorch-win-shared-with-deps-${v}%2B${var}.zip"
+            ;;
+          *)
+            echo "::error::no libtorch archive for runner OS ${{ runner.os }}"
+            exit 1
+            ;;
+        esac
+        echo "url=$url" >> "$GITHUB_OUTPUT"
+        echo "path=.libtorch-archive/libtorch-${v}-${var}.zip" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the archive from the cache
+      if: inputs.cache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.archive.outputs.path }}
+        key: libtorch-${{ runner.os }}-${{ runner.arch }}-${{ inputs.version }}-${{ inputs.variant }}-cxx11name-${{ inputs.linux-cxx11-abi-name }}
+
+    - name: Download and unpack
+      shell: bash
+      run: |
+        set -euo pipefail
+        archive="${{ steps.archive.outputs.path }}"
+        mkdir -p "$(dirname "$archive")"
+        if [ ! -s "$archive" ]; then
+          curl -sSL --fail --retry 5 --retry-delay 5 --retry-all-errors \
+            -o "$archive" "${{ steps.archive.outputs.url }}"
+        fi
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          7z x -y "$archive" > /dev/null
+        else
+          unzip -q "$archive"
+        fi
+        if [ "${{ inputs.cache }}" != "true" ]; then
+          rm -f "$archive"
+        fi
+        echo "LIBTORCH=${{ github.workspace }}/libtorch" >> "$GITHUB_ENV"

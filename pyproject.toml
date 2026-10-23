@@ -1,9 +1,23 @@
 # The repository root is not itself a Python distribution. The installable
-# Python package is resolve-core (src/core/python), the nanobind bindings over
-# the C++ engine; build it with `pip install ./src/core/python`.
+# Python package is resolve-core, the nanobind bindings over the C++ engine,
+# whose project root is src/core; build it with `pip install ./src/core`.
 #
 # This file carries repo-level tool configuration only, so it does not spell out
 # a version and is not listed in tools/version.py.
 
 [tool.pytest.ini_options]
 testpaths = ["tests/core"]
+
+[tool.ruff]
+# The oldest Python the resolve-core wheels are built for (release-pypi.yml).
+target-version = "py310"
+
+[tool.ruff.lint]
+# Spelled out so the pre-commit hook checks the same rules whichever ruff
+# release it pins: syntax and import errors, undefined and unused names.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# The CUDA allocator is configured before torch is imported, and torch before
+# the compiled extension loads, so those imports follow setup code.
+"src/core/python/src/resolve_core/__init__.py" = ["E402"]

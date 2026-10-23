@@ -33,12 +33,13 @@ By participating, you are expected to uphold this code and maintain a respectful
 ## What the repository contains
 
 RESOLVE is a C++ engine on libtorch, in `src/core/`. Python (`resolve_core`), R
-(`resolve`), and the `resolve` command line are bindings over that one library
+(`resolveR`), and the `resolve` command line are bindings over that one library
 and carry API translation only, so a feature lands in the engine first and then
 in each binding, with tests on both sides.
 
 The repository root is not itself a Python distribution. The installable Python
-package is `resolve-core`, whose project root is `src/core/python`.
+package is `resolve-core`, whose project root is `src/core` (CMake
+configures the extension from `src/core/python`).
 
 ## Building
 
@@ -59,7 +60,7 @@ Requirements:
 
 - Python >= 3.10
 - PyTorch >= 2.0 — the extension links the libtorch that ships with it
-- CMake >= 3.18, Ninja, and a C++17 compiler
+- CMake >= 3.18, Ninja, and a C++20 compiler
 - Git, and an editor or IDE
 
 ```bash
@@ -68,10 +69,10 @@ source .venv/bin/activate      # Linux/macOS
 .venv\Scripts\activate         # Windows
 
 pip install "torch>=2.0"
-pip install "scikit-build-core>=0.4.3" "nanobind>=2.0.0" cmake ninja pandas numpy
+pip install "scikit-build-core>=0.10" "nanobind>=2.0.0" cmake ninja pandas numpy
 pip install pytest pytest-cov
 
-pip install ./src/core/python --no-build-isolation
+pip install ./src/core --no-build-isolation
 ```
 
 `--no-build-isolation` reuses the torch you just installed rather than
@@ -118,7 +119,7 @@ To exercise the engine from R, fetch a prebuilt backend for the installed
 package version:
 
 ```r
-library(resolve)
+library(resolveR)
 resolve.install_backend()                  # CPU
 resolve.install_backend(variant = "cuda")
 ```
@@ -174,13 +175,20 @@ Guidelines:
 
 ## Documentation
 
-The site is MkDocs Material, configured in `mkdocs.yml`:
+The site is MkDocs Material, configured in `mkdocs.yml`, with the R package's
+pkgdown reference published under it at `r/`. `build_docs.py` builds both the
+way the deploy workflow does:
 
 ```bash
-pip install mkdocs mkdocs-material
-mkdocs serve      # preview at http://localhost:8000
-mkdocs build      # writes site/
+pip install "mkdocs>=1.6,<2" mkdocs-material pymdown-extensions
+python build_docs.py           # mkdocs --strict into site/
+python build_docs.py --r       # also the pkgdown site into site/r/ (needs R + pkgdown)
+python build_docs.py --serve   # live preview at http://localhost:8000
+Rscript r/build_site.R         # the pkgdown site alone, into r/docs/
 ```
+
+`--strict` turns every MkDocs warning (a broken link, a page missing from the
+nav) into a failed build.
 
 - Tutorials and guides: `docs/tutorials/`
 - API reference: `docs/api/`
@@ -201,12 +209,12 @@ resolve/
 ├── CONTRIBUTING.md
 ├── NEWS.md
 ├── README.md
-├── src/core/               <- the C++ engine
+├── src/core/               <- the C++ engine; its pyproject.toml builds resolve-core
 │   ├── include/resolve/    <- public headers, including the C ABI facade
 │   ├── cpp_src/            <- implementation
 │   ├── cuda/               <- CUDA kernels
 │   ├── cli/                <- the resolve command line
-│   ├── python/             <- nanobind bindings; root of the resolve-core wheel
+│   ├── python/             <- nanobind bindings and the extension's CMake project
 │   └── tests/              <- Catch2 tests and fixtures
 ├── r/                      <- R package, an Rcpp client over the C ABI
 ├── tests/core/             <- pytest suite over resolve_core
@@ -237,7 +245,9 @@ resolve/
 
 ### C++
 
-- C++17. Headers in `include/resolve/`, implementation in `cpp_src/`.
+- C++20. Headers in `include/resolve/`, implementation in `cpp_src/`.
+- Formatting follows the repo-root `.clang-format`; the pre-commit hook applies
+  it to the C++ files a commit stages.
 - Extract shared logic into one helper rather than copying it between
   specialized variants; the compiler inlines `static inline` helpers, so the
   single source of truth costs nothing at runtime.
@@ -276,7 +286,7 @@ checkpoint metadata all report the compiled `resolve::VERSION`, and
 `python tools/version.py --check` reports drift and gates CI; the engine
 constant is compiled in, so rebuild after a bump. The R package version doubles
 as the release-tag version: `resolve.install_backend()` builds its download URL
-from `packageVersion("resolve")`, so a bump is only usable once a matching
+from `packageVersion("resolveR")`, so a bump is only usable once a matching
 `v<VERSION>` release carries the backend assets.
 
 ## Pull request checklist

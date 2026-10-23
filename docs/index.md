@@ -104,7 +104,7 @@ Covariates ───────┘
 
     ```bash
     git clone https://github.com/gcol33/resolve.git
-    cd resolve/src/core/python
+    cd resolve/src/core
     pip install .
     ```
 

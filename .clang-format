@@ -1,0 +1,21 @@
+# Formatting of the C++, CUDA and Rcpp sources. The pre-commit hook applies it
+# through git-clang-format to the lines a commit changes, so untouched code
+# keeps its layout.
+#
+# Read off the existing sources: four-space indentation, a 100-column limit
+# (the 99th percentile of line length in src/core is 98), braces on the same
+# line, namespaces not indented and closed with `}  // namespace`, access
+# specifiers at the class's own indentation, `T* p` / `T& r`, and include
+# blocks kept in the order and grouping the author wrote.
+BasedOnStyle: Google
+Standard: c++20
+IndentWidth: 4
+ColumnLimit: 100
+AccessModifierOffset: -4
+DerivePointerAlignment: false
+PointerAlignment: Left
+AllowShortFunctionsOnASingleLine: Inline
+SortIncludes: Never
+IncludeBlocks: Preserve
+InsertNewlineAtEOF: true
+LineEnding: DeriveLF
