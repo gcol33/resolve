@@ -3,37 +3,16 @@
 #include "resolve/csv_reader.hpp"
 #include "resolve/dataset.hpp"
 #include "resolve/role_mapping.hpp"
-#include <fstream>
-#include <filesystem>
+#include "resolve/model.hpp"
+#include "resolve/trainer.hpp"
+#include "test_support.hpp"
+
+#include <algorithm>
+#include <sstream>
+#include <unordered_map>
 
 using namespace resolve;
-
-// Helper to create temporary CSV files for testing
-class TempFile {
-public:
-    TempFile(const std::string& content, const std::string& suffix = ".csv") {
-        // Create temp file path
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_test_" + std::to_string(counter_++) + suffix);
-
-        // Write content
-        std::ofstream file(path_);
-        file << content;
-        file.close();
-    }
-
-    ~TempFile() {
-        std::filesystem::remove(path_);
-    }
-
-    std::string path() const { return path_.string(); }
-
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-
-int TempFile::counter_ = 0;
+using namespace resolve::test;
 
 // ============================================================================
 // CSV Reader Tests
@@ -207,14 +186,7 @@ TEST_CASE("ResolveDataset from_species_csv basic loading", "[dataset]") {
         "p2,sp3,0.2,11.0,51.0,Pinus,Pinaceae,200\n"
     );
 
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "species";
-    roles.abundance = "cover";
-    roles.longitude = "lon";
-    roles.latitude = "lat";
-    roles.genus = "genus";
-    roles.family = "family";
+    const RoleMapping roles = Roles("plot_id", "species").taxonomy().coordinates();
 
     std::vector<TargetSpec> targets = {
         TargetSpec::regression("area")
@@ -278,9 +250,10 @@ TEST_CASE("ResolveDataset from_species_csv basic loading", "[dataset]") {
 }
 
 TEST_CASE("ResolveDataset from_species_csv factorizes string classification targets", "[dataset]") {
-    // Regression guard for the bug where from_species_csv pushed every target
-    // cell through safe_stof and cast to int64, collapsing string-coded classes
-    // (e.g. "Forest"/"Grassland") to class 0 with no class_names and no NA drop.
+    // from_species_csv factorizes a string-coded class column: pushing every
+    // target cell through safe_stof and an int64 cast would collapse the
+    // classes (e.g. "Forest"/"Grassland") to class 0 with no class_names and
+    // no NA drop.
     TempFile csv(
         "plot_id,species,cover,habitat\n"
         "p1,sp1,0.5,Forest\n"
@@ -290,10 +263,7 @@ TEST_CASE("ResolveDataset from_species_csv factorizes string classification targ
         "p4,sp1,0.1,NA\n"   // missing target -> plot dropped
     );
 
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "species";
-    roles.abundance = "cover";
+    const RoleMapping roles = Roles("plot_id", "species");
 
     std::vector<TargetSpec> targets = {
         TargetSpec::classification("habitat", /*num_classes=*/0)  // auto-fit
@@ -314,7 +284,7 @@ TEST_CASE("ResolveDataset from_species_csv factorizes string classification targ
         const auto& tgt = dataset.targets().at("habitat");
         REQUIRE(tgt.dtype() == torch::kLong);
         REQUIRE(tgt.size(0) == 3);
-        // Two distinct classes -> codes {0, 1}, not all 0 (the bug). Two Forest
+        // Two distinct classes -> codes {0, 1}, not all 0. Two Forest
         // (0) + one Grassland (1) over the kept plots -> min 0, max 1, sum 1.
         REQUIRE(tgt.min().item<int64_t>() == 0);
         REQUIRE(tgt.max().item<int64_t>() == 1);
@@ -341,18 +311,15 @@ TEST_CASE("ResolveDataset from_species_csv factorizes string classification targ
 TEST_CASE("Classification num_classes smaller than emitted codes throws", "[dataset][classification]") {
     // Direct integer labels are used verbatim as class codes, so a 1-indexed
     // column 1..3 emits class_names of size 4 (index 0 reserved). Passing
-    // num_classes=3 would let a target code 3 index a 3-wide head out of bounds
-    // (issue #79). The loader must reject the too-small explicit value.
+    // num_classes=3 would let a target code 3 index a 3-wide head out of bounds,
+    // so the loader rejects the too-small explicit value.
     TempFile csv(
         "plot_id,species,cover,habitat\n"
         "p1,sp1,0.5,1\n"
         "p2,sp2,0.5,2\n"
         "p3,sp3,0.5,3\n"
     );
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "species";
-    roles.abundance = "cover";
+    const RoleMapping roles = Roles("plot_id", "species");
 
     DatasetConfig config;
     config.species_encoding = SpeciesEncodingMode::Hash;
@@ -382,17 +349,14 @@ TEST_CASE("Classification num_classes smaller than emitted codes throws", "[data
 TEST_CASE("Classification vocab is fit from surviving rows only", "[dataset][classification]") {
     // A class that occurs only in a plot dropped because ANOTHER target (area) is
     // missing must not enter class_names -- it would be an untrainable zero-example
-    // class and (lexicographically) shift every other code (issue #84).
+    // class and (lexicographically) shift every other code.
     TempFile csv(
         "plot_id,species,cover,habitat,area\n"
         "p1,sp1,0.5,Forest,100\n"
         "p2,sp2,0.5,Grassland,200\n"
         "p3,sp3,0.5,Xerophyte,NA\n"  // area NA -> p3 dropped; Xerophyte lives only here
     );
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "species";
-    roles.abundance = "cover";
+    const RoleMapping roles = Roles("plot_id", "species");
 
     std::vector<TargetSpec> targets = {
         TargetSpec::classification("habitat", 0),
@@ -426,10 +390,7 @@ TEST_CASE("ResolveDataset embed mode", "[dataset]") {
         "p2,sp5,0.2\n"
     );
 
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "species";
-    roles.abundance = "cover";
+    const RoleMapping roles = Roles("plot_id", "species");
 
     std::vector<TargetSpec> targets;  // No targets for this test
 
@@ -463,10 +424,7 @@ TEST_CASE("ResolveDataset sparse mode", "[dataset]") {
         "p2,sp3,0.2\n"
     );
 
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "species";
-    roles.abundance = "cover";
+    const RoleMapping roles = Roles("plot_id", "species");
 
     std::vector<TargetSpec> targets;
 
@@ -556,13 +514,7 @@ TEST_CASE("ResolveDataset::from_csv_with_schema reuses train vocab + class "
         "E4,sp_c,1.0,gen_x,fam_x\n"
     );
 
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "species";
-    roles.abundance = "cover";
-    roles.genus = "genus";
-    roles.family = "family";
-    roles.categoricals = {"region"};
+    const RoleMapping roles = Roles("plot_id", "species").taxonomy().categoricals({"region"});
 
     std::vector<TargetSpec> targets = {
         TargetSpec::classification("habitat", /*num_classes=*/0)
@@ -804,12 +756,7 @@ TEST_CASE("from_csv fails loudly on missing role columns", "[dataset][validation
         "p2,sp2,1.0\n"
     );
 
-    auto base_roles = [] {
-        RoleMapping r;
-        r.plot_id = "plot_id"; r.species_id = "species"; r.abundance = "cover";
-        r.latitude = "lat"; r.longitude = "lon";
-        return r;
-    };
+    auto base_roles = [] { return RoleMapping(Roles("plot_id", "species").coordinates()); };
     DatasetConfig cfg;
     cfg.species_encoding = SpeciesEncodingMode::Hash;
     cfg.hash_dim = 8;
@@ -845,10 +792,10 @@ TEST_CASE("from_csv fails loudly on missing role columns", "[dataset][validation
     }
 }
 
-// Issue #94: the single-table species loaders must throw loudly when a role
-// names a column that cannot be resolved (typo / absent), instead of silently
-// dropping the feature and baking the wrong feature count into the checkpoint --
-// matching the header loader's guard tested above.
+// The single-table species loaders throw when a role names a column that cannot
+// be resolved (typo / absent), instead of dropping the feature and baking the
+// wrong feature count into the checkpoint -- matching the header loader's guard
+// tested above.
 TEST_CASE("ResolveDataset from_species_csv throws on unresolvable role column",
           "[dataset]") {
     TempFile csv(
@@ -858,11 +805,7 @@ TEST_CASE("ResolveDataset from_species_csv throws on unresolvable role column",
     );
 
     auto base_roles = [] {
-        RoleMapping r;
-        r.plot_id = "plot_id"; r.species_id = "species"; r.abundance = "cover";
-        r.longitude = "lon"; r.latitude = "lat";
-        r.genus = "genus"; r.family = "family";
-        return r;
+        return RoleMapping(Roles("plot_id", "species").taxonomy().coordinates());
     };
     std::vector<TargetSpec> targets = {TargetSpec::regression("area")};
     DatasetConfig config;
@@ -912,10 +855,9 @@ TEST_CASE("ResolveDataset from_species_csv throws on unresolvable role column",
     }
 }
 
-// Issue #94 (related): an abundance column that is present but holds a
-// missing/NA/unparseable cell defaults the weight to 1.0 and warns, rather than
-// silently conflating missing cover with a real presence. Load must still
-// succeed (warning, not error).
+// An abundance column that is present but holds a missing/NA/unparseable cell
+// defaults the weight to 1.0 and warns, rather than silently conflating missing
+// cover with a real presence. Load still succeeds (warning, not error).
 TEST_CASE("ResolveDataset from_species_csv coerces unparseable abundance to 1.0",
           "[dataset]") {
     TempFile csv(
@@ -926,8 +868,7 @@ TEST_CASE("ResolveDataset from_species_csv coerces unparseable abundance to 1.0"
         "p2,sp3,2.5abc,200\n"   // garbage cover -> 1.0 + warn
     );
 
-    RoleMapping roles;
-    roles.plot_id = "plot_id"; roles.species_id = "species"; roles.abundance = "cover";
+    const RoleMapping roles = Roles("plot_id", "species");
     std::vector<TargetSpec> targets = {TargetSpec::regression("area")};
     DatasetConfig config;
     config.species_encoding = SpeciesEncodingMode::Sparse;
@@ -938,8 +879,8 @@ TEST_CASE("ResolveDataset from_species_csv coerces unparseable abundance to 1.0"
     REQUIRE(ds.schema().n_species_vocab == 4);  // <UNK> + sp1 + sp2 + sp3
 }
 
-// Issue #68: a species that occurs only in a plot dropped for a missing target
-// must NOT inflate the vocabulary (its embedding row would never be referenced).
+// A species that occurs only in a plot dropped for a missing target must NOT
+// inflate the vocabulary (its embedding row would never be referenced).
 TEST_CASE("ResolveDataset vocab excludes species only in dropped plots",
           "[dataset][vocab]") {
     // p3 has a missing (NA) target -> dropped; "sp_only" appears only in p3.
@@ -952,10 +893,7 @@ TEST_CASE("ResolveDataset vocab excludes species only in dropped plots",
         "p3,sp_only,1.0,NA\n"
     );
 
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "species";
-    roles.abundance = "cover";
+    const RoleMapping roles = Roles("plot_id", "species");
 
     DatasetConfig config;
     config.species_encoding = SpeciesEncodingMode::Sparse;
@@ -973,8 +911,134 @@ TEST_CASE("ResolveDataset vocab excludes species only in dropped plots",
     REQUIRE(ds.schema().n_species_vocab == 4);
 }
 
+// Species records of a plot the header does not keep are filtered out of the
+// vocab, also when the species file covers fewer plots than the header keeps.
+TEST_CASE("phantom-plot species do not inflate the vocab", "[dataset][vocab]") {
+    // Header keeps 4 plots (P0..P3). Species file covers only P0, P1, and a
+    // PHANTOM plot P9 not in the header: 3 record-plots <= 4 kept plots, the
+    // case a size comparison between the two would wrongly skip.
+    const RoleMapping roles = Roles();
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::Hash;
+    dcfg.hash_dim = 4; dcfg.use_taxonomy = false;
+
+    std::string header = "plot_id,y\nP0,1\nP1,2\nP2,3\nP3,4\n";
+
+    std::string species_phantom =
+        "plot_id,sp,cover\nP0,spA,1.0\nP1,spB,1.0\nP9,spPhantom,1.0\n";
+    std::string species_clean =
+        "plot_id,sp,cover\nP0,spA,1.0\nP1,spB,1.0\n";
+
+    TempFile hdr(header);
+    TempFile spc_phantom(species_phantom), spc_clean(species_clean);
+
+    auto ds_phantom = ResolveDataset::from_csv(
+        hdr.path(), spc_phantom.path(), roles, {TargetSpec::regression("y")}, dcfg);
+    auto ds_clean = ResolveDataset::from_csv(
+        hdr.path(), spc_clean.path(), roles, {TargetSpec::regression("y")}, dcfg);
+
+    // The phantom species must not appear: the vocab matches the clean load.
+    REQUIRE(ds_phantom.schema().n_species_vocab == ds_clean.schema().n_species_vocab);
+}
+
+// A duplicate plot_id in the header is rejected, not read as two plot slots
+// sharing one species record.
+TEST_CASE("Duplicate plot_id in header is rejected", "[dataset][validation]") {
+    TempFile hdr("plot_id,y\nP0,1.0\nP1,2.0\nP0,3.0\n");
+    TempFile spc("plot_id,sp,cover\nP0,sp1,1.0\nP1,sp2,1.0\n");
+    REQUIRE_THROWS(ResolveDataset::from_csv(
+        hdr.path(), spc.path(), Roles(),
+        {TargetSpec::regression("y")}, hash_dataset_config()));
+}
+
+// A quoted field containing an embedded newline is one logical row, not two
+// physical rows.
+TEST_CASE("CSV quoted field with embedded newline is one row", "[dataset][csv]") {
+    TempFile hdr("plot_id,note,y\nP0,\"line one\nline two\",10\nP1,simple,20\n");
+    TempFile spc("plot_id,sp,cover\nP0,sp1,1.0\nP1,sp2,1.0\n");
+    auto ds = ResolveDataset::from_csv(
+        hdr.path(), spc.path(), Roles(), {TargetSpec::regression("y")}, hash_dataset_config());
+    REQUIRE(ds.n_plots() == 2);
+}
+
+// A classification column with a negative integer label loads, falling back to
+// a compact factorization instead of indexing out of bounds.
+TEST_CASE("Negative integer class label loads without crashing",
+          "[dataset][classification]") {
+    std::ostringstream hdr, spc;
+    hdr << "plot_id,hab\n";
+    spc << "plot_id,sp,cover\n";
+    for (int i = 0; i < 30; ++i) {
+        int hab = (i % 3) - 1;  // -1, 0, 1
+        hdr << "P" << i << "," << hab << "\n";
+        spc << "P" << i << ",sp" << (i % 4) << ",1.0\n";
+    }
+    TempFile hdr_f(hdr.str()), spc_f(spc.str());
+    ResolveDataset ds;
+    REQUIRE_NOTHROW(ds = ResolveDataset::from_csv(
+        hdr_f.path(), spc_f.path(), Roles(),
+        {TargetSpec::classification("hab", 3)}, hash_dataset_config()));
+    REQUIRE(ds.n_plots() == 30);
+}
+
+// classification_with_mapping sizes the head from max_code+1, so a non-dense
+// mapping ({0,2,5}) builds a 6-output head and a code-5 target stays in bounds
+// (mapping.size() would give 3).
+TEST_CASE("sparse class_mapping sizes the head correctly", "[dataset][classification]") {
+    std::unordered_map<std::string, int64_t> mapping = {{"a", 0}, {"b", 2}, {"c", 5}};
+    auto spec = TargetSpec::classification_with_mapping("hab", mapping);
+    REQUIRE(spec.num_classes == 6);
+
+    std::ostringstream hdr, spc;
+    hdr << "plot_id,hab\n";
+    spc << "plot_id,sp,cover\n";
+    const char* labels[] = {"a", "b", "c"};
+    for (int i = 0; i < 120; ++i) {
+        hdr << "P" << i << "," << labels[i % 3] << "\n";
+        spc << "P" << i << ",sp" << (i % 5) << ",1.0\n";
+    }
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(), Roles(), {spec},
+                                       hash_dataset_config());
+    REQUIRE(ds.schema().targets.size() == 1);
+    REQUIRE(ds.schema().targets[0].num_classes == 6);
+    REQUIRE(ds.schema().targets[0].class_names.size() == 6);
+
+    // A short fit must not throw: a 3-output head would make CrossEntropy on a
+    // target of 5 assert out of bounds.
+    ResolveModel model(ds.schema(), hash_mlp_config({16, 8}));
+    Trainer trainer(model, recovery_train_config(3));
+    trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/3);
+    REQUIRE_NOTHROW(trainer.fit());
+}
+
+// An explicit class_mapping rejects a negative code, which would index the
+// head out of bounds through a size_t cast.
+TEST_CASE("explicit class_mapping rejects negative codes", "[dataset][classification]") {
+    std::unordered_map<std::string, int64_t> mapping = {{"a", 0}, {"b", -1}};
+    auto spec = TargetSpec::classification_with_mapping("hab", mapping);
+
+    std::ostringstream hdr, spc;
+    hdr << "plot_id,hab\n";
+    spc << "plot_id,sp,cover\n";
+    for (int i = 0; i < 20; ++i) {
+        hdr << "P" << i << "," << ((i % 2) ? "a" : "b") << "\n";
+        spc << "P" << i << ",sp" << (i % 3) << ",1.0\n";
+    }
+    TempFile header_csv(hdr.str()), species_csv(spc.str());
+
+    DatasetConfig dcfg;
+    dcfg.species_encoding = SpeciesEncodingMode::Hash;
+    dcfg.hash_dim = 4; dcfg.use_taxonomy = false;
+
+    REQUIRE_THROWS_AS(
+        ResolveDataset::from_csv(header_csv.path(), species_csv.path(), Roles(), {spec}, dcfg),
+        std::invalid_argument);
+}
+
 // ============================================================================
-// Clearing an optional role (issue #111)
+// Clearing an optional role
 // ============================================================================
 //
 // RoleMapping's optional columns are std::optional<std::string>, but a caller
@@ -982,10 +1046,10 @@ TEST_CASE("ResolveDataset vocab excludes species only in dropped plots",
 // the empty string. Read as a NAME that produced `column not found: ""`, so a
 // deliberately cleared coordinate role became a load failure. Empty means
 // unset -- and only empty: a non-empty name the file does not carry is still
-// the loud configuration error issue #94 added.
+// the loud configuration error tested above.
 
 TEST_CASE("an optional role cleared with an empty string is unset",
-          "[dataset][roles][issue111]") {
+          "[dataset][roles]") {
     TempFile header(
         "plot_id,lat,lon,bio1,area\n"
         "p1,50.0,10.0,1.0,100\n"
@@ -998,11 +1062,7 @@ TEST_CASE("an optional role cleared with an empty string is unset",
     );
 
     auto base_roles = [] {
-        RoleMapping r;
-        r.plot_id = "plot_id"; r.species_id = "species"; r.abundance = "cover";
-        r.latitude = "lat"; r.longitude = "lon";
-        r.genus = "genus"; r.family = "family";
-        return r;
+        return RoleMapping(Roles("plot_id", "species").taxonomy().coordinates());
     };
     DatasetConfig cfg;
     cfg.species_encoding = SpeciesEncodingMode::Hash;

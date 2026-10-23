@@ -6,12 +6,11 @@
 #include "resolve/encoder.hpp"
 #include "resolve/model.hpp"
 #include "resolve/role_mapping.hpp"
+#include "test_support.hpp"
 
 #include <torch/torch.h>
 
 #include <cmath>
-#include <filesystem>
-#include <fstream>
 #include <map>
 #include <memory>
 #include <set>
@@ -20,17 +19,16 @@
 #include <vector>
 
 using namespace resolve;
+using namespace resolve::test;
 
 // ============================================================================
-// Architecture knobs that reached no code
+// Architecture knobs reach the engine
 //
 // Every field of every architecture sub-config round-trips through the
 // checkpoint, the C ABI, nanobind, R and `resolve info` -- the field registry
-// (issue #108) makes that automatic. What the registry cannot check is whether
-// the ENGINE reads the field, and several did not: a run could set one, save
-// it, print it back, and train a model shaped by none of it. Same defect as
-// TabNetConfig::use_sparsemax (issue #103), SelectionMode outside the hash
-// encoding (issue #113) and HeterogeneousGNNConfig::n_heads.
+// makes that automatic. What the registry cannot check is whether the ENGINE
+// reads the field: a run could set one, save it, print it back, and train a
+// model shaped by none of it.
 //
 // These cases pin, per knob, that it changes what the engine builds or
 // computes.
@@ -85,42 +83,13 @@ ModelConfig hash_only_model(int64_t hash_dim) {
 
 // --- a small dataset, for the cases that need real plots -------------------
 
-class TempFile {
-public:
-    explicit TempFile(const std::string& content) {
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_arch_knobs_" + std::to_string(counter_++) + ".csv");
-        std::ofstream file(path_);
-        file << content;
-    }
-    ~TempFile() {
-        std::error_code ec;
-        std::filesystem::remove(path_, ec);
-    }
-    [[nodiscard]] std::string path() const { return path_.string(); }
-
-    TempFile(const TempFile&) = delete;
-    TempFile& operator=(const TempFile&) = delete;
-
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-int TempFile::counter_ = 0;
-
 constexpr int kPlots = 24;
 constexpr int kSpeciesPerPlot = 4;
 constexpr int kSpecies = 8;
 
 // Plots on a line, so spatial neighbourhood is plot index order.
 std::string graph_header_csv() {
-    std::ostringstream out;
-    out << "plot_id,lon,lat,elev,y\n";
-    for (int i = 0; i < kPlots; ++i) {
-        out << "p" << i << "," << (5.0 + 0.5 * i) << "," << (45.0 + 0.5 * i)
-            << "," << (200 + 7 * i) << "," << (2.0 + 0.1 * i) << "\n";
-    }
-    return out.str();
+    return line_header_csv({kPlots, 5.0, 0.5, 45.0, 0.5, 200.0, 7.0, 2.0, 0.1});
 }
 
 // Composition cycles with a period of three, which cuts across the spatial
@@ -138,24 +107,11 @@ std::string graph_species_csv() {
     return out.str();
 }
 
-RoleMapping graph_roles() {
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "sp";
-    roles.abundance = "cover";
-    roles.genus = "genus";
-    roles.family = "family";
-    roles.longitude = "lon";
-    roles.latitude = "lat";
-    roles.covariates = {"elev"};
-    return roles;
-}
-
 ResolveDataset graph_dataset(const std::string& header, const std::string& species) {
     DatasetConfig config;
     config.species_encoding = SpeciesEncodingMode::Sparse;
     config.use_taxonomy = true;
-    return ResolveDataset::from_csv(header, species, graph_roles(),
+    return ResolveDataset::from_csv(header, species, Roles().taxonomy().coordinates().covariates({"elev"}),
                                     {TargetSpec::regression("y")}, config);
 }
 
@@ -244,8 +200,8 @@ TEST_CASE("FTTransformerConfig::ffn_dropout reaches the feed-forward layer",
         "adapter.ft_transformer.encoder.layers.0.attention.dropout";
     REQUIRE(rates.count(ffn) == 1);
     REQUIRE(rates.count(attention) == 1);
-    // The configured attention rate used to drive all three places, so the FFN
-    // ran at 0.15 and ffn_dropout was inert.
+    // Each place runs at its own rate: the FFN at ffn_dropout, not at the
+    // attention rate.
     CHECK_THAT(rates.at(ffn), Catch::Matchers::WithinAbs(0.45, 1e-6));
     CHECK_THAT(rates.at(attention), Catch::Matchers::WithinAbs(0.15, 1e-6));
 }
@@ -503,7 +459,7 @@ TEST_CASE("Each graph mode builds its graph from the features it names",
     REQUIRE(std::isfinite(cooccurrence_out.sum().item<float>()));
 
     // Identical weights and identical features: only the graph differs, and
-    // every mode used to build the spatial one.
+    // each mode builds its own.
     CHECK_FALSE(torch::allclose(spatial_out, taxonomic_out, 1e-4, 1e-5));
     CHECK_FALSE(torch::allclose(spatial_out, cooccurrence_out, 1e-4, 1e-5));
     CHECK_FALSE(torch::allclose(taxonomic_out, cooccurrence_out, 1e-4, 1e-5));
@@ -597,7 +553,7 @@ TEST_CASE("TraitNetConfig::interaction_dim is the width the head reads",
     ResolveModel wide(schema, trait_model(trait_dim, /*interaction_dim=*/24));
     auto shapes = parameter_shapes(*wide);
     // The interaction produces interaction_dim, which the output projection
-    // reads; it used to be pinned to the width of the environment encoding.
+    // reads, independent of the width of the environment encoding.
     REQUIRE(shapes.count("trait_net_encoder.output_proj.weight") == 1);
     const std::vector<int64_t> head_in{1, 24};
     const std::vector<int64_t> bilinear_shape{24, 12, 12};
@@ -802,19 +758,6 @@ ParallelLayersConfig parallel_layers(
     // branches are ten wide.
     config.attention_heads = 2;
     return config;
-}
-
-std::set<std::string> parameter_names(const torch::nn::Module& module) {
-    std::set<std::string> names;
-    for (const auto& item : module.named_parameters()) names.insert(item.key());
-    return names;
-}
-
-bool any_starts_with(const std::set<std::string>& names, const std::string& prefix) {
-    for (const auto& name : names) {
-        if (name.rfind(prefix, 0) == 0) return true;
-    }
-    return false;
 }
 
 }  // namespace

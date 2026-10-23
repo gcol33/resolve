@@ -1,6 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/catch_approx.hpp>
 #include "resolve/loss.hpp"
+
+#include <cmath>
 
 using namespace resolve;
 using namespace Catch::Matchers;
@@ -323,7 +326,7 @@ TEST_CASE("PhasedLoss regression_loss", "[loss]") {
     }
 }
 
-// Issue #99: the phase-3 band penalty must optimize the configured band, not a
+// The phase-3 band penalty optimizes the configured band, not a
 // hardcoded 0.25. A 0.3 ratio deviation is inside a 0.5 band (no penalty) but
 // outside a 0.1 band (penalized), so a tighter configured band -> larger phase-3
 // loss on the same predictions.
@@ -413,19 +416,19 @@ TEST_CASE("Metrics::compute reports regression metrics in original units",
     REQUIRE_THAT(metrics["mae"], WithinRel(expected_mae, 1e-4f));
     REQUIRE_THAT(metrics["rmse"], WithinRel(expected_rmse, 1e-4f));
 
-    // Original-units error is on the scale of the targets (hundreds+), not the
-    // ~0.1 standardized-space number the pre-fix path reported.
+    // Original-units error is on the scale of the targets (hundreds+), not a
+    // ~0.1 standardized-space number.
     REQUIRE(metrics["mae"] > 1.0f);
 
     // smape and band are finite and within their natural ranges.
     REQUIRE(metrics["smape"] >= 0.0f);
-    REQUIRE(metrics["smape"] <= 2.0f);  // standard sSMAPE range (issue #95)
+    REQUIRE(metrics["smape"] <= 2.0f);  // standard sSMAPE range
     REQUIRE(metrics["band_25"] >= 0.0f);
     REQUIRE(metrics["band_25"] <= 1.0f);
 
     // Contrast: omitting the scalers leaves the metrics in standardized-log
-    // space, where the same inputs report a tiny, meaningless mae. This is the
-    // pre-fix behavior and confirms the unscale is load-bearing.
+    // space, where the same inputs report a tiny, meaningless mae, which
+    // confirms the unscale is load-bearing.
     auto unscaled = Metrics::compute(pred_std.unsqueeze(1), t_std,
                                      TaskType::Regression, TransformType::Log1p,
                                      {0.25f}, 0);
@@ -460,10 +463,9 @@ TEST_CASE("Metrics::compute classification", "[metrics][integration]") {
 
 TEST_CASE("MultiTaskLoss::compute seeds a deterministic scalar accumulator",
           "[loss][multitask]") {
-    // The accumulator used to be seeded from predictions.begin()->second
-    // (an arbitrary head from an unordered_map) with shape {1}. It is now a
-    // true scalar on a device chosen deterministically from the first target
-    // in the configured order.
+    // The accumulator is a true scalar on a device chosen deterministically
+    // from the first target in the configured order, not shaped or placed by
+    // an arbitrary head of the unordered predictions map.
     std::vector<TargetConfig> targets;
     TargetConfig a; a.name = "a"; a.task = TaskType::Classification;
     a.num_classes = 3; a.weight = 1.0f;
@@ -549,4 +551,107 @@ TEST_CASE("MultiTaskLoss::objective_settled gates patience only where phases cha
         REQUIRE_FALSE(PhasedLoss::from_config(LossConfigMode::MAE).varies_by_phase());
         REQUIRE(PhasedLoss::from_config(LossConfigMode::Combined).varies_by_phase());
     }
+}
+
+// macro-F1 averages over ALL classes; a class with no support in the fold
+// contributes F1 = 0 (the sklearn macro convention) rather than being excluded.
+TEST_CASE("macro_f1 includes zero-support classes", "[metrics][classification]") {
+    // 3-class head, but class 2 never appears in target or prediction.
+    // Classes 0 and 1 are predicted perfectly. classification_metrics expects
+    // (N, num_classes) logits/probabilities (it argmaxes over dim 1), so encode
+    // the predicted classes as one-hot rows.
+    auto target = torch::tensor({0, 0, 1, 1, 0, 1}, torch::kInt64);
+    auto pred_classes = torch::tensor({0, 0, 1, 1, 0, 1}, torch::kInt64);
+    auto pred = torch::one_hot(pred_classes, /*num_classes=*/3).to(torch::kFloat32);
+
+    auto m = Metrics::classification_metrics(pred, target, /*num_classes=*/3);
+
+    REQUIRE(m.accuracy == Catch::Approx(1.0f));
+    // Per-class F1: class0=1, class1=1, class2=0 (no support). Excluding the
+    // zero-support class would give 1.0; the macro over all 3 labels is 2/3.
+    REQUIRE(m.macro_f1 == Catch::Approx(2.0f / 3.0f).margin(1e-5));
+    // weighted-F1 weights by support, so the absent class contributes nothing.
+    REQUIRE(m.weighted_f1 == Catch::Approx(1.0f));
+}
+
+// ============================================================================
+// NCALoss
+// ============================================================================
+
+TEST_CASE("NCALoss forward returns scalar", "[nca]") {
+    NCALoss nca(32, 5, 0.1f, 16);
+
+    auto latent = torch::randn({16, 32});
+    auto targets = torch::randint(0, 5, {16});
+
+    // Must first populate reference set
+    nca->update_references(latent, targets);
+
+    auto loss = nca->forward(latent, targets);
+    REQUIRE(loss.dim() == 0);  // Scalar
+    REQUIRE(loss.item<float>() > 0.0f);
+}
+
+TEST_CASE("NCALoss predict returns class probabilities", "[nca]") {
+    NCALoss nca(32, 5, 0.1f, 16);
+
+    auto ref_latent = torch::randn({32, 32});
+    auto ref_targets = torch::randint(0, 5, {32});
+    nca->update_references(ref_latent, ref_targets);
+
+    auto query = torch::randn({8, 32});
+    auto probs = nca->predict(query);
+
+    REQUIRE(probs.size(0) == 8);
+    REQUIRE(probs.size(1) == 5);
+
+    // Probabilities should sum to ~1
+    auto sums = probs.sum(1);
+    for (int i = 0; i < 8; ++i) {
+        REQUIRE_THAT(sums[i].item<float>(), WithinAbs(1.0f, 1e-4f));
+    }
+}
+
+TEST_CASE("NCALoss update_references", "[nca]") {
+    NCALoss nca(16, 3, 0.1f, 8);
+
+    auto latent1 = torch::randn({10, 16});
+    auto targets1 = torch::randint(0, 3, {10});
+    nca->update_references(latent1, targets1);
+
+    // Should not crash on forward after update
+    auto loss = nca->forward(latent1, targets1);
+    REQUIRE(loss.item<float>() >= 0.0f);
+}
+
+TEST_CASE("NCA loss averages over contributing samples only", "[loss][nca]") {
+    // Four base samples (classes 0,0,1,1) all have a same-class neighbor. Adding a
+    // fifth sample of a unique class with a near-opposite direction (cosine ~ -1,
+    // negligible influence on the others' softmax at temperature 0.1) contributes
+    // 0 to the loss. Dividing by the number of contributing samples keeps the
+    // loss ~unchanged; a batch-size divisor would shrink it by a factor 4/5.
+    NCALoss nca(/*latent_dim=*/4, /*n_classes=*/3, /*temperature=*/0.1f, /*n_neighbors=*/0);
+    nca->eval();
+
+    auto base = torch::tensor({
+        {1.0f, 0.0f, 0.0f, 0.0f},
+        {0.98f, 0.20f, 0.0f, 0.0f},   // ~ class-0 neighbor of row 0
+        {0.0f, 0.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 0.98f, 0.20f},   // ~ class-1 neighbor of row 2
+    });
+    auto base_tgt = torch::tensor({0, 0, 1, 1}, torch::kLong);
+
+    auto extra = torch::tensor({{-1.0f, -1.0f, -1.0f, -1.0f}});
+    auto with_extra = torch::cat({base, extra}, 0);
+    auto with_extra_tgt = torch::cat({base_tgt, torch::tensor({2}, torch::kLong)}, 0);
+
+    float loss_base = nca->forward(base, base_tgt).item<float>();
+    float loss_extra = nca->forward(with_extra, with_extra_tgt).item<float>();
+
+    REQUIRE(std::isfinite(loss_base));
+    REQUIRE(std::isfinite(loss_extra));
+    REQUIRE(loss_base > 0.0f);
+    // Within 10% (the extra sample's tiny softmax leakage); a sum/batch_size
+    // reduction would differ by ~20% (factor 4/5).
+    REQUIRE(std::abs(loss_extra - loss_base) < 0.10f * loss_base);
 }

@@ -33,109 +33,24 @@
 #include "resolve/predictor.hpp"
 #include "resolve/role_mapping.hpp"
 #include "resolve/trainer.hpp"
+#include "test_support.hpp"
 
 #include <cmath>
-#include <filesystem>
-#include <fstream>
 #include <set>
-#include <sstream>
 #include <string>
 #include <vector>
 
 using namespace resolve;
+using namespace resolve::test;
 
 namespace {
-
-class TempFile {
-public:
-    explicit TempFile(const std::string& content, const std::string& suffix = ".csv") {
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_moe_" + std::to_string(counter_++) + suffix);
-        std::ofstream file(path_);
-        file << content;
-    }
-    ~TempFile() {
-        std::error_code ec;
-        std::filesystem::remove(path_, ec);
-    }
-    [[nodiscard]] std::string path() const { return path_.string(); }
-
-    TempFile(const TempFile&) = delete;
-    TempFile& operator=(const TempFile&) = delete;
-
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-int TempFile::counter_ = 0;
-
-constexpr int kSpecies = 6;
-constexpr int kPlots = 40;
-
-std::string header_csv() {
-    std::ostringstream out;
-    out << "plot_id,lon,lat,elev,y\n";
-    for (int i = 0; i < kPlots; ++i) {
-        out << "p" << i << "," << (10.0 + 0.1 * i) << "," << (47.0 + 0.1 * i)
-            << "," << (100 + 5 * i) << "," << (1.0 + 0.25 * i) << "\n";
-    }
-    return out.str();
-}
-
-std::string species_csv() {
-    std::ostringstream out;
-    out << "plot_id,sp,cover,genus,family\n";
-    for (int i = 0; i < kPlots; ++i) {
-        for (int j = 0; j < kSpecies; ++j) {
-            out << "p" << i << ",sp_" << j << "," << (((j + i) % kSpecies) + 1)
-                << ",gen_" << (j % 3) << ",fam_" << (j % 2) << "\n";
-        }
-    }
-    return out.str();
-}
-
-RoleMapping roles() {
-    RoleMapping r;
-    r.plot_id = "plot_id";
-    r.species_id = "sp";
-    r.abundance = "cover";
-    r.genus = "genus";
-    r.family = "family";
-    r.longitude = "lon";
-    r.latitude = "lat";
-    r.covariates = {"elev"};
-    return r;
-}
-
-std::vector<TargetSpec> targets() { return {TargetSpec::regression("y")}; }
-
-ResolveDataset build(const std::string& header_path, const std::string& species_path,
-                     SpeciesEncodingMode mode) {
-    DatasetConfig cfg;
-    cfg.species_encoding = mode;
-    cfg.use_taxonomy = true;
-    return ResolveDataset::from_csv(header_path, species_path, roles(), targets(), cfg);
-}
 
 // Small but genuinely splittable: with four widths the backbone keeps the first
 // two and the mixture produces the last, so a tail that quietly ran the whole
 // MLP would report a different latent.
 const std::vector<int64_t> kHidden = {24, 20, 16, 12};
 
-ModelConfig base_model(SpeciesEncodingMode mode) {
-    ModelConfig cfg;
-    cfg.species_encoding = mode;
-    cfg.hidden_dims = kHidden;
-    cfg.species_embed_dim = 8;
-    cfg.genus_emb_dim = 4;
-    cfg.family_emb_dim = 4;
-    cfg.hash_dim = 32;
-    cfg.d_model = 16;
-    cfg.n_heads = 2;
-    cfg.n_attention_layers = 1;
-    cfg.transformer_ff_dim = 16;
-    return cfg;
-}
+ModelConfig base_model(SpeciesEncodingMode mode) { return small_encoder_config(mode, kHidden); }
 
 ModelConfig moe_model(SpeciesEncodingMode mode, MoEPlacement placement,
                       MoERoutingType routing = MoERoutingType::Soft) {
@@ -149,45 +64,11 @@ ModelConfig moe_model(SpeciesEncodingMode mode, MoEPlacement placement,
     return cfg;
 }
 
-std::set<std::string> parameter_names(const ResolveModel& model) {
-    std::set<std::string> names;
-    for (const auto& item : model->named_parameters()) {
-        names.insert(item.key());
-    }
-    return names;
-}
-
 // First n rows of a tensor, or the tensor itself when the encoding does not
 // fill it (the pooled encodings leave genus_ids / family_ids undefined).
 torch::Tensor head_rows(const torch::Tensor& t, int64_t n) {
     if (!t.defined() || t.numel() == 0) return t;
     return t.index_select(0, torch::arange(n, torch::kInt64));
-}
-
-bool any_starts_with(const std::set<std::string>& names, const std::string& prefix) {
-    for (const auto& name : names) {
-        if (name.rfind(prefix, 0) == 0) return true;
-    }
-    return false;
-}
-
-const SpeciesEncodingMode kAllEncodings[] = {
-    SpeciesEncodingMode::Hash,
-    SpeciesEncodingMode::Embed,
-    SpeciesEncodingMode::Sparse,
-    SpeciesEncodingMode::RankPool,
-    SpeciesEncodingMode::Transformer,
-};
-
-const char* name_of(SpeciesEncodingMode mode) {
-    switch (mode) {
-        case SpeciesEncodingMode::Hash: return "hash";
-        case SpeciesEncodingMode::Embed: return "embed";
-        case SpeciesEncodingMode::Sparse: return "sparse";
-        case SpeciesEncodingMode::RankPool: return "rank_pool";
-        case SpeciesEncodingMode::Transformer: return "transformer";
-    }
-    return "?";
 }
 
 // Width of the continuous block Trainer::prepare_data assembles for this
@@ -223,14 +104,13 @@ ModelForwardResult forward_batch(ResolveModel& model, const ResolveDataset& ds,
 
 TEST_CASE("A tail mixture builds and runs for every species encoding",
           "[moe][encoder]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
+    const SmallCorpus corpus;
 
-    for (auto mode : kAllEncodings) {
-        INFO("encoding " << name_of(mode));
+    for (auto mode : all_species_encodings()) {
+        INFO("encoding " << species_encoding_to_string(mode));
         torch::manual_seed(7);
 
-        auto ds = build(header.path(), species.path(), mode);
+        auto ds = corpus.load(mode);
         ResolveModel model(ds.schema(), moe_model(mode, MoEPlacement::Tail));
         model->eval();
 
@@ -247,18 +127,17 @@ TEST_CASE("A tail mixture builds and runs for every species encoding",
 
 TEST_CASE("The tail's parameters are named backbone + moe, and only then",
           "[moe][encoder][checkpoint]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
+    const SmallCorpus corpus;
 
-    for (auto mode : kAllEncodings) {
-        INFO("encoding " << name_of(mode));
-        auto ds = build(header.path(), species.path(), mode);
+    for (auto mode : all_species_encodings()) {
+        INFO("encoding " << species_encoding_to_string(mode));
+        auto ds = corpus.load(mode);
 
         // A hash-mode MoE checkpoint has always carried encoder.backbone.* and
         // encoder.moe.*; keeping those names is what lets one load after the
         // dedicated MoE encoder class went away.
         ResolveModel with_moe(ds.schema(), moe_model(mode, MoEPlacement::Tail));
-        const auto moe_names = parameter_names(with_moe);
+        const auto moe_names = parameter_names(*with_moe);
         CHECK(any_starts_with(moe_names, "encoder.backbone."));
         CHECK(any_starts_with(moe_names, "encoder.moe."));
         CHECK_FALSE(any_starts_with(moe_names, "encoder.mlp."));
@@ -266,7 +145,7 @@ TEST_CASE("The tail's parameters are named backbone + moe, and only then",
 
         // And a run without routing is untouched by any of this.
         ResolveModel plain(ds.schema(), base_model(mode));
-        const auto plain_names = parameter_names(plain);
+        const auto plain_names = parameter_names(*plain);
         CHECK(any_starts_with(plain_names, "encoder.mlp."));
         CHECK_FALSE(any_starts_with(plain_names, "encoder.moe."));
         CHECK_FALSE(any_starts_with(plain_names, "encoder.backbone."));
@@ -275,9 +154,8 @@ TEST_CASE("The tail's parameters are named backbone + moe, and only then",
 
 TEST_CASE("The tail backbone takes hidden_dims minus its last two widths",
           "[moe][encoder]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
-    auto ds = build(header.path(), species.path(), SpeciesEncodingMode::Hash);
+    const SmallCorpus corpus;
+    auto ds = corpus.load(SpeciesEncodingMode::Hash);
 
     // {24, 20, 16, 12}: backbone 24 -> 20, mixture 20 -> 12. The split is what
     // makes a mixture a redistribution of the encoder's capacity rather than an
@@ -301,9 +179,8 @@ TEST_CASE("The tail backbone takes hidden_dims minus its last two widths",
 
 TEST_CASE("A shorter hidden_dims spec still splits into a backbone and a mixture",
           "[moe][encoder]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
-    auto ds = build(header.path(), species.path(), SpeciesEncodingMode::Hash);
+    const SmallCorpus corpus;
+    auto ds = corpus.load(SpeciesEncodingMode::Hash);
 
     // Two widths: too short to drop two stages, so the first is the backbone
     // and the mixture produces the second.
@@ -324,14 +201,13 @@ TEST_CASE("A shorter hidden_dims spec still splits into a backbone and a mixture
 
 TEST_CASE("A tail mixture's load-balancing loss reaches training",
           "[moe][trainer]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
+    const SmallCorpus corpus;
 
-    for (auto mode : kAllEncodings) {
-        INFO("encoding " << name_of(mode));
+    for (auto mode : all_species_encodings()) {
+        INFO("encoding " << species_encoding_to_string(mode));
         torch::manual_seed(11);
 
-        auto ds = build(header.path(), species.path(), mode);
+        auto ds = corpus.load(mode);
         ResolveModel model(ds.schema(), moe_model(mode, MoEPlacement::Tail));
 
         TrainConfig train_config;
@@ -350,9 +226,8 @@ TEST_CASE("A tail mixture's load-balancing loss reaches training",
 }
 
 TEST_CASE("The aux-loss weight changes what the tail optimizes", "[moe][trainer]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
-    auto ds = build(header.path(), species.path(), SpeciesEncodingMode::Hash);
+    const SmallCorpus corpus;
+    auto ds = corpus.load(SpeciesEncodingMode::Hash);
 
     // Same seed, same data, same architecture: the only difference is how
     // heavily the load-balancing term counts. Weighting it must move the
@@ -391,19 +266,18 @@ TEST_CASE("The aux-loss weight changes what the tail optimizes", "[moe][trainer]
 // ===========================================================================
 
 TEST_CASE("A post mixture preserves the latent width", "[moe][encoder]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
+    const SmallCorpus corpus;
 
-    for (auto mode : kAllEncodings) {
-        INFO("encoding " << name_of(mode));
+    for (auto mode : all_species_encodings()) {
+        INFO("encoding " << species_encoding_to_string(mode));
         torch::manual_seed(5);
 
-        auto ds = build(header.path(), species.path(), mode);
+        auto ds = corpus.load(mode);
         ResolveModel model(ds.schema(), moe_model(mode, MoEPlacement::Post));
         model->eval();
 
         REQUIRE(model->latent_dim() == kHidden.back());
-        const auto names = parameter_names(model);
+        const auto names = parameter_names(*model);
         CHECK(any_starts_with(names, "post_moe."));
         CHECK(any_starts_with(names, "encoder.mlp."));  // the encoder keeps its tail
 
@@ -415,9 +289,8 @@ TEST_CASE("A post mixture preserves the latent width", "[moe][encoder]") {
 
 TEST_CASE("An encoder with no MLP tail takes the mixture after the latent",
           "[moe][adapter]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
-    auto ds = build(header.path(), species.path(), SpeciesEncodingMode::Sparse);
+    const SmallCorpus corpus;
+    auto ds = corpus.load(SpeciesEncodingMode::Sparse);
 
     // The adapter architectures were refused any mixture at all; Post is a
     // placement they can honour, so the refusal becomes a supported case.
@@ -430,7 +303,7 @@ TEST_CASE("An encoder with no MLP tail takes the mixture after the latent",
 
     ResolveModel model(ds.schema(), cfg);
     model->eval();
-    CHECK(any_starts_with(parameter_names(model), "post_moe."));
+    CHECK(any_starts_with(parameter_names(*model), "post_moe."));
 
     auto out = forward_batch(model, ds, SpeciesEncodingMode::Sparse, 8);
     REQUIRE(out.outputs.at("y").size(0) == 8);
@@ -440,9 +313,8 @@ TEST_CASE("An encoder with no MLP tail takes the mixture after the latent",
 
 TEST_CASE("Asking a tail-less encoder for a tail mixture names the placement that works",
           "[moe][adapter]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
-    auto ds = build(header.path(), species.path(), SpeciesEncodingMode::Sparse);
+    const SmallCorpus corpus;
+    auto ds = corpus.load(SpeciesEncodingMode::Sparse);
 
     auto cfg = moe_model(SpeciesEncodingMode::Sparse, MoEPlacement::Tail);
     cfg.encoder_architecture = EncoderArchitecture::TabNet;
@@ -458,12 +330,11 @@ TEST_CASE("Asking a tail-less encoder for a tail mixture names the placement tha
 }
 
 TEST_CASE("TabM and a mixture cannot both have the tail", "[moe][encoder]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
-    auto ds = build(header.path(), species.path(), SpeciesEncodingMode::Hash);
+    const SmallCorpus corpus;
+    auto ds = corpus.load(SpeciesEncodingMode::Hash);
 
-    // Both replace the encoder's MLP tail. The dedicated MoE encoder took no
-    // TabMConfig at all, so this combination used to drop TabM in silence.
+    // Both replace the encoder's MLP tail, so the combination is refused rather
+    // than dropping TabM in silence.
     auto cfg = moe_model(SpeciesEncodingMode::Hash, MoEPlacement::Tail);
     cfg.tabm.enabled = true;
     REQUIRE_THROWS_AS(ResolveModel(ds.schema(), cfg), std::invalid_argument);
@@ -479,9 +350,8 @@ TEST_CASE("TabM and a mixture cannot both have the tail", "[moe][encoder]") {
 
 TEST_CASE("Gate probabilities come back for the encoders this signature drives",
           "[moe][gates]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
-    auto ds = build(header.path(), species.path(), SpeciesEncodingMode::Hash);
+    const SmallCorpus corpus;
+    auto ds = corpus.load(SpeciesEncodingMode::Hash);
 
     const auto rows = torch::arange(8, torch::kInt64);
     const auto slice = [&](const torch::Tensor& t) {
@@ -510,9 +380,8 @@ TEST_CASE("Gate probabilities come back for the encoders this signature drives",
 
 TEST_CASE("Gate probabilities are still empty when there is no mixture",
           "[moe][gates]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
-    auto ds = build(header.path(), species.path(), SpeciesEncodingMode::Hash);
+    const SmallCorpus corpus;
+    auto ds = corpus.load(SpeciesEncodingMode::Hash);
 
     ResolveModel model(ds.schema(), base_model(SpeciesEncodingMode::Hash));
     auto probs = model->get_gate_probs(
@@ -522,8 +391,7 @@ TEST_CASE("Gate probabilities are still empty when there is no mixture",
 }
 
 TEST_CASE("An encoder this signature cannot drive says so", "[moe][gates]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
+    const SmallCorpus corpus;
 
     // The three-argument form carries no species IDs and no species vector, so
     // it cannot run an embed / sparse / pooled encoder. Returning an undefined
@@ -531,8 +399,8 @@ TEST_CASE("An encoder this signature cannot drive says so", "[moe][gates]") {
     for (auto mode : {SpeciesEncodingMode::Embed, SpeciesEncodingMode::Sparse,
                       SpeciesEncodingMode::RankPool,
                       SpeciesEncodingMode::Transformer}) {
-        INFO("encoding " << name_of(mode));
-        auto ds = build(header.path(), species.path(), mode);
+        INFO("encoding " << species_encoding_to_string(mode));
+        auto ds = corpus.load(mode);
         ResolveModel model(ds.schema(), moe_model(mode, MoEPlacement::Tail));
         REQUIRE_THROWS_AS(
             model->get_gate_probs(torch::randn({8, continuous_width(ds, mode)}),
@@ -548,17 +416,16 @@ TEST_CASE("An encoder this signature cannot drive says so", "[moe][gates]") {
 
 TEST_CASE("A mixture survives the checkpoint at either placement",
           "[moe][checkpoint]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
+    const SmallCorpus corpus;
 
     for (auto placement : {MoEPlacement::Tail, MoEPlacement::Post}) {
         for (auto mode : {SpeciesEncodingMode::Hash, SpeciesEncodingMode::Embed,
                           SpeciesEncodingMode::RankPool}) {
-            INFO("encoding " << name_of(mode) << ", placement "
+            INFO("encoding " << species_encoding_to_string(mode) << ", placement "
                              << (placement == MoEPlacement::Tail ? "tail" : "post"));
             torch::manual_seed(17);
 
-            auto ds = build(header.path(), species.path(), mode);
+            auto ds = corpus.load(mode);
             ResolveModel model(ds.schema(), moe_model(mode, placement));
 
             TrainConfig train_config;
@@ -570,7 +437,7 @@ TEST_CASE("A mixture survives the checkpoint at either placement",
             trainer.prepare_data(ds);
             trainer.fit();
 
-            TempFile checkpoint("", ".pt");
+            const TempPath checkpoint(".pt");
             trainer.save(checkpoint.path());
 
             // The reload rebuilds the architecture from the persisted config,
@@ -578,7 +445,7 @@ TEST_CASE("A mixture survives the checkpoint at either placement",
             // a placement that failed to round-trip cannot load quietly.
             auto predictor = Predictor::load(checkpoint.path(), torch::kCPU);
             auto reloaded = predictor.predict(ds, /*return_latent=*/true);
-            REQUIRE(reloaded.predictions.at("y").size(0) == kPlots);
+            REQUIRE(reloaded.predictions.at("y").size(0) == SmallCorpus::kPlots);
             REQUIRE(reloaded.latent.size(1) == kHidden.back());
         }
     }
@@ -586,11 +453,10 @@ TEST_CASE("A mixture survives the checkpoint at either placement",
 
 TEST_CASE("A reloaded mixture carries the weights that were trained",
           "[moe][checkpoint]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
+    const SmallCorpus corpus;
     torch::manual_seed(23);
 
-    auto ds = build(header.path(), species.path(), SpeciesEncodingMode::RankPool);
+    auto ds = corpus.load(SpeciesEncodingMode::RankPool);
     ResolveModel model(ds.schema(), moe_model(SpeciesEncodingMode::RankPool,
                                               MoEPlacement::Tail));
 
@@ -603,7 +469,7 @@ TEST_CASE("A reloaded mixture carries the weights that were trained",
     trainer.prepare_data(ds);
     trainer.fit();
 
-    TempFile checkpoint("", ".pt");
+    const TempPath checkpoint(".pt");
     trainer.save(checkpoint.path());
 
     auto predictor = Predictor::load(checkpoint.path(), torch::kCPU);
@@ -629,11 +495,10 @@ TEST_CASE("A reloaded mixture carries the weights that were trained",
 
 TEST_CASE("The placement a run trained with is the placement it reloads",
           "[moe][checkpoint]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
+    const SmallCorpus corpus;
     torch::manual_seed(29);
 
-    auto ds = build(header.path(), species.path(), SpeciesEncodingMode::Hash);
+    auto ds = corpus.load(SpeciesEncodingMode::Hash);
     ResolveModel model(ds.schema(), moe_model(SpeciesEncodingMode::Hash,
                                               MoEPlacement::Post));
 
@@ -646,7 +511,7 @@ TEST_CASE("The placement a run trained with is the placement it reloads",
     trainer.prepare_data(ds);
     trainer.fit();
 
-    TempFile checkpoint("", ".pt");
+    const TempPath checkpoint(".pt");
     trainer.save(checkpoint.path());
 
     auto predictor = Predictor::load(checkpoint.path(), torch::kCPU);
@@ -655,7 +520,7 @@ TEST_CASE("The placement a run trained with is the placement it reloads",
     // the placement came back.
     REQUIRE(predictor.model()->config().moe_placement == MoEPlacement::Post);
     REQUIRE(predictor.model()->config().moe_routing == MoERoutingType::Soft);
-    REQUIRE(any_starts_with(parameter_names(predictor.model()), "post_moe."));
+    REQUIRE(any_starts_with(parameter_names(*predictor.model()), "post_moe."));
 }
 
 // ===========================================================================
@@ -663,11 +528,10 @@ TEST_CASE("The placement a run trained with is the placement it reloads",
 // ===========================================================================
 
 TEST_CASE("TopK routing runs on a tail as well as Soft", "[moe][encoder]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
+    const SmallCorpus corpus;
     torch::manual_seed(31);
 
-    auto ds = build(header.path(), species.path(), SpeciesEncodingMode::Embed);
+    auto ds = corpus.load(SpeciesEncodingMode::Embed);
     ResolveModel model(ds.schema(), moe_model(SpeciesEncodingMode::Embed,
                                               MoEPlacement::Tail,
                                               MoERoutingType::TopK));

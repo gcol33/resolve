@@ -7,7 +7,7 @@
 using namespace resolve;
 
 // ============================================================================
-// AMP fp32-normalization fix (gcol33/resolve#21)
+// fp32 normalization under AMP
 //
 // Under fp16 autocast, BatchNorm computes its batch statistics and updates its
 // running mean/variance in fp16, so the running buffers drift: the model trains
@@ -15,11 +15,11 @@ using namespace resolve;
 // uses the corrupted running stats). run_norm_fp32 forces the normalization to
 // run in fp32 so the running statistics stay accurate.
 //
-// This test pins the invariant: with the fix, BatchNorm running statistics
-// accumulated under autocast match the fp32 reference (same fp16-quantized
-// input, statistics computed in fp32). It also checks the fix is load-bearing:
-// the same BatchNorm invoked directly under autocast (no run_norm_fp32) drifts
-// from the reference.
+// This test pins the invariant: through run_norm_fp32, BatchNorm running
+// statistics accumulated under autocast match the fp32 reference (same
+// fp16-quantized input, statistics computed in fp32). It also checks that
+// run_norm_fp32 is load-bearing: the same BatchNorm invoked directly under
+// autocast drifts from the reference.
 // ============================================================================
 
 #ifdef RESOLVE_HAS_CUDA
@@ -41,8 +41,7 @@ double running_stat_drift(const torch::nn::BatchNorm1d& a,
 TEST_CASE("run_norm_fp32 keeps BatchNorm statistics in fp32 under autocast",
           "[encoder][amp][cuda]") {
     if (c10::cuda::device_count() == 0) {
-        SUCCEED("No CUDA device available; skipping autocast BN-stat check");
-        return;
+        SKIP("No CUDA device available");
     }
 
     const auto device = torch::kCUDA;
@@ -92,14 +91,15 @@ TEST_CASE("run_norm_fp32 keeps BatchNorm statistics in fp32 under autocast",
 
     INFO("drift_fix=" << drift_fix << "  drift_bug=" << drift_bug);
 
-    // Invariant: with the fix, autocast BN running stats match the fp32 reference.
+    // Invariant: through run_norm_fp32, autocast BN running stats match the fp32
+    // reference.
     REQUIRE(drift_fix < 1e-2);
 
     if (drift_bug < 1e-2) {
         WARN("BatchNorm runs in fp32 under autocast on this libtorch build; "
              "run_norm_fp32 is belt-and-suspenders here, not load-bearing.");
     } else {
-        // The fix is load-bearing: direct-autocast BN drifts far more.
+        // run_norm_fp32 is load-bearing: direct-autocast BN drifts far more.
         REQUIRE(drift_fix < drift_bug);
     }
 }

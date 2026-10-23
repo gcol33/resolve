@@ -2,36 +2,20 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "resolve/csv_utils.hpp"
 #include "resolve/csv_reader.hpp"
-#include <fstream>
-#include <filesystem>
+#include "test_support.hpp"
 #include <string>
 
 using namespace resolve;
+using namespace resolve::test;
 using namespace Catch::Matchers;
 
 namespace {
 
-// Local temp-file helper. Named distinctly from test_dataset.cpp's TempFile to
-// avoid a duplicate-symbol/ODR clash when both link into resolve_tests. Writes
-// in binary mode so a leading BOM is emitted verbatim (text mode is fine too,
-// but binary keeps the bytes exact for the BOM case).
-class TempCSV {
-public:
-    explicit TempCSV(const std::string& content) {
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_csvutils_" + std::to_string(counter_++) + ".csv");
-        std::ofstream file(path_, std::ios::binary);
-        file << content;
-    }
-    ~TempCSV() { std::filesystem::remove(path_); }
-    std::string path() const { return path_.string(); }
-
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-
-int TempCSV::counter_ = 0;
+// The reader sees the bytes exactly as written, so a leading BOM reaches it
+// verbatim.
+TempFile binary_csv(const std::string& content) {
+    return TempFile(content, ".csv", WriteMode::Binary);
+}
 
 }  // namespace
 
@@ -87,7 +71,7 @@ TEST_CASE("safe_stoi rejects trailing garbage", "[csv_utils][parse]") {
 TEST_CASE("CSVReader strips a leading UTF-8 BOM from the header",
           "[csv_utils][csv_reader][bom]") {
     const std::string bom = "\xEF\xBB\xBF";
-    TempCSV f(bom + "plot_id,area\np1,100\n");
+    const TempFile f = binary_csv(bom + "plot_id,area\np1,100\n");
 
     CSVReader reader(f.path());
     // Without BOM stripping the first column would be "﻿plot_id" and the
@@ -99,7 +83,7 @@ TEST_CASE("CSVReader strips a leading UTF-8 BOM from the header",
 
 TEST_CASE("CSVReader reads a normal header without a BOM",
           "[csv_utils][csv_reader]") {
-    TempCSV f("plot_id,area,habitat\np1,100,M\n");
+    const TempFile f = binary_csv("plot_id,area,habitat\np1,100,M\n");
     CSVReader reader(f.path());
     REQUIRE(reader.column_index("plot_id") == 0);
     REQUIRE(reader.column_index("area") == 1);
@@ -111,6 +95,6 @@ TEST_CASE("CSVReader throws on duplicate header column names",
           "[csv_utils][csv_reader][duplicate]") {
     // "id" appears twice: without the guard every reader of "id" would silently
     // bind to the last occurrence.
-    TempCSV f("id,area,id\np1,100,p1\n");
+    const TempFile f = binary_csv("id,area,id\np1,100,p1\n");
     REQUIRE_THROWS_AS(CSVReader(f.path()), std::runtime_error);
 }

@@ -3,13 +3,12 @@
 // Part 1 -- unknown_fraction / unknown_count
 //
 //   DatasetConfig::track_unknown_fraction defaults to true, so every model
-//   trained with the defaults is handed an unknown-mass column. That column was
-//   allocated as zeros and never filled: a dataset built from a training
-//   checkpoint's vocabulary reported 0.0 novelty however many of its species
-//   were absent from that vocabulary. The tests below build a scoring dataset in
-//   which a KNOWN share of each plot's abundance comes from species the training
-//   file never contained, and assert the reported values, for every encoding
-//   mode.
+//   trained with the defaults is handed an unknown-mass column, which a dataset
+//   built from a training checkpoint's vocabulary fills with the share of each
+//   plot's species absent from that vocabulary. The tests below build a scoring
+//   dataset in which a KNOWN share of each plot's abundance comes from species
+//   the training file never contained, and assert the reported values, for
+//   every encoding mode.
 //
 //   The definition (compute_unknown_species_stats, species_encoding.hpp):
 //     fraction[p] = unknown abundance in p / total abundance in p
@@ -18,12 +17,10 @@
 //
 // Part 2 -- LossConfigMode::NCA
 //
-//   PhasedLoss::from_config had no NCA case, so the value fell through to
-//   Combined: a run could record loss_config = NCA in its checkpoint and train
-//   plain cross-entropy. The knob now enables the NCA neighbourhood term
-//   (nca_objective), and these tests pin that it is selected, that it changes
-//   the computed loss, that it carries gradient, that it trains, and that it
-//   survives a checkpoint round-trip.
+//   loss_config = NCA enables the NCA neighbourhood term (nca_objective) rather
+//   than falling through to Combined, and these tests pin that it is selected,
+//   that it changes the computed loss, that it carries gradient, that it
+//   trains, and that it survives a checkpoint round-trip.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -35,40 +32,21 @@
 #include "resolve/role_mapping.hpp"
 #include "resolve/species_encoding.hpp"
 #include "resolve/trainer.hpp"
+#include "test_support.hpp"
 
 #include <algorithm>
 #include <cmath>
-#include <filesystem>
-#include <fstream>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 using namespace resolve;
+using namespace resolve::test;
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
 
 namespace {
-
-class TempFile {
-public:
-    explicit TempFile(const std::string& content, const std::string& suffix = ".csv") {
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_unknown_" + std::to_string(counter_++) + suffix);
-        std::ofstream file(path_);
-        file << content;
-    }
-    ~TempFile() {
-        std::error_code ec;
-        std::filesystem::remove(path_, ec);
-    }
-    [[nodiscard]] std::string path() const { return path_.string(); }
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-int TempFile::counter_ = 0;
 
 // ---------------------------------------------------------------------------
 // Synthetic corpus
@@ -155,59 +133,14 @@ std::string scoring_species_csv(int n_plots) {
     return out.str();
 }
 
-RoleMapping test_roles() {
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "sp";
-    roles.abundance = "cover";
-    roles.latitude = "lat";
-    roles.longitude = "lon";
-    roles.genus = "genus";
-    roles.family = "family";
-    roles.covariates = {"cov1"};
-    return roles;
-}
+RoleMapping test_roles() { return Roles().taxonomy().coordinates().covariates({"cov1"}); }
 
 std::vector<TargetSpec> test_targets() {
     return {TargetSpec::regression("y"), TargetSpec::classification("cls", 3)};
 }
 
 DatasetConfig tracking_config(SpeciesEncodingMode mode) {
-    DatasetConfig cfg;
-    cfg.species_encoding = mode;
-    cfg.top_k = 2;
-    cfg.top_k_species = 3;
-    cfg.use_taxonomy = true;
-    cfg.track_unknown_fraction = true;
-    cfg.track_unknown_count = true;
-    return cfg;
-}
-
-ModelConfig tracking_model_config(SpeciesEncodingMode mode) {
-    ModelConfig cfg;
-    cfg.species_encoding = mode;
-    cfg.encoder_architecture = EncoderArchitecture::MLP;
-    cfg.top_k = 2;
-    cfg.top_k_species = 3;
-    cfg.n_taxonomy_slots = 2;
-    cfg.species_embed_dim = 8;
-    cfg.genus_emb_dim = 4;
-    cfg.family_emb_dim = 4;
-    cfg.hidden_dims = {16, 8};
-    cfg.d_model = 16;
-    cfg.n_heads = 2;
-    cfg.n_attention_layers = 0;
-    return cfg;
-}
-
-TrainConfig quiet_train_config(int epochs = 1) {
-    TrainConfig cfg;
-    cfg.batch_size = 8;
-    cfg.max_epochs = epochs;
-    cfg.patience = epochs;
-    cfg.lr = 1e-3f;
-    cfg.log = null_log;
-    return cfg;
+    return vocab_dataset_config(mode, /*track_unknown=*/true);
 }
 
 constexpr int kTrainPlots = 32;
@@ -249,25 +182,6 @@ std::vector<float> to_vector(const torch::Tensor& t) {
     return out;
 }
 
-const std::vector<SpeciesEncodingMode> kAllModes = {
-    SpeciesEncodingMode::Hash,
-    SpeciesEncodingMode::Embed,
-    SpeciesEncodingMode::Sparse,
-    SpeciesEncodingMode::RankPool,
-    SpeciesEncodingMode::Transformer,
-};
-
-std::string mode_label(SpeciesEncodingMode mode) {
-    switch (mode) {
-        case SpeciesEncodingMode::Hash: return "hash";
-        case SpeciesEncodingMode::Embed: return "embed";
-        case SpeciesEncodingMode::Sparse: return "sparse";
-        case SpeciesEncodingMode::RankPool: return "rank_pool";
-        case SpeciesEncodingMode::Transformer: return "transformer";
-    }
-    return "?";
-}
-
 }  // namespace
 
 // ===========================================================================
@@ -276,8 +190,8 @@ std::string mode_label(SpeciesEncodingMode mode) {
 
 TEST_CASE("Novel species are reported per plot, in every encoding mode",
           "[dataset][unknown]") {
-    for (auto mode : kAllModes) {
-        INFO("encoding mode: " << mode_label(mode));
+    for (auto mode : all_species_encodings()) {
+        INFO("encoding mode: " << species_encoding_to_string(mode));
         auto cfg = tracking_config(mode);
         auto pair = build_pair(cfg);
 
@@ -305,8 +219,8 @@ TEST_CASE("A vocabulary fitted on the same records reports no novelty",
           "[dataset][unknown]") {
     // The training dataset fits its vocabulary from its own species, so every
     // name is known by construction and both columns are legitimately zero.
-    for (auto mode : kAllModes) {
-        INFO("encoding mode: " << mode_label(mode));
+    for (auto mode : all_species_encodings()) {
+        INFO("encoding mode: " << species_encoding_to_string(mode));
         auto cfg = tracking_config(mode);
         auto pair = build_pair(cfg);
 
@@ -501,12 +415,11 @@ TEST_CASE("Both unknown columns stay consistent with the model's input width",
     auto cfg = tracking_config(SpeciesEncodingMode::Hash);
     auto pair = build_pair(cfg);
 
-    const auto path = (std::filesystem::temp_directory_path() /
-                       "resolve_unknown_width.pt")
-                          .string();
+    const TempPath path_file(".pt");
+    const std::string path = path_file.path();
 
     torch::manual_seed(7);
-    ResolveModel model(pair.train.schema(), tracking_model_config(SpeciesEncodingMode::Hash));
+    ResolveModel model(pair.train.schema(), vocab_model_config(SpeciesEncodingMode::Hash));
     Trainer trainer(model, quiet_train_config(/*epochs=*/2));
     trainer.prepare_data(pair.train, /*test_size=*/0.25f, /*seed=*/0);
     auto result = trainer.fit();
@@ -517,9 +430,6 @@ TEST_CASE("Both unknown columns stay consistent with the model's input width",
     auto out = predictor.predict(pair.score);
     REQUIRE(out.predictions.count("y") == 1);
     REQUIRE(out.predictions.at("y").size(0) == kScorePlots);
-
-    std::error_code ec;
-    std::filesystem::remove(path, ec);
 }
 
 // ===========================================================================
@@ -706,7 +616,7 @@ TEST_CASE("A model trains under the NCA loss config", "[loss][nca][trainer]") {
 
     torch::manual_seed(17);
     ResolveModel model(pair.train.schema(),
-                       tracking_model_config(SpeciesEncodingMode::Hash));
+                       vocab_model_config(SpeciesEncodingMode::Hash));
     auto train_config = quiet_train_config(/*epochs=*/25);
     train_config.loss_config = LossConfigMode::NCA;
     train_config.lr = 1e-2f;
@@ -728,13 +638,12 @@ TEST_CASE("loss_config = NCA survives the checkpoint round-trip",
     auto cfg = tracking_config(SpeciesEncodingMode::Hash);
     auto pair = build_pair(cfg);
 
-    const auto path = (std::filesystem::temp_directory_path() /
-                       "resolve_nca_roundtrip.pt")
-                          .string();
+    const TempPath path_file(".pt");
+    const std::string path = path_file.path();
 
     torch::manual_seed(18);
     ResolveModel model(pair.train.schema(),
-                       tracking_model_config(SpeciesEncodingMode::Hash));
+                       vocab_model_config(SpeciesEncodingMode::Hash));
     auto train_config = quiet_train_config();
     train_config.loss_config = LossConfigMode::NCA;
 
@@ -745,16 +654,12 @@ TEST_CASE("loss_config = NCA survives the checkpoint round-trip",
     auto loaded = Trainer::load_train_config(path);
     REQUIRE(loaded.loss_config == LossConfigMode::NCA);
     REQUIRE(PhasedLoss::from_config(loaded.loss_config).uses_nca());
-
-    std::error_code ec;
-    std::filesystem::remove(path, ec);
 }
 
 TEST_CASE("The NCA hyperparameters are configurable and round-trip",
           "[loss][nca][checkpoint][config]") {
-    // temperature / n_neighbors / weight used to be constants no caller could
-    // reach. They are TrainConfig fields now, so a run's own recipe carries them
-    // to the loss, into the checkpoint and back out again.
+    // temperature / n_neighbors / weight are TrainConfig fields, so a run's own
+    // recipe carries them to the loss, into the checkpoint and back out again.
     TrainConfig tuned;
     tuned.loss_config = LossConfigMode::NCA;
     tuned.nca_temperature = 0.45f;   // default 0.1
@@ -814,13 +719,12 @@ TEST_CASE("The NCA hyperparameters are configurable and round-trip",
         auto cfg = tracking_config(SpeciesEncodingMode::Hash);
         auto pair = build_pair(cfg);
 
-        const auto path = (std::filesystem::temp_directory_path() /
-                           "resolve_nca_hyperparams_roundtrip.pt")
-                              .string();
+        const TempPath path_file(".pt");
+        const std::string path = path_file.path();
 
         torch::manual_seed(20);
         ResolveModel model(pair.train.schema(),
-                           tracking_model_config(SpeciesEncodingMode::Hash));
+                           vocab_model_config(SpeciesEncodingMode::Hash));
         auto train_config = quiet_train_config();
         train_config.loss_config = tuned.loss_config;
         train_config.nca_temperature = tuned.nca_temperature;
@@ -835,17 +739,13 @@ TEST_CASE("The NCA hyperparameters are configurable and round-trip",
         REQUIRE_THAT(loaded.nca_temperature, WithinRel(tuned.nca_temperature, 1e-6f));
         REQUIRE(loaded.nca_neighbors == tuned.nca_neighbors);
         REQUIRE_THAT(loaded.nca_weight, WithinRel(tuned.nca_weight, 1e-6f));
-
-        std::error_code ec;
-        std::filesystem::remove(path, ec);
     }
 
     SECTION("a checkpoint written before the keys existed keeps the defaults") {
         // try_read semantics: an archive with none of the train_nca_* keys reads
         // back as the struct defaults rather than as zeros.
-        const auto path = (std::filesystem::temp_directory_path() /
-                           "resolve_nca_hyperparams_legacy.pt")
-                              .string();
+        const TempPath path_file(".pt");
+        const std::string path = path_file.path();
         {
             torch::serialize::OutputArchive archive;
             archive.write("train_batch_size", torch::tensor(2048));
@@ -858,8 +758,5 @@ TEST_CASE("The NCA hyperparameters are configurable and round-trip",
         REQUIRE_THAT(loaded.nca_temperature, WithinRel(defaults.nca_temperature, 1e-6f));
         REQUIRE(loaded.nca_neighbors == defaults.nca_neighbors);
         REQUIRE_THAT(loaded.nca_weight, WithinRel(defaults.nca_weight, 1e-6f));
-
-        std::error_code ec;
-        std::filesystem::remove(path, ec);
     }
 }

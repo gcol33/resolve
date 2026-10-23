@@ -2,6 +2,10 @@
 #
 # Every test/benchmark target links resolve_warnings (resolve_warnings.cmake),
 # so the test sources compile under the same flags as the engine.
+#
+# RESOLVE_BUILD_BENCHMARKS adds the two benchmark executables and the
+# crash-handler smoke; nothing in CTest runs them.
+option(RESOLVE_BUILD_BENCHMARKS "Build the benchmark and crash-smoke executables" OFF)
 
 # Download Catch2
 include(FetchContent)
@@ -30,12 +34,30 @@ foreach(RESOLVE_CATCH_TARGET Catch2 Catch2WithMain)
     endif()
 endforeach()
 
-# Test executable
+# Links the CUDA toolkit's library directory into `target` on a CUDA build.
+function(resolve_link_cuda_dirs target)
+    if(USE_CUDA AND CUDAToolkit_FOUND)
+        target_link_directories(${target} PRIVATE ${CUDAToolkit_LIBRARY_DIR})
+    elseif(USE_CUDA AND DEFINED CUDA_TOOLKIT_ROOT_DIR)
+        target_link_directories(${target} PRIVATE ${CUDA_TOOLKIT_ROOT_DIR}/lib/x64)
+    elseif(USE_CUDA AND DEFINED ENV{CUDA_PATH})
+        target_link_directories(${target} PRIVATE $ENV{CUDA_PATH}/lib/x64)
+    endif()
+endfunction()
+
+# Test executable. Shared fixtures live in test_support.hpp.
 add_executable(resolve_tests
     test_model.cpp
     test_dataset.cpp
     test_loss.cpp
-    test_new_modules.cpp
+    test_tabm.cpp
+    test_pretraining.cpp
+    test_vae.cpp
+    test_experts.cpp
+    test_gnn.cpp
+    test_attention_encoders.cpp
+    test_tabular_adapter.cpp
+    test_cross_validation.cpp
     test_rank_pool_encoder.cpp
     test_transformer_encoder.cpp
     test_mlm_pretrain.cpp
@@ -54,9 +76,6 @@ add_executable(resolve_tests
     test_amp_norm.cpp
     test_dataframe.cpp
     test_recovery.cpp
-    test_review_fixes.cpp
-    test_review_fixes_round2.cpp
-    test_review_fixes_round3.cpp
     test_entmax.cpp
     test_pretrain_seed.cpp
     test_checkpoint_vocab.cpp
@@ -76,14 +95,7 @@ add_executable(resolve_tests
     test_target_masking.cpp
 )
 
-# Add CUDA library directory if CUDA is available
-if(USE_CUDA AND CUDAToolkit_FOUND)
-    target_link_directories(resolve_tests PRIVATE ${CUDAToolkit_LIBRARY_DIR})
-elseif(USE_CUDA AND DEFINED CUDA_TOOLKIT_ROOT_DIR)
-    target_link_directories(resolve_tests PRIVATE ${CUDA_TOOLKIT_ROOT_DIR}/lib/x64)
-elseif(USE_CUDA AND DEFINED ENV{CUDA_PATH})
-    target_link_directories(resolve_tests PRIVATE $ENV{CUDA_PATH}/lib/x64)
-endif()
+resolve_link_cuda_dirs(resolve_tests)
 
 target_link_libraries(resolve_tests
     PRIVATE
@@ -93,63 +105,51 @@ target_link_libraries(resolve_tests
         resolve_warnings
 )
 
-# Register test without discovery (avoids needing to run the binary at build time)
-# Tests can be run manually with the test executable
+# Two CTest entries over the one executable: the unit cases, and the
+# parameter-recovery fits ([recovery]) that train to convergence and take
+# minutes. `ctest -L unit` / `ctest -L recovery` runs one of them.
 include(CTest)
-add_test(NAME resolve_tests COMMAND resolve_tests)
+add_test(NAME resolve_tests_unit COMMAND resolve_tests "~[recovery]")
+add_test(NAME resolve_tests_recovery COMMAND resolve_tests "[recovery]")
+set_tests_properties(resolve_tests_unit PROPERTIES LABELS unit)
+set_tests_properties(resolve_tests_recovery PROPERTIES LABELS recovery)
 
-# Crash-handler smoke (issues #18 / #19). Deliberately faults, so it is a
-# standalone exe checked from outside by its exit code, not a Catch2 case.
-# Driver: src/core/dev_notes/crash_smoke_drive.ps1.
-add_executable(resolve_crash_smoke
-    crash_smoke.cpp
-)
-target_link_libraries(resolve_crash_smoke
-    PRIVATE
-        resolve_core
-        ${TORCH_LIBRARIES}
-        resolve_warnings
-)
+if(RESOLVE_BUILD_BENCHMARKS)
+    # Crash-handler smoke. Deliberately faults, so it is a standalone exe
+    # checked from outside by its exit code, not a Catch2 case.
+    # Driver: src/core/dev_notes/crash_smoke_drive.ps1.
+    add_executable(resolve_crash_smoke
+        crash_smoke.cpp
+    )
+    target_link_libraries(resolve_crash_smoke
+        PRIVATE
+            resolve_core
+            ${TORCH_LIBRARIES}
+            resolve_warnings
+    )
 
-# Benchmark executable (standalone, no Catch2)
-add_executable(resolve_benchmark
-    benchmark_cuda.cpp
-)
+    # Benchmark executable (standalone, no Catch2)
+    add_executable(resolve_benchmark
+        benchmark_cuda.cpp
+    )
+    resolve_link_cuda_dirs(resolve_benchmark)
+    target_link_libraries(resolve_benchmark
+        PRIVATE
+            resolve_core
+            ${TORCH_LIBRARIES}
+            resolve_warnings
+    )
 
-# Add CUDA library directory if CUDA is available
-if(USE_CUDA AND CUDAToolkit_FOUND)
-    target_link_directories(resolve_benchmark PRIVATE ${CUDAToolkit_LIBRARY_DIR})
-elseif(USE_CUDA AND DEFINED CUDA_TOOLKIT_ROOT_DIR)
-    target_link_directories(resolve_benchmark PRIVATE ${CUDA_TOOLKIT_ROOT_DIR}/lib/x64)
-elseif(USE_CUDA AND DEFINED ENV{CUDA_PATH})
-    target_link_directories(resolve_benchmark PRIVATE $ENV{CUDA_PATH}/lib/x64)
+    # Catch2 benchmarks (with statistical analysis)
+    add_executable(resolve_benchmark_catch2
+        benchmark_catch2.cpp
+    )
+    resolve_link_cuda_dirs(resolve_benchmark_catch2)
+    target_link_libraries(resolve_benchmark_catch2
+        PRIVATE
+            resolve_core
+            ${TORCH_LIBRARIES}
+            Catch2::Catch2WithMain
+            resolve_warnings
+    )
 endif()
-
-target_link_libraries(resolve_benchmark
-    PRIVATE
-        resolve_core
-        ${TORCH_LIBRARIES}
-        resolve_warnings
-)
-
-# Catch2 benchmarks (with statistical analysis)
-add_executable(resolve_benchmark_catch2
-    benchmark_catch2.cpp
-)
-
-# Add CUDA library directory if CUDA is available
-if(USE_CUDA AND CUDAToolkit_FOUND)
-    target_link_directories(resolve_benchmark_catch2 PRIVATE ${CUDAToolkit_LIBRARY_DIR})
-elseif(USE_CUDA AND DEFINED CUDA_TOOLKIT_ROOT_DIR)
-    target_link_directories(resolve_benchmark_catch2 PRIVATE ${CUDA_TOOLKIT_ROOT_DIR}/lib/x64)
-elseif(USE_CUDA AND DEFINED ENV{CUDA_PATH})
-    target_link_directories(resolve_benchmark_catch2 PRIVATE $ENV{CUDA_PATH}/lib/x64)
-endif()
-
-target_link_libraries(resolve_benchmark_catch2
-    PRIVATE
-        resolve_core
-        ${TORCH_LIBRARIES}
-        Catch2::Catch2WithMain
-        resolve_warnings
-)

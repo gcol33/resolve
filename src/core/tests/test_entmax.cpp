@@ -4,20 +4,21 @@
 #include "resolve/attention.hpp"
 #include "resolve/checkpoint.hpp"
 #include "resolve/types.hpp"
+#include "test_support.hpp"
 
 #include <torch/torch.h>
 
 #include <cmath>
 #include <cstddef>
-#include <filesystem>
 #include <string>
 #include <vector>
 
 using namespace resolve;
+using namespace resolve::test;
 using namespace Catch::Matchers;
 
 // ============================================================================
-// 1.5-entmax (gcol33/resolve#103)
+// 1.5-entmax
 //
 // Reference: Peters, Niculae & Martins, "Sparse Sequence-to-Sequence Models",
 // ACL 2019 (arXiv:1905.05702).
@@ -67,9 +68,9 @@ TEST_CASE("entmax15 matches hand-computed Algorithm 2 values", "[entmax]") {
         REQUIRE_THAT(p[0][2].item<float>(), WithinAbs(0.12987346f, 1e-5));
         REQUIRE_THAT(p.sum().item<float>(), WithinAbs(1.0f, 1e-5));
 
-        // The pre-fix implementation solved [z - tau]_+^2 (no (alpha - 1)
-        // factor), which on this input saturates to the one-hot [1, 0, 0] --
-        // i.e. it reproduced sparsemax, not 1.5-entmax.
+        // Solving [z - tau]_+^2 without the (alpha - 1) factor saturates on
+        // this input to the one-hot [1, 0, 0] -- i.e. it reproduces sparsemax,
+        // not 1.5-entmax.
         auto sm = sparsemax(z, /*dim=*/-1);
         REQUIRE_THAT(sm[0][0].item<float>(), WithinAbs(1.0f, 1e-5));
         REQUIRE(p[0][1].item<float>() > 0.1f);
@@ -465,8 +466,8 @@ TEST_CASE("use_sparsemax = false round-trips through the checkpoint", "[entmax][
     cfg.tabnet.n_a = 8;
     cfg.tabnet.use_sparsemax = false;  // non-default
 
-    const std::string path =
-        (std::filesystem::temp_directory_path() / "resolve_entmax_tabnet_cfg.pt").string();
+    const TempPath path_file(".pt");
+    const std::string path = path_file.path();
     {
         torch::serialize::OutputArchive ar;
         save_model_config(ar, cfg);
@@ -475,7 +476,6 @@ TEST_CASE("use_sparsemax = false round-trips through the checkpoint", "[entmax][
     torch::serialize::InputArchive ar;
     ar.load_from(path);
     ModelConfig loaded = load_model_config(ar);
-    std::filesystem::remove(path);
 
     REQUIRE(loaded.encoder_architecture == EncoderArchitecture::TabNet);
     REQUIRE(loaded.tabnet.n_steps == 2);
@@ -511,4 +511,25 @@ TEST_CASE("use_sparsemax = false round-trips through the checkpoint", "[entmax][
 
     REQUIRE(torch::allclose(imp_rebuilt, imp_entmax, 1e-5, 1e-7));
     REQUIRE_FALSE(torch::allclose(imp_rebuilt, imp_sparse, 1e-4, 1e-6));
+}
+
+TEST_CASE("sparsemax output is a normalized distribution", "[attention]") {
+    // The projection sums to 1 along the sparsemax dim for ANY support size,
+    // which a wrong threshold tau breaks for support > 1.
+    SECTION("worked example, support size 2") {
+        auto x = torch::tensor({{1.0f, 0.9f, 0.2f}});
+        auto y = sparsemax(x, /*dim=*/-1);
+        REQUIRE_THAT(y.sum().item<float>(), WithinAbs(1.0f, 1e-5));
+        // Expected: tau = (1.9-1)/2 = 0.45 -> [0.55, 0.45, 0].
+        REQUIRE_THAT(y[0][0].item<float>(), WithinAbs(0.55f, 1e-4));
+        REQUIRE_THAT(y[0][1].item<float>(), WithinAbs(0.45f, 1e-4));
+        REQUIRE_THAT(y[0][2].item<float>(), WithinAbs(0.00f, 1e-4));
+    }
+    SECTION("random batch, all rows sum to 1 and are non-negative") {
+        auto x = torch::randn({16, 40});
+        auto y = sparsemax(x, /*dim=*/-1);
+        auto sums = y.sum(/*dim=*/-1);
+        REQUIRE_THAT((sums - 1.0f).abs().max().item<float>(), WithinAbs(0.0f, 1e-4));
+        REQUIRE(y.min().item<float>() >= -1e-6f);
+    }
 }

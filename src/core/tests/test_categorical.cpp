@@ -21,34 +21,10 @@
 #include "resolve/model.hpp"
 #include "resolve/trainer.hpp"
 #include "resolve/predictor.hpp"
-
-#include <filesystem>
-#include <fstream>
+#include "test_support.hpp"
 
 using namespace resolve;
-
-namespace {
-
-// Minimal TempFile helper (duplicated from test_dataset.cpp to keep tests
-// independent — these test files are independently buildable).
-class TempFile {
-public:
-    explicit TempFile(const std::string& content,
-                      const std::string& suffix = ".csv") {
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_cat_test_" + std::to_string(counter_++) + suffix);
-        std::ofstream file(path_);
-        file << content;
-    }
-    ~TempFile() { std::filesystem::remove(path_); }
-    [[nodiscard]] std::string path() const { return path_.string(); }
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-int TempFile::counter_ = 0;
-
-}  // namespace
+using namespace resolve::test;
 
 // =============================================================================
 // 1. CategoricalVocab — fit/encode/NA handling
@@ -150,19 +126,18 @@ TEST_CASE("CategoricalVocab save/load roundtrip preserves all maps",
     original.fit_column("c1", {"a", "b", "a", "c"});
     original.fit_column("c2", {"x", "", "y"});
 
-    auto tmp_path = std::filesystem::temp_directory_path() /
-                    "cat_vocab_roundtrip.pt";
+    const TempPath tmp(".pt");
 
     {
         torch::serialize::OutputArchive out;
         original.save(out, "tcat_");
-        out.save_to(tmp_path.string());
+        out.save_to(tmp.path());
     }
 
     CategoricalVocab loaded;
     {
         torch::serialize::InputArchive in;
-        in.load_from(tmp_path.string());
+        in.load_from(tmp.path());
         loaded = CategoricalVocab::load(in, "tcat_");
     }
 
@@ -177,31 +152,26 @@ TEST_CASE("CategoricalVocab save/load roundtrip preserves all maps",
     REQUIRE(loaded.encode("c2", "x") == original.encode("c2", "x"));
     REQUIRE(loaded.encode("c2", "y") == original.encode("c2", "y"));
     REQUIRE(loaded.encode("c2", "") == 0);  // NA always 0
-
-    std::filesystem::remove(tmp_path);
 }
 
 TEST_CASE("CategoricalVocab::load returns empty vocab for archives without "
           "the categorical section (back-compat)",
           "[categorical][vocab][serialize][backcompat]") {
-    auto tmp_path = std::filesystem::temp_directory_path() /
-                    "cat_vocab_backcompat.pt";
+    const TempPath tmp(".pt");
 
     // Write an archive that has no categorical_ keys at all.
     {
         torch::serialize::OutputArchive out;
         out.write("unrelated_key", torch::tensor(42));
-        out.save_to(tmp_path.string());
+        out.save_to(tmp.path());
     }
 
     torch::serialize::InputArchive in;
-    in.load_from(tmp_path.string());
+    in.load_from(tmp.path());
     auto loaded = CategoricalVocab::load(in, "trainer_categorical_");
 
     REQUIRE(loaded.column_names().empty());
     REQUIRE(loaded.vocab_sizes().empty());
-
-    std::filesystem::remove(tmp_path);
 }
 
 // =============================================================================
@@ -293,14 +263,7 @@ TEST_CASE("ResolveDataset.from_csv loads a categorical column and "
         "P4,b,1.0\n"
     );
 
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "sp";
-    roles.abundance = "cover";
-    roles.latitude = "lat";
-    roles.longitude = "lon";
-    roles.covariates = {"cov1"};
-    roles.categoricals = {"region"};
+    RoleMapping roles = Roles().coordinates().covariates({"cov1"}).categoricals({"region"});
 
     auto ts = TargetSpec::regression("target_y");
     DatasetConfig dcfg;
@@ -474,7 +437,7 @@ TEST_CASE("ResolveModel adapter + categoricals sizes the numerical block correct
         return cfg;
     };
 
-    SECTION("TabNet forward runs (previously crashed on the shape mismatch)") {
+    SECTION("TabNet forward runs with the categorical embeddings in its input width") {
         auto cfg = make_cfg(EncoderArchitecture::TabNet);
         cfg.tabnet.n_d = 8;
         cfg.tabnet.n_a = 8;
@@ -524,31 +487,14 @@ TEST_CASE("Trainer save/load roundtrip preserves categorical vocab + "
         "P4,b,1.0\nP5,c,0.6\nP6,a,0.3\nP7,b,0.8\n"
     );
 
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "sp";
-    roles.abundance = "cover";
-    roles.latitude = "lat";
-    roles.longitude = "lon";
-    roles.covariates = {"cov1"};
-    roles.categoricals = {"region"};
-
-    DatasetConfig dcfg;
-    dcfg.species_encoding = SpeciesEncodingMode::Hash;
-    dcfg.hash_dim = 4;
-    dcfg.use_taxonomy = false;
-    dcfg.track_unknown_fraction = false;
-    dcfg.track_unknown_count = false;
+    const RoleMapping roles =
+        Roles().coordinates().covariates({"cov1"}).categoricals({"region"});
 
     auto ds = ResolveDataset::from_csv(
         header_csv.path(), species_csv.path(), roles,
-        {TargetSpec::regression("y")}, dcfg);
+        {TargetSpec::regression("y")}, hash_dataset_config());
 
-    ModelConfig mcfg;
-    mcfg.species_encoding = SpeciesEncodingMode::Hash;
-    mcfg.encoder_architecture = EncoderArchitecture::MLP;
-    mcfg.hash_dim = 4;
-    mcfg.hidden_dims = {8, 4};
+    ModelConfig mcfg = hash_mlp_config({8, 4});
     mcfg.categorical_embed_dim = 4;
 
     ResolveModel model(ds.schema(), mcfg);
@@ -572,8 +518,8 @@ TEST_CASE("Trainer save/load roundtrip preserves categorical vocab + "
     // Skip fit() — the test focuses on save/load mechanics, not training.
     // We instead invoke save() after prepare_data so the random-init
     // embedding weights + the schema + the vocab are all persisted.
-    auto ckpt_path =
-        (std::filesystem::temp_directory_path() / "cat_ckpt_test.pt").string();
+    const TempPath ckpt(".pt");
+    const std::string ckpt_path = ckpt.path();
     trainer.save(ckpt_path);
 
     SECTION("Predictor::load restores schema, vocab, and model") {
@@ -595,6 +541,20 @@ TEST_CASE("Trainer save/load roundtrip preserves categorical vocab + "
                 trainer.categorical_vocab().encode("region", "east"));
         REQUIRE(loaded_vocab.encode("region", "missing-at-train") == 0);
     }
+}
 
-    std::filesystem::remove(ckpt_path);
+// =============================================================================
+// NA detection
+// =============================================================================
+
+// NA detection is one canonical, case-insensitive function shared by the
+// target and categorical paths.
+TEST_CASE("is_na_string is canonical and case-insensitive", "[categorical][na]") {
+    for (const auto* s : {"", "NA", "na", "Na", "N/A", "n/a", "NaN", "NAN",
+                          "nan", "NULL", "null", "None", "none", ".", "-"}) {
+        REQUIRE(is_na_string(s));
+    }
+    for (const auto* s : {"0", "NAN1", "species", "N", "na ", " NA"}) {
+        REQUIRE_FALSE(is_na_string(s));
+    }
 }

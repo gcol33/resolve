@@ -58,6 +58,7 @@ echo === Configuring ===
     -DBUILD_PYTHON=ON ^
     -DBUILD_CLI=ON ^
     -DBUILD_TESTS=ON ^
+    -DRESOLVE_BUILD_BENCHMARKS=ON ^
     -DUSE_CUDA=ON ^
     -DTorch_DIR="%TORCH_DIR%" ^
     -DPython_EXECUTABLE="%PYTHON_EXE%"

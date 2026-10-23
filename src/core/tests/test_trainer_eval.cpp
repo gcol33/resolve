@@ -1,4 +1,4 @@
-// Tests for the checkpoint-evaluation surface added for issue #4:
+// Tests for the checkpoint-evaluation surface:
 //   - Trainer::load_state  : in-place loader (the static load() tuple return
 //                            has no language-binding converter).
 //   - Trainer::compute_classification_predictions : per-plot test-fold
@@ -28,31 +28,16 @@
 #include "resolve/model.hpp"
 #include "resolve/trainer.hpp"
 #include "resolve/checkpoint.hpp"
+#include "test_support.hpp"
 
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 
 using namespace resolve;
+using namespace resolve::test;
 
 namespace {
-
-class TempFile {
-public:
-    explicit TempFile(const std::string& content,
-                      const std::string& suffix = ".csv") {
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_traineval_" + std::to_string(counter_++) + suffix);
-        std::ofstream file(path_);
-        file << content;
-    }
-    ~TempFile() { std::filesystem::remove(path_); }
-    [[nodiscard]] std::string path() const { return path_.string(); }
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-int TempFile::counter_ = 0;
 
 constexpr int kNumHabClasses = 3;
 
@@ -87,54 +72,25 @@ ResolveDataset make_synthetic_dataset(
     TempFile header_csv(hdr.str());
     TempFile species_csv(spc.str());
 
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "sp";
-    roles.abundance = "cover";
-    roles.latitude = "lat";
-    roles.longitude = "lon";
-    roles.covariates = {"cov1", "cov2"};
-    if (use_taxonomy) {
-        roles.genus = "genus";
-        roles.family = "family";
-    }
+    Roles roles;
+    roles.coordinates().covariates({"cov1", "cov2"});
+    if (use_taxonomy) roles.taxonomy();
 
-    DatasetConfig dcfg;
-    dcfg.species_encoding = SpeciesEncodingMode::Hash;
-    dcfg.hash_dim = 4;
+    DatasetConfig dcfg = hash_dataset_config();
     dcfg.use_taxonomy = use_taxonomy;
-    dcfg.track_unknown_fraction = false;
-    dcfg.track_unknown_count = false;
 
     return ResolveDataset::from_csv(
         header_csv.path(), species_csv.path(), roles, targets, dcfg);
 }
 
-ModelConfig make_model_config() {
-    ModelConfig mcfg;
-    mcfg.species_encoding = SpeciesEncodingMode::Hash;
-    mcfg.encoder_architecture = EncoderArchitecture::MLP;
-    mcfg.hash_dim = 4;
-    mcfg.hidden_dims = {8, 4};
-    return mcfg;
-}
-
-TrainConfig make_train_config() {
-    TrainConfig tcfg;
-    tcfg.batch_size = 8;
-    tcfg.max_epochs = 1;
-    tcfg.patience = 1;
-    tcfg.lr = 1e-3f;
-    tcfg.device = torch::kCPU;
-    return tcfg;
-}
+ModelConfig make_model_config() { return hash_mlp_config({8, 4}); }
 
 // A trainer whose model holds known (random) weights, with prepare_data
 // already run on the given seed. Saved to `ckpt_path` so a second trainer can
 // load_state from it.
 Trainer make_prepared_trainer(const ResolveDataset& ds, int seed) {
     ResolveModel model(ds.schema(), make_model_config());
-    Trainer trainer(model, make_train_config());
+    Trainer trainer(model, quiet_train_config());
     trainer.prepare_data(ds, /*test_size=*/0.25f, seed);
     return trainer;
 }
@@ -151,8 +107,8 @@ TEST_CASE("Trainer::load_state restores checkpoint weights in place",
 
     // Source trainer: random init, saved without fit().
     Trainer src = make_prepared_trainer(ds, /*seed=*/7);
-    auto ckpt = (std::filesystem::temp_directory_path() /
-                 "trainer_load_state_test.pt").string();
+    const TempPath ckpt_file(".pt");
+    const std::string ckpt = ckpt_file.path();
     src.save(ckpt);
 
     // Destination trainer: a different random init + the same fold (same seed).
@@ -174,7 +130,6 @@ TEST_CASE("Trainer::load_state restores checkpoint weights in place",
     REQUIRE(differ_before);
 
     dst.load_state(ckpt, torch::kCPU);
-    std::filesystem::remove(ckpt);
 
     // After loading, every parameter must match the source bit-for-bit.
     auto dst_loaded = dst.model()->parameters();
@@ -302,9 +257,9 @@ TEST_CASE("Trainer::compute_residuals unaffected by shared forward refactor",
 }
 
 TEST_CASE("Checkpoint train-config + run-metadata round-trip", "[trainer][checkpoint]") {
-    // The save_*_config / save_run_metadata writers now have matching readers
-    // (issue #14). Save a distinctive config + metadata to an archive and read
-    // it back through the path-based Trainer::load_* convenience methods.
+    // The save_*_config / save_run_metadata writers have matching readers. Save
+    // a distinctive config + metadata to an archive and read it back through
+    // the path-based Trainer::load_* convenience methods.
     TrainConfig cfg;
     cfg.batch_size = 8192;
     cfg.batch_size_floor = 512;
@@ -333,8 +288,8 @@ TEST_CASE("Checkpoint train-config + run-metadata round-trip", "[trainer][checkp
     meta.final_metrics["area"] = {{"rmse", 1.5f}, {"r2", 0.83f}};
     meta.final_metrics["eunis"] = {{"accuracy", 0.91f}};
 
-    const std::string path =
-        (std::filesystem::temp_directory_path() / "resolve_ckpt_cfg_meta_roundtrip.pt").string();
+    const TempPath path_file(".pt");
+    const std::string path = path_file.path();
     {
         torch::serialize::OutputArchive ar;
         save_train_config(ar, cfg);
@@ -344,7 +299,6 @@ TEST_CASE("Checkpoint train-config + run-metadata round-trip", "[trainer][checkp
 
     const TrainConfig cfg2 = Trainer::load_train_config(path);
     const RunMetadata meta2 = Trainer::load_run_metadata(path);
-    std::filesystem::remove(path);
 
     SECTION("train config fields round-trip") {
         REQUIRE(cfg2.batch_size == cfg.batch_size);
@@ -389,7 +343,7 @@ TEST_CASE("Checkpoint train-config + run-metadata round-trip", "[trainer][checkp
 
 TEST_CASE("Checkpoint model-config sub-config round-trip", "[trainer][checkpoint]") {
     // Non-MLP encoder sub-configs must survive the checkpoint or Predictor::load
-    // rebuilds default-sized layers whose weights mismatch (issue #37).
+    // rebuilds default-sized layers whose weights mismatch.
     ModelConfig cfg;
     cfg.encoder_architecture = EncoderArchitecture::FTTransformer;
     cfg.ft_transformer.d_model = 256;        // non-default (192)
@@ -415,8 +369,8 @@ TEST_CASE("Checkpoint model-config sub-config round-trip", "[trainer][checkpoint
     cfg.parallel_layers.aggregation = ParallelAggregation::Gated;
     cfg.parallel_layers.branches = {b1, b2};
 
-    const std::string path =
-        (std::filesystem::temp_directory_path() / "resolve_modelcfg_subconfig_roundtrip.pt").string();
+    const TempPath path_file(".pt");
+    const std::string path = path_file.path();
     {
         torch::serialize::OutputArchive ar;
         save_model_config(ar, cfg);
@@ -425,7 +379,6 @@ TEST_CASE("Checkpoint model-config sub-config round-trip", "[trainer][checkpoint
     torch::serialize::InputArchive ar;
     ar.load_from(path);
     ModelConfig cfg2 = load_model_config(ar);
-    std::filesystem::remove(path);
 
     REQUIRE(cfg2.encoder_architecture == EncoderArchitecture::FTTransformer);
     REQUIRE(cfg2.ft_transformer.d_model == 256);
@@ -452,7 +405,7 @@ TEST_CASE("Checkpoint model-config sub-config round-trip", "[trainer][checkpoint
 TEST_CASE("Checkpoint schema pool-weighting round-trip", "[trainer][checkpoint]") {
     // pool_weighting / pool_species_cap must survive the checkpoint so the
     // predict side rebuilds the same DatasetConfig instead of defaulting to
-    // Log1p and recomputing different pool weights (issue #38).
+    // Log1p and recomputing different pool weights.
     ResolveSchema schema;
     schema.n_plots = 100;
     schema.n_species = 40;
@@ -460,8 +413,8 @@ TEST_CASE("Checkpoint schema pool-weighting round-trip", "[trainer][checkpoint]"
     schema.pool_weighting = 4;      // PoolWeighting::Rank (non-default)
     schema.pool_species_cap = 137;  // resolved max-species width
 
-    const std::string path =
-        (std::filesystem::temp_directory_path() / "resolve_schema_pool_roundtrip.pt").string();
+    const TempPath path_file(".pt");
+    const std::string path = path_file.path();
     {
         torch::serialize::OutputArchive ar;
         save_schema(ar, schema);
@@ -470,18 +423,17 @@ TEST_CASE("Checkpoint schema pool-weighting round-trip", "[trainer][checkpoint]"
     torch::serialize::InputArchive ar;
     ar.load_from(path);
     ResolveSchema schema2 = load_schema(ar);
-    std::filesystem::remove(path);
 
     REQUIRE(schema2.pool_weighting == 4);
     REQUIRE(schema2.pool_species_cap == 137);
 
-    SECTION("pre-#38 checkpoint keeps schema defaults") {
+    SECTION("a checkpoint without the pool keys keeps schema defaults") {
         // A schema archive that never wrote the pool keys must read back as the
         // Log1p / auto defaults, not throw.
         ResolveSchema legacy;
         legacy.n_plots = 5;
-        const std::string lpath =
-            (std::filesystem::temp_directory_path() / "resolve_schema_legacy.pt").string();
+        const TempPath lpath_file(".pt");
+        const std::string lpath = lpath_file.path();
         {
             torch::serialize::OutputArchive ar2;
             // Write only the categorical block's prerequisite key set by writing
@@ -492,7 +444,6 @@ TEST_CASE("Checkpoint schema pool-weighting round-trip", "[trainer][checkpoint]"
         torch::serialize::InputArchive ar2;
         ar2.load_from(lpath);
         ResolveSchema legacy2 = load_schema(ar2);
-        std::filesystem::remove(lpath);
         REQUIRE(legacy2.pool_weighting == 2);   // Log1p
         REQUIRE(legacy2.pool_species_cap == 0);  // auto
     }
@@ -500,8 +451,8 @@ TEST_CASE("Checkpoint schema pool-weighting round-trip", "[trainer][checkpoint]"
 
 TEST_CASE("Checkpoint schema class-weights round-trip", "[trainer][checkpoint]") {
     // TargetConfig.class_weights is consumed by MultiTaskLoss for imbalanced
-    // classification, but was never persisted, so a resumed / reloaded model
-    // silently reverted to unweighted CE (issue #91).
+    // classification and must be persisted, or a resumed / reloaded model
+    // silently reverts to unweighted CE.
     ResolveSchema schema;
     schema.n_plots = 100;
     schema.n_species = 40;
@@ -520,8 +471,8 @@ TEST_CASE("Checkpoint schema class-weights round-trip", "[trainer][checkpoint]")
     unweighted.task = TaskType::Regression;
     schema.targets.push_back(unweighted);
 
-    const std::string path =
-        (std::filesystem::temp_directory_path() / "resolve_schema_classw_roundtrip.pt").string();
+    const TempPath path_file(".pt");
+    const std::string path = path_file.path();
     {
         torch::serialize::OutputArchive ar;
         save_schema(ar, schema);
@@ -530,7 +481,6 @@ TEST_CASE("Checkpoint schema class-weights round-trip", "[trainer][checkpoint]")
     torch::serialize::InputArchive ar;
     ar.load_from(path);
     ResolveSchema schema2 = load_schema(ar);
-    std::filesystem::remove(path);
 
     REQUIRE(schema2.targets.size() == 2);
     REQUIRE(schema2.targets[0].class_weights.size() == 3);
@@ -539,7 +489,7 @@ TEST_CASE("Checkpoint schema class-weights round-trip", "[trainer][checkpoint]")
     REQUIRE(schema2.targets[0].class_weights[2] == Catch::Approx(3.5f));
     REQUIRE(schema2.targets[1].class_weights.empty());
 
-    SECTION("pre-#91 checkpoint reads class_weights as empty") {
+    SECTION("a checkpoint without class_weights reads them as empty") {
         // A schema whose targets never wrote class_weights must read back empty
         // (unweighted CE), not throw.
         ResolveSchema legacy;
@@ -549,8 +499,8 @@ TEST_CASE("Checkpoint schema class-weights round-trip", "[trainer][checkpoint]")
         t.task = TaskType::Classification;
         t.num_classes = 2;
         legacy.targets.push_back(t);
-        const std::string lpath =
-            (std::filesystem::temp_directory_path() / "resolve_schema_classw_legacy.pt").string();
+        const TempPath lpath_file(".pt");
+        const std::string lpath = lpath_file.path();
         {
             torch::serialize::OutputArchive ar2;
             save_schema(ar2, legacy);
@@ -559,14 +509,13 @@ TEST_CASE("Checkpoint schema class-weights round-trip", "[trainer][checkpoint]")
         torch::serialize::InputArchive ar2;
         ar2.load_from(lpath);
         ResolveSchema legacy2 = load_schema(ar2);
-        std::filesystem::remove(lpath);
         REQUIRE(legacy2.targets.size() == 1);
         REQUIRE(legacy2.targets[0].class_weights.empty());
     }
 }
 
-// Issue #65: JSON sidecar string values must be escaped. A target name or
-// version containing a quote used to emit invalid JSON.
+// JSON sidecar string values are escaped, so a target name or version
+// containing a quote still emits valid JSON.
 TEST_CASE("write_metadata_json escapes string values", "[checkpoint][json]") {
     resolve::ModelConfig mc;
     resolve::TrainConfig tc;
@@ -575,7 +524,8 @@ TEST_CASE("write_metadata_json escapes string values", "[checkpoint][json]") {
     md.resolve_version = "1.0\"x";
     md.final_metrics["area\"m2"] = {{"mae", 1.5f}};
 
-    auto base = (std::filesystem::temp_directory_path() / "meta_escape_test.pt").string();
+    const TempPath base_file(".pt");
+    const std::string base = base_file.path();
     resolve::write_metadata_json(base, mc, tc, md, sch);
     auto json_path = base.substr(0, base.size() - 3) + ".json";
 
@@ -591,7 +541,7 @@ TEST_CASE("write_metadata_json escapes string values", "[checkpoint][json]") {
     REQUIRE(content.find("1.0\\\"x") != std::string::npos);
 }
 
-// Issue #69: the target-scaler map must survive save/load so predictions come
+// The target-scaler map survives save/load so predictions come
 // back in original units, not scaled space.
 TEST_CASE("save/load_scalers round-trips target and continuous scalers",
           "[checkpoint][scalers]") {
@@ -600,8 +550,8 @@ TEST_CASE("save/load_scalers round-trips target and continuous scalers",
     s.continuous_scale = torch::tensor({0.5f, 4.0f});
     s.target_scalers["y"] = {torch::tensor(1000.0f), torch::tensor(20.0f)};
 
-    const std::string path =
-        (std::filesystem::temp_directory_path() / "scalers_roundtrip.pt").string();
+    const TempPath path_file(".pt");
+    const std::string path = path_file.path();
     {
         torch::serialize::OutputArchive ar;
         save_scalers(ar, s);
@@ -610,7 +560,6 @@ TEST_CASE("save/load_scalers round-trips target and continuous scalers",
     torch::serialize::InputArchive ar;
     ar.load_from(path);
     Scalers s2 = load_scalers(ar);
-    std::filesystem::remove(path);
 
     REQUIRE(torch::allclose(s2.continuous_mean, s.continuous_mean));
     REQUIRE(torch::allclose(s2.continuous_scale, s.continuous_scale));
@@ -619,12 +568,12 @@ TEST_CASE("save/load_scalers round-trips target and continuous scalers",
     REQUIRE(s2.target_scalers.at("y").second.item<float>() == Catch::Approx(20.0f));
 }
 
-// Issue #69: a pre-#37 checkpoint that never wrote the arch sub-config keys must
-// load with struct defaults (try_read), not throw.
+// A checkpoint that never wrote the arch sub-config keys loads with struct
+// defaults (try_read), not throw.
 TEST_CASE("load_model_config back-compat: missing sub-config keys -> defaults",
           "[checkpoint][backcompat]") {
-    const std::string path =
-        (std::filesystem::temp_directory_path() / "modelcfg_legacy.pt").string();
+    const TempPath path_file(".pt");
+    const std::string path = path_file.path();
     {
         // Write ONLY the keys load_model_config reads unconditionally.
         torch::serialize::OutputArchive ar;
@@ -644,7 +593,6 @@ TEST_CASE("load_model_config back-compat: missing sub-config keys -> defaults",
     torch::serialize::InputArchive ar;
     ar.load_from(path);
     ModelConfig cfg = load_model_config(ar);
-    std::filesystem::remove(path);
 
     REQUIRE(cfg.hash_dim == 32);
     REQUIRE(cfg.hidden_dims == std::vector<int64_t>{64, 32});
@@ -672,7 +620,7 @@ TEST_CASE("Trainer::prepare_data rejects data carrying no targets",
 
     SECTION("the dataset overload throws, naming targets") {
         ResolveModel model(ds.schema(), make_model_config());
-        Trainer trainer(model, make_train_config());
+        Trainer trainer(model, quiet_train_config());
         REQUIRE_THROWS_AS(trainer.prepare_data(ds, 0.25f, 7),
                           std::invalid_argument);
         REQUIRE_THROWS_WITH(
@@ -682,7 +630,7 @@ TEST_CASE("Trainer::prepare_data rejects data carrying no targets",
 
     SECTION("the raw-tensor overload is the shared body, so it throws too") {
         ResolveModel model(ds.schema(), make_model_config());
-        Trainer trainer(model, make_train_config());
+        Trainer trainer(model, quiet_train_config());
         REQUIRE_THROWS_AS(
             trainer.prepare_data(
                 ds.coordinates(), ds.covariates(), ds.hash_embedding(),
@@ -699,7 +647,7 @@ TEST_CASE("Trainer::prepare_data rejects data carrying no targets",
             /*n_plots=*/40, {TargetSpec::regression("y")});
         REQUIRE(with_target.targets().size() == 1);
         ResolveModel model(with_target.schema(), make_model_config());
-        Trainer trainer(model, make_train_config());
+        Trainer trainer(model, quiet_train_config());
         REQUIRE_NOTHROW(trainer.prepare_data(with_target, 0.25f, 7));
     }
 }
@@ -713,7 +661,7 @@ TEST_CASE("Trainer::prepare_data rejects data carrying no targets",
 TEST_CASE("Early stopping counts patience from the epoch the objective settles", "[trainer]") {
     const int patience = 4;
     auto frozen_config = [&](LossConfigMode mode, std::pair<int, int> boundaries) {
-        TrainConfig cfg = make_train_config();
+        TrainConfig cfg = quiet_train_config();
         cfg.lr = 0.0f;
         cfg.lr_scheduler = LRSchedulerType::None;
         cfg.weight_decay = 0.0f;
@@ -755,7 +703,7 @@ TEST_CASE("Early stopping counts patience from the epoch the objective settles",
 namespace {
 
 TrainConfig cosine_config(int max_epochs, int fixed_epochs) {
-    TrainConfig cfg = make_train_config();
+    TrainConfig cfg = quiet_train_config();
     cfg.lr = 1e-2f;
     cfg.lr_scheduler = LRSchedulerType::CosineAnnealing;
     cfg.loss_config = LossConfigMode::MAE;
@@ -793,7 +741,7 @@ TEST_CASE("fixed_epochs runs that many epochs, whatever early stopping would do"
     auto ds = make_synthetic_dataset(48, {TargetSpec::regression("y")});
     // A frozen model never improves after epoch 0, so early stopping alone
     // would end the run after patience + 1 epochs.
-    TrainConfig cfg = make_train_config();
+    TrainConfig cfg = quiet_train_config();
     cfg.lr = 0.0f;
     cfg.weight_decay = 0.0f;
     cfg.loss_config = LossConfigMode::MAE;
@@ -834,24 +782,22 @@ TEST_CASE("fixed_epochs follows the full schedule rather than a shortened one",
 TEST_CASE("fixed_epochs keeps the weights its last epoch left", "[trainer][fixed_epochs]") {
     auto ds = make_synthetic_dataset(48, {TargetSpec::regression("y")});
     const int n = 5;
-    const auto dir = std::filesystem::temp_directory_path() / "resolve_fixed_epochs_ckpt";
-    std::filesystem::remove_all(dir);
+    const TempDir dir;
 
     TrainConfig cfg = cosine_config(/*max_epochs=*/30, /*fixed_epochs=*/n);
-    cfg.checkpoint_dir = dir.string();
+    cfg.checkpoint_dir = dir.path();
     cfg.checkpoint_every = n;
     auto run = fit_run(ds, cfg, 0.25f);
 
     // checkpoint_<n>.pt is written at the end of the last epoch, before fit()
     // returns; the model fit() hands back has to be that one.
     Trainer last = make_prepared_trainer(ds, 5);
-    last.load_state((dir / ("checkpoint_" + std::to_string(n) + ".pt")).string(), torch::kCPU);
+    last.load_state(dir.file("checkpoint_" + std::to_string(n) + ".pt"), torch::kCPU);
     auto last_params = last.model()->parameters();
     REQUIRE(last_params.size() == run.parameters.size());
     for (size_t i = 0; i < last_params.size(); ++i) {
         REQUIRE(torch::equal(last_params[i].detach().to(torch::kCPU), run.parameters[i]));
     }
-    std::filesystem::remove_all(dir);
 }
 
 TEST_CASE("fixed_epochs trains on every plot when nothing is held out",

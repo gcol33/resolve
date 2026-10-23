@@ -1,5 +1,5 @@
-// Tests for issue #105 (the effective batch size is unreadable after fit()),
-// the #110 trainer cleanups, and the CLI's declarative flag table (#104).
+// Tests for the effective batch size after fit(), train_epoch's scaler source,
+// and the CLI's declarative flag table.
 //
 // Driving the OOM auto-halve without a GPU
 // ---------------------------------------
@@ -25,41 +25,18 @@
 
 #include "../cli/arg_parser.hpp"
 #include "../cli/cli_spec.hpp"
+#include "test_support.hpp"
 
 #include <cmath>
-#include <filesystem>
-#include <fstream>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
 
 using namespace resolve;
+using namespace resolve::test;
 
 namespace {
-
-class TempPath {
-public:
-    explicit TempPath(const std::string& suffix) {
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_effbatch_" + std::to_string(counter_++) + suffix);
-    }
-    ~TempPath() {
-        std::error_code ec;
-        std::filesystem::remove(path_, ec);
-    }
-    [[nodiscard]] std::string path() const { return path_.string(); }
-
-    void write(const std::string& content) const {
-        std::ofstream file(path_);
-        file << content;
-    }
-
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-int TempPath::counter_ = 0;
 
 // Small regression dataset: one hash-encoded species per plot, two covariates,
 // a linear target. Fits in one 64-row batch, so the halved run is genuinely a
@@ -76,36 +53,15 @@ ResolveDataset make_dataset(int64_t n_plots) {
         spc << "P" << i << ",sp" << (i % 13) << ",1.0\n";
     }
 
-    TempPath header_csv(".csv");
-    TempPath species_csv(".csv");
-    header_csv.write(hdr.str());
-    species_csv.write(spc.str());
+    TempFile header_csv(hdr.str());
+    TempFile species_csv(spc.str());
 
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "sp";
-    roles.abundance = "cover";
-    roles.covariates = {"cov1", "cov2"};
-
-    DatasetConfig dcfg;
-    dcfg.species_encoding = SpeciesEncodingMode::Hash;
-    dcfg.hash_dim = 4;
-    dcfg.use_taxonomy = false;
-    dcfg.track_unknown_fraction = false;
-    dcfg.track_unknown_count = false;
-
-    return ResolveDataset::from_csv(header_csv.path(), species_csv.path(), roles,
-                                    {TargetSpec::regression("y")}, dcfg);
+    return ResolveDataset::from_csv(header_csv.path(), species_csv.path(),
+                                    Roles().covariates({"cov1", "cov2"}),
+                                    {TargetSpec::regression("y")}, hash_dataset_config());
 }
 
-ModelConfig make_model_config() {
-    ModelConfig mcfg;
-    mcfg.species_encoding = SpeciesEncodingMode::Hash;
-    mcfg.encoder_architecture = EncoderArchitecture::MLP;
-    mcfg.hash_dim = 4;
-    mcfg.hidden_dims = {8, 4};
-    return mcfg;
-}
+ModelConfig make_model_config() { return hash_mlp_config({8, 4}); }
 
 // A TrainConfig::log callback that raises an out-of-memory error the first
 // `n_failures` times fit() prints an epoch progress line. Every other message
@@ -142,7 +98,7 @@ int read_checkpoint_int(const std::string& path, const char* key) {
 }  // namespace
 
 // =============================================================================
-// Issue #105: the effective batch size after fit()
+// The effective batch size after fit()
 // =============================================================================
 
 TEST_CASE("A clean fit reports the requested batch size as effective",
@@ -193,9 +149,8 @@ TEST_CASE("An OOM-halved fit reports the halved batch size, config the requested
     CHECK(trainer.effective_batch_size() == 32);
 
     // config() still reports what the caller asked for, so a later
-    // cross_validate does not silently inherit the shrink. Before this issue
-    // that made the fallback undetectable in memory: the CLI compared these two
-    // and always found them equal.
+    // cross_validate does not silently inherit the shrink, and the effective
+    // size is the separate value that makes the fallback visible.
     CHECK(trainer.config().batch_size == 64);
     CHECK(result.effective_batch_size != trainer.config().batch_size);
 
@@ -275,16 +230,15 @@ TEST_CASE("An OOM that would halve below the floor is rethrown with context",
 }
 
 // =============================================================================
-// Issue #110 item 2: train_epoch's scaler source
+// train_epoch's scaler source
 // =============================================================================
 
 TEST_CASE("CPU training runs the no-scaler-cache branch of train_epoch",
           "[effective_batch]") {
-    // On CPU there is no GPU scaler cache, so train_epoch takes the branch
-    // whose alternative used to be a materialized temporary (the conditional
-    // yielded a prvalue, so the reference bound to a lifetime-extended copy of
-    // gpu_scalers_ instead of to the member). It is now a static empty map.
-    // A completed CPU fit with finite losses is the behavioural guard.
+    // On CPU there is no GPU scaler cache, so train_epoch takes the branch that
+    // binds its scaler reference to a static empty map rather than to a
+    // lifetime-extended copy of gpu_scalers_. A completed CPU fit with finite
+    // losses is the behavioural guard.
     auto dataset = make_dataset(64);
     ResolveModel model(dataset.schema(), make_model_config());
 
@@ -306,7 +260,7 @@ TEST_CASE("CPU training runs the no-scaler-cache branch of train_epoch",
 }
 
 // =============================================================================
-// Issue #104: the CLI flag table
+// The CLI flag table
 // =============================================================================
 
 using resolve_cli::Arity;
@@ -355,8 +309,8 @@ TEST_CASE("The flag table parses values, flags, repeats and defaults", "[cli_arg
 }
 
 TEST_CASE("An unknown flag is rejected and the near-miss is named", "[cli_args]") {
-    // The two spellings that used to be silently ignored: a dropped hyphen and
-    // an underscore. Both normalize onto a declared flag.
+    // Two near-miss spellings, a dropped hyphen and an underscore, are refused
+    // rather than ignored. Both normalize onto a declared flag.
     CHECK_THROWS_AS(parse_args(toy_spec(), {"--maxepochs", "10"}), ArgError);
     CHECK_THROWS_AS(parse_args(toy_spec(), {"--test_size", "0.3"}), ArgError);
 

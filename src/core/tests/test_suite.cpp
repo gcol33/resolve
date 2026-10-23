@@ -25,6 +25,7 @@
 #include "resolve/species_encoding.hpp"
 #include "resolve/suite.hpp"
 #include "resolve/trainer.hpp"
+#include "test_support.hpp"
 
 #include <cmath>
 #include <filesystem>
@@ -37,38 +38,13 @@
 #include <vector>
 
 using namespace resolve;
+using namespace resolve::test;
 using Catch::Matchers::ContainsSubstring;
 using Catch::Matchers::WithinAbs;
 
 namespace fs = std::filesystem;
 
 namespace {
-
-// A scratch directory, removed with everything in it on scope exit.
-class TempDir {
-public:
-    TempDir() {
-        path_ = fs::temp_directory_path() / ("resolve_suite_" + std::to_string(counter_++) +
-                                             "_" + std::to_string(::time(nullptr)));
-        fs::create_directories(path_);
-    }
-    ~TempDir() {
-        std::error_code ec;
-        fs::remove_all(path_, ec);
-    }
-    [[nodiscard]] std::string path() const { return path_.string(); }
-    [[nodiscard]] std::string file(const std::string& name) const { return (path_ / name).string(); }
-    void write(const std::string& name, const std::string& content) const {
-        fs::create_directories((path_ / name).parent_path());
-        std::ofstream out(path_ / name, std::ios::binary);
-        out << content;
-    }
-
-private:
-    fs::path path_;
-    static int counter_;
-};
-int TempDir::counter_ = 0;
 
 // ---------------------------------------------------------------------------
 // Synthetic plots
@@ -145,16 +121,7 @@ std::string species_csv(const std::vector<Plot>& plots) {
 }
 
 RoleMapping training_roles() {
-    RoleMapping roles;
-    roles.plot_id = "plot";
-    roles.species_id = "taxon";
-    roles.abundance = "cover";
-    roles.latitude = "lat";
-    roles.longitude = "lon";
-    roles.genus = "genus";
-    roles.family = "family";
-    roles.covariates = {"cov1"};
-    return roles;
+    return Roles("plot", "taxon").taxonomy().coordinates().covariates({"cov1"});
 }
 
 DatasetConfig training_dataset_config() {

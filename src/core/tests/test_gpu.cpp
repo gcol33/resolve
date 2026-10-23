@@ -75,8 +75,7 @@ TEST_CASE("set_vram_fraction no-ops cleanly with no usable device", "[gpu]") {
 
 TEST_CASE("set_vram_fraction applies cap on a CUDA device", "[gpu][cuda]") {
     if (c10::cuda::device_count() == 0) {
-        SUCCEED("No CUDA device available; skipping live cap check");
-        return;
+        SKIP("No CUDA device available");
     }
 
     RecordingLogger log;

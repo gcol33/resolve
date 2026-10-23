@@ -1,7 +1,7 @@
 // Tests for Predictor::predict(ResolveDataset, return_latent, batch_size).
 //
-// Covers the chunked-forward port (issue #2). The behavioral contract is:
-//   - batch_size = -1 runs a single forward over the whole dataset (legacy).
+// Covers the chunked forward. The behavioral contract is:
+//   - batch_size = -1 runs a single forward over the whole dataset.
 //   - batch_size > 0 chunks the dataset along dim 0 and concats outputs on
 //     CPU. The chunked output MUST equal the one-shot output bit-for-bit
 //     up to libtorch's nondeterminism budget (we use a tight allclose).
@@ -31,32 +31,14 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #endif
 
-#include <filesystem>
-#include <fstream>
+#include "test_support.hpp"
+
 #include <sstream>
 
 using namespace resolve;
+using namespace resolve::test;
 
 namespace {
-
-// TempFile helper (same shape as the other test files; kept local so this
-// file builds independently).
-class TempFile {
-public:
-    explicit TempFile(const std::string& content,
-                      const std::string& suffix = ".csv") {
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_pred_test_" + std::to_string(counter_++) + suffix);
-        std::ofstream file(path_);
-        file << content;
-    }
-    ~TempFile() { std::filesystem::remove(path_); }
-    [[nodiscard]] std::string path() const { return path_.string(); }
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-int TempFile::counter_ = 0;
 
 // The three habitat labels of the synthetic dataset, in the sorted order the
 // loader factorizes them (so label k has class code k).
@@ -91,38 +73,17 @@ ResolveDataset make_synthetic_dataset(int64_t n_plots) {
     TempFile header_csv(hdr.str());
     TempFile species_csv(spc.str());
 
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "sp";
-    roles.abundance = "cover";
-    roles.latitude = "lat";
-    roles.longitude = "lon";
-    roles.covariates = {"cov1", "cov2"};
-
-    DatasetConfig dcfg;
-    dcfg.species_encoding = SpeciesEncodingMode::Hash;
-    dcfg.hash_dim = 4;
-    dcfg.use_taxonomy = false;
-    dcfg.track_unknown_fraction = false;
-    dcfg.track_unknown_count = false;
-
     return ResolveDataset::from_csv(
-        header_csv.path(), species_csv.path(), roles,
+        header_csv.path(), species_csv.path(), Roles().coordinates().covariates({"cov1", "cov2"}),
         {TargetSpec::regression("y"), TargetSpec::classification("hab", 3)},
-        dcfg);
+        hash_dataset_config());
 }
 
 // Build a minimal Predictor over the given dataset. Random model weights
 // are fine — both predict paths share the same forward and the test
 // asserts agreement between paths, not against any ground truth.
 Predictor make_test_predictor(const ResolveDataset& ds) {
-    ModelConfig mcfg;
-    mcfg.species_encoding = SpeciesEncodingMode::Hash;
-    mcfg.encoder_architecture = EncoderArchitecture::MLP;
-    mcfg.hash_dim = 4;
-    mcfg.hidden_dims = {8, 4};
-
-    ResolveModel model(ds.schema(), mcfg);
+    ResolveModel model(ds.schema(), hash_mlp_config({8, 4}));
 
     TrainConfig tcfg;
     tcfg.batch_size = 4;
@@ -136,13 +97,9 @@ Predictor make_test_predictor(const ResolveDataset& ds) {
     // Persist + reload to get a real Predictor (mirrors the path the
     // chunking actually runs through in production). Skipping fit() so
     // the test stays under a second.
-    auto ckpt_path =
-        (std::filesystem::temp_directory_path() / "pred_batch_test.pt")
-            .string();
-    trainer.save(ckpt_path);
-    Predictor p = Predictor::load(ckpt_path, torch::kCPU);
-    std::filesystem::remove(ckpt_path);
-    return p;
+    const TempPath ckpt(".pt");
+    trainer.save(ckpt.path());
+    return Predictor::load(ckpt.path(), torch::kCPU);
 }
 
 }  // namespace
@@ -288,7 +245,7 @@ TEST_CASE("Predictor::predict rejects batch_size=0 / negative non-(-1)",
 }
 
 // =============================================================================
-// 6b. class probabilities (issue #117)
+// 6b. class probabilities
 // =============================================================================
 
 // A classification target's `probabilities` entry is the softmax row its
@@ -393,7 +350,7 @@ TEST_CASE("Predictor::optimize_for_inference preserves predictions",
 }
 
 // =============================================================================
-// 8. get_embeddings smoke (issue #69: was untested)
+// 8. get_embeddings smoke
 // =============================================================================
 
 TEST_CASE("Predictor::get_embeddings returns per-plot latent rows",
@@ -411,17 +368,17 @@ TEST_CASE("Predictor::get_embeddings returns per-plot latent rows",
 }
 
 // =============================================================================
-// 9. Checkpoint deserialization targets the REQUESTED device (issue #112)
+// 9. Checkpoint deserialization targets the REQUESTED device
 // =============================================================================
 //
-// Trainer::load called InputArchive::load_from(path) with no device, so the
-// unpickler restored every tensor to the device the checkpoint was SAVED on and
-// the model->to(device) that follows never got the chance: loading a
-// GPU-trained checkpoint on a host with no CUDA device threw inside
-// deserialization ("No CUDA GPUs are available").
+// Trainer::load hands the requested device to InputArchive::load_from. Without
+// it the unpickler restores every tensor to the device the checkpoint was SAVED
+// on before model->to(device) runs, so loading a GPU-trained checkpoint on a
+// host with no CUDA device throws inside deserialization ("No CUDA GPUs are
+// available").
 //
 // A host that HAS the device cannot observe that failure -- deserialization
-// succeeds onto the GPU and the weights are moved back -- so the observable
+// would succeed onto the GPU and the weights be moved back -- so the observable
 // contract here is that a CPU load of a CUDA-saved checkpoint allocates no CUDA
 // memory at all. That is only measurable on a CUDA build; on a CPU build the
 // case below still pins that a CPU-saved checkpoint round-trips onto the CPU,
@@ -429,13 +386,10 @@ TEST_CASE("Predictor::get_embeddings returns per-plot latent rows",
 // GPU-less host.
 
 TEST_CASE("Predictor::load puts the weights on the requested device",
-          "[predictor][device][issue112]") {
+          "[predictor][device]") {
     auto ds = make_synthetic_dataset(/*n_plots=*/32);
 
-    ModelConfig mcfg;
-    mcfg.species_encoding = SpeciesEncodingMode::Hash;
-    mcfg.hash_dim = 4;
-    mcfg.hidden_dims = {8, 4};
+    const ModelConfig mcfg = hash_mlp_config({8, 4});
 
     const bool have_cuda = torch::cuda::is_available();
     const torch::Device save_device = have_cuda ? torch::Device(torch::kCUDA, 0)
@@ -453,17 +407,17 @@ TEST_CASE("Predictor::load puts the weights on the requested device",
     Trainer trainer(model, tcfg);
     trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/0);
 
-    TempFile ckpt("", ".pt");
+    const TempPath ckpt(".pt");
     trainer.save(ckpt.path());
 
     auto cpu_predictor = [&] {
 #ifdef RESOLVE_HAS_CUDA
         if (have_cuda) {
             // Reading a CUDA-saved checkpoint onto the CPU must not touch the
-            // GPU at all. Before the fix the archive landed on the GPU and the
-            // weights were moved back afterwards, so the result LOOKED right
-            // while the peak allocation was non-zero -- and on a host with no
-            // CUDA device the same code threw instead. Index 0 of the stat
+            // GPU at all. An archive landing on the GPU with the weights moved
+            // back afterwards would LOOK right while the peak allocation is
+            // non-zero -- and on a host with no CUDA device the same code
+            // would throw instead. Index 0 of the stat
             // array is the AGGREGATE pool; the enum naming that constant moved
             // namespace between libtorch 2.6 and 2.9, the index did not.
             c10::cuda::CUDACachingAllocator::emptyCache();

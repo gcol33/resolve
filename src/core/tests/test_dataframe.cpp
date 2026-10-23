@@ -2,15 +2,15 @@
 #include "resolve/dataset.hpp"
 #include "resolve/row_source.hpp"
 #include "resolve/role_mapping.hpp"
-#include <fstream>
-#include <filesystem>
+#include "test_support.hpp"
 #include <string>
 #include <vector>
 
 using namespace resolve;
+using namespace resolve::test;
 
 // ============================================================================
-// In-memory (DataFrame) dataset loaders (issue #22).
+// In-memory (DataFrame) dataset loaders.
 //
 // The contract: a dataset built from an in-memory ColumnTable is byte-identical
 // to one built from the equivalent CSV, because both paths run the exact same
@@ -19,22 +19,6 @@ using namespace resolve;
 // ============================================================================
 
 namespace {
-
-int g_counter = 0;
-
-class TempCSV {
-public:
-    explicit TempCSV(const std::string& content) {
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_df_test_" + std::to_string(g_counter++) + ".csv");
-        std::ofstream f(path_);
-        f << content;
-    }
-    ~TempCSV() { std::filesystem::remove(path_); }
-    std::string path() const { return path_.string(); }
-private:
-    std::filesystem::path path_;
-};
 
 std::string join_csv(const std::vector<std::string>& names,
                      const std::vector<std::vector<std::string>>& rows) {
@@ -118,15 +102,7 @@ const std::vector<std::vector<std::string>> kSpeciesRows = {
 };
 
 RoleMapping make_roles() {
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "species";
-    roles.abundance = "cover";
-    roles.genus = "genus";
-    roles.family = "family";
-    roles.covariates = {"elevation"};
-    roles.categoricals = {"soil"};
-    return roles;
+    return Roles("plot_id", "species").taxonomy().covariates({"elevation"}).categoricals({"soil"});
 }
 
 std::vector<TargetSpec> make_targets() {
@@ -147,8 +123,8 @@ DatasetConfig make_config() {
 }  // namespace
 
 TEST_CASE("from_dataframe matches from_csv (two-file)", "[dataset][dataframe]") {
-    TempCSV header_csv(join_csv(kHeaderNames, kHeaderRows));
-    TempCSV species_csv(join_csv(kSpeciesNames, kSpeciesRows));
+    TempFile header_csv(join_csv(kHeaderNames, kHeaderRows));
+    TempFile species_csv(join_csv(kSpeciesNames, kSpeciesRows));
 
     auto roles = make_roles();
     auto targets = make_targets();
@@ -175,7 +151,7 @@ TEST_CASE("from_species_dataframe matches from_species_csv", "[dataset][datafram
         {"p2", "sp1", "0.8", "Quercus", "Fagaceae", "200"},
         {"p2", "sp3", "0.2", "Pinus",   "Pinaceae", "200"},
     };
-    TempCSV csv(join_csv(names, rows));
+    TempFile csv(join_csv(names, rows));
 
     auto roles = make_roles();
     std::vector<TargetSpec> targets = {TargetSpec::regression("area")};
@@ -190,8 +166,8 @@ TEST_CASE("from_species_dataframe matches from_species_csv", "[dataset][datafram
 }
 
 TEST_CASE("from_dataframe_header matches from_csv", "[dataset][dataframe]") {
-    TempCSV header_csv(join_csv(kHeaderNames, kHeaderRows));
-    TempCSV species_csv(join_csv(kSpeciesNames, kSpeciesRows));
+    TempFile header_csv(join_csv(kHeaderNames, kHeaderRows));
+    TempFile species_csv(join_csv(kSpeciesNames, kSpeciesRows));
 
     auto roles = make_roles();
     auto targets = make_targets();
@@ -210,8 +186,8 @@ TEST_CASE("from_dataframe_header matches from_csv", "[dataset][dataframe]") {
 
 TEST_CASE("from_dataframe_with_schema matches from_csv_with_schema",
           "[dataset][dataframe]") {
-    TempCSV header_csv(join_csv(kHeaderNames, kHeaderRows));
-    TempCSV species_csv(join_csv(kSpeciesNames, kSpeciesRows));
+    TempFile header_csv(join_csv(kHeaderNames, kHeaderRows));
+    TempFile species_csv(join_csv(kSpeciesNames, kSpeciesRows));
 
     auto roles = make_roles();
     auto targets = make_targets();
@@ -231,8 +207,8 @@ TEST_CASE("from_dataframe_with_schema matches from_csv_with_schema",
 }
 
 TEST_CASE("from_dataframe matches from_csv (hash encoding)", "[dataset][dataframe]") {
-    TempCSV header_csv(join_csv(kHeaderNames, kHeaderRows));
-    TempCSV species_csv(join_csv(kSpeciesNames, kSpeciesRows));
+    TempFile header_csv(join_csv(kHeaderNames, kHeaderRows));
+    TempFile species_csv(join_csv(kSpeciesNames, kSpeciesRows));
 
     auto roles = make_roles();
     auto targets = make_targets();

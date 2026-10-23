@@ -1,35 +1,32 @@
-// Tests for the issue #5 fix: TaxonomyVocab must assign genus/family IDs
-// deterministically (sorted), independent of the order records arrive in.
+// TaxonomyVocab assigns genus/family IDs deterministically (sorted),
+// independent of the order records arrive in, like SpeciesVocab.
 //
-// The bug: TaxonomyVocab::fit assigned IDs by first-appearance order, so the
-// same underlying data in a different CSV row order produced a different
-// genus/family -> ID mapping. A checkpoint trained on one ordering and scored
-// against a differently-ordered rebuild (from_csv_with_schema in another
-// process) silently misaligned the genus/family embedding lookups (~5pp EUNIS
-// accuracy drop downstream). SpeciesVocab was already sorted; TaxonomyVocab is
-// now too.
+// IDs by first-appearance order would give the same underlying data in a
+// different CSV row order a different genus/family -> ID mapping, so a
+// checkpoint trained on one ordering and scored against a differently-ordered
+// rebuild (from_csv_with_schema in another process) would silently misalign
+// the genus/family embedding lookups.
 //
 // Coverage:
 //   1. Unit: fit() yields the same map for any record ordering, IDs are in
 //      sorted order, and <UNK> stays at 0.
-//   2. Unit: save/load round-trips the (now sorted) maps.
-//   3. Regression: two datasets whose taxonomy vocab is fit from the same
-//      species set in different row orders, reused via from_csv_with_schema,
-//      produce identical genus_ids / family_ids tensors (the downstream
-//      symptom in the issue).
+//   2. Unit: save/load round-trips the sorted maps.
+//   3. Two datasets whose taxonomy vocab is fit from the same species set in
+//      different row orders, reused via from_csv_with_schema, produce
+//      identical genus_ids / family_ids tensors.
 
 #include <catch2/catch_test_macros.hpp>
 
 #include "resolve/types.hpp"
 #include "resolve/dataset.hpp"
 #include "resolve/role_mapping.hpp"
+#include "test_support.hpp"
 
 #include <algorithm>
-#include <filesystem>
-#include <fstream>
 #include <sstream>
 
 using namespace resolve;
+using namespace resolve::test;
 
 namespace {
 
@@ -43,23 +40,6 @@ SpeciesRecord mk(const std::string& sp, const std::string& genus,
     r.plot_id = "P0";
     return r;
 }
-
-class TempFile {
-public:
-    explicit TempFile(const std::string& content,
-                      const std::string& suffix = ".csv") {
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_taxvocab_" + std::to_string(counter_++) + suffix);
-        std::ofstream f(path_);
-        f << content;
-    }
-    ~TempFile() { std::filesystem::remove(path_); }
-    [[nodiscard]] std::string path() const { return path_.string(); }
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-int TempFile::counter_ = 0;
 
 }  // namespace
 
@@ -128,8 +108,8 @@ TEST_CASE("TaxonomyVocab save/load round-trips the maps", "[taxonomy][vocab]") {
     TaxonomyVocab va;
     va.fit(recs);
 
-    auto path = (std::filesystem::temp_directory_path() /
-                 "resolve_taxvocab_roundtrip.pt").string();
+    const TempPath archive(".pt");
+    const std::string path = archive.path();
     {
         torch::serialize::OutputArchive oa;
         va.save(oa, "tax_");
@@ -141,15 +121,14 @@ TEST_CASE("TaxonomyVocab save/load round-trips the maps", "[taxonomy][vocab]") {
         ia.load_from(path);
         vb = TaxonomyVocab::load(ia, "tax_");
     }
-    std::filesystem::remove(path);
 
     REQUIRE(va.genus_map() == vb.genus_map());
     REQUIRE(va.family_map() == vb.family_map());
 }
 
 // =============================================================================
-// 3. Regression: row-order of the schema source no longer changes the
-//    genus/family ID tensors of a dataset built via from_csv_with_schema
+// 3. The row order of the schema source does not change the genus/family ID
+//    tensors of a dataset built via from_csv_with_schema
 // =============================================================================
 
 namespace {
@@ -191,15 +170,7 @@ std::string make_species(int n_plots, bool reversed) {
     return s.str();
 }
 
-RoleMapping tax_roles() {
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "sp";
-    roles.genus = "genus";
-    roles.family = "family";
-    roles.abundance = "cover";
-    return roles;
-}
+RoleMapping tax_roles() { return Roles().taxonomy(); }
 
 }  // namespace
 

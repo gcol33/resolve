@@ -1,17 +1,16 @@
 // Missing covariates and coordinates.
 //
-// A blank covariate or coordinate cell used to be read as 0.0, so a recorded
-// zero and a missing value were one input, and a plot without coordinates sat
-// at (0, 0). The loader now keeps the cell as NaN and DatasetConfig::
-// missing_values decides how the model reads it:
+// Read as 0.0, a blank covariate or coordinate cell would make a recorded zero
+// and a missing value one input, and put a plot without coordinates at (0, 0).
+// The loader keeps the cell as NaN and DatasetConfig::missing_values decides
+// how the model reads it:
 //
 //   Indicate  the continuous block carries a 0/1 column per covariate and one
 //             for the coordinate pair; the value is filled with the mean of
 //             that column's recorded values on the fitting rows before
 //             standardisation.
-//   Zero      the value is read as 0.0 with no flag -- the earlier behaviour,
-//             and what a checkpoint written before the policy existed reloads
-//             as.
+//   Zero      the value is read as 0.0 with no flag -- what a checkpoint
+//             written without the policy reloads as.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -23,10 +22,9 @@
 #include "resolve/predictor.hpp"
 #include "resolve/role_mapping.hpp"
 #include "resolve/trainer.hpp"
+#include "test_support.hpp"
 
 #include <cmath>
-#include <filesystem>
-#include <fstream>
 #include <limits>
 #include <set>
 #include <sstream>
@@ -34,32 +32,12 @@
 #include <vector>
 
 using namespace resolve;
+using namespace resolve::test;
 using Catch::Matchers::WithinAbs;
 
 namespace {
 
 const float kNaN = std::numeric_limits<float>::quiet_NaN();
-
-class TempFile {
-public:
-    explicit TempFile(const std::string& content) {
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_missing_" + std::to_string(counter_++) + ".csv");
-        std::ofstream file(path_);
-        file << content;
-    }
-    ~TempFile() {
-        std::error_code ec;
-        std::filesystem::remove(path_, ec);
-    }
-    [[nodiscard]] std::string path() const { return path_.string(); }
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-int TempFile::counter_ = 0;
-
-void null_log(const std::string&) {}
 
 constexpr int kPlots = 60;
 
@@ -95,19 +73,6 @@ std::string species_csv() {
     return out.str();
 }
 
-RoleMapping roles() {
-    RoleMapping r;
-    r.plot_id = "plot_id";
-    r.species_id = "sp";
-    r.abundance = "cover";
-    r.latitude = "lat";
-    r.longitude = "lon";
-    r.genus = "genus";
-    r.family = "family";
-    r.covariates = {"cov1", "cov2"};
-    return r;
-}
-
 DatasetConfig dataset_config(MissingValuePolicy policy) {
     DatasetConfig cfg;
     cfg.species_encoding = SpeciesEncodingMode::Hash;
@@ -122,7 +87,8 @@ DatasetConfig dataset_config(MissingValuePolicy policy) {
 ResolveDataset load(MissingValuePolicy policy) {
     TempFile header(header_csv());
     TempFile species(species_csv());
-    return ResolveDataset::from_csv(header.path(), species.path(), roles(),
+    return ResolveDataset::from_csv(header.path(), species.path(),
+                                    Roles().taxonomy().coordinates().covariates({"cov1", "cov2"}),
                                     {TargetSpec::regression("y")},
                                     dataset_config(policy));
 }
@@ -136,17 +102,6 @@ ModelConfig model_config() {
     cfg.genus_emb_dim = 4;
     cfg.family_emb_dim = 4;
     cfg.hidden_dims = {16, 8};
-    return cfg;
-}
-
-TrainConfig train_config(int epochs) {
-    TrainConfig cfg;
-    cfg.batch_size = 8;
-    cfg.max_epochs = epochs;
-    cfg.patience = epochs;
-    cfg.lr = 1e-3f;
-    cfg.device = torch::kCPU;
-    cfg.log = null_log;
     return cfg;
 }
 
@@ -255,7 +210,7 @@ TEST_CASE("the model is sized for the flags, trains, and reloads through missing
             auto ds = load(policy);
             torch::manual_seed(0);
             ResolveModel model(ds.schema(), model_config());
-            Trainer trainer(model, train_config(3));
+            Trainer trainer(model, quiet_train_config(3));
             trainer.prepare_data(ds, 0.25f, 7);
             auto result = trainer.fit();
             CHECK(std::isfinite(result.final_metrics.at("y").at("mae")));
@@ -264,9 +219,8 @@ TEST_CASE("the model is sized for the flags, trains, and reloads through missing
             REQUIRE(scalers.continuous_fill.defined());
             REQUIRE(torch::isfinite(scalers.continuous_fill).all().item<bool>());
 
-            const auto path = (std::filesystem::temp_directory_path() /
-                               ("resolve_missing_ckpt_" +
-                                std::to_string(static_cast<int>(policy)) + ".pt")).string();
+            const TempPath ckpt(".pt");
+            const std::string path = ckpt.path();
             trainer.save(path);
             auto predictor = Predictor::load(path, torch::kCPU);
             CHECK(predictor.schema().missing_values == policy);
@@ -279,7 +233,6 @@ TEST_CASE("the model is sized for the flags, trains, and reloads through missing
             const auto& a = one_shot.predictions.at("y");
             REQUIRE(torch::isfinite(a).all().item<bool>());
             CHECK(torch::allclose(a, chunked.predictions.at("y"), 1e-5, 1e-6));
-            std::filesystem::remove(path);
         }
     }
 }
@@ -309,7 +262,7 @@ TEST_CASE("cross-validation refits the fill on each fold and stays finite",
     auto ds = load(MissingValuePolicy::Indicate);
     torch::manual_seed(0);
     ResolveModel model(ds.schema(), model_config());
-    Trainer trainer(model, train_config(2));
+    Trainer trainer(model, quiet_train_config(2));
     trainer.prepare_data(ds, 0.2f, 3);
     const Scalers before = trainer.scalers();
     auto cv = trainer.cross_validate(3, 11);
@@ -409,8 +362,8 @@ TEST_CASE("The standardization scale is finite even where it cannot be estimated
 //
 // The unknown-species fraction is 0 on every fitting row, since the species
 // vocabulary is built from them, so its scale is the offset alone. Dividing a
-// later fraction of 0.01 by that entered the network at 1e6 and sent every
-// plot holding one unseen species to the same prediction (issue #118).
+// later fraction of 0.01 by that would enter the network at 1e6 and send every
+// plot holding one unseen species to the same prediction.
 // ============================================================================
 
 TEST_CASE("A column constant in the fitting rows standardises to zero at any value",

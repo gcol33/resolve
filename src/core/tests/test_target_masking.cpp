@@ -1,4 +1,4 @@
-// Per-target missing-label masking (TargetMissingPolicy::Mask, gcol33/resolve#119).
+// Per-target missing-label masking (TargetMissingPolicy::Mask).
 //
 // Under Drop (the default) a plot missing any target's label leaves the fit.
 // Under Mask the plot stays with a sentinel in that target's tensor (class code
@@ -17,11 +17,10 @@
 #include "resolve/role_mapping.hpp"
 #include "resolve/target_labels.hpp"
 #include "resolve/trainer.hpp"
+#include "test_support.hpp"
 
 #include <cmath>
 #include <cstdint>
-#include <filesystem>
-#include <fstream>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -32,27 +31,9 @@
 #include <vector>
 
 using namespace resolve;
+using namespace resolve::test;
 
 namespace {
-
-class TempFile {
-public:
-    explicit TempFile(const std::string& content, const std::string& suffix = ".csv") {
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_masking_" + std::to_string(counter_++) + suffix);
-        std::ofstream file(path_, std::ios::binary);
-        file << content;
-    }
-    ~TempFile() {
-        std::error_code ec;
-        std::filesystem::remove(path_, ec);
-    }
-    [[nodiscard]] std::string path() const { return path_.string(); }
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-int TempFile::counter_ = 0;
 
 // One synthetic plot: two covariates, a regression label and a class label,
 // either of which may be missing ("" in the CSV).
@@ -97,28 +78,8 @@ Files write_csvs(const std::vector<Plot>& plots) {
         hdr << "\n";
         spc << "P" << i << ",sp" << (i % 8) << ",1.0\n";
     }
-    return Files{TempFile(hdr.str()), TempFile(spc.str())};
-}
-
-RoleMapping roles() {
-    RoleMapping r;
-    r.plot_id = "plot_id";
-    r.species_id = "sp";
-    r.abundance = "cover";
-    r.latitude = "lat";
-    r.longitude = "lon";
-    r.covariates = {"cov1", "cov2"};
-    return r;
-}
-
-DatasetConfig dataset_config() {
-    DatasetConfig d;
-    d.species_encoding = SpeciesEncodingMode::Hash;
-    d.hash_dim = 4;
-    d.use_taxonomy = false;
-    d.track_unknown_fraction = false;
-    d.track_unknown_count = false;
-    return d;
+    return Files{TempFile(hdr.str(), ".csv", WriteMode::Binary),
+                 TempFile(spc.str(), ".csv", WriteMode::Binary)};
 }
 
 TargetSpec y_spec(TargetMissingPolicy missing) {
@@ -137,27 +98,16 @@ TargetSpec cls_spec(TargetMissingPolicy missing) {
 }
 
 ResolveDataset load(const Files& f, const std::vector<TargetSpec>& targets) {
-    return ResolveDataset::from_csv(f.header.path(), f.species.path(), roles(),
-                                    targets, dataset_config());
+    return ResolveDataset::from_csv(f.header.path(), f.species.path(),
+                                    Roles().coordinates().covariates({"cov1", "cov2"}), targets,
+                                    hash_dataset_config());
 }
 
-ModelConfig model_config() {
-    ModelConfig m;
-    m.species_encoding = SpeciesEncodingMode::Hash;
-    m.encoder_architecture = EncoderArchitecture::MLP;
-    m.hash_dim = 4;
-    m.hidden_dims = {32, 16};
-    return m;
-}
+ModelConfig model_config() { return hash_mlp_config({32, 16}); }
 
 TrainConfig train_config(int fixed_epochs = 0, int max_epochs = 300) {
-    TrainConfig t;
-    t.batch_size = 64;
-    t.max_epochs = max_epochs;
+    TrainConfig t = recovery_train_config(max_epochs);
     t.fixed_epochs = fixed_epochs;
-    t.patience = 40;
-    t.lr = 1e-2f;
-    t.device = torch::kCPU;
     return t;
 }
 
@@ -206,21 +156,6 @@ int64_t count_labelled(const std::vector<Plot>& plots, bool y, bool cls) {
         if ((!y || p.y) && (!cls || p.cls)) ++n;
     }
     return n;
-}
-
-double pearson(const std::vector<float>& a, const std::vector<float>& b) {
-    const size_t n = a.size();
-    double ma = 0, mb = 0;
-    for (size_t i = 0; i < n; ++i) { ma += a[i]; mb += b[i]; }
-    ma /= static_cast<double>(n);
-    mb /= static_cast<double>(n);
-    double sab = 0, saa = 0, sbb = 0;
-    for (size_t i = 0; i < n; ++i) {
-        const double da = a[i] - ma, db = b[i] - mb;
-        sab += da * db; saa += da * da; sbb += db * db;
-    }
-    if (saa <= 0 || sbb <= 0) return 0.0;
-    return sab / std::sqrt(saa * sbb);
 }
 
 TargetConfig target_config(const std::string& name, TaskType task,
@@ -557,7 +492,7 @@ TEST_CASE("The missing-label policy round-trips through the checkpoint",
     trainer.prepare_data(ds, 0.25f, 11);
     trainer.fit();
 
-    TempFile ckpt("", ".pt");
+    const TempPath ckpt(".pt");
     RunMetadata meta;
     trainer.save(ckpt.path(), &meta);
     auto [loaded, scalers, vocab] = Trainer::load(ckpt.path(), torch::kCPU);

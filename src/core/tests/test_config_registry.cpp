@@ -1,4 +1,4 @@
-// Exhaustiveness tests for the configuration field registries (issue #108).
+// Exhaustiveness tests for the configuration field registries.
 //
 // The registries in resolve/config_registry.hpp exist so that a field cannot be
 // added to a config struct and then silently missed by one of the places that
@@ -21,6 +21,7 @@
 
 #include "resolve/checkpoint.hpp"
 #include "resolve/config_registry.hpp"
+#include "test_support.hpp"
 
 #include <cstddef>
 #include <filesystem>
@@ -35,6 +36,7 @@
 #include <vector>
 
 using namespace resolve;
+using namespace resolve::test;
 
 namespace {
 
@@ -336,10 +338,6 @@ Cfg name_keyed_round_trip(const Cfg& config) {
     return out;
 }
 
-std::string temp_path(const char* stem) {
-    return (std::filesystem::temp_directory_path() / stem).string();
-}
-
 bool archive_has_key(const std::string& path, const std::string& key) {
     torch::serialize::InputArchive archive;
     archive.load_from(path);
@@ -356,8 +354,8 @@ bool archive_has_key(const std::string& path, const std::string& key) {
 TEST_CASE("Every config struct's registry covers every member", "[config][registry]") {
     // The build already fails when these disagree (the static_assert inside
     // RESOLVE_DEFINE_FIELD_REGISTRY). Restating the counts here makes the shape
-    // of the guarantee visible in the test output, and pins the numbers so a
-    // reviewer sees an intended addition in the diff.
+    // of the guarantee visible in the test output, and pins the numbers so an
+    // intended addition shows in the diff.
     CHECK(field_registry_size(static_cast<const FTTransformerConfig*>(nullptr)) == 7);
     CHECK(field_registry_size(static_cast<const TabNetConfig*>(nullptr)) == 7);
     // SAINT lost use_contrastive_pretrain and mixup_alpha: both described a
@@ -434,7 +432,8 @@ TEST_CASE("ModelConfig round-trips through the checkpoint with every field chang
     // Two branches, so the numbered parallel_branch_<i>_ blocks are exercised.
     REQUIRE(config.parallel_layers.branches.size() == 2);
 
-    const std::string path = temp_path("resolve_registry_modelcfg.pt");
+    const TempPath path_file(".pt");
+    const std::string path = path_file.path();
     {
         torch::serialize::OutputArchive archive;
         save_model_config(archive, config);
@@ -443,7 +442,6 @@ TEST_CASE("ModelConfig round-trips through the checkpoint with every field chang
     torch::serialize::InputArchive archive;
     archive.load_from(path);
     const ModelConfig loaded = load_model_config(archive);
-    std::filesystem::remove(path);
 
     const auto diffs = digest_differences(digest_of(config, true), digest_of(loaded, true));
     INFO("fields that did not survive: " << describe(diffs));
@@ -456,7 +454,8 @@ TEST_CASE("TrainConfig round-trips through the checkpoint with every persisted f
     TrainConfig config;
     for_each_field(config, FieldMutator{&counter});
 
-    const std::string path = temp_path("resolve_registry_traincfg.pt");
+    const TempPath path_file(".pt");
+    const std::string path = path_file.path();
     {
         torch::serialize::OutputArchive archive;
         save_train_config(archive, config);
@@ -481,18 +480,18 @@ TEST_CASE("TrainConfig round-trips through the checkpoint with every persisted f
         CHECK(loaded.device == defaults.device);
     }
 
-    std::filesystem::remove(path);
 }
 
 TEST_CASE("The requested batch size is what a checkpoint restores",
           "[config][registry][checkpoint]") {
     // save_train_config writes the REQUESTED batch size under train_batch_size
     // and the effective one alongside it, so an OOM fallback stays visible while
-    // load_train_config recovers the recipe the operator asked for (issue #86).
+    // load_train_config recovers the recipe the operator asked for.
     TrainConfig config;
     config.batch_size = 512;  // the value the OOM retry ended up training at
 
-    const std::string path = temp_path("resolve_registry_batchsize.pt");
+    const TempPath path_file(".pt");
+    const std::string path = path_file.path();
     {
         torch::serialize::OutputArchive archive;
         save_train_config(archive, config, /*requested_batch_size=*/4096);
@@ -504,7 +503,6 @@ TEST_CASE("The requested batch size is what a checkpoint restores",
 
     torch::Tensor effective;
     REQUIRE(archive.try_read(kEffectiveBatchSizeKey, effective));
-    std::filesystem::remove(path);
 
     CHECK(loaded.batch_size == 4096);
     CHECK(effective.item<int>() == 512);
@@ -523,7 +521,8 @@ TEST_CASE("Checkpoint keys keep the spellings earlier releases wrote",
     ModelConfig model;
     for_each_field(model, FieldMutator{&counter});
 
-    const std::string model_path = temp_path("resolve_registry_keys_model.pt");
+    const TempPath model_path_file(".pt");
+    const std::string model_path = model_path_file.path();
     {
         torch::serialize::OutputArchive archive;
         save_model_config(archive, model);
@@ -550,12 +549,12 @@ TEST_CASE("Checkpoint keys keep the spellings earlier releases wrote",
         INFO("model-config key " << key);
         CHECK(archive_has_key(model_path, key));
     }
-    std::filesystem::remove(model_path);
 
     counter = 0;
     TrainConfig train;
     for_each_field(train, FieldMutator{&counter});
-    const std::string train_path = temp_path("resolve_registry_keys_train.pt");
+    const TempPath train_path_file(".pt");
+    const std::string train_path = train_path_file.path();
     {
         torch::serialize::OutputArchive archive;
         save_train_config(archive, train);
@@ -574,14 +573,14 @@ TEST_CASE("Checkpoint keys keep the spellings earlier releases wrote",
         INFO("train-config key " << key);
         CHECK(archive_has_key(train_path, key));
     }
-    std::filesystem::remove(train_path);
 }
 
 TEST_CASE("A checkpoint missing a long-standing model-config key is rejected",
           "[config][registry][checkpoint]") {
     // Defaulting these would build a differently-shaped model whose weights then
     // fail to load with a shape error far from the cause.
-    const std::string path = temp_path("resolve_registry_truncated.pt");
+    const TempPath path_file(".pt");
+    const std::string path = path_file.path();
     {
         torch::serialize::OutputArchive archive;
         archive.write("species_encoding", torch::tensor(0));
@@ -590,7 +589,6 @@ TEST_CASE("A checkpoint missing a long-standing model-config key is rejected",
     torch::serialize::InputArchive archive;
     archive.load_from(path);
     CHECK_THROWS_AS(load_model_config(archive), std::runtime_error);
-    std::filesystem::remove(path);
 }
 
 // ===========================================================================
@@ -673,8 +671,9 @@ TEST_CASE("The metadata sidecar carries the whole model and train config",
     ResolveSchema schema;
     schema.n_plots = 10;
 
-    const std::string checkpoint = temp_path("resolve_registry_sidecar.pt");
-    const std::string sidecar = temp_path("resolve_registry_sidecar.json");
+    const TempPath checkpoint_file(".pt");
+    const std::string checkpoint = checkpoint_file.path();
+    const std::string sidecar = checkpoint.substr(0, checkpoint.size() - 3) + ".json";
     write_metadata_json(checkpoint, model, train, metadata, schema, /*requested_batch_size=*/8192);
 
     std::ifstream file(sidecar);

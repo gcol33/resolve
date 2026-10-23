@@ -471,7 +471,7 @@ TEST_CASE("FuzzyIndex: query_batch matches serial query", "[fuzzy][batch]") {
     }
 }
 
-// Issue #69: exercise the adaptive-k tightening path (small top_n) and verify
+// Exercise the adaptive-k tightening path (small top_n) and verify
 // the returned matches are exactly the closest top-N by distance, not merely a
 // high-recall subset (the other cross-checks use top_n = vocab_size, which never
 // tightens effective_k).
@@ -522,4 +522,26 @@ TEST_CASE("FuzzyIndex: small top_n returns the exact closest-N by distance",
             REQUIRE(got[i].distance == truth_dists[i]);
         }
     }
+}
+
+TEST_CASE("Fuzzy case-insensitive match folds Latin Extended-A", "[fuzzy]") {
+    // "\xC4\x8D" = U+010D (c-caron, lowercase), "\xC4\x8C" = U+010C (uppercase).
+    // "\xC5\xA1" = U+0161 (s-caron), "\xC5\xA0" = U+0160 (uppercase).
+    std::vector<std::string> entries = {
+        "\xC4\x8D" "ern" "\xC5\xA1",  // "cerns" with carons, lowercase
+        "quercus",
+    };
+    resolve::fuzzy::BuildOptions bopts;
+    bopts.case_insensitive = true;
+    auto index = resolve::fuzzy::FuzzyIndex::build(entries, bopts);
+
+    resolve::fuzzy::QueryOptions qopts;
+    qopts.max_edit_distance = 0;  // require an exact case-folded match
+    qopts.top_n = 1;
+
+    // Uppercase query with the same diacritics must fold to distance 0.
+    auto matches = index.query("\xC4\x8C" "ERN" "\xC5\xA0", qopts);
+    REQUIRE(!matches.empty());
+    REQUIRE(matches[0].distance == 0);
+    REQUIRE(matches[0].entry == entries[0]);
 }

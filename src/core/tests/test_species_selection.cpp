@@ -1,18 +1,12 @@
-// DatasetConfig::selection outside the hash encoding (issue #113).
-//
-// apply_selection was called only inside the hash branch of encode_species, so
-// a rank_pool / transformer / sparse dataset reported the selection it was
-// given on its schema and then encoded every species the plot recorded, and the
-// embed branch hardcoded SelectionMode::Top whatever it was asked for. The
-// value was accepted, persisted to the checkpoint, and had no effect.
+// DatasetConfig::selection in every species encoding.
 //
 // The contract these tests pin:
 //
 //   * Each encoding takes its per-plot budget from the knob that also fixes its
-//     width -- top_k for hash, top_k_species for embed, and the new
+//     width -- top_k for hash, top_k_species for embed, and
 //     DatasetConfig::species_budget for rank_pool / transformer / sparse.
 //   * species_budget defaults to 0 = no budget, so a pooled or sparse dataset
-//     built with any existing configuration encodes exactly what it did before.
+//     encodes every species the plot records.
 //   * With a budget, Top and Bottom select different species, and exactly the
 //     ones the abundance ranking names.
 //   * The schema records the selection the run APPLIED (effective_selection),
@@ -28,41 +22,18 @@
 #include "resolve/role_mapping.hpp"
 #include "resolve/species_encoding.hpp"
 #include "resolve/trainer.hpp"
+#include "test_support.hpp"
 
 #include <algorithm>
-#include <filesystem>
-#include <fstream>
 #include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
 using namespace resolve;
+using namespace resolve::test;
 
 namespace {
-
-class TempFile {
-public:
-    explicit TempFile(const std::string& content, const std::string& suffix = ".csv") {
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_selection_" + std::to_string(counter_++) + suffix);
-        std::ofstream file(path_);
-        file << content;
-    }
-    ~TempFile() {
-        std::error_code ec;
-        std::filesystem::remove(path_, ec);
-    }
-    [[nodiscard]] std::string path() const { return path_.string(); }
-
-    TempFile(const TempFile&) = delete;
-    TempFile& operator=(const TempFile&) = delete;
-
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-int TempFile::counter_ = 0;
 
 // ---------------------------------------------------------------------------
 // Synthetic corpus
@@ -114,16 +85,6 @@ std::string species_csv(int n_plots) {
         }
     }
     return out.str();
-}
-
-RoleMapping species_roles() {
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "sp";
-    roles.abundance = "cover";
-    roles.genus = "genus";
-    roles.family = "family";
-    return roles;
 }
 
 std::vector<TargetSpec> targets() {
@@ -178,7 +139,7 @@ std::set<std::string> encoded_species(const ResolveDataset& ds, int64_t plot_row
 
 ResolveDataset build(const std::string& header_path, const std::string& species_path,
                      const DatasetConfig& cfg) {
-    return ResolveDataset::from_csv(header_path, species_path, species_roles(),
+    return ResolveDataset::from_csv(header_path, species_path, Roles().taxonomy(),
                                     targets(), cfg);
 }
 
@@ -499,7 +460,7 @@ TEST_CASE("embed honours the configured selection", "[selection][embed]") {
         }
     }
 
-    SECTION("Bottom is no longer silently treated as Top") {
+    SECTION("Bottom is not treated as Top") {
         auto cfg = base_config(SpeciesEncodingMode::Embed);
         cfg.selection = SelectionMode::Bottom;
         cfg.top_k_species = 3;
@@ -592,7 +553,7 @@ TEST_CASE("species_budget survives the checkpoint", "[selection][checkpoint]") {
     trainer.prepare_data(ds);
     trainer.fit();
 
-    TempFile checkpoint("", ".pt");
+    const TempPath checkpoint(".pt");
     trainer.save(checkpoint.path());
 
     auto predictor = Predictor::load(checkpoint.path(), torch::kCPU);
@@ -615,8 +576,8 @@ TEST_CASE("species_budget survives the checkpoint", "[selection][checkpoint]") {
 
 TEST_CASE("a checkpoint without the budget key reads back as no budget",
           "[selection][checkpoint]") {
-    // Back-compat: species_budget is absent from every checkpoint written before
-    // issue #113, and the schema default 0 is exactly what those runs did.
+    // Back-compat: a checkpoint without the species_budget key reads back as
+    // the schema default 0, i.e. no budget.
     ResolveSchema schema;
     REQUIRE(schema.species_budget == 0);
 
@@ -624,4 +585,43 @@ TEST_CASE("a checkpoint without the budget key reads back as no budget",
     model_config.species_encoding = SpeciesEncodingMode::RankPool;
     auto cfg = dataset_config_from_checkpoint(schema, model_config);
     REQUIRE(cfg.species_budget == 0);
+}
+
+// ============================================================================
+// select_top_k tie-breaking
+// ============================================================================
+
+// Abundance ties break by name, so the selected set does not depend on input
+// (CSV row) order.
+TEST_CASE("select_top_k is order-independent on abundance ties", "[species_selection][determinism]") {
+    // Five species, all equal abundance (presence/absence data): the top-3 must
+    // be the three alphabetically-first names regardless of input order.
+    std::vector<std::pair<std::string, float>> a = {
+        {"zeta", 1.0f}, {"alpha", 1.0f}, {"gamma", 1.0f}, {"beta", 1.0f}, {"delta", 1.0f}};
+    std::vector<std::pair<std::string, float>> b = {
+        {"delta", 1.0f}, {"gamma", 1.0f}, {"beta", 1.0f}, {"alpha", 1.0f}, {"zeta", 1.0f}};
+
+    auto sa = select_top_k(a, 3);
+    auto sb = select_top_k(b, 3);
+
+    std::vector<std::string> na, nb;
+    for (auto& p : sa) na.push_back(p.first);
+    for (auto& p : sb) nb.push_back(p.first);
+    std::sort(na.begin(), na.end());
+    std::sort(nb.begin(), nb.end());
+
+    REQUIRE(na == nb);
+    const std::vector<std::string> expected = {"alpha", "beta", "delta"};
+    REQUIRE(na == expected);
+}
+
+// Mixed abundances still rank by abundance first; only genuine ties use the name.
+TEST_CASE("select_top_k ranks by abundance, name only on ties", "[species_selection][determinism]") {
+    std::vector<std::pair<std::string, float>> in = {
+        {"low", 0.1f}, {"tieB", 2.0f}, {"tieA", 2.0f}, {"high", 5.0f}};
+    auto s = select_top_k(in, 3);
+    REQUIRE(s.size() == 3);
+    REQUIRE(s[0].first == "high");   // strictly largest
+    REQUIRE(s[1].first == "tieA");   // tie at 2.0 -> name ascending
+    REQUIRE(s[2].first == "tieB");
 }

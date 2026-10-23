@@ -19,97 +19,18 @@
 #include "resolve/predictor.hpp"
 #include "resolve/role_mapping.hpp"
 #include "resolve/trainer.hpp"
+#include "test_support.hpp"
 
-#include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <vector>
 
 using namespace resolve;
+using namespace resolve::test;
 
 namespace {
 
-class TempFile {
-public:
-    explicit TempFile(const std::string& content, const std::string& suffix = ".csv") {
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_freeze_" + std::to_string(counter_++) + suffix);
-        std::ofstream file(path_);
-        file << content;
-    }
-    ~TempFile() {
-        std::error_code ec;
-        std::filesystem::remove(path_, ec);
-    }
-    [[nodiscard]] std::string path() const { return path_.string(); }
-
-    TempFile(const TempFile&) = delete;
-    TempFile& operator=(const TempFile&) = delete;
-
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-int TempFile::counter_ = 0;
-
-constexpr int kSpecies = 6;
-constexpr int kPlots = 40;
-
-std::string header_csv() {
-    std::ostringstream out;
-    out << "plot_id,lon,lat,elev,y\n";
-    for (int i = 0; i < kPlots; ++i) {
-        out << "p" << i << "," << (10.0 + 0.1 * i) << "," << (47.0 + 0.1 * i)
-            << "," << (100 + 5 * i) << "," << (1.0 + 0.25 * i) << "\n";
-    }
-    return out.str();
-}
-
-std::string species_csv() {
-    std::ostringstream out;
-    out << "plot_id,sp,cover,genus,family\n";
-    for (int i = 0; i < kPlots; ++i) {
-        for (int j = 0; j < kSpecies; ++j) {
-            out << "p" << i << ",sp_" << j << "," << (((j + i) % kSpecies) + 1)
-                << ",gen_" << (j % 3) << ",fam_" << (j % 2) << "\n";
-        }
-    }
-    return out.str();
-}
-
-ResolveDataset build(const std::string& header_path, const std::string& species_path,
-                     SpeciesEncodingMode mode, bool taxonomy = true) {
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "sp";
-    roles.abundance = "cover";
-    if (taxonomy) {
-        roles.genus = "genus";
-        roles.family = "family";
-    }
-    roles.longitude = "lon";
-    roles.latitude = "lat";
-    roles.covariates = {"elev"};
-    DatasetConfig cfg;
-    cfg.species_encoding = mode;
-    cfg.use_taxonomy = taxonomy;
-    return ResolveDataset::from_csv(header_path, species_path, roles,
-                                    {TargetSpec::regression("y")}, cfg);
-}
-
 ModelConfig model_config(SpeciesEncodingMode mode, bool freeze) {
-    ModelConfig cfg;
-    cfg.species_encoding = mode;
-    cfg.hidden_dims = {16, 12};
-    cfg.species_embed_dim = 8;
-    cfg.genus_emb_dim = 4;
-    cfg.family_emb_dim = 4;
-    cfg.hash_dim = 32;
-    cfg.d_model = 16;
-    cfg.n_heads = 2;
-    cfg.n_attention_layers = 1;
-    cfg.transformer_ff_dim = 16;
+    ModelConfig cfg = small_encoder_config(mode, {16, 12});
     cfg.freeze_composition = freeze;
     return cfg;
 }
@@ -130,36 +51,16 @@ std::vector<torch::Tensor> snapshot(const std::vector<torch::Tensor>& tensors) {
     return out;
 }
 
-const SpeciesEncodingMode kEncodings[] = {
-    SpeciesEncodingMode::Hash,
-    SpeciesEncodingMode::Embed,
-    SpeciesEncodingMode::Sparse,
-    SpeciesEncodingMode::RankPool,
-    SpeciesEncodingMode::Transformer,
-};
-
-const char* name_of(SpeciesEncodingMode mode) {
-    switch (mode) {
-        case SpeciesEncodingMode::Hash: return "hash";
-        case SpeciesEncodingMode::Embed: return "embed";
-        case SpeciesEncodingMode::Sparse: return "sparse";
-        case SpeciesEncodingMode::RankPool: return "rank_pool";
-        case SpeciesEncodingMode::Transformer: return "transformer";
-    }
-    return "?";
-}
-
 }  // namespace
 
 TEST_CASE("Frozen composition tables keep their initialisation through a fit",
           "[freeze_composition]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
+    const SmallCorpus corpus;
 
-    for (auto mode : kEncodings) {
-        INFO("encoding " << name_of(mode));
+    for (auto mode : all_species_encodings()) {
+        INFO("encoding " << species_encoding_to_string(mode));
         torch::manual_seed(5);
-        auto ds = build(header.path(), species.path(), mode);
+        auto ds = corpus.load(mode);
         ResolveModel model(ds.schema(), model_config(mode, /*freeze=*/true));
 
         const auto tables = model->composition_parameters();
@@ -192,13 +93,12 @@ TEST_CASE("Frozen composition tables keep their initialisation through a fit",
 }
 
 TEST_CASE("Unfrozen composition tables train", "[freeze_composition]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
+    const SmallCorpus corpus;
 
-    for (auto mode : kEncodings) {
-        INFO("encoding " << name_of(mode));
+    for (auto mode : all_species_encodings()) {
+        INFO("encoding " << species_encoding_to_string(mode));
         torch::manual_seed(5);
-        auto ds = build(header.path(), species.path(), mode);
+        auto ds = corpus.load(mode);
         ResolveModel model(ds.schema(), model_config(mode, /*freeze=*/false));
 
         const auto before = snapshot(model->composition_parameters());
@@ -219,18 +119,17 @@ TEST_CASE("Unfrozen composition tables train", "[freeze_composition]") {
 }
 
 TEST_CASE("A frozen model reloads frozen", "[freeze_composition][checkpoint]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
+    const SmallCorpus corpus;
     torch::manual_seed(9);
 
-    auto ds = build(header.path(), species.path(), SpeciesEncodingMode::RankPool);
+    auto ds = corpus.load(SpeciesEncodingMode::RankPool);
     ResolveModel model(ds.schema(),
                        model_config(SpeciesEncodingMode::RankPool, /*freeze=*/true));
     Trainer trainer(model, train_config());
     trainer.prepare_data(ds);
     trainer.fit();
 
-    TempFile checkpoint("", ".pt");
+    const TempPath checkpoint(".pt");
     trainer.save(checkpoint.path());
     auto predictor = Predictor::load(checkpoint.path(), torch::kCPU);
 
@@ -246,12 +145,10 @@ TEST_CASE("A frozen model reloads frozen", "[freeze_composition][checkpoint]") {
 
 TEST_CASE("A model with no composition table refuses freeze_composition",
           "[freeze_composition]") {
-    TempFile header(header_csv());
-    TempFile species(species_csv());
+    const SmallCorpus corpus;
 
     SECTION("hash encoding without taxonomy") {
-        auto ds = build(header.path(), species.path(), SpeciesEncodingMode::Hash,
-                        /*taxonomy=*/false);
+        auto ds = corpus.load(SpeciesEncodingMode::Hash, /*taxonomy=*/false);
         CHECK(ResolveModel(ds.schema(), model_config(SpeciesEncodingMode::Hash, false))
                   ->composition_parameters().empty());
         CHECK_THROWS_WITH(
@@ -260,7 +157,7 @@ TEST_CASE("A model with no composition table refuses freeze_composition",
     }
 
     SECTION("an adapter architecture") {
-        auto ds = build(header.path(), species.path(), SpeciesEncodingMode::Embed);
+        auto ds = corpus.load(SpeciesEncodingMode::Embed);
         auto cfg = model_config(SpeciesEncodingMode::Embed, /*freeze=*/true);
         cfg.encoder_architecture = EncoderArchitecture::FTTransformer;
         CHECK_THROWS_WITH(ResolveModel(ds.schema(), cfg),

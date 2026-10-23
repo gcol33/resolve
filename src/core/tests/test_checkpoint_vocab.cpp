@@ -1,13 +1,13 @@
-// Tests for checkpoint-persisted vocabularies (gcol33/resolve#102).
+// Tests for checkpoint-persisted vocabularies.
 //
-// The defect: a checkpoint carried only the SIZES of the species / genus /
-// family vocabularies. Every non-hash encoder indexes an embedding table with a
-// code that is a function of the file the vocabulary was fitted on -- the
-// species vocab is frequency-ranked, the taxonomy vocab is a function of the
-// name set -- so scoring new data from a checkpoint alone re-fitted the codes
-// and looked up other species' embedding rows. Wrong predictions, no error.
+// Every non-hash encoder indexes an embedding table with a code that is a
+// function of the file the vocabulary was fitted on -- the species vocab is
+// frequency-ranked, the taxonomy vocab is a function of the name set -- so a
+// checkpoint carrying only the vocabulary SIZES would re-fit the codes when
+// scoring new data and look up other species' embedding rows. Wrong
+// predictions, no error.
 //
-// The contract now:
+// The contract:
 //   1. save_schema/load_schema round-trip the ordered species / genus / family
 //      vocabularies, plus the remaining DatasetConfig knobs the loader consumed.
 //   2. ResolveDataset::from_csv_with_schema(const ResolveSchema&) builds an
@@ -15,7 +15,7 @@
 //      dataset on hand.
 //   3. Predictor::predict(ResolveDataset) REJECTS a dataset whose vocabularies
 //      are not the model's, instead of scoring it.
-//   4. A pre-#102 checkpoint (no vocab block) still loads: the vectors come
+//   4. A checkpoint without the vocab block still loads: the vectors come
 //      back empty and only the size guard applies.
 //
 // The headline test (per encoder) trains on file A, scores a file B whose rows
@@ -33,52 +33,18 @@
 #include "resolve/predictor.hpp"
 #include "resolve/role_mapping.hpp"
 #include "resolve/trainer.hpp"
+#include "test_support.hpp"
 
 #include <algorithm>
-#include <filesystem>
-#include <fstream>
 #include <map>
 #include <sstream>
 #include <string>
 #include <vector>
 
 using namespace resolve;
+using namespace resolve::test;
 
 namespace {
-
-class TempFile {
-public:
-    explicit TempFile(const std::string& content, const std::string& suffix = ".csv") {
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_ckpt_vocab_" + std::to_string(counter_++) + suffix);
-        std::ofstream file(path_);
-        file << content;
-    }
-    ~TempFile() { std::filesystem::remove(path_); }
-    [[nodiscard]] std::string path() const { return path_.string(); }
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-int TempFile::counter_ = 0;
-
-// Scratch path for a checkpoint, removed on scope exit.
-class TempPath {
-public:
-    explicit TempPath(const std::string& stem) {
-        path_ = std::filesystem::temp_directory_path() /
-                (stem + std::to_string(counter_++) + ".pt");
-    }
-    ~TempPath() {
-        std::error_code ec;
-        std::filesystem::remove(path_, ec);
-    }
-    [[nodiscard]] std::string path() const { return path_.string(); }
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-int TempPath::counter_ = 0;
 
 // ---------------------------------------------------------------------------
 // Synthetic corpus
@@ -168,57 +134,13 @@ std::string species_csv(const std::vector<Plot>& plots) {
     return out.str();
 }
 
-RoleMapping test_roles() {
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "sp";
-    roles.abundance = "cover";
-    roles.latitude = "lat";
-    roles.longitude = "lon";
-    roles.genus = "genus";
-    roles.family = "family";
-    roles.covariates = {"cov1"};
-    return roles;
-}
+RoleMapping test_roles() { return Roles().taxonomy().coordinates().covariates({"cov1"}); }
 
+// No unknown-species columns, so the continuous block is identical between the
+// full file and any subset and a prediction difference can only come from the
+// species / taxonomy IDs.
 DatasetConfig test_dataset_config(SpeciesEncodingMode mode) {
-    DatasetConfig cfg;
-    cfg.species_encoding = mode;
-    cfg.top_k = 2;
-    cfg.top_k_species = 3;
-    cfg.use_taxonomy = true;
-    // Keep the continuous block identical between the full file and any subset
-    // so any prediction difference can only come from the species/taxonomy IDs.
-    cfg.track_unknown_fraction = false;
-    cfg.track_unknown_count = false;
-    return cfg;
-}
-
-ModelConfig test_model_config(SpeciesEncodingMode mode) {
-    ModelConfig cfg;
-    cfg.species_encoding = mode;
-    cfg.encoder_architecture = EncoderArchitecture::MLP;
-    cfg.top_k = 2;
-    cfg.top_k_species = 3;
-    cfg.n_taxonomy_slots = 2;
-    cfg.species_embed_dim = 8;
-    cfg.genus_emb_dim = 4;
-    cfg.family_emb_dim = 4;
-    cfg.hidden_dims = {16, 8};
-    cfg.d_model = 16;
-    cfg.n_heads = 2;
-    cfg.n_attention_layers = 0;
-    return cfg;
-}
-
-TrainConfig quiet_train_config() {
-    TrainConfig cfg;
-    cfg.batch_size = 8;
-    cfg.max_epochs = 1;
-    cfg.patience = 1;
-    cfg.lr = 1e-3f;
-    cfg.log = null_log;
-    return cfg;
+    return vocab_dataset_config(mode, /*track_unknown=*/false);
 }
 
 // Save a checkpoint for `ds` with randomly-initialised weights. Random init is
@@ -235,7 +157,7 @@ void save_checkpoint(const ResolveDataset& ds, const ModelConfig& mcfg,
 
 void save_checkpoint(const ResolveDataset& ds, SpeciesEncodingMode mode,
                      const std::string& path) {
-    save_checkpoint(ds, test_model_config(mode), path);
+    save_checkpoint(ds, vocab_model_config(mode), path);
 }
 
 // Map plot_id -> row index in a predictions result.
@@ -251,17 +173,6 @@ double pred_at(const ResolvePredictions& preds, const std::string& target, size_
     return it->second[static_cast<int64_t>(row)].item<double>();
 }
 
-const char* mode_name(SpeciesEncodingMode m) {
-    switch (m) {
-        case SpeciesEncodingMode::Hash: return "hash";
-        case SpeciesEncodingMode::Embed: return "embed";
-        case SpeciesEncodingMode::Sparse: return "sparse";
-        case SpeciesEncodingMode::RankPool: return "rank_pool";
-        case SpeciesEncodingMode::Transformer: return "transformer";
-    }
-    return "?";
-}
-
 }  // namespace
 
 // =============================================================================
@@ -269,7 +180,7 @@ const char* mode_name(SpeciesEncodingMode m) {
 // =============================================================================
 
 TEST_CASE("Scoring a subset from a checkpoint alone matches scoring the full file",
-          "[checkpoint][vocab][issue102]") {
+          "[checkpoint][vocab]") {
     const auto all_plots = corpus();
     const std::vector<Plot> reorder(all_plots.begin() + 16, all_plots.end());
     const std::vector<Plot> drop(all_plots.begin() + 12, all_plots.begin() + 20);
@@ -286,12 +197,12 @@ TEST_CASE("Scoring a subset from a checkpoint alone matches scoring the full fil
 
     for (auto mode : {SpeciesEncodingMode::Embed, SpeciesEncodingMode::Sparse,
                       SpeciesEncodingMode::RankPool, SpeciesEncodingMode::Transformer}) {
-        DYNAMIC_SECTION("encoder = " << mode_name(mode)) {
+        DYNAMIC_SECTION("encoder = " << species_encoding_to_string(mode)) {
             const auto dcfg = test_dataset_config(mode);
             auto ds_a = ResolveDataset::from_csv(
                 hdr_a.path(), spc_a.path(), roles, targets, dcfg);
 
-            TempPath ckpt("resolve_vocab_head_");
+            const TempPath ckpt(".pt");
             save_checkpoint(ds_a, mode, ckpt.path());
 
             Predictor predictor = Predictor::load(ckpt.path(), torch::kCPU);
@@ -352,7 +263,7 @@ TEST_CASE("Scoring a subset from a checkpoint alone matches scoring the full fil
 // old size-only checkpoint had nothing to compare. Both frequency-ranked
 // encoders (embed, sparse) permute their codes on the reordered subset.
 TEST_CASE("A re-fitted species vocabulary is caught even when its size is unchanged",
-          "[checkpoint][vocab][issue102][guard]") {
+          "[checkpoint][vocab][guard]") {
     const auto all_plots = corpus();
     const std::vector<Plot> reorder(all_plots.begin() + 16, all_plots.end());
 
@@ -365,20 +276,20 @@ TEST_CASE("A re-fitted species vocabulary is caught even when its size is unchan
     const std::vector<TargetSpec> targets = {TargetSpec::regression("y")};
 
     for (auto mode : {SpeciesEncodingMode::Embed, SpeciesEncodingMode::Sparse}) {
-        DYNAMIC_SECTION("encoder = " << mode_name(mode)) {
+        DYNAMIC_SECTION("encoder = " << species_encoding_to_string(mode)) {
             const auto dcfg = test_dataset_config(mode);
             auto ds_a = ResolveDataset::from_csv(
                 hdr_a.path(), spc_a.path(), roles, targets, dcfg);
 
-            TempPath ckpt("resolve_vocab_silent_");
+            const TempPath ckpt(".pt");
             save_checkpoint(ds_a, mode, ckpt.path());
             Predictor predictor = Predictor::load(ckpt.path(), torch::kCPU);
 
             auto ds_naive = ResolveDataset::from_csv(
                 hdr_r.path(), spc_r.path(), roles, targets, dcfg);
 
-            // Same size, different meaning: this is exactly what used to be
-            // scored without complaint.
+            // Same size, different meaning: exactly what a size check alone
+            // would score without complaint.
             REQUIRE(ds_naive.schema().n_species_vocab ==
                     predictor.schema().n_species_vocab);
             REQUIRE(ds_naive.species_vocab() != predictor.species_vocab());
@@ -389,9 +300,9 @@ TEST_CASE("A re-fitted species vocabulary is caught even when its size is unchan
 
 // The species-dropping subset shrinks the vocabulary, which every
 // species-indexing encoder must reject on the size check alone -- the guard
-// that also protects a pre-issue-#102 checkpoint.
+// that also protects a checkpoint written without the vocab block.
 TEST_CASE("A scoring file missing a species is rejected by every species-indexing encoder",
-          "[checkpoint][vocab][issue102][guard]") {
+          "[checkpoint][vocab][guard]") {
     const auto all_plots = corpus();
     const std::vector<Plot> drop(all_plots.begin() + 12, all_plots.begin() + 20);
 
@@ -405,12 +316,12 @@ TEST_CASE("A scoring file missing a species is rejected by every species-indexin
 
     for (auto mode : {SpeciesEncodingMode::Embed, SpeciesEncodingMode::Sparse,
                       SpeciesEncodingMode::RankPool, SpeciesEncodingMode::Transformer}) {
-        DYNAMIC_SECTION("encoder = " << mode_name(mode)) {
+        DYNAMIC_SECTION("encoder = " << species_encoding_to_string(mode)) {
             const auto dcfg = test_dataset_config(mode);
             auto ds_a = ResolveDataset::from_csv(
                 hdr_a.path(), spc_a.path(), roles, targets, dcfg);
 
-            TempPath ckpt("resolve_vocab_drop_");
+            const TempPath ckpt(".pt");
             save_checkpoint(ds_a, mode, ckpt.path());
             Predictor predictor = Predictor::load(ckpt.path(), torch::kCPU);
 
@@ -428,7 +339,7 @@ TEST_CASE("A scoring file missing a species is rejected by every species-indexin
 // =============================================================================
 
 TEST_CASE("A species absent from training maps to the reserved UNK code",
-          "[checkpoint][vocab][issue102]") {
+          "[checkpoint][vocab]") {
     const auto all_plots = corpus();
     TempFile hdr_a(header_csv(all_plots));
     TempFile spc_a(species_csv(all_plots));
@@ -448,12 +359,12 @@ TEST_CASE("A species absent from training maps to the reserved UNK code",
 
     for (auto mode : {SpeciesEncodingMode::Embed, SpeciesEncodingMode::RankPool,
                       SpeciesEncodingMode::Transformer}) {
-        DYNAMIC_SECTION("encoder = " << mode_name(mode)) {
+        DYNAMIC_SECTION("encoder = " << species_encoding_to_string(mode)) {
             const auto dcfg = test_dataset_config(mode);
             auto ds_a = ResolveDataset::from_csv(
                 hdr_a.path(), spc_a.path(), roles, targets, dcfg);
 
-            TempPath ckpt("resolve_vocab_unk_");
+            const TempPath ckpt(".pt");
             save_checkpoint(ds_a, mode, ckpt.path());
             Predictor predictor = Predictor::load(ckpt.path(), torch::kCPU);
 
@@ -487,7 +398,7 @@ TEST_CASE("A species absent from training maps to the reserved UNK code",
 // =============================================================================
 
 TEST_CASE("save_schema/load_schema round-trip the species and taxonomy vocabularies",
-          "[checkpoint][vocab][issue102]") {
+          "[checkpoint][vocab]") {
     ResolveSchema schema;
     schema.n_plots = 7;
     schema.n_species = 3;
@@ -503,7 +414,7 @@ TEST_CASE("save_schema/load_schema round-trip the species and taxonomy vocabular
     schema.targets.push_back(TargetConfig{"y", TaskType::Regression,
                                           TransformType::None, 0, 1.0f, {}, {}});
 
-    TempPath path("resolve_vocab_roundtrip_");
+    const TempPath path(".pt");
     {
         torch::serialize::OutputArchive archive;
         save_schema(archive, schema);
@@ -533,11 +444,11 @@ TEST_CASE("save_schema/load_schema round-trip the species and taxonomy vocabular
 }
 
 TEST_CASE("An empty vocabulary round-trips as empty rather than as a corrupt read",
-          "[checkpoint][vocab][issue102]") {
+          "[checkpoint][vocab]") {
     ResolveSchema schema;
     schema.n_plots = 1;
     // No species / genus / family vocabularies at all (a schema built by hand).
-    TempPath path("resolve_vocab_empty_");
+    const TempPath path(".pt");
     {
         torch::serialize::OutputArchive archive;
         save_schema(archive, schema);
@@ -554,12 +465,12 @@ TEST_CASE("An empty vocabulary round-trips as empty rather than as a corrupt rea
 }
 
 TEST_CASE("A checkpoint written before the vocab block still loads",
-          "[checkpoint][vocab][issue102][backcompat]") {
+          "[checkpoint][vocab][backcompat]") {
     // Emit ONLY the keys load_schema reads unconditionally, i.e. exactly what a
-    // pre-issue-#102 save_schema produced. Every field added since must come
+    // save_schema without the vocab block produced. Every later field must come
     // back at its default rather than throwing.
     namespace k = ckpt_schema_keys;
-    TempPath path("resolve_vocab_legacy_");
+    const TempPath path(".pt");
     {
         torch::serialize::OutputArchive archive;
         archive.write(k::kNPlots, torch::tensor(static_cast<int64_t>(11)));
@@ -614,7 +525,7 @@ TEST_CASE("A checkpoint written before the vocab block still loads",
 // =============================================================================
 
 TEST_CASE("Every loading-side DatasetConfig field round-trips through the schema",
-          "[checkpoint][vocab][issue102][config]") {
+          "[checkpoint][vocab][config]") {
     // Non-default value for every knob, so a dropped field is visible.
     ResolveSchema schema;
     schema.track_unknown_fraction = false;
@@ -628,7 +539,7 @@ TEST_CASE("Every loading-side DatasetConfig field round-trips through the schema
     schema.pool_weighting = static_cast<int>(PoolWeighting::Rank);
     schema.pool_species_cap = 23;
 
-    TempPath path("resolve_vocab_cfg_");
+    const TempPath path(".pt");
     {
         torch::serialize::OutputArchive archive;
         save_schema(archive, schema);
@@ -676,7 +587,7 @@ TEST_CASE("Every loading-side DatasetConfig field round-trips through the schema
 }
 
 TEST_CASE("A loaded dataset publishes its own config onto the schema",
-          "[checkpoint][vocab][issue102][config]") {
+          "[checkpoint][vocab][config]") {
     const auto plots = corpus();
     TempFile hdr(header_csv(plots));
     TempFile spc(species_csv(plots));
@@ -703,7 +614,7 @@ TEST_CASE("A loaded dataset publishes its own config onto the schema",
 }
 
 TEST_CASE("The rank-pool resolved species cap survives into the inference config",
-          "[checkpoint][vocab][issue102][config]") {
+          "[checkpoint][vocab][config]") {
     const auto plots = corpus();
     TempFile hdr(header_csv(plots));
     TempFile spc(species_csv(plots));
@@ -716,7 +627,7 @@ TEST_CASE("The rank-pool resolved species cap survives into the inference config
     // checkpoint always carries a concrete >0 cap even when the request was 0.
     REQUIRE(ds.schema().pool_species_cap == ds.pool_weights().size(1));
 
-    TempPath ckpt("resolve_vocab_cap_");
+    const TempPath ckpt(".pt");
     save_checkpoint(ds, SpeciesEncodingMode::RankPool, ckpt.path());
     Predictor predictor = Predictor::load(ckpt.path(), torch::kCPU);
 
@@ -754,7 +665,7 @@ TEST_CASE("Data encoded against a training schema is truncated to the training w
     }
 
     SECTION("against a checkpoint's schema and its predictor") {
-        TempPath ckpt("resolve_vocab_width_");
+        const TempPath ckpt(".pt");
         save_checkpoint(train, SpeciesEncodingMode::RankPool, ckpt.path());
         Predictor predictor = Predictor::load(ckpt.path(), torch::kCPU);
         REQUIRE(external_vocabs_from_schema(predictor.schema()).pool_species_cap == 2);
@@ -781,7 +692,7 @@ TEST_CASE("Data encoded against a training schema is truncated to the training w
 // =============================================================================
 
 TEST_CASE("Predictor::predict rejects a dataset whose species vocabulary differs in size",
-          "[checkpoint][vocab][issue102][guard]") {
+          "[checkpoint][vocab][guard]") {
     const auto plots = corpus();
     TempFile hdr_a(header_csv(plots));
     TempFile spc_a(species_csv(plots));
@@ -802,7 +713,7 @@ TEST_CASE("Predictor::predict rejects a dataset whose species vocabulary differs
     const auto dcfg = test_dataset_config(SpeciesEncodingMode::Embed);
 
     auto ds_a = ResolveDataset::from_csv(hdr_a.path(), spc_a.path(), roles, targets, dcfg);
-    TempPath ckpt("resolve_vocab_guard_");
+    const TempPath ckpt(".pt");
     save_checkpoint(ds_a, SpeciesEncodingMode::Embed, ckpt.path());
     Predictor predictor = Predictor::load(ckpt.path(), torch::kCPU);
 
@@ -815,7 +726,7 @@ TEST_CASE("Predictor::predict rejects a dataset whose species vocabulary differs
 }
 
 TEST_CASE("Hash encoding is exempt from the species check but not the taxonomy one",
-          "[checkpoint][vocab][issue102][guard]") {
+          "[checkpoint][vocab][guard]") {
     const auto plots = corpus();
     // Hash features are derived from the species STRING, so its codes never
     // reach the model and a differing species vocabulary is harmless. The
@@ -840,9 +751,9 @@ TEST_CASE("Hash encoding is exempt from the species check but not the taxonomy o
     dcfg.use_taxonomy = false;  // species-only: nothing left to check
 
     auto ds_a = ResolveDataset::from_csv(hdr_a.path(), spc_a.path(), roles, targets, dcfg);
-    ModelConfig mcfg = test_model_config(SpeciesEncodingMode::Hash);
+    ModelConfig mcfg = vocab_model_config(SpeciesEncodingMode::Hash);
     mcfg.hash_dim = 8;
-    TempPath ckpt("resolve_vocab_hash_");
+    const TempPath ckpt(".pt");
     save_checkpoint(ds_a, mcfg, ckpt.path());
     Predictor predictor = Predictor::load(ckpt.path(), torch::kCPU);
 
@@ -874,7 +785,7 @@ std::string header_csv_with_region(const std::vector<Plot>& plots,
 }  // namespace
 
 TEST_CASE("Predictor::predict rejects a dataset that re-factorized its categorical columns",
-          "[checkpoint][vocab][issue102][categorical]") {
+          "[checkpoint][vocab][categorical]") {
     const auto plots = corpus();
     // Training sees four regions; the scoring file sees only two of them, so a
     // fresh factorize assigns codes 1..2 over values that were 2 and 4 at
@@ -895,10 +806,10 @@ TEST_CASE("Predictor::predict rejects a dataset that re-factorized its categoric
     auto ds_a = ResolveDataset::from_csv(hdr_a.path(), spc_a.path(), roles, targets, dcfg);
     REQUIRE(ds_a.schema().has_categoricals());
 
-    ModelConfig mcfg = test_model_config(SpeciesEncodingMode::Hash);
+    ModelConfig mcfg = vocab_model_config(SpeciesEncodingMode::Hash);
     mcfg.hash_dim = 8;
     mcfg.categorical_embed_dim = 4;
-    TempPath ckpt("resolve_vocab_cat_");
+    const TempPath ckpt(".pt");
     save_checkpoint(ds_a, mcfg, ckpt.path());
     Predictor predictor = Predictor::load(ckpt.path(), torch::kCPU);
     REQUIRE(predictor.categorical_vocab().vocab_size("region") == 5);
@@ -932,10 +843,10 @@ TEST_CASE("Predictor::predict rejects a dataset that re-factorized its categoric
 // =============================================================================
 
 TEST_CASE("The single-table loader has a vocabulary-reusing sibling",
-          "[checkpoint][vocab][issue102]") {
+          "[checkpoint][vocab]") {
     // One long table carrying the target: the shape `resolve predict` uses when
-    // no header file is given. Before #102 it had no *_with_schema sibling at
-    // all, so that CLI path could not stay in the model's ID namespace.
+    // no header file is given. Its *_with_schema sibling keeps that CLI path in
+    // the model's ID namespace.
     const auto plots = corpus();
     std::ostringstream full, part;
     full << "plot_id,sp,cover,genus,family,lat,lon,y\n";
@@ -954,20 +865,13 @@ TEST_CASE("The single-table loader has a vocabulary-reusing sibling",
     TempFile full_csv(full.str());
     TempFile part_csv(part.str());
 
-    RoleMapping roles;
-    roles.plot_id = "plot_id";
-    roles.species_id = "sp";
-    roles.abundance = "cover";
-    roles.genus = "genus";
-    roles.family = "family";
-    roles.latitude = "lat";
-    roles.longitude = "lon";
+    const RoleMapping roles = Roles().taxonomy().coordinates();
     const std::vector<TargetSpec> targets = {TargetSpec::regression("y")};
 
     const auto dcfg = test_dataset_config(SpeciesEncodingMode::Embed);
     auto ds_full = ResolveDataset::from_species_csv(full_csv.path(), roles, targets, dcfg);
 
-    TempPath ckpt("resolve_vocab_single_");
+    const TempPath ckpt(".pt");
     save_checkpoint(ds_full, SpeciesEncodingMode::Embed, ckpt.path());
     Predictor predictor = Predictor::load(ckpt.path(), torch::kCPU);
 
@@ -997,7 +901,7 @@ TEST_CASE("The single-table loader has a vocabulary-reusing sibling",
 // =============================================================================
 
 TEST_CASE("ExternalVocabs from a dataset and from a schema describe the same namespace",
-          "[checkpoint][vocab][issue102]") {
+          "[checkpoint][vocab]") {
     const auto plots = corpus();
     TempFile hdr(header_csv(plots));
     TempFile spc(species_csv(plots));

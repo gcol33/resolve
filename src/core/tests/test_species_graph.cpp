@@ -6,13 +6,12 @@
 #include "resolve/role_mapping.hpp"
 #include "resolve/species_graph.hpp"
 #include "resolve/trainer.hpp"
+#include "test_support.hpp"
 
 #include <torch/torch.h>
 
 #include <algorithm>
 #include <cmath>
-#include <filesystem>
-#include <fstream>
 #include <map>
 #include <set>
 #include <sstream>
@@ -20,6 +19,7 @@
 #include <vector>
 
 using namespace resolve;
+using namespace resolve::test;
 
 // ============================================================================
 // The species graph a HeterogeneousGNN passes messages on
@@ -27,52 +27,20 @@ using namespace resolve;
 // The architecture reads a typed graph over the species vocabulary, and
 // HeterogeneousGNNConfig carries four fields describing how to build one:
 // use_taxonomic_edges, use_cooccurrence_edges, k_cooccurrence and
-// cooccurrence_threshold. No engine code read any of them, and no public
-// surface could hand a graph in either -- set_species_graph existed on the
-// adapter alone, which nothing exposes -- so selecting heterogeneous_gnn built
-// a model whose every forward threw "Species graph not set." The architecture
-// was unusable and the four fields described a builder that did not exist.
+// cooccurrence_threshold. Trainer::prepare_data builds the graph from them and
+// the checkpoint carries it.
 //
 // These cases pin what each field does, what the relations are, and that a
-// model now trains and scores on the graph the trainer builds and the
-// checkpoint carries.
+// model trains and scores on the graph the trainer builds and the checkpoint
+// carries.
 // ============================================================================
 
 namespace {
 
-class TempFile {
-public:
-    explicit TempFile(const std::string& content, const std::string& suffix = ".csv") {
-        path_ = std::filesystem::temp_directory_path() /
-                ("resolve_species_graph_" + std::to_string(counter_++) + suffix);
-        std::ofstream file(path_);
-        file << content;
-    }
-    ~TempFile() {
-        std::error_code ec;
-        std::filesystem::remove(path_, ec);
-    }
-    [[nodiscard]] std::string path() const { return path_.string(); }
-
-    TempFile(const TempFile&) = delete;
-    TempFile& operator=(const TempFile&) = delete;
-
-private:
-    std::filesystem::path path_;
-    static int counter_;
-};
-int TempFile::counter_ = 0;
-
 constexpr int kPlots = 12;
 
 std::string header_csv() {
-    std::ostringstream out;
-    out << "plot_id,lon,lat,elev,y\n";
-    for (int i = 0; i < kPlots; ++i) {
-        out << "p" << i << "," << (9.0 + 0.3 * i) << "," << (46.0 + 0.3 * i)
-            << "," << (150 + 11 * i) << "," << (1.0 + 0.2 * i) << "\n";
-    }
-    return out.str();
+    return line_header_csv({kPlots, 9.0, 0.3, 46.0, 0.3, 150.0, 11.0, 1.0, 0.2});
 }
 
 // Two groups of plots with disjoint composition, so co-occurrence is a
@@ -101,26 +69,14 @@ std::string species_csv() {
     return out.str();
 }
 
-RoleMapping roles() {
-    RoleMapping r;
-    r.plot_id = "plot_id";
-    r.species_id = "sp";
-    r.abundance = "cover";
-    r.genus = "genus";
-    r.family = "family";
-    r.longitude = "lon";
-    r.latitude = "lat";
-    r.covariates = {"elev"};
-    return r;
-}
-
 ResolveDataset build_dataset(const std::string& header, const std::string& species,
                              SpeciesEncodingMode mode = SpeciesEncodingMode::Sparse,
                              bool use_taxonomy = true) {
     DatasetConfig config;
     config.species_encoding = mode;
     config.use_taxonomy = use_taxonomy;
-    return ResolveDataset::from_csv(header, species, roles(),
+    return ResolveDataset::from_csv(header, species,
+                                    Roles().taxonomy().coordinates().covariates({"elev"}),
                                     {TargetSpec::regression("y")}, config);
 }
 
@@ -423,8 +379,7 @@ TEST_CASE("A HeterogeneousGNN trains on the graph the trainer builds",
     torch::manual_seed(3);
     ResolveModel model(dataset.schema(), hetero_model());
     REQUIRE(model->requires_species_graph());
-    // Nothing has built one yet, and that is exactly the state in which every
-    // forward used to throw with no way to fix it from outside the adapter.
+    // Nothing has built one yet: prepare_data is where the graph comes from.
     REQUIRE_FALSE(model->has_species_graph());
 
     TrainConfig train;
@@ -466,8 +421,8 @@ TEST_CASE("The trained graph travels in the checkpoint",
     auto expected_type = model->species_graph_edge_type().clone();
     REQUIRE(expected_index.numel() > 0);
 
-    const auto path = (std::filesystem::temp_directory_path() /
-                       "resolve_species_graph_ckpt.pt").string();
+    const TempPath ckpt(".pt");
+    const std::string path = ckpt.path();
     trainer.save(path);
 
     // Scoring passes messages on the same graph the weights were trained on,
@@ -486,8 +441,6 @@ TEST_CASE("The trained graph travels in the checkpoint",
     REQUIRE(reloaded->has_species_graph());
     CHECK(torch::equal(reloaded->species_graph_edge_index(), expected_index));
     CHECK(torch::equal(reloaded->species_graph_edge_type(), expected_type));
-
-    std::filesystem::remove(path);
 }
 
 TEST_CASE("Only the architecture that reads a species graph accepts one",

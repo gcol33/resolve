@@ -203,8 +203,44 @@ TEST_CASE("An unknown transformer pooling is refused, not read as CLS",
     REQUIRE_NOTHROW(build("attention"));
     REQUIRE_NOTHROW(build("cls"));
     // The forward reads anything that is not "attention" as CLS, so an unknown
-    // spelling used to select CLS pooling in silence -- a different
-    // architecture from the one asked for.
+    // spelling accepted at construction would select CLS pooling in silence --
+    // a different architecture from the one asked for.
     CHECK_THROWS_AS(build("mean"), std::invalid_argument);
     CHECK_THROWS_AS(build(""), std::invalid_argument);
+}
+
+// CLS pooling with zero attention layers would emit a constant (the CLS
+// parameter) and drop every species, so it is rejected.
+TEST_CASE("Transformer CLS pooling requires >=1 attention layer", "[transformer]") {
+    REQUIRE_THROWS_AS(
+        PlotEncoderTransformer(
+            /*n_continuous=*/5, /*n_species=*/50, /*n_genera=*/0, /*n_families=*/0,
+            /*d_model=*/32, /*n_heads=*/2, /*n_attention_layers=*/0,
+            /*transformer_ff_dim=*/64, /*transformer_pooling=*/"cls"),
+        std::invalid_argument);
+
+    // attention pooling with 0 layers stays valid.
+    REQUIRE_NOTHROW(
+        PlotEncoderTransformer(
+            /*n_continuous=*/5, /*n_species=*/50, /*n_genera=*/0, /*n_families=*/0,
+            /*d_model=*/32, /*n_heads=*/2, /*n_attention_layers=*/0,
+            /*transformer_ff_dim=*/64, /*transformer_pooling=*/"attention"));
+}
+
+// With an attention layer, CLS pooling depends on the species input (a
+// constant pooled vector would make every plot identical).
+TEST_CASE("Transformer CLS pooling depends on species", "[transformer]") {
+    PlotEncoderTransformer encoder(
+        /*n_continuous=*/4, /*n_species=*/40, /*n_genera=*/0, /*n_families=*/0,
+        /*d_model=*/16, /*n_heads=*/2, /*n_attention_layers=*/1,
+        /*transformer_ff_dim=*/32, /*transformer_pooling=*/"cls");
+    encoder->eval();
+
+    auto continuous = torch::zeros({2, 4});
+    auto sp_a = torch::randint(1, 40, {2, 6}, torch::kInt64);
+    auto sp_b = torch::randint(1, 40, {2, 6}, torch::kInt64);
+    auto out_a = encoder->forward(continuous, sp_a);
+    auto out_b = encoder->forward(continuous, sp_b);
+    REQUIRE(out_a.isfinite().all().item<bool>());
+    REQUIRE_FALSE(torch::allclose(out_a, out_b));
 }
