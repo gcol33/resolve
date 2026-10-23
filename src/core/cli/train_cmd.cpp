@@ -299,18 +299,7 @@ int train_command(const ParsedArgs& args) {
     torch::manual_seed(static_cast<uint64_t>(seed));
 
     // ---------------------------------------------------------------- model
-    // The knobs that size the model to the data come from the dataset config,
-    // and the taxonomy-slot count is the width the loader built (top_k,
-    // doubled for top_bottom selection), so the model is never sized against a
-    // different width than the data carries.
-    model_config.species_encoding = dataset_config.species_encoding;
-    model_config.hash_dim = dataset_config.hash_dim;
-    model_config.top_k = dataset_config.top_k;
-    model_config.top_k_species = dataset_config.top_k_species;
-    const torch::Tensor& genus_ids = dataset.genus_ids();
-    if (genus_ids.defined() && genus_ids.dim() == 2 && genus_ids.size(1) > 0) {
-        model_config.n_taxonomy_slots = static_cast<int>(genus_ids.size(1));
-    }
+    model_config = model_config_for_dataset(dataset, model_config);
 
     std::cout << "\nCreating model..." << std::endl;
     ResolveModel model(dataset.schema(), model_config);

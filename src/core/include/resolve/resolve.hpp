@@ -20,6 +20,7 @@
 #include "resolve/model.hpp"
 #include "resolve/trainer.hpp"
 #include "resolve/predictor.hpp"
+#include "resolve/retrieval.hpp"
 #include "resolve/suite.hpp"
 #include "resolve/json.hpp"
 #include "resolve/sha256.hpp"

@@ -41,6 +41,10 @@
 #include "resolve/types.hpp"
 #include "resolve/dataset.hpp"
 #include "resolve/enum_names.hpp"
+#include "resolve/pretraining.hpp"
+#include "resolve/retrieval.hpp"
+#include "resolve/trainer.hpp"
+#include "resolve/vae.hpp"
 
 #include <cstddef>
 #include <string>
@@ -381,6 +385,90 @@ inline constexpr const char* kRequiredDatasetConfigKeys[] = {
     F(batch_size_floor,    "train_batch_size_floor")
 
 RESOLVE_DEFINE_FIELD_REGISTRY(TrainConfig, RESOLVE_TRAIN_CONFIG_FIELDS)
+
+// ============================================================================
+// Call settings that are not persisted
+// ============================================================================
+//
+// These configure one call -- a cross-validation, a pretraining run, a
+// retrieval -- rather than describe a checkpoint, so every key is empty. They
+// still have registries: the C-ABI value tree reads and checks them and the
+// Python attributes are bound from them, like the persisted structs.
+
+#define RESOLVE_SPATIAL_BLOCK_CONFIG_FIELDS(F) \
+    F(lat_size, "")                            \
+    F(lon_size, "")                            \
+    F(balance,  "")
+
+RESOLVE_DEFINE_FIELD_REGISTRY(SpatialBlockConfig, RESOLVE_SPATIAL_BLOCK_CONFIG_FIELDS)
+
+#define RESOLVE_RETRIEVAL_CONFIG_FIELDS(F) \
+    F(k_neighbors, "")                     \
+    F(alpha,       "")                     \
+    F(temperature, "")
+
+RESOLVE_DEFINE_FIELD_REGISTRY(RetrievalConfig, RESOLVE_RETRIEVAL_CONFIG_FIELDS)
+
+#define RESOLVE_PRETRAIN_CONFIG_FIELDS(F)  \
+    F(mask_ratio,            "")           \
+    F(mask_strategy,         "")           \
+    F(pretrain_epochs,       "")           \
+    F(pretrain_lr,           "")           \
+    F(pretrain_weight_decay, "")           \
+    F(batch_size,            "")           \
+    F(device,                "")           \
+    F(log,                   "")           \
+    F(seed,                  "")           \
+    F(ema_decay,             "")           \
+    F(ema_decay_end,         "")           \
+    F(predictor_hidden_dim,  "")           \
+    F(predictor_n_layers,    "")           \
+    F(predictor_dropout,     "")           \
+    F(corruption_rate,       "")           \
+    F(temperature,           "")           \
+    F(projection_dim,        "")           \
+    F(mixup_alpha,           "")
+
+RESOLVE_DEFINE_FIELD_REGISTRY(PretrainConfig, RESOLVE_PRETRAIN_CONFIG_FIELDS)
+
+#define RESOLVE_MLM_PRETRAIN_CONFIG_FIELDS(F) \
+    F(mask_prob,             "")              \
+    F(pretrain_epochs,       "")              \
+    F(pretrain_lr,           "")              \
+    F(pretrain_weight_decay, "")              \
+    F(batch_size,            "")              \
+    F(device,                "")              \
+    F(log,                   "")              \
+    F(seed,                  "")
+
+RESOLVE_DEFINE_FIELD_REGISTRY(MLMPretrainConfig, RESOLVE_MLM_PRETRAIN_CONFIG_FIELDS)
+
+#define RESOLVE_VAE_CONFIG_FIELDS(F)       \
+    F(latent_dim,            "")           \
+    F(encoder_dims,          "")           \
+    F(decoder_dims,          "")           \
+    F(dropout,               "")           \
+    F(kl_weight,             "")           \
+    F(kl_anneal_epochs,      "")           \
+    F(pretrain_epochs,       "")           \
+    F(pretrain_lr,           "")           \
+    F(pretrain_weight_decay, "")           \
+    F(batch_size,            "")           \
+    F(device,                "")           \
+    F(log,                   "")           \
+    F(seed,                  "")
+
+RESOLVE_DEFINE_FIELD_REGISTRY(VAEConfig, RESOLVE_VAE_CONFIG_FIELDS)
+
+// The member names of a registered struct, in registry order: the keys a
+// value tree or a keyword list may carry for it.
+template <typename Cfg>
+std::vector<std::string> field_names() {
+    std::vector<std::string> names;
+    const Cfg cfg{};
+    for_each_field(cfg, [&](const char* name, const char*, const auto&) { names.emplace_back(name); });
+    return names;
+}
 
 // The batch size that actually trained the model, which is config_.batch_size
 // after any CUDA auto-halve-on-OOM retry. Not a TrainConfig field (the config

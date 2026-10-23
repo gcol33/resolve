@@ -276,6 +276,45 @@ jobs:
       # to score carry no target column, which both predict paths must accept.
       # The suite's vote and mean are recomputed from the members' own
       # single-model predictions, and a changed weight file is refused.
+      # Retrieval: with the training plots as the reference, k = 1 and alpha = 1
+      # every plot retrieves itself, so each prediction is its own label.
+      - name: Predict with retrieval
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=${{ github.workspace }}/libtorch/lib:${LD_LIBRARY_PATH:-}
+          RESOLVE=${{ github.workspace }}/cli/resolve
+          FIXTURES=${{ github.workspace }}/src/core/tests/fixtures
+
+          "$RESOLVE" predict \
+            --model "$OUT/model.pt" \
+            --header "$FIXTURES/cli_header.csv" \
+            --species "$FIXTURES/cli_species.csv" \
+            --plot-id plot_id --species-id species --abundance cover \
+            --lat lat --lon lon --genus genus --family family \
+            --retrieval-header "$FIXTURES/cli_header.csv" \
+            --retrieval-species "$FIXTURES/cli_species.csv" \
+            --retrieval-k 1 --retrieval-alpha 1 \
+            --output "$OUT/predictions_retrieval.csv"
+
+          python3 - "$OUT/predictions_retrieval.csv" "$FIXTURES/cli_header.csv" <<'CHECK'
+          import csv
+          import math
+          import sys
+
+          predictions_path, fixture_path = sys.argv[1], sys.argv[2]
+          with open(fixture_path, newline="") as fh:
+              fixture = {p["plot_id"]: p for p in csv.DictReader(fh)}
+          with open(predictions_path, newline="") as fh:
+              rows = list(csv.DictReader(fh))
+          assert len(rows) == len(fixture)
+          for row in rows:
+              truth = fixture[row["plot_id"]]
+              assert math.isclose(float(row["area"]), float(truth["area"]), rel_tol=1e-4,
+                                  abs_tol=1e-4), (row["plot_id"], row["area"], truth["area"])
+              assert row["habitat"] == truth["habitat"], (row["plot_id"], row["habitat"])
+          print(f"OK: {len(rows)} retrieval predictions equal their own labels")
+          CHECK
+
       - name: Predict with a model suite
         run: |
           set -euo pipefail

@@ -105,9 +105,10 @@ inline const CommandSpec& train_spec() {
                          "train/test split, the epoch shuffle, and the\n"
                          "cross-validation folds, so two identical runs\n"
                          "produce the same model."});
-        flags.push_back({"--cuda", Arity::Flag, "", "",
-                         "Train on the CUDA device (an error when none is\n"
-                         "available)"});
+        flags.push_back({"--device", Arity::Value, "DEVICE", "cpu",
+                         "Device to train on: cpu, cuda (the current CUDA\n"
+                         "device) or cuda:N (CUDA device N). A CUDA device\n"
+                         "that is not available is an error."});
 
         // Cross-validation
         flags.push_back({"--cv-folds", Arity::Value, "N", "0",
@@ -162,9 +163,9 @@ inline const CommandSpec& predict_spec() {
         flags.push_back({"--output", Arity::Value, "PATH", "predictions.csv",
                          "Output path for predictions"});
         append_role_flags(flags);
-        flags.push_back({"--cuda", Arity::Flag, "", "",
-                         "Predict on the CUDA device (default: CPU; an error\n"
-                         "when no device is available). Predict on a\n"
+        flags.push_back({"--device", Arity::Value, "DEVICE", "cpu",
+                         "Device to predict on: cpu, cuda or cuda:N (a CUDA\n"
+                         "device that is not available is an error). Predict on a\n"
                          "5M-param MLP over 300k plots is ~12s on CPU vs ~1s\n"
                          "on GPU; the OOM and bookkeeping cost of GPU\n"
                          "predict on 16 GiB-class cards usually outweighs\n"
@@ -177,6 +178,18 @@ inline const CommandSpec& predict_spec() {
         flags.push_back({"--vram-fraction", Arity::Value, "FLOAT", "1.0",
                          "Fraction of GPU VRAM the PyTorch caching allocator\n"
                          "may use"});
+        flags.push_back({"--retrieval-header", Arity::Value, "PATH", "",
+                         "Header CSV of the retrieval reference plots (with\n"
+                         "--retrieval-species): normally the training plots,\n"
+                         "carrying a column for each target, named as the\n"
+                         "target. Each prediction is then blended with the\n"
+                         "labels of its nearest reference plots in the\n"
+                         "model's latent space."});
+        flags.push_back({"--retrieval-species", Arity::Value, "PATH", "",
+                         "Species CSV of the retrieval reference plots; alone,\n"
+                         "a single table that also carries the targets."});
+        append_config_flags(flags, "Retrieval", resolve::RetrievalConfig{},
+                            FlagNaming::members(kRetrievalConfigFlags));
         flags.push_back({"--probabilities", Arity::Flag, "", "",
                          "Also write each classification target's class\n"
                          "probabilities: one column per class,\n"

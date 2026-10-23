@@ -11,6 +11,18 @@
 
 namespace resolve {
 
+// Read the checkpoint at `path` into `archive`, its tensors onto `device`,
+// retrying a transient read fault (io::with_retry). A path that is not a
+// readable file throws io::IOError, a storage failure, once the retries are
+// spent; an unreadable archive (a truncated or foreign file) throws the
+// deserializer's error.
+void read_checkpoint_archive(torch::serialize::InputArchive& archive, const std::string& path,
+                             const torch::Device& device, const char* what);
+
+// Write `archive` to `path`, retrying a transient write fault; a write that
+// still fails throws io::IOError.
+void write_checkpoint_archive(torch::serialize::OutputArchive& archive, const std::string& path);
+
 // Write `checkpoint_dir`/progress.json for monitoring a run: the epoch, the
 // best epoch and loss (null until an epoch is scored), the patience count and
 // one band accuracy of the best epoch.

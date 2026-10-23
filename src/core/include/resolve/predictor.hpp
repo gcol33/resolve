@@ -4,7 +4,10 @@
 #include "resolve/model.hpp"
 #include "resolve/trainer.hpp"
 #include "resolve/dataset.hpp"
+#include "resolve/retrieval.hpp"
 #include <torch/torch.h>
+
+#include <optional>
 
 namespace resolve {
 
@@ -77,7 +80,9 @@ public:
     // and, for every classification target, a `probabilities` entry holding
     // the softmax row `(n_plots, n_classes)` the code was taken from, so a
     // caller can read a per-plot confidence (max probability, margin,
-    // entropy) off a checkpoint scored on any dataset.
+    // entropy) off a checkpoint scored on any dataset. With a retrieval set
+    // (set_retrieval) both are the blend with the plot's nearest reference
+    // plots.
     //
     // `batch_size` controls how the forward pass is chunked along dim 0:
     //   -1  : one forward pass over the whole dataset. Maximum throughput,
@@ -124,6 +129,25 @@ public:
     [[nodiscard]] torch::Tensor get_genus_embeddings() const;
     [[nodiscard]] torch::Tensor get_family_embeddings() const;
     [[nodiscard]] torch::Tensor get_species_embeddings() const;
+
+    // Retrieval augmentation (retrieval.hpp). Encodes the `reference` plots in
+    // chunks of `batch_size`, keeps their latents and labels on the predictor's
+    // device, and from then on every predict() blends each plot's prediction
+    // with the labels of its nearest reference plots; the latent and
+    // get_embeddings() are unchanged. `reference` must be built in the model's
+    // namespace (validated as predict() validates a dataset) and carry labels
+    // for every target of the model, normally the training plots; a plot
+    // unlabelled for a target there is not retrieved for that target. Replaces
+    // a retrieval set before.
+    void set_retrieval(const ResolveDataset& reference,
+                       const RetrievalConfig& config = RetrievalConfig{},
+                       int64_t batch_size = 4096);
+    // Back to the model's own predictions.
+    void clear_retrieval() noexcept { retrieval_.reset(); }
+    // The retrieval predict() applies, or nullptr.
+    [[nodiscard]] const RetrievalIndex* retrieval() const noexcept {
+        return retrieval_ ? &*retrieval_ : nullptr;
+    }
 
     // Optimize model for inference (fuses BatchNorm into Linear layers)
     void optimize_for_inference();
@@ -198,6 +222,7 @@ private:
     Scalers scalers_;
     CategoricalVocab categorical_vocab_;
     torch::Device device_;
+    std::optional<RetrievalIndex> retrieval_;
 };
 
 } // namespace resolve

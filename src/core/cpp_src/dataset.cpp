@@ -840,10 +840,32 @@ ResolveDataset ResolveDataset::load_table(
     return dataset;
 }
 
-// Public verbs. A CSV read is wrapped in io::with_retry<io::IOError>, so a
-// transient storage fault re-runs the whole load into a fresh dataset; a
-// parse/logic error propagates on the first try. A fully in-memory load does
-// no I/O and is not retried.
+// Public verbs: every one is a form of load(), which opens the sources and
+// runs load_tables (header + species) or load_table (one table).
+
+std::unique_ptr<RowSource> TableSource::open() const {
+    if (table_ != nullptr) return std::make_unique<InMemoryRowSource>(*table_);
+    return std::make_unique<CSVReader>(path_);
+}
+
+ResolveDataset ResolveDataset::load(
+    const std::optional<TableSource>& header,
+    const TableSource& species,
+    const RoleMapping& roles,
+    const std::vector<TargetSpec>& targets,
+    const DatasetConfig& config,
+    const ExternalVocabs* vocabs
+) {
+    auto run = [&] {
+        const std::unique_ptr<RowSource> species_source = species.open();
+        if (!header) return load_table(*species_source, roles, targets, config, vocabs);
+        const std::unique_ptr<RowSource> header_source = header->open();
+        return load_tables(*header_source, *species_source, roles, targets, config, vocabs);
+    };
+    const bool reads_file = species.is_csv() || (header && header->is_csv());
+    if (!reads_file) return run();
+    return io::with_retry<io::IOError>(run, "dataset load");
+}
 
 ResolveDataset ResolveDataset::from_csv(
     const std::string& header_path,
@@ -852,13 +874,8 @@ ResolveDataset ResolveDataset::from_csv(
     const std::vector<TargetSpec>& targets,
     const DatasetConfig& config
 ) {
-    return io::with_retry<io::IOError>(
-        [&] {
-            CSVReader header(header_path);
-            CSVReader species(species_path);
-            return load_tables(header, species, roles, targets, config, nullptr);
-        },
-        "dataset CSV load");
+    return load(TableSource::csv(header_path), TableSource::csv(species_path), roles, targets,
+                config);
 }
 
 ResolveDataset ResolveDataset::from_csv_with_schema(
@@ -893,13 +910,8 @@ ResolveDataset ResolveDataset::from_csv_with_vocabs(
     const ExternalVocabs& vocabs,
     const DatasetConfig& config
 ) {
-    return io::with_retry<io::IOError>(
-        [&] {
-            CSVReader header(header_path);
-            CSVReader species(species_path);
-            return load_tables(header, species, roles, targets, config, &vocabs);
-        },
-        "dataset CSV load (schema)");
+    return load(TableSource::csv(header_path), TableSource::csv(species_path), roles, targets,
+                config, &vocabs);
 }
 
 ResolveDataset ResolveDataset::from_species_csv(
@@ -908,12 +920,7 @@ ResolveDataset ResolveDataset::from_species_csv(
     const std::vector<TargetSpec>& targets,
     const DatasetConfig& config
 ) {
-    return io::with_retry<io::IOError>(
-        [&] {
-            CSVReader reader(species_path);
-            return load_table(reader, roles, targets, config, nullptr);
-        },
-        "species CSV load");
+    return load(std::nullopt, TableSource::csv(species_path), roles, targets, config);
 }
 
 ResolveDataset ResolveDataset::from_species_csv_with_schema(
@@ -934,12 +941,7 @@ ResolveDataset ResolveDataset::from_species_csv_with_vocabs(
     const ExternalVocabs& vocabs,
     const DatasetConfig& config
 ) {
-    return io::with_retry<io::IOError>(
-        [&] {
-            CSVReader reader(species_path);
-            return load_table(reader, roles, targets, config, &vocabs);
-        },
-        "species CSV load (schema)");
+    return load(std::nullopt, TableSource::csv(species_path), roles, targets, config, &vocabs);
 }
 
 ResolveDataset ResolveDataset::from_dataframe(
@@ -949,9 +951,7 @@ ResolveDataset ResolveDataset::from_dataframe(
     const std::vector<TargetSpec>& targets,
     const DatasetConfig& config
 ) {
-    InMemoryRowSource header_source(header);
-    InMemoryRowSource species_source(species);
-    return load_tables(header_source, species_source, roles, targets, config, nullptr);
+    return load(TableSource::table(header), TableSource::table(species), roles, targets, config);
 }
 
 ResolveDataset ResolveDataset::from_dataframe_header(
@@ -961,13 +961,8 @@ ResolveDataset ResolveDataset::from_dataframe_header(
     const std::vector<TargetSpec>& targets,
     const DatasetConfig& config
 ) {
-    return io::with_retry<io::IOError>(
-        [&] {
-            InMemoryRowSource header_source(header);
-            CSVReader species(species_path);
-            return load_tables(header_source, species, roles, targets, config, nullptr);
-        },
-        "dataset load (DataFrame header + species CSV)");
+    return load(TableSource::table(header), TableSource::csv(species_path), roles, targets,
+                config);
 }
 
 ResolveDataset ResolveDataset::from_dataframe_with_schema(
@@ -990,9 +985,8 @@ ResolveDataset ResolveDataset::from_dataframe_with_vocabs(
     const ExternalVocabs& vocabs,
     const DatasetConfig& config
 ) {
-    InMemoryRowSource header_source(header);
-    InMemoryRowSource species_source(species);
-    return load_tables(header_source, species_source, roles, targets, config, &vocabs);
+    return load(TableSource::table(header), TableSource::table(species), roles, targets, config,
+                &vocabs);
 }
 
 ResolveDataset ResolveDataset::from_species_dataframe(
@@ -1001,8 +995,7 @@ ResolveDataset ResolveDataset::from_species_dataframe(
     const std::vector<TargetSpec>& targets,
     const DatasetConfig& config
 ) {
-    InMemoryRowSource source(species);
-    return load_table(source, roles, targets, config, nullptr);
+    return load(std::nullopt, TableSource::table(species), roles, targets, config);
 }
 
 ResolveDataset ResolveDataset::from_species_dataframe_with_vocabs(
@@ -1012,8 +1005,7 @@ ResolveDataset ResolveDataset::from_species_dataframe_with_vocabs(
     const ExternalVocabs& vocabs,
     const DatasetConfig& config
 ) {
-    InMemoryRowSource source(species);
-    return load_table(source, roles, targets, config, &vocabs);
+    return load(std::nullopt, TableSource::table(species), roles, targets, config, &vocabs);
 }
 
 // =============================================================================
@@ -1063,6 +1055,36 @@ DatasetConfig dataset_config_from_checkpoint(const ResolveSchema& schema,
     // Predictor::predict consumes the precomputed hash embedding.
     config.use_cuda_hash = false;
     return config;
+}
+
+ModelConfig model_config_for_dataset(const ResolveDataset& dataset, ModelConfig base) {
+    const DatasetConfig& loader = dataset.config();
+    base.species_encoding = loader.species_encoding;
+    base.hash_dim = loader.hash_dim;
+    base.top_k = loader.top_k;
+    base.top_k_species = loader.top_k_species;
+    const torch::Tensor& genus_slots = dataset.genus_ids();
+    if (genus_slots.defined() && genus_slots.dim() == 2 && genus_slots.size(1) > 0) {
+        base.n_taxonomy_slots = static_cast<int>(genus_slots.size(1));
+    }
+    return base;
+}
+
+std::vector<TargetSpec> target_specs_from_schema(const ResolveSchema& schema) {
+    std::vector<TargetSpec> specs;
+    specs.reserve(schema.targets.size());
+    for (const TargetConfig& target : schema.targets) {
+        TargetSpec spec;
+        spec.target_name = target.name;
+        spec.column_name = target.name;
+        spec.task = target.task;
+        spec.transform = target.transform;
+        spec.num_classes = target.num_classes;
+        spec.weight = target.weight;
+        spec.missing = target.missing;
+        specs.push_back(std::move(spec));
+    }
+    return specs;
 }
 
 torch::Tensor ResolveDataset::continuous_block(bool include_hash) const {

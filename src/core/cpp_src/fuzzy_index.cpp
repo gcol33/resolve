@@ -138,6 +138,10 @@ FuzzyIndex FuzzyIndex::build(const std::vector<std::string>& entries,
     impl.global_trie.finalize();
     for (auto& kv : impl.buckets) kv.second.finalize();
 
+    // The bucket function is read only while building; the index does not
+    // keep it, so a binding may hand in a callable it owns for the call alone.
+    impl.opts.bucket_fn = nullptr;
+
     return idx;
 }
 

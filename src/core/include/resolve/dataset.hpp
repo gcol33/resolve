@@ -14,6 +14,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
+#include <optional>
 
 namespace resolve {
 
@@ -78,6 +79,27 @@ ExternalVocabs external_vocabs_from_schema(const ResolveSchema& schema);
 DatasetConfig dataset_config_from_checkpoint(const ResolveSchema& schema,
                                              const ModelConfig& model_config);
 
+class ResolveDataset;
+
+// The inverse direction: `base` with the fields that size a model to the data
+// taken from `dataset`. species_encoding, hash_dim, top_k and top_k_species come
+// from the loader settings the dataset was encoded with, and n_taxonomy_slots
+// from the width of its fixed genus slots (top_k, doubled under top_bottom
+// selection; left as `base` has it for an encoding without fixed slots). Every
+// other field is `base`'s. The R verbs, the CLI and Python build a model for a
+// dataset through this, so a model is never sized against a width the data
+// does not carry.
+[[nodiscard]] ModelConfig model_config_for_dataset(const ResolveDataset& dataset,
+                                                   ModelConfig base);
+
+// The targets a checkpoint was trained on, each read from the column of its
+// own name, with the task, transform, class count, weight and missing-label
+// policy the schema records: what a loader needs to read those targets' labels
+// from new data (the reference plots of retrieval). A *_with_vocabs loader
+// replays each classification target's class -> code mapping from the
+// vocabularies, so no class_mapping is set here.
+[[nodiscard]] std::vector<TargetSpec> target_specs_from_schema(const ResolveSchema& schema);
+
 // The selection a dataset built under `config` actually applies. Hash and embed
 // always select, because their widths ARE per-plot budgets (top_k and
 // top_k_species). The rank_pool / transformer / sparse encodings select only
@@ -97,6 +119,24 @@ SelectionMode effective_selection(const DatasetConfig& config);
 // or adopts one EncodingVocab, and runs the configured species encoding.
 class ResolveDataset {
 public:
+    // The one loader every verb below is a form of: the plots of `header`
+    // (one row per plot), or with no header a single table where each plot's
+    // plot-level columns are read from its first `species` row (covariates and
+    // categoricals need a header), and the species records of `species` (one
+    // row per record). With `vocabs` the dataset is encoded in their namespace
+    // and classification class mappings are replayed from them; without, its
+    // vocabularies are fitted on this data. A load that reads a CSV file runs
+    // inside io::with_retry<io::IOError>, so a transient storage fault re-runs
+    // it while a parse error does not; a fully in-memory load is not retried.
+    static ResolveDataset load(
+        const std::optional<TableSource>& header,
+        const TableSource& species,
+        const RoleMapping& roles,
+        const std::vector<TargetSpec>& targets,
+        const DatasetConfig& config = DatasetConfig{},
+        const ExternalVocabs* vocabs = nullptr
+    );
+
     // Load from two CSV files: header data (one row per plot) and species data (multiple rows per plot)
     static ResolveDataset from_csv(
         const std::string& header_path,

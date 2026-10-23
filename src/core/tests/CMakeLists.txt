@@ -117,10 +117,23 @@ add_executable(resolve_tests
     test_load_scale.cpp
     test_encoder_parity.cpp
     test_species_encoder.cpp
+    test_retrieval.cpp
 )
 
 resolve_link_cuda_dirs(resolve_tests)
 resolve_use_catch_prelude(resolve_tests)
+
+# The C ABI cases call resolve_c as a C client does; its DLL is copied beside
+# the test executable so the loader finds it.
+if(TARGET resolve_c)
+    target_sources(resolve_tests PRIVATE test_capi.cpp)
+    target_link_libraries(resolve_tests PRIVATE resolve_c)
+    if(WIN32)
+        add_custom_command(TARGET resolve_tests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:resolve_c> $<TARGET_FILE_DIR:resolve_tests>)
+    endif()
+endif()
 
 # Recorded inputs the cases read back (tests/fixtures).
 target_compile_definitions(resolve_tests PRIVATE

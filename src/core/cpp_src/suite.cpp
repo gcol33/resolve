@@ -594,42 +594,24 @@ std::vector<std::string> SuiteManifest::verify(const std::string& dir,
 
 SuiteInput SuiteInput::csv(std::string header_path, std::string species_path) {
     if (species_path.empty()) throw std::invalid_argument("SuiteInput: a species CSV is required");
-    SuiteInput in;
-    in.header_path_ = std::move(header_path);
-    in.species_path_ = std::move(species_path);
-    return in;
+    std::optional<TableSource> header;
+    if (!header_path.empty()) header = TableSource::csv(std::move(header_path));
+    return SuiteInput(std::move(header), TableSource::csv(std::move(species_path)));
 }
 
 SuiteInput SuiteInput::tables(const ColumnTable* header, const ColumnTable& species) {
-    SuiteInput in;
-    in.header_table_ = header;
-    in.species_table_ = &species;
-    return in;
+    std::optional<TableSource> header_source;
+    if (header != nullptr) header_source = TableSource::table(*header);
+    return SuiteInput(std::move(header_source), TableSource::table(species));
 }
 
-bool SuiteInput::has_header() const noexcept {
-    return header_table_ != nullptr || !header_path_.empty();
-}
+bool SuiteInput::has_header() const noexcept { return header_.has_value(); }
 
 ResolveDataset SuiteInput::encode(const RoleMapping& roles, const ExternalVocabs& vocabs,
                                   const DatasetConfig& config) const {
     // No targets: the plots to score carry none, and a loader asked for one
     // would drop every plot where it is missing.
-    const std::vector<TargetSpec> no_targets;
-    if (species_table_ != nullptr) {
-        if (header_table_ != nullptr) {
-            return ResolveDataset::from_dataframe_with_vocabs(
-                *header_table_, *species_table_, roles, no_targets, vocabs, config);
-        }
-        return ResolveDataset::from_species_dataframe_with_vocabs(
-            *species_table_, roles, no_targets, vocabs, config);
-    }
-    if (!header_path_.empty()) {
-        return ResolveDataset::from_csv_with_vocabs(
-            header_path_, species_path_, roles, no_targets, vocabs, config);
-    }
-    return ResolveDataset::from_species_csv_with_vocabs(
-        species_path_, roles, no_targets, vocabs, config);
+    return ResolveDataset::load(header_, species_, roles, /*targets=*/{}, config, &vocabs);
 }
 
 // ============================================================================

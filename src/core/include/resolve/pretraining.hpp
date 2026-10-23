@@ -94,15 +94,6 @@ private:
 // Configuration for self-supervised pretraining
 // =============================================================================
 
-// Masking strategy for feature corruption. All three operate on the continuous
-// feature vector; none is species/taxonomy-aware (the species inputs are
-// masked by mask_species_view).
-enum class MaskStrategy {
-    Random,     // Mask random individual features uniformly
-    Block,      // Mask one contiguous feature range per sample
-    Structured  // Mask whole contiguous feature groups (n_features/4 groups)
-};
-
 // Pretraining configuration
 struct PretrainConfig {
     // Common settings
@@ -396,6 +387,15 @@ PretrainResult run_pretrain_loop(
     const PretrainBatchFn& batch_fn,
     const PretrainLoopHooks& hooks = PretrainLoopHooks{}
 );
+
+class ResolveDataset;
+
+// The model inputs a pretext task reads for the plots of `dataset`: every
+// PlotInputs field the dataset carries, with `continuous` the unstandardised
+// continuous block `model`'s encoder reads (the hash embedding included when
+// the model reads it there). What a binding pretrains a model on when it hands
+// over a dataset rather than tensors.
+[[nodiscard]] PlotInputs pretraining_inputs(const ResolveDataset& dataset, const ResolveModel& model);
 
 // =============================================================================
 // JEPAPretrainer: T-JEPA self-supervised pretraining orchestrator (C++)

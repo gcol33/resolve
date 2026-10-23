@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "resolve/dataset.hpp"
+#include "resolve/gpu.hpp"
 #include "resolve/role_mapping.hpp"
 #include "resolve/suite.hpp"
 
@@ -59,18 +60,25 @@ inline resolve::SuiteColumns read_suite_columns(const ParsedArgs& args) {
     return columns;
 }
 
-// CUDA with --cuda, the CPU otherwise. Asking for CUDA on a machine without a
-// usable device is an error, not a quiet run on the CPU.
+// The device --device names (resolve::parse_device). A CUDA device the machine
+// does not have is an error, not a quiet run on the CPU.
 inline torch::Device choose_device(const ParsedArgs& args) {
-    if (!args.has("--cuda")) {
-        std::cout << "Using CPU" << std::endl;
-        return torch::kCPU;
+    torch::Device device(torch::kCPU);
+    try {
+        device = resolve::parse_device(args.get("--device"));
+    } catch (const std::invalid_argument& e) {
+        throw ArgError(std::string("--device: ") + e.what());
     }
-    if (!torch::cuda::is_available()) {
-        throw ArgError("--cuda: no CUDA device is available");
+    if (device.is_cuda()) {
+        const auto n_devices = static_cast<int>(torch::cuda::device_count());
+        if (n_devices == 0) throw ArgError("--device: no CUDA device is available");
+        if (device.has_index() && device.index() >= n_devices) {
+            throw ArgError("--device: " + resolve::device_name(device) + " does not exist (" +
+                           std::to_string(n_devices) + " CUDA device(s) present)");
+        }
     }
-    std::cout << "Using CUDA" << std::endl;
-    return torch::kCUDA;
+    std::cout << "Using " << resolve::device_name(device) << std::endl;
+    return device;
 }
 
 // The plots of a header and a species CSV, or of a species CSV alone when no
@@ -82,17 +90,10 @@ inline resolve::ResolveDataset load_dataset(const std::string& header_path,
                                             const std::vector<resolve::TargetSpec>& targets,
                                             const resolve::DatasetConfig& config,
                                             const resolve::ExternalVocabs* vocabs = nullptr) {
-    using resolve::ResolveDataset;
-    if (header_path.empty()) {
-        return vocabs != nullptr
-                   ? ResolveDataset::from_species_csv_with_vocabs(species_path, roles, targets,
-                                                                  *vocabs, config)
-                   : ResolveDataset::from_species_csv(species_path, roles, targets, config);
-    }
-    return vocabs != nullptr
-               ? ResolveDataset::from_csv_with_vocabs(header_path, species_path, roles, targets,
-                                                      *vocabs, config)
-               : ResolveDataset::from_csv(header_path, species_path, roles, targets, config);
+    std::optional<resolve::TableSource> header;
+    if (!header_path.empty()) header = resolve::TableSource::csv(header_path);
+    return resolve::ResolveDataset::load(header, resolve::TableSource::csv(species_path), roles,
+                                         targets, config, vocabs);
 }
 
 }  // namespace resolve_cli

@@ -245,10 +245,11 @@ public:
                                         const DatasetConfig& config) const;
 
 private:
-    std::string header_path_;
-    std::string species_path_;
-    const ColumnTable* header_table_ = nullptr;
-    const ColumnTable* species_table_ = nullptr;
+    SuiteInput(std::optional<TableSource> header, TableSource species)
+        : header_(std::move(header)), species_(std::move(species)) {}
+
+    std::optional<TableSource> header_;
+    TableSource species_;
 };
 
 // ============================================================================

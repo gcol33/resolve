@@ -33,6 +33,7 @@ set(RESOLVE_CORE_SOURCES
     ${RESOLVE_CORE_DIR}/cpp_src/trainer_checkpoint.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/lr_schedule.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/predictor.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/retrieval.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/suite.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/json.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/sha256.cpp

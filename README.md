@@ -175,7 +175,7 @@ The engine runs without a language runtime:
 resolve train --header plots.csv --species species.csv \
               --plot-id PlotID --species-id Species --abundance Cover \
               --target Area:regression --target Habitat:classification:9 \
-              --encoding rank_pool --cuda --output model.pt
+              --encoding rank_pool --device cuda --output model.pt
 
 resolve predict --model model.pt --header new_plots.csv --species new_species.csv \
                 --output predictions.csv

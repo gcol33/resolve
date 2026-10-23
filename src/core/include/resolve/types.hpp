@@ -674,6 +674,15 @@ enum class TabMAggregation {
     Median
 };
 
+// How the pretext tasks of self-supervised pretraining (pretraining.hpp) mask
+// the continuous feature vector; the species inputs are masked by
+// mask_species_view instead.
+enum class MaskStrategy {
+    Random,     // Mask random individual features uniformly
+    Block,      // Mask one contiguous feature range per sample
+    Structured  // Mask whole contiguous feature groups (n_features/4 groups)
+};
+
 // TabM (BatchEnsemble) configuration
 struct TabMConfig {
     bool enabled = false;                    // Whether to use TabM instead of standard MLP

@@ -36,21 +36,21 @@ RESOLVE_SYM(resolve_value_t*, resolve_value_new_string_array, (const char* const
 RESOLVE_SYM(resolve_value_t*, resolve_value_new_double_matrix, (const double* v, int64_t nrow, int64_t ncol), (v, nrow, ncol))
 RESOLVE_SYM(resolve_value_t*, resolve_value_new_int_matrix,    (const int64_t* v, int64_t nrow, int64_t ncol), (v, nrow, ncol))
 
-/* ---- resolve_value_t: map setters (all void) ------------------------------ */
-RESOLVE_SYM_VOID(resolve_map_set_null,   (resolve_value_t* map, const char* key), (map, key))
-RESOLVE_SYM_VOID(resolve_map_set_bool,   (resolve_value_t* map, const char* key, int v), (map, key, v))
-RESOLVE_SYM_VOID(resolve_map_set_int,    (resolve_value_t* map, const char* key, int64_t v), (map, key, v))
-RESOLVE_SYM_VOID(resolve_map_set_double, (resolve_value_t* map, const char* key, double v), (map, key, v))
-RESOLVE_SYM_VOID(resolve_map_set_string, (resolve_value_t* map, const char* key, const char* v), (map, key, v))
-RESOLVE_SYM_VOID(resolve_map_set_int_array,    (resolve_value_t* map, const char* key, const int64_t* v, int64_t n), (map, key, v, n))
-RESOLVE_SYM_VOID(resolve_map_set_double_array, (resolve_value_t* map, const char* key, const double* v, int64_t n), (map, key, v, n))
-RESOLVE_SYM_VOID(resolve_map_set_string_array, (resolve_value_t* map, const char* key, const char* const* v, int64_t n), (map, key, v, n))
-RESOLVE_SYM_VOID(resolve_map_set_double_matrix, (resolve_value_t* map, const char* key, const double* v, int64_t nrow, int64_t ncol), (map, key, v, nrow, ncol))
-RESOLVE_SYM_VOID(resolve_map_set_int_matrix,    (resolve_value_t* map, const char* key, const int64_t* v, int64_t nrow, int64_t ncol), (map, key, v, nrow, ncol))
-RESOLVE_SYM_VOID(resolve_map_set_value,  (resolve_value_t* map, const char* key, resolve_value_t* child), (map, key, child))
+/* ---- resolve_value_t: map setters ----------------------------------------- */
+RESOLVE_SYM(int, resolve_map_set_null,   (resolve_value_t* map, const char* key), (map, key))
+RESOLVE_SYM(int, resolve_map_set_bool,   (resolve_value_t* map, const char* key, int v), (map, key, v))
+RESOLVE_SYM(int, resolve_map_set_int,    (resolve_value_t* map, const char* key, int64_t v), (map, key, v))
+RESOLVE_SYM(int, resolve_map_set_double, (resolve_value_t* map, const char* key, double v), (map, key, v))
+RESOLVE_SYM(int, resolve_map_set_string, (resolve_value_t* map, const char* key, const char* v), (map, key, v))
+RESOLVE_SYM(int, resolve_map_set_int_array,    (resolve_value_t* map, const char* key, const int64_t* v, int64_t n), (map, key, v, n))
+RESOLVE_SYM(int, resolve_map_set_double_array, (resolve_value_t* map, const char* key, const double* v, int64_t n), (map, key, v, n))
+RESOLVE_SYM(int, resolve_map_set_string_array, (resolve_value_t* map, const char* key, const char* const* v, int64_t n), (map, key, v, n))
+RESOLVE_SYM(int, resolve_map_set_double_matrix, (resolve_value_t* map, const char* key, const double* v, int64_t nrow, int64_t ncol), (map, key, v, nrow, ncol))
+RESOLVE_SYM(int, resolve_map_set_int_matrix,    (resolve_value_t* map, const char* key, const int64_t* v, int64_t nrow, int64_t ncol), (map, key, v, nrow, ncol))
+RESOLVE_SYM(int, resolve_map_set_value,  (resolve_value_t* map, const char* key, resolve_value_t* child), (map, key, child))
 
 /* ---- resolve_value_t: list builders --------------------------------------- */
-RESOLVE_SYM_VOID(resolve_list_append_value, (resolve_value_t* list, resolve_value_t* child), (list, child))
+RESOLVE_SYM(int, resolve_list_append_value, (resolve_value_t* list, resolve_value_t* child), (list, child))
 
 /* ---- resolve_value_t: readers --------------------------------------------- */
 RESOLVE_SYM(resolve_value_kind_t, resolve_value_kind, (const resolve_value_t* v), (v))
@@ -79,6 +79,7 @@ RESOLVE_SYM(const resolve_value_t*, resolve_list_at,   (const resolve_value_t* l
 RESOLVE_SYM(const char*, resolve_capi_version, (void), ())
 RESOLVE_SYM(int, resolve_capi_set_vram_fraction, (double fraction, int device_index), (fraction, device_index))
 RESOLVE_SYM(resolve_value_t*, resolve_capi_configure_cuda_allocator, (int force), (force))
+RESOLVE_SYM(resolve_value_t*, resolve_default_config, (const char* which), (which))
 RESOLVE_SYM(int, resolve_capi_set_thread_pools, (int intraop_threads, int interop_threads), (intraop_threads, interop_threads))
 RESOLVE_SYM(int, resolve_capi_install_crash_handler, (int shutdown_exit_code), (shutdown_exit_code))
 RESOLVE_SYM(int, resolve_capi_signal_work_complete, (void), ())
@@ -92,24 +93,13 @@ RESOLVE_SYM(int, resolve_metric_accuracy,      (const double* pred, const double
 RESOLVE_SYM(int, resolve_metric_r_squared,     (const double* pred, const double* target, int64_t n, double* out), (pred, target, n, out))
 
 /* ---- Dataset -------------------------------------------------------------- */
-RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_csv, (const char* header_path, const char* species_path, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* config), (header_path, species_path, roles, targets, config))
-RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_csv_with_schema, (const char* header_path, const char* species_path, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_dataset_t* schema_source, const resolve_value_t* config), (header_path, species_path, roles, targets, schema_source, config))
-RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_species_csv, (const char* species_path, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* config), (species_path, roles, targets, config))
-RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_dataframe, (const resolve_value_t* header, const resolve_value_t* species, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* config), (header, species, roles, targets, config))
-RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_dataframe_header, (const resolve_value_t* header, const char* species_path, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* config), (header, species_path, roles, targets, config))
-RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_species_dataframe, (const resolve_value_t* species, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* config), (species, roles, targets, config))
-RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_dataframe_with_schema, (const resolve_value_t* header, const resolve_value_t* species, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_dataset_t* schema_source, const resolve_value_t* config), (header, species, roles, targets, schema_source, config))
-/* Vocabulary-reusing loaders (issue #102): build the dataset in a trained
- * model's integer-code namespace from a checkpoint-derived `vocabs` tree. */
-RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_csv_with_vocabs, (const char* header_path, const char* species_path, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* vocabs, const resolve_value_t* config), (header_path, species_path, roles, targets, vocabs, config))
-RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_species_csv_with_vocabs, (const char* species_path, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* vocabs, const resolve_value_t* config), (species_path, roles, targets, vocabs, config))
-RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_dataframe_with_vocabs, (const resolve_value_t* header, const resolve_value_t* species, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* vocabs, const resolve_value_t* config), (header, species, roles, targets, vocabs, config))
-RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_from_species_dataframe_with_vocabs, (const resolve_value_t* species, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* vocabs, const resolve_value_t* config), (species, roles, targets, vocabs, config))
+RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_load, (const resolve_value_t* header, const resolve_value_t* species, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* config, const resolve_dataset_t* schema_source, const resolve_value_t* vocabs), (header, species, roles, targets, config, schema_source, vocabs))
 RESOLVE_SYM_VOID(resolve_dataset_free, (resolve_dataset_t* ds), (ds))
 RESOLVE_SYM(resolve_value_t*, resolve_dataset_get, (const resolve_dataset_t* ds, const char* what), (ds, what))
 
 /* ---- Model ---------------------------------------------------------------- */
 RESOLVE_SYM(resolve_model_t*, resolve_model_create, (const resolve_value_t* schema, const resolve_value_t* config), (schema, config))
+RESOLVE_SYM(resolve_model_t*, resolve_model_create_for_dataset, (const resolve_dataset_t* ds, const resolve_value_t* config), (ds, config))
 RESOLVE_SYM_VOID(resolve_model_free, (resolve_model_t* m), (m))
 RESOLVE_SYM(resolve_value_t*, resolve_model_call, (resolve_model_t* m, const char* method, const resolve_value_t* inputs), (m, method, inputs))
 RESOLVE_SYM(resolve_value_t*, resolve_model_get, (const resolve_model_t* m, const char* what), (m, what))
@@ -118,6 +108,8 @@ RESOLVE_SYM(int, resolve_model_to_device, (resolve_model_t* m, const char* devic
 RESOLVE_SYM(int, resolve_model_set_traits, (resolve_model_t* m, const resolve_value_t* traits), (m, traits))
 RESOLVE_SYM(int, resolve_model_set_species_graph, (resolve_model_t* m, const resolve_value_t* edge_index, const resolve_value_t* edge_type), (m, edge_index, edge_type))
 RESOLVE_SYM(resolve_value_t*, resolve_build_species_graph, (const resolve_dataset_t* ds, const resolve_value_t* config), (ds, config))
+RESOLVE_SYM(resolve_value_t*, resolve_model_pretrain, (resolve_model_t* m, const char* method, const resolve_dataset_t* ds, const resolve_value_t* config), (m, method, ds, config))
+RESOLVE_SYM(resolve_value_t*, resolve_vae_pretrain, (const resolve_dataset_t* ds, const resolve_value_t* config), (ds, config))
 
 /* ---- Trainer -------------------------------------------------------------- */
 RESOLVE_SYM(resolve_trainer_t*, resolve_trainer_create, (resolve_model_t* model, const resolve_value_t* config), (model, config))
@@ -144,6 +136,8 @@ RESOLVE_SYM(resolve_value_t*, resolve_predictor_predict, (resolve_predictor_t* p
 RESOLVE_SYM(resolve_value_t*, resolve_predictor_predict_dataset, (resolve_predictor_t* p, const resolve_dataset_t* ds, int return_latent, int64_t batch_size), (p, ds, return_latent, batch_size))
 RESOLVE_SYM(resolve_value_t*, resolve_predictor_get_embeddings, (resolve_predictor_t* p, const resolve_value_t* inputs), (p, inputs))
 RESOLVE_SYM(int, resolve_predictor_optimize_for_inference, (resolve_predictor_t* p), (p))
+RESOLVE_SYM(int, resolve_predictor_set_retrieval, (resolve_predictor_t* p, const resolve_dataset_t* reference, const resolve_value_t* config, int64_t batch_size), (p, reference, config, batch_size))
+RESOLVE_SYM(int, resolve_predictor_clear_retrieval, (resolve_predictor_t* p), (p))
 RESOLVE_SYM(resolve_value_t*, resolve_predictor_get, (const resolve_predictor_t* p, const char* what), (p, what))
 
 /* ---- Model suite ---------------------------------------------------------- */
@@ -154,3 +148,9 @@ RESOLVE_SYM(resolve_value_t*, resolve_suite_predict_dataframe, (resolve_suite_t*
 RESOLVE_SYM(resolve_value_t*, resolve_suite_predict_csv, (resolve_suite_t* s, const char* header_path, const char* species_path, const resolve_value_t* options), (s, header_path, species_path, options))
 RESOLVE_SYM(resolve_value_t*, resolve_suite_verify, (const char* dir), (dir))
 RESOLVE_SYM(resolve_value_t*, resolve_suite_seal, (const char* dir), (dir))
+
+/* ---- Fuzzy string index --------------------------------------------------- */
+RESOLVE_SYM(resolve_fuzzy_t*, resolve_fuzzy_build, (const resolve_value_t* entries, const resolve_value_t* options), (entries, options))
+RESOLVE_SYM_VOID(resolve_fuzzy_free, (resolve_fuzzy_t* f), (f))
+RESOLVE_SYM(resolve_value_t*, resolve_fuzzy_query, (const resolve_fuzzy_t* f, const resolve_value_t* needles, const resolve_value_t* options), (f, needles, options))
+RESOLVE_SYM(resolve_value_t*, resolve_fuzzy_get, (const resolve_fuzzy_t* f, const char* what), (f, what))

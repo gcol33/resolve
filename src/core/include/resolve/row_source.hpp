@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -83,6 +84,34 @@ private:
     std::vector<std::vector<std::string>> columns_;  // column-major
     size_t num_rows_ = 0;
     std::unordered_map<std::string, int> index_;
+};
+
+// A table a dataset loader reads: a CSV file named by its path, or a
+// ColumnTable in memory, held by reference (the table must outlive the source).
+class TableSource {
+public:
+    static TableSource csv(std::string path) {
+        TableSource source;
+        source.path_ = std::move(path);
+        return source;
+    }
+    static TableSource table(const ColumnTable& table) {
+        TableSource source;
+        source.table_ = &table;
+        return source;
+    }
+
+    [[nodiscard]] bool is_csv() const noexcept { return table_ == nullptr; }
+
+    // A RowSource over the table: a CSVReader streaming the file, or an
+    // InMemoryRowSource over the ColumnTable. Defined in dataset.cpp.
+    [[nodiscard]] std::unique_ptr<RowSource> open() const;
+
+private:
+    TableSource() = default;
+
+    std::string path_;
+    const ColumnTable* table_ = nullptr;
 };
 
 // Adapts a ColumnTable to the RowSource interface: each row is a set of views

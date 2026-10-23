@@ -1,10 +1,15 @@
 #include "resolve/gpu.hpp"
 #include "resolve/env.hpp"
 
+#include <algorithm>
+#include <charconv>
+#include <cstring>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <cstring>
+#include <string_view>
+#include <system_error>
 
 #ifdef RESOLVE_HAS_CUDA
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -12,6 +17,33 @@
 #endif
 
 namespace resolve {
+
+torch::Device parse_device(const std::string& name) {
+    if (name == "cpu") return torch::Device(torch::kCPU);
+    constexpr std::string_view kCuda = "cuda";
+    const std::string_view text(name);
+    if (text == kCuda) return torch::Device(torch::kCUDA);
+    if (text.size() > kCuda.size() + 1 && text.substr(0, kCuda.size()) == kCuda &&
+        text[kCuda.size()] == ':') {
+        const std::string_view digits = text.substr(kCuda.size() + 1);
+        int index = 0;
+        const auto [end, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), index);
+        const bool all_digits = std::all_of(digits.begin(), digits.end(),
+                                            [](char c) { return c >= '0' && c <= '9'; });
+        if (all_digits && ec == std::errc() && end == digits.data() + digits.size() &&
+            index <= std::numeric_limits<c10::DeviceIndex>::max()) {
+            return torch::Device(torch::kCUDA, static_cast<c10::DeviceIndex>(index));
+        }
+    }
+    throw std::invalid_argument("device must be 'cpu', 'cuda' or 'cuda:N' (N a device index), not '" +
+                                name + "'");
+}
+
+std::string device_name(const torch::Device& device) {
+    if (!device.is_cuda()) return "cpu";
+    if (!device.has_index()) return "cuda";
+    return "cuda:" + std::to_string(static_cast<int>(device.index()));
+}
 
 std::string default_cuda_alloc_conf() {
     std::string base = "garbage_collection_threshold:0.8,max_split_size_mb:256";

@@ -791,11 +791,36 @@ json::Value checkpoint_description(
     return out;
 }
 
+void read_checkpoint_archive(torch::serialize::InputArchive& archive, const std::string& path,
+                             const torch::Device& device, const char* what) {
+    io::with_retry(
+        [&] {
+            std::error_code ec;
+            if (!std::filesystem::is_regular_file(path, ec)) {
+                throw io::IOError("cannot read checkpoint '" + path + "': no such file");
+            }
+            archive.load_from(path, device);
+        },
+        what);
+}
+
+void write_checkpoint_archive(torch::serialize::OutputArchive& archive, const std::string& path) {
+    io::with_retry(
+        [&] {
+            try {
+                archive.save_to(path);
+            } catch (const c10::Error& e) {
+                throw io::IOError("cannot write checkpoint '" + path + "': " + e.what_without_backtrace());
+            }
+        },
+        "checkpoint save");
+}
+
 json::Value describe_checkpoint(const std::string& path) {
     torch::serialize::InputArchive archive;
     // Read onto the CPU: deserialization restores every tensor, weights
     // included, so a GPU-saved checkpoint would otherwise need a CUDA device.
-    io::with_retry([&] { archive.load_from(path, torch::kCPU); }, "checkpoint load");
+    read_checkpoint_archive(archive, path, torch::kCPU, "checkpoint load");
     const ModelConfig model_config = load_model_config(archive);
     return checkpoint_description(model_config, load_train_config(archive),
                                   load_effective_batch_size(archive), load_run_metadata(archive),

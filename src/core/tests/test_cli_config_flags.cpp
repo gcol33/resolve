@@ -6,6 +6,7 @@
 // CLI-side headers, reached the way test_effective_batch.cpp reaches the flag
 // table: these are compiled into the CLI binary, not into the engine library.
 #include "../cli/config_flags.hpp"
+#include "../cli/cli_common.hpp"
 #include "../cli/cli_spec.hpp"
 
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -297,7 +298,8 @@ TEST_CASE("Every top-level config field has a train flag unless another source s
     // Derived from the data or from the DatasetConfig flags.
     CHECK(declared.count("--n-taxonomy-slots") == 0);
     CHECK(declared.count("--uses-explicit-vector") == 0);
-    CHECK(declared.count("--device") == 0);
+    // The device is the command's own --device flag, shared with predict.
+    CHECK(declared.count("--device") == 1);
 }
 
 TEST_CASE("Every override row names a real registry field", "[cli][config_flags]") {
@@ -482,4 +484,23 @@ TEST_CASE("The architecture table covers every encoder with a sub-config", "[cli
         });
     });
     CHECK(members.size() == std::size(kArchitectures));
+}
+
+TEST_CASE("--device names the device with parse_device's spellings", "[cli][config_flags]") {
+    CHECK(choose_device(parse_args(train_spec(), {})) == torch::Device(torch::kCPU));
+    CHECK(choose_device(parse_args(predict_spec(), {"--device", "cpu"})) ==
+          torch::Device(torch::kCPU));
+    for (const char* bad : {"gpu", "CUDA", "cuda:x"}) {
+        INFO(bad);
+        CHECK_THROWS_AS(choose_device(parse_args(train_spec(), {"--device", bad})), ArgError);
+    }
+    if (!torch::cuda::is_available()) {
+        CHECK_THROWS_AS(choose_device(parse_args(train_spec(), {"--device", "cuda"})), ArgError);
+    } else {
+        const auto n = static_cast<int>(torch::cuda::device_count());
+        CHECK(choose_device(parse_args(train_spec(), {"--device", "cuda:0"})).index() == 0);
+        CHECK_THROWS_AS(choose_device(parse_args(train_spec(),
+                                                 {"--device", "cuda:" + std::to_string(n)})),
+                        ArgError);
+    }
 }

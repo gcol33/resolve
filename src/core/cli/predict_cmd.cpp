@@ -13,6 +13,7 @@
 
 #include "arg_parser.hpp"
 #include "cli_common.hpp"
+#include "config_flags.hpp"
 #include "csv_output.hpp"
 
 using resolve_cli::csv_field;
@@ -27,6 +28,13 @@ int predict_command(const ParsedArgs& args) {
         if (args.has("--model")) {
             std::cerr << "Error: pass --model or --suite, not both" << std::endl;
             return 1;
+        }
+        for (const char* model_only : {"--retrieval-header", "--retrieval-species", "--retrieval-k",
+                                       "--retrieval-alpha", "--retrieval-temperature"}) {
+            if (args.has(model_only)) {
+                std::cerr << "Error: " << model_only << " applies to --model only" << std::endl;
+                return 1;
+            }
         }
         return predict_suite_command(args);
     }
@@ -53,6 +61,18 @@ int predict_command(const ParsedArgs& args) {
     if (species_path.empty()) {
         std::cerr << "Error: --species is required" << std::endl;
         return 1;
+    }
+
+    const std::string retrieval_header = args.get("--retrieval-header");
+    const std::string retrieval_species = args.get("--retrieval-species");
+    if (retrieval_species.empty()) {
+        for (const char* flag : {"--retrieval-header", "--retrieval-k", "--retrieval-alpha",
+                                 "--retrieval-temperature"}) {
+            if (args.has(flag)) {
+                std::cerr << "Error: " << flag << " needs --retrieval-species" << std::endl;
+                return 1;
+            }
+        }
     }
 
     std::cout << "RESOLVE Prediction" << std::endl;
@@ -140,6 +160,29 @@ int predict_command(const ParsedArgs& args) {
     auto& dataset = *dataset_opt;
 
     std::cout << "Loaded " << dataset.n_plots() << " plots" << std::endl;
+
+    // Retrieval: the reference plots, read with the model's targets in its
+    // namespace (their class labels coded as at training), blend every
+    // prediction with the labels of its nearest reference plots.
+    if (!retrieval_species.empty()) {
+        try {
+            RetrievalConfig retrieval;
+            resolve_cli::read_config_flags(
+                retrieval, args, resolve_cli::FlagNaming::members(resolve_cli::kRetrievalConfigFlags));
+            std::vector<TargetSpec> reference_targets = target_specs_from_schema(schema);
+            // A reference plot unlabelled for one target still serves the others.
+            for (auto& spec : reference_targets) spec.missing = TargetMissingPolicy::Mask;
+            const ResolveDataset reference = resolve_cli::load_dataset(
+                retrieval_header, retrieval_species, roles, reference_targets, dataset_config,
+                reuse_vocabs ? &vocabs : nullptr);
+            predictor.set_retrieval(reference, retrieval, predict_batch_size);
+            std::cout << "Retrieval: " << reference.n_plots() << " reference plots, k = "
+                      << retrieval.k_neighbors << ", alpha = " << retrieval.alpha << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "Error setting up retrieval: " << e.what() << std::endl;
+            return 1;
+        }
+    }
 
     // Make predictions
     std::cout << "Making predictions";

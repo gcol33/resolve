@@ -21,6 +21,38 @@ struct RecordingLogger {
 
 } // namespace
 
+TEST_CASE("parse_device reads cpu, cuda and cuda:N and nothing else", "[gpu]") {
+    CHECK(parse_device("cpu") == torch::Device(torch::kCPU));
+    CHECK(parse_device("cuda") == torch::Device(torch::kCUDA));
+    CHECK_FALSE(parse_device("cuda").has_index());
+    CHECK(parse_device("cuda:0") == torch::Device(torch::kCUDA, 0));
+    CHECK(parse_device("cuda:3") == torch::Device(torch::kCUDA, 3));
+    CHECK(parse_device("cuda:12").index() == 12);
+
+    for (const char* bad : {"", "CPU", "CUDA", "Cuda", "gpu", "cuda:", "cuda:-1", "cuda:+1",
+                            "cuda:1x", "cuda: 1", " cuda", "cuda ", "cuda:1:2", "mps",
+                            "cuda:99999999999"}) {
+        INFO(bad);
+        CHECK_THROWS_AS(parse_device(bad), std::invalid_argument);
+    }
+    try {
+        (void)parse_device("gpu");
+    } catch (const std::invalid_argument& e) {
+        const std::string msg = e.what();
+        CHECK(msg.find("'gpu'") != std::string::npos);
+        CHECK(msg.find("cuda:N") != std::string::npos);
+    }
+}
+
+TEST_CASE("device_name is the text parse_device reads back", "[gpu]") {
+    CHECK(device_name(torch::Device(torch::kCPU)) == "cpu");
+    CHECK(device_name(torch::Device(torch::kCUDA)) == "cuda");
+    CHECK(device_name(torch::Device(torch::kCUDA, 2)) == "cuda:2");
+    for (const char* name : {"cpu", "cuda", "cuda:0", "cuda:7"}) {
+        CHECK(device_name(parse_device(name)) == name);
+    }
+}
+
 TEST_CASE("set_vram_fraction rejects out-of-range values", "[gpu]") {
     SECTION("fraction <= 0 throws") {
         REQUIRE_THROWS_AS(set_vram_fraction(0.0, -1, null_log),

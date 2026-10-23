@@ -35,7 +35,8 @@ struct BuildOptions {
     // Optional bucket function. If provided, entries are partitioned by
     // bucket_fn(entry) and stored as per-bucket sub-tries plus a global
     // trie. Query-time bucket_hint then prunes to the matching bucket
-    // first, falling back to the global trie on a miss.
+    // first, falling back to the global trie on a miss. Called once per
+    // entry inside build(), which does not keep it.
     std::function<std::string(std::string_view)> bucket_fn = nullptr;
 
     // Lowercase entries and queries before matching.

@@ -236,9 +236,7 @@ void Trainer::save_checkpoint(const std::string& path, const RunMetadata* metada
         write_progress(archive, *progress);
     }
 
-    // Retry a transient write fault on flaky storage; a small
-    // checkpoint re-write is cheap, so any failure is retried.
-    io::with_retry([&] { archive.save_to(path); }, "checkpoint save");
+    write_checkpoint_archive(archive, path);
 
     // Write human-readable JSON metadata alongside checkpoint
     if (metadata != nullptr) {
@@ -358,10 +356,10 @@ torch::serialize::InputArchive Trainer::open_checkpoint(
     // so loading a GPU-trained checkpoint on a machine with no CUDA device
     // throws inside deserialization ("No CUDA GPUs are available").
     //
-    // Retry a transient read fault on flaky storage. A mmap-backed load can
-    // still fault as an OS structured exception, which the crash handler
-    // reports (process.hpp); this catches the throwing-read failures.
-    io::with_retry([&] { archive.load_from(path, device); }, "checkpoint load");
+    // A mmap-backed load can still fault as an OS structured exception, which
+    // the crash handler reports (process.hpp); the retry covers the throwing
+    // reads.
+    read_checkpoint_archive(archive, path, device, "checkpoint load");
     return archive;
 }
 
@@ -397,8 +395,7 @@ TrainConfig Trainer::load_train_config(const std::string& path) {
     // Read onto the CPU. Deserialization restores every tensor in the archive,
     // model weights included, so a GPU-saved checkpoint would need a CUDA
     // device present just to read back a handful of scalars.
-    io::with_retry([&] { archive.load_from(path, torch::kCPU); },
-                   "checkpoint load (train config)");
+    read_checkpoint_archive(archive, path, torch::kCPU, "checkpoint load (train config)");
     // Qualify to the free function (checkpoint.cpp); the unqualified name would
     // resolve to this static member and recurse.
     return resolve::load_train_config(archive);
@@ -407,8 +404,7 @@ TrainConfig Trainer::load_train_config(const std::string& path) {
 RunMetadata Trainer::load_run_metadata(const std::string& path) {
     torch::serialize::InputArchive archive;
     // CPU for the same reason as load_train_config above: metadata is scalars.
-    io::with_retry([&] { archive.load_from(path, torch::kCPU); },
-                   "checkpoint load (run metadata)");
+    read_checkpoint_archive(archive, path, torch::kCPU, "checkpoint load (run metadata)");
     return resolve::load_run_metadata(archive);
 }
 

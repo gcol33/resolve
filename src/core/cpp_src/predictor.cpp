@@ -308,8 +308,14 @@ ResolvePredictions Predictor::run_inference(
             scalers_);
         chunk = chunk.to(device_);
 
+        const bool retrieve = want_outputs && retrieval_.has_value();
+        torch::Tensor latent;
+        if (want_latent || retrieve) latent = model_->get_latent(chunk).detach();
+
         if (want_outputs) {
             const auto outputs = model_->forward(chunk);
+            TensorMap chunk_predictions;
+            TensorMap chunk_probabilities;
             for (const auto& cfg : schema.targets) {
                 auto out_it = outputs.find(cfg.name);
                 if (out_it == outputs.end()) continue;
@@ -320,24 +326,27 @@ ResolvePredictions Predictor::run_inference(
                     // probability and its argmax the predicted code, so the
                     // two outputs agree by construction.
                     auto probs = torch::softmax(pred, /*dim=*/1);
-                    pred_chunks[cfg.name].push_back(
-                        torch::argmax(probs, /*dim=*/1).to(torch::kCPU));
-                    prob_chunks[cfg.name].push_back(probs.to(torch::kCPU));
+                    chunk_predictions[cfg.name] = torch::argmax(probs, /*dim=*/1);
+                    chunk_probabilities[cfg.name] = std::move(probs);
                 } else {
                     torch::Tensor mean, scale;
                     auto scaler_it = scalers_.target_scalers.find(cfg.name);
                     if (scaler_it != scalers_.target_scalers.end()) {
                         std::tie(mean, scale) = scaler_it->second;
                     }
-                    pred_chunks[cfg.name].push_back(
-                        to_original_units(pred.squeeze(-1), cfg.transform, mean, scale)
-                            .to(torch::kCPU));
+                    chunk_predictions[cfg.name] =
+                        to_original_units(pred.squeeze(-1), cfg.transform, mean, scale);
                 }
             }
+            if (retrieve) retrieval_->blend(latent, chunk_predictions, chunk_probabilities);
+            for (auto& [name, values] : chunk_predictions) {
+                pred_chunks[name].push_back(values.to(torch::kCPU));
+            }
+            for (auto& [name, values] : chunk_probabilities) {
+                prob_chunks[name].push_back(values.to(torch::kCPU));
+            }
         }
-        if (want_latent) {
-            latent_chunks.push_back(model_->get_latent(chunk).detach().to(torch::kCPU));
-        }
+        if (want_latent) latent_chunks.push_back(latent.to(torch::kCPU));
     }
 
     ResolvePredictions result;
@@ -351,6 +360,18 @@ ResolvePredictions Predictor::run_inference(
         result.latent = torch::cat(latent_chunks, /*dim=*/0);
     }
     return result;
+}
+
+void Predictor::set_retrieval(const ResolveDataset& reference,
+                              const RetrievalConfig& config,
+                              int64_t batch_size) {
+    config.validate();
+    validate_dataset_vocabs(reference);
+    const torch::Tensor latents =
+        run_inference(reference.continuous_inputs(), reference.plot_inputs(),
+                      /*want_outputs=*/false, /*want_latent=*/true, batch_size)
+            .latent;
+    retrieval_.emplace(latents.to(device_), schema().targets, reference.targets(), config);
 }
 
 void Predictor::optimize_for_inference() {

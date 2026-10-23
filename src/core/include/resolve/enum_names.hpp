@@ -222,6 +222,12 @@ inline constexpr EnumName<TabMAggregation> kTabMAggregationNames[] = {
     {"median", TabMAggregation::Median},
 };
 
+inline constexpr EnumName<MaskStrategy> kMaskStrategyNames[] = {
+    {"random", MaskStrategy::Random},
+    {"block", MaskStrategy::Block},
+    {"structured", MaskStrategy::Structured},
+};
+
 inline constexpr EnumName<SuiteCombine> kSuiteCombineNames[] = {
     {"mean", SuiteCombine::Mean},
     {"vote", SuiteCombine::Vote},
@@ -302,6 +308,8 @@ RESOLVE_DECLARE_ENUM_NAMES(TransformerPooling, kTransformerPoolingNames,
                            "transformer pooling", "attention")
 RESOLVE_DECLARE_ENUM_NAMES(TabMAggregation, kTabMAggregationNames,
                            "TabM aggregation", "mean")
+RESOLVE_DECLARE_ENUM_NAMES(MaskStrategy, kMaskStrategyNames,
+                           "mask strategy", "random")
 RESOLVE_DECLARE_ENUM_NAMES(SuiteCombine, kSuiteCombineNames,
                            "suite combine rule", "mean")
 RESOLVE_DECLARE_ENUM_NAMES(SuiteTargetStatus, kSuiteTargetStatusNames,

@@ -1,5 +1,6 @@
 #include "resolve/pretraining.hpp"
 #include "resolve/continuous_block.hpp"
+#include "resolve/dataset.hpp"
 #include "resolve/sparse_rows.hpp"
 #include "resolve/utils.hpp"
 #include <algorithm>
@@ -10,6 +11,12 @@
 #include <utility>
 
 namespace resolve {
+
+PlotInputs pretraining_inputs(const ResolveDataset& dataset, const ResolveModel& model) {
+    PlotInputs inputs = dataset.plot_inputs();
+    inputs.continuous = dataset.continuous_block(model->hash_in_continuous());
+    return inputs.without_empty();
+}
 
 // =============================================================================
 // PretrainRng

@@ -9,23 +9,38 @@
 
 namespace resolve {
 
-// The default PYTORCH_CUDA_ALLOC_CONF value RESOLVE sets to tame WDDM
-// fragmentation, for the two C++ callers (the nanobind
-// configure_cuda_allocator entry point and the C-ABI native shim); the Python
-// package keeps its own copy in resolve_core/__init__.py because it must set the
-// env var BEFORE `import torch`, i.e. before this library is loaded. Includes
-// the `expandable_segments:True` prefix off Windows (the cuMemMap allocator is
-// not implemented on win32).
+// The device a binding, the CLI or a config names as text. Accepted, exactly as
+// libtorch spells them (lower case, no spaces):
+//
+//   "cpu"     the CPU
+//   "cuda"    the current CUDA device
+//   "cuda:N"  CUDA device N, N a non-negative decimal integer
+//
+// Anything else -- "CUDA", "gpu", "cuda:", "cuda:-1", "cuda:1x", "" -- throws
+// std::invalid_argument naming the accepted forms, so a misspelled device is an
+// error rather than a run on the CPU. Whether the named device exists is not
+// checked here: that is a question about the machine, answered when the device
+// is first used.
+[[nodiscard]] torch::Device parse_device(const std::string& name);
+
+// The text parse_device reads back to `device`: "cpu", "cuda" (no index) or
+// "cuda:N".
+[[nodiscard]] std::string device_name(const torch::Device& device);
+
+// The PYTORCH_CUDA_ALLOC_CONF value RESOLVE sets to tame WDDM fragmentation:
+// the one definition, read by configure_cuda_allocator and by every binding.
+// Includes the `expandable_segments:True` prefix off Windows (the cuMemMap
+// allocator is not implemented on win32).
 std::string default_cuda_alloc_conf();
 
 // Apply default_cuda_alloc_conf() to the process environment and return the
 // value PYTORCH_CUDA_ALLOC_CONF ends up holding.
 //
 // An existing non-empty setting wins unless `force` is true, so a user's own
-// allocator tuning is never overwritten silently. Late-bound: once the CUDA
-// caching allocator has initialized, changing the variable no longer affects
-// it, which is why resolve_core/__init__.py sets the same value before
-// `import torch`. Shared by the nanobind and C-ABI entry points.
+// allocator tuning is never overwritten silently. The CUDA caching allocator
+// reads the variable when it first allocates on a device, so this takes effect
+// whenever it runs before the process's first CUDA allocation, and not after.
+// The nanobind module and the C ABI call it when they load.
 std::string configure_cuda_allocator(bool force);
 
 // Limit the fraction of GPU VRAM that the PyTorch caching allocator may use

@@ -71,7 +71,7 @@ struct FieldFlag {
 };
 
 // A field the command line does not set: it is derived from the data or from
-// another struct's flag, or reached through a flag of its own (--cuda).
+// another struct's flag, or reached through a flag of its own (--device).
 inline constexpr const char* kNoFlag = "";
 
 namespace config_flags_detail {
@@ -117,7 +117,7 @@ std::string join_values(const Seq& values) {
 }
 
 // The field types a command line cannot carry, each reached another way: the
-// device through --cuda, the parallel branches through --parallel-branch, a
+// device through --device, the parallel branches through --parallel-branch, a
 // sub-config through its own block, the log callback not at all.
 template <typename T>
 inline constexpr bool reached_elsewhere_v =
@@ -488,6 +488,17 @@ inline constexpr FieldFlag kTrainConfigFlags[] = {
     {"batch_size_floor", nullptr,
      "Smallest batch size the out-of-memory retry may\nhalve to: on a CUDA out-of-memory error the trainer\n"
      "halves the batch size and restarts from epoch 0;\nbelow this floor the error is rethrown."},
+};
+
+// `resolve predict`'s retrieval settings (RetrievalConfig), read when
+// --retrieval-species names the reference plots.
+inline constexpr FieldFlag kRetrievalConfigFlags[] = {
+    {"k_neighbors", "--retrieval-k",
+     "Reference plots each prediction reads, the nearest\nin the model's latent space (cosine)"},
+    {"alpha", "--retrieval-alpha",
+     "Share of the neighbours' labels in the blend with\nthe model's prediction, in [0, 1]"},
+    {"temperature", "--retrieval-temperature",
+     "Softmax temperature over the neighbours' cosine\nsimilarities (smaller: weight on the nearest)"},
 };
 
 // The override table of each top-level struct.
