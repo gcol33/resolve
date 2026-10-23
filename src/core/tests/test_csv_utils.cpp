@@ -179,19 +179,21 @@ TEST_CASE("CSVReader reads records across its buffer boundary", "[csv_utils][csv
     const TempFile f = binary_csv(content);
     CSVReader reader(f.path());
     size_t n = 0;
+    size_t mismatched = 0;
     bool saw_big = false;
     reader.read_rows([&](size_t, RowFields row) {
-        REQUIRE(row.size() == 2);
-        if (row[0] == "big") {
-            saw_big = true;
-            REQUIRE(row[1].size() == big.size());
+        if (row.size() == 2 && row[0] == "big") {
+            saw_big = row[1].size() == big.size();
             return;
         }
-        REQUIRE(row[0] == "r" + std::to_string(n));
-        REQUIRE(row[1] == "v," + std::to_string(n));
+        if (row.size() != 2 || row[0] != "r" + std::to_string(n) ||
+            row[1] != "v," + std::to_string(n)) {
+            ++mismatched;
+        }
         ++n;
     });
     REQUIRE(n == static_cast<size_t>(n_rows));
+    REQUIRE(mismatched == 0);
     REQUIRE(saw_big);
 }
 
