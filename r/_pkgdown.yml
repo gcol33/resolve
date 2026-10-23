@@ -49,6 +49,7 @@ reference:
       - resolve.install_backend
       - resolve.available
       - resolve.version
+      - resolve.set_vram_fraction
   - title: "Data"
     desc: "Load plots and their species records into an engine dataset."
     contents:
@@ -59,6 +60,9 @@ reference:
     desc: "Fit a model and follow its progress."
     contents:
       - resolve.train.dataset
+      - resolve.cross_validate
+      - resolve.pretrain_vae
+      - resolve.default_config
       - resolve.progress
   - title: "Models"
     desc: "Save, load and inspect trained checkpoints."
@@ -71,6 +75,7 @@ reference:
     desc: "Predict targets for new plots."
     contents:
       - resolve.predict.dataset
+      - resolve.retrieval
   - title: "Model suites"
     desc: "Released sets of models scored as one."
     contents:
@@ -79,6 +84,11 @@ reference:
       - resolve.seal_suite
       - resolve.predict.suite
       - as.data.frame.resolve_suite_predictions
+  - title: "Name matching"
+    desc: "Find the entries of a list of names within a few edits of a query."
+    contents:
+      - resolve.fuzzy_index
+      - resolve.fuzzy_match
   - title: "Metrics"
     desc: "Score predictions against observed values."
     contents:
