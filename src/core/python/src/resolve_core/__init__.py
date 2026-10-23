@@ -205,11 +205,13 @@ _atexit.register(_signal_work_complete)
 # Attach the high-level in-memory loaders ResolveDataset.from_pandas /
 # .from_dataframe, wrapping the low-level from_columns* bindings.
 from . import _from_pandas as _from_pandas_mod
+
 _from_pandas_mod.install()
 
 # Attach SuitePredictor.predict (pandas DataFrames or CSV paths) and
 # SuitePredictions.to_pandas over the low-level suite bindings.
 from . import _suite as _suite_mod
+
 _suite_mod.install()
 
 # Report the version of the engine actually loaded, not a literal that can go

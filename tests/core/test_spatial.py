@@ -24,13 +24,15 @@ from resolve_core import SpatialBlockConfig
 from conftest import make_model_config, make_train_config
 
 
-def _trainer(dataset, *, max_epochs: int = 2, weight_seed: int | None = None) -> "rc.Trainer":
+def _trainer(
+    dataset, *, max_epochs: int = 2, weight_seed: int | None = None
+) -> "rc.Trainer":
     # `weight_seed` seeds the process-global torch RNG that ResolveModel's
     # weight initialisation draws from. The seed passed to prepare_data and to
     # cross_validate_spatial governs the SPLIT only; nothing on the library path
     # seeds initialisation, so two otherwise identical runs start from different
     # weights unless the caller seeds first, the way the CLI's --seed does before
-    # it constructs the model (issue #115).
+    # it constructs the model.
     if weight_seed is not None:
         torch.manual_seed(weight_seed)
     model = rc.ResolveModel(dataset.schema, make_model_config())
@@ -88,7 +90,9 @@ def test_spatial_cv_is_deterministic_under_a_seed(hash_dataset):
         assert a.best_epoch == b.best_epoch
     for target, metrics in first.mean_metrics.items():
         for name, value in metrics.items():
-            assert value == pytest.approx(second.mean_metrics[target][name], rel=0, abs=0)
+            assert value == pytest.approx(
+                second.mean_metrics[target][name], rel=0, abs=0
+            )
 
 
 def test_an_unseeded_run_is_not_reproducible(hash_dataset):

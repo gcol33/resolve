@@ -65,7 +65,9 @@ def _torch_rates(config: "rc.TrainConfig", losses: list[float]) -> list[float]:
 
 
 @pytest.mark.parametrize("threshold", [1e-4, 0.999])
-def test_the_rates_are_torch_reduce_lr_on_plateau_on_the_held_out_loss(hash_dataset, threshold):
+def test_the_rates_are_torch_reduce_lr_on_plateau_on_the_held_out_loss(
+    hash_dataset, threshold
+):
     config = _plateau_config(max_epochs=20, threshold=threshold)
     result = _trainer(hash_dataset, config).fit()
 
@@ -83,21 +85,26 @@ def test_the_rates_are_torch_reduce_lr_on_plateau_on_the_held_out_loss(hash_data
 def test_a_plateau_without_a_held_out_fold_is_refused(hash_dataset):
     config = _plateau_config(max_epochs=3, threshold=0.0)
     config.fixed_epochs = 3
-    trainer = rc.Trainer(rc.ResolveModel(hash_dataset.schema, make_model_config()), config)
+    trainer = rc.Trainer(
+        rc.ResolveModel(hash_dataset.schema, make_model_config()), config
+    )
     with pytest.raises(ValueError, match="no held-out fold"):
         trainer.prepare_data(hash_dataset, 0.0, 42)
 
 
 def test_an_out_of_range_factor_is_refused(hash_dataset):
     config = _plateau_config(max_epochs=3, threshold=0.0, lr_plateau_factor=1.5)
-    trainer = rc.Trainer(rc.ResolveModel(hash_dataset.schema, make_model_config()), config)
+    trainer = rc.Trainer(
+        rc.ResolveModel(hash_dataset.schema, make_model_config()), config
+    )
     with pytest.raises(ValueError, match="lr_plateau_factor"):
         trainer.prepare_data(hash_dataset, 0.25, 42)
 
 
 def test_the_plateau_knobs_round_trip_through_the_checkpoint(tmp_path, hash_dataset):
-    config = _plateau_config(max_epochs=3, threshold=1e-4, lr_plateau_patience=5,
-                             lr_plateau_cooldown=2)
+    config = _plateau_config(
+        max_epochs=3, threshold=1e-4, lr_plateau_patience=5, lr_plateau_cooldown=2
+    )
     trainer = _trainer(hash_dataset, config)
     trainer.fit()
     path = str(tmp_path / "plateau.pt")
@@ -120,7 +127,8 @@ def test_a_plateau_run_resumes_with_its_schedule(tmp_path, hash_dataset):
 
     full = _trainer(hash_dataset, config, seed=1).fit()
     resumed = _trainer(hash_dataset, config, seed=2).resume(
-        str(tmp_path / "ckpt" / "checkpoint_4.pt"))
+        str(tmp_path / "ckpt" / "checkpoint_4.pt")
+    )
 
     assert resumed.resumed_from_epoch == 4
     assert resumed.lr_history == full.lr_history

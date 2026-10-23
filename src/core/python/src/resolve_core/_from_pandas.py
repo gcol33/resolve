@@ -10,6 +10,7 @@ values become the empty string), and the engine reuses the identical CSV loader
 body via its RowSource seam, so ``from_pandas(df)`` is equivalent to
 ``from_csv`` on ``df.to_csv()`` -- only the disk I/O is elided.
 """
+
 from __future__ import annotations
 
 from . import _resolve_core as _core
@@ -36,9 +37,7 @@ def _df_to_columns(df, what: str):
     frame would serialize to.
     """
     if not _is_dataframe(df):
-        raise TypeError(
-            f"{what} must be a pandas DataFrame, got {type(df).__name__}"
-        )
+        raise TypeError(f"{what} must be a pandas DataFrame, got {type(df).__name__}")
     names = [str(c) for c in df.columns]
     columns = []
     for c in df.columns:
@@ -53,8 +52,9 @@ def _df_to_columns(df, what: str):
     return names, columns
 
 
-def from_pandas(header, species=None, roles=None, targets=None,
-                config=None, schema_source=None):
+def from_pandas(
+    header, species=None, roles=None, targets=None, config=None, schema_source=None
+):
     """Load a :class:`ResolveDataset` from in-memory pandas DataFrame(s).
 
     Parameters
@@ -92,8 +92,7 @@ def from_pandas(header, species=None, roles=None, targets=None,
                 "(pass a separate species frame to reuse a schema)"
             )
         names, cols = _df_to_columns(header, "header/species frame")
-        return _ResolveDataset.from_species_columns(
-            names, cols, roles, targets, **kw)
+        return _ResolveDataset.from_species_columns(names, cols, roles, targets, **kw)
 
     h_names, h_cols = _df_to_columns(header, "header")
 
@@ -105,15 +104,18 @@ def from_pandas(header, species=None, roles=None, targets=None,
                 "pass both header and species as DataFrames"
             )
         return _ResolveDataset.from_columns_header(
-            h_names, h_cols, species, roles, targets, **kw)
+            h_names, h_cols, species, roles, targets, **kw
+        )
 
     # Both frames in memory.
     s_names, s_cols = _df_to_columns(species, "species")
     if schema_source is not None:
         return _ResolveDataset.from_columns_with_schema(
-            h_names, h_cols, s_names, s_cols, roles, targets, schema_source, **kw)
+            h_names, h_cols, s_names, s_cols, roles, targets, schema_source, **kw
+        )
     return _ResolveDataset.from_columns(
-        h_names, h_cols, s_names, s_cols, roles, targets, **kw)
+        h_names, h_cols, s_names, s_cols, roles, targets, **kw
+    )
 
 
 def install():

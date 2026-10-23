@@ -19,16 +19,18 @@ from pathlib import Path
 
 import pytest
 
+# Without the engine every test module is skipped at collection, so nothing
+# below that reaches for ``rc`` ever runs.
 try:
     import resolve_core as rc
 except ImportError:  # pragma: no cover - exercised only on installs without the engine
-    rc = None
     collect_ignore_glob = ["test_*.py"]
 
 
 # ---------------------------------------------------------------------------
 # CSV builders
 # ---------------------------------------------------------------------------
+
 
 def write_csv(path: Path, header: list[str], rows: list[list]) -> Path:
     lines = [",".join(header)]
@@ -145,6 +147,7 @@ def make_categorical_csvs(tmp_path: Path) -> tuple[str, str]:
 # Role / target / config builders
 # ---------------------------------------------------------------------------
 
+
 def make_roles(
     *,
     taxonomy: bool = True,
@@ -226,12 +229,14 @@ def trainer_continuous(dataset: "rc.ResolveDataset", model_config: "rc.ModelConf
     what a model built from the same schema reads.
     """
     return dataset.continuous_block(
-        model_config.species_encoding == rc.SpeciesEncodingMode.Hash)
+        model_config.species_encoding == rc.SpeciesEncodingMode.Hash
+    )
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def plot_csvs(tmp_path: Path) -> PlotCsvs:

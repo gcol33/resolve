@@ -7,6 +7,7 @@ prediction is checked against the same rule applied to the members scored one
 at a time through ``Predictor``, and the manifest is checked as the contract it
 is: a changed file, a wrong input column or an unknown key stops the load.
 """
+
 from __future__ import annotations
 
 import json
@@ -27,6 +28,7 @@ from conftest import make_model_config, make_train_config, write_csv
 # A suite on disk
 # ---------------------------------------------------------------------------
 
+
 def _plots(n: int, *, with_targets: bool, extra: bool = False):
     header, species = [], []
     for i in range(n):
@@ -34,17 +36,31 @@ def _plots(n: int, *, with_targets: bool, extra: bool = False):
         if i >= 30:
             picks.append("sp_late")  # only in the later plots
         bearing = (41.0 * i) % 360.0
-        row = [f"P{i}", f"{46.0 + 0.05 * i:.4f}", f"{9.0 + 0.03 * i:.4f}", 100.0 + 5 * i]
+        row = [
+            f"P{i}",
+            f"{46.0 + 0.05 * i:.4f}",
+            f"{9.0 + 0.03 * i:.4f}",
+            100.0 + 5 * i,
+        ]
         if with_targets:
             r = math.radians(bearing)
-            row += ["ABC"[i % 3], 1.0 + 0.2 * i, f"{math.sin(r):.6f}", f"{math.cos(r):.6f}"]
+            row += [
+                "ABC"[i % 3],
+                1.0 + 0.2 * i,
+                f"{math.sin(r):.6f}",
+                f"{math.cos(r):.6f}",
+            ]
         header.append(row)
         for rank, sp in enumerate(picks):
-            species.append([f"P{i}", sp, 0 if rank == 2 else 1.0 + rank,
-                            f"g{sp[-1]}", "fam"])
+            species.append(
+                [f"P{i}", sp, 0 if rank == 2 else 1.0 + rank, f"g{sp[-1]}", "fam"]
+            )
     if extra:
         header.append(["NEW", "46.5", "9.5", 150.0])
-        species += [["NEW", "sp1", 3.0, "g1", "fam"], ["NEW", "sp_unseen", 1.0, "gz", "fam"]]
+        species += [
+            ["NEW", "sp1", 3.0, "g1", "fam"],
+            ["NEW", "sp_unseen", 1.0, "gz", "fam"],
+        ]
     cols = ["plot", "lat", "lon", "elev"]
     if with_targets:
         cols += ["hab", "y", "asp_sin", "asp_cos"]
@@ -74,8 +90,10 @@ def _config():
 
 def _save_member(dataset, seed: int, path: Path) -> None:
     torch.manual_seed(seed)
-    model = rc.ResolveModel(dataset.schema,
-                            make_model_config(rc.SpeciesEncodingMode.RankPool, hidden_dims=[16, 8]))
+    model = rc.ResolveModel(
+        dataset.schema,
+        make_model_config(rc.SpeciesEncodingMode.RankPool, hidden_dims=[16, 8]),
+    )
     trainer = rc.Trainer(model, make_train_config(max_epochs=1, batch_size=16))
     trainer.prepare_data(dataset, 0.25, seed)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -86,20 +104,35 @@ def _save_member(dataset, seed: int, path: Path) -> None:
 def suite_dir(tmp_path: Path) -> Path:
     cols, header, species = _plots(40, with_targets=True)
     full_h = write_csv(tmp_path / "train_header.csv", cols, header)
-    full_s = write_csv(tmp_path / "train_species.csv", ["plot", "taxon", "cover", "genus", "family"],
-                       species)
+    full_s = write_csv(
+        tmp_path / "train_species.csv",
+        ["plot", "taxon", "cover", "genus", "family"],
+        species,
+    )
     early_h = write_csv(tmp_path / "early_header.csv", cols, header[:30])
-    early_s = write_csv(tmp_path / "early_species.csv",
-                        ["plot", "taxon", "cover", "genus", "family"],
-                        [r for r in species if int(r[0][1:]) < 30])
+    early_s = write_csv(
+        tmp_path / "early_species.csv",
+        ["plot", "taxon", "cover", "genus", "family"],
+        [r for r in species if int(r[0][1:]) < 30],
+    )
 
-    hab_ds = rc.ResolveDataset.from_csv(str(early_h), str(early_s), _roles(),
-                                        [rc.TargetSpec.classification("hab", 0)], _config())
-    y_ds = rc.ResolveDataset.from_csv(str(full_h), str(full_s), _roles(),
-                                      [rc.TargetSpec.regression("y")], _config())
-    asp_ds = rc.ResolveDataset.from_csv(str(full_h), str(full_s), _roles(),
-                                        [rc.TargetSpec.regression("asp_sin"),
-                                         rc.TargetSpec.regression("asp_cos")], _config())
+    hab_ds = rc.ResolveDataset.from_csv(
+        str(early_h),
+        str(early_s),
+        _roles(),
+        [rc.TargetSpec.classification("hab", 0)],
+        _config(),
+    )
+    y_ds = rc.ResolveDataset.from_csv(
+        str(full_h), str(full_s), _roles(), [rc.TargetSpec.regression("y")], _config()
+    )
+    asp_ds = rc.ResolveDataset.from_csv(
+        str(full_h),
+        str(full_s),
+        _roles(),
+        [rc.TargetSpec.regression("asp_sin"), rc.TargetSpec.regression("asp_cos")],
+        _config(),
+    )
 
     root = tmp_path / "suite"
     manifest = {
@@ -112,30 +145,57 @@ def suite_dir(tmp_path: Path) -> Path:
         "taxonomy": "synthetic",
         "training_scope": "40 synthetic plots",
         "inputs": {
-            "plot_id": "plot", "species": "taxon", "abundance": "cover",
-            "genus": "genus", "family": "family", "latitude": "lat", "longitude": "lon",
-            "covariates": ["elev"], "abundance_units": "percent cover",
+            "plot_id": "plot",
+            "species": "taxon",
+            "abundance": "cover",
+            "genus": "genus",
+            "family": "family",
+            "latitude": "lat",
+            "longitude": "lon",
+            "covariates": ["elev"],
+            "abundance_units": "percent cover",
             "zero_abundance_as": 1.0,
         },
         "targets": [],
     }
     for name, combine, outputs, ds, seeds, extra in (
         ("hab", "vote", ["hab"], hab_ds, [0, 1, 2], {"task": "classification"}),
-        ("y", "mean", ["y"], y_ds, [3, 4],
-         {"task": "regression", "units": "m", "status": "experimental",
-          "limit": "synthetic plots only"}),
-        ("aspect", "circular_mean", ["asp_sin", "asp_cos"], asp_ds, [5, 6],
-         {"task": "regression", "units": "degrees", "period": 360}),
+        (
+            "y",
+            "mean",
+            ["y"],
+            y_ds,
+            [3, 4],
+            {
+                "task": "regression",
+                "units": "m",
+                "status": "experimental",
+                "limit": "synthetic plots only",
+            },
+        ),
+        (
+            "aspect",
+            "circular_mean",
+            ["asp_sin", "asp_cos"],
+            asp_ds,
+            [5, 6],
+            {"task": "regression", "units": "degrees", "period": 360},
+        ),
     ):
         members = []
         for seed in seeds:
             rel = f"{name}/seed_{seed}/model_final.pt"
             _save_member(ds, seed, root / rel)
             members.append({"seed": seed, "file": rel})
-        target = {"name": name, "combine": combine, "outputs": outputs,
-                  "status": "released", "members": members,
-                  "training": {"fixed_epochs": 13},
-                  "validation": {"canonical": {"metric": 0.5}}}
+        target: dict[str, object] = {
+            "name": name,
+            "combine": combine,
+            "outputs": outputs,
+            "status": "released",
+            "members": members,
+            "training": {"fixed_epochs": 13},
+            "validation": {"canonical": {"metric": 0.5}},
+        }
         target.update(extra)
         manifest["targets"].append(target)
 
@@ -161,14 +221,16 @@ def _member_predictions(path: Path, h_path: Path, s_path: Path):
     p = rc.Predictor.load(str(path))
     cfg = p.dataset_config
     cfg.zero_abundance_as = 1.0
-    ds = rc.ResolveDataset.from_csv_with_vocabs(str(h_path), str(s_path), _roles(), [],
-                                                p.external_vocabs, cfg)
+    ds = rc.ResolveDataset.from_csv_with_vocabs(
+        str(h_path), str(s_path), _roles(), [], p.external_vocabs, cfg
+    )
     return p.predict_dataset(ds)
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 def test_a_suite_combines_members_by_each_targets_rule(suite_dir, scoring):
     h, s, h_path, s_path = scoring
@@ -192,14 +254,23 @@ def test_a_suite_combines_members_by_each_targets_rule(suite_dir, scoring):
             elif target.name == "y":
                 stacks["y"].append(p.predictions["y"][order])
             else:
-                stacks["aspect"].append(rc.bearing_from_components(
-                    p.predictions["asp_sin"][order], p.predictions["asp_cos"][order], 360.0))
+                stacks["aspect"].append(
+                    rc.bearing_from_components(
+                        p.predictions["asp_sin"][order],
+                        p.predictions["asp_cos"][order],
+                        360.0,
+                    )
+                )
 
     hab = out.target("hab")
-    vote = rc.combine_vote(torch.stack(stacks["hab"]), 3, torch.stack(stacks["hab_p"]).mean(0))
+    vote = rc.combine_vote(
+        torch.stack(stacks["hab"]), 3, torch.stack(stacks["hab_p"]).mean(0)
+    )
     assert torch.equal(hab.value, vote.value)
     assert torch.allclose(hab.agreement, vote.agreement)
-    assert torch.allclose(hab.probabilities, torch.stack(stacks["hab_p"]).mean(0), atol=1e-6)
+    assert torch.allclose(
+        hab.probabilities, torch.stack(stacks["hab_p"]).mean(0), atol=1e-6
+    )
     assert hab.class_names == ["A", "B", "C"]
     assert hab.combine == rc.SuiteCombine.Vote
     assert hab.dispersion is None
@@ -218,8 +289,10 @@ def test_a_suite_combines_members_by_each_targets_rule(suite_dir, scoring):
 
     # sp_late is missing from the vote target's vocabulary only; sp_unseen from all.
     late = ids.index("P35")
-    assert (hab.recognition.n_recognised[late].item()
-            == hab.recognition.n_species[late].item() - 1)
+    assert (
+        hab.recognition.n_recognised[late].item()
+        == hab.recognition.n_species[late].item() - 1
+    )
     assert y.recognition.count_share[late].item() == 1.0
     new = ids.index("NEW")
     assert y.recognition.count_share[new].item() == pytest.approx(0.5)
@@ -236,13 +309,25 @@ def test_csv_paths_score_like_dataframes_and_flatten_to_pandas(suite_dir, scorin
 
     table = paths.to_pandas(probabilities=True)
     assert len(table) == len(h)
-    for col in ("plot_id", "hab", "hab_code", "hab_agreement", "hab_prob_A", "y", "y_sd",
-                "aspect", "aspect_circular_sd", "y_n_species", "y_recognised_share",
-                "y_recognised_abundance_share"):
+    for col in (
+        "plot_id",
+        "hab",
+        "hab_code",
+        "hab_agreement",
+        "hab_prob_A",
+        "y",
+        "y_sd",
+        "aspect",
+        "aspect_circular_sd",
+        "y_n_species",
+        "y_recognised_share",
+        "y_recognised_abundance_share",
+    ):
         assert col in table.columns
     assert set(table["hab"]) <= {"A", "B", "C"}
-    assert np.allclose(table[["hab_prob_A", "hab_prob_B", "hab_prob_C"]].sum(axis=1), 1.0,
-                       atol=1e-5)
+    assert np.allclose(
+        table[["hab_prob_A", "hab_prob_B", "hab_prob_C"]].sum(axis=1), 1.0, atol=1e-5
+    )
 
 
 def test_renamed_columns_and_a_target_subset(suite_dir, scoring):
@@ -251,9 +336,11 @@ def test_renamed_columns_and_a_target_subset(suite_dir, scoring):
     assert suite.target_names == ["y"]
     assert suite.n_encodings == 1
     base = suite.predict(s, header=h)
-    renamed = suite.predict(s.rename(columns={"taxon": "name"}),
-                            header=h.rename(columns={"elev": "altitude"}),
-                            columns={"species_id": "name", "covariates": ["altitude"]})
+    renamed = suite.predict(
+        s.rename(columns={"taxon": "name"}),
+        header=h.rename(columns={"elev": "altitude"}),
+        columns={"species_id": "name", "covariates": ["altitude"]},
+    )
     assert torch.allclose(base.target("y").value, renamed.target("y").value)
     with pytest.raises(ValueError, match="unknown key"):
         suite.predict(s, header=h, columns={"species": "name"})
@@ -278,7 +365,9 @@ def test_the_manifest_is_a_contract(suite_dir):
     assert len(manifest.verify(str(suite_dir))) == 1
     with pytest.raises(Exception, match="SHA-256"):
         rc.SuitePredictor.load(str(suite_dir))
-    rc.SuitePredictor.load(str(suite_dir), targets=["hab"])  # untouched targets still load
+    rc.SuitePredictor.load(
+        str(suite_dir), targets=["hab"]
+    )  # untouched targets still load
 
 
 def test_a_manifest_the_members_do_not_match_is_refused(suite_dir):
@@ -321,17 +410,23 @@ def test_combination_rules_and_recognition():
 
 
 def test_zero_abundance_as_reaches_the_schema(tmp_path):
-    header = write_csv(tmp_path / "h.csv", ["plot", "y"], [["a", 1], ["b", 2], ["c", 3], ["d", 4]])
-    species = write_csv(tmp_path / "s.csv", ["plot", "taxon", "cover"],
-                        [["a", "x", 0], ["b", "x", 1], ["c", "z", 2], ["d", "x", 3]])
+    header = write_csv(
+        tmp_path / "h.csv", ["plot", "y"], [["a", 1], ["b", 2], ["c", 3], ["d", 4]]
+    )
+    species = write_csv(
+        tmp_path / "s.csv",
+        ["plot", "taxon", "cover"],
+        [["a", "x", 0], ["b", "x", 1], ["c", "z", 2], ["d", "x", 3]],
+    )
     roles = rc.RoleMapping()
     roles.plot_id, roles.species_id, roles.abundance = "plot", "taxon", "cover"
     cfg = rc.DatasetConfig()
     cfg.species_encoding = rc.SpeciesEncodingMode.RankPool
     cfg.use_taxonomy = False
     cfg.zero_abundance_as = 1.0
-    ds = rc.ResolveDataset.from_csv(str(header), str(species), roles,
-                                    [rc.TargetSpec.regression("y")], cfg)
+    ds = rc.ResolveDataset.from_csv(
+        str(header), str(species), roles, [rc.TargetSpec.regression("y")], cfg
+    )
     assert ds.schema.dataset_config.zero_abundance_as == 1.0
     weights = ds.pool_weights
     assert torch.allclose(weights[0], weights[1])  # a read as 1, like b
@@ -340,6 +435,7 @@ def test_zero_abundance_as_reaches_the_schema(tmp_path):
 # ---------------------------------------------------------------------------
 # Targets that read different parts of one contract
 # ---------------------------------------------------------------------------
+
 
 def _roles_reading(coordinates: bool, covariates: list[str]):
     roles = _roles()
@@ -352,39 +448,87 @@ def _roles_reading(coordinates: bool, covariates: list[str]):
 
 @pytest.fixture
 def split_suite_dir(tmp_path: Path) -> Path:
-    """"y" reads species and coordinates; "where" reads species and elev and
+    """ "y" reads species and coordinates; "where" reads species and elev and
     predicts the plot's latitude / longitude, combined by a spherical mean."""
     cols, header, species = _plots(40, with_targets=True)
     h = write_csv(tmp_path / "train_header.csv", cols, header)
-    s = write_csv(tmp_path / "train_species.csv", ["plot", "taxon", "cover", "genus", "family"],
-                  species)
-    y_ds = rc.ResolveDataset.from_csv(str(h), str(s), _roles_reading(True, []),
-                                      [rc.TargetSpec.regression("y")], _config())
-    where_ds = rc.ResolveDataset.from_csv(str(h), str(s), _roles_reading(False, ["elev"]),
-                                          [rc.TargetSpec.regression("lat"),
-                                           rc.TargetSpec.regression("lon")], _config())
+    s = write_csv(
+        tmp_path / "train_species.csv",
+        ["plot", "taxon", "cover", "genus", "family"],
+        species,
+    )
+    y_ds = rc.ResolveDataset.from_csv(
+        str(h),
+        str(s),
+        _roles_reading(True, []),
+        [rc.TargetSpec.regression("y")],
+        _config(),
+    )
+    where_ds = rc.ResolveDataset.from_csv(
+        str(h),
+        str(s),
+        _roles_reading(False, ["elev"]),
+        [rc.TargetSpec.regression("lat"), rc.TargetSpec.regression("lon")],
+        _config(),
+    )
     root = tmp_path / "split"
     targets = []
     for name, combine, outputs, units, inputs, ds, seeds in (
-        ("y", "mean", ["y"], "m", {"coordinates": True, "covariates": []}, y_ds, [0, 1]),
-        ("where", "spherical_mean", ["lat", "lon"], "degrees",
-         {"coordinates": False, "covariates": ["elev"]}, where_ds, [2, 3, 4]),
+        (
+            "y",
+            "mean",
+            ["y"],
+            "m",
+            {"coordinates": True, "covariates": []},
+            y_ds,
+            [0, 1],
+        ),
+        (
+            "where",
+            "spherical_mean",
+            ["lat", "lon"],
+            "degrees",
+            {"coordinates": False, "covariates": ["elev"]},
+            where_ds,
+            [2, 3, 4],
+        ),
     ):
         members = []
         for seed in seeds:
             rel = f"{name}/seed_{seed}/model_final.pt"
             _save_member(ds, seed, root / rel)
             members.append({"seed": seed, "file": rel})
-        targets.append({"name": name, "task": "regression", "combine": combine,
-                        "outputs": outputs, "units": units, "inputs": inputs,
-                        "status": "released", "members": members})
+        targets.append(
+            {
+                "name": name,
+                "task": "regression",
+                "combine": combine,
+                "outputs": outputs,
+                "units": units,
+                "inputs": inputs,
+                "status": "released",
+                "members": members,
+            }
+        )
     manifest = {
-        "format": "resolve-suite", "format_version": 2, "name": "split_suite",
-        "licence": "CC-BY-4.0", "engine_version": rc.__version__, "taxonomy": "synthetic",
+        "format": "resolve-suite",
+        "format_version": 2,
+        "name": "split_suite",
+        "licence": "CC-BY-4.0",
+        "engine_version": rc.__version__,
+        "taxonomy": "synthetic",
         "training_scope": "40 synthetic plots",
-        "inputs": {"plot_id": "plot", "species": "taxon", "abundance": "cover",
-                   "genus": "genus", "family": "family", "latitude": "lat", "longitude": "lon",
-                   "covariates": ["elev"], "zero_abundance_as": 1.0},
+        "inputs": {
+            "plot_id": "plot",
+            "species": "taxon",
+            "abundance": "cover",
+            "genus": "genus",
+            "family": "family",
+            "latitude": "lat",
+            "longitude": "lon",
+            "covariates": ["elev"],
+            "zero_abundance_as": 1.0,
+        },
         "targets": targets,
     }
     m = rc.SuiteManifest.from_json(json.dumps(manifest))
@@ -412,8 +556,9 @@ def test_each_target_reads_its_own_columns(split_suite_dir, scoring):
             p = rc.Predictor.load(str(split_suite_dir / member.file))
             cfg = p.dataset_config
             cfg.zero_abundance_as = 1.0
-            ds = rc.ResolveDataset.from_csv_with_vocabs(str(h_path), str(s_path), roles, [],
-                                                        p.external_vocabs, cfg)
+            ds = rc.ResolveDataset.from_csv_with_vocabs(
+                str(h_path), str(s_path), roles, [], p.external_vocabs, cfg
+            )
             pred = p.predict_dataset(ds)
             order = [pred.plot_ids.index(i) for i in ids]
             stack.append({k: v[order] for k, v in pred.predictions.items()})
@@ -421,8 +566,9 @@ def test_each_target_reads_its_own_columns(split_suite_dir, scoring):
 
     ys = member_values("y", _roles_reading(True, []))
     y = out.target("y")
-    assert torch.allclose(y.value, rc.combine_mean(torch.stack([m["y"] for m in ys])).value,
-                          atol=1e-5)
+    assert torch.allclose(
+        y.value, rc.combine_mean(torch.stack([m["y"] for m in ys])).value, atol=1e-5
+    )
 
     wh = member_values("where", _roles_reading(False, ["elev"]))
     points = torch.stack([torch.stack([m["lat"], m["lon"]], 1) for m in wh])
@@ -436,8 +582,15 @@ def test_each_target_reads_its_own_columns(split_suite_dir, scoring):
     assert torch.allclose(where.dispersion, sphere.dispersion, atol=1e-3)
 
     table = out.to_pandas()
-    for col in ("where_latitude", "where_longitude", "where_spread_km",
-                "where_seed2_latitude", "where_seed4_longitude", "y", "y_sd"):
+    for col in (
+        "where_latitude",
+        "where_longitude",
+        "where_spread_km",
+        "where_seed2_latitude",
+        "where_seed4_longitude",
+        "y",
+        "y_sd",
+    ):
         assert col in table.columns
     assert np.allclose(table["where_latitude"], where.value[:, 0].numpy())
 
@@ -445,7 +598,9 @@ def test_each_target_reads_its_own_columns(split_suite_dir, scoring):
 def test_declared_inputs_are_checked_against_the_contract(split_suite_dir):
     text = json.loads(rc.SuiteManifest.read(str(split_suite_dir)).to_json())
     text["targets"][0]["inputs"]["covariates"] = ["slope"]
-    with pytest.raises(Exception, match="'slope' is not a column of the input contract"):
+    with pytest.raises(
+        Exception, match="'slope' is not a column of the input contract"
+    ):
         rc.SuiteManifest.from_json(json.dumps(text)).validate()
     text = json.loads(rc.SuiteManifest.read(str(split_suite_dir)).to_json())
     text["format_version"] = 1
@@ -458,7 +613,9 @@ def test_a_spherical_mean_averages_across_the_antimeridian():
     out = rc.combine_spherical(c)
     assert abs(out.value[0, 0].item()) < 1e-4
     assert abs(abs(out.value[0, 1].item()) - 180.0) < 1e-4
-    assert out.dispersion[0].item() == pytest.approx(rc.EARTH_RADIUS_KM * math.pi / 180, rel=1e-4)
+    assert out.dispersion[0].item() == pytest.approx(
+        rc.EARTH_RADIUS_KM * math.pi / 180, rel=1e-4
+    )
 
 
 def test_the_prediction_table_is_the_engines(suite_dir, scoring):

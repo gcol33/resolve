@@ -6,6 +6,7 @@ bindings; ``SuitePredictions.to_pandas`` is the engine's prediction table
 (``suite_prediction_columns``) as a DataFrame, the columns
 ``resolve predict --suite`` writes.
 """
+
 from __future__ import annotations
 
 import os
@@ -34,7 +35,9 @@ def _columns(columns):
     return out
 
 
-def predict(self, species, header=None, columns=None, batch_size=4096, keep_members=False):
+def predict(
+    self, species, header=None, columns=None, batch_size=4096, keep_members=False
+):
     """Score plots with every loaded target of the suite.
 
     Parameters
@@ -61,16 +64,25 @@ def predict(self, species, header=None, columns=None, batch_size=4096, keep_memb
     cols = _columns(columns)
     if isinstance(species, (str, os.PathLike)):
         if header is not None and not isinstance(header, (str, os.PathLike)):
-            raise TypeError("with a species CSV path, header must be a CSV path or None")
-        return self.predict_csv(os.fspath(species),
-                                "" if header is None else os.fspath(header),
-                                cols, batch_size, keep_members)
+            raise TypeError(
+                "with a species CSV path, header must be a CSV path or None"
+            )
+        return self.predict_csv(
+            os.fspath(species),
+            "" if header is None else os.fspath(header),
+            cols,
+            batch_size,
+            keep_members,
+        )
     s_names, s_cols = _df_to_columns(species, "species")
     if header is None:
-        return self.predict_columns(s_names, s_cols, None, None, cols, batch_size, keep_members)
+        return self.predict_columns(
+            s_names, s_cols, None, None, cols, batch_size, keep_members
+        )
     h_names, h_cols = _df_to_columns(header, "header")
-    return self.predict_columns(s_names, s_cols, h_names, h_cols, cols, batch_size,
-                                keep_members)
+    return self.predict_columns(
+        s_names, s_cols, h_names, h_cols, cols, batch_size, keep_members
+    )
 
 
 def to_pandas(self, probabilities=False):
@@ -88,10 +100,12 @@ def to_pandas(self, probabilities=False):
     """
     import pandas as pd
 
-    return pd.DataFrame({
-        name: values if isinstance(values, list) else values.numpy()
-        for name, values in _core.suite_prediction_columns(self, probabilities)
-    })
+    return pd.DataFrame(
+        {
+            name: values if isinstance(values, list) else values.numpy()
+            for name, values in _core.suite_prediction_columns(self, probabilities)
+        }
+    )
 
 
 def install():

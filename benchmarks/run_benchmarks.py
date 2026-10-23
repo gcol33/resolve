@@ -410,8 +410,10 @@ def generate_synthetic_source(
         weights = covers / covers.sum()
 
         plot_ids.append(pid)
-        log_area[pid] = 3.0 + 1.5 * float(species_effect[spp_ids] @ weights) + float(
-            rng.normal(0.0, 0.25)
+        log_area[pid] = (
+            3.0
+            + 1.5 * float(species_effect[spp_ids] @ weights)
+            + float(rng.normal(0.0, 0.25))
         )
 
         for sid, cover in zip(spp_ids, covers):
@@ -546,10 +548,14 @@ def run_single_benchmark(
     """Run a single benchmark configuration and return its cross-validated result."""
     print(f"\n{'=' * 60}")
     print(f"Running: {cfg.name}")
-    print(f"  encoding={cfg.species_encoding}  arch={cfg.encoder_architecture}  "
-          f"hash_dim={cfg.hash_dim}  moe={cfg.moe_routing}")
-    print(f"  epochs={cfg.max_epochs}  patience={cfg.patience}  "
-          f"batch_size={cfg.batch_size}  lr={cfg.lr}")
+    print(
+        f"  encoding={cfg.species_encoding}  arch={cfg.encoder_architecture}  "
+        f"hash_dim={cfg.hash_dim}  moe={cfg.moe_routing}"
+    )
+    print(
+        f"  epochs={cfg.max_epochs}  patience={cfg.patience}  "
+        f"batch_size={cfg.batch_size}  lr={cfg.lr}"
+    )
     print(f"{'=' * 60}")
     sys.stdout.flush()
 
@@ -630,9 +636,16 @@ def print_results_table(results: list[BenchmarkResult]) -> None:
     # precision_<c> / recall_<c> / f1_<c> for every class, which would make the
     # table thousands of columns wide; the JSON keeps all of them.
     headline = [
-        "mae", "rmse", "r2", "smape",
-        "band_10", "band_25", "band_50",
-        "accuracy", "macro_f1", "weighted_f1",
+        "mae",
+        "rmse",
+        "r2",
+        "smape",
+        "band_10",
+        "band_25",
+        "band_50",
+        "accuracy",
+        "macro_f1",
+        "weighted_f1",
     ]
 
     print("\n")
@@ -641,10 +654,10 @@ def print_results_table(results: list[BenchmarkResult]) -> None:
     print("=" * 120)
     print("Headline metrics only; every per-class metric is in the JSON.")
 
-    for target, metrics in sorted(all_targets.items()):
-        sorted_metrics = [m for m in headline if m in metrics]
+    for target, metric_names in sorted(all_targets.items()):
+        sorted_metrics = [m for m in headline if m in metric_names]
         if not sorted_metrics:
-            sorted_metrics = sorted(metrics)
+            sorted_metrics = sorted(metric_names)
         print(f"\n--- Target: {target} ---\n")
 
         # Build header
@@ -865,16 +878,20 @@ def main(argv: list[str] | None = None) -> None:
         spatial_cv = source.has_coordinates
 
     if spatial_cv and not source.has_coordinates:
-        print("WARNING: --spatial-cv requested but the data has no coordinates. "
-              "Falling back to random CV.")
+        print(
+            "WARNING: --spatial-cv requested but the data has no coordinates. "
+            "Falling back to random CV."
+        )
         spatial_cv = False
 
     cv_label = "spatial block" if spatial_cv else "random"
     print(f"CV strategy: {args.cv_folds}-fold {cv_label}")
     print(f"Device: {device}")
     print(f"Engine: resolve_core {rc.__version__}")
-    print(f"Configs to run ({len(selected_configs)}): "
-          f"{[c.name for c in selected_configs]}")
+    print(
+        f"Configs to run ({len(selected_configs)}): "
+        f"{[c.name for c in selected_configs]}"
+    )
 
     metadata = {
         "timestamp": datetime.now(timezone.utc).isoformat(),

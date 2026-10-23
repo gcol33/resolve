@@ -67,7 +67,9 @@ def test_every_native_name_is_reexported(native):
 
 
 def test_every_native_name_is_in_all(native):
-    missing = sorted(name for name in _canonical_names(native) if name not in rc.__all__)
+    missing = sorted(
+        name for name in _canonical_names(native) if name not in rc.__all__
+    )
     assert missing == [], (
         "re-exported but absent from resolve_core.__all__: " + ", ".join(missing)
     )

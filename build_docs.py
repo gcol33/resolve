@@ -32,10 +32,16 @@ def run(cmd: list[str]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--serve", action="store_true",
-                        help="serve the MkDocs site with live reload instead of building it")
-    parser.add_argument("--r", action="store_true",
-                        help="also build the R package's pkgdown site into site/r/")
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="serve the MkDocs site with live reload instead of building it",
+    )
+    parser.add_argument(
+        "--r",
+        action="store_true",
+        help="also build the R package's pkgdown site into site/r/",
+    )
     args = parser.parse_args(argv)
 
     mkdocs = [sys.executable, "-m", "mkdocs"]

@@ -47,6 +47,7 @@ def categorical_dataset(categorical_csvs) -> "rc.ResolveDataset":
 # Vocabulary contract
 # ---------------------------------------------------------------------------
 
+
 def test_codes_are_sorted_and_start_at_one(categorical_dataset):
     vocab = categorical_dataset.categorical_vocab
     assert vocab.column_names == ["resurvey", "soil"]
@@ -93,6 +94,7 @@ def test_has_column_predicate(categorical_dataset):
 # Schema wiring
 # ---------------------------------------------------------------------------
 
+
 def test_schema_carries_the_categorical_layout(categorical_dataset):
     schema = categorical_dataset.schema
     assert schema.has_categoricals()
@@ -110,6 +112,7 @@ def test_numeric_covariate_stays_out_of_the_categorical_block(categorical_datase
 # ---------------------------------------------------------------------------
 # Letter-coded classification target
 # ---------------------------------------------------------------------------
+
 
 def test_letter_target_factorized_alphabetically(categorical_dataset):
     eunis = next(t for t in categorical_dataset.schema.targets if t.name == "eunis")
@@ -145,15 +148,23 @@ def test_explicit_class_mapping_is_honoured(categorical_csvs):
 # Round-trips
 # ---------------------------------------------------------------------------
 
-def test_schema_source_reuse_keeps_the_same_codes(categorical_csvs, categorical_dataset):
+
+def test_schema_source_reuse_keeps_the_same_codes(
+    categorical_csvs, categorical_dataset
+):
     header, species = categorical_csvs
     rebuilt = rc.ResolveDataset.from_csv_with_schema(
-        header, species, _roles(), _targets(), categorical_dataset,
+        header,
+        species,
+        _roles(),
+        _targets(),
+        categorical_dataset,
         make_dataset_config(hash_dim=8),
     )
     assert torch.equal(rebuilt.categorical_ids, categorical_dataset.categorical_ids)
-    assert rebuilt.categorical_vocab.column_map("soil") == \
-        categorical_dataset.categorical_vocab.column_map("soil")
+    assert rebuilt.categorical_vocab.column_map(
+        "soil"
+    ) == categorical_dataset.categorical_vocab.column_map("soil")
 
 
 def test_vocab_survives_a_checkpoint_round_trip(tmp_path, categorical_dataset):

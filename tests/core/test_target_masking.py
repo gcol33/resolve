@@ -34,10 +34,12 @@ def _csvs(tmp_path: Path, n: int = 160) -> tuple[str, str]:
             cls = ""  # with i % 3 == 0 this plot is labelled for nothing
         header_rows.append([f"P{i}", f"{c1:.5f}", f"{c2:.5f}", y, cls])
         species_rows.append([f"P{i}", f"sp{i % 6}", "1.0"])
-    header = write_csv(tmp_path / "mask_header.csv", ["plot_id", "c1", "c2", "y", "cls"],
-                       header_rows)
-    species = write_csv(tmp_path / "mask_species.csv", ["plot_id", "sp", "cover"],
-                        species_rows)
+    header = write_csv(
+        tmp_path / "mask_header.csv", ["plot_id", "c1", "c2", "y", "cls"], header_rows
+    )
+    species = write_csv(
+        tmp_path / "mask_species.csv", ["plot_id", "sp", "cover"], species_rows
+    )
     return str(header), str(species)
 
 
@@ -99,7 +101,9 @@ def test_mask_keeps_partly_labelled_plots_with_sentinels(tmp_path):
 def test_masked_fit_reports_labelled_counts_and_round_trips(tmp_path):
     ds = _load(tmp_path, rc.TargetMissingPolicy.Mask)
     torch.manual_seed(0)
-    model = rc.ResolveModel(ds.schema, make_model_config(rc.SpeciesEncodingMode.Hash, hash_dim=8))
+    model = rc.ResolveModel(
+        ds.schema, make_model_config(rc.SpeciesEncodingMode.Hash, hash_dim=8)
+    )
     trainer = rc.Trainer(model, make_train_config(max_epochs=4, batch_size=16))
     trainer.prepare_data(ds, test_size=0.25, seed=1)
     result = trainer.fit()
@@ -116,12 +120,18 @@ def test_masked_fit_reports_labelled_counts_and_round_trips(tmp_path):
     assert (classified.actuals >= 0).all()
 
     residuals = trainer.compute_residuals("y")
-    assert len(residuals.test_rows) == len(residuals.actuals) == int(torch.isfinite(y_test).sum())
+    assert (
+        len(residuals.test_rows)
+        == len(residuals.actuals)
+        == int(torch.isfinite(y_test).sum())
+    )
 
     path = str(tmp_path / "masked.pt")
     trainer.save(path)
     predictor = rc.Predictor.load(path)
-    assert [t.missing for t in predictor.schema.targets] == [rc.TargetMissingPolicy.Mask] * 2
+    assert [t.missing for t in predictor.schema.targets] == [
+        rc.TargetMissingPolicy.Mask
+    ] * 2
     predictions = predictor.predict_dataset(ds).predictions
     # Every plot is predicted, labelled or not.
     assert predictions["y"].shape[0] == ds.n_plots
@@ -140,8 +150,9 @@ def _decomposes(by_target, total, names, aux=None):
         assert terms == pytest.approx(value, rel=1e-5, abs=1e-6), epoch
 
 
-def _fit_masked(ds, *, test_size=0.25, fixed_epochs=0, moe=False, tabnet=False,
-                batch_size=16):
+def _fit_masked(
+    ds, *, test_size=0.25, fixed_epochs=0, moe=False, tabnet=False, batch_size=16
+):
     torch.manual_seed(0)
     model_cfg = make_model_config(rc.SpeciesEncodingMode.Hash, hash_dim=8)
     if moe:
@@ -166,8 +177,12 @@ def test_the_loss_history_splits_by_target(tmp_path):
     assert isinstance(result.train_loss_history_by_target, dict)
     assert isinstance(result.test_loss_history_by_target, dict)
     assert len(result.train_loss_history) == 4
-    _decomposes(result.train_loss_history_by_target, result.train_loss_history, ["y", "cls"])
-    _decomposes(result.test_loss_history_by_target, result.test_loss_history, ["y", "cls"])
+    _decomposes(
+        result.train_loss_history_by_target, result.train_loss_history, ["y", "cls"]
+    )
+    _decomposes(
+        result.test_loss_history_by_target, result.test_loss_history, ["y", "cls"]
+    )
     assert result.train_aux_loss_history == {}
 
 
@@ -176,9 +191,15 @@ def test_the_moe_term_is_recorded_beside_the_targets(tmp_path):
     result = _fit_masked(ds, moe=True)
     assert list(result.train_aux_loss_history) == ["moe"]
     assert len(result.train_aux_loss_history["moe"]) == len(result.train_loss_history)
-    _decomposes(result.train_loss_history_by_target, result.train_loss_history, ["y", "cls"],
-                aux=result.train_aux_loss_history)
-    _decomposes(result.test_loss_history_by_target, result.test_loss_history, ["y", "cls"])
+    _decomposes(
+        result.train_loss_history_by_target,
+        result.train_loss_history,
+        ["y", "cls"],
+        aux=result.train_aux_loss_history,
+    )
+    _decomposes(
+        result.test_loss_history_by_target, result.test_loss_history, ["y", "cls"]
+    )
 
 
 def test_the_tabnet_sparsity_term_is_recorded_beside_the_targets(tmp_path):
@@ -186,9 +207,15 @@ def test_the_tabnet_sparsity_term_is_recorded_beside_the_targets(tmp_path):
     result = _fit_masked(ds, tabnet=True)
     assert list(result.train_aux_loss_history) == ["tabnet_sparsity"]
     assert all(term > 0 for term in result.train_aux_loss_history["tabnet_sparsity"])
-    _decomposes(result.train_loss_history_by_target, result.train_loss_history, ["y", "cls"],
-                aux=result.train_aux_loss_history)
-    _decomposes(result.test_loss_history_by_target, result.test_loss_history, ["y", "cls"])
+    _decomposes(
+        result.train_loss_history_by_target,
+        result.train_loss_history,
+        ["y", "cls"],
+        aux=result.train_aux_loss_history,
+    )
+    _decomposes(
+        result.test_loss_history_by_target, result.test_loss_history, ["y", "cls"]
+    )
 
 
 def test_nothing_held_out_leaves_the_test_split_empty(tmp_path):
@@ -196,7 +223,9 @@ def test_nothing_held_out_leaves_the_test_split_empty(tmp_path):
     result = _fit_masked(ds, test_size=0.0, fixed_epochs=3)
     assert result.test_loss_history == []
     assert result.test_loss_history_by_target == {}
-    _decomposes(result.train_loss_history_by_target, result.train_loss_history, ["y", "cls"])
+    _decomposes(
+        result.train_loss_history_by_target, result.train_loss_history, ["y", "cls"]
+    )
 
 
 def test_a_single_target_history_is_the_total(tmp_path):
@@ -205,8 +234,9 @@ def test_a_single_target_history_is_the_total(tmp_path):
     cfg.species_encoding = rc.SpeciesEncodingMode.Hash
     cfg.hash_dim = 8
     cfg.track_unknown_fraction = False
-    ds = rc.ResolveDataset.from_csv(header, species, _roles(),
-                                    [rc.TargetSpec.regression("y")], cfg)
+    ds = rc.ResolveDataset.from_csv(
+        header, species, _roles(), [rc.TargetSpec.regression("y")], cfg
+    )
     result = _fit_masked(ds)
     assert result.train_loss_history_by_target == {"y": result.train_loss_history}
     assert result.test_loss_history_by_target == {"y": result.test_loss_history}

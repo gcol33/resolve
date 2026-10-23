@@ -20,6 +20,7 @@ contract that keeps Windows off the unimplemented ``expandable_segments``
 path), structure for the VRAM cap, whose effect is only observable on a CUDA
 device and is pinned by Catch2 in ``src/core/tests/test_gpu.cpp``.
 """
+
 from __future__ import annotations
 
 import os
@@ -136,6 +137,7 @@ def test_batch_size_floor_default_exposed_through_train_config() -> None:
 # ---------------------------------------------------------------------------
 # VRAM cap
 # ---------------------------------------------------------------------------
+
 
 def test_vram_fraction_defaults_to_the_whole_device() -> None:
     """A dedicated training job on a solo GPU should not be capped by default."""

@@ -19,20 +19,33 @@ from conftest import (
     make_dataset_config,
     make_model_config,
     make_roles,
-    make_targets,
     make_train_config,
     trainer_continuous,
 )
 
-POOL_FIELDS = ("species_ids", "pool_genus_ids", "pool_family_ids", "pool_weights",
-               "pool_mask", "pool_has_cover")
-CONTINUOUS_PARTS = ("coordinates", "covariates", "unknown_fraction", "unknown_count",
-                    "hash_embedding")
+POOL_FIELDS = (
+    "species_ids",
+    "pool_genus_ids",
+    "pool_family_ids",
+    "pool_weights",
+    "pool_mask",
+    "pool_has_cover",
+)
+CONTINUOUS_PARTS = (
+    "coordinates",
+    "covariates",
+    "unknown_fraction",
+    "unknown_count",
+    "hash_embedding",
+)
 
 
 def _present(dataset, names):
-    return {name: getattr(dataset, name) for name in names
-            if getattr(dataset, name) is not None}
+    return {
+        name: getattr(dataset, name)
+        for name in names
+        if getattr(dataset, name) is not None
+    }
 
 
 @pytest.fixture
@@ -45,8 +58,11 @@ def hash_model(hash_dataset):
 
 def test_positional_and_keyword_inputs_agree(hash_dataset, hash_model):
     model, continuous = hash_model
-    by_keyword = model.forward(continuous=continuous, genus_ids=hash_dataset.genus_ids,
-                               family_ids=hash_dataset.family_ids)
+    by_keyword = model.forward(
+        continuous=continuous,
+        genus_ids=hash_dataset.genus_ids,
+        family_ids=hash_dataset.family_ids,
+    )
     by_position = model(continuous, hash_dataset.genus_ids, hash_dataset.family_ids)
     assert set(by_keyword) == set(by_position) == {"y", "hab"}
     for target in by_keyword:
@@ -96,21 +112,29 @@ def test_forward_single_reads_the_pool_inputs(pool_dataset):
 
 
 def test_predictor_tensor_paths_match_the_dataset_path(tmp_path, pool_dataset):
-    model = rc.ResolveModel(pool_dataset.schema,
-                            make_model_config(rc.SpeciesEncodingMode.RankPool))
+    model = rc.ResolveModel(
+        pool_dataset.schema, make_model_config(rc.SpeciesEncodingMode.RankPool)
+    )
     trainer = rc.Trainer(model, make_train_config(max_epochs=1))
     trainer.prepare_data(pool_dataset, 0.25, 42)
     path = str(tmp_path / "pool.pt")
     trainer.save(path)
     predictor = rc.Predictor.load(path, device="cpu")
 
-    kwargs = {**_present(pool_dataset, CONTINUOUS_PARTS), **_present(pool_dataset, POOL_FIELDS)}
+    kwargs = {
+        **_present(pool_dataset, CONTINUOUS_PARTS),
+        **_present(pool_dataset, POOL_FIELDS),
+    }
     reference = predictor.predict_dataset(pool_dataset, True, -1)
 
     by_tensors = predictor.predict(**kwargs, return_latent=True, batch_size=7)
     for target in reference.predictions:
-        assert torch.allclose(by_tensors.predictions[target].float(),
-                              reference.predictions[target].float(), rtol=1e-5, atol=1e-6)
+        assert torch.allclose(
+            by_tensors.predictions[target].float(),
+            reference.predictions[target].float(),
+            rtol=1e-5,
+            atol=1e-6,
+        )
     assert torch.allclose(by_tensors.latent, reference.latent, rtol=1e-5, atol=1e-6)
 
     embeddings = predictor.get_embeddings(**kwargs)
@@ -123,20 +147,29 @@ def test_predictor_tensor_paths_match_the_dataset_path(tmp_path, pool_dataset):
 
 def test_embeddings_read_the_categorical_columns(tmp_path, categorical_csvs):
     header, species = categorical_csvs
-    roles = make_roles(taxonomy=False, coordinates=False, covariates=False,
-                       categoricals=["soil"])
+    roles = make_roles(
+        taxonomy=False, coordinates=False, covariates=False, categoricals=["soil"]
+    )
     dataset = rc.ResolveDataset.from_csv(
-        header, species, roles, [rc.TargetSpec.regression("y")],
-        make_dataset_config(rc.SpeciesEncodingMode.Embed, use_taxonomy=False))
-    model = rc.ResolveModel(dataset.schema, make_model_config(rc.SpeciesEncodingMode.Embed))
+        header,
+        species,
+        roles,
+        [rc.TargetSpec.regression("y")],
+        make_dataset_config(rc.SpeciesEncodingMode.Embed, use_taxonomy=False),
+    )
+    model = rc.ResolveModel(
+        dataset.schema, make_model_config(rc.SpeciesEncodingMode.Embed)
+    )
     trainer = rc.Trainer(model, make_train_config(max_epochs=1))
     trainer.prepare_data(dataset, 0.25, 42)
     path = str(tmp_path / "embed.pt")
     trainer.save(path)
     predictor = rc.Predictor.load(path, device="cpu")
 
-    kwargs = {**_present(dataset, CONTINUOUS_PARTS),
-              **_present(dataset, ("species_ids", "categorical_ids"))}
+    kwargs = {
+        **_present(dataset, CONTINUOUS_PARTS),
+        **_present(dataset, ("species_ids", "categorical_ids")),
+    }
     embeddings = predictor.get_embeddings(**kwargs)
     reference = predictor.predict_dataset(dataset, True, -1).latent
     assert torch.allclose(embeddings, reference, rtol=1e-5, atol=1e-6)

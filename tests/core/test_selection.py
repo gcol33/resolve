@@ -42,7 +42,9 @@ def rotated_csvs(tmp_path: Path) -> tuple[str, str]:
             cover = ((j + i) % N_SPECIES) + 1
             species_rows.append([f"P{i}", f"sp{j}", cover, f"g{j % 3}", f"f{j % 2}"])
 
-    header = write_csv(tmp_path / "sel_header.csv", ["plot_id", "y", "hab"], header_rows)
+    header = write_csv(
+        tmp_path / "sel_header.csv", ["plot_id", "y", "hab"], header_rows
+    )
     species = write_csv(
         tmp_path / "sel_species.csv",
         ["plot_id", "sp", "cover", "genus", "family"],
@@ -99,9 +101,7 @@ def _encoded_names(ds, row: int) -> set[str]:
         }
     ids = ds.species_ids[row]
     return {
-        n
-        for c in range(ids.size(0))
-        if (n := name_of(int(ids[c].item()))) is not None
+        n for c in range(ids.size(0)) if (n := name_of(int(ids[c].item()))) is not None
     }
 
 
@@ -117,6 +117,7 @@ def _expected_end(plot_index: int, k: int, *, top: bool) -> set[str]:
 # ---------------------------------------------------------------------------
 # The knob exists and round-trips
 # ---------------------------------------------------------------------------
+
 
 def test_species_budget_defaults_to_no_budget():
     assert rc.DatasetConfig().species_budget == 0
@@ -142,6 +143,7 @@ def test_effective_selection_reports_what_a_load_applies():
 # The pooled and sparse encodings
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "encoding",
     [
@@ -151,7 +153,11 @@ def test_effective_selection_reports_what_a_load_applies():
     ],
 )
 def test_no_budget_encodes_every_species(rotated_csvs, encoding):
-    for selection in (rc.SelectionMode.Top, rc.SelectionMode.Bottom, rc.SelectionMode.All):
+    for selection in (
+        rc.SelectionMode.Top,
+        rc.SelectionMode.Bottom,
+        rc.SelectionMode.All,
+    ):
         ds = _build(rotated_csvs, _config(encoding, selection, 0))
         for row in range(ds.n_plots):
             assert len(_encoded_names(ds, row)) == N_SPECIES
@@ -185,9 +191,12 @@ def test_budget_keeps_the_ranked_end(rotated_csvs, encoding, selection, top):
 
 def test_the_two_arms_share_one_vocabulary(rotated_csvs):
     """An ablation's arms must be comparable: same codes, different assemblage."""
-    top = _build(rotated_csvs, _config(rc.SpeciesEncodingMode.RankPool, rc.SelectionMode.Top, 3))
+    top = _build(
+        rotated_csvs, _config(rc.SpeciesEncodingMode.RankPool, rc.SelectionMode.Top, 3)
+    )
     bottom = _build(
-        rotated_csvs, _config(rc.SpeciesEncodingMode.RankPool, rc.SelectionMode.Bottom, 3)
+        rotated_csvs,
+        _config(rc.SpeciesEncodingMode.RankPool, rc.SelectionMode.Bottom, 3),
     )
 
     assert list(top.species_vocab) == list(bottom.species_vocab)
@@ -211,6 +220,7 @@ def test_budget_narrows_the_padded_width(rotated_csvs):
 # ---------------------------------------------------------------------------
 # Embed
 # ---------------------------------------------------------------------------
+
 
 def test_embed_honours_bottom(rotated_csvs):
     cfg = _config(rc.SpeciesEncodingMode.Embed, rc.SelectionMode.Bottom, 0)
@@ -244,6 +254,7 @@ def test_embed_rejects_all(rotated_csvs):
 # Hash is unchanged
 # ---------------------------------------------------------------------------
 
+
 def test_hash_ignores_the_budget(rotated_csvs):
     cfg = _config(rc.SpeciesEncodingMode.Hash, rc.SelectionMode.Top, 0)
     cfg.top_k = 2
@@ -261,6 +272,7 @@ def test_hash_ignores_the_budget(rotated_csvs):
 # ---------------------------------------------------------------------------
 # Checkpoint round trip
 # ---------------------------------------------------------------------------
+
 
 def test_species_budget_survives_the_checkpoint(rotated_csvs, tmp_path):
     from conftest import make_model_config, make_train_config

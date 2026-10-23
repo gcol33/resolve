@@ -28,6 +28,7 @@ from conftest import (
 # Schema and role mapping
 # ---------------------------------------------------------------------------
 
+
 def test_from_csv_populates_schema(hash_dataset, plot_csvs):
     schema = hash_dataset.schema
 
@@ -78,6 +79,7 @@ def test_target_tensors_have_expected_shape_and_dtype(hash_dataset):
 # ---------------------------------------------------------------------------
 # Accessor tensors
 # ---------------------------------------------------------------------------
+
 
 def test_hash_mode_accessors(hash_dataset):
     n = hash_dataset.n_plots
@@ -181,11 +183,16 @@ def test_a_dense_species_vector_reaches_the_model_as_sparse_rows(plot_csvs):
     model.eval()
     continuous = dataset.continuous_block(False)
     continuous = torch.nan_to_num(continuous)
-    kwargs = dict(continuous=continuous, genus_ids=dataset.genus_ids,
-                  family_ids=dataset.family_ids)
+    kwargs = dict(
+        continuous=continuous,
+        genus_ids=dataset.genus_ids,
+        family_ids=dataset.family_ids,
+    )
     with torch.no_grad():
         sparse_out = model.forward(species_vector=dataset.species_vector, **kwargs)
-        dense_out = model.forward(species_vector=dataset.species_vector.to_dense(), **kwargs)
+        dense_out = model.forward(
+            species_vector=dataset.species_vector.to_dense(), **kwargs
+        )
     for name in sparse_out:
         assert torch.equal(sparse_out[name], dense_out[name])
 
@@ -193,6 +200,7 @@ def test_a_dense_species_vector_reaches_the_model_as_sparse_rows(plot_csvs):
 # ---------------------------------------------------------------------------
 # Loader equivalence
 # ---------------------------------------------------------------------------
+
 
 def test_from_pandas_matches_from_csv(plot_csvs):
     pd = pytest.importorskip("pandas")
@@ -211,7 +219,13 @@ def test_from_pandas_matches_from_csv(plot_csvs):
 
     assert in_memory.n_plots == from_disk.n_plots
     assert list(in_memory.plot_ids) == list(from_disk.plot_ids)
-    for name in ("coordinates", "covariates", "hash_embedding", "genus_ids", "family_ids"):
+    for name in (
+        "coordinates",
+        "covariates",
+        "hash_embedding",
+        "genus_ids",
+        "family_ids",
+    ):
         assert torch.equal(getattr(in_memory, name), getattr(from_disk, name)), name
     for key in from_disk.targets:
         assert torch.equal(in_memory.targets[key], from_disk.targets[key]), key
@@ -250,7 +264,9 @@ def test_single_table_loader(tmp_path):
             rows.append([f"P{i}", f"sp{(i + j) % 6}", f"{1.0 + j:.2f}", float(i)])
     path = tmp_path / "long.csv"
     path.write_text(
-        "plot_id,sp,cover,y\n" + "\n".join(",".join(str(c) for c in r) for r in rows) + "\n",
+        "plot_id,sp,cover,y\n"
+        + "\n".join(",".join(str(c) for c in r) for r in rows)
+        + "\n",
         encoding="utf-8",
     )
 
@@ -269,6 +285,7 @@ def test_single_table_loader(tmp_path):
 # ---------------------------------------------------------------------------
 # Loader rejections
 # ---------------------------------------------------------------------------
+
 
 def test_unknown_role_column_raises(plot_csvs):
     roles = make_roles()
@@ -309,8 +326,9 @@ def test_missing_file_raises(tmp_path, plot_csvs):
 
 
 # ---------------------------------------------------------------------------
-# Clearing an optional role (issue #111)
+# Clearing an optional role
 # ---------------------------------------------------------------------------
+
 
 def test_optional_roles_accept_none():
     """``roles.latitude = None`` is the unset path, matching the getter.
@@ -370,7 +388,10 @@ def test_a_misspelled_role_column_still_throws(plot_csvs):
     roles.latitude = "lattitude"
     with pytest.raises(Exception):
         rc.ResolveDataset.from_csv(
-            plot_csvs.header, plot_csvs.species, roles, make_targets(),
+            plot_csvs.header,
+            plot_csvs.species,
+            roles,
+            make_targets(),
             make_dataset_config(),
         )
 
@@ -379,8 +400,9 @@ def test_model_config_for_dataset_takes_the_sizing_fields_from_the_dataset(plot_
     cfg = make_dataset_config(rc.SpeciesEncodingMode.Hash, hash_dim=12)
     cfg.top_k = 2
     cfg.selection = rc.SelectionMode.TopBottom
-    dataset = rc.ResolveDataset.from_csv(plot_csvs.header, plot_csvs.species, make_roles(),
-                                         make_targets(), cfg)
+    dataset = rc.ResolveDataset.from_csv(
+        plot_csvs.header, plot_csvs.species, make_roles(), make_targets(), cfg
+    )
     base = rc.ModelConfig()
     base.hash_dim = 99
     base.hidden_dims = [8]
@@ -399,17 +421,30 @@ def test_a_csv_load_releases_the_gil(tmp_path):
     n_plots, per_plot = 20000, 10
     header = tmp_path / "gil_header.csv"
     species = tmp_path / "gil_species.csv"
-    header.write_text("plot_id,y\n" + "".join(f"p{i},{i % 7}\n" for i in range(n_plots)))
-    species.write_text("plot_id,sp,cover\n" + "".join(
-        f"p{i},sp{(i * 7 + j) % 500},1\n" for i in range(n_plots) for j in range(per_plot)))
+    header.write_text(
+        "plot_id,y\n" + "".join(f"p{i},{i % 7}\n" for i in range(n_plots))
+    )
+    species.write_text(
+        "plot_id,sp,cover\n"
+        + "".join(
+            f"p{i},sp{(i * 7 + j) % 500},1\n"
+            for i in range(n_plots)
+            for j in range(per_plot)
+        )
+    )
     roles = rc.RoleMapping()
     roles.plot_id = "plot_id"
     roles.species_id = "sp"
     roles.abundance = "cover"
 
     loaded = []
-    worker = threading.Thread(target=lambda: loaded.append(rc.ResolveDataset.from_csv(
-        str(header), str(species), roles, [rc.TargetSpec.regression("y")])))
+    worker = threading.Thread(
+        target=lambda: loaded.append(
+            rc.ResolveDataset.from_csv(
+                str(header), str(species), roles, [rc.TargetSpec.regression("y")]
+            )
+        )
+    )
     ticks = 0
     worker.start()
     while worker.is_alive():

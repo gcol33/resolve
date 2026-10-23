@@ -30,10 +30,16 @@ from conftest import (
 
 @pytest.fixture(scope="module")
 def dataset(tmp_path_factory):
-    csvs = make_plot_csvs(tmp_path_factory.mktemp("architectures"), n_plots=60, n_species=10)
+    csvs = make_plot_csvs(
+        tmp_path_factory.mktemp("architectures"), n_plots=60, n_species=10
+    )
     return rc.ResolveDataset.from_csv(
-        csvs.header, csvs.species, make_roles(), make_targets(),
-        make_dataset_config(rc.SpeciesEncodingMode.Hash))
+        csvs.header,
+        csvs.species,
+        make_roles(),
+        make_targets(),
+        make_dataset_config(rc.SpeciesEncodingMode.Hash),
+    )
 
 
 def _tabnet_config():
@@ -57,14 +63,18 @@ def _saint_config(rows=8):
 
 
 def test_each_model_names_the_auxiliary_terms_it_adds(dataset):
-    plain = rc.ResolveModel(dataset.schema, make_model_config(rc.SpeciesEncodingMode.Hash))
+    plain = rc.ResolveModel(
+        dataset.schema, make_model_config(rc.SpeciesEncodingMode.Hash)
+    )
     assert plain.aux_loss_names == []
 
     moe_cfg = make_model_config(rc.SpeciesEncodingMode.Hash)
     moe_cfg.moe_routing = rc.MoERoutingType.Soft
     assert rc.ResolveModel(dataset.schema, moe_cfg).aux_loss_names == ["moe"]
 
-    assert rc.ResolveModel(dataset.schema, _tabnet_config()).aux_loss_names == ["tabnet_sparsity"]
+    assert rc.ResolveModel(dataset.schema, _tabnet_config()).aux_loss_names == [
+        "tabnet_sparsity"
+    ]
 
 
 def test_forward_with_aux_returns_the_weighted_terms(dataset):
@@ -81,7 +91,9 @@ def test_forward_with_aux_returns_the_weighted_terms(dataset):
     assert term.dim() == 0
     assert float(term) > 0.0
 
-    plain = rc.ResolveModel(dataset.schema, make_model_config(rc.SpeciesEncodingMode.Hash))
+    plain = rc.ResolveModel(
+        dataset.schema, make_model_config(rc.SpeciesEncodingMode.Hash)
+    )
     assert plain.forward_with_aux(continuous, genus, family).aux_losses == {}
 
 
@@ -123,11 +135,17 @@ def test_transformer_pooling_is_an_enum():
 
 
 @pytest.mark.parametrize(
-    "encoding", [rc.SpeciesEncodingMode.RankPool, rc.SpeciesEncodingMode.Transformer])
+    "encoding", [rc.SpeciesEncodingMode.RankPool, rc.SpeciesEncodingMode.Transformer]
+)
 def test_a_pooled_encoding_trains_a_tabular_architecture(tmp_path, encoding):
     csvs = make_plot_csvs(tmp_path, n_plots=40, n_species=8)
     dataset = rc.ResolveDataset.from_csv(
-        csvs.header, csvs.species, make_roles(), make_targets(), make_dataset_config(encoding))
+        csvs.header,
+        csvs.species,
+        make_roles(),
+        make_targets(),
+        make_dataset_config(encoding),
+    )
     cfg = make_model_config(encoding)
     cfg.d_model = 16
     cfg.n_heads = 2
@@ -150,7 +168,9 @@ def test_heterogeneous_gnn_refuses_an_encoding_without_a_species_vector(dataset)
 
 
 def test_diagnostics_report_every_hidden_layer(dataset):
-    model = rc.ResolveModel(dataset.schema, make_model_config(rc.SpeciesEncodingMode.Hash))
+    model = rc.ResolveModel(
+        dataset.schema, make_model_config(rc.SpeciesEncodingMode.Hash)
+    )
     trainer = rc.Trainer(model, make_train_config(max_epochs=1, batch_size=16))
     trainer.prepare_data(dataset)
     trainer.fit()

@@ -31,6 +31,7 @@ from conftest import make_train_config, write_csv
 # Generating functions
 # ---------------------------------------------------------------------------
 
+
 def _species_signal_csvs(tmp_path, n_plots: int = 600, n_species: int = 12):
     """y is the sum of per-species contributions over each plot's species set.
 
@@ -64,9 +65,7 @@ def _covariate_signal_csvs(tmp_path, n_plots: int = 600):
         cov1 = (i % 37) / 37.0
         cov2 = (i % 23) / 23.0
         y = 3.0 * cov1 - 2.0 * cov2 + 1.0
-        header_rows.append(
-            [f"P{i}", f"{cov1:.6f}", f"{cov2:.6f}", f"{y:.6f}"]
-        )
+        header_rows.append([f"P{i}", f"{cov1:.6f}", f"{cov2:.6f}", f"{y:.6f}"])
         species_rows.append([f"P{i}", f"sp{i % 5}", "1.0"])
 
     header = write_csv(
@@ -141,6 +140,7 @@ def _fit(dataset, model_config, *, max_epochs: int = 400, seed: int = 7):
 # Regression from covariates
 # ---------------------------------------------------------------------------
 
+
 def test_regression_recovers_a_linear_covariate_signal(tmp_path):
     header, species = _covariate_signal_csvs(tmp_path)
     dataset = rc.ResolveDataset.from_csv(
@@ -166,6 +166,7 @@ def test_regression_recovers_a_linear_covariate_signal(tmp_path):
 # ---------------------------------------------------------------------------
 # Classification
 # ---------------------------------------------------------------------------
+
 
 def test_classification_separates_a_separable_signal(tmp_path):
     header, species = _separable_class_csvs(tmp_path)
@@ -194,6 +195,7 @@ def test_classification_separates_a_separable_signal(tmp_path):
 # ---------------------------------------------------------------------------
 # Species-composition encoders
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     ("encoding", "build_model", "threshold"),
@@ -278,6 +280,7 @@ def _model_config_embed() -> "rc.ModelConfig":
 # ---------------------------------------------------------------------------
 # The recovered model survives the checkpoint
 # ---------------------------------------------------------------------------
+
 
 def test_a_recovered_model_still_recovers_after_a_round_trip(tmp_path):
     """Saving and reloading must not lose what the model learned.

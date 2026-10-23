@@ -52,6 +52,7 @@ def _flat_weights(model) -> torch.Tensor:
 # SCARF / JEPA
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     ("name", "cls"),
     [("scarf", rc.SCARFPretrainer), ("jepa", rc.JEPAPretrainer)],
@@ -115,7 +116,8 @@ def test_pretrain_rejects_an_unknown_input(pretrain_inputs):
     model, continuous, _, _ = pretrain_inputs
     with pytest.raises(TypeError, match="speciess_ids"):
         rc.JEPAPretrainer(model, _pretrain_config(1)).pretrain(
-            continuous, speciess_ids=continuous)
+            continuous, speciess_ids=continuous
+        )
 
 
 def test_masked_species_pretraining_trains_a_transformer_model(pool_dataset):
@@ -188,6 +190,7 @@ def test_pretraining_without_taxonomy(plot_csvs):
 # VAE
 # ---------------------------------------------------------------------------
 
+
 def test_vae_pretrainer_runs_over_a_species_matrix(hash_dataset):
     n_species = hash_dataset.schema.n_species_vocab
 
@@ -215,6 +218,7 @@ def test_vae_pretrainer_runs_over_a_species_matrix(hash_dataset):
 # ---------------------------------------------------------------------------
 # Config validation
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     ("field", "value"),

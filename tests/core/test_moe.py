@@ -80,6 +80,7 @@ def _has_prefix(names: set[str], prefix: str) -> bool:
 # The placement enum reached the module
 # ---------------------------------------------------------------------------
 
+
 def test_placement_enum_is_public():
     assert rc.MoEPlacement.Tail is not rc.MoEPlacement.Post
     cfg = rc.ModelConfig()
@@ -111,6 +112,7 @@ def test_moe_config_fields_round_trip():
 # ---------------------------------------------------------------------------
 # Tail: available to every species encoding
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("encoding", ENCODINGS, ids=lambda e: str(e).split(".")[-1])
 def test_tail_mixture_builds_for_every_encoding(csvs, encoding):
@@ -159,6 +161,7 @@ def test_post_mixture_keeps_the_encoder_tail(csvs, encoding):
 # Training
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "placement",
     [rc.MoEPlacement.Tail, rc.MoEPlacement.Post],
@@ -166,8 +169,11 @@ def test_post_mixture_keeps_the_encoder_tail(csvs, encoding):
 )
 @pytest.mark.parametrize(
     "encoding",
-    [rc.SpeciesEncodingMode.Hash, rc.SpeciesEncodingMode.Embed,
-     rc.SpeciesEncodingMode.RankPool],
+    [
+        rc.SpeciesEncodingMode.Hash,
+        rc.SpeciesEncodingMode.Embed,
+        rc.SpeciesEncodingMode.RankPool,
+    ],
     ids=lambda e: str(e).split(".")[-1],
 )
 def test_a_mixture_trains(csvs, encoding, placement):
@@ -187,6 +193,7 @@ def test_a_mixture_trains(csvs, encoding, placement):
 # ---------------------------------------------------------------------------
 # Placements an encoder without an MLP tail can and cannot take
 # ---------------------------------------------------------------------------
+
 
 def test_tail_is_refused_where_there_is_no_mlp_tail(csvs):
     ds = _dataset(csvs, rc.SpeciesEncodingMode.Sparse)
@@ -221,6 +228,7 @@ def test_tabm_and_a_mixture_cannot_both_have_the_tail(csvs):
 # ---------------------------------------------------------------------------
 # Checkpoint
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "placement",

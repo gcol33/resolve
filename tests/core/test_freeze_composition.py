@@ -34,7 +34,9 @@ def test_a_fit_moves_the_tables_only_when_they_are_not_frozen(pool_dataset, free
     trainer.prepare_data(pool_dataset, test_size=0.25, seed=1)
     trainer.fit()
 
-    unchanged = all(torch.equal(t, b) for t, b in zip(model.composition_parameters(), before))
+    unchanged = all(
+        torch.equal(t, b) for t, b in zip(model.composition_parameters(), before)
+    )
     assert unchanged is freeze
 
 

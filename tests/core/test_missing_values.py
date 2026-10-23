@@ -29,11 +29,19 @@ def _csvs(tmp_path: Path) -> tuple[str, str]:
         y = 1.0 if i % 5 == 1 else 0.01 * float(elev)
         header_rows.append([f"P{i}", lat, lon, elev, f"{y:.4f}"])
         species_rows.append([f"P{i}", f"sp{i % 6}", "2.0", f"g{i % 3}", f"f{i % 2}"])
-        species_rows.append([f"P{i}", f"sp{(i + 1) % 6}", "1.0", f"g{(i + 1) % 3}", "f0"])
-    header = write_csv(tmp_path / "missing_header.csv", ["plot_id", "lat", "lon", "elev", "y"],
-                       header_rows)
-    species = write_csv(tmp_path / "missing_species.csv",
-                        ["plot_id", "sp", "cover", "genus", "family"], species_rows)
+        species_rows.append(
+            [f"P{i}", f"sp{(i + 1) % 6}", "1.0", f"g{(i + 1) % 3}", "f0"]
+        )
+    header = write_csv(
+        tmp_path / "missing_header.csv",
+        ["plot_id", "lat", "lon", "elev", "y"],
+        header_rows,
+    )
+    species = write_csv(
+        tmp_path / "missing_species.csv",
+        ["plot_id", "sp", "cover", "genus", "family"],
+        species_rows,
+    )
     return str(header), str(species)
 
 
@@ -57,8 +65,9 @@ def _load(tmp_path: Path, policy: "rc.MissingValuePolicy") -> "rc.ResolveDataset
     cfg.hash_dim = 16
     cfg.track_unknown_fraction = False
     cfg.missing_values = policy
-    return rc.ResolveDataset.from_csv(header, species, _roles(),
-                                      [rc.TargetSpec.regression("y")], cfg)
+    return rc.ResolveDataset.from_csv(
+        header, species, _roles(), [rc.TargetSpec.regression("y")], cfg
+    )
 
 
 def test_the_default_policy_flags_missing_values():
@@ -104,7 +113,9 @@ def test_fit_and_reload_stay_finite_through_missing_values(tmp_path, policy):
     path = str(tmp_path / f"missing_{policy}.pt")
     trainer.save(path)
     predictor = rc.Predictor.load(path)
-    assert predictor.schema.dataset_config.missing_values == getattr(rc.MissingValuePolicy, policy)
+    assert predictor.schema.dataset_config.missing_values == getattr(
+        rc.MissingValuePolicy, policy
+    )
     assert torch.allclose(predictor.scalers.continuous_fill, fill)
     predictions = predictor.predict_dataset(ds).predictions["y"]
     assert torch.isfinite(predictions).all()

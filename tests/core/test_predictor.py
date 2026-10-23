@@ -28,6 +28,7 @@ def saved_model(tmp_path, fitted_trainer) -> str:
 # Round-trip
 # ---------------------------------------------------------------------------
 
+
 def test_predictor_reproduces_the_trainers_predictions(saved_model, fitted_trainer):
     """train -> save -> load -> predict must return the trainer's own numbers."""
     trainer, dataset = fitted_trainer.trainer, fitted_trainer.dataset
@@ -82,10 +83,13 @@ def test_chunked_prediction_matches_the_one_shot_forward(saved_model, fitted_tra
 
 
 # ---------------------------------------------------------------------------
-# Class probabilities (issue #117)
+# Class probabilities
 # ---------------------------------------------------------------------------
 
-def test_classification_targets_carry_softmax_probabilities(saved_model, fitted_trainer):
+
+def test_classification_targets_carry_softmax_probabilities(
+    saved_model, fitted_trainer
+):
     """A classification target's probabilities are the softmax rows its code
     was taken from; a regression target has none."""
     predictor = rc.Predictor.load(saved_model, device="cpu")
@@ -149,6 +153,7 @@ def test_latent_is_returned_on_request(saved_model, fitted_trainer):
 # Embedding accessors
 # ---------------------------------------------------------------------------
 
+
 def test_taxonomy_embedding_accessors(saved_model, fitted_trainer):
     predictor = rc.Predictor.load(saved_model, device="cpu")
     schema = fitted_trainer.dataset.schema
@@ -174,6 +179,7 @@ def test_predictor_carries_the_model_schema(saved_model, fitted_trainer):
 # Pool encoders survive the checkpoint
 # ---------------------------------------------------------------------------
 
+
 def test_rank_pool_checkpoint_round_trip(tmp_path, pool_dataset):
     """A rank-pool checkpoint must reload with its pool hyperparameters intact.
 
@@ -194,8 +200,13 @@ def test_rank_pool_checkpoint_round_trip(tmp_path, pool_dataset):
     reloaded = predictor.model.config
     assert reloaded.species_encoding == rc.SpeciesEncodingMode.RankPool
     assert reloaded.cover_dropout == pytest.approx(0.15)
-    assert predictor.model.schema.dataset_config.pool_weighting == rc.PoolWeighting.Log1p
-    assert predictor.model.schema.dataset_config.pool_species_cap == pool_dataset.schema.dataset_config.pool_species_cap
+    assert (
+        predictor.model.schema.dataset_config.pool_weighting == rc.PoolWeighting.Log1p
+    )
+    assert (
+        predictor.model.schema.dataset_config.pool_species_cap
+        == pool_dataset.schema.dataset_config.pool_species_cap
+    )
 
     out = predictor.predict_dataset(pool_dataset, False, 64)
     assert torch.isfinite(out.predictions["y"]).all()

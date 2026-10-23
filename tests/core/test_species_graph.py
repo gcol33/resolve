@@ -19,11 +19,16 @@ from conftest import make_dataset_config, make_roles, make_targets, make_train_c
 
 
 def sparse_dataset(plot_csvs, *, use_taxonomy: bool = True) -> "rc.ResolveDataset":
-    config = make_dataset_config(rc.SpeciesEncodingMode.Sparse,
-                                 use_taxonomy=use_taxonomy)
+    config = make_dataset_config(
+        rc.SpeciesEncodingMode.Sparse, use_taxonomy=use_taxonomy
+    )
     return rc.ResolveDataset.from_csv(
-        plot_csvs.header, plot_csvs.species,
-        make_roles(taxonomy=use_taxonomy), make_targets(), config)
+        plot_csvs.header,
+        plot_csvs.species,
+        make_roles(taxonomy=use_taxonomy),
+        make_targets(),
+        config,
+    )
 
 
 def hetero_config(**overrides) -> "rc.HeterogeneousGNNConfig":
@@ -52,9 +57,11 @@ def test_the_graph_carries_one_edge_type_per_relation(plot_csvs):
     types = set(int(t) for t in graph.edge_type.tolist())
     # The stored value is the index the encoder's edge-type embedding looks up,
     # so it is the enum's own numbering.
-    assert types <= {rc.SpeciesEdgeType.SameGenus.value,
-                     rc.SpeciesEdgeType.SameFamily.value,
-                     rc.SpeciesEdgeType.CoOccurrence.value}
+    assert types <= {
+        rc.SpeciesEdgeType.SameGenus.value,
+        rc.SpeciesEdgeType.SameFamily.value,
+        rc.SpeciesEdgeType.CoOccurrence.value,
+    }
     # The corpus has several genera, several families and species that share
     # plots, so all three relations are present.
     assert types == {0, 1, 2}
@@ -66,9 +73,9 @@ def test_each_relation_can_be_switched_off(plot_csvs):
     dataset = sparse_dataset(plot_csvs)
 
     taxonomy = rc.build_species_graph(
-        dataset, hetero_config(use_cooccurrence_edges=False))
-    shared = rc.build_species_graph(
-        dataset, hetero_config(use_taxonomic_edges=False))
+        dataset, hetero_config(use_cooccurrence_edges=False)
+    )
+    shared = rc.build_species_graph(dataset, hetero_config(use_taxonomic_edges=False))
     both = rc.build_species_graph(dataset, hetero_config())
 
     assert set(int(t) for t in taxonomy.edge_type.tolist()) == {0, 1}
@@ -76,8 +83,10 @@ def test_each_relation_can_be_switched_off(plot_csvs):
     assert both.n_edges == taxonomy.n_edges + shared.n_edges
 
     with pytest.raises(Exception):
-        rc.build_species_graph(dataset, hetero_config(
-            use_taxonomic_edges=False, use_cooccurrence_edges=False))
+        rc.build_species_graph(
+            dataset,
+            hetero_config(use_taxonomic_edges=False, use_cooccurrence_edges=False),
+        )
 
 
 def test_the_cooccurrence_cut_is_the_configured_one(plot_csvs):
@@ -85,25 +94,31 @@ def test_the_cooccurrence_cut_is_the_configured_one(plot_csvs):
     base = dict(use_taxonomic_edges=False)
 
     wide = rc.build_species_graph(
-        dataset, hetero_config(**base, k_cooccurrence=8, cooccurrence_threshold=0.0))
+        dataset, hetero_config(**base, k_cooccurrence=8, cooccurrence_threshold=0.0)
+    )
     narrow = rc.build_species_graph(
-        dataset, hetero_config(**base, k_cooccurrence=1, cooccurrence_threshold=0.0))
+        dataset, hetero_config(**base, k_cooccurrence=1, cooccurrence_threshold=0.0)
+    )
     assert narrow.n_edges < wide.n_edges
 
     # No pair shares every plot, so a threshold of 1 leaves nothing.
     none = rc.build_species_graph(
-        dataset, hetero_config(**base, cooccurrence_threshold=1.0))
+        dataset, hetero_config(**base, cooccurrence_threshold=1.0)
+    )
     assert none.n_edges == 0
 
 
 def test_a_relation_the_dataset_cannot_supply_is_refused(plot_csvs, hash_dataset):
     # Hash encoding has no per-plot species vector to count co-occurrence in.
     with pytest.raises(Exception):
-        rc.build_species_graph(hash_dataset,
-                               hetero_config(use_taxonomic_edges=False))
+        rc.build_species_graph(hash_dataset, hetero_config(use_taxonomic_edges=False))
     # Its taxonomy is still there.
-    assert rc.build_species_graph(
-        hash_dataset, hetero_config(use_cooccurrence_edges=False)).n_edges > 0
+    assert (
+        rc.build_species_graph(
+            hash_dataset, hetero_config(use_cooccurrence_edges=False)
+        ).n_edges
+        > 0
+    )
 
     # A dataset loaded without taxonomy cannot supply the taxonomic relation.
     plain = sparse_dataset(plot_csvs, use_taxonomy=False)
@@ -130,8 +145,9 @@ def test_the_dataset_reports_the_taxonomy_of_its_vocabulary(plot_csvs):
     assert plain.species_genus_ids is None
 
 
-def test_a_heterogeneous_gnn_trains_on_the_graph_the_trainer_builds(plot_csvs,
-                                                                   tmp_path):
+def test_a_heterogeneous_gnn_trains_on_the_graph_the_trainer_builds(
+    plot_csvs, tmp_path
+):
     dataset = sparse_dataset(plot_csvs)
 
     model_config = rc.ModelConfig()

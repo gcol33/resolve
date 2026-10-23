@@ -29,6 +29,7 @@ from conftest import (
 # Fit
 # ---------------------------------------------------------------------------
 
+
 def test_fit_returns_a_populated_result(fitted_trainer):
     result = fitted_trainer.result
     assert result.best_epoch >= 0
@@ -70,6 +71,7 @@ def test_hash_dim_mismatch_is_rejected_at_prepare_data(hash_dataset):
 # Held-out fold accessors
 # ---------------------------------------------------------------------------
 
+
 def test_split_accessors_partition_the_plots(fitted_trainer):
     trainer, dataset = fitted_trainer.trainer, fitted_trainer.dataset
     train_ids = trainer.train_plot_ids()
@@ -93,6 +95,7 @@ def test_index_accessors_match_the_plot_id_accessors(fitted_trainer):
 # ---------------------------------------------------------------------------
 # Test-fold evaluators
 # ---------------------------------------------------------------------------
+
 
 def test_compute_residuals_shapes(fitted_trainer):
     residuals = fitted_trainer.trainer.compute_residuals("y")
@@ -127,9 +130,7 @@ def test_classification_actuals_match_the_dataset_targets(fitted_trainer):
     trainer, dataset = fitted_trainer.trainer, fitted_trainer.dataset
     preds = trainer.compute_classification_predictions("hab")
     expected = dataset.targets["hab"].index_select(0, trainer.test_indices())
-    np.testing.assert_array_equal(
-        np.asarray(preds.actuals), expected.numpy()
-    )
+    np.testing.assert_array_equal(np.asarray(preds.actuals), expected.numpy())
 
 
 def test_compute_calibration_bins_a_classification_target(fitted_trainer):
@@ -157,6 +158,7 @@ def test_calibration_is_empty_for_a_regression_target(fitted_trainer):
 # ---------------------------------------------------------------------------
 # Cross-validation
 # ---------------------------------------------------------------------------
+
 
 def test_cross_validate_returns_per_fold_results(hash_dataset):
     model = rc.ResolveModel(hash_dataset.schema, make_model_config())
@@ -191,6 +193,7 @@ def test_cross_validate_restores_the_trainers_own_split(hash_dataset):
 # ---------------------------------------------------------------------------
 # Checkpoint config / metadata readers
 # ---------------------------------------------------------------------------
+
 
 def test_train_config_round_trips_through_the_checkpoint(tmp_path, fitted_trainer):
     path = str(tmp_path / "cfg.pt")
@@ -271,7 +274,9 @@ def test_resume_continues_the_run_a_checkpoint_stopped(tmp_path, hash_dataset):
 
     def trainer(seed: int) -> "rc.Trainer":
         torch.manual_seed(seed)
-        t = rc.Trainer(rc.ResolveModel(hash_dataset.schema, make_model_config()), config)
+        t = rc.Trainer(
+            rc.ResolveModel(hash_dataset.schema, make_model_config()), config
+        )
         t.prepare_data(hash_dataset, 0.25, 42)
         return t
 
@@ -346,6 +351,7 @@ def test_load_state_rejects_a_mismatched_architecture(
 # ``element 0 of tensors does not require grad and does not have a grad_fn``,
 # an autograd message that names nothing about targets.
 
+
 def test_prepare_data_rejects_a_dataset_with_no_targets(plot_csvs):
     targetless = rc.ResolveDataset.from_csv(
         plot_csvs.header,
@@ -380,8 +386,12 @@ def test_a_missing_checkpoint_raises_an_oserror(tmp_path):
 
 def test_a_missing_csv_raises_an_oserror(tmp_path):
     with pytest.raises(OSError):
-        rc.ResolveDataset.from_csv(str(tmp_path / "h.csv"), str(tmp_path / "s.csv"),
-                                   make_roles(), make_targets())
+        rc.ResolveDataset.from_csv(
+            str(tmp_path / "h.csv"),
+            str(tmp_path / "s.csv"),
+            make_roles(),
+            make_targets(),
+        )
 
 
 def test_an_unwritable_checkpoint_path_raises_an_oserror(tmp_path, fitted_trainer):
@@ -389,7 +399,9 @@ def test_an_unwritable_checkpoint_path_raises_an_oserror(tmp_path, fitted_traine
         fitted_trainer.trainer.save(str(tmp_path / "no_such_dir" / "model.pt"))
 
 
-def test_trainer_load_returns_the_model_scalers_and_vocabulary(tmp_path, fitted_trainer):
+def test_trainer_load_returns_the_model_scalers_and_vocabulary(
+    tmp_path, fitted_trainer
+):
     path = str(tmp_path / "model.pt")
     fitted_trainer.trainer.save(path, fitted_trainer.trainer.run_metadata)
     model, scalers, vocab = rc.Trainer.load(path)
@@ -400,7 +412,9 @@ def test_trainer_load_returns_the_model_scalers_and_vocabulary(tmp_path, fitted_
 
 
 @pytest.mark.parametrize("device", ["gpu", "CUDA", "cuda:", "cuda:-1", "cuda:1x", ""])
-def test_a_device_name_that_is_not_cpu_cuda_or_cuda_n_is_refused(device, tmp_path, fitted_trainer):
+def test_a_device_name_that_is_not_cpu_cuda_or_cuda_n_is_refused(
+    device, tmp_path, fitted_trainer
+):
     cfg = rc.TrainConfig()
     with pytest.raises(ValueError, match="cuda:N"):
         cfg.device = device

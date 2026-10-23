@@ -55,10 +55,10 @@ def test_exact_match_is_distance_zero_with_its_entry_id(index):
 @pytest.mark.parametrize(
     ("needle", "expected"),
     [
-        ("Fagus silvatica", 1),   # substitution
-        ("Fagus sylvatca", 1),    # deletion
+        ("Fagus silvatica", 1),  # substitution
+        ("Fagus sylvatca", 1),  # deletion
         ("Fagus sylvatiica", 1),  # insertion
-        ("Fagus sylvaitca", 1),   # adjacent transposition, one Damerau edit
+        ("Fagus sylvaitca", 1),  # adjacent transposition, one Damerau edit
     ],
 )
 def test_single_edits_are_distance_one(index, needle, expected):
@@ -83,7 +83,9 @@ def test_results_are_ordered_by_distance_then_id(index):
 def test_top_n_caps_the_result_list(index):
     everything = index.query("Quercus rob", max_edit_distance=3, top_n=10)
     assert len(everything) == 2
-    assert as_tuples(index.query("Quercus rob", max_edit_distance=3, top_n=1)) == as_tuples(everything[:1])
+    assert as_tuples(
+        index.query("Quercus rob", max_edit_distance=3, top_n=1)
+    ) == as_tuples(everything[:1])
     assert index.query("Quercus rob", max_edit_distance=3, top_n=0) == []
 
 
@@ -108,7 +110,9 @@ def test_case_is_folded_by_default_and_the_entry_keeps_its_casing(index):
 
 
 def test_case_sensitive_index_counts_case_changes_as_edits():
-    sensitive = rc.fuzzy.FuzzyIndex.build(ENTRIES, max_edit_distance=3, case_insensitive=False)
+    sensitive = rc.fuzzy.FuzzyIndex.build(
+        ENTRIES, max_edit_distance=3, case_insensitive=False
+    )
     assert as_tuples(sensitive.query("abies alba", top_n=1)) == [("Abies alba", 6, 1)]
     assert sensitive.query("ABIES ALBA", max_edit_distance=3) == []
 
@@ -117,7 +121,9 @@ def test_utf8_entries_match_by_codepoint():
     names = ["Rosa canina", "Rosa rubiginósa", "Sorbus aria"]
     utf8 = rc.fuzzy.FuzzyIndex.build(names, max_edit_distance=2)
     # One accented codepoint is one edit, not two bytes' worth.
-    assert as_tuples(utf8.query("Rosa rubiginosa", top_n=1)) == [("Rosa rubiginósa", 1, 1)]
+    assert as_tuples(utf8.query("Rosa rubiginosa", top_n=1)) == [
+        ("Rosa rubiginósa", 1, 1)
+    ]
 
 
 @pytest.fixture(scope="module")
@@ -172,20 +178,28 @@ def test_query_batch_matches_query_needle_by_needle(index):
     batch = index.query_batch(NEEDLES, max_edit_distance=2, top_n=3)
     assert len(batch) == len(NEEDLES)
     for needle, matches in zip(NEEDLES, batch):
-        assert as_tuples(matches) == as_tuples(index.query(needle, max_edit_distance=2, top_n=3))
+        assert as_tuples(matches) == as_tuples(
+            index.query(needle, max_edit_distance=2, top_n=3)
+        )
 
 
 def test_query_batch_with_one_bucket_hint(bucketed):
-    batch = bucketed.query_batch(NEEDLES, max_edit_distance=3, top_n=2, bucket_hint="Quercus")
+    batch = bucketed.query_batch(
+        NEEDLES, max_edit_distance=3, top_n=2, bucket_hint="Quercus"
+    )
     for needle, matches in zip(NEEDLES, batch):
-        single = bucketed.query(needle, max_edit_distance=3, top_n=2, bucket_hint="Quercus")
+        single = bucketed.query(
+            needle, max_edit_distance=3, top_n=2, bucket_hint="Quercus"
+        )
         assert as_tuples(matches) == as_tuples(single)
 
 
 def test_query_batch_derives_a_hint_per_needle(bucketed):
     batch = bucketed.query_batch(NEEDLES, max_edit_distance=3, top_n=2, bucket_fn=genus)
     for needle, matches in zip(NEEDLES, batch):
-        single = bucketed.query(needle, max_edit_distance=3, top_n=2, bucket_hint=genus(needle))
+        single = bucketed.query(
+            needle, max_edit_distance=3, top_n=2, bucket_hint=genus(needle)
+        )
         assert as_tuples(matches) == as_tuples(single)
 
 
