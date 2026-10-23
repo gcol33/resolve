@@ -1,6 +1,8 @@
 #include "bindings_common.hpp"
 #include "bindings_plot_inputs.hpp"
 
+#include <nanobind/stl/tuple.h>
+
 void register_trainer(nb::module_& m) {
     nb::class_<resolve::Trainer>(m, "Trainer")
         .def(nb::init<resolve::ResolveModel, const resolve::TrainConfig&>(),
@@ -63,24 +65,24 @@ void register_trainer(nb::module_& m) {
              "recipe (Trainer.load_train_config) and be prepared on the run's data "
              "with its seed. Raises ValueError for a checkpoint without run "
              "progress or a split that differs from the run's.")
-        .def("save", [](const resolve::Trainer& self, const std::string& path, nb::object metadata_obj) {
-            if (metadata_obj.is_none()) {
-                self.save(path);
-            } else {
-                auto metadata = nb::cast<resolve::RunMetadata>(metadata_obj);
-                self.save(path, &metadata);
-            }
-        }, nb::arg("path"), nb::arg("metadata") = nb::none())
+        .def("save", [](const resolve::Trainer& self, const std::string& path,
+                        std::optional<resolve::RunMetadata> metadata) {
+            nb::gil_scoped_release nogil;
+            self.save(path, metadata ? &*metadata : nullptr);
+        }, nb::arg("path"), nb::arg("metadata") = nb::none(),
+           "Save the model, scalers and vocabularies to a checkpoint, with the run "
+           "metadata when given (pass trainer.run_metadata to record the split).")
         .def_static("load", [](const std::string& path, const std::string& device, float vram_fraction) {
-            torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
-            return resolve::Trainer::load(path, dev, vram_fraction);
-        }, nb::arg("path"), nb::arg("device") = "cpu", nb::arg("vram_fraction") = 1.0f)
+            return resolve::Trainer::load(path, resolve::parse_device(device), vram_fraction);
+        }, nb::arg("path"), nb::arg("device") = "cpu", nb::arg("vram_fraction") = 1.0f,
+           nb::call_guard<nb::gil_scoped_release>(),
+           "Load a checkpoint as (ResolveModel, Scalers, CategoricalVocab).")
         .def_static("load_train_config", &resolve::Trainer::load_train_config,
-                    nb::arg("path"),
+                    nb::arg("path"), nb::call_guard<nb::gil_scoped_release>(),
                     "Recover the persisted TrainConfig from a checkpoint (training "
                     "hyperparameters; fields not persisted keep TrainConfig defaults).")
         .def_static("load_run_metadata", &resolve::Trainer::load_run_metadata,
-                    nb::arg("path"),
+                    nb::arg("path"), nb::call_guard<nb::gil_scoped_release>(),
                     "Recover the persisted RunMetadata (timing, plot counts, best "
                     "epoch, and the per-target final-metric tree) from a checkpoint.")
         .def_prop_ro("model", [](resolve::Trainer& self) -> resolve::ResolveModel { return self.model(); })
@@ -101,42 +103,34 @@ void register_trainer(nb::module_& m) {
                          return self.categorical_vocab();
                      })
         .def("compute_diagnostics", &resolve::Trainer::compute_diagnostics,
+             nb::call_guard<nb::gil_scoped_release>(),
              "Compute network health diagnostics (dead neurons, saturation, etc.)")
         .def("compute_calibration", &resolve::Trainer::compute_calibration,
              nb::arg("target_name"),
              nb::arg("n_bins") = 10,
+             nb::call_guard<nb::gil_scoped_release>(),
              "Compute calibration curve for a classification target")
         .def("compute_residuals", &resolve::Trainer::compute_residuals,
              nb::arg("target_name"),
+             nb::call_guard<nb::gil_scoped_release>(),
              "Compute residual analysis for a regression target")
         .def("compute_classification_predictions",
              &resolve::Trainer::compute_classification_predictions,
              nb::arg("target_name"),
+             nb::call_guard<nb::gil_scoped_release>(),
              "Per-plot test-fold predictions for a classification target "
              "(predicted_classes, probabilities, actuals).")
         .def("load_state", [](resolve::Trainer& self, const std::string& path,
                               const std::string& device, float vram_fraction) {
-            torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
-            self.load_state(path, dev, vram_fraction);
+            self.load_state(path, resolve::parse_device(device), vram_fraction);
         }, nb::arg("path"), nb::arg("device") = "cpu", nb::arg("vram_fraction") = 1.0f,
+           nb::call_guard<nb::gil_scoped_release>(),
            "Load checkpoint weights, scalers, and categorical vocab into this "
-           "trainer in place (first-class replacement for the static load()).")
-        .def("test_indices", [](const resolve::Trainer& self) {
-            auto t = self.test_indices();
-            if (t.defined()) {
-                auto cpu_tensor = t.detach().cpu().contiguous();
-                return nb::steal(THPVariable_Wrap(cpu_tensor));
-            }
-            return nb::none();
-        }, "Global plot indices of the held-out test fold (int64).")
-        .def("train_indices", [](const resolve::Trainer& self) {
-            auto t = self.train_indices();
-            if (t.defined()) {
-                auto cpu_tensor = t.detach().cpu().contiguous();
-                return nb::steal(THPVariable_Wrap(cpu_tensor));
-            }
-            return nb::none();
-        }, "Global plot indices of the training fold (int64).")
+           "trainer in place.")
+        .def("test_indices", [](const resolve::Trainer& self) { return tensor_or_none(self.test_indices()); },
+             "Global plot indices of the held-out test fold (int64).")
+        .def("train_indices", [](const resolve::Trainer& self) { return tensor_or_none(self.train_indices()); },
+             "Global plot indices of the training fold (int64).")
         .def("test_plot_ids", &resolve::Trainer::test_plot_ids,
              "Plot IDs of the held-out test fold (requires prepare_data(dataset)).")
         .def("train_plot_ids", &resolve::Trainer::train_plot_ids,
@@ -170,13 +164,12 @@ void register_trainer(nb::module_& m) {
 
     nb::class_<resolve::Predictor>(m, "Predictor")
         .def("__init__", [](resolve::Predictor* self, resolve::ResolveModel model, resolve::Scalers scalers, const std::string& device) {
-            torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
-            new (self) resolve::Predictor(model, scalers, dev);
+            new (self) resolve::Predictor(model, scalers, resolve::parse_device(device));
         }, nb::arg("model"), nb::arg("scalers"), nb::arg("device") = "cpu")
         .def_static("load", [](const std::string& path, const std::string& device, float vram_fraction) {
-            torch::Device dev = (device == "cuda") ? torch::kCUDA : torch::kCPU;
-            return resolve::Predictor::load(path, dev, vram_fraction);
-        }, nb::arg("path"), nb::arg("device") = "cpu", nb::arg("vram_fraction") = 1.0f)
+            return resolve::Predictor::load(path, resolve::parse_device(device), vram_fraction);
+        }, nb::arg("path"), nb::arg("device") = "cpu", nb::arg("vram_fraction") = 1.0f,
+           nb::call_guard<nb::gil_scoped_release>())
         .def("predict", [](resolve::Predictor& self, nb::args args, nb::kwargs kwargs) {
             CallArgs call("predict", args, kwargs, {});
             const auto parts = call.continuous_parts();
@@ -225,34 +218,44 @@ void register_trainer(nb::module_& m) {
                 nb::gil_scoped_release nogil;
                 out = self.get_embeddings(parts, inputs, batch_size);
             }
-            return nb::steal(THPVariable_Wrap(out));
+            return tensor_or_none(out);
         }, persistent_doc(
                "get_embeddings(*, " + argument_list(continuous_part_names()) + ", " +
                argument_list(species_input_names()) + ", batch_size=4096) -> Tensor\n\n"
                "Latent embedding (n_plots, latent_dim) of each plot, on the CPU, from "
                "the same keyword inputs as predict()."))
-        // Move to CPU (detached) so a CUDA predictor returns a CPU tensor, like
-        // the sibling predict/scalers accessors and the C-ABI predictor_get
-        // (which always emits a CPU matrix). An undefined tensor (no taxonomy /
-        // non-embedding encoder) wraps to None, so only .cpu() when defined.
         .def("get_genus_embeddings", [](resolve::Predictor& self) {
-            auto t = self.get_genus_embeddings();
-            if (t.defined()) t = t.detach().cpu();
-            return nb::steal(THPVariable_Wrap(t));
+            return tensor_or_none(self.get_genus_embeddings());
         })
         .def("get_family_embeddings", [](resolve::Predictor& self) {
-            auto t = self.get_family_embeddings();
-            if (t.defined()) t = t.detach().cpu();
-            return nb::steal(THPVariable_Wrap(t));
+            return tensor_or_none(self.get_family_embeddings());
         })
         .def("get_species_embeddings", [](resolve::Predictor& self) {
-            auto t = self.get_species_embeddings();
-            if (t.defined()) t = t.detach().cpu();
-            return nb::steal(THPVariable_Wrap(t));
+            return tensor_or_none(self.get_species_embeddings());
         })
         .def("optimize_for_inference", &resolve::Predictor::optimize_for_inference)
+        .def("set_retrieval", &resolve::Predictor::set_retrieval, nb::arg("reference"),
+             nb::arg("config") = resolve::RetrievalConfig{}, nb::arg("batch_size") = 4096,
+             nb::call_guard<nb::gil_scoped_release>(),
+             "Retrieval augmentation (TabR): encode the reference plots (built in "
+             "the model's namespace, carrying every target's labels, normally the "
+             "training plots) and from then on blend every prediction with the "
+             "labels of the plot's k nearest reference plots in latent space: "
+             "(1 - alpha) * prediction + alpha * the neighbours' softmax-weighted "
+             "label, regression in original units, classification as class "
+             "probabilities. A reference plot unlabelled for a target is not "
+             "retrieved for it.")
+        .def("clear_retrieval", &resolve::Predictor::clear_retrieval,
+             "Back to the model's own predictions.")
+        .def_prop_ro("retrieval", [](const resolve::Predictor& self) -> std::optional<resolve::RetrievalConfig> {
+            if (self.retrieval() == nullptr) return std::nullopt;
+            return self.retrieval()->config();
+        }, "The RetrievalConfig predict() applies, or None.")
+        .def_prop_ro("n_retrieval_reference", [](const resolve::Predictor& self) -> int64_t {
+            return self.retrieval() == nullptr ? 0 : self.retrieval()->n_reference();
+        }, "How many reference plots the retrieval holds; 0 without one.")
         .def_prop_ro("device", [](const resolve::Predictor& self) {
-            return self.device().is_cuda() ? std::string("cuda") : std::string("cpu");
+            return resolve::device_name(self.device());
         })
         .def_prop_ro("model", [](resolve::Predictor& self) -> resolve::ResolveModel { return self.model(); })
         .def_prop_ro("scalers", [](resolve::Predictor& self) -> const resolve::Scalers& { return self.scalers(); })

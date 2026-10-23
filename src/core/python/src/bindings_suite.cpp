@@ -76,12 +76,6 @@ resolve::json::Value py_to_json_object(nb::handle h, const char* what) {
     return v;
 }
 
-torch::Device parse_device(const std::string& device) {
-    if (device == "cpu") return torch::kCPU;
-    if (device == "cuda") return torch::kCUDA;
-    throw std::invalid_argument("device must be 'cpu' or 'cuda', not '" + device + "'");
-}
-
 }  // namespace
 
 void register_suite(nb::module_& m) {
@@ -189,6 +183,7 @@ void register_suite(nb::module_& m) {
         .def_prop_ro("format_version", &SuiteManifest::format_version,
                      "The lowest manifest format version that holds this manifest.")
         .def_static("read", &SuiteManifest::read, nb::arg("dir"),
+                    nb::call_guard<nb::gil_scoped_release>(),
                     "Read and validate <dir>/manifest.json.")
         .def("write", &SuiteManifest::write, nb::arg("dir"),
              "Validate, then write <dir>/manifest.json.")

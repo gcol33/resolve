@@ -88,5 +88,5 @@ cfg.device = "cuda"
 cfg.vram_fraction = 0.80   # leave headroom when sharing the GPU with a desktop
 ```
 
-Inference defaults to CPU. Pass `device="cuda"` to `Predictor.load` when the GPU
+Inference defaults to CPU. Pass `device="cuda"` (or `"cuda:N"` for device N) to `Predictor.load` when the GPU
 is idle and the test set is known to fit.

@@ -1,15 +1,16 @@
-// Main binding entry point - delegates to split modules for maintainability
-//
-// The actual binding code is split into:
-// - bindings_enums.cpp: All enum bindings
-// - bindings_types.cpp: Configuration structs and result types
+// The _resolve_core extension module. The bindings are split by area:
+// - bindings_enums.cpp: enums
+// - bindings_types.cpp: configuration structs and result types
 // - bindings_dataset.cpp: ResolveDataset and species encoding
 // - bindings_model.cpp: ResolveModel
 // - bindings_trainer.cpp: Trainer and Predictor
-// - bindings_metrics.cpp: Metrics classes
+// - bindings_metrics.cpp: metrics
+// - bindings_pretraining.cpp: self-supervised pretraining
+// - bindings_fuzzy.cpp: the fuzzy string index
 // - bindings_suite.cpp: model suites, their manifest and results
 
 #include "bindings_common.hpp"
+#include "resolve/io_retry.hpp"
 
 #include <string>
 
@@ -22,7 +23,10 @@ NB_MODULE(_resolve_core, m) {
     // fixed by returning config objects by value (not reference) in property bindings.
     nb::set_leak_warnings(false);
 
-    // Register all bindings from split modules
+    // A storage read or write that failed after the engine's own retries
+    // (io::with_retry): an OSError, so `except OSError` catches it.
+    nb::exception<resolve::io::IOError>(m, "StorageError", PyExc_OSError);
+
     register_enums(m);
     register_types(m);
     register_dataset(m);
@@ -33,28 +37,19 @@ NB_MODULE(_resolve_core, m) {
     register_fuzzy(m);
     register_suite(m);
 
-    // Platform-aware PYTORCH_CUDA_ALLOC_CONF setter. The primary surface is
-    // resolve_core.configure_cuda_allocator() in the Python __init__ which
-    // runs at module import (pre-torch). This C++ entry point is the
-    // late-bound fallback for users who imported torch first; in that case
-    // the allocator has already initialized and changing the env var no
-    // longer affects allocator behavior. Returns the resulting config
-    // string for logging.
-    m.def(
-        "_configure_cuda_allocator_native",
-        &resolve::configure_cuda_allocator,
-        nb::arg("force") = false,
-        "Set PYTORCH_CUDA_ALLOC_CONF if unset (or force-set). Linux/macOS\n"
-        "prepend expandable_segments:True; Windows omits it. Returns the\n"
-        "active value. Use resolve_core.configure_cuda_allocator() instead;\n"
-        "this native shim is late-bound and cannot rescue allocators that\n"
-        "have already initialized."
-    );
+    m.def("default_cuda_alloc_conf", &resolve::default_cuda_alloc_conf,
+          "The PYTORCH_CUDA_ALLOC_CONF value RESOLVE sets: garbage collection at\n"
+          "0.8 and a 256 MB split limit, plus expandable segments off Windows.");
 
-    // Top-level helper: cap the PyTorch CUDA caching allocator at a fraction
-    // of device VRAM. Standalone counterpart to TrainConfig.vram_fraction for
-    // users running Predictor-only workflows or wanting to apply the cap
-    // before constructing any RESOLVE object.
+    // Sets the variable in the C runtime's environment; resolve_core's
+    // configure_cuda_allocator() calls this and mirrors the result into
+    // os.environ.
+    m.def("_configure_cuda_allocator", &resolve::configure_cuda_allocator,
+          nb::arg("force") = false);
+
+    // Cap the PyTorch CUDA caching allocator at a fraction of device VRAM: the
+    // standalone counterpart of TrainConfig.vram_fraction for Predictor-only
+    // work or before any RESOLVE object exists.
     m.def(
         "set_vram_fraction",
         [](double fraction, int device_index) {
@@ -68,9 +63,9 @@ NB_MODULE(_resolve_core, m) {
         "CUDA device is present."
     );
 
-    // Pin libtorch's host thread pools. Standalone counterpart used at startup
-    // to avoid worker-thread teardown races on Windows (issue #18); harmless
-    // elsewhere. <=0 keeps libtorch's default for the corresponding pool.
+    // Pin libtorch's host thread pools, which avoids worker-thread teardown
+    // races on Windows; harmless elsewhere. <=0 keeps libtorch's default for
+    // the corresponding pool.
     m.def(
         "set_thread_pools",
         [](int intraop_threads, int interop_threads) {
@@ -82,12 +77,11 @@ NB_MODULE(_resolve_core, m) {
         "default). Best-effort; call at startup before the first op."
     );
 
-    // Windows crash hardening (issue #19): convert an unhandled native fault in
-    // a headless training worker into an immediate TerminateProcess with the
-    // fault's NTSTATUS, instead of an indefinite Windows-Error-Reporting /
-    // JIT-debugger (vsjitdebugger) hang that holds the GPU and stalls the
-    // batch. No-op off Windows. Auto-installed at import below; also exposed so
-    // callers can re-arm or adjust the shutdown exit code explicitly.
+    // Windows crash hardening: an unhandled native fault in a headless worker
+    // becomes an immediate TerminateProcess with the fault's NTSTATUS, instead
+    // of an indefinite Windows-Error-Reporting / JIT-debugger hang that holds
+    // the GPU. No-op off Windows. Installed at import below; exposed so callers
+    // can re-arm it or change the shutdown exit code.
     m.def(
         "install_crash_handler",
         [](int shutdown_exit_code) {
@@ -99,10 +93,10 @@ NB_MODULE(_resolve_core, m) {
         "Windows. Idempotent."
     );
 
-    // Internal: flip the crash handler to treat a subsequent native fault as a
-    // benign teardown artifact (exit with the shutdown code, not a failure
-    // code). Registered with atexit() in resolve_core/__init__.py so a clean
-    // interpreter shutdown after a successful run is not misreported as a crash.
+    // Treat a later native fault as a benign teardown artifact (exit with the
+    // shutdown code, not a failure code). Registered with atexit() in
+    // resolve_core/__init__.py, so a clean interpreter shutdown after a
+    // successful run is not reported as a crash.
     m.def(
         "_signal_work_complete",
         []() { resolve::signal_work_complete(); },
@@ -110,11 +104,10 @@ NB_MODULE(_resolve_core, m) {
     );
 
     // Arm the crash handler as soon as resolve_core is imported, so a training
-    // worker is hardened before Trainer::fit() ever runs (issue #19). Default
-    // shutdown code 0: a clean interpreter shutdown (after _signal_work_complete
-    // via atexit) exits 0; a mid-run native fault exits with its NTSTATUS.
+    // worker is hardened before Trainer::fit() ever runs. Shutdown code 0: a
+    // clean interpreter shutdown (after _signal_work_complete via atexit)
+    // exits 0; a mid-run native fault exits with its NTSTATUS.
     resolve::install_crash_handler(0);
 
-    // Version
     m.attr("__version__") = resolve::VERSION;
 }

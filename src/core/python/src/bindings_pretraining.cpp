@@ -49,27 +49,17 @@ void register_pretraining(nb::module_& m) {
         .value("Structured", resolve::MaskStrategy::Structured)
         .export_values();
 
-    // PretrainConfig
-    nb::class_<resolve::PretrainConfig>(m, "PretrainConfig")
-        .def(nb::init<>())
-        .def_rw("mask_ratio", &resolve::PretrainConfig::mask_ratio)
-        .def_rw("mask_strategy", &resolve::PretrainConfig::mask_strategy)
-        .def_rw("pretrain_epochs", &resolve::PretrainConfig::pretrain_epochs)
-        .def_rw("pretrain_lr", &resolve::PretrainConfig::pretrain_lr)
-        .def_rw("pretrain_weight_decay", &resolve::PretrainConfig::pretrain_weight_decay)
-        .def_rw("batch_size", &resolve::PretrainConfig::batch_size)
-        // Seeds the dedicated pretraining RNG: a fixed value reproduces the run
-        // and leaves the global torch RNG stream untouched.
-        .def_rw("seed", &resolve::PretrainConfig::seed)
-        .def_rw("ema_decay", &resolve::PretrainConfig::ema_decay)
-        .def_rw("ema_decay_end", &resolve::PretrainConfig::ema_decay_end)
-        .def_rw("predictor_hidden_dim", &resolve::PretrainConfig::predictor_hidden_dim)
-        .def_rw("predictor_n_layers", &resolve::PretrainConfig::predictor_n_layers)
-        .def_rw("predictor_dropout", &resolve::PretrainConfig::predictor_dropout)
-        .def_rw("corruption_rate", &resolve::PretrainConfig::corruption_rate)
-        .def_rw("temperature", &resolve::PretrainConfig::temperature)
-        .def_rw("projection_dim", &resolve::PretrainConfig::projection_dim)
-        .def_rw("mixup_alpha", &resolve::PretrainConfig::mixup_alpha);
+    // The pretraining configs are bound from their field registries
+    // (config_registry.hpp); `seed` seeds the dedicated pretraining RNG, so a
+    // fixed value reproduces the run and leaves the global torch RNG stream
+    // untouched.
+    {
+        using Cfg = resolve::PretrainConfig;
+        auto cls = nb::class_<Cfg>(m, "PretrainConfig");
+        cls.def(nb::init<>());
+        RESOLVE_PRETRAIN_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+        bind_device_property(cls, &Cfg::device);
+    }
 
     // PretrainResult
     nb::class_<resolve::PretrainResult>(m, "PretrainResult")
@@ -92,14 +82,13 @@ void register_pretraining(nb::module_& m) {
              continuous_pretrain_doc());
 
     // Masked-species (MLM) pretraining of a transformer-encoded model
-    nb::class_<resolve::MLMPretrainConfig>(m, "MLMPretrainConfig")
-        .def(nb::init<>())
-        .def_rw("mask_prob", &resolve::MLMPretrainConfig::mask_prob)
-        .def_rw("pretrain_epochs", &resolve::MLMPretrainConfig::pretrain_epochs)
-        .def_rw("pretrain_lr", &resolve::MLMPretrainConfig::pretrain_lr)
-        .def_rw("pretrain_weight_decay", &resolve::MLMPretrainConfig::pretrain_weight_decay)
-        .def_rw("batch_size", &resolve::MLMPretrainConfig::batch_size)
-        .def_rw("seed", &resolve::MLMPretrainConfig::seed);
+    {
+        using Cfg = resolve::MLMPretrainConfig;
+        auto cls = nb::class_<Cfg>(m, "MLMPretrainConfig");
+        cls.def(nb::init<>());
+        RESOLVE_MLM_PRETRAIN_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+        bind_device_property(cls, &Cfg::device);
+    }
 
     nb::class_<resolve::MaskedSpeciesPretrainer>(m, "MaskedSpeciesPretrainer")
         .def(nb::init<resolve::ResolveModel, const resolve::MLMPretrainConfig&>(),
@@ -124,22 +113,13 @@ void register_pretraining(nb::module_& m) {
     // VAE Module
     // =========================================================================
 
-    // VAEConfig
-    nb::class_<resolve::VAEConfig>(m, "VAEConfig")
-        .def(nb::init<>())
-        .def_rw("latent_dim", &resolve::VAEConfig::latent_dim)
-        .def_rw("encoder_dims", &resolve::VAEConfig::encoder_dims)
-        .def_rw("decoder_dims", &resolve::VAEConfig::decoder_dims)
-        .def_rw("dropout", &resolve::VAEConfig::dropout)
-        .def_rw("kl_weight", &resolve::VAEConfig::kl_weight)
-        .def_rw("kl_anneal_epochs", &resolve::VAEConfig::kl_anneal_epochs)
-        .def_rw("pretrain_epochs", &resolve::VAEConfig::pretrain_epochs)
-        .def_rw("pretrain_lr", &resolve::VAEConfig::pretrain_lr)
-        .def_rw("pretrain_weight_decay", &resolve::VAEConfig::pretrain_weight_decay)
-        .def_rw("batch_size", &resolve::VAEConfig::batch_size)
-        // Seeds the shuffle and the reparameterization noise; see
-        // PretrainConfig.seed.
-        .def_rw("seed", &resolve::VAEConfig::seed);
+    {
+        using Cfg = resolve::VAEConfig;
+        auto cls = nb::class_<Cfg>(m, "VAEConfig");
+        cls.def(nb::init<>());
+        RESOLVE_VAE_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+        bind_device_property(cls, &Cfg::device);
+    }
 
     // VAEPretrainResult
     nb::class_<resolve::VAEPretrainResult>(m, "VAEPretrainResult")
@@ -168,8 +148,7 @@ void register_pretraining(nb::module_& m) {
                  "positional or by keyword, required). The other model inputs are "
                  "accepted and unused."))
         .def("get_projection_weights", [](resolve::VAEPretrainer& self) {
-            auto weights = self.vae()->get_projection_weights();
-            return nb::steal(THPVariable_Wrap(weights));
+            return tensor_or_none(self.vae()->get_projection_weights());
         })
         .def("get_latent_dim", [](resolve::VAEPretrainer& self) {
             return self.vae()->latent_dim();

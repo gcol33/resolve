@@ -191,3 +191,43 @@ def test_query_batch_derives_a_hint_per_needle(bucketed):
 
 def test_query_batch_on_an_empty_list(index):
     assert index.query_batch([]) == []
+
+
+class BucketFailure(Exception):
+    pass
+
+
+def _failing_bucket(name: str) -> str:
+    if name.startswith("Pinus"):
+        raise BucketFailure(name)
+    return genus(name)
+
+
+def test_an_exception_in_the_bucket_function_propagates_from_build():
+    with pytest.raises(BucketFailure, match="Pinus"):
+        rc.fuzzy.FuzzyIndex.build(ENTRIES, bucket_fn=_failing_bucket)
+
+
+def test_an_exception_in_the_bucket_function_propagates_from_query_batch(bucketed):
+    # The callback runs inside the engine's parallel loop; its exception is
+    # raised once the batch returns, and the index stays usable.
+    with pytest.raises(BucketFailure):
+        bucketed.query_batch(NEEDLES, bucket_fn=_failing_bucket)
+    assert len(bucketed.query_batch(NEEDLES, bucket_fn=genus)) == len(NEEDLES)
+
+
+def test_the_index_keeps_no_reference_to_the_bucket_function():
+    import gc
+    import weakref
+
+    class Bucket:
+        def __call__(self, name):
+            return genus(name)
+
+    bucket = Bucket()
+    alive = weakref.ref(bucket)
+    built = rc.fuzzy.FuzzyIndex.build(ENTRIES, bucket_fn=bucket)
+    del bucket
+    gc.collect()
+    assert alive() is None
+    assert built.bucket_count == 5

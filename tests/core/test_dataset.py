@@ -373,3 +373,48 @@ def test_a_misspelled_role_column_still_throws(plot_csvs):
             plot_csvs.header, plot_csvs.species, roles, make_targets(),
             make_dataset_config(),
         )
+
+
+def test_model_config_for_dataset_takes_the_sizing_fields_from_the_dataset(plot_csvs):
+    cfg = make_dataset_config(rc.SpeciesEncodingMode.Hash, hash_dim=12)
+    cfg.top_k = 2
+    cfg.selection = rc.SelectionMode.TopBottom
+    dataset = rc.ResolveDataset.from_csv(plot_csvs.header, plot_csvs.species, make_roles(),
+                                         make_targets(), cfg)
+    base = rc.ModelConfig()
+    base.hash_dim = 99
+    base.hidden_dims = [8]
+    model_config = rc.model_config_for_dataset(dataset, base)
+    assert model_config.hash_dim == 12
+    assert model_config.top_k == 2
+    assert model_config.n_taxonomy_slots == dataset.genus_ids.shape[1] == 4
+    assert model_config.hidden_dims == [8]
+    rc.ResolveModel(dataset.schema, model_config)
+
+
+def test_a_csv_load_releases_the_gil(tmp_path):
+    """Another Python thread keeps running while the engine reads a large CSV."""
+    import threading
+
+    n_plots, per_plot = 20000, 10
+    header = tmp_path / "gil_header.csv"
+    species = tmp_path / "gil_species.csv"
+    header.write_text("plot_id,y\n" + "".join(f"p{i},{i % 7}\n" for i in range(n_plots)))
+    species.write_text("plot_id,sp,cover\n" + "".join(
+        f"p{i},sp{(i * 7 + j) % 500},1\n" for i in range(n_plots) for j in range(per_plot)))
+    roles = rc.RoleMapping()
+    roles.plot_id = "plot_id"
+    roles.species_id = "sp"
+    roles.abundance = "cover"
+
+    loaded = []
+    worker = threading.Thread(target=lambda: loaded.append(rc.ResolveDataset.from_csv(
+        str(header), str(species), roles, [rc.TargetSpec.regression("y")])))
+    ticks = 0
+    worker.start()
+    while worker.is_alive():
+        ticks += 1
+    worker.join()
+    assert loaded and loaded[0].n_plots == n_plots
+    # With the GIL held for the whole load this loop could not run meanwhile.
+    assert ticks > 1000

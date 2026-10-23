@@ -22,7 +22,17 @@ model = rc.ResolveModel(dataset.schema, rc.ModelConfig())
 | `config` | `ModelConfig` | `ModelConfig()` | Architecture |
 
 The schema fixes the input widths and the heads, so the model follows the data
-rather than being described twice.
+rather than being described twice. The species encoding, the hash width,
+`top_k`, `top_k_species` and the taxonomy slot count also size the model; take
+them from the dataset's loader settings with
+`rc.model_config_for_dataset(dataset, config)`, which returns `config` with those
+fields set:
+
+```python
+model = rc.ResolveModel(dataset.schema, rc.model_config_for_dataset(dataset, config))
+```
+
+`model.to(device)` takes `"cpu"`, `"cuda"` or `"cuda:N"`.
 
 ### Properties
 

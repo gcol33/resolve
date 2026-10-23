@@ -1,79 +1,21 @@
 """
-Resolve Core - C++ backend for species-composition based prediction.
+Resolve Core - the Python bindings of the RESOLVE C++ engine.
 
-This module provides low-level Python bindings to the C++ core library.
-For high-level API, use the `resolve` package instead.
+    from resolve_core import ResolveDataset, ResolveModel, Trainer, Predictor, ...
 
-Low-level usage:
-    from resolve_core import ResolveModel, Trainer, Predictor, ...
-
-Import-order constraint
------------------------
-``configure_cuda_allocator()`` sets ``PYTORCH_CUDA_ALLOC_CONF`` and MUST run
-BEFORE ``torch`` is imported by this process. The PyTorch CUDA caching
-allocator reads ``PYTORCH_CUDA_ALLOC_CONF`` exactly once during the first
-allocator initialization (which torch triggers on module import). To make this
-work for downstream callers, the helper runs unconditionally at the very top
-of this module before ``import torch``. If you ``import torch`` in your own
-script before ``import resolve_core``, the env var is already too late; in
-that case set ``PYTORCH_CUDA_ALLOC_CONF`` yourself before importing torch.
+The CUDA caching allocator reads ``PYTORCH_CUDA_ALLOC_CONF`` when it first
+allocates on a device, not when ``torch`` is imported, so importing this
+package sets the engine's default (``configure_cuda_allocator``) in time for
+any run that has not yet touched the GPU. A value already set is kept.
 """
 
-# --- BEGIN: pre-torch allocator configuration ---------------------------------
-# Order-sensitive: this block MUST stay above any `import torch` (direct or
-# transitive via `from . import _resolve_core`).
 import os as _os
-import sys as _sys
 
-
-def configure_cuda_allocator(force: bool = False) -> str:
-    """Set a platform-aware ``PYTORCH_CUDA_ALLOC_CONF`` default.
-
-    Sets ``os.environ["PYTORCH_CUDA_ALLOC_CONF"]`` if it is unset, or always
-    when ``force=True``. The returned string is the final config in effect
-    after this call (the existing value when neither branch overrides it).
-
-    Linux/macOS get ``expandable_segments:True,...`` prefixed; the
-    cuMemMap-backed expandable-segments allocator is not implemented on
-    Windows (libtorch warns ``expandable_segments not supported on this
-    platform``), so on ``win32`` that prefix is intentionally omitted.
-
-    The baseline ``garbage_collection_threshold:0.8,max_split_size_mb:256``
-    pair helps recover the most fragmented reserved memory on Windows and
-    is harmless on Linux.
-
-    Effective ONLY if called before ``torch`` is imported. After the
-    allocator has lazy-initialized, the env var is read at most once and
-    later changes are ignored. ``resolve_core`` calls this function once
-    at import time, before ``import torch``, so the default applies for
-    normal usage. ``force=True`` is useful when callers want to make the
-    intent explicit (it overrides any existing value), but cannot rescue
-    the case where torch was already imported.
-    """
-    base = "garbage_collection_threshold:0.8,max_split_size_mb:256"
-    if _sys.platform != "win32":
-        base = "expandable_segments:True," + base
-
-    if force or "PYTORCH_CUDA_ALLOC_CONF" not in _os.environ:
-        _os.environ["PYTORCH_CUDA_ALLOC_CONF"] = base
-        return base
-
-    return _os.environ["PYTORCH_CUDA_ALLOC_CONF"]
-
-
-# Apply the default before torch is imported (below). Side-effecting on import
-# is intentional: this is the only ordering that lets the allocator pick the
-# config up before its first allocation.
-_RESOLVE_CUDA_ALLOC_CONF = configure_cuda_allocator()
-# --- END: pre-torch allocator configuration -----------------------------------
-
-# Why: _resolve_core.pyd uses THPVariable_Wrap from torch_python.dll to wrap
-# C++ at::Tensor results as Python torch.Tensor objects. THPVariable_Wrap
-# requires torch's Python tensor class to be registered first, which only
-# happens when the torch package's __init__ has run. Importing torch here
-# guarantees that ordering. Without it, any binding that returns a tensor
-# segfaults inside THPVariable_Wrap.
-import torch  # noqa: F401  (must come AFTER configure_cuda_allocator)
+# _resolve_core wraps engine tensors as torch.Tensor objects through
+# torch_python, which needs torch's Python tensor class registered first, and
+# on Windows torch's DLL directory added to the search path: both happen when
+# torch is imported.
+import torch  # noqa: F401
 
 # Every public name the compiled extension registers is re-exported here, and
 # listed in __all__ below. `resolve_core.X` is the supported import path for all
@@ -102,7 +44,7 @@ try:
         NormLayerType,
         # Pool-style species encoder weighting (rank_pool / transformer modes)
         PoolWeighting,
-        # Architecture enums (v2.0)
+        # Architecture enums
         EncoderArchitecture,
         GNNType,
         GraphConstructionMode,
@@ -128,7 +70,8 @@ try:
         DatasetConfig,
         SpatialBlockConfig,
         ModelForwardResult,
-        # Architecture configs (v2.0)
+        RetrievalConfig,
+        # Architecture configs
         FTTransformerConfig,
         TabNetConfig,
         SAINTConfig,
@@ -162,6 +105,8 @@ try:
         external_vocabs_from_schema,
         dataset_config_from_checkpoint,
         effective_selection,
+        model_config_for_dataset,
+        target_specs_from_schema,
         # Model
         ResolveModel,
         # Training
@@ -214,6 +159,14 @@ try:
         compute_species_recognition,
         sha256_file,
         suite_prediction_columns,
+        # Storage failures (an OSError), GPU memory and process hardening
+        StorageError,
+        default_cuda_alloc_conf,
+        set_vram_fraction,
+        set_thread_pools,
+        install_crash_handler,
+        _configure_cuda_allocator,
+        _signal_work_complete,
     )
 except ImportError as e:
     raise ImportError(
@@ -221,72 +174,36 @@ except ImportError as e:
         "Make sure the package was built with CMake and libtorch is available."
     ) from e
 
-# Optional symbols added in newer builds; tolerate older installed .pyd.
-try:
-    from ._resolve_core import set_vram_fraction
-except ImportError:
-    def set_vram_fraction(*_args, **_kwargs):
-        """Stub for older resolve_core builds that lack set_vram_fraction.
 
-        Rebuild resolve_core to enable GPU VRAM control via this function.
-        """
-        return None
+def configure_cuda_allocator(force: bool = False) -> str:
+    """Set ``PYTORCH_CUDA_ALLOC_CONF`` to the engine's default and return it.
 
-# Windows crash hardening (issue #19). The C++ module installs the
-# unhandled-exception filter at import (see bindings.cpp), so a native fault in
-# a headless training worker fails fast with the fault's NTSTATUS instead of
-# hanging forever on the JIT debugger. Register an atexit hook so a *clean*
-# interpreter shutdown after a successful run is treated as work-complete -- any
-# late libtorch teardown fault then exits 0 rather than being misreported as a
-# crash. All three symbols are tolerant of older installed .pyd files.
-try:
-    from ._resolve_core import set_thread_pools, install_crash_handler
-    from ._resolve_core import _signal_work_complete as _signal_work_complete
+    The default (``default_cuda_alloc_conf()``) sets the garbage-collection
+    threshold and the split-size limit that keep Windows WDDM fragmentation in
+    check, and prefixes ``expandable_segments:True`` off Windows (the
+    cuMemMap-backed allocator does not exist there). A value already set is
+    kept unless ``force`` is true; the return value is the setting in effect.
+    It takes effect when it runs before the process's first CUDA allocation;
+    importing ``resolve_core`` calls it.
+    """
+    value = _configure_cuda_allocator(force)
+    _os.environ["PYTORCH_CUDA_ALLOC_CONF"] = value
+    return value
 
-    import atexit as _atexit
-    _atexit.register(_signal_work_complete)
-except ImportError:
-    def set_thread_pools(*_args, **_kwargs):
-        """Stub for older resolve_core builds that lack set_thread_pools."""
-        return None
 
-    def install_crash_handler(*_args, **_kwargs):
-        """Stub for older resolve_core builds that lack install_crash_handler."""
-        return None
+configure_cuda_allocator()
 
-from ._io_retry import retry_io
+# The extension installs the Windows crash handler at import, so a native
+# fault in a headless worker fails fast with its NTSTATUS instead of hanging on
+# the JIT debugger. A clean interpreter shutdown after a successful run marks
+# the work complete, so a late libtorch teardown fault then exits 0 rather than
+# being reported as a crash.
+import atexit as _atexit  # noqa: E402
 
-# Wrap checkpoint I/O entry points with retry_io so transient OSError on the
-# host filesystem (WinError 121 semaphore timeout, EINVAL on a hung handle,
-# etc.) doesn't kill a multi-hour training run. The C++ side passes filesystem
-# faults through as Python OSError; retry_io catches them, sleeps with
-# exponential backoff, and retries.
-_Trainer_save_orig = Trainer.save
-def _trainer_save(self, path, metadata=None):
-    return retry_io(
-        lambda: _Trainer_save_orig(self, path, metadata),
-        what=f"Trainer.save({path!r})",
-    )
-Trainer.save = _trainer_save
-
-_Trainer_load_orig = Trainer.load
-def _trainer_load(path, device="cpu", vram_fraction=1.0):
-    return retry_io(
-        lambda: _Trainer_load_orig(path, device, vram_fraction),
-        what=f"Trainer.load({path!r})",
-    )
-Trainer.load = staticmethod(_trainer_load)
-
-_Predictor_load_orig = Predictor.load
-def _predictor_load(path, device="cpu", vram_fraction=1.0):
-    return retry_io(
-        lambda: _Predictor_load_orig(path, device, vram_fraction),
-        what=f"Predictor.load({path!r})",
-    )
-Predictor.load = staticmethod(_predictor_load)
+_atexit.register(_signal_work_complete)
 
 # Attach the high-level in-memory loaders ResolveDataset.from_pandas /
-# .from_dataframe (issue #22), wrapping the low-level from_columns* bindings.
+# .from_dataframe, wrapping the low-level from_columns* bindings.
 from . import _from_pandas as _from_pandas_mod
 _from_pandas_mod.install()
 
@@ -319,7 +236,7 @@ __all__ = [
     "ActivationType",
     "NormLayerType",
     "PoolWeighting",
-    # Architecture enums (v2.0)
+    # Architecture enums
     "EncoderArchitecture",
     "GNNType",
     "GraphConstructionMode",
@@ -345,7 +262,8 @@ __all__ = [
     "DatasetConfig",
     "SpatialBlockConfig",
     "ModelForwardResult",
-    # Architecture configs (v2.0)
+    "RetrievalConfig",
+    # Architecture configs
     "FTTransformerConfig",
     "TabNetConfig",
     "SAINTConfig",
@@ -379,6 +297,8 @@ __all__ = [
     "external_vocabs_from_schema",
     "dataset_config_from_checkpoint",
     "effective_selection",
+    "model_config_for_dataset",
+    "target_specs_from_schema",
     # Model
     "ResolveModel",
     # Training
@@ -431,12 +351,13 @@ __all__ = [
     "compute_species_recognition",
     "sha256_file",
     "suite_prediction_columns",
+    # Storage failures
+    "StorageError",
     # GPU memory management
     "set_vram_fraction",
     "configure_cuda_allocator",
-    # Process hardening (Windows teardown / crash; issues #18, #19)
+    "default_cuda_alloc_conf",
+    # Process hardening (Windows teardown and crashes)
     "set_thread_pools",
     "install_crash_handler",
-    # I/O resilience helper (also auto-applied to Trainer.save/load and Predictor.load)
-    "retry_io",
 ]

@@ -20,6 +20,7 @@ from conftest import (
     make_dataset_config,
     make_model_config,
     make_roles,
+    make_targets,
     make_train_config,
 )
 
@@ -366,3 +367,54 @@ def test_prepare_data_accepts_a_dataset_that_has_targets(hash_dataset):
     trainer = rc.Trainer(model, make_train_config(max_epochs=1))
     trainer.prepare_data(hash_dataset, 0.25, 42)
     assert trainer.test_indices().numel() > 0
+
+
+def test_a_missing_checkpoint_raises_an_oserror(tmp_path):
+    missing = str(tmp_path / "no_such_model.pt")
+    with pytest.raises(rc.StorageError) as caught:
+        rc.Predictor.load(missing)
+    assert isinstance(caught.value, OSError)
+    with pytest.raises(OSError):
+        rc.Trainer.load_train_config(missing)
+
+
+def test_a_missing_csv_raises_an_oserror(tmp_path):
+    with pytest.raises(OSError):
+        rc.ResolveDataset.from_csv(str(tmp_path / "h.csv"), str(tmp_path / "s.csv"),
+                                   make_roles(), make_targets())
+
+
+def test_an_unwritable_checkpoint_path_raises_an_oserror(tmp_path, fitted_trainer):
+    with pytest.raises(OSError):
+        fitted_trainer.trainer.save(str(tmp_path / "no_such_dir" / "model.pt"))
+
+
+def test_trainer_load_returns_the_model_scalers_and_vocabulary(tmp_path, fitted_trainer):
+    path = str(tmp_path / "model.pt")
+    fitted_trainer.trainer.save(path, fitted_trainer.trainer.run_metadata)
+    model, scalers, vocab = rc.Trainer.load(path)
+    assert isinstance(model, rc.ResolveModel)
+    assert isinstance(scalers, rc.Scalers)
+    assert isinstance(vocab, rc.CategoricalVocab)
+    assert model.latent_dim == fitted_trainer.trainer.model.latent_dim
+
+
+@pytest.mark.parametrize("device", ["gpu", "CUDA", "cuda:", "cuda:-1", "cuda:1x", ""])
+def test_a_device_name_that_is_not_cpu_cuda_or_cuda_n_is_refused(device, tmp_path, fitted_trainer):
+    cfg = rc.TrainConfig()
+    with pytest.raises(ValueError, match="cuda:N"):
+        cfg.device = device
+    path = str(tmp_path / "model.pt")
+    fitted_trainer.trainer.save(path)
+    with pytest.raises(ValueError, match="cuda:N"):
+        rc.Predictor.load(path, device=device)
+
+
+def test_device_names_round_trip_through_the_config():
+    cfg = rc.TrainConfig()
+    for name in ["cpu", "cuda", "cuda:0", "cuda:3"]:
+        cfg.device = name
+        assert cfg.device == name
+    pretrain = rc.PretrainConfig()
+    pretrain.device = "cuda:1"
+    assert pretrain.device == "cuda:1"

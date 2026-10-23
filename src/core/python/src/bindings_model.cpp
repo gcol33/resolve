@@ -114,12 +114,8 @@ void register_model(nb::module_& m) {
         .def("train", [](resolve::ResolveModel& self, bool mode) { self->train(mode); }, nb::arg("mode") = true)
         .def("eval", [](resolve::ResolveModel& self) { self->eval(); })
         .def("to", [](resolve::ResolveModel& self, const std::string& device) {
-            if (device == "cuda") {
-                self->to(torch::kCUDA);
-            } else {
-                self->to(torch::kCPU);
-            }
-        })
+            self->to(resolve::parse_device(device));
+        }, nb::arg("device"), "Move the model to a device: cpu, cuda or cuda:N.")
         .def_prop_ro("schema", [](const resolve::ResolveModel& self) -> resolve::ResolveSchema { return self->schema(); })
         .def_prop_ro("config", [](const resolve::ResolveModel& self) -> resolve::ModelConfig { return self->config(); })
         .def_prop_ro("latent_dim", [](resolve::ResolveModel& self) { return self->latent_dim(); })
@@ -312,11 +308,9 @@ void register_model(nb::module_& m) {
             return self->has_species_graph();
         })
         .def_prop_ro("species_graph_edge_index", [](resolve::ResolveModel& self) {
-            auto t = self->species_graph_edge_index();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+            return tensor_or_none(self->species_graph_edge_index());
         })
         .def_prop_ro("species_graph_edge_type", [](resolve::ResolveModel& self) {
-            auto t = self->species_graph_edge_type();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
+            return tensor_or_none(self->species_graph_edge_type());
         });
 }

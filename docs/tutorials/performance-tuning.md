@@ -180,12 +180,13 @@ resolve_core.set_vram_fraction(0.80)
 ### Allocator config: `configure_cuda_allocator`
 
 `resolve_core.configure_cuda_allocator()` runs once at module import time
-and sets a platform-aware `PYTORCH_CUDA_ALLOC_CONF` default. The PyTorch
-CUDA caching allocator reads that variable exactly once, on first
-initialization, so the call has to happen *before* the first `import torch`
-in the process. `resolve_core` performs this ordering itself; call the helper
-explicitly only when your code imports torch before resolve_core, or when you
-want to log the active config:
+and sets the engine's `PYTORCH_CUDA_ALLOC_CONF` default
+(`resolve_core.default_cuda_alloc_conf()`, the same value the R package and the
+CLI use). The PyTorch CUDA caching allocator reads that variable when it first
+allocates on a device, not when torch is imported, so the call has to happen
+before the process's first CUDA allocation; importing resolve_core does that
+in time unless the GPU was already used. A value already set is kept. Call the
+helper explicitly to log the active config or to overwrite it:
 
 ```python
 import resolve_core

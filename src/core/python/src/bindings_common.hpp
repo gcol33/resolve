@@ -10,19 +10,51 @@
 #include <torch/csrc/autograd/python_variable.h>  // For THPVariable_Wrap/Unpack
 
 #include "resolve/resolve.hpp"
+#include "resolve/config_registry.hpp"
 #include "resolve/role_mapping.hpp"
 #include "resolve/dataset.hpp"
 
 namespace nb = nanobind;
 
-// A tensor member as a detached CPU torch.Tensor, or None when undefined.
-// nanobind has no caster for at::Tensor, so a def_ro / def_prop_ro over a
-// tensor member goes through this.
+// The one rule for a tensor handed to Python: data and results (a dataset's
+// tensors, predictions, scalers, indices, graphs, evaluation results) are
+// detached CPU tensors, or None when undefined. A CPU tensor is handed over
+// without a copy, so it shares storage with the engine object it came from.
+// The exceptions act on the module itself and stay live on the model's device:
+// ResolveModel's forward outputs (autograd for a custom training loop) and its
+// parameter accessors (parameters, named_parameters, composition_parameters,
+// get_*_weights), which an optimizer or a freeze must reach.
+//
+// nanobind has no caster for at::Tensor, so every tensor goes through this or
+// through THPVariable_Wrap directly for the live exceptions.
 inline nb::object tensor_or_none(const torch::Tensor& t) {
     if (!t.defined()) return nb::none();
-    auto cpu = t.detach().cpu().contiguous();
-    return nb::steal(THPVariable_Wrap(cpu));
+    torch::Tensor host = t.detach().cpu();
+    // A sparse layout (the sparse encoding's species vector) has no strides.
+    if (host.layout() == torch::kStrided) host = host.contiguous();
+    return nb::steal(THPVariable_Wrap(host));
 }
+
+// Registers one field-registry row as a read/write Python attribute. A device
+// is reachable through a string property (bind_device_property) and the log
+// callback has no Python form at all, so both are skipped by TYPE rather than
+// by being quietly left off a list -- the omission a reader would have to
+// notice.
+template <typename Class, typename Cfg, typename T>
+void bind_config_field(Class& cls, const char* name, T Cfg::*member) {
+    if constexpr (resolve::is_python_bindable_field_v<T>) {
+        cls.def_rw(name, member);
+    } else {
+        (void)cls;
+        (void)name;
+        (void)member;
+    }
+}
+
+// Expands one registry row into a def_rw. `cls` and `Cfg` come from the
+// enclosing block, so a struct is bound by opening a scope, naming it once, and
+// handing its field list to this macro.
+#define RESOLVE_BIND_FIELD(member, key) bind_config_field(cls, #member, &Cfg::member);
 
 // Unpack an optional tensor argument. Returns an undefined tensor for None;
 // THPVariable_Unpack on Py_None reinterprets the None singleton as a
@@ -62,19 +94,23 @@ inline std::unordered_map<std::string, torch::Tensor> dict_to_tensor_map(const n
     return result;
 }
 
-// Helper to convert unordered_map of tensors to Python dict
-inline nb::object tensor_map_to_dict(const std::unordered_map<std::string, torch::Tensor>& m) {
-    PyObject* py_dict = PyDict_New();
+// A tensor map as a dict of name -> tensor, each through tensor_or_none; an
+// undefined entry is left out.
+inline nb::dict tensor_map_to_dict(const std::unordered_map<std::string, torch::Tensor>& m) {
+    nb::dict out;
     for (const auto& [key, value] : m) {
-        if (value.defined()) {
-            // Move tensor to CPU and make contiguous for Python interop
-            auto cpu_tensor = value.detach().cpu().contiguous();
-            PyObject* py_tensor = THPVariable_Wrap(cpu_tensor);
-            PyDict_SetItemString(py_dict, key.c_str(), py_tensor);
-            Py_DECREF(py_tensor);  // PyDict_SetItemString increments refcount
-        }
+        if (value.defined()) out[key.c_str()] = tensor_or_none(value);
     }
-    return nb::steal(py_dict);
+    return out;
+}
+
+// A torch::Device field as a read/write `str` attribute: "cpu", "cuda" or
+// "cuda:N" (resolve::parse_device; anything else raises ValueError).
+template <typename Class, typename Cfg>
+void bind_device_property(Class& cls, torch::Device Cfg::*member) {
+    cls.def_prop_rw(
+        "device", [member](const Cfg& c) { return resolve::device_name(c.*member); },
+        [member](Cfg& c, const std::string& device) { c.*member = resolve::parse_device(device); });
 }
 
 // Forward declarations for binding registration functions

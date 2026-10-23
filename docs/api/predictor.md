@@ -19,7 +19,7 @@ predictor = rc.Predictor.load("model.pt", device="cpu", vram_fraction=1.0)
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `path` | `str` | required | Checkpoint written by `Trainer.save` |
-| `device` | `str` | `"cpu"` | `"cpu"` or `"cuda"` |
+| `device` | `str` | `"cpu"` | `"cpu"`, `"cuda"` (the current CUDA device) or `"cuda:N"`; anything else raises `ValueError` |
 | `vram_fraction` | `float` | `1.0` | Cap on the CUDA caching allocator, applied before the model uploads |
 
 `device` defaults to CPU. Inference on a ~5M-parameter MLP over 300k plots takes
@@ -39,6 +39,9 @@ predictor = rc.Predictor(model, scalers, device="cpu")
 
 Loading retries on a transient filesystem error, with exponential backoff,
 tunable through `RESOLVE_IO_RETRY_ATTEMPTS` and `RESOLVE_IO_RETRY_BACKOFF_MS`.
+A checkpoint that still cannot be read (a missing file, say) raises
+`rc.StorageError`, a subclass of `OSError`, as does a failed `Trainer.save` and
+a CSV that cannot be opened; an unreadable archive raises `RuntimeError`.
 
 ### Predicting on a dataset
 
@@ -173,6 +176,40 @@ for target, probs in predictions.probabilities.items():
 frame.to_csv("predictions.csv", index=False)
 ```
 
+### Retrieval augmentation
+
+A predictor can blend each prediction with the labels of the plot's nearest
+training plots in the model's latent space (Gorishniy et al. 2024, TabR):
+
+```python
+reference = rc.ResolveDataset.from_csv_with_vocabs(
+    train_header, train_species, roles,
+    rc.target_specs_from_schema(predictor.schema),   # every target, by its name
+    predictor.external_vocabs, predictor.dataset_config)
+
+config = rc.RetrievalConfig()
+config.k_neighbors = 32      # reference plots each prediction reads
+config.alpha = 0.3           # share of the neighbours' labels in the blend
+config.temperature = 1.0     # softmax temperature over cosine similarity
+predictor.set_retrieval(reference, config, batch_size=4096)
+
+predictions = predictor.predict_dataset(new_plots)   # blended
+predictor.clear_retrieval()                          # back to the model alone
+```
+
+For each plot the k reference plots most similar to it by cosine similarity of
+their latents are weighted by a softmax of similarity / temperature; only the
+neighbours labelled for a target count for it, their weights renormalised, and
+a plot with none keeps the model's prediction. A regression target is then
+`(1 - alpha) * prediction + alpha * sum(w * y)` in original units; a
+classification target blends its softmax row with the neighbours' label
+distribution, and the predicted class is the blend's argmax. The latent and
+`get_embeddings` are not blended. The search is exact (brute force over blocks
+of the reference set, on the predictor's device). A reference plot that is also
+scored finds itself first. `predictor.retrieval` is the active
+`RetrievalConfig` or `None`, `predictor.n_retrieval_reference` the reference
+size.
+
 ---
 
 ## Scalers
@@ -191,11 +228,11 @@ Feature and target scaling fitted on the training fold.
 
 | Function | Description |
 |----------|-------------|
-| `rc.set_vram_fraction(fraction, device_index=0)` | Cap the CUDA caching allocator directly |
-| `rc.configure_cuda_allocator(force=False)` | Set a platform-aware `PYTORCH_CUDA_ALLOC_CONF`; runs at import, before torch loads |
+| `rc.set_vram_fraction(fraction, device_index=-1)` | Cap the CUDA caching allocator directly |
+| `rc.configure_cuda_allocator(force=False)` | Set the engine's `PYTORCH_CUDA_ALLOC_CONF` default; runs at import, before the first CUDA allocation |
+| `rc.default_cuda_alloc_conf()` | That default, as a string |
 | `rc.set_thread_pools(intraop, interop)` | Pin libtorch's host thread pools |
 | `rc.install_crash_handler(shutdown_exit_code)` | Windows only; turn a native fault into a fast, deterministic exit rather than a JIT-debugger hang |
-| `rc.retry_io(fn, what=...)` | The retry wrapper applied to `Trainer.save`, `Trainer.load`, and `Predictor.load` |
 
 The crash handler is installed and an `atexit` hook registered when
 `resolve_core` is imported, so a headless worker that faults fails fast instead
@@ -213,6 +250,11 @@ resolve predict --model model.pt \
                 --predict-batch-size 4096 \
                 --probabilities
 ```
+
+`--device cuda` (or `cuda:N`) predicts on a GPU. `--retrieval-header` /
+`--retrieval-species` name the reference plots of retrieval augmentation (their
+target columns named as the targets), with `--retrieval-k`, `--retrieval-alpha`
+and `--retrieval-temperature`.
 
 The CLI rebuilds its `DatasetConfig` and its vocabularies from the checkpoint,
 so its codes mean what they meant at training time. `--probabilities` appends

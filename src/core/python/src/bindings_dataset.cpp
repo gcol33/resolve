@@ -32,6 +32,7 @@ void register_dataset(nb::module_& m) {
                     nb::arg("roles"),
                     nb::arg("targets"),
                     nb::arg("config") = resolve::DatasetConfig{},
+                    nb::call_guard<nb::gil_scoped_release>(),
                     "Load dataset from header CSV and species CSV files")
         // from_csv_with_schema is overloaded on the vocabulary source, so each
         // overload needs an explicit function-pointer cast (a bare &member is
@@ -51,6 +52,7 @@ void register_dataset(nb::module_& m) {
                     nb::arg("targets"),
                     nb::arg("schema_source"),
                     nb::arg("config") = resolve::DatasetConfig{},
+                    nb::call_guard<nb::gil_scoped_release>(),
                     "Load dataset reusing the categorical / taxonomy / species "
                     "vocabularies and classification class mappings from "
                     "`schema_source`. Use for cross-split workflows (leave-one-"
@@ -71,6 +73,7 @@ void register_dataset(nb::module_& m) {
                     nb::arg("targets"),
                     nb::arg("schema"),
                     nb::arg("config") = resolve::DatasetConfig{},
+                    nb::call_guard<nb::gil_scoped_release>(),
                     "Load dataset reusing the vocabularies a CHECKPOINT's schema "
                     "carries, so the training CSVs need not exist. Raises when "
                     "the schema has no species vocabulary (a checkpoint that "
@@ -85,6 +88,7 @@ void register_dataset(nb::module_& m) {
                     nb::arg("targets"),
                     nb::arg("vocabs"),
                     nb::arg("config") = resolve::DatasetConfig{},
+                    nb::call_guard<nb::gil_scoped_release>(),
                     "Load dataset with every vocabulary supplied explicitly "
                     "(ExternalVocabs). The complete form: use with "
                     "predictor.external_vocabs, whose categorical maps live on "
@@ -94,6 +98,7 @@ void register_dataset(nb::module_& m) {
                     nb::arg("roles"),
                     nb::arg("targets"),
                     nb::arg("config") = resolve::DatasetConfig{},
+                    nb::call_guard<nb::gil_scoped_release>(),
                     "Load dataset from a single species CSV file")
         .def_static("from_species_csv_with_schema",
                     &resolve::ResolveDataset::from_species_csv_with_schema,
@@ -102,6 +107,7 @@ void register_dataset(nb::module_& m) {
                     nb::arg("targets"),
                     nb::arg("schema"),
                     nb::arg("config") = resolve::DatasetConfig{},
+                    nb::call_guard<nb::gil_scoped_release>(),
                     "Single-table counterpart of from_csv_with_schema: reuse a "
                     "checkpoint's vocabularies when scoring a species-only CSV.")
         .def_static("from_species_csv_with_vocabs",
@@ -111,6 +117,7 @@ void register_dataset(nb::module_& m) {
                     nb::arg("targets"),
                     nb::arg("vocabs"),
                     nb::arg("config") = resolve::DatasetConfig{},
+                    nb::call_guard<nb::gil_scoped_release>(),
                     "Single-table counterpart of from_csv_with_vocabs.")
         // --- In-memory (DataFrame) loaders ---
         // Low-level column entry points: each frame arrives as (names, columns)
@@ -243,93 +250,37 @@ void register_dataset(nb::module_& m) {
                     nb::arg("config") = resolve::DatasetConfig{},
                     nb::call_guard<nb::gil_scoped_release>(),
                     "In-memory analog of from_species_csv_with_vocabs.")
-        // Tensor accessors must be wrapped via THPVariable_Wrap; nanobind
-        // has no built-in caster for at::Tensor (would produce
-        // "Unable to convert function return value to a Python type").
-        // Undefined tensors are surfaced as None.
-        .def_prop_ro("coordinates", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.coordinates();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
-        .def_prop_ro("covariates", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.covariates();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
-        .def_prop_ro("hash_embedding", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.hash_embedding();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
+        // Tensor accessors go through tensor_or_none (bindings_common.hpp).
+        .def_prop_ro("coordinates", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.coordinates()); })
+        .def_prop_ro("covariates", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.covariates()); })
+        .def_prop_ro("hash_embedding", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.hash_embedding()); })
         // The taxonomy of the VOCABULARY: index = species code, value = the
         // genus / family code that species belongs to. genus_ids /
         // family_ids below are per-plot slots instead.
-        .def_prop_ro("species_genus_ids", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.species_genus_ids();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
-        .def_prop_ro("species_family_ids", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.species_family_ids();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
-        .def_prop_ro("species_ids", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.species_ids();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
+        .def_prop_ro("species_genus_ids", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.species_genus_ids()); })
+        .def_prop_ro("species_family_ids", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.species_family_ids()); })
+        .def_prop_ro("species_ids", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.species_ids()); })
         // A torch sparse CSR tensor (n_plots, n_species_vocab): each plot's
         // species codes (col_indices) and values; .to_dense() for the matrix.
-        .def_prop_ro("species_vector", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.species_vector();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
-        .def_prop_ro("genus_ids", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.genus_ids();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
-        .def_prop_ro("family_ids", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.family_ids();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
-        .def_prop_ro("unknown_fraction", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.unknown_fraction();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
-        .def_prop_ro("unknown_count", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.unknown_count();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
+        .def_prop_ro("species_vector", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.species_vector()); })
+        .def_prop_ro("genus_ids", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.genus_ids()); })
+        .def_prop_ro("family_ids", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.family_ids()); })
+        .def_prop_ro("unknown_fraction", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.unknown_fraction()); })
+        .def_prop_ro("unknown_count", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.unknown_count()); })
         .def("continuous_block", [](const resolve::ResolveDataset& self, bool include_hash) {
-            return nb::steal(THPVariable_Wrap(self.continuous_block(include_hash)));
+            return tensor_or_none(self.continuous_block(include_hash));
         }, nb::arg("include_hash"),
            "The unstandardised continuous block a model built from this dataset's "
            "schema reads: coordinates, covariates, their missingness flags "
            "(missing_values = indicate; missing cells stay NaN), the "
            "unknown-species columns and, with include_hash, the hash embedding.")
-        .def_prop_ro("categorical_ids", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.categorical_ids();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
-        // Pool-style encoder tensors (rank_pool / transformer modes). Wrap
-        // via THPVariable_Wrap inside a lambda: nanobind has no caster for
-        // at::Tensor, so def_prop_ro(&accessor) fails to convert the return.
-        .def_prop_ro("pool_genus_ids", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.pool_genus_ids();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
-        .def_prop_ro("pool_family_ids", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.pool_family_ids();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
-        .def_prop_ro("pool_weights", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.pool_weights();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
-        .def_prop_ro("pool_mask", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.pool_mask();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
-        .def_prop_ro("pool_has_cover", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.pool_has_cover();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
+        .def_prop_ro("categorical_ids", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.categorical_ids()); })
+        // Pool-style encoder tensors (rank_pool / transformer modes).
+        .def_prop_ro("pool_genus_ids", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.pool_genus_ids()); })
+        .def_prop_ro("pool_family_ids", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.pool_family_ids()); })
+        .def_prop_ro("pool_weights", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.pool_weights()); })
+        .def_prop_ro("pool_mask", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.pool_mask()); })
+        .def_prop_ro("pool_has_cover", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.pool_has_cover()); })
         .def("has_pool_data", &resolve::ResolveDataset::has_pool_data)
         .def_prop_ro("categorical_vocab",
                      [](const resolve::ResolveDataset& self) -> const resolve::CategoricalVocab& {
@@ -349,18 +300,9 @@ void register_dataset(nb::module_& m) {
         .def_prop_ro("config", [](const resolve::ResolveDataset& self) -> resolve::DatasetConfig { return self.config(); })
         // CUDA hash accessors
         .def("has_raw_species_data", &resolve::ResolveDataset::has_raw_species_data)
-        .def_prop_ro("raw_species_ids", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.raw_species_ids();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
-        .def_prop_ro("raw_weights", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.raw_weights();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
-        .def_prop_ro("plot_offsets", [](const resolve::ResolveDataset& self) {
-            const auto& t = self.plot_offsets();
-            return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
-        })
+        .def_prop_ro("raw_species_ids", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.raw_species_ids()); })
+        .def_prop_ro("raw_weights", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.raw_weights()); })
+        .def_prop_ro("plot_offsets", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.plot_offsets()); })
         .def_prop_ro("taxonomy_vocab", [](const resolve::ResolveDataset& self) -> const resolve::TaxonomyVocab& {
             return self.taxonomy_vocab();
         })
@@ -531,16 +473,23 @@ void register_dataset(nb::module_& m) {
           "(they size the model); everything else the loader consumed comes "
           "from the schema. use_cuda_hash is deliberately not restored.");
 
+    m.def("model_config_for_dataset", &resolve::model_config_for_dataset,
+          nb::arg("dataset"), nb::arg("config") = resolve::ModelConfig{},
+          "`config` with the fields that size a model to the data taken from "
+          "`dataset`: species_encoding, hash_dim, top_k and top_k_species from "
+          "its loader settings and n_taxonomy_slots from the width of its genus "
+          "slots. Build a model for a dataset as "
+          "ResolveModel(dataset.schema, model_config_for_dataset(dataset, config)).");
+
+    m.def("target_specs_from_schema", &resolve::target_specs_from_schema, nb::arg("schema"),
+          "The targets a checkpoint was trained on, each read from the column of "
+          "its own name: the targets a retrieval reference set is loaded with "
+          "(from_csv_with_vocabs replays the class codes).");
+
     nb::class_<resolve::SpeciesGraph>(m, "SpeciesGraph")
         .def(nb::init<>())
-        .def_prop_ro("edge_index", [](const resolve::SpeciesGraph& self) {
-            return self.edge_index.defined()
-                ? nb::steal(THPVariable_Wrap(self.edge_index)) : nb::none();
-        })
-        .def_prop_ro("edge_type", [](const resolve::SpeciesGraph& self) {
-            return self.edge_type.defined()
-                ? nb::steal(THPVariable_Wrap(self.edge_type)) : nb::none();
-        })
+        .def_prop_ro("edge_index", [](const resolve::SpeciesGraph& self) { return tensor_or_none(self.edge_index); })
+        .def_prop_ro("edge_type", [](const resolve::SpeciesGraph& self) { return tensor_or_none(self.edge_type); })
         .def_ro("n_species", &resolve::SpeciesGraph::n_species)
         .def_prop_ro("n_edges", &resolve::SpeciesGraph::n_edges);
 

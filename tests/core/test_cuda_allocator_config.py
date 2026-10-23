@@ -33,10 +33,8 @@ import resolve_core
 
 
 def _expected_base() -> str:
-    base = "garbage_collection_threshold:0.8,max_split_size_mb:256"
-    if sys.platform != "win32":
-        base = "expandable_segments:True," + base
-    return base
+    """The engine's one definition of the default."""
+    return resolve_core.default_cuda_alloc_conf()
 
 
 def test_import_side_effect_sets_env_var() -> None:
@@ -45,7 +43,7 @@ def test_import_side_effect_sets_env_var() -> None:
     script = textwrap.dedent(
         """
         import os
-        # Make sure we observe the import-time side effect (no prior value).
+        # The import-time side effect, from no prior value.
         os.environ.pop("PYTORCH_CUDA_ALLOC_CONF", None)
         import resolve_core  # noqa: F401  (side effect: configure_cuda_allocator)
         print(os.environ.get("PYTORCH_CUDA_ALLOC_CONF", ""))

@@ -1,26 +1,8 @@
 #include "bindings_common.hpp"
 
-#include "resolve/config_registry.hpp"
-
 #include <type_traits>
 
 namespace {
-
-// Registers one field-registry row as a read/write Python attribute. The
-// training device is reachable through a string property (torch::Device has no
-// natural Python spelling) and the log callback has no Python form at all, so
-// both are skipped by TYPE rather than by being quietly left off a list -- the
-// omission a reader would have to notice.
-template <typename Class, typename Cfg, typename T>
-void bind_config_field(Class& cls, const char* name, T Cfg::*member) {
-    if constexpr (resolve::is_python_bindable_field_v<T>) {
-        cls.def_rw(name, member);
-    } else {
-        (void)cls;
-        (void)name;
-        (void)member;
-    }
-}
 
 // Registers one optional RoleMapping column as an `Optional[str]` attribute.
 //
@@ -49,11 +31,6 @@ void bind_optional_role(Class& cls, const char* name,
 }
 
 }  // namespace
-
-// Expands one registry row into a def_rw. `cls` and `Cfg` come from the
-// enclosing block, so a struct is bound by opening a scope, naming it once, and
-// handing its field list to this macro.
-#define RESOLVE_BIND_FIELD(member, key) bind_config_field(cls, #member, &Cfg::member);
 
 void register_types(nb::module_& m) {
     // Role Mapping and Dataset Configuration
@@ -242,16 +219,16 @@ void register_types(nb::module_& m) {
         auto cls = nb::class_<Cfg>(m, "TrainConfig");
         cls.def(nb::init<>());
         RESOLVE_TRAIN_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
-        // The device is the one field the registry cannot bind directly:
-        // torch::Device has no natural Python spelling, so it is exposed as the
-        // string "cuda" / "cpu". The log callback has no Python form at all.
-        cls.def_prop_rw("device",
-            [](const Cfg& c) {
-                return c.device.is_cuda() ? "cuda" : "cpu";
-            },
-            [](Cfg& c, const std::string& dev) {
-                c.device = (dev == "cuda") ? torch::kCUDA : torch::kCPU;
-            });
+        bind_device_property(cls, &Cfg::device);
+    }
+
+    {
+        using Cfg = resolve::RetrievalConfig;
+        auto cls = nb::class_<Cfg>(m, "RetrievalConfig",
+                                   "Retrieval augmentation settings (Predictor.set_retrieval).");
+        cls.def(nb::init<>());
+        RESOLVE_RETRIEVAL_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+        cls.def("validate", &Cfg::validate);
     }
 
     // Baseline metrics for comparison against naive baselines
@@ -324,40 +301,16 @@ void register_types(nb::module_& m) {
             return tensor_map_to_dict(p.targets);
         })
         .def_ro("plot_ids", &resolve::ResolvePredictions::plot_ids)
-        .def_prop_ro("latent", [](const resolve::ResolvePredictions& p) {
-            if (p.latent.defined()) {
-                auto cpu_tensor = p.latent.detach().cpu().contiguous();
-                return nb::steal(THPVariable_Wrap(cpu_tensor));
-            }
-            return nb::none();
-        });
+        .def_prop_ro("latent", [](const resolve::ResolvePredictions& p) { return tensor_or_none(p.latent); });
 
     nb::class_<resolve::Scalers>(m, "Scalers")
         .def(nb::init<>())
-        .def_prop_ro("continuous_mean", [](const resolve::Scalers& s) {
-            if (s.continuous_mean.defined()) {
-                auto cpu_tensor = s.continuous_mean.detach().cpu().contiguous();
-                return nb::steal(THPVariable_Wrap(cpu_tensor));
-            }
-            return nb::none();
-        })
+        .def_prop_ro("continuous_mean", [](const resolve::Scalers& s) { return tensor_or_none(s.continuous_mean); })
         // The value each continuous column's missing cells are filled with
         // before standardisation; None for a checkpoint written before
         // missing values were filled.
-        .def_prop_ro("continuous_fill", [](const resolve::Scalers& s) {
-            if (s.continuous_fill.defined()) {
-                auto cpu_tensor = s.continuous_fill.detach().cpu().contiguous();
-                return nb::steal(THPVariable_Wrap(cpu_tensor));
-            }
-            return nb::none();
-        })
-        .def_prop_ro("continuous_scale", [](const resolve::Scalers& s) {
-            if (s.continuous_scale.defined()) {
-                auto cpu_tensor = s.continuous_scale.detach().cpu().contiguous();
-                return nb::steal(THPVariable_Wrap(cpu_tensor));
-            }
-            return nb::none();
-        })
+        .def_prop_ro("continuous_fill", [](const resolve::Scalers& s) { return tensor_or_none(s.continuous_fill); })
+        .def_prop_ro("continuous_scale", [](const resolve::Scalers& s) { return tensor_or_none(s.continuous_scale); })
         // Per-target regression scaling as { name: (mean, scale) }. Mirrors the
         // C-ABI scalers_to_value target_scalers marshal so both bindings expose
         // the target scaling that save_scalers/load_scalers persist.
@@ -413,41 +366,18 @@ void register_types(nb::module_& m) {
         .def(nb::init<>())
         .def_ro("target_name", &resolve::ClassificationPredictions::target_name)
         .def_ro("class_names", &resolve::ClassificationPredictions::class_names)
-        .def_prop_ro("predicted_classes", [](const resolve::ClassificationPredictions& c) {
-            if (c.predicted_classes.defined()) {
-                auto cpu_tensor = c.predicted_classes.detach().cpu().contiguous();
-                return nb::steal(THPVariable_Wrap(cpu_tensor));
-            }
-            return nb::none();
-        })
-        .def_prop_ro("probabilities", [](const resolve::ClassificationPredictions& c) {
-            if (c.probabilities.defined()) {
-                auto cpu_tensor = c.probabilities.detach().cpu().contiguous();
-                return nb::steal(THPVariable_Wrap(cpu_tensor));
-            }
-            return nb::none();
-        })
-        .def_prop_ro("actuals", [](const resolve::ClassificationPredictions& c) {
-            if (c.actuals.defined()) {
-                auto cpu_tensor = c.actuals.detach().cpu().contiguous();
-                return nb::steal(THPVariable_Wrap(cpu_tensor));
-            }
-            return nb::none();
-        })
-        .def_prop_ro("test_rows", [](const resolve::ClassificationPredictions& c) {
-            if (c.test_rows.defined()) {
-                auto cpu_tensor = c.test_rows.detach().cpu().contiguous();
-                return nb::steal(THPVariable_Wrap(cpu_tensor));
-            }
-            return nb::none();
-        });
+        .def_prop_ro("predicted_classes", [](const resolve::ClassificationPredictions& c) { return tensor_or_none(c.predicted_classes); })
+        .def_prop_ro("probabilities", [](const resolve::ClassificationPredictions& c) { return tensor_or_none(c.probabilities); })
+        .def_prop_ro("actuals", [](const resolve::ClassificationPredictions& c) { return tensor_or_none(c.actuals); })
+        .def_prop_ro("test_rows", [](const resolve::ClassificationPredictions& c) { return tensor_or_none(c.test_rows); });
 
-    // Spatial block configuration
-    nb::class_<resolve::SpatialBlockConfig>(m, "SpatialBlockConfig")
-        .def(nb::init<>())
-        .def_rw("lat_size", &resolve::SpatialBlockConfig::lat_size)
-        .def_rw("lon_size", &resolve::SpatialBlockConfig::lon_size)
-        .def_rw("balance", &resolve::SpatialBlockConfig::balance);
+    // Spatial block configuration (cross_validate_spatial)
+    {
+        using Cfg = resolve::SpatialBlockConfig;
+        auto cls = nb::class_<Cfg>(m, "SpatialBlockConfig");
+        cls.def(nb::init<>());
+        RESOLVE_SPATIAL_BLOCK_CONFIG_FIELDS(RESOLVE_BIND_FIELD)
+    }
 
     // Cross-validation result
     nb::class_<resolve::CrossValidationResult>(m, "CrossValidationResult")
@@ -481,12 +411,9 @@ void register_types(nb::module_& m) {
         .def_prop_ro("aux_losses", [](const resolve::ModelForwardResult& r) {
             nb::dict terms;
             for (const auto& [name, term] : r.aux_losses) {
-                if (!term.defined()) continue;
-                terms[nb::str(name.c_str())] =
-                    nb::steal(THPVariable_Wrap(term.detach().cpu().contiguous()));
+                if (term.defined()) terms[nb::str(name.c_str())] = tensor_or_none(term);
             }
             return terms;
         });
 }
 
-#undef RESOLVE_BIND_FIELD

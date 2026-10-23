@@ -1,4 +1,4 @@
-"""High-level in-memory dataset loaders (issue #22).
+"""High-level in-memory dataset loaders.
 
 ``ResolveDataset.from_pandas`` / ``.from_dataframe`` build a dataset directly
 from pandas DataFrames already in RAM, eliminating the write-to-temp-CSV /

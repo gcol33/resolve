@@ -12,10 +12,6 @@ import os
 
 from . import _resolve_core as _core
 from ._from_pandas import _df_to_columns
-from ._io_retry import retry_io
-
-_COLUMN_FIELDS = ("plot_id", "species_id", "abundance", "genus", "family",
-                  "latitude", "longitude", "covariates", "categoricals")
 
 
 def _columns(columns):
@@ -26,10 +22,11 @@ def _columns(columns):
         return columns
     if not isinstance(columns, dict):
         raise TypeError("columns must be a SuiteColumns or a dict")
-    unknown = sorted(set(columns) - set(_COLUMN_FIELDS))
-    if unknown:
-        raise ValueError(f"columns: unknown key(s) {unknown}; accepted: {list(_COLUMN_FIELDS)}")
     out = _core.SuiteColumns()
+    fields = [name for name in dir(out) if not name.startswith("_")]
+    unknown = sorted(set(columns) - set(fields))
+    if unknown:
+        raise ValueError(f"columns: unknown key(s) {unknown}; accepted: {fields}")
     for key, value in columns.items():
         if key in ("covariates", "categoricals") and value is not None:
             value = [str(v) for v in value]
@@ -98,14 +95,6 @@ def to_pandas(self, probabilities=False):
 
 
 def install():
-    """Attach predict / to_pandas, and retry transient storage faults on load."""
-    _load = _core.SuitePredictor.load
-
-    def load(dir, device="cpu", vram_fraction=1.0, verify=True, targets=None):
-        return retry_io(lambda: _load(dir, device, vram_fraction, verify, targets),
-                        what=f"SuitePredictor.load({dir!r})")
-
-    load.__doc__ = _load.__doc__
-    _core.SuitePredictor.load = staticmethod(load)
+    """Attach predict / to_pandas to the suite bindings."""
     _core.SuitePredictor.predict = predict
     _core.SuitePredictions.to_pandas = to_pandas

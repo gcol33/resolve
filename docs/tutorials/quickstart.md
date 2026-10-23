@@ -54,11 +54,10 @@ A single long table also works, with the targets carried inline; see
     print(f"Plots: {dataset.schema.n_plots}")
     print(f"Species vocabulary: {dataset.schema.n_species_vocab}")
 
-    # 5. Build the model from the dataset's schema
+    # 5. Build the model for the dataset (its encoding and widths come from it)
     model_config = rc.ModelConfig()
-    model_config.species_encoding = rc.SpeciesEncodingMode.RankPool
-    model_config.hidden_dims      = [256, 128]
-    model = rc.ResolveModel(dataset.schema, model_config)
+    model_config.hidden_dims = [256, 128]
+    model = rc.ResolveModel(dataset.schema, rc.model_config_for_dataset(dataset, model_config))
 
     # 6. Train
     train_config = rc.TrainConfig()
