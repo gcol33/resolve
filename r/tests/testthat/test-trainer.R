@@ -1,147 +1,81 @@
 # Tests for RESOLVE Trainer
 
-test_that("Trainer can be created with config", {
+# Builds a model on a small hashed dataset, trains it for `train_config`'s
+# epochs, saves it, and checks that both the live trainer and the checkpoint
+# report every field of `train_config` as given (to float32 precision, the
+# width the engine stores learning rates at).
+expect_config_round_trip <- function(train_config) {
+  tables <- signal_tables(60L)
+  dataset <- load_tables(tables, signal_roles(), regression_target())
+  model <- new(.resolve_module()$ResolveModel, dataset$schema(),
+               list(species_encoding = "hash", hash_dim = 4L, top_k = 2L,
+                    hidden_dims = c(16L, 8L)))
+  trainer <- new(.resolve_module()$Trainer, model, train_config)
+
+  live <- trainer$get_config()
+  for (field in names(train_config)) {
+    expect_equal(live[[field]], train_config[[field]], tolerance = 1e-6, info = field)
+  }
+
+  trainer$prepare_data_from_dataset(dataset, 0.25, 3L)
+  result <- trainer$fit()
+  expect_length(result$train_loss, train_config$max_epochs)
+
+  model_file <- local_model_file()
+  trainer$save(model_file, NULL)
+  saved <- resolve.load_train_config(model_file)
+  for (field in names(train_config)) {
+    expect_equal(saved[[field]], train_config[[field]], tolerance = 1e-6, info = field)
+  }
+}
+
+test_that("a trainer keeps its configuration and the checkpoint carries it", {
   skip_if_no_backend()
   skip_on_cran()
 
-  # Create minimal schema
-  schema <- list(
-    n_plots = 100L,
-    n_species = 50L,
-    has_coordinates = TRUE,
-    has_abundance = FALSE,
-    has_taxonomy = FALSE,
-    n_genera = 0L,
-    n_families = 0L,
-    track_unknown_fraction = FALSE,
-    track_unknown_count = FALSE,
-    targets = list(
-      area = list(
-        task = "regression",
-        transform = "none"
-      )
-    )
-  )
-
-  model_config <- list(
-    species_encoding = "hash",
-    hash_dim = 16L,
-    hidden_dims = c(32L, 16L)
-  )
-
-  train_config <- list(
+  expect_config_round_trip(list(
     batch_size = 16L,
     max_epochs = 2L,
     patience = 5L,
-    lr = 0.001
-  )
-
-  model <- new(.resolve_module()$ResolveModel, schema, model_config)
-  trainer <- new(.resolve_module()$Trainer, model, train_config)
-
-  # Should not raise
-  expect_true(!is.null(trainer))
+    lr = 0.001,
+    lr_scheduler = "none"
+  ))
 })
 
-test_that("LR scheduler options are accepted", {
+test_that("a cosine learning-rate schedule round-trips through the checkpoint", {
   skip_if_no_backend()
   skip_on_cran()
 
-  schema <- list(
-    n_plots = 50L,
-    n_species = 20L,
-    has_coordinates = TRUE,
-    has_abundance = FALSE,
-    has_taxonomy = FALSE,
-    n_genera = 0L,
-    n_families = 0L,
-    track_unknown_fraction = FALSE,
-    track_unknown_count = FALSE,
-    targets = list(
-      area = list(task = "regression", transform = "none")
-    )
-  )
-
-  model_config <- list(
-    species_encoding = "hash",
-    hash_dim = 16L,
-    hidden_dims = c(32L, 16L)
-  )
-
-  # Config with LR scheduler
-
-  train_config <- list(
+  expect_config_round_trip(list(
     batch_size = 16L,
     max_epochs = 3L,
+    patience = 5L,
     lr = 0.01,
     lr_scheduler = "cosine",
     lr_min = 0.0001
-  )
-
-  model <- new(.resolve_module()$ResolveModel, schema, model_config)
-  trainer <- new(.resolve_module()$Trainer, model, train_config)
-
-  expect_true(!is.null(trainer))
+  ))
 })
 
-test_that("Step LR scheduler config is accepted", {
+test_that("a step learning-rate schedule round-trips through the checkpoint", {
   skip_if_no_backend()
   skip_on_cran()
 
-  schema <- list(
-    n_plots = 50L,
-    n_species = 20L,
-    has_coordinates = TRUE,
-    has_abundance = FALSE,
-    has_taxonomy = FALSE,
-    n_genera = 0L,
-    n_families = 0L,
-    track_unknown_fraction = FALSE,
-    track_unknown_count = FALSE,
-    targets = list(
-      area = list(task = "regression", transform = "none")
-    )
-  )
-
-  model_config <- list(
-    species_encoding = "hash",
-    hash_dim = 16L,
-    hidden_dims = c(32L, 16L)
-  )
-
-  train_config <- list(
+  expect_config_round_trip(list(
     batch_size = 16L,
     max_epochs = 5L,
+    patience = 10L,
     lr = 0.01,
     lr_scheduler = "step",
     lr_step_size = 2L,
     lr_gamma = 0.5
-  )
-
-  model <- new(.resolve_module()$ResolveModel, schema, model_config)
-  trainer <- new(.resolve_module()$Trainer, model, train_config)
-
-  expect_true(!is.null(trainer))
+  ))
 })
 
 test_that("A mixture of experts builds at either placement", {
   skip_if_no_backend()
   skip_on_cran()
 
-  schema <- list(
-    n_plots = 60L,
-    n_species = 20L,
-    has_coordinates = TRUE,
-    has_abundance = FALSE,
-    has_taxonomy = FALSE,
-    n_genera = 0L,
-    n_families = 0L,
-    track_unknown_fraction = FALSE,
-    track_unknown_count = FALSE,
-    targets = list(
-      area = list(task = "regression", transform = "none")
-    )
-  )
+  schema <- fixture_schema(n_plots = 60L)
 
   # Four widths so the tail split is visible: the backbone keeps the first two
   # and the mixture produces the last, which stays the latent width.
@@ -168,21 +102,7 @@ test_that("A tail mixture is refused where there is no MLP tail", {
   skip_if_no_backend()
   skip_on_cran()
 
-  schema <- list(
-    n_plots = 60L,
-    n_species = 20L,
-    has_coordinates = TRUE,
-    has_abundance = FALSE,
-    has_taxonomy = FALSE,
-    n_genera = 0L,
-    n_families = 0L,
-    n_species_vocab = 21L,
-    track_unknown_fraction = FALSE,
-    track_unknown_count = FALSE,
-    targets = list(
-      area = list(task = "regression", transform = "none")
-    )
-  )
+  schema <- fixture_schema(n_plots = 60L, n_species_vocab = 21L)
 
   model_config <- list(
     species_encoding = "hash",
@@ -210,22 +130,15 @@ test_that("freeze_composition fixes the composition tables and is refused withou
   skip_if_no_backend()
   skip_on_cran()
 
-  schema <- list(
+  schema <- fixture_schema(
     n_plots = 60L,
-    n_species = 20L,
-    has_coordinates = TRUE,
     has_abundance = TRUE,
     has_taxonomy = TRUE,
     n_genera = 5L,
     n_families = 3L,
     n_species_vocab = 21L,
     n_genera_vocab = 5L,
-    n_families_vocab = 3L,
-    track_unknown_fraction = FALSE,
-    track_unknown_count = FALSE,
-    targets = list(
-      area = list(task = "regression", transform = "none")
-    )
+    n_families_vocab = 3L
   )
   model_config <- list(
     species_encoding = "rank_pool",

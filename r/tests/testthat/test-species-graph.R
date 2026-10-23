@@ -1,15 +1,8 @@
-# The species graph a heterogeneous GNN passes messages on.
-#
-# HeterogeneousGNNConfig carried four fields describing how to build one and no
-# engine code read any of them; nor could a graph be handed in from R, so every
-# heterogeneous_gnn forward threw "Species graph not set." These tests cover the
-# R surface of the fix: the builder, the taxonomy of the vocabulary, and the
-# model accessors.
+# The species graph a heterogeneous GNN passes messages on, through R: the
+# builder, the taxonomy of the dataset's vocabulary, and the model accessors
+# that take a graph handed in from R.
 
-graph_csvs <- function() {
-  header_file <- tempfile(fileext = ".csv")
-  species_file <- tempfile(fileext = ".csv")
-
+graph_csvs <- function(env = parent.frame()) {
   n_plots <- 12
   header_data <- data.frame(
     plot_id = paste0("p", seq_len(n_plots)),
@@ -19,7 +12,6 @@ graph_csvs <- function() {
     y = 1 + 0.2 * seq_len(n_plots),
     stringsAsFactors = FALSE
   )
-  write.csv(header_data, header_file, row.names = FALSE)
 
   # Two plot groups with disjoint composition, so co-occurrence is a different
   # relation from taxonomy.
@@ -41,9 +33,7 @@ graph_csvs <- function() {
       )
     }
   }
-  write.csv(do.call(rbind, rows), species_file, row.names = FALSE)
-
-  list(header = header_file, species = species_file)
+  local_csv_pair(header_data, do.call(rbind, rows), env = env)
 }
 
 graph_dataset <- function(files, use_taxonomy = TRUE) {
@@ -73,7 +63,6 @@ test_that("resolve.species_graph joins species by taxonomy and co-occurrence", {
   skip_on_cran()
 
   files <- graph_csvs()
-  on.exit(unlink(unlist(files)), add = TRUE)
   dataset <- graph_dataset(files)
 
   graph <- resolve.species_graph(dataset)
@@ -98,7 +87,6 @@ test_that("each relation of the species graph can be switched off", {
   skip_on_cran()
 
   files <- graph_csvs()
-  on.exit(unlink(unlist(files)), add = TRUE)
   dataset <- graph_dataset(files)
 
   taxonomy <- resolve.species_graph(dataset, cooccurrenceEdges = FALSE)
@@ -122,7 +110,6 @@ test_that("the dataset reports the taxonomy of its own vocabulary", {
   skip_on_cran()
 
   files <- graph_csvs()
-  on.exit(unlink(unlist(files)), add = TRUE)
   dataset <- graph_dataset(files)
 
   genus <- dataset$species_genus_ids()
@@ -146,7 +133,6 @@ test_that("only a heterogeneous GNN reads a species graph", {
   skip_on_cran()
 
   files <- graph_csvs()
-  on.exit(unlink(unlist(files)), add = TRUE)
   dataset <- graph_dataset(files)
   graph <- resolve.species_graph(dataset)
 

@@ -1,39 +1,31 @@
-# Per-target missing-label masking (gcol33/resolve#119): the `missing` key of a
-# target specification. "drop" (default) leaves a plot without that label out
-# of the fit; "mask" keeps it, and it trains and is scored on its other targets.
+# Per-target missing-label masking: the `missing` key of a target
+# specification. "drop" (default) leaves a plot without that label out of the
+# fit; "mask" keeps it, and it trains and is scored on its other targets.
 
-masking_files <- function(n = 160L) {
-  header_file <- tempfile(fileext = ".csv")
-  species_file <- tempfile(fileext = ".csv")
+# The signal tables with every third `y` missing and a two-class target `cls`
+# missing on a different, overlapping set of plots. The CSVs live as long as
+# `env`; the returned indices (0-based) are the plots labelled for each target.
+masking_files <- function(n = 160L, env = parent.frame()) {
+  tables <- signal_tables(n)
   i <- seq_len(n) - 1L
-  c1 <- sin(i * 0.13)
-  c2 <- cos(i * 0.07)
-  y <- 2.0 * c1 - 1.5 * c2 + 3.0
-  y[i %% 3L == 0L] <- NA
-  cls <- ifelse(c1 + c2 > 0, "pos", "neg")
-  cls[i %% 4L == 1L | i %% 12L == 0L] <- NA
-  write.csv(data.frame(plot_id = paste0("P", i), c1 = c1, c2 = c2, y = y,
-                       cls = cls, stringsAsFactors = FALSE),
-            header_file, row.names = FALSE, na = "")
-  write.csv(data.frame(plot_id = paste0("P", i), species_id = paste0("sp", i %% 6L),
-                       cover = 1.0, stringsAsFactors = FALSE),
-            species_file, row.names = FALSE)
-  list(header = header_file, species = species_file,
-       labelled_y = i[i %% 3L != 0L],
-       labelled_cls = i[!(i %% 4L == 1L | i %% 12L == 0L)])
+  header <- tables$header
+  header$y[i %% 3L == 0L] <- NA
+  header$cls <- ifelse(header$cov1 + header$cov2 > 0, "pos", "neg")
+  header$cls[i %% 4L == 1L | i %% 12L == 0L] <- NA
+  files <- local_csv_pair(header, tables$species, env = env)
+  c(files, list(labelled_y = i[i %% 3L != 0L],
+                labelled_cls = i[!(i %% 4L == 1L | i %% 12L == 0L)]))
 }
 
 masking_dataset <- function(files, missing) {
   resolve.dataset.csv(
     header = files$header, species = files$species,
-    roles = list(plot_id = "plot_id", species_id = "species_id",
-                 abundance = "cover", covariates = c("c1", "c2")),
+    roles = signal_roles(),
     targets = list(
       y = list(column = "y", task = "regression", missing = missing),
       cls = list(column = "cls", task = "classification", missing = missing)
     ),
-    config = list(species_encoding = "hash", hash_dim = 4L, top_k = 2L,
-                  track_unknown_fraction = FALSE)
+    config = small_hash_config(track_unknown_fraction = FALSE)
   )
 }
 
@@ -47,7 +39,6 @@ test_that("mask keeps partly labelled plots with the sentinels", {
   skip_if_no_backend()
   skip_on_cran()
   files <- masking_files()
-  on.exit(unlink(c(files$header, files$species)), add = TRUE)
 
   drop <- masking_dataset(files, "drop")
   mask <- masking_dataset(files, "mask")
@@ -73,11 +64,7 @@ test_that("a masked fit reports per-target counts and keeps the policy in the ch
   skip_if_no_backend()
   skip_on_cran()
   files <- masking_files()
-  model_file <- tempfile(fileext = ".pt")
-  on.exit({
-    unlink(c(files$header, files$species, model_file))
-    unlink(sub("\\.pt$", ".json", model_file))
-  }, add = TRUE)
+  model_file <- local_model_file()
 
   dataset <- masking_dataset(files, "mask")
   fit <- resolve.train.dataset(
@@ -119,7 +106,6 @@ test_that("the loss histories split by target and add up to the totals", {
   skip_if_no_backend()
   skip_on_cran()
   files <- masking_files()
-  on.exit(unlink(c(files$header, files$species)), add = TRUE)
 
   dataset <- masking_dataset(files, "mask")
   fit <- resolve.train.dataset(

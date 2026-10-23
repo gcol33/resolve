@@ -91,9 +91,7 @@ test_that("a suite combines its members and reports recognition per target", {
   skip_if_no_backend()
   skip_on_cran()
 
-  root <- tempfile("suite_")
-  dir.create(root)
-  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  root <- local_dir("suite_")
   sealed <- .build_suite(root)
   expect_equal(length(sealed$targets[[1]]$members), 3L)
   expect_match(sealed$targets[[1]]$members[[1]]$sha256, "^[0-9a-f]{64}$")
@@ -176,9 +174,7 @@ test_that("the suite front doors reject what the manifest does not allow", {
   skip_if_no_backend()
   skip_on_cran()
 
-  root <- tempfile("suite_")
-  dir.create(root)
-  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  root <- local_dir("suite_")
   .build_suite(root)
   score <- .suite_plots(10L, with_targets = FALSE)
 
@@ -260,9 +256,7 @@ test_that("each target of a suite reads its own columns; a location is a spheric
   skip_if_no_backend()
   skip_on_cran()
 
-  root <- tempfile("suite_")
-  dir.create(root)
-  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  root <- local_dir("suite_")
   roles <- .build_split_suite(root)
 
   suite <- resolve.load_suite(root)

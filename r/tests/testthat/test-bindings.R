@@ -5,7 +5,7 @@
 #   2. Version string format
 #   3. Modern R wrapper input validation (works WITHOUT libtorch)
 #   4. Factory function exports
-#   5. Removed legacy entry points raise clear errors
+#   5. Wrapper signatures and defaults
 
 # =============================================================================
 # 1. Module registration
@@ -23,9 +23,7 @@ test_that("resolve_module is loaded", {
   # directly off the module pointer.
   registered <- resolveR:::.resolve_module_registered()
 
-  # Verify core classes are registered. SpeciesEncoder was removed when the
-  # unified resolve::SpeciesEncoder C++ class was split into RankPoolEncoder
-  # and EmbeddingEncoder — see ?resolve.encoder for the full rationale.
+  # The core classes are registered, and there is no SpeciesEncoder class.
   expect_false("SpeciesEncoder" %in% registered)
   expect_true("ResolveModel" %in% registered)
   expect_true("Trainer" %in% registered)
@@ -44,7 +42,6 @@ test_that("module factory functions are registered", {
   expect_true("ResolveDataset_from_species_csv" %in% registered)
   expect_true("ResolveDataset_from_csv_with_schema" %in% registered)
   expect_true("Predictor_load" %in% registered)
-  # SpeciesEncoder_load was removed alongside SpeciesEncoder.
   expect_false("SpeciesEncoder_load" %in% registered)
 })
 
@@ -80,9 +77,8 @@ test_that("resolve.load rejects non-existent file", {
 })
 
 test_that("resolve.load rejects invalid device", {
-  tmp <- tempfile(fileext = ".pt")
+  tmp <- local_model_file()
   writeLines("fake", tmp)
-  on.exit(unlink(tmp), add = TRUE)
 
   expect_error(resolve.load(tmp, device = "tpu"), "device")
   expect_error(resolve.load(tmp, device = "mps"), "device")
@@ -105,9 +101,7 @@ test_that("resolve.dataset.csv rejects non-string header path", {
 })
 
 test_that("resolve.dataset.csv rejects non-existent header file", {
-  tmp_species <- tempfile(fileext = ".csv")
-  writeLines("plot_id,species_id\np1,sp1", tmp_species)
-  on.exit(unlink(tmp_species), add = TRUE)
+  tmp_species <- local_csv(c("plot_id,species_id", "p1,sp1"))
 
   expect_error(
     resolve.dataset.csv(
@@ -120,9 +114,7 @@ test_that("resolve.dataset.csv rejects non-existent header file", {
 })
 
 test_that("resolve.dataset.csv rejects non-string species path", {
-  tmp_header <- tempfile(fileext = ".csv")
-  writeLines("plot_id,area\np1,100", tmp_header)
-  on.exit(unlink(tmp_header), add = TRUE)
+  tmp_header <- local_csv(c("plot_id,area", "p1,100"))
 
   expect_error(
     resolve.dataset.csv(header = tmp_header, species = 42),
@@ -131,9 +123,7 @@ test_that("resolve.dataset.csv rejects non-string species path", {
 })
 
 test_that("resolve.dataset.csv rejects non-existent species file", {
-  tmp_header <- tempfile(fileext = ".csv")
-  writeLines("plot_id,area\np1,100", tmp_header)
-  on.exit(unlink(tmp_header), add = TRUE)
+  tmp_header <- local_csv(c("plot_id,area", "p1,100"))
 
   expect_error(
     resolve.dataset.csv(
@@ -146,11 +136,8 @@ test_that("resolve.dataset.csv rejects non-existent species file", {
 })
 
 test_that("resolve.dataset.csv rejects non-list roles", {
-  tmp_h <- tempfile(fileext = ".csv")
-  tmp_s <- tempfile(fileext = ".csv")
-  writeLines("plot_id,area\np1,100", tmp_h)
-  writeLines("plot_id,species_id\np1,sp1", tmp_s)
-  on.exit({unlink(tmp_h); unlink(tmp_s)}, add = TRUE)
+  tmp_h <- local_csv(c("plot_id,area", "p1,100"))
+  tmp_s <- local_csv(c("plot_id,species_id", "p1,sp1"))
 
   expect_error(
     resolve.dataset.csv(
@@ -164,11 +151,8 @@ test_that("resolve.dataset.csv rejects non-list roles", {
 })
 
 test_that("resolve.dataset.csv rejects empty targets", {
-  tmp_h <- tempfile(fileext = ".csv")
-  tmp_s <- tempfile(fileext = ".csv")
-  writeLines("plot_id,area\np1,100", tmp_h)
-  writeLines("plot_id,species_id\np1,sp1", tmp_s)
-  on.exit({unlink(tmp_h); unlink(tmp_s)}, add = TRUE)
+  tmp_h <- local_csv(c("plot_id,area", "p1,100"))
+  tmp_s <- local_csv(c("plot_id,species_id", "p1,sp1"))
 
   expect_error(
     resolve.dataset.csv(header = tmp_h, species = tmp_s, targets = list()),
@@ -177,11 +161,8 @@ test_that("resolve.dataset.csv rejects empty targets", {
 })
 
 test_that("resolve.dataset.csv rejects target without column", {
-  tmp_h <- tempfile(fileext = ".csv")
-  tmp_s <- tempfile(fileext = ".csv")
-  writeLines("plot_id,area\np1,100", tmp_h)
-  writeLines("plot_id,species_id\np1,sp1", tmp_s)
-  on.exit({unlink(tmp_h); unlink(tmp_s)}, add = TRUE)
+  tmp_h <- local_csv(c("plot_id,area", "p1,100"))
+  tmp_s <- local_csv(c("plot_id,species_id", "p1,sp1"))
 
   expect_error(
     resolve.dataset.csv(
@@ -194,11 +175,8 @@ test_that("resolve.dataset.csv rejects target without column", {
 })
 
 test_that("resolve.dataset.csv rejects invalid schemaSource", {
-  tmp_h <- tempfile(fileext = ".csv")
-  tmp_s <- tempfile(fileext = ".csv")
-  writeLines("plot_id,area\np1,100", tmp_h)
-  writeLines("plot_id,species_id\np1,sp1", tmp_s)
-  on.exit({unlink(tmp_h); unlink(tmp_s)}, add = TRUE)
+  tmp_h <- local_csv(c("plot_id,area", "p1,100"))
+  tmp_s <- local_csv(c("plot_id,species_id", "p1,sp1"))
 
   # A non-ResolveDataset schemaSource is rejected before any C++ call, so this
   # runs without libtorch.
@@ -214,11 +192,8 @@ test_that("resolve.dataset.csv rejects invalid schemaSource", {
 })
 
 test_that("resolve.dataset.csv rejects invalid target task", {
-  tmp_h <- tempfile(fileext = ".csv")
-  tmp_s <- tempfile(fileext = ".csv")
-  writeLines("plot_id,area\np1,100", tmp_h)
-  writeLines("plot_id,species_id\np1,sp1", tmp_s)
-  on.exit({unlink(tmp_h); unlink(tmp_s)}, add = TRUE)
+  tmp_h <- local_csv(c("plot_id,area", "p1,100"))
+  tmp_s <- local_csv(c("plot_id,species_id", "p1,sp1"))
 
   expect_error(
     resolve.dataset.csv(
@@ -382,8 +357,8 @@ test_that("resolve.predict.dataset rejects invalid dataset type", {
 test_that("all exported R wrapper functions exist", {
   ns <- asNamespace("resolveR")
 
-  # The pre-engine facades (resolve.encoder / .dataset / .train / .predict)
-  # are gone, not stubbed: the package exports only what it implements.
+  # The package exports only the verbs it implements: there is no
+  # resolve.encoder / .dataset / .train / .predict.
   expect_false(exists("resolve.encoder", envir = ns))
   expect_false(exists("resolve.dataset", envir = ns))
   expect_false(exists("resolve.train", envir = ns))
