@@ -151,10 +151,9 @@ public:
         Nullable<IntegerMatrix> pool_mask = R_NilValue,
         Nullable<NumericVector> pool_has_cover = R_NilValue,
         Nullable<IntegerMatrix> categorical_ids = R_NilValue) {
-        ValuePtr in = owned_value(resolve_value_new_map());
-        fill_forward_inputs(in.get(), continuous, genus_ids, family_ids, species_ids, species_vector,
-                            pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                            categorical_ids);
+        ValuePtr in = forward_inputs(continuous, genus_ids, family_ids, species_ids, species_vector,
+                                     pool_genus_ids, pool_family_ids, pool_weights, pool_mask,
+                                     pool_has_cover, categorical_ids);
         return value_to_r_owned(resolve_trainer_predict(trainer_.get(), in.get()));
     }
 

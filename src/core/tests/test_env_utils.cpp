@@ -1,8 +1,7 @@
-// Contract for the small shared helpers extracted while enabling -Wall/-Wextra
-// (issue #109): the single environment-variable accessor that replaced seven
-// std::getenv call sites, the cosine ramp shared by the LR schedule and the
-// JEPA EMA schedule, and the allocator-config entry point that the nanobind and
-// C-ABI shims each used to carry a copy of.
+// Contract for small shared helpers: the single environment-variable accessor
+// (env.hpp), the cosine ramp shared by the LR schedule and the JEPA EMA
+// schedule, and the allocator-config entry point the nanobind module and the C
+// ABI both call.
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 

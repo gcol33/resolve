@@ -9,11 +9,11 @@ using namespace resolve;
 // process-global state shared with every other test in this binary -- which
 // could mask resolve_tests' own exit code. So the unit tests cover only the
 // pure exit-code policy and the side-effect-free guard paths; the handler's
-// runtime behavior is verified end to end by the issue #18 Rscript repro and
-// the issue #19 fail-fast smoke (see src/core/dev_notes/).
+// runtime behavior is verified end to end by the resolve_crash_smoke
+// executable, driven by tools/crash_smoke_drive.ps1.
 
 TEST_CASE("crash_exit_code: work complete returns the shutdown code", "[process]") {
-    // Teardown-after-success path (issue #18): the fault is benign, so the
+    // Teardown-after-success path: the fault is benign, so the
     // process exits with the caller's chosen code regardless of the NTSTATUS.
     REQUIRE(crash_exit_code(true, 0, 0xC0000005UL) == 0U);
     REQUIRE(crash_exit_code(true, 7, 0xC0000006UL) == 7U);
@@ -21,7 +21,7 @@ TEST_CASE("crash_exit_code: work complete returns the shutdown code", "[process]
 }
 
 TEST_CASE("crash_exit_code: mid-run fault never reports success", "[process]") {
-    // Mid-run path (issue #19): the orchestrator must record a failure. The
+    // Mid-run path: the orchestrator must record a failure. The
     // real NTSTATUS is preserved when present so the recorded code matches the
     // fault (e.g. 0xC0000005 access violation, 0xC0000006 in-page error).
     REQUIRE(crash_exit_code(false, 0, 0xC0000005UL) == 0xC0000005U);

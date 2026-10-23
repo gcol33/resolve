@@ -84,47 +84,54 @@ public:
                     categorical_ids);
     }
 
-    RObject forward_single(
-        const std::string& target,
-        NumericMatrix continuous,
-        Nullable<IntegerMatrix> genus_ids = R_NilValue,
-        Nullable<IntegerMatrix> family_ids = R_NilValue,
-        Nullable<IntegerMatrix> species_ids = R_NilValue,
-        Nullable<NumericMatrix> species_vector = R_NilValue,
-        Nullable<IntegerMatrix> categorical_ids = R_NilValue) {
-        ValuePtr in = owned_value(resolve_value_new_map());
+    // The prediction for one named target only.
+    RObject forward_single(const std::string& target, NumericMatrix continuous,
+                           Nullable<IntegerMatrix> genus_ids = R_NilValue,
+                           Nullable<IntegerMatrix> family_ids = R_NilValue,
+                           Nullable<IntegerMatrix> species_ids = R_NilValue,
+                           Nullable<NumericMatrix> species_vector = R_NilValue,
+                           Nullable<IntegerMatrix> pool_genus_ids = R_NilValue,
+                           Nullable<IntegerMatrix> pool_family_ids = R_NilValue,
+                           Nullable<NumericMatrix> pool_weights = R_NilValue,
+                           Nullable<IntegerMatrix> pool_mask = R_NilValue,
+                           Nullable<NumericVector> pool_has_cover = R_NilValue,
+                           Nullable<IntegerMatrix> categorical_ids = R_NilValue) {
+        ValuePtr in = forward_inputs(continuous, genus_ids, family_ids, species_ids, species_vector,
+                                     pool_genus_ids, pool_family_ids, pool_weights, pool_mask,
+                                     pool_has_cover, categorical_ids);
         capi_check_status(resolve_map_set_string(in.get(), "target", target.c_str()));
-        map_set_num_matrix(in.get(), "continuous", continuous);
-        map_set_opt_int_matrix(in.get(), "genus_ids", genus_ids);
-        map_set_opt_int_matrix(in.get(), "family_ids", family_ids);
-        map_set_opt_int_matrix(in.get(), "species_ids", species_ids);
-        map_set_opt_num_matrix(in.get(), "species_vector", species_vector);
-        map_set_opt_int_matrix(in.get(), "categorical_ids", categorical_ids);
-        return value_to_r_owned(resolve_model_call(model_.get(), "forward_single", in.get()));
+        return run("forward_single", in);
     }
 
-    RObject encode_with_activations(
-        NumericMatrix continuous,
-        Nullable<IntegerMatrix> genus_ids = R_NilValue,
-        Nullable<IntegerMatrix> family_ids = R_NilValue,
-        Nullable<IntegerMatrix> categorical_ids = R_NilValue) {
-        ValuePtr in = owned_value(resolve_value_new_map());
-        map_set_num_matrix(in.get(), "continuous", continuous);
-        map_set_opt_int_matrix(in.get(), "genus_ids", genus_ids);
-        map_set_opt_int_matrix(in.get(), "family_ids", family_ids);
-        map_set_opt_int_matrix(in.get(), "categorical_ids", categorical_ids);
-        return value_to_r_owned(resolve_model_call(model_.get(), "encode_with_activations", in.get()));
+    RObject encode_with_activations(NumericMatrix continuous,
+                                    Nullable<IntegerMatrix> genus_ids = R_NilValue,
+                                    Nullable<IntegerMatrix> family_ids = R_NilValue,
+                                    Nullable<IntegerMatrix> species_ids = R_NilValue,
+                                    Nullable<NumericMatrix> species_vector = R_NilValue,
+                                    Nullable<IntegerMatrix> pool_genus_ids = R_NilValue,
+                                    Nullable<IntegerMatrix> pool_family_ids = R_NilValue,
+                                    Nullable<NumericMatrix> pool_weights = R_NilValue,
+                                    Nullable<IntegerMatrix> pool_mask = R_NilValue,
+                                    Nullable<NumericVector> pool_has_cover = R_NilValue,
+                                    Nullable<IntegerMatrix> categorical_ids = R_NilValue) {
+        return call("encode_with_activations", continuous, genus_ids, family_ids, species_ids,
+                    species_vector, pool_genus_ids, pool_family_ids, pool_weights, pool_mask,
+                    pool_has_cover, categorical_ids);
     }
 
-    RObject get_gate_probs(
-        NumericMatrix continuous,
-        Nullable<IntegerMatrix> genus_ids = R_NilValue,
-        Nullable<IntegerMatrix> family_ids = R_NilValue) {
-        ValuePtr in = owned_value(resolve_value_new_map());
-        map_set_num_matrix(in.get(), "continuous", continuous);
-        map_set_opt_int_matrix(in.get(), "genus_ids", genus_ids);
-        map_set_opt_int_matrix(in.get(), "family_ids", family_ids);
-        return value_to_r_owned(resolve_model_call(model_.get(), "get_gate_probs", in.get()));
+    RObject get_gate_probs(NumericMatrix continuous, Nullable<IntegerMatrix> genus_ids = R_NilValue,
+                           Nullable<IntegerMatrix> family_ids = R_NilValue,
+                           Nullable<IntegerMatrix> species_ids = R_NilValue,
+                           Nullable<NumericMatrix> species_vector = R_NilValue,
+                           Nullable<IntegerMatrix> pool_genus_ids = R_NilValue,
+                           Nullable<IntegerMatrix> pool_family_ids = R_NilValue,
+                           Nullable<NumericMatrix> pool_weights = R_NilValue,
+                           Nullable<IntegerMatrix> pool_mask = R_NilValue,
+                           Nullable<NumericVector> pool_has_cover = R_NilValue,
+                           Nullable<IntegerMatrix> categorical_ids = R_NilValue) {
+        return call("get_gate_probs", continuous, genus_ids, family_ids, species_ids,
+                    species_vector, pool_genus_ids, pool_family_ids, pool_weights, pool_mask,
+                    pool_has_cover, categorical_ids);
     }
 
     void train(bool mode = true) { capi_check_status(resolve_model_set_train(model_.get(), mode ? 1 : 0)); }
@@ -181,10 +188,12 @@ private:
         Nullable<IntegerMatrix> pool_genus_ids, Nullable<IntegerMatrix> pool_family_ids,
         Nullable<NumericMatrix> pool_weights, Nullable<IntegerMatrix> pool_mask,
         Nullable<NumericVector> pool_has_cover, Nullable<IntegerMatrix> categorical_ids) {
-        ValuePtr in = owned_value(resolve_value_new_map());
-        fill_forward_inputs(in.get(), continuous, genus_ids, family_ids, species_ids, species_vector,
-                            pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                            categorical_ids);
+        return run(method,
+                   forward_inputs(continuous, genus_ids, family_ids, species_ids, species_vector,
+                                  pool_genus_ids, pool_family_ids, pool_weights, pool_mask,
+                                  pool_has_cover, categorical_ids));
+    }
+    RObject run(const char* method, const ValuePtr& in) {
         return value_to_r_owned(resolve_model_call(model_.get(), method, in.get()));
     }
 

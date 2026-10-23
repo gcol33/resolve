@@ -351,6 +351,63 @@ TEST_CASE("A batch with no labelled row for a masked target adds exactly zero",
     }
 }
 
+TEST_CASE("A masked target's loss is the Drop loss over its labelled rows in every phase",
+          "[masking][loss]") {
+    torch::manual_seed(11);
+    const int64_t batch = 16;
+    const int n_classes = 4;
+    auto pred_y = torch::randn({batch, 1});
+    auto pred_c = torch::randn({batch, n_classes});
+    auto y = torch::rand({batch}) + 0.5;
+    auto c = torch::randint(0, n_classes, {batch}, torch::kLong);
+    for (int64_t i : {2, 3, 11}) y[i] = std::numeric_limits<float>::quiet_NaN();
+    for (int64_t i : {0, 7, 8, 13}) c[i] = kUnlabelledClass;
+    const auto keep_y = labelled_mask(y, TaskType::Regression).nonzero().reshape({-1});
+    const auto keep_c = labelled_mask(c, TaskType::Classification).nonzero().reshape({-1});
+
+    const std::vector<TargetConfig> masked = {
+        target_config("y", TaskType::Regression, TargetMissingPolicy::Mask),
+        target_config("c", TaskType::Classification, TargetMissingPolicy::Mask, n_classes)};
+    const std::vector<TargetConfig> drop_y = {
+        target_config("y", TaskType::Regression, TargetMissingPolicy::Drop)};
+    const std::vector<TargetConfig> drop_c = {
+        target_config("c", TaskType::Classification, TargetMissingPolicy::Drop, n_classes)};
+
+    for (auto mode : {LossConfigMode::Combined, LossConfigMode::NCA}) {
+        for (int epoch : {0, 150, 400}) {
+            INFO("mode " << static_cast<int>(mode) << ", epoch " << epoch);
+            const auto parts =
+                MultiTaskLoss(masked, {100, 300}, mode)
+                    .compute({{"y", pred_y}, {"c", pred_c}}, {{"y", y}, {"c", c}}, epoch)
+                    .second;
+            const auto ly = MultiTaskLoss(drop_y, {100, 300}, mode)
+                                .compute({{"y", pred_y.index_select(0, keep_y)}},
+                                         {{"y", y.index_select(0, keep_y)}}, epoch)
+                                .second;
+            const auto lc = MultiTaskLoss(drop_c, {100, 300}, mode)
+                                .compute({{"c", pred_c.index_select(0, keep_c)}},
+                                         {{"c", c.index_select(0, keep_c)}}, epoch)
+                                .second;
+            REQUIRE(parts.at("y").item<float>() ==
+                    Catch::Approx(ly.at("y").item<float>()).epsilon(1e-6));
+            REQUIRE(parts.at("c").item<float>() ==
+                    Catch::Approx(lc.at("c").item<float>()).epsilon(1e-6));
+        }
+    }
+
+    SECTION("a truncated NCA neighbourhood reaches only labelled samples") {
+        const auto labelled = labelled_mask(c, TaskType::Classification);
+        for (int k : {1, 4, 10, 30}) {
+            INFO("n_neighbors " << k);
+            const float on_mask = nca_objective(pred_c, c, 0.2f, k, labelled).item<float>();
+            const float on_rows =
+                nca_objective(pred_c.index_select(0, keep_c), c.index_select(0, keep_c), 0.2f, k)
+                    .item<float>();
+            REQUIRE(on_mask == Catch::Approx(on_rows).epsilon(1e-6));
+        }
+    }
+}
+
 // =============================================================================
 // Data
 // =============================================================================

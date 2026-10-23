@@ -118,6 +118,7 @@ add_executable(resolve_tests
     test_encoder_parity.cpp
     test_species_encoder.cpp
     test_retrieval.cpp
+    test_grad_clip.cpp
 )
 
 resolve_link_cuda_dirs(resolve_tests)
@@ -159,7 +160,7 @@ set_tests_properties(resolve_tests_recovery PROPERTIES LABELS recovery)
 if(RESOLVE_BUILD_BENCHMARKS)
     # Crash-handler smoke. Deliberately faults, so it is a standalone exe
     # checked from outside by its exit code, not a Catch2 case.
-    # Driver: src/core/dev_notes/crash_smoke_drive.ps1.
+    # Driver: tools/crash_smoke_drive.ps1.
     add_executable(resolve_crash_smoke
         crash_smoke.cpp
     )

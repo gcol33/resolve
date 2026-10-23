@@ -95,6 +95,7 @@ set(RESOLVE_CORE_HEADERS
     ${RESOLVE_CORE_DIR}/include/resolve/ln_mlp.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/model.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/trainer.hpp
+    ${RESOLVE_CORE_DIR}/include/resolve/grad_clip.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/lr_schedule.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/scalers.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/target_transform.hpp

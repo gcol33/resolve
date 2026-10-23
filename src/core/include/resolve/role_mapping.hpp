@@ -38,10 +38,10 @@ struct RoleMapping {
     // empty string. An empty name cannot identify a column, and assigning ""
     // is how a caller clears a role when its language binding offers no natural
     // "unset" spelling -- read as a name it makes the loaders reject a
-    // deliberately cleared role with `column not found: ""` (issue #111).
+    // deliberately cleared role with `column not found: ""`.
     //
     // A non-empty name the file does not carry stays an error, so a typo still
-    // fails loudly instead of silently dropping the feature (issue #94).
+    // fails loudly instead of silently dropping the feature.
     //
     // Every consumer reads an optional role through the accessors below rather
     // than off the field, so "unset" has one definition.
@@ -134,7 +134,7 @@ struct TargetSpec {
     // vector the loader builds (class_names[code] == label). Sizing from
     // mapping.size() would under-size the head for non-dense codes (e.g.
     // {0,2,5} needs 6 outputs, not 3), so a target code of 5 would index the
-    // head out of bounds (issue #74). For dense 0..K-1 codes the two agree.
+    // head out of bounds. For dense 0..K-1 codes the two agree.
     // Use the regular `classification(column, num_classes)` factory when the
     // column is already encoded as integers.
     static TargetSpec classification_with_mapping(

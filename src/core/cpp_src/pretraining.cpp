@@ -1,6 +1,8 @@
 #include "resolve/pretraining.hpp"
 #include "resolve/continuous_block.hpp"
 #include "resolve/dataset.hpp"
+#include "resolve/grad_clip.hpp"
+#include "resolve/ln_mlp.hpp"
 #include "resolve/sparse_rows.hpp"
 #include "resolve/utils.hpp"
 #include <algorithm>
@@ -218,22 +220,12 @@ JEPAPredictorImpl::JEPAPredictorImpl(
     int n_layers,
     float dropout
 ) {
-    torch::nn::Sequential layers;
-
-    int64_t in_dim = latent_dim;
-    for (int i = 0; i < n_layers; ++i) {
-        layers->push_back(torch::nn::Linear(in_dim, hidden_dim));
-        layers->push_back(torch::nn::LayerNorm(
-            torch::nn::LayerNormOptions({hidden_dim})));
-        layers->push_back(torch::nn::GELU());
-        if (dropout > 0.0f) {
-            layers->push_back(torch::nn::Dropout(dropout));
-        }
-        in_dim = hidden_dim;
-    }
+    torch::nn::Sequential layers = make_ln_gelu_mlp(
+        latent_dim, std::vector<int64_t>(static_cast<size_t>(std::max(n_layers, 0)), hidden_dim),
+        dropout);
 
     // Final projection back to latent_dim
-    layers->push_back(torch::nn::Linear(hidden_dim, latent_dim));
+    layers->push_back(torch::nn::Linear(n_layers > 0 ? hidden_dim : latent_dim, latent_dim));
 
     mlp_ = register_module("mlp", layers);
 }
@@ -444,7 +436,7 @@ PretrainResult run_pretrain_loop(
             optimizer.zero_grad();
             loss.backward();
             if (spec.grad_clip_norm > 0.0f) {
-                torch::nn::utils::clip_grad_norm_(spec.params, spec.grad_clip_norm);
+                clip_grad_norm(spec.params, spec.grad_clip_norm);
             }
             optimizer.step();
 

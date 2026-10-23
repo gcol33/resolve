@@ -392,18 +392,15 @@ inline void map_set_opt_num_vector(resolve_value_t* map, const char* key, Nullab
     if (x.isNotNull()) map_set_num_vector(map, key, as<NumericVector>(x));
 }
 
-// Fill the standard forward/predict input map (continuous required; the rest
-// optional). Shared by model.forward / get_latent / forward_with_aux,
-// trainer.predict, and the species/pool part of predictor.predict.
-inline void fill_forward_inputs(
-    resolve_value_t* in,
-    NumericMatrix continuous,
-    Nullable<IntegerMatrix> genus_ids, Nullable<IntegerMatrix> family_ids,
+// Fill the composition and categorical part of a plot-input map (every key
+// optional): the inputs every model, trainer and predictor entry point reads
+// besides its continuous block.
+inline void fill_composition_inputs(
+    resolve_value_t* in, Nullable<IntegerMatrix> genus_ids, Nullable<IntegerMatrix> family_ids,
     Nullable<IntegerMatrix> species_ids, Nullable<NumericMatrix> species_vector,
     Nullable<IntegerMatrix> pool_genus_ids, Nullable<IntegerMatrix> pool_family_ids,
     Nullable<NumericMatrix> pool_weights, Nullable<IntegerMatrix> pool_mask,
     Nullable<NumericVector> pool_has_cover, Nullable<IntegerMatrix> categorical_ids) {
-    map_set_num_matrix(in, "continuous", continuous);
     map_set_opt_int_matrix(in, "genus_ids", genus_ids);
     map_set_opt_int_matrix(in, "family_ids", family_ids);
     map_set_opt_int_matrix(in, "species_ids", species_ids);
@@ -414,6 +411,47 @@ inline void fill_forward_inputs(
     map_set_opt_int_matrix(in, "pool_mask", pool_mask);
     map_set_opt_num_vector(in, "pool_has_cover", pool_has_cover);
     map_set_opt_int_matrix(in, "categorical_ids", categorical_ids);
+}
+
+// The model / trainer input map: the assembled continuous block plus the
+// composition inputs.
+inline ValuePtr forward_inputs(
+    NumericMatrix continuous, Nullable<IntegerMatrix> genus_ids, Nullable<IntegerMatrix> family_ids,
+    Nullable<IntegerMatrix> species_ids, Nullable<NumericMatrix> species_vector,
+    Nullable<IntegerMatrix> pool_genus_ids, Nullable<IntegerMatrix> pool_family_ids,
+    Nullable<NumericMatrix> pool_weights, Nullable<IntegerMatrix> pool_mask,
+    Nullable<NumericVector> pool_has_cover, Nullable<IntegerMatrix> categorical_ids) {
+    ValuePtr in = owned_value(resolve_value_new_map());
+    map_set_num_matrix(in.get(), "continuous", continuous);
+    fill_composition_inputs(in.get(), genus_ids, family_ids, species_ids, species_vector,
+                            pool_genus_ids, pool_family_ids, pool_weights, pool_mask,
+                            pool_has_cover, categorical_ids);
+    return in;
+}
+
+// The predictor input map: the unscaled continuous parts the predictor
+// standardises with the checkpoint's scalers (each optional: a dataset without
+// coordinates, covariates or a hash encoding returns NULL for that part), the
+// unknown-species columns, and the composition inputs.
+inline ValuePtr predictor_inputs(
+    Nullable<NumericMatrix> coordinates, Nullable<NumericMatrix> covariates,
+    Nullable<NumericMatrix> hash_embedding, Nullable<IntegerMatrix> species_ids,
+    Nullable<NumericMatrix> species_vector, Nullable<IntegerMatrix> genus_ids,
+    Nullable<IntegerMatrix> family_ids, Nullable<NumericVector> unknown_fraction,
+    Nullable<NumericVector> unknown_count, Nullable<IntegerMatrix> pool_genus_ids,
+    Nullable<IntegerMatrix> pool_family_ids, Nullable<NumericMatrix> pool_weights,
+    Nullable<IntegerMatrix> pool_mask, Nullable<NumericVector> pool_has_cover,
+    Nullable<IntegerMatrix> categorical_ids) {
+    ValuePtr in = owned_value(resolve_value_new_map());
+    map_set_opt_num_matrix(in.get(), "coordinates", coordinates);
+    map_set_opt_num_matrix(in.get(), "covariates", covariates);
+    map_set_opt_num_matrix(in.get(), "hash_embedding", hash_embedding);
+    map_set_opt_num_vector(in.get(), "unknown_fraction", unknown_fraction);
+    map_set_opt_num_vector(in.get(), "unknown_count", unknown_count);
+    fill_composition_inputs(in.get(), genus_ids, family_ids, species_ids, species_vector,
+                            pool_genus_ids, pool_family_ids, pool_weights, pool_mask,
+                            pool_has_cover, categorical_ids);
+    return in;
 }
 
 // =============================================================================

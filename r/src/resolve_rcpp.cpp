@@ -157,29 +157,38 @@ RCPP_MODULE(resolve_module) {
 
     class_<RPredictor>("Predictor")
         .method("predict", &RPredictor::predict, "Make predictions from tensors")
-        .method("predict_dataset", &RPredictor::predict_dataset, "Make predictions from ResolveDataset")
+        .method("predict_dataset", &RPredictor::predict_dataset,
+                "Make predictions from ResolveDataset")
         .method("get_embeddings", &RPredictor::get_embeddings, "Get latent embeddings")
-        .method("get_embeddings", &RPredictor::get_embeddings_unknown,
-                "Get latent embeddings, passing the unknown-species fraction and count")
         .method("get_genus_embeddings", &RPredictor::get_genus_embeddings, "Get genus embeddings")
-        .method("get_family_embeddings", &RPredictor::get_family_embeddings, "Get family embeddings")
-        .method("get_species_embeddings", &RPredictor::get_species_embeddings, "Get species embeddings")
-        .method("optimize_for_inference", &RPredictor::optimize_for_inference, "Fuse BatchNorm for faster inference")
+        .method("get_family_embeddings", &RPredictor::get_family_embeddings,
+                "Get family embeddings")
+        .method("get_species_embeddings", &RPredictor::get_species_embeddings,
+                "Get species embeddings")
+        .method("optimize_for_inference", &RPredictor::optimize_for_inference,
+                "Fuse BatchNorm for faster inference")
         .method("device", &RPredictor::device, "Get current device")
         .method("get_scalers", &RPredictor::get_scalers, "Get fitted scalers")
-        .method("categorical_vocab", &RPredictor::categorical_vocab, "Get categorical covariate vocabulary loaded from the checkpoint")
-        .method("schema", &RPredictor::schema, "Get the checkpoint's schema (incl. the fitted species/taxonomy vocabularies)")
-        .method("vocabs", &RPredictor::vocabs, "Get every training vocabulary, for the *_with_vocabs loaders")
-        .method("species_vocab", &RPredictor::species_vocab, "Ordered species vocabulary the model was trained with")
-        .method("genus_vocab", &RPredictor::genus_vocab, "Ordered genus vocabulary the model was trained with")
-        .method("family_vocab", &RPredictor::family_vocab, "Ordered family vocabulary the model was trained with")
-        .method("dataset_config", &RPredictor::dataset_config, "The DatasetConfig this checkpoint implies")
+        .method("categorical_vocab", &RPredictor::categorical_vocab,
+                "Get categorical covariate vocabulary loaded from the checkpoint")
+        .method("schema", &RPredictor::schema,
+                "Get the checkpoint's schema (incl. the fitted species/taxonomy vocabularies)")
+        .method("vocabs", &RPredictor::vocabs,
+                "Get every training vocabulary, for the *_with_vocabs loaders")
+        .method("species_vocab", &RPredictor::species_vocab,
+                "Ordered species vocabulary the model was trained with")
+        .method("genus_vocab", &RPredictor::genus_vocab,
+                "Ordered genus vocabulary the model was trained with")
+        .method("family_vocab", &RPredictor::family_vocab,
+                "Ordered family vocabulary the model was trained with")
+        .method("dataset_config", &RPredictor::dataset_config,
+                "The DatasetConfig this checkpoint implies")
         .method("model_config", &RPredictor::model_config, "The checkpoint's ModelConfig")
         .method("set_retrieval", &RPredictor::set_retrieval,
                 "Blend predictions with the labels of the nearest reference plots")
-        .method("clear_retrieval", &RPredictor::clear_retrieval, "Back to the model's own predictions")
-        .method("retrieval", &RPredictor::retrieval, "The retrieval settings, or NULL")
-        ;
+        .method("clear_retrieval", &RPredictor::clear_retrieval,
+                "Back to the model's own predictions")
+        .method("retrieval", &RPredictor::retrieval, "The retrieval settings, or NULL");
 
     class_<RFuzzyIndex>("FuzzyIndex")
         .method("query", &RFuzzyIndex::query, "Best matches of each needle")

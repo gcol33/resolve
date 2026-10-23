@@ -15,62 +15,50 @@ public:
         return p;
     }
 
-    RObject predict(
-        NumericMatrix coordinates, NumericMatrix covariates, NumericMatrix hash_embedding,
-        Nullable<IntegerMatrix> species_ids = R_NilValue,
-        Nullable<NumericMatrix> species_vector = R_NilValue,
-        Nullable<IntegerMatrix> genus_ids = R_NilValue,
-        Nullable<IntegerMatrix> family_ids = R_NilValue,
-        Nullable<NumericVector> unknown_fraction = R_NilValue,
-        Nullable<NumericVector> unknown_count = R_NilValue,
-        Nullable<IntegerMatrix> pool_genus_ids = R_NilValue,
-        Nullable<IntegerMatrix> pool_family_ids = R_NilValue,
-        Nullable<NumericMatrix> pool_weights = R_NilValue,
-        Nullable<IntegerMatrix> pool_mask = R_NilValue,
-        Nullable<NumericVector> pool_has_cover = R_NilValue,
-        Nullable<IntegerMatrix> categorical_ids = R_NilValue,
-        bool return_latent = false) {
-        ValuePtr in = owned_value(resolve_value_new_map());
-        map_set_num_matrix(in.get(), "coordinates", coordinates);
-        map_set_num_matrix(in.get(), "covariates", covariates);
-        map_set_num_matrix(in.get(), "hash_embedding", hash_embedding);
-        map_set_opt_int_matrix(in.get(), "species_ids", species_ids);
-        map_set_opt_num_matrix(in.get(), "species_vector", species_vector);
-        map_set_opt_int_matrix(in.get(), "genus_ids", genus_ids);
-        map_set_opt_int_matrix(in.get(), "family_ids", family_ids);
-        map_set_opt_num_vector(in.get(), "unknown_fraction", unknown_fraction);
-        map_set_opt_num_vector(in.get(), "unknown_count", unknown_count);
-        map_set_opt_int_matrix(in.get(), "pool_genus_ids", pool_genus_ids);
-        map_set_opt_int_matrix(in.get(), "pool_family_ids", pool_family_ids);
-        map_set_opt_num_matrix(in.get(), "pool_weights", pool_weights);
-        map_set_opt_int_matrix(in.get(), "pool_mask", pool_mask);
-        map_set_opt_num_vector(in.get(), "pool_has_cover", pool_has_cover);
-        map_set_opt_int_matrix(in.get(), "categorical_ids", categorical_ids);
+    RObject predict(Nullable<NumericMatrix> coordinates = R_NilValue,
+                    Nullable<NumericMatrix> covariates = R_NilValue,
+                    Nullable<NumericMatrix> hash_embedding = R_NilValue,
+                    Nullable<IntegerMatrix> species_ids = R_NilValue,
+                    Nullable<NumericMatrix> species_vector = R_NilValue,
+                    Nullable<IntegerMatrix> genus_ids = R_NilValue,
+                    Nullable<IntegerMatrix> family_ids = R_NilValue,
+                    Nullable<NumericVector> unknown_fraction = R_NilValue,
+                    Nullable<NumericVector> unknown_count = R_NilValue,
+                    Nullable<IntegerMatrix> pool_genus_ids = R_NilValue,
+                    Nullable<IntegerMatrix> pool_family_ids = R_NilValue,
+                    Nullable<NumericMatrix> pool_weights = R_NilValue,
+                    Nullable<IntegerMatrix> pool_mask = R_NilValue,
+                    Nullable<NumericVector> pool_has_cover = R_NilValue,
+                    Nullable<IntegerMatrix> categorical_ids = R_NilValue,
+                    bool return_latent = false) {
+        ValuePtr in = predictor_inputs(coordinates, covariates, hash_embedding, species_ids,
+                                       species_vector, genus_ids, family_ids, unknown_fraction,
+                                       unknown_count, pool_genus_ids, pool_family_ids, pool_weights,
+                                       pool_mask, pool_has_cover, categorical_ids);
         return value_to_r_owned(resolve_predictor_predict(
             predictor_.get(), in.get(), return_latent ? 1 : 0));
     }
 
-    RObject get_embeddings(
-        NumericMatrix coordinates, NumericMatrix covariates, NumericMatrix hash_embedding,
-        Nullable<IntegerMatrix> genus_ids = R_NilValue,
-        Nullable<IntegerMatrix> family_ids = R_NilValue) {
-        return get_embeddings_unknown(coordinates, covariates, hash_embedding,
-                                      genus_ids, family_ids, R_NilValue, R_NilValue);
-    }
-
-    // The same, for a model that reads the unknown-species fraction or count.
-    RObject get_embeddings_unknown(
-        NumericMatrix coordinates, NumericMatrix covariates, NumericMatrix hash_embedding,
-        Nullable<IntegerMatrix> genus_ids, Nullable<IntegerMatrix> family_ids,
-        Nullable<NumericVector> unknown_fraction, Nullable<NumericVector> unknown_count) {
-        ValuePtr in = owned_value(resolve_value_new_map());
-        map_set_num_matrix(in.get(), "coordinates", coordinates);
-        map_set_num_matrix(in.get(), "covariates", covariates);
-        map_set_num_matrix(in.get(), "hash_embedding", hash_embedding);
-        map_set_opt_int_matrix(in.get(), "genus_ids", genus_ids);
-        map_set_opt_int_matrix(in.get(), "family_ids", family_ids);
-        map_set_opt_num_vector(in.get(), "unknown_fraction", unknown_fraction);
-        map_set_opt_num_vector(in.get(), "unknown_count", unknown_count);
+    // The latent representation of every plot; the same inputs as predict().
+    RObject get_embeddings(Nullable<NumericMatrix> coordinates = R_NilValue,
+                           Nullable<NumericMatrix> covariates = R_NilValue,
+                           Nullable<NumericMatrix> hash_embedding = R_NilValue,
+                           Nullable<IntegerMatrix> species_ids = R_NilValue,
+                           Nullable<NumericMatrix> species_vector = R_NilValue,
+                           Nullable<IntegerMatrix> genus_ids = R_NilValue,
+                           Nullable<IntegerMatrix> family_ids = R_NilValue,
+                           Nullable<NumericVector> unknown_fraction = R_NilValue,
+                           Nullable<NumericVector> unknown_count = R_NilValue,
+                           Nullable<IntegerMatrix> pool_genus_ids = R_NilValue,
+                           Nullable<IntegerMatrix> pool_family_ids = R_NilValue,
+                           Nullable<NumericMatrix> pool_weights = R_NilValue,
+                           Nullable<IntegerMatrix> pool_mask = R_NilValue,
+                           Nullable<NumericVector> pool_has_cover = R_NilValue,
+                           Nullable<IntegerMatrix> categorical_ids = R_NilValue) {
+        ValuePtr in = predictor_inputs(coordinates, covariates, hash_embedding, species_ids,
+                                       species_vector, genus_ids, family_ids, unknown_fraction,
+                                       unknown_count, pool_genus_ids, pool_family_ids, pool_weights,
+                                       pool_mask, pool_has_cover, categorical_ids);
         return value_to_r_owned(resolve_predictor_get_embeddings(predictor_.get(), in.get()));
     }
 

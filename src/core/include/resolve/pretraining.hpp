@@ -347,7 +347,7 @@ struct PretrainLoopSpec {
     // eval()) is deliberately NOT listed here; its owner moves it itself.
     std::vector<std::shared_ptr<torch::nn::Module>> modules;
 
-    // Handed to AdamW and to clip_grad_norm_. Collected by the task because
+    // Handed to AdamW and to clip_grad_norm. Collected by the task because
     // only the task knows which of its modules are trainable. Safe to collect
     // before the loop's device move: Module::to() rebinds parameter storage via
     // set_data(), so these handles follow their module onto the device.

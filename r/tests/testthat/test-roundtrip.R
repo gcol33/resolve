@@ -178,3 +178,50 @@ test_that("every loader setting round-trips through the checkpoint", {
   }
   expect_length(unlist(predictor$schema()$unrecorded_dataset_settings), 0L)
 })
+
+# The tensor-level model and predictor entry points take the full plot-input
+# set, so a pooled encoding reaches every one of them.
+test_that("tensor-level entry points take a pooled encoding's inputs", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  tables <- signal_tables(120L, n_species = 8L)
+  model_file <- local_model_file()
+  dataset <- load_tables(tables, roles = signal_roles(), targets = regression_target(),
+                         config = list(species_encoding = "rank_pool",
+                                       track_unknown_fraction = FALSE,
+                                       track_unknown_count = FALSE,
+                                       missing_values = "zero"))
+  expect_true(dataset$has_pool_data())
+  si <- dataset$species_ids()
+  pg <- dataset$pool_genus_ids()
+  pf <- dataset$pool_family_ids()
+  pw <- dataset$pool_weights()
+  pm <- dataset$pool_mask()
+  pc <- dataset$pool_has_cover()
+
+  resolve.train.dataset(dataset, hiddenDims = c(16L, 8L), maxEpochs = 3L, patience = 3L,
+                        lr = 1e-2, batchSize = 32L, testSize = 0.25, seed = 5L,
+                        savePath = model_file, verbose = FALSE)
+  predictor <- resolve.load(model_file, device = "cpu")
+  expected <- resolve.predict.dataset(predictor, dataset, returnLatent = TRUE)$latent
+  latent <- predictor$get_embeddings(
+    dataset$coordinates(), dataset$covariates(), dataset$hash_embedding(),
+    si, NULL, NULL, NULL, NULL, NULL, pg, pf, pw, pm, pc, NULL)
+  expect_equal(dim(latent), dim(expected))
+  expect_equal(latent, expected, tolerance = 1e-5)
+
+  model <- resolveR:::.resolve_module()$ResolveModel_for_dataset(
+    dataset, list(hidden_dims = c(8L)))
+  model$eval()
+  continuous <- dataset$covariates()
+  full <- model$forward(continuous, NULL, NULL, si, NULL, pg, pf, pw, pm, pc, NULL)
+  single <- model$forward_single("y", continuous, NULL, NULL, si, NULL,
+                                 pg, pf, pw, pm, pc, NULL)
+  expect_equal(as.numeric(single), as.numeric(full$y), tolerance = 1e-6)
+  encoded <- model$encode_with_activations(continuous, NULL, NULL, si, NULL,
+                                           pg, pf, pw, pm, pc, NULL)
+  expect_equal(encoded$latent,
+               model$get_latent(continuous, NULL, NULL, si, NULL, pg, pf, pw, pm, pc, NULL),
+               tolerance = 1e-6)
+})

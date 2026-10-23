@@ -187,22 +187,31 @@ std::span<const float> PlotAssemblages::ranking(int64_t p) const {
     return std::span<const float>(ranking_).subspan(begin, static_cast<size_t>(plot_size(p)));
 }
 
-std::vector<int64_t> PlotAssemblages::species_codes(const SpeciesVocab& vocab) const {
-    std::vector<int64_t> codes(static_cast<size_t>(n_species()));
-    for (int32_t s = 0; s < n_species(); ++s) codes[static_cast<size_t>(s)] = vocab.encode(species_name(s));
+namespace {
+
+// The vocabulary code of each interned name: entry i is encode(names.name(i)).
+template <typename Encode>
+std::vector<int64_t> codes_of(const NamePool& names, Encode&& encode) {
+    std::vector<int64_t> codes(static_cast<size_t>(names.size()));
+    for (int32_t i = 0; i < names.size(); ++i)
+        codes[static_cast<size_t>(i)] = encode(names.name(i));
     return codes;
+}
+
+}  // namespace
+
+std::vector<int64_t> PlotAssemblages::species_codes(const SpeciesVocab& vocab) const {
+    return codes_of(species_names_, [&](const std::string& name) { return vocab.encode(name); });
 }
 
 std::vector<int64_t> PlotAssemblages::genus_codes(const TaxonomyVocab& taxonomy) const {
-    std::vector<int64_t> codes(static_cast<size_t>(n_genera()));
-    for (int32_t g = 0; g < n_genera(); ++g) codes[static_cast<size_t>(g)] = taxonomy.encode_genus(genus_name(g));
-    return codes;
+    return codes_of(genus_names_,
+                    [&](const std::string& name) { return taxonomy.encode_genus(name); });
 }
 
 std::vector<int64_t> PlotAssemblages::family_codes(const TaxonomyVocab& taxonomy) const {
-    std::vector<int64_t> codes(static_cast<size_t>(n_families()));
-    for (int32_t f = 0; f < n_families(); ++f) codes[static_cast<size_t>(f)] = taxonomy.encode_family(family_name(f));
-    return codes;
+    return codes_of(family_names_,
+                    [&](const std::string& name) { return taxonomy.encode_family(name); });
 }
 
 // =============================================================================

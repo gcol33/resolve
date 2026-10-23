@@ -27,6 +27,16 @@ inline torch::Tensor weighted_term(const TargetConfig& cfg, const torch::Tensor&
     return cfg.weight * loss;
 }
 
+// Mean of the per-row `terms` over the rows `labelled` marks, or over every
+// row when `labelled` is undefined. A row left out adds an exact zero value
+// and gradient, and a mask with no true row gives an exact zero (the count is
+// clamped to one). The count stays on the device, so nothing waits on the host.
+inline torch::Tensor labelled_mean(const torch::Tensor& terms, const torch::Tensor& labelled) {
+    if (!labelled.defined()) return terms.mean();
+    const auto kept = torch::where(labelled, terms, torch::zeros_like(terms));
+    return kept.sum() / labelled.sum().clamp_min(1).to(terms.scalar_type());
+}
+
 }  // namespace
 
 // PhasedLoss implementation
@@ -83,14 +93,10 @@ int PhasedLoss::get_phase(int epoch) const {
     return 3;
 }
 
-torch::Tensor PhasedLoss::regression_loss(
-    torch::Tensor pred,
-    torch::Tensor target,
-    int epoch,
-    torch::Tensor scaler_mean,
-    torch::Tensor scaler_scale,
-    TransformType transform
-) const {
+torch::Tensor PhasedLoss::regression_loss(torch::Tensor pred, torch::Tensor target, int epoch,
+                                          torch::Tensor scaler_mean, torch::Tensor scaler_scale,
+                                          TransformType transform,
+                                          const torch::Tensor& labelled) const {
     int phase = get_phase(epoch);
 
     // Squeeze prediction if needed
@@ -98,8 +104,17 @@ torch::Tensor PhasedLoss::regression_loss(
         pred = pred.squeeze(1);
     }
 
+    // An unlabelled row's target (NaN) is replaced by the row's own detached
+    // prediction, so every term below stays finite there and the mask alone
+    // removes the row.
+    torch::Tensor rows;
+    if (labelled.defined()) {
+        rows = labelled.reshape_as(target);
+        target = torch::where(rows, target, pred.detach().to(target.scalar_type()));
+    }
+
     // MAE loss (always)
-    auto mae = torch::abs(pred - target).mean();
+    auto mae = labelled_mean(torch::abs(pred - target), rows);
 
     if (phase == 1) {
         return mae;
@@ -110,7 +125,7 @@ torch::Tensor PhasedLoss::regression_loss(
     const auto target_orig = to_original_units(target, transform, scaler_mean, scaler_scale);
 
     // SMAPE loss (standard symmetric form, shared with Metrics::smape)
-    auto smape = smape_terms(pred_orig, target_orig, eps_).mean();
+    auto smape = labelled_mean(smape_terms(pred_orig, target_orig, eps_), rows);
 
     if (phase == 2) {
         return mae + smape_weight_p2_ * smape;
@@ -122,27 +137,28 @@ torch::Tensor PhasedLoss::regression_loss(
     // zero gradient, so it shifts the reported loss without ever steering the
     // optimizer toward the band the model is later scored on.
     auto ratio = pred_orig / (target_orig + eps_);
-    auto band_penalty = torch::relu(torch::abs(ratio - 1.0f) - band_threshold_).mean();
+    auto band_penalty =
+        labelled_mean(torch::relu(torch::abs(ratio - 1.0f) - band_threshold_), rows);
 
     return mae + smape_weight_p3_ * smape + band_weight_p3_ * band_penalty;
 }
 
-torch::Tensor PhasedLoss::classification_loss(
-    torch::Tensor pred,
-    torch::Tensor target,
-    torch::Tensor class_weights
-) const {
-    torch::Tensor loss;
+torch::Tensor PhasedLoss::classification_loss(torch::Tensor pred, torch::Tensor target,
+                                              torch::Tensor class_weights,
+                                              const torch::Tensor& labelled) const {
+    // Under a mask the unlabelled rows hold kUnlabelledClass, which
+    // cross-entropy ignores, so its mean is over the labelled rows (weighted by
+    // class weight, as torch normalises it).
+    auto options = torch::nn::functional::CrossEntropyFuncOptions();
     if (class_weights.defined() && class_weights.numel() > 0) {
-        loss = torch::nn::functional::cross_entropy(pred, target,
-            torch::nn::functional::CrossEntropyFuncOptions().weight(class_weights));
-    } else {
-        loss = torch::nn::functional::cross_entropy(pred, target);
+        options.weight(class_weights);
     }
-
-    if (!nca_.enabled) {
-        return loss;
+    torch::Tensor rows;
+    if (labelled.defined()) {
+        rows = labelled.reshape({-1});
+        options.ignore_index(kUnlabelledClass);
     }
+    torch::Tensor loss = torch::nn::functional::cross_entropy(pred, target, options);
 
     // The NCA term acts on the head's own output space: it pulls same-class
     // samples together and pushes different-class ones apart on the unit
@@ -157,8 +173,17 @@ torch::Tensor PhasedLoss::classification_loss(
     // coordinate -> class mapping, and argmax over it -- the rule every
     // prediction, accuracy and calibration path in the engine uses -- would be
     // meaningless. Cross-entropy fixes that mapping; NCA shapes the space.
-    return loss + nca_.weight * nca_objective(pred, target,
-                                              nca_.temperature, nca_.n_neighbors);
+    if (nca_.enabled) {
+        loss = loss +
+               nca_.weight * nca_objective(pred, target, nca_.temperature, nca_.n_neighbors, rows);
+    }
+
+    // With no labelled row the cross-entropy mean is 0/0; the target then adds
+    // an exact zero, decided on the device.
+    if (rows.defined()) {
+        loss = torch::where(rows.any(), loss, torch::zeros_like(loss));
+    }
+    return loss;
 }
 
 // MultiTaskLoss implementation
@@ -231,15 +256,15 @@ std::pair<torch::Tensor, std::unordered_map<std::string, torch::Tensor>> MultiTa
         // taken over those rows (cross-entropy weighted by class weight, as
         // torch normalises it; NCA over the labelled rows' neighbourhoods).
         // With no labelled row the target adds an exact zero and no gradient,
-        // where the mean over an empty set would be NaN. The batch's other
-        // targets, their weights and the phase schedule are untouched.
-        const auto rows = labelled_rows(cfg, target_it->second);
-        if (rows.n_labelled == 0) {
-            losses[cfg.name] = torch::zeros({}, total_loss.options());
-            continue;
-        }
-        const torch::Tensor pred = rows.select(pred_it->second);
-        const torch::Tensor target = rows.select(target_it->second);
+        // where the mean over an empty set would be NaN. The rows are a device
+        // mask, never counted on the host, so a masked target costs the batch
+        // no synchronisation. The batch's other targets, their weights and the
+        // phase schedule are untouched.
+        const torch::Tensor& pred = pred_it->second;
+        const torch::Tensor& target = target_it->second;
+        const torch::Tensor labelled = cfg.missing == TargetMissingPolicy::Mask
+                                           ? labelled_mask(target, cfg.task)
+                                           : torch::Tensor();
 
         torch::Tensor loss;
         if (cfg.task == TaskType::Regression) {
@@ -249,13 +274,11 @@ std::pair<torch::Tensor, std::unordered_map<std::string, torch::Tensor>> MultiTa
                 scaler_mean = scaler_it->second.first;
                 scaler_scale = scaler_it->second.second;
             }
-            loss = phased_loss_.regression_loss(
-                pred, target, epoch,
-                scaler_mean, scaler_scale, cfg.transform
-            );
+            loss = phased_loss_.regression_loss(pred, target, epoch, scaler_mean, scaler_scale,
+                                                cfg.transform, labelled);
         } else {
             loss = phased_loss_.classification_loss(pred, target,
-                                                    class_weights_on(i, pred.device()));
+                                                    class_weights_on(i, pred.device()), labelled);
         }
 
         losses[cfg.name] = loss;
@@ -514,12 +537,8 @@ std::unordered_map<std::string, float> Metrics::compute(
 // NCA objective
 // =============================================================================
 
-torch::Tensor nca_objective(
-    torch::Tensor embeddings,
-    torch::Tensor targets,
-    float temperature,
-    int n_neighbors
-) {
+torch::Tensor nca_objective(torch::Tensor embeddings, torch::Tensor targets, float temperature,
+                            int n_neighbors, const torch::Tensor& labelled) {
     const int64_t batch_size = embeddings.size(0);
 
     // Unit-norm rows, so the scaled dot product below is the paper's softmax
@@ -535,6 +554,16 @@ torch::Tensor nca_objective(
     // normalizing sum by pushing the diagonal below the softmax floor.
     auto mask = torch::eye(batch_size, sim.options()).to(torch::kBool);
     sim.masked_fill_(mask, -1e9f);
+
+    // An unlabelled sample is nobody's neighbour: its column sits at the same
+    // floor, so it adds nothing to any softmax and, once truncated below, is
+    // kept only where fewer labelled samples than n_neighbors exist, where it
+    // still adds nothing.
+    torch::Tensor unlabelled;
+    if (labelled.defined()) {
+        unlabelled = labelled.reshape({-1}).logical_not();
+        sim.masked_fill_(unlabelled.unsqueeze(0), -1e9f);
+    }
 
     // Truncated neighbour set: restrict each sample to its n_neighbors most
     // similar (non-self) samples and mask the rest, so n_neighbors bounds the
@@ -557,6 +586,11 @@ torch::Tensor nca_objective(
     auto targets_col = targets.unsqueeze(0);  // (1, batch)
     auto same_class = (targets_row == targets_col).to(torch::kFloat32);  // (batch, batch)
     same_class.masked_fill_(mask, 0.0f);
+    // ... and no anchor: with no same-class neighbour its row drops out below.
+    if (unlabelled.defined()) {
+        same_class.masked_fill_(unlabelled.unsqueeze(1), 0.0f);
+        same_class.masked_fill_(unlabelled.unsqueeze(0), 0.0f);
+    }
 
     // log p_i = log sum_{j in C_i} p_ij (paper eq. 2), via logsumexp for
     // numerical stability. The 1e-10 floor keeps log() finite on the

@@ -13,7 +13,7 @@ namespace resolve {
 // inside libtorch's static-destructor / DLL_PROCESS_DETACH teardown. Under the
 // Rscript.exe launcher that join races with the rest of the C runtime teardown
 // and faults with an access violation after the script has already finished and
-// flushed its output (issue #18). Pinning both pools to 1 at load leaves no
+// flushed its output. Pinning both pools to 1 at load leaves no
 // worker threads to join, removing the race at its source. Harmless on other
 // platforms; the engine's heavy parallelism lives in CUDA kernels and batched
 // tensor ops, not the host thread pools, for the thin-client (metrics / small
@@ -32,9 +32,9 @@ void set_thread_pools(int intraop_threads, int interop_threads = -1);
 // error, ...) into an immediate, deterministic process termination instead of:
 //   * a Windows Error Reporting / JIT-debugger (AeDebug, vsjitdebugger)
 //     handshake that hangs a headless training worker forever, holding the GPU
-//     and stalling the batch (issue #19), or
+//     and stalling the batch, or
 //   * a post-main libtorch static-destructor access violation that crashes the
-//     Rscript.exe launcher at teardown (issue #18).
+//     Rscript.exe launcher at teardown.
 //
 // Installs, best-effort and Windows-only:
 //   * SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX |
@@ -43,11 +43,11 @@ void set_thread_pools(int intraop_threads, int interop_threads = -1);
 //   * SetUnhandledExceptionFilter(filter) -- the filter calls TerminateProcess
 //     (which bypasses AeDebug entirely) with the exit code chosen by
 //     crash_exit_code(): the shutdown code once signal_work_complete() has run
-//     (the work finished; a later fault is a teardown artifact -- issue #18),
-//     or a non-zero failure code derived from the exception otherwise (a
-//     mid-run crash the orchestrator must record -- issue #19).
+//     (the work finished; a later fault is a teardown artifact), or a
+//     non-zero failure code derived from the exception otherwise (a mid-run
+//     crash the orchestrator must record).
 //
-// No minidump is written: the canonical #19 trigger is a faulting storage
+// No minidump is written: the typical mid-run fault is a faulting storage
 // device, so touching the disk from inside the fault handler could itself hang.
 // The fault's NTSTATUS is carried out through the process exit code instead.
 //
@@ -66,12 +66,12 @@ void signal_work_complete();
 // the exit-code policy is unit-testable without actually faulting a process.
 //
 //   work_complete == true  -> shutdown_exit_code (cast to unsigned), the clean
-//                             teardown-after-success path (issue #18);
+//                             teardown-after-success path;
 //   work_complete == false -> a guaranteed non-zero code: the NTSTATUS in
 //                             exception_code when it is non-zero (so the
 //                             orchestrator records the real fault, e.g.
 //                             0xC0000005 / 0xC0000006), else a fixed non-zero
-//                             fallback (issue #19).
+//                             fallback.
 unsigned int crash_exit_code(
     bool work_complete,
     int shutdown_exit_code,

@@ -12,7 +12,7 @@
 namespace resolve {
 namespace io {
 
-// A transient, retryable storage read/write failure (issue #20): a file that
+// A transient, retryable storage read/write failure: a file that
 // could not be opened, or a stream that errored mid-read/-write. The explicit
 // I/O paths (CSV reader) throw this specifically so with_retry can retry a
 // flaky-disk hiccup while letting non-I/O errors (a CSV parse error, a corrupt
@@ -42,7 +42,7 @@ inline int default_retry_backoff_ms() {
     return 100;
 }
 
-// Bounded retry-with-backoff for idempotent, explicit file I/O (issue #20).
+// Bounded retry-with-backoff for idempotent, explicit file I/O.
 //
 // Runs fn() and, on a thrown exception assignable to Exc, logs and retries up
 // to `attempts` total tries with exponential backoff (`backoff_ms << (k-1)`,
@@ -54,10 +54,10 @@ inline int default_retry_backoff_ms() {
 // load, where a re-read is cheap). attempts / backoff_ms < 0 take the env
 // defaults above.
 //
-// Scope note (issue #20): only RESOLVE's explicit stream reads/writes are
-// retryable here. mmap-backed page-ins (torch::load mmap) and DLL code-page
-// faults surface as OS structured exceptions at an arbitrary instruction and
-// cannot be resumed; those are issue #19's domain (fail fast, do not hang).
+// Scope: only RESOLVE's explicit stream reads/writes are retryable here.
+// mmap-backed page-ins (torch::load mmap) and DLL code-page faults surface as
+// OS structured exceptions at an arbitrary instruction and cannot be resumed;
+// those belong to the crash handler (process.hpp: fail fast, do not hang).
 template <typename Exc = std::exception, typename Fn>
 auto with_retry(Fn&& fn,
                 const char* what,

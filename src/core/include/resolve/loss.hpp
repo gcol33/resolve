@@ -33,13 +33,14 @@ namespace resolve {
 // and each sample's neighbour set is its `n_neighbors` most similar in-batch
 // samples. n_neighbors <= 0, or >= batch - 1, keeps the full in-batch set.
 //
-// `targets` is (batch,) int64 class labels.
-[[nodiscard]] torch::Tensor nca_objective(
-    torch::Tensor embeddings,
-    torch::Tensor targets,
-    float temperature = kNCATemperature,
-    int n_neighbors = kNCANeighbors
-);
+// `targets` is (batch,) int64 class labels. `labelled`, an optional (batch,)
+// bool mask, restricts the objective to the labelled samples: an unlabelled
+// sample is neither an anchor nor anyone's neighbour and gets an exact zero
+// gradient. Undefined keeps every sample.
+[[nodiscard]] torch::Tensor nca_objective(torch::Tensor embeddings, torch::Tensor targets,
+                                          float temperature = kNCATemperature,
+                                          int n_neighbors = kNCANeighbors,
+                                          const torch::Tensor& labelled = {});
 
 // The NCA term PhasedLoss adds to its classification loss. Off by default;
 // LossConfigMode::NCA turns it on (see PhasedLoss::from_config). The three
@@ -98,24 +99,26 @@ public:
         return smape_weight_p2_ != 0.0f || smape_weight_p3_ != 0.0f || band_weight_p3_ != 0.0f;
     }
 
-    // Compute regression loss
-    torch::Tensor regression_loss(
-        torch::Tensor pred,
-        torch::Tensor target,
-        int epoch,
-        torch::Tensor scaler_mean = {},
-        torch::Tensor scaler_scale = {},
-        TransformType transform = TransformType::None
-    ) const;
+    // Compute regression loss.
+    //
+    // `labelled` is an optional (batch,) bool mask of the rows that carry a
+    // label (labelled_mask()): every term is then the mean over those rows, a
+    // row outside it gets an exact zero gradient whatever its target holds,
+    // and a mask with no true row gives an exact zero. Undefined scores every
+    // row.
+    torch::Tensor regression_loss(torch::Tensor pred, torch::Tensor target, int epoch,
+                                  torch::Tensor scaler_mean = {}, torch::Tensor scaler_scale = {},
+                                  TransformType transform = TransformType::None,
+                                  const torch::Tensor& labelled = {}) const;
 
     // Compute classification loss (with optional class weights for imbalanced
     // data). When the NCA term is enabled, the NCA objective over `pred` is
     // added to the cross-entropy; see the impl for why both terms are present.
-    torch::Tensor classification_loss(
-        torch::Tensor pred,
-        torch::Tensor target,
-        torch::Tensor class_weights = {}
-    ) const;
+    // `labelled` restricts both terms to the labelled rows, as for
+    // regression_loss.
+    torch::Tensor classification_loss(torch::Tensor pred, torch::Tensor target,
+                                      torch::Tensor class_weights = {},
+                                      const torch::Tensor& labelled = {}) const;
 
 private:
     std::pair<int, int> phase_boundaries_;

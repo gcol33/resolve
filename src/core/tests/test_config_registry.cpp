@@ -974,7 +974,7 @@ TEST_CASE("The sidecar describes the schema's loader settings and reads back",
     INFO("train fields that did not survive: " << describe(train_diffs));
     CHECK(train_diffs.empty());
 
-    // The schema fields `resolve info` used to print alone, and full precision.
+    // Schema fields, and numbers at full precision.
     CHECK(description.at("schema").at("covariates").items().front().as_string() == "elev");
     CHECK(description.at("schema").at("targets").items().front().at("class_names").size() == 2);
     CHECK(static_cast<float>(description.at("train_time_seconds").as_number()) ==

@@ -13,8 +13,10 @@
 // The sentinel is the only record of which plots are unlabelled. Every split,
 // fold and batch is an index_select of the target tensor, so the record travels
 // with the rows and cannot fall out of step with them. Everything that fits or
-// scores a target -- loss, scalers, metrics, baselines, calibration, residuals,
-// test-fold predictions -- reads the labelled rows through labelled_rows().
+// scores a target -- scalers, metrics, baselines, calibration, residuals,
+// test-fold predictions -- reads the labelled rows through labelled_rows(); the
+// per-batch loss weights its rows by labelled_mask() instead, so a training
+// batch never waits on the host to count them.
 //
 // A Drop target never holds a sentinel: its unlabelled plots are not in the
 // dataset. labelled_rows() therefore reports every row of a Drop target as

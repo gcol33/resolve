@@ -43,7 +43,7 @@ unsigned int crash_exit_code(
 
 void set_thread_pools(int intraop_threads, int interop_threads) {
     // Best-effort: the thread pinning is a defensive measure against the
-    // teardown-join race (issue #18), not a correctness requirement, so a
+    // teardown-join race, not a correctness requirement, so a
     // libtorch rejection (e.g. the inter-op pool already started) is swallowed
     // rather than propagated to the binding's load path.
     if (intraop_threads > 0) {
@@ -79,15 +79,15 @@ unsigned long exception_code_of(EXCEPTION_POINTERS* info) {
                : 0UL;
 }
 
-// Last-resort handler for a mid-run fault while the process is otherwise live
-// (issue #19). Reached only if no frame-based handler claimed the exception.
+// Last-resort handler for a mid-run fault while the process is otherwise live.
+// Reached only if no frame-based handler claimed the exception.
 LONG WINAPI resolve_unhandled_exception_filter(EXCEPTION_POINTERS* info) {
     const unsigned int code = crash_exit_code(
         g_work_complete.load(std::memory_order_acquire),
         g_shutdown_exit_code.load(std::memory_order_acquire),
         exception_code_of(info));
     // TerminateProcess never consults the AeDebug post-mortem-debugger key, so a
-    // headless run cannot hang waiting for a JIT debugger to attach (issue #19).
+    // headless run cannot hang waiting for a JIT debugger to attach.
     ::TerminateProcess(::GetCurrentProcess(), code);
     return EXCEPTION_EXECUTE_HANDLER;  // unreached if TerminateProcess succeeds
 }
@@ -96,9 +96,9 @@ LONG WINAPI resolve_unhandled_exception_filter(EXCEPTION_POINTERS* info) {
 // post-main C-runtime teardown / DLL_PROCESS_DETACH, where the unhandled-
 // exception filter above is no longer invoked -- that teardown window is the
 // suspected point of the libtorch static-destructor access violation that
-// crashes the Rscript.exe launcher (issue #18). It acts ONLY once work is
-// complete (so a live mid-run fault still flows to the normal handlers / the
-// #19 path) and ONLY on an access-violation-class fault (so C++ exceptions and
+// crashes the Rscript.exe launcher. It acts ONLY once work is complete (so a
+// live mid-run fault still flows to the normal handlers / the filter above)
+// and ONLY on an access-violation-class fault (so C++ exceptions and
 // breakpoints pass through untouched). In that narrow case the fault is a
 // benign teardown artifact, so exit with the shutdown code.
 LONG WINAPI resolve_vectored_handler(EXCEPTION_POINTERS* info) {
@@ -144,7 +144,7 @@ void install_crash_handler(int shutdown_exit_code) {
 
     ::SetUnhandledExceptionFilter(&resolve_unhandled_exception_filter);
 
-    // First-in-line vectored handler so a teardown-window fault (issue #18),
+    // First-in-line vectored handler so a teardown-window fault,
     // which the unhandled-exception filter above never sees, is still caught.
     ::AddVectoredExceptionHandler(1UL, &resolve_vectored_handler);
 }

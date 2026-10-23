@@ -109,7 +109,7 @@ TEST_CASE("SpatialBlockSplitter spatial coherence", "[spatial_cv]") {
 
 TEST_CASE("SpatialBlockSplitter rejects fewer blocks than folds", "[spatial_cv]") {
     // Only two spatial blocks but three folds -> one fold would be empty and
-    // divide by zero in the baseline metrics; the splitter must reject it (#82).
+    // divide by zero in the baseline metrics; the splitter must reject it.
     SpatialBlockSplitter splitter(1.0f, 1.0f, 3, 42);
     auto coords = torch::zeros({20, 2});
     coords.index_put_({torch::indexing::Slice(0, 10), torch::indexing::Slice()}, 5.5f);

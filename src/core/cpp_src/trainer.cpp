@@ -4,6 +4,7 @@
 #include "resolve/checkpoint.hpp"
 #include "resolve/continuous_block.hpp"
 #include "resolve/gpu.hpp"
+#include "resolve/grad_clip.hpp"
 #include "resolve/species_graph.hpp"
 #include "resolve/target_labels.hpp"
 #include "resolve/target_transform.hpp"
@@ -851,7 +852,7 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
                 optimizer_->zero_grad();
             } else {
                 // Gradient clipping (on unscaled gradients)
-                torch::nn::utils::clip_grad_norm_(model_->parameters(), kMaxGradNorm);
+                clip_grad_norm(model_->parameters(), kMaxGradNorm);
 
                 // Optimizer step
                 optimizer_->step();
@@ -870,7 +871,7 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
             loss.backward();
 
             // Gradient clipping
-            torch::nn::utils::clip_grad_norm_(model_->parameters(), kMaxGradNorm);
+            clip_grad_norm(model_->parameters(), kMaxGradNorm);
 
             optimizer_->step();
 
