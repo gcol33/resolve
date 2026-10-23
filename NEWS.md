@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### Added
+
+- **Retrieval augmentation (TabR) in the engine.** `Predictor::set_retrieval`
+  keeps the latents and labels of reference plots (normally the training
+  plots) and blends every later prediction with the labels of the plot's k
+  nearest reference plots by cosine similarity, weighted by a softmax over
+  similarity / temperature: `(1 - alpha) * prediction + alpha * retrieved`,
+  regression in original units, classification as class probabilities. The
+  search is exact and needs no dependency. Python `Predictor.set_retrieval`
+  with `RetrievalConfig`, R `resolve.retrieval()`, `resolve predict
+  --retrieval-header / --retrieval-species / --retrieval-k / --retrieval-alpha
+  / --retrieval-temperature`. The Python-only `resolve_core.tabr` (which
+  averaged class codes into logits and needed faiss) is gone.
+- **R reaches the whole engine.** `resolve.cross_validate()` (random or
+  spatial-block folds), `modelConfig` / `trainConfig` on
+  `resolve.train.dataset()` for every model and training field (any
+  `encoder_architecture`, the heterogeneous GNN with its species graph, the
+  normalization, activation and head settings), `pretrain = list(method =
+  "jepa" | "scarf" | "masked_species", ...)` and `resolve.pretrain_vae()`,
+  `resolve.fuzzy_index()` / `resolve.fuzzy_match()`,
+  `resolve.set_vram_fraction()` and `resolve.default_config()`.
+- `model_config_for_dataset(dataset, config)` (C++, Python, and behind the R
+  verbs and `resolve train`) sets the fields that size a model to its data from
+  the dataset; `target_specs_from_schema(schema)` lists a checkpoint's targets
+  for loading labelled data.
+- `ResolveDataset::load(header, species, ...)` takes each table as a CSV path or
+  an in-memory table, with or without a model's vocabularies; every loader verb
+  is a form of it, and the C ABI has the one `resolve_dataset_load`.
+
 ### Changed
 
 - **The `resolve-core` project root is `src/core`.** Build from a checkout
@@ -116,7 +145,42 @@
   and read as before. `SuiteManifest.verify(dir, targets=)` checks the named
   targets only.
 
+- **Devices are named `cpu`, `cuda` or `cuda:N` everywhere** (Python, R, the
+  C ABI, configs). Any other spelling (`"CUDA"`, `"gpu"`, `"cuda:x"`) is an
+  error; it used to run on the CPU. The CLI's `--cuda` is now `--device DEVICE`.
+- **Configuration lists are read strictly.** A key the engine does not know, at
+  any level of nesting, a key given twice, and a value of the wrong kind are
+  errors naming the field and the accepted keys; `config = list(species_encodng
+  = "embed")` used to train with the default.
+- **The R verbs take the engine's defaults.** `resolve.train.dataset()`'s
+  arguments default to `NULL`, the engine's value: in particular `lossConfig`
+  is now `"combined"` unless given (it was `"mae"` in R alone). The R package
+  holds no copy of a default, a key list or an enum spelling.
+- A storage failure (a checkpoint or CSV that cannot be read, a checkpoint that
+  cannot be written) is `resolve_core.StorageError`, an `OSError`, after the
+  engine's own retries; `resolve_core.retry_io` and the Python retry wrappers
+  are gone.
+- Every tensor a Python accessor returns is a detached CPU tensor, or `None`;
+  the model's forward outputs and parameter accessors stay live on its device.
+- Long Python calls release the GIL (CSV loads, save / load / load_state /
+  resume, `Predictor.load`, `SuiteManifest.read`, the `compute_*` evaluators).
+- `PYTORCH_CUDA_ALLOC_CONF`'s default has one definition in the engine
+  (`resolve_core.default_cuda_alloc_conf()`).
+- `resolve_core.species_graph` (an unused Python copy of
+  `build_species_graph` with other edge codes) is gone.
+
 ### Fixed
+
+- R accessors of 64-bit integers (`raw_species_ids()`, `plot_offsets()`, any
+  int64 result) return doubles, exact to 2^53, when a value exceeds R's
+  integer range; they used to narrow with one warning per element.
+- A Python exception raised by a fuzzy index's `bucket_fn` inside
+  `query_batch` is raised to the caller after the batch; it used to terminate
+  the process.
+- The C ABI's value builders return NULL / -1 on failure instead of
+  terminating, refuse a NULL map, and free a partly built result tree.
+- `Trainer.load` returns `(ResolveModel, Scalers, CategoricalVocab)` in Python
+  (it raised `TypeError`).
 
 - `representation = presence_absence` was honoured by the sparse encoding
   only. It now sets every species' value to 1.0 in every encoding (hash
