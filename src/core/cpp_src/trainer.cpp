@@ -523,7 +523,7 @@ void Trainer::prepare_split(
     // embedding rides along at its end.
     ContinuousInputs block_parts = parts;
     if (!model_->hash_in_continuous()) block_parts.hash_embedding = torch::Tensor();
-    all.continuous = assemble_continuous(block_parts, model_->schema().missing_values, n_plots);
+    all.continuous = assemble_continuous(block_parts, model_->schema().dataset_config.missing_values, n_plots);
 
     // Each target the schema names, a regression target transformed.
     TensorMap raw_targets;

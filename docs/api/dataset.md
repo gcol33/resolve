@@ -270,12 +270,12 @@ Describes a loaded dataset and travels into the checkpoint.
 | `categorical_vocab_sizes` | `list[int]` | Code count per categorical column |
 | `categorical_embed_dim` | `int` | Embedding width per categorical column |
 | `targets` | `list[TargetConfig]` | One per declared target |
-| `has_coordinates`, `has_abundance`, `has_taxonomy` | `bool` | What the data carried |
-| `track_unknown_fraction`, `track_unknown_count` | `bool` | Loader settings |
+| `has_coordinates`, `has_abundance`, `has_taxonomy` | `bool` | What the data carried (`has_abundance`: the species records had an abundance column) |
 | `species_vocab`, `genus_vocab`, `family_vocab` | `list[str]` | Fitted vocabularies, index equals code, `[0]` is `"<UNK>"` |
-| `missing_values` | `MissingValuePolicy` | The missing-value policy the model was built for; `Zero` for a checkpoint written before the policy existed. `missing_flag_width()` gives the number of flag columns it adds |
-| `top_k_species`, `selection`, `species_budget`, `representation`, `normalization`, `aggregation`, `use_taxonomy` | | The `DatasetConfig` knobs the loader consumed. `selection` is the one the load APPLIED: a pooled or sparse dataset with no `species_budget` encodes every record, so it reports `All` |
-| `pool_weighting`, `pool_species_cap` | | Pool settings, so inference recomputes the same weights |
+| `dataset_config` | `DatasetConfig` | The loader settings the dataset was encoded with, every field of `DatasetConfig`; the checkpoint carries them and `dataset_config_from_checkpoint` turns them into the configuration an inference load uses. `selection` is the one the load APPLIED: a pooled or sparse dataset with no `species_budget` encodes every record, so it reports `All`; `pool_species_cap` is the width a rank_pool / transformer load truncated to |
+| `unrecorded_dataset_settings` | `list[str]` | The `DatasetConfig` fields a loaded checkpoint does not carry because it predates them. Each holds the value the engine used before the setting existed: the `DatasetConfig` default, except `missing_values`, which reads as `Zero`. Empty for a dataset's own schema |
+
+`missing_flag_width()` gives the number of missingness columns `dataset_config.missing_values` adds to the continuous block.
 
 | Method | Returns |
 |--------|---------|

@@ -52,7 +52,7 @@ void require_matching_vocab(
                "model's namespace: ResolveDataset::from_csv_with_vocabs(header, "
                "species, roles, targets, predictor.external_vocabs(), "
                "dataset_config_from_checkpoint(predictor.schema(), "
-               "predictor.model()->config())). See gcol33/resolve#102.";
+               "predictor.model()->config())).";
         throw std::runtime_error(msg.str());
     };
 
@@ -116,8 +116,8 @@ Predictor Predictor::load(
     if (indexes_species_codes(predictor.model()) &&
         !predictor.schema().has_species_vocab()) {
         std::cerr << "[resolve] warning: this checkpoint does not carry the fitted "
-                     "species/taxonomy vocabularies (written before "
-                     "gcol33/resolve#102). Its encoder indexes species embeddings "
+                     "species/taxonomy vocabularies, only their sizes. Its encoder "
+                     "indexes species embeddings "
                      "by an integer code that depends on the file the vocabulary "
                      "was fitted on, so scoring new data can silently look up the "
                      "wrong embedding rows. Only the vocabulary SIZES can be "
@@ -179,7 +179,7 @@ void Predictor::validate_dataset_vocabs(const ResolveDataset& dataset) const {
                 << data_cols.size() << ") do not match the model's ("
                 << model_cols.size() << ") in name or order. Build the dataset "
                    "with ResolveDataset::from_csv_with_vocabs(..., "
-                   "predictor.external_vocabs(), ...). See gcol33/resolve#102.";
+                   "predictor.external_vocabs(), ...).";
             throw std::runtime_error(msg.str());
         }
         for (const auto& col : model_cols) {
@@ -190,8 +190,7 @@ void Predictor::validate_dataset_vocabs(const ResolveDataset& dataset) const {
                     << col << "' was factorized against its own values, so its "
                        "codes mean something different from the model's. Build "
                        "the dataset with ResolveDataset::from_csv_with_vocabs("
-                       "..., predictor.external_vocabs(), ...). See "
-                       "gcol33/resolve#102.";
+                       "..., predictor.external_vocabs(), ...).";
                 throw std::runtime_error(msg.str());
             }
         }
@@ -261,12 +260,12 @@ ResolvePredictions Predictor::run_inference(
 
     const auto& schema = model_->schema();
     auto present = [](const torch::Tensor& t) { return t.defined() && t.numel() > 0; };
-    if (schema.track_unknown_fraction && !present(parts.unknown_fraction)) {
+    if (schema.dataset_config.track_unknown_fraction && !present(parts.unknown_fraction)) {
         throw std::invalid_argument(
             "Predictor: the model reads an unknown-species fraction "
             "(track_unknown_fraction), so pass unknown_fraction");
     }
-    if (schema.track_unknown_count && !present(parts.unknown_count)) {
+    if (schema.dataset_config.track_unknown_count && !present(parts.unknown_count)) {
         throw std::invalid_argument(
             "Predictor: the model reads an unknown-species count "
             "(track_unknown_count), so pass unknown_count");
@@ -277,13 +276,10 @@ ResolvePredictions Predictor::run_inference(
     const PlotInputs species_inputs = inputs.without_empty();
     const int64_t n = parts.n_rows() > 0 ? parts.n_rows() : species_inputs.n_plots();
 
-    // The coordinate-kNN GNN builds each plot's representation from the OTHER
-    // plots in the same forward, so a chunked forward would make a plot's
-    // prediction depend on its chunk-mates and break the one-shot == chunked
-    // equivalence that holds for every other encoder (SAINT's inference rows
-    // attend to its fixed reference set, not to each other). Force a single
-    // forward for it rather than silently returning chunk-composition-dependent
-    // predictions.
+    // A batch-dependent encoder (architectures.hpp) builds each plot's
+    // representation from the other plots of the same forward, so a chunked
+    // forward would make a plot's prediction depend on its chunk-mates; it gets
+    // one forward over every plot.
     const bool batch_dependent_encoder = model_->requires_full_batch_training();
     if (batch_dependent_encoder && batch_size != -1 && n > batch_size) {
         static std::atomic<bool> warned{false};
@@ -316,7 +312,7 @@ ResolvePredictions Predictor::run_inference(
         // Trainer did at fit time (continuous_block.hpp).
         PlotInputs chunk = species_inputs.slice(start, end);
         chunk.continuous = standardize_continuous(
-            assemble_continuous(block_parts.slice(start, end), schema.missing_values,
+            assemble_continuous(block_parts.slice(start, end), schema.dataset_config.missing_values,
                                 end - start),
             scalers_);
         chunk = chunk.to(device_);

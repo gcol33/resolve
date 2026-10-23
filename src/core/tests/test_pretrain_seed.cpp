@@ -55,7 +55,7 @@ ResolveSchema embed_schema() {
     schema.has_taxonomy = true;
     schema.n_genera = 25;
     schema.n_families = 15;
-    schema.track_unknown_fraction = true;
+    schema.dataset_config.track_unknown_fraction = true;
     schema.targets.push_back({"area", TaskType::Regression, TransformType::None, 0, 1.0f});
     return schema;
 }

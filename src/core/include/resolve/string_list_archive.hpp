@@ -1,13 +1,18 @@
 #pragma once
 
-// A list of strings through a torch::serialize archive, which stores tensors
-// only. The list travels as two entries: "<key>_lengths", an int64 vector of
-// byte lengths, and "<key>_bytes", the concatenated UTF-8 bytes. Two entries
-// per list rather than per string, so a 30k-species vocabulary stays two zip
-// members. Every reader of a persisted string list goes through
-// try_read_string_list, which bounds-checks the lengths against the byte
+// Strings through a torch::serialize archive, which stores tensors only.
+//
+// A single string travels as "<key>_len", an int64 scalar, and "<key>", its
+// UTF-8 bytes (absent for the empty string). A list travels as two entries:
+// "<key>_lengths", an int64 vector of byte lengths, and "<key>_bytes", the
+// concatenated bytes. Two entries per list rather than per string, so a
+// 30k-species vocabulary stays two zip members.
+//
+// Every reader of a persisted string goes through try_read_string or
+// try_read_string_list, which check the stored lengths against the byte
 // buffer, so a truncated or corrupt archive throws instead of reading out of
-// bounds.
+// bounds. Both read through a CPU copy: an archive loaded onto a device holds
+// its tensors there.
 
 #include <torch/torch.h>
 
@@ -17,6 +22,59 @@
 #include <vector>
 
 namespace resolve {
+
+inline void write_string(torch::serialize::OutputArchive& archive, const std::string& key,
+                         const std::string& value) {
+    archive.write(key + "_len", torch::tensor(static_cast<int64_t>(value.size())));
+    if (!value.empty()) {
+        archive.write(key, torch::from_blob(const_cast<char*>(value.data()),
+                                            {static_cast<int64_t>(value.size())},
+                                            torch::kUInt8)
+                               .clone());
+    }
+}
+
+// Reads the string stored under `key` into `out`. Returns false, leaving `out`
+// untouched, when the length entry is absent; an empty string reads as "".
+// Throws when the entries are present but inconsistent.
+inline bool try_read_string(torch::serialize::InputArchive& archive, const std::string& key,
+                            std::string& out) {
+    torch::Tensor len_t;
+    if (!archive.try_read(key + "_len", len_t)) return false;
+    if (len_t.numel() != 1) {
+        throw std::runtime_error("string '" + key + "' is corrupt: its length is not a scalar");
+    }
+    const int64_t len = len_t.to(torch::kCPU).to(torch::kLong).item<int64_t>();
+    if (len < 0) {
+        throw std::runtime_error("string '" + key + "' is corrupt: negative length");
+    }
+    if (len == 0) {
+        out.clear();
+        return true;
+    }
+    torch::Tensor bytes_t;
+    if (!archive.try_read(key, bytes_t)) {
+        throw std::runtime_error("string '" + key + "' is corrupt: its bytes are missing");
+    }
+    bytes_t = bytes_t.to(torch::kCPU).to(torch::kUInt8).contiguous();
+    if (bytes_t.dim() != 1 || bytes_t.numel() < len) {
+        throw std::runtime_error("string '" + key + "' is corrupt: " + std::to_string(len) +
+                                 " bytes recorded, " + std::to_string(bytes_t.numel()) +
+                                 " stored");
+    }
+    out.assign(reinterpret_cast<const char*>(bytes_t.data_ptr<uint8_t>()),
+               static_cast<size_t>(len));
+    return true;
+}
+
+// As try_read_string, for a string the archive must hold.
+inline std::string read_string(torch::serialize::InputArchive& archive, const std::string& key) {
+    std::string value;
+    if (!try_read_string(archive, key, value)) {
+        throw std::runtime_error("archive holds no string '" + key + "'");
+    }
+    return value;
+}
 
 inline void write_string_list(torch::serialize::OutputArchive& archive,
                               const std::string& key,

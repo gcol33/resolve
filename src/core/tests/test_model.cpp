@@ -72,7 +72,7 @@ TEST_CASE("Hash+taxonomy embedding tables sized to n_genera (no +1 over-alloc)",
     schema.has_taxonomy = true;
     schema.n_genera = 20;          // dataset convention: count includes <UNK>=0
     schema.n_families = 10;
-    schema.track_unknown_fraction = true;
+    schema.dataset_config.track_unknown_fraction = true;
     schema.targets.push_back({"area", TaskType::Regression, TransformType::None, 0, 1.0f});
 
     ModelConfig config;
@@ -209,7 +209,7 @@ TEST_CASE("ResolveModel hash mode forward", "[model]") {
     schema.n_genera = 20;
     schema.n_families = 10;
     schema.covariate_names = {};
-    schema.track_unknown_fraction = true;
+    schema.dataset_config.track_unknown_fraction = true;
 
     // Add targets
     schema.targets.push_back({"area", TaskType::Regression, TransformType::Log1p, 0, 1.0f});
@@ -258,7 +258,7 @@ TEST_CASE("ResolveModel embed mode forward", "[model]") {
     schema.n_genera = 25;
     schema.n_families = 15;
     schema.covariate_names = {};
-    schema.track_unknown_fraction = true;
+    schema.dataset_config.track_unknown_fraction = true;
     schema.targets.push_back({"area", TaskType::Regression, TransformType::None, 0, 1.0f});
 
     ModelConfig config;
@@ -291,7 +291,7 @@ TEST_CASE("ResolveModel sparse mode forward", "[model]") {
     schema.has_coordinates = true;
     schema.has_taxonomy = false;
     schema.covariate_names = {"temp", "precip"};
-    schema.track_unknown_fraction = false;
+    schema.dataset_config.track_unknown_fraction = false;
     schema.targets.push_back({"biomass", TaskType::Regression, TransformType::Log1p, 0, 1.0f});
 
     ModelConfig config;
@@ -322,7 +322,7 @@ TEST_CASE("ResolveModel get latent", "[model]") {
     schema.has_taxonomy = false;
     schema.n_genera = 0;
     schema.n_families = 0;
-    schema.track_unknown_fraction = false;
+    schema.dataset_config.track_unknown_fraction = false;
     schema.targets.push_back({"area", TaskType::Regression, TransformType::None, 0, 1.0f});
 
     ModelConfig config;

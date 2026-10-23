@@ -13,6 +13,11 @@
 // Numbers are held as double. Every integer a manifest carries (a seed, a byte
 // count, a format version) is far inside 2^53, where a double is exact, and
 // `as_int` refuses a number that is not integral rather than truncating it.
+// JSON has no spelling for a NaN or an infinity, so a non-finite number becomes
+// null: a Number value is always finite. A float is held as the double nearest
+// to its shortest decimal spelling, so it is written as that spelling (0.1f as
+// 0.1, not as the 0.10000000149011612 of its widening) and reads back to the
+// same float.
 
 #include <cstdint>
 #include <string>
@@ -32,7 +37,8 @@ public:
     Value() = default;
     Value(std::nullptr_t) {}  // NOLINT(google-explicit-constructor)
     Value(bool b) : kind_(Kind::Bool), bool_(b) {}  // NOLINT(google-explicit-constructor)
-    Value(double n) : kind_(Kind::Number), number_(n) {}  // NOLINT(google-explicit-constructor)
+    Value(double n);  // NOLINT(google-explicit-constructor)
+    Value(float n);   // NOLINT(google-explicit-constructor)
     Value(int n) : Value(static_cast<double>(n)) {}  // NOLINT(google-explicit-constructor)
     Value(int64_t n) : Value(static_cast<double>(n)) {}  // NOLINT(google-explicit-constructor)
     Value(std::string s) : kind_(Kind::String), string_(std::move(s)) {}  // NOLINT(google-explicit-constructor)
@@ -62,7 +68,6 @@ public:
     [[nodiscard]] const Items& items() const;
     [[nodiscard]] Items& items();
     [[nodiscard]] const Members& members() const;
-    [[nodiscard]] std::vector<std::string> as_string_array() const;
 
     // Object access. `find` returns null when the key is absent; `at` throws
     // naming the key. `set` replaces an existing member in place, so a member's
@@ -71,6 +76,8 @@ public:
     [[nodiscard]] const Value& at(std::string_view key) const;
     [[nodiscard]] bool contains(std::string_view key) const { return find(key) != nullptr; }
     Value& set(const std::string& key, Value value);
+    // Remove a member; false when the object has none of that name.
+    bool erase(std::string_view key);
 
     // Array append.
     void push_back(Value value);
@@ -98,9 +105,9 @@ private:
 
 // Serialize. `indent` > 0 pretty-prints with that many spaces per level and a
 // newline between members; 0 writes the compact form. A number that is
-// integral and within 2^53 is written without a fractional part; any other
-// finite number with 17 significant digits, which reads back to the same
-// double. A non-finite number has no JSON spelling and throws.
+// integral and within 2^53 is written without a fractional part; any other in
+// the shortest form that reads back to the same double. Numbers are written
+// and read with '.' as the decimal point whatever the process locale.
 [[nodiscard]] std::string dump(const Value& value, int indent = 2);
 
 // Whole-file helpers. Both throw std::runtime_error naming the path.

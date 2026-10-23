@@ -44,6 +44,48 @@
 - `ResolveSchema.n_genera_vocab` / `n_families_vocab` are removed: they always
   equalled `n_genera` / `n_families`, which size the taxonomy tables (also in
   the C ABI / R schema list).
+- **The schema's loader settings are one `DatasetConfig`.** The flat schema
+  attributes `track_unknown_fraction`, `track_unknown_count`, `top_k_species`,
+  `selection`, `species_budget`, `representation`, `normalization`,
+  `aggregation`, `use_taxonomy`, `missing_values`, `zero_abundance_as`,
+  `pool_weighting` (an integer) and `pool_species_cap` moved to
+  `schema.dataset_config` (Python), `schema()$dataset_config` (R, C ABI), which
+  holds every `DatasetConfig` field, `pool_weighting` as the enum.
+  `schema.unrecorded_dataset_settings` lists the settings a loaded checkpoint
+  predates; they read as the engine read them before the setting existed.
+- `resolve info` prints the checkpoint's description, the document the JSON
+  sidecar holds, so both show the same fields: the run, the schema (targets
+  with their class names, covariates, categoricals), the model config, the
+  loader settings and the persisted training config. The sidecar no longer
+  lists the device, AMP / cuDNN switches or checkpoint destination, which the
+  checkpoint does not carry. Non-finite numbers are `null`, and every number
+  is written at full precision in the C locale (also in `progress.json` and
+  suite manifests).
+- **Every `resolve train` setting is a flag, generated from the config
+  structs.** New flags reach the ModelConfig fields the CLI could not set
+  (`--species-embed-dim`, `--genus-emb-dim`, `--family-emb-dim`,
+  `--categorical-embed-dim`, `--activation`, `--norm-layer`, `--norm-groups`,
+  `--residual`, `--leaky-relu-slope`, `--elu-alpha`, `--head-hidden-dims`,
+  `--head-activation`, `--head-dropout`) and the TrainConfig fields
+  (`--phase-boundaries`, `--amp-init-scale`, ...); every boolean has its
+  `--no-` form. Defaults are the structs': `--n-attention-layers` defaults to
+  0 (it said 2). A flag for a setting that does not apply is refused
+  (`--d-model` without `--encoding transformer`, the mixture's hyperparameters
+  without `--moe-routing`, the NCA, step-schedule and cosine-schedule knobs
+  outside their loss or schedule, `--cover-dropout` outside rank_pool /
+  transformer, `--checkpoint-every` without `--checkpoint-dir`). Numbers parse
+  whole (`256x`, `1,5` are errors). `--cuda` on a machine without a CUDA
+  device is an error rather than a CPU run.
+- A suite's predictions as a table come from the engine
+  (`resolve_core.suite_prediction_columns`): `SuitePredictions.to_pandas`, R's
+  `as.data.frame()` and `resolve predict --suite` share its columns and its
+  one rule for a class code without a label (the code itself). `resolve help`
+  lists the spherical-mean columns.
+- Suite manifest format 3: a member may state the `zero_abundance_as` its
+  training data was read at, for a checkpoint that predates the setting
+  (`SuiteMember.zero_abundance_as`). Manifests that do not use it are written
+  and read as before. `SuiteManifest.verify(dir, targets=)` checks the named
+  targets only.
 
 ### Fixed
 
@@ -77,6 +119,21 @@
 - `forward_single` and `get_gate_probs` take the species IDs, species vector
   and pool tensors, so they work for every species encoding instead of
   refusing the encoders that read composition from them.
+- A suite member trained reading a recorded abundance of 0 as another value
+  than the input contract states was accepted when it read 0 (and then scored
+  at the contract's value); it is refused, as are a member reading genus or
+  family the contract does not name and one trained on an abundance column
+  the contract does not read.
+- A circular mean of bearings whose unit vectors cancel returned an arbitrary
+  bearing with a huge spread; it returns NaN for both, as the spherical mean
+  does. Every combine rule reports a one-member dispersion as NaN (the
+  circular mean said 0).
+- Prediction CSVs wrote six significant digits (`1.23457e+06`, `47.1235`);
+  they write the shortest exact decimal.
+- A checkpoint string or class-weight list whose stored length disagrees with
+  its data threw nothing and read out of bounds; it is refused.
+- `ResolveSchema.has_abundance` was always true; it records whether the
+  species records had an abundance column.
 - The Catch2 suite force-includes a prelude that keeps `CHECK` Catch2's
   assertion: in files that included libtorch after Catch2, libtorch's own
   `CHECK` macro had replaced it, so those checks were neither counted nor

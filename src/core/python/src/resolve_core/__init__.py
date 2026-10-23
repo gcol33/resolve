@@ -212,6 +212,7 @@ try:
         SpeciesRecognition,
         compute_species_recognition,
         sha256_file,
+        suite_prediction_columns,
     )
 except ImportError as e:
     raise ImportError(
@@ -427,6 +428,7 @@ __all__ = [
     "SpeciesRecognition",
     "compute_species_recognition",
     "sha256_file",
+    "suite_prediction_columns",
     # GPU memory management
     "set_vram_fraction",
     "configure_cuda_allocator",

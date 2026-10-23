@@ -1,5 +1,6 @@
 #pragma once
 
+#include "resolve/json.hpp"
 #include "resolve/types.hpp"
 #include "resolve/model.hpp"
 #include "resolve/trainer.hpp"
@@ -10,7 +11,9 @@
 
 namespace resolve {
 
-// Write training progress to JSON file for monitoring
+// Write `checkpoint_dir`/progress.json for monitoring a run: the epoch, the
+// best epoch and loss (null until an epoch is scored), the patience count and
+// one band accuracy of the best epoch.
 void write_progress_file(
     const std::string& checkpoint_dir,
     int epoch,
@@ -36,7 +39,7 @@ ModelConfig load_model_config(
 // caller asked for before any CUDA OOM auto-halve; pass -1 (default) to fall back
 // to config.batch_size. It is written under `train_batch_size` (so load_train_config
 // restores the requested value) while `train_effective_batch_size` records the
-// effective config.batch_size, making an OOM fallback detectable (issue #86).
+// effective config.batch_size, making an OOM fallback detectable.
 void save_train_config(
     torch::serialize::OutputArchive& archive,
     const TrainConfig& config,
@@ -47,6 +50,12 @@ void save_train_config(
 // the persisted training hyperparameters; fields save_train_config does not
 // write keep their TrainConfig defaults.
 TrainConfig load_train_config(
+    torch::serialize::InputArchive& archive
+);
+
+// The batch size that trained the model (`train_effective_batch_size`), or the
+// requested one for a checkpoint that does not record it.
+int load_effective_batch_size(
     torch::serialize::InputArchive& archive
 );
 
@@ -61,10 +70,25 @@ RunMetadata load_run_metadata(
     torch::serialize::InputArchive& archive
 );
 
-// Write run metadata as JSON file alongside checkpoint. `requested_batch_size`
-// mirrors save_train_config: -1 (default) uses train_config.batch_size; otherwise
-// the sidecar's `batch_size` is the requested value and `effective_batch_size` the
-// value that actually trained the model (issue #86).
+// What a checkpoint holds, as one JSON document: the run metadata, the schema
+// (its loader settings included), the model config, the persisted train config
+// (`batch_size` as requested beside `effective_batch_size`) and the final
+// metrics. The sidecar beside a checkpoint is this document, and `resolve info`
+// prints it.
+json::Value checkpoint_description(
+    const ModelConfig& model_config,
+    const TrainConfig& train_config,
+    int effective_batch_size,
+    const RunMetadata& metadata,
+    const ResolveSchema& schema
+);
+
+// checkpoint_description of a saved checkpoint, read onto the CPU.
+json::Value describe_checkpoint(const std::string& path);
+
+// Write checkpoint_description as `<checkpoint>.json` beside the checkpoint
+// (`.pt` replaced). `train_config.batch_size` is the effective batch size and
+// `requested_batch_size` the requested one; -1 (default) takes them as equal.
 void write_metadata_json(
     const std::string& checkpoint_path,
     const ModelConfig& model_config,
@@ -91,9 +115,11 @@ void save_schema(
     const ResolveSchema& schema
 );
 
-// Load schema from archive
+// Load schema from archive. With `model_config` (the checkpoint's own), the
+// loader settings that also size the model are taken from it.
 ResolveSchema load_schema(
-    torch::serialize::InputArchive& archive
+    torch::serialize::InputArchive& archive,
+    const ModelConfig* model_config = nullptr
 );
 
 } // namespace resolve

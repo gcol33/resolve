@@ -133,7 +133,7 @@ TEST_CASE("SCARF pretrain runs on embed encoder with masked species views",
     schema.has_taxonomy = true;
     schema.n_genera = 25;
     schema.n_families = 15;
-    schema.track_unknown_fraction = true;
+    schema.dataset_config.track_unknown_fraction = true;
     schema.targets.push_back({"area", TaskType::Regression, TransformType::None, 0, 1.0f});
 
     ModelConfig mcfg;

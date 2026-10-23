@@ -368,7 +368,7 @@ std::tuple<ResolveModel, Scalers, CategoricalVocab> Trainer::load(
     auto archive = open_checkpoint(path, device, vram_fraction, default_log);
 
     ModelConfig config = load_model_config(archive);
-    ResolveSchema schema = load_schema(archive);
+    ResolveSchema schema = load_schema(archive, &config);
     Scalers scalers = load_scalers(archive);
 
     // Load the categorical vocabulary; a checkpoint without categorical

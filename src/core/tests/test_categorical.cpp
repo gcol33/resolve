@@ -325,8 +325,8 @@ TEST_CASE("ResolveModel with categoricals widens n_continuous and passes "
     schema.n_species = 3;
     schema.has_coordinates = true;
     schema.covariate_names = {"cov_a", "cov_b"};
-    schema.track_unknown_fraction = false;
-    schema.track_unknown_count = false;
+    schema.dataset_config.track_unknown_fraction = false;
+    schema.dataset_config.track_unknown_count = false;
     schema.has_taxonomy = false;
     // Two categorical columns; vocab sizes include the UNK slot.
     schema.categorical_names = {"col1", "col2"};
@@ -403,8 +403,8 @@ TEST_CASE("ResolveModel adapter + categoricals sizes the numerical block correct
     schema.n_species = 10;
     schema.has_coordinates = true;
     schema.covariate_names = {"cov_a", "cov_b"};
-    schema.track_unknown_fraction = false;
-    schema.track_unknown_count = false;
+    schema.dataset_config.track_unknown_fraction = false;
+    schema.dataset_config.track_unknown_count = false;
     schema.has_taxonomy = false;
     schema.categorical_names = {"col1", "col2"};
     schema.categorical_vocab_sizes = {5, 4};

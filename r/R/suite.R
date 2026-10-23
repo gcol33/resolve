@@ -215,11 +215,13 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
 }
 
 
-# Shape the C-ABI result for R: class labels beside codes, labelled probability
-# columns, and members as plots x members.
+# Shape the C-ABI result for R: class labels beside codes (the labels of the
+# engine's prediction table), labelled probability columns, and members as
+# plots x members.
 .resolve_suite_predictions <- function(raw) {
   plot_ids <- as.character(unlist(raw$plot_ids))
-  targets <- lapply(raw$targets, function(t) {
+  label_of <- function(column) as.character(unlist(raw$columns[[column]]))
+  targets <- Map(function(t, name) {
     classes <- as.character(unlist(t$class_names))
     seeds <- as.integer(unlist(t$member_seeds))
     out <- list(
@@ -243,7 +245,7 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
     )
     if (identical(t$combine, "vote")) {
       out$value <- as.integer(t$value)
-      out$label <- if (length(classes) > 0) classes[out$value + 1L] else as.character(out$value)
+      out$label <- label_of(name)
       if (!is.null(out$probabilities) && ncol(out$probabilities) == length(classes)) {
         colnames(out$probabilities) <- classes
       }
@@ -263,27 +265,30 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
                             longitude = by_seed(t$members$longitude))
       } else {
         members <- by_seed(t$members)
-        if (identical(t$combine, "vote") && length(classes) > 0) {
-          members <- matrix(classes[members + 1L], nrow = nrow(members),
-                            dimnames = dimnames(members))
+        if (identical(t$combine, "vote")) {
+          labels <- vapply(seeds, function(s) label_of(paste0(name, "_seed", s)),
+                           character(nrow(members)))
+          members <- matrix(labels, nrow = nrow(members), dimnames = dimnames(members))
         }
         out$members <- members
       }
     }
     out[!vapply(out, is.null, logical(1))]
-  })
+  }, raw$targets, names(raw$targets))
   experimental <- Filter(function(t) identical(t$status, "experimental"), targets)
   for (name in names(experimental)) {
     message(sprintf("'%s' is released as experimental: %s", name, experimental[[name]]$limit))
   }
-  structure(list(plot_ids = plot_ids, targets = targets),
+  structure(list(plot_ids = plot_ids, targets = targets, columns = raw$columns,
+                 probability_columns = as.character(unlist(raw$probability_columns))),
             class = "resolve_suite_predictions")
 }
 
 
 #' Flatten Suite Predictions to One Row per Plot
 #'
-#' The same columns `resolve predict --suite` writes: `plot_id`, then per target
+#' The engine's prediction table, the columns `resolve predict --suite` writes:
+#' `plot_id`, then per target
 #' the prediction (`<target>`; for a vote also `<target>_code` and
 #' `<target>_agreement`; for a spherical mean `<target>_latitude` and
 #' `<target>_longitude`), its dispersion (`<target>_sd` for a mean,
@@ -301,45 +306,9 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
 #' @export
 as.data.frame.resolve_suite_predictions <- function(x, row.names = NULL, optional = FALSE,
                                                     probabilities = FALSE, ...) {
-  out <- data.frame(plot_id = x$plot_ids, stringsAsFactors = FALSE)
-  for (name in names(x$targets)) {
-    t <- x$targets[[name]]
-    spherical <- identical(t$combine, "spherical_mean")
-    if (spherical) {
-      out[[paste0(name, "_latitude")]] <- t$value[, "latitude"]
-      out[[paste0(name, "_longitude")]] <- t$value[, "longitude"]
-      out[[paste0(name, "_spread_km")]] <- t$dispersion
-    } else if (identical(t$combine, "vote")) {
-      out[[name]] <- t$label
-      out[[paste0(name, "_code")]] <- t$value
-      out[[paste0(name, "_agreement")]] <- t$agreement
-      if (probabilities) {
-        for (k in seq_len(ncol(t$probabilities))) {
-          label <- colnames(t$probabilities)[k]
-          if (is.null(label)) label <- as.character(k - 1L)
-          out[[paste0(name, "_prob_", label)]] <- t$probabilities[, k]
-        }
-      }
-    } else {
-      out[[name]] <- t$value
-      sd_name <- if (identical(t$combine, "circular_mean")) "_circular_sd" else "_sd"
-      out[[paste0(name, sd_name)]] <- t$dispersion
-    }
-    out[[paste0(name, "_n_species")]] <- t$n_species
-    out[[paste0(name, "_n_recognised")]] <- t$n_recognised
-    out[[paste0(name, "_recognised_share")]] <- t$recognised_share
-    out[[paste0(name, "_recognised_abundance_share")]] <- t$recognised_abundance_share
-    if (spherical && !is.null(t$members)) {
-      for (k in seq_len(ncol(t$members$latitude))) {
-        seed <- colnames(t$members$latitude)[k]
-        out[[paste0(name, "_", seed, "_latitude")]] <- t$members$latitude[, k]
-        out[[paste0(name, "_", seed, "_longitude")]] <- t$members$longitude[, k]
-      }
-    } else if (!is.null(t$members)) {
-      for (k in seq_len(ncol(t$members))) {
-        out[[paste0(name, "_", colnames(t$members)[k])]] <- t$members[, k]
-      }
-    }
+  columns <- x$columns
+  if (!probabilities) {
+    columns <- columns[setdiff(names(columns), x$probability_columns)]
   }
-  out
+  as.data.frame(lapply(columns, unlist), stringsAsFactors = FALSE, optional = TRUE)
 }

@@ -201,6 +201,136 @@ enum class NormLayerType {
     None        // No normalization
 };
 
+// Per-species weight the rank_pool / transformer encoders pool with
+// (RankPoolEncoder): 1, the abundance, log1p(abundance), the abundance over the
+// plot's total, or a weight falling with the species' abundance rank.
+enum class PoolWeighting { Binary, Abundance, Log1p, Norm, Rank };
+
+// Configuration for dataset loading
+struct DatasetConfig {
+    // Species encoding configuration
+    SpeciesEncodingMode species_encoding = SpeciesEncodingMode::Hash;
+    int hash_dim = 32;
+    int top_k = 3;
+    int top_k_species = 10;  // For embed mode
+    // Which species of a plot survive its per-plot budget. Each encoding takes
+    // its budget from the knob that also fixes its width:
+    //   hash          -> top_k
+    //   embed         -> top_k_species (All is rejected: a fixed number of
+    //                    ranked slots cannot encode every species)
+    //   rank_pool /
+    //   transformer /
+    //   sparse        -> species_budget below, 0 by default = no budget
+    // The selection ranks a plot's species by their recorded abundance (summed
+    // over a species' records in the plot), ties by name.
+    SelectionMode selection = SelectionMode::Top;
+    // The value each species carries into the encoding: its abundance, or 1.0
+    // under PresenceAbsence. Applies to every encoding: the hash weights, the
+    // sparse vector, the rank-pool / transformer weights (whose has_cover flag
+    // is then 0), the abundance-ranked taxonomy slots and the unknown-species
+    // fraction. The selection still ranks by recorded abundance.
+    RepresentationMode representation = RepresentationMode::Abundance;
+    // Rescales the hash weights of a plot's selected species: Raw, Norm (divide
+    // by their sum) or Log1p.
+    NormalizationMode normalization = NormalizationMode::Raw;
+    // How the fixed genus / family slots of the hash, sparse and embed
+    // encodings rank a plot's taxa: Abundance by the summed value of their
+    // species, Count by how many of the plot's species they hold. rank_pool /
+    // transformer carry each species' own taxonomy and reject Count.
+    AggregationMode aggregation = AggregationMode::Abundance;
+
+    // Unknown species tracking
+    bool track_unknown_fraction = true;
+    bool track_unknown_count = false;
+
+    // Taxonomy
+    bool use_taxonomy = true;  // If available in data
+
+    // CUDA hash computation (for hash mode)
+    // When true, stores raw species data in CSR form for on-the-fly GPU hash
+    // computation per batch instead of a precomputed hash embedding.
+    bool use_cuda_hash = false;
+
+    // Per-species weight scheme for the rank_pool / transformer encoders:
+    // binary, abundance, log1p, norm or rank. Ignored for hash / embed /
+    // sparse encodings.
+    PoolWeighting pool_weighting = PoolWeighting::Log1p;
+
+    // Cap on species-per-plot for rank_pool / transformer encoders. Caps the
+    // padded `max_species` dimension to avoid one outlier plot inflating the
+    // padding for the whole dataset.
+    //
+    //   0 (default) : no cap. The longest plot in the dataset dictates the
+    //                 width of every row's pool tensors.
+    //  -x           : a percentile cap, read as 100 - x: -1 is the 99th
+    //                 percentile, -5 the 95th; x runs 1..99, and -100 or
+    //                 below is rejected. The percentile of per-plot species
+    //                 counts is computed on the data being loaded and longer
+    //                 plots are truncated to it, printing a one-line summary
+    //                 so users see the drop. It is a cap, not "no cap": that
+    //                 is 0.
+    //  >0           : manual cap. Truncate longer plots to this many species,
+    //                 kept in plot order (the order of their first record).
+    //
+    // Plots shorter than the cap are unaffected. Truncation is a hard slice
+    // (not top-k by abundance); the rank-pool weighting still applies to
+    // whatever survives the slice.
+    int pool_species_cap = 0;
+
+    // Per-plot species budget for the encodings whose width is not otherwise
+    // fixed: rank_pool, transformer and sparse. `selection` picks
+    // which species survive it.
+    //
+    //   0 (default) : no budget. Every species a plot records is encoded,
+    //                 whatever `selection` says.
+    //   >0          : keep this many species per plot, taken from the end of
+    //                 the abundance ranking `selection` names (up to 2x this
+    //                 many under TopBottom, as everywhere else). This is what
+    //                 makes a top-versus-bottom species ablation reachable on
+    //                 the pooled encoders.
+    //
+    // SelectionMode::All names no rule for picking a subset, so it encodes
+    // every species regardless of the budget. For rank_pool / transformer the
+    // budget narrows the plot BEFORE pool_species_cap slices it, so a cap still
+    // means what it documents: the first `cap` survivors in plot order.
+    //
+    // The species vocabulary is fitted over every species, budget or not, so
+    // the integer codes are identical across settings and an ablation's arms
+    // stay comparable.
+    int species_budget = 0;
+
+    // How a missing numeric covariate or coordinate enters the model:
+    //
+    //   Indicate (default) : the loader keeps the cell as NaN; the model reads
+    //                        the fitting fold's mean in its place and a 0/1
+    //                        column beside the covariates that marks it (one per
+    //                        covariate, one for the coordinate pair).
+    //   Zero               : the cell is read as 0.0 and nothing marks it, so a
+    //                        recorded 0 and a missing value are one input.
+    MissingValuePolicy missing_values = MissingValuePolicy::Indicate;
+
+    // The abundance a record whose recorded abundance is exactly 0 is read at.
+    // Vegetation archives write a record that states presence without a cover
+    // estimate as 0% (EVA converts every cover scale to a percentage), and a
+    // weighting such as log1p then gives the species no weight at all, so a
+    // presence-only survey reaches the model with no species signal. Setting
+    // this to 1.0 reads such a record at the weight a record with a missing
+    // cover already gets. The default 0.0 reads a 0 as 0, i.e. leaves the
+    // recorded value alone. Negative values are rejected at load.
+    float zero_abundance_as = 0.0f;
+};
+
+// The loader settings of a schema no loader recorded: a schema assembled by
+// hand, whose caller lays out the continuous block itself, and every setting a
+// checkpoint written before that setting existed does not carry. Each is what
+// the engine did before the setting existed: the DatasetConfig default, except
+// that a missing covariate or coordinate was read as 0 and not flagged.
+inline DatasetConfig unrecorded_dataset_config() {
+    DatasetConfig config;
+    config.missing_values = MissingValuePolicy::Zero;
+    return config;
+}
+
 // Configuration for a prediction target
 struct TargetConfig {
     std::string name;
@@ -225,13 +355,21 @@ struct TargetConfig {
     TargetMissingPolicy missing = TargetMissingPolicy::Drop;
 };
 
+// The label a class code is written as: class_names[code] when the target
+// carries a class vocabulary that holds the code, otherwise the code itself in
+// decimal (a column that was already integer-coded has no vocabulary).
+inline std::string class_label(const std::vector<std::string>& class_names, int64_t code) {
+    const bool in_vocab = code >= 0 && code < static_cast<int64_t>(class_names.size());
+    return in_vocab ? class_names[static_cast<size_t>(code)] : std::to_string(code);
+}
+
 // Schema information for a dataset
 struct ResolveSchema {
     int64_t n_plots = 0;
     int64_t n_species = 0;          // Number of unique species
     int64_t n_species_vocab = 0;    // Size of species vocabulary (for embed/sparse modes)
     bool has_coordinates = false;   // Default false, set true when coords found
-    bool has_abundance = false;
+    bool has_abundance = false;     // the species records carried an abundance column
     bool has_taxonomy = false;
     // Genus / family vocabulary sizes, the reserved <UNK> code 0 included: the
     // heights of the taxonomy embedding tables. 0 without taxonomy.
@@ -239,8 +377,6 @@ struct ResolveSchema {
     int64_t n_families = 0;
     std::vector<std::string> covariate_names;
     std::vector<TargetConfig> targets;
-    bool track_unknown_fraction = true;
-    bool track_unknown_count = false;
 
     // Categorical covariates. Parallel layout: categorical_names[i] is the
     // CSV column name; categorical_vocab_sizes[i] is the size of that
@@ -255,53 +391,29 @@ struct ResolveSchema {
     // ModelConfig — important for Predictor.load.
     int64_t categorical_embed_dim = 8;
 
-    // Rank-pool / transformer pooling scheme + species cap used to build the
-    // pool weight tensors at load time. Stored so a checkpoint can rebuild the
-    // matching inference-side DatasetConfig instead of silently defaulting to
-    // Log1p (which recomputes different per-species weights for the same model).
-    // pool_weighting is the underlying PoolWeighting enum value
-    // (Binary=0, Abundance=1, Log1p=2, Norm=3, Rank=4); kept as int because
-    // types.hpp cannot include species_encoding.hpp. pool_species_cap mirrors
-    // DatasetConfig::pool_species_cap, whose sentinels are 0 = no cap (pad to
-    // the global per-plot max), -1 = auto p99, >0 = manual cap. After a
-    // rank-pool / transformer load the dataset overwrites this with the
-    // RESOLVED width, so a checkpoint always carries a concrete >0 cap.
-    int pool_weighting = 2;    // PoolWeighting::Log1p
-    int pool_species_cap = 0;  // 0 = no cap, -x = p(100 - x), >0 = manual cap
+    // The loader settings the dataset was encoded with: what an inference run
+    // must encode new plots with for the model to read them as it was trained
+    // to. A checkpoint carries them (config_registry.hpp gives every persisted
+    // row its key), and dataset_config_from_checkpoint (dataset.hpp) is the one
+    // place that turns them back into the DatasetConfig of a load.
+    //
+    // `selection` is the selection the load APPLIED, not the one it was
+    // configured with: a rank_pool / transformer / sparse dataset with no
+    // species_budget encodes every record, which is All (effective_selection).
+    // `pool_species_cap` is, after a rank_pool / transformer load, the width
+    // the species were truncated to, so a checkpoint carries a concrete cap.
+    // `species_encoding`, `hash_dim` and `top_k` also size the model; the
+    // ModelConfig is authoritative for them. `use_cuda_hash` records the
+    // training-time compute path; an inference load does not take it over.
+    //
+    // A setting the loader did not record holds unrecorded_dataset_config()'s
+    // value, the value the engine used before the setting existed.
+    DatasetConfig dataset_config = unrecorded_dataset_config();
 
-    // Remaining DatasetConfig knobs that shape the encoded tensors but are not
-    // recoverable from ModelConfig. Persisted so an inference-side
-    // DatasetConfig can be rebuilt in full from the checkpoint rather than
-    // silently reverting to the struct defaults: top_k_species and
-    // track_unknown_count change tensor widths (loud shape errors), while
-    // selection / representation / normalization / aggregation / use_taxonomy
-    // change values silently. Read back through
-    // dataset_config_from_checkpoint() (dataset.hpp), the single place that
-    // reassembles a DatasetConfig from a checkpoint.
-    int top_k_species = 10;
-    // The selection the run APPLIED, not the one it was configured with: a
-    // rank_pool / transformer / sparse dataset with no species_budget encodes
-    // every record, which is All. See effective_selection().
-    SelectionMode selection = SelectionMode::Top;
-    // Per-plot species budget for the rank_pool / transformer / sparse
-    // encodings; 0 = no budget. Mirrors DatasetConfig::species_budget.
-    int species_budget = 0;
-    RepresentationMode representation = RepresentationMode::Abundance;
-    NormalizationMode normalization = NormalizationMode::Raw;
-    AggregationMode aggregation = AggregationMode::Abundance;
-    bool use_taxonomy = true;
-
-    // How missing covariates and coordinates enter the continuous block.
-    // Mirrors DatasetConfig::missing_values, which a dataset load copies here.
-    // Zero for a schema assembled by hand, whose caller lays out the block
-    // itself, and for a checkpoint written before the field existed, which is
-    // what those models were trained under.
-    MissingValuePolicy missing_values = MissingValuePolicy::Zero;
-
-    // The abundance a recorded 0 was read at. Mirrors
-    // DatasetConfig::zero_abundance_as; 0 (a 0 stays 0) for a checkpoint
-    // written before the field existed, which is what its loader did.
-    float zero_abundance_as = 0.0f;
+    // The DatasetConfig fields a loaded checkpoint did not carry, because it
+    // was written before they existed; each holds unrecorded_dataset_config()'s
+    // value. Empty for a schema a loader built. Not persisted.
+    std::vector<std::string> unrecorded_dataset_settings;
 
     // Ordered species / genus / family vocabularies fitted at training time.
     // Element i is the name that encodes to integer code i, and
@@ -356,7 +468,7 @@ struct ResolveSchema {
     // for the coordinate pair and one per covariate under Indicate, none under
     // Zero. Single source of truth for every place that sizes the block.
     [[nodiscard]] int64_t missing_flag_width() const noexcept {
-        if (missing_values != MissingValuePolicy::Indicate) return 0;
+        if (dataset_config.missing_values != MissingValuePolicy::Indicate) return 0;
         return (has_coordinates ? 1 : 0) + static_cast<int64_t>(covariate_names.size());
     }
     // Helper: the width of the continuous block a model's encoder receives
@@ -366,8 +478,8 @@ struct ResolveSchema {
     // after it.
     [[nodiscard]] int64_t continuous_width() const noexcept {
         return (has_coordinates ? 2 : 0) + static_cast<int64_t>(covariate_names.size()) +
-               missing_flag_width() + (track_unknown_fraction ? 1 : 0) +
-               (track_unknown_count ? 1 : 0) + categorical_embed_width();
+               missing_flag_width() + (dataset_config.track_unknown_fraction ? 1 : 0) +
+               (dataset_config.track_unknown_count ? 1 : 0) + categorical_embed_width();
     }
     // Helper: the height of the genus / family embedding tables a model
     // builds for the taxonomy slots -- the vocabulary size, <UNK> included, or
@@ -807,6 +919,8 @@ struct TrainResult {
     std::unordered_map<std::string, std::unordered_map<std::string, float>> final_metrics;
     std::vector<float> train_loss_history;
     std::vector<float> test_loss_history;
+    // The learning rate each epoch trained at, one value per epoch.
+    std::vector<float> lr_history;
 
     // The two histories above split by target. Per epoch, a target's entry is
     // the term it adds to that epoch's total: its weighted loss, averaged over

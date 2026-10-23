@@ -16,17 +16,23 @@
 //
 // Adding a flag is one row plus one read. No torch, no engine types: this
 // header is pure string handling so the parsing rules can be unit-tested
-// without a process (see tests/test_effective_batch.cpp).
+// without a process (tests/test_effective_batch.cpp).
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
+
+#include "resolve/number_text.hpp"
 
 namespace resolve_cli {
 
@@ -56,9 +62,9 @@ public:
 namespace detail {
 
 // Lowercase and drop '-' / '_' so "--maxepochs" and "--max_epochs" both
-// normalize to the same key as "--max-epochs". Those two spellings are exactly
-// the typos an ignored-unknown-flag parser used to swallow, so the suggestion
-// is derived from the same normalization rather than an edit distance.
+// normalize to the same key as "--max-epochs". Those two spellings are the
+// common typos, so the suggestion is derived from the same normalization
+// rather than an edit distance.
 inline std::string normalize_flag(const std::string& s) {
     std::string out;
     out.reserve(s.size());
@@ -71,11 +77,54 @@ inline std::string normalize_flag(const std::string& s) {
 
 }  // namespace detail
 
+// A whole-value integer: digits with an optional leading '-', nothing before
+// or after them ("256x", " 256", "2.5" and "" are refused), within int64.
+inline int64_t parse_int64_value(const std::string& flag, const std::string& raw) {
+    int64_t value = 0;
+    const char* end = raw.data() + raw.size();
+    const auto [ptr, ec] = std::from_chars(raw.data(), end, value);
+    if (raw.empty() || ec != std::errc() || ptr != end) {
+        throw ArgError(flag + " expects an integer, got '" + raw + "'");
+    }
+    return value;
+}
+
+// As parse_int64_value, within the range of int.
+inline int parse_int_value(const std::string& flag, const std::string& raw) {
+    const int64_t value = parse_int64_value(flag, raw);
+    if (value < std::numeric_limits<int>::min() || value > std::numeric_limits<int>::max()) {
+        throw ArgError(flag + " expects an integer between " +
+                       std::to_string(std::numeric_limits<int>::min()) + " and " +
+                       std::to_string(std::numeric_limits<int>::max()) + ", got '" + raw + "'");
+    }
+    return static_cast<int>(value);
+}
+
+// A whole-value finite decimal number with '.' as the decimal point whatever
+// the process locale ("0.5x", "1,5", "inf" and "" are refused).
+inline float parse_float_value(const std::string& flag, const std::string& raw) {
+    float value = 0.0f;
+    if (!resolve::decimal_to_number(raw, value) || !std::isfinite(value)) {
+        throw ArgError(flag + " expects a number, got '" + raw + "'");
+    }
+    return value;
+}
+
 // The flag table for one subcommand, plus the prose that heads its help block.
+// A flag declared twice is a programming error in the table and throws.
 class CommandSpec {
 public:
     CommandSpec(std::string name, std::string summary, std::vector<FlagSpec> flags)
-        : name_(std::move(name)), summary_(std::move(summary)), flags_(std::move(flags)) {}
+        : name_(std::move(name)), summary_(std::move(summary)), flags_(std::move(flags)) {
+        for (std::size_t i = 0; i < flags_.size(); ++i) {
+            for (std::size_t j = 0; j < i; ++j) {
+                if (std::string(flags_[i].name) == flags_[j].name) {
+                    throw std::logic_error("command '" + name_ + "' declares " +
+                                           flags_[i].name + " twice");
+                }
+            }
+        }
+    }
 
     [[nodiscard]] const std::string& name() const noexcept { return name_; }
     [[nodiscard]] const std::string& summary() const noexcept { return summary_; }
@@ -177,13 +226,13 @@ public:
     }
 
     [[nodiscard]] int get_int(const std::string& flag) const {
-        return static_cast<int>(parse_int64(flag, get(flag)));
+        return parse_int_value(flag, get(flag));
     }
     [[nodiscard]] int64_t get_int64(const std::string& flag) const {
-        return parse_int64(flag, get(flag));
+        return parse_int64_value(flag, get(flag));
     }
     [[nodiscard]] float get_float(const std::string& flag) const {
-        return parse_float(flag, get(flag));
+        return parse_float_value(flag, get(flag));
     }
 
     // Boolean carried by a pair of opposing presence flags (--amp / --no-amp).
@@ -223,28 +272,6 @@ private:
                            "' read undeclared flag " + flag);
         }
         return found;
-    }
-
-    static int64_t parse_int64(const std::string& flag, const std::string& raw) {
-        try {
-            size_t consumed = 0;
-            const long long value = std::stoll(raw, &consumed);
-            if (consumed != raw.size()) throw std::invalid_argument("trailing characters");
-            return static_cast<int64_t>(value);
-        } catch (const std::exception&) {
-            throw ArgError(flag + " expects an integer, got '" + raw + "'");
-        }
-    }
-
-    static float parse_float(const std::string& flag, const std::string& raw) {
-        try {
-            size_t consumed = 0;
-            const float value = std::stof(raw, &consumed);
-            if (consumed != raw.size()) throw std::invalid_argument("trailing characters");
-            return value;
-        } catch (const std::exception&) {
-            throw ArgError(flag + " expects a number, got '" + raw + "'");
-        }
     }
 
     const CommandSpec* spec_ = nullptr;

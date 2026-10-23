@@ -2,6 +2,7 @@
 
 #include "resolve/config_registry.hpp"
 #include "resolve/enum_names.hpp"
+#include "resolve/number_text.hpp"
 #include "resolve/sha256.hpp"
 
 #include <algorithm>
@@ -245,7 +246,7 @@ json::Value target_to_json(const SuiteTarget& t) {
     o.set("outputs", json::Value::array_of(t.outputs));
     o.set("units", t.units);
     if (t.inputs) o.set("inputs", target_inputs_to_json(*t.inputs));
-    if (t.combine == SuiteCombine::CircularMean) o.set("period", t.period);
+    if (combine_rule(t.combine).needs_period) o.set("period", t.period);
     o.set("status", enum_to_name(t.status));
     if (!t.limit.empty()) o.set("limit", t.limit);
     json::Value members = json::Value::array();
@@ -255,6 +256,7 @@ json::Value target_to_json(const SuiteTarget& t) {
         mo.set("file", m.file);
         mo.set("sha256", m.sha256);
         mo.set("bytes", m.bytes);
+        if (m.zero_abundance_as) mo.set("zero_abundance_as", *m.zero_abundance_as);
         members.push_back(std::move(mo));
     }
     o.set("members", std::move(members));
@@ -286,6 +288,9 @@ SuiteTarget target_from_json(const json::Value& value, const std::string& where)
         m.file = mr.string("file", true);
         m.sha256 = mr.string("sha256", false);
         m.bytes = mr.integer("bytes", false);
+        if (mr.get("zero_abundance_as") != nullptr) {
+            m.zero_abundance_as = static_cast<float>(mr.number("zero_abundance_as", 0.0));
+        }
         mr.finish();
         t.members.push_back(std::move(m));
     }
@@ -343,8 +348,9 @@ SuiteManifest SuiteManifest::from_json(const json::Value& value) {
     r.finish();
     if (version < m.format_version()) {
         r.fail("format_version", "is " + std::to_string(version) + ", but the manifest uses "
-               "per-target inputs or a spherical mean, which need version " +
-               std::to_string(m.format_version()));
+               "features that need version " + std::to_string(m.format_version()) +
+               " (per-target inputs and the spherical mean need version 2, a member's own "
+               "zero_abundance_as version 3)");
     }
     return m;
 }
@@ -355,10 +361,15 @@ SuiteTargetInputs SuiteManifest::inputs_of(const SuiteTarget& target) const {
 }
 
 int SuiteManifest::format_version() const {
+    int version = 1;
     for (const auto& t : targets) {
-        if (t.inputs || t.combine == SuiteCombine::SphericalMean) return 2;
+        version = std::max(version, combine_rule(t.combine).format_version);
+        if (t.inputs) version = std::max(version, 2);
+        for (const auto& m : t.members) {
+            if (m.zero_abundance_as) version = std::max(version, 3);
+        }
     }
-    return 1;
+    return version;
 }
 
 void SuiteManifest::validate() const {
@@ -394,48 +405,23 @@ void SuiteManifest::validate() const {
             problems.add(where + ".name", "'" + t.name + "' names two targets");
         }
 
-        switch (t.combine) {
-            case SuiteCombine::Vote:
-                if (t.task != TaskType::Classification) {
-                    problems.add(where, "a vote combines class predictions; task must be classification");
-                }
-                if (t.outputs.size() != 1) problems.add(where + ".outputs", "a vote reads one output");
-                break;
-            case SuiteCombine::Mean:
-                if (t.task != TaskType::Regression) {
-                    problems.add(where, "a mean combines values; task must be regression");
-                }
-                if (t.outputs.size() != 1) problems.add(where + ".outputs", "a mean reads one output");
-                break;
-            case SuiteCombine::CircularMean:
-                if (t.task != TaskType::Regression) {
-                    problems.add(where, "a circular mean combines bearings; task must be regression");
-                }
-                if (t.outputs.size() != 1 && t.outputs.size() != 2) {
-                    problems.add(where + ".outputs", "a circular mean reads one output (the "
-                                 "bearing) or two (its sine, then its cosine)");
-                }
-                if (!(std::isfinite(t.period) && t.period > 0.0)) {
-                    problems.add(where + ".period", "a circular mean needs a positive period");
-                }
-                break;
-            case SuiteCombine::SphericalMean:
-                if (t.task != TaskType::Regression) {
-                    problems.add(where, "a spherical mean combines coordinates; task must be "
-                                 "regression");
-                }
-                if (t.outputs.size() != 2) {
-                    problems.add(where + ".outputs", "a spherical mean reads two outputs "
-                                 "(latitude, then longitude)");
-                }
-                if (t.units != "degrees") {
-                    problems.add(where + ".units", "a spherical mean reads latitude and "
-                                 "longitude in degrees; units must be 'degrees'");
-                }
-                break;
+        const SuiteCombineRule& rule = combine_rule(t.combine);
+        if (t.task != rule.task) {
+            problems.add(where, std::string(rule.noun) + " combines " + rule.combines +
+                         "; task must be " + enum_to_name(rule.task));
         }
-        if (t.combine != SuiteCombine::CircularMean && t.period != 0.0) {
-            problems.add(where + ".period", "is read only by a circular mean");
+        if (t.outputs.size() < rule.min_outputs || t.outputs.size() > rule.max_outputs) {
+            problems.add(where + ".outputs", std::string(rule.noun) + " reads " + rule.outputs);
+        }
+        if (rule.required_units != nullptr && t.units != rule.required_units) {
+            problems.add(where + ".units", std::string(rule.noun) + " reads its outputs in " +
+                         rule.required_units + "; units must be '" + rule.required_units + "'");
+        }
+        if (rule.needs_period && !(std::isfinite(t.period) && t.period > 0.0)) {
+            problems.add(where + ".period", std::string(rule.noun) + " needs a positive period");
+        }
+        if (!rule.needs_period && t.period != 0.0) {
+            problems.add(where + ".period", "is read only by a combine rule with a period");
         }
         for (const auto& out : t.outputs) {
             if (out.empty()) problems.add(where + ".outputs", "an output name is empty");
@@ -463,6 +449,10 @@ void SuiteManifest::validate() const {
                              "manifest to fill it)");
             }
             if (m.bytes <= 0) problems.add(mw + ".bytes", "must be positive (seal the manifest)");
+            if (m.zero_abundance_as &&
+                !(std::isfinite(*m.zero_abundance_as) && *m.zero_abundance_as >= 0.0f)) {
+                problems.add(mw + ".zero_abundance_as", "must be a finite value >= 0");
+            }
         }
 
         if (t.inputs) {
@@ -582,9 +572,13 @@ std::string member_problem(const std::string& dir, const std::string& target,
 
 }  // namespace
 
-std::vector<std::string> SuiteManifest::verify(const std::string& dir) const {
+std::vector<std::string> SuiteManifest::verify(const std::string& dir,
+                                               const std::vector<std::string>& names) const {
     std::vector<std::string> problems;
     for (const auto& t : targets) {
+        if (!names.empty() && std::find(names.begin(), names.end(), t.name) == names.end()) {
+            continue;
+        }
         for (const auto& m : t.members) {
             if (std::string p = member_problem(dir, t.name, m); !p.empty()) {
                 problems.push_back(std::move(p));
@@ -709,14 +703,23 @@ CombinedPrediction combine_circular(const torch::Tensor& member_bearings, double
     const auto radians = member_bearings.to(torch::kCPU, torch::kFloat64) * (kTwoPi / period);
     const auto s = radians.sin().mean(0);
     const auto c = radians.cos().mean(0);
-    CombinedPrediction out;
-    out.value = torch::remainder(torch::atan2(s, c) * (period / kTwoPi), period).to(torch::kFloat32);
     // Mean resultant length R in [0, 1]; the circular standard deviation
     // sqrt(-2 ln R) is 0 when every member names the same bearing and grows
-    // without bound as the bearings spread round the circle.
+    // without bound as the bearings spread round the circle. Members whose
+    // vectors cancel name no bearing: both are left undefined rather than
+    // chosen arbitrarily.
     const auto resultant = torch::sqrt(s * s + c * c).clamp_max(1.0);
-    out.dispersion = (torch::sqrt(-2.0 * torch::log(resultant)) * (period / kTwoPi))
-                         .to(torch::kFloat32);
+    const auto cancelled = resultant < kCancelledResultant;
+    const auto nan = torch::full_like(resultant, std::numeric_limits<double>::quiet_NaN());
+    CombinedPrediction out;
+    out.value = torch::where(cancelled, nan,
+                             torch::remainder(torch::atan2(s, c) * (period / kTwoPi), period))
+                    .to(torch::kFloat32);
+    out.dispersion = member_bearings.size(0) == 1
+        ? torch::full({member_bearings.size(1)}, std::numeric_limits<float>::quiet_NaN())
+        : torch::where(cancelled, nan,
+                       torch::sqrt(-2.0 * torch::log(resultant)) * (period / kTwoPi))
+              .to(torch::kFloat32);
     return out;
 }
 
@@ -736,7 +739,8 @@ CombinedPrediction combine_spherical(const torch::Tensor& member_coordinates) {
     const auto norm = sum.norm(2, /*dim=*/{1}, /*keepdim=*/true);
     // Members whose vectors cancel name no direction: the combined point is
     // left undefined rather than chosen arbitrarily.
-    const auto centre = torch::where(norm > 1e-12, sum / norm,
+    const auto resultant = norm / static_cast<double>(c.size(0));
+    const auto centre = torch::where(resultant >= kCancelledResultant, sum / norm,
                                      torch::full_like(sum, std::numeric_limits<double>::quiet_NaN()));
     const auto x = centre.select(1, 0);
     const auto y = centre.select(1, 1);
@@ -763,6 +767,201 @@ torch::Tensor bearing_from_components(const torch::Tensor& sine, const torch::Te
     }
     const auto angle = torch::atan2(sine.to(torch::kFloat64), cosine.to(torch::kFloat64));
     return torch::remainder(angle * (period / kTwoPi), period).to(torch::kFloat32);
+}
+
+// ============================================================================
+// Combine rules
+// ============================================================================
+
+namespace {
+
+torch::Tensor member_head(const ResolvePredictions& member, const std::string& name) {
+    return member.predictions.at(name).detach().to(torch::kCPU);
+}
+
+SuiteMemberOutput extract_vote(const SuiteTarget& target, const ResolvePredictions& member) {
+    const std::string& head = target.outputs.front();
+    return {member_head(member, head).to(torch::kLong),
+            member.probabilities.at(head).detach().to(torch::kCPU)};
+}
+
+SuiteMemberOutput extract_mean(const SuiteTarget& target, const ResolvePredictions& member) {
+    return {member_head(member, target.outputs.front()).to(torch::kFloat32), {}};
+}
+
+// A bearing from one head, or from a sine / cosine pair.
+SuiteMemberOutput extract_bearing(const SuiteTarget& target, const ResolvePredictions& member) {
+    if (target.outputs.size() == 2) {
+        return {bearing_from_components(member_head(member, target.outputs[0]),
+                                        member_head(member, target.outputs[1]), target.period),
+                {}};
+    }
+    return {torch::remainder(member_head(member, target.outputs.front()).to(torch::kFloat64),
+                             target.period)
+                .to(torch::kFloat32),
+            {}};
+}
+
+SuiteMemberOutput extract_coordinates(const SuiteTarget& target, const ResolvePredictions& member) {
+    return {torch::stack({member_head(member, target.outputs[0]).to(torch::kFloat32),
+                          member_head(member, target.outputs[1]).to(torch::kFloat32)},
+                         1),
+            {}};
+}
+
+CombinedPrediction combine_by_vote(const torch::Tensor& members, const torch::Tensor& probabilities,
+                                   const SuiteTarget&) {
+    return combine_vote(members, probabilities.size(1), probabilities);
+}
+
+CombinedPrediction combine_by_mean(const torch::Tensor& members, const torch::Tensor&,
+                                   const SuiteTarget&) {
+    return combine_mean(members);
+}
+
+CombinedPrediction combine_by_circular_mean(const torch::Tensor& members, const torch::Tensor&,
+                                            const SuiteTarget& target) {
+    return combine_circular(members, target.period);
+}
+
+CombinedPrediction combine_by_spherical_mean(const torch::Tensor& members, const torch::Tensor&,
+                                             const SuiteTarget&) {
+    return combine_spherical(members);
+}
+
+// In SuiteCombine order.
+const SuiteCombineRule kSuiteCombineRules[] = {
+    {SuiteCombine::Mean, "a mean", TaskType::Regression, "values", 1, 1, "one output", false,
+     nullptr, 1, DispersionUnits::TargetUnits, {"", nullptr}, "_sd",
+     "members' standard deviation", &extract_mean, &combine_by_mean},
+    {SuiteCombine::Vote, "a vote", TaskType::Classification, "class predictions", 1, 1,
+     "one output", false, nullptr, 1, DispersionUnits::None, {"", nullptr}, nullptr,
+     nullptr, &extract_vote, &combine_by_vote},
+    {SuiteCombine::CircularMean, "a circular mean", TaskType::Regression, "bearings", 1, 2,
+     "one output (the bearing) or two (its sine, then its cosine)", true, nullptr, 1,
+     DispersionUnits::TargetUnits, {"", nullptr}, "_circular_sd",
+     "members' circular standard deviation", &extract_bearing, &combine_by_circular_mean},
+    {SuiteCombine::SphericalMean, "a spherical mean", TaskType::Regression, "coordinates", 2, 2,
+     "two outputs (latitude, then longitude)", false, "degrees", 2,
+     DispersionUnits::Kilometres, {"_latitude", "_longitude"}, "_spread_km",
+     "median great-circle distance of the members from the combined point, km",
+     &extract_coordinates, &combine_by_spherical_mean},
+};
+
+}  // namespace
+
+std::span<const SuiteCombineRule> suite_combine_rules() { return kSuiteCombineRules; }
+
+const SuiteCombineRule& combine_rule(SuiteCombine combine) {
+    for (const auto& rule : kSuiteCombineRules) {
+        if (rule.combine == combine) return rule;
+    }
+    throw std::invalid_argument("suite: no combine rule for value " +
+                                std::to_string(static_cast<int>(combine)));
+}
+
+// ============================================================================
+// Predictions as columns
+// ============================================================================
+
+namespace {
+
+SuiteColumn number_column(std::string name, const torch::Tensor& values, int64_t n_rows,
+                          bool probability = false) {
+    SuiteColumn column;
+    column.name = std::move(name);
+    column.kind = SuiteColumn::Kind::Number;
+    column.probability = probability;
+    if (!values.defined()) {
+        column.numbers.assign(static_cast<size_t>(n_rows), std::numeric_limits<float>::quiet_NaN());
+        return column;
+    }
+    const auto v = values.to(torch::kCPU).to(torch::kFloat32).contiguous();
+    const float* data = v.numel() > 0 ? v.data_ptr<float>() : nullptr;
+    column.numbers.assign(data, data + v.numel());
+    return column;
+}
+
+SuiteColumn label_column(std::string name, const torch::Tensor& codes,
+                         const std::vector<std::string>& class_names) {
+    SuiteColumn column;
+    column.name = std::move(name);
+    column.kind = SuiteColumn::Kind::Text;
+    const auto c = codes.to(torch::kCPU).to(torch::kLong).contiguous();
+    const int64_t* data = c.numel() > 0 ? c.data_ptr<int64_t>() : nullptr;
+    column.text.reserve(static_cast<size_t>(c.numel()));
+    for (int64_t i = 0; i < c.numel(); ++i) column.text.push_back(class_label(class_names, data[i]));
+    return column;
+}
+
+// Component `i` of a value laid out as `rule.value_columns`: the tensor itself
+// for one column, its column i for two.
+torch::Tensor value_component(const torch::Tensor& value, const SuiteCombineRule& rule, std::size_t i) {
+    return rule.n_value_columns() == 1 ? value : value.select(-1, static_cast<int64_t>(i));
+}
+
+}  // namespace
+
+std::vector<SuiteColumn> suite_prediction_columns(const SuitePredictions& predictions,
+                                                  bool probabilities) {
+    const auto n = static_cast<int64_t>(predictions.plot_ids.size());
+    std::vector<SuiteColumn> columns;
+    SuiteColumn plot_ids;
+    plot_ids.name = "plot_id";
+    plot_ids.kind = SuiteColumn::Kind::Text;
+    plot_ids.text = predictions.plot_ids;
+    columns.push_back(std::move(plot_ids));
+
+    for (const auto& t : predictions.targets) {
+        const SuiteCombineRule& rule = combine_rule(t.combine);
+        const std::string& name = t.name;
+        if (rule.task == TaskType::Classification) {
+            columns.push_back(label_column(name, t.value, t.class_names));
+            SuiteColumn codes;
+            codes.name = name + "_code";
+            codes.kind = SuiteColumn::Kind::Integer;
+            const auto c = t.value.to(torch::kCPU).to(torch::kLong).contiguous();
+            const int64_t* data = c.numel() > 0 ? c.data_ptr<int64_t>() : nullptr;
+            codes.integers.assign(data, data + c.numel());
+            columns.push_back(std::move(codes));
+            columns.push_back(number_column(name + "_agreement", t.agreement, n));
+            if (probabilities && t.probabilities.defined()) {
+                for (int64_t k = 0; k < t.probabilities.size(1); ++k) {
+                    columns.push_back(number_column(name + "_prob_" + class_label(t.class_names, k),
+                                                    t.probabilities.select(1, k), n,
+                                                    /*probability=*/true));
+                }
+            }
+        } else {
+            for (std::size_t i = 0; i < rule.n_value_columns(); ++i) {
+                columns.push_back(number_column(name + rule.value_columns[i],
+                                                value_component(t.value, rule, i), n));
+            }
+        }
+        if (rule.dispersion_column != nullptr) {
+            columns.push_back(number_column(name + rule.dispersion_column, t.dispersion, n));
+        }
+        columns.push_back(number_column(name + "_n_species", t.recognition.n_species, n));
+        columns.push_back(number_column(name + "_n_recognised", t.recognition.n_recognised, n));
+        columns.push_back(number_column(name + "_recognised_share", t.recognition.count_share, n));
+        columns.push_back(number_column(name + "_recognised_abundance_share",
+                                        t.recognition.abundance_share, n));
+        if (t.members.defined()) {
+            for (std::size_t m = 0; m < t.member_seeds.size(); ++m) {
+                const std::string seed = name + "_seed" + std::to_string(t.member_seeds[m]);
+                const torch::Tensor member = t.members.select(0, static_cast<int64_t>(m));
+                if (rule.task == TaskType::Classification) {
+                    columns.push_back(label_column(seed, member, t.class_names));
+                    continue;
+                }
+                for (std::size_t i = 0; i < rule.n_value_columns(); ++i) {
+                    columns.push_back(number_column(seed + rule.value_columns[i],
+                                                    value_component(member, rule, i), n));
+                }
+            }
+        }
+    }
+    return columns;
 }
 
 // ============================================================================
@@ -869,8 +1068,8 @@ void check_member(const SuiteManifest& manifest, const SuiteTarget& target,
     auto fail = [&](const std::string& what) { throw std::runtime_error(label + ": " + what); };
 
     if (!schema.has_species_vocab()) {
-        fail("the checkpoint carries no species vocabulary (written before "
-             "gcol33/resolve#102), so new plots cannot be encoded in its namespace");
+        fail("the checkpoint carries no species vocabulary, only its size, so new plots "
+             "cannot be encoded in its namespace");
     }
     for (const auto& out : target.outputs) {
         const TargetConfig* head = nullptr;
@@ -900,13 +1099,42 @@ void check_member(const SuiteManifest& manifest, const SuiteTarget& target,
                  ? "the checkpoint reads coordinates, " + source + " names none"
                  : source + " names coordinates, the checkpoint reads none");
     }
-    if (schema.has_taxonomy && in.genus.empty() && in.family.empty()) {
-        fail("the checkpoint reads genus / family, the input contract names neither column");
+    // A taxonomy vocabulary always holds <UNK>; a level the data named holds
+    // more.
+    if (schema.has_taxonomy && schema.n_genera > 1 && in.genus.empty()) {
+        fail("the checkpoint reads genus, the input contract names no genus column");
     }
-    if (schema.zero_abundance_as != 0.0f && schema.zero_abundance_as != in.zero_abundance_as) {
-        fail("the checkpoint was trained reading a zero abundance as " +
-             std::to_string(schema.zero_abundance_as) + ", the input contract as " +
-             std::to_string(in.zero_abundance_as));
+    if (schema.has_taxonomy && schema.n_families > 1 && in.family.empty()) {
+        fail("the checkpoint reads family, the input contract names no family column");
+    }
+    if (schema.has_abundance && in.abundance.empty()) {
+        fail("the checkpoint was trained on recorded abundances, the input contract names no "
+             "abundance column");
+    }
+
+    // The abundance a recorded 0 was read at in training: the checkpoint's
+    // record, or for a checkpoint that predates the setting the value the
+    // manifest states for the member. A member with neither is read at the
+    // contract's value.
+    const auto& unrecorded = schema.unrecorded_dataset_settings;
+    const bool recorded = std::find(unrecorded.begin(), unrecorded.end(), "zero_abundance_as") ==
+                          unrecorded.end();
+    auto as_text = [](float v) { return number_to_decimal(v); };
+    if (recorded) {
+        const float trained = schema.dataset_config.zero_abundance_as;
+        if (member.zero_abundance_as && *member.zero_abundance_as != trained) {
+            fail("the manifest states the member read a zero abundance as " +
+                 as_text(*member.zero_abundance_as) + ", the checkpoint records " +
+                 as_text(trained));
+        }
+        if (trained != in.zero_abundance_as) {
+            fail("the checkpoint was trained reading a zero abundance as " + as_text(trained) +
+                 ", the input contract reads it as " + as_text(in.zero_abundance_as));
+        }
+    } else if (member.zero_abundance_as && *member.zero_abundance_as != in.zero_abundance_as) {
+        fail("the manifest states the member read a zero abundance as " +
+             as_text(*member.zero_abundance_as) + ", the input contract reads it as " +
+             as_text(in.zero_abundance_as));
     }
 }
 
@@ -962,15 +1190,9 @@ SuitePredictor SuitePredictor::load(const std::string& dir, const SuiteLoadOptio
     }
 
     if (options.verify_checksums) {
-        std::vector<std::string> problems;
-        for (const std::size_t i : selected) {
-            const SuiteTarget& t = manifest.targets[i];
-            for (const auto& m : t.members) {
-                if (std::string p = member_problem(dir, t.name, m); !p.empty()) {
-                    problems.push_back(std::move(p));
-                }
-            }
-        }
+        std::vector<std::string> names;
+        for (const std::size_t i : selected) names.push_back(manifest.targets[i].name);
+        const std::vector<std::string> problems = manifest.verify(dir, names);
         if (!problems.empty()) {
             std::string msg = "suite '" + manifest.name + "' in '" + dir +
                               "' does not match its manifest:";
@@ -1160,65 +1382,35 @@ SuitePredictions SuitePredictor::predict(const SuiteInput& input,
             out.status = spec.status;
             out.limit = spec.limit;
             out.units = spec.units;
-            out.dispersion_units = spec.combine == SuiteCombine::Vote          ? std::string()
-                                   : spec.combine == SuiteCombine::SphericalMean ? std::string("km")
-                                                                                 : spec.units;
+            const SuiteCombineRule& rule = combine_rule(spec.combine);
+            switch (rule.dispersion_units) {
+                case DispersionUnits::None: out.dispersion_units.clear(); break;
+                case DispersionUnits::TargetUnits: out.dispersion_units = spec.units; break;
+                case DispersionUnits::Kilometres: out.dispersion_units = "km"; break;
+            }
             out.class_names = loaded.class_names;
 
             std::vector<torch::Tensor> member_values;
             std::vector<torch::Tensor> member_probabilities;
             for (auto& member : loaded.members) {
                 out.member_seeds.push_back(member.seed);
-                ResolvePredictions p =
-                    member.predictor.predict(dataset, /*return_latent=*/false, options.batch_size);
-                auto head = [&](const std::string& name) {
-                    return p.predictions.at(name).detach().to(torch::kCPU);
-                };
-                switch (spec.combine) {
-                    case SuiteCombine::Vote:
-                        member_values.push_back(head(spec.outputs.front()).to(torch::kLong));
-                        member_probabilities.push_back(
-                            p.probabilities.at(spec.outputs.front()).detach().to(torch::kCPU));
-                        break;
-                    case SuiteCombine::Mean:
-                        member_values.push_back(head(spec.outputs.front()).to(torch::kFloat32));
-                        break;
-                    case SuiteCombine::CircularMean:
-                        member_values.push_back(
-                            spec.outputs.size() == 2
-                                ? bearing_from_components(head(spec.outputs[0]),
-                                                          head(spec.outputs[1]), spec.period)
-                                : torch::remainder(head(spec.outputs.front()).to(torch::kFloat64),
-                                                   spec.period).to(torch::kFloat32));
-                        break;
-                    case SuiteCombine::SphericalMean:
-                        member_values.push_back(torch::stack(
-                            {head(spec.outputs[0]).to(torch::kFloat32),
-                             head(spec.outputs[1]).to(torch::kFloat32)}, 1));
-                        break;
+                SuiteMemberOutput output = rule.extract(
+                    spec, member.predictor.predict(dataset, /*return_latent=*/false,
+                                                   options.batch_size));
+                member_values.push_back(std::move(output.value));
+                if (output.probabilities.defined()) {
+                    member_probabilities.push_back(std::move(output.probabilities));
                 }
             }
 
             const torch::Tensor stack = reorder(torch::stack(member_values, 0), perm, 1);
-            CombinedPrediction combined;
-            switch (spec.combine) {
-                case SuiteCombine::Vote: {
-                    const auto probabilities =
-                        reorder(torch::stack(member_probabilities, 0).mean(0), perm, 0);
-                    combined = combine_vote(stack, probabilities.size(1), probabilities);
-                    out.probabilities = probabilities.to(torch::kFloat32);
-                    break;
-                }
-                case SuiteCombine::Mean:
-                    combined = combine_mean(stack);
-                    break;
-                case SuiteCombine::CircularMean:
-                    combined = combine_circular(stack, spec.period);
-                    break;
-                case SuiteCombine::SphericalMean:
-                    combined = combine_spherical(stack);
-                    break;
+            torch::Tensor mean_probabilities;
+            if (!member_probabilities.empty()) {
+                mean_probabilities = reorder(torch::stack(member_probabilities, 0).mean(0), perm, 0)
+                                         .to(torch::kFloat32);
+                out.probabilities = mean_probabilities;
             }
+            const CombinedPrediction combined = rule.combine_members(stack, mean_probabilities, spec);
             out.value = combined.value;
             out.agreement = combined.agreement;
             out.dispersion = combined.dispersion;

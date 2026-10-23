@@ -30,7 +30,7 @@ ResolveSchema trait_schema(int64_t n_species) {
     schema.n_species = n_species;
     schema.has_coordinates = true;
     schema.covariate_names = {"elev"};
-    schema.track_unknown_fraction = false;
+    schema.dataset_config.track_unknown_fraction = false;
     schema.targets.push_back({"y", TaskType::Regression, TransformType::None, 0, 1.0f});
     return schema;
 }

@@ -2,8 +2,9 @@
 
 ``SuitePredictor.predict`` scores plots given as pandas DataFrames or as CSV
 paths, dispatching to the low-level ``predict_columns`` / ``predict_csv``
-bindings; ``SuitePredictions.to_pandas`` flattens a result to one row per plot,
-with the columns ``resolve predict --suite`` writes.
+bindings; ``SuitePredictions.to_pandas`` is the engine's prediction table
+(``suite_prediction_columns``) as a DataFrame, the columns
+``resolve predict --suite`` writes.
 """
 from __future__ import annotations
 
@@ -85,51 +86,15 @@ def to_pandas(self, probabilities=False):
     ``<target>_circular_sd`` for a bearing, ``<target>_spread_km`` for a
     spherical mean), the four recognition columns, and ``<target>_seed<N>``
     per member when the members were kept (``<target>_seed<N>_latitude`` and
-    ``_longitude`` for a spherical mean).
+    ``_longitude`` for a spherical mean). The table is the engine's
+    (``suite_prediction_columns``).
     """
     import pandas as pd
 
-    data = {"plot_id": list(self.plot_ids)}
-    for t in self.targets:
-        name = t.name
-        names = list(t.class_names)
-        spherical = t.combine == _core.SuiteCombine.SphericalMean
-        if spherical:
-            value = t.value.numpy()
-            data[f"{name}_latitude"] = value[:, 0]
-            data[f"{name}_longitude"] = value[:, 1]
-            data[f"{name}_spread_km"] = t.dispersion.numpy()
-        elif t.combine == _core.SuiteCombine.Vote:
-            codes = t.value.tolist()
-            data[name] = [names[c] if 0 <= c < len(names) else str(c) for c in codes]
-            data[f"{name}_code"] = codes
-            data[f"{name}_agreement"] = t.agreement.numpy()
-            if probabilities:
-                probs = t.probabilities.numpy()
-                for k in range(probs.shape[1]):
-                    label = names[k] if k < len(names) else str(k)
-                    data[f"{name}_prob_{label}"] = probs[:, k]
-        else:
-            data[name] = t.value.numpy()
-            suffix = "_circular_sd" if t.combine == _core.SuiteCombine.CircularMean else "_sd"
-            data[f"{name}{suffix}"] = t.dispersion.numpy()
-        r = t.recognition
-        data[f"{name}_n_species"] = r.n_species.numpy()
-        data[f"{name}_n_recognised"] = r.n_recognised.numpy()
-        data[f"{name}_recognised_share"] = r.count_share.numpy()
-        data[f"{name}_recognised_abundance_share"] = r.abundance_share.numpy()
-        members = t.members
-        if members is not None:
-            for k, seed in enumerate(t.member_seeds):
-                if spherical:
-                    data[f"{name}_seed{seed}_latitude"] = members[k, :, 0].numpy()
-                    data[f"{name}_seed{seed}_longitude"] = members[k, :, 1].numpy()
-                    continue
-                row = members[k].tolist()
-                if t.combine == _core.SuiteCombine.Vote:
-                    row = [names[c] if 0 <= c < len(names) else str(c) for c in row]
-                data[f"{name}_seed{seed}"] = row
-    return pd.DataFrame(data)
+    return pd.DataFrame({
+        name: values if isinstance(values, list) else values.numpy()
+        for name, values in _core.suite_prediction_columns(self, probabilities)
+    })
 
 
 def install():

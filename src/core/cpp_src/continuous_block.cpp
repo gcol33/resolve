@@ -142,7 +142,7 @@ torch::Tensor standardize_continuous(const torch::Tensor& block, const Scalers& 
 std::vector<std::pair<std::vector<int64_t>, int64_t>>
 missing_flag_columns(const ResolveSchema& schema) {
     std::vector<std::pair<std::vector<int64_t>, int64_t>> columns;
-    if (schema.missing_values != MissingValuePolicy::Indicate) {
+    if (schema.dataset_config.missing_values != MissingValuePolicy::Indicate) {
         return columns;
     }
     int64_t at = 0;

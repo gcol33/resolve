@@ -72,7 +72,7 @@ def test_a_missing_cell_is_nan_and_a_recorded_zero_is_not(tmp_path):
     assert math.isnan(covariates[ids.index("P1"), 0].item())
     assert covariates[ids.index("P3"), 0].item() == 0.0
     assert torch.isnan(ds.coordinates[ids.index("P4")]).all()
-    assert ds.schema.missing_values == rc.MissingValuePolicy.Indicate
+    assert ds.schema.dataset_config.missing_values == rc.MissingValuePolicy.Indicate
     assert ds.schema.missing_flag_width() == 2
 
 
@@ -104,7 +104,7 @@ def test_fit_and_reload_stay_finite_through_missing_values(tmp_path, policy):
     path = str(tmp_path / f"missing_{policy}.pt")
     trainer.save(path)
     predictor = rc.Predictor.load(path)
-    assert predictor.schema.missing_values == getattr(rc.MissingValuePolicy, policy)
+    assert predictor.schema.dataset_config.missing_values == getattr(rc.MissingValuePolicy, policy)
     assert torch.allclose(predictor.scalers.continuous_fill, fill)
     predictions = predictor.predict_dataset(ds).predictions["y"]
     assert torch.isfinite(predictions).all()

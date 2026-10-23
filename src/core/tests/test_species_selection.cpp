@@ -299,7 +299,7 @@ TEST_CASE("rank_pool honours the species budget", "[selection][rank_pool]") {
                 REQUIRE(encoded_species(ds, p).size() == static_cast<size_t>(kSpecies));
             }
             // ... and says so, rather than reporting a selection it did not make.
-            REQUIRE(ds.schema().selection == SelectionMode::All);
+            REQUIRE(ds.schema().dataset_config.selection == SelectionMode::All);
         }
     }
 
@@ -309,8 +309,8 @@ TEST_CASE("rank_pool honours the species budget", "[selection][rank_pool]") {
         cfg.species_budget = kBudget;
         auto ds = build(header.path(), species.path(), cfg);
 
-        REQUIRE(ds.schema().selection == SelectionMode::Top);
-        REQUIRE(ds.schema().species_budget == kBudget);
+        REQUIRE(ds.schema().dataset_config.selection == SelectionMode::Top);
+        REQUIRE(ds.schema().dataset_config.species_budget == kBudget);
         for (int64_t p = 0; p < kPlots; ++p) {
             REQUIRE(encoded_species(ds, p) ==
                     expected_end(static_cast<int>(p), kBudget, /*top=*/true));
@@ -423,7 +423,7 @@ TEST_CASE("sparse honours the species budget", "[selection][sparse]") {
         for (int64_t p = 0; p < kPlots; ++p) {
             REQUIRE(encoded_species(ds, p).size() == static_cast<size_t>(kSpecies));
         }
-        REQUIRE(ds.schema().selection == SelectionMode::All);
+        REQUIRE(ds.schema().dataset_config.selection == SelectionMode::All);
     }
 
     SECTION("a budget leaves the unselected columns at zero") {
@@ -516,7 +516,7 @@ TEST_CASE("hash still selects on top_k and ignores the budget", "[selection][has
     auto with_budget = build(header.path(), species.path(), cfg);
 
     REQUIRE(torch::allclose(without_budget.hash_embedding(), with_budget.hash_embedding()));
-    REQUIRE(without_budget.schema().selection == SelectionMode::Top);
+    REQUIRE(without_budget.schema().dataset_config.selection == SelectionMode::Top);
 
     // Different top_k really does change the hashed content, so the comparison
     // above is not comparing two constant tensors.
@@ -560,8 +560,8 @@ TEST_CASE("species_budget survives the checkpoint", "[selection][checkpoint]") {
 
     auto predictor = Predictor::load(checkpoint.path(), torch::kCPU);
     const auto& loaded_schema = predictor.schema();
-    REQUIRE(loaded_schema.species_budget == 3);
-    REQUIRE(loaded_schema.selection == SelectionMode::Bottom);
+    REQUIRE(loaded_schema.dataset_config.species_budget == 3);
+    REQUIRE(loaded_schema.dataset_config.selection == SelectionMode::Bottom);
 
     auto rebuilt = dataset_config_from_checkpoint(loaded_schema, model_config);
     REQUIRE(rebuilt.species_budget == 3);
@@ -581,7 +581,7 @@ TEST_CASE("a checkpoint without the budget key reads back as no budget",
     // Back-compat: a checkpoint without the species_budget key reads back as
     // the schema default 0, i.e. no budget.
     ResolveSchema schema;
-    REQUIRE(schema.species_budget == 0);
+    REQUIRE(schema.dataset_config.species_budget == 0);
 
     ModelConfig model_config;
     model_config.species_encoding = SpeciesEncodingMode::RankPool;

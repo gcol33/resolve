@@ -1,5 +1,8 @@
 #include "resolve/json.hpp"
 
+#include "resolve/number_text.hpp"
+
+#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -141,13 +144,12 @@ private:
             if (!(peek() >= '0' && peek() <= '9')) fail("invalid number");
             while (peek() >= '0' && peek() <= '9') ++pos_;
         }
-        // strtod reads the C locale's decimal point, and the grammar above has
-        // already confirmed the span is a JSON number.
-        const std::string span(text_.substr(start, pos_ - start));
-        char* end = nullptr;
-        const double value = std::strtod(span.c_str(), &end);
-        if (end != span.c_str() + span.size()) fail("invalid number");
-        if (!std::isfinite(value)) fail("number out of range");
+        // The grammar above has confirmed the span is a JSON number.
+        double value = 0.0;
+        if (!decimal_to_number(text_.substr(start, pos_ - start), value) ||
+            !std::isfinite(value)) {
+            fail("number out of range");
+        }
         return value;
     }
 
@@ -256,18 +258,15 @@ void dump_string(std::string& out, const std::string& s) {
 }
 
 void dump_number(std::string& out, double n) {
-    if (!std::isfinite(n)) {
-        throw std::runtime_error("json: a non-finite number has no JSON spelling");
-    }
-    char buf[32];
     if (n == std::floor(n) && std::fabs(n) < kExactIntegerLimit) {
-        std::snprintf(buf, sizeof(buf), "%.0f", n);
-        // "-0" reads back as 0.0 either way; write the plain spelling.
-        if (std::string_view(buf) == "-0") std::snprintf(buf, sizeof(buf), "0");
+        // An integer prints as one; -0 reads back as 0.0 either way.
+        char buf[24];
+        const auto [end, ec] = std::to_chars(buf, buf + sizeof(buf), static_cast<int64_t>(n));
+        (void)ec;
+        out.append(buf, end);
     } else {
-        std::snprintf(buf, sizeof(buf), "%.17g", n);
+        out += number_to_decimal(n);
     }
-    out += buf;
 }
 
 void newline(std::string& out, int indent, int level) {
@@ -327,6 +326,20 @@ const char* kind_name(Value::Kind kind) noexcept {
     return "an unknown kind";
 }
 
+Value::Value(double n) {
+    if (std::isfinite(n)) {
+        kind_ = Kind::Number;
+        number_ = n;
+    }
+}
+
+Value::Value(float n) {
+    if (std::isfinite(n)) {
+        kind_ = Kind::Number;
+        decimal_to_number(number_to_decimal(n), number_);
+    }
+}
+
 Value Value::array_of(const std::vector<std::string>& strings) {
     Value v = array();
     v.items_.reserve(strings.size());
@@ -379,13 +392,6 @@ const Value::Members& Value::members() const {
     return members_;
 }
 
-std::vector<std::string> Value::as_string_array() const {
-    std::vector<std::string> out;
-    out.reserve(items().size());
-    for (const auto& item : items()) out.push_back(item.as_string());
-    return out;
-}
-
 const Value* Value::find(std::string_view key) const {
     for (const auto& [name, value] : members()) {
         if (name == key) return &value;
@@ -409,6 +415,17 @@ Value& Value::set(const std::string& key, Value value) {
     }
     members_.emplace_back(key, std::move(value));
     return members_.back().second;
+}
+
+bool Value::erase(std::string_view key) {
+    if (kind_ != Kind::Object) wrong_kind("an object", kind_);
+    for (auto it = members_.begin(); it != members_.end(); ++it) {
+        if (it->first == key) {
+            members_.erase(it);
+            return true;
+        }
+    }
+    return false;
 }
 
 void Value::push_back(Value value) {

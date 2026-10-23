@@ -575,7 +575,7 @@ TEST_CASE("PresenceAbsence reaches every encoding", "[dataset][representation]")
     }
     SECTION("the schema records it") {
         auto ds = load_layered(presence(SpeciesEncodingMode::Hash));
-        REQUIRE(ds.schema().representation == RepresentationMode::PresenceAbsence);
+        REQUIRE(ds.schema().dataset_config.representation == RepresentationMode::PresenceAbsence);
     }
 }
 
@@ -602,7 +602,7 @@ TEST_CASE("AggregationMode ranks the fixed taxonomy slots of hash, sparse and em
                     by_count.taxonomy_vocab().encode_genus("gen_many"));
             REQUIRE(by_count.family_ids()[0][0].item<int64_t>() ==
                     by_count.taxonomy_vocab().encode_family("fam_y"));
-            REQUIRE(by_count.schema().aggregation == AggregationMode::Count);
+            REQUIRE(by_count.schema().dataset_config.aggregation == AggregationMode::Count);
         }
     }
 }

@@ -471,7 +471,8 @@ bool is_pool_encoding(SpeciesEncodingMode mode) {
 // to, so a positive value is a width; a percentile request (< 0) or no cap (0)
 // that never reached a rank-pool encoder records none.
 int resolved_species_width(const ResolveSchema& schema) {
-    return schema.pool_species_cap > 0 ? schema.pool_species_cap : 0;
+    const int cap = schema.dataset_config.pool_species_cap;
+    return cap > 0 ? cap : 0;
 }
 
 }  // namespace
@@ -1055,36 +1056,22 @@ ExternalVocabs external_vocabs_from_schema(const ResolveSchema& schema) {
 
 DatasetConfig dataset_config_from_checkpoint(const ResolveSchema& schema,
                                              const ModelConfig& model_config) {
-    DatasetConfig config;
-    // Knobs that also size the model: ModelConfig is authoritative for these,
-    // because a disagreement would have shape-errored at training time.
+    DatasetConfig config = schema.dataset_config;
+    // The settings that also size the model: the ModelConfig is authoritative,
+    // since a disagreement would have failed at training time.
     config.species_encoding = model_config.species_encoding;
     config.hash_dim = model_config.hash_dim;
     config.top_k = model_config.top_k;
-    // Everything else the loader consumed, from the schema.
-    config.top_k_species = schema.top_k_species;
-    config.selection = schema.selection;
-    config.species_budget = schema.species_budget;
-    config.representation = schema.representation;
-    config.normalization = schema.normalization;
-    config.aggregation = schema.aggregation;
-    config.track_unknown_fraction = schema.track_unknown_fraction;
-    config.track_unknown_count = schema.track_unknown_count;
-    config.use_taxonomy = schema.use_taxonomy;
-    config.missing_values = schema.missing_values;
-    config.zero_abundance_as = schema.zero_abundance_as;
-    config.pool_weighting = static_cast<PoolWeighting>(schema.pool_weighting);
-    config.pool_species_cap = schema.pool_species_cap;
-    // use_cuda_hash stays false by design: it is a training-time compute path
-    // (raw CSR species data instead of a precomputed hash embedding), and
-    // Predictor::predict consumes the precomputed embedding.
+    // A training-time compute path (raw CSR species data hashed per batch);
+    // Predictor::predict consumes the precomputed hash embedding.
+    config.use_cuda_hash = false;
     return config;
 }
 
 torch::Tensor ResolveDataset::continuous_block(bool include_hash) const {
     ContinuousInputs parts = continuous_inputs();
     if (!include_hash) parts.hash_embedding = torch::Tensor();
-    return assemble_continuous(parts, schema_.missing_values, schema_.n_plots);
+    return assemble_continuous(parts, schema_.dataset_config.missing_values, schema_.n_plots);
 }
 
 ContinuousInputs ResolveDataset::continuous_inputs() const {
@@ -1213,26 +1200,15 @@ void ResolveDataset::record_encoding_settings() {
             "what counts species per genus there.");
     }
 
-    // The loader knobs that shape the encoded tensors and are not recoverable
-    // from ModelConfig, read back by dataset_config_from_checkpoint() so an
-    // inference run rebuilds the same DatasetConfig. pool_species_cap is
-    // refined to the resolved width by the rank-pool encoding.
-    schema_.track_unknown_fraction = config_.track_unknown_fraction;
-    schema_.track_unknown_count = config_.track_unknown_count;
-    schema_.pool_weighting = static_cast<int>(config_.pool_weighting);
-    schema_.pool_species_cap = config_.pool_species_cap;
-    schema_.top_k_species = config_.top_k_species;
-    // The selection this load APPLIES (All for a pooled / sparse encoding
-    // without a species_budget), so a checkpoint never reports a selection the
-    // run did not make.
-    schema_.selection = effective_selection(config_);
-    schema_.species_budget = config_.species_budget;
-    schema_.representation = config_.representation;
-    schema_.normalization = config_.normalization;
-    schema_.aggregation = config_.aggregation;
-    schema_.use_taxonomy = config_.use_taxonomy;
-    schema_.missing_values = config_.missing_values;
-    schema_.zero_abundance_as = config_.zero_abundance_as;
+    // The loader settings, read back by dataset_config_from_checkpoint() so an
+    // inference run encodes new plots the same way. The selection is the one
+    // this load APPLIES (All for a pooled / sparse encoding without a
+    // species_budget), so a checkpoint never reports a selection the run did
+    // not make; pool_species_cap is refined to the resolved width by the
+    // rank-pool encoding.
+    schema_.dataset_config = config_;
+    schema_.dataset_config.selection = effective_selection(config_);
+    schema_.unrecorded_dataset_settings.clear();
 }
 
 void ResolveDataset::fit_vocab(const PlotAssemblages& assemblages) {
@@ -1243,7 +1219,7 @@ void ResolveDataset::fit_vocab(const PlotAssemblages& assemblages) {
         vocab_ = EncodingVocab::fit(assemblages, /*min_count=*/1,
                                     assemblages.names_taxa() && config_.use_taxonomy);
     }
-    schema_.has_abundance = true;
+    schema_.has_abundance = has_abundance_column_;
     schema_.n_species = vocab_.species.size() - 1;
     schema_.n_species_vocab = vocab_.species.size();
     schema_.has_taxonomy = config_.use_taxonomy && vocab_.has_taxonomy();
@@ -1375,7 +1351,7 @@ void ResolveDataset::encode_pool(const PlotAssemblages& assemblages) {
     pool_has_cover_ = std::move(encoded.has_cover);
     // The resolved width, so inference truncates every plot to the width the
     // model was trained on even when the cap was a percentile.
-    schema_.pool_species_cap = static_cast<int>(species_ids_.size(1));
+    schema_.dataset_config.pool_species_cap = static_cast<int>(species_ids_.size(1));
 }
 
 void ResolveDataset::encode_fixed_taxonomy(const PlotAssemblages& assemblages) {

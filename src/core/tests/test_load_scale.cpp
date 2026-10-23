@@ -169,7 +169,7 @@ TEST_CASE("Loading a synthetic archive: time and peak memory", "[.scale]") {
     roles.latitude = "lat";
     roles.covariates = {"c1", "c2", "c3"};
     DatasetConfig config;
-    config.species_encoding = parse_species_encoding_mode(encoding);
+    config.species_encoding = enum_from_name<SpeciesEncodingMode>(encoding);
 
     const MemorySample before = sample_memory();
     const auto start = std::chrono::steady_clock::now();

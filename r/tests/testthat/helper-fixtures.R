@@ -56,8 +56,7 @@ fixture_schema <- function(..., n_plots = 50L, n_species = 20L) {
     has_taxonomy = FALSE,
     n_genera = 0L,
     n_families = 0L,
-    track_unknown_fraction = FALSE,
-    track_unknown_count = FALSE,
+    dataset_config = list(track_unknown_fraction = FALSE, track_unknown_count = FALSE),
     targets = list(area = list(task = "regression", transform = "none"))
   )
   overrides <- list(...)

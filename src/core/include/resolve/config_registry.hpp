@@ -4,18 +4,22 @@
 //
 // A configuration field is read by the struct, the checkpoint writer and
 // reader, the C-ABI value-tree parser/emitter, the nanobind binding, the JSON
-// sidecar and `resolve info`. Each struct gets ONE list. A row names the member and the checkpoint key
-// it serializes under; the C-ABI value-tree key, the Python attribute name, the
-// JSON key and the `resolve info` label are the member name itself. Every
-// consumer is a visitor over that list:
+// sidecar, `resolve info` and the CLI flags. Each struct gets ONE list. A row
+// names the member and the checkpoint key it serializes under; the C-ABI
+// value-tree key, the Python attribute name, the JSON key and the `resolve info`
+// label are the member name itself. Every consumer is a visitor over that list:
 //
 //   save_model_config / load_model_config, save_train_config /
-//   load_train_config    -> archive write / read visitors (checkpoint.cpp)
+//   load_train_config, save_schema / load_schema
+//                        -> archive write / read visitors (checkpoint.cpp)
 //   parse_*_config, *_config_to_value
 //                        -> value-tree read / write visitors (resolve_capi.cpp)
 //   register_types       -> def_rw visitor (python/src/bindings_types.cpp)
-//   write_metadata_json  -> JSON print visitor (checkpoint.cpp)
-//   info_command         -> console print visitor (cli/info_cmd.cpp)
+//   checkpoint_description
+//                        -> JSON visitor (checkpoint.cpp), which the sidecar
+//                           writes and `resolve info` prints
+//   train_spec / read_*_flags
+//                        -> CLI flag writer / reader (cli/config_flags.hpp)
 //
 // Two things are then guaranteed at COMPILE time, not by review:
 //
@@ -29,10 +33,9 @@
 // Adding a field is therefore one struct member plus one row, and the compiler
 // finds every consumer that has to say something about it.
 //
-// The checkpoint key column is authoritative and must stay byte-identical to
-// what earlier releases wrote -- a renamed key silently drops the field on load
-// of an existing checkpoint. The registry supplies those spellings; it does not
-// get to change them.
+// The checkpoint key column is what existing checkpoints hold: a renamed key
+// silently drops the field on load of an existing checkpoint, so the spellings
+// do not change. A row with an empty key is not persisted.
 
 #include "resolve/aggregate_arity.hpp"
 #include "resolve/types.hpp"
@@ -99,8 +102,7 @@ inline constexpr bool is_registered_config_v = false;
 // ============================================================================
 //
 // The checkpoint namespace is flat, so each sub-config's keys carry a prefix
-// ("ft_", "tabnet_", "excel_", ...). Those spellings predate this file and are
-// reproduced verbatim.
+// ("ft_", "tabnet_", "excel_", ...).
 
 #define RESOLVE_FT_TRANSFORMER_CONFIG_FIELDS(F) \
     F(d_model,           "ft_d_model")          \
@@ -134,8 +136,7 @@ RESOLVE_DEFINE_FIELD_REGISTRY(TabNetConfig, RESOLVE_TABNET_CONFIG_FIELDS)
 
 RESOLVE_DEFINE_FIELD_REGISTRY(SAINTConfig, RESOLVE_SAINT_CONFIG_FIELDS)
 
-// gnn_type keeps the un-prefixed spelling "gnn_type" it has always had; the
-// member name already carries the family.
+// gnn_type's key carries no prefix; the member name already names the family.
 #define RESOLVE_GNN_CONFIG_FIELDS(F)             \
     F(gnn_type,          "gnn_type")             \
     F(n_layers,          "gnn_n_layers")         \
@@ -280,11 +281,10 @@ inline std::string parallel_branch_prefix(std::size_t i) {
 
 RESOLVE_DEFINE_FIELD_REGISTRY(ModelConfig, RESOLVE_MODEL_CONFIG_FIELDS)
 
-// The keys load_model_config demands rather than defaulting. They have been in
-// every checkpoint since the first release, so their absence means a truncated
-// or foreign archive, and quietly substituting a default would build a
-// differently-shaped model whose weights then fail to load with a shape error
-// far from the cause.
+// The keys load_model_config demands rather than defaulting. Every checkpoint
+// carries them, so their absence means a truncated or foreign archive, and
+// quietly substituting a default would build a differently-shaped model whose
+// weights then fail to load with a shape error far from the cause.
 inline constexpr const char* kRequiredModelConfigKeys[] = {
     "species_encoding", "uses_explicit_vector", "hash_dim", "species_embed_dim",
     "genus_emb_dim", "family_emb_dim", "top_k", "top_k_species",
@@ -295,31 +295,40 @@ inline constexpr const char* kRequiredModelConfigKeys[] = {
 // DatasetConfig
 // ============================================================================
 //
-// The loader config is not serialized under its own keys: a checkpoint carries
-// these knobs on ResolveSchema (schema_* keys) and
-// dataset_config_from_checkpoint reassembles them. The key column is therefore
-// empty, and archive visitors skip empty keys.
+// A checkpoint carries the loader settings as ResolveSchema::dataset_config,
+// under schema_* keys. A key a checkpoint does not carry keeps the value of
+// unrecorded_dataset_config() (types.hpp), the value the engine used before the
+// setting existed. species_encoding, hash_dim and top_k also size the model and
+// travel in the ModelConfig too, which is authoritative for them: load_schema
+// takes them from the checkpoint's ModelConfig when it is given one.
 
-#define RESOLVE_DATASET_CONFIG_FIELDS(F) \
-    F(species_encoding,       "")        \
-    F(hash_dim,               "")        \
-    F(top_k,                  "")        \
-    F(top_k_species,          "")        \
-    F(selection,              "")        \
-    F(representation,         "")        \
-    F(normalization,          "")        \
-    F(aggregation,            "")        \
-    F(track_unknown_fraction, "")        \
-    F(track_unknown_count,    "")        \
-    F(use_taxonomy,           "")        \
-    F(use_cuda_hash,          "")        \
-    F(pool_weighting,         "")        \
-    F(pool_species_cap,       "")        \
-    F(species_budget,         "")        \
-    F(missing_values,         "")        \
-    F(zero_abundance_as,      "")
+#define RESOLVE_DATASET_CONFIG_FIELDS(F)                       \
+    F(species_encoding,       "schema_species_encoding")       \
+    F(hash_dim,               "schema_hash_dim")               \
+    F(top_k,                  "schema_top_k")                  \
+    F(top_k_species,          "schema_top_k_species")          \
+    F(selection,              "schema_selection")              \
+    F(representation,         "schema_representation")         \
+    F(normalization,          "schema_normalization")          \
+    F(aggregation,            "schema_aggregation")            \
+    F(track_unknown_fraction, "schema_track_unknown_fraction") \
+    F(track_unknown_count,    "schema_track_unknown_count")    \
+    F(use_taxonomy,           "schema_use_taxonomy")           \
+    F(use_cuda_hash,          "schema_use_cuda_hash")          \
+    F(pool_weighting,         "schema_pool_weighting")         \
+    F(pool_species_cap,       "schema_pool_species_cap")       \
+    F(species_budget,         "schema_species_budget")         \
+    F(missing_values,         "schema_missing_values")         \
+    F(zero_abundance_as,      "schema_zero_abundance_as")
 
 RESOLVE_DEFINE_FIELD_REGISTRY(DatasetConfig, RESOLVE_DATASET_CONFIG_FIELDS)
+
+// The two loader keys every checkpoint has carried. Both widen the continuous
+// block, so their absence means a truncated or foreign archive, and
+// load_schema refuses it rather than building a model of another width.
+inline constexpr const char* kRequiredDatasetConfigKeys[] = {
+    "schema_track_unknown_fraction", "schema_track_unknown_count",
+};
 
 // ============================================================================
 // TrainConfig
@@ -384,9 +393,9 @@ inline bool has_checkpoint_key(const char* key) noexcept {
     return key != nullptr && key[0] != '\0';
 }
 
-// True for the field types a config visitor must handle. Used only to give the
-// nanobind binder a clean skip for the two members Python reaches another way
-// (device, through a string property) or not at all (the log callback).
+// False for the two members Python reaches another way (device, through a
+// string property) or not at all (the log callback); the nanobind binder skips
+// them.
 template <typename T>
 inline constexpr bool is_python_bindable_field_v =
     !std::is_same_v<T, torch::Device> && !std::is_same_v<T, LogCallback>;

@@ -30,7 +30,7 @@ ResolveSchema taxonomy_schema() {
     schema.has_taxonomy = true;
     schema.n_genera = 20;
     schema.n_families = 10;
-    schema.track_unknown_fraction = true;
+    schema.dataset_config.track_unknown_fraction = true;
     schema.targets.push_back({"area", TaskType::Regression, TransformType::None, 0, 1.0f});
     return schema;
 }
@@ -85,7 +85,7 @@ TEST_CASE("TabularAdapter FTTransformer forward", "[adapter]") {
 TEST_CASE("TabularAdapter ExcelFormer forward", "[adapter]") {
     auto schema = taxonomy_schema();
     schema.has_taxonomy = false;
-    schema.track_unknown_fraction = false;
+    schema.dataset_config.track_unknown_fraction = false;
     auto config = hash_config(EncoderArchitecture::ExcelFormer);
     config.excelformer.d_model = 64;
     config.excelformer.n_heads = 4;

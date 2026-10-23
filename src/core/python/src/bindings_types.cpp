@@ -104,10 +104,8 @@ void register_types(nb::module_& m) {
                     &resolve::TargetSpec::classification_with_mapping,
                     nb::arg("column"), nb::arg("mapping"));
 
-    // Loader configuration. Attribute names come from the field registry, so
-    // `pool_weighting` (the rank_pool / transformer per-species weight scheme)
-    // and `pool_species_cap` (0 = no cap, -x = the (100 - x)th percentile, >0 = manual) reach
-    // Python the moment they exist on the struct.
+    // Loader configuration. Attribute names come from the field registry, so a
+    // setting reaches Python the moment it exists on the struct.
     {
         using Cfg = resolve::DatasetConfig;
         auto cls = nb::class_<Cfg>(m, "DatasetConfig");
@@ -143,31 +141,15 @@ void register_types(nb::module_& m) {
         .def_rw("n_families", &resolve::ResolveSchema::n_families)
         .def_rw("covariate_names", &resolve::ResolveSchema::covariate_names)
         .def_rw("targets", &resolve::ResolveSchema::targets)
-        .def_rw("track_unknown_fraction", &resolve::ResolveSchema::track_unknown_fraction)
-        .def_rw("track_unknown_count", &resolve::ResolveSchema::track_unknown_count)
         .def_rw("categorical_names", &resolve::ResolveSchema::categorical_names)
         .def_rw("categorical_vocab_sizes", &resolve::ResolveSchema::categorical_vocab_sizes)
         .def_rw("categorical_embed_dim", &resolve::ResolveSchema::categorical_embed_dim)
-        .def_rw("pool_weighting", &resolve::ResolveSchema::pool_weighting)
-        .def_rw("pool_species_cap", &resolve::ResolveSchema::pool_species_cap)
-        // Remaining DatasetConfig knobs the loader consumed; without these an
-        // inference-side DatasetConfig would revert to the struct defaults.
-        .def_rw("top_k_species", &resolve::ResolveSchema::top_k_species)
-        // The selection the load APPLIED. A rank_pool / transformer / sparse
-        // dataset with no species_budget encodes every record, so it reports
-        // All whatever the config asked for.
-        .def_rw("selection", &resolve::ResolveSchema::selection)
-        .def_rw("species_budget", &resolve::ResolveSchema::species_budget)
-        .def_rw("representation", &resolve::ResolveSchema::representation)
-        .def_rw("normalization", &resolve::ResolveSchema::normalization)
-        .def_rw("aggregation", &resolve::ResolveSchema::aggregation)
-        .def_rw("use_taxonomy", &resolve::ResolveSchema::use_taxonomy)
-        // How missing covariates and coordinates enter the model; Zero for a
-        // checkpoint written before the policy existed.
-        .def_rw("missing_values", &resolve::ResolveSchema::missing_values)
-        // The abundance a recorded 0 was read at; 0 (left alone) for a
-        // checkpoint written before the knob existed.
-        .def_rw("zero_abundance_as", &resolve::ResolveSchema::zero_abundance_as)
+        // The loader settings the dataset was encoded with (a DatasetConfig;
+        // `selection` is the one the load applied), and the settings a loaded
+        // checkpoint predates, which hold unrecorded_dataset_config()'s value.
+        .def_rw("dataset_config", &resolve::ResolveSchema::dataset_config)
+        .def_rw("unrecorded_dataset_settings",
+                &resolve::ResolveSchema::unrecorded_dataset_settings)
         .def("missing_flag_width", &resolve::ResolveSchema::missing_flag_width)
         // Fitted species / genus / family vocabularies, index = integer code,
         // [0] = "<UNK>". Empty on a checkpoint that stores only the sizes.
@@ -319,6 +301,7 @@ void register_types(nb::module_& m) {
         .def_ro("final_metrics", &resolve::TrainResult::final_metrics)
         .def_ro("train_loss_history", &resolve::TrainResult::train_loss_history)
         .def_ro("test_loss_history", &resolve::TrainResult::test_loss_history)
+        .def_ro("lr_history", &resolve::TrainResult::lr_history)
         .def_ro("train_loss_history_by_target", &resolve::TrainResult::train_loss_history_by_target)
         .def_ro("test_loss_history_by_target", &resolve::TrainResult::test_loss_history_by_target)
         .def_ro("train_aux_loss_history", &resolve::TrainResult::train_aux_loss_history)

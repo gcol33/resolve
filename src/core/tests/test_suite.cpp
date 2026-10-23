@@ -19,6 +19,7 @@
 #include "resolve/dataset.hpp"
 #include "resolve/json.hpp"
 #include "resolve/model.hpp"
+#include "resolve/number_text.hpp"
 #include "resolve/predictor.hpp"
 #include "resolve/role_mapping.hpp"
 #include "resolve/sha256.hpp"
@@ -27,8 +28,11 @@
 #include "resolve/trainer.hpp"
 #include "test_support.hpp"
 
+#include <clocale>
 #include <cmath>
 #include <filesystem>
+#include <limits>
+#include <optional>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -124,12 +128,14 @@ RoleMapping training_roles() {
     return Roles("plot", "taxon").taxonomy().coordinates().covariates({"cov1"});
 }
 
+// Read a recorded 0 as the input contract of base_manifest() does.
 DatasetConfig training_dataset_config() {
     DatasetConfig cfg;
     cfg.species_encoding = SpeciesEncodingMode::RankPool;
     cfg.selection = SelectionMode::All;
     cfg.pool_weighting = PoolWeighting::Log1p;
     cfg.use_taxonomy = true;
+    cfg.zero_abundance_as = 1.0f;
     return cfg;
 }
 
@@ -301,6 +307,36 @@ TEST_CASE("json round-trips every kind and keeps member order", "[suite][json]")
     REQUIRE(json::dump(json::Value("a\"b\\c\n")) == escaped);
 }
 
+TEST_CASE("json numbers: shortest exact spelling, null for non-finite, any locale",
+          "[suite][json]") {
+    CHECK(json::dump(json::Value(0.1f), 0) == "0.1");
+    // The float's shortest spelling: nine digits at most, reading back exactly.
+    CHECK(json::dump(json::Value(47.123456f), 0).size() <= 10);
+    CHECK(static_cast<float>(json::parse(json::dump(json::Value(47.123456f), 0)).as_number()) ==
+          47.123456f);
+    CHECK(json::dump(json::Value(0.1), 0) == "0.1");
+    CHECK(json::dump(json::Value(8192), 0) == "8192");
+    CHECK(json::dump(json::Value(1e300), 0) == "1e+300");
+    CHECK(json::Value(std::numeric_limits<double>::infinity()).is_null());
+    CHECK(json::Value(std::numeric_limits<float>::quiet_NaN()).is_null());
+    json::Value o = json::Value::object();
+    o.set("loss", std::numeric_limits<float>::infinity());
+    CHECK(json::dump(o, 0) == "{\"loss\":null}");
+    CHECK(o.erase("loss"));
+    CHECK_FALSE(o.erase("loss"));
+
+    // A process locale with a comma decimal point changes neither direction.
+    const char* german = std::setlocale(LC_NUMERIC, "de-DE");
+    if (german == nullptr) german = std::setlocale(LC_NUMERIC, "de_DE.UTF-8");
+    if (german == nullptr) SKIP("no locale with a comma decimal point is installed");
+    CHECK(json::dump(json::Value(2.5), 0) == "2.5");
+    CHECK(json::parse("2.5").as_number() == 2.5);
+    float parsed = 0.0f;
+    CHECK(decimal_to_number(std::string_view("0.25"), parsed));
+    CHECK(parsed == 0.25f);
+    std::setlocale(LC_NUMERIC, "C");
+}
+
 TEST_CASE("json rejects what is not JSON, naming where", "[suite][json]") {
     REQUIRE_THROWS_WITH(json::parse("{\"a\": 1,\n  \"a\": 2}"),
                         ContainsSubstring("duplicate member 'a'") &&
@@ -311,7 +347,7 @@ TEST_CASE("json rejects what is not JSON, naming where", "[suite][json]") {
     REQUIRE_THROWS(json::parse("\"\\ud800\""));
     REQUIRE_THROWS(json::parse("[1,]"));
     REQUIRE_THROWS(json::parse(""));
-    REQUIRE_THROWS(json::dump(json::Value(std::nan(""))));
+    REQUIRE(json::dump(json::Value(std::nan(""))) == "null");
     REQUIRE_THROWS_WITH(json::Value(1.5).as_int(), ContainsSubstring("integer"));
     REQUIRE_THROWS_WITH(json::Value("x").as_number(), ContainsSubstring("a string"));
     // A byte-order mark is tolerated.
@@ -459,6 +495,155 @@ TEST_CASE("a spherical mean averages points as unit vectors", "[suite][combine]"
     REQUIRE(std::isnan(none.dispersion[0].item<double>()));
     REQUIRE_THROWS(combine_spherical(torch::zeros({2, 3})));
     REQUIRE_THROWS(combine_spherical(torch::zeros({2, 3, 3})));
+}
+
+TEST_CASE("every combination rule leaves the dispersion of one member undefined",
+          "[suite][combine]") {
+    const auto values = torch::tensor({1.0f, 5.0f}).reshape({1, 2});
+    REQUIRE(std::isnan(combine_mean(values).dispersion[0].item<double>()));
+    REQUIRE(std::isnan(combine_circular(values, 360.0).dispersion[1].item<double>()));
+    REQUIRE_THAT(combine_circular(values, 360.0).value[1].item<double>(), WithinAbs(5.0, 1e-4));
+    const auto point = torch::tensor({10.0f, 20.0f}).reshape({1, 1, 2});
+    REQUIRE(std::isnan(combine_spherical(point).dispersion[0].item<double>()));
+    // A vote of one member names its class with every member behind it.
+    const auto vote = combine_vote(torch::tensor(std::vector<int64_t>{2}).reshape({1, 1}), 3);
+    REQUIRE(vote.value[0].item<int64_t>() == 2);
+    REQUIRE(vote.agreement[0].item<float>() == 1.0f);
+}
+
+TEST_CASE("a circular mean of cancelling bearings names no bearing", "[suite][combine]") {
+    // 0 and 180 degrees, and 0 / 120 / 240: the unit vectors sum to zero.
+    const auto pair = torch::tensor({0.0f, 180.0f}).reshape({2, 1});
+    const auto c = combine_circular(pair, 360.0);
+    REQUIRE(std::isnan(c.value[0].item<double>()));
+    REQUIRE(std::isnan(c.dispersion[0].item<double>()));
+    const auto three = torch::tensor({0.0f, 120.0f, 240.0f}).reshape({3, 1});
+    REQUIRE(std::isnan(combine_circular(three, 360.0).value[0].item<double>()));
+    // Nearly opposite bearings still name a direction.
+    const auto near = torch::tensor({0.0f, 179.0f}).reshape({2, 1});
+    REQUIRE_THAT(combine_circular(near, 360.0).value[0].item<double>(), WithinAbs(89.5, 1e-3));
+}
+
+TEST_CASE("every combine rule has one descriptor", "[suite][combine]") {
+    const auto rules = suite_combine_rules();
+    REQUIRE(rules.size() == std::size(kSuiteCombineNames));
+    for (const auto& entry : kSuiteCombineNames) {
+        INFO("rule " << entry.name);
+        const SuiteCombineRule& rule = combine_rule(entry.value);
+        CHECK(rule.combine == entry.value);
+        CHECK(rule.extract != nullptr);
+        CHECK(rule.combine_members != nullptr);
+        CHECK(rule.min_outputs <= rule.max_outputs);
+        // A classification rule reports agreement, every other rule a
+        // dispersion in named units.
+        CHECK((rule.dispersion_column == nullptr) == (rule.task == TaskType::Classification));
+        CHECK((rule.dispersion_units == DispersionUnits::None) ==
+              (rule.task == TaskType::Classification));
+    }
+    CHECK(combine_rule(SuiteCombine::SphericalMean).n_value_columns() == 2);
+    CHECK(combine_rule(SuiteCombine::CircularMean).needs_period);
+    CHECK(combine_rule(SuiteCombine::SphericalMean).format_version == 2);
+}
+
+TEST_CASE("suite predictions flatten to one row per plot with every rule's columns",
+          "[suite][columns]") {
+    SuitePredictions p;
+    p.plot_ids = {"a", "b"};
+    const auto recognition = SpeciesRecognition{
+        torch::tensor({3.0f, 0.0f}), torch::tensor({2.0f, 0.0f}),
+        torch::tensor({2.0f / 3.0f, std::nanf("")}), torch::tensor({0.5f, std::nanf("")})};
+
+    SuiteTargetPrediction vote;
+    vote.name = "hab";
+    vote.task = TaskType::Classification;
+    vote.combine = SuiteCombine::Vote;
+    vote.class_names = {"M"};  // code 1 has no label
+    vote.member_seeds = {7, 8};
+    vote.value = torch::tensor(std::vector<int64_t>{0, 1});
+    vote.agreement = torch::tensor({1.0f, 0.5f});
+    vote.probabilities = torch::tensor({0.9f, 0.1f, 0.4f, 0.6f}).reshape({2, 2});
+    vote.members = torch::tensor(std::vector<int64_t>{0, 1, 0, 0}).reshape({2, 2});
+    vote.recognition = recognition;
+    p.targets.push_back(vote);
+
+    SuiteTargetPrediction where;
+    where.name = "where";
+    where.combine = SuiteCombine::SphericalMean;
+    where.member_seeds = {3};
+    where.value = torch::tensor({47.123456f, 9.5f, -33.25f, 151.0f}).reshape({2, 2});
+    where.dispersion = torch::tensor({std::nanf(""), std::nanf("")});
+    where.members = where.value.unsqueeze(0);
+    where.recognition = recognition;
+    p.targets.push_back(where);
+
+    SuiteTargetPrediction y;
+    y.name = "y";
+    y.combine = SuiteCombine::Mean;
+    y.value = torch::tensor({1.5f, 2.5f});
+    y.recognition = recognition;
+    p.targets.push_back(y);
+
+    const auto columns = suite_prediction_columns(p, /*probabilities=*/true);
+    std::vector<std::string> names;
+    for (const auto& c : columns) names.push_back(c.name);
+    const std::vector<std::string> expected = {
+        "plot_id", "hab", "hab_code", "hab_agreement", "hab_prob_M", "hab_prob_1",
+        "hab_n_species", "hab_n_recognised", "hab_recognised_share",
+        "hab_recognised_abundance_share", "hab_seed7", "hab_seed8",
+        "where_latitude", "where_longitude", "where_spread_km", "where_n_species",
+        "where_n_recognised", "where_recognised_share", "where_recognised_abundance_share",
+        "where_seed3_latitude", "where_seed3_longitude",
+        "y", "y_sd", "y_n_species", "y_n_recognised", "y_recognised_share",
+        "y_recognised_abundance_share"};
+    REQUIRE(names == expected);
+
+    auto column = [&](const std::string& name) -> const SuiteColumn& {
+        for (const auto& c : columns) {
+            if (c.name == name) return c;
+        }
+        FAIL("no column " << name);
+        return columns.front();
+    };
+    // A class code without a label is written as the code.
+    CHECK(column("hab").text == std::vector<std::string>{"M", "1"});
+    CHECK(column("hab_code").integers == std::vector<int64_t>{0, 1});
+    CHECK(column("hab_seed7").text == std::vector<std::string>{"M", "1"});
+    CHECK(column("hab_prob_1").probability);
+    CHECK_FALSE(column("hab_agreement").probability);
+    CHECK(column("where_latitude").numbers[0] == 47.123456f);
+    CHECK(column("where_seed3_longitude").numbers[1] == 151.0f);
+    CHECK(std::isnan(column("where_spread_km").numbers[0]));
+    // An undefined statistic is NaN in every row.
+    CHECK(std::isnan(column("y_sd").numbers[1]));
+    CHECK(std::isnan(column("y_recognised_share").numbers[1]));
+
+    const auto without = suite_prediction_columns(p, /*probabilities=*/false);
+    CHECK(without.size() == columns.size() - 2);
+}
+
+TEST_CASE("a member may state the zero abundance it was trained under; that is format 3",
+          "[suite][manifest]") {
+    SuiteManifest m = base_manifest();
+    SuiteTarget y;
+    y.name = "y";
+    y.outputs = {"y"};
+    y.members.push_back({0, "y/m.pt", std::string(64, 'a'), 10});
+    m.targets.push_back(y);
+    REQUIRE(m.format_version() == 1);
+
+    m.targets[0].members[0].zero_abundance_as = 1.0f;
+    REQUIRE_NOTHROW(m.validate());
+    REQUIRE(m.format_version() == 3);
+    const SuiteManifest back = SuiteManifest::from_json(json::parse(json::dump(m.to_json())));
+    REQUIRE(back.targets[0].members[0].zero_abundance_as == std::optional<float>(1.0f));
+    REQUIRE(back.to_json() == m.to_json());
+
+    json::Value stated = m.to_json();
+    stated.set("format_version", 2);
+    REQUIRE_THROWS_WITH(SuiteManifest::from_json(stated), ContainsSubstring("need version 3"));
+
+    m.targets[0].members[0].zero_abundance_as = -1.0f;
+    REQUIRE_THROWS_WITH(m.validate(), ContainsSubstring("zero_abundance_as"));
 }
 
 // =============================================================================
@@ -676,7 +861,7 @@ TEST_CASE("zero_abundance_as reads a recorded 0 at the given abundance",
     const auto one = ResolveDataset::from_csv(dir.file("h.csv"), dir.file("one.csv"), roles,
                                               {TargetSpec::regression("y")}, cfg);
     REQUIRE(torch::equal(zero.pool_weights(), one.pool_weights()));
-    REQUIRE(zero.schema().zero_abundance_as == 1.0f);
+    REQUIRE(zero.schema().dataset_config.zero_abundance_as == 1.0f);
 
     cfg.zero_abundance_as = 0.0f;
     const auto left = ResolveDataset::from_csv(dir.file("h.csv"), dir.file("zero.csv"), roles,
@@ -695,7 +880,7 @@ TEST_CASE("zero_abundance_as reads a recorded 0 at the given abundance",
                                              {TargetSpec::regression("y")}, cfg);
     save_member(ds, 0, dir.file("m/model.pt"));
     const Predictor p = Predictor::load(dir.file("m/model.pt"));
-    REQUIRE(p.schema().zero_abundance_as == 1.0f);
+    REQUIRE(p.schema().dataset_config.zero_abundance_as == 1.0f);
     REQUIRE(dataset_config_from_checkpoint(p.schema(), p.model()->config()).zero_abundance_as ==
             1.0f);
 }
@@ -905,6 +1090,49 @@ TEST_CASE("a suite refuses members that do not match its manifest", "[suite][pre
         m.write(dir.path());
         REQUIRE_THROWS_WITH(SuitePredictor::load(dir.path()),
                             ContainsSubstring("is a classification head"));
+    }
+
+    SECTION("verify checks the members of the targets it is given") {
+        fs::remove(dir.file(written.targets[2].members[1].file));
+        REQUIRE(written.verify(dir.path()).size() == 1);
+        REQUIRE(written.verify(dir.path(), {"hab", "y"}).empty());
+        REQUIRE(written.verify(dir.path(), {"aspect"}).size() == 1);
+    }
+
+    SECTION("a member trained reading a zero abundance as the contract does not") {
+        SuiteManifest m = written;
+        m.inputs.zero_abundance_as = 0.5f;
+        m.write(dir.path());
+        REQUIRE_THROWS_WITH(SuitePredictor::load(dir.path()),
+                            ContainsSubstring("reading a zero abundance as 1"));
+        // A statement in the manifest that the checkpoint contradicts.
+        m = written;
+        m.targets[1].members[0].zero_abundance_as = 0.0f;
+        m.write(dir.path());
+        REQUIRE_THROWS_WITH(SuitePredictor::load(dir.path()),
+                            ContainsSubstring("the checkpoint records 1"));
+        m.targets[1].members[0].zero_abundance_as = 1.0f;
+        m.write(dir.path());
+        REQUIRE_NOTHROW(SuitePredictor::load(dir.path()));
+    }
+
+    SECTION("a contract that names fewer taxonomy levels or no abundance") {
+        SuiteManifest m = written;
+        m.inputs.family.clear();
+        m.write(dir.path());
+        REQUIRE_THROWS_WITH(SuitePredictor::load(dir.path()),
+                            ContainsSubstring("reads family, the input contract names no family"));
+        m = written;
+        m.inputs.genus.clear();
+        m.write(dir.path());
+        REQUIRE_THROWS_WITH(SuitePredictor::load(dir.path()),
+                            ContainsSubstring("reads genus, the input contract names no genus"));
+        m = written;
+        m.inputs.abundance.clear();
+        m.inputs.zero_abundance_as = 0.0f;
+        m.write(dir.path());
+        REQUIRE_THROWS_WITH(SuitePredictor::load(dir.path()),
+                            ContainsSubstring("no abundance column"));
     }
 
     SECTION("members of one target on different vocabularies") {

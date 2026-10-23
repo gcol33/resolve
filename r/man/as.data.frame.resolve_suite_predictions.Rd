@@ -26,7 +26,8 @@
 A data.frame with one row per plot.
 }
 \description{
-The same columns \verb{resolve predict --suite} writes: \code{plot_id}, then per target
+The engine's prediction table, the columns \verb{resolve predict --suite} writes:
+\code{plot_id}, then per target
 the prediction (\verb{<target>}; for a vote also \verb{<target>_code} and
 \verb{<target>_agreement}; for a spherical mean \verb{<target>_latitude} and
 \verb{<target>_longitude}), its dispersion (\verb{<target>_sd} for a mean,

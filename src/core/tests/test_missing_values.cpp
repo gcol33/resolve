@@ -131,7 +131,7 @@ TEST_CASE("the loader keeps a missing covariate or coordinate as NaN",
     CHECK_FALSE(std::isnan(coords[row_of(ds, "P4")][0].item<float>()));
 
     // The schema records the policy and sizes the flags from it.
-    CHECK(ds.schema().missing_values == MissingValuePolicy::Indicate);
+    CHECK(ds.schema().dataset_config.missing_values == MissingValuePolicy::Indicate);
     CHECK(ds.schema().missing_flag_width() == 3);
     CHECK(load(MissingValuePolicy::Zero).schema().missing_flag_width() == 0);
 }
@@ -187,7 +187,7 @@ TEST_CASE("the fill is the mean of a column's recorded values on the fitting row
 
     SECTION("unstandardize restores the missing cells") {
         ResolveSchema schema;
-        schema.missing_values = MissingValuePolicy::Indicate;
+        schema.dataset_config.missing_values = MissingValuePolicy::Indicate;
         schema.has_coordinates = true;
         schema.covariate_names = {"cov1", "cov2"};
         auto coords = torch::tensor({{1.0f, 2.0f}, {kNaN, kNaN}, {5.0f, 6.0f}, {7.0f, 8.0f}});
@@ -223,7 +223,7 @@ TEST_CASE("the model is sized for the flags, trains, and reloads through missing
             const std::string path = ckpt.path();
             trainer.save(path);
             auto predictor = Predictor::load(path, torch::kCPU);
-            CHECK(predictor.schema().missing_values == policy);
+            CHECK(predictor.schema().dataset_config.missing_values == policy);
             REQUIRE(predictor.scalers().continuous_fill.defined());
             CHECK(torch::allclose(predictor.scalers().continuous_fill,
                                   scalers.continuous_fill));
@@ -305,18 +305,18 @@ TEST_CASE("the policy round-trips through a checkpoint's schema",
           "[missing_values][checkpoint]") {
     for (auto policy : {MissingValuePolicy::Indicate, MissingValuePolicy::Zero}) {
         ResolveSchema schema;
-        schema.missing_values = policy;
+        schema.dataset_config.missing_values = policy;
         torch::serialize::OutputArchive out;
         save_schema(out, schema);
         std::stringstream buffer;
         out.save_to(buffer);
         torch::serialize::InputArchive in;
         in.load_from(buffer);
-        CHECK(load_schema(in).missing_values == policy);
+        CHECK(load_schema(in).dataset_config.missing_values == policy);
     }
     // dataset_config_from_checkpoint hands the policy to an inference load.
     ResolveSchema schema;
-    schema.missing_values = MissingValuePolicy::Zero;
+    schema.dataset_config.missing_values = MissingValuePolicy::Zero;
     CHECK(dataset_config_from_checkpoint(schema, ModelConfig{}).missing_values ==
           MissingValuePolicy::Zero);
 }

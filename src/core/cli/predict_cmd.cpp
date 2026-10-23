@@ -12,20 +12,13 @@
 #include "resolve/resolve.hpp"
 
 #include "arg_parser.hpp"
+#include "cli_common.hpp"
 #include "csv_output.hpp"
 
 using resolve_cli::csv_field;
 using resolve_cli::ParsedArgs;
 
 int predict_suite_command(const ParsedArgs& args);
-
-namespace {
-
-std::string class_label(const resolve::TargetConfig& target, int64_t code) {
-    return resolve_cli::class_label(target.class_names, code);
-}
-
-}  // namespace
 
 int predict_command(const ParsedArgs& args) {
     using namespace resolve;
@@ -67,29 +60,12 @@ int predict_command(const ParsedArgs& args) {
 
     // Load model
     std::cout << "Loading model from: " << model_path << std::endl;
-    torch::Device device = torch::kCPU;
-    if (args.has("--cuda") && torch::cuda::is_available()) {
-        device = torch::kCUDA;
-        std::cout << "Using CUDA" << std::endl;
-    } else {
-        std::cout << "Using CPU" << std::endl;
-    }
-
+    const torch::Device device = resolve_cli::choose_device(args);
     Predictor predictor =
         Predictor::load(model_path, device, args.get_float("--vram-fraction"));
     const auto& schema = predictor.schema();
 
-    // Set up role mapping
-    RoleMapping roles;
-    roles.plot_id = args.get("--plot-id");
-    roles.species_id = args.get("--species-id");
-
-    std::string role_value;
-    if (args.get_if_present("--abundance", role_value)) roles.abundance = role_value;
-    if (args.get_if_present("--lon", role_value)) roles.longitude = role_value;
-    if (args.get_if_present("--lat", role_value)) roles.latitude = role_value;
-    if (args.get_if_present("--genus", role_value)) roles.genus = role_value;
-    if (args.get_if_present("--family", role_value)) roles.family = role_value;
+    RoleMapping roles = resolve_cli::read_roles(args);
 
     // Covariate / categorical columns. The checkpoint's schema already names
     // the columns the model was fitted on, in the order the encoder expects, so
@@ -97,7 +73,6 @@ int predict_command(const ParsedArgs& args) {
     // --covariate / --categorical override it for a prediction CSV whose columns
     // are named differently; the count must still match, because the encoder's
     // input width is fixed by the checkpoint.
-    roles.covariates = args.get_all("--covariate");
     if (roles.covariates.empty()) {
         roles.covariates = schema.covariate_names;
     } else if (roles.covariates.size() != schema.covariate_names.size()) {
@@ -108,7 +83,6 @@ int predict_command(const ParsedArgs& args) {
         return 1;
     }
 
-    roles.categoricals = args.get_all("--categorical");
     if (roles.categoricals.empty()) {
         roles.categoricals = schema.categorical_names;
     } else if (roles.categoricals.size() != schema.categorical_names.size()) {
@@ -131,14 +105,8 @@ int predict_command(const ParsedArgs& args) {
     // plot missing it would be dropped from the output.
     const std::vector<TargetSpec> targets;
 
-    // Rebuild the loading-side DatasetConfig the checkpoint was trained with.
-    // Single source of truth: species_encoding / hash_dim / top_k
-    // come from ModelConfig (they size the model), everything else the loader
-    // consumed -- top_k_species, selection, representation, normalization,
-    // aggregation, track_unknown_*, use_taxonomy, pool_weighting and the
-    // resolved pool_species_cap -- from the schema. Rebuilding only a subset
-    // would re-encode the data with the struct defaults.
-    DatasetConfig dataset_config =
+    // The loader settings the checkpoint was trained with.
+    const DatasetConfig dataset_config =
         dataset_config_from_checkpoint(schema, predictor.model()->config());
 
     // Load dataset IN THE MODEL'S ID NAMESPACE. Every non-hash encoder indexes
@@ -149,8 +117,8 @@ int predict_command(const ParsedArgs& args) {
     std::cout << "Loading data..." << std::endl;
     const bool reuse_vocabs = schema.has_species_vocab();
     if (!reuse_vocabs) {
-        std::cerr << "[resolve] warning: this checkpoint predates "
-                     "gcol33/resolve#102 and carries no fitted vocabularies, so "
+        std::cerr << "[resolve] warning: this checkpoint carries no fitted "
+                     "vocabularies, only their sizes, so "
                      "the species / taxonomy codes are being re-fit from the "
                      "prediction data. That is safe only for a hash-encoded "
                      "model without taxonomy; anything else should be retrained "
@@ -162,19 +130,9 @@ int predict_command(const ParsedArgs& args) {
 
     std::optional<ResolveDataset> dataset_opt;
     try {
-        if (header_path.empty()) {
-            dataset_opt = reuse_vocabs
-                ? ResolveDataset::from_species_csv_with_vocabs(
-                      species_path, roles, targets, vocabs, dataset_config)
-                : ResolveDataset::from_species_csv(
-                      species_path, roles, targets, dataset_config);
-        } else {
-            dataset_opt = reuse_vocabs
-                ? ResolveDataset::from_csv_with_vocabs(
-                      header_path, species_path, roles, targets, vocabs, dataset_config)
-                : ResolveDataset::from_csv(
-                      header_path, species_path, roles, targets, dataset_config);
-        }
+        dataset_opt = resolve_cli::load_dataset(header_path, species_path, roles, targets,
+                                                dataset_config,
+                                                reuse_vocabs ? &vocabs : nullptr);
     } catch (const std::exception& e) {
         std::cerr << "Error loading data: " << e.what() << std::endl;
         return 1;
@@ -233,7 +191,8 @@ int predict_command(const ParsedArgs& args) {
             if (!target.class_names.empty()) wrote_labels = true;
             if (write_probabilities) {
                 for (int64_t k = 0; k < target.num_classes; ++k) {
-                    out << "," << csv_field(target.name + "_prob_" + class_label(target, k));
+                    out << "," << csv_field(target.name + "_prob_" +
+                                            class_label(target.class_names, k));
                 }
                 wrote_probabilities = true;
             }
@@ -284,7 +243,7 @@ int predict_command(const ParsedArgs& args) {
             }
             if (is_classification) {
                 const int64_t code = col.values.data_ptr<int64_t>()[row];
-                out << "," << csv_field(class_label(target, code));
+                out << "," << csv_field(class_label(target.class_names, code));
                 out << "," << code;
                 if (n_prob_columns > 0) {
                     const float* probs =

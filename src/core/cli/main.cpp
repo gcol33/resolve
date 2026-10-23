@@ -19,7 +19,6 @@
 #include "arg_parser.hpp"
 #include "cli_spec.hpp"
 
-using resolve_cli::ArgError;
 using resolve_cli::ParsedArgs;
 
 // Command handlers. Each reads its values from the ParsedArgs by the same flag
@@ -29,6 +28,37 @@ int predict_command(const ParsedArgs& args);
 int info_command(const ParsedArgs& args);
 
 namespace {
+
+// The columns `predict --suite` writes, one line group per combine rule, from
+// the rules themselves (resolve::suite_combine_rules).
+std::string suite_columns_usage() {
+    std::string out =
+        "Suite prediction output columns (--suite):\n"
+        "  plot_id, then per suite target in manifest order:\n";
+    for (const auto& rule : resolve::suite_combine_rules()) {
+        out += "    " + std::string(rule.noun) + ": ";
+        if (rule.task == resolve::TaskType::Classification) {
+            out += "<target> (label), <target>_code, <target>_agreement (share of\n"
+                   "      members naming that class), and with --probabilities\n"
+                   "      <target>_prob_<class> (members' mean probability)\n";
+        } else {
+            for (std::size_t i = 0; i < rule.n_value_columns(); ++i) {
+                out += (i == 0 ? "<target>" : ", <target>") + std::string(rule.value_columns[i]);
+            }
+            out += ", <target>" + std::string(rule.dispersion_column) + "\n      (" +
+                   rule.dispersion_meaning + ")\n";
+        }
+    }
+    out += "    every target: <target>_n_species, <target>_n_recognised,\n"
+           "      <target>_recognised_share and <target>_recognised_abundance_share\n"
+           "      (how much of the plot the target's species vocabulary recognises)\n"
+           "    with --members: <target>_seed<N>, each member's own prediction, in\n"
+           "      the columns of the combined value\n"
+           "  Dispersion and agreement measure how far the members disagree; they are\n"
+           "  not calibrated intervals. A target of one member has no dispersion. NA\n"
+           "  marks a value that is undefined for the plot.\n";
+    return out;
+}
 
 void print_usage() {
     std::cout << R"(
@@ -55,21 +85,7 @@ Pass --help after a subcommand for that command's flags only.
   also gets one column per class, <target>_prob_<class> in code order, holding
   the class probabilities the code was taken from (they sum to one per row).
 
-Suite prediction output columns (--suite):
-  plot_id, then per suite target in manifest order:
-    a vote (classes):  <target> (label), <target>_code, <target>_agreement
-                       (share of members naming that class), and with
-                       --probabilities <target>_prob_<class> (members' mean)
-    a mean:            <target>, <target>_sd (members' standard deviation)
-    a circular mean:   <target> (bearing), <target>_circular_sd
-    every target:      <target>_n_species, <target>_n_recognised,
-                       <target>_recognised_share and
-                       <target>_recognised_abundance_share (how much of the
-                       plot the target's species vocabulary recognises)
-    with --members:    <target>_seed<N>, each member's own prediction
-  Dispersion and agreement measure how far the members disagree; they are
-  not calibrated intervals. NA marks a value that is undefined for the plot.
-
+)" << suite_columns_usage() << R"(
 Examples:
   resolve train --header plots.csv --species occurrences.csv \
                 --target area:regression:log1p \
@@ -141,28 +157,24 @@ int run_cli(int argc, char* argv[]) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    // Issue #19: a native fault during a (possibly overnight, headless) run must
-    // fail fast with the fault's NTSTATUS, never hang on the Windows JIT
-    // debugger. Arm the handler before any engine work. No-op off Windows.
+    // A native fault during a (possibly overnight, headless) run must fail fast
+    // with the fault's NTSTATUS, never hang on the Windows JIT debugger. Arm
+    // the handler before any engine work. No-op off Windows.
     resolve::install_crash_handler(0);
 
     int rc;
     try {
         rc = run_cli(argc, argv);
-    } catch (const ArgError& e) {
-        // Unknown flag, missing value, stray positional, or a non-numeric value
-        // for a numeric flag. Every one of these used to be ignored, which for
-        // a research CLI is a wrong run that looks fine.
-        std::cerr << "Error: " << e.what() << std::endl;
-        rc = 1;
     } catch (const std::exception& e) {
+        // An argument problem (ArgError: an unknown flag, a missing or
+        // unusable value) or an engine error.
         std::cerr << "Error: " << e.what() << std::endl;
         rc = 1;
     }
 
-    // Issue #18: the command is done and its output is flushed; from here a
-    // libtorch teardown fault is a benign artifact. Carry the command's real
-    // exit code through, then mark work complete so the handler exits with it.
+    // The command is done and its output is flushed; from here a libtorch
+    // teardown fault is a benign artifact. Carry the command's real exit code
+    // through, then mark work complete so the handler exits with it.
     resolve::install_crash_handler(rc);
     resolve::signal_work_complete();
     return rc;

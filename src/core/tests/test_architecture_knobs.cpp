@@ -83,8 +83,8 @@ ResolveSchema hash_only_schema() {
     schema.n_species = 20;
     schema.has_coordinates = false;
     schema.has_taxonomy = false;
-    schema.track_unknown_fraction = false;
-    schema.track_unknown_count = false;
+    schema.dataset_config.track_unknown_fraction = false;
+    schema.dataset_config.track_unknown_count = false;
     schema.targets.push_back({"y", TaskType::Regression, TransformType::None, 0, 1.0f});
     return schema;
 }
@@ -526,8 +526,8 @@ ResolveSchema trait_schema(int64_t n_species) {
     schema.has_coordinates = true;
     schema.covariate_names = {"elev"};
     schema.has_taxonomy = false;
-    schema.track_unknown_fraction = false;
-    schema.track_unknown_count = false;
+    schema.dataset_config.track_unknown_fraction = false;
+    schema.dataset_config.track_unknown_count = false;
     schema.targets.push_back({"y", TaskType::Regression, TransformType::None, 0, 1.0f});
     return schema;
 }

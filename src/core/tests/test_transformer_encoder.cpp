@@ -154,7 +154,7 @@ TEST_CASE("ResolveModel with Transformer mode constructs and forwards", "[transf
     schema.n_species_vocab = 500;
     schema.has_coordinates = true;
     schema.has_taxonomy = false;
-    schema.track_unknown_fraction = false;
+    schema.dataset_config.track_unknown_fraction = false;
     schema.targets.push_back({"area", TaskType::Regression, TransformType::None, 0});
 
     ModelConfig config;

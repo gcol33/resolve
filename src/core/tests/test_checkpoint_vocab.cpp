@@ -476,8 +476,8 @@ TEST_CASE("A checkpoint written before the vocab block still loads",
         archive.write(k::kHasTaxonomy, torch::tensor(0));
         archive.write(k::kNGenera, torch::tensor(static_cast<int64_t>(0)));
         archive.write(k::kNFamilies, torch::tensor(static_cast<int64_t>(0)));
-        archive.write(k::kTrackUnknownFrac, torch::tensor(1));
-        archive.write(k::kTrackUnknownCount, torch::tensor(0));
+        archive.write("schema_track_unknown_fraction", torch::tensor(1));
+        archive.write("schema_track_unknown_count", torch::tensor(0));
         archive.write(k::kNCovariates, torch::tensor(static_cast<int64_t>(0)));
         archive.write(k::kNTargets, torch::tensor(static_cast<int64_t>(1)));
         const std::string prefix = k::target_prefix(0);
@@ -496,17 +496,21 @@ TEST_CASE("A checkpoint written before the vocab block still loads",
     REQUIRE(loaded.n_plots == 11);
     REQUIRE(loaded.n_species_vocab == 6);
     REQUIRE(loaded.targets.size() == 1);
-    // Nothing was persisted for the new fields, so they hold the defaults --
-    // which are the DatasetConfig defaults, i.e. exactly the old behaviour.
+    // Nothing was persisted for the later loader settings, so they hold the
+    // values the engine used before they existed, and are listed.
     REQUIRE_FALSE(loaded.has_species_vocab());
     REQUIRE_FALSE(loaded.has_taxonomy_vocab());
-    const DatasetConfig defaults;
-    REQUIRE(loaded.top_k_species == defaults.top_k_species);
-    REQUIRE(loaded.selection == defaults.selection);
-    REQUIRE(loaded.representation == defaults.representation);
-    REQUIRE(loaded.normalization == defaults.normalization);
-    REQUIRE(loaded.aggregation == defaults.aggregation);
-    REQUIRE(loaded.use_taxonomy == defaults.use_taxonomy);
+    const DatasetConfig defaults = unrecorded_dataset_config();
+    REQUIRE(loaded.dataset_config.missing_values == MissingValuePolicy::Zero);
+    REQUIRE(std::find(loaded.unrecorded_dataset_settings.begin(),
+                      loaded.unrecorded_dataset_settings.end(),
+                      "missing_values") != loaded.unrecorded_dataset_settings.end());
+    REQUIRE(loaded.dataset_config.top_k_species == defaults.top_k_species);
+    REQUIRE(loaded.dataset_config.selection == defaults.selection);
+    REQUIRE(loaded.dataset_config.representation == defaults.representation);
+    REQUIRE(loaded.dataset_config.normalization == defaults.normalization);
+    REQUIRE(loaded.dataset_config.aggregation == defaults.aggregation);
+    REQUIRE(loaded.dataset_config.use_taxonomy == defaults.use_taxonomy);
 
     // The vocabulary carrier derived from such a schema is empty, which is what
     // makes the loaders refuse it instead of silently re-fitting the codes.
@@ -521,16 +525,16 @@ TEST_CASE("Every loading-side DatasetConfig field round-trips through the schema
           "[checkpoint][vocab][config]") {
     // Non-default value for every knob, so a dropped field is visible.
     ResolveSchema schema;
-    schema.track_unknown_fraction = false;
-    schema.track_unknown_count = true;
-    schema.top_k_species = 7;
-    schema.selection = SelectionMode::TopBottom;
-    schema.representation = RepresentationMode::PresenceAbsence;
-    schema.normalization = NormalizationMode::Log1p;
-    schema.aggregation = AggregationMode::Count;
-    schema.use_taxonomy = false;
-    schema.pool_weighting = static_cast<int>(PoolWeighting::Rank);
-    schema.pool_species_cap = 23;
+    schema.dataset_config.track_unknown_fraction = false;
+    schema.dataset_config.track_unknown_count = true;
+    schema.dataset_config.top_k_species = 7;
+    schema.dataset_config.selection = SelectionMode::TopBottom;
+    schema.dataset_config.representation = RepresentationMode::PresenceAbsence;
+    schema.dataset_config.normalization = NormalizationMode::Log1p;
+    schema.dataset_config.aggregation = AggregationMode::Count;
+    schema.dataset_config.use_taxonomy = false;
+    schema.dataset_config.pool_weighting = PoolWeighting::Rank;
+    schema.dataset_config.pool_species_cap = 23;
 
     const TempPath path(".pt");
     {
@@ -542,16 +546,16 @@ TEST_CASE("Every loading-side DatasetConfig field round-trips through the schema
     in.load_from(path.path());
     const ResolveSchema loaded = load_schema(in);
 
-    REQUIRE(loaded.track_unknown_fraction == false);
-    REQUIRE(loaded.track_unknown_count == true);
-    REQUIRE(loaded.top_k_species == 7);
-    REQUIRE(loaded.selection == SelectionMode::TopBottom);
-    REQUIRE(loaded.representation == RepresentationMode::PresenceAbsence);
-    REQUIRE(loaded.normalization == NormalizationMode::Log1p);
-    REQUIRE(loaded.aggregation == AggregationMode::Count);
-    REQUIRE(loaded.use_taxonomy == false);
-    REQUIRE(loaded.pool_weighting == static_cast<int>(PoolWeighting::Rank));
-    REQUIRE(loaded.pool_species_cap == 23);
+    REQUIRE(loaded.dataset_config.track_unknown_fraction == false);
+    REQUIRE(loaded.dataset_config.track_unknown_count == true);
+    REQUIRE(loaded.dataset_config.top_k_species == 7);
+    REQUIRE(loaded.dataset_config.selection == SelectionMode::TopBottom);
+    REQUIRE(loaded.dataset_config.representation == RepresentationMode::PresenceAbsence);
+    REQUIRE(loaded.dataset_config.normalization == NormalizationMode::Log1p);
+    REQUIRE(loaded.dataset_config.aggregation == AggregationMode::Count);
+    REQUIRE(loaded.dataset_config.use_taxonomy == false);
+    REQUIRE(loaded.dataset_config.pool_weighting == PoolWeighting::Rank);
+    REQUIRE(loaded.dataset_config.pool_species_cap == 23);
 
     // The reassembled DatasetConfig: the three model-sizing knobs come from
     // ModelConfig, the other nine from the schema. All twelve loading-side
@@ -595,12 +599,12 @@ TEST_CASE("A loaded dataset publishes its own config onto the schema",
     auto ds = ResolveDataset::from_csv(hdr.path(), spc.path(), test_roles(),
                                        {TargetSpec::regression("y")}, dcfg);
 
-    REQUIRE(ds.schema().top_k_species == 3);
-    REQUIRE(ds.schema().selection == SelectionMode::Top);
-    REQUIRE(ds.schema().representation == RepresentationMode::PresenceAbsence);
-    REQUIRE(ds.schema().normalization == NormalizationMode::Norm);
-    REQUIRE(ds.schema().aggregation == AggregationMode::Count);
-    REQUIRE(ds.schema().use_taxonomy == true);
+    REQUIRE(ds.schema().dataset_config.top_k_species == 3);
+    REQUIRE(ds.schema().dataset_config.selection == SelectionMode::Top);
+    REQUIRE(ds.schema().dataset_config.representation == RepresentationMode::PresenceAbsence);
+    REQUIRE(ds.schema().dataset_config.normalization == NormalizationMode::Norm);
+    REQUIRE(ds.schema().dataset_config.aggregation == AggregationMode::Count);
+    REQUIRE(ds.schema().dataset_config.use_taxonomy == true);
     REQUIRE(ds.schema().species_vocab == ds.species_vocab());
     REQUIRE(ds.schema().genus_vocab == ds.taxonomy_vocab().genus_names());
     REQUIRE(ds.schema().family_vocab == ds.taxonomy_vocab().family_names());
@@ -618,7 +622,7 @@ TEST_CASE("The rank-pool resolved species cap survives into the inference config
 
     // encode_species overwrites pool_species_cap with the RESOLVED width, so a
     // checkpoint always carries a concrete >0 cap even when the request was 0.
-    REQUIRE(ds.schema().pool_species_cap == ds.pool_weights().size(1));
+    REQUIRE(ds.schema().dataset_config.pool_species_cap == ds.pool_weights().size(1));
 
     const TempPath ckpt(".pt");
     save_checkpoint(ds, SpeciesEncodingMode::RankPool, ckpt.path());
@@ -626,7 +630,7 @@ TEST_CASE("The rank-pool resolved species cap survives into the inference config
 
     const DatasetConfig infer = dataset_config_from_checkpoint(
         predictor.schema(), predictor.model()->config());
-    REQUIRE(infer.pool_species_cap == ds.schema().pool_species_cap);
+    REQUIRE(infer.pool_species_cap == ds.schema().dataset_config.pool_species_cap);
     REQUIRE(infer.pool_weighting == dcfg.pool_weighting);
 }
 
@@ -654,7 +658,7 @@ TEST_CASE("Data encoded against a training schema is truncated to the training w
             hdr.path(), spc.path(), test_roles(), {TargetSpec::regression("y")}, train,
             open_cfg);
         REQUIRE(held_out.pool_weights().size(1) == 2);
-        REQUIRE(held_out.schema().pool_species_cap == 2);
+        REQUIRE(held_out.schema().dataset_config.pool_species_cap == 2);
     }
 
     SECTION("against a checkpoint's schema and its predictor") {
@@ -961,4 +965,81 @@ TEST_CASE("A checkpoint's string lists load onto a CUDA device",
         REQUIRE(predictor.species_vocab() == ds.species_vocab());
         REQUIRE(predictor.schema().genus_vocab == ds.taxonomy_vocab().genus_names());
     }
+}
+
+// =============================================================================
+// Bounds-checked strings
+// =============================================================================
+
+TEST_CASE("A string whose stored length runs past its bytes is refused",
+          "[checkpoint][strings]") {
+    const TempPath path(".pt");
+    {
+        torch::serialize::OutputArchive archive;
+        write_string(archive, "ok", "hello");
+        write_string(archive, "empty", "");
+        archive.write("long_len", torch::tensor(static_cast<int64_t>(10)));
+        archive.write("long", torch::tensor(std::vector<uint8_t>{'a', 'b', 'c'}, torch::kUInt8));
+        archive.write("negative_len", torch::tensor(static_cast<int64_t>(-1)));
+        archive.write("nobytes_len", torch::tensor(static_cast<int64_t>(2)));
+        archive.save_to(path.path());
+    }
+    torch::serialize::InputArchive in;
+    in.load_from(path.path());
+    CHECK(read_string(in, "ok") == "hello");
+    std::string value = "kept";
+    CHECK(try_read_string(in, "empty", value));
+    CHECK(value.empty());
+    value = "kept";
+    CHECK_FALSE(try_read_string(in, "absent", value));
+    CHECK(value == "kept");
+    CHECK_THROWS_AS(try_read_string(in, "long", value), std::runtime_error);
+    CHECK_THROWS_AS(try_read_string(in, "negative", value), std::runtime_error);
+    CHECK_THROWS_AS(try_read_string(in, "nobytes", value), std::runtime_error);
+}
+
+TEST_CASE("Class weights whose count disagrees with the stored values are refused",
+          "[checkpoint][strings]") {
+    ResolveSchema schema;
+    schema.targets.push_back(TargetConfig{"hab", TaskType::Classification, TransformType::None, 3,
+                                          1.0f, {0.5f, 1.0f, 2.0f}});
+    const TempPath good(".pt");
+    {
+        torch::serialize::OutputArchive archive;
+        save_schema(archive, schema);
+        archive.save_to(good.path());
+    }
+    torch::serialize::InputArchive in;
+    in.load_from(good.path());
+    CHECK(load_schema(in).targets.front().class_weights == std::vector<float>{0.5f, 1.0f, 2.0f});
+
+    // A target whose count claims more weights than it holds.
+    namespace k = ckpt_schema_keys;
+    const TempPath bad(".pt");
+    {
+        torch::serialize::OutputArchive archive;
+        archive.write(k::kNPlots, torch::tensor(static_cast<int64_t>(1)));
+        archive.write(k::kNSpecies, torch::tensor(static_cast<int64_t>(1)));
+        archive.write(k::kNSpeciesVocab, torch::tensor(static_cast<int64_t>(2)));
+        archive.write(k::kHasCoordinates, torch::tensor(0));
+        archive.write(k::kHasAbundance, torch::tensor(1));
+        archive.write(k::kHasTaxonomy, torch::tensor(0));
+        archive.write(k::kNGenera, torch::tensor(static_cast<int64_t>(0)));
+        archive.write(k::kNFamilies, torch::tensor(static_cast<int64_t>(0)));
+        archive.write("schema_track_unknown_fraction", torch::tensor(1));
+        archive.write("schema_track_unknown_count", torch::tensor(0));
+        archive.write(k::kNCovariates, torch::tensor(static_cast<int64_t>(0)));
+        archive.write(k::kNTargets, torch::tensor(static_cast<int64_t>(1)));
+        const std::string prefix = k::target_prefix(0);
+        archive.write(prefix + k::kTargetTask, torch::tensor(1));
+        archive.write(prefix + k::kTargetTransform, torch::tensor(0));
+        archive.write(prefix + k::kTargetNumClasses, torch::tensor(3));
+        archive.write(prefix + k::kTargetWeight, torch::tensor(1.0f));
+        archive.write(prefix + k::kTargetNClassWeights, torch::tensor(static_cast<int64_t>(5)));
+        archive.write(prefix + k::kTargetClassWeights, torch::tensor({0.5f, 1.0f, 2.0f}));
+        archive.save_to(bad.path());
+    }
+    torch::serialize::InputArchive corrupt;
+    corrupt.load_from(bad.path());
+    CHECK_THROWS_AS(load_schema(corrupt), std::runtime_error);
 }

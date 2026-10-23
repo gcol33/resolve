@@ -1,8 +1,8 @@
 # RESOLVE CLI Application
 
 # No argument-parsing dependency: arg_parser.hpp is a header-only declarative
-# flag table (issue #104) and cli_spec.hpp holds one table per subcommand. Both
-# are listed so they show up in generated IDE projects.
+# flag table and cli_spec.hpp holds one table per subcommand. The headers are
+# listed so they show up in generated IDE projects.
 set(CLI_SOURCES
     main.cpp
     train_cmd.cpp
@@ -10,7 +10,10 @@ set(CLI_SOURCES
     suite_cmd.cpp
     info_cmd.cpp
     arg_parser.hpp
+    cli_common.hpp
     cli_spec.hpp
+    config_flags.hpp
+    config_report.hpp
     csv_output.hpp
 )
 

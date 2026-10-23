@@ -1,10 +1,10 @@
 // RESOLVE CLI - Train command implementation
 //
 // Reads its values from the ParsedArgs produced by the `train` flag table in
-// cli_spec.hpp. Every DatasetConfig / ModelConfig / TrainConfig knob the CLI
-// exposes is set here; the flag names below are the ones that table declares,
-// and reading a name it does not declare throws rather than silently returning
-// a default.
+// cli_spec.hpp. The DatasetConfig, ModelConfig, TrainConfig and architecture
+// fields come back through the field-registry readers of config_flags.hpp;
+// the flags below are the ones that table declares, and reading a name it
+// does not declare throws rather than silently returning a default.
 
 #include <cstdint>
 #include <fstream>
@@ -16,12 +16,11 @@
 #include "resolve/resolve.hpp"
 
 #include "arg_parser.hpp"
+#include "cli_common.hpp"
 #include "config_flags.hpp"
 
 using resolve_cli::ArgError;
 using resolve_cli::ParsedArgs;
-using resolve_cli::parse_parallel_branch;
-using resolve_cli::read_architecture_flags;
 using resolve_cli::trim_whitespace;
 
 namespace {
@@ -78,7 +77,7 @@ resolve::TargetSpec parse_target_spec(const std::string& raw) {
                                      ? fields[1]
                                      : std::string("regression");
     try {
-        spec.task = resolve::parse_task_type(type_str);
+        spec.task = resolve::enum_from_name<resolve::TaskType>(type_str);
     } catch (const std::exception& e) {
         throw ArgError(std::string("--target ") + raw + ": " + e.what());
     }
@@ -93,16 +92,13 @@ resolve::TargetSpec parse_target_spec(const std::string& raw) {
             continue;
         }
         if (modifier == "drop" || modifier == "mask") {
-            spec.missing = resolve::parse_target_missing_policy(modifier);
+            spec.missing = resolve::enum_from_name<resolve::TargetMissingPolicy>(modifier);
             continue;
         }
         try {
-            size_t consumed = 0;
-            const int value = std::stoi(modifier, &consumed);
-            if (consumed != modifier.size()) throw std::invalid_argument("trailing");
-            spec.num_classes = value;
+            spec.num_classes = resolve_cli::parse_int_value("--target", modifier);
             saw_classes = true;
-        } catch (const std::exception&) {
+        } catch (const ArgError&) {
             throw ArgError("--target " + raw + ": unknown modifier '" + modifier +
                            "'. Expected a class count, 'log1p', 'drop' or 'mask'.");
         }
@@ -185,19 +181,7 @@ int train_command(const ParsedArgs& args) {
     std::cout << "================" << std::endl;
 
     // ---------------------------------------------------------------- roles
-    RoleMapping roles;
-    roles.plot_id = args.get("--plot-id");
-    roles.species_id = args.get("--species-id");
-
-    std::string role_value;
-    if (args.get_if_present("--abundance", role_value)) roles.abundance = role_value;
-    if (args.get_if_present("--lon", role_value)) roles.longitude = role_value;
-    if (args.get_if_present("--lat", role_value)) roles.latitude = role_value;
-    if (args.get_if_present("--genus", role_value)) roles.genus = role_value;
-    if (args.get_if_present("--family", role_value)) roles.family = role_value;
-
-    roles.covariates = args.get_all("--covariate");
-    roles.categoricals = args.get_all("--categorical");
+    const RoleMapping roles = resolve_cli::read_roles(args);
 
     // Covariates and categoricals are header (plot-level) columns; the
     // single-table species loader has no plot-level row to read them from.
@@ -238,8 +222,7 @@ int train_command(const ParsedArgs& args) {
     targets.reserve(target_specs.size());
     for (const auto& raw : target_specs) {
         TargetSpec spec = parse_target_spec(raw);
-        std::cout << "Target: " << spec.column_name << " ("
-                  << task_type_to_string(spec.task);
+        std::cout << "Target: " << spec.column_name << " (" << enum_to_name(spec.task);
         if (spec.task == TaskType::Classification) {
             std::cout << ", " << spec.num_classes << " classes";
         } else if (spec.transform == TransformType::Log1p) {
@@ -252,54 +235,49 @@ int train_command(const ParsedArgs& args) {
         targets.push_back(std::move(spec));
     }
 
-    // ------------------------------------------------------- dataset config
+    // -------------------------------------------------------------- configs
+    // Every field from its registry-generated flag; a field whose flag is not
+    // given keeps its struct default.
     DatasetConfig dataset_config;
-    dataset_config.species_encoding =
-        parse_species_encoding_mode(args.get("--encoding"));
-    dataset_config.hash_dim = args.get_int("--hash-dim");
-    dataset_config.top_k = args.get_int("--top-k");
-    dataset_config.top_k_species = args.get_int("--top-k-species");
-    dataset_config.selection = parse_selection_mode(args.get("--selection"));
-    dataset_config.species_budget = args.get_int("--species-budget");
-    dataset_config.missing_values =
-        parse_missing_value_policy(args.get("--missing-values"));
-    dataset_config.representation =
-        parse_representation_mode(args.get("--representation"));
-    dataset_config.normalization =
-        parse_normalization_mode(args.get("--normalization"));
-    dataset_config.aggregation = parse_aggregation_mode(args.get("--aggregation"));
-    dataset_config.use_taxonomy = !args.has("--no-taxonomy");
-    dataset_config.track_unknown_fraction = !args.has("--no-unknown-fraction");
-    dataset_config.track_unknown_count = args.has("--unknown-count");
-    dataset_config.use_cuda_hash = args.has("--use-cuda-hash");
-    dataset_config.pool_weighting = parse_pool_weighting(args.get("--pool-weighting"));
-    dataset_config.pool_species_cap = args.get_int("--pool-species-cap");
-    dataset_config.zero_abundance_as = args.get_float("--zero-abundance-as");
+    resolve_cli::read_top_level_flags(dataset_config, args);
+    ModelConfig model_config;
+    resolve_cli::read_top_level_flags(model_config, args);
+    resolve_cli::read_architecture_flags(model_config, args);
+    TrainConfig train_config;
+    resolve_cli::read_top_level_flags(train_config, args);
+    {
+        const resolve_cli::FlagContext context{dataset_config, model_config, train_config};
+        resolve_cli::check_flag_gates(dataset_config, args, context);
+        resolve_cli::check_flag_gates(model_config, args, context);
+        resolve_cli::check_flag_gates(train_config, args, context);
+    }
 
-    const bool is_pool_encoder =
-        dataset_config.species_encoding == SpeciesEncodingMode::RankPool ||
-        dataset_config.species_encoding == SpeciesEncodingMode::Transformer;
-
-    if (dataset_config.use_cuda_hash &&
-        dataset_config.species_encoding != SpeciesEncodingMode::Hash) {
-        std::cerr << "Error: --use-cuda-hash applies to --encoding hash only"
+    // The parallel block's branches are variable-length, so they have their own
+    // repeatable grammar rather than a value flag per field.
+    for (const auto& spec : args.get_all("--parallel-branch")) {
+        model_config.parallel_layers.branches.push_back(
+            resolve_cli::parse_parallel_branch(spec));
+    }
+    if (model_config.parallel_layers.enabled &&
+        model_config.parallel_layers.branches.empty()) {
+        std::cerr << "Error: --parallel-enabled needs at least one "
+                     "--parallel-branch, e.g. --parallel-branch 256,128"
                   << std::endl;
         return 1;
     }
+    if (model_config.hidden_dims.empty()) {
+        std::cerr << "Error: --hidden-dims needs at least one width, e.g. 256,128"
+                  << std::endl;
+        return 1;
+    }
+    train_config.device = resolve_cli::choose_device(args);
 
     // ----------------------------------------------------------------- load
     std::cout << "\nLoading data..." << std::endl;
     ResolveDataset dataset;
     try {
-        if (header_path.empty()) {
-            dataset = ResolveDataset::from_species_csv(
-                species_path, roles, targets, dataset_config
-            );
-        } else {
-            dataset = ResolveDataset::from_csv(
-                header_path, species_path, roles, targets, dataset_config
-            );
-        }
+        dataset = resolve_cli::load_dataset(header_path, species_path, roles, targets,
+                                            dataset_config);
     } catch (const std::exception& e) {
         std::cerr << "Error loading data: " << e.what() << std::endl;
         return 1;
@@ -320,171 +298,23 @@ int train_command(const ParsedArgs& args) {
     const int seed = args.get_int("--seed");
     torch::manual_seed(static_cast<uint64_t>(seed));
 
-    // --------------------------------------------------------- model config
-    ModelConfig model_config;
+    // ---------------------------------------------------------------- model
+    // The knobs that size the model to the data come from the dataset config,
+    // and the taxonomy-slot count is the width the loader built (top_k,
+    // doubled for top_bottom selection), so the model is never sized against a
+    // different width than the data carries.
     model_config.species_encoding = dataset_config.species_encoding;
     model_config.hash_dim = dataset_config.hash_dim;
     model_config.top_k = dataset_config.top_k;
     model_config.top_k_species = dataset_config.top_k_species;
-    model_config.encoder_architecture =
-        parse_encoder_architecture(args.get("--encoder-architecture"));
-    model_config.dropout = args.get_float("--dropout");
-
-    // The taxonomy-slot count is a property of the tensors the loader actually
-    // built (top_k, doubled for top_bottom selection). Read it off the dataset
-    // rather than recomputing the rule here, so the model can never be sized
-    // against a different width than the data carries.
     const torch::Tensor& genus_ids = dataset.genus_ids();
     if (genus_ids.defined() && genus_ids.dim() == 2 && genus_ids.size(1) > 0) {
         model_config.n_taxonomy_slots = static_cast<int>(genus_ids.size(1));
     }
 
-    const auto hidden_dims = args.get_list("--hidden-dims");
-    if (hidden_dims.empty()) {
-        std::cerr << "Error: --hidden-dims needs at least one width, e.g. 256,128"
-                  << std::endl;
-        return 1;
-    }
-    model_config.hidden_dims.clear();
-    for (const auto& width : hidden_dims) {
-        try {
-            model_config.hidden_dims.push_back(std::stoll(width));
-        } catch (const std::exception&) {
-            std::cerr << "Error: --hidden-dims expects integers, got '" << width
-                      << "'" << std::endl;
-            return 1;
-        }
-    }
-
-    // Mixture of experts. Parsing the two enums here turns an unknown spelling
-    // into a CLI error naming the accepted values, rather than an exception out
-    // of the model constructor.
-    try {
-        model_config.moe_routing = parse_moe_routing_type(args.get("--moe-routing"));
-        model_config.moe_placement = parse_moe_placement(args.get("--moe-placement"));
-    } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
-        return 1;
-    }
-    if (model_config.moe_routing != MoERoutingType::None) {
-        model_config.n_experts = args.get_int("--n-experts");
-        model_config.moe_top_k = args.get_int("--moe-top-k");
-        model_config.moe_noise_std = args.get_float("--moe-noise-std");
-        model_config.moe_aux_loss_weight = args.get_float("--moe-aux-loss-weight");
-
-        const auto expert_dims = args.get_list("--expert-hidden-dims");
-        model_config.expert_hidden_dims.clear();
-        for (const auto& width : expert_dims) {
-            try {
-                model_config.expert_hidden_dims.push_back(std::stoll(width));
-            } catch (const std::exception&) {
-                std::cerr << "Error: --expert-hidden-dims expects integers, got '"
-                          << width << "'" << std::endl;
-                return 1;
-            }
-        }
-    }
-
-    // Every architecture sub-config, read back through the same field registry
-    // that declared the flags, so a field added to one of them needs no edit
-    // here. An unusable value (an unknown enum spelling, a non-numeric width)
-    // raises ArgError, which main() reports as a CLI error.
-    read_architecture_flags(model_config, args);
-
-    // The parallel block's branches are variable-length, so they have their own
-    // repeatable grammar rather than a value flag per field.
-    for (const auto& spec : args.get_all("--parallel-branch")) {
-        model_config.parallel_layers.branches.push_back(parse_parallel_branch(spec));
-    }
-    if (model_config.parallel_layers.enabled &&
-        model_config.parallel_layers.branches.empty()) {
-        std::cerr << "Error: --parallel-enabled needs at least one "
-                     "--parallel-branch, e.g. --parallel-branch 256,128"
-                  << std::endl;
-        return 1;
-    }
-
-    // Transformer / rank_pool knobs. The transformer encoder rejects
-    // pooling='cls' with 0 attention layers (the CLS vector would be constant),
-    // so validate here for a clean CLI error instead of an exception.
-    if (is_pool_encoder) {
-        model_config.cover_dropout = args.get_float("--cover-dropout");
-    }
-    model_config.freeze_composition = args.has("--freeze-composition");
-    if (dataset_config.species_encoding == SpeciesEncodingMode::Transformer) {
-        const std::string transformer_pooling = args.get("--transformer-pooling");
-        const int n_attention_layers = args.get_int("--n-attention-layers");
-        if (transformer_pooling != "attention" && transformer_pooling != "cls") {
-            std::cerr << "Error: unknown --transformer-pooling '" << transformer_pooling
-                      << "'. Valid values: attention, cls" << std::endl;
-            return 1;
-        }
-        if (transformer_pooling == "cls" && n_attention_layers < 1) {
-            std::cerr << "Error: --transformer-pooling cls requires "
-                         "--n-attention-layers >= 1" << std::endl;
-            return 1;
-        }
-        model_config.d_model = args.get_int("--d-model");
-        model_config.n_heads = args.get_int("--n-heads");
-        model_config.n_attention_layers = n_attention_layers;
-        model_config.transformer_ff_dim = args.get_int("--transformer-ff-dim");
-        model_config.transformer_pooling = transformer_pooling;
-        model_config.transformer_dropout = args.get_float("--transformer-dropout");
-    }
-
     std::cout << "\nCreating model..." << std::endl;
     ResolveModel model(dataset.schema(), model_config);
-
-    // --------------------------------------------------------- train config
-    TrainConfig train_config;
-    const int requested_batch_size = args.get_int("--batch-size");
-    train_config.batch_size = requested_batch_size;
-    train_config.batch_size_floor = args.get_int("--batch-size-floor");
-    train_config.max_epochs = args.get_int("--max-epochs");
-    train_config.patience = args.get_int("--patience");
-    train_config.fixed_epochs = args.get_int("--fixed-epochs");
-    train_config.lr = args.get_float("--lr");
-    train_config.weight_decay = args.get_float("--weight-decay");
-    train_config.loss_config = parse_loss_config_mode(args.get("--loss-config"));
-    train_config.lr_scheduler = parse_lr_scheduler_type(args.get("--lr-scheduler"));
-    train_config.lr_step_size = args.get_int("--lr-step-size");
-    train_config.lr_gamma = args.get_float("--lr-gamma");
-    train_config.lr_min = args.get_float("--lr-min");
-    train_config.band_threshold = args.get_float("--band-threshold");
-    train_config.nca_temperature = args.get_float("--nca-temperature");
-    train_config.nca_neighbors = args.get_int("--nca-neighbors");
-    train_config.nca_weight = args.get_float("--nca-weight");
-    train_config.checkpoint_dir = args.get("--checkpoint-dir");
-    train_config.checkpoint_every = args.get_int("--checkpoint-every");
-    train_config.use_amp = args.get_switch("--amp", "--no-amp", false);
-    train_config.cudnn_benchmark =
-        args.get_switch("--cudnn-benchmark", "--no-cudnn-benchmark", true);
-    train_config.allow_tf32 = !args.has("--no-tf32");
-    train_config.vram_fraction = args.get_float("--vram-fraction");
-
-    train_config.band_thresholds.clear();
-    for (const auto& threshold : args.get_list("--band-thresholds")) {
-        try {
-            train_config.band_thresholds.push_back(std::stof(threshold));
-        } catch (const std::exception&) {
-            std::cerr << "Error: --band-thresholds expects numbers, got '"
-                      << threshold << "'" << std::endl;
-            return 1;
-        }
-    }
-
-    if (train_config.checkpoint_every > 0 && train_config.checkpoint_dir.empty()) {
-        std::cerr << "Error: --checkpoint-every needs --checkpoint-dir" << std::endl;
-        return 1;
-    }
-
-    if (args.has("--cuda") && torch::cuda::is_available()) {
-        train_config.device = torch::kCUDA;
-        std::cout << "Using CUDA" << std::endl;
-    } else {
-        train_config.device = torch::kCPU;
-        std::cout << "Using CPU" << std::endl;
-    }
+    const int requested_batch_size = train_config.batch_size;
 
     // ------------------------------------------------------- prepare + train
     Trainer trainer(model, train_config);

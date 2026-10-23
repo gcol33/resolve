@@ -194,8 +194,8 @@ def test_rank_pool_checkpoint_round_trip(tmp_path, pool_dataset):
     reloaded = predictor.model.config
     assert reloaded.species_encoding == rc.SpeciesEncodingMode.RankPool
     assert reloaded.cover_dropout == pytest.approx(0.15)
-    assert predictor.model.schema.pool_weighting == rc.PoolWeighting.Log1p.value
-    assert predictor.model.schema.pool_species_cap == pool_dataset.schema.pool_species_cap
+    assert predictor.model.schema.dataset_config.pool_weighting == rc.PoolWeighting.Log1p
+    assert predictor.model.schema.dataset_config.pool_species_cap == pool_dataset.schema.dataset_config.pool_species_cap
 
     out = predictor.predict_dataset(pool_dataset, False, 64)
     assert torch.isfinite(out.predictions["y"]).all()

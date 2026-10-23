@@ -1,25 +1,23 @@
-// Tests for what `resolve info` prints about a checkpoint's model.
+// Tests for what `resolve info` prints about a checkpoint.
 //
-// The Model Configuration block used to be a hand-written std::cout line per
-// field plus a switch over the architectures, while the Data Encoding and
-// Training Configuration blocks below it were already driven by the shared
-// field registry. A ModelConfig field therefore did NOT appear in `info` for
-// free -- moe_placement needed a line added by hand -- which is the same
-// missing-consumer shape as the defects issue #108 closed everywhere else.
-//
-// The block is now one registry pass with a filter, and these cases pin both
-// halves of that: every field prints unless another field of the same struct
-// switches its feature off, and the filter's name-keyed rules still match real
-// registry rows. The writer takes an ostream so the block can be rendered into
-// a stringstream here; info_cmd.cpp passes std::cout.
+// `info` prints the checkpoint description (checkpoint_description, the
+// document the JSON sidecar holds), so every config row comes from the field
+// registry. These cases pin the model block's filter -- every field prints
+// unless another field of the same struct switches its feature off -- that the
+// filter's name-keyed rules still match real registry rows, and the layout of
+// nested sub-configs and lists. The renderer takes an ostream so a block can be
+// rendered into a stringstream here; info_cmd.cpp passes std::cout.
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "resolve/architectures.hpp"
+#include "resolve/config_json.hpp"
 #include "resolve/types.hpp"
 
 #include "../cli/config_report.hpp"
@@ -30,8 +28,8 @@ namespace {
 
 std::string render_model_block(const ModelConfig& config) {
     std::ostringstream out;
-    resolve_cli::print_config_block(out, "Model", config, /*persisted_only=*/false,
-                                    resolve_cli::model_field_filter(config));
+    resolve_cli::print_block(out, resolve::config_to_json(config), "Model",
+                             resolve_cli::model_field_filter(config));
     return out.str();
 }
 
@@ -50,6 +48,12 @@ std::vector<std::string> model_field_names() {
         names.emplace_back(name);
     });
     return names;
+}
+
+std::size_t count(const std::string& text, const std::string& what) {
+    std::size_t n = 0;
+    for (auto at = text.find(what); at != std::string::npos; at = text.find(what, at + 1)) ++n;
+    return n;
 }
 
 // Everything the filter can gate, switched on, so only the sub-configs of the
@@ -72,14 +76,14 @@ TEST_CASE("info reports every ModelConfig field it is not told to hide", "[info]
     const ModelConfig config = fully_enabled_config();
     const std::string text = render_model_block(config);
 
-    // The sub-configs of the six architectures this checkpoint did not select.
+    // The sub-configs of the architectures this checkpoint did not select.
     // Reporting them would read as configuration the model uses.
-    const std::vector<std::string> unselected = {"tabnet",      "saint",       "gnn",
-                                                 "trait_net",   "excelformer", "heterogeneous_gnn"};
-
     for (const auto& name : model_field_names()) {
-        const bool is_unselected =
-            std::find(unselected.begin(), unselected.end(), name) != unselected.end();
+        const auto* entry = std::find_if(
+            std::begin(resolve::kArchitectures), std::end(resolve::kArchitectures),
+            [&name](const resolve::ArchitectureEntry& e) { return name == e.member; });
+        const bool is_unselected = entry != std::end(resolve::kArchitectures) &&
+                                   entry->architecture != config.encoder_architecture;
         INFO("field: " << name);
         REQUIRE(has_row(text, name) == !is_unselected);
     }
@@ -94,6 +98,10 @@ TEST_CASE("every conditional field name is a real registry row", "[info]") {
         INFO("conditional field: " << conditional);
         REQUIRE(std::find(names.begin(), names.end(), std::string(conditional)) != names.end());
     }
+    for (const auto& entry : resolve::kArchitectures) {
+        INFO("architecture member: " << entry.member);
+        REQUIRE(std::find(names.begin(), names.end(), std::string(entry.member)) != names.end());
+    }
 }
 
 TEST_CASE("only the selected architecture's sub-config is printed", "[info]") {
@@ -103,13 +111,10 @@ TEST_CASE("only the selected architecture's sub-config is printed", "[info]") {
         const std::string text = render_model_block(config);
 
         REQUIRE(has_row(text, "encoder_architecture"));
-        REQUIRE_FALSE(has_row(text, "ft_transformer"));
-        REQUIRE_FALSE(has_row(text, "tabnet"));
-        REQUIRE_FALSE(has_row(text, "saint"));
-        REQUIRE_FALSE(has_row(text, "gnn"));
-        REQUIRE_FALSE(has_row(text, "trait_net"));
-        REQUIRE_FALSE(has_row(text, "excelformer"));
-        REQUIRE_FALSE(has_row(text, "heterogeneous_gnn"));
+        for (const auto& entry : resolve::kArchitectures) {
+            INFO("architecture member: " << entry.member);
+            REQUIRE_FALSE(has_row(text, entry.member));
+        }
     }
 
     SECTION("TabNet selects its own and no other") {
@@ -189,6 +194,7 @@ TEST_CASE("TabM, the parallel branches and the head follow their own switches", 
 
     SECTION("all three on") {
         ModelConfig config = fully_enabled_config();
+        config.parallel_layers.branches[1].branch_weight = 0.5f;
         const std::string text = render_model_block(config);
 
         REQUIRE(has_row(text, "tabm"));
@@ -196,25 +202,60 @@ TEST_CASE("TabM, the parallel branches and the head follow their own switches", 
         REQUIRE(has_row(text, "head_activation"));
         REQUIRE(text.find("  Model head_hidden_dims: [64, 32]") != std::string::npos);
 
-        // Each branch is numbered under the parallel block.
-        REQUIRE(text.find("\n    branches: 2") != std::string::npos);
-        REQUIRE(text.find("\n      branch 0:") != std::string::npos);
-        REQUIRE(text.find("\n      branch 1:") != std::string::npos);
-        REQUIRE(text.find("\n        branch_weight: ") != std::string::npos);
+        // Each branch is one "- " item under the parallel block, its first
+        // field on the item line and the rest indented under it.
+        REQUIRE(text.find("\n    branches:\n") != std::string::npos);
+        REQUIRE(count(text, "\n      - hidden_dims: ") == 2);
+        REQUIRE(text.find("\n        branch_weight: 0.5\n") != std::string::npos);
     }
 }
 
-TEST_CASE("persisted_only drops the rows a checkpoint does not carry", "[info]") {
-    // DatasetConfig travels on ResolveSchema rather than under its own keys, so
-    // every row's registry key is empty: asking for the persisted subset asks
-    // for nothing, while the unfiltered block is what `info` prints.
-    resolve::DatasetConfig config;
+TEST_CASE("a description holds only the rows a checkpoint carries", "[info]") {
+    // The device, the AMP / cuDNN switches, the checkpoint destination and the
+    // log callback carry no key: a checkpoint reads them back as defaults, so
+    // describing them would report what the run never recorded.
+    const auto train = resolve::config_to_json(resolve::TrainConfig{});
+    CHECK(train.contains("batch_size"));
+    CHECK(train.contains("loss_config"));
+    CHECK_FALSE(train.contains("device"));
+    CHECK_FALSE(train.contains("use_amp"));
+    CHECK_FALSE(train.contains("checkpoint_dir"));
+    CHECK_FALSE(train.contains("log"));
 
-    std::ostringstream persisted;
-    resolve_cli::print_config_block(persisted, "Dataset", config, /*persisted_only=*/true);
-    REQUIRE(persisted.str().empty());
+    // Every loader setting is carried.
+    const auto dataset = resolve::config_to_json(resolve::DatasetConfig{});
+    std::size_t rows = 0;
+    resolve::for_each_field(resolve::DatasetConfig{},
+                            [&](const char* name, const char*, const auto&) {
+                                INFO("field: " << name);
+                                CHECK(dataset.contains(name));
+                                ++rows;
+                            });
+    CHECK(dataset.size() == rows);
 
-    std::ostringstream full;
-    resolve_cli::print_config_block(full, "Dataset", config);
-    REQUIRE(full.str().find("  Dataset species_budget: ") != std::string::npos);
+    std::ostringstream out;
+    resolve_cli::print_block(out, dataset, "Dataset");
+    CHECK(out.str().find("  Dataset species_budget: 0\n") != std::string::npos);
+    CHECK(out.str().find("  Dataset use_taxonomy: yes\n") != std::string::npos);
+}
+
+TEST_CASE("info prints a null as NA and a list of objects as items", "[info]") {
+    resolve::json::Value object = resolve::json::Value::object();
+    object.set("best_loss", std::numeric_limits<float>::infinity());
+    object.set("names", resolve::json::Value::array_of(std::vector<std::string>{"a", "b"}));
+    resolve::json::Value targets = resolve::json::Value::array();
+    resolve::json::Value target = resolve::json::Value::object();
+    target.set("name", "area");
+    target.set("task", "regression");
+    targets.push_back(target);
+    object.set("targets", targets);
+
+    std::ostringstream out;
+    resolve_cli::print_block(out, object, "");
+    CHECK(out.str() ==
+          "  best_loss: NA\n"
+          "  names: [a, b]\n"
+          "  targets:\n"
+          "    - name: area\n"
+          "      task: regression\n");
 }

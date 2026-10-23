@@ -206,13 +206,13 @@ test_that("species_budget narrows the pooled encoding", {
   full <- load_with(0L, "top")
   expect_equal(ncol(full$species_ids()), n_species)
   # With no budget the encoding really did select nothing, and says so.
-  expect_equal(full$schema()$selection, "all")
-  expect_equal(full$schema()$species_budget, 0L)
+  expect_equal(full$schema()$dataset_config$selection, "all")
+  expect_equal(full$schema()$dataset_config$species_budget, 0L)
 
   narrowed <- load_with(2L, "bottom")
   expect_equal(ncol(narrowed$species_ids()), 2L)
-  expect_equal(narrowed$schema()$selection, "bottom")
-  expect_equal(narrowed$schema()$species_budget, 2L)
+  expect_equal(narrowed$schema()$dataset_config$selection, "bottom")
+  expect_equal(narrowed$schema()$dataset_config$species_budget, 2L)
 })
 
 # --- targets / roles specification validation ------------------------------
@@ -368,12 +368,12 @@ test_that("a missing covariate or coordinate is NaN and the policy is recorded",
 
   indicated <- load("indicate")
   expect_equal(indicated$config()$missing_values, "indicate")
-  expect_equal(indicated$schema()$missing_values, "indicate")
+  expect_equal(indicated$schema()$dataset_config$missing_values, "indicate")
   expect_true(all(is.nan(indicated$coordinates()[2, ])))
   covariates <- indicated$covariates()
   expect_equal(covariates[2, 1], 0)
   expect_true(is.nan(covariates[3, 1]))
 
-  expect_equal(load("zero")$schema()$missing_values, "zero")
+  expect_equal(load("zero")$schema()$dataset_config$missing_values, "zero")
   expect_error(load("impute"), "missing value policy")
 })

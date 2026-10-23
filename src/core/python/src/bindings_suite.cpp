@@ -125,14 +125,19 @@ void register_suite(nb::module_& m) {
     nb::class_<SuiteMember>(m, "SuiteMember", "One weight file of a suite target.")
         .def("__init__",
              [](SuiteMember* self, int64_t seed, const std::string& file,
-                const std::string& sha256, int64_t bytes) {
-                 new (self) SuiteMember{seed, file, sha256, bytes};
+                const std::string& sha256, int64_t bytes,
+                std::optional<float> zero_abundance_as) {
+                 new (self) SuiteMember{seed, file, sha256, bytes, zero_abundance_as};
              },
-             nb::arg("seed"), nb::arg("file"), nb::arg("sha256") = "", nb::arg("bytes") = 0)
+             nb::arg("seed"), nb::arg("file"), nb::arg("sha256") = "", nb::arg("bytes") = 0,
+             nb::arg("zero_abundance_as") = nb::none())
         .def_rw("seed", &SuiteMember::seed)
         .def_rw("file", &SuiteMember::file)
         .def_rw("sha256", &SuiteMember::sha256)
-        .def_rw("bytes", &SuiteMember::bytes);
+        .def_rw("bytes", &SuiteMember::bytes)
+        .def_rw("zero_abundance_as", &SuiteMember::zero_abundance_as,
+                "For a checkpoint that does not record it: the abundance a recorded 0 was "
+                "read at while the member trained.");
 
     nb::class_<SuiteTarget>(m, "SuiteTarget", "One released target of a suite.")
         .def(nb::init<>())
@@ -191,8 +196,10 @@ void register_suite(nb::module_& m) {
              nb::call_guard<nb::gil_scoped_release>(),
              "Fill every member's sha256 and byte count from the files under dir.")
         .def("verify", &SuiteManifest::verify, nb::arg("dir"),
+             nb::arg("targets") = std::vector<std::string>{},
              nb::call_guard<nb::gil_scoped_release>(),
-             "Problems with the member files under dir; empty when intact.");
+             "Problems with the member files under dir (of `targets` only, when given); "
+             "empty when intact.");
 
     m.def("sha256_file", &sha256_file, nb::arg("path"),
           nb::call_guard<nb::gil_scoped_release>(),
@@ -291,6 +298,38 @@ void register_suite(nb::module_& m) {
         .def_ro("plot_ids", &SuitePredictions::plot_ids)
         .def_ro("targets", &SuitePredictions::targets)
         .def("target", &SuitePredictions::target, nb::arg("name"), nb::rv_policy::copy);
+
+    m.def("suite_prediction_columns",
+          [](const SuitePredictions& predictions, bool probabilities) {
+              nb::list out;
+              for (auto& column : suite_prediction_columns(predictions, probabilities)) {
+                  nb::object values;
+                  const auto n = static_cast<int64_t>(column.kind == SuiteColumn::Kind::Text
+                                                          ? column.text.size()
+                                                          : column.kind == SuiteColumn::Kind::Integer
+                                                              ? column.integers.size()
+                                                              : column.numbers.size());
+                  switch (column.kind) {
+                      case SuiteColumn::Kind::Text:
+                          values = nb::cast(column.text);
+                          break;
+                      case SuiteColumn::Kind::Integer:
+                          values = tensor_or_none(
+                              torch::tensor(column.integers, torch::kInt64).reshape({n}));
+                          break;
+                      case SuiteColumn::Kind::Number:
+                          values = tensor_or_none(
+                              torch::tensor(column.numbers, torch::kFloat32).reshape({n}));
+                          break;
+                  }
+                  out.append(nb::make_tuple(column.name, values));
+              }
+              return out;
+          },
+          nb::arg("predictions"), nb::arg("probabilities") = false,
+          "The predictions as (column name, values) pairs, one value per plot: the columns "
+          "`resolve predict --suite` writes. Labels and plot IDs are lists of str, class "
+          "codes int64 tensors, every other column a float32 tensor (NaN where undefined).");
 
     nb::class_<SuitePredictor>(m, "SuitePredictor",
                                "A model suite loaded from its directory, scored as one model.")

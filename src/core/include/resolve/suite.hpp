@@ -47,7 +47,14 @@
 //     distinct species and by abundance (compute_species_recognition).
 // None of these is combined into a single support level, and none is a
 // calibrated interval: seed spread measures how much the members disagree, not
-// how far the combined prediction is from the truth.
+// how far the combined prediction is from the truth. A single member measures
+// no spread, so every dispersion of a one-member target is NaN; the share of
+// members naming the winning class is then 1.
+//
+// Each combine rule is one SuiteCombineRule (combine_rule): what it reads,
+// how it combines, and the columns its prediction is written as. The manifest
+// validation, the predictor, suite_prediction_columns and the CLI usage text
+// all read that table.
 
 #include "resolve/dataset.hpp"
 #include "resolve/json.hpp"
@@ -57,8 +64,10 @@
 
 #include <torch/torch.h>
 
+#include <array>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -70,9 +79,10 @@ namespace resolve {
 
 inline constexpr const char* kSuiteManifestFile = "manifest.json";
 inline constexpr const char* kSuiteFormat = "resolve-suite";
-// Version 2 adds per-target inputs and the spherical mean. A manifest that
-// uses neither is written as version 1, so an older engine still reads it.
-inline constexpr int kSuiteFormatVersion = 2;
+// Version 2 adds per-target inputs and the spherical mean, version 3 a
+// member's own zero_abundance_as. A manifest is written as the lowest version
+// that holds it, so an older engine still reads one that uses neither.
+inline constexpr int kSuiteFormatVersion = 3;
 
 // The Earth radius a spherical mean measures member spread with, in km.
 inline constexpr double kEarthRadiusKm = 6371.0;
@@ -124,6 +134,11 @@ struct SuiteMember {
     std::string file;    // path relative to the suite directory, '/'-separated
     std::string sha256;  // lower-case hex
     int64_t bytes = 0;
+    // The abundance a recorded 0 was read at while this member trained, stated
+    // for a checkpoint that does not record it (one written before the engine
+    // had the setting). Loading compares it with the input contract. Unset for
+    // a checkpoint that records its own; when both are given they must agree.
+    std::optional<float> zero_abundance_as = std::nullopt;
 };
 
 // One released target.
@@ -171,8 +186,9 @@ struct SuiteManifest {
     // What a target's members read: its declared inputs, or the whole contract.
     [[nodiscard]] SuiteTargetInputs inputs_of(const SuiteTarget& target) const;
 
-    // The lowest format version that holds this manifest: 2 when a target
-    // declares its inputs or combines by a spherical mean, else 1.
+    // The lowest format version that holds this manifest: 3 when a member
+    // states its zero_abundance_as, 2 when a target declares its inputs or
+    // combines by a spherical mean, else 1.
     [[nodiscard]] int format_version() const;
 
     // Read `<dir>/manifest.json` and validate it.
@@ -186,7 +202,9 @@ struct SuiteManifest {
 
     // Problems with the files under `dir`: a member that is missing, of the
     // wrong size, or whose digest differs. Empty when the suite is intact.
-    [[nodiscard]] std::vector<std::string> verify(const std::string& dir) const;
+    // `targets` (suite names) narrows the check to those targets' members.
+    [[nodiscard]] std::vector<std::string> verify(
+        const std::string& dir, const std::vector<std::string>& targets = {}) const;
 };
 
 // ============================================================================
@@ -276,12 +294,12 @@ struct SuiteTargetPrediction {
     // Vote: (n_plots, n_classes) float32 mean of the members' class
     // probabilities.
     torch::Tensor probabilities;
-    // Mean: members' standard deviation (n - 1 denominator; NaN for a single
-    // member). Circular mean: circular standard deviation sqrt(-2 ln R) of the
-    // members' bearings, R their mean resultant length. Spherical mean: the
-    // median great-circle distance of the members from the combined point
-    // (NaN for a single member). (n_plots,) float32 in `dispersion_units`;
-    // undefined for a vote.
+    // Mean: members' standard deviation (n - 1 denominator). Circular mean:
+    // circular standard deviation sqrt(-2 ln R) of the members' bearings, R
+    // their mean resultant length. Spherical mean: the median great-circle
+    // distance of the members from the combined point. NaN for a single member
+    // and where the members' directions cancel. (n_plots,) float32 in
+    // `dispersion_units`; undefined for a vote.
     torch::Tensor dispersion;
     // With keep_members: (n_members, n_plots) -- (n_members, n_plots, 2) for a
     // spherical mean -- each member's own prediction in the form of `value`.
@@ -299,7 +317,8 @@ struct SuitePredictions {
 
 // The combination rules on their own, over a (n_members, n_plots) stack of
 // member predictions. Shared by SuitePredictor and exposed so a caller holding
-// member predictions from elsewhere combines them identically.
+// member predictions from elsewhere combines them identically. Every
+// dispersion is NaN for a single member, which measures no spread.
 struct CombinedPrediction {
     torch::Tensor value;
     torch::Tensor agreement;   // vote only
@@ -314,6 +333,8 @@ struct CombinedPrediction {
                                               const torch::Tensor& mean_probabilities = {});
 [[nodiscard]] CombinedPrediction combine_mean(const torch::Tensor& member_values);
 // Bearings in [0, period) (any real value is reduced modulo the period).
+// Where the members' unit vectors cancel (mean resultant length below
+// kCancelledResultant) the combined bearing and its spread are NaN.
 [[nodiscard]] CombinedPrediction combine_circular(const torch::Tensor& member_bearings,
                                                   double period);
 // Points on the sphere: a (n_members, n_plots, 2) stack of latitude and
@@ -321,7 +342,8 @@ struct CombinedPrediction {
 // projected back onto the sphere, as (n_plots, 2) latitude / longitude in
 // degrees; its dispersion is the median great-circle distance of the members
 // from it, in km (NaN for a single member). Where the members' vectors cancel
-// the combined point is undefined and both are NaN.
+// (mean resultant length below kCancelledResultant) the combined point is
+// undefined and both are NaN.
 [[nodiscard]] CombinedPrediction combine_spherical(const torch::Tensor& member_coordinates);
 // A member's bearing from its sine and cosine outputs, in [0, period). The
 // pair need not have unit length: the network's two outputs are read as a
@@ -329,6 +351,91 @@ struct CombinedPrediction {
 [[nodiscard]] torch::Tensor bearing_from_components(const torch::Tensor& sine,
                                                     const torch::Tensor& cosine,
                                                     double period);
+
+// The mean resultant length below which the members' unit vectors of a
+// circular or spherical mean count as cancelling: they name no direction.
+inline constexpr double kCancelledResultant = 1e-12;
+
+// ============================================================================
+// Combine rules
+// ============================================================================
+
+// The units of a rule's dispersion: none (a vote reports agreement), the
+// target's own, or kilometres.
+enum class DispersionUnits { None, TargetUnits, Kilometres };
+
+// What one member contributes to a target: its prediction in the form of
+// SuiteTargetPrediction::value, and for a vote its class probabilities.
+struct SuiteMemberOutput {
+    torch::Tensor value;
+    torch::Tensor probabilities;
+};
+
+// One combine rule. A manifest target is checked against it, the predictor
+// reads and combines member outputs through it, and its prediction is laid out
+// as columns from it (suite_prediction_columns, the CLI and its usage text).
+struct SuiteCombineRule {
+    SuiteCombine combine;
+    const char* noun;          // "a vote"
+    TaskType task;             // the task of the heads it reads
+    const char* combines;      // what it combines, for messages: "class predictions"
+    std::size_t min_outputs;   // heads read, inclusive bounds
+    std::size_t max_outputs;
+    const char* outputs;       // the heads in words: "one output"
+    bool needs_period;         // reads SuiteTarget::period
+    const char* required_units;  // the units its outputs must be in; null: any
+    int format_version;        // the first manifest format that holds it
+    DispersionUnits dispersion_units;
+    // Column suffixes of the combined value: one column, or one per component
+    // (latitude, longitude). A classification rule writes the label under the
+    // target's name and the code, agreement and probabilities beside it.
+    std::array<const char*, 2> value_columns;
+    const char* dispersion_column;   // suffix; null for a vote
+    const char* dispersion_meaning;  // in words, for the usage text
+    SuiteMemberOutput (*extract)(const SuiteTarget& target, const ResolvePredictions& member);
+    // `mean_probabilities` is the members' mean class probabilities for a
+    // vote and undefined otherwise.
+    CombinedPrediction (*combine_members)(const torch::Tensor& members,
+                                          const torch::Tensor& mean_probabilities,
+                                          const SuiteTarget& target);
+
+    [[nodiscard]] std::size_t n_value_columns() const noexcept {
+        return value_columns[1] == nullptr ? 1 : 2;
+    }
+};
+
+// Every rule, in SuiteCombine order, and the rule of one combine.
+[[nodiscard]] std::span<const SuiteCombineRule> suite_combine_rules();
+[[nodiscard]] const SuiteCombineRule& combine_rule(SuiteCombine combine);
+
+// ============================================================================
+// Predictions as columns
+// ============================================================================
+
+// One named column of a suite prediction table: text (plot IDs, class
+// labels), integers (class codes) or numbers (NaN where undefined).
+struct SuiteColumn {
+    enum class Kind { Text, Integer, Number };
+    std::string name;
+    Kind kind = Kind::Number;
+    bool probability = false;  // a class-probability column
+    std::vector<std::string> text;
+    std::vector<int64_t> integers;
+    std::vector<float> numbers;
+};
+
+// The predictions as one row per plot: `plot_id`, then per target in order
+// the prediction (for a classification rule `<t>` the class label, `<t>_code`
+// and `<t>_agreement`, with `probabilities` `<t>_prob_<label>` per class; for
+// a spherical mean `<t>_latitude` and `<t>_longitude`), its dispersion
+// (`<t>_sd`, `<t>_circular_sd`, `<t>_spread_km`), `<t>_n_species`,
+// `<t>_n_recognised`, `<t>_recognised_share`, `<t>_recognised_abundance_share`,
+// and with kept members `<t>_seed<N>` per member (a label for a vote,
+// `_latitude` / `_longitude` for a spherical mean). A class code is labelled
+// by class_label. The CLI writes this table, and the Python and R data frames
+// are built from it.
+[[nodiscard]] std::vector<SuiteColumn> suite_prediction_columns(const SuitePredictions& predictions,
+                                                                bool probabilities);
 
 class SuitePredictor {
 public:

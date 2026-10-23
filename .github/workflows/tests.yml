@@ -152,11 +152,13 @@ jobs:
           "$RESOLVE" info --model "$OUT/model.pt" | tee "$OUT/info.txt"
           grep -q "Model species_encoding: rank_pool" "$OUT/info.txt"
           grep -q "Model encoder_architecture: mlp" "$OUT/info.txt"
-          grep -q "area: regression" "$OUT/info.txt"
-          grep -q "habitat: classification (3 classes)" "$OUT/info.txt"
+          grep -q -- "- name: area" "$OUT/info.txt"
+          grep -q -- "- name: habitat" "$OUT/info.txt"
+          grep -q "task: classification" "$OUT/info.txt"
+          grep -q "num_classes: 3" "$OUT/info.txt"
           # The covariate and the categorical reached the model's schema.
-          grep -q "Covariates: elevation" "$OUT/info.txt"
-          grep -q "Categoricals: bedrock" "$OUT/info.txt"
+          grep -q "covariates: \[elevation\]" "$OUT/info.txt"
+          grep -q -- "- name: bedrock" "$OUT/info.txt"
           # The training recipe the checkpoint records, including the NCA
           # hyperparameters, which were constants no caller could set.
           grep -q "Train loss_config: nca" "$OUT/info.txt"
@@ -403,7 +405,7 @@ jobs:
             --output "$OUT/bare.pt"
           "$RESOLVE" info --model "$OUT/bare.pt" > "$OUT/info_bare.txt"
 
-          if grep -q "Covariates:" "$OUT/info_bare.txt"; then
+          if ! grep -q "covariates: \[\]" "$OUT/info_bare.txt"; then
             echo "::error::a model trained without --covariate reports covariates"
             exit 1
           fi
@@ -567,8 +569,7 @@ jobs:
           "$RESOLVE" train             --header "$FIXTURES/cli_header.csv"             --species "$FIXTURES/cli_species.csv"             --plot-id plot_id --species-id species --abundance cover             --lat lat --lon lon --genus genus --family family             --target area:regression             --encoding rank_pool             --parallel-enabled --parallel-aggregation sum             --parallel-branch 24,16 --parallel-branch 24,16:relu:layer_norm:0.1:0.5             --hidden-dims 32 --batch-size 32 --max-epochs 2 --patience 2             --seed 3 --output "$OUT/parallel.pt"
           "$RESOLVE" info --model "$OUT/parallel.pt" | tee "$OUT/info_parallel.txt"
           grep -q "Model parallel_layers:" "$OUT/info_parallel.txt"
-          grep -q "branches: 2" "$OUT/info_parallel.txt"
-          grep -q "branch 1:" "$OUT/info_parallel.txt"
+          test "$(grep -c -- "- hidden_dims:" "$OUT/info_parallel.txt")" -eq 2
           grep -q "branch_weight: 0.5" "$OUT/info_parallel.txt"
           grep -q "aggregation: sum" "$OUT/info_parallel.txt"
 

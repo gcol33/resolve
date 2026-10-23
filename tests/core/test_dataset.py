@@ -100,7 +100,7 @@ def test_taxonomy_ids_stay_inside_their_vocab(hash_dataset):
 
 def test_pool_tensors_populated_for_rank_pool(pool_dataset, plot_csvs):
     n = pool_dataset.n_plots
-    cap = pool_dataset.schema.pool_species_cap
+    cap = pool_dataset.schema.dataset_config.pool_species_cap
 
     assert pool_dataset.has_pool_data()
     assert cap > 0
@@ -118,8 +118,8 @@ def test_pool_tensors_populated_for_rank_pool(pool_dataset, plot_csvs):
 
 
 def test_pool_weighting_and_cap_recorded_on_schema(pool_dataset):
-    assert pool_dataset.schema.pool_weighting == rc.PoolWeighting.Log1p.value
-    assert pool_dataset.schema.pool_species_cap == 3
+    assert pool_dataset.schema.dataset_config.pool_weighting == rc.PoolWeighting.Log1p
+    assert pool_dataset.schema.dataset_config.pool_species_cap == 3
 
 
 def test_pool_weighting_changes_the_weights(plot_csvs):

@@ -562,12 +562,10 @@ resolve_value* tensor_to_ivec(const torch::Tensor& t) {
 // Enum parsers / emitters
 // ============================================================================
 //
-// The string <-> enum tables these call sites use live in
-// include/resolve/enum_names.hpp, one table per enum, read by both the parser
-// and the emitter. They are shared with the CLI, which parses the same
-// spellings off its flags and prints them back in `resolve info`. The
-// file-level `using namespace resolve` brings parse_selection_mode /
-// selection_mode_to_string / ... into scope unqualified.
+// The string <-> enum tables live in include/resolve/enum_names.hpp, one table
+// per enum, read by enum_from_name and enum_to_name. They are shared with the
+// CLI, which parses the same spellings off its flags and prints them back in
+// `resolve info`.
 
 namespace {
 
@@ -782,11 +780,11 @@ std::vector<TargetSpec> parse_targets(const resolve_value* targets) {
         TargetSpec ts;
         ts.target_name = name;
         ts.column_name = vhas(spec, "column") ? vstr(spec, "column") : name;
-        if (vhas(spec, "task")) ts.task = parse_task_type(vstr(spec, "task"));
-        if (vhas(spec, "transform")) ts.transform = parse_transform_type(vstr(spec, "transform"));
+        if (vhas(spec, "task")) ts.task = enum_from_name<TaskType>(vstr(spec, "task"));
+        if (vhas(spec, "transform")) ts.transform = enum_from_name<TransformType>(vstr(spec, "transform"));
         if (vhas(spec, "num_classes")) ts.num_classes = (int)vint(spec, "num_classes");
         if (vhas(spec, "weight")) ts.weight = (float)vdbl(spec, "weight");
-        if (vhas(spec, "missing")) ts.missing = parse_target_missing_policy(vstr(spec, "missing"));
+        if (vhas(spec, "missing")) ts.missing = enum_from_name<TargetMissingPolicy>(vstr(spec, "missing"));
         // Optional explicit class -> integer-code mapping (a sub-map of
         // name->int), so a held-out set can be pinned to the same codes as the
         // training set instead of auto-fitting a possibly-different order.
@@ -828,24 +826,13 @@ inline constexpr const char* kNGenera            = "n_genera";
 inline constexpr const char* kNFamilies          = "n_families";
 inline constexpr const char* kCovariateNames     = "covariate_names";
 inline constexpr const char* kTargets            = "targets";
-inline constexpr const char* kTrackUnknownFrac   = "track_unknown_fraction";
-inline constexpr const char* kTrackUnknownCount  = "track_unknown_count";
 inline constexpr const char* kCategoricalNames   = "categorical_names";
 inline constexpr const char* kCategoricalVocabSizes = "categorical_vocab_sizes";
 inline constexpr const char* kCategoricalEmbedDim   = "categorical_embed_dim";
-inline constexpr const char* kPoolWeighting      = "pool_weighting";
-inline constexpr const char* kPoolSpeciesCap     = "pool_species_cap";
-// Remaining DatasetConfig knobs + the fitted vocabularies.
-inline constexpr const char* kTopKSpecies        = "top_k_species";
-inline constexpr const char* kSelection          = "selection";
-inline constexpr const char* kSpeciesBudget      = "species_budget";
-inline constexpr const char* kRepresentation     = "representation";
-inline constexpr const char* kNormalization      = "normalization";
-inline constexpr const char* kAggregation        = "aggregation";
-inline constexpr const char* kUseTaxonomy        = "use_taxonomy";
-inline constexpr const char* kMissingValues      = "missing_values";
-inline constexpr const char* kZeroAbundanceAs    = "zero_abundance_as";
-inline constexpr const char* kSpeciesVocab      = "species_vocab";
+// The loader settings: a DatasetConfig map, through the field registry.
+inline constexpr const char* kDatasetConfig      = "dataset_config";
+inline constexpr const char* kUnrecordedSettings = "unrecorded_dataset_settings";
+inline constexpr const char* kSpeciesVocab       = "species_vocab";
 inline constexpr const char* kGenusVocab         = "genus_vocab";
 inline constexpr const char* kFamilyVocab        = "family_vocab";
 // Categorical string -> code maps. Not part of ResolveSchema (which carries
@@ -878,25 +865,15 @@ ResolveSchema parse_schema(const resolve_value* s) {
     if (vhas(s, k::kNGenera)) schema.n_genera = vint(s, k::kNGenera);
     if (vhas(s, k::kNFamilies)) schema.n_families = vint(s, k::kNFamilies);
     if (vhas(s, k::kCovariateNames)) schema.covariate_names = vstr_vec(s, k::kCovariateNames);
-    if (vhas(s, k::kTrackUnknownFrac)) schema.track_unknown_fraction = vbool(s, k::kTrackUnknownFrac);
-    if (vhas(s, k::kTrackUnknownCount)) schema.track_unknown_count = vbool(s, k::kTrackUnknownCount);
     if (vhas(s, k::kCategoricalNames)) schema.categorical_names = vstr_vec(s, k::kCategoricalNames);
     if (vhas(s, k::kCategoricalVocabSizes)) schema.categorical_vocab_sizes = vint_vec(s, k::kCategoricalVocabSizes);
     if (vhas(s, k::kCategoricalEmbedDim)) schema.categorical_embed_dim = vint(s, k::kCategoricalEmbedDim);
-    if (vhas(s, k::kPoolWeighting)) schema.pool_weighting = (int)vint(s, k::kPoolWeighting);
-    if (vhas(s, k::kPoolSpeciesCap)) schema.pool_species_cap = (int)vint(s, k::kPoolSpeciesCap);
-    // Remaining loader knobs + the fitted vocabularies. The enum
-    // fields reuse the DatasetConfig string spellings so one parser serves both
-    // trees.
-    if (vhas(s, k::kTopKSpecies)) schema.top_k_species = (int)vint(s, k::kTopKSpecies);
-    if (vhas(s, k::kSelection)) schema.selection = parse_selection_mode(vstr(s, k::kSelection));
-    if (vhas(s, k::kSpeciesBudget)) schema.species_budget = (int)vint(s, k::kSpeciesBudget);
-    if (vhas(s, k::kRepresentation)) schema.representation = parse_representation_mode(vstr(s, k::kRepresentation));
-    if (vhas(s, k::kNormalization)) schema.normalization = parse_normalization_mode(vstr(s, k::kNormalization));
-    if (vhas(s, k::kAggregation)) schema.aggregation = parse_aggregation_mode(vstr(s, k::kAggregation));
-    if (vhas(s, k::kUseTaxonomy)) schema.use_taxonomy = vbool(s, k::kUseTaxonomy);
-    if (vhas(s, k::kMissingValues)) schema.missing_values = parse_missing_value_policy(vstr(s, k::kMissingValues));
-    if (vhas(s, k::kZeroAbundanceAs)) schema.zero_abundance_as = (float)vdbl(s, k::kZeroAbundanceAs);
+    if (vhas(s, k::kDatasetConfig)) {
+        for_each_field(schema.dataset_config, ValueFieldReader{vget(s, k::kDatasetConfig)});
+    }
+    if (vhas(s, k::kUnrecordedSettings)) {
+        schema.unrecorded_dataset_settings = vstr_vec(s, k::kUnrecordedSettings);
+    }
     if (vhas(s, k::kSpeciesVocab)) schema.species_vocab = vstr_vec(s, k::kSpeciesVocab);
     if (vhas(s, k::kGenusVocab)) schema.genus_vocab = vstr_vec(s, k::kGenusVocab);
     if (vhas(s, k::kFamilyVocab)) schema.family_vocab = vstr_vec(s, k::kFamilyVocab);
@@ -907,13 +884,13 @@ ResolveSchema parse_schema(const resolve_value* s) {
             const resolve_value* tc_v = targets->vals[i];
             TargetConfig tc;
             tc.name = targets->keys[i];
-            if (vhas(tc_v, k::kTargetTask)) tc.task = parse_task_type(vstr(tc_v, k::kTargetTask));
-            if (vhas(tc_v, k::kTargetTransform)) tc.transform = parse_transform_type(vstr(tc_v, k::kTargetTransform));
+            if (vhas(tc_v, k::kTargetTask)) tc.task = enum_from_name<TaskType>(vstr(tc_v, k::kTargetTask));
+            if (vhas(tc_v, k::kTargetTransform)) tc.transform = enum_from_name<TransformType>(vstr(tc_v, k::kTargetTransform));
             if (vhas(tc_v, k::kTargetNumClasses)) tc.num_classes = (int)vint(tc_v, k::kTargetNumClasses);
             if (vhas(tc_v, k::kTargetWeight)) tc.weight = (float)vdbl(tc_v, k::kTargetWeight);
             if (vhas(tc_v, k::kTargetClassWeights)) tc.class_weights = vfloat_vec(tc_v, k::kTargetClassWeights);
             if (vhas(tc_v, k::kTargetClassNames)) tc.class_names = vstr_vec(tc_v, k::kTargetClassNames);
-            if (vhas(tc_v, k::kTargetMissing)) tc.missing = parse_target_missing_policy(vstr(tc_v, k::kTargetMissing));
+            if (vhas(tc_v, k::kTargetMissing)) tc.missing = enum_from_name<TargetMissingPolicy>(vstr(tc_v, k::kTargetMissing));
             schema.targets.push_back(tc);
         }
     }
@@ -1050,6 +1027,7 @@ resolve_value* train_result_to_value(const TrainResult& tr) {
     v_put(m, "final_metrics", nested_metrics_to_value(tr.final_metrics));
     v_put(m, "train_loss", v_double_array(tr.train_loss_history));
     v_put(m, "test_loss", v_double_array(tr.test_loss_history));
+    v_put(m, "lr", v_double_array(tr.lr_history));
     v_put(m, "train_loss_by_target", named_histories_to_value(tr.train_loss_history_by_target));
     v_put(m, "test_loss_by_target", named_histories_to_value(tr.test_loss_history_by_target));
     v_put(m, "train_aux_loss", named_histories_to_value(tr.train_aux_loss_history));
@@ -1205,11 +1183,9 @@ resolve_value* schema_to_value(const ResolveSchema& s) {
     namespace k = schema_tree_keys;
     auto* targets_m = v_map();
     for (const auto& tc : s.targets) {
-        std::string task_str = (tc.task == TaskType::Regression) ? "regression" : "classification";
-        std::string transform_str = (tc.transform == TransformType::Log1p) ? "log1p" : "none";
         auto* tm = v_map();
-        v_put(tm, k::kTargetTask, v_string(task_str));
-        v_put(tm, k::kTargetTransform, v_string(transform_str));
+        v_put(tm, k::kTargetTask, v_string(enum_to_name(tc.task)));
+        v_put(tm, k::kTargetTransform, v_string(enum_to_name(tc.transform)));
         v_put(tm, k::kTargetNumClasses, v_int(tc.num_classes));
         v_put(tm, k::kTargetWeight, v_double(tc.weight));
         v_put(tm, k::kTargetClassWeights, v_double_array(tc.class_weights));
@@ -1217,7 +1193,7 @@ resolve_value* schema_to_value(const ResolveSchema& s) {
         // R callers can recover the code->label mapping like Python's
         // TargetConfig.class_names.
         v_put(tm, k::kTargetClassNames, v_string_array(tc.class_names));
-        v_put(tm, k::kTargetMissing, v_string(target_missing_policy_to_string(tc.missing)));
+        v_put(tm, k::kTargetMissing, v_string(enum_to_name(tc.missing)));
         v_put(targets_m, tc.name, tm);
     }
     auto* m = v_map();
@@ -1231,23 +1207,13 @@ resolve_value* schema_to_value(const ResolveSchema& s) {
     v_put(m, k::kNFamilies, v_int(s.n_families));
     v_put(m, k::kCovariateNames, v_string_array(s.covariate_names));
     v_put(m, k::kTargets, targets_m);
-    v_put(m, k::kTrackUnknownFrac, v_bool(s.track_unknown_fraction));
-    v_put(m, k::kTrackUnknownCount, v_bool(s.track_unknown_count));
     v_put(m, k::kCategoricalNames, v_string_array(s.categorical_names));
     v_put(m, k::kCategoricalVocabSizes, v_int_array(s.categorical_vocab_sizes));
     v_put(m, k::kCategoricalEmbedDim, v_int(s.categorical_embed_dim));
-    v_put(m, k::kPoolWeighting, v_int(s.pool_weighting));
-    v_put(m, k::kPoolSpeciesCap, v_int(s.pool_species_cap));
-    // Remaining loader knobs + the fitted vocabularies.
-    v_put(m, k::kTopKSpecies, v_int(s.top_k_species));
-    v_put(m, k::kSelection, v_string(selection_mode_to_string(s.selection)));
-    v_put(m, k::kSpeciesBudget, v_int(s.species_budget));
-    v_put(m, k::kRepresentation, v_string(representation_mode_to_string(s.representation)));
-    v_put(m, k::kNormalization, v_string(normalization_mode_to_string(s.normalization)));
-    v_put(m, k::kAggregation, v_string(aggregation_mode_to_string(s.aggregation)));
-    v_put(m, k::kUseTaxonomy, v_bool(s.use_taxonomy));
-    v_put(m, k::kMissingValues, v_string(missing_value_policy_to_string(s.missing_values)));
-    v_put(m, k::kZeroAbundanceAs, v_double(s.zero_abundance_as));
+    auto* dataset_config = v_map();
+    v_put(m, k::kDatasetConfig, dataset_config);
+    for_each_field(s.dataset_config, ValueFieldWriter{dataset_config});
+    v_put(m, k::kUnrecordedSettings, v_string_array(s.unrecorded_dataset_settings));
     v_put(m, k::kSpeciesVocab, v_string_array(s.species_vocab));
     v_put(m, k::kGenusVocab, v_string_array(s.genus_vocab));
     v_put(m, k::kFamilyVocab, v_string_array(s.family_vocab));
@@ -1263,7 +1229,7 @@ resolve_value* external_vocabs_to_value(const ExternalVocabs& v) {
     s.genus_vocab = v.taxonomy.genus_names();
     s.family_vocab = v.taxonomy.family_names();
     s.targets = v.targets;
-    s.pool_species_cap = v.pool_species_cap;
+    s.dataset_config.pool_species_cap = v.pool_species_cap;
     auto* m = schema_to_value(s);
     v_put(m, schema_tree_keys::kCategoricalVocab, categorical_vocab_to_value(v.categorical));
     return m;
@@ -2289,6 +2255,27 @@ resolve_value* suite_predictions_to_value(const SuitePredictions& p) {
         v_put(m, "recognised_share", vec_or_null(t.recognition.count_share));
         v_put(m, "recognised_abundance_share", vec_or_null(t.recognition.abundance_share));
     }
+    // The predictions as one row per plot (suite_prediction_columns), the class
+    // probabilities included and named, so a binding's data frame holds the
+    // columns the CLI writes.
+    auto* columns = v_map();
+    v_put(result, "columns", columns);
+    std::vector<std::string> probability_columns;
+    for (const auto& column : suite_prediction_columns(p, /*probabilities=*/true)) {
+        switch (column.kind) {
+            case SuiteColumn::Kind::Text:
+                v_put(columns, column.name, v_string_array(column.text));
+                break;
+            case SuiteColumn::Kind::Integer:
+                v_put(columns, column.name, v_int_array(column.integers));
+                break;
+            case SuiteColumn::Kind::Number:
+                v_put(columns, column.name, v_double_array(column.numbers));
+                break;
+        }
+        if (column.probability) probability_columns.push_back(column.name);
+    }
+    v_put(result, "probability_columns", v_string_array(probability_columns));
     return g.release();
 }
 

@@ -5,7 +5,8 @@
 // This is the single place a flag is declared. The parser accepts exactly what
 // is listed here (anything else exits non-zero), `resolve help` is rendered
 // from these rows, and each command reads its values back by the same name.
-// Adding a knob is one row here plus one read in the command body.
+// The DatasetConfig, ModelConfig, TrainConfig and architecture flags of
+// `train` are generated from the field registry (config_flags.hpp).
 //
 // Header-only and torch-free so the tables can be exercised from a unit test
 // without spawning a process.
@@ -16,8 +17,7 @@
 namespace resolve_cli {
 
 // Roles shared by `train` and `predict`: both read the same two CSVs with the
-// same column semantics, so the rows live in one function rather than in two
-// tables that can drift.
+// same column semantics.
 inline void append_role_flags(std::vector<FlagSpec>& flags) {
     flags.push_back({"--plot-id", Arity::Value, "COL", "plot_id",
                      "Column name for plot ID"});
@@ -63,113 +63,9 @@ inline const CommandSpec& train_spec() {
                          "keep plots that lack this label: they train the\n"
                          "other targets only (default :drop leaves them out)."});
 
-        // Dataset / encoding
-        flags.push_back({"--encoding", Arity::Value, "MODE", "hash",
-                         "Species encoding: hash, embed, sparse, rank_pool,\n"
-                         "transformer"});
-        flags.push_back({"--hash-dim", Arity::Value, "N", "32",
-                         "Hash dimension"});
-        flags.push_back({"--top-k", Arity::Value, "N", "3",
-                         "Top-k species per taxonomy slot"});
-        flags.push_back({"--top-k-species", Arity::Value, "N", "10",
-                         "Species slots kept per plot in embed mode"});
-        flags.push_back({"--selection", Arity::Value, "MODE", "top",
-                         "Which species to keep: top, bottom, top_bottom, all"});
-        flags.push_back({"--species-budget", Arity::Value, "N", "0",
-                         "Species kept per plot by --selection for the\n"
-                         "rank_pool / transformer / sparse encodings:\n"
-                         "0 = no budget (encode every species). hash uses\n"
-                         "--top-k and embed uses --top-k-species instead."});
-        flags.push_back({"--missing-values", Arity::Value, "MODE", "indicate",
-                         "How a missing covariate or coordinate enters the\n"
-                         "model: indicate (fill with the fitting fold's mean\n"
-                         "and add a 0/1 missingness column) or zero."});
-        flags.push_back({"--representation", Arity::Value, "MODE", "abundance",
-                         "The value each species carries into every\n"
-                         "encoding: abundance or presence_absence (1.0)"});
-        flags.push_back({"--normalization", Arity::Value, "MODE", "raw",
-                         "Abundance normalization: raw, norm, log1p"});
-        flags.push_back({"--aggregation", Arity::Value, "MODE", "abundance",
-                         "How the fixed genus/family slots rank a plot's\n"
-                         "taxa: abundance (summed) or count (species held)"});
-        flags.push_back({"--no-taxonomy", Arity::Flag, "", "",
-                         "Ignore the genus/family columns even when present"});
-        flags.push_back({"--no-unknown-fraction", Arity::Flag, "", "",
-                         "Drop the unknown-species-fraction feature (on by\n"
-                         "default)"});
-        flags.push_back({"--unknown-count", Arity::Flag, "", "",
-                         "Add the unknown-species-count feature (off by\n"
-                         "default)"});
-        flags.push_back({"--use-cuda-hash", Arity::Flag, "", "",
-                         "Hash species on the GPU each batch instead of\n"
-                         "precomputing the embedding. Hash encoding only."});
-        flags.push_back({"--pool-weighting", Arity::Value, "W", "log1p",
-                         "Per-species pooling weight for rank_pool /\n"
-                         "transformer encoders: binary, abundance, log1p,\n"
-                         "norm, rank. Ignored for hash/embed/sparse."});
-        flags.push_back({"--pool-species-cap", Arity::Value, "N", "0",
-                         "Species-per-plot cap for the pool encoders:\n"
-                         "0 = no cap, -x = the (100 - x)th percentile of\n"
-                         "species per plot (-1 = p99, -5 = p95; x in 1..99),\n"
-                         ">0 = manual cap"});
-        flags.push_back({"--zero-abundance-as", Arity::Value, "FLOAT", "0",
-                         "Abundance a recorded 0 is read at. Archives that\n"
-                         "write a presence-only record as 0% cover need a\n"
-                         "positive value here, or a log1p weighting gives\n"
-                         "those species no weight. 0 = leave a 0 alone."});
-
-        // Model architecture
-        flags.push_back({"--encoder-architecture", Arity::Value, "A", "mlp",
-                         "Encoder architecture: mlp, ft_transformer, tabnet,\n"
-                         "saint, trait_net, gnn, excelformer,\n"
-                         "heterogeneous_gnn"});
-        flags.push_back({"--hidden-dims", Arity::Value, "LIST", "2048,1024,512,256,128,64",
-                         "Comma-separated MLP hidden layer widths"});
-        flags.push_back({"--dropout", Arity::Value, "FLOAT", "0.3",
-                         "Dropout rate in the encoder MLP"});
-        flags.push_back({"--cover-dropout", Arity::Value, "FLOAT", "0.0",
-                         "Probability of dropping a plot's cover values in\n"
-                         "the rank_pool / transformer encoders"});
-        flags.push_back({"--freeze-composition", Arity::Flag, "", "",
-                         "Keep the species, genus and family tables at their\n"
-                         "initialisation instead of learning them"});
-        flags.push_back({"--moe-routing", Arity::Value, "R", "none",
-                         "Mixture of experts routing: none, soft, topk"});
-        flags.push_back({"--moe-placement", Arity::Value, "P", "tail",
-                         "Where the mixture sits: tail (it replaces the\n"
-                         "encoder's final MLP stage) or post (it runs over\n"
-                         "the finished latent). Only post is available for a\n"
-                         "non-MLP --encoder-architecture."});
-        flags.push_back({"--n-experts", Arity::Value, "N", "4",
-                         "Expert networks in the mixture (>= 2)"});
-        flags.push_back({"--expert-hidden-dims", Arity::Value, "LIST", "256,128",
-                         "Comma-separated hidden widths inside each expert"});
-        flags.push_back({"--moe-top-k", Arity::Value, "N", "2",
-                         "Experts activated per sample under topk routing"});
-        flags.push_back({"--moe-noise-std", Arity::Value, "FLOAT", "0.1",
-                         "Gate-logit noise during training, for load balancing"});
-        flags.push_back({"--moe-aux-loss-weight", Arity::Value, "FLOAT", "0.01",
-                         "Weight on the mixture's load-balancing loss"});
-        flags.push_back({"--d-model", Arity::Value, "N", "128",
-                         "Transformer token dimension"});
-        flags.push_back({"--n-heads", Arity::Value, "N", "4",
-                         "Transformer attention heads"});
-        flags.push_back({"--n-attention-layers", Arity::Value, "N", "2",
-                         "Transformer self-attention layers. Required >= 1\n"
-                         "when --transformer-pooling cls."});
-        flags.push_back({"--transformer-ff-dim", Arity::Value, "N", "256",
-                         "Feed-forward width inside each transformer block"});
-        flags.push_back({"--transformer-pooling", Arity::Value, "P", "attention",
-                         "Transformer pooling: attention or cls"});
-        flags.push_back({"--transformer-dropout", Arity::Value, "FLOAT", "0.1",
-                         "Dropout inside transformer blocks"});
-
-        // Every field of every architecture sub-config, generated from the
-        // shared field registry (config_flags.hpp) rather than written out
-        // here: the flag is the field's checkpoint key with dashes, so
-        // --tabnet-n-steps, --gnn-graph-mode, --hgnn-k-cooccurrence. Before
-        // this the CLI could reach no architecture hyperparameter at all, so a
-        // standalone run could not train what the bindings could.
+        // Every DatasetConfig, ModelConfig and TrainConfig field, then every
+        // field of every architecture sub-config, from the field registry.
+        append_top_level_flags(flags);
         append_architecture_flags(flags);
         flags.push_back({"--parallel-branch", Arity::Repeatable, "SPEC", "",
                          "One branch of the parallel block. Repeat per\n"
@@ -184,67 +80,6 @@ inline const CommandSpec& train_spec() {
                          "Needs --parallel-enabled; the block then replaces\n"
                          "the encoder's MLP tail."});
 
-        // Training
-        flags.push_back({"--batch-size", Arity::Value, "N", "4096",
-                         "Batch size"});
-        flags.push_back({"--batch-size-floor", Arity::Value, "N", "1024",
-                         "Smallest batch size the auto-halve-on-OOM retry in\n"
-                         "Trainer::fit is allowed to drop to. On CUDA\n"
-                         "OutOfMemoryError the trainer releases optimizer /\n"
-                         "AMP / GPU caches, halves batch_size, and restarts\n"
-                         "from epoch 0; below this floor the OOM is\n"
-                         "rethrown. Especially relevant on Windows, where\n"
-                         "the allocator's expandable_segments option is\n"
-                         "unavailable."});
-        flags.push_back({"--max-epochs", Arity::Value, "N", "500",
-                         "Maximum epochs"});
-        flags.push_back({"--patience", Arity::Value, "N", "50",
-                         "Early stopping patience"});
-        flags.push_back({"--fixed-epochs", Arity::Value, "N", "0",
-                         "Train exactly N epochs of the --max-epochs\n"
-                         "schedule, with no early stopping, and keep the\n"
-                         "final weights (0 = early stopping). The only mode\n"
-                         "that accepts --test-size 0, for a refit on every\n"
-                         "plot."});
-        flags.push_back({"--lr", Arity::Value, "FLOAT", "0.001",
-                         "Learning rate"});
-        flags.push_back({"--weight-decay", Arity::Value, "FLOAT", "0.0001",
-                         "AdamW weight decay"});
-        flags.push_back({"--lr-scheduler", Arity::Value, "S", "none",
-                         "Learning rate schedule: none, step, cosine"});
-        flags.push_back({"--lr-step-size", Arity::Value, "N", "100",
-                         "Epochs between decays, for --lr-scheduler step"});
-        flags.push_back({"--lr-gamma", Arity::Value, "FLOAT", "0.1",
-                         "Decay factor, for --lr-scheduler step"});
-        flags.push_back({"--lr-min", Arity::Value, "FLOAT", "0.000001",
-                         "Floor learning rate, for --lr-scheduler cosine"});
-        flags.push_back({"--loss-config", Arity::Value, "M", "combined",
-                         "Loss recipe: mae, smape, combined, nca"});
-        flags.push_back({"--band-threshold", Arity::Value, "FLOAT", "0.25",
-                         "Tolerance band the phase-3 loss penalty optimizes\n"
-                         "toward (predictions outside [1-t, 1+t] times the\n"
-                         "target are penalized)"});
-        flags.push_back({"--band-thresholds", Arity::Value, "LIST", "0.1,0.25,0.5",
-                         "Comma-separated band accuracies to REPORT. Does\n"
-                         "not change what training optimizes."});
-        flags.push_back({"--nca-temperature", Arity::Value, "FLOAT", "0.1",
-                         "Scale of the stochastic-neighbour softmax in the\n"
-                         "NCA term, i.e. the effective number of neighbours\n"
-                         "each sample spreads over. Acts only under\n"
-                         "--loss-config nca."});
-        flags.push_back({"--nca-neighbors", Arity::Value, "N", "32",
-                         "Neighbours per sample the NCA term sums over, its\n"
-                         "most similar in-batch samples. 0 or less keeps the\n"
-                         "whole batch. Acts only under --loss-config nca."});
-        flags.push_back({"--nca-weight", Arity::Value, "FLOAT", "0.1",
-                         "Weight of the NCA term against the cross-entropy\n"
-                         "it is added to. Acts only under --loss-config nca."});
-        flags.push_back({"--checkpoint-dir", Arity::Value, "PATH", "",
-                         "Directory for per-epoch checkpoints and the\n"
-                         "progress file (empty = disabled)"});
-        flags.push_back({"--checkpoint-every", Arity::Value, "N", "0",
-                         "Also checkpoint every N epochs (0 = best only).\n"
-                         "Requires --checkpoint-dir."});
         flags.push_back({"--resume", Arity::Value, "PATH", "",
                          "Continue the run that wrote PATH (best.pt or\n"
                          "checkpoint_<N>.pt under its --checkpoint-dir) at\n"
@@ -252,18 +87,6 @@ inline const CommandSpec& train_spec() {
                          "model and training flags and --seed, so the split\n"
                          "and recipe are the ones it trained on. Not\n"
                          "combined with --cv-folds."});
-        flags.push_back({"--amp", Arity::Flag, "", "",
-                         "Enable CUDA automatic mixed precision (off by\n"
-                         "default; helps transformer encoders, rarely MLPs)"});
-        flags.push_back({"--no-amp", Arity::Flag, "", "",
-                         "Disable AMP explicitly (the default)"});
-        flags.push_back({"--cudnn-benchmark", Arity::Flag, "", "",
-                         "Enable the cuDNN autotuner (the default)"});
-        flags.push_back({"--no-cudnn-benchmark", Arity::Flag, "", "",
-                         "Disable the cuDNN autotuner, for run-to-run\n"
-                         "determinism"});
-        flags.push_back({"--no-tf32", Arity::Flag, "", "",
-                         "Disable TF32 matmuls on Ampere+ GPUs"});
         flags.push_back({"--test-size", Arity::Value, "FLOAT", "0.2",
                          "Held-out fraction early stopping watches, drawn\n"
                          "at random with --seed. 0 holds nothing out and\n"
@@ -283,13 +106,8 @@ inline const CommandSpec& train_spec() {
                          "cross-validation folds, so two identical runs\n"
                          "produce the same model."});
         flags.push_back({"--cuda", Arity::Flag, "", "",
-                         "Use CUDA if available"});
-        flags.push_back({"--vram-fraction", Arity::Value, "FLOAT", "1.0",
-                         "Fraction of GPU VRAM the PyTorch caching allocator\n"
-                         "may use. Dedicated training jobs on a solo GPU use\n"
-                         "the full device. Pass an explicit lower value\n"
-                         "(e.g. 0.80) when sharing the GPU with a desktop /\n"
-                         "GUI to leave headroom."});
+                         "Train on the CUDA device (an error when none is\n"
+                         "available)"});
 
         // Cross-validation
         flags.push_back({"--cv-folds", Arity::Value, "N", "0",
@@ -345,7 +163,8 @@ inline const CommandSpec& predict_spec() {
                          "Output path for predictions"});
         append_role_flags(flags);
         flags.push_back({"--cuda", Arity::Flag, "", "",
-                         "Use CUDA if available (default: CPU). Predict on a\n"
+                         "Predict on the CUDA device (default: CPU; an error\n"
+                         "when no device is available). Predict on a\n"
                          "5M-param MLP over 300k plots is ~12s on CPU vs ~1s\n"
                          "on GPU; the OOM and bookkeeping cost of GPU\n"
                          "predict on 16 GiB-class cards usually outweighs\n"

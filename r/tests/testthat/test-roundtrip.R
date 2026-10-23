@@ -145,3 +145,36 @@ test_that("fixedEpochs refits on every plot for a fixed duration", {
                                      verbose = FALSE),
                "maxEpochs")
 })
+
+# Every loader setting of the dataset (the DatasetConfig fields the C ABI emits,
+# one per field-registry row) reaches the checkpoint's schema and comes back
+# through the C ABI, with the selection the load applied.
+test_that("every loader setting round-trips through the checkpoint", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  tables <- signal_tables(120L, n_species = 8L)
+  config <- list(species_encoding = "rank_pool", top_k_species = 7L,
+                 representation = "presence_absence", normalization = "log1p",
+                 track_unknown_count = TRUE, pool_weighting = "rank",
+                 species_budget = 4L, selection = "bottom", missing_values = "zero",
+                 zero_abundance_as = 0.5, use_taxonomy = FALSE)
+  dataset <- load_tables(tables, roles = signal_roles(), targets = regression_target(),
+                         config = config)
+  model_file <- local_model_file()
+  resolve.train.dataset(dataset, hiddenDims = c(8L), maxEpochs = 2L, patience = 2L,
+                        batchSize = 32L, testSize = 0.25, seed = 1L,
+                        savePath = model_file, verbose = FALSE)
+  predictor <- resolve.load(model_file, device = "cpu")
+
+  recorded <- dataset$schema()$dataset_config
+  loaded <- predictor$schema()$dataset_config
+  expect_setequal(names(loaded), names(dataset$config()))
+  for (name in names(dataset$config())) {
+    expect_equal(loaded[[name]], recorded[[name]], info = name)
+  }
+  for (name in names(config)) {
+    expect_equal(recorded[[name]], config[[name]], info = name)
+  }
+  expect_length(unlist(predictor$schema()$unrecorded_dataset_settings), 0L)
+})

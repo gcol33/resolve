@@ -12,131 +12,31 @@
 #include "resolve/resolve.hpp"
 
 #include "arg_parser.hpp"
+#include "cli_common.hpp"
 #include "csv_output.hpp"
 
-using resolve_cli::class_label;
 using resolve_cli::csv_field;
 using resolve_cli::csv_number;
 using resolve_cli::ParsedArgs;
 
 namespace {
 
-// A role flag renames a contract column only when it was given; its table
-// default belongs to `--model`, where no manifest supplies the name.
-std::optional<std::string> column_flag(const ParsedArgs& args, const char* flag) {
-    std::string value;
-    if (args.get_if_present(flag, value)) return value;
-    return std::nullopt;
-}
-
-void write_header(std::ostream& out, const resolve::SuitePredictions& p, bool probabilities,
-                  bool members) {
-    using resolve::SuiteCombine;
-    out << "plot_id";
-    for (const auto& t : p.targets) {
-        const std::string n = t.name;
-        const bool spherical = t.combine == SuiteCombine::SphericalMean;
-        if (spherical) {
-            out << "," << csv_field(n + "_latitude") << "," << csv_field(n + "_longitude");
-        } else {
-            out << "," << csv_field(n);
-        }
-        switch (t.combine) {
-            case SuiteCombine::Vote:
-                out << "," << csv_field(n + "_code") << "," << csv_field(n + "_agreement");
-                if (probabilities) {
-                    for (int64_t k = 0; k < t.probabilities.size(1); ++k) {
-                        out << "," << csv_field(n + "_prob_" + class_label(t.class_names, k));
-                    }
-                }
-                break;
-            case SuiteCombine::Mean:
-                out << "," << csv_field(n + "_sd");
-                break;
-            case SuiteCombine::CircularMean:
-                out << "," << csv_field(n + "_circular_sd");
-                break;
-            case SuiteCombine::SphericalMean:
-                out << "," << csv_field(n + "_spread_km");
-                break;
-        }
-        out << "," << csv_field(n + "_n_species") << "," << csv_field(n + "_n_recognised")
-            << "," << csv_field(n + "_recognised_share") << ","
-            << csv_field(n + "_recognised_abundance_share");
-        if (members) {
-            for (const int64_t seed : t.member_seeds) {
-                const std::string s = n + "_seed" + std::to_string(seed);
-                if (spherical) {
-                    out << "," << csv_field(s + "_latitude") << "," << csv_field(s + "_longitude");
-                } else {
-                    out << "," << csv_field(s);
-                }
-            }
-        }
+// The engine's prediction table (suite_prediction_columns) as CSV.
+void write_columns(std::ostream& out, const std::vector<resolve::SuiteColumn>& columns) {
+    using Kind = resolve::SuiteColumn::Kind;
+    for (std::size_t c = 0; c < columns.size(); ++c) {
+        out << (c == 0 ? "" : ",") << csv_field(columns[c].name);
     }
     out << "\n";
-}
-
-double at(const torch::Tensor& t, int64_t i) {
-    return t.defined() ? t[i].item<double>() : std::nan("");
-}
-
-void write_rows(std::ostream& out, const resolve::SuitePredictions& p, bool probabilities,
-                bool members) {
-    using resolve::SuiteCombine;
-    // Contiguous CPU tensors, so the per-cell reads below are plain indexing.
-    struct Columns {
-        torch::Tensor value, agreement, probabilities, dispersion, members;
-        torch::Tensor n_species, n_recognised, count_share, abundance_share;
-    };
-    std::vector<Columns> cols;
-    auto cpu = [](const torch::Tensor& t) {
-        return t.defined() ? t.to(torch::kCPU).contiguous() : t;
-    };
-    for (const auto& t : p.targets) {
-        cols.push_back({cpu(t.value), cpu(t.agreement), cpu(t.probabilities),
-                        cpu(t.dispersion), cpu(t.members), cpu(t.recognition.n_species),
-                        cpu(t.recognition.n_recognised), cpu(t.recognition.count_share),
-                        cpu(t.recognition.abundance_share)});
-    }
-
-    const auto n = static_cast<int64_t>(p.plot_ids.size());
-    for (int64_t i = 0; i < n; ++i) {
-        out << csv_field(p.plot_ids[static_cast<size_t>(i)]);
-        for (std::size_t j = 0; j < p.targets.size(); ++j) {
-            const auto& t = p.targets[j];
-            const auto& c = cols[j];
-            if (t.combine == SuiteCombine::Vote) {
-                const int64_t code = c.value[i].item<int64_t>();
-                out << "," << csv_field(class_label(t.class_names, code)) << "," << code << ","
-                    << csv_number(at(c.agreement, i));
-                if (probabilities) {
-                    for (int64_t k = 0; k < c.probabilities.size(1); ++k) {
-                        out << "," << csv_number(c.probabilities[i][k].item<double>());
-                    }
-                }
-            } else if (t.combine == SuiteCombine::SphericalMean) {
-                out << "," << csv_number(c.value[i][0].item<double>()) << ","
-                    << csv_number(c.value[i][1].item<double>()) << ","
-                    << csv_number(at(c.dispersion, i));
-            } else {
-                out << "," << csv_number(at(c.value, i)) << "," << csv_number(at(c.dispersion, i));
-            }
-            out << "," << csv_number(at(c.n_species, i)) << ","
-                << csv_number(at(c.n_recognised, i)) << "," << csv_number(at(c.count_share, i))
-                << "," << csv_number(at(c.abundance_share, i));
-            if (members) {
-                for (int64_t m = 0; m < c.members.size(0); ++m) {
-                    if (t.combine == SuiteCombine::Vote) {
-                        out << "," << csv_field(class_label(t.class_names,
-                                                            c.members[m][i].item<int64_t>()));
-                    } else if (t.combine == SuiteCombine::SphericalMean) {
-                        out << "," << csv_number(c.members[m][i][0].item<double>()) << ","
-                            << csv_number(c.members[m][i][1].item<double>());
-                    } else {
-                        out << "," << csv_number(c.members[m][i].item<double>());
-                    }
-                }
+    const std::size_t n_rows = columns.empty() ? 0 : columns.front().text.size();
+    for (std::size_t i = 0; i < n_rows; ++i) {
+        for (std::size_t c = 0; c < columns.size(); ++c) {
+            const resolve::SuiteColumn& column = columns[c];
+            if (c > 0) out << ",";
+            switch (column.kind) {
+                case Kind::Text: out << csv_field(column.text[i]); break;
+                case Kind::Integer: out << column.integers[i]; break;
+                case Kind::Number: out << csv_number(column.numbers[i]); break;
             }
         }
         out << "\n";
@@ -176,12 +76,7 @@ int predict_suite_command(const ParsedArgs& args) {
     load.verify_checksums = !args.has("--no-verify");
     load.targets = args.get_all("--target");
     load.vram_fraction = args.get_float("--vram-fraction");
-    if (args.has("--cuda") && torch::cuda::is_available()) {
-        load.device = torch::kCUDA;
-        std::cout << "Using CUDA" << std::endl;
-    } else {
-        std::cout << "Using CPU" << std::endl;
-    }
+    load.device = resolve_cli::choose_device(args);
 
     std::optional<SuitePredictor> suite;
     try {
@@ -200,15 +95,9 @@ int predict_suite_command(const ParsedArgs& args) {
     SuitePredictOptions predict;
     predict.batch_size = args.get_int64("--predict-batch-size");
     predict.keep_members = members;
-    predict.columns.plot_id = column_flag(args, "--plot-id");
-    predict.columns.species_id = column_flag(args, "--species-id");
-    predict.columns.abundance = column_flag(args, "--abundance");
-    predict.columns.genus = column_flag(args, "--genus");
-    predict.columns.family = column_flag(args, "--family");
-    predict.columns.latitude = column_flag(args, "--lat");
-    predict.columns.longitude = column_flag(args, "--lon");
-    if (args.has("--covariate")) predict.columns.covariates = args.get_all("--covariate");
-    if (args.has("--categorical")) predict.columns.categoricals = args.get_all("--categorical");
+    // A role flag renames a contract column only when it was given; its table
+    // default belongs to `--model`, where no manifest supplies the name.
+    predict.columns = resolve_cli::read_suite_columns(args);
 
     std::optional<SuitePredictions> predictions;
     try {
@@ -223,8 +112,7 @@ int predict_suite_command(const ParsedArgs& args) {
         std::cerr << "Error: Cannot open output file: " << output_path << std::endl;
         return 1;
     }
-    write_header(out, *predictions, probabilities, members);
-    write_rows(out, *predictions, probabilities, members);
+    write_columns(out, suite_prediction_columns(*predictions, probabilities));
     out.close();
 
     std::cout << "Wrote " << predictions->plot_ids.size() << " plots to " << output_path
@@ -260,8 +148,8 @@ int info_suite_command(const ParsedArgs& args) {
             std::cout << "  Abundance units: " << in.abundance_units << std::endl;
         }
         if (in.zero_abundance_as != 0.0f) {
-            std::cout << "  A recorded abundance of 0 is read as " << in.zero_abundance_as
-                      << std::endl;
+            std::cout << "  A recorded abundance of 0 is read as "
+                      << number_to_decimal(in.zero_abundance_as) << std::endl;
         }
         optional_column("Genus", in.genus);
         optional_column("Family", in.family);
@@ -285,6 +173,12 @@ int info_suite_command(const ParsedArgs& args) {
                 std::cout << std::endl;
             }
             if (!t.limit.empty()) std::cout << "    limit: " << t.limit << std::endl;
+            for (const auto& member : t.members) {
+                if (member.zero_abundance_as) {
+                    std::cout << "    seed " << member.seed << " read a recorded abundance of 0 as "
+                              << number_to_decimal(*member.zero_abundance_as) << std::endl;
+                }
+            }
             for (const auto& [regime, metrics] : t.validation.members()) {
                 std::cout << "    validation " << regime << ": " << json::dump(metrics, 0)
                           << std::endl;

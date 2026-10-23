@@ -372,8 +372,6 @@ struct RankPoolEncodedData {
     torch::Tensor has_cover;    // (n_plots,) float32
 };
 
-enum class PoolWeighting { Binary, Abundance, Log1p, Norm, Rank };
-
 class RankPoolEncoder : public SpeciesVocabEncoder {
 public:
     // `selection` + `species_budget` are the per-plot species budget

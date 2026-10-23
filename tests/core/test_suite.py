@@ -332,7 +332,7 @@ def test_zero_abundance_as_reaches_the_schema(tmp_path):
     cfg.zero_abundance_as = 1.0
     ds = rc.ResolveDataset.from_csv(str(header), str(species), roles,
                                     [rc.TargetSpec.regression("y")], cfg)
-    assert ds.schema.zero_abundance_as == 1.0
+    assert ds.schema.dataset_config.zero_abundance_as == 1.0
     weights = ds.pool_weights
     assert torch.allclose(weights[0], weights[1])  # a read as 1, like b
 
@@ -459,3 +459,45 @@ def test_a_spherical_mean_averages_across_the_antimeridian():
     assert abs(out.value[0, 0].item()) < 1e-4
     assert abs(abs(out.value[0, 1].item()) - 180.0) < 1e-4
     assert out.dispersion[0].item() == pytest.approx(rc.EARTH_RADIUS_KM * math.pi / 180, rel=1e-4)
+
+
+def test_the_prediction_table_is_the_engines(suite_dir, scoring):
+    h, s, _, _ = scoring
+    suite = rc.SuitePredictor.load(str(suite_dir))
+    out = suite.predict(s, header=h, keep_members=True)
+    columns = rc.suite_prediction_columns(out, probabilities=True)
+    table = out.to_pandas(probabilities=True)
+    assert list(table.columns) == [name for name, _ in columns]
+    values = dict(columns)
+    assert isinstance(values["hab"], list) and values["hab"] == list(table["hab"])
+    assert values["hab_code"].dtype == torch.int64
+    assert values["y"].dtype == torch.float32
+    assert "hab_prob_A" not in out.to_pandas().columns
+    members = [c for c in table.columns if c.startswith("hab_seed")]
+    assert members and set(table[members[0]]) <= {"A", "B", "C"}
+
+
+def test_one_member_has_no_spread_and_cancelling_bearings_no_mean():
+    one = torch.tensor([[10.0, 20.0]])
+    assert math.isnan(rc.combine_circular(one, 360.0).dispersion[0].item())
+    assert math.isnan(rc.combine_mean(one).dispersion[0].item())
+    opposite = torch.tensor([[0.0], [180.0]])
+    out = rc.combine_circular(opposite, 360.0)
+    assert math.isnan(out.value[0].item()) and math.isnan(out.dispersion[0].item())
+
+
+def test_a_member_states_the_zero_abundance_it_was_trained_under(suite_dir):
+    manifest = rc.SuiteManifest.read(str(suite_dir))
+    target = manifest.targets[1]
+    members = list(target.members)
+    members[0].zero_abundance_as = 1.0
+    target.members = members
+    targets = list(manifest.targets)
+    targets[1] = target
+    manifest.targets = targets
+    assert manifest.format_version == 3
+    manifest.write(str(suite_dir))
+    back = rc.SuiteManifest.read(str(suite_dir))
+    assert back.targets[1].members[0].zero_abundance_as == 1.0
+    rc.SuitePredictor.load(str(suite_dir))
+    assert back.verify(str(suite_dir), targets=["hab"]) == []

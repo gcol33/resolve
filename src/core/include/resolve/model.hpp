@@ -2,6 +2,7 @@
 
 #include "resolve/types.hpp"
 #include "resolve/adapter.hpp"
+#include "resolve/architectures.hpp"
 #include "resolve/aux_loss.hpp"
 #include "resolve/categorical.hpp"
 #include "resolve/encoder.hpp"
@@ -88,15 +89,12 @@ public:
     [[nodiscard]] bool uses_moe() const noexcept { return config_.moe_routing != MoERoutingType::None; }
     [[nodiscard]] int n_experts() const noexcept { return uses_moe() ? config_.n_experts : 0; }
 
-    // The coordinate-kNN GNN builds its spatial graph from the coordinates of the
-    // plots in the current forward. Mini-batching would build the graph from an
-    // arbitrary subset of plots, so each plot would attend to random batch-mates
-    // rather than its true spatial neighbors. Training must therefore forward the
-    // full node set in a single batch, so the graph is the global spatial
-    // structure -- mirroring the single full-batch inference forward the Predictor
-    // already forces for this architecture.
+    // An encoder that builds a plot's representation from the other plots of
+    // the same forward (architectures.hpp: the plot GNN's kNN graph) would read
+    // an arbitrary subset of plots under mini-batching, so it trains and
+    // predicts on the whole set in one forward.
     [[nodiscard]] bool requires_full_batch_training() const noexcept {
-        return config_.encoder_architecture == EncoderArchitecture::GNN;
+        return is_batch_dependent(config_.encoder_architecture);
     }
 
     // Embedding weight extraction (delegates to active encoder)

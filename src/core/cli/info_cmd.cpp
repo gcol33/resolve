@@ -1,35 +1,21 @@
 // RESOLVE CLI - Info command implementation
 //
-// Prints everything that defines a checkpoint's architecture, so `info` alone
-// answers "what model is this?" for every encoder family, not just the MLP.
+// Prints a checkpoint's description, the document its JSON sidecar holds
+// (checkpoint_description): the run, the schema, the model, the loader
+// settings and the training recipe, so `info` alone answers "what model is
+// this?" for every encoder family. The latent width and the parameter count
+// come from the model the checkpoint builds.
 
-#include <cstddef>
 #include <iostream>
 #include <string>
-#include <vector>
 
+#include "resolve/checkpoint.hpp"
 #include "resolve/resolve.hpp"
 
 #include "arg_parser.hpp"
 #include "config_report.hpp"
 
-using resolve_cli::model_field_filter;
 using resolve_cli::ParsedArgs;
-using resolve_cli::print_config_block;
-
-namespace {
-
-void print_name_list(const char* label, const std::vector<std::string>& names) {
-    if (names.empty()) return;
-    std::cout << label;
-    for (size_t i = 0; i < names.size(); ++i) {
-        if (i > 0) std::cout << ", ";
-        std::cout << names[i];
-    }
-    std::cout << std::endl;
-}
-
-}  // namespace
 
 int info_suite_command(const ParsedArgs& args);
 
@@ -55,108 +41,45 @@ int info_command(const ParsedArgs& args) {
     std::cout << "Model: " << model_path << std::endl;
 
     try {
-        // Load model. Trainer::load returns (model, scalers, vocab); `info`
-        // only reports schema/config/parameter counts, so the vocab is unused.
+        const json::Value description = describe_checkpoint(model_path);
         auto [model, scalers, vocab] = Trainer::load(model_path, torch::kCPU);
+        (void)scalers;
         (void)vocab;
-        const auto& schema = model->schema();
-        const auto& config = model->config();
 
-        // Print schema information
+        // The run metadata: the description's top-level scalars.
+        std::cout << "\nRun:" << std::endl;
+        resolve_cli::print_block(std::cout, description, "", [&description](const char* name) {
+            const json::Value& v = description.at(name);
+            return !v.is_object() && !v.is_array();
+        });
+
+        json::Value schema = description.at("schema");
+        const json::Value dataset_config = schema.at("dataset_config");
+        schema.erase("dataset_config");
         std::cout << "\nSchema:" << std::endl;
-        std::cout << "  Plots: " << schema.n_plots << std::endl;
-        std::cout << "  Species: " << schema.n_species << std::endl;
-        std::cout << "  Species vocab: " << schema.n_species_vocab << std::endl;
-        std::cout << "  Has coordinates: " << (schema.has_coordinates ? "yes" : "no") << std::endl;
-        std::cout << "  Has abundance: " << (schema.has_abundance ? "yes" : "no") << std::endl;
-        std::cout << "  Has taxonomy: " << (schema.has_taxonomy ? "yes" : "no") << std::endl;
+        resolve_cli::print_block(std::cout, schema, "");
 
-        if (schema.has_taxonomy) {
-            std::cout << "  Genera: " << schema.n_genera << std::endl;
-            std::cout << "  Families: " << schema.n_families << std::endl;
-        }
-
-        print_name_list("  Covariates: ", schema.covariate_names);
-        print_name_list("  Categoricals: ", schema.categorical_names);
-        if (schema.has_categoricals()) {
-            std::cout << "  Categorical vocab sizes: ";
-            for (size_t i = 0; i < schema.categorical_vocab_sizes.size(); ++i) {
-                if (i > 0) std::cout << ", ";
-                std::cout << schema.categorical_vocab_sizes[i];
-            }
-            std::cout << std::endl;
-            std::cout << "  Categorical embed dim: " << schema.categorical_embed_dim
-                      << std::endl;
-        }
-
-        // Print targets
-        std::cout << "\nTargets:" << std::endl;
-        for (const auto& target : schema.targets) {
-            std::cout << "  " << target.name << ": ";
-            if (target.task == TaskType::Classification) {
-                std::cout << "classification (" << target.num_classes << " classes)";
-            } else {
-                std::cout << "regression";
-                if (target.transform == TransformType::Log1p) {
-                    std::cout << " [log1p]";
-                }
-            }
-            if (target.missing == TargetMissingPolicy::Mask) {
-                std::cout << " [missing labels masked]";
-            }
-            std::cout << std::endl;
-        }
-
-        // The architecture the checkpoint records. Driven by the shared field
-        // registry, so a hyperparameter added to ModelConfig or to one of its
-        // architecture sub-configs is reported here in the edit that adds it.
-        // model_field_filter (config_report.hpp) hides only a row whose feature
-        // another field of the same struct switches off -- the six sub-configs
-        // this checkpoint's architecture did not select, the mixture's
-        // hyperparameters when routing is none, TabM and the parallel branches
-        // when disabled, and the head's shape when it has no hidden layers.
+        // Every sub-config row the selected architecture does not read, and the
+        // rows another field switches off, are hidden (model_field_filter).
         std::cout << "\nModel Configuration:" << std::endl;
-        print_config_block(std::cout, "Model", config, /*persisted_only=*/false,
-                           model_field_filter(config));
-
+        resolve_cli::print_block(std::cout, description.at("model_config"), "Model",
+                                 resolve_cli::model_field_filter(model->config()));
         std::cout << "  Latent dim: " << model->latent_dim() << std::endl;
 
-        // The loading-side DatasetConfig this checkpoint implies -- the same one
-        // `resolve predict` rebuilds to encode new data. Driven by the shared
-        // field registry, so a loader knob added to DatasetConfig is reported
-        // here in the edit that adds it. `selection` is the selection the run
-        // APPLIED, not the one it was configured with (issue #113).
+        // The loader settings `resolve predict` encodes new plots with;
+        // `selection` is the selection the training load applied.
         std::cout << "\nData Encoding:" << std::endl;
-        print_config_block(std::cout, "Dataset", dataset_config_from_checkpoint(schema, config));
+        resolve_cli::print_block(std::cout, dataset_config, "Dataset");
 
-        // The training recipe the checkpoint records. Driven by the same field
-        // registry as the archive itself, so a hyperparameter added to
-        // TrainConfig is reported here in the edit that adds it; only the rows
-        // save_train_config actually persists are shown, since the rest read
-        // back as struct defaults rather than as what this run used.
         std::cout << "\nTraining Configuration:" << std::endl;
-        print_config_block(std::cout, "Train", Trainer::load_train_config(model_path),
-                           /*persisted_only=*/true);
+        resolve_cli::print_block(std::cout, description.at("train_config"), "Train");
 
-        // The run, when the checkpoint was saved with its run metadata: how
-        // the plots were split and where early stopping settled.
-        const RunMetadata run = Trainer::load_run_metadata(model_path);
-        if (run.n_plots_train + run.n_plots_test > 0) {
-            std::cout << "\nRun:" << std::endl;
-            std::cout << "  Plots: " << run.n_plots_train << " fitting, "
-                      << run.n_plots_test << " held out" << std::endl;
-            std::cout << "  Held-out fold: " << enum_to_name(run.hold_out);
-            if (run.hold_out == HoldOutMode::Random) {
-                std::cout << " (test_size " << run.test_size << ")";
-            }
-            std::cout << ", seed " << run.split_seed << std::endl;
-            if (run.total_epochs > 0) {
-                std::cout << "  Epochs: " << run.total_epochs << " (best "
-                          << run.best_epoch << ")" << std::endl;
-            }
+        const json::Value& metrics = description.at("final_metrics");
+        if (metrics.size() > 0) {
+            std::cout << "\nFinal metrics:" << std::endl;
+            resolve_cli::print_block(std::cout, metrics, "");
         }
 
-        // Print parameter count
         int64_t total_params = 0;
         for (const auto& param : model->parameters()) {
             total_params += param.numel();

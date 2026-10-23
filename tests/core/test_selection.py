@@ -157,8 +157,8 @@ def test_no_budget_encodes_every_species(rotated_csvs, encoding):
             assert len(_encoded_names(ds, row)) == N_SPECIES
         # ... and the schema says so, rather than claiming a selection the run
         # did not make.
-        assert ds.schema.selection == rc.SelectionMode.All
-        assert ds.schema.species_budget == 0
+        assert ds.schema.dataset_config.selection == rc.SelectionMode.All
+        assert ds.schema.dataset_config.species_budget == 0
 
 
 @pytest.mark.parametrize(
@@ -177,8 +177,8 @@ def test_budget_keeps_the_ranked_end(rotated_csvs, encoding, selection, top):
     budget = 3
     ds = _build(rotated_csvs, _config(encoding, selection, budget))
 
-    assert ds.schema.selection == selection
-    assert ds.schema.species_budget == budget
+    assert ds.schema.dataset_config.selection == selection
+    assert ds.schema.dataset_config.species_budget == budget
     for row in range(ds.n_plots):
         assert _encoded_names(ds, row) == _expected_end(row, budget, top=top)
 
@@ -255,7 +255,7 @@ def test_hash_ignores_the_budget(rotated_csvs):
     import torch
 
     assert torch.equal(plain.hash_embedding, with_budget.hash_embedding)
-    assert plain.schema.selection == rc.SelectionMode.Top
+    assert plain.schema.dataset_config.selection == rc.SelectionMode.Top
 
 
 # ---------------------------------------------------------------------------
@@ -278,8 +278,8 @@ def test_species_budget_survives_the_checkpoint(rotated_csvs, tmp_path):
     trainer.save(path)
 
     predictor = rc.Predictor.load(path, device="cpu")
-    assert predictor.schema.species_budget == 3
-    assert predictor.schema.selection == rc.SelectionMode.Bottom
+    assert predictor.schema.dataset_config.species_budget == 3
+    assert predictor.schema.dataset_config.selection == rc.SelectionMode.Bottom
 
     rebuilt = predictor.dataset_config
     assert rebuilt.species_budget == 3

@@ -1,16 +1,15 @@
 #pragma once
 
 // String <-> enum names for every RESOLVE enum that crosses a text boundary:
-// the C ABI value tree (R config lists), the CLI's flag values, and the
-// checkpoint's human-readable JSON sidecar.
+// the C ABI value tree (R config lists), the CLI's flag values, the checkpoint's
+// JSON sidecar, `resolve info` and the suite manifest.
 //
-// One table per enum. The parser and the emitter both read that table, so a
-// spelling cannot drift between the site that produces a name and the site
-// that consumes it, and adding a variant is a single row rather than an edit
-// in every switch statement that mentions the enum.
+// One table per enum, declared once below and reachable from the type through
+// EnumNames<E>. enum_to_name and enum_from_name both read that table, so a
+// spelling cannot drift between the site that produces a name and the site that
+// consumes it, and adding a variant is a single row.
 
 #include "resolve/types.hpp"
-#include "resolve/species_encoding.hpp"  // PoolWeighting
 
 #include <cstddef>
 #include <stdexcept>
@@ -217,157 +216,6 @@ inline constexpr EnumName<TabMAggregation> kTabMAggregationNames[] = {
     {"median", TabMAggregation::Median},
 };
 
-// ============================================================================
-// Parsers and emitters
-// ============================================================================
-
-inline SpeciesEncodingMode parse_species_encoding_mode(const std::string& s) {
-    return parse_enum_name(s, kSpeciesEncodingNames, "species encoding mode");
-}
-inline const char* species_encoding_to_string(SpeciesEncodingMode m) {
-    return enum_name_of(m, kSpeciesEncodingNames, "unknown");
-}
-
-inline SelectionMode parse_selection_mode(const std::string& s) {
-    return parse_enum_name(s, kSelectionModeNames, "selection mode");
-}
-inline const char* selection_mode_to_string(SelectionMode m) {
-    return enum_name_of(m, kSelectionModeNames, "top");
-}
-
-inline RepresentationMode parse_representation_mode(const std::string& s) {
-    return parse_enum_name(s, kRepresentationModeNames, "representation mode");
-}
-inline const char* representation_mode_to_string(RepresentationMode m) {
-    return enum_name_of(m, kRepresentationModeNames, "abundance");
-}
-
-inline NormalizationMode parse_normalization_mode(const std::string& s) {
-    return parse_enum_name(s, kNormalizationModeNames, "normalization mode");
-}
-inline const char* normalization_mode_to_string(NormalizationMode m) {
-    return enum_name_of(m, kNormalizationModeNames, "raw");
-}
-
-inline AggregationMode parse_aggregation_mode(const std::string& s) {
-    return parse_enum_name(s, kAggregationModeNames, "aggregation mode");
-}
-inline const char* aggregation_mode_to_string(AggregationMode m) {
-    return enum_name_of(m, kAggregationModeNames, "abundance");
-}
-
-inline MissingValuePolicy parse_missing_value_policy(const std::string& s) {
-    return parse_enum_name(s, kMissingValuePolicyNames, "missing value policy");
-}
-inline const char* missing_value_policy_to_string(MissingValuePolicy m) {
-    return enum_name_of(m, kMissingValuePolicyNames, "indicate");
-}
-
-inline PoolWeighting parse_pool_weighting(const std::string& s) {
-    return parse_enum_name(s, kPoolWeightingNames, "pool weighting");
-}
-inline const char* pool_weighting_to_string(PoolWeighting m) {
-    return enum_name_of(m, kPoolWeightingNames, "log1p");
-}
-
-inline TaskType parse_task_type(const std::string& s) {
-    return parse_enum_name(s, kTaskTypeNames, "task type");
-}
-inline const char* task_type_to_string(TaskType m) {
-    return enum_name_of(m, kTaskTypeNames, "regression");
-}
-
-inline TransformType parse_transform_type(const std::string& s) {
-    return parse_enum_name(s, kTransformTypeNames, "transform type");
-}
-inline const char* transform_type_to_string(TransformType m) {
-    return enum_name_of(m, kTransformTypeNames, "none");
-}
-
-inline TargetMissingPolicy parse_target_missing_policy(const std::string& s) {
-    return parse_enum_name(s, kTargetMissingPolicyNames, "target missing-label policy");
-}
-inline const char* target_missing_policy_to_string(TargetMissingPolicy m) {
-    return enum_name_of(m, kTargetMissingPolicyNames, "drop");
-}
-
-inline HoldOutMode parse_hold_out_mode(const std::string& s) {
-    return parse_enum_name(s, kHoldOutModeNames, "hold-out mode");
-}
-inline const char* hold_out_mode_to_string(HoldOutMode m) {
-    return enum_name_of(m, kHoldOutModeNames, "random");
-}
-
-inline LossConfigMode parse_loss_config_mode(const std::string& s) {
-    return parse_enum_name(s, kLossConfigModeNames, "loss config mode");
-}
-inline const char* loss_config_mode_to_string(LossConfigMode m) {
-    return enum_name_of(m, kLossConfigModeNames, "combined");
-}
-
-inline LRSchedulerType parse_lr_scheduler_type(const std::string& s) {
-    return parse_enum_name(s, kLRSchedulerTypeNames, "LR scheduler type");
-}
-inline const char* lr_scheduler_type_to_string(LRSchedulerType m) {
-    return enum_name_of(m, kLRSchedulerTypeNames, "none");
-}
-
-inline MoERoutingType parse_moe_routing_type(const std::string& s) {
-    return parse_enum_name(s, kMoERoutingTypeNames, "MoE routing type");
-}
-inline const char* moe_routing_type_to_string(MoERoutingType m) {
-    return enum_name_of(m, kMoERoutingTypeNames, "none");
-}
-
-inline MoEPlacement parse_moe_placement(const std::string& s) {
-    return parse_enum_name(s, kMoEPlacementNames, "MoE placement");
-}
-inline const char* moe_placement_to_string(MoEPlacement m) {
-    return enum_name_of(m, kMoEPlacementNames, "tail");
-}
-
-inline ActivationType parse_activation_type(const std::string& s) {
-    return parse_enum_name(s, kActivationTypeNames, "activation type");
-}
-inline const char* activation_type_to_string(ActivationType m) {
-    return enum_name_of(m, kActivationTypeNames, "gelu");
-}
-
-inline NormLayerType parse_norm_layer_type(const std::string& s) {
-    return parse_enum_name(s, kNormLayerTypeNames, "normalization layer type");
-}
-inline const char* norm_layer_type_to_string(NormLayerType m) {
-    return enum_name_of(m, kNormLayerTypeNames, "batch_norm");
-}
-
-inline EncoderArchitecture parse_encoder_architecture(const std::string& s) {
-    return parse_enum_name(s, kEncoderArchitectureNames, "encoder architecture");
-}
-inline const char* encoder_architecture_to_string(EncoderArchitecture m) {
-    return enum_name_of(m, kEncoderArchitectureNames, "mlp");
-}
-
-inline GNNType parse_gnn_type(const std::string& s) {
-    return parse_enum_name(s, kGNNTypeNames, "GNN type");
-}
-inline const char* gnn_type_to_string(GNNType m) {
-    return enum_name_of(m, kGNNTypeNames, "gat");
-}
-
-inline GraphConstructionMode parse_graph_construction_mode(const std::string& s) {
-    return parse_enum_name(s, kGraphConstructionModeNames, "graph construction mode");
-}
-inline const char* graph_construction_mode_to_string(GraphConstructionMode m) {
-    return enum_name_of(m, kGraphConstructionModeNames, "spatial");
-}
-
-inline TraitInteractionMode parse_trait_interaction_mode(const std::string& s) {
-    return parse_enum_name(s, kTraitInteractionModeNames, "trait interaction mode");
-}
-inline const char* trait_interaction_mode_to_string(TraitInteractionMode m) {
-    return enum_name_of(m, kTraitInteractionModeNames, "bilinear");
-}
-
 inline constexpr EnumName<SuiteCombine> kSuiteCombineNames[] = {
     {"mean", SuiteCombine::Mean},
     {"vote", SuiteCombine::Vote},
@@ -380,22 +228,14 @@ inline constexpr EnumName<SuiteTargetStatus> kSuiteTargetStatusNames[] = {
     {"experimental", SuiteTargetStatus::Experimental},
 };
 
-inline ParallelAggregation parse_parallel_aggregation(const std::string& s) {
-    return parse_enum_name(s, kParallelAggregationNames, "parallel aggregation");
-}
-inline const char* parallel_aggregation_to_string(ParallelAggregation m) {
-    return enum_name_of(m, kParallelAggregationNames, "concat");
-}
-
 // ============================================================================
-// Generic table access
+// Access by type
 // ============================================================================
 //
-// The named helpers above are the call-site form: the caller knows which enum it
-// holds. A table-driven consumer does not -- the config field registry
-// (config_registry.hpp) visits an enum-typed field generically and has only the
-// type. EnumNames<E> makes the table reachable from the type, pointing at the
-// SAME rows, so a spelling is still written in exactly one place.
+// EnumNames<E> makes an enum's table reachable from its type, which is all a
+// table-driven consumer such as the config field registry (config_registry.hpp)
+// has: `label` names the enum in an error, `fallback` is the name of a value
+// outside the table (reachable only through a corrupt cast).
 
 template <typename EnumT>
 struct EnumNames;
@@ -461,16 +301,29 @@ RESOLVE_DECLARE_ENUM_NAMES(SuiteTargetStatus, kSuiteTargetStatusNames,
 
 #undef RESOLVE_DECLARE_ENUM_NAMES
 
-// Enum -> name / name -> enum for a caller that knows only the type. Both route
-// through the same enum_name_of / parse_enum_name the named helpers use.
+// Enum -> name.
 template <typename EnumT>
 const char* enum_to_name(EnumT value) {
     return enum_name_of(value, EnumNames<EnumT>::table, EnumNames<EnumT>::fallback);
 }
 
+// Name -> enum. Throws std::runtime_error naming the value and every accepted
+// spelling.
 template <typename EnumT>
 EnumT enum_from_name(const std::string& s) {
     return parse_enum_name(s, EnumNames<EnumT>::table, EnumNames<EnumT>::label);
+}
+
+// The accepted spellings of an enum, comma-separated, for help text.
+template <typename EnumT>
+std::string enum_spellings() {
+    return enum_value_list(EnumNames<EnumT>::table);
+}
+
+// The two names the model's error messages print.
+inline const char* species_encoding_to_string(SpeciesEncodingMode m) { return enum_to_name(m); }
+inline const char* encoder_architecture_to_string(EncoderArchitecture m) {
+    return enum_to_name(m);
 }
 
 }  // namespace resolve

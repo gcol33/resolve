@@ -520,7 +520,12 @@ RESOLVE_CAPI resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const 
  * dispersion members (members x plots; for a spherical mean a MAP of
  * "latitude" and "longitude", each members x plots) n_species n_recognised
  * recognised_share recognised_abundance_share. A statistic the target's
- * combine rule does not define is NULL-kind; NaN marks an undefined value. */
+ * combine rule does not define is NULL-kind; NaN marks an undefined value.
+ * "columns" is the same prediction as an ordered MAP of column name -> array,
+ * one entry per plot (STRING_ARRAY labels, INT_ARRAY codes, DOUBLE_ARRAY
+ * numbers), the columns `resolve predict --suite --probabilities --members`
+ * writes; "probability_columns" (STRING_ARRAY) names its class-probability
+ * columns. */
 RESOLVE_CAPI resolve_value_t* resolve_suite_predict_dataframe(
     resolve_suite_t* s, const resolve_value_t* header, const resolve_value_t* species,
     const resolve_value_t* options);

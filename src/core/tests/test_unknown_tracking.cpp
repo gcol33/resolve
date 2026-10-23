@@ -241,8 +241,8 @@ TEST_CASE("Tracking flags gate the feature columns", "[dataset][unknown]") {
         auto pair = build_pair(cfg);
         REQUIRE(pair.score.unknown_fraction().defined());
         REQUIRE_FALSE(pair.score.unknown_count().defined());
-        REQUIRE(pair.score.schema().track_unknown_fraction);
-        REQUIRE_FALSE(pair.score.schema().track_unknown_count);
+        REQUIRE(pair.score.schema().dataset_config.track_unknown_fraction);
+        REQUIRE_FALSE(pair.score.schema().dataset_config.track_unknown_count);
     }
 
     SECTION("neither") {

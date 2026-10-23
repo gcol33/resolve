@@ -1,22 +1,13 @@
 #pragma once
 
-#include <cerrno>
+#include "resolve/number_text.hpp"
+
 #include <charconv>
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
-
-#if !(defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L)
-#include <clocale>
-#include <cstdlib>
-#if defined(__APPLE__)
-#include <xlocale.h>
-#else
-#include <locale.h>
-#endif
-#endif
 
 namespace resolve {
 
@@ -32,29 +23,6 @@ inline std::string_view trim_c_space(std::string_view s) noexcept {
     while (!s.empty() && is_c_space(s.front())) s.remove_prefix(1);
     while (!s.empty() && is_c_space(s.back())) s.remove_suffix(1);
     return s;
-}
-
-// The correctly rounded float nearest to the decimal number `text`, which
-// parse_float_strict has already checked is an optional '-' followed by
-// digits, at most one '.' and an optional exponent. False when the text does
-// not convert as a whole or the value is outside the float range. The
-// conversion is std::from_chars where the standard library has it for
-// floating point; otherwise the C library's strtof under a "C" locale object,
-// which is the same correctly rounded conversion and is not affected by the
-// process locale either.
-inline bool decimal_to_float(std::string_view text, float& value) {
-#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
-    const char* end = text.data() + text.size();
-    const auto [ptr, ec] = std::from_chars(text.data(), end, value);
-    return ec == std::errc() && ptr == end;
-#else
-    static const locale_t c_locale = newlocale(LC_ALL_MASK, "C", static_cast<locale_t>(0));
-    const std::string buffer(text);
-    char* end = nullptr;
-    errno = 0;
-    value = strtof_l(buffer.c_str(), &end, c_locale);
-    return errno != ERANGE && end == buffer.c_str() + buffer.size();
-#endif
 }
 
 }  // namespace detail
@@ -85,7 +53,7 @@ inline std::optional<float> parse_float_strict(std::string_view s) {
         }
     }
     float value = 0.0f;
-    if (!detail::decimal_to_float(s, value)) return std::nullopt;
+    if (!decimal_to_number(s, value)) return std::nullopt;
     return value;
 }
 

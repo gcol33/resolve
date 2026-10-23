@@ -410,8 +410,8 @@ TEST_CASE("Checkpoint schema pool-weighting round-trip", "[trainer][checkpoint]"
     schema.n_plots = 100;
     schema.n_species = 40;
     schema.n_species_vocab = 41;
-    schema.pool_weighting = 4;      // PoolWeighting::Rank (non-default)
-    schema.pool_species_cap = 137;  // resolved max-species width
+    schema.dataset_config.pool_weighting = PoolWeighting::Rank;
+    schema.dataset_config.pool_species_cap = 137;  // resolved max-species width
 
     const TempPath path_file(".pt");
     const std::string path = path_file.path();
@@ -424,8 +424,8 @@ TEST_CASE("Checkpoint schema pool-weighting round-trip", "[trainer][checkpoint]"
     ar.load_from(path);
     ResolveSchema schema2 = load_schema(ar);
 
-    REQUIRE(schema2.pool_weighting == 4);
-    REQUIRE(schema2.pool_species_cap == 137);
+    REQUIRE(schema2.dataset_config.pool_weighting == PoolWeighting::Rank);
+    REQUIRE(schema2.dataset_config.pool_species_cap == 137);
 
     SECTION("a checkpoint without the pool keys keeps schema defaults") {
         // A schema archive that never wrote the pool keys must read back as the
@@ -444,8 +444,8 @@ TEST_CASE("Checkpoint schema pool-weighting round-trip", "[trainer][checkpoint]"
         torch::serialize::InputArchive ar2;
         ar2.load_from(lpath);
         ResolveSchema legacy2 = load_schema(ar2);
-        REQUIRE(legacy2.pool_weighting == 2);   // Log1p
-        REQUIRE(legacy2.pool_species_cap == 0);  // auto
+        REQUIRE(legacy2.dataset_config.pool_weighting == PoolWeighting::Log1p);
+        REQUIRE(legacy2.dataset_config.pool_species_cap == 0);  // auto
     }
 }
 

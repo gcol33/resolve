@@ -20,10 +20,15 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "resolve/checkpoint.hpp"
+#include "resolve/checkpoint_schema_keys.hpp"
+#include "resolve/config_json.hpp"
 #include "resolve/config_registry.hpp"
+#include "resolve/json.hpp"
 #include "test_support.hpp"
 
+#include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -731,4 +736,256 @@ TEST_CASE("The metadata sidecar carries the whole model and train config",
     }
     CHECK(opens == closes);
     CHECK(opens > 10);
+}
+
+// ===========================================================================
+// The schema's loader settings
+// ===========================================================================
+
+namespace {
+
+// The keys load_schema reads unconditionally, as a checkpoint written before
+// any loader setting existed held them.
+void write_core_schema(torch::serialize::OutputArchive& archive) {
+    namespace k = ckpt_schema_keys;
+    archive.write(k::kNPlots, torch::tensor(static_cast<int64_t>(4)));
+    archive.write(k::kNSpecies, torch::tensor(static_cast<int64_t>(3)));
+    archive.write(k::kNSpeciesVocab, torch::tensor(static_cast<int64_t>(4)));
+    archive.write(k::kHasCoordinates, torch::tensor(0));
+    archive.write(k::kHasAbundance, torch::tensor(1));
+    archive.write(k::kHasTaxonomy, torch::tensor(0));
+    archive.write(k::kNGenera, torch::tensor(static_cast<int64_t>(0)));
+    archive.write(k::kNFamilies, torch::tensor(static_cast<int64_t>(0)));
+    archive.write(k::kNCovariates, torch::tensor(static_cast<int64_t>(0)));
+    archive.write(k::kNTargets, torch::tensor(static_cast<int64_t>(0)));
+}
+
+// One DatasetConfig row in the layout checkpoints hold it in (int for a bool or
+// an enum, float32 for a float), every row but `skip`.
+struct LegacyRowWriter {
+    torch::serialize::OutputArchive& archive;
+    std::string skip;
+
+    template <typename T>
+    void operator()(const char* name, const char* key, const T& value) const {
+        if (name == skip) return;
+        if constexpr (std::is_same_v<T, bool> || std::is_enum_v<T>) {
+            archive.write(key, torch::tensor(static_cast<int>(value)));
+        } else if constexpr (std::is_same_v<T, int> || std::is_same_v<T, float>) {
+            archive.write(key, torch::tensor(value));
+        } else {
+            static_assert(registry_detail::always_false<T>, "a DatasetConfig field type");
+        }
+    }
+};
+
+std::string digest_entry(const FieldDigest& digest, const std::string& name) {
+    for (const auto& [path, text] : digest) {
+        if (path == name) return text;
+    }
+    return "(absent)";
+}
+
+}  // namespace
+
+TEST_CASE("Every DatasetConfig field round-trips through the schema in a checkpoint",
+          "[config][registry][checkpoint]") {
+    int counter = 0;
+    ResolveSchema schema;
+    for_each_field(schema.dataset_config, FieldMutator{&counter});
+
+    const TempPath path(".pt");
+    {
+        torch::serialize::OutputArchive archive;
+        save_schema(archive, schema);
+        archive.save_to(path.path());
+    }
+    torch::serialize::InputArchive archive;
+    archive.load_from(path.path());
+    const ResolveSchema loaded = load_schema(archive);
+
+    const auto diffs = digest_differences(digest_of(schema.dataset_config, true),
+                                          digest_of(loaded.dataset_config, true));
+    INFO("fields that did not survive: " << describe(diffs));
+    CHECK(diffs.empty());
+    CHECK(loaded.unrecorded_dataset_settings.empty());
+    // Every field is carried: none has an empty key.
+    CHECK(digest_of(schema.dataset_config, true).size() ==
+          digest_of(schema.dataset_config, false).size());
+}
+
+TEST_CASE("A loader setting a checkpoint predates reads as the engine read it then",
+          "[config][registry][checkpoint]") {
+    int counter = 0;
+    DatasetConfig recorded;
+    for_each_field(recorded, FieldMutator{&counter});
+    const FieldDigest recorded_digest = digest_of(recorded, true);
+    const FieldDigest unrecorded_digest = digest_of(unrecorded_dataset_config(), true);
+    // An old checkpoint read a missing covariate as 0 and flagged nothing.
+    CHECK(unrecorded_dataset_config().missing_values == MissingValuePolicy::Zero);
+    CHECK(DatasetConfig{}.missing_values == MissingValuePolicy::Indicate);
+
+    for_each_field(recorded, [&](const char* name, const char*, const auto&) {
+        const std::string skipped = name;
+        if (skipped == "track_unknown_fraction" || skipped == "track_unknown_count") return;
+        DYNAMIC_SECTION("without " << skipped) {
+            const TempPath path(".pt");
+            {
+                torch::serialize::OutputArchive archive;
+                write_core_schema(archive);
+                for_each_field(recorded, LegacyRowWriter{archive, skipped});
+                archive.save_to(path.path());
+            }
+            torch::serialize::InputArchive archive;
+            archive.load_from(path.path());
+            const ResolveSchema loaded = load_schema(archive);
+            const FieldDigest loaded_digest = digest_of(loaded.dataset_config, true);
+            for (const auto& [field, text] : loaded_digest) {
+                INFO("field " << field);
+                CHECK(text == digest_entry(field == skipped ? unrecorded_digest : recorded_digest,
+                                           field));
+            }
+            CHECK(loaded.unrecorded_dataset_settings == std::vector<std::string>{skipped});
+        }
+    });
+}
+
+TEST_CASE("A checkpoint without the unknown-species keys is refused",
+          "[config][registry][checkpoint]") {
+    const TempPath path(".pt");
+    {
+        torch::serialize::OutputArchive archive;
+        write_core_schema(archive);
+        archive.save_to(path.path());
+    }
+    torch::serialize::InputArchive archive;
+    archive.load_from(path.path());
+    CHECK_THROWS_AS(load_schema(archive), std::runtime_error);
+}
+
+TEST_CASE("The model-sizing loader settings come from the checkpoint's ModelConfig",
+          "[config][registry][checkpoint]") {
+    ResolveSchema schema;
+    ModelConfig model;
+    model.species_encoding = SpeciesEncodingMode::RankPool;
+    model.hash_dim = 77;
+    model.top_k = 5;
+
+    const TempPath path(".pt");
+    {
+        torch::serialize::OutputArchive archive;
+        write_core_schema(archive);
+        archive.write("schema_track_unknown_fraction", torch::tensor(1));
+        archive.write("schema_track_unknown_count", torch::tensor(0));
+        archive.save_to(path.path());
+    }
+    torch::serialize::InputArchive archive;
+    archive.load_from(path.path());
+    const ResolveSchema without = load_schema(archive);
+    CHECK(std::find(without.unrecorded_dataset_settings.begin(),
+                    without.unrecorded_dataset_settings.end(),
+                    "hash_dim") != without.unrecorded_dataset_settings.end());
+    const ResolveSchema with = load_schema(archive, &model);
+    CHECK(with.dataset_config.species_encoding == SpeciesEncodingMode::RankPool);
+    CHECK(with.dataset_config.hash_dim == 77);
+    CHECK(with.dataset_config.top_k == 5);
+    CHECK(std::find(with.unrecorded_dataset_settings.begin(),
+                    with.unrecorded_dataset_settings.end(),
+                    "hash_dim") == with.unrecorded_dataset_settings.end());
+}
+
+TEST_CASE("Every config field round-trips through its JSON description",
+          "[config][registry][json]") {
+    SECTION("ModelConfig") {
+        int counter = 0;
+        ModelConfig config;
+        for_each_field(config, FieldMutator{&counter});
+        const auto text = json::dump(config_to_json(config));
+        const auto back = config_from_json<ModelConfig>(json::parse(text));
+        const auto diffs = digest_differences(digest_of(config, true), digest_of(back, true));
+        INFO("fields that did not survive: " << describe(diffs));
+        CHECK(diffs.empty());
+    }
+    SECTION("DatasetConfig") {
+        int counter = 0;
+        DatasetConfig config;
+        for_each_field(config, FieldMutator{&counter});
+        const auto text = json::dump(config_to_json(config));
+        const auto back = config_from_json<DatasetConfig>(json::parse(text));
+        const auto diffs = digest_differences(digest_of(config, true), digest_of(back, true));
+        INFO("fields that did not survive: " << describe(diffs));
+        CHECK(diffs.empty());
+    }
+    SECTION("TrainConfig") {
+        int counter = 0;
+        TrainConfig config;
+        for_each_field(config, FieldMutator{&counter});
+        const auto text = json::dump(config_to_json(config));
+        const auto back = config_from_json<TrainConfig>(json::parse(text));
+        const auto diffs = digest_differences(digest_of(config, true), digest_of(back, true));
+        INFO("fields that did not survive: " << describe(diffs));
+        CHECK(diffs.empty());
+    }
+}
+
+TEST_CASE("The sidecar describes the schema's loader settings and reads back",
+          "[config][registry][checkpoint]") {
+    int counter = 0;
+    ModelConfig model;
+    for_each_field(model, FieldMutator{&counter});
+    TrainConfig train;
+    for_each_field(train, FieldMutator{&counter});
+    ResolveSchema schema;
+    schema.n_plots = 12;
+    schema.covariate_names = {"elev"};
+    schema.targets.push_back(TargetConfig{"hab", TaskType::Classification, TransformType::None, 2,
+                                          1.0f, {}, {"a", "b"}});
+    for_each_field(schema.dataset_config, FieldMutator{&counter});
+    RunMetadata metadata;
+    metadata.train_time_seconds = 1234567.875f;
+    metadata.final_metrics["hab"] = {{"accuracy", 0.1f},
+                                     {"mae", std::numeric_limits<float>::quiet_NaN()}};
+
+    const TempPath checkpoint_file(".pt");
+    const std::string checkpoint = checkpoint_file.path();
+    const std::string sidecar = checkpoint.substr(0, checkpoint.size() - 3) + ".json";
+    write_metadata_json(checkpoint, model, train, metadata, schema, /*requested_batch_size=*/-1);
+    const json::Value description = json::read_file(sidecar);
+    std::filesystem::remove(sidecar);
+
+    const auto& dataset = description.at("schema").at("dataset_config");
+    const auto dataset_diffs = digest_differences(
+        digest_of(schema.dataset_config, true),
+        digest_of(config_from_json<DatasetConfig>(dataset), true));
+    INFO("loader settings that did not survive: " << describe(dataset_diffs));
+    CHECK(dataset_diffs.empty());
+    const auto model_diffs = digest_differences(
+        digest_of(model, true), digest_of(config_from_json<ModelConfig>(description.at("model_config")), true));
+    INFO("model fields that did not survive: " << describe(model_diffs));
+    CHECK(model_diffs.empty());
+    const auto train_diffs = digest_differences(
+        digest_of(train, true), digest_of(config_from_json<TrainConfig>(description.at("train_config")), true));
+    INFO("train fields that did not survive: " << describe(train_diffs));
+    CHECK(train_diffs.empty());
+
+    // The schema fields `resolve info` used to print alone, and full precision.
+    CHECK(description.at("schema").at("covariates").items().front().as_string() == "elev");
+    CHECK(description.at("schema").at("targets").items().front().at("class_names").size() == 2);
+    CHECK(static_cast<float>(description.at("train_time_seconds").as_number()) ==
+          1234567.875f);
+    // A metric that is NaN has no JSON number: it is null.
+    CHECK(description.at("final_metrics").at("hab").at("mae").is_null());
+    CHECK(description.at("final_metrics").at("hab").at("accuracy").as_number() == 0.1);
+}
+
+TEST_CASE("The progress file is valid JSON with an unscored best loss as null",
+          "[config][registry][checkpoint]") {
+    const TempDir dir;
+    write_progress_file(dir.path(), 3, 10, 0, std::numeric_limits<float>::infinity(), 2,
+                        {{"area", {{"band_50", 0.5f}, {"band_25", 0.25f}}}});
+    const json::Value progress = json::read_file(dir.file("progress.json"));
+    CHECK(progress.at("best_loss").is_null());
+    CHECK(progress.at("epoch").as_int() == 3);
+    CHECK(progress.at("best_metric_name").as_string() == "area/band_25");
+    CHECK(progress.at("best_metric").as_number() == 0.25);
 }
