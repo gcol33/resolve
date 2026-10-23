@@ -169,6 +169,11 @@ MOE_ROUTINGS = {
     "topk": rc.MoERoutingType.TopK,
 }
 
+TRANSFORMER_POOLINGS = {
+    "attention": rc.TransformerPooling.Attention,
+    "cls": rc.TransformerPooling.Cls,
+}
+
 
 def build_dataset_config(cfg: BenchmarkConfig) -> rc.DatasetConfig:
     config = rc.DatasetConfig()
@@ -191,7 +196,7 @@ def build_model_config(cfg: BenchmarkConfig) -> rc.ModelConfig:
     config.n_heads = cfg.n_heads
     config.n_attention_layers = cfg.n_attention_layers
     config.transformer_ff_dim = cfg.transformer_ff_dim
-    config.transformer_pooling = cfg.transformer_pooling
+    config.transformer_pooling = TRANSFORMER_POOLINGS[cfg.transformer_pooling]
     config.moe_routing = MOE_ROUTINGS[cfg.moe_routing]
     config.n_experts = cfg.n_experts
     return config

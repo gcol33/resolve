@@ -53,6 +53,15 @@ set(RESOLVE_CORE_HEADERS
     include/resolve/resolve.hpp
     include/resolve/types.hpp
     include/resolve/encoder.hpp
+    include/resolve/mlp_block.hpp
+    include/resolve/species_encoder.hpp
+    include/resolve/species_pool.hpp
+    include/resolve/plot_encoder_hash.hpp
+    include/resolve/plot_encoder_embed.hpp
+    include/resolve/plot_encoder_sparse.hpp
+    include/resolve/plot_encoder_rank_pool.hpp
+    include/resolve/plot_encoder_transformer.hpp
+    include/resolve/task_head.hpp
     include/resolve/ft_transformer.hpp
     include/resolve/tabnet.hpp
     include/resolve/saint.hpp

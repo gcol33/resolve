@@ -1,27 +1,19 @@
 #pragma once
 
+// The building blocks of the species encoders (species_encoder.hpp) and the
+// tabular adapter: normalization under AMP, the configurable MLP and its
+// residual block, the parallel block, the fused positional embedding, and the
+// encoder tail every species encoder ends in.
+
 #include "resolve/types.hpp"
 #include "resolve/experts.hpp"
+#include "resolve/mlp_block.hpp"
 #include "resolve/tabm.hpp"
 #include <torch/torch.h>
-#include <utility>
 #include <functional>
+#include <vector>
 
 namespace resolve {
-
-// =============================================================================
-// Constants
-// =============================================================================
-
-// Default MLP architecture
-inline const std::vector<int64_t> kDefaultHiddenDims = {2048, 1024, 512, 256, 128, 64};
-
-// Default embedding dimensions
-constexpr int kDefaultGenusEmbDim = 8;
-constexpr int kDefaultFamilyEmbDim = 8;
-constexpr int kDefaultSpeciesEmbDim = 32;
-constexpr int kDefaultTopK = 3;
-constexpr int kDefaultTopKSpecies = 10;
 
 // =============================================================================
 // Custom Normalization Layers
@@ -58,18 +50,16 @@ TORCH_MODULE(RMSNorm);
 // normalization in fp32 keeps the statistics accurate while the surrounding
 // Linear/embedding matmuls stay in fp16, preserving the AMP speed/memory win.
 //
-// A no-op (calls norm_fwd directly) when CUDA autocast is inactive (AMP off or
-// CPU build) or when the environment variable RESOLVE_FP32_NORM=0 is set. The
-// env toggle exists to A/B the fix against the original collapse in a single
-// build. See gcol33/resolve#21.
+// Calls norm_fwd directly when CUDA autocast is inactive (AMP off or a CPU
+// build).
 torch::Tensor run_norm_fp32(
     const std::function<torch::Tensor(torch::Tensor)>& norm_fwd,
     torch::Tensor x
 );
 
 // Wraps a normalization module so its forward runs through run_norm_fp32. Used
-// by the non-residual nn::Sequential MLP path, where the norm module is invoked
-// opaquely by Sequential::forward and there is no other interception point.
+// by the nn::Sequential MLP path, where the norm module is invoked opaquely by
+// Sequential::forward and there is no other interception point.
 class Fp32NormImpl : public torch::nn::Module {
 public:
     explicit Fp32NormImpl(torch::nn::AnyModule inner);
@@ -91,30 +81,6 @@ TORCH_MODULE(Fp32Norm);
 // =============================================================================
 // Configurable Architecture Types
 // =============================================================================
-
-// Configuration for building MLP blocks
-struct MLPBlockConfig {
-    ActivationType activation = ActivationType::GELU;
-    NormLayerType normalization = NormLayerType::BatchNorm;
-    int norm_groups = kDefaultNormGroups;
-    float dropout = kDefaultDropout;
-    bool use_residual = false;
-    float leaky_relu_slope = kDefaultLeakyReLUSlope;
-    float elu_alpha = kDefaultELUAlpha;
-
-    // Create from ModelConfig
-    static MLPBlockConfig from_model_config(const ModelConfig& cfg) {
-        MLPBlockConfig block;
-        block.activation = cfg.activation;
-        block.normalization = cfg.normalization;
-        block.norm_groups = cfg.norm_groups;
-        block.dropout = cfg.dropout;
-        block.use_residual = cfg.use_residual;
-        block.leaky_relu_slope = cfg.leaky_relu_slope;
-        block.elu_alpha = cfg.elu_alpha;
-        return block;
-    }
-};
 
 // Description of the mixture of experts that may stand in for an encoder's MLP
 // tail. Mirrors MLPBlockConfig: a torch-free projection of the MoE knobs on
@@ -150,7 +116,9 @@ struct MoETailConfig {
 struct MLPBuildResult {
     torch::nn::Sequential mlp;
     int64_t output_dim;
-    std::vector<size_t> activation_indices;  // Indices of activation layers in sequential
+    // Positions in `mlp` of each hidden layer's activation (a residual block's
+    // position, its output being the layer's).
+    std::vector<size_t> activation_indices;
 };
 
 // =============================================================================
@@ -166,8 +134,10 @@ torch::nn::AnyModule make_activation(
     float elu_alpha = kDefaultELUAlpha
 );
 
-// Create normalization module based on type
-// Returns empty AnyModule for NormLayerType::None
+// The normalization module of `type` over the last dimension `dim` (GroupNorm
+// over `norm_groups` groups, reduced until they divide `dim`). Empty for
+// NormLayerType::None. Its forward is not routed through run_norm_fp32: a
+// caller runs it through run_norm_fp32, or wraps it in Fp32Norm.
 torch::nn::AnyModule make_normalization(
     NormLayerType type,
     int64_t dim,
@@ -190,30 +160,12 @@ public:
 
     torch::Tensor forward(torch::Tensor x);
 
-    // Get last activation output (for diagnostics)
-    [[nodiscard]] torch::Tensor last_activation() const { return last_activation_; }
-
 private:
     torch::nn::Linear linear_{nullptr};
-
-    // Typed norm modules (only one will be used based on norm_type_)
-    torch::nn::BatchNorm1d norm_bn_{nullptr};
-    torch::nn::LayerNorm norm_ln_{nullptr};
-    torch::nn::GroupNorm norm_gn_{nullptr};
-    RMSNorm norm_rms_{nullptr};
-
-    // Activation: AnyModule for functional dispatch, PReLU stored separately for parameters
-    torch::nn::AnyModule activation_;
-    torch::nn::PReLU prelu_{nullptr};
-
+    torch::nn::AnyModule norm_;        // "norm"; empty without normalization
+    torch::nn::AnyModule activation_;  // "activation"
     torch::nn::Dropout dropout_{nullptr};
     torch::nn::Linear projection_{nullptr};  // For dimension mismatch
-
-    bool needs_projection_;
-    bool has_norm_;
-    NormLayerType norm_type_;
-    ActivationType activation_type_;
-    mutable torch::Tensor last_activation_;  // Stored for diagnostics
 };
 
 TORCH_MODULE(ResidualBlock);
@@ -230,6 +182,13 @@ TORCH_MODULE(ResidualBlock);
     const MLPBlockConfig& config
 );
 
+// `mlp` applied to `x`. With `activations`, the output of each module at
+// `activation_indices` is appended to it.
+torch::Tensor run_mlp(torch::nn::Sequential& mlp,
+                      const std::vector<size_t>& activation_indices,
+                      torch::Tensor x,
+                      std::vector<torch::Tensor>* activations);
+
 // =============================================================================
 // Parallel Layers Block
 // =============================================================================
@@ -242,7 +201,8 @@ public:
         const ParallelBranchConfig& config
     );
 
-    torch::Tensor forward(torch::Tensor x);
+    // With `activations`, each hidden layer's activation is appended to it.
+    torch::Tensor forward(torch::Tensor x, std::vector<torch::Tensor>* activations = nullptr);
 
     [[nodiscard]] int64_t output_dim() const noexcept { return output_dim_; }
     // What this branch is worth in the aggregation
@@ -251,6 +211,7 @@ public:
 
 private:
     torch::nn::Sequential mlp_{nullptr};
+    std::vector<size_t> activation_indices_;
     int64_t output_dim_;
     float branch_weight_ = 1.0f;
 };
@@ -304,7 +265,9 @@ public:
         const ParallelLayersConfig& config
     );
 
-    torch::Tensor forward(torch::Tensor x);
+    // With `activations`, the hidden-layer activations of every branch, in
+    // branch order, are appended to it.
+    torch::Tensor forward(torch::Tensor x, std::vector<torch::Tensor>* activations = nullptr);
 
     [[nodiscard]] int64_t output_dim() const noexcept { return output_dim_; }
     [[nodiscard]] int n_branches() const noexcept { return static_cast<int>(branches_.size()); }
@@ -313,7 +276,6 @@ private:
     std::vector<ParallelBranch> branches_;
     ParallelAggregation aggregation_;
     int64_t output_dim_;
-    int64_t branch_output_dim_;  // Output dim of each branch (for non-concat modes)
     bool use_residual_;
 
     // Aggregation-specific modules
@@ -353,9 +315,13 @@ public:
     [[nodiscard]] int embed_dim() const noexcept { return embed_dim_; }
     [[nodiscard]] int64_t total_output_dim() const noexcept { return n_positions_ * embed_dim_; }
 
-    // Get the underlying embedding table (for checkpoint migration)
+    // The underlying (vocab_size * n_positions, embed_dim) table.
     [[nodiscard]] torch::nn::Embedding& embedding() { return embedding_; }
     [[nodiscard]] const torch::nn::Embedding& embedding() const { return embedding_; }
+
+    // (vocab_size, embed_dim): each item's rows averaged over the positions,
+    // detached.
+    [[nodiscard]] torch::Tensor position_average() const;
 
 private:
     int64_t vocab_size_;
@@ -368,29 +334,17 @@ private:
 TORCH_MODULE(FusedPositionalEmbedding);
 
 // =============================================================================
-// Shared Encoder Helpers (reduce duplication across encoder types)
+// Taxonomy input check
 // =============================================================================
 
-// Register per-rank taxonomy embeddings on a module.
-// Populates genus_embeddings and family_embeddings vectors.
-// Returns the input dimension contribution (top_k * (genus_emb_dim + family_emb_dim)).
-int64_t register_per_rank_embeddings(
-    torch::nn::Module& module,
-    std::vector<torch::nn::Embedding>& genus_embeddings,
-    std::vector<torch::nn::Embedding>& family_embeddings,
-    int64_t n_genera, int64_t n_families,
-    int genus_emb_dim, int family_emb_dim, int top_k
-);
-
 // Validate that a concat-based encoder was given the taxonomy tensors it
-// reserved concat width for. A concat encoder (fused embed / per-rank hash /
-// sparse / MoE) allocates fixed input width for BOTH genus and family at
-// construction, so once taxonomy is enabled its forward pass needs both tensors;
-// supplying only one (or an empty tensor) would otherwise produce an x narrower
-// than the MLP's input_dim and an opaque torch::cat/Linear shape error. This
-// throws a clear message instead. Unlike the additive transformer/rank-pool
-// encoders (issue #90), independent gating cannot apply here -- a missing column
-// cannot be "not added" without shrinking the concat (issue #99). No-op when
+// reserved concat width for. Such an encoder (fixed taxonomy slots, the pooled
+// rank_pool tables) allocates input width for BOTH genus and family at
+// construction, so once taxonomy is enabled its forward pass needs both
+// tensors; supplying only one (or an empty tensor) would otherwise produce an x
+// narrower than the MLP's input_dim and an opaque torch::cat/Linear shape
+// error. This throws a clear message instead. The transformer encoding adds its
+// taxonomy embeddings to the tokens and gates each independently. No-op when
 // taxonomy is disabled.
 void check_concat_taxonomy(
     bool has_taxonomy,
@@ -399,15 +353,9 @@ void check_concat_taxonomy(
     const char* encoder_name
 );
 
-// Collect per-rank embedding lookups into parts vector.
-// Appends top_k genus embeddings then top_k family embeddings.
-void embed_per_rank_taxonomy(
-    std::vector<torch::Tensor>& parts,
-    std::vector<torch::nn::Embedding>& genus_embeddings,
-    std::vector<torch::nn::Embedding>& family_embeddings,
-    torch::Tensor genus_ids, torch::Tensor family_ids,
-    int top_k, bool has_taxonomy
-);
+// =============================================================================
+// Encoder tail
+// =============================================================================
 
 // What an encoder tail produces. aux_loss and gate_probs are undefined unless
 // the tail is a mixture of experts; a caller that only wants the representation
@@ -425,8 +373,7 @@ struct TailOutput {
 //
 // The modules are registered onto the OWNING encoder rather than onto a
 // sub-module of their own, so the parameter names stay flat ("mlp", "tabm",
-// "backbone" + "moe") and are the names each configuration has always written.
-// This follows register_per_rank_embeddings above, for the same reason.
+// "backbone" + "moe", "parallel").
 struct EncoderTail {
     torch::nn::Sequential mlp{nullptr};
     TabMEncoder tabm{nullptr};
@@ -439,7 +386,8 @@ struct EncoderTail {
     MixtureOfExperts moe{nullptr};
 
     int64_t latent_dim = 0;
-    std::vector<size_t> activation_indices;  // Indices of activation layers (plain MLP only)
+    // Activation positions in `mlp`, or in `backbone` under a mixture.
+    std::vector<size_t> activation_indices;
 
     [[nodiscard]] bool has_moe() const noexcept { return static_cast<bool>(moe); }
     [[nodiscard]] bool has_tabm() const noexcept { return static_cast<bool>(tabm); }
@@ -463,571 +411,11 @@ int64_t build_encoder_tail(
     const ParallelLayersConfig& parallel_config = ParallelLayersConfig{}
 );
 
-// Run whichever tail was built.
-TailOutput forward_encoder_tail(EncoderTail& tail, torch::Tensor x);
-
-// PlotEncoder: shared encoder for all tasks (hash mode)
-// Architecture: learned taxonomy embeddings + MLP
-class PlotEncoderImpl : public torch::nn::Module {
-public:
-    // New constructor with configurable architecture
-    PlotEncoderImpl(
-        int64_t n_continuous,
-        int64_t n_genera,
-        int64_t n_families,
-        int genus_emb_dim,
-        int family_emb_dim,
-        int top_k,
-        const std::vector<int64_t>& hidden_dims,
-        const MLPBlockConfig& mlp_config,
-        const TabMConfig& tabm_config = TabMConfig{},
-        const MoETailConfig& moe_config = MoETailConfig{},
-        const ParallelLayersConfig& parallel_config = ParallelLayersConfig{}
-    );
-
-    // Legacy constructor (backward compatibility)
-    PlotEncoderImpl(
-        int64_t n_continuous,
-        int64_t n_genera = 0,
-        int64_t n_families = 0,
-        int genus_emb_dim = 8,
-        int family_emb_dim = 8,
-        int top_k = 3,
-        const std::vector<int64_t>& hidden_dims = {2048, 1024, 512, 256, 128, 64},
-        float dropout = 0.3f
-    );
-
-    // Forward pass
-    // continuous: (batch, n_continuous) - coords + covariates + hash embedding
-    // genus_ids: (batch, top_k) - optional
-    // family_ids: (batch, top_k) - optional
-    torch::Tensor forward(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {}
-    );
-
-    // The full tail output. forward() is this with everything but the latent
-    // dropped; a mixture-of-experts tail also reports its load-balancing loss
-    // and gate probabilities here, which is how they reach the trainer.
-    TailOutput encode(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {}
-    );
-
-    // Forward pass intended to also return intermediate activations for network
-    // diagnostics. NOTE: this PlotEncoder path returns the final output with an
-    // EMPTY activations vector -- libtorch's type-erased nn::Sequential storage
-    // does not allow per-layer capture here. Only the hash-mode encoder path
-    // (encode_with_activations) actually populates activations; compute_diagnostics
-    // bails out for the other encoders accordingly.
-    std::pair<torch::Tensor, std::vector<torch::Tensor>> forward_with_activations(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {}
-    );
-
-    [[nodiscard]] int64_t latent_dim() const noexcept { return latent_dim_; }
-    [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
-    [[nodiscard]] const std::vector<int64_t>& hidden_dims() const noexcept { return hidden_dims_; }
-
-    // Embedding weight extraction (averaged across positions)
-    [[nodiscard]] torch::Tensor get_genus_weights() const;
-    [[nodiscard]] torch::Tensor get_family_weights() const;
-
-    // The species, genus and family tables this encoder reads a plot's
-    // composition through, as the parameter tensors themselves.
-    [[nodiscard]] std::vector<torch::Tensor> composition_parameters() const;
-
-private:
-    bool has_taxonomy_;
-    int top_k_;
-    int64_t latent_dim_;
-    std::vector<int64_t> hidden_dims_;
-    MLPBlockConfig mlp_config_;
-    std::vector<size_t> activation_indices_;  // For diagnostics
-
-    // Taxonomy embeddings (one per rank position)
-    std::vector<torch::nn::Embedding> genus_embeddings_;
-    std::vector<torch::nn::Embedding> family_embeddings_;
-
-    // Final stage: plain MLP, TabM ensemble, backbone + mixture of experts, or
-    // a parallel block of branches
-    EncoderTail tail_;
-
-    // Helper for constructor implementation
-    void init(int64_t n_continuous, int64_t n_genera, int64_t n_families,
-              int genus_emb_dim, int family_emb_dim, int top_k,
-              const std::vector<int64_t>& hidden_dims, const MLPBlockConfig& config,
-              const TabMConfig& tabm_config = TabMConfig{},
-              const MoETailConfig& moe_config = MoETailConfig{},
-              const ParallelLayersConfig& parallel_config = ParallelLayersConfig{});
-};
-
-TORCH_MODULE(PlotEncoder);
-
-
-// PlotEncoderEmbed: learnable embeddings for top-k species
-// Used when species_encoding="embed"
-class PlotEncoderEmbedImpl : public torch::nn::Module {
-public:
-    // Constructor with configurable architecture (always uses fused embeddings)
-    PlotEncoderEmbedImpl(
-        int64_t n_continuous,
-        int64_t n_species,
-        int64_t n_genera,
-        int64_t n_families,
-        int species_embed_dim,
-        int genus_emb_dim,
-        int family_emb_dim,
-        int top_k_species,
-        int top_k_taxonomy,
-        const std::vector<int64_t>& hidden_dims,
-        const MLPBlockConfig& mlp_config,
-        const TabMConfig& tabm_config = TabMConfig{},
-        const MoETailConfig& moe_config = MoETailConfig{},
-        const ParallelLayersConfig& parallel_config = ParallelLayersConfig{}
-    );
-
-    // Legacy constructor (backward compatibility)
-    PlotEncoderEmbedImpl(
-        int64_t n_continuous,
-        int64_t n_species,
-        int64_t n_genera = 0,
-        int64_t n_families = 0,
-        int species_embed_dim = 32,
-        int genus_emb_dim = 8,
-        int family_emb_dim = 8,
-        int top_k_species = 10,
-        int top_k_taxonomy = 3,
-        const std::vector<int64_t>& hidden_dims = {2048, 1024, 512, 256, 128, 64},
-        float dropout = 0.3f
-    );
-
-    // Forward pass
-    // continuous: (batch, n_continuous) - coords + covariates (NO hash embedding)
-    // species_ids: (batch, top_k_species) - integer IDs
-    // genus_ids: (batch, top_k_taxonomy) - optional
-    // family_ids: (batch, top_k_taxonomy) - optional
-    torch::Tensor forward(
-        torch::Tensor continuous,
-        torch::Tensor species_ids,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {}
-    );
-
-    // The full tail output; see PlotEncoderImpl::encode.
-    TailOutput encode(
-        torch::Tensor continuous,
-        torch::Tensor species_ids,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {}
-    );
-
-    [[nodiscard]] int64_t latent_dim() const noexcept { return latent_dim_; }
-    [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
-
-    // Embedding weight extraction (averaged across positions from fused tables)
-    [[nodiscard]] torch::Tensor get_species_weights() const;
-    [[nodiscard]] torch::Tensor get_genus_weights() const;
-    [[nodiscard]] torch::Tensor get_family_weights() const;
-
-    // The species, genus and family tables this encoder reads a plot's
-    // composition through, as the parameter tensors themselves.
-    [[nodiscard]] std::vector<torch::Tensor> composition_parameters() const;
-
-private:
-    bool has_taxonomy_;
-    int top_k_species_;
-    int top_k_taxonomy_;
-    int64_t latent_dim_;
-    MLPBlockConfig mlp_config_;
-
-    // Fused positional embeddings (single embedding table per type)
-    FusedPositionalEmbedding fused_species_{nullptr};
-    FusedPositionalEmbedding fused_genus_{nullptr};
-    FusedPositionalEmbedding fused_family_{nullptr};
-
-    // Final stage: plain MLP, TabM ensemble, backbone + mixture of experts, or
-    // a parallel block of branches
-    EncoderTail tail_;
-
-    // Helper for constructor implementation
-    void init(int64_t n_continuous, int64_t n_species, int64_t n_genera, int64_t n_families,
-              int species_embed_dim, int genus_emb_dim, int family_emb_dim,
-              int top_k_species, int top_k_taxonomy,
-              const std::vector<int64_t>& hidden_dims, const MLPBlockConfig& config,
-              const TabMConfig& tabm_config = TabMConfig{},
-              const MoETailConfig& moe_config = MoETailConfig{},
-              const ParallelLayersConfig& parallel_config = ParallelLayersConfig{});
-};
-
-TORCH_MODULE(PlotEncoderEmbed);
-
-
-// PlotEncoderSparse: explicit species abundance vectors
-// Used for selection="all" or selection="presence_absence"
-class PlotEncoderSparseImpl : public torch::nn::Module {
-public:
-    // New constructor with configurable architecture
-    PlotEncoderSparseImpl(
-        int64_t n_continuous,
-        int64_t n_species,
-        int species_embed_dim,
-        int64_t n_genera,
-        int64_t n_families,
-        int genus_emb_dim,
-        int family_emb_dim,
-        int top_k,
-        const std::vector<int64_t>& hidden_dims,
-        const MLPBlockConfig& mlp_config,
-        const TabMConfig& tabm_config = TabMConfig{},
-        const MoETailConfig& moe_config = MoETailConfig{},
-        const ParallelLayersConfig& parallel_config = ParallelLayersConfig{}
-    );
-
-    // Legacy constructor (backward compatibility)
-    PlotEncoderSparseImpl(
-        int64_t n_continuous,
-        int64_t n_species,
-        int species_embed_dim = 64,
-        int64_t n_genera = 0,
-        int64_t n_families = 0,
-        int genus_emb_dim = 8,
-        int family_emb_dim = 8,
-        int top_k = 3,
-        const std::vector<int64_t>& hidden_dims = {2048, 1024, 512, 256, 128, 64},
-        float dropout = 0.3f
-    );
-
-    // Forward pass
-    // continuous: (batch, n_continuous) - coords + covariates
-    // species_vector: (batch, n_species) sparse rows (sparse_rows.hpp) - the
-    //                 value each species carries; projected as a sparse x dense
-    //                 product, the same as a dense Linear over the matrix
-    // genus_ids: (batch, top_k) - optional
-    // family_ids: (batch, top_k) - optional
-    torch::Tensor forward(
-        torch::Tensor continuous,
-        torch::Tensor species_vector,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {}
-    );
-
-    // The full tail output; see PlotEncoderImpl::encode.
-    TailOutput encode(
-        torch::Tensor continuous,
-        torch::Tensor species_vector,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {}
-    );
-
-    [[nodiscard]] int64_t latent_dim() const noexcept { return latent_dim_; }
-    [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
-    [[nodiscard]] int64_t n_species() const noexcept { return n_species_; }
-
-    // Embedding weight extraction (averaged across positions)
-    [[nodiscard]] torch::Tensor get_genus_weights() const;
-    [[nodiscard]] torch::Tensor get_family_weights() const;
-
-    // The species, genus and family tables this encoder reads a plot's
-    // composition through, as the parameter tensors themselves.
-    [[nodiscard]] std::vector<torch::Tensor> composition_parameters() const;
-
-private:
-    bool has_taxonomy_;
-    int64_t n_species_;
-    int top_k_;
-    int64_t latent_dim_;
-    MLPBlockConfig mlp_config_;
-
-    // Linear projection from species abundances to embedding
-    torch::nn::Linear species_projection_{nullptr};
-
-    // Taxonomy embeddings (one per rank position)
-    std::vector<torch::nn::Embedding> genus_embeddings_;
-    std::vector<torch::nn::Embedding> family_embeddings_;
-
-    // Final stage: plain MLP, TabM ensemble, backbone + mixture of experts, or
-    // a parallel block of branches
-    EncoderTail tail_;
-
-    // Helper for constructor implementation
-    void init(int64_t n_continuous, int64_t n_species, int species_embed_dim,
-              int64_t n_genera, int64_t n_families, int genus_emb_dim, int family_emb_dim,
-              int top_k, const std::vector<int64_t>& hidden_dims, const MLPBlockConfig& config,
-              const TabMConfig& tabm_config = TabMConfig{},
-              const MoETailConfig& moe_config = MoETailConfig{},
-              const ParallelLayersConfig& parallel_config = ParallelLayersConfig{});
-};
-
-TORCH_MODULE(PlotEncoderSparse);
-
-
-// =============================================================================
-// Cover Dropout Helper (shared by RankPool and Transformer encoders)
-// =============================================================================
-
-// Apply cover dropout: randomly zero out weights and has_cover for a fraction
-// of training samples. Tensors are cloned before modification.
-void apply_cover_dropout(
-    bool training,
-    float cover_dropout,
-    int64_t batch_size,
-    torch::Device device,
-    torch::Tensor& weights,
-    const torch::Tensor& mask,
-    torch::Tensor& has_cover
-);
-
-
-// =============================================================================
-// PlotEncoderRankPool: weighted mean pooling over variable-length species
-// =============================================================================
-
-// Used when species_encoding="rank_pool". Single shared embedding tables,
-// weighted mean pooling, cover dropout for robustness.
-class PlotEncoderRankPoolImpl : public torch::nn::Module {
-public:
-    PlotEncoderRankPoolImpl(
-        int64_t n_continuous,
-        int64_t n_species,
-        int64_t n_genera = 0,
-        int64_t n_families = 0,
-        int species_embed_dim = 64,
-        int genus_embed_dim = 16,
-        int family_embed_dim = 16,
-        const std::vector<int64_t>& hidden_dims = {2048, 1024, 512, 256, 128, 64},
-        const MLPBlockConfig& mlp_config = MLPBlockConfig{},
-        float cover_dropout = 0.0f,
-        const TabMConfig& tabm_config = TabMConfig{},
-        const MoETailConfig& moe_config = MoETailConfig{},
-        const ParallelLayersConfig& parallel_config = ParallelLayersConfig{}
-    );
-
-    // Forward pass with weighted mean pooling
-    // continuous: (batch, n_continuous)
-    // species_ids: (batch, max_species) int64, padded with 0
-    // genus_ids, family_ids: (batch, max_species) int64, optional
-    // weights: (batch, max_species) float, optional
-    // mask: (batch, max_species) bool, optional (True=valid)
-    // has_cover: (batch,) float, optional (defaults to 1.0)
-    torch::Tensor forward(
-        torch::Tensor continuous,
-        torch::Tensor species_ids,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {},
-        torch::Tensor weights = {},
-        torch::Tensor mask = {},
-        torch::Tensor has_cover = {}
-    );
-
-    // The full tail output; see PlotEncoderImpl::encode.
-    TailOutput encode(
-        torch::Tensor continuous,
-        torch::Tensor species_ids,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {},
-        torch::Tensor weights = {},
-        torch::Tensor mask = {},
-        torch::Tensor has_cover = {}
-    );
-
-    [[nodiscard]] int64_t latent_dim() const noexcept { return latent_dim_; }
-    [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
-
-    [[nodiscard]] torch::Tensor get_species_weights() const;
-    [[nodiscard]] torch::Tensor get_genus_weights() const;
-    [[nodiscard]] torch::Tensor get_family_weights() const;
-
-    // The species, genus and family tables this encoder reads a plot's
-    // composition through, as the parameter tensors themselves.
-    [[nodiscard]] std::vector<torch::Tensor> composition_parameters() const;
-
-private:
-    bool has_taxonomy_;
-    float cover_dropout_;
-    int64_t latent_dim_;
-
-    // Single shared embedding tables (NOT per-rank)
-    torch::nn::Embedding species_embedding_{nullptr};
-    torch::nn::Embedding genus_embedding_{nullptr};
-    torch::nn::Embedding family_embedding_{nullptr};
-
-    // Final stage: plain MLP, TabM ensemble, backbone + mixture of experts, or
-    // a parallel block of branches
-    EncoderTail tail_;
-};
-
-TORCH_MODULE(PlotEncoderRankPool);
-
-
-// =============================================================================
-// PlotEncoderTransformer: self-attention over species tokens
-// =============================================================================
-
-// Used when species_encoding="transformer". Additive embeddings in d_model space,
-// optional self-attention, attention or CLS pooling, cover dropout.
-class PlotEncoderTransformerImpl : public torch::nn::Module {
-public:
-    PlotEncoderTransformerImpl(
-        int64_t n_continuous,
-        int64_t n_species,
-        int64_t n_genera = 0,
-        int64_t n_families = 0,
-        int d_model = 128,
-        int n_heads = 4,
-        int n_attention_layers = 0,
-        int transformer_ff_dim = 256,
-        const std::string& transformer_pooling = "attention",
-        float transformer_dropout = 0.1f,
-        const std::vector<int64_t>& hidden_dims = {1024, 512},
-        const MLPBlockConfig& mlp_config = MLPBlockConfig{},
-        float cover_dropout = 0.0f,
-        const TabMConfig& tabm_config = TabMConfig{},
-        const MoETailConfig& moe_config = MoETailConfig{},
-        const ParallelLayersConfig& parallel_config = ParallelLayersConfig{}
-    );
-
-    // Forward pass: species tokens → self-attention → pooling → MLP → latent
-    torch::Tensor forward(
-        torch::Tensor continuous,
-        torch::Tensor species_ids,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {},
-        torch::Tensor weights = {},
-        torch::Tensor mask = {},
-        torch::Tensor has_cover = {},
-        torch::Tensor masked_positions = {}
-    );
-
-    // The full tail output; see PlotEncoderImpl::encode.
-    TailOutput encode(
-        torch::Tensor continuous,
-        torch::Tensor species_ids,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {},
-        torch::Tensor weights = {},
-        torch::Tensor mask = {},
-        torch::Tensor has_cover = {},
-        torch::Tensor masked_positions = {}
-    );
-
-    // Get pre-pooling token embeddings for MLM pretraining
-    // Returns (batch, max_species, d_model) after self-attention
-    torch::Tensor forward_tokens(
-        torch::Tensor species_ids,
-        torch::Tensor genus_ids,
-        torch::Tensor family_ids,
-        torch::Tensor weights,
-        torch::Tensor mask,
-        torch::Tensor masked_positions = {}
-    );
-
-    [[nodiscard]] int64_t latent_dim() const noexcept { return latent_dim_; }
-    [[nodiscard]] int d_model() const noexcept { return d_model_; }
-    [[nodiscard]] bool has_taxonomy() const noexcept { return has_taxonomy_; }
-
-    [[nodiscard]] torch::Tensor get_species_weights() const;
-    [[nodiscard]] torch::Tensor get_genus_weights() const;
-    [[nodiscard]] torch::Tensor get_family_weights() const;
-
-    // The species, genus and family tables this encoder reads a plot's
-    // composition through, as the parameter tensors themselves.
-    [[nodiscard]] std::vector<torch::Tensor> composition_parameters() const;
-
-private:
-    // Build additive token embeddings from species/genus/family/weights
-    torch::Tensor build_tokens(
-        torch::Tensor species_ids,
-        torch::Tensor genus_ids,
-        torch::Tensor family_ids,
-        torch::Tensor weights,
-        torch::Tensor masked_positions
-    );
-
-    int d_model_;
-    int n_attention_layers_;
-    std::string transformer_pooling_;
-    bool has_taxonomy_;
-    float cover_dropout_;
-    int64_t latent_dim_;
-
-    // Embeddings (all d_model-dimensional, additive)
-    torch::nn::Embedding species_embedding_{nullptr};
-    torch::nn::Embedding genus_embedding_{nullptr};
-    torch::nn::Embedding family_embedding_{nullptr};
-    torch::nn::Linear weight_proj_{nullptr};
-    torch::Tensor mask_embedding_;
-
-    // Self-attention
-    torch::nn::TransformerEncoder transformer_encoder_{nullptr};
-
-    // Attention pooling
-    torch::Tensor pool_query_;
-    torch::nn::MultiheadAttention pool_attn_{nullptr};
-    torch::nn::LayerNorm pool_norm_{nullptr};
-
-    // CLS pooling
-    torch::Tensor cls_token_;
-
-    // Final stage: plain MLP, TabM ensemble, backbone + mixture of experts, or
-    // a parallel block of branches
-    EncoderTail tail_;
-};
-
-TORCH_MODULE(PlotEncoderTransformer);
-
-
-// Task head: prediction head for a single target
-// Supports optional hidden layers for deeper task-specific processing
-class TaskHeadImpl : public torch::nn::Module {
-public:
-    // Legacy constructor (single linear layer)
-    TaskHeadImpl(
-        int64_t latent_dim,
-        TaskType task,
-        int num_classes = 0,
-        TransformType transform = TransformType::None
-    );
-
-    // New constructor with configurable hidden layers
-    TaskHeadImpl(
-        int64_t latent_dim,
-        TaskType task,
-        int num_classes,
-        TransformType transform,
-        const std::vector<int64_t>& hidden_dims,
-        ActivationType activation = ActivationType::GELU,
-        float dropout = 0.0f
-    );
-
-    // Forward pass - returns raw output
-    torch::Tensor forward(torch::Tensor latent);
-
-    // Predict with inverse transform
-    torch::Tensor predict(torch::Tensor latent);
-
-    // Inverse transform for predictions
-    torch::Tensor inverse_transform(torch::Tensor predictions);
-
-    [[nodiscard]] TaskType task() const noexcept { return task_; }
-    [[nodiscard]] TransformType transform() const noexcept { return transform_; }
-    [[nodiscard]] bool has_hidden_layers() const noexcept { return !hidden_dims_.empty(); }
-
-private:
-    void init_output_layer(int64_t input_dim, int num_classes);
-
-    TaskType task_;
-    TransformType transform_;
-    std::vector<int64_t> hidden_dims_;
-    torch::nn::Sequential head_mlp_{nullptr};  // Hidden layers (if any)
-    torch::nn::Linear output_{nullptr};         // Final projection
-};
-
-TORCH_MODULE(TaskHead);
-
-
+// Run whichever tail was built. With `activations`, each hidden layer's output
+// is appended to it as a (rows, neurons) tensor: the activations of the plain
+// MLP, the mixture's backbone or each parallel branch, and each TabM layer with
+// its ensemble members as rows.
+TailOutput forward_encoder_tail(EncoderTail& tail, torch::Tensor x,
+                                std::vector<torch::Tensor>* activations = nullptr);
 
 } // namespace resolve

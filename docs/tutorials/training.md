@@ -560,8 +560,10 @@ for layer in diagnostics.layers:
     print(layer.name, layer.n_dead, layer.n_saturated, layer.mean_activation)
 ```
 
-Diagnostics read the encoder's per-layer activations, which the hash encoder
-exposes. Other species encoders report that diagnostics are unavailable.
+Diagnostics read the activations of every hidden layer of the species encoder's
+tail (the MLP, the mixture's backbone, each TabM layer with its ensemble
+members as rows, each parallel branch), under every species encoding. The
+tabular architectures and TraitNet report that diagnostics are unavailable.
 
 ## Cross-validation
 

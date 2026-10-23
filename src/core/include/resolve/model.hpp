@@ -5,8 +5,10 @@
 #include "resolve/architectures.hpp"
 #include "resolve/aux_loss.hpp"
 #include "resolve/categorical.hpp"
-#include "resolve/encoder.hpp"
+#include "resolve/plot_encoder_transformer.hpp"
 #include "resolve/plot_inputs.hpp"
+#include "resolve/species_encoder.hpp"
+#include "resolve/task_head.hpp"
 #include "resolve/traitnet.hpp"
 #include <torch/torch.h>
 
@@ -24,14 +26,12 @@ struct ModelForwardResult {
     AuxLosses aux_losses;
 };
 
-// Full Resolve model: shared encoder + multiple task heads
-// Species encodings:
-// - Hash: Feature hashing for species (PlotEncoder)
-// - Embed: Learnable embeddings for top-k species (PlotEncoderEmbed)
-// - Sparse: Explicit species vector input (PlotEncoderSparse)
-// - RankPool: Weighted pool over every species of the plot (PlotEncoderRankPool)
-// - Transformer: Attention over the plot's species (PlotEncoderTransformer)
-// Each can optionally use Mixture of Experts (MoE)
+// Full Resolve model: one encoder shared by the task heads of every target.
+// Under encoder_architecture = MLP the encoder is the species encoder of the
+// effective species encoding (species_encoder.hpp: hash, embed, sparse,
+// rank_pool, transformer); the tabular architectures encode in the
+// TabularAdapter, TraitNet through its trait matrix. A mixture of experts can
+// stand in for the species encoder's MLP tail or run over the latent.
 class ResolveModelImpl : public torch::nn::Module {
 public:
     ResolveModelImpl(
@@ -65,9 +65,9 @@ public:
     // Latent representation (without heads).
     torch::Tensor get_latent(const PlotInputs& inputs);
 
-    // The latent plus the hidden-layer activations of the encoder, for
-    // diagnostics. Only the hash encoder reports activations; every other
-    // encoder returns its latent with an empty list.
+    // The latent plus the hidden-layer activations of the species encoder's
+    // tail (SpeciesEncoderImpl::encode), for diagnostics; the tabular
+    // architectures and TraitNet return their latent with an empty list.
     std::pair<torch::Tensor, std::vector<torch::Tensor>> encode_with_activations(
         const PlotInputs& inputs);
 
@@ -80,11 +80,15 @@ public:
     [[nodiscard]] int64_t latent_dim() const;
     [[nodiscard]] SpeciesEncodingMode species_encoding() const noexcept { return config_.species_encoding; }
     [[nodiscard]] bool uses_explicit_vector() const noexcept { return config_.uses_explicit_vector; }
+    // The encoding the model runs (effective_species_encoding): species_encoding
+    // with uses_explicit_vector applied.
+    [[nodiscard]] SpeciesEncodingMode effective_species_encoding() const noexcept {
+        return effective_encoding_;
+    }
     // Whether the hash embedding is the tail of the continuous block, i.e.
     // whether ContinuousInputs::hash_embedding is part of what this model reads.
-    [[nodiscard]] bool hash_in_continuous() const noexcept {
-        return config_.species_encoding == SpeciesEncodingMode::Hash &&
-               !config_.uses_explicit_vector;
+    [[nodiscard]] bool hash_in_continuous() const {
+        return species_encoding_traits(effective_encoding_).hash_in_continuous;
     }
     [[nodiscard]] bool uses_moe() const noexcept { return config_.moe_routing != MoERoutingType::None; }
     [[nodiscard]] int n_experts() const noexcept { return uses_moe() ? config_.n_experts : 0; }
@@ -97,7 +101,9 @@ public:
         return is_batch_dependent(config_.encoder_architecture);
     }
 
-    // Embedding weight extraction (delegates to active encoder)
+    // The species encoder's embedding tables, one row per code (averaged over
+    // slot positions where it keeps one table per slot); undefined for the
+    // tabular architectures, TraitNet, and a table the encoding lacks.
     [[nodiscard]] torch::Tensor get_genus_weights() const;
     [[nodiscard]] torch::Tensor get_family_weights() const;
     [[nodiscard]] torch::Tensor get_species_weights() const;
@@ -150,13 +156,6 @@ public:
     [[nodiscard]] const TaskHead& head(const std::string& name) const;
 
 private:
-    // Dispatch taxonomy weight extraction to the active encoder
-    torch::Tensor get_taxonomy_weights_(
-        torch::Tensor (PlotEncoderImpl::*hash_fn)() const,
-        torch::Tensor (PlotEncoderEmbedImpl::*embed_fn)() const,
-        torch::Tensor (PlotEncoderSparseImpl::*sparse_fn)() const
-    ) const;
-
     // What the encoder stage produces: the latent, the weighted auxiliary
     // terms, and the MoE gate probabilities (undefined without MoE).
     struct EncodedPlots {
@@ -168,9 +167,12 @@ private:
     // The one encoder dispatch. Fuses the categorical embeddings into
     // `inputs`, runs whichever encoder was built and then the post-placement
     // mixture of experts if there is one. In training mode it also refreshes
-    // SAINT's reference rows from `inputs`. encode(), forward_with_aux() and
-    // get_gate_probs() are readings of this rather than copies of the chain.
-    EncodedPlots encode_all(const PlotInputs& inputs);
+    // SAINT's reference rows from `inputs`. encode(), forward_with_aux(),
+    // encode_with_activations() and get_gate_probs() are readings of this
+    // rather than copies of the chain. With `activations`, the species
+    // encoder's tail appends its hidden-layer activations to it.
+    EncodedPlots encode_all(const PlotInputs& inputs,
+                            std::vector<torch::Tensor>* activations = nullptr);
 
     // The latent alone; same `inputs` convention as encode_all().
     torch::Tensor encode(const PlotInputs& inputs);
@@ -193,13 +195,10 @@ private:
 
     ResolveSchema schema_;
     ModelConfig config_;
+    SpeciesEncodingMode effective_encoding_;
 
-    // Standard encoders (one will be used based on encoding mode)
-    PlotEncoder encoder_hash_{nullptr};
-    PlotEncoderEmbed encoder_embed_{nullptr};
-    PlotEncoderSparse encoder_sparse_{nullptr};
-    PlotEncoderRankPool encoder_rank_pool_{nullptr};
-    PlotEncoderTransformer encoder_transformer_{nullptr};
+    // The species encoder of the MLP architecture, registered as "encoder".
+    SpeciesEncoder encoder_{nullptr};
 
     // TraitNet encoder (used when encoder_architecture == TraitNet)
     TraitNetEncoder trait_net_encoder_{nullptr};

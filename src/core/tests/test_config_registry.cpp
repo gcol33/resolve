@@ -451,38 +451,43 @@ TEST_CASE("ModelConfig round-trips through the checkpoint with every field chang
 
 TEST_CASE("An enum field stored as its name reads back as the enum",
           "[config][registry][checkpoint]") {
-    // TabMConfig::aggregation, written in the string layout (<key>_len beside
-    // the UInt8 bytes) rather than as an ordinal.
-    const TempPath path_file(".pt");
-    const std::string path = path_file.path();
-    {
-        // Every other key as save_model_config writes it.
-        const TempPath defaults_file(".pt");
+    // TabMConfig::aggregation and ModelConfig::transformer_pooling, written in
+    // the string layout (<key>_len beside the UInt8 bytes) rather than as an
+    // ordinal.
+    auto load_with_name = [](const std::string& key, const std::string& name) {
+        const TempPath path_file(".pt");
+        const std::string path = path_file.path();
         {
-            torch::serialize::OutputArchive defaults;
-            save_model_config(defaults, ModelConfig{});
-            defaults.save_to(defaults_file.path());
+            // Every other key as save_model_config writes it.
+            const TempPath defaults_file(".pt");
+            {
+                torch::serialize::OutputArchive defaults;
+                save_model_config(defaults, ModelConfig{});
+                defaults.save_to(defaults_file.path());
+            }
+            torch::serialize::InputArchive defaults;
+            defaults.load_from(defaults_file.path());
+            torch::serialize::OutputArchive archive;
+            for (const auto& existing : defaults.keys()) {
+                if (existing.rfind(key, 0) == 0) continue;
+                torch::Tensor value;
+                defaults.read(existing, value);
+                archive.write(existing, value);
+            }
+            std::vector<uint8_t> bytes(name.begin(), name.end());
+            archive.write(key + "_len", torch::tensor(static_cast<int64_t>(name.size())));
+            archive.write(key, torch::from_blob(bytes.data(), {static_cast<int64_t>(bytes.size())},
+                                                torch::kUInt8).clone());
+            archive.save_to(path);
         }
-        torch::serialize::InputArchive defaults;
-        defaults.load_from(defaults_file.path());
-        torch::serialize::OutputArchive archive;
-        for (const auto& key : defaults.keys()) {
-            if (key.rfind("tabm_aggregation", 0) == 0) continue;
-            torch::Tensor value;
-            defaults.read(key, value);
-            archive.write(key, value);
-        }
-        const std::string name = "median";
-        std::vector<uint8_t> bytes(name.begin(), name.end());
-        archive.write("tabm_aggregation_len", torch::tensor(static_cast<int64_t>(name.size())));
-        archive.write("tabm_aggregation",
-                      torch::from_blob(bytes.data(), {static_cast<int64_t>(bytes.size())},
-                                       torch::kUInt8).clone());
-        archive.save_to(path);
-    }
-    torch::serialize::InputArchive archive;
-    archive.load_from(path);
-    CHECK(load_model_config(archive).tabm.aggregation == TabMAggregation::Median);
+        torch::serialize::InputArchive archive;
+        archive.load_from(path);
+        return load_model_config(archive);
+    };
+    CHECK(load_with_name("tabm_aggregation", "median").tabm.aggregation ==
+          TabMAggregation::Median);
+    CHECK(load_with_name("transformer_pooling", "cls").transformer_pooling ==
+          TransformerPooling::Cls);
 }
 
 TEST_CASE("TrainConfig round-trips through the checkpoint with every persisted field changed",
@@ -569,8 +574,7 @@ TEST_CASE("Checkpoint keys keep the spellings earlier releases wrote",
              "species_encoding", "uses_explicit_vector", "hash_dim", "hidden_dims",
              "categorical_embed_dim", "encoder_architecture", "head_hidden_dims",
              "moe_routing", "moe_placement", "n_experts", "expert_hidden_dims",
-             "cover_dropout", "freeze_composition", "d_model", "transformer_pooling_len",
-             "transformer_pooling",
+             "cover_dropout", "freeze_composition", "d_model", "transformer_pooling",
              "ft_d_model", "ft_pre_norm",
              "tabnet_n_steps", "tabnet_use_sparsemax",
              "saint_use_row_attention", "saint_row_attention_rows",

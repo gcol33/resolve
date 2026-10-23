@@ -65,7 +65,7 @@ above or by keyword; an unknown keyword raises `TypeError`.
 | `get_latent(...)` | `Tensor` of shape `(batch, latent_dim)` |
 | `forward_with_aux(...)` | `ModelForwardResult` with `outputs` and `aux_losses` |
 | `forward_single(target, ...)` | `Tensor` for one head |
-| `encode_with_activations(...)` | `(latent, [activations])`; activations are non-empty for the hash encoder |
+| `encode_with_activations(...)` | `(latent, [activations])`: one `(rows, neurons)` tensor per hidden layer of the species encoder's tail; empty for the tabular architectures and TraitNet |
 | `get_gate_probs(...)` | `Tensor` of expert gate probabilities `(batch, n_experts)`, `None` without MoE |
 
 The forward passes release the GIL around the compute, so other Python threads
@@ -108,7 +108,7 @@ config = rc.ModelConfig()
 |-----------|------|---------|-------------|
 | `species_encoding` | `SpeciesEncodingMode` | `Hash` | Must match `DatasetConfig.species_encoding` |
 | `hash_dim` | `int` | `32` | Must match `DatasetConfig.hash_dim` |
-| `uses_explicit_vector` | `bool` | `False` | Read the sparse species vector |
+| `uses_explicit_vector` | `bool` | `False` | Read the sparse species vector: turns `Hash` into `Sparse`; refused with `Embed`, `RankPool` and `Transformer`, which read no species vector |
 | `species_embed_dim` | `int` | `32` | Species embedding width |
 | `top_k` | `int` | `3` | Fixed taxonomy slots |
 | `top_k_species` | `int` | `10` | Species slots in embed mode |
@@ -147,7 +147,7 @@ config = rc.ModelConfig()
 | `n_heads` | `int` | `4` | Attention heads |
 | `n_attention_layers` | `int` | `0` | Self-attention layers; `0` gives pooling alone |
 | `transformer_ff_dim` | `int` | `256` | Feed-forward width inside an attention layer |
-| `transformer_pooling` | `str` | `"attention"` | `"attention"` or `"cls"`; `"cls"` needs at least one attention layer |
+| `transformer_pooling` | `TransformerPooling` | `Attention` | `Attention` or `Cls`; `Cls` needs at least one attention layer |
 | `transformer_dropout` | `float` | `0.1` | Dropout inside attention layers |
 
 ### Mixture of experts
@@ -196,6 +196,18 @@ config.tabnet.use_sparsemax = False       # 1.5-entmax instead
 | `TraitNet` | `trait_net` | `env_dim`, `trait_dim`, `interaction_dim`, `interaction`, `shared_trait_encoder` |
 | `GNN` | `gnn` | `gnn_type`, `n_layers`, `hidden_dim`, `n_heads`, `k_neighbors`, `graph_mode`, `edge_dropout`, `use_edge_features` |
 | `HeterogeneousGNN` | `heterogeneous_gnn` | `hidden_dim`, `output_dim`, `n_layers`, `n_edge_types`, `n_heads`, `dropout`, `k_cooccurrence`, `cooccurrence_threshold`, `use_taxonomic_edges`, `use_cooccurrence_edges` |
+
+Every species encoding reaches these architectures as numerical features
+beside the continuous block: `Hash` through its hash embedding, `Embed` through
+its fused species slots, `Sparse` through its projected species vector,
+`RankPool` and `Transformer` through their pooled species embedding (genus and
+family pooled in) and the `has_cover` flag. The fixed genus / family slots of
+`Hash`, `Embed` and `Sparse` enter as categoricals (tokenized by
+`FTTransformer`, `SAINT` and `ExcelFormer`, embedded per slot by `TabNet` and
+`GNN`). `HeterogeneousGNN` and the `CoOccurrence` GNN graph read the species
+vector and need `Sparse`; the `Taxonomic` GNN graph reads the fixed slots and
+does not take `RankPool` or `Transformer`. Constructing the model refuses those
+pairs with a message naming what would work.
 
 `TabNet.use_sparsemax = False` selects exact 1.5-entmax
 (Peters, Niculae & Martins, arXiv:1905.05702, Algorithm 2), which keeps strictly

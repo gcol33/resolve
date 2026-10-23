@@ -10,7 +10,7 @@
 #include "resolve/continuous_block.hpp"
 #include "resolve/pretraining.hpp"
 #include "resolve/vae.hpp"
-#include "resolve/encoder.hpp"
+#include "resolve/plot_encoder_transformer.hpp"
 
 using namespace resolve;
 using namespace Catch::Matchers;
@@ -131,21 +131,17 @@ std::vector<float> run_scarf(const EmbedInputs& in, int seed, int epochs) {
 // -----------------------------------------------------------------------------
 
 PlotEncoderTransformer make_mlm_encoder() {
-    MLPBlockConfig mlp_config;
-    mlp_config.dropout = 0.0f;
-    return PlotEncoderTransformer(
-        /*n_continuous=*/5,
-        /*n_species=*/60,
-        /*n_genera=*/0,
-        /*n_families=*/0,
-        /*d_model=*/32,
-        /*n_heads=*/2,
-        /*n_attention_layers=*/1,
-        /*transformer_ff_dim=*/64,
-        /*transformer_pooling=*/"attention",
-        /*transformer_dropout=*/0.0f,
-        /*hidden_dims=*/std::vector<int64_t>{16},
-        /*mlp_config=*/mlp_config);
+    SpeciesEncoderSpec spec;
+    spec.n_continuous = 5;
+    spec.n_species = 60;
+    spec.config.d_model = 32;
+    spec.config.n_heads = 2;
+    spec.config.n_attention_layers = 1;
+    spec.config.transformer_ff_dim = 64;
+    spec.config.transformer_dropout = 0.0f;
+    spec.config.hidden_dims = {16};
+    spec.config.dropout = 0.0f;
+    return PlotEncoderTransformer(spec);
 }
 
 struct MLMInputs {

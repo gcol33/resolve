@@ -180,7 +180,7 @@ diagnostics = trainer.compute_diagnostics()
 | `compute_residuals(target_name)` | `ResidualAnalysis` |
 | `compute_classification_predictions(target_name)` | `ClassificationPredictions` |
 | `compute_calibration(target_name, n_bins=10)` | `CalibrationResult`; no bins for a regression target |
-| `compute_diagnostics()` | `NetworkDiagnostics`; per-layer activations are available for the hash encoder |
+| `compute_diagnostics()` | `NetworkDiagnostics`: per-layer activation statistics of the species encoder's tail, under every species encoding (not for the tabular architectures or TraitNet) |
 
 ### Cross-validation
 

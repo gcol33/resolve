@@ -10,8 +10,13 @@
 # the includer (src/core vs src/core/python) does not matter.
 set(RESOLVE_CORE_SOURCES
     ${RESOLVE_CORE_DIR}/cpp_src/encoder_common.cpp
-    ${RESOLVE_CORE_DIR}/cpp_src/encoder_topk.cpp
-    ${RESOLVE_CORE_DIR}/cpp_src/encoder_pool.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/species_encoder.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/species_pool.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/plot_encoder_hash.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/plot_encoder_embed.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/plot_encoder_sparse.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/plot_encoder_rank_pool.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/plot_encoder_transformer.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/task_head.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/ft_transformer.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/tabnet.cpp

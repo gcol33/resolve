@@ -212,6 +212,11 @@ inline constexpr EnumName<ParallelAggregation> kParallelAggregationNames[] = {
     {"gated", ParallelAggregation::Gated},
 };
 
+inline constexpr EnumName<TransformerPooling> kTransformerPoolingNames[] = {
+    {"attention", TransformerPooling::Attention},
+    {"cls", TransformerPooling::Cls},
+};
+
 inline constexpr EnumName<TabMAggregation> kTabMAggregationNames[] = {
     {"mean", TabMAggregation::Mean},
     {"median", TabMAggregation::Median},
@@ -293,6 +298,8 @@ RESOLVE_DECLARE_ENUM_NAMES(TraitInteractionMode, kTraitInteractionModeNames,
                            "trait interaction mode", "bilinear")
 RESOLVE_DECLARE_ENUM_NAMES(ParallelAggregation, kParallelAggregationNames,
                            "parallel aggregation", "concat")
+RESOLVE_DECLARE_ENUM_NAMES(TransformerPooling, kTransformerPoolingNames,
+                           "transformer pooling", "attention")
 RESOLVE_DECLARE_ENUM_NAMES(TabMAggregation, kTabMAggregationNames,
                            "TabM aggregation", "mean")
 RESOLVE_DECLARE_ENUM_NAMES(SuiteCombine, kSuiteCombineNames,

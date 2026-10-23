@@ -2,6 +2,7 @@
 #include "resolve/dataset.hpp"
 #include "resolve/continuous_block.hpp"
 #include "resolve/encoder.hpp"  // Fp32NormImpl (inference-time BN fusion)
+#include "resolve/species_encoder.hpp"
 #include "resolve/target_transform.hpp"
 #include <algorithm>
 #include <atomic>
@@ -15,22 +16,12 @@ namespace resolve {
 
 namespace {
 
-// True when the encoder looks species IDs up in an embedding table, i.e. when a
-// species-code mismatch silently returns another species' row. Hash mode
-// derives its features from the species STRING (content-derived, so the vocab
-// codes never reach the model) unless it was built with an explicit species
-// vector, which is indexed by code like sparse mode.
+// True when the encoder reads species as vocabulary codes (embedding rows or
+// species-vector columns), so a species-code mismatch silently returns another
+// species' row. Hash mode derives its features from the species STRING, so the
+// vocab codes never reach the model.
 bool indexes_species_codes(const ResolveModel& model) {
-    switch (model->species_encoding()) {
-        case SpeciesEncodingMode::Embed:
-        case SpeciesEncodingMode::Sparse:
-        case SpeciesEncodingMode::RankPool:
-        case SpeciesEncodingMode::Transformer:
-            return true;
-        case SpeciesEncodingMode::Hash:
-            return model->uses_explicit_vector();
-    }
-    return false;
+    return species_encoding_traits(model->effective_species_encoding()).indexes_species_codes;
 }
 
 // Shared body of every vocabulary check: sizes first (cheap, and the only
@@ -373,11 +364,9 @@ void Predictor::optimize_for_inference() {
 
         for (size_t i = 0; i + 1 < seq->size(); ++i) {
             auto linear = std::dynamic_pointer_cast<torch::nn::LinearImpl>((*seq)[i]);
-            // Since the fp32-norm guard, every norm in the
-            // Sequential MLP is wrapped in Fp32Norm, so the child is an
-            // Fp32NormImpl, not a bare BatchNorm1dImpl. Unwrap it to reach the
-            // inner BatchNorm1d; fall back to a direct cast for any un-wrapped
-            // norm (e.g. RESOLVE_FP32_NORM=0 builds).
+            // A norm in a Sequential MLP is wrapped in Fp32Norm, so the child
+            // is an Fp32NormImpl; unwrap it to reach the inner BatchNorm1d. A
+            // Sequential built elsewhere may hold a bare BatchNorm1d.
             std::shared_ptr<torch::nn::BatchNorm1dImpl> bn;
             if (auto fp32 = std::dynamic_pointer_cast<Fp32NormImpl>((*seq)[i + 1])) {
                 bn = std::dynamic_pointer_cast<torch::nn::BatchNorm1dImpl>(fp32->inner_module());

@@ -83,6 +83,8 @@ venv.bak/
 # Committed CLI fixtures. The CLI end-to-end job in tests.yml trains and
 # predicts on these, so they are tracked sources despite the *.csv rule.
 !src/core/tests/fixtures/*.csv
+# Recorded models the encoder parity case loads (test_encoder_parity.cpp).
+!src/core/tests/fixtures/encoder_parity/*.pt
 
 # OS
 .DS_Store

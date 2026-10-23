@@ -310,7 +310,7 @@ TEST_CASE("Transformer encoder recovers a species-driven target", "[recovery][tr
     mcfg.n_heads = 4;
     mcfg.n_attention_layers = 1;
     mcfg.transformer_ff_dim = 64;
-    mcfg.transformer_pooling = "attention";
+    mcfg.transformer_pooling = TransformerPooling::Attention;
     mcfg.hidden_dims = {32};
 
     ResolveModel model(ds.schema(), mcfg);

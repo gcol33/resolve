@@ -6,6 +6,7 @@
 #include "resolve/io_retry.hpp"
 #include "resolve/name_pool.hpp"
 #include "resolve/sparse_rows.hpp"
+#include "resolve/species_encoder.hpp"
 #include "resolve/target_labels.hpp"
 #include <algorithm>
 #include <cmath>
@@ -460,10 +461,6 @@ void require_valid_zero_abundance(float zero_abundance_as) {
 // embedding encoder's taxonomy width: top_k, doubled under TopBottom.
 int taxonomy_slot_count(const DatasetConfig& config) {
     return config.selection == SelectionMode::TopBottom ? 2 * config.top_k : config.top_k;
-}
-
-bool is_pool_encoding(SpeciesEncodingMode mode) {
-    return mode == SpeciesEncodingMode::RankPool || mode == SpeciesEncodingMode::Transformer;
 }
 
 // The species width a schema records as resolved: encode_species overwrites a
@@ -1059,7 +1056,7 @@ DatasetConfig dataset_config_from_checkpoint(const ResolveSchema& schema,
     DatasetConfig config = schema.dataset_config;
     // The settings that also size the model: the ModelConfig is authoritative,
     // since a disagreement would have failed at training time.
-    config.species_encoding = model_config.species_encoding;
+    config.species_encoding = effective_species_encoding(model_config);
     config.hash_dim = model_config.hash_dim;
     config.top_k = model_config.top_k;
     // A training-time compute path (raw CSR species data hashed per batch);
@@ -1190,16 +1187,6 @@ void ResolveDataset::encode_species(const PlotAssemblages& assemblages) {
 }
 
 void ResolveDataset::record_encoding_settings() {
-    if (config_.aggregation == AggregationMode::Count &&
-        is_pool_encoding(config_.species_encoding)) {
-        throw std::invalid_argument(
-            "DatasetConfig.aggregation = count ranks the fixed genus / family slots "
-            "of the hash, sparse and embed encodings. The rank_pool and transformer "
-            "encodings have no such slots: every species carries its own genus and "
-            "family, pooled with the species weights, so pool_weighting = binary is "
-            "what counts species per genus there.");
-    }
-
     // The loader settings, read back by dataset_config_from_checkpoint() so an
     // inference run encodes new plots the same way. The selection is the one
     // this load APPLIES (All for a pooled / sparse encoding without a

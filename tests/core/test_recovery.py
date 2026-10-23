@@ -261,7 +261,7 @@ def _model_config_transformer() -> "rc.ModelConfig":
     config.n_heads = 4
     config.n_attention_layers = 1
     config.transformer_ff_dim = 64
-    config.transformer_pooling = "attention"
+    config.transformer_pooling = rc.TransformerPooling.Attention
     config.hidden_dims = [32]
     return config
 

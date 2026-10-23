@@ -111,6 +111,7 @@ try:
         build_species_graph,
         TraitInteractionMode,
         TabMAggregation,
+        TransformerPooling,
         ParallelAggregation,
         # Config structs
         TargetConfig,
@@ -327,6 +328,7 @@ __all__ = [
     "build_species_graph",
     "TraitInteractionMode",
     "TabMAggregation",
+    "TransformerPooling",
     "ParallelAggregation",
     # Config structs
     "TargetConfig",

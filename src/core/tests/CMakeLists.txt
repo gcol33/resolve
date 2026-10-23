@@ -115,10 +115,16 @@ add_executable(resolve_tests
     test_pretrain_inputs.cpp
     test_sparse_rows.cpp
     test_load_scale.cpp
+    test_encoder_parity.cpp
+    test_species_encoder.cpp
 )
 
 resolve_link_cuda_dirs(resolve_tests)
 resolve_use_catch_prelude(resolve_tests)
+
+# Recorded inputs the cases read back (tests/fixtures).
+target_compile_definitions(resolve_tests PRIVATE
+    RESOLVE_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
 target_link_libraries(resolve_tests
     PRIVATE

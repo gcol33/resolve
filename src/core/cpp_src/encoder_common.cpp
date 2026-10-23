@@ -1,5 +1,4 @@
 #include "resolve/encoder.hpp"
-#include "resolve/env.hpp"
 #include <cmath>
 #include <stdexcept>
 #include <ATen/autocast_mode.h>
@@ -7,23 +6,12 @@
 namespace resolve {
 
 // =============================================================================
-// fp32 Normalization Under AMP Autocast (see encoder.hpp / gcol33/resolve#21)
+// fp32 Normalization Under AMP Autocast
 // =============================================================================
 
 namespace {
-#ifdef RESOLVE_HAS_CUDA
-// Read RESOLVE_FP32_NORM once. Default enabled; only the literal "0" disables.
-// Guarded with its only caller in run_norm_fp32: the fp32 branch exists for
-// CUDA autocast, so a CPU build has no use for the switch.
-bool fp32_norm_enabled() {
-    static const bool enabled = !env_flag_disabled("RESOLVE_FP32_NORM");
-    return enabled;
-}
-#endif
-
 // GroupNorm needs a group count that divides the channel dim. Shrink the
-// requested count until it does (down to 1). Single source for both norm
-// construction paths (make_normalization and ResidualBlockImpl).
+// requested count until it does (down to 1).
 int groupnorm_groups_for(int requested, int64_t dim) {
     int groups = requested;
     while (groups > 1 && dim % groups != 0) {
@@ -38,7 +26,7 @@ torch::Tensor run_norm_fp32(
     torch::Tensor x
 ) {
 #ifdef RESOLVE_HAS_CUDA
-    if (fp32_norm_enabled() && at::autocast::is_autocast_enabled(at::kCUDA)) {
+    if (at::autocast::is_autocast_enabled(at::kCUDA)) {
         // Locally disable autocast so the normalization (and, for BatchNorm, its
         // running-statistic update) runs in fp32. The guard re-enables autocast
         // even if norm_fwd throws; the autocast cast cache is keyed by nesting
@@ -139,13 +127,17 @@ torch::Tensor FusedPositionalEmbeddingImpl::forward(torch::Tensor ids) {
     // which only freezes position 0's id-0 row; for positions k>0 the id-0 slot
     // offsets to row k*vocab_size, an ordinary learnable row. Mask the lookup by
     // (original id != 0) so an absent/UNK entry at any position contributes the
-    // zero vector and receives no gradient, matching the per-rank
+    // zero vector and receives no gradient, matching the per-slot
     // nn::Embedding(..., padding_idx=0) tables used by the other encoders.
     auto pad_mask = (ids.flatten() != 0).to(flat_emb.dtype()).unsqueeze(-1);
     flat_emb = flat_emb * pad_mask;
 
     // Reshape to (batch, n_positions * embed_dim)
     return flat_emb.view({batch_size, n_positions_ * embed_dim_});
+}
+
+torch::Tensor FusedPositionalEmbeddingImpl::position_average() const {
+    return embedding_->weight.detach().view({n_positions_, vocab_size_, embed_dim_}).mean(0);
 }
 
 // =============================================================================
@@ -172,7 +164,6 @@ torch::nn::AnyModule make_activation(
         case ActivationType::Tanh:
             return torch::nn::AnyModule(torch::nn::Tanh());
         case ActivationType::Mish:
-            // Mish: x * tanh(softplus(x)) - use functional form via lambda
             return torch::nn::AnyModule(torch::nn::Mish());
         case ActivationType::ELU:
             return torch::nn::AnyModule(
@@ -188,9 +179,8 @@ torch::nn::AnyModule make_activation(
                 throw std::invalid_argument("PReLU requires dim > 0 for initialization");
             }
             return torch::nn::AnyModule(torch::nn::PReLU(torch::nn::PReLUOptions().num_parameters(dim)));
-        default:
-            return torch::nn::AnyModule(torch::nn::GELU());
     }
+    return torch::nn::AnyModule(torch::nn::GELU());
 }
 
 // =============================================================================
@@ -202,28 +192,20 @@ torch::nn::AnyModule make_normalization(
     int64_t dim,
     int norm_groups
 ) {
-    // Wrap each norm in Fp32Norm so it runs in fp32 under AMP autocast (see
-    // run_norm_fp32 / gcol33/resolve#21). Sequential::forward invokes the norm
-    // opaquely, so the wrapper is the only place to enforce fp32 on this path.
     switch (type) {
         case NormLayerType::BatchNorm:
-            return torch::nn::AnyModule(Fp32Norm(
-                torch::nn::AnyModule(torch::nn::BatchNorm1d(dim))));
+            return torch::nn::AnyModule(torch::nn::BatchNorm1d(dim));
         case NormLayerType::LayerNorm:
-            return torch::nn::AnyModule(Fp32Norm(
-                torch::nn::AnyModule(torch::nn::LayerNorm(
-                    torch::nn::LayerNormOptions({dim})))));
+            return torch::nn::AnyModule(torch::nn::LayerNorm(torch::nn::LayerNormOptions({dim})));
         case NormLayerType::GroupNorm:
-            return torch::nn::AnyModule(Fp32Norm(
-                torch::nn::AnyModule(torch::nn::GroupNorm(
-                    groupnorm_groups_for(norm_groups, dim), dim))));
+            return torch::nn::AnyModule(
+                torch::nn::GroupNorm(groupnorm_groups_for(norm_groups, dim), dim));
         case NormLayerType::RMSNorm:
-            return torch::nn::AnyModule(Fp32Norm(
-                torch::nn::AnyModule(RMSNorm(dim))));
+            return torch::nn::AnyModule(RMSNorm(dim));
         case NormLayerType::None:
-        default:
-            return torch::nn::AnyModule();  // Empty module
+            break;
     }
+    return torch::nn::AnyModule();
 }
 
 // =============================================================================
@@ -234,103 +216,38 @@ ResidualBlockImpl::ResidualBlockImpl(
     int64_t input_dim,
     int64_t output_dim,
     const MLPBlockConfig& config
-) : needs_projection_(input_dim != output_dim),
-    has_norm_(config.normalization != NormLayerType::None),
-    norm_type_(config.normalization),
-    activation_type_(config.activation)
-{
-    // Main transformation
+) {
     linear_ = register_module("linear", torch::nn::Linear(input_dim, output_dim));
 
-    // Normalization (if any)
-    // We create typed modules and store them appropriately to ensure proper registration
-    if (has_norm_) {
-        switch (config.normalization) {
-            case NormLayerType::BatchNorm:
-                norm_bn_ = register_module("norm", torch::nn::BatchNorm1d(output_dim));
-                break;
-            case NormLayerType::LayerNorm:
-                norm_ln_ = register_module("norm", torch::nn::LayerNorm(
-                    torch::nn::LayerNormOptions({output_dim})));
-                break;
-            case NormLayerType::GroupNorm:
-                norm_gn_ = register_module("norm", torch::nn::GroupNorm(
-                    groupnorm_groups_for(config.norm_groups, output_dim), output_dim));
-                break;
-            case NormLayerType::RMSNorm:
-                norm_rms_ = register_module("norm", RMSNorm(output_dim));
-                break;
-            default:
-                has_norm_ = false;  // None
-                break;
-        }
+    norm_ = make_normalization(config.normalization, output_dim, config.norm_groups);
+    if (!norm_.is_empty()) {
+        register_module("norm", norm_.ptr());
     }
 
-    // Activation - create typed modules for ones with parameters
-    if (config.activation == ActivationType::PReLU) {
-        prelu_ = register_module("activation", torch::nn::PReLU(
-            torch::nn::PReLUOptions().num_parameters(output_dim)));
-    }
-    // Other activations are functional (no learnable parameters), stored in AnyModule for dispatch
-    activation_ = make_activation(config.activation, output_dim, config.leaky_relu_slope, config.elu_alpha);
+    activation_ = make_activation(config.activation, output_dim, config.leaky_relu_slope,
+                                  config.elu_alpha);
+    register_module("activation", activation_.ptr());
 
-    // Dropout
     if (config.dropout > 0) {
         dropout_ = register_module("dropout", torch::nn::Dropout(config.dropout));
     }
 
-    // Projection for residual if dimensions don't match
-    if (needs_projection_) {
+    if (input_dim != output_dim) {
         projection_ = register_module("projection", torch::nn::Linear(input_dim, output_dim));
     }
 }
 
 torch::Tensor ResidualBlockImpl::forward(torch::Tensor x) {
-    auto identity = x;
-
-    // Main path: Linear -> Norm -> Activation -> Dropout
+    // Main path: Linear -> Norm (in fp32 under AMP autocast) -> Activation -> Dropout
     auto out = linear_->forward(x);
-
-    // Apply normalization using typed module, in fp32 under AMP autocast
-    // (gcol33/resolve#21). Typed members keep their "norm" checkpoint key; only
-    // the forward is routed through run_norm_fp32.
-    if (has_norm_) {
-        switch (norm_type_) {
-            case NormLayerType::BatchNorm:
-                out = run_norm_fp32([this](torch::Tensor t) { return norm_bn_->forward(t); }, out);
-                break;
-            case NormLayerType::LayerNorm:
-                out = run_norm_fp32([this](torch::Tensor t) { return norm_ln_->forward(t); }, out);
-                break;
-            case NormLayerType::GroupNorm:
-                out = run_norm_fp32([this](torch::Tensor t) { return norm_gn_->forward(t); }, out);
-                break;
-            case NormLayerType::RMSNorm:
-                out = run_norm_fp32([this](torch::Tensor t) { return norm_rms_->forward(t); }, out);
-                break;
-            default:
-                break;
-        }
+    if (!norm_.is_empty()) {
+        out = run_norm_fp32([this](torch::Tensor t) { return norm_.forward(t); }, out);
     }
-
-    // Apply activation - PReLU uses registered module, others use AnyModule
-    if (activation_type_ == ActivationType::PReLU) {
-        out = prelu_->forward(out);
-    } else {
-        out = activation_.forward(out);
-    }
-    last_activation_ = out;  // Store for diagnostics
-
+    out = activation_.forward(out);
     if (dropout_) {
         out = dropout_->forward(out);
     }
-
-    // Residual connection
-    if (needs_projection_) {
-        identity = projection_->forward(identity);
-    }
-
-    return out + identity;
+    return out + (projection_ ? projection_->forward(x) : x);
 }
 
 // =============================================================================
@@ -352,28 +269,23 @@ MLPBuildResult build_mlp_configurable(
         int64_t out_dim = hidden_dims[i];
 
         if (config.use_residual) {
-            // Use ResidualBlock for this layer
             mlp->push_back(ResidualBlock(prev_dim, out_dim, config));
-            // Track activation index (ResidualBlock stores activation internally)
             result.activation_indices.push_back(mlp->size() - 1);
         } else {
-            // Standard layer: Linear -> Norm -> Activation -> Dropout
+            // Standard layer: Linear -> Norm -> Activation -> Dropout. The norm
+            // runs in fp32 under AMP autocast through its Fp32Norm wrapper,
+            // since Sequential::forward invokes it opaquely.
             mlp->push_back(torch::nn::Linear(prev_dim, out_dim));
 
-            // Normalization
-            if (config.normalization != NormLayerType::None) {
-                auto norm = make_normalization(config.normalization, out_dim, config.norm_groups);
-                if (!norm.is_empty()) {
-                    mlp->push_back(norm);
-                }
+            auto norm = make_normalization(config.normalization, out_dim, config.norm_groups);
+            if (!norm.is_empty()) {
+                mlp->push_back(Fp32Norm(std::move(norm)));
             }
 
-            // Activation
             auto act = make_activation(config.activation, out_dim, config.leaky_relu_slope, config.elu_alpha);
-            result.activation_indices.push_back(mlp->size());  // Index of activation
+            result.activation_indices.push_back(mlp->size());
             mlp->push_back(act);
 
-            // Dropout
             if (config.dropout > 0) {
                 mlp->push_back(torch::nn::Dropout(config.dropout));
             }
@@ -386,34 +298,27 @@ MLPBuildResult build_mlp_configurable(
     return result;
 }
 
-// =============================================================================
-// Shared Encoder Helpers
-// =============================================================================
-
-int64_t register_per_rank_embeddings(
-    torch::nn::Module& module,
-    std::vector<torch::nn::Embedding>& genus_embeddings,
-    std::vector<torch::nn::Embedding>& family_embeddings,
-    int64_t n_genera, int64_t n_families,
-    int genus_emb_dim, int family_emb_dim, int top_k
-) {
-    // padding_idx(0) zeros and freezes row 0 (the reserved UNK / empty-slot id),
-    // matching the fused embed / rank-pool / transformer tables. Without it the
-    // padding slots of species-poor plots and every UNK-genus species pull a
-    // learnable ~N(0,1) row that accumulates gradient and injects a constant
-    // per-slot signal into the MLP concat.
-    for (int k = 0; k < top_k; ++k) {
-        genus_embeddings.push_back(module.register_module(
-            "genus_emb_" + std::to_string(k),
-            torch::nn::Embedding(torch::nn::EmbeddingOptions(n_genera, genus_emb_dim).padding_idx(0))
-        ));
-        family_embeddings.push_back(module.register_module(
-            "family_emb_" + std::to_string(k),
-            torch::nn::Embedding(torch::nn::EmbeddingOptions(n_families, family_emb_dim).padding_idx(0))
-        ));
+torch::Tensor run_mlp(torch::nn::Sequential& mlp,
+                      const std::vector<size_t>& activation_indices,
+                      torch::Tensor x,
+                      std::vector<torch::Tensor>* activations) {
+    if (activations == nullptr) return mlp->forward(std::move(x));
+    auto next = activation_indices.begin();
+    size_t position = 0;
+    for (auto& module : *mlp) {
+        x = module.forward<torch::Tensor>(x);
+        if (next != activation_indices.end() && *next == position) {
+            activations->push_back(x);
+            ++next;
+        }
+        ++position;
     }
-    return static_cast<int64_t>(top_k) * (genus_emb_dim + family_emb_dim);
+    return x;
 }
+
+// =============================================================================
+// Taxonomy input check
+// =============================================================================
 
 void check_concat_taxonomy(
     bool has_taxonomy,
@@ -434,23 +339,9 @@ void check_concat_taxonomy(
     }
 }
 
-void embed_per_rank_taxonomy(
-    std::vector<torch::Tensor>& parts,
-    std::vector<torch::nn::Embedding>& genus_embeddings,
-    std::vector<torch::nn::Embedding>& family_embeddings,
-    torch::Tensor genus_ids, torch::Tensor family_ids,
-    int top_k, bool has_taxonomy
-) {
-    check_concat_taxonomy(has_taxonomy, genus_ids, family_ids,
-                          "PlotEncoder (per-rank taxonomy)");
-    if (!has_taxonomy) return;
-    for (int k = 0; k < top_k; ++k) {
-        parts.push_back(genus_embeddings[k](genus_ids.select(1, k)));
-    }
-    for (int k = 0; k < top_k; ++k) {
-        parts.push_back(family_embeddings[k](family_ids.select(1, k)));
-    }
-}
+// =============================================================================
+// Encoder tail
+// =============================================================================
 
 namespace {
 // Split hidden_dims into the backbone that feeds the mixture and the width the
@@ -481,9 +372,7 @@ int64_t build_encoder_tail(
     const ParallelLayersConfig& parallel_config
 ) {
     // TabM, a mixture and a parallel block are all replacements for the same
-    // MLP tail, so only one of them can have it. Requesting TabM and a mixture
-    // together used to drop TabM without a word, since the MoE encoder took no
-    // TabMConfig at all.
+    // MLP tail, so only one of them can have it.
     if (tabm_config.enabled && moe_config.enabled()) {
         throw std::invalid_argument(
             "encoder tail: tabm.enabled and moe_routing are both set, but both "
@@ -519,8 +408,8 @@ int64_t build_encoder_tail(
 
     if (tabm_config.enabled) {
         tail.tabm = owner.register_module("tabm", TabMEncoder(
-            input_dim, hidden_dims, tabm_config.n_ensembles,
-            config.dropout, tabm_config.aggregation));
+            input_dim, hidden_dims, tabm_config.n_ensembles, config,
+            tabm_config.aggregation));
         tail.latent_dim = tail.tabm->output_dim();
         return tail.latent_dim;
     }
@@ -529,6 +418,7 @@ int64_t build_encoder_tail(
         auto build = build_mlp_configurable(
             input_dim, moe_backbone_dims(hidden_dims), config);
         tail.backbone = owner.register_module("backbone", build.mlp);
+        tail.activation_indices = build.activation_indices;
 
         const int64_t moe_output_dim =
             hidden_dims.empty() ? build.output_dim : hidden_dims.back();
@@ -552,49 +442,20 @@ int64_t build_encoder_tail(
     return tail.latent_dim;
 }
 
-TailOutput forward_encoder_tail(EncoderTail& tail, torch::Tensor x) {
+TailOutput forward_encoder_tail(EncoderTail& tail, torch::Tensor x,
+                                std::vector<torch::Tensor>* activations) {
     if (tail.has_parallel()) {
-        return {tail.parallel->forward(std::move(x)), {}, {}};
+        return {tail.parallel->forward(std::move(x), activations), {}, {}};
     }
     if (tail.has_tabm()) {
-        return {tail.tabm->forward(std::move(x)), {}, {}};
+        return {tail.tabm->forward(std::move(x), activations), {}, {}};
     }
     if (tail.has_moe()) {
-        auto result = tail.moe->forward(tail.backbone->forward(std::move(x)));
+        auto result = tail.moe->forward(
+            run_mlp(tail.backbone, tail.activation_indices, std::move(x), activations));
         return {result.output, result.aux_loss, result.gate_probs};
     }
-    return {tail.mlp->forward(std::move(x)), {}, {}};
-}
-
-// =============================================================================
-// Embedding Weight Extraction (per-position -> averaged)
-// =============================================================================
-
-// Helper: stack per-position embedding weights and average
-torch::Tensor average_embedding_weights(
-    const std::vector<torch::nn::Embedding>& embeddings
-) {
-    if (embeddings.empty()) return torch::Tensor();
-    std::vector<torch::Tensor> weights;
-    weights.reserve(embeddings.size());
-    for (const auto& emb : embeddings) {
-        weights.push_back(emb->weight);
-    }
-    // (top_k, vocab_size, emb_dim) -> mean(0) -> (vocab_size, emb_dim)
-    return torch::stack(weights, 0).mean(0);
-}
-
-// Helper: extract from FusedPositionalEmbedding and average across positions
-torch::Tensor average_fused_weights(
-    const FusedPositionalEmbedding& fused
-) {
-    if (!fused) return torch::Tensor();
-    auto weight = fused->embedding()->weight;  // (vocab_size * n_positions, embed_dim)
-    auto n_pos = fused->n_positions();
-    auto vocab = fused->vocab_size();
-    auto dim = fused->embed_dim();
-    // (n_positions, vocab_size, embed_dim) -> mean(0)
-    return weight.view({n_pos, vocab, dim}).mean(0);
+    return {run_mlp(tail.mlp, tail.activation_indices, std::move(x), activations), {}, {}};
 }
 
 // =============================================================================
@@ -605,7 +466,6 @@ ParallelBranchImpl::ParallelBranchImpl(
     int64_t input_dim,
     const ParallelBranchConfig& config
 ) : branch_weight_(config.branch_weight) {
-    // Build MLP for this branch
     MLPBlockConfig mlp_config;
     mlp_config.activation = config.activation;
     mlp_config.normalization = config.normalization;
@@ -613,11 +473,13 @@ ParallelBranchImpl::ParallelBranchImpl(
 
     auto result = build_mlp_configurable(input_dim, config.hidden_dims, mlp_config);
     mlp_ = register_module("mlp", result.mlp);
+    activation_indices_ = result.activation_indices;
     output_dim_ = result.output_dim;
 }
 
-torch::Tensor ParallelBranchImpl::forward(torch::Tensor x) {
-    auto out = mlp_->forward(x);
+torch::Tensor ParallelBranchImpl::forward(torch::Tensor x,
+                                          std::vector<torch::Tensor>* activations) {
+    auto out = run_mlp(mlp_, activation_indices_, std::move(x), activations);
     // What this branch is worth in the aggregation
     // (ParallelBranchConfig::branch_weight). A weight of 1 -- the default --
     // leaves the output untouched, and 0 takes the branch out of the sum
@@ -743,8 +605,6 @@ ParallelBlockImpl::ParallelBlockImpl(
         }
     }
 
-    branch_output_dim_ = first_branch_dim;
-
     // Validate aggregation mode vs branch dimensions
     if ((aggregation_ == ParallelAggregation::Sum ||
          aggregation_ == ParallelAggregation::Mean ||
@@ -783,13 +643,13 @@ ParallelBlockImpl::ParallelBlockImpl(
     }
 }
 
-torch::Tensor ParallelBlockImpl::forward(torch::Tensor x) {
+torch::Tensor ParallelBlockImpl::forward(torch::Tensor x,
+                                         std::vector<torch::Tensor>* activations) {
     auto identity = x;
 
-    // Run all branches in parallel (conceptually - PyTorch will batch them)
     std::vector<torch::Tensor> branch_outputs;
     for (auto& branch : branches_) {
-        branch_outputs.push_back(branch->forward(x));
+        branch_outputs.push_back(branch->forward(x, activations));
     }
 
     torch::Tensor aggregated;

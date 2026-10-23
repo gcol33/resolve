@@ -10,6 +10,7 @@
 #include "resolve/dataset.hpp"
 #include "resolve/enum_names.hpp"
 #include "resolve/role_mapping.hpp"
+#include "resolve/species_encoder.hpp"
 #include "resolve/types.hpp"
 
 #include <torch/torch.h>
@@ -243,6 +244,21 @@ inline ModelConfig small_encoder_config(SpeciesEncodingMode mode,
     cfg.n_attention_layers = 1;
     cfg.transformer_ff_dim = 16;
     return cfg;
+}
+
+// The spec of a standalone species encoder: the given table sizes, the knobs
+// of small_encoder_config(mode, hidden_dims).
+inline SpeciesEncoderSpec encoder_spec(SpeciesEncodingMode mode, int64_t n_continuous,
+                                       int64_t n_species, int64_t n_genera = 0,
+                                       int64_t n_families = 0,
+                                       std::vector<int64_t> hidden_dims = {32, 16}) {
+    SpeciesEncoderSpec spec;
+    spec.n_continuous = n_continuous;
+    spec.n_species = n_species;
+    spec.n_genera = n_genera;
+    spec.n_families = n_families;
+    spec.config = small_encoder_config(mode, std::move(hidden_dims));
+    return spec;
 }
 
 // A silent CPU run of `epochs` epochs at batch size 8: for cases that need a

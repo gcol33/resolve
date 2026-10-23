@@ -91,8 +91,9 @@ void register_model(nb::module_& m) {
         wrap_tensor);
     def_model_inputs_method(
         model_cls, "encode_with_activations", {}, "tuple[Tensor, list[Tensor]]",
-        "The latent and the encoder's hidden-layer activations (hash encoder only; "
-        "an empty list for every other encoder).",
+        "The latent and the activations of every hidden layer of the species "
+        "encoder's tail, each (rows, neurons); an empty list for the tabular "
+        "architectures and TraitNet.",
         [](resolve::ResolveModel& self, Lead, const resolve::PlotInputs& in) {
             return self->encode_with_activations(in);
         },

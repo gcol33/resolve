@@ -126,6 +126,10 @@ void register_enums(nb::module_& m) {
         .value("Attention", resolve::TraitInteractionMode::Attention)
         .export_values();
 
+    nb::enum_<resolve::TransformerPooling>(m, "TransformerPooling")
+        .value("Attention", resolve::TransformerPooling::Attention)
+        .value("Cls", resolve::TransformerPooling::Cls);
+
     nb::enum_<resolve::TabMAggregation>(m, "TabMAggregation")
         .value("Mean", resolve::TabMAggregation::Mean)
         .value("Median", resolve::TabMAggregation::Median)

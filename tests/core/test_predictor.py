@@ -219,7 +219,7 @@ def test_transformer_checkpoint_round_trip(tmp_path, plot_csvs):
     config.n_heads = 4
     config.n_attention_layers = 1
     config.transformer_ff_dim = 64
-    config.transformer_pooling = "attention"
+    config.transformer_pooling = rc.TransformerPooling.Attention
     config.transformer_dropout = 0.05
     config.hidden_dims = [32]
 
@@ -236,5 +236,5 @@ def test_transformer_checkpoint_round_trip(tmp_path, plot_csvs):
     assert reloaded.n_heads == 4
     assert reloaded.n_attention_layers == 1
     assert reloaded.transformer_ff_dim == 64
-    assert reloaded.transformer_pooling == "attention"
+    assert reloaded.transformer_pooling == rc.TransformerPooling.Attention
     assert reloaded.transformer_dropout == pytest.approx(0.05)

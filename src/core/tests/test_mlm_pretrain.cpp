@@ -2,10 +2,25 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <stdexcept>
 #include "resolve/pretraining.hpp"
-#include "resolve/encoder.hpp"
+#include "test_support.hpp"
 
 using namespace resolve;
+using namespace resolve::test;
 using namespace Catch::Matchers;
+
+namespace {
+
+// A transformer encoder over 50 species: d_model 32, two heads, one layer.
+SpeciesEncoderSpec mlm_encoder_spec() {
+    auto spec = encoder_spec(SpeciesEncodingMode::Transformer, 5, 50, 0, 0, {1024, 512});
+    spec.config.d_model = 32;
+    spec.config.n_heads = 2;
+    spec.config.n_attention_layers = 1;
+    spec.config.transformer_ff_dim = 256;
+    return spec;
+}
+
+}  // namespace
 
 // ============================================================================
 // mask_species_batch Tests
@@ -103,15 +118,7 @@ TEST_CASE("MaskedSpeciesHead output shape", "[mlm]") {
 // ============================================================================
 
 TEST_CASE("MaskedSpeciesPretrainer single epoch runs", "[mlm]") {
-    PlotEncoderTransformer encoder(
-        /*n_continuous=*/5,
-        /*n_species=*/50,
-        /*n_genera=*/0,
-        /*n_families=*/0,
-        /*d_model=*/32,
-        /*n_heads=*/2,
-        /*n_attention_layers=*/1
-    );
+    PlotEncoderTransformer encoder(mlm_encoder_spec());
 
     MLMPretrainConfig config;
     config.pretrain_epochs = 1;
@@ -134,9 +141,7 @@ TEST_CASE("MaskedSpeciesPretrainer single epoch runs", "[mlm]") {
 TEST_CASE("MLMPretrainConfig::validate rejects bad values", "[mlm][validation]") {
     // batch_size / mask_prob are guarded before they reach the divide/step and
     // masking paths. The pretrainer constructor calls validate().
-    PlotEncoderTransformer encoder(
-        /*n_continuous=*/5, /*n_species=*/50, /*n_genera=*/0, /*n_families=*/0,
-        /*d_model=*/32, /*n_heads=*/2, /*n_attention_layers=*/1);
+    PlotEncoderTransformer encoder(mlm_encoder_spec());
 
     SECTION("valid config passes") {
         MLMPretrainConfig ok;
@@ -161,18 +166,10 @@ TEST_CASE("MLMPretrainConfig::validate rejects bad values", "[mlm][validation]")
 }
 
 TEST_CASE("MaskedSpeciesPretrainer encoder weights change after training", "[mlm]") {
-    PlotEncoderTransformer encoder(
-        /*n_continuous=*/5,
-        /*n_species=*/50,
-        /*n_genera=*/0,
-        /*n_families=*/0,
-        /*d_model=*/32,
-        /*n_heads=*/2,
-        /*n_attention_layers=*/1
-    );
+    PlotEncoderTransformer encoder(mlm_encoder_spec());
 
     // Snapshot initial weights
-    auto initial_weights = encoder->get_species_weights().clone();
+    auto initial_weights = encoder->species_weights().clone();
 
     MLMPretrainConfig config;
     config.pretrain_epochs = 3;
@@ -187,6 +184,6 @@ TEST_CASE("MaskedSpeciesPretrainer encoder weights change after training", "[mlm
     pretrainer.pretrain({.species_ids = species_ids, .pool_mask = valid_mask});
 
     // Weights should have changed
-    auto final_weights = pretrainer.encoder()->get_species_weights();
+    auto final_weights = pretrainer.encoder()->species_weights();
     REQUIRE(!torch::allclose(initial_weights, final_weights));
 }

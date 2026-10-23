@@ -1,54 +1,64 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "resolve/model.hpp"
+#include "resolve/plot_encoder_embed.hpp"
+#include "resolve/plot_encoder_hash.hpp"
+#include "resolve/plot_encoder_sparse.hpp"
+#include "test_support.hpp"
 
 using namespace resolve;
+using namespace resolve::test;
 
 TEST_CASE("PlotEncoder forward without taxonomy", "[encoder]") {
-    PlotEncoder encoder(10, 0, 0, 8, 8, 3, std::vector<int64_t>{32, 16}, 0.3f);
+    auto spec = encoder_spec(SpeciesEncodingMode::Hash, 10, 0);
+    spec.config.hash_dim = 0;
+    PlotEncoder encoder(spec);
 
-    auto continuous = torch::randn({4, 10});  // batch of 4, 10 features
-    auto output = encoder->forward(continuous);
+    auto output = encoder->forward({.continuous = torch::randn({4, 10})});
 
     REQUIRE(output.size(0) == 4);
     REQUIRE(output.size(1) == 16);  // Last hidden dim
 }
 
 TEST_CASE("PlotEncoder forward with taxonomy", "[encoder]") {
-    PlotEncoder encoder(10, 100, 50, 8, 8, 3, std::vector<int64_t>{32, 16}, 0.3f);
+    auto spec = encoder_spec(SpeciesEncodingMode::Hash, 10, 0, 100, 50);
+    spec.config.hash_dim = 0;
+    spec.config.n_taxonomy_slots = 3;
+    PlotEncoder encoder(spec);
 
-    auto continuous = torch::randn({4, 10});
-    auto genus_ids = torch::randint(0, 100, {4, 3});  // batch x top_k
-    auto family_ids = torch::randint(0, 50, {4, 3});
-
-    auto output = encoder->forward(continuous, genus_ids, family_ids);
+    auto output = encoder->forward({.continuous = torch::randn({4, 10}),
+                                    .genus_ids = torch::randint(0, 100, {4, 3}),
+                                    .family_ids = torch::randint(0, 50, {4, 3})});
 
     REQUIRE(output.size(0) == 4);
     REQUIRE(output.size(1) == 16);
 }
 
-// Issue #99 item 1: a taxonomy-enabled concat encoder reserves fixed input width
-// for BOTH genus and family, so forward() must be given both. Missing or partial
-// taxonomy inputs previously fell through to an opaque torch::cat/Linear shape
-// error; now check_concat_taxonomy throws a clear message.
+// A taxonomy-enabled concat encoder reserves fixed input width for BOTH genus
+// and family, so forward() must be given both; check_concat_taxonomy names the
+// missing one instead of an opaque torch::cat/Linear shape error.
 TEST_CASE("PlotEncoder with taxonomy throws on missing taxonomy input", "[encoder]") {
-    PlotEncoder encoder(10, 100, 50, 8, 8, 3, std::vector<int64_t>{32, 16}, 0.3f);
+    auto spec = encoder_spec(SpeciesEncodingMode::Hash, 10, 0, 100, 50);
+    spec.config.hash_dim = 0;
+    spec.config.n_taxonomy_slots = 3;
+    PlotEncoder encoder(spec);
     auto continuous = torch::randn({4, 10});
     auto genus_ids = torch::randint(0, 100, {4, 3});
 
     SECTION("no taxonomy tensors at all") {
-        REQUIRE_THROWS(encoder->forward(continuous));
+        REQUIRE_THROWS(encoder->forward({.continuous = continuous}));
     }
     SECTION("only genus provided, family missing") {
-        REQUIRE_THROWS(encoder->forward(continuous, genus_ids, torch::Tensor()));
+        REQUIRE_THROWS(encoder->forward({.continuous = continuous, .genus_ids = genus_ids}));
     }
     SECTION("both provided still works") {
-        auto family_ids = torch::randint(0, 50, {4, 3});
-        REQUIRE_NOTHROW(encoder->forward(continuous, genus_ids, family_ids));
+        REQUIRE_NOTHROW(encoder->forward({.continuous = continuous,
+                                          .genus_ids = genus_ids,
+                                          .family_ids = torch::randint(0, 50, {4, 3})}));
     }
 }
 
-// check_concat_taxonomy is the shared guard (issue #99). Direct unit coverage.
+// check_concat_taxonomy is the shared guard. Direct unit coverage.
 TEST_CASE("check_concat_taxonomy gates on both taxonomy tensors", "[encoder]") {
     auto g = torch::randint(0, 10, {4, 3});
     auto f = torch::randint(0, 10, {4, 3});
@@ -61,9 +71,8 @@ TEST_CASE("check_concat_taxonomy gates on both taxonomy tensors", "[encoder]") {
     REQUIRE_THROWS(check_concat_taxonomy(true, torch::Tensor(), torch::Tensor(), "x"));
 }
 
-// Issue #99 item 2: TaxonomyVocab::fit reserves <UNK>=0 so n_genera()/n_families()
-// already count UNK; the correct table size is exactly n_genera, not n_genera + 1.
-// The hash/sparse/MoE/adapter paths now size to n_genera like the embed/pool paths.
+// TaxonomyVocab::fit reserves <UNK>=0, so n_genera()/n_families() already count
+// UNK; every encoding's taxonomy tables have exactly n_genera rows.
 TEST_CASE("Hash+taxonomy embedding tables sized to n_genera (no +1 over-alloc)", "[model]") {
     ResolveSchema schema;
     schema.n_plots = 100;
@@ -92,26 +101,18 @@ TEST_CASE("Hash+taxonomy embedding tables sized to n_genera (no +1 over-alloc)",
 }
 
 TEST_CASE("PlotEncoderEmbed forward", "[encoder]") {
-    PlotEncoderEmbed encoder(
-        5,      // n_continuous
-        100,    // n_species
-        20,     // n_genera
-        10,     // n_families
-        16,     // species_embed_dim
-        8,      // genus_emb_dim
-        8,      // family_emb_dim
-        5,      // top_k_species
-        3,      // top_k_taxonomy
-        std::vector<int64_t>{32, 16},
-        0.3f
-    );
+    auto spec = encoder_spec(SpeciesEncodingMode::Embed, 5, 100, 20, 10);
+    spec.config.species_embed_dim = 16;
+    spec.config.genus_emb_dim = 8;
+    spec.config.family_emb_dim = 8;
+    spec.config.top_k_species = 5;
+    spec.config.n_taxonomy_slots = 3;
+    PlotEncoderEmbed encoder(spec);
 
-    auto continuous = torch::randn({4, 5});
-    auto species_ids = torch::randint(1, 100, {4, 5});  // avoid 0 (padding)
-    auto genus_ids = torch::randint(1, 20, {4, 3});
-    auto family_ids = torch::randint(1, 10, {4, 3});
-
-    auto output = encoder->forward(continuous, species_ids, genus_ids, family_ids);
+    auto output = encoder->forward({.continuous = torch::randn({4, 5}),
+                                    .genus_ids = torch::randint(1, 20, {4, 3}),
+                                    .family_ids = torch::randint(1, 10, {4, 3}),
+                                    .species_ids = torch::randint(1, 100, {4, 5})});
 
     REQUIRE(output.size(0) == 4);
     REQUIRE(output.size(1) == 16);
@@ -140,26 +141,17 @@ TEST_CASE("FusedPositionalEmbedding zeroes padding/UNK at every position", "[enc
 }
 
 TEST_CASE("PlotEncoderSparse forward", "[encoder]") {
-    PlotEncoderSparse encoder(
-        5,      // n_continuous
-        50,     // n_species
-        32,     // species_embed_dim
-        20,     // n_genera
-        10,     // n_families
-        8,      // genus_emb_dim
-        8,      // family_emb_dim
-        3,      // top_k
-        std::vector<int64_t>{32, 16},
-        0.3f
-    );
+    auto spec = encoder_spec(SpeciesEncodingMode::Sparse, 5, 50, 20, 10);
+    spec.config.species_embed_dim = 32;
+    spec.config.genus_emb_dim = 8;
+    spec.config.family_emb_dim = 8;
+    spec.config.n_taxonomy_slots = 3;
+    PlotEncoderSparse encoder(spec);
 
-    auto continuous = torch::randn({4, 5});
-    auto species_vector = torch::randn({4, 50});
-    auto genus_ids = torch::randint(0, 20, {4, 3});
-    auto family_ids = torch::randint(0, 10, {4, 3});
-
-    auto output = encoder->forward(continuous, to_sparse_rows(species_vector), genus_ids,
-                                   family_ids);
+    auto output = encoder->forward({.continuous = torch::randn({4, 5}),
+                                    .genus_ids = torch::randint(0, 20, {4, 3}),
+                                    .family_ids = torch::randint(0, 10, {4, 3}),
+                                    .species_vector = to_sparse_rows(torch::randn({4, 50}))});
 
     REQUIRE(output.size(0) == 4);
     REQUIRE(output.size(1) == 16);
@@ -199,6 +191,18 @@ TEST_CASE("TaskHead inverse transform log1p", "[head]") {
     REQUIRE_THAT(back.item<float>(), Catch::Matchers::WithinAbs(1.0f, 1e-5));
 }
 
+TEST_CASE("TaskHead without hidden widths is the single output layer", "[head]") {
+    TaskHead single(16, TaskType::Classification, 4);
+    CHECK_FALSE(single->has_hidden_layers());
+    CHECK(parameter_names(*single) == std::set<std::string>{"output.weight", "output.bias"});
+
+    TaskHead deep(16, TaskType::Regression, 0, TransformType::None, std::vector<int64_t>{8, 6},
+                  ActivationType::ReLU, 0.1f);
+    CHECK(deep->has_hidden_layers());
+    CHECK(any_starts_with(parameter_names(*deep), "head_mlp.0."));
+    CHECK(deep->forward(torch::randn({3, 16})).sizes() == torch::IntArrayRef({3, 1}));
+}
+
 TEST_CASE("ResolveModel hash mode forward", "[model]") {
     ResolveSchema schema;
     schema.n_plots = 100;
@@ -225,7 +229,7 @@ TEST_CASE("ResolveModel hash mode forward", "[model]") {
 
     // n_continuous = 2 (coords) + 0 (covariates) + 1 (unknown_fraction) + 32 (hash) = 35
     auto continuous = torch::randn({8, 35});
-    auto genus_ids = torch::randint(0, 20, {8, 3});   // valid ids 0..n_genera-1 (issue #99)
+    auto genus_ids = torch::randint(0, 20, {8, 3});   // valid ids 0..n_genera-1
     auto family_ids = torch::randint(0, 10, {8, 3});  // valid ids 0..n_families-1
 
     auto outputs = model->forward({.continuous = continuous, .genus_ids = genus_ids, .family_ids = family_ids});
@@ -242,7 +246,7 @@ TEST_CASE("ResolveModel hash mode forward", "[model]") {
         REQUIRE(outputs["habitat"].size(1) == 5);
     }
 
-    SECTION("MLP does not require full-batch training (issue #73)") {
+    SECTION("MLP does not require full-batch training") {
         REQUIRE_FALSE(model->requires_full_batch_training());
     }
 }

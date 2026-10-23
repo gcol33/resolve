@@ -1,4 +1,5 @@
 #include "resolve/tabm.hpp"
+#include "resolve/encoder.hpp"  // make_normalization, make_activation, run_norm_fp32
 #include <stdexcept>
 #include <cmath>
 
@@ -81,11 +82,23 @@ torch::Tensor BatchEnsembleLinearImpl::forward(torch::Tensor x) {
 // TabMEncoder Implementation
 // =============================================================================
 
+namespace {
+// `fn` applied to every ensemble member's features: (batch, n_ensembles, d)
+// is read as (batch * n_ensembles, d) rows, so a BatchNorm pools its
+// statistics over members and a per-channel activation (PReLU) sees the
+// feature axis as its channels.
+torch::Tensor per_member(const torch::Tensor& x,
+                         const std::function<torch::Tensor(torch::Tensor)>& fn) {
+    const auto sizes = x.sizes().vec();
+    return fn(x.reshape({-1, sizes.back()})).reshape(sizes);
+}
+}  // namespace
+
 TabMEncoderImpl::TabMEncoderImpl(
     int64_t input_dim,
     const std::vector<int64_t>& hidden_dims,
     int n_ensembles,
-    float dropout,
+    const MLPBlockConfig& block,
     TabMAggregation aggregation
 ) : n_ensembles_(n_ensembles),
     aggregation_(aggregation)
@@ -98,54 +111,77 @@ TabMEncoderImpl::TabMEncoderImpl(
 
     layers_ = register_module("layers", torch::nn::ModuleList());
     norms_ = register_module("norms", torch::nn::ModuleList());
+    activations_ = register_module("activations", torch::nn::ModuleList());
     dropouts_ = register_module("dropouts", torch::nn::ModuleList());
+    if (block.use_residual) {
+        projections_ = register_module("projections", torch::nn::ModuleList());
+    }
 
     int64_t prev_dim = input_dim;
     for (size_t i = 0; i < hidden_dims.size(); ++i) {
-        layers_->push_back(
-            BatchEnsembleLinear(prev_dim, hidden_dims[i], n_ensembles));
+        const int64_t width = hidden_dims[i];
+        layers_->push_back(BatchEnsembleLinear(prev_dim, width, n_ensembles));
 
-        // LayerNorm per ensemble member (applied to last dim)
-        norms_->push_back(
-            torch::nn::LayerNorm(torch::nn::LayerNormOptions({hidden_dims[i]})));
-
-        if (dropout > 0.0f) {
-            dropouts_->push_back(torch::nn::Dropout(dropout));
+        auto norm = make_normalization(block.normalization, width, block.norm_groups);
+        if (!norm.is_empty()) {
+            norms_->push_back(norm.ptr());
+            norm_fns_.push_back(std::move(norm));
         }
 
-        prev_dim = hidden_dims[i];
+        auto activation = make_activation(block.activation, width, block.leaky_relu_slope,
+                                          block.elu_alpha);
+        activations_->push_back(activation.ptr());
+        activation_fns_.push_back(std::move(activation));
+
+        if (block.dropout > 0.0f) {
+            dropouts_->push_back(torch::nn::Dropout(block.dropout));
+        }
+
+        if (block.use_residual) {
+            auto projection = prev_dim == width
+                ? torch::nn::AnyModule(torch::nn::Identity())
+                : torch::nn::AnyModule(torch::nn::Linear(prev_dim, width));
+            projections_->push_back(projection.ptr());
+            projection_fns_.push_back(std::move(projection));
+        }
+
+        prev_dim = width;
     }
 }
 
-torch::Tensor TabMEncoderImpl::forward_all(torch::Tensor x) {
-    // x: (batch, input_dim)
-    // Returns: (batch, n_ensembles, output_dim)
-
+torch::Tensor TabMEncoderImpl::forward_all(torch::Tensor x,
+                                           std::vector<torch::Tensor>* activations) {
+    // x: (batch, input_dim) -> (batch, n_ensembles, output_dim)
     for (size_t i = 0; i < layers_->size(); ++i) {
-        // BatchEnsembleLinear: produces (batch, n_ensembles, dim)
-        x = layers_->ptr(static_cast<int64_t>(i))
-            ->as<BatchEnsembleLinearImpl>()->forward(x);
+        const auto skip_input = x;
+        x = layers_->ptr(static_cast<int64_t>(i))->as<BatchEnsembleLinearImpl>()->forward(x);
 
-        // LayerNorm (applied to last dim, works with 3D tensors)
-        x = norms_->ptr(static_cast<int64_t>(i))
-            ->as<torch::nn::LayerNormImpl>()->forward(x);
+        if (!norm_fns_.empty()) {
+            auto& norm = norm_fns_[i];
+            x = per_member(x, [&norm](torch::Tensor t) {
+                return run_norm_fp32([&norm](torch::Tensor u) { return norm.forward(u); },
+                                     std::move(t));
+            });
+        }
+        auto& activation = activation_fns_[i];
+        x = per_member(x, [&activation](torch::Tensor t) { return activation.forward(t); });
+        if (activations != nullptr) activations->push_back(x.reshape({-1, x.size(-1)}));
 
-        // GELU activation
-        x = torch::gelu(x);
-
-        // Dropout
         if (dropouts_->size() > 0) {
-            x = dropouts_->ptr(static_cast<int64_t>(i))
-                ->as<torch::nn::DropoutImpl>()->forward(x);
+            x = dropouts_->ptr(static_cast<int64_t>(i))->as<torch::nn::DropoutImpl>()->forward(x);
+        }
+
+        if (!projection_fns_.empty()) {
+            auto skip = projection_fns_[i].forward(skip_input);
+            x = x + (skip.dim() == 2 ? skip.unsqueeze(1) : skip);
         }
     }
 
     return x;
 }
 
-torch::Tensor TabMEncoderImpl::forward(torch::Tensor x) {
-    // Get all ensemble outputs: (batch, n_ensembles, output_dim)
-    auto all_outputs = forward_all(x);
+torch::Tensor TabMEncoderImpl::forward(torch::Tensor x, std::vector<torch::Tensor>* activations) {
+    auto all_outputs = forward_all(std::move(x), activations);
 
     switch (aggregation_) {
         case TabMAggregation::Median:

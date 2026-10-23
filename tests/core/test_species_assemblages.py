@@ -70,7 +70,7 @@ def test_embedding_taxonomy_slots_follow_the_aggregation():
         assert encoded.genus_ids[0, 0].item() == encoder.taxonomy_vocab.encode_genus(leader)
 
 
-def test_pooled_encodings_reject_count_aggregation(tmp_path):
+def test_pooled_encodings_record_count_aggregation(tmp_path):
     header = tmp_path / "h.csv"
     species = tmp_path / "s.csv"
     header.write_text("plot_id,y\nP1,1\nP2,2\n")
@@ -78,8 +78,9 @@ def test_pooled_encodings_reject_count_aggregation(tmp_path):
     roles = rc.RoleMapping()
     roles.plot_id, roles.species_id, roles.abundance = "plot_id", "sp", "cover"
     cfg = rc.DatasetConfig()
-    cfg.species_encoding = rc.SpeciesEncodingMode.RankPool
     cfg.aggregation = rc.AggregationMode.Count
-    with pytest.raises(ValueError, match="aggregation"):
-        rc.ResolveDataset.from_csv(str(header), str(species), roles,
-                                   [rc.TargetSpec.regression("y")], cfg)
+    for encoding in (rc.SpeciesEncodingMode.RankPool, rc.SpeciesEncodingMode.Transformer):
+        cfg.species_encoding = encoding
+        dataset = rc.ResolveDataset.from_csv(str(header), str(species), roles,
+                                             [rc.TargetSpec.regression("y")], cfg)
+        assert dataset.schema.dataset_config.aggregation == rc.AggregationMode.Count

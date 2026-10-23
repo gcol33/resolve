@@ -238,7 +238,9 @@ struct DatasetConfig {
     // How the fixed genus / family slots of the hash, sparse and embed
     // encodings rank a plot's taxa: Abundance by the summed value of their
     // species, Count by how many of the plot's species they hold. rank_pool /
-    // transformer carry each species' own taxonomy and reject Count.
+    // transformer, which carry each species' own genus and family, weigh them
+    // by the species weights under Abundance and one per species under Count
+    // (PlotEncoderRankPool, PlotEncoderTransformer).
     AggregationMode aggregation = AggregationMode::Abundance;
 
     // Unknown species tracking
@@ -658,6 +660,14 @@ struct HeterogeneousGNNConfig {
     bool use_cooccurrence_edges = true; // Add co-occurrence edges
 };
 
+// How the transformer species encoding pools its species tokens into one
+// vector: a learned query attending over them, or the output at a CLS token
+// run through the self-attention with them.
+enum class TransformerPooling {
+    Attention,
+    Cls
+};
+
 // How TabM combines the outputs of its ensemble members.
 enum class TabMAggregation {
     Mean,
@@ -769,7 +779,7 @@ struct ModelConfig {
     int n_heads = 4;
     int n_attention_layers = 0;
     int transformer_ff_dim = 256;
-    std::string transformer_pooling = "attention";
+    TransformerPooling transformer_pooling = TransformerPooling::Attention;
     float transformer_dropout = 0.1f;
 };
 

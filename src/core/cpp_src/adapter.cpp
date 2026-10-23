@@ -1,4 +1,5 @@
 #include "resolve/adapter.hpp"
+#include "resolve/enum_names.hpp"
 #include "resolve/sparse_rows.hpp"
 
 #include <stdexcept>
@@ -34,46 +35,62 @@ torch::Tensor taxonomy_composition(const torch::Tensor& genus_ids,
     return composition;
 }
 
+// Refuses an architecture that reads an input the species encoding does not
+// provide, naming what would work.
+void require_encoding_supported(EncoderArchitecture architecture, SpeciesEncodingMode encoding,
+                                const ModelConfig& config) {
+    const auto& traits = species_encoding_traits(encoding);
+    auto refuse = [&](const std::string& needs, const std::string& remedy) {
+        throw std::invalid_argument(
+            std::string("encoder_architecture=") + encoder_architecture_to_string(architecture) +
+            " " + needs + ", which species_encoding=" + species_encoding_to_string(encoding) +
+            " does not provide. " + remedy);
+    };
+    if (architecture == EncoderArchitecture::HeterogeneousGNN &&
+        encoding != SpeciesEncodingMode::Sparse) {
+        refuse("aggregates its species-graph embeddings through the plot's species vector",
+               "Use species_encoding=sparse.");
+    }
+    if (architecture == EncoderArchitecture::GNN) {
+        if (config.gnn.graph_mode == GraphConstructionMode::CoOccurrence &&
+            encoding != SpeciesEncodingMode::Sparse) {
+            refuse("with graph_mode=cooccurrence builds its graph from the plot's species vector",
+                   "Use species_encoding=sparse, or another graph_mode.");
+        }
+        if (config.gnn.graph_mode == GraphConstructionMode::Taxonomic && !traits.taxonomy_slots) {
+            refuse("with graph_mode=taxonomic builds its graph from the fixed genus / family slots",
+                   "Use species_encoding=hash, embed or sparse, or another graph_mode.");
+        }
+    }
+}
+
 }  // namespace
 
 TabularAdapterImpl::TabularAdapterImpl(
     const ResolveSchema& schema,
     const ModelConfig& config
 ) : architecture_(config.encoder_architecture),
-    species_encoding_(config.species_encoding),
-    has_taxonomy_(schema.has_taxonomy),
     n_taxonomy_slots_(config.n_taxonomy_slots),
     has_coordinates_(schema.has_coordinates)
 {
     // =========================================================================
-    // Numerical features: the continuous block plus the species encoding
+    // Numerical features: the continuous block plus the species encoding's
+    // features (species_encoder.hpp)
     // =========================================================================
 
-    const int64_t n_continuous = schema.continuous_width();
+    const SpeciesEncodingMode encoding = effective_species_encoding(config);
+    require_encoding_supported(architecture_, encoding, config);
+    const auto& traits = species_encoding_traits(encoding);
+    const auto spec = SpeciesEncoderSpec::from_schema(schema, config);
+    has_taxonomy_ = traits.taxonomy_slots && spec.has_taxonomy();
 
-    if (config.species_encoding == SpeciesEncodingMode::Hash && !config.uses_explicit_vector) {
-        // Hash mode: hash embedding is already in continuous
-        n_numerical_ = n_continuous + config.hash_dim;
-    }
-    else if (config.species_encoding == SpeciesEncodingMode::Embed) {
-        // Embed mode: learnable species embeddings become numerical features
-        fused_species_ = register_module("fused_species",
-            FusedPositionalEmbedding(schema.n_species_vocab, config.top_k_species,
-                                     config.species_embed_dim));
-        n_numerical_ = n_continuous +
-                       static_cast<int64_t>(config.top_k_species) * config.species_embed_dim;
-    }
-    else if (architecture_ == EncoderArchitecture::HeterogeneousGNN) {
-        // HeterogeneousGNN builds plot features from the species graph and the
-        // continuous block directly (see forward()); it never runs a
-        // species-vector projection.
-        n_numerical_ = n_continuous;
-    }
-    else {
-        // Sparse mode: project species vector to embedding
-        species_projection_ = register_module("species_projection",
-            torch::nn::Linear(schema.n_species_vocab, config.species_embed_dim));
-        n_numerical_ = n_continuous + config.species_embed_dim;
+    const int64_t n_continuous = schema.continuous_width();
+    n_numerical_ = n_continuous + (traits.hash_in_continuous ? config.hash_dim : 0);
+    // HeterogeneousGNN builds plot features from the species graph and the
+    // continuous block directly (see forward()).
+    if (architecture_ != EncoderArchitecture::HeterogeneousGNN) {
+        species_features_ = traits.make_features(*this, spec);
+        n_numerical_ += species_features_->width();
     }
 
     // =========================================================================
@@ -106,10 +123,8 @@ TabularAdapterImpl::TabularAdapterImpl(
     // the width they add to the feature vector.
     auto register_taxonomy_embeddings = [&]() -> int64_t {
         if (!has_taxonomy_) return 0;
-        return register_per_rank_embeddings(
-            *this, genus_embeddings_, family_embeddings_, schema.genus_table_size(),
-            schema.family_table_size(), config.genus_emb_dim, config.family_emb_dim,
-            n_taxonomy_slots_);
+        slot_taxonomy_ = make_per_rank_slot_taxonomy(*this, spec);
+        return slot_taxonomy_->width();
     };
 
     // =========================================================================
@@ -216,17 +231,9 @@ TabularAdapterImpl::TabularAdapterImpl(
 }
 
 torch::Tensor TabularAdapterImpl::prepare_numerical(const PlotInputs& inputs) {
-    if (species_encoding_ == SpeciesEncodingMode::Embed && fused_species_) {
-        return torch::cat({inputs.continuous, fused_species_->forward(inputs.species_ids)},
-                          /*dim=*/1);
-    }
-    if (species_encoding_ == SpeciesEncodingMode::Sparse && species_projection_) {
-        return torch::cat({inputs.continuous,
-                           sparse_rows_linear(inputs.species_vector, species_projection_->weight,
-                                              species_projection_->bias)}, /*dim=*/1);
-    }
-    // Hash mode: the hash embedding is already the tail of continuous.
-    return inputs.continuous;
+    if (!species_features_ || species_features_->width() == 0) return inputs.continuous;
+    return torch::cat({inputs.continuous, species_features_->forward(inputs, is_training())},
+                      /*dim=*/1);
 }
 
 torch::Tensor TabularAdapterImpl::taxonomy_codes(const PlotInputs& inputs) const {
@@ -237,11 +244,10 @@ torch::Tensor TabularAdapterImpl::taxonomy_codes(const PlotInputs& inputs) const
 
 torch::Tensor TabularAdapterImpl::flat_features(const torch::Tensor& numerical,
                                                 const PlotInputs& inputs) {
+    if (!slot_taxonomy_) return numerical;
     std::vector<torch::Tensor> parts{numerical};
-    embed_per_rank_taxonomy(parts, genus_embeddings_, family_embeddings_,
-                            inputs.genus_ids, inputs.family_ids, n_taxonomy_slots_,
-                            has_taxonomy_);
-    return parts.size() == 1 ? numerical : torch::cat(parts, /*dim=*/1);
+    slot_taxonomy_->append(parts, inputs);
+    return torch::cat(parts, /*dim=*/1);
 }
 
 torch::Tensor TabularAdapterImpl::graph_features(const PlotInputs& inputs) const {

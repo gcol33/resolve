@@ -41,6 +41,35 @@
   adopt a vocabulary with `set_vocab` and no longer return unknown-species
   statistics (call `compute_unknown_species_stats`, which takes a
   `representation`).
+- **Every species encoding reaches every tabular architecture.** rank_pool and
+  transformer feed FT-Transformer, TabNet, SAINT, GNN and ExcelFormer their
+  pooled species embedding (genus and family pooled in) and the `has_cover`
+  flag; they used to fail with a shape error. A pair the encoding cannot feed
+  is refused when the model is built: HeterogeneousGNN and the co-occurrence
+  GNN graph need `sparse`, the taxonomic GNN graph the fixed taxonomy slots
+  (not rank_pool / transformer). `uses_explicit_vector` turns hash into sparse
+  everywhere (model, adapter, the inference-side dataset config) and is refused
+  with embed, rank_pool and transformer.
+- **`aggregation = count` works under rank_pool and transformer** (it was
+  refused): the genus and family embeddings are pooled with one weight per
+  species instead of the species weights; under transformer they leave the
+  tokens and are added to the pooled vector.
+- `ModelConfig.transformer_pooling` is the enum `TransformerPooling`
+  (`Attention`, `Cls`) in Python and C++; R and the CLI keep the names
+  `"attention"` / `"cls"`, and checkpoints that stored the name still load.
+- **The TabM tail honours `activation`, `normalization` and `use_residual`**
+  (it always ran LayerNorm and GELU). Under the default `normalization =
+  BatchNorm` a TabM model is built differently: retrain TabM checkpoints
+  trained without `normalization = LayerNorm`.
+- `Trainer.compute_diagnostics` reports every hidden layer of every species
+  encoder's tail (plain, residual, mixture backbone, TabM, parallel branches);
+  it used to report "not available" for everything but hash.
+- In C++ the species encoders (`PlotEncoder`, `PlotEncoderEmbed`,
+  `PlotEncoderSparse`, `PlotEncoderRankPool`, `PlotEncoderTransformer`) are
+  built from a `SpeciesEncoderSpec` and read a `PlotInputs`; their weight
+  getters are `species_weights` / `genus_weights` / `family_weights`. The
+  `RESOLVE_FP32_NORM` switch is gone (normalization always runs in fp32 under
+  AMP), and `MixtureOfExperts` refuses `MoERoutingType::None`.
 - `ResolveSchema.n_genera_vocab` / `n_families_vocab` are removed: they always
   equalled `n_genera` / `n_families`, which size the taxonomy tables (also in
   the C ABI / R schema list).

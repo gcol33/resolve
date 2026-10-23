@@ -447,7 +447,9 @@ resolve.progress <- function(checkpointDir) {
 #'   - aggregation: "abundance" or "count" (default "abundance"). How the
 #'     fixed genus/family slots of the hash, sparse and embed encodings rank a
 #'     plot's taxa: by the summed value of their species, or by how many of
-#'     the plot's species they hold. rank_pool and transformer reject "count".
+#'     the plot's species they hold. rank_pool and transformer pool each
+#'     species' genus and family embeddings with the species weights, or under
+#'     "count" with one weight per species.
 #'   - normalization: "raw", "norm", or "log1p" (default "raw")
 #'   - track_unknown_fraction: Track unknown species fraction (default TRUE)
 #'   - track_unknown_count: Track unknown species count (default FALSE)

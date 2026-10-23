@@ -2,7 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "resolve/dataset.hpp"
-#include "resolve/encoder.hpp"
+#include "resolve/plot_encoder_sparse.hpp"
 #include "resolve/model.hpp"
 #include "resolve/plot_inputs.hpp"
 #include "resolve/sparse_rows.hpp"
@@ -183,17 +183,18 @@ TEST_CASE("Sparse rows work on the GPU", "[sparse_rows][cuda]") {
 TEST_CASE("The sparse encoder reads sparse rows and refuses a dense matrix",
           "[sparse_rows][model]") {
     torch::manual_seed(10);
-    PlotEncoderSparse encoder(/*n_continuous=*/3, /*n_species=*/20, /*species_embed_dim=*/4,
-                              /*n_genera=*/0, /*n_families=*/0, /*genus_emb_dim=*/0,
-                              /*family_emb_dim=*/0, /*top_k=*/0, std::vector<int64_t>{8},
-                              /*dropout=*/0.0f);
+    auto spec = encoder_spec(SpeciesEncodingMode::Sparse, 3, 20, 0, 0, {8});
+    spec.config.species_embed_dim = 4;
+    spec.config.dropout = 0.0f;
+    PlotEncoderSparse encoder(spec);
     encoder->eval();
     const auto continuous = torch::randn({6, 3});
     const auto dense = sparse_matrix(6, 20, 0.3, 11);
-    const auto out = encoder->forward(continuous, to_sparse_rows(dense));
+    const auto out = encoder->forward(
+        {.continuous = continuous, .species_vector = to_sparse_rows(dense)});
     REQUIRE(out.size(0) == 6);
     REQUIRE(torch::isfinite(out).all().item<bool>());
-    REQUIRE_THROWS(encoder->forward(continuous, dense));
+    REQUIRE_THROWS(encoder->forward({.continuous = continuous, .species_vector = dense}));
 }
 
 TEST_CASE("A sparse-encoded dataset stores each plot's species as one sparse row",

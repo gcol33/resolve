@@ -87,12 +87,14 @@ so presence/absence with `Top` keeps the dominant species.
 The fixed genus and family slots of `Hash`, `Sparse` and `Embed` hold a plot's
 leading taxa: `aggregation = Abundance` (default) ranks them by the summed
 abundance of their species, `Count` by how many of the plot's species they
-hold.
+hold. `RankPool` and `Transformer` carry each species' own genus and family
+instead; under `Count` each species weighs once in the plot's genus and family
+embeddings rather than by its pool weight.
 
 **Strengths.** No embedding table, so memory is flat in vocabulary size. A
 species the model never saw still lands in a bucket, so the representation
 degrades smoothly on new data. Fastest mode to train and to score, and the only
-one with a dedicated CUDA kernel and with layer diagnostics.
+one with a dedicated CUDA kernel.
 
 **Costs.** Two species can share a bucket, and the encoder has no way to tell
 them apart. Nothing about a species is learned; whatever the model knows about
@@ -224,13 +226,13 @@ model_config.d_model              = 128
 model_config.n_heads              = 4
 model_config.n_attention_layers   = 2
 model_config.transformer_ff_dim   = 256
-model_config.transformer_pooling  = "attention"   # or "cls"
+model_config.transformer_pooling  = rc.TransformerPooling.Attention   # or Cls
 model_config.transformer_dropout  = 0.1
 ```
 
-`transformer_pooling = "attention"` learns a weight per token and takes the
-weighted sum. `"cls"` prepends a learned token and reads its output, so it needs
-at least one attention layer; `n_attention_layers = 0` with `"cls"` is rejected.
+`transformer_pooling = Attention` learns a weight per token and takes the
+weighted sum. `Cls` prepends a learned token and reads its output, so it needs
+at least one attention layer; `n_attention_layers = 0` with `Cls` is rejected.
 
 With `n_attention_layers = 0` the encoder is additive token embeddings plus
 attention pooling, which is rank pooling with a learned weighting.
@@ -279,7 +281,6 @@ It writes a JSON file of per-fold metrics and prints a comparison table.
 | `pool_species_cap` | ignored | used | used, and matters more |
 | `selection` | used, with `top_k` (hash) or `top_k_species` (embed) | used, with `species_budget` | used, with `species_budget` |
 | `species_budget` | ignored | used | used |
-| Layer diagnostics | hash only | unavailable | unavailable |
 
 ## Next steps
 

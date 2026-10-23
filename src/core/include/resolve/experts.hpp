@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <stdexcept>
 #include <torch/torch.h>
 #include "resolve/types.hpp"
 
@@ -21,10 +22,10 @@ struct MoEResult {
 // per-expert forward passes.  For E experts this reduces GPU kernel launches
 // from E to 1 per layer.
 //
-// Supports three routing modes:
-//   None  – bypass, single linear projection (no experts)
+// Routing modes:
 //   Soft  – all experts contribute, weighted by softmax gate probs
 //   TopK  – sparse routing, only top-k experts per sample
+// MoERoutingType::None means no mixture is built at all.
 // ---------------------------------------------------------------------------
 class MixtureOfExpertsImpl : public torch::nn::Module {
 public:
@@ -37,8 +38,7 @@ public:
         int top_k,
         float noise_std,
         float dropout
-    ) : input_dim_(input_dim),
-        output_dim_(output_dim),
+    ) : output_dim_(output_dim),
         n_experts_(n_experts),
         routing_(routing),
         top_k_(std::min(top_k, n_experts)),
@@ -46,16 +46,14 @@ public:
         dropout_(dropout) {
 
         if (routing_ == MoERoutingType::None) {
-            // Bypass mode: single linear layer, no expert routing
-            bypass_linear_ = register_module(
-                "bypass_linear", torch::nn::Linear(input_dim, output_dim));
-            return;
+            throw std::invalid_argument(
+                "MixtureOfExperts needs a routing (soft or top_k); "
+                "MoERoutingType::None builds no mixture.");
         }
 
-        // A mixture needs at least two experts. With n_experts == 1 the Soft
-        // routing CV^2 load-balancing loss reduces to var() over a single value,
-        // which is NaN under Bessel correction and poisons the whole loss (issue
-        // #83). Reject it loudly; MoERoutingType::None is the way to disable MoE.
+        // A mixture needs at least two experts: with one, the gate has nothing
+        // to choose between and the load-balancing loss has no spread to
+        // measure. MoERoutingType::None is the way to disable MoE.
         if (n_experts_ < 2) {
             throw std::invalid_argument(
                 "MixtureOfExperts with routing requires n_experts >= 2 (got " +
@@ -97,14 +95,6 @@ public:
 
     // Forward returns MoEResult with output, aux_loss, gate_probs
     MoEResult forward(torch::Tensor x) {
-        if (routing_ == MoERoutingType::None) {
-            auto output = bypass_linear_->forward(x);
-            auto aux_loss = torch::tensor(0.0f, x.options());
-            auto gate_probs = torch::ones(
-                {x.size(0), 1}, x.options());
-            return {output, aux_loss, gate_probs};
-        }
-
         // Gate logits with optional noise for load balancing during training
         auto logits = gate_->forward(x);  // (B, E)
         if (is_training() && noise_std_ > 0.0f) {
@@ -206,7 +196,6 @@ private:
         return h;  // (E, B, D_out)
     }
 
-    int64_t input_dim_;
     int64_t output_dim_;
     int n_experts_;
     MoERoutingType routing_;
@@ -215,10 +204,6 @@ private:
     float dropout_;
     int n_layers_ = 0;
 
-    // Bypass mode (routing == None)
-    torch::nn::Linear bypass_linear_{nullptr};
-
-    // Expert routing mode
     torch::nn::Linear gate_{nullptr};
     std::vector<torch::Tensor> layer_weights_;
     std::vector<torch::Tensor> layer_biases_;

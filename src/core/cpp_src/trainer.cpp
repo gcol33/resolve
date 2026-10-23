@@ -1542,10 +1542,9 @@ NetworkDiagnostics Trainer::compute_diagnostics() {
         test_indices_.index_select(0, sample_indices),
         /*use_cache=*/false);
 
-    // Use encode_with_activations to get intermediate layer outputs
+    // The species encoder's tail reports each hidden layer's activations; the
+    // tabular architectures and TraitNet report none.
     auto [latent, activations] = model_->encode_with_activations(sample);
-
-    // Only the hash encoder reports activations; the others get no diagnostics.
     if (activations.empty()) {
         diag.summary = "Diagnostics not available for this encoder type.";
         return diag;

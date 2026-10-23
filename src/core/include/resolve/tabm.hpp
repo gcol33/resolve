@@ -1,5 +1,6 @@
 #pragma once
 
+#include "resolve/mlp_block.hpp"
 #include "resolve/types.hpp"  // TabMAggregation
 
 #include <torch/torch.h>
@@ -64,9 +65,13 @@ TORCH_MODULE(BatchEnsembleLinear);
 // TabM Encoder: MLP with BatchEnsemble layers
 // =============================================================================
 
-// TabM replaces standard Linear layers in the MLP backbone with
-// BatchEnsembleLinear layers. During forward pass, N ensemble members
-// run in parallel. Predictions are aggregated (mean/median) for output.
+// TabM replaces the Linear layers of the MLP with BatchEnsembleLinear layers,
+// so N ensemble members run in parallel; their outputs are aggregated (mean or
+// median) at the end. Each hidden layer is built as MLPBlockConfig says --
+// BatchEnsembleLinear, normalization, activation, dropout, and with
+// use_residual a skip connection (projected by a shared Linear where the
+// widths differ) -- with the normalization and activation applied to every
+// member's features alike.
 //
 // It is one of the encoder tails (EncoderTail in encoder.hpp), open to every
 // species encoder, not an EncoderArchitecture of its own.
@@ -75,19 +80,18 @@ public:
     TabMEncoderImpl(
         int64_t input_dim,
         const std::vector<int64_t>& hidden_dims,
-        int n_ensembles = 16,
-        float dropout = 0.0f,
+        int n_ensembles,
+        const MLPBlockConfig& block,
         TabMAggregation aggregation = TabMAggregation::Mean
     );
 
-    // Forward pass
-    // x: (batch, input_dim)
-    // Returns: (batch, output_dim) - aggregated across ensembles
-    torch::Tensor forward(torch::Tensor x);
+    // x: (batch, input_dim) -> (batch, output_dim), aggregated across the
+    // ensemble. With `activations`, each layer's activation is appended to it
+    // as (batch * n_ensembles, width).
+    torch::Tensor forward(torch::Tensor x, std::vector<torch::Tensor>* activations = nullptr);
 
-    // Forward without aggregation (for analysis)
-    // Returns: (batch, n_ensembles, output_dim)
-    torch::Tensor forward_all(torch::Tensor x);
+    // Forward without aggregation: (batch, n_ensembles, output_dim).
+    torch::Tensor forward_all(torch::Tensor x, std::vector<torch::Tensor>* activations = nullptr);
 
     [[nodiscard]] int64_t output_dim() const noexcept { return output_dim_; }
     [[nodiscard]] int n_ensembles() const noexcept { return n_ensembles_; }
@@ -97,10 +101,14 @@ private:
     int n_ensembles_;
     TabMAggregation aggregation_;
 
-    // Stack of BatchEnsemble layers with activations
-    torch::nn::ModuleList layers_{nullptr};
-    torch::nn::ModuleList norms_{nullptr};
-    torch::nn::ModuleList dropouts_{nullptr};
+    torch::nn::ModuleList layers_{nullptr};       // BatchEnsembleLinear per layer
+    torch::nn::ModuleList norms_{nullptr};        // one per layer, or none
+    torch::nn::ModuleList activations_{nullptr};  // one per layer
+    torch::nn::ModuleList dropouts_{nullptr};     // one per layer, or none
+    torch::nn::ModuleList projections_{nullptr};  // with use_residual: one per layer
+    std::vector<torch::nn::AnyModule> norm_fns_;
+    std::vector<torch::nn::AnyModule> activation_fns_;
+    std::vector<torch::nn::AnyModule> projection_fns_;
 };
 
 TORCH_MODULE(TabMEncoder);

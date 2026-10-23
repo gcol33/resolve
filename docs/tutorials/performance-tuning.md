@@ -110,7 +110,7 @@ cfg.amp_growth_interval = 2000
 
 Normalization layers are forced to fp32 inside the autocast region, so
 BatchNorm statistics cannot saturate at the fp16 maximum and collapse
-eval-mode output. Set `RESOLVE_FP32_NORM=0` to A/B that guard.
+eval-mode output.
 
 If a loss goes to NaN a few steps into an AMP run with attention layers, turn
 AMP off before touching anything else.
@@ -307,12 +307,12 @@ model_config.d_model             = 128
 model_config.n_heads             = 4
 model_config.n_attention_layers  = 2
 model_config.transformer_ff_dim  = 256
-model_config.transformer_pooling = "attention"
+model_config.transformer_pooling = rc.TransformerPooling.Attention
 train_config.lr      = 3e-4
 train_config.use_amp = False
 ```
 
-`transformer_pooling = "cls"` needs at least one attention layer, since the CLS
+`transformer_pooling = Cls` needs at least one attention layer, since the CLS
 token only sees the species through attention. `transformer_ff_dim` is normally
 2 to 4 times `d_model`.
 

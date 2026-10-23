@@ -243,3 +243,20 @@ test_that("resume refuses a checkpoint without run progress", {
   )
   expect_error(resolve.train.dataset(dataset, checkpointEvery = 2L), "checkpointDir")
 })
+
+test_that("the pooled encodings train under aggregation = \"count\"", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  tables <- signal_tables(40L)
+  for (encoding in c("rank_pool", "transformer")) {
+    dataset <- load_tables(
+      tables, signal_roles(), regression_target(),
+      config = list(species_encoding = encoding, aggregation = "count")
+    )
+    expect_identical(dataset$config()$aggregation, "count")
+    fit <- resolve.train.dataset(dataset, hiddenDims = c(8L), maxEpochs = 1L,
+                                 batchSize = 8L, verbose = FALSE)
+    expect_length(fit$result$train_loss, 1L)
+  }
+})

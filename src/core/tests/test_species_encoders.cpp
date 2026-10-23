@@ -607,12 +607,19 @@ TEST_CASE("AggregationMode ranks the fixed taxonomy slots of hash, sparse and em
     }
 }
 
-TEST_CASE("AggregationMode::Count is rejected by the per-species taxonomy encodings",
+// The per-species taxonomy encodings encode the same tensors under either
+// aggregation; Count changes how the model pools a plot's genera and families
+// (test_species_encoder.cpp), so the dataset records it for the model.
+TEST_CASE("AggregationMode::Count reaches the per-species taxonomy encodings' schema",
           "[dataset][aggregation]") {
     for (auto mode : {SpeciesEncodingMode::RankPool, SpeciesEncodingMode::Transformer}) {
         auto cfg = encoding(mode);
+        auto by_abundance = load_layered(cfg);
         cfg.aggregation = AggregationMode::Count;
-        REQUIRE_THROWS_AS(load_layered(cfg), std::invalid_argument);
+        auto by_count = load_layered(cfg);
+        REQUIRE(by_count.schema().dataset_config.aggregation == AggregationMode::Count);
+        REQUIRE(torch::equal(by_count.pool_weights(), by_abundance.pool_weights()));
+        REQUIRE(torch::equal(by_count.pool_genus_ids(), by_abundance.pool_genus_ids()));
     }
 }
 

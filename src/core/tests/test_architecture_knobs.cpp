@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "resolve/dataset.hpp"
@@ -488,7 +489,9 @@ TEST_CASE("Each graph mode builds its graph from the features it names",
 TEST_CASE("A graph mode the data cannot supply is refused by name",
           "[gnn][graph_mode]") {
     // No coordinates, no taxonomy, no species vector: every mode is short of
-    // what it measures, and each says which.
+    // what it measures, and each says which. The species vector is a property
+    // of the encoding, so the co-occurrence graph is refused when the model is
+    // built; coordinates and taxonomy are data, refused at the forward.
     auto schema = hash_only_schema();
     auto continuous = torch::randn({8, 16});
 
@@ -504,11 +507,11 @@ TEST_CASE("A graph mode the data cannot supply is refused by name",
 
     auto spatial = model_for(GraphConstructionMode::Spatial);
     auto taxonomic = model_for(GraphConstructionMode::Taxonomic);
-    auto cooccurrence = model_for(GraphConstructionMode::CoOccurrence);
 
     CHECK_THROWS(spatial->forward({.continuous = continuous}));
     CHECK_THROWS(taxonomic->forward({.continuous = continuous}));
-    CHECK_THROWS(cooccurrence->forward({.continuous = continuous}));
+    CHECK_THROWS_WITH(model_for(GraphConstructionMode::CoOccurrence),
+                      Catch::Matchers::ContainsSubstring("species vector"));
 }
 
 // ============================================================================

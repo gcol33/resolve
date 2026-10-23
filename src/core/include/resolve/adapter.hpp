@@ -8,11 +8,13 @@
 #include "resolve/hetero_gnn.hpp"
 #include "resolve/plot_inputs.hpp"
 #include "resolve/saint.hpp"
+#include "resolve/species_encoder.hpp"
 #include "resolve/tabnet.hpp"
 #include "resolve/types.hpp"
 
 #include <torch/torch.h>
 
+#include <memory>
 #include <vector>
 
 namespace resolve {
@@ -26,11 +28,21 @@ namespace resolve {
 // The adapter:
 // 1. Takes the plot inputs the model forward receives (with the categorical
 //    embeddings already fused into `continuous`)
-// 2. Turns the species encoding into numerical features
+// 2. Turns the species encoding into numerical features: the features of its
+//    SpeciesFeatures (species_encoder.hpp) -- none for hash, whose hash
+//    embedding is already in the continuous block; the fused species slots for
+//    embed; the projected species vector for sparse; the pooled species
+//    embeddings (with their pooled genus / family embeddings) and the
+//    has_cover flag for rank_pool and transformer
 // 3. Feeds those with the continuous block as numerical features, and the
-//    taxonomy slots as categoricals (embedded per slot for the architectures
-//    that read one flat feature vector), to the selected architecture
+//    fixed taxonomy slots of the hash / embed / sparse encodings as
+//    categoricals (embedded per slot for the architectures that read one flat
+//    feature vector), to the selected architecture
 // 4. Returns a latent vector the model's heads read
+//
+// The construction refuses an architecture that reads an input the encoding
+// does not provide: HeterogeneousGNN and the co-occurrence GNN graph read the
+// species vector (sparse), the taxonomic GNN graph the fixed taxonomy slots.
 
 // What one adapter forward produces: the latent, and the auxiliary objective
 // terms the architecture adds to the training loss (TabNet's sparsity term).
@@ -90,17 +102,14 @@ private:
     torch::Tensor graph_features(const PlotInputs& inputs) const;
 
     EncoderArchitecture architecture_;
-    SpeciesEncodingMode species_encoding_;
     int64_t latent_dim_ = 0;
     int64_t n_numerical_ = 0;
     bool has_taxonomy_ = false;
     int n_taxonomy_slots_ = 0;
 
-    // Species embedding for embed mode
-    FusedPositionalEmbedding fused_species_{nullptr};
-
-    // Species projection for sparse mode
-    torch::nn::Linear species_projection_{nullptr};
+    // The species encoding's features, registered on this module; null for
+    // HeterogeneousGNN.
+    std::unique_ptr<SpeciesFeatures> species_features_;
 
     // Projection from a transformer-family encoder's d_model to latent_dim
     torch::nn::Linear output_proj_{nullptr};
@@ -108,8 +117,7 @@ private:
     // Per-slot taxonomy embeddings for the flat-input architectures (TabNet,
     // GNN), which cannot read integer codes as magnitudes. The attention
     // encoders embed the codes in their own tokenizer instead.
-    std::vector<torch::nn::Embedding> genus_embeddings_;
-    std::vector<torch::nn::Embedding> family_embeddings_;
+    std::unique_ptr<SlotTaxonomy> slot_taxonomy_;
 
     // Architecture-specific encoders (only one is built)
     FTTransformerEncoder ft_transformer_{nullptr};

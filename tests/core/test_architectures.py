@@ -4,7 +4,10 @@ Coverage kind: structure / plumbing. The architectures are pinned by the
 Catch2 suite (``test_attention_encoders.cpp``, ``test_tabular_adapter.cpp``,
 ``test_data_buffers.cpp``); what is asserted here is that the Python surface
 reaches them: the named auxiliary terms on ``forward_with_aux``, the TabM
-aggregation enum, SAINT's reference set and its chunk-independent predictions.
+aggregation and transformer pooling enums, SAINT's reference set and its
+chunk-independent predictions, the pooled species encodings feeding an
+architecture, the refusal of a pair the encoding cannot feed, and the
+per-layer diagnostics.
 """
 
 from __future__ import annotations
@@ -110,3 +113,46 @@ def test_saint_predictions_do_not_depend_on_the_chunk(dataset, tmp_path):
                 rtol=1e-5,
                 atol=1e-6,
             ), f"{target} differs at batch_size={batch_size}"
+
+
+def test_transformer_pooling_is_an_enum():
+    cfg = rc.ModelConfig()
+    assert cfg.transformer_pooling == rc.TransformerPooling.Attention
+    cfg.transformer_pooling = rc.TransformerPooling.Cls
+    assert cfg.transformer_pooling == rc.TransformerPooling.Cls
+
+
+@pytest.mark.parametrize(
+    "encoding", [rc.SpeciesEncodingMode.RankPool, rc.SpeciesEncodingMode.Transformer])
+def test_a_pooled_encoding_trains_a_tabular_architecture(tmp_path, encoding):
+    csvs = make_plot_csvs(tmp_path, n_plots=40, n_species=8)
+    dataset = rc.ResolveDataset.from_csv(
+        csvs.header, csvs.species, make_roles(), make_targets(), make_dataset_config(encoding))
+    cfg = make_model_config(encoding)
+    cfg.d_model = 16
+    cfg.n_heads = 2
+    cfg.encoder_architecture = rc.EncoderArchitecture.FTTransformer
+    cfg.ft_transformer.d_model = 16
+    cfg.ft_transformer.n_heads = 2
+    cfg.ft_transformer.n_layers = 1
+    model = rc.ResolveModel(dataset.schema, cfg)
+    trainer = rc.Trainer(model, make_train_config(max_epochs=1, batch_size=16))
+    trainer.prepare_data(dataset)
+    result = trainer.fit()
+    assert len(result.train_loss_history) == 1
+
+
+def test_heterogeneous_gnn_refuses_an_encoding_without_a_species_vector(dataset):
+    cfg = make_model_config(rc.SpeciesEncodingMode.Hash)
+    cfg.encoder_architecture = rc.EncoderArchitecture.HeterogeneousGNN
+    with pytest.raises(Exception, match="does not provide"):
+        rc.ResolveModel(dataset.schema, cfg)
+
+
+def test_diagnostics_report_every_hidden_layer(dataset):
+    model = rc.ResolveModel(dataset.schema, make_model_config(rc.SpeciesEncodingMode.Hash))
+    trainer = rc.Trainer(model, make_train_config(max_epochs=1, batch_size=16))
+    trainer.prepare_data(dataset)
+    trainer.fit()
+    diagnostics = trainer.compute_diagnostics()
+    assert [layer.n_neurons for layer in diagnostics.layers] == [32, 16]
