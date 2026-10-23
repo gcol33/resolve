@@ -128,23 +128,30 @@ def test_masked_fit_reports_labelled_counts_and_round_trips(tmp_path):
     assert torch.isfinite(predictions["y"]).all()
 
 
-def _decomposes(by_target, total, names, moe_aux=None):
-    """Per epoch, the targets' terms (plus the MoE term) add up to the total."""
+def _decomposes(by_target, total, names, aux=None):
+    """Per epoch, the targets' terms (plus the auxiliary terms) add up to the total."""
     assert sorted(by_target) == sorted(names)
     for name in names:
         assert len(by_target[name]) == len(total)
     for epoch, value in enumerate(total):
         terms = sum(by_target[name][epoch] for name in names)
-        if moe_aux is not None:
-            terms += moe_aux[epoch]
+        if aux is not None:
+            terms += sum(history[epoch] for history in aux.values())
         assert terms == pytest.approx(value, rel=1e-5, abs=1e-6), epoch
 
 
-def _fit_masked(ds, *, test_size=0.25, fixed_epochs=0, moe=False, batch_size=16):
+def _fit_masked(ds, *, test_size=0.25, fixed_epochs=0, moe=False, tabnet=False,
+                batch_size=16):
     torch.manual_seed(0)
     model_cfg = make_model_config(rc.SpeciesEncodingMode.Hash, hash_dim=8)
     if moe:
         model_cfg.moe_routing = rc.MoERoutingType.Soft
+    if tabnet:
+        model_cfg.encoder_architecture = rc.EncoderArchitecture.TabNet
+        model_cfg.tabnet.n_steps = 2
+        model_cfg.tabnet.n_d = 8
+        model_cfg.tabnet.n_a = 8
+        model_cfg.tabnet.sparsity_coefficient = 0.5
     train_cfg = make_train_config(max_epochs=4, batch_size=batch_size)
     train_cfg.fixed_epochs = fixed_epochs
     trainer = rc.Trainer(rc.ResolveModel(ds.schema, model_cfg), train_cfg)
@@ -161,15 +168,26 @@ def test_the_loss_history_splits_by_target(tmp_path):
     assert len(result.train_loss_history) == 4
     _decomposes(result.train_loss_history_by_target, result.train_loss_history, ["y", "cls"])
     _decomposes(result.test_loss_history_by_target, result.test_loss_history, ["y", "cls"])
-    assert result.train_moe_aux_loss_history == []
+    assert result.train_aux_loss_history == {}
 
 
 def test_the_moe_term_is_recorded_beside_the_targets(tmp_path):
     ds = _load(tmp_path, rc.TargetMissingPolicy.Mask)
     result = _fit_masked(ds, moe=True)
-    assert len(result.train_moe_aux_loss_history) == len(result.train_loss_history)
+    assert list(result.train_aux_loss_history) == ["moe"]
+    assert len(result.train_aux_loss_history["moe"]) == len(result.train_loss_history)
     _decomposes(result.train_loss_history_by_target, result.train_loss_history, ["y", "cls"],
-                moe_aux=result.train_moe_aux_loss_history)
+                aux=result.train_aux_loss_history)
+    _decomposes(result.test_loss_history_by_target, result.test_loss_history, ["y", "cls"])
+
+
+def test_the_tabnet_sparsity_term_is_recorded_beside_the_targets(tmp_path):
+    ds = _load(tmp_path, rc.TargetMissingPolicy.Mask)
+    result = _fit_masked(ds, tabnet=True)
+    assert list(result.train_aux_loss_history) == ["tabnet_sparsity"]
+    assert all(term > 0 for term in result.train_aux_loss_history["tabnet_sparsity"])
+    _decomposes(result.train_loss_history_by_target, result.train_loss_history, ["y", "cls"],
+                aux=result.train_aux_loss_history)
     _decomposes(result.test_loss_history_by_target, result.test_loss_history, ["y", "cls"])
 
 

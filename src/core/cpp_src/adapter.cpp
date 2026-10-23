@@ -1,29 +1,12 @@
 #include "resolve/adapter.hpp"
 #include "resolve/sparse_rows.hpp"
+
 #include <stdexcept>
 #include <string>
 
 namespace resolve {
 
 namespace {
-
-// ModelConfig's GNNType and the encoder's own GNNType are separate enums, so
-// the two have to be mapped. A switch that returns from every case keeps
-// -Wswitch coverage (adding a variant is still a compile-time warning) while
-// leaving no path that reads an uninitialized value: the previous form
-// declared the target uninitialized and assigned it inside the switch, so a
-// value outside the enumerators -- which a checkpoint written by a newer
-// version, or a C-ABI caller passing a raw int, can produce -- fell through to
-// an uninitialized read.
-GNNEncoderImpl::GNNType to_encoder_gnn_type(GNNType type) {
-    switch (type) {
-        case GNNType::GCN:       return GNNEncoderImpl::GNNType::GCN;
-        case GNNType::GAT:       return GNNEncoderImpl::GNNType::GAT;
-        case GNNType::GraphSAGE: return GNNEncoderImpl::GNNType::GraphSAGE;
-    }
-    throw std::invalid_argument(
-        "unknown GNNType value: " + std::to_string(static_cast<int>(type)));
-}
 
 // Multi-hot taxonomic composition: column j counts the plot's slots naming
 // genus j, and the family block after it does the same for families. Slot id 0
@@ -58,95 +41,79 @@ TabularAdapterImpl::TabularAdapterImpl(
     const ModelConfig& config
 ) : architecture_(config.encoder_architecture),
     species_encoding_(config.species_encoding),
+    has_taxonomy_(schema.has_taxonomy),
+    n_taxonomy_slots_(config.n_taxonomy_slots),
     has_coordinates_(schema.has_coordinates)
 {
     // =========================================================================
-    // Step 1: Determine numerical feature count from species encoding
+    // Numerical features: the continuous block plus the species encoding
     // =========================================================================
 
-    int64_t n_coords = schema.has_coordinates ? 2 : 0;
-    int64_t n_unknown_features = schema.track_unknown_fraction ? 1 : 0;
-    if (schema.track_unknown_count) n_unknown_features += 1;
-    // Include the categorical-covariate embedding width: ResolveModel fuses the
-    // CategoricalEmbedder output into `continuous` (fuse_categoricals_) BEFORE
-    // calling the adapter, so the numerical block the adapter receives is wider
-    // by exactly this amount. Omitting it made the FeatureTokenizer read only
-    // the leading columns (silently dropping features) and crashed TabNet/GNN on
-    // the shape mismatch.
-    int64_t n_continuous_base = n_coords + static_cast<int64_t>(schema.covariate_names.size())
-                                + schema.missing_flag_width()
-                                + n_unknown_features + schema.categorical_embed_width();
-
-    // Species features contribute to numerical features
-    int64_t n_species_features = 0;
+    const int64_t n_continuous = schema.continuous_width();
 
     if (config.species_encoding == SpeciesEncodingMode::Hash && !config.uses_explicit_vector) {
         // Hash mode: hash embedding is already in continuous
-        n_species_features = config.hash_dim;
-        n_numerical_ = n_continuous_base + n_species_features;
+        n_numerical_ = n_continuous + config.hash_dim;
     }
     else if (config.species_encoding == SpeciesEncodingMode::Embed) {
         // Embed mode: learnable species embeddings become numerical features
-        top_k_species_ = config.top_k_species;
-        species_embed_dim_ = config.species_embed_dim;
         fused_species_ = register_module("fused_species",
-            FusedPositionalEmbedding(schema.n_species_vocab, top_k_species_, species_embed_dim_));
-        n_species_features = top_k_species_ * species_embed_dim_;
-        n_numerical_ = n_continuous_base + n_species_features;
+            FusedPositionalEmbedding(schema.n_species_vocab, config.top_k_species,
+                                     config.species_embed_dim));
+        n_numerical_ = n_continuous +
+                       static_cast<int64_t>(config.top_k_species) * config.species_embed_dim;
     }
     else if (architecture_ == EncoderArchitecture::HeterogeneousGNN) {
         // HeterogeneousGNN builds plot features from the species graph and the
         // continuous block directly (see forward()); it never runs a
-        // species-vector projection. Registering one here would add an untrained
-        // n_species_vocab x embed_dim parameter block and a wasted per-batch GEMM.
-        n_numerical_ = n_continuous_base;
+        // species-vector projection.
+        n_numerical_ = n_continuous;
     }
     else {
         // Sparse mode: project species vector to embedding
-        species_project_dim_ = config.species_embed_dim;
         species_projection_ = register_module("species_projection",
-            torch::nn::Linear(schema.n_species_vocab, species_project_dim_));
-        n_species_features = species_project_dim_;
-        n_numerical_ = n_continuous_base + n_species_features;
+            torch::nn::Linear(schema.n_species_vocab, config.species_embed_dim));
+        n_numerical_ = n_continuous + config.species_embed_dim;
     }
 
     // =========================================================================
-    // Step 2: Determine categorical features from taxonomy
+    // Categorical features: one per taxonomy slot
     // =========================================================================
 
+    // Genus slots then family slots. Codes run 0..n_genera-1 with the reserved
+    // <UNK> = 0, so the cardinality is n_genera, the height of the model's
+    // taxonomy tables.
     std::vector<int64_t> cat_cardinalities;
-    if (schema.has_taxonomy) {
-        // Each taxonomy slot is a categorical feature. n_genera()/n_families()
-        // already count the reserved <UNK>=0 slot (ids run 0..n_genera-1), so the
-        // cardinality is n_genera, the height of the model's taxonomy tables.
-        const int64_t genus_card = schema.n_genera;
-        const int64_t family_card = schema.n_families;
-        int n_slots = config.n_taxonomy_slots;
-        for (int k = 0; k < n_slots; ++k) {
-            cat_cardinalities.push_back(genus_card);
-        }
-        for (int k = 0; k < n_slots; ++k) {
-            cat_cardinalities.push_back(family_card);
-        }
+    if (has_taxonomy_) {
+        cat_cardinalities.assign(static_cast<size_t>(n_taxonomy_slots_),
+                                 schema.genus_table_size());
+        cat_cardinalities.insert(cat_cardinalities.end(),
+                                 static_cast<size_t>(n_taxonomy_slots_),
+                                 schema.family_table_size());
     }
-    n_categoricals_ = static_cast<int64_t>(cat_cardinalities.size());
 
-    // Project a transformer-family encoder's d_model output down to the model's
-    // latent dim (the last hidden dim, or the arch output when no hidden dims).
-    // Shared by FT-Transformer / SAINT / ExcelFormer so the block lives once.
-    auto setup_output_proj = [&](int64_t arch_output) {
+    // A transformer-family encoder's d_model output, projected to the model's
+    // latent dim (the last hidden dim) when the two differ.
+    auto project_to_latent = [&](int64_t arch_output) {
         latent_dim_ = config.hidden_dims.empty() ? arch_output : config.hidden_dims.back();
         if (arch_output != latent_dim_) {
             output_proj_ = register_module("output_proj",
                 torch::nn::Linear(arch_output, latent_dim_));
-            needs_output_proj_ = true;
-        } else {
-            latent_dim_ = arch_output;
         }
     };
 
+    // Per-slot taxonomy embeddings for the flat-input architectures; returns
+    // the width they add to the feature vector.
+    auto register_taxonomy_embeddings = [&]() -> int64_t {
+        if (!has_taxonomy_) return 0;
+        return register_per_rank_embeddings(
+            *this, genus_embeddings_, family_embeddings_, schema.genus_table_size(),
+            schema.family_table_size(), config.genus_emb_dim, config.family_emb_dim,
+            n_taxonomy_slots_);
+    };
+
     // =========================================================================
-    // Step 3: Create architecture-specific encoder
+    // Architecture-specific encoder
     // =========================================================================
 
     switch (architecture_) {
@@ -165,31 +132,19 @@ TabularAdapterImpl::TabularAdapterImpl(
                 /*residual_dropout=*/cfg.ffn_dropout,
                 /*pre_norm=*/cfg.pre_norm};
             ft_transformer_ = register_module("ft_transformer",
-                FTTransformerEncoder(
-                    n_numerical_,
-                    cat_cardinalities,
-                    block,
-                    cfg.n_layers,
-                    /*use_cls_token=*/true
-                ));
-            setup_output_proj(cfg.d_model);
+                FTTransformerEncoder(n_numerical_, cat_cardinalities, block, cfg.n_layers));
+            project_to_latent(cfg.d_model);
             break;
         }
 
         case EncoderArchitecture::TabNet: {
             const auto& cfg = config.tabnet;
-            // TabNet takes numerical features only (categoricals not embedded)
+            const int64_t input_dim = n_numerical_ + register_taxonomy_embeddings();
             tabnet_ = register_module("tabnet",
-                TabNetEncoder(
-                    n_numerical_,
-                    cfg.n_steps,
-                    cfg.n_d,
-                    cfg.n_a,
-                    cfg.relaxation_factor,
-                    cfg.sparsity_coefficient,
-                    cfg.use_sparsemax,
-                    cfg.virtual_batch_size
-                ));
+                TabNetEncoder(input_dim, cfg.n_steps, cfg.n_d, cfg.n_a,
+                              cfg.relaxation_factor, cfg.use_sparsemax,
+                              cfg.virtual_batch_size));
+            tabnet_sparsity_coefficient_ = cfg.sparsity_coefficient;
             latent_dim_ = cfg.n_d;
             break;
         }
@@ -202,15 +157,9 @@ TabularAdapterImpl::TabularAdapterImpl(
                 cfg.d_model, cfg.n_heads, /*d_ff=*/4 * cfg.d_model,
                 cfg.attention_dropout);
             saint_ = register_module("saint",
-                SAINTEncoder(
-                    n_numerical_,
-                    cat_cardinalities,
-                    block,
-                    cfg.n_layers,
-                    cfg.use_row_attention,
-                    /*use_cls_token=*/true
-                ));
-            setup_output_proj(cfg.d_model);
+                SAINTEncoder(n_numerical_, cat_cardinalities, block, cfg.n_layers,
+                             cfg.use_row_attention ? cfg.row_attention_rows : 0));
+            project_to_latent(cfg.d_model);
             break;
         }
 
@@ -219,43 +168,12 @@ TabularAdapterImpl::TabularAdapterImpl(
             k_neighbors_ = cfg.k_neighbors;
             graph_mode_ = cfg.graph_mode;
             use_edge_features_ = cfg.use_edge_features;
-            // Widths of the taxonomic composition vector under
-            // GraphConstructionMode::Taxonomic. TaxonomyVocab reserves <UNK>=0,
-            // so n_genera already counts it.
-            if (schema.has_taxonomy) {
-                genus_vocab_size_ = schema.n_genera;
-                family_vocab_size_ = schema.n_families;
-            }
-            const GNNEncoderImpl::GNNType gnn_type = to_encoder_gnn_type(cfg.gnn_type);
-            // Embed the taxonomy categoricals into the node-feature matrix instead
-            // of concatenating raw integer IDs as continuous magnitudes, which the
-            // encoder cannot interpret (issue #73). One table per slot, sized by
-            // that slot's cardinality; genus slots use genus_emb_dim, family slots
-            // use family_emb_dim (cat_cardinalities is [genus x n_slots, family x
-            // n_slots]).
-            gnn_cat_embed_total_ = 0;
-            if (!cat_cardinalities.empty()) {
-                gnn_cat_embeddings_ = register_module("gnn_cat_embeddings", torch::nn::ModuleList());
-                const int n_slots = config.n_taxonomy_slots;
-                for (size_t i = 0; i < cat_cardinalities.size(); ++i) {
-                    const int emb_dim = (static_cast<int>(i) < n_slots)
-                        ? config.genus_emb_dim : config.family_emb_dim;
-                    gnn_cat_embeddings_->push_back(torch::nn::Embedding(
-                        torch::nn::EmbeddingOptions(cat_cardinalities[i], emb_dim).padding_idx(0)));
-                    gnn_cat_embed_total_ += emb_dim;
-                }
-            }
-            int64_t gnn_input = n_numerical_ + gnn_cat_embed_total_;
+            genus_vocab_size_ = schema.genus_table_size();
+            family_vocab_size_ = schema.family_table_size();
+            const int64_t input_dim = n_numerical_ + register_taxonomy_embeddings();
             gnn_ = register_module("gnn",
-                GNNEncoder(
-                    gnn_input,
-                    cfg.hidden_dim,
-                    cfg.hidden_dim,
-                    cfg.n_layers,
-                    gnn_type,
-                    cfg.n_heads,
-                    cfg.edge_dropout
-                ));
+                GNNEncoder(input_dim, cfg.hidden_dim, cfg.hidden_dim, cfg.n_layers,
+                           cfg.gnn_type, cfg.n_heads, cfg.edge_dropout));
             latent_dim_ = cfg.hidden_dim;
             break;
         }
@@ -267,83 +185,66 @@ TabularAdapterImpl::TabularAdapterImpl(
                 /*d_ff=*/cfg.ffn_multiplier * cfg.d_model,
                 cfg.attention_dropout, cfg.pre_norm);
             excelformer_ = register_module("excelformer",
-                ExcelFormerEncoder(
-                    n_numerical_,
-                    cat_cardinalities,
-                    block,
-                    cfg.n_layers,
-                    cfg.importance_threshold,
-                    /*use_cls_token=*/true
-                ));
-            setup_output_proj(cfg.d_model);
+                ExcelFormerEncoder(n_numerical_, cat_cardinalities, block, cfg.n_layers,
+                                   cfg.importance_threshold));
+            project_to_latent(cfg.d_model);
             break;
         }
 
         case EncoderArchitecture::HeterogeneousGNN: {
             const auto& cfg = config.heterogeneous_gnn;
-            // HeterogeneousGNN learns species embeddings from a graph,
-            // then aggregates them using species_vector to produce plot features.
-            // Requires sparse species encoding mode.
+            // Species embeddings learned on the species graph, aggregated per
+            // plot through the species vector (sparse encoding).
             hetero_gnn_ = register_module("hetero_gnn",
-                HeterogeneousGNNEncoder(
-                    schema.n_species_vocab,
-                    cfg.hidden_dim,
-                    cfg.output_dim,
-                    cfg.n_layers,
-                    cfg.n_edge_types,
-                    cfg.n_heads,
-                    cfg.dropout
-                ));
-            // Output is the environmental (continuous) block concatenated with
-            // the per-plot species-graph embedding, so covariates influence the
-            // plot representation. Previously only the graph output was returned,
-            // silently dropping every continuous/environmental feature.
-            latent_dim_ = n_continuous_base + cfg.output_dim;
+                HeterogeneousGNNEncoder(schema.n_species_vocab, cfg.hidden_dim,
+                                        cfg.output_dim, cfg.n_layers, cfg.n_edge_types,
+                                        cfg.n_heads, cfg.dropout));
+            // The continuous block concatenated with the per-plot species-graph
+            // embedding, so covariates reach the plot representation.
+            latent_dim_ = n_continuous + cfg.output_dim;
             break;
         }
 
         case EncoderArchitecture::TraitNet:
-            throw std::runtime_error(
-                "TraitNet requires a trait-environment architecture that is not compatible "
-                "with TabularAdapter. TraitNet support is planned for a future release.");
         case EncoderArchitecture::MLP:
-        default:
-            throw std::runtime_error(
-                "TabularAdapter does not handle EncoderArchitecture::MLP. "
-                "Use the standard PlotEncoder for MLP mode.");
+            throw std::invalid_argument(
+                std::string("TabularAdapter builds the tabular architectures; "
+                            "encoder_architecture=") +
+                (architecture_ == EncoderArchitecture::MLP ? "mlp" : "traitnet") +
+                " is built by ResolveModel itself.");
     }
 }
 
-torch::Tensor TabularAdapterImpl::prepare_numerical(
-    torch::Tensor continuous,
-    torch::Tensor species_ids,
-    torch::Tensor species_vector
-) {
-    std::vector<torch::Tensor> parts;
-    parts.push_back(continuous);
-
+torch::Tensor TabularAdapterImpl::prepare_numerical(const PlotInputs& inputs) {
     if (species_encoding_ == SpeciesEncodingMode::Embed && fused_species_) {
-        // Embed mode: look up species embeddings
-        auto species_emb = fused_species_->forward(species_ids);
-        parts.push_back(species_emb);
+        return torch::cat({inputs.continuous, fused_species_->forward(inputs.species_ids)},
+                          /*dim=*/1);
     }
-    else if (species_encoding_ == SpeciesEncodingMode::Sparse && species_projection_) {
-        // Sparse mode: project species vector
-        auto species_emb = sparse_rows_linear(species_vector, species_projection_->weight,
-                                              species_projection_->bias);
-        parts.push_back(species_emb);
+    if (species_encoding_ == SpeciesEncodingMode::Sparse && species_projection_) {
+        return torch::cat({inputs.continuous,
+                           sparse_rows_linear(inputs.species_vector, species_projection_->weight,
+                                              species_projection_->bias)}, /*dim=*/1);
     }
-    // Hash mode: hash embedding is already in continuous
-
-    return torch::cat(parts, /*dim=*/1);
+    // Hash mode: the hash embedding is already the tail of continuous.
+    return inputs.continuous;
 }
 
-torch::Tensor TabularAdapterImpl::graph_features(
-    const torch::Tensor& continuous,
-    const torch::Tensor& genus_ids,
-    const torch::Tensor& family_ids,
-    const torch::Tensor& species_vector
-) const {
+torch::Tensor TabularAdapterImpl::taxonomy_codes(const PlotInputs& inputs) const {
+    if (!has_taxonomy_) return {};
+    check_concat_taxonomy(true, inputs.genus_ids, inputs.family_ids, "TabularAdapter");
+    return torch::cat({inputs.genus_ids, inputs.family_ids}, /*dim=*/1);
+}
+
+torch::Tensor TabularAdapterImpl::flat_features(const torch::Tensor& numerical,
+                                                const PlotInputs& inputs) {
+    std::vector<torch::Tensor> parts{numerical};
+    embed_per_rank_taxonomy(parts, genus_embeddings_, family_embeddings_,
+                            inputs.genus_ids, inputs.family_ids, n_taxonomy_slots_,
+                            has_taxonomy_);
+    return parts.size() == 1 ? numerical : torch::cat(parts, /*dim=*/1);
+}
+
+torch::Tensor TabularAdapterImpl::graph_features(const PlotInputs& inputs) const {
     switch (graph_mode_) {
         case GraphConstructionMode::Spatial: {
             // The first two continuous columns are the plot coordinates ONLY
@@ -351,19 +252,18 @@ torch::Tensor TabularAdapterImpl::graph_features(
             // [coordinates | coordinate flag | covariates | covariate flags |
             // unknown_* | categorical_embed | ...], see continuous_block.hpp;
             // the flags are present under MissingValuePolicy::Indicate).
-            // Without coordinates those columns are covariates, and building a
-            // "spatial" kNN graph from them is meaningless -- refuse rather
-            // than silently corrupt the graph (issue #73).
+            // Without coordinates those columns are covariates, and a
+            // "spatial" kNN graph built from them would be meaningless.
             TORCH_CHECK(has_coordinates_,
                 "GNN encoder requires coordinates to build its spatial graph, "
                 "but the dataset has none. Provide longitude/latitude roles, "
                 "select another GNNConfig::graph_mode, or use a non-GNN encoder "
                 "architecture.");
-            return continuous.slice(/*dim=*/1, 0, 2);
+            return inputs.continuous.slice(/*dim=*/1, 0, 2);
         }
         case GraphConstructionMode::Taxonomic: {
-            const bool has_genus = genus_ids.defined() && genus_ids.numel() > 0;
-            const bool has_family = family_ids.defined() && family_ids.numel() > 0;
+            const bool has_genus = inputs.genus_ids.defined() && inputs.genus_ids.numel() > 0;
+            const bool has_family = inputs.family_ids.defined() && inputs.family_ids.numel() > 0;
             TORCH_CHECK(has_genus || has_family,
                 "GNNConfig::graph_mode = taxonomic builds its graph from the "
                 "genus/family composition of each plot, but this forward "
@@ -372,16 +272,16 @@ torch::Tensor TabularAdapterImpl::graph_features(
             TORCH_CHECK(genus_vocab_size_ > 0 || family_vocab_size_ > 0,
                 "GNNConfig::graph_mode = taxonomic needs a fitted taxonomy "
                 "vocabulary, but the schema reports none.");
-            return taxonomy_composition(genus_ids, family_ids,
+            return taxonomy_composition(inputs.genus_ids, inputs.family_ids,
                                         genus_vocab_size_, family_vocab_size_);
         }
         case GraphConstructionMode::CoOccurrence: {
-            TORCH_CHECK(species_vector.defined() && species_vector.numel() > 0,
+            TORCH_CHECK(inputs.species_vector.defined() && inputs.species_vector.numel() > 0,
                 "GNNConfig::graph_mode = cooccurrence builds its graph from "
                 "the per-plot species vector, which only the sparse species "
                 "encoding provides. Set DatasetConfig::species_encoding = "
                 "sparse, or select another graph_mode.");
-            return sparse_rows_to_dense(species_vector).to(torch::kFloat32);
+            return sparse_rows_to_dense(inputs.species_vector).to(torch::kFloat32);
         }
     }
     throw std::invalid_argument(
@@ -389,60 +289,39 @@ torch::Tensor TabularAdapterImpl::graph_features(
         std::to_string(static_cast<int>(graph_mode_)));
 }
 
-std::vector<torch::Tensor> TabularAdapterImpl::prepare_categoricals(
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids
-) {
-    std::vector<torch::Tensor> cats;
-    if (genus_ids.defined() && family_ids.defined()) {
-        // Each taxonomy slot becomes a separate categorical
-        const int64_t n_slots = genus_ids.size(1);
-        for (int64_t k = 0; k < n_slots; ++k) {
-            cats.push_back(genus_ids.select(1, k));
-        }
-        for (int64_t k = 0; k < n_slots; ++k) {
-            cats.push_back(family_ids.select(1, k));
-        }
-    }
-    return cats;
-}
-
-torch::Tensor TabularAdapterImpl::forward(
-    torch::Tensor continuous,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids,
-    torch::Tensor species_ids,
-    torch::Tensor species_vector
-) {
-    // HeterogeneousGNN ignores the numerical block (it uses continuous + the
-    // species-graph embedding), so skip the projection GEMM for it.
-    torch::Tensor numerical;
-    if (architecture_ != EncoderArchitecture::HeterogeneousGNN) {
-        numerical = prepare_numerical(continuous, species_ids, species_vector);
-    }
-    auto categoricals = prepare_categoricals(genus_ids, family_ids);
-
-    torch::Tensor output;
+AdapterOutput TabularAdapterImpl::forward(const PlotInputs& inputs,
+                                          const PlotInputs& reference) {
+    AdapterOutput out;
 
     switch (architecture_) {
         case EncoderArchitecture::FTTransformer:
-            output = ft_transformer_->forward(numerical, categoricals);
+            out.latent = ft_transformer_->forward(prepare_numerical(inputs),
+                                                  taxonomy_codes(inputs));
             break;
 
         case EncoderArchitecture::TabNet: {
-            // TabNet needs flat input; embed categoricals and concat
-            // For now, pass numerical directly (categoricals are optional for TabNet)
-            auto [tabnet_out, feature_importance] = tabnet_->forward(numerical);
-            output = tabnet_out;
+            auto tabnet = tabnet_->forward(flat_features(prepare_numerical(inputs), inputs));
+            out.latent = tabnet.output;
+            out.aux_losses[kTabNetSparsityLoss] =
+                tabnet_sparsity_coefficient_ * tabnet.mask_entropy;
             break;
         }
 
-        case EncoderArchitecture::SAINT:
-            output = saint_->forward(numerical, categoricals);
+        case EncoderArchitecture::SAINT: {
+            torch::Tensor reference_numerical;
+            torch::Tensor reference_categoricals;
+            if (!is_training() && reference.n_plots() > 0) {
+                reference_numerical = prepare_numerical(reference);
+                reference_categoricals = taxonomy_codes(reference);
+            }
+            out.latent = saint_->forward(prepare_numerical(inputs), taxonomy_codes(inputs),
+                                         reference_numerical, reference_categoricals);
             break;
+        }
 
         case EncoderArchitecture::ExcelFormer:
-            output = excelformer_->forward(numerical, categoricals);
+            out.latent = excelformer_->forward(prepare_numerical(inputs),
+                                               taxonomy_codes(inputs));
             break;
 
         case EncoderArchitecture::GNN: {
@@ -452,77 +331,61 @@ torch::Tensor TabularAdapterImpl::forward(
             // forces full-batch training; Predictor::predict forces a single
             // full-batch inference forward), so the graph is the global
             // structure over all plots -- each plot attends to its true nearest
-            // neighbors -- not an arbitrary mini-batch neighborhood (issue #73).
-            auto features = graph_features(continuous, genus_ids, family_ids,
-                                           species_vector);
+            // neighbours -- not an arbitrary mini-batch neighbourhood.
+            //
             // Coordinates are a straight-line distance; a composition vector is
             // compared by the angle between plots, so that the number of
             // species recorded does not stand in for their identity.
-            const GraphMetric metric =
-                graph_mode_ == GraphConstructionMode::Spatial
-                    ? GraphMetric::Euclidean : GraphMetric::Cosine;
-            auto adj = build_knn_adjacency(features, k_neighbors_, metric,
-                                           use_edge_features_);
-            // Flatten features for GNN: numerical block + embedded taxonomy slots.
-            std::vector<torch::Tensor> all_feats;
-            all_feats.push_back(numerical);
-            for (size_t i = 0; i < categoricals.size(); ++i) {
-                auto emb = gnn_cat_embeddings_->at<torch::nn::EmbeddingImpl>(i)
-                    .forward(categoricals[i]);  // (batch,) int64 -> (batch, emb_dim)
-                all_feats.push_back(emb);
-            }
-            auto flat = torch::cat(all_feats, /*dim=*/1);
-            auto gnn_out = gnn_->forward(flat, adj);
-            // GNN returns per-node (per-sample) features already
-            output = gnn_out;
+            const GraphMetric metric = graph_mode_ == GraphConstructionMode::Spatial
+                                           ? GraphMetric::Euclidean : GraphMetric::Cosine;
+            auto graph = build_knn_graph(graph_features(inputs), k_neighbors_, metric,
+                                         use_edge_features_);
+            out.latent = gnn_->forward(flat_features(prepare_numerical(inputs), inputs), graph);
             break;
         }
 
         case EncoderArchitecture::HeterogeneousGNN: {
-            TORCH_CHECK(hetero_graph_set_,
-                "Species graph not set. Call set_species_graph() before forward().");
-            TORCH_CHECK(species_vector.defined(),
+            TORCH_CHECK(inputs.species_vector.defined(),
                 "HeterogeneousGNN requires species_vector (sparse encoding mode).");
-
-            // Move graph to same device as input
-            auto ei = hetero_edge_index_.to(continuous.device());
-            auto et = hetero_edge_type_.to(continuous.device());
-
-            // Run GNN on species graph to get species embeddings
-            auto species_emb = hetero_gnn_->forward(ei, et);  // (n_species, output_dim)
-
-            // Aggregate per plot using species abundance vector, then prepend
-            // the environmental (continuous) features so they are not dropped.
-            auto gnn_plot = HeterogeneousGNNEncoderImpl::aggregate_for_plots(
-                species_emb, species_vector);  // (batch, output_dim)
-            output = torch::cat({continuous, gnn_plot}, /*dim=*/1);  // (batch, n_cont + output_dim)
+            auto species_emb = hetero_gnn_->forward();  // (n_species, output_dim)
+            auto plot_emb = HeterogeneousGNNEncoderImpl::aggregate_for_plots(
+                species_emb, inputs.species_vector);
+            out.latent = torch::cat({inputs.continuous, plot_emb}, /*dim=*/1);
             break;
         }
 
-        default:
-            throw std::runtime_error("Unsupported architecture in TabularAdapter::forward");
+        case EncoderArchitecture::TraitNet:
+        case EncoderArchitecture::MLP:
+            throw std::logic_error("TabularAdapter holds no encoder for this architecture");
     }
 
-    // Project to desired latent dimension if needed
-    if (needs_output_proj_) {
-        output = output_proj_->forward(output);
+    if (output_proj_) {
+        out.latent = output_proj_->forward(out.latent);
     }
-
-    return output;
+    return out;
 }
 
-void TabularAdapterImpl::set_species_graph(
-    torch::Tensor edge_index,
-    torch::Tensor edge_type
-) {
-    TORCH_CHECK(edge_index.dim() == 2 && edge_index.size(0) == 2,
-        "edge_index must be (2, n_edges), got ", edge_index.sizes());
-    TORCH_CHECK(edge_type.dim() == 1 && edge_type.size(0) == edge_index.size(1),
-        "edge_type must be (n_edges,) matching edge_index, got ", edge_type.sizes());
+void TabularAdapterImpl::set_species_graph(const torch::Tensor& edge_index,
+                                           const torch::Tensor& edge_type) {
+    TORCH_CHECK(hetero_gnn_, "set_species_graph(): only a HeterogeneousGNN reads a species graph");
+    hetero_gnn_->set_graph(edge_index, edge_type);
+}
 
-    hetero_edge_index_ = edge_index;
-    hetero_edge_type_ = edge_type;
-    hetero_graph_set_ = true;
+bool TabularAdapterImpl::has_species_graph() const {
+    return hetero_gnn_ && hetero_gnn_->has_graph();
+}
+
+torch::Tensor TabularAdapterImpl::species_graph_edge_index() const {
+    return has_species_graph() ? hetero_gnn_->graph_edge_index() : torch::Tensor();
+}
+
+torch::Tensor TabularAdapterImpl::species_graph_edge_type() const {
+    return has_species_graph() ? hetero_gnn_->graph_edge_type() : torch::Tensor();
+}
+
+std::vector<torch::Tensor> TabularAdapterImpl::data_buffers() const {
+    if (!hetero_gnn_) return {};
+    return {hetero_gnn_->graph_edge_index(), hetero_gnn_->graph_edge_type()};
 }
 
 } // namespace resolve

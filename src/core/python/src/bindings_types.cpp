@@ -321,7 +321,7 @@ void register_types(nb::module_& m) {
         .def_ro("test_loss_history", &resolve::TrainResult::test_loss_history)
         .def_ro("train_loss_history_by_target", &resolve::TrainResult::train_loss_history_by_target)
         .def_ro("test_loss_history_by_target", &resolve::TrainResult::test_loss_history_by_target)
-        .def_ro("train_moe_aux_loss_history", &resolve::TrainResult::train_moe_aux_loss_history)
+        .def_ro("train_aux_loss_history", &resolve::TrainResult::train_aux_loss_history)
         .def_ro("train_time_seconds", &resolve::TrainResult::train_time_seconds)
         .def_ro("resumed_from_epoch", &resolve::TrainResult::resumed_from_epoch)
         .def_ro("effective_batch_size", &resolve::TrainResult::effective_batch_size)
@@ -495,12 +495,14 @@ void register_types(nb::module_& m) {
         .def_prop_ro("outputs", [](const resolve::ModelForwardResult& r) {
             return tensor_map_to_dict(r.outputs);
         })
-        .def_prop_ro("moe_aux_loss", [](const resolve::ModelForwardResult& r) {
-            if (r.moe_aux_loss.defined()) {
-                auto cpu_tensor = r.moe_aux_loss.detach().cpu().contiguous();
-                return nb::steal(THPVariable_Wrap(cpu_tensor));
+        .def_prop_ro("aux_losses", [](const resolve::ModelForwardResult& r) {
+            nb::dict terms;
+            for (const auto& [name, term] : r.aux_losses) {
+                if (!term.defined()) continue;
+                terms[nb::str(name.c_str())] =
+                    nb::steal(THPVariable_Wrap(term.detach().cpu().contiguous()));
             }
-            return nb::none();
+            return terms;
         });
 }
 

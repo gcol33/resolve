@@ -358,11 +358,7 @@ TEST_CASE("Every config struct's registry covers every member", "[config][regist
     // intended addition shows in the diff.
     CHECK(field_registry_size(static_cast<const FTTransformerConfig*>(nullptr)) == 7);
     CHECK(field_registry_size(static_cast<const TabNetConfig*>(nullptr)) == 7);
-    // SAINT lost use_contrastive_pretrain and mixup_alpha: both described a
-    // self-supervised pre-training stage, which a model configuration cannot
-    // run, and neither was read. The augmentation moved to
-    // PretrainConfig::mixup_alpha.
-    CHECK(field_registry_size(static_cast<const SAINTConfig*>(nullptr)) == 5);
+    CHECK(field_registry_size(static_cast<const SAINTConfig*>(nullptr)) == 6);
     CHECK(field_registry_size(static_cast<const GNNConfig*>(nullptr)) == 8);
     CHECK(field_registry_size(static_cast<const TraitNetConfig*>(nullptr)) == 5);
     CHECK(field_registry_size(static_cast<const ExcelFormerConfig*>(nullptr)) == 7);
@@ -446,6 +442,42 @@ TEST_CASE("ModelConfig round-trips through the checkpoint with every field chang
     const auto diffs = digest_differences(digest_of(config, true), digest_of(loaded, true));
     INFO("fields that did not survive: " << describe(diffs));
     CHECK(diffs.empty());
+}
+
+TEST_CASE("An enum field stored as its name reads back as the enum",
+          "[config][registry][checkpoint]") {
+    // TabMConfig::aggregation, written in the string layout (<key>_len beside
+    // the UInt8 bytes) rather than as an ordinal.
+    const TempPath path_file(".pt");
+    const std::string path = path_file.path();
+    {
+        // Every other key as save_model_config writes it.
+        const TempPath defaults_file(".pt");
+        {
+            torch::serialize::OutputArchive defaults;
+            save_model_config(defaults, ModelConfig{});
+            defaults.save_to(defaults_file.path());
+        }
+        torch::serialize::InputArchive defaults;
+        defaults.load_from(defaults_file.path());
+        torch::serialize::OutputArchive archive;
+        for (const auto& key : defaults.keys()) {
+            if (key.rfind("tabm_aggregation", 0) == 0) continue;
+            torch::Tensor value;
+            defaults.read(key, value);
+            archive.write(key, value);
+        }
+        const std::string name = "median";
+        std::vector<uint8_t> bytes(name.begin(), name.end());
+        archive.write("tabm_aggregation_len", torch::tensor(static_cast<int64_t>(name.size())));
+        archive.write("tabm_aggregation",
+                      torch::from_blob(bytes.data(), {static_cast<int64_t>(bytes.size())},
+                                       torch::kUInt8).clone());
+        archive.save_to(path);
+    }
+    torch::serialize::InputArchive archive;
+    archive.load_from(path);
+    CHECK(load_model_config(archive).tabm.aggregation == TabMAggregation::Median);
 }
 
 TEST_CASE("TrainConfig round-trips through the checkpoint with every persisted field changed",
@@ -536,12 +568,12 @@ TEST_CASE("Checkpoint keys keep the spellings earlier releases wrote",
              "transformer_pooling",
              "ft_d_model", "ft_pre_norm",
              "tabnet_n_steps", "tabnet_use_sparsemax",
-             "saint_use_row_attention",
+             "saint_use_row_attention", "saint_row_attention_rows",
              "gnn_type", "gnn_graph_mode",
              "trait_trait_dim", "trait_shared_trait_encoder",
              "excel_importance_threshold", "excel_pre_norm",
              "hgnn_cooccurrence_threshold", "hgnn_use_cooccurrence_edges",
-             "tabm_enabled", "tabm_aggregation_len", "tabm_aggregation",
+             "tabm_enabled", "tabm_aggregation",
              "parallel_enabled", "parallel_n_branches",
              "parallel_branch_0_hidden_dims", "parallel_branch_0_branch_weight",
              "parallel_branch_1_dropout",

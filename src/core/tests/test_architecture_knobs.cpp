@@ -1,9 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-#include "resolve/attention.hpp"
 #include "resolve/dataset.hpp"
 #include "resolve/encoder.hpp"
+#include "resolve/ft_transformer.hpp"
+#include "resolve/gnn.hpp"
+#include "resolve/tabnet.hpp"
+#include "resolve/traitnet.hpp"
 #include "resolve/model.hpp"
 #include "resolve/role_mapping.hpp"
 #include "test_support.hpp"
@@ -38,16 +41,30 @@ namespace {
 
 // Dropout rate per module path, so a test can say WHERE a configured rate
 // landed. A rate of 0 registers no module, so a path missing from the map means
-// there is no dropout there.
+// there is no dropout there. Attention drops its weights inside the attention
+// call rather than through a module, so its rate is listed under
+// "<attention path>.dropout".
 std::map<std::string, double> dropout_rates(const torch::nn::Module& module) {
     std::map<std::string, double> rates;
     for (const auto& item : module.named_modules()) {
         if (auto dropout =
                 std::dynamic_pointer_cast<torch::nn::DropoutImpl>(item.value())) {
             rates[item.key()] = dropout->options.p();
+        } else if (auto attention =
+                       std::dynamic_pointer_cast<MultiHeadAttentionImpl>(item.value())) {
+            if (attention->dropout() > 0.0f) {
+                rates[item.key() + ".dropout"] = attention->dropout();
+            }
         }
     }
     return rates;
+}
+
+// The k-NN graph's adjacency entries as a dense matrix.
+torch::Tensor dense_adjacency(const KnnGraph& graph) {
+    auto adj = torch::zeros({graph.n_nodes, graph.n_nodes});
+    adj.index_put_({graph.target, graph.source}, graph.weight);
+    return adj;
 }
 
 bool has_module(const torch::nn::Module& module, const std::string& name) {
@@ -230,8 +247,8 @@ TEST_CASE("ExcelFormerConfig::pre_norm chooses the normalization placement",
     post_norm->eval();
 
     // The trailing normalization belongs to the pre-norm arrangement only.
-    CHECK(has_module(*pre_norm, "adapter.excelformer.final_norm"));
-    CHECK_FALSE(has_module(*post_norm, "adapter.excelformer.final_norm"));
+    CHECK(has_module(*pre_norm, "adapter.excelformer.encoder.final_norm"));
+    CHECK_FALSE(has_module(*post_norm, "adapter.excelformer.encoder.final_norm"));
 
     // And the two compute different functions: the knob was hardcoded to
     // pre-norm, so asking for post-norm changed nothing at all.
@@ -313,7 +330,6 @@ TEST_CASE("TabNet runs its blocks at the configured ghost size",
         torch::manual_seed(7);
         return TabNetEncoder(input_dim, /*n_steps=*/2, /*n_d=*/8, /*n_a=*/8,
                              /*relaxation_factor=*/1.5f,
-                             /*sparsity_coefficient=*/1e-3f,
                              /*use_sparsemax=*/true, virtual_batch_size);
     };
 
@@ -327,13 +343,13 @@ TEST_CASE("TabNet runs its blocks at the configured ghost size",
     // carry their initial statistics.
     full->eval();
     ghost->eval();
-    CHECK(torch::allclose(full->forward(x).first, ghost->forward(x).first,
+    CHECK(torch::allclose(full->forward(x).output, ghost->forward(x).output,
                           1e-5, 1e-6));
 
     full->train();
     ghost->train();
-    auto full_out = full->forward(x).first;
-    auto ghost_out = ghost->forward(x).first;
+    auto full_out = full->forward(x).output;
+    auto ghost_out = ghost->forward(x).output;
     REQUIRE(full_out.sizes() == ghost_out.sizes());
     // Same weights, same input: the only difference is how the blocks
     // normalize, and it has to show.
@@ -344,7 +360,7 @@ TEST_CASE("TabNet runs its blocks at the configured ghost size",
     // knob is part of what the model learns, not only of one forward.
     full->eval();
     ghost->eval();
-    CHECK_FALSE(torch::allclose(full->forward(x).first, ghost->forward(x).first,
+    CHECK_FALSE(torch::allclose(full->forward(x).output, ghost->forward(x).output,
                                 1e-5, 1e-6));
 }
 
@@ -396,8 +412,8 @@ TEST_CASE("A weighted edge carries its similarity, an unweighted one carries 1",
     // graph is the same whatever the weighting -- only the weights differ.
     auto coords = torch::tensor({{0.0f, 0.0f}, {1.0f, 0.0f}, {40.0f, 0.0f}});
 
-    auto plain = build_knn_adjacency(coords, 2, GraphMetric::Euclidean, false);
-    auto weighted = build_knn_adjacency(coords, 2, GraphMetric::Euclidean, true);
+    auto plain = dense_adjacency(build_knn_graph(coords, 2, GraphMetric::Euclidean, false));
+    auto weighted = dense_adjacency(build_knn_graph(coords, 2, GraphMetric::Euclidean, true));
 
     // Unweighted, a near and a far neighbour count the same.
     CHECK_THAT(plain[0][1].item<float>(),
@@ -419,8 +435,8 @@ TEST_CASE("The cosine metric compares composition, the Euclidean metric distance
     // weights are.
     auto features = torch::tensor({{1.0f, 0.0f}, {6.0f, 0.0f}, {0.0f, 3.0f}});
 
-    auto cosine = build_knn_adjacency(features, 2, GraphMetric::Cosine, true);
-    auto euclidean = build_knn_adjacency(features, 2, GraphMetric::Euclidean, true);
+    auto cosine = dense_adjacency(build_knn_graph(features, 2, GraphMetric::Cosine, true));
+    auto euclidean = dense_adjacency(build_knn_graph(features, 2, GraphMetric::Euclidean, true));
 
     // Same direction, so the cosine graph ties rows 0 and 1 together...
     CHECK(cosine[0][1].item<float>() > cosine[0][2].item<float>());

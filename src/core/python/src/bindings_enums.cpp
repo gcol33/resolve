@@ -125,6 +125,11 @@ void register_enums(nb::module_& m) {
         .value("Attention", resolve::TraitInteractionMode::Attention)
         .export_values();
 
+    nb::enum_<resolve::TabMAggregation>(m, "TabMAggregation")
+        .value("Mean", resolve::TabMAggregation::Mean)
+        .value("Median", resolve::TabMAggregation::Median)
+        .export_values();
+
     nb::enum_<resolve::ParallelAggregation>(m, "ParallelAggregation")
         .value("Concat", resolve::ParallelAggregation::Concat)
         .value("Sum", resolve::ParallelAggregation::Sum)

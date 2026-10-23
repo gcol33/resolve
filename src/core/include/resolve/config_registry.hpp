@@ -129,7 +129,8 @@ RESOLVE_DEFINE_FIELD_REGISTRY(TabNetConfig, RESOLVE_TABNET_CONFIG_FIELDS)
     F(n_heads,                  "saint_n_heads")                   \
     F(n_layers,                 "saint_n_layers")                  \
     F(attention_dropout,        "saint_attention_dropout")         \
-    F(use_row_attention,        "saint_use_row_attention")
+    F(use_row_attention,        "saint_use_row_attention")         \
+    F(row_attention_rows,       "saint_row_attention_rows")
 
 RESOLVE_DEFINE_FIELD_REGISTRY(SAINTConfig, RESOLVE_SAINT_CONFIG_FIELDS)
 

@@ -173,8 +173,10 @@ A list with \code{trainer}, \code{result}, and \code{dataset}. \code{result} car
 \code{train_loss} and \code{test_loss} (one value per epoch), their split by target
 \code{train_loss_by_target} and \code{test_loss_by_target} (named lists of per-epoch
 vectors: each target's weighted term of the total, so per epoch they add
-up to it), \code{train_moe_aux_loss} (the mixture-of-experts load-balancing
-term of \code{train_loss}, which belongs to no target; empty without one),
+up to it), \code{train_aux_loss} (a named list of the auxiliary terms of
+\code{train_loss}, which belong to no target, each already weighted: \code{moe},
+the mixture-of-experts load balancing, and \code{tabnet_sparsity}, TabNet's
+feature-mask sparsity; empty for a model with neither),
 the per-target \code{baselines} (the model against the training mean or mode,
 regression values in original units), \code{diagnostics}, \code{effective_batch_size}
 -- the batch size the run actually trained at, which is smaller than

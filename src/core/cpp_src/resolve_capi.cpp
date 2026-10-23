@@ -1038,10 +1038,10 @@ resolve_value* nested_metrics_to_value(
     }
     return result;
 }
-resolve_value* histories_by_target_to_value(
+resolve_value* named_histories_to_value(
     const std::unordered_map<std::string, std::vector<float>>& histories) {
     auto* result = v_map();
-    for (const auto& [target, history] : histories) v_put(result, target, v_double_array(history));
+    for (const auto& [name, history] : histories) v_put(result, name, v_double_array(history));
     return result;
 }
 resolve_value* train_result_to_value(const TrainResult& tr) {
@@ -1050,9 +1050,9 @@ resolve_value* train_result_to_value(const TrainResult& tr) {
     v_put(m, "final_metrics", nested_metrics_to_value(tr.final_metrics));
     v_put(m, "train_loss", v_double_array(tr.train_loss_history));
     v_put(m, "test_loss", v_double_array(tr.test_loss_history));
-    v_put(m, "train_loss_by_target", histories_by_target_to_value(tr.train_loss_history_by_target));
-    v_put(m, "test_loss_by_target", histories_by_target_to_value(tr.test_loss_history_by_target));
-    v_put(m, "train_moe_aux_loss", v_double_array(tr.train_moe_aux_loss_history));
+    v_put(m, "train_loss_by_target", named_histories_to_value(tr.train_loss_history_by_target));
+    v_put(m, "test_loss_by_target", named_histories_to_value(tr.test_loss_history_by_target));
+    v_put(m, "train_aux_loss", named_histories_to_value(tr.train_aux_loss_history));
     v_put(m, "train_time_seconds", v_double(tr.train_time_seconds));
     v_put(m, "resumed_from_epoch", v_int(tr.resumed_from_epoch));
     v_put(m, "effective_batch_size", v_int(tr.effective_batch_size));
@@ -1767,7 +1767,11 @@ resolve_value_t* resolve_model_call(resolve_model_t* m, const char* method, cons
             auto* ret = v_map();
             ValueGuard g(ret);  // frees the partial tree if a conversion throws
             v_put(ret, "outputs", target_map_to_value(result.outputs));
-            if (result.moe_aux_loss.defined()) v_put(ret, "moe_aux_loss", tensor_to_vec(result.moe_aux_loss));
+            auto* aux = v_map();
+            v_put(ret, "aux_losses", aux);
+            for (const auto& [name, term] : result.aux_losses) {
+                if (term.defined()) v_put(aux, name, v_double(term.detach().item<double>()));
+            }
             return g.release();
         }
         if (mt == "forward_single") {
@@ -1815,6 +1819,8 @@ resolve_value_t* resolve_model_get(const resolve_model_t* m, const char* what) {
             }
             return g.release();
         }
+        if (w == "aux_loss_names") return v_string_array(m->model->aux_loss_names());
+        if (w == "row_reference_rows") return v_int(m->model->row_reference_rows());
         // The species graph a HeterogeneousGNN passes messages on.
         if (w == "requires_species_graph") {
             return v_bool(m->model->requires_species_graph());

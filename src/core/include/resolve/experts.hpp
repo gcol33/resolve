@@ -165,11 +165,6 @@ public:
         return {output, aux_loss, gate_probs};
     }
 
-    // Simplified forward without aux loss (for inference)
-    torch::Tensor forward_simple(torch::Tensor x) {
-        return forward(x).output;
-    }
-
     [[nodiscard]] int64_t output_dim() const noexcept { return output_dim_; }
     [[nodiscard]] int n_experts() const noexcept { return n_experts_; }
 

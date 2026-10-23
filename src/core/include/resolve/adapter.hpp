@@ -1,24 +1,43 @@
 #pragma once
 
-#include "resolve/types.hpp"
+#include "resolve/aux_loss.hpp"
 #include "resolve/encoder.hpp"
-#include "resolve/attention.hpp"
+#include "resolve/excelformer.hpp"
+#include "resolve/ft_transformer.hpp"
+#include "resolve/gnn.hpp"
+#include "resolve/hetero_gnn.hpp"
+#include "resolve/plot_inputs.hpp"
+#include "resolve/saint.hpp"
+#include "resolve/tabnet.hpp"
+#include "resolve/types.hpp"
+
 #include <torch/torch.h>
+
+#include <vector>
 
 namespace resolve {
 
 // =============================================================================
-// TabularAdapter: bridges RESOLVE's species-encoding pipeline to generic
-// tabular architectures (FT-Transformer, TabNet, SAINT, GNN, TraitNet)
+// TabularAdapter: bridges RESOLVE's species-encoding pipeline to the generic
+// tabular architectures (FT-Transformer, TabNet, SAINT, GNN, ExcelFormer,
+// HeterogeneousGNN)
 // =============================================================================
 
 // The adapter:
-// 1. Takes same inputs as PlotEncoder (continuous, genus_ids, family_ids,
-//    species_ids, species_vector)
-// 2. Produces species embedding via shared embedding logic
-// 3. Feeds combined features as numerical + taxonomy IDs as categoricals
-//    to the selected tabular architecture
-// 4. Returns latent vector of the same shape as PlotEncoder output
+// 1. Takes the plot inputs the model forward receives (with the categorical
+//    embeddings already fused into `continuous`)
+// 2. Turns the species encoding into numerical features
+// 3. Feeds those with the continuous block as numerical features, and the
+//    taxonomy slots as categoricals (embedded per slot for the architectures
+//    that read one flat feature vector), to the selected architecture
+// 4. Returns a latent vector the model's heads read
+
+// What one adapter forward produces: the latent, and the auxiliary objective
+// terms the architecture adds to the training loss (TabNet's sparsity term).
+struct AdapterOutput {
+    torch::Tensor latent;
+    AuxLosses aux_losses;
+};
 
 class TabularAdapterImpl : public torch::nn::Module {
 public:
@@ -27,110 +46,92 @@ public:
         const ModelConfig& config
     );
 
-    // Forward pass (same signature as PlotEncoder variants)
-    torch::Tensor forward(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {},
-        torch::Tensor species_ids = {},
-        torch::Tensor species_vector = {}
-    );
+    // `reference` is read by SAINT's row attention in eval mode: the training
+    // rows every plot attends to (row_reference_rows()). Every other
+    // architecture ignores it.
+    AdapterOutput forward(const PlotInputs& inputs, const PlotInputs& reference = {});
 
     [[nodiscard]] int64_t latent_dim() const noexcept { return latent_dim_; }
     [[nodiscard]] EncoderArchitecture architecture() const noexcept { return architecture_; }
 
-private:
-    // Prepare numerical features from species encoding + continuous
-    torch::Tensor prepare_numerical(
-        torch::Tensor continuous,
-        torch::Tensor species_ids,
-        torch::Tensor species_vector
-    );
+    // How many training rows SAINT's inference attends over; 0 for every other
+    // architecture and for SAINT without row attention.
+    [[nodiscard]] int64_t row_reference_rows() const noexcept {
+        return saint_ ? saint_->reference_rows() : 0;
+    }
 
-    // Prepare categorical features from taxonomy IDs
-    std::vector<torch::Tensor> prepare_categoricals(
-        torch::Tensor genus_ids,
-        torch::Tensor family_ids
-    );
+    // The species graph a HeterogeneousGNN passes messages on.
+    void set_species_graph(const torch::Tensor& edge_index, const torch::Tensor& edge_type);
+    [[nodiscard]] bool has_species_graph() const;
+    [[nodiscard]] torch::Tensor species_graph_edge_index() const;
+    [[nodiscard]] torch::Tensor species_graph_edge_type() const;
+
+    // Buffers that hold data the model was trained with rather than a
+    // quantity of fixed shape: their shape is the data's (ResolveModel::
+    // data_buffers).
+    [[nodiscard]] std::vector<torch::Tensor> data_buffers() const;
+
+private:
+    // Continuous block plus the species-encoding features.
+    torch::Tensor prepare_numerical(const PlotInputs& inputs);
+
+    // (batch, 2 * n_taxonomy_slots) taxonomy codes, genus slots then family
+    // slots; undefined without taxonomy.
+    torch::Tensor taxonomy_codes(const PlotInputs& inputs) const;
+
+    // The numerical features with the taxonomy slots embedded and appended:
+    // the one flat vector TabNet and the GNN read.
+    torch::Tensor flat_features(const torch::Tensor& numerical, const PlotInputs& inputs);
 
     // The per-plot features the GNN measures neighbourhood on, chosen by
     // GNNConfig::graph_mode: the coordinates, the taxonomic composition, or the
     // species vector. Refuses a mode the data cannot supply rather than
     // measuring distance on whatever happens to sit in those columns.
-    torch::Tensor graph_features(
-        const torch::Tensor& continuous,
-        const torch::Tensor& genus_ids,
-        const torch::Tensor& family_ids,
-        const torch::Tensor& species_vector
-    ) const;
+    torch::Tensor graph_features(const PlotInputs& inputs) const;
 
     EncoderArchitecture architecture_;
     SpeciesEncodingMode species_encoding_;
-    int64_t latent_dim_;
-    int64_t n_numerical_;
-    int64_t n_categoricals_;
+    int64_t latent_dim_ = 0;
+    int64_t n_numerical_ = 0;
+    bool has_taxonomy_ = false;
+    int n_taxonomy_slots_ = 0;
 
     // Species embedding for embed mode
     FusedPositionalEmbedding fused_species_{nullptr};
-    int top_k_species_ = 0;
-    int species_embed_dim_ = 0;
 
     // Species projection for sparse mode
     torch::nn::Linear species_projection_{nullptr};
-    int species_project_dim_ = 0;
 
-    // Output projection from architecture output_dim to desired latent_dim
+    // Projection from a transformer-family encoder's d_model to latent_dim
     torch::nn::Linear output_proj_{nullptr};
-    bool needs_output_proj_ = false;
 
-    // Architecture-specific encoders (only one is used)
+    // Per-slot taxonomy embeddings for the flat-input architectures (TabNet,
+    // GNN), which cannot read integer codes as magnitudes. The attention
+    // encoders embed the codes in their own tokenizer instead.
+    std::vector<torch::nn::Embedding> genus_embeddings_;
+    std::vector<torch::nn::Embedding> family_embeddings_;
+
+    // Architecture-specific encoders (only one is built)
     FTTransformerEncoder ft_transformer_{nullptr};
     TabNetEncoder tabnet_{nullptr};
     SAINTEncoder saint_{nullptr};
     GNNEncoder gnn_{nullptr};
-
-    // GNN taxonomy embeddings: one table per categorical (taxonomy) slot. The
-    // GNN flattens all features into a node-feature matrix, so unlike the
-    // attention encoders (which embed categoricals internally) it must embed the
-    // genus/family IDs here rather than feed raw integer IDs as continuous
-    // magnitudes (issue #73). Ordered [genus x n_slots, family x n_slots], matching
-    // prepare_categoricals / cat_cardinalities.
-    torch::nn::ModuleList gnn_cat_embeddings_{nullptr};
-    int64_t gnn_cat_embed_total_ = 0;
     ExcelFormerEncoder excelformer_{nullptr};
     HeterogeneousGNNEncoder hetero_gnn_{nullptr};
 
-    // For GNN: adjacency matrix builder
+    float tabnet_sparsity_coefficient_ = 0.0f;
+
+    // GNN graph construction (GNNConfig::k_neighbors / graph_mode /
+    // use_edge_features).
     int k_neighbors_ = 10;
-    // What the graph is built from, and whether an edge carries its similarity
-    // as a weight (GNNConfig::graph_mode / use_edge_features).
     GraphConstructionMode graph_mode_ = GraphConstructionMode::Spatial;
     bool use_edge_features_ = false;
     // Vocabulary widths for the taxonomic composition vector.
     int64_t genus_vocab_size_ = 0;
     int64_t family_vocab_size_ = 0;
-    // The GNN builds its spatial graph from the first two continuous columns,
-    // which are the coordinates ONLY when the dataset has them. Captured from
-    // the schema so forward() can refuse to reinterpret covariates as
-    // coordinates when coordinates are absent (issue #73).
+    // The spatial graph reads the first two continuous columns, which are the
+    // coordinates only when the dataset has them.
     bool has_coordinates_ = false;
-
-    // For Heterogeneous GNN: stored graph structure
-    torch::Tensor hetero_edge_index_;  // (2, n_edges)
-    torch::Tensor hetero_edge_type_;   // (n_edges,)
-    bool hetero_graph_set_ = false;
-
-public:
-    // Set the species graph for HeterogeneousGNN mode
-    // Must be called before forward() when using HeterogeneousGNN architecture
-    void set_species_graph(torch::Tensor edge_index, torch::Tensor edge_type);
-    [[nodiscard]] bool has_species_graph() const noexcept { return hetero_graph_set_; }
-    [[nodiscard]] const torch::Tensor& species_graph_edge_index() const noexcept {
-        return hetero_edge_index_;
-    }
-    [[nodiscard]] const torch::Tensor& species_graph_edge_type() const noexcept {
-        return hetero_edge_type_;
-    }
 };
 
 TORCH_MODULE(TabularAdapter);

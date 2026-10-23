@@ -53,7 +53,16 @@ set(RESOLVE_CORE_HEADERS
     include/resolve/resolve.hpp
     include/resolve/types.hpp
     include/resolve/encoder.hpp
-    include/resolve/attention.hpp
+    include/resolve/ft_transformer.hpp
+    include/resolve/tabnet.hpp
+    include/resolve/saint.hpp
+    include/resolve/excelformer.hpp
+    include/resolve/traitnet.hpp
+    include/resolve/gnn.hpp
+    include/resolve/hetero_gnn.hpp
+    include/resolve/adapter.hpp
+    include/resolve/aux_loss.hpp
+    include/resolve/ln_mlp.hpp
     include/resolve/model.hpp
     include/resolve/trainer.hpp
     include/resolve/predictor.hpp

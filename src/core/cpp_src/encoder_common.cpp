@@ -644,7 +644,8 @@ BranchAttentionImpl::BranchAttentionImpl(int64_t branch_dim, int n_heads)
     }
     head_dim_ = branch_dim / n_heads;
 
-    // Query from learned context vector, keys and values from branches
+    // Query projected from the mean of the branch outputs, keys and values
+    // from each branch
     query_ = register_module("query", torch::nn::Linear(branch_dim, branch_dim));
     key_ = register_module("key", torch::nn::Linear(branch_dim, branch_dim));
     value_ = register_module("value", torch::nn::Linear(branch_dim, branch_dim));
@@ -657,7 +658,7 @@ torch::Tensor BranchAttentionImpl::forward(torch::Tensor branch_outputs) {
     int64_t n_branches = branch_outputs.size(1);
     int64_t branch_dim = branch_outputs.size(2);
 
-    // Use mean as query (learned aggregation)
+    // The query is projected from the mean over branches
     auto query_input = branch_outputs.mean(/*dim=*/1);  // (batch, branch_dim)
     auto q = query_->forward(query_input);  // (batch, branch_dim)
     q = q.view({batch_size, 1, n_heads_, head_dim_}).transpose(1, 2);  // (batch, n_heads, 1, head_dim)

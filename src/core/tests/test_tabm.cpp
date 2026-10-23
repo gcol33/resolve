@@ -62,7 +62,7 @@ TEST_CASE("BatchEnsembleLinear ensemble diversity", "[tabm]") {
 
 TEST_CASE("TabMEncoder forward shape", "[tabm]") {
     std::vector<int64_t> dims = {64, 32};
-    TabMEncoder encoder(32, dims, 8, 0.1f, std::string("mean"));
+    TabMEncoder encoder(32, dims, 8, 0.1f, TabMAggregation::Mean);
     auto x = torch::randn({16, 32});
     auto out = encoder->forward(x);
 
@@ -72,7 +72,7 @@ TEST_CASE("TabMEncoder forward shape", "[tabm]") {
 
 TEST_CASE("TabMEncoder forward_all returns per-ensemble", "[tabm]") {
     std::vector<int64_t> dims = {64, 32};
-    TabMEncoder encoder(32, dims, 8, 0.0f, std::string("mean"));
+    TabMEncoder encoder(32, dims, 8, 0.0f, TabMAggregation::Mean);
     auto x = torch::randn({16, 32});
     auto all = encoder->forward_all(x);
 
@@ -83,7 +83,7 @@ TEST_CASE("TabMEncoder forward_all returns per-ensemble", "[tabm]") {
 
 TEST_CASE("TabMEncoder aggregation matches forward_all mean", "[tabm]") {
     std::vector<int64_t> dims = {32, 16};
-    TabMEncoder encoder(16, dims, 4, 0.0f, std::string("mean"));
+    TabMEncoder encoder(16, dims, 4, 0.0f, TabMAggregation::Mean);
     encoder->eval();  // Disable dropout
     auto x = torch::randn({8, 16});
 

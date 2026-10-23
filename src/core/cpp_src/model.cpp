@@ -29,42 +29,35 @@ ResolveModelImpl::ResolveModelImpl(
     // table; CategoricalEmbedder concatenates the per-column lookups in
     // forward(). When there are no categoricals, the embedder is left as
     // nullptr and fuse_categoricals_() is a no-op.
-    int64_t n_categorical_embed = 0;
     if (schema_.has_categoricals()) {
         categorical_embedder_ = register_module(
             "categorical_embedder",
             CategoricalEmbedder(schema_.categorical_vocab_sizes,
                                 schema_.categorical_embed_dim));
-        n_categorical_embed = categorical_embedder_->output_dim();
     }
 
-    // Calculate number of continuous features based on mode.
-    // The encoder is built to accept (base continuous) + (categorical embed
-    // dims) because fuse_categoricals_() will concatenate them in forward.
-    int64_t n_coords = schema.has_coordinates ? 2 : 0;
-    int64_t n_unknown_features = schema.track_unknown_fraction ? 1 : 0;
-    if (schema.track_unknown_count) {
-        n_unknown_features += 1;
-    }
+    // The width of the continuous block the encoder receives: the schema's
+    // continuous columns plus the categorical embeddings fuse_categoricals_()
+    // concatenates in forward.
+    const int64_t n_continuous_base = schema_.continuous_width();
 
-    int64_t n_continuous_base = n_coords + schema.covariate_names.size()
-                              + schema.missing_flag_width()
-                              + n_unknown_features + n_categorical_embed;
-
-    // Pre-compute the taxonomy embedding-table sizes once (single source of
-    // truth for every encoder family). TaxonomyVocab::fit reserves <UNK>=0, so
-    // n_genera()/n_families() already count the UNK slot (max id = n_genera - 1)
-    // and the correct table size is exactly n_genera, NOT n_genera + 1.
-    auto genus_vocab_size = schema.has_taxonomy ? schema.n_genera : 0;
-    auto family_vocab_size = schema.has_taxonomy ? schema.n_families : 0;
+    // The taxonomy embedding-table heights every encoder family builds.
+    const int64_t genus_vocab_size = schema_.genus_table_size();
+    const int64_t family_vocab_size = schema_.family_table_size();
 
     // Check if using advanced architecture (non-MLP)
     bool use_adapter = (config.encoder_architecture != EncoderArchitecture::MLP &&
                         config.encoder_architecture != EncoderArchitecture::TraitNet);
 
     if (use_adapter) {
-        // Use TabularAdapter for FT-Transformer, TabNet, SAINT, GNN
-        adapter_ = register_module("adapter", TabularAdapter(schema, config));
+        adapter_ = register_module("adapter", TabularAdapter(schema_, config));
+        row_reference_rows_ = adapter_->row_reference_rows();
+        if (row_reference_rows_ > 0) {
+            row_reference_.for_each([this](const PlotInputField& field, torch::Tensor& buffer) {
+                buffer = register_buffer(std::string("row_reference_") + field.name,
+                                         torch::empty({0}, field.dtype));
+            });
+        }
     }
 
     // Check if MoE is enabled
@@ -94,140 +87,140 @@ ResolveModelImpl::ResolveModelImpl(
     // species encoder takes it, so the mixture reaches all five of them.
     MoETailConfig moe_tail = MoETailConfig::from_model_config(config);
 
-    // Create appropriate encoder based on mode and MoE setting (only for MLP mode)
-    if (use_adapter) {
-        // Adapter handles encoding internally, no separate encoder needed
-    }
-    else if (config.encoder_architecture == EncoderArchitecture::TraitNet) {
-        // TraitNet: direct path, bypasses both adapter and species-encoding encoders.
-        // env_dim = continuous base features (coords + covariates + unknown features).
-        // TraitNet does NOT use hash embeddings or species IDs — it uses a trait matrix.
-        const auto& tc = config.trait_net;
-        trait_net_encoder_ = register_module("trait_net_encoder", TraitNetEncoder(
-            /*env_dim=*/n_continuous_base,
-            /*trait_dim=*/tc.trait_dim,
-            /*n_species=*/schema.n_species_vocab > 0 ? schema.n_species_vocab : schema.n_species,
-            /*hidden_dim=*/tc.env_dim,
-            /*n_layers=*/2,
-            /*dropout=*/config.dropout,
-            /*interaction_dim=*/tc.interaction_dim,
-            /*interaction=*/tc.interaction,
-            /*shared_trait_encoder=*/tc.shared_trait_encoder
-        ));
-    }
-    else if (config.species_encoding == SpeciesEncodingMode::Hash && !config.uses_explicit_vector) {
-        // Hash mode: continuous includes hash_dim
-        int64_t n_continuous = n_continuous_base + config.hash_dim;
+    // The species encoder, for the MLP architecture; the adapter
+    // architectures encode inside the adapter.
+    if (!use_adapter) {
+        if (config.encoder_architecture == EncoderArchitecture::TraitNet) {
+            // TraitNet: direct path, bypasses both adapter and species-encoding encoders.
+            // env_dim = continuous base features (coords + covariates + unknown features).
+            // TraitNet does NOT use hash embeddings or species IDs — it uses a trait matrix.
+            const auto& tc = config.trait_net;
+            trait_net_encoder_ = register_module("trait_net_encoder", TraitNetEncoder(
+                /*env_dim=*/n_continuous_base,
+                /*trait_dim=*/tc.trait_dim,
+                /*n_species=*/schema.n_species_vocab > 0 ? schema.n_species_vocab : schema.n_species,
+                /*hidden_dim=*/tc.env_dim,
+                /*n_layers=*/2,
+                /*dropout=*/config.dropout,
+                /*interaction_dim=*/tc.interaction_dim,
+                /*interaction=*/tc.interaction,
+                /*shared_trait_encoder=*/tc.shared_trait_encoder
+            ));
+        }
+        else if (config.species_encoding == SpeciesEncodingMode::Hash && !config.uses_explicit_vector) {
+            // Hash mode: continuous includes hash_dim
+            int64_t n_continuous = n_continuous_base + config.hash_dim;
 
-        encoder_hash_ = register_module("encoder", PlotEncoder(
-            n_continuous,
-            genus_vocab_size,
-            family_vocab_size,
-            config.genus_emb_dim,
-            config.family_emb_dim,
-            config.n_taxonomy_slots,
-            config.hidden_dims,
-            mlp_config,
-            config.tabm,
-            moe_tail,
-            config.parallel_layers
-        ));
-    }
-    else if (config.species_encoding == SpeciesEncodingMode::Embed) {
-        // Embed mode: learnable species embeddings
-        if (schema.n_species_vocab == 0) {
-            throw std::runtime_error(
-                "species_encoding=Embed requires n_species_vocab > 0 in schema"
-            );
+            encoder_hash_ = register_module("encoder", PlotEncoder(
+                n_continuous,
+                genus_vocab_size,
+                family_vocab_size,
+                config.genus_emb_dim,
+                config.family_emb_dim,
+                config.n_taxonomy_slots,
+                config.hidden_dims,
+                mlp_config,
+                config.tabm,
+                moe_tail,
+                config.parallel_layers
+            ));
         }
+        else if (config.species_encoding == SpeciesEncodingMode::Embed) {
+            // Embed mode: learnable species embeddings
+            if (schema.n_species_vocab == 0) {
+                throw std::runtime_error(
+                    "species_encoding=Embed requires n_species_vocab > 0 in schema"
+                );
+            }
 
-        encoder_embed_ = register_module("encoder", PlotEncoderEmbed(
-            n_continuous_base,
-            schema.n_species_vocab,
-            genus_vocab_size,
-            family_vocab_size,
-            config.species_embed_dim,
-            config.genus_emb_dim,
-            config.family_emb_dim,
-            config.top_k_species,
-            config.n_taxonomy_slots,
-            config.hidden_dims,
-            mlp_config,
-            config.tabm,
-            moe_tail,
-            config.parallel_layers
-        ));
-    }
-    else if (config.species_encoding == SpeciesEncodingMode::RankPool) {
-        if (schema.n_species_vocab == 0) {
-            throw std::runtime_error(
-                "species_encoding=RankPool requires n_species_vocab > 0 in schema"
-            );
+            encoder_embed_ = register_module("encoder", PlotEncoderEmbed(
+                n_continuous_base,
+                schema.n_species_vocab,
+                genus_vocab_size,
+                family_vocab_size,
+                config.species_embed_dim,
+                config.genus_emb_dim,
+                config.family_emb_dim,
+                config.top_k_species,
+                config.n_taxonomy_slots,
+                config.hidden_dims,
+                mlp_config,
+                config.tabm,
+                moe_tail,
+                config.parallel_layers
+            ));
         }
-        encoder_rank_pool_ = register_module("encoder", PlotEncoderRankPool(
-            n_continuous_base,
-            schema.n_species_vocab,
-            genus_vocab_size,
-            family_vocab_size,
-            config.species_embed_dim,
-            config.genus_emb_dim,
-            config.family_emb_dim,
-            config.hidden_dims,
-            mlp_config,
-            config.cover_dropout,
-            config.tabm,
-            moe_tail,
-            config.parallel_layers
-        ));
-    }
-    else if (config.species_encoding == SpeciesEncodingMode::Transformer) {
-        if (schema.n_species_vocab == 0) {
-            throw std::runtime_error(
-                "species_encoding=Transformer requires n_species_vocab > 0 in schema"
-            );
+        else if (config.species_encoding == SpeciesEncodingMode::RankPool) {
+            if (schema.n_species_vocab == 0) {
+                throw std::runtime_error(
+                    "species_encoding=RankPool requires n_species_vocab > 0 in schema"
+                );
+            }
+            encoder_rank_pool_ = register_module("encoder", PlotEncoderRankPool(
+                n_continuous_base,
+                schema.n_species_vocab,
+                genus_vocab_size,
+                family_vocab_size,
+                config.species_embed_dim,
+                config.genus_emb_dim,
+                config.family_emb_dim,
+                config.hidden_dims,
+                mlp_config,
+                config.cover_dropout,
+                config.tabm,
+                moe_tail,
+                config.parallel_layers
+            ));
         }
-        encoder_transformer_ = register_module("encoder", PlotEncoderTransformer(
-            n_continuous_base,
-            schema.n_species_vocab,
-            genus_vocab_size,
-            family_vocab_size,
-            config.d_model,
-            config.n_heads,
-            config.n_attention_layers,
-            config.transformer_ff_dim,
-            config.transformer_pooling,
-            config.transformer_dropout,
-            config.hidden_dims,
-            mlp_config,
-            config.cover_dropout,
-            config.tabm,
-            moe_tail,
-            config.parallel_layers
-        ));
-    }
-    else {
-        // Sparse mode (uses_explicit_vector=true): explicit species vector
-        if (schema.n_species_vocab == 0) {
-            throw std::runtime_error(
-                "uses_explicit_vector=true requires n_species_vocab > 0 in schema"
-            );
+        else if (config.species_encoding == SpeciesEncodingMode::Transformer) {
+            if (schema.n_species_vocab == 0) {
+                throw std::runtime_error(
+                    "species_encoding=Transformer requires n_species_vocab > 0 in schema"
+                );
+            }
+            encoder_transformer_ = register_module("encoder", PlotEncoderTransformer(
+                n_continuous_base,
+                schema.n_species_vocab,
+                genus_vocab_size,
+                family_vocab_size,
+                config.d_model,
+                config.n_heads,
+                config.n_attention_layers,
+                config.transformer_ff_dim,
+                config.transformer_pooling,
+                config.transformer_dropout,
+                config.hidden_dims,
+                mlp_config,
+                config.cover_dropout,
+                config.tabm,
+                moe_tail,
+                config.parallel_layers
+            ));
         }
+        else {
+            // Sparse mode (uses_explicit_vector=true): explicit species vector
+            if (schema.n_species_vocab == 0) {
+                throw std::runtime_error(
+                    "uses_explicit_vector=true requires n_species_vocab > 0 in schema"
+                );
+            }
 
-        encoder_sparse_ = register_module("encoder", PlotEncoderSparse(
-            n_continuous_base,
-            schema.n_species_vocab,
-            config.species_embed_dim,
-            genus_vocab_size,
-            family_vocab_size,
-            config.genus_emb_dim,
-            config.family_emb_dim,
-            config.n_taxonomy_slots,
-            config.hidden_dims,
-            mlp_config,
-            config.tabm,
-            moe_tail,
-            config.parallel_layers
-        ));
+            encoder_sparse_ = register_module("encoder", PlotEncoderSparse(
+                n_continuous_base,
+                schema.n_species_vocab,
+                config.species_embed_dim,
+                genus_vocab_size,
+                family_vocab_size,
+                config.genus_emb_dim,
+                config.family_emb_dim,
+                config.n_taxonomy_slots,
+                config.hidden_dims,
+                mlp_config,
+                config.tabm,
+                moe_tail,
+                config.parallel_layers
+            ));
+        }
     }
 
     // MoEPlacement::Post: the encoder produced its latent already, and the
@@ -379,62 +372,67 @@ int64_t ResolveModelImpl::latent_dim() const {
     }
 }
 
-TailOutput ResolveModelImpl::encode_all(const PlotInputs& inputs) {
+ResolveModelImpl::EncodedPlots ResolveModelImpl::encode_all(const PlotInputs& raw) {
+    if (is_training() && row_reference_rows_ > 0) {
+        capture_row_reference(raw);
+    }
+    const PlotInputs inputs = fuse_categoricals_(raw);
+
+    EncodedPlots encoded;
+    // A tail mixture of experts reports its load-balancing loss with the
+    // encoder output.
+    auto take_tail = [&](TailOutput tail) {
+        encoded.latent = tail.latent;
+        encoded.gate_probs = tail.gate_probs;
+        if (tail.aux_loss.defined()) {
+            encoded.aux_losses[kMoEAuxLoss] = config_.moe_aux_loss_weight * tail.aux_loss;
+        }
+    };
+
     if (trait_net_encoder_) {
-        // TraitNet uses only env features (continuous without hash embedding).
-        // Traits are pre-set via set_traits().
-        return {trait_net_encoder_->forward(inputs.continuous), {}, {}};
-    }
-    if (adapter_) {
-        return {adapter_->forward(inputs.continuous, inputs.genus_ids,
-                                  inputs.family_ids, inputs.species_ids,
-                                  inputs.species_vector), {}, {}};
-    }
-    if (encoder_rank_pool_) {
-        return encoder_rank_pool_->encode(
+        // TraitNet reads the environment block; the species enter through the
+        // trait matrix set_traits() stored.
+        encoded.latent = trait_net_encoder_->forward(inputs.continuous);
+    } else if (adapter_) {
+        auto adapted = adapter_->forward(inputs, row_reference());
+        encoded.latent = adapted.latent;
+        encoded.aux_losses = std::move(adapted.aux_losses);
+    } else if (encoder_rank_pool_) {
+        take_tail(encoder_rank_pool_->encode(
             inputs.continuous, inputs.species_ids,
             inputs.pool_genus_ids, inputs.pool_family_ids,
-            inputs.pool_weights, inputs.pool_mask, inputs.pool_has_cover);
-    }
-    if (encoder_transformer_) {
-        return encoder_transformer_->encode(
+            inputs.pool_weights, inputs.pool_mask, inputs.pool_has_cover));
+    } else if (encoder_transformer_) {
+        take_tail(encoder_transformer_->encode(
             inputs.continuous, inputs.species_ids,
             inputs.pool_genus_ids, inputs.pool_family_ids,
-            inputs.pool_weights, inputs.pool_mask, inputs.pool_has_cover);
+            inputs.pool_weights, inputs.pool_mask, inputs.pool_has_cover));
+    } else if (encoder_hash_) {
+        take_tail(encoder_hash_->encode(inputs.continuous, inputs.genus_ids,
+                                        inputs.family_ids));
+    } else if (encoder_embed_) {
+        take_tail(encoder_embed_->encode(inputs.continuous, inputs.species_ids,
+                                         inputs.genus_ids, inputs.family_ids));
+    } else {
+        take_tail(encoder_sparse_->encode(inputs.continuous, inputs.species_vector,
+                                          inputs.genus_ids, inputs.family_ids));
     }
-    if (encoder_hash_) {
-        return encoder_hash_->encode(inputs.continuous, inputs.genus_ids,
-                                     inputs.family_ids);
+
+    // Only one MoE placement is ever built, so the post mixture never meets a
+    // tail one.
+    if (post_moe_) {
+        auto moe = post_moe_->forward(encoded.latent);
+        encoded.latent = moe.output;
+        encoded.gate_probs = moe.gate_probs;
+        if (moe.aux_loss.defined()) {
+            encoded.aux_losses[kMoEAuxLoss] = config_.moe_aux_loss_weight * moe.aux_loss;
+        }
     }
-    if (encoder_embed_) {
-        return encoder_embed_->encode(inputs.continuous, inputs.species_ids,
-                                      inputs.genus_ids, inputs.family_ids);
-    }
-    return encoder_sparse_->encode(inputs.continuous, inputs.species_vector,
-                                   inputs.genus_ids, inputs.family_ids);
+    return encoded;
 }
 
 torch::Tensor ResolveModelImpl::encode(const PlotInputs& inputs) {
-    auto latent = encode_all(inputs).latent;
-    if (post_moe_) {
-        latent = post_moe_->forward_simple(latent);
-    }
-    return latent;
-}
-
-std::pair<torch::Tensor, torch::Tensor> ResolveModelImpl::encode_with_aux(
-    const PlotInputs& inputs
-) {
-    auto encoded = encode_all(inputs);
-
-    // post_moe_ runs on the training path as well as in encode(), so the
-    // latent the heads train on is the one get_latent extracts. Only one
-    // placement is ever built, so the two auxiliary losses never both exist.
-    if (post_moe_) {
-        auto moe_result = post_moe_->forward(encoded.latent);
-        return {moe_result.output, moe_result.aux_loss};
-    }
-    return {encoded.latent, encoded.aux_loss};
+    return encode_all(inputs).latent;
 }
 
 std::unordered_map<std::string, torch::Tensor> ResolveModelImpl::forward(
@@ -444,25 +442,75 @@ std::unordered_map<std::string, torch::Tensor> ResolveModelImpl::forward(
 }
 
 ModelForwardResult ResolveModelImpl::forward_with_aux(const PlotInputs& inputs) {
-    auto [latent, aux_loss] = encode_with_aux(fuse_categoricals_(inputs));
+    auto encoded = encode_all(inputs);
 
     std::unordered_map<std::string, torch::Tensor> outputs;
     for (auto& [name, head] : heads_) {
-        outputs[name] = head->forward(latent);
+        outputs[name] = head->forward(encoded.latent);
     }
+    return ModelForwardResult{std::move(outputs), std::move(encoded.aux_losses)};
+}
 
-    return ModelForwardResult{outputs, aux_loss};
+std::vector<std::string> ResolveModelImpl::aux_loss_names() const {
+    AuxLosses present;
+    if (uses_moe()) present[kMoEAuxLoss];
+    if (config_.encoder_architecture == EncoderArchitecture::TabNet) {
+        present[kTabNetSparsityLoss];
+    }
+    std::vector<std::string> names;
+    names.reserve(present.size());
+    for (const auto& entry : present) names.push_back(entry.first);
+    return names;
 }
 
 torch::Tensor ResolveModelImpl::forward_single(
     const std::string& target,
     const PlotInputs& inputs
 ) {
-    return head(target)->forward(encode(fuse_categoricals_(inputs)));
+    return head(target)->forward(encode(inputs));
 }
 
 torch::Tensor ResolveModelImpl::get_latent(const PlotInputs& inputs) {
-    return encode(fuse_categoricals_(inputs));
+    return encode(inputs);
+}
+
+PlotInputs ResolveModelImpl::row_reference() {
+    if (row_reference_rows_ == 0 || is_training()) return {};
+    PlotInputs reference = row_reference_.without_empty().conformed();
+    if (reference.n_plots() == 0) return {};
+    return fuse_categoricals_(reference);
+}
+
+void ResolveModelImpl::capture_row_reference(const PlotInputs& inputs) {
+    const int64_t n_rows = std::min(inputs.n_plots(), row_reference_rows_);
+    if (n_rows == 0 || n_rows < row_reference_.n_plots()) return;
+
+    std::vector<torch::Tensor> rows;
+    inputs.slice(0, n_rows).for_each([&rows](const PlotInputField&, const torch::Tensor& t) {
+        rows.push_back(t);
+    });
+    torch::NoGradGuard no_grad;
+    std::size_t i = 0;
+    row_reference_.for_each([&](const PlotInputField& field, torch::Tensor& buffer) {
+        // A module buffer is dense, so a sparse-rows field is held as its
+        // dense rows; row_reference() conforms it back.
+        const torch::Tensor& source = rows[i++];
+        buffer.set_data(source.defined()
+            ? (is_sparse_rows(source) ? sparse_rows_to_dense(source) : source.detach().clone())
+            : torch::empty({0}, buffer.options().dtype(field.dtype)));
+    });
+}
+
+std::vector<torch::Tensor> ResolveModelImpl::data_buffers() const {
+    std::vector<torch::Tensor> buffers;
+    if (adapter_) buffers = adapter_->data_buffers();
+    if (trait_net_encoder_) buffers.push_back(trait_net_encoder_->traits_buffer());
+    if (row_reference_rows_ > 0) {
+        row_reference_.for_each([&buffers](const PlotInputField&, const torch::Tensor& t) {
+            buffers.push_back(t);
+        });
+    }
+    return buffers;
 }
 
 PlotEncoderTransformer ResolveModelImpl::transformer_encoder() const {
@@ -496,12 +544,12 @@ const TaskHead& ResolveModelImpl::head(const std::string& name) const {
 std::pair<torch::Tensor, std::vector<torch::Tensor>> ResolveModelImpl::encode_with_activations(
     const PlotInputs& inputs
 ) {
-    const PlotInputs fused = fuse_categoricals_(inputs);
     if (encoder_hash_) {
+        const PlotInputs fused = fuse_categoricals_(inputs);
         return encoder_hash_->forward_with_activations(
             fused.continuous, fused.genus_ids, fused.family_ids);
     }
-    return {encode(fused), {}};
+    return {encode(inputs), {}};
 }
 
 torch::Tensor ResolveModelImpl::get_taxonomy_weights_(
@@ -554,14 +602,10 @@ torch::Tensor ResolveModelImpl::get_species_weights() const {
 torch::Tensor ResolveModelImpl::get_gate_probs(const PlotInputs& inputs) {
     // Under MoEPlacement::Post the probabilities come from the mixture over
     // the latent; under Tail they come back with the encoder's own output.
-    if (config_.moe_routing == MoERoutingType::None) {
+    if (!uses_moe()) {
         return torch::Tensor();
     }
-    auto encoded = encode_all(fuse_categoricals_(inputs));
-    if (post_moe_) {
-        return post_moe_->forward(encoded.latent).gate_probs;
-    }
-    return encoded.gate_probs;
+    return encode_all(inputs).gate_probs;
 }
 
 void ResolveModelImpl::set_traits(torch::Tensor traits) {
@@ -580,21 +624,19 @@ void ResolveModelImpl::set_species_graph(torch::Tensor edge_index,
             "heterogeneous_gnn; this model is built with " +
             std::string(enum_to_name(config_.encoder_architecture)) + ".");
     }
-    adapter_->set_species_graph(std::move(edge_index), std::move(edge_type));
+    adapter_->set_species_graph(edge_index, edge_type);
 }
 
 bool ResolveModelImpl::has_species_graph() const noexcept {
-    return adapter_ && requires_species_graph() && adapter_->has_species_graph();
+    return adapter_ && adapter_->has_species_graph();
 }
 
 torch::Tensor ResolveModelImpl::species_graph_edge_index() const {
-    return has_species_graph() ? adapter_->species_graph_edge_index()
-                               : torch::Tensor();
+    return adapter_ ? adapter_->species_graph_edge_index() : torch::Tensor();
 }
 
 torch::Tensor ResolveModelImpl::species_graph_edge_type() const {
-    return has_species_graph() ? adapter_->species_graph_edge_type()
-                               : torch::Tensor();
+    return adapter_ ? adapter_->species_graph_edge_type() : torch::Tensor();
 }
 
 } // namespace resolve

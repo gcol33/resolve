@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-#include "resolve/attention.hpp"
+#include "resolve/tabnet.hpp"
 #include "resolve/checkpoint.hpp"
 #include "resolve/types.hpp"
 #include "test_support.hpp"
@@ -358,8 +358,7 @@ TEST_CASE("TabNetEncoder forwards and trains at both use_sparsemax settings",
     auto build = [&](bool use_sparsemax, int64_t n_steps) {
         torch::manual_seed(2026);
         return TabNetEncoder(input_dim, n_steps, /*n_d=*/8, /*n_a=*/8,
-                             /*relaxation_factor=*/1.5f,
-                             /*sparsity_coefficient=*/1e-3f, use_sparsemax);
+                             /*relaxation_factor=*/1.5f, use_sparsemax);
     };
 
     SECTION("accessor reports the configured mapping") {
@@ -367,11 +366,11 @@ TEST_CASE("TabNetEncoder forwards and trains at both use_sparsemax settings",
         REQUIRE_FALSE(build(false, 2)->use_sparsemax());
     }
 
-    SECTION("single-step feature importance is the raw mask and differs") {
-        // At n_steps = 1 the returned feature_importance IS the one attentive
-        // mask, produced from logits that are identical across the two settings
-        // (same seeded weights, prior_scales still all ones). The support
-        // ordering is therefore the operator-level guarantee.
+    SECTION("single-step masks differ between the two settings") {
+        // At n_steps = 1 the one attentive mask is produced from logits that
+        // are identical across the two settings (same seeded weights,
+        // prior_scales still all ones), so any difference in the output and in
+        // the mask entropy is the simplex mapping.
         torch::manual_seed(31);
         auto x = torch::randn({batch, input_dim}) * 1.5f;
 
@@ -380,21 +379,12 @@ TEST_CASE("TabNetEncoder forwards and trains at both use_sparsemax settings",
         enc_sparse->eval();
         enc_entmax->eval();
 
-        auto imp_s = enc_sparse->forward(x).second;
-        auto imp_e = enc_entmax->forward(x).second;
+        auto out_s = enc_sparse->forward(x);
+        auto out_e = enc_entmax->forward(x);
 
-        REQUIRE(imp_s.sizes() == imp_e.sizes());
-        // Each is still a per-row distribution.
-        REQUIRE_THAT((imp_s.sum(-1) - 1.0f).abs().max().item<float>(),
-                     WithinAbs(0.0f, 1e-4));
-        REQUIRE_THAT((imp_e.sum(-1) - 1.0f).abs().max().item<float>(),
-                     WithinAbs(0.0f, 1e-4));
-
-        // The knob is live, and entmax never drops a feature sparsemax kept.
-        REQUIRE_FALSE(torch::allclose(imp_s, imp_e, 1e-4, 1e-6));
-        auto n_s = (imp_s > 0).to(torch::kLong).sum(-1);
-        auto n_e = (imp_e > 0).to(torch::kLong).sum(-1);
-        REQUIRE((n_s <= n_e).all().item<bool>());
+        REQUIRE_FALSE(torch::allclose(out_s.output, out_e.output, 1e-4, 1e-6));
+        REQUIRE(std::abs(out_s.mask_entropy.item<float>() -
+                         out_e.mask_entropy.item<float>()) > 1e-4f);
     }
 
     SECTION("multi-step forwards differ between the two settings") {
@@ -409,10 +399,10 @@ TEST_CASE("TabNetEncoder forwards and trains at both use_sparsemax settings",
         auto out_s = enc_sparse->forward(x);
         auto out_e = enc_entmax->forward(x);
 
-        REQUIRE(out_s.first.sizes() == out_e.first.sizes());
-        REQUIRE(torch::isfinite(out_s.first).all().item<bool>());
-        REQUIRE(torch::isfinite(out_e.first).all().item<bool>());
-        REQUIRE_FALSE(torch::allclose(out_s.second, out_e.second, 1e-4, 1e-6));
+        REQUIRE(out_s.output.sizes() == out_e.output.sizes());
+        REQUIRE(torch::isfinite(out_s.output).all().item<bool>());
+        REQUIRE(torch::isfinite(out_e.output).all().item<bool>());
+        REQUIRE_FALSE(torch::allclose(out_s.output, out_e.output, 1e-4, 1e-6));
     }
 
     SECTION("both settings train") {
@@ -434,7 +424,7 @@ TEST_CASE("TabNetEncoder forwards and trains at both use_sparsemax settings",
             std::vector<double> losses;
             for (int step = 0; step < 60; ++step) {
                 opt.zero_grad();
-                auto latent = encoder->forward(x).first;
+                auto latent = encoder->forward(x).output;
                 auto loss = torch::mse_loss(head->forward(latent), y);
                 loss.backward();
                 opt.step();
@@ -489,7 +479,7 @@ TEST_CASE("use_sparsemax = false round-trips through the checkpoint", "[entmax][
         torch::manual_seed(1905);
         auto enc = TabNetEncoder(input_dim, loaded.tabnet.n_steps, loaded.tabnet.n_d,
                                  loaded.tabnet.n_a, loaded.tabnet.relaxation_factor,
-                                 loaded.tabnet.sparsity_coefficient, use_sparsemax);
+                                 use_sparsemax);
         enc->eval();
         return enc;
     };
@@ -497,7 +487,6 @@ TEST_CASE("use_sparsemax = false round-trips through the checkpoint", "[entmax][
     torch::manual_seed(1905);
     auto rebuilt = TabNetEncoder(input_dim, loaded.tabnet.n_steps, loaded.tabnet.n_d,
                                  loaded.tabnet.n_a, loaded.tabnet.relaxation_factor,
-                                 loaded.tabnet.sparsity_coefficient,
                                  loaded.tabnet.use_sparsemax);
     rebuilt->eval();
     REQUIRE_FALSE(rebuilt->use_sparsemax());
@@ -505,9 +494,9 @@ TEST_CASE("use_sparsemax = false round-trips through the checkpoint", "[entmax][
     torch::manual_seed(5702);
     auto x = torch::randn({32, input_dim}) * 1.5f;
 
-    auto imp_rebuilt = rebuilt->forward(x).second;
-    auto imp_entmax = make(false)->forward(x).second;
-    auto imp_sparse = make(true)->forward(x).second;
+    auto imp_rebuilt = rebuilt->forward(x).output;
+    auto imp_entmax = make(false)->forward(x).output;
+    auto imp_sparse = make(true)->forward(x).output;
 
     REQUIRE(torch::allclose(imp_rebuilt, imp_entmax, 1e-5, 1e-7));
     REQUIRE_FALSE(torch::allclose(imp_rebuilt, imp_sparse, 1e-4, 1e-6));

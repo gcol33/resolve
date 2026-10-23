@@ -13,8 +13,13 @@ set(RESOLVE_CORE_SOURCES
     ${RESOLVE_CORE_DIR}/cpp_src/encoder_topk.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/encoder_pool.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/task_head.cpp
-    ${RESOLVE_CORE_DIR}/cpp_src/attention.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/ft_transformer.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/tabnet.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/saint.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/excelformer.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/traitnet.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/gnn.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/hetero_gnn.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/tabm.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/adapter.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/model.cpp

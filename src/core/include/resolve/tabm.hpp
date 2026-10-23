@@ -1,5 +1,7 @@
 #pragma once
 
+#include "resolve/types.hpp"  // TabMAggregation
+
 #include <torch/torch.h>
 #include <vector>
 
@@ -66,17 +68,16 @@ TORCH_MODULE(BatchEnsembleLinear);
 // BatchEnsembleLinear layers. During forward pass, N ensemble members
 // run in parallel. Predictions are aggregated (mean/median) for output.
 //
-// This is NOT a new EncoderArchitecture: it modifies the MLP backbone
-// used by any PlotEncoder variant (hash/embed/sparse).
+// It is one of the encoder tails (EncoderTail in encoder.hpp), open to every
+// species encoder, not an EncoderArchitecture of its own.
 class TabMEncoderImpl : public torch::nn::Module {
 public:
-    // aggregation: "mean" or "median"
     TabMEncoderImpl(
         int64_t input_dim,
         const std::vector<int64_t>& hidden_dims,
         int n_ensembles = 16,
         float dropout = 0.0f,
-        const std::string& aggregation = "mean"
+        TabMAggregation aggregation = TabMAggregation::Mean
     );
 
     // Forward pass
@@ -94,13 +95,12 @@ public:
 private:
     int64_t output_dim_;
     int n_ensembles_;
-    std::string aggregation_;
+    TabMAggregation aggregation_;
 
     // Stack of BatchEnsemble layers with activations
     torch::nn::ModuleList layers_{nullptr};
     torch::nn::ModuleList norms_{nullptr};
     torch::nn::ModuleList dropouts_{nullptr};
-    std::vector<int64_t> dims_;
 };
 
 TORCH_MODULE(TabMEncoder);

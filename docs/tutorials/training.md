@@ -304,7 +304,7 @@ cfg.ft_transformer.n_layers = 3
 | `MLP` | `hidden_dims` and friends | Default |
 | `FTTransformer` | `ft_transformer` | Feature tokenization plus self-attention over features |
 | `TabNet` | `tabnet` | Sequential attentive feature selection; `use_sparsemax=False` selects 1.5-entmax |
-| `SAINT` | `saint` | Row and column attention |
+| `SAINT` | `saint` | Row and column attention; inference rows attend to a fixed set of training rows |
 | `ExcelFormer` | `excelformer` | Semi-permeable attention driven by learned feature importance |
 | `TraitNet` | `trait_net` | Environment and trait interaction; needs traits set on the model |
 | `GNN` | `gnn` | Spatial, taxonomic, or co-occurrence graph; the spatial mode needs coordinates and trains full-batch |
@@ -412,9 +412,10 @@ for target, history in result.test_loss_history_by_target.items():
 ```
 
 Per epoch the terms add up to the total. A model with a mixture of experts adds
-a load-balancing term to the training loss that belongs to no target; it is in
-`train_moe_aux_loss_history`, and the training terms add up to the total with
-it. A batch with no labelled plot for a target with `missing = Mask`
+a load-balancing term to the training loss that belongs to no target, and
+TabNet adds its feature-mask sparsity term; they are in
+`train_aux_loss_history` under `moe` and `tabnet_sparsity`, and the training
+terms add up to the total with them. A batch with no labelled plot for a target with `missing = Mask`
 contributes 0 for that target, averaged in like any batch.
 
 ### Metrics

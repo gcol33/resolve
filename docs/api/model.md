@@ -63,7 +63,7 @@ above or by keyword; an unknown keyword raises `TypeError`.
 |--------|---------|
 | `forward(...)` / `__call__(...)` | `dict[str, Tensor]` |
 | `get_latent(...)` | `Tensor` of shape `(batch, latent_dim)` |
-| `forward_with_aux(...)` | `ModelForwardResult` with `outputs` and `moe_aux_loss` |
+| `forward_with_aux(...)` | `ModelForwardResult` with `outputs` and `aux_losses` |
 | `forward_single(target, ...)` | `Tensor` for one head |
 | `encode_with_activations(...)` | `(latent, [activations])`; activations are non-empty for the hash encoder |
 | `get_gate_probs(...)` | `Tensor` of expert gate probabilities `(batch, n_experts)`, `None` without MoE |
@@ -191,7 +191,7 @@ config.tabnet.use_sparsemax = False       # 1.5-entmax instead
 | `MLP` | `hidden_dims` and friends | Default |
 | `FTTransformer` | `ft_transformer` | `d_model`, `n_heads`, `n_layers`, `attention_dropout`, `ffn_dropout`, `ffn_multiplier`, `pre_norm` |
 | `TabNet` | `tabnet` | `n_steps`, `n_d`, `n_a`, `relaxation_factor`, `sparsity_coefficient`, `virtual_batch_size`, `use_sparsemax` |
-| `SAINT` | `saint` | `d_model`, `n_heads`, `n_layers`, `attention_dropout`, `use_row_attention` |
+| `SAINT` | `saint` | `d_model`, `n_heads`, `n_layers`, `attention_dropout`, `use_row_attention`, `row_attention_rows` |
 | `ExcelFormer` | `excelformer` | `d_model`, `n_heads`, `n_layers`, `attention_dropout`, `ffn_multiplier`, `importance_threshold`, `pre_norm` |
 | `TraitNet` | `trait_net` | `env_dim`, `trait_dim`, `interaction_dim`, `interaction`, `shared_trait_encoder` |
 | `GNN` | `gnn` | `gnn_type`, `n_layers`, `hidden_dim`, `n_heads`, `k_neighbors`, `graph_mode`, `edge_dropout`, `use_edge_features` |
@@ -210,12 +210,27 @@ each edge's similarity as its weight instead of a plain 1.
 
 `TabNet.virtual_batch_size` is the ghost batch normalization slice every block
 below the input normalization runs at; 0 normalizes the batch in one piece.
+TabNet reads the taxonomy slots through one embedding table per slot (as wide
+as `genus_emb_dim` / `family_emb_dim`), appended to its numerical features, and
+adds `sparsity_coefficient` times the entropy of its feature masks to the
+training loss, recorded as the `tabnet_sparsity` term of
+`TrainResult.train_aux_loss_history`.
+
+`SAINT` attends across rows as well as across features. In training a batch is
+cut into groups of `row_attention_rows` rows and each row attends over its
+group. At inference each plot attends over a fixed reference set of
+`row_attention_rows - 1` training rows plus itself; the reference rows are
+captured from the training batches and saved with the weights, so a plot's
+prediction does not depend on which other plots share its batch, and the
+predictor scores a SAINT model in chunks like any other.
 
 `FTTransformer` reads `attention_dropout` on the attention weights and
 `ffn_dropout` inside the feed-forward layer and on each sublayer's residual
 branch.
 
-`TraitNet` needs a trait matrix supplied through `model.set_traits(traits)`.
+`TraitNet` needs a trait matrix supplied through `model.set_traits(traits)`;
+the model keeps it in a buffer, so it moves with the model and is saved in the
+checkpoint.
 `interaction` is how the environment and a species' traits are combined
 (`Bilinear`, `MLP`, `Attention`), `interaction_dim` the width that combination
 produces, and `shared_trait_encoder = False` gives every species its own trait
@@ -225,8 +240,10 @@ encoder, which costs `n_species` times the parameters.
 `Trainer.prepare_data` builds it from the dataset -- same-genus and same-family
 edges when `use_taxonomic_edges`, co-occurrence edges above
 `cooccurrence_threshold` keeping `k_cooccurrence` partners per species when
-`use_cooccurrence_edges` -- and the checkpoint carries it, so scoring reads the
-graph the weights were trained on. Co-occurrence needs the sparse species
+`use_cooccurrence_edges` -- and keeps it in model buffers, sorted by edge type,
+so the checkpoint carries it and scoring reads the graph the weights were
+trained on. In eval mode the species embeddings are computed once and reused
+until the weights or the graph change. Co-occurrence needs the sparse species
 encoding. See `build_species_graph` in the dataset reference.
 
 ### Parallel branches and TabM
@@ -234,7 +251,7 @@ encoding. See `build_species_graph` in the dataset reference.
 | Attribute | Fields |
 |-----------|--------|
 | `parallel_layers` | `enabled`, `branches` (a list of `ParallelBranchConfig`), `aggregation`, `attention_heads`, `use_residual` |
-| `tabm` | `enabled`, `n_ensembles`, `aggregation` |
+| `tabm` | `enabled`, `n_ensembles`, `aggregation` (`TabMAggregation.Mean` or `Median`) |
 
 `ParallelBranchConfig` carries `hidden_dims`, `activation`, `normalization`,
 `dropout`, and `branch_weight`, the last being what the branch contributes to
@@ -256,7 +273,7 @@ Returned by `forward_with_aux`.
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `outputs` | `dict[str, Tensor]` | One entry per target |
-| `moe_aux_loss` | `Tensor` or `None` | Load-balancing loss when routing is active |
+| `aux_losses` | `dict[str, Tensor]` | The auxiliary terms the forward adds to the training loss, each already weighted: `moe` (mixture-of-experts load balancing, times `moe_aux_loss_weight`) and `tabnet_sparsity` (TabNet's mask entropy, times `tabnet.sparsity_coefficient`); empty for a model with neither. `model.aux_loss_names` lists the ones a model produces |
 
 ---
 

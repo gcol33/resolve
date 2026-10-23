@@ -12,6 +12,7 @@
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #endif
 
+#include <algorithm>
 #include <mutex>
 #include <sstream>
 
@@ -66,12 +67,19 @@ torch::Tensor read_required(torch::serialize::InputArchive& archive, const std::
 
 // (n_targets, n_epochs): row i is `history[targets[i].name]`, an absent target
 // a row of zeros.
+std::vector<std::string> names_of(const std::vector<TargetConfig>& targets) {
+    std::vector<std::string> names;
+    names.reserve(targets.size());
+    for (const auto& target : targets) names.push_back(target.name);
+    return names;
+}
+
 torch::Tensor history_matrix(const std::unordered_map<std::string, std::vector<float>>& history,
-                             const std::vector<TargetConfig>& targets, size_t n_epochs) {
-    auto out = torch::zeros({static_cast<int64_t>(targets.size()),
+                             const std::vector<std::string>& names, size_t n_epochs) {
+    auto out = torch::zeros({static_cast<int64_t>(names.size()),
                              static_cast<int64_t>(n_epochs)}, torch::kFloat32);
-    for (size_t i = 0; i < targets.size(); ++i) {
-        auto it = history.find(targets[i].name);
+    for (size_t i = 0; i < names.size(); ++i) {
+        auto it = history.find(names[i]);
         if (it == history.end() || it->second.empty()) continue;
         out[static_cast<int64_t>(i)].copy_(float_tensor(it->second));
     }
@@ -79,11 +87,11 @@ torch::Tensor history_matrix(const std::unordered_map<std::string, std::vector<f
 }
 
 std::unordered_map<std::string, std::vector<float>> history_map(
-    const torch::Tensor& matrix, const std::vector<TargetConfig>& targets) {
+    const torch::Tensor& matrix, const std::vector<std::string>& names) {
     std::unordered_map<std::string, std::vector<float>> out;
     if (matrix.numel() == 0 || matrix.size(1) == 0) return out;
-    for (size_t i = 0; i < targets.size(); ++i) {
-        out[targets[i].name] = float_vector(matrix[static_cast<int64_t>(i)]);
+    for (size_t i = 0; i < names.size(); ++i) {
+        out[names[i]] = float_vector(matrix[static_cast<int64_t>(i)]);
     }
     return out;
 }
@@ -203,13 +211,6 @@ void Trainer::save_checkpoint(const std::string& path, const RunMetadata* metada
     save_schema(archive, model_->schema());
     save_scalers(archive, scalers_);
 
-    // The species graph a HeterogeneousGNN was trained on. Scoring has to pass
-    // messages on the same graph, and the training data is not around at
-    // inference time, so it belongs in the checkpoint. Writes nothing for every
-    // other architecture.
-    save_species_graph(archive, model_->species_graph_edge_index(),
-                       model_->species_graph_edge_type());
-
     // Save categorical vocabulary (string -> code maps for each categorical
     // column). An empty vocab writes a count of zero, which load() reads back
     // as an empty vocabulary.
@@ -260,12 +261,14 @@ void Trainer::write_progress(torch::serialize::OutputArchive& archive,
     archive.write("resume_train_loss", float_tensor(result.train_loss_history));
     archive.write("resume_test_loss", float_tensor(result.test_loss_history));
     archive.write("resume_train_loss_by_target",
-                  history_matrix(result.train_loss_history_by_target, targets,
+                  history_matrix(result.train_loss_history_by_target, names_of(targets),
                                  result.train_loss_history.size()));
     archive.write("resume_test_loss_by_target",
-                  history_matrix(result.test_loss_history_by_target, targets,
+                  history_matrix(result.test_loss_history_by_target, names_of(targets),
                                  result.test_loss_history.size()));
-    archive.write("resume_moe_aux", float_tensor(result.train_moe_aux_loss_history));
+    archive.write("resume_aux_loss", history_matrix(result.train_aux_loss_history,
+                                                    model_->aux_loss_names(),
+                                                    result.train_loss_history.size()));
 
     // The best epoch's metrics as three parallel lists.
     std::vector<std::string> metric_targets;
@@ -354,17 +357,6 @@ torch::serialize::InputArchive Trainer::open_checkpoint(
 void Trainer::restore_model_state(torch::serialize::InputArchive& archive,
                                   ResolveModel& model, torch::Device device) {
     load_weights_into(archive, model);
-
-    // A checkpoint written before the species graph was persisted carries
-    // none, and such a model still needs one set explicitly before it can
-    // forward.
-    if (model->requires_species_graph()) {
-        auto [edge_index, edge_type] = load_species_graph(archive);
-        if (edge_index.defined() && edge_type.defined()) {
-            model->set_species_graph(edge_index, edge_type);
-        }
-    }
-
     model->to(device);
 }
 
@@ -430,11 +422,22 @@ void Trainer::load_weights_into(torch::serialize::InputArchive& archive, Resolve
             note_missing("param_" + pair.key());
         }
     }
+    // A data buffer (the species graph, the trait matrix, SAINT's reference
+    // rows) takes the shape it was saved with; every other tensor must match.
+    const auto data_buffers = model->data_buffers();
+    auto is_data_buffer = [&data_buffers](const torch::Tensor& buffer) {
+        return std::any_of(data_buffers.begin(), data_buffers.end(),
+                           [&buffer](const torch::Tensor& d) { return d.is_same(buffer); });
+    };
     for (const auto& pair : model->named_buffers()) {
         ++n_expected;
         torch::Tensor t;
         if (archive.try_read("buffer_" + pair.key(), t)) {
-            pair.value().copy_(t);
+            if (is_data_buffer(pair.value())) {
+                pair.value().set_data(t.to(pair.value().scalar_type()));
+            } else {
+                pair.value().copy_(t);
+            }
             ++n_loaded;
         } else {
             note_missing("buffer_" + pair.key());
@@ -449,7 +452,9 @@ void Trainer::load_weights_into(torch::serialize::InputArchive& archive, Resolve
             << " of " << n_expected << " model tensors, so the loaded model would "
                "keep randomly-initialized weights. The model architecture likely "
                "does not match the checkpoint (e.g. a different encoder_architecture "
-               "or architecture sub-config). First missing tensor: " << first_missing;
+               "or architecture sub-config, or a checkpoint written before a change "
+               "to this architecture's layout, which has to be retrained). First "
+               "missing tensor: " << first_missing;
         throw std::runtime_error(msg.str());
     }
     // The missing-tensor check above catches a subset model loaded from a subset
@@ -523,11 +528,11 @@ Trainer::RunProgress Trainer::read_progress(torch::serialize::InputArchive& arch
     result.train_loss_history = float_vector(read_required(archive, "resume_train_loss", path));
     result.test_loss_history = float_vector(read_required(archive, "resume_test_loss", path));
     result.train_loss_history_by_target =
-        history_map(read_required(archive, "resume_train_loss_by_target", path), targets);
+        history_map(read_required(archive, "resume_train_loss_by_target", path), names_of(targets));
     result.test_loss_history_by_target =
-        history_map(read_required(archive, "resume_test_loss_by_target", path), targets);
-    result.train_moe_aux_loss_history =
-        float_vector(read_required(archive, "resume_moe_aux", path));
+        history_map(read_required(archive, "resume_test_loss_by_target", path), names_of(targets));
+    result.train_aux_loss_history =
+        history_map(read_required(archive, "resume_aux_loss", path), model_->aux_loss_names());
 
     const auto metric_targets = read_string_list(archive, "resume_metric_target");
     const auto metric_names = read_string_list(archive, "resume_metric_name");

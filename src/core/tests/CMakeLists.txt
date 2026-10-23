@@ -69,6 +69,7 @@ add_executable(resolve_tests
     test_gnn.cpp
     test_attention_encoders.cpp
     test_tabular_adapter.cpp
+    test_data_buffers.cpp
     test_cross_validation.cpp
     test_rank_pool_encoder.cpp
     test_transformer_encoder.cpp

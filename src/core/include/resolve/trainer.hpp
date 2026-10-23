@@ -362,13 +362,13 @@ private:
     [[nodiscard]] LabelledPlots unstandardized(LabelledPlots plots, const Scalers& scalers) const;
 
     // One epoch's loss: the value the total history records, and its split
-    // into the term each target adds (loss_fn_.targets() order) plus the MoE
-    // load-balancing term, which belongs to no target (0 without MoE, and
-    // always 0 on the held-out fold).
+    // into the term each target adds (loss_fn_.targets() order) plus the
+    // auxiliary terms, which belong to no target (model_->aux_loss_names()
+    // order; empty on the held-out fold, which never carries them).
     struct EpochLoss {
         float total = 0.0f;
         std::vector<float> by_target;
-        float moe_aux = 0.0f;
+        std::vector<float> aux;
     };
 
     using MetricMap = std::unordered_map<std::string, std::unordered_map<std::string, float>>;

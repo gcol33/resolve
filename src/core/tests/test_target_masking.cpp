@@ -661,21 +661,31 @@ TEST_CASE("Cross-validation keeps masked targets consistent across folds",
 
 namespace {
 
-// Per epoch, the per-target terms of `names` -- plus `moe_aux`, the term that
-// belongs to no target, when given -- add up to `total`.
-void require_decomposes(const std::unordered_map<std::string, std::vector<float>>& by_target,
+using Histories = std::unordered_map<std::string, std::vector<float>>;
+
+// Per epoch, the per-target terms of `names` -- plus every auxiliary term of
+// `aux`, which belong to no target, when given -- add up to `total`.
+void require_decomposes(const Histories& by_target,
                         const std::vector<float>& total,
                         const std::vector<std::string>& names,
-                        const std::vector<float>* moe_aux = nullptr) {
+                        const Histories* aux = nullptr) {
     REQUIRE(by_target.size() == names.size());
     for (const auto& name : names) {
         INFO("target " << name);
         REQUIRE(by_target.count(name) == 1);
         REQUIRE(by_target.at(name).size() == total.size());
     }
-    if (moe_aux) REQUIRE(moe_aux->size() == total.size());
+    if (aux) {
+        for (const auto& [name, history] : *aux) {
+            INFO("auxiliary term " << name);
+            REQUIRE(history.size() == total.size());
+        }
+    }
     for (size_t e = 0; e < total.size(); ++e) {
-        double sum = moe_aux ? static_cast<double>((*moe_aux)[e]) : 0.0;
+        double sum = 0.0;
+        if (aux) {
+            for (const auto& [name, history] : *aux) sum += history[e];
+        }
         for (const auto& name : names) sum += by_target.at(name)[e];
         INFO("epoch " << e << ": terms " << sum << ", total " << total[e]);
         REQUIRE(std::isfinite(total[e]));
@@ -709,7 +719,7 @@ TEST_CASE("The per-target loss history adds up to the total, batches without a l
     REQUIRE(r.test_loss_history.size() == 5);
     require_decomposes(r.train_loss_history_by_target, r.train_loss_history, {"y", "cls"});
     require_decomposes(r.test_loss_history_by_target, r.test_loss_history, {"y", "cls"});
-    REQUIRE(r.train_moe_aux_loss_history.empty());
+    REQUIRE(r.train_aux_loss_history.empty());
 
     for (size_t e = 0; e < r.train_loss_history.size(); ++e) {
         INFO("epoch " << e);
@@ -792,12 +802,50 @@ TEST_CASE("The MoE load-balancing term is recorded beside the targets' terms",
     trainer.prepare_data(ds, 0.25f, 11);
     const auto r = trainer.fit();
 
-    REQUIRE(r.train_moe_aux_loss_history.size() == 3);
-    for (float aux : r.train_moe_aux_loss_history) CHECK(aux > 0.0f);
+    REQUIRE(r.train_aux_loss_history.size() == 1);
+    REQUIRE(r.train_aux_loss_history.at(kMoEAuxLoss).size() == 3);
+    for (float aux : r.train_aux_loss_history.at(kMoEAuxLoss)) CHECK(aux > 0.0f);
     require_decomposes(r.train_loss_history_by_target, r.train_loss_history, {"y", "cls"},
-                       &r.train_moe_aux_loss_history);
+                       &r.train_aux_loss_history);
     // The held-out selection loss carries no load-balancing term.
     require_decomposes(r.test_loss_history_by_target, r.test_loss_history, {"y", "cls"});
+}
+
+TEST_CASE("TabNet's sparsity term is part of the training objective",
+          "[masking][loss_history][tabnet]") {
+    const auto plots = make_plots(200, 1.0, 0.6, 26);
+    const auto files = write_csvs(plots);
+    const auto ds = load(files, {y_spec(TargetMissingPolicy::Drop),
+                                 cls_spec(TargetMissingPolicy::Mask)});
+
+    auto fit_with = [&](float coefficient) {
+        torch::manual_seed(20261023);
+        auto mcfg = model_config();
+        mcfg.encoder_architecture = EncoderArchitecture::TabNet;
+        mcfg.tabnet.n_steps = 2;
+        mcfg.tabnet.n_d = 8;
+        mcfg.tabnet.n_a = 8;
+        mcfg.tabnet.virtual_batch_size = 0;
+        mcfg.tabnet.sparsity_coefficient = coefficient;
+        ResolveModel model(ds.schema(), mcfg);
+        REQUIRE(model->aux_loss_names() == std::vector<std::string>{kTabNetSparsityLoss});
+        Trainer trainer(model, train_config(/*fixed_epochs=*/3));
+        trainer.prepare_data(ds, 0.25f, 11);
+        return trainer.fit();
+    };
+
+    const auto r = fit_with(0.5f);
+    REQUIRE(r.train_aux_loss_history.size() == 1);
+    REQUIRE(r.train_aux_loss_history.at(kTabNetSparsityLoss).size() == 3);
+    for (float term : r.train_aux_loss_history.at(kTabNetSparsityLoss)) CHECK(term > 0.0f);
+    require_decomposes(r.train_loss_history_by_target, r.train_loss_history, {"y", "cls"},
+                       &r.train_aux_loss_history);
+    require_decomposes(r.test_loss_history_by_target, r.test_loss_history, {"y", "cls"});
+
+    // The coefficient reaches the optimizer: the trained models differ.
+    const auto off = fit_with(0.0f);
+    for (float term : off.train_aux_loss_history.at(kTabNetSparsityLoss)) CHECK(term == 0.0f);
+    CHECK(off.train_loss_history != r.train_loss_history);
 }
 
 TEST_CASE("Each cross-validation fold carries its own per-target loss history",

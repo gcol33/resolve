@@ -110,6 +110,7 @@ try:
         SpeciesGraph,
         build_species_graph,
         TraitInteractionMode,
+        TabMAggregation,
         ParallelAggregation,
         # Config structs
         TargetConfig,
@@ -324,6 +325,7 @@ __all__ = [
     "SpeciesGraph",
     "build_species_graph",
     "TraitInteractionMode",
+    "TabMAggregation",
     "ParallelAggregation",
     # Config structs
     "TargetConfig",

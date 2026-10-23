@@ -336,8 +336,10 @@ RESOLVE_CAPI resolve_value_t* resolve_model_call(
  * uses_explicit_vector uses_moe n_experts genus_weights family_weights
  * species_weights composition_parameters (a list of matrices, the species,
  * genus and family tables the species encoder reads composition through)
+ * aux_loss_names (the auxiliary objective terms forward_with_aux reports
+ * under "aux_losses") row_reference_rows (SAINT's inference reference rows)
  * requires_species_graph has_species_graph species_graph_edge_index
- * species_graph_edge_type.
+ * species_graph_edge_type (sorted by edge type).
  * Returns value tree / NULL. */
 RESOLVE_CAPI resolve_value_t* resolve_model_get(const resolve_model_t* m, const char* what);
 

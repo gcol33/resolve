@@ -280,6 +280,15 @@ void register_model(nb::module_& m) {
            "plot's composition through, as the parameters themselves; "
            "ModelConfig.freeze_composition keeps them at their initialisation.")
         .def_prop_ro("uses_moe", [](resolve::ResolveModel& self) { return self->uses_moe(); })
+        .def_prop_ro("aux_loss_names", [](resolve::ResolveModel& self) {
+            return self->aux_loss_names();
+        }, "The auxiliary objective terms forward_with_aux() reports in "
+           "aux_losses: 'moe' with a mixture of experts, 'tabnet_sparsity' for "
+           "TabNet.")
+        .def_prop_ro("row_reference_rows", [](resolve::ResolveModel& self) {
+            return self->row_reference_rows();
+        }, "How many training rows SAINT's row attention keeps as the "
+           "reference set inference attends over; 0 for other architectures.")
         .def_prop_ro("n_experts", [](resolve::ResolveModel& self) { return self->n_experts(); })
         .def("set_traits", [](resolve::ResolveModel& self, nb::object traits_obj) {
             at::Tensor traits = unpack_required_tensor(traits_obj, "traits");

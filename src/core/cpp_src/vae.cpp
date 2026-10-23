@@ -1,4 +1,5 @@
 #include "resolve/vae.hpp"
+#include "resolve/ln_mlp.hpp"
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -15,41 +16,22 @@ SpeciesVAEImpl::SpeciesVAEImpl(
 ) : input_dim_(input_dim),
     latent_dim_(config.latent_dim)
 {
-    // Build encoder
-    torch::nn::Sequential enc;
-    int64_t in_dim = input_dim;
-    for (auto hidden : config.encoder_dims) {
-        enc->push_back(torch::nn::Linear(in_dim, hidden));
-        enc->push_back(torch::nn::LayerNorm(
-            torch::nn::LayerNormOptions({hidden})));
-        enc->push_back(torch::nn::GELU());
-        if (config.dropout > 0.0f) {
-            enc->push_back(torch::nn::Dropout(config.dropout));
-        }
-        in_dim = hidden;
-    }
-    encoder_ = register_module("encoder", enc);
+    encoder_ = register_module("encoder",
+        make_ln_gelu_mlp(input_dim, config.encoder_dims, config.dropout));
+    const int64_t encoded_dim =
+        config.encoder_dims.empty() ? input_dim : config.encoder_dims.back();
 
     // Latent projections
-    mu_layer_ = register_module("mu", torch::nn::Linear(in_dim, config.latent_dim));
-    logvar_layer_ = register_module("logvar", torch::nn::Linear(in_dim, config.latent_dim));
+    mu_layer_ = register_module("mu", torch::nn::Linear(encoded_dim, config.latent_dim));
+    logvar_layer_ = register_module("logvar", torch::nn::Linear(encoded_dim, config.latent_dim));
 
-    // Build decoder (mirror of encoder)
-    torch::nn::Sequential dec;
-    in_dim = config.latent_dim;
-    for (auto hidden : config.decoder_dims) {
-        dec->push_back(torch::nn::Linear(in_dim, hidden));
-        dec->push_back(torch::nn::LayerNorm(
-            torch::nn::LayerNormOptions({hidden})));
-        dec->push_back(torch::nn::GELU());
-        if (config.dropout > 0.0f) {
-            dec->push_back(torch::nn::Dropout(config.dropout));
-        }
-        in_dim = hidden;
-    }
-    // Final output layer (no activation, raw reconstruction)
-    dec->push_back(torch::nn::Linear(in_dim, input_dim));
-    decoder_ = register_module("decoder", dec);
+    // Decoder: the encoder's stages over decoder_dims, then a linear output
+    // layer for the raw reconstruction.
+    auto decoder = make_ln_gelu_mlp(config.latent_dim, config.decoder_dims, config.dropout);
+    const int64_t decoded_dim =
+        config.decoder_dims.empty() ? config.latent_dim : config.decoder_dims.back();
+    decoder->push_back(torch::nn::Linear(decoded_dim, input_dim));
+    decoder_ = register_module("decoder", decoder);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> SpeciesVAEImpl::forward(

@@ -94,11 +94,10 @@ test_that("a masked fit reports per-target counts and keeps the policy in the ch
   expect_true(all(is.finite(preds$predictions$y)))
 })
 
-expect_decomposes <- function(byTarget, total, targets, moeAux = NULL) {
+expect_decomposes <- function(byTarget, total, targets, aux = list()) {
   expect_setequal(names(byTarget), targets)
   for (target in targets) expect_length(byTarget[[target]], length(total))
-  terms <- Reduce(`+`, byTarget[targets])
-  if (!is.null(moeAux)) terms <- terms + moeAux
+  terms <- Reduce(`+`, c(byTarget[targets], unname(aux)))
   expect_equal(terms, total, tolerance = 1e-5)
 }
 
@@ -116,16 +115,17 @@ test_that("the loss histories split by target and add up to the totals", {
   expect_length(result$train_loss, 4L)
   expect_decomposes(result$train_loss_by_target, result$train_loss, c("y", "cls"))
   expect_decomposes(result$test_loss_by_target, result$test_loss, c("y", "cls"))
-  expect_length(result$train_moe_aux_loss, 0L)
+  expect_length(result$train_aux_loss, 0L)
 
   moe <- resolve.train.dataset(
     dataset, hiddenDims = c(16L, 8L), maxEpochs = 3L, patience = 3L,
     lr = 1e-2, batchSize = 16L, testSize = 0.25, seed = 3L,
     moeRouting = "soft", verbose = FALSE
   )$result
-  expect_length(moe$train_moe_aux_loss, 3L)
+  expect_named(moe$train_aux_loss, "moe")
+  expect_length(moe$train_aux_loss$moe, 3L)
   expect_decomposes(moe$train_loss_by_target, moe$train_loss, c("y", "cls"),
-                    moeAux = moe$train_moe_aux_loss)
+                    aux = moe$train_aux_loss)
   expect_decomposes(moe$test_loss_by_target, moe$test_loss, c("y", "cls"))
 
   refit <- resolve.train.dataset(

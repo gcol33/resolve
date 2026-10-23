@@ -45,7 +45,6 @@ constexpr double kMaxGradNorm = 1.0;
 
 // Initialization constants
 constexpr float kBertInitStd = 0.02f;
-constexpr float kAttentionMaskFill = -1e9f;
 constexpr float kGATInitStd = 0.01f;
 
 // Phase boundaries for phased loss
@@ -360,6 +359,25 @@ struct ResolveSchema {
         if (missing_values != MissingValuePolicy::Indicate) return 0;
         return (has_coordinates ? 1 : 0) + static_cast<int64_t>(covariate_names.size());
     }
+    // Helper: the width of the continuous block a model's encoder receives
+    // before any species features -- coordinates, covariates, their
+    // missingness flags, the unknown-species columns and the fused categorical
+    // embeddings (continuous_block.hpp). Hash mode's hash embedding is appended
+    // after it.
+    [[nodiscard]] int64_t continuous_width() const noexcept {
+        return (has_coordinates ? 2 : 0) + static_cast<int64_t>(covariate_names.size()) +
+               missing_flag_width() + (track_unknown_fraction ? 1 : 0) +
+               (track_unknown_count ? 1 : 0) + categorical_embed_width();
+    }
+    // Helper: the height of the genus / family embedding tables a model
+    // builds for the taxonomy slots -- the vocabulary size, <UNK> included, or
+    // 0 for a schema without taxonomy.
+    [[nodiscard]] int64_t genus_table_size() const noexcept {
+        return has_taxonomy ? n_genera : 0;
+    }
+    [[nodiscard]] int64_t family_table_size() const noexcept {
+        return has_taxonomy ? n_families : 0;
+    }
 };
 
 // Mixture of Experts routing type
@@ -388,12 +406,12 @@ enum class MoEPlacement {
 };
 
 // =============================================================================
-// Advanced Architecture Types (v2.0)
+// Encoder architectures
 // =============================================================================
 
 // Encoder architecture type
 enum class EncoderArchitecture {
-    MLP,            // Default MLP-based encoder (current)
+    MLP,            // Species encoder with an MLP tail (default)
     FTTransformer,  // Feature Tokenizer + Transformer
     TabNet,         // Sequential attention with feature selection
     SAINT,          // Self-Attention + Inter-sample Attention
@@ -445,15 +463,14 @@ struct TabNetConfig {
     int n_d = 64;                   // Decision embedding dimension
     int n_a = 64;                   // Attention embedding dimension
     float relaxation_factor = 1.5f; // Sparsity relaxation
+    // Weight of the feature-mask entropy (the sparsity regularizer) in the
+    // training objective; recorded as the "tabnet_sparsity" auxiliary term.
     float sparsity_coefficient = 1e-3f;
     int virtual_batch_size = 128;   // Ghost batch norm size
     // Simplex mapping every decision step's attentive transformer applies to
     // its feature logits. true = sparsemax (alpha = 2; Arik & Pfister's
     // default); false = 1.5-entmax (Peters et al. 2019, Eq. 13), which is still
     // sparse but keeps a strictly larger mask support on the same logits.
-    // Reaches TabNetEncoder -> TabNetStep::attentive_forward via
-    // ModelAdapter's TabNet branch, and round-trips through the checkpoint key
-    // "tabnet_use_sparsemax".
     bool use_sparsemax = true;
 };
 
@@ -464,6 +481,11 @@ struct SAINTConfig {
     int n_layers = 6;
     float attention_dropout = 0.1f;
     bool use_row_attention = true;  // Enable inter-sample attention
+    // Rows one row attends over: a training batch is cut into groups of this
+    // many rows, and at inference a row attends over this many minus one
+    // reference training rows plus itself (saint.hpp). Bounds the row-attention
+    // memory at any batch size. Must be >= 1 under use_row_attention.
+    int row_attention_rows = 256;
 };
 
 // GNN configuration
@@ -522,11 +544,17 @@ struct HeterogeneousGNNConfig {
     bool use_cooccurrence_edges = true; // Add co-occurrence edges
 };
 
+// How TabM combines the outputs of its ensemble members.
+enum class TabMAggregation {
+    Mean,
+    Median
+};
+
 // TabM (BatchEnsemble) configuration
 struct TabMConfig {
     bool enabled = false;                    // Whether to use TabM instead of standard MLP
     int n_ensembles = 16;                    // Number of implicit ensemble members
-    std::string aggregation = "mean";        // "mean" or "median" aggregation
+    TabMAggregation aggregation = TabMAggregation::Mean;
 };
 
 // Parallel layer aggregation mode
@@ -596,7 +624,7 @@ struct ModelConfig {
     ActivationType head_activation = ActivationType::GELU;
     float head_dropout = 0.0f;                            // Dropout in prediction heads
 
-    // Advanced architecture selection (v2.0)
+    // Encoder architecture
     EncoderArchitecture encoder_architecture = EncoderArchitecture::MLP;
 
     // Architecture-specific configs
@@ -787,14 +815,16 @@ struct TrainResult {
     // under the phase-invariant selection objective. Keyed by target name, one
     // value per epoch; the test map is empty when nothing is held out.
     //
-    // The MoE load-balancing term belongs to no target and is recorded in
-    // train_moe_aux_loss_history (empty without MoE; the held-out loss never
-    // carries it). Per epoch, the train entries plus that term add up to
-    // train_loss_history, and the test entries to test_loss_history, within
-    // float rounding.
+    // The auxiliary objective terms belong to no target and are recorded in
+    // train_aux_loss_history, keyed by term name (aux_loss.hpp: "moe" for the
+    // mixture-of-experts load balancing, "tabnet_sparsity" for TabNet's mask
+    // sparsity), each already weighted; empty for a model with none, and the
+    // held-out loss never carries them. Per epoch, the train entries plus
+    // those terms add up to train_loss_history, and the test entries to
+    // test_loss_history, within float rounding.
     std::unordered_map<std::string, std::vector<float>> train_loss_history_by_target;
     std::unordered_map<std::string, std::vector<float>> test_loss_history_by_target;
-    std::vector<float> train_moe_aux_loss_history;
+    std::unordered_map<std::string, std::vector<float>> train_aux_loss_history;
 
     // Training time of the whole run, a resumed run's earlier epochs included.
     float train_time_seconds = 0.0f;

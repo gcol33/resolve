@@ -110,8 +110,8 @@ TEST_CASE("A tail mixture builds and runs for every species encoding",
 
         auto out = forward_batch(model, ds, mode, 8);
         REQUIRE(out.outputs.at("y").size(0) == 8);
-        REQUIRE(out.moe_aux_loss.defined());
-        REQUIRE(std::isfinite(out.moe_aux_loss.item<float>()));
+        REQUIRE(out.aux_losses.count(kMoEAuxLoss) == 1);
+        REQUIRE(std::isfinite(out.aux_losses.at(kMoEAuxLoss).item<float>()));
     }
 }
 
@@ -272,8 +272,8 @@ TEST_CASE("A post mixture preserves the latent width", "[moe][encoder]") {
         CHECK(any_starts_with(names, "encoder.mlp."));  // the encoder keeps its tail
 
         auto out = forward_batch(model, ds, mode, 8);
-        REQUIRE(out.moe_aux_loss.defined());
-        REQUIRE(std::isfinite(out.moe_aux_loss.item<float>()));
+        REQUIRE(out.aux_losses.count(kMoEAuxLoss) == 1);
+        REQUIRE(std::isfinite(out.aux_losses.at(kMoEAuxLoss).item<float>()));
     }
 }
 
@@ -297,8 +297,8 @@ TEST_CASE("An encoder with no MLP tail takes the mixture after the latent",
 
     auto out = forward_batch(model, ds, SpeciesEncodingMode::Sparse, 8);
     REQUIRE(out.outputs.at("y").size(0) == 8);
-    REQUIRE(out.moe_aux_loss.defined());
-    REQUIRE(std::isfinite(out.moe_aux_loss.item<float>()));
+    REQUIRE(out.aux_losses.count(kMoEAuxLoss) == 1);
+    REQUIRE(std::isfinite(out.aux_losses.at(kMoEAuxLoss).item<float>()));
 }
 
 TEST_CASE("Asking a tail-less encoder for a tail mixture names the placement that works",
@@ -520,9 +520,9 @@ TEST_CASE("TopK routing runs on a tail as well as Soft", "[moe][encoder]") {
     model->train();
 
     auto out = forward_batch(model, ds, SpeciesEncodingMode::Embed, 16);
-    REQUIRE(out.moe_aux_loss.defined());
-    REQUIRE(std::isfinite(out.moe_aux_loss.item<float>()));
+    REQUIRE(out.aux_losses.count(kMoEAuxLoss) == 1);
+    REQUIRE(std::isfinite(out.aux_losses.at(kMoEAuxLoss).item<float>()));
     // Switch-Transformer load balancing: E * sum(f_i * P_i), minimised at 1.0
     // when the load is even, so it is never negative.
-    REQUIRE(out.moe_aux_loss.item<float>() >= 0.0f);
+    REQUIRE(out.aux_losses.at(kMoEAuxLoss).item<float>() >= 0.0f);
 }

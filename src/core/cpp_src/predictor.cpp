@@ -277,23 +277,22 @@ ResolvePredictions Predictor::run_inference(
     const PlotInputs species_inputs = inputs.without_empty();
     const int64_t n = parts.n_rows() > 0 ? parts.n_rows() : species_inputs.n_plots();
 
-    // SAINT (inter-sample attention) and the coordinate-kNN GNN build each
-    // plot's representation from the OTHER plots in the same forward batch, so
-    // a chunked forward would make a plot's prediction depend on its chunk-mates
-    // and break the one-shot == chunked equivalence that holds for every other
-    // encoder. Force a single forward for them rather than silently returning
-    // chunk-composition-dependent predictions.
-    const EncoderArchitecture arch = model_->config().encoder_architecture;
-    const bool batch_dependent_encoder =
-        (arch == EncoderArchitecture::SAINT || arch == EncoderArchitecture::GNN);
+    // The coordinate-kNN GNN builds each plot's representation from the OTHER
+    // plots in the same forward, so a chunked forward would make a plot's
+    // prediction depend on its chunk-mates and break the one-shot == chunked
+    // equivalence that holds for every other encoder (SAINT's inference rows
+    // attend to its fixed reference set, not to each other). Force a single
+    // forward for it rather than silently returning chunk-composition-dependent
+    // predictions.
+    const bool batch_dependent_encoder = model_->requires_full_batch_training();
     if (batch_dependent_encoder && batch_size != -1 && n > batch_size) {
         static std::atomic<bool> warned{false};
         if (!warned.exchange(true)) {
-            std::cerr << "[resolve] warning: the model's encoder uses "
-                         "inter-sample / batch-local attention (SAINT or GNN); its "
-                         "predictions depend on batch composition, so chunked "
-                         "inference is disabled and a single full-batch forward is "
-                         "used. Pass predict batch_size=-1 to silence this.\n";
+            std::cerr << "[resolve] warning: the model's encoder is a kNN graph "
+                         "over the plots of a forward (GNN); its predictions depend "
+                         "on batch composition, so chunked inference is disabled "
+                         "and a single full-batch forward is used. Pass predict "
+                         "batch_size=-1 to silence this.\n";
         }
     }
     const bool one_chunk = batch_size == -1 || batch_dependent_encoder;

@@ -1,20 +1,26 @@
 #pragma once
 
 #include "resolve/types.hpp"
-#include "resolve/encoder.hpp"
 #include "resolve/adapter.hpp"
-#include "resolve/attention.hpp"
+#include "resolve/aux_loss.hpp"
 #include "resolve/categorical.hpp"
+#include "resolve/encoder.hpp"
 #include "resolve/plot_inputs.hpp"
+#include "resolve/traitnet.hpp"
 #include <torch/torch.h>
-#include <variant>
+
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace resolve {
 
-// Forward result with optional MoE auxiliary loss
+// One forward's outputs per target and the auxiliary objective terms it adds
+// to the training loss (aux_loss.hpp), each already weighted; a model with
+// none returns an empty map.
 struct ModelForwardResult {
     std::unordered_map<std::string, torch::Tensor> outputs;
-    torch::Tensor moe_aux_loss;  // Empty if MoE not used
+    AuxLosses aux_losses;
 };
 
 // Full Resolve model: shared encoder + multiple task heads
@@ -44,8 +50,13 @@ public:
     // Forward pass for all targets.
     std::unordered_map<std::string, torch::Tensor> forward(const PlotInputs& inputs);
 
-    // Forward pass returning outputs + MoE auxiliary loss (for training with MoE)
+    // Forward pass returning the outputs and the auxiliary objective terms.
     ModelForwardResult forward_with_aux(const PlotInputs& inputs);
+
+    // The names of the auxiliary terms forward_with_aux() returns for this
+    // model, in AuxLosses order: kMoEAuxLoss with a mixture of experts,
+    // kTabNetSparsityLoss for TabNet. Empty when it adds none.
+    [[nodiscard]] std::vector<std::string> aux_loss_names() const;
 
     // Forward pass for one target's head.
     torch::Tensor forward_single(const std::string& target, const PlotInputs& inputs);
@@ -99,13 +110,14 @@ public:
     // gradient at construction.
     [[nodiscard]] std::vector<torch::Tensor> composition_parameters() const;
 
-    // Set species trait matrix (for TraitNet architecture)
+    // Set species trait matrix (for TraitNet architecture). Stored in a
+    // buffer, so it moves with the model and is saved in the checkpoint.
     void set_traits(torch::Tensor traits);
 
     // The species graph a HeterogeneousGNN passes messages on (species_graph.hpp).
-    // It is built from the training data once and is part of the trained model,
-    // so Trainer::prepare_data builds and sets it, Trainer::save writes it into
-    // the checkpoint and a load restores it.
+    // It is built from the training data once and is part of the trained model:
+    // Trainer::prepare_data builds and sets it, and it is held in model buffers,
+    // so it is saved and loaded with the weights.
     void set_species_graph(torch::Tensor edge_index, torch::Tensor edge_type);
     [[nodiscard]] bool has_species_graph() const noexcept;
     [[nodiscard]] torch::Tensor species_graph_edge_index() const;
@@ -116,6 +128,19 @@ public:
     [[nodiscard]] bool requires_species_graph() const noexcept {
         return config_.encoder_architecture == EncoderArchitecture::HeterogeneousGNN;
     }
+
+    // Buffers holding data the model was trained with rather than a quantity
+    // of fixed shape -- the species graph, the TraitNet trait matrix, SAINT's
+    // reference rows. A checkpoint load gives each the shape it was saved
+    // with; every other tensor must match the model's shape exactly.
+    [[nodiscard]] std::vector<torch::Tensor> data_buffers() const;
+
+    // How many training rows SAINT's row attention keeps as the reference set
+    // inference attends over (saint.hpp); 0 for every other architecture. The
+    // reference rows are captured, as raw model inputs, from the training
+    // batches: every training forward of at least as many rows as are held
+    // refreshes them with its leading rows.
+    [[nodiscard]] int64_t row_reference_rows() const noexcept { return row_reference_rows_; }
 
     // The transformer species encoder of a species_encoding == Transformer
     // model, which masked-species pretraining trains; throws
@@ -134,24 +159,32 @@ private:
         torch::Tensor (PlotEncoderSparseImpl::*sparse_fn)() const
     ) const;
 
-    // The one encoder dispatch. Runs whichever encoder was built and returns
-    // its full tail output: the latent plus, when the mixture of experts sits
-    // in the tail, the load-balancing loss and gate probabilities. encode(),
-    // encode_with_aux() and get_gate_probs() are the three readings of this,
-    // rather than three copies of the same if-else chain. Encoders with no tail
-    // (the adapter architectures and TraitNet) report the latent alone.
-    //
-    // `inputs` here is the value fuse_categoricals_() returned: its
-    // `continuous` already carries the categorical embeddings.
-    TailOutput encode_all(const PlotInputs& inputs);
+    // What the encoder stage produces: the latent, the weighted auxiliary
+    // terms, and the MoE gate probabilities (undefined without MoE).
+    struct EncodedPlots {
+        torch::Tensor latent;
+        AuxLosses aux_losses;
+        torch::Tensor gate_probs;
+    };
 
-    // The latent alone, with the post-placement mixture applied. Same
-    // `inputs` convention as encode_all().
+    // The one encoder dispatch. Fuses the categorical embeddings into
+    // `inputs`, runs whichever encoder was built and then the post-placement
+    // mixture of experts if there is one. In training mode it also refreshes
+    // SAINT's reference rows from `inputs`. encode(), forward_with_aux() and
+    // get_gate_probs() are readings of this rather than copies of the chain.
+    EncodedPlots encode_all(const PlotInputs& inputs);
+
+    // The latent alone; same `inputs` convention as encode_all().
     torch::Tensor encode(const PlotInputs& inputs);
 
-    // The latent and the MoE auxiliary loss (undefined without MoE). Same
-    // `inputs` convention as encode_all().
-    std::pair<torch::Tensor, torch::Tensor> encode_with_aux(const PlotInputs& inputs);
+    // SAINT's reference rows, categorical embeddings fused, for an eval
+    // forward; empty in training mode, for other architectures and before
+    // any training forward.
+    PlotInputs row_reference();
+
+    // Keep the leading row_reference_rows_ rows of a training batch as the
+    // reference set, unless the batch is smaller than the set already held.
+    void capture_row_reference(const PlotInputs& inputs);
 
     // The one place categorical codes reach the encoder: a copy of `inputs`
     // whose `continuous` has the categorical embeddings concatenated, so it
@@ -178,8 +211,13 @@ private:
     // the encoder instead, as its final stage.
     MixtureOfExperts post_moe_{nullptr};
 
-    // Tabular adapter (used when encoder_architecture != MLP)
+    // Tabular adapter (the architectures other than MLP and TraitNet)
     TabularAdapter adapter_{nullptr};
+
+    // SAINT's reference rows as raw model inputs, one buffer per field
+    // (empty until captured), and how many rows it holds at most.
+    PlotInputs row_reference_;
+    int64_t row_reference_rows_ = 0;
 
     // Categorical embedder (one nn::Embedding table per categorical column).
     // Null when the schema has no categorical covariates.

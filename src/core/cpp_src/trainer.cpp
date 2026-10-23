@@ -192,12 +192,14 @@ void append_by_target(std::unordered_map<std::string, std::vector<float>>& histo
 
 // The progress-line suffix that splits a multi-target epoch's loss by target:
 // " | by target (train/test): a 0.12/0.15, b 0.40/0.52", followed by
-// "; moe_aux 0.001" when the model has a mixture of experts. `test_terms` is
-// null when nothing is held out, and each entry then shows its train term only.
+// "; moe 0.001, tabnet_sparsity 0.0002" for the model's auxiliary terms.
+// `test_terms` is null when nothing is held out, and each entry then shows its
+// train term only.
 std::string by_target_suffix(const std::vector<TargetConfig>& targets,
                              const std::vector<float>& train_terms,
                              const std::vector<float>* test_terms,
-                             const float* moe_aux) {
+                             const std::vector<std::string>& aux_names,
+                             const std::vector<float>& aux_terms) {
     std::ostringstream msg;
     msg << " | by target (" << (test_terms ? "train/test" : "train") << "): ";
     for (size_t i = 0; i < targets.size(); ++i) {
@@ -205,7 +207,9 @@ std::string by_target_suffix(const std::vector<TargetConfig>& targets,
         msg << targets[i].name << " " << train_terms[i];
         if (test_terms) msg << "/" << (*test_terms)[i];
     }
-    if (moe_aux) msg << "; moe_aux " << *moe_aux;
+    for (size_t i = 0; i < aux_names.size(); ++i) {
+        msg << (i == 0 ? "; " : ", ") << aux_names[i] << " " << aux_terms[i];
+    }
     return msg.str();
 }
 
@@ -661,17 +665,18 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
 
     int n_batches = 0;
 
-    // Check if MoE is enabled for aux loss handling
-    bool use_moe = model_->uses_moe();
-    float moe_aux_weight = model_->config().moe_aux_loss_weight;
+    // The auxiliary objective terms the model adds (already weighted).
+    const std::vector<std::string> aux_names = model_->aux_loss_names();
+    const auto n_aux = static_cast<int64_t>(aux_names.size());
 
     // Running sums over the counted batches, kept on the device and read back
     // once per epoch so the loop adds no host sync per batch: slot 0 the total
-    // loss, then one slot per target in loss_fn_.targets() order, then the MoE
-    // term.
+    // loss, then one slot per target in loss_fn_.targets() order, then one per
+    // auxiliary term in aux_names order.
     const auto n_loss_targets = static_cast<int64_t>(loss_fn_.targets().size());
     torch::Tensor sums = torch::zeros(
-        {n_loss_targets + 2}, torch::TensorOptions().dtype(torch::kFloat32).device(config_.device));
+        {1 + n_loss_targets + n_aux},
+        torch::TensorOptions().dtype(torch::kFloat32).device(config_.device));
 
     // Async prefetching setup for CUDA hash computation
 #ifdef RESOLVE_HAS_CUDA
@@ -776,38 +781,36 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
         // Forward pass
         optimizer_->zero_grad();
 
-        std::unordered_map<std::string, torch::Tensor> predictions;
-        torch::Tensor moe_aux_loss;
         torch::Tensor loss;
         torch::Tensor batch_sums;
 
         {
             AutocastScope amp_scope(amp_enabled_);
 
-            if (use_moe) {
-                auto result = model_->forward_with_aux(batch.inputs);
-                predictions = std::move(result.outputs);
-                moe_aux_loss = result.moe_aux_loss;
-            } else {
-                predictions = model_->forward(batch.inputs);
-            }
-
-            auto [loss_val, target_losses] = loss_fn_.compute(predictions, batch.targets, epoch, scalers);
+            auto result = model_->forward_with_aux(batch.inputs);
+            auto [loss_val, target_losses] =
+                loss_fn_.compute(result.outputs, batch.targets, epoch, scalers);
             loss = loss_val;
 
-            // Add MoE auxiliary loss for load balancing
-            torch::Tensor moe_term;
-            if (use_moe && moe_aux_loss.defined()) {
-                moe_term = moe_aux_weight * moe_aux_loss;
-                loss = loss + moe_term;
+            // The auxiliary terms join the objective as they come; a term the
+            // model did not produce this batch counts 0.
+            std::vector<torch::Tensor> aux_terms;
+            aux_terms.reserve(aux_names.size());
+            for (const auto& name : aux_names) {
+                auto it = result.aux_losses.find(name);
+                if (it != result.aux_losses.end() && it->second.defined()) {
+                    loss = loss + it->second;
+                    aux_terms.push_back(it->second.detach().to(sums.options()).reshape({1}));
+                } else {
+                    aux_terms.push_back(torch::zeros({1}, sums.options()));
+                }
             }
 
-            batch_sums = torch::cat({
+            std::vector<torch::Tensor> parts{
                 loss.detach().to(sums.options()).reshape({1}),
-                loss_fn_.contributions(target_losses).to(sums.device()),
-                moe_term.defined()
-                    ? moe_term.detach().to(sums.options()).reshape({1})
-                    : torch::zeros({1}, sums.options())});
+                loss_fn_.contributions(target_losses).to(sums.device())};
+            parts.insert(parts.end(), aux_terms.begin(), aux_terms.end());
+            batch_sums = torch::cat(parts);
         }  // autocast disabled here (also on exception unwind) before backward
 
         // A batch counts toward the epoch mean once its optimizer step runs.
@@ -887,7 +890,10 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
     for (int64_t i = 0; i < n_loss_targets; ++i) {
         out.by_target.push_back(epoch_mean(s[i + 1]));
     }
-    out.moe_aux = epoch_mean(s[n_loss_targets + 1]);
+    out.aux.reserve(static_cast<size_t>(n_aux));
+    for (int64_t i = 0; i < n_aux; ++i) {
+        out.aux.push_back(epoch_mean(s[1 + n_loss_targets + i]));
+    }
     return out;
 }
 
@@ -1224,7 +1230,7 @@ TrainResult Trainer::train(const RunProgress* resume_from) {
 
 void Trainer::run_epochs(RunProgress& progress, const RunPlan& plan) {
     const auto& loss_targets = loss_fn_.targets();
-    const bool uses_moe = model_->uses_moe();
+    const std::vector<std::string> aux_names = model_->aux_loss_names();
     TrainResult& result = progress.result;
 
     // The phased loss activates later terms (SMAPE, band) only once their
@@ -1245,8 +1251,8 @@ void Trainer::run_epochs(RunProgress& progress, const RunPlan& plan) {
         const float train_loss = train.total;
         result.train_loss_history.push_back(train_loss);
         append_by_target(result.train_loss_history_by_target, loss_targets, train.by_target);
-        if (uses_moe) {
-            result.train_moe_aux_loss_history.push_back(train.moe_aux);
+        for (size_t i = 0; i < aux_names.size(); ++i) {
+            result.train_aux_loss_history[aux_names[i]].push_back(train.aux[i]);
         }
 
         float test_loss = std::numeric_limits<float>::quiet_NaN();
@@ -1319,7 +1325,7 @@ void Trainer::run_epochs(RunProgress& progress, const RunPlan& plan) {
             if (loss_targets.size() > 1) {
                 msg << by_target_suffix(loss_targets, train.by_target,
                                         plan.has_held_out ? &test.by_target : nullptr,
-                                        uses_moe ? &train.moe_aux : nullptr);
+                                        aux_names, train.aux);
             }
             config_.log(msg.str());
         }

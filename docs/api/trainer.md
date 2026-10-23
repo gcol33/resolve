@@ -295,7 +295,7 @@ Neighbourhood Components Analysis term to every classification target. See
 | `test_loss_history` | `list[float]` | Same length; empty when nothing is held out |
 | `train_loss_history_by_target` | `dict[str, list[float]]` | `train_loss_history` split by target: per epoch, the term each target adds to the total (its weighted loss, averaged over the epoch's batches like the total; a batch with no labelled row for a masked target adds 0) |
 | `test_loss_history_by_target` | `dict[str, list[float]]` | `test_loss_history` split by target: each target's weighted term of the phase-invariant selection loss; empty when nothing is held out |
-| `train_moe_aux_loss_history` | `list[float]` | The mixture-of-experts load-balancing term of `train_loss_history`, which belongs to no target; empty without MoE. Per epoch the train terms plus this add up to the total, and the test terms add up to the test total, within float rounding |
+| `train_aux_loss_history` | `dict[str, list[float]]` | The auxiliary terms of `train_loss_history`, which belong to no target, keyed by name: `moe` (mixture-of-experts load balancing) and `tabnet_sparsity` (TabNet's mask sparsity), each already weighted; empty for a model with neither. Per epoch the train terms plus these add up to the total, and the test terms add up to the test total, within float rounding |
 | `train_time_seconds` | `float` | Wall time of the whole run, a resumed run's earlier epochs included |
 | `resumed_from_epoch` | `int` | The epoch `resume` continued the run from; `0` for a run `fit` trained from the start |
 | `baselines` | `dict[str, BaselineMetrics]` | Naive baseline per target |

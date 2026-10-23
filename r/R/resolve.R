@@ -933,8 +933,10 @@ resolve.dataset.frame <- function(header,
 #'   `train_loss` and `test_loss` (one value per epoch), their split by target
 #'   `train_loss_by_target` and `test_loss_by_target` (named lists of per-epoch
 #'   vectors: each target's weighted term of the total, so per epoch they add
-#'   up to it), `train_moe_aux_loss` (the mixture-of-experts load-balancing
-#'   term of `train_loss`, which belongs to no target; empty without one),
+#'   up to it), `train_aux_loss` (a named list of the auxiliary terms of
+#'   `train_loss`, which belong to no target, each already weighted: `moe`,
+#'   the mixture-of-experts load balancing, and `tabnet_sparsity`, TabNet's
+#'   feature-mask sparsity; empty for a model with neither),
 #'   the per-target `baselines` (the model against the training mean or mode,
 #'   regression values in original units), `diagnostics`, `effective_batch_size`
 #'   -- the batch size the run actually trained at, which is smaller than

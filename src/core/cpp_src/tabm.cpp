@@ -86,17 +86,12 @@ TabMEncoderImpl::TabMEncoderImpl(
     const std::vector<int64_t>& hidden_dims,
     int n_ensembles,
     float dropout,
-    const std::string& aggregation
+    TabMAggregation aggregation
 ) : n_ensembles_(n_ensembles),
-    aggregation_(aggregation),
-    dims_(hidden_dims)
+    aggregation_(aggregation)
 {
     if (hidden_dims.empty()) {
         throw std::invalid_argument("hidden_dims must not be empty");
-    }
-    if (aggregation != "mean" && aggregation != "median") {
-        throw std::invalid_argument(
-            "aggregation must be 'mean' or 'median', got '" + aggregation + "'");
     }
 
     output_dim_ = hidden_dims.back();
@@ -152,13 +147,13 @@ torch::Tensor TabMEncoderImpl::forward(torch::Tensor x) {
     // Get all ensemble outputs: (batch, n_ensembles, output_dim)
     auto all_outputs = forward_all(x);
 
-    // Aggregate across ensemble dimension
-    if (aggregation_ == "mean") {
-        return all_outputs.mean(/*dim=*/1);
-    } else {
-        // Median aggregation
-        return std::get<0>(all_outputs.median(/*dim=*/1));
+    switch (aggregation_) {
+        case TabMAggregation::Median:
+            return std::get<0>(all_outputs.median(/*dim=*/1));
+        case TabMAggregation::Mean:
+            break;
     }
+    return all_outputs.mean(/*dim=*/1);
 }
 
 } // namespace resolve
