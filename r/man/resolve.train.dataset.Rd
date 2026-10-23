@@ -14,6 +14,7 @@ resolve.train.dataset(
   batchSize = 4096L,
   device = "cpu",
   testSize = 0.2,
+  stoppingPlots = NULL,
   seed = 42L,
   savePath = NULL,
   lossConfig = "mae",
@@ -60,7 +61,17 @@ every plot.}
 \item{device}{Device: "cpu" or "cuda" (default "cpu")}
 
 \item{testSize}{Fraction of the data held out for early stopping (default
-0.2). 0 holds nothing out and needs \code{fixedEpochs}.}
+0.2), drawn at random with \code{seed}. 0 holds nothing out and needs
+\code{fixedEpochs}.}
+
+\item{stoppingPlots}{Plot IDs to hold out for early stopping instead of a
+random \code{testSize} fraction (default \code{NULL}): a withheld spatial block or
+database, or the fold a published protocol selects its epoch on. Early
+stopping, \code{best_epoch}, \code{final_metrics} and the baselines read exactly
+these plots; every other plot trains. Each ID must be a plot of
+\code{dataset}, listed once, and at least one plot must be left to train. With
+a masked target, the fold needs at least one plot labelled for it. Not
+combined with \code{testSize}.}
 
 \item{seed}{Random seed (default 42)}
 

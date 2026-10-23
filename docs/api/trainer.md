@@ -39,6 +39,33 @@ training fold alone, records the categorical vocabulary, and keeps the split
 reachable. It raises when `DatasetConfig.hash_dim` and `ModelConfig.hash_dim`
 disagree.
 
+To hold out a fold of your choosing instead of a random fraction, such as a
+withheld spatial block or database, or the fold a published protocol selects
+its epoch on, pass the plots' positions:
+
+```python
+fold = dataset.plot_indices(["plot_17", "plot_204", "plot_311"])
+trainer.prepare_data(dataset, fold, seed=42)
+# or by keyword
+trainer.prepare_data(dataset, stopping_indices=fold, seed=42)
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `dataset` | `ResolveDataset` | required | The loaded dataset |
+| `stopping_indices` | `list[int]` | required | 0-based positions in `dataset.plot_ids` of the held-out plots |
+| `seed` | `int` | `42` | Orders the fitting rows and seeds the epoch shuffle |
+
+Early stopping, `best_epoch`, `final_metrics`, the baselines, the evaluators
+below and `test_indices()` / `test_plot_ids()` then read exactly these plots,
+in the order given; every other plot is a fitting row. The fitting rows keep
+the order the random split would give them, so naming the fold a random split
+drew reproduces that run exactly. `dataset.plot_indices(ids)` maps plot IDs to
+positions and raises `ValueError` for an ID the dataset does not hold.
+`prepare_data` raises `ValueError` for an empty fold, a position out of range,
+a position listed twice, a fold of every plot, and a fold with no labelled plot
+for a target whose `missing` policy is `Mask`.
+
 For a `heterogeneous_gnn` model it also builds the species graph the encoder
 passes messages on, from the dataset's taxonomy and co-occurrence as
 `heterogeneous_gnn` asks; `Trainer.save` writes it into the checkpoint, so
@@ -99,6 +126,7 @@ from epoch 0, down to `batch_size_floor`. The GIL is released for the whole fit.
 | `config` | `TrainConfig` | The config in force; `batch_size` reflects any OOM halving |
 | `scalers` | `Scalers` | Feature and per-target scaling fitted on the training fold |
 | `categorical_vocab` | `CategoricalVocab` | Captured at `prepare_data` time |
+| `run_metadata` | `RunMetadata` | The split `prepare_data` made and, after `fit`, the run's timing, epochs and final metrics |
 
 ### The held-out fold
 
@@ -159,7 +187,7 @@ checkpoint and use [`Predictor`](predictor.md).
 
 ```python
 trainer.save("model.pt")
-trainer.save("model.pt", metadata=run_metadata)
+trainer.save("model.pt", metadata=trainer.run_metadata)
 
 trainer.load_state("model.pt", device="cpu", vram_fraction=1.0)
 
@@ -358,6 +386,9 @@ from resolve_core import SpatialBlockConfig
 | `created_at`, `completed_at` | `str` |
 | `train_time_seconds` | `float` |
 | `n_plots_train`, `n_plots_test` | `int` |
+| `hold_out` | `HoldOutMode`: `Random` (a `test_size` fraction drawn with `split_seed`) or `Explicit` (the plots passed as `stopping_indices`) |
+| `test_size` | `float`; `0` under `Explicit` |
+| `split_seed` | `int`; the `prepare_data` seed, which also seeds the epoch shuffle |
 | `best_epoch`, `total_epochs` | `int` |
 | `final_metrics` | `dict[str, dict[str, float]]` |
 

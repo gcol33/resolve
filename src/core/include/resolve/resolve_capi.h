@@ -376,6 +376,16 @@ RESOLVE_CAPI int resolve_trainer_prepare_data(
 RESOLVE_CAPI int resolve_trainer_prepare_data_from_dataset(
     resolve_trainer_t* t, const resolve_dataset_t* ds, double test_size, int seed);
 
+/* prepare_data with the held-out fold early stopping watches named by the
+ * caller instead of drawn at random. `stopping` is an INT_ARRAY of 0-based
+ * positions in the dataset's plot order, or a STRING_ARRAY of plot IDs. Every
+ * other plot is a fitting row; `seed` drives the per-epoch shuffle. An empty
+ * fold, an unknown plot, a repeated plot, a fold of every plot, or a fold with
+ * no labelled plot for a masked target fails. Returns 0 / -1. */
+RESOLVE_CAPI int resolve_trainer_prepare_data_stopping_fold(
+    resolve_trainer_t* t, const resolve_dataset_t* ds,
+    const resolve_value_t* stopping, int seed);
+
 /* Train. Returns a MAP value tree (TrainResult) / NULL. */
 RESOLVE_CAPI resolve_value_t* resolve_trainer_fit(resolve_trainer_t* t);
 
@@ -388,7 +398,10 @@ RESOLVE_CAPI int resolve_trainer_load_state(
     resolve_trainer_t* t, const char* path, const char* device, double vram_fraction);
 
 /* Zero-arg accessor. `what`: scalers config test_indices train_indices
- * test_plot_ids train_plot_ids categorical_vocab effective_batch_size.
+ * test_plot_ids train_plot_ids categorical_vocab effective_batch_size
+ * run_metadata (a MAP shaped like resolve_load_run_metadata's: the split
+ * prepare_data made and, after fit, the run's timing, epochs and metrics; pass
+ * it to resolve_trainer_save to record it in the checkpoint).
  * Returns value / NULL. */
 RESOLVE_CAPI resolve_value_t* resolve_trainer_get(const resolve_trainer_t* t, const char* what);
 

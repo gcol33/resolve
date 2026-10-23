@@ -125,6 +125,11 @@ inline constexpr EnumName<TargetMissingPolicy> kTargetMissingPolicyNames[] = {
     {"mask", TargetMissingPolicy::Mask},
 };
 
+inline constexpr EnumName<HoldOutMode> kHoldOutModeNames[] = {
+    {"random", HoldOutMode::Random},
+    {"explicit", HoldOutMode::Explicit},
+};
+
 inline constexpr EnumName<LossConfigMode> kLossConfigModeNames[] = {
     {"mae", LossConfigMode::MAE},
     {"smape", LossConfigMode::SMAPE},
@@ -281,6 +286,13 @@ inline const char* target_missing_policy_to_string(TargetMissingPolicy m) {
     return enum_name_of(m, kTargetMissingPolicyNames, "drop");
 }
 
+inline HoldOutMode parse_hold_out_mode(const std::string& s) {
+    return parse_enum_name(s, kHoldOutModeNames, "hold-out mode");
+}
+inline const char* hold_out_mode_to_string(HoldOutMode m) {
+    return enum_name_of(m, kHoldOutModeNames, "random");
+}
+
 inline LossConfigMode parse_loss_config_mode(const std::string& s) {
     return parse_enum_name(s, kLossConfigModeNames, "loss config mode");
 }
@@ -411,6 +423,8 @@ RESOLVE_DECLARE_ENUM_NAMES(TransformType, kTransformTypeNames,
                            "transform type", "none")
 RESOLVE_DECLARE_ENUM_NAMES(TargetMissingPolicy, kTargetMissingPolicyNames,
                            "target missing-label policy", "drop")
+RESOLVE_DECLARE_ENUM_NAMES(HoldOutMode, kHoldOutModeNames,
+                           "hold-out mode", "random")
 RESOLVE_DECLARE_ENUM_NAMES(LossConfigMode, kLossConfigModeNames,
                            "loss config mode", "combined")
 RESOLVE_DECLARE_ENUM_NAMES(LRSchedulerType, kLRSchedulerTypeNames,

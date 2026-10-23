@@ -250,8 +250,10 @@ resolve.load_train_config <- function(path) {
 #' Recover the Run Metadata From a Checkpoint
 #'
 #' Reads back the run metadata persisted in a RESOLVE checkpoint: training time,
-#' train/test plot counts, best and total epochs, the RESOLVE version and
-#' timestamps, and the per-target final-metric tree.
+#' train/test plot counts, how the held-out fold was chosen (`hold_out`:
+#' `"random"`, a `test_size` fraction drawn with `split_seed`, or `"explicit"`,
+#' the plots named by `stoppingPlots`), best and total epochs, the RESOLVE
+#' version and timestamps, and the per-target final-metric tree.
 #'
 #' @param path Path to a `.pt` checkpoint.
 #' @return A named list of run-metadata fields, including `final_metrics`, a
@@ -842,7 +844,16 @@ resolve.dataset.frame <- function(header,
 #' @param batchSize Batch size (default 4096)
 #' @param device Device: "cpu" or "cuda" (default "cpu")
 #' @param testSize Fraction of the data held out for early stopping (default
-#'   0.2). 0 holds nothing out and needs `fixedEpochs`.
+#'   0.2), drawn at random with `seed`. 0 holds nothing out and needs
+#'   `fixedEpochs`.
+#' @param stoppingPlots Plot IDs to hold out for early stopping instead of a
+#'   random `testSize` fraction (default `NULL`): a withheld spatial block or
+#'   database, or the fold a published protocol selects its epoch on. Early
+#'   stopping, `best_epoch`, `final_metrics` and the baselines read exactly
+#'   these plots; every other plot trains. Each ID must be a plot of
+#'   `dataset`, listed once, and at least one plot must be left to train. With
+#'   a masked target, the fold needs at least one plot labelled for it. Not
+#'   combined with `testSize`.
 #' @param seed Random seed (default 42)
 #' @param savePath Path to save model checkpoint (optional)
 #' @param lossConfig Loss configuration: "mae", "smape", "combined", or "nca"
@@ -923,6 +934,7 @@ resolve.train.dataset <- function(dataset,
                                   batchSize = 4096L,
                                   device = "cpu",
                                   testSize = 0.2,
+                                  stoppingPlots = NULL,
                                   seed = 42L,
                                   savePath = NULL,
                                   lossConfig = "mae",
@@ -969,11 +981,21 @@ resolve.train.dataset <- function(dataset,
   if (!device %in% c("cpu", "cuda")) {
     stop("device must be 'cpu' or 'cuda'")
   }
-  if (!is.numeric(testSize) || testSize < 0 || testSize >= 1) {
-    stop("testSize must be at least 0 and below 1")
-  }
-  if (testSize == 0 && fixedEpochs == 0) {
-    stop("testSize = 0 leaves early stopping nothing to watch; set fixedEpochs")
+  if (!is.null(stoppingPlots)) {
+    if (!missing(testSize)) {
+      stop("pass testSize or stoppingPlots, not both")
+    }
+    if (!is.character(stoppingPlots) || length(stoppingPlots) < 1 ||
+        anyNA(stoppingPlots)) {
+      stop("stoppingPlots must be a non-empty character vector of plot IDs")
+    }
+  } else {
+    if (!is.numeric(testSize) || testSize < 0 || testSize >= 1) {
+      stop("testSize must be at least 0 and below 1")
+    }
+    if (testSize == 0 && fixedEpochs == 0) {
+      stop("testSize = 0 leaves early stopping nothing to watch; set fixedEpochs")
+    }
   }
   if (!lossConfig %in% c("mae", "smape", "combined", "nca")) {
     stop("lossConfig must be 'mae', 'smape', 'combined', or 'nca'")
@@ -1072,7 +1094,11 @@ resolve.train.dataset <- function(dataset,
   trainer <- new(.resolve_module()$Trainer, model, trainConfig)
 
   # Prepare data from dataset (C++ API)
-  trainer$prepare_data_from_dataset(dataset, testSize, as.integer(seed))
+  if (is.null(stoppingPlots)) {
+    trainer$prepare_data_from_dataset(dataset, testSize, as.integer(seed))
+  } else {
+    trainer$prepare_data_stopping_fold(dataset, stoppingPlots, as.integer(seed))
+  }
 
   # Train
   if (verbose) {
@@ -1101,10 +1127,10 @@ resolve.train.dataset <- function(dataset,
     }
   }
 
-  # Save if requested. Pass `metadata = NULL` explicitly: Rcpp module methods do
-  # not honor the C++ default arg, so a one-argument `$save()` fails to match.
+  # Save if requested, with the run metadata, so the checkpoint records how the
+  # plots were split (resolve.load_run_metadata reads it back).
   if (!is.null(savePath)) {
-    trainer$save(savePath, NULL)
+    trainer$save(savePath, trainer$run_metadata())
     if (verbose) {
       cat(sprintf("Model saved to: %s\n", savePath))
     }

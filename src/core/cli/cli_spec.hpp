@@ -256,8 +256,17 @@ inline const CommandSpec& train_spec() {
         flags.push_back({"--no-tf32", Arity::Flag, "", "",
                          "Disable TF32 matmuls on Ampere+ GPUs"});
         flags.push_back({"--test-size", Arity::Value, "FLOAT", "0.2",
-                         "Held-out fraction early stopping watches. 0 holds\n"
-                         "nothing out and needs --fixed-epochs."});
+                         "Held-out fraction early stopping watches, drawn\n"
+                         "at random with --seed. 0 holds nothing out and\n"
+                         "needs --fixed-epochs."});
+        flags.push_back({"--stopping-plots", Arity::Value, "PATH", "",
+                         "File of plot IDs, one per line, to hold out for\n"
+                         "early stopping instead of a random --test-size\n"
+                         "fraction: a withheld spatial block or database,\n"
+                         "or the fold a published protocol selects its\n"
+                         "epoch on. Best epoch, final metrics and baselines\n"
+                         "are read on exactly these plots; every other plot\n"
+                         "trains. Not combined with --test-size."});
         flags.push_back({"--seed", Arity::Value, "N", "42",
                          "Random seed. Seeds the global torch RNG before the\n"
                          "model is constructed (weight init) and drives the\n"

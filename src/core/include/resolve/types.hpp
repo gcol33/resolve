@@ -156,6 +156,14 @@ enum class TargetMissingPolicy {
            // for no target at all is still left out, since it trains nothing.
 };
 
+// How Trainer::prepare_data chooses the held-out fold that early stopping,
+// the reported metrics and the baselines read.
+enum class HoldOutMode {
+    Random,   // A fraction of the plots, drawn by a seeded shuffle.
+    Explicit  // The plots the caller names: a withheld spatial block or
+              // database, or the fold a published protocol selects on.
+};
+
 // How a model suite combines the predictions of a target's members (suite.hpp).
 enum class SuiteCombine {
     Mean,          // arithmetic mean on the target's own scale
@@ -957,6 +965,12 @@ struct RunMetadata {
     float train_time_seconds = 0.0f;
     int64_t n_plots_train = 0;
     int64_t n_plots_test = 0;
+    // How the held-out fold was chosen. Random: `test_size` of the plots,
+    // drawn with `split_seed`. Explicit: the plots the caller named, and
+    // test_size is 0. split_seed also seeds the per-epoch training shuffle.
+    HoldOutMode hold_out = HoldOutMode::Random;
+    float test_size = 0.0f;
+    int split_seed = 0;
     int best_epoch = 0;
     int total_epochs = 0;
     std::unordered_map<std::string, std::unordered_map<std::string, float>> final_metrics;

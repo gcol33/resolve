@@ -93,6 +93,7 @@ add_executable(resolve_tests
     test_cli_config_flags.cpp
     test_suite.cpp
     test_target_masking.cpp
+    test_stopping_fold.cpp
 )
 
 resolve_link_cuda_dirs(resolve_tests)

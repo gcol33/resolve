@@ -138,6 +138,22 @@ void Trainer::prepare_data(
     float test_size,
     int seed
 ) {
+    prepare_from_dataset(dataset, {HoldOutMode::Random, test_size, {}}, seed);
+}
+
+void Trainer::prepare_data(
+    const ResolveDataset& dataset,
+    const std::vector<int64_t>& stopping_indices,
+    int seed
+) {
+    prepare_from_dataset(dataset, {HoldOutMode::Explicit, 0.0f, stopping_indices}, seed);
+}
+
+void Trainer::prepare_from_dataset(
+    const ResolveDataset& dataset,
+    const HoldOutRequest& hold_out,
+    int seed
+) {
     // Check if dataset has raw species data for CUDA hash computation
     if (dataset.has_raw_species_data()) {
         use_cuda_hash_ = true;
@@ -155,8 +171,8 @@ void Trainer::prepare_data(
     categorical_vocab_ = dataset.categorical_vocab();
 
     // Capture plot IDs so test_plot_ids() / train_plot_ids() can recover which
-    // plots landed in each split. The raw-tensor prepare_data overload below
-    // has no plot IDs, so this is the only place plot_ids_ is populated.
+    // plots landed in each split. The raw-tensor prepare_data overload has no
+    // plot IDs, so this is the only place plot_ids_ is populated.
     plot_ids_ = dataset.plot_ids();
 
     // A HeterogeneousGNN passes messages on a graph over the species, which is
@@ -174,8 +190,7 @@ void Trainer::prepare_data(
         model_->set_species_graph(graph.edge_index, graph.edge_type);
     }
 
-    // Delegate to the raw tensor API using data from the dataset
-    prepare_data(
+    prepare_split(
         dataset.coordinates(),
         dataset.covariates(),
         dataset.hash_embedding(),
@@ -192,7 +207,7 @@ void Trainer::prepare_data(
         dataset.pool_mask(),
         dataset.pool_has_cover(),
         dataset.categorical_ids(),
-        test_size,
+        hold_out,
         seed
     );
 }
@@ -217,10 +232,128 @@ void Trainer::prepare_data(
     float test_size,
     int seed
 ) {
-    // Capture the seed so the per-epoch training shuffle is reproducible
-    // (the dataset overload forwards its seed here, so both paths set it).
-    data_seed_ = seed;
+    prepare_split(coordinates, covariates, hash_embedding, species_ids, species_vector,
+                  genus_ids, family_ids, unknown_fraction, unknown_count, targets,
+                  pool_genus_ids, pool_family_ids, pool_weights, pool_mask,
+                  pool_has_cover, categorical_ids,
+                  {HoldOutMode::Random, test_size, {}}, seed);
+}
 
+std::pair<torch::Tensor, torch::Tensor> Trainer::hold_out_indices(
+    const HoldOutRequest& hold_out,
+    int64_t n_plots,
+    int seed,
+    const std::unordered_map<std::string, torch::Tensor>& targets
+) const {
+    std::vector<int64_t> order(n_plots);
+    std::iota(order.begin(), order.end(), 0);
+    std::mt19937 gen(seed);
+    std::shuffle(order.begin(), order.end(), gen);
+
+    if (hold_out.mode == HoldOutMode::Random) {
+        const int64_t n_test = static_cast<int64_t>(n_plots * hold_out.test_size);
+        const int64_t n_train = n_plots - n_test;
+
+        // An empty test fold makes every held-out metric divide by zero
+        // (accuracy, baseline, residuals) and returns NaN rather than an error.
+        // Fail loudly so a too-small dataset / test_size is caught here, not as
+        // silent NaNs downstream. test_size = 0 asks for no fold at all.
+        if (hold_out.test_size > 0.0f && n_test <= 0) {
+            throw std::runtime_error(
+                "prepare_data: test_size=" + std::to_string(hold_out.test_size) +
+                " yields an empty test fold for " + std::to_string(n_plots) +
+                " plots; increase test_size or provide more data");
+        }
+        return {torch::tensor(std::vector<int64_t>(order.begin(), order.begin() + n_train)),
+                torch::tensor(std::vector<int64_t>(order.begin() + n_train, order.end()))};
+    }
+
+    // A plot index as a message names it: with its plot ID when the dataset
+    // overload captured them.
+    const auto describe = [&](int64_t index) {
+        std::string out = "index " + std::to_string(index);
+        if (index >= 0 && index < static_cast<int64_t>(plot_ids_.size()) &&
+            static_cast<int64_t>(plot_ids_.size()) == n_plots) {
+            out += " (plot '" + plot_ids_[static_cast<size_t>(index)] + "')";
+        }
+        return out;
+    };
+
+    const auto& fold = hold_out.stopping_indices;
+    if (fold.empty()) {
+        throw std::invalid_argument(
+            "prepare_data: the stopping fold is empty; early stopping needs at "
+            "least one held-out plot");
+    }
+    std::vector<char> held(static_cast<size_t>(n_plots), 0);
+    for (const int64_t index : fold) {
+        if (index < 0 || index >= n_plots) {
+            throw std::invalid_argument(
+                "prepare_data: stopping fold " + describe(index) +
+                " is outside the " + std::to_string(n_plots) + " plots [0, " +
+                std::to_string(n_plots) + ")");
+        }
+        auto& slot = held[static_cast<size_t>(index)];
+        if (slot) {
+            throw std::invalid_argument(
+                "prepare_data: stopping fold lists " + describe(index) +
+                " more than once");
+        }
+        slot = 1;
+    }
+    if (static_cast<int64_t>(fold.size()) == n_plots) {
+        throw std::invalid_argument(
+            "prepare_data: the stopping fold holds all " + std::to_string(n_plots) +
+            " plots, which leaves none to fit");
+    }
+
+    auto test_idx = torch::tensor(std::vector<int64_t>(fold.begin(), fold.end()));
+
+    // A masked target scored on a fold with none of its labels has no metric
+    // and adds nothing to the stopping loss, so the fold could not select an
+    // epoch for it. A random fold may draw that by chance; a named fold is
+    // chosen, so naming one without the target's labels is refused.
+    for (const auto& cfg : model_->schema().targets) {
+        if (cfg.missing != TargetMissingPolicy::Mask) continue;
+        auto it = targets.find(cfg.name);
+        if (it == targets.end()) continue;
+        if (labelled_rows(cfg, it->second.index_select(0, test_idx)).n_labelled == 0) {
+            throw std::invalid_argument(
+                "prepare_data: target '" + cfg.name + "' (missing = mask) is "
+                "labelled on none of the " + std::to_string(fold.size()) +
+                " plots of the stopping fold, so the fold cannot select an "
+                "epoch for it");
+        }
+    }
+
+    std::vector<int64_t> train;
+    train.reserve(static_cast<size_t>(n_plots) - fold.size());
+    for (const int64_t index : order) {
+        if (!held[static_cast<size_t>(index)]) train.push_back(index);
+    }
+    return {torch::tensor(train), test_idx};
+}
+
+void Trainer::prepare_split(
+    torch::Tensor coordinates,
+    torch::Tensor covariates,
+    torch::Tensor hash_embedding,
+    torch::Tensor species_ids,
+    torch::Tensor species_vector,
+    torch::Tensor genus_ids,
+    torch::Tensor family_ids,
+    torch::Tensor unknown_fraction,
+    torch::Tensor unknown_count,
+    const std::unordered_map<std::string, torch::Tensor>& targets,
+    torch::Tensor pool_genus_ids,
+    torch::Tensor pool_family_ids,
+    torch::Tensor pool_weights,
+    torch::Tensor pool_mask,
+    torch::Tensor pool_has_cover,
+    torch::Tensor categorical_ids,
+    const HoldOutRequest& hold_out,
+    int seed
+) {
     // A fit needs something to fit to. Without this guard an empty target map
     // reaches the training loop, MultiTaskLoss accumulates over no terms, and
     // the failure surfaces at loss.backward() as "element 0 of tensors does not
@@ -234,11 +367,6 @@ void Trainer::prepare_data(
             "Trainer::prepare_data: the data carries no targets, so there is "
             "nothing to fit. Check the target specification the dataset was "
             "built with -- at least one target is required to train.");
-    }
-
-    // Store raw coordinates for spatial CV (before scaling/concatenation)
-    if (coordinates.defined() && coordinates.numel() > 0) {
-        coordinates_ = coordinates.clone();
     }
 
     // Determine n_plots from first defined tensor
@@ -255,33 +383,30 @@ void Trainer::prepare_data(
         throw std::runtime_error("No valid input tensors provided");
     }
 
-    // Create indices and shuffle
-    std::vector<int64_t> indices(n_plots);
-    std::iota(indices.begin(), indices.end(), 0);
-    std::mt19937 gen(seed);
-    std::shuffle(indices.begin(), indices.end(), gen);
+    auto fold_indices = hold_out_indices(hold_out, n_plots, seed, targets);
+    const torch::Tensor train_idx = std::move(fold_indices.first);
+    const torch::Tensor test_idx = std::move(fold_indices.second);
 
-    // Split indices
-    int64_t n_test = static_cast<int64_t>(n_plots * test_size);
-    int64_t n_train = n_plots - n_test;
+    // Capture the seed so the per-epoch training shuffle is reproducible.
+    data_seed_ = seed;
 
-    // An empty test fold makes every held-out metric divide by zero (accuracy,
-    // baseline, residuals) and returns NaN rather than an error. Fail loudly so
-    // a too-small dataset / test_size is caught here, not as silent NaNs
-    // downstream (issue #74).
-    if (test_size > 0.0f && n_test <= 0) {
-        throw std::runtime_error(
-            "prepare_data: test_size=" + std::to_string(test_size) +
-            " yields an empty test fold for " + std::to_string(n_plots) +
-            " plots; increase test_size or provide more data");
+    // Store raw coordinates for spatial CV (before scaling/concatenation)
+    if (coordinates.defined() && coordinates.numel() > 0) {
+        coordinates_ = coordinates.clone();
     }
-
-    auto train_idx = torch::tensor(std::vector<int64_t>(indices.begin(), indices.begin() + n_train));
-    auto test_idx = torch::tensor(std::vector<int64_t>(indices.begin() + n_train, indices.end()));
 
     // Store indices for CUDA hash computation
     train_indices_ = train_idx.clone();
     test_indices_ = test_idx.clone();
+
+    // How the plots were split, for run_metadata() and the checkpoint.
+    run_metadata_ = RunMetadata{};
+    run_metadata_.n_plots_train = train_indices_.numel();
+    run_metadata_.n_plots_test = test_indices_.numel();
+    run_metadata_.hold_out = hold_out.mode;
+    run_metadata_.test_size =
+        hold_out.mode == HoldOutMode::Random ? hold_out.test_size : 0.0f;
+    run_metadata_.split_seed = seed;
 
     // The continuous block (continuous_block.hpp); in hash mode the hash
     // embedding rides along at its end.
@@ -1496,20 +1621,19 @@ TrainResult Trainer::fit() {
     auto end_time = std::chrono::high_resolution_clock::now();
     result.train_time_seconds = std::chrono::duration<float>(end_time - start_time).count();
 
-    // Save final checkpoint WITH run metadata so a saved checkpoint records its
-    // own train time, best epoch, and reported metrics (load_run_metadata /
-    // the JSON sidecar were otherwise write-only -- fit() never populated them).
+    // Complete the run metadata prepare_split started with the split, and save
+    // the final checkpoint WITH it, so a saved checkpoint records its own
+    // split, train time, best epoch, and reported metrics.
+    run_metadata_.created_at = created_at_;
+    run_metadata_.completed_at = iso8601_now();
+    run_metadata_.train_time_seconds = result.train_time_seconds;
+    run_metadata_.n_plots_train = train_indices_.defined() ? train_indices_.numel() : 0;
+    run_metadata_.n_plots_test = test_indices_.defined() ? test_indices_.numel() : 0;
+    run_metadata_.best_epoch = result.best_epoch;
+    run_metadata_.total_epochs = static_cast<int>(result.train_loss_history.size());
+    run_metadata_.final_metrics = result.final_metrics;
     if (use_checkpoints) {
-        RunMetadata meta;
-        meta.created_at = created_at_;
-        meta.completed_at = iso8601_now();
-        meta.train_time_seconds = result.train_time_seconds;
-        meta.n_plots_train = train_indices_.defined() ? train_indices_.numel() : 0;
-        meta.n_plots_test = test_indices_.defined() ? test_indices_.numel() : 0;
-        meta.best_epoch = result.best_epoch;
-        meta.total_epochs = static_cast<int>(result.train_loss_history.size());
-        meta.final_metrics = result.final_metrics;
-        save(config_.checkpoint_dir + "/checkpoint.pt", &meta);
+        save(config_.checkpoint_dir + "/checkpoint.pt", &run_metadata_);
     }
 
     // Report the batch size that actually trained the model before restoring
@@ -2484,6 +2608,9 @@ CrossValidationResult Trainer::run_cross_validation(
     std::string original_state = original_state_stream.str();
     Scalers original_scalers = scalers_;
     SplitState split_snapshot = capture_split_state();
+    // Each fold's fit() rewrites the run metadata; the trainer's own run is
+    // the one it reports afterwards.
+    const RunMetadata original_run_metadata = run_metadata_;
 
     // Don't let per-fold fit() calls clobber the user's on-disk checkpoint.
     CheckpointDirSilencer ckpt_silencer(config_.checkpoint_dir);
@@ -2614,6 +2741,7 @@ CrossValidationResult Trainer::run_cross_validation(
         model_->load(archive);
     }
     restore_split_state(split_snapshot);
+    run_metadata_ = original_run_metadata;
 
     auto end_time = std::chrono::high_resolution_clock::now();
     cv_result.total_time_seconds = std::chrono::duration<float>(end_time - start_time).count();

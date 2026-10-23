@@ -116,6 +116,42 @@ rather than a schedule compressed to end there. A `best_epoch` of `e`
 `fixedEpochs` on `resolve.train.dataset(..., testSize = 0)`; on the command
 line it is `--fixed-epochs N --test-size 0`.
 
+### Stopping on a fold you name
+
+A random held-out fraction scatters its plots among the training ones. When the
+fold early stopping watches has to be a specific set, such as a withheld
+spatial block or database in a spatial or database cross-validation, or the
+fold a published protocol selects its epoch on, name its plots:
+
+=== "Python"
+
+    ```python
+    fold = dataset.plot_indices(block_plot_ids)   # plot IDs -> positions
+    trainer.prepare_data(dataset, fold, seed=42)
+    result = trainer.fit()
+    ```
+
+=== "R"
+
+    ```r
+    fit <- resolve.train.dataset(dataset, stoppingPlots = block_plot_ids,
+                                 seed = 42L, savePath = "model.pt")
+    ```
+
+=== "Command line"
+
+    ```bash
+    resolve train ... --stopping-plots block_plots.txt --output model.pt
+    ```
+
+    `block_plots.txt` holds one plot ID per line.
+
+Early stopping, the best epoch, the final metrics and the baselines are then
+read on exactly these plots, and every other plot trains. The checkpoint
+records the split: `load_run_metadata` reports `hold_out` as `explicit` (or
+`random` with its `test_size`), the seed, and the plot counts, and
+`resolve info` prints them.
+
 ### Loss presets
 
 `loss_config` selects how the regression objective is composed:

@@ -138,6 +138,24 @@ int info_command(const ParsedArgs& args) {
         print_config_block(std::cout, "Train", Trainer::load_train_config(model_path),
                            /*persisted_only=*/true);
 
+        // The run, when the checkpoint was saved with its run metadata: how
+        // the plots were split and where early stopping settled.
+        const RunMetadata run = Trainer::load_run_metadata(model_path);
+        if (run.n_plots_train + run.n_plots_test > 0) {
+            std::cout << "\nRun:" << std::endl;
+            std::cout << "  Plots: " << run.n_plots_train << " fitting, "
+                      << run.n_plots_test << " held out" << std::endl;
+            std::cout << "  Held-out fold: " << enum_to_name(run.hold_out);
+            if (run.hold_out == HoldOutMode::Random) {
+                std::cout << " (test_size " << run.test_size << ")";
+            }
+            std::cout << ", seed " << run.split_seed << std::endl;
+            if (run.total_epochs > 0) {
+                std::cout << "  Epochs: " << run.total_epochs << " (best "
+                          << run.best_epoch << ")" << std::endl;
+            }
+        }
+
         // Print parameter count
         int64_t total_params = 0;
         for (const auto& param : model->parameters()) {

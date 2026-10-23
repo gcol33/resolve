@@ -964,6 +964,9 @@ RunMetadata parse_run_metadata(const resolve_value* c) {
     if (vhas(c, "train_time_seconds")) rm.train_time_seconds = (float)vdbl(c, "train_time_seconds");
     if (vhas(c, "n_plots_train")) rm.n_plots_train = vint(c, "n_plots_train");
     if (vhas(c, "n_plots_test")) rm.n_plots_test = vint(c, "n_plots_test");
+    if (vhas(c, "hold_out")) rm.hold_out = enum_from_name<HoldOutMode>(vstr(c, "hold_out"));
+    if (vhas(c, "test_size")) rm.test_size = (float)vdbl(c, "test_size");
+    if (vhas(c, "split_seed")) rm.split_seed = (int)vint(c, "split_seed");
     if (vhas(c, "best_epoch")) rm.best_epoch = (int)vint(c, "best_epoch");
     if (vhas(c, "total_epochs")) rm.total_epochs = (int)vint(c, "total_epochs");
     if (vhas(c, "final_metrics")) rm.final_metrics = value_to_nested_metrics(vget(c, "final_metrics"));
@@ -1314,6 +1317,9 @@ resolve_value* run_metadata_to_value(const RunMetadata& m0) {
     v_put(m, "train_time_seconds", v_double(m0.train_time_seconds));
     v_put(m, "n_plots_train", v_int(m0.n_plots_train));
     v_put(m, "n_plots_test", v_int(m0.n_plots_test));
+    v_put(m, "hold_out", v_string(enum_to_name(m0.hold_out)));
+    v_put(m, "test_size", v_double(m0.test_size));
+    v_put(m, "split_seed", v_int(m0.split_seed));
     v_put(m, "best_epoch", v_int(m0.best_epoch));
     v_put(m, "total_epochs", v_int(m0.total_epochs));
     v_put(m, "final_metrics", nested_metrics_to_value(m0.final_metrics));
@@ -1938,6 +1944,25 @@ int resolve_trainer_prepare_data_from_dataset(resolve_trainer_t* t, const resolv
     })
 }
 
+int resolve_trainer_prepare_data_stopping_fold(resolve_trainer_t* t, const resolve_dataset_t* ds,
+                                               const resolve_value_t* stopping, int seed) {
+    CAPI_BODY_INT({
+        if (!t || !ds) throw std::runtime_error("prepare_data_stopping_fold: null handle");
+        std::vector<int64_t> indices;
+        if (stopping && stopping->kind == RESOLVE_VALUE_INT_ARRAY) {
+            indices = stopping->iarr;
+        } else if (stopping && stopping->kind == RESOLVE_VALUE_STRING_ARRAY) {
+            indices = ds->ds.plot_indices(stopping->sarr);
+        } else {
+            throw std::invalid_argument(
+                "prepare_data_stopping_fold: the stopping fold is an INT_ARRAY "
+                "of plot positions or a STRING_ARRAY of plot IDs");
+        }
+        t->trainer->prepare_data(ds->ds, indices, seed);
+        return 0;
+    })
+}
+
 resolve_value_t* resolve_trainer_fit(resolve_trainer_t* t) {
     CAPI_BODY_PTR({
         if (!t) throw std::runtime_error("fit: null handle");
@@ -1985,6 +2010,7 @@ resolve_value_t* resolve_trainer_get(const resolve_trainer_t* t, const char* wha
         if (w == "test_plot_ids") return v_string_array(tr.test_plot_ids());
         if (w == "train_plot_ids") return v_string_array(tr.train_plot_ids());
         if (w == "effective_batch_size") return v_int(tr.effective_batch_size());
+        if (w == "run_metadata") return run_metadata_to_value(tr.run_metadata());
         if (w == "config") {
             // Full TrainConfig serializer (parity with the Python Trainer.config
             // surface and resolve.load_train_config). Device / checkpoint fields

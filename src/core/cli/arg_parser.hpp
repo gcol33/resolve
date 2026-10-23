@@ -104,6 +104,15 @@ private:
     std::vector<FlagSpec> flags_;
 };
 
+// `s` without leading and trailing whitespace (a CRLF line's '\r' included).
+inline std::string trim_whitespace(const std::string& s) {
+    size_t begin = 0;
+    size_t end = s.size();
+    while (begin < end && std::isspace(static_cast<unsigned char>(s[begin]))) ++begin;
+    while (end > begin && std::isspace(static_cast<unsigned char>(s[end - 1]))) --end;
+    return s.substr(begin, end - begin);
+}
+
 // Values collected for one subcommand invocation. Reads are checked against the
 // spec, so a name that is not a declared flag throws instead of quietly
 // returning a default.
@@ -161,7 +170,7 @@ public:
         std::string item;
         std::istringstream stream(raw);
         while (std::getline(stream, item, ',')) {
-            const std::string trimmed = trim(item);
+            const std::string trimmed = trim_whitespace(item);
             if (!trimmed.empty()) out.push_back(trimmed);
         }
         return out;
@@ -214,14 +223,6 @@ private:
                            "' read undeclared flag " + flag);
         }
         return found;
-    }
-
-    static std::string trim(const std::string& s) {
-        size_t begin = 0;
-        size_t end = s.size();
-        while (begin < end && std::isspace(static_cast<unsigned char>(s[begin]))) ++begin;
-        while (end > begin && std::isspace(static_cast<unsigned char>(s[end - 1]))) --end;
-        return s.substr(begin, end - begin);
     }
 
     static int64_t parse_int64(const std::string& flag, const std::string& raw) {

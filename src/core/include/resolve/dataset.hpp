@@ -465,6 +465,13 @@ public:
     // Plot IDs for tracking
     const std::vector<std::string>& plot_ids() const { return plot_ids_; }
 
+    // Position of each of `ids` in plot_ids(), in the order given: the plot
+    // indices Trainer::prepare_data takes for an explicit stopping fold. An ID
+    // the dataset does not hold (absent from the data, or dropped for a missing
+    // label) throws std::invalid_argument naming it. A repeated ID yields a
+    // repeated index, which prepare_data then rejects.
+    [[nodiscard]] std::vector<int64_t> plot_indices(const std::vector<std::string>& ids) const;
+
     // Taxonomy vocabulary (for saving/loading)
     const TaxonomyVocab& taxonomy_vocab() const { return taxonomy_vocab_; }
     TaxonomyVocab& taxonomy_vocab() { return taxonomy_vocab_; }

@@ -2215,4 +2215,25 @@ void ResolveDataset::publish_vocabs_to_schema() {
     schema_.family_vocab = taxonomy_vocab_.family_names();
 }
 
+std::vector<int64_t> ResolveDataset::plot_indices(const std::vector<std::string>& ids) const {
+    std::unordered_map<std::string, int64_t> position;
+    position.reserve(plot_ids_.size());
+    for (size_t i = 0; i < plot_ids_.size(); ++i) {
+        position.emplace(plot_ids_[i], static_cast<int64_t>(i));
+    }
+    std::vector<int64_t> out;
+    out.reserve(ids.size());
+    for (const auto& id : ids) {
+        auto it = position.find(id);
+        if (it == position.end()) {
+            throw std::invalid_argument(
+                "plot '" + id + "' is not among the dataset's " +
+                std::to_string(plot_ids_.size()) + " plots (absent from the "
+                "data, or dropped because a target label was missing)");
+        }
+        out.push_back(it->second);
+    }
+    return out;
+}
+
 } // namespace resolve

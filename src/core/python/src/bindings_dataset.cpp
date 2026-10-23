@@ -338,6 +338,10 @@ void register_dataset(nb::module_& m) {
         })
         .def_prop_ro("schema", [](const resolve::ResolveDataset& self) -> resolve::ResolveSchema { return self.schema(); })
         .def_prop_ro("plot_ids", &resolve::ResolveDataset::plot_ids)
+        .def("plot_indices", &resolve::ResolveDataset::plot_indices, nb::arg("ids"),
+             "Position of each plot ID in plot_ids, in the order given: the "
+             "stopping_indices Trainer.prepare_data takes. Raises ValueError for "
+             "an ID the dataset does not hold.")
         .def_prop_ro("species_vocab", &resolve::ResolveDataset::species_vocab)
         .def_prop_ro("n_plots", &resolve::ResolveDataset::n_plots)
         .def_prop_ro("config", [](const resolve::ResolveDataset& self) -> resolve::DatasetConfig { return self.config(); })

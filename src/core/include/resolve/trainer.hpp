@@ -7,6 +7,7 @@
 #include "resolve/scalers.hpp"
 #include <torch/torch.h>
 #include <chrono>
+#include <span>
 
 namespace resolve {
 
@@ -57,10 +58,29 @@ public:
         const TrainConfig& config = TrainConfig{}
     );
 
-    // Prepare data from a ResolveDataset (preferred API)
+    // Prepare data from a ResolveDataset (preferred API). A seeded random
+    // `test_size` fraction of the plots is held out for early stopping.
     void prepare_data(
         const ResolveDataset& dataset,
         float test_size = 0.2f,
+        int seed = 42
+    );
+
+    // Prepare data from a ResolveDataset, holding out the plots the caller
+    // names: a withheld spatial block or database, or the fold a published
+    // protocol selects its epoch on. `stopping_indices` are positions in
+    // dataset.plot_ids() (ResolveDataset::plot_indices maps plot IDs to them).
+    // Early stopping, best_epoch, final_metrics, the baselines and
+    // test_indices() / test_plot_ids() read exactly these plots, in this
+    // order; every other plot is a fitting row, and the scalers are fitted on
+    // those alone. `seed` orders the fitting rows and drives the per-epoch
+    // shuffle as under the random split, so a fold equal to the random one
+    // reproduces that split row for row. Throws std::invalid_argument for an
+    // empty fold, an index outside [0, n_plots), a repeated index, a fold that
+    // holds every plot, and a fold without a labelled plot for a masked target.
+    void prepare_data(
+        const ResolveDataset& dataset,
+        const std::vector<int64_t>& stopping_indices,
         int seed = 42
     );
 
@@ -220,10 +240,17 @@ public:
     [[nodiscard]] torch::Tensor test_indices() const noexcept { return test_indices_; }
 
     // Plot IDs for the train / test split, in fold order. Populated only when
-    // prepare_data(const ResolveDataset&) was used (the raw-tensor overload
-    // carries no plot IDs); empty otherwise.
+    // a ResolveDataset overload of prepare_data was used (the raw-tensor
+    // overload carries no plot IDs); empty otherwise.
     [[nodiscard]] std::vector<std::string> train_plot_ids() const;
     [[nodiscard]] std::vector<std::string> test_plot_ids() const;
+
+    // The run as a checkpoint records it: the split prepare_data made (plot
+    // counts, hold_out mode, test_size, split_seed) and, once fit() returns,
+    // its timestamps, train time, best / total epochs and final metrics. fit()
+    // writes it into checkpoint_dir/checkpoint.pt; pass it to save() to record
+    // it in any other checkpoint.
+    [[nodiscard]] const RunMetadata& run_metadata() const noexcept { return run_metadata_; }
 
     // Perform k-fold cross-validation
     // Returns aggregated metrics across all folds
@@ -255,6 +282,54 @@ public:
     );
 
 private:
+    // The held-out fold a prepare_data call asks for: a `test_size` fraction
+    // drawn by the seeded shuffle (Random), or the caller's plot indices
+    // (Explicit), which must outlive the call.
+    struct HoldOutRequest {
+        HoldOutMode mode = HoldOutMode::Random;
+        float test_size = 0.2f;
+        std::span<const int64_t> stopping_indices;
+    };
+
+    // The dataset half of both ResolveDataset overloads: captures what the
+    // trainer keeps from the dataset, then hands its tensors to prepare_split.
+    void prepare_from_dataset(const ResolveDataset& dataset,
+                              const HoldOutRequest& hold_out, int seed);
+
+    // The one split-application path behind every prepare_data overload:
+    // validates the inputs, picks the fold (hold_out_indices), fits the
+    // scalers on the fitting rows, splits every tensor and records the split
+    // in run_metadata_. Arguments as for the raw-tensor prepare_data.
+    void prepare_split(
+        torch::Tensor coordinates,
+        torch::Tensor covariates,
+        torch::Tensor hash_embedding,
+        torch::Tensor species_ids,
+        torch::Tensor species_vector,
+        torch::Tensor genus_ids,
+        torch::Tensor family_ids,
+        torch::Tensor unknown_fraction,
+        torch::Tensor unknown_count,
+        const std::unordered_map<std::string, torch::Tensor>& targets,
+        torch::Tensor pool_genus_ids,
+        torch::Tensor pool_family_ids,
+        torch::Tensor pool_weights,
+        torch::Tensor pool_mask,
+        torch::Tensor pool_has_cover,
+        torch::Tensor categorical_ids,
+        const HoldOutRequest& hold_out,
+        int seed
+    );
+
+    // The (fitting rows, held-out fold) global plot indices `hold_out` asks
+    // for among `n_plots` plots. Both modes start from the same seeded shuffle:
+    // the random fold is its tail, and under an explicit fold the fitting rows
+    // keep their shuffled order. `targets` (unscaled, keyed by target name) is
+    // read to check an explicit fold against the masked targets.
+    [[nodiscard]] std::pair<torch::Tensor, torch::Tensor> hold_out_indices(
+        const HoldOutRequest& hold_out, int64_t n_plots, int seed,
+        const std::unordered_map<std::string, torch::Tensor>& targets) const;
+
     // One epoch's loss: the value the total history records, and its split
     // into the term each target adds (loss_fn_.targets() order) plus the MoE
     // load-balancing term, which belongs to no target (0 without MoE, and
@@ -370,11 +445,15 @@ private:
     // out of scope before save).
     CategoricalVocab categorical_vocab_;
 
-    // Plot IDs captured at prepare_data(const ResolveDataset&) time, in the
+    // Plot IDs captured by a ResolveDataset prepare_data overload, in the
     // dataset's original plot order. Empty when the raw-tensor prepare_data
     // overload was used. Indexed by train_indices_ / test_indices_ to recover
     // the plot IDs of each fold (train_plot_ids() / test_plot_ids()).
     std::vector<std::string> plot_ids_;
+
+    // What run_metadata() reports: the split fields are set by prepare_split,
+    // the rest by fit().
+    RunMetadata run_metadata_;
 
     // Raw coordinates stored for spatial CV (before scaling/concatenation)
     torch::Tensor coordinates_;

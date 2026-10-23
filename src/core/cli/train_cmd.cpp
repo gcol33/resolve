@@ -7,6 +7,7 @@
 // a default.
 
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -21,8 +22,25 @@ using resolve_cli::ArgError;
 using resolve_cli::ParsedArgs;
 using resolve_cli::parse_parallel_branch;
 using resolve_cli::read_architecture_flags;
+using resolve_cli::trim_whitespace;
 
 namespace {
+
+// The plot IDs of a --stopping-plots file: one per line, surrounding
+// whitespace dropped, blank lines skipped.
+std::vector<std::string> read_plot_id_list(const std::string& path) {
+    std::ifstream in(path);
+    if (!in) {
+        throw ArgError("--stopping-plots: cannot open '" + path + "'");
+    }
+    std::vector<std::string> ids;
+    std::string line;
+    while (std::getline(in, line)) {
+        std::string id = trim_whitespace(line);
+        if (!id.empty()) ids.push_back(std::move(id));
+    }
+    return ids;
+}
 
 // Parse one --target value: COL[:TYPE[:N][:log1p][:mask]].
 //
@@ -470,7 +488,25 @@ int train_command(const ParsedArgs& args) {
 
     // ------------------------------------------------------- prepare + train
     Trainer trainer(model, train_config);
-    trainer.prepare_data(dataset, args.get_float("--test-size"), seed);
+    std::string stopping_plots_path;
+    if (args.get_if_present("--stopping-plots", stopping_plots_path)) {
+        if (args.has("--test-size")) {
+            std::cerr << "Error: pass --test-size or --stopping-plots, not both"
+                      << std::endl;
+            return 1;
+        }
+        const auto stopping_ids = read_plot_id_list(stopping_plots_path);
+        try {
+            trainer.prepare_data(dataset, dataset.plot_indices(stopping_ids), seed);
+            std::cout << "Stopping fold: " << stopping_ids.size() << " plots from "
+                      << stopping_plots_path << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "Error: --stopping-plots: " << e.what() << std::endl;
+            return 1;
+        }
+    } else {
+        trainer.prepare_data(dataset, args.get_float("--test-size"), seed);
+    }
 
     // Cross-validation runs first and restores the trainer's weights and split
     // when it finishes, so the model saved below is the same one a run without
@@ -522,8 +558,10 @@ int train_command(const ParsedArgs& args) {
     std::cout << "\nFinal metrics:" << std::endl;
     print_metric_tree(result.final_metrics, "  ");
 
+    // Saved with the run metadata, so the checkpoint records how the plots
+    // were split, and the JSON sidecar beside it says so in plain text.
     std::cout << "\nSaving model to: " << output_path << std::endl;
-    trainer.save(output_path);
+    trainer.save(output_path, &trainer.run_metadata());
 
     std::cout << "Done!" << std::endl;
     return 0;

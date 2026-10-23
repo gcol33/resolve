@@ -15,8 +15,10 @@ nested list keyed by target then metric (e.g. \verb{$final_metrics$area$rmse}).
 }
 \description{
 Reads back the run metadata persisted in a RESOLVE checkpoint: training time,
-train/test plot counts, best and total epochs, the RESOLVE version and
-timestamps, and the per-target final-metric tree.
+train/test plot counts, how the held-out fold was chosen (\code{hold_out}:
+\code{"random"}, a \code{test_size} fraction drawn with \code{split_seed}, or \code{"explicit"},
+the plots named by \code{stoppingPlots}), best and total epochs, the RESOLVE
+version and timestamps, and the per-target final-metric tree.
 }
 \examples{
 \dontrun{

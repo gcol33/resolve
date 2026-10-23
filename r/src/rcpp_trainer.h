@@ -64,6 +64,27 @@ public:
             trainer_.get(), dataset.handle(), test_size, seed));
     }
 
+    // Holds out the plots named by `stopping_plots` (plot IDs) for early
+    // stopping. Always sent as a STRING_ARRAY, so a single plot ID is not
+    // read as a scalar.
+    void prepare_data_stopping_fold(RResolveDataset& dataset, CharacterVector stopping_plots,
+                                    int seed = 42) {
+        std::vector<std::string> ids(static_cast<size_t>(stopping_plots.size()));
+        std::vector<const char*> ptrs(ids.size());
+        for (R_xlen_t i = 0; i < stopping_plots.size(); ++i) {
+            if (stopping_plots[i] == NA_STRING) {
+                stop("stoppingPlots must not contain NA");
+            }
+            ids[static_cast<size_t>(i)] = std::string(CHAR(stopping_plots[i]));
+            ptrs[static_cast<size_t>(i)] = ids[static_cast<size_t>(i)].c_str();
+        }
+        ValuePtr fold(resolve_value_new_string_array(ptrs.data(),
+                                                     static_cast<int64_t>(ptrs.size())));
+        capi_check(fold.get());
+        capi_check_status(resolve_trainer_prepare_data_stopping_fold(
+            trainer_.get(), dataset.handle(), fold.get(), seed));
+    }
+
     RObject fit() { return value_to_r_owned(resolve_trainer_fit(trainer_.get())); }
 
     void save(std::string path, Nullable<List> metadata = R_NilValue) {
@@ -82,6 +103,7 @@ public:
     RObject test_plot_ids() const { return get("test_plot_ids"); }
     RObject train_plot_ids() const { return get("train_plot_ids"); }
     RObject effective_batch_size() const { return get("effective_batch_size"); }
+    RObject run_metadata() const { return get("run_metadata"); }
 
     List categorical_vocab() const {
         ValuePtr v(resolve_trainer_get(trainer_.get(), "categorical_vocab"));

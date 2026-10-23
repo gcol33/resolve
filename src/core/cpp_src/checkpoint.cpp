@@ -113,8 +113,7 @@ void write_progress_file(
 // rather than renaming it, so existing checkpoints keep loading.
 
 // Why: libtorch's archive API stores tensors, not strings. A std::string
-// round-trips as a length-prefixed UInt8 tensor pair, "<key>_len" + "<key>"
-// (the same approach save_run_metadata uses for resolve_version/timestamps).
+// round-trips as a length-prefixed UInt8 tensor pair, "<key>_len" + "<key>".
 static void write_string_to_archive(
     torch::serialize::OutputArchive& archive,
     const std::string& prefix,
@@ -887,33 +886,20 @@ void save_run_metadata(
     torch::serialize::OutputArchive& archive,
     const RunMetadata& metadata
 ) {
-    // Save version as bytes
-    std::vector<uint8_t> version_bytes(metadata.resolve_version.begin(), metadata.resolve_version.end());
-    archive.write("meta_version_len", torch::tensor(static_cast<int64_t>(version_bytes.size())));
-    if (!version_bytes.empty()) {
-        archive.write("meta_version", torch::from_blob(
-            version_bytes.data(), {static_cast<int64_t>(version_bytes.size())}, torch::kUInt8).clone());
-    }
-
-    // Save timestamps as bytes
-    std::vector<uint8_t> created_bytes(metadata.created_at.begin(), metadata.created_at.end());
-    archive.write("meta_created_len", torch::tensor(static_cast<int64_t>(created_bytes.size())));
-    if (!created_bytes.empty()) {
-        archive.write("meta_created", torch::from_blob(
-            created_bytes.data(), {static_cast<int64_t>(created_bytes.size())}, torch::kUInt8).clone());
-    }
-
-    std::vector<uint8_t> completed_bytes(metadata.completed_at.begin(), metadata.completed_at.end());
-    archive.write("meta_completed_len", torch::tensor(static_cast<int64_t>(completed_bytes.size())));
-    if (!completed_bytes.empty()) {
-        archive.write("meta_completed", torch::from_blob(
-            completed_bytes.data(), {static_cast<int64_t>(completed_bytes.size())}, torch::kUInt8).clone());
-    }
+    write_string_to_archive(archive, "meta_version", metadata.resolve_version);
+    write_string_to_archive(archive, "meta_created", metadata.created_at);
+    write_string_to_archive(archive, "meta_completed", metadata.completed_at);
 
     // Save numeric fields
     archive.write("meta_train_time", torch::tensor(metadata.train_time_seconds));
     archive.write("meta_n_plots_train", torch::tensor(metadata.n_plots_train));
     archive.write("meta_n_plots_test", torch::tensor(metadata.n_plots_test));
+
+    // The hold-out mode is stored by name, so the key reads the same however
+    // the enum is ordered.
+    write_string_to_archive(archive, "meta_hold_out", enum_to_name(metadata.hold_out));
+    archive.write("meta_test_size", torch::tensor(metadata.test_size));
+    archive.write("meta_split_seed", torch::tensor(static_cast<int64_t>(metadata.split_seed)));
     archive.write("meta_best_epoch", torch::tensor(metadata.best_epoch));
     archive.write("meta_total_epochs", torch::tensor(metadata.total_epochs));
 
@@ -925,13 +911,7 @@ void save_run_metadata(
     for (const auto& [target_name, metrics] : metadata.final_metrics) {
         std::string prefix = "meta_target_" + std::to_string(target_idx) + "_";
 
-        // Save target name
-        std::vector<uint8_t> name_bytes(target_name.begin(), target_name.end());
-        archive.write(prefix + "name_len", torch::tensor(static_cast<int64_t>(name_bytes.size())));
-        if (!name_bytes.empty()) {
-            archive.write(prefix + "name", torch::from_blob(
-                name_bytes.data(), {static_cast<int64_t>(name_bytes.size())}, torch::kUInt8).clone());
-        }
+        write_string_to_archive(archive, prefix + "name", target_name);
 
         // Save metrics for this target
         int64_t n_metrics = static_cast<int64_t>(metrics.size());
@@ -941,12 +921,7 @@ void save_run_metadata(
         for (const auto& [metric_name, value] : metrics) {
             std::string m_prefix = prefix + "metric_" + std::to_string(metric_idx) + "_";
 
-            std::vector<uint8_t> m_name_bytes(metric_name.begin(), metric_name.end());
-            archive.write(m_prefix + "name_len", torch::tensor(static_cast<int64_t>(m_name_bytes.size())));
-            if (!m_name_bytes.empty()) {
-                archive.write(m_prefix + "name", torch::from_blob(
-                    m_name_bytes.data(), {static_cast<int64_t>(m_name_bytes.size())}, torch::kUInt8).clone());
-            }
+            write_string_to_archive(archive, m_prefix + "name", metric_name);
             archive.write(m_prefix + "value", torch::tensor(value));
             metric_idx++;
         }
@@ -975,26 +950,22 @@ RunMetadata load_run_metadata(
     // flattened per-target metric tree. Missing keys fall back to defaults.
     RunMetadata meta;
 
-    auto read_string_pair = [&](const std::string& prefix) -> std::string {
-        torch::Tensor len_t;
-        if (!archive.try_read(prefix + "_len", len_t)) return std::string();
-        int64_t len = len_t.item<int64_t>();
-        if (len <= 0) return std::string();
-        torch::Tensor t;
-        if (!archive.try_read(prefix, t)) return std::string();
-        auto ptr = t.data_ptr<uint8_t>();
-        return std::string(reinterpret_cast<const char*>(ptr), static_cast<size_t>(len));
-    };
-
-    std::string version = read_string_pair("meta_version");
-    if (!version.empty()) meta.resolve_version = version;
-    meta.created_at = read_string_pair("meta_created");
-    meta.completed_at = read_string_pair("meta_completed");
+    try_read_string_from_archive(archive, "meta_version", meta.resolve_version);
+    try_read_string_from_archive(archive, "meta_created", meta.created_at);
+    try_read_string_from_archive(archive, "meta_completed", meta.completed_at);
 
     // Fresh tensor per read (see load_train_config note on InputArchive::read).
     { torch::Tensor x; if (archive.try_read("meta_train_time", x)) meta.train_time_seconds = x.item<float>(); }
     { torch::Tensor x; if (archive.try_read("meta_n_plots_train", x)) meta.n_plots_train = x.item<int64_t>(); }
     { torch::Tensor x; if (archive.try_read("meta_n_plots_test", x)) meta.n_plots_test = x.item<int64_t>(); }
+    {
+        std::string hold_out;
+        if (try_read_string_from_archive(archive, "meta_hold_out", hold_out)) {
+            meta.hold_out = enum_from_name<HoldOutMode>(hold_out);
+        }
+    }
+    { torch::Tensor x; if (archive.try_read("meta_test_size", x)) meta.test_size = x.item<float>(); }
+    { torch::Tensor x; if (archive.try_read("meta_split_seed", x)) meta.split_seed = static_cast<int>(x.item<int64_t>()); }
     { torch::Tensor x; if (archive.try_read("meta_best_epoch", x)) meta.best_epoch = x.item<int>(); }
     { torch::Tensor x; if (archive.try_read("meta_total_epochs", x)) meta.total_epochs = x.item<int>(); }
 
@@ -1003,14 +974,16 @@ RunMetadata load_run_metadata(
         int64_t n_targets = n_targets_t.item<int64_t>();
         for (int64_t ti = 0; ti < n_targets; ++ti) {
             std::string prefix = "meta_target_" + std::to_string(ti) + "_";
-            std::string target_name = read_string_pair(prefix + "name");
+            std::string target_name;
+            try_read_string_from_archive(archive, prefix + "name", target_name);
             torch::Tensor n_metrics_t;
             if (!archive.try_read(prefix + "n_metrics", n_metrics_t)) continue;
             int64_t n_metrics = n_metrics_t.item<int64_t>();
             std::unordered_map<std::string, float> metrics;
             for (int64_t mi = 0; mi < n_metrics; ++mi) {
                 std::string m_prefix = prefix + "metric_" + std::to_string(mi) + "_";
-                std::string metric_name = read_string_pair(m_prefix + "name");
+                std::string metric_name;
+                try_read_string_from_archive(archive, m_prefix + "name", metric_name);
                 torch::Tensor val_t;
                 if (archive.try_read(m_prefix + "value", val_t))
                     metrics[metric_name] = val_t.item<float>();
@@ -1049,6 +1022,9 @@ void write_metadata_json(
     file << "  \"train_time_seconds\": " << metadata.train_time_seconds << ",\n";
     file << "  \"n_plots_train\": " << metadata.n_plots_train << ",\n";
     file << "  \"n_plots_test\": " << metadata.n_plots_test << ",\n";
+    file << "  \"hold_out\": \"" << enum_to_name(metadata.hold_out) << "\",\n";
+    file << "  \"test_size\": " << metadata.test_size << ",\n";
+    file << "  \"split_seed\": " << metadata.split_seed << ",\n";
     file << "  \"best_epoch\": " << metadata.best_epoch << ",\n";
     file << "  \"total_epochs\": " << metadata.total_epochs << ",\n";
 

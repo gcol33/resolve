@@ -495,6 +495,9 @@ void register_types(nb::module_& m) {
         .def_rw("train_time_seconds", &resolve::RunMetadata::train_time_seconds)
         .def_rw("n_plots_train", &resolve::RunMetadata::n_plots_train)
         .def_rw("n_plots_test", &resolve::RunMetadata::n_plots_test)
+        .def_rw("hold_out", &resolve::RunMetadata::hold_out)
+        .def_rw("test_size", &resolve::RunMetadata::test_size)
+        .def_rw("split_seed", &resolve::RunMetadata::split_seed)
         .def_rw("best_epoch", &resolve::RunMetadata::best_epoch)
         .def_rw("total_epochs", &resolve::RunMetadata::total_epochs)
         .def_rw("final_metrics", &resolve::RunMetadata::final_metrics);

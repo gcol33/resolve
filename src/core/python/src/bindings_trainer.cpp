@@ -12,7 +12,27 @@ void register_trainer(nb::module_& m) {
         }, nb::arg("dataset"),
            nb::arg("test_size") = 0.2f,
            nb::arg("seed") = 42,
-           "Prepare data from a ResolveDataset (preferred API)")
+           nb::call_guard<nb::gil_scoped_release>(),
+           "Prepare data from a ResolveDataset, holding out a seeded random "
+           "test_size fraction of the plots for early stopping.")
+        .def("prepare_data", [](resolve::Trainer& self,
+                               const resolve::ResolveDataset& dataset,
+                               const std::vector<int64_t>& stopping_indices,
+                               int seed) {
+            self.prepare_data(dataset, stopping_indices, seed);
+        }, nb::arg("dataset"),
+           nb::arg("stopping_indices"),
+           nb::arg("seed") = 42,
+           nb::call_guard<nb::gil_scoped_release>(),
+           "Prepare data from a ResolveDataset, holding out the plots at "
+           "stopping_indices (0-based positions in dataset.plot_ids; "
+           "dataset.plot_indices maps plot IDs to them) for early stopping. "
+           "Early stopping, best_epoch, final_metrics, the baselines and "
+           "test_indices() read exactly these plots, in this order; every other "
+           "plot is a fitting row. seed drives the per-epoch shuffle. Raises "
+           "ValueError for an empty fold, an index out of range, a repeated "
+           "index, a fold of every plot, or a fold with no labelled plot for a "
+           "masked target.")
         .def("prepare_data_raw", [](resolve::Trainer& self,
                                nb::object coordinates_obj,
                                nb::object covariates_obj,
@@ -94,6 +114,12 @@ void register_trainer(nb::module_& m) {
         .def_prop_ro("model", [](resolve::Trainer& self) -> resolve::ResolveModel { return self.model(); })
         .def_prop_ro("scalers", [](const resolve::Trainer& self) { return resolve::Scalers(self.scalers()); })
         .def_prop_ro("config", [](const resolve::Trainer& self) { return resolve::TrainConfig(self.config()); })
+        .def_prop_ro("run_metadata",
+                     [](const resolve::Trainer& self) { return resolve::RunMetadata(self.run_metadata()); },
+                     "The run as a checkpoint records it: the split prepare_data "
+                     "made (n_plots_train / n_plots_test, hold_out, test_size, "
+                     "split_seed) and, after fit(), its timing, epochs and final "
+                     "metrics. Pass it to save() to record it in the checkpoint.")
         .def_prop_ro("effective_batch_size", &resolve::Trainer::effective_batch_size,
                      "Batch size the last fit() actually trained at. Equal to "
                      "config.batch_size on a clean run, smaller when the CUDA "

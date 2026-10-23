@@ -144,6 +144,12 @@ void register_enums(nb::module_& m) {
         .value("Mask", resolve::TargetMissingPolicy::Mask)
         .export_values();
 
+    // How Trainer.prepare_data chose the held-out fold (RunMetadata.hold_out).
+    nb::enum_<resolve::HoldOutMode>(m, "HoldOutMode")
+        .value("Random", resolve::HoldOutMode::Random)
+        .value("Explicit", resolve::HoldOutMode::Explicit)
+        .export_values();
+
     // Not exported to module scope: "Mean" would collide with other enums'
     // value names there.
     nb::enum_<resolve::SuiteCombine>(m, "SuiteCombine")
