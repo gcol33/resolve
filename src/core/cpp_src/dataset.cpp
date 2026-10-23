@@ -157,7 +157,7 @@ void resolve_classification_mapping(
             // A negative code is written verbatim into the int64 target tensor
             // and later indexes the classification head out of bounds
             // (static_cast<size_t> of a negative -> huge). Reject it here rather
-            // than only skipping it for class_names (issue #74).
+            // than only skipping it for class_names.
             if (c < 0) {
                 throw std::invalid_argument(
                     "class_mapping code for '" + name + "' is negative (" +
@@ -185,7 +185,7 @@ void resolve_classification_mapping(
 }
 
 // Like resolve_classification_mapping, but for the auto-fit branch it fits the
-// vocabulary from KEPT rows only (issue #84): a class value that occurs solely in
+// vocabulary from KEPT rows only: a class value that occurs solely in
 // rows that will be dropped because a *different* target is missing must not enter
 // class_names, since that both inflates num_classes with a zero-example class and
 // (for the lexicographic factorization) shifts every other code. Explicit mappings
@@ -218,7 +218,7 @@ void resolve_classification_mapping_kept(
 // kUnlabelledClass. Either way the cell contributes nothing to the class list,
 // which is therefore fit on the kept rows labelled for this target.
 //
-// num_classes validation (issue #79): the direct-integer path emits the parsed
+// num_classes validation: the direct-integer path emits the parsed
 // integers verbatim as class codes, so class_names.size() == max_code + 1. The
 // classification head is sized from num_classes, so a caller-supplied num_classes
 // smaller than class_names.size() (e.g. a 1-indexed column 1..9 built with
@@ -285,8 +285,8 @@ torch::Tensor encode_classification_target(
     return tensor;
 }
 
-// Finalize the keep flags for a classification target WITHOUT fitting the vocab
-// (issue #84): so that every classification vocab is fit against the final
+// Finalize the keep flags for a classification target WITHOUT fitting the vocab:
+// so that every classification vocab is fit against the final
 // surviving-row set even when another classification target drives additional
 // drops. Auto-fit maps every non-NA cell in a kept row, so only NA cells drop;
 // an explicit mapping additionally drops non-NA cells absent from the mapping.
@@ -386,7 +386,7 @@ void finalize_masked_labels(
 }
 
 // Drop species records for plots that were removed (missing/NA target) so the
-// species / taxonomy vocab is built only from surviving plots (issue #68):
+// species / taxonomy vocab is built only from surviving plots:
 // species occurring solely in dropped plots must not inflate the embedding
 // tables with never-referenced rows. `kept_ids` is the compacted plot_ids_.
 void filter_records_to_plots(
@@ -399,7 +399,7 @@ void filter_records_to_plots(
     // wrongly skips filtering when the species file references a plot absent
     // from the kept set while staying within the count (e.g. one phantom plot,
     // no header plots dropped) -- that plot's species then inflate and shift the
-    // frequency-sorted vocab (issue #71, the #68 class via the fast-path guard).
+    // frequency-sorted vocab.
     std::unordered_set<std::string> kept(kept_ids.begin(), kept_ids.end());
     if (plot_records.size() == kept.size()) {
         // Same count: a full pass is only skippable when every key is kept.
@@ -449,7 +449,7 @@ ColumnIndices ColumnIndices::from_source(const RowSource& source, const RoleMapp
     // an absent covariate/coordinate/target column; without the same guard here
     // a species-table role typo (roles.genus = "genuss") would flip
     // has_taxonomy/has_coordinates to false with no signal and bake the wrong
-    // feature count into the checkpoint (issue #94). A role left unset
+    // feature count into the checkpoint. A role left unset
     // (nullopt) still resolves to -1 without throwing.
     auto resolve_role = [&source](const std::optional<std::string>& name,
                                   const char* role) -> int {
@@ -480,7 +480,7 @@ ColumnIndices ColumnIndices::from_source(const RowSource& source, const RoleMapp
 
 
 // --- Public loader verbs: thin io::with_retry<io::IOError> wrappers over the
-// single-attempt *_impl bodies. A transient storage read fault (issue #20) is
+// single-attempt *_impl bodies. A transient storage read fault is
 // retried with backoff into a fresh dataset; a parse/logic error (not
 // io::IOError) propagates on the first try, so a permanent fault never re-reads
 // a multi-GB file. ---
@@ -576,7 +576,7 @@ ResolveDataset ResolveDataset::from_species_csv_with_vocabs(
         "species CSV load (schema)");
 }
 
-// --- In-memory (DataFrame) loaders (issue #22). These share the exact loader
+// --- In-memory (DataFrame) loaders. These share the exact loader
 // bodies as the CSV verbs via the RowSource seam; the only difference is the row
 // provider (InMemoryRowSource over a ColumnTable instead of a CSVReader). A
 // fully in-memory load does no I/O, so it needs no io::with_retry; the mixed
@@ -715,7 +715,7 @@ ResolveDataset ResolveDataset::from_csv_impl(
     return dataset;
 }
 
-// --- Vocabulary reuse (issue #102) -----------------------------------------
+// --- Vocabulary reuse -----------------------------------------
 //
 // Every non-hash encoder indexes an embedding table by a code that is a
 // function of the file its vocab was fitted on (the species vocab is
@@ -768,7 +768,7 @@ DatasetConfig dataset_config_from_checkpoint(const ResolveSchema& schema,
     config.species_encoding = model_config.species_encoding;
     config.hash_dim = model_config.hash_dim;
     config.top_k = model_config.top_k;
-    // Everything else the loader consumed, from the schema (issue #102).
+    // Everything else the loader consumed, from the schema.
     config.top_k_species = schema.top_k_species;
     config.selection = schema.selection;
     config.species_budget = schema.species_budget;
@@ -789,10 +789,28 @@ DatasetConfig dataset_config_from_checkpoint(const ResolveSchema& schema,
 }
 
 torch::Tensor ResolveDataset::continuous_block(bool include_hash) const {
-    return assemble_continuous(
-        {coordinates_, covariates_, unknown_fraction_, unknown_count_,
-         include_hash ? hash_embedding_ : torch::Tensor()},
-        schema_.missing_values, schema_.n_plots);
+    ContinuousInputs parts = continuous_inputs();
+    if (!include_hash) parts.hash_embedding = torch::Tensor();
+    return assemble_continuous(parts, schema_.missing_values, schema_.n_plots);
+}
+
+ContinuousInputs ResolveDataset::continuous_inputs() const {
+    return {coordinates_, covariates_, unknown_fraction_, unknown_count_, hash_embedding_};
+}
+
+PlotInputs ResolveDataset::plot_inputs() const {
+    PlotInputs inputs;
+    inputs.genus_ids = genus_ids_;
+    inputs.family_ids = family_ids_;
+    inputs.species_ids = species_ids_;
+    inputs.species_vector = species_vector_;
+    inputs.pool_genus_ids = pool_genus_ids_;
+    inputs.pool_family_ids = pool_family_ids_;
+    inputs.pool_weights = pool_weights_;
+    inputs.pool_mask = pool_mask_;
+    inputs.pool_has_cover = pool_has_cover_;
+    inputs.categorical_ids = categorical_ids_;
+    return inputs;
 }
 
 SelectionMode effective_selection(const DatasetConfig& config) {
@@ -915,7 +933,7 @@ ResolveDataset ResolveDataset::from_species_csv_impl(
 // When an abundance column is present but a cell is missing/NA/unparseable, the
 // weight defaults to 1.0 and *abundance_coerced (if given) is incremented so the
 // caller can warn -- mirroring the loud coordinate/covariate coercion warnings,
-// rather than silently conflating missing cover with a real presence (issue #94).
+// rather than silently conflating missing cover with a real presence.
 // A parsed abundance of exactly 0 is read as `zero_abundance_as`
 // (DatasetConfig::zero_abundance_as; 0 leaves it alone).
 static SpeciesRecord make_species_record(const std::vector<std::string>& row,
@@ -1003,7 +1021,7 @@ ResolveDataset ResolveDataset::from_species_source(
     ResolveDataset dataset;
     dataset.config_ = config;
 
-    // Vocab-reusing single-table load (issue #102): adopt the training
+    // Vocab-reusing single-table load: adopt the training
     // vocabularies and replay each classification target's class -> code
     // mapping, exactly as load_with_vocabs does for the two-file path.
     std::vector<TargetSpec> targets = in_targets;
@@ -1071,7 +1089,7 @@ ResolveDataset ResolveDataset::from_species_source(
             dataset.plot_ids_.push_back(plot_id);
 
             // Coordinates. NA-aware parse: a missing/unparseable cell is kept
-            // as NaN, never read as a real (0, 0) location (issue #46); the
+            // as NaN, never read as a real (0, 0) location; the
             // continuous block decides how the model reads it.
             if (cols.longitude >= 0 && cols.latitude >= 0 &&
                 row.size() > static_cast<size_t>(std::max(cols.longitude, cols.latitude))) {
@@ -1140,9 +1158,9 @@ ResolveDataset ResolveDataset::from_species_source(
 
     // Build target configs (in target order) + regression tensors; collect the
     // raw classification cells. Classification encoding is deferred to a second
-    // pass so every vocab is fit from the final surviving-row set (issue #84),
+    // pass so every vocab is fit from the final surviving-row set,
     // through the same encode_classification_target used by the header loader
-    // (single source of truth + num_classes validation, issues #79/#86).
+    // (single source of truth + num_classes validation).
     std::vector<std::vector<std::string>> cls_raw(targets.size());
     for (size_t t = 0; t < targets.size(); ++t) {
         const auto& target_spec = targets[t];
@@ -1218,7 +1236,7 @@ ResolveDataset ResolveDataset::from_species_source(
 
     dataset.has_abundance_column_ = (cols.abundance >= 0);
 
-    // Build the vocab only from kept plots (issue #68).
+    // Build the vocab only from kept plots.
     filter_records_to_plots(plot_records, dataset.plot_ids_);
 
     // Encode species data
@@ -1242,7 +1260,7 @@ void ResolveDataset::load_header_data(
     // configuration error, not a silent "no coordinates": failing loudly here
     // avoids training a model that quietly dropped the coordinates the user
     // asked for. A role CLEARED with "" is unset, not named (RoleMapping::
-    // as_column, issue #111), so it takes the -1 path without a lookup.
+    // as_column), so it takes the -1 path without a lookup.
     int lon_col = -1, lat_col = -1;
     if (const auto lon = roles.longitude_column()) {
         lon_col = reader.column_index(*lon);
@@ -1334,7 +1352,7 @@ void ResolveDataset::load_header_data(
     }
 
     // Per-column count of covariate cells that were missing/unparseable during
-    // the scan, kept as NaN (issue #32); reported afterwards.
+    // the scan, kept as NaN; reported afterwards.
     std::vector<int64_t> cov_na_counts(covariate_cols.size(), 0);
     // Count of rows whose longitude/latitude was missing/unparseable, kept as
     // NaN rather than read as (0, 0), a real location (Gulf of Guinea).
@@ -1388,7 +1406,7 @@ void ResolveDataset::load_header_data(
 
         // Coordinates. Parse with the NA-aware helper so a blank / "NA" /
         // unparseable cell is kept as NaN rather than read as a real (0, 0)
-        // location; count them and report after the scan (issue #46). A genuine
+        // location; count them and report after the scan. A genuine
         // "0" parses to 0.0 and is not counted.
         if (has_coords) {
             auto lon = (row.size() > static_cast<size_t>(lon_col))
@@ -1405,7 +1423,7 @@ void ResolveDataset::load_header_data(
         // Covariates. Parse with the NaN-aware helper so a blank / "NA" /
         // unparseable cell is kept as NaN rather than read as a real 0.0; the
         // continuous block decides how the model reads it. Counted per column
-        // and reported after the scan (issue #32).
+        // and reported after the scan.
         if (cov_cols > 0) {
             for (size_t i = 0; i < covariate_cols.size(); ++i) {
                 int col = covariate_cols[i];
@@ -1475,8 +1493,7 @@ void ResolveDataset::load_header_data(
     // Materialize tensors from the streaming buffers at the true loaded-row count.
     // from_blob + clone copies out of the std::vector storage into tensor-owned
     // memory before the buffers go out of scope. Ragged rows were never appended,
-    // so there are no trailing phantom zero rows to compact away (the old prealloc
-    // path sized to count_rows and had to trim them).
+    // so there are no trailing phantom zero rows to compact away.
     if (has_coords) {
         coordinates_ = (n_loaded > 0)
             ? torch::from_blob(coords_buf.data(), {n_loaded, 2}, torch::kFloat32).clone()
@@ -1506,11 +1523,11 @@ void ResolveDataset::load_header_data(
 
     // ---- Fit + encode classification target columns ----
     // Two passes so every classification vocab is fit from the final surviving-row
-    // set (issue #84): pass 1 finalizes keep_row (regression drops are already in
+    // set: pass 1 finalizes keep_row (regression drops are already in
     // it from the scan; here we add classification NA / explicit-unmapped drops),
     // pass 2 fits each vocab on kept rows only and encodes. The shared
-    // encode_classification_target also validates num_classes (issue #79) and is
-    // the single source of truth with the from_species_csv loader (issue #86).
+    // encode_classification_target also validates num_classes and is
+    // the single source of truth with the from_species_csv loader.
     for (size_t t = 0; t < targets.size(); ++t) {
         if (targets[t].task != TaskType::Classification) continue;
         mark_classification_drops(targets[t], classification_raw[t], keep_row);
@@ -1551,7 +1568,7 @@ void ResolveDataset::load_header_data(
         plot_ids_ = std::move(new_pids);
 
         // Compact tensors via index_select. index_select returns a new
-        // contiguous tensor — the original buffer is released when the old
+        // contiguous tensor — the original buffer is released when the
         // member is overwritten, so the working set drops immediately.
         auto idx_t = torch::tensor(keep_idx, torch::kInt64);
         if (coordinates_.defined()) coordinates_ = coordinates_.index_select(0, idx_t);
@@ -1644,7 +1661,7 @@ void ResolveDataset::load_species_data(
 
     has_abundance_column_ = (cols.abundance >= 0);
 
-    // Build the vocab only from kept plots (issue #68): load_header_data has
+    // Build the vocab only from kept plots: load_header_data has
     // already dropped missing-target plots and compacted plot_ids_.
     filter_records_to_plots(plot_records, plot_ids_);
 
@@ -1672,8 +1689,8 @@ void ResolveDataset::build_species_vocab(
     // the ID assignment is a pure function of the data (independent of
     // unordered_map iteration order). Without the name tie-break, tied-frequency
     // species get IDs in nondeterministic hash order, so a checkpoint and a
-    // separately-rebuilt dataset can disagree on embedding rows (cf. #5 for the
-    // taxonomy vocab; SpeciesVocab::from_records already sorts by name).
+    // separately-rebuilt dataset can disagree on embedding rows (TaxonomyVocab and
+    // SpeciesVocab::from_records sort by name too).
     std::sort(sorted_species.begin(), sorted_species.end(),
         [](const auto& a, const auto& b) {
             return a.second != b.second ? a.second > b.second : a.first < b.first;
@@ -1741,21 +1758,20 @@ void ResolveDataset::encode_species(
     schema_.track_unknown_count = config_.track_unknown_count;
 
     // Record the pool weighting scheme so a checkpoint can rebuild the matching
-    // inference-side DatasetConfig (issue #38). pool_species_cap is refined to
+    // inference-side DatasetConfig. pool_species_cap is refined to
     // the resolved max-species width in the rank_pool block below.
     schema_.pool_weighting = static_cast<int>(config_.pool_weighting);
     schema_.pool_species_cap = config_.pool_species_cap;
 
     // The remaining loader knobs that shape the encoded tensors and are not
-    // recoverable from ModelConfig (issue #102). Read back through
+    // recoverable from ModelConfig. Read back through
     // dataset_config_from_checkpoint() so an inference run rebuilds the same
     // DatasetConfig instead of silently reverting to the struct defaults.
     schema_.top_k_species = config_.top_k_species;
     // The selection this load APPLIES, which is All for a pooled / sparse
     // encoding given no species_budget however the config is spelled. Recording
     // the requested value there would have the checkpoint (and every result
-    // tree built from it) report a species selection the run never made
-    // (issue #113).
+    // tree built from it) report a species selection the run never made.
     schema_.selection = effective_selection(config_);
     schema_.species_budget = config_.species_budget;
     schema_.representation = config_.representation;
@@ -1933,11 +1949,10 @@ void ResolveDataset::encode_species(
 
         // top_k_taxonomy = n_taxonomy_slots preserves the fixed-slot width
         // (2*top_k under TopBottom selection). The species slots take the
-        // configured selection: this branch used to hardcode Top, so Bottom and
-        // TopBottom were accepted, persisted to the schema and silently ignored
-        // (issue #113). The width stays top_k_species -- the encoder halves the
-        // per-side k under TopBottom rather than doubling the row -- so the
-        // model's embed encoder is sized the same as before.
+        // configured selection, Bottom and TopBottom included. The width stays
+        // top_k_species -- the encoder halves the per-side k under TopBottom
+        // rather than doubling the row -- so the model's embed encoder is sized
+        // by top_k_species alone.
         EmbeddingEncoder emb_encoder(config_.top_k_species, n_taxonomy_slots,
                                      config_.selection);
         emb_encoder.fit(all_records);  // builds species_to_genus_/_family_ maps
@@ -1978,7 +1993,7 @@ void ResolveDataset::encode_species(
         //   pool_has_cover_   : f32    (n_plots,) 1.0 if plot had real
         //                              abundance values, 0.0 otherwise
 
-        // The species budget (issue #113) is the encoder's, not this loop's, so
+        // The species budget is the encoder's, not this loop's, so
         // it lands before the weights, the taxonomy IDs and the padded width are
         // computed, and so the novelty statistics keep describing the plot's
         // full record list. min_frequency stays 1: the vocabulary is fitted over
@@ -2064,11 +2079,10 @@ void ResolveDataset::encode_species(
         species_vector_ = torch::zeros({n_plots, schema_.n_species_vocab}, torch::kFloat32);
         auto vec_acc = species_vector_.accessor<float, 2>();
 
-        // Whether the per-plot species budget narrows anything at all (issue
-        // #113). A budget of 0 -- the default -- and SelectionMode::All both
-        // mean "write every record", which is what this branch always did, so
-        // the narrowing path is skipped rather than run as an identity over
-        // every plot. The vector's width is the vocabulary either way, which is
+        // Whether the per-plot species budget narrows anything at all. A
+        // budget of 0 -- the default -- and SelectionMode::All both mean "write
+        // every record", so the narrowing path is skipped rather than run as an
+        // identity over every plot. The vector's width is the vocabulary either way, which is
         // fitted over every record, so no column changes meaning.
         const bool has_budget = config_.species_budget > 0 &&
                                 config_.selection != SelectionMode::All;
@@ -2128,8 +2142,7 @@ void ResolveDataset::encode_species(
 
             // Canonical embed-mode taxonomy: aggregate abundance per DISTINCT
             // genus and per DISTINCT family, then take the top-k of each
-            // independently (shared topk_by_abundance; matches EmbeddingEncoder,
-            // resolving the former per-species-slot divergence, issue #60).
+            // independently (shared topk_by_abundance; matches EmbeddingEncoder).
             std::unordered_map<std::string, float> genus_abd, family_abd;
             for (const auto& rec : it->second) {
                 if (!rec.genus.empty())  genus_abd[rec.genus]   += rec.abundance;
@@ -2203,7 +2216,7 @@ void ResolveDataset::encode_species(
     }
 
     // Mirror the settled vocabularies onto the schema so they travel into the
-    // checkpoint (issue #102). Last thing in encode_species: the rank-pool /
+    // checkpoint. Last thing in encode_species: the rank-pool /
     // transformer branch replaces both species_vocab_ and taxonomy_vocab_ with
     // the encoder's own, so an earlier copy would capture the pre-swap maps.
     publish_vocabs_to_schema();

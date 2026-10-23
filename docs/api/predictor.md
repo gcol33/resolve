@@ -79,15 +79,19 @@ derived from the name, and its genus and family slots are still checked.
 ### Predicting on tensors
 
 ```
-predict(coordinates, covariates, hash_embedding, species_ids, species_vector,
-        genus_ids, family_ids, unknown_fraction, unknown_count,
+predict(*, coordinates=None, covariates=None, unknown_fraction=None,
+        unknown_count=None, hash_embedding=None,
+        genus_ids=None, family_ids=None, species_ids=None, species_vector=None,
         pool_genus_ids=None, pool_family_ids=None, pool_weights=None,
         pool_mask=None, pool_has_cover=None, categorical_ids=None,
-        return_latent=False)
+        return_latent=False, batch_size=4096)
 ```
 
-Returns a `ResolvePredictions`. The first nine arguments are positional; pass
-`None` for anything the encoding does not use.
+Returns a `ResolvePredictions`. Every argument is a keyword; leave out anything
+the encoding does not use. The first five are the parts of the continuous
+block, assembled and standardised as at training time; `unknown_fraction` and
+`unknown_count` are required when the model reads them. `batch_size` chunks the
+forward exactly as `predict_dataset` does, and the outputs are on the CPU.
 
 ### Embeddings
 
@@ -96,7 +100,7 @@ Returns a `ResolvePredictions`. The first nine arguments are positional; pass
 | `get_species_embeddings()` | `(n_species_vocab, species_embed_dim)`, or `None` for hash and sparse encoders |
 | `get_genus_embeddings()` | `(n_genera, genus_emb_dim)`, or `None` without taxonomy |
 | `get_family_embeddings()` | `(n_families, family_emb_dim)`, or `None` without taxonomy |
-| `get_embeddings(coordinates, covariates, hash_embedding, genus_ids, family_ids)` | Latent vectors for those inputs |
+| `get_embeddings(*, ..., batch_size=4096)` | `(n_plots, latent_dim)` latent vectors, from the same keyword inputs as `predict` and for every encoder |
 
 Tables come back detached on CPU.
 

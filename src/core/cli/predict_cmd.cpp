@@ -132,13 +132,12 @@ int predict_command(const ParsedArgs& args) {
     const std::vector<TargetSpec> targets;
 
     // Rebuild the loading-side DatasetConfig the checkpoint was trained with.
-    // Single source of truth (issue #102): species_encoding / hash_dim / top_k
+    // Single source of truth: species_encoding / hash_dim / top_k
     // come from ModelConfig (they size the model), everything else the loader
     // consumed -- top_k_species, selection, representation, normalization,
     // aggregation, track_unknown_*, use_taxonomy, pool_weighting and the
     // resolved pool_species_cap -- from the schema. Rebuilding only a subset
-    // silently re-encoded the data with the struct defaults (#38 fixed
-    // pool_weighting alone).
+    // would re-encode the data with the struct defaults.
     DatasetConfig dataset_config =
         dataset_config_from_checkpoint(schema, predictor.model()->config());
 
@@ -146,7 +145,7 @@ int predict_command(const ParsedArgs& args) {
     // an embedding table with a code that is a function of the file the vocab
     // was fitted on, so a plain from_csv here re-fits the species / taxonomy /
     // categorical codes and the model looks up the wrong rows -- wrong
-    // predictions with no error (issue #102).
+    // predictions with no error.
     std::cout << "Loading data..." << std::endl;
     const bool reuse_vocabs = schema.has_species_vocab();
     if (!reuse_vocabs) {
@@ -196,7 +195,7 @@ int predict_command(const ParsedArgs& args) {
         predictions_opt = predictor.predict(
             dataset, /*return_latent=*/false, predict_batch_size);
     } catch (const std::exception& e) {
-        // Includes the issue-#102 vocabulary guard: the dataset's integer codes
+        // Includes the vocabulary guard: the dataset's integer codes
         // are not the model's, so scoring it would return plausible-looking
         // wrong numbers.
         std::cerr << "Error predicting: " << e.what() << std::endl;
@@ -212,19 +211,18 @@ int predict_command(const ParsedArgs& args) {
         return 1;
     }
 
-    // Header. A classification target gets TWO columns (issue #110 item 5):
-    //   <target>       the original CSV class label (schema.targets[].class_names,
-    //                  persisted since #76), or the integer code when the
-    //                  checkpoint has no class vocabulary (pre-#76, or a column
-    //                  that was already integer-coded);
+    // Header. A classification target gets TWO columns:
+    //   <target>       the original CSV class label (schema.targets[].class_names),
+    //                  or the integer code when the checkpoint has no class
+    //                  vocabulary (a column that was already integer-coded);
     //   <target>_code  always the integer code the model predicted.
-    // Emitting the code alone forced every user to reconstruct the mapping by
-    // hand; emitting the label alone would lose the code an already-integer
+    // The code alone would leave every user to reconstruct the mapping by
+    // hand; the label alone would lose the code an already-integer
     // column carries.
     //
     // With --probabilities a classification target additionally gets one
     // column per class, '<target>_prob_<class>' in code order, carrying the
-    // softmax row the code was taken from (issue #117).
+    // softmax row the code was taken from.
     out << "plot_id";
     bool wrote_labels = false;
     bool wrote_probabilities = false;
@@ -243,32 +241,60 @@ int predict_command(const ParsedArgs& args) {
     }
     out << "\n";
 
+    // Each target's outputs as contiguous CPU tensors in the dtype the writer
+    // reads, so every cell below is a plain array read. Undefined for a target
+    // the checkpoint produced no output for.
+    struct TargetColumns {
+        torch::Tensor values;         // (n,) float32 regression values or int64 codes
+        torch::Tensor probabilities;  // (n, n_classes) float32 when written
+    };
+    std::vector<TargetColumns> columns;
+    columns.reserve(schema.targets.size());
+    for (const auto& target : schema.targets) {
+        TargetColumns col;
+        auto it = predictions.predictions.find(target.name);
+        if (it != predictions.predictions.end()) {
+            const bool is_classification = target.task == TaskType::Classification;
+            col.values = it->second.to(torch::kCPU)
+                             .to(is_classification ? torch::kInt64 : torch::kFloat32)
+                             .contiguous();
+            if (is_classification && write_probabilities) {
+                col.probabilities = predictions.probabilities.at(target.name)
+                                        .to(torch::kCPU).to(torch::kFloat32).contiguous();
+            }
+        }
+        columns.push_back(std::move(col));
+    }
+
     // Write predictions
     for (size_t i = 0; i < predictions.plot_ids.size(); ++i) {
         out << csv_field(predictions.plot_ids[i]);
+        const auto row = static_cast<int64_t>(i);
 
-        for (const auto& target : schema.targets) {
-            auto it = predictions.predictions.find(target.name);
+        for (size_t t = 0; t < schema.targets.size(); ++t) {
+            const auto& target = schema.targets[t];
+            const auto& col = columns[t];
             const bool is_classification = target.task == TaskType::Classification;
             const int64_t n_prob_columns =
                 (is_classification && write_probabilities) ? target.num_classes : 0;
-            if (it == predictions.predictions.end()) {
+            if (!col.values.defined()) {
                 out << (is_classification ? ",NA,NA" : ",NA");
                 for (int64_t k = 0; k < n_prob_columns; ++k) out << ",NA";
                 continue;
             }
             if (is_classification) {
-                const int64_t code = it->second[i].item<int64_t>();
+                const int64_t code = col.values.data_ptr<int64_t>()[row];
                 out << "," << csv_field(class_label(target, code));
                 out << "," << code;
                 if (n_prob_columns > 0) {
-                    const auto& probs = predictions.probabilities.at(target.name);
+                    const float* probs =
+                        col.probabilities.data_ptr<float>() + row * col.probabilities.size(1);
                     for (int64_t k = 0; k < n_prob_columns; ++k) {
-                        out << "," << resolve_cli::csv_number(probs[i][k].item<float>());
+                        out << "," << resolve_cli::csv_number(probs[k]);
                     }
                 }
             } else {
-                out << "," << resolve_cli::csv_number(it->second[i].item<float>());
+                out << "," << resolve_cli::csv_number(col.values.data_ptr<float>()[row]);
             }
         }
         out << "\n";

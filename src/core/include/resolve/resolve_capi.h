@@ -1,6 +1,6 @@
 /* resolve_capi.h - Flat C ABI facade over the RESOLVE C++ engine.
  *
- * Purpose (issue #17): let the R package build on Windows. R packages there are
+ * Purpose: let the R package build on Windows. R packages there are
  * compiled with Rtools mingw-w64; the only Windows libtorch is MSVC-built, and
  * the two C++ ABIs do not cross. A C ABI does. This header exposes the engine
  * through opaque handles and primitive types ONLY -- no torch::Tensor, no
@@ -26,7 +26,7 @@
  * human-readable message is available from `resolve_last_error()` (thread-local).
  * C++ exceptions never cross the boundary.
  *
- * Runtime binding (issue: CRAN R package): a client that defines
+ * Runtime binding (the CRAN R package): a client that defines
  * RESOLVE_CAPI_DYNLOAD before including this header gets ONLY the opaque handle
  * typedefs and the resolve_value_kind_t enum -- every function PROTOTYPE is
  * suppressed. Such a client supplies its own dynamically-loaded forwarders
@@ -190,12 +190,12 @@ RESOLVE_CAPI resolve_value_t* resolve_capi_configure_cuda_allocator(int force);
 
 /* Pin libtorch's intra-op / inter-op thread pools (<=0 keeps the default).
  * Best-effort: removes the worker threads whose teardown join crashes the
- * Rscript.exe launcher on Windows (issue #18). Call at startup. */
+ * Rscript.exe launcher on Windows. Call at startup. */
 RESOLVE_CAPI int resolve_capi_set_thread_pools(int intraop_threads, int interop_threads);
 
 /* Install the Windows crash handler: turn an unhandled native fault into an
- * immediate TerminateProcess instead of a JIT-debugger hang (issue #19) or a
- * teardown access violation (issue #18). No-op off Windows. Exits with
+ * immediate TerminateProcess instead of a JIT-debugger hang or a
+ * teardown access violation. No-op off Windows. Exits with
  * `shutdown_exit_code` once resolve_capi_signal_work_complete() has run, else a
  * non-zero failure code derived from the fault. */
 RESOLVE_CAPI int resolve_capi_install_crash_handler(int shutdown_exit_code);
@@ -232,7 +232,7 @@ RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_csv_with_schema(
     const resolve_value_t* roles, const resolve_value_t* targets,
     const resolve_dataset_t* schema_source, const resolve_value_t* config);
 
-/* Vocabulary-reusing loaders (issue #102). `vocabs` is a MAP value tree: a
+/* Vocabulary-reusing loaders. `vocabs` is a MAP value tree: a
  * schema tree (species_vocab / genus_vocab / family_vocab / targets, as emitted
  * by resolve_predictor_get(p, "vocabs") or resolve_dataset_get(ds, "vocabs"))
  * plus an optional "categorical_vocab" sub-map of {column -> {name -> code}}.
@@ -242,7 +242,7 @@ RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_csv_with_schema(
  * is a function of the file its vocab was fitted on, so a plain from_csv on new
  * data looks up the wrong rows and predicts wrongly with no error. NULL on
  * error, including when `vocabs` carries no species vocabulary (a checkpoint
- * written before issue #102). */
+ * that stores only the vocabulary sizes). */
 RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_csv_with_vocabs(
     const char* header_path, const char* species_path,
     const resolve_value_t* roles, const resolve_value_t* targets,
@@ -258,7 +258,7 @@ RESOLVE_CAPI resolve_dataset_t* resolve_dataset_from_species_csv_with_vocabs(
     const resolve_value_t* roles, const resolve_value_t* targets,
     const resolve_value_t* vocabs, const resolve_value_t* config);
 
-/* In-memory (DataFrame) loaders (issue #22). `header` / `species` are MAP value
+/* In-memory (DataFrame) loaders. `header` / `species` are MAP value
  * trees: an ordered (column name -> STRING_ARRAY) mapping, i.e. a data.frame
  * with every cell stringified (missing value = empty string). Identical result
  * to the from_csv* verbs on the equivalent CSV; no disk round-trip. NULL on
@@ -451,8 +451,8 @@ RESOLVE_CAPI resolve_value_t* resolve_predictor_predict(
 RESOLVE_CAPI resolve_value_t* resolve_predictor_predict_dataset(
     resolve_predictor_t* p, const resolve_dataset_t* ds, int return_latent, int64_t batch_size);
 
-/* get_embeddings. `inputs` MAP carries coordinates/covariates/hash_embedding +
- * optional genus_ids/family_ids. Returns a DOUBLE_MATRIX value / NULL. */
+/* get_embeddings. `inputs` MAP carries the same keys as
+ * resolve_predictor_predict. Returns a DOUBLE_MATRIX value / NULL. */
 RESOLVE_CAPI resolve_value_t* resolve_predictor_get_embeddings(
     resolve_predictor_t* p, const resolve_value_t* inputs);
 
@@ -463,7 +463,7 @@ RESOLVE_CAPI int resolve_predictor_optimize_for_inference(resolve_predictor_t* p
  * family_vocab dataset_config. Returns value / NULL.
  *
  * "vocabs" + "dataset_config" are what a caller needs to score new data
- * correctly (issue #102): pass the first to a resolve_dataset_from_*_with_vocabs
+ * correctly: pass the first to a resolve_dataset_from_*_with_vocabs
  * loader and the second as that loader's `config`. */
 RESOLVE_CAPI resolve_value_t* resolve_predictor_get(const resolve_predictor_t* p, const char* what);
 

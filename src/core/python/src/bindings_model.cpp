@@ -1,46 +1,50 @@
 #include "bindings_common.hpp"
+#include "bindings_plot_inputs.hpp"
 #include <map>
 #include <set>
 #include <torch/csrc/autograd/python_variable.h>  // For THPVariable_WrapList
 
 namespace {
 
-// Shared body for ResolveModel.forward and ResolveModel.__call__ (identical
-// marshalling): unpack the 11 optional input tensors, run the pure-C++ forward
-// with the GIL released, and return the {target -> tensor} dict.
-nb::object model_forward_dict(
-    resolve::ResolveModel& self,
-    nb::object continuous_obj, nb::object genus_ids_obj, nb::object family_ids_obj,
-    nb::object species_ids_obj, nb::object species_vector_obj,
-    nb::object pool_genus_ids_obj, nb::object pool_family_ids_obj,
-    nb::object pool_weights_obj, nb::object pool_mask_obj,
-    nb::object pool_has_cover_obj, nb::object categorical_ids_obj)
-{
-    at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
-    at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
-    at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
-    at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
-    at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
-    at::Tensor pool_genus_ids = unpack_optional_tensor(pool_genus_ids_obj);
-    at::Tensor pool_family_ids = unpack_optional_tensor(pool_family_ids_obj);
-    at::Tensor pool_weights = unpack_optional_tensor(pool_weights_obj);
-    at::Tensor pool_mask = unpack_optional_tensor(pool_mask_obj);
-    at::Tensor pool_has_cover = unpack_optional_tensor(pool_has_cover_obj);
-    at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
+// Binds `name` as a ResolveModel method taking the model inputs, positionally
+// in PlotInputs field order (continuous required) or by keyword, after the
+// leading arguments `lead`. `run(model, lead_args, inputs)` runs with the GIL
+// released (pure C++, the inputs hold their storage) and its result goes to
+// `wrap` with the GIL held.
+template <typename Run, typename Wrap>
+void def_model_inputs_method(nb::class_<resolve::ResolveModel>& cls, const char* name,
+                             const std::vector<std::string>& lead, const std::string& returns,
+                             const std::string& summary, Run run, Wrap wrap) {
+    std::vector<std::string> positional = lead;
+    for (const auto& field : plot_input_names()) positional.push_back(field);
+    const std::string method = name;
+    const std::size_t n_lead = lead.size();
+    const char* doc = persistent_doc(
+        method + "(" + argument_list(positional, n_lead + 1) + ") -> " + returns +
+        "\n\n" + summary);
+    cls.def(name, [method, positional, n_lead, run, wrap](resolve::ResolveModel& self,
+                                                          nb::args args, nb::kwargs kwargs) {
+        CallArgs call(method, args, kwargs, positional);
+        std::vector<std::string> lead_values;
+        for (std::size_t i = 0; i < n_lead; ++i) {
+            lead_values.push_back(call.require<std::string>(positional[i]));
+        }
+        const resolve::PlotInputs inputs = call.plot_inputs(/*with_continuous=*/true);
+        call.finish();
+        decltype(run(self, lead_values, inputs)) result;
+        {
+            nb::gil_scoped_release nogil;
+            result = run(self, lead_values, inputs);
+        }
+        return wrap(result);
+    }, doc);
+}
 
-    std::unordered_map<std::string, torch::Tensor> result;
-    {
-        // Pure-C++ compute: drop the GIL so other Python threads can run during
-        // the (potentially multi-second) forward. Inputs are held as at::Tensor
-        // (storage stays alive); no Python C-API runs here.
-        nb::gil_scoped_release nogil;
-        result = self->forward(continuous, genus_ids, family_ids, species_ids, species_vector,
-                               pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                               categorical_ids);
-    }
+nb::object wrap_tensor(const torch::Tensor& t) { return nb::steal(THPVariable_Wrap(t)); }
 
+nb::object wrap_tensor_dict(const std::unordered_map<std::string, torch::Tensor>& m) {
     PyObject* py_dict = PyDict_New();
-    for (const auto& [key, value] : result) {
+    for (const auto& [key, value] : m) {
         PyObject* py_tensor = THPVariable_Wrap(value);
         PyDict_SetItemString(py_dict, key.c_str(), py_tensor);
         Py_DECREF(py_tensor);
@@ -51,106 +55,61 @@ nb::object model_forward_dict(
 }  // namespace
 
 void register_model(nb::module_& m) {
-    nb::class_<resolve::ResolveModel>(m, "ResolveModel")
-        .def(nb::init<const resolve::ResolveSchema&, const resolve::ModelConfig&>(),
-             nb::arg("schema"), nb::arg("config") = resolve::ModelConfig{})
-        .def("forward", [](resolve::ResolveModel& self,
-                          nb::object continuous_obj,
-                          nb::object genus_ids_obj,
-                          nb::object family_ids_obj,
-                          nb::object species_ids_obj,
-                          nb::object species_vector_obj,
-                          nb::object pool_genus_ids_obj,
-                          nb::object pool_family_ids_obj,
-                          nb::object pool_weights_obj,
-                          nb::object pool_mask_obj,
-                          nb::object pool_has_cover_obj,
-                          nb::object categorical_ids_obj) {
-            return model_forward_dict(self, continuous_obj, genus_ids_obj, family_ids_obj,
-                species_ids_obj, species_vector_obj, pool_genus_ids_obj, pool_family_ids_obj,
-                pool_weights_obj, pool_mask_obj, pool_has_cover_obj, categorical_ids_obj);
-        }, nb::arg("continuous"),
-           nb::arg("genus_ids") = nb::none(),
-           nb::arg("family_ids") = nb::none(),
-           nb::arg("species_ids") = nb::none(),
-           nb::arg("species_vector") = nb::none(),
-           nb::arg("pool_genus_ids") = nb::none(),
-           nb::arg("pool_family_ids") = nb::none(),
-           nb::arg("pool_weights") = nb::none(),
-           nb::arg("pool_mask") = nb::none(),
-           nb::arg("pool_has_cover") = nb::none(),
-           nb::arg("categorical_ids") = nb::none())
-        // __call__ makes model(inputs) work like PyTorch
-        .def("__call__", [](resolve::ResolveModel& self,
-                           nb::object continuous_obj,
-                           nb::object genus_ids_obj,
-                           nb::object family_ids_obj,
-                           nb::object species_ids_obj,
-                           nb::object species_vector_obj,
-                           nb::object pool_genus_ids_obj,
-                           nb::object pool_family_ids_obj,
-                           nb::object pool_weights_obj,
-                           nb::object pool_mask_obj,
-                           nb::object pool_has_cover_obj,
-                           nb::object categorical_ids_obj) {
-            return model_forward_dict(self, continuous_obj, genus_ids_obj, family_ids_obj,
-                species_ids_obj, species_vector_obj, pool_genus_ids_obj, pool_family_ids_obj,
-                pool_weights_obj, pool_mask_obj, pool_has_cover_obj, categorical_ids_obj);
-        }, nb::arg("continuous"),
-           nb::arg("genus_ids") = nb::none(),
-           nb::arg("family_ids") = nb::none(),
-           nb::arg("species_ids") = nb::none(),
-           nb::arg("species_vector") = nb::none(),
-           nb::arg("pool_genus_ids") = nb::none(),
-           nb::arg("pool_family_ids") = nb::none(),
-           nb::arg("pool_weights") = nb::none(),
-           nb::arg("pool_mask") = nb::none(),
-           nb::arg("pool_has_cover") = nb::none(),
-           nb::arg("categorical_ids") = nb::none())
-        .def("get_latent", [](resolve::ResolveModel& self,
-                              nb::object continuous_obj,
-                              nb::object genus_ids_obj,
-                              nb::object family_ids_obj,
-                              nb::object species_ids_obj,
-                              nb::object species_vector_obj,
-                              nb::object pool_genus_ids_obj,
-                              nb::object pool_family_ids_obj,
-                              nb::object pool_weights_obj,
-                              nb::object pool_mask_obj,
-                              nb::object pool_has_cover_obj,
-                              nb::object categorical_ids_obj) {
-            // Convert Python tensors to C++ tensors
-            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
-            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
-            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
-            at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
-            at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
-            at::Tensor pool_genus_ids = unpack_optional_tensor(pool_genus_ids_obj);
-            at::Tensor pool_family_ids = unpack_optional_tensor(pool_family_ids_obj);
-            at::Tensor pool_weights = unpack_optional_tensor(pool_weights_obj);
-            at::Tensor pool_mask = unpack_optional_tensor(pool_mask_obj);
-            at::Tensor pool_has_cover = unpack_optional_tensor(pool_has_cover_obj);
-            at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
+    using Lead = const std::vector<std::string>&;
+    auto model_cls = nb::class_<resolve::ResolveModel>(m, "ResolveModel");
+    model_cls.def(nb::init<const resolve::ResolveSchema&, const resolve::ModelConfig&>(),
+                  nb::arg("schema"), nb::arg("config") = resolve::ModelConfig{});
 
-            at::Tensor result;
-            {
-                nb::gil_scoped_release nogil;  // pure-C++ compute; see forward()
-                result = self->get_latent(continuous, genus_ids, family_ids, species_ids, species_vector,
-                                          pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                                          categorical_ids);
-            }
-            return nb::steal(THPVariable_Wrap(result));
-        }, nb::arg("continuous"),
-           nb::arg("genus_ids") = nb::none(),
-           nb::arg("family_ids") = nb::none(),
-           nb::arg("species_ids") = nb::none(),
-           nb::arg("species_vector") = nb::none(),
-           nb::arg("pool_genus_ids") = nb::none(),
-           nb::arg("pool_family_ids") = nb::none(),
-           nb::arg("pool_weights") = nb::none(),
-           nb::arg("pool_mask") = nb::none(),
-           nb::arg("pool_has_cover") = nb::none(),
-           nb::arg("categorical_ids") = nb::none())
+    auto forward = [](resolve::ResolveModel& self, Lead, const resolve::PlotInputs& in) {
+        return self->forward(in);
+    };
+    def_model_inputs_method(model_cls, "forward", {}, "dict[str, Tensor]",
+                            "Per-target outputs: regression in standardised space, "
+                            "classification as logits.",
+                            forward, wrap_tensor_dict);
+    // __call__ makes model(inputs) work like PyTorch
+    def_model_inputs_method(model_cls, "__call__", {}, "dict[str, Tensor]",
+                            "Same as forward().", forward, wrap_tensor_dict);
+    def_model_inputs_method(
+        model_cls, "get_latent", {}, "Tensor", "Latent representation (batch, latent_dim).",
+        [](resolve::ResolveModel& self, Lead, const resolve::PlotInputs& in) {
+            return self->get_latent(in);
+        },
+        wrap_tensor);
+    def_model_inputs_method(
+        model_cls, "forward_with_aux", {}, "ModelForwardResult",
+        "Outputs plus the mixture-of-experts load-balancing loss.",
+        [](resolve::ResolveModel& self, Lead, const resolve::PlotInputs& in) {
+            return self->forward_with_aux(in);
+        },
+        [](const resolve::ModelForwardResult& r) { return nb::cast(r, nb::rv_policy::copy); });
+    def_model_inputs_method(
+        model_cls, "forward_single", {"target"}, "Tensor", "The output of one target's head.",
+        [](resolve::ResolveModel& self, Lead lead, const resolve::PlotInputs& in) {
+            return self->forward_single(lead.front(), in);
+        },
+        wrap_tensor);
+    def_model_inputs_method(
+        model_cls, "encode_with_activations", {}, "tuple[Tensor, list[Tensor]]",
+        "The latent and the encoder's hidden-layer activations (hash encoder only; "
+        "an empty list for every other encoder).",
+        [](resolve::ResolveModel& self, Lead, const resolve::PlotInputs& in) {
+            return self->encode_with_activations(in);
+        },
+        [](const std::pair<torch::Tensor, std::vector<torch::Tensor>>& r) {
+            nb::list act_list;
+            for (const auto& a : r.second) act_list.append(wrap_tensor(a));
+            return nb::object(nb::make_tuple(wrap_tensor(r.first), act_list));
+        });
+    def_model_inputs_method(
+        model_cls, "get_gate_probs", {}, "Tensor",
+        "Expert gate probabilities (batch, n_experts); undefined without MoE.",
+        [](resolve::ResolveModel& self, Lead, const resolve::PlotInputs& in) {
+            return self->get_gate_probs(in);
+        },
+        wrap_tensor);
+
+    model_cls
         .def("train", [](resolve::ResolveModel& self, bool mode) { self->train(mode); }, nb::arg("mode") = true)
         .def("eval", [](resolve::ResolveModel& self) { self->eval(); })
         .def("to", [](resolve::ResolveModel& self, const std::string& device) {
@@ -320,106 +279,6 @@ void register_model(nb::module_& m) {
         }, "The species, genus and family tables the species encoder reads a "
            "plot's composition through, as the parameters themselves; "
            "ModelConfig.freeze_composition keeps them at their initialisation.")
-        .def("forward_with_aux", [](resolve::ResolveModel& self,
-                                    nb::object continuous_obj,
-                                    nb::object genus_ids_obj,
-                                    nb::object family_ids_obj,
-                                    nb::object species_ids_obj,
-                                    nb::object species_vector_obj,
-                                    nb::object pool_genus_ids_obj,
-                                    nb::object pool_family_ids_obj,
-                                    nb::object pool_weights_obj,
-                                    nb::object pool_mask_obj,
-                                    nb::object pool_has_cover_obj,
-                                    nb::object categorical_ids_obj) {
-            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
-            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
-            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
-            at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
-            at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
-            at::Tensor pool_genus_ids = unpack_optional_tensor(pool_genus_ids_obj);
-            at::Tensor pool_family_ids = unpack_optional_tensor(pool_family_ids_obj);
-            at::Tensor pool_weights = unpack_optional_tensor(pool_weights_obj);
-            at::Tensor pool_mask = unpack_optional_tensor(pool_mask_obj);
-            at::Tensor pool_has_cover = unpack_optional_tensor(pool_has_cover_obj);
-            at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
-
-            resolve::ModelForwardResult result;
-            {
-                // Pure-C++ compute; drop the GIL like forward()/get_latent().
-                nb::gil_scoped_release nogil;
-                result = self->forward_with_aux(continuous, genus_ids, family_ids, species_ids, species_vector,
-                                                 pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                                                 categorical_ids);
-            }
-            return result;  // ModelForwardResult is already bound
-        }, nb::arg("continuous"), nb::arg("genus_ids") = nb::none(), nb::arg("family_ids") = nb::none(),
-           nb::arg("species_ids") = nb::none(), nb::arg("species_vector") = nb::none(),
-           nb::arg("pool_genus_ids") = nb::none(), nb::arg("pool_family_ids") = nb::none(),
-           nb::arg("pool_weights") = nb::none(), nb::arg("pool_mask") = nb::none(),
-           nb::arg("pool_has_cover") = nb::none(),
-           nb::arg("categorical_ids") = nb::none())
-        .def("forward_single", [](resolve::ResolveModel& self,
-                                   const std::string& target,
-                                   nb::object continuous_obj,
-                                   nb::object genus_ids_obj,
-                                   nb::object family_ids_obj,
-                                   nb::object species_ids_obj,
-                                   nb::object species_vector_obj,
-                                   nb::object categorical_ids_obj) {
-            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
-            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
-            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
-            at::Tensor species_ids = unpack_optional_tensor(species_ids_obj);
-            at::Tensor species_vector = unpack_optional_tensor(species_vector_obj);
-            at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
-            at::Tensor result;
-            {
-                nb::gil_scoped_release nogil;
-                result = self->forward_single(target, continuous, genus_ids, family_ids, species_ids, species_vector,
-                                              categorical_ids);
-            }
-            return nb::steal(THPVariable_Wrap(result));
-        }, nb::arg("target"), nb::arg("continuous"), nb::arg("genus_ids") = nb::none(),
-           nb::arg("family_ids") = nb::none(), nb::arg("species_ids") = nb::none(), nb::arg("species_vector") = nb::none(),
-           nb::arg("categorical_ids") = nb::none())
-        .def("encode_with_activations", [](resolve::ResolveModel& self,
-                                            nb::object continuous_obj,
-                                            nb::object genus_ids_obj,
-                                            nb::object family_ids_obj,
-                                            nb::object categorical_ids_obj) {
-            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
-            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
-            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
-            at::Tensor categorical_ids = unpack_optional_tensor(categorical_ids_obj);
-            torch::Tensor latent;
-            std::vector<torch::Tensor> activations;
-            {
-                nb::gil_scoped_release nogil;
-                std::tie(latent, activations) =
-                    self->encode_with_activations(continuous, genus_ids, family_ids, categorical_ids);
-            }
-            nb::list act_list;
-            for (const auto& a : activations) {
-                act_list.append(nb::steal(THPVariable_Wrap(a)));
-            }
-            return std::make_pair(nb::steal(THPVariable_Wrap(latent)), act_list);
-        }, nb::arg("continuous"), nb::arg("genus_ids") = nb::none(), nb::arg("family_ids") = nb::none(),
-           nb::arg("categorical_ids") = nb::none())
-        .def("get_gate_probs", [](resolve::ResolveModel& self,
-                                   nb::object continuous_obj,
-                                   nb::object genus_ids_obj,
-                                   nb::object family_ids_obj) {
-            at::Tensor continuous = unpack_required_tensor(continuous_obj, "continuous");
-            at::Tensor genus_ids = unpack_optional_tensor(genus_ids_obj);
-            at::Tensor family_ids = unpack_optional_tensor(family_ids_obj);
-            at::Tensor result;
-            {
-                nb::gil_scoped_release nogil;
-                result = self->get_gate_probs(continuous, genus_ids, family_ids);
-            }
-            return nb::steal(THPVariable_Wrap(result));
-        }, nb::arg("continuous"), nb::arg("genus_ids") = nb::none(), nb::arg("family_ids") = nb::none())
         .def_prop_ro("uses_moe", [](resolve::ResolveModel& self) { return self->uses_moe(); })
         .def_prop_ro("n_experts", [](resolve::ResolveModel& self) { return self->n_experts(); })
         .def("set_traits", [](resolve::ResolveModel& self, nb::object traits_obj) {
@@ -450,6 +309,4 @@ void register_model(nb::module_& m) {
             auto t = self->species_graph_edge_type();
             return t.defined() ? nb::steal(THPVariable_Wrap(t)) : nb::none();
         });
-
-    m.attr("SpaccModel") = m.attr("ResolveModel");
 }

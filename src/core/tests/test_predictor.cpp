@@ -298,7 +298,7 @@ TEST_CASE("Predictor::predict class probabilities are the softmax of the model's
     torch::NoGradGuard no_grad;
     auto scaled = standardize_continuous(ds.continuous_block(/*include_hash=*/true),
                                          predictor.scalers());
-    auto outputs = predictor.model()->forward(scaled);
+    auto outputs = predictor.model()->forward({.continuous = scaled});
     auto reference = torch::softmax(outputs.at("hab"), /*dim=*/1);
 
     REQUIRE(torch::allclose(probs, reference, /*rtol=*/1e-5, /*atol=*/1e-6));
@@ -309,10 +309,7 @@ TEST_CASE("Predictor::predict raw-tensor overload also returns probabilities",
     auto ds = make_synthetic_dataset(/*n_plots=*/24);
     auto predictor = make_test_predictor(ds);
 
-    auto preds = predictor.predict(
-        ds.coordinates(), ds.covariates(), ds.hash_embedding(),
-        ds.species_ids(), ds.species_vector(), ds.genus_ids(), ds.family_ids(),
-        ds.unknown_fraction(), ds.unknown_count());
+    auto preds = predictor.predict(ds.continuous_inputs(), ds.plot_inputs());
 
     REQUIRE(preds.probabilities.count("hab") == 1);
     REQUIRE(preds.probabilities.at("hab").sizes() == torch::IntArrayRef({24, 3}));
@@ -358,13 +355,66 @@ TEST_CASE("Predictor::get_embeddings returns per-plot latent rows",
     auto ds = make_synthetic_dataset(/*n_plots=*/48);
     auto predictor = make_test_predictor(ds);
 
-    auto emb = predictor.get_embeddings(
-        ds.coordinates(), ds.covariates(), ds.hash_embedding(),
-        ds.genus_ids(), ds.family_ids());
+    auto emb = predictor.get_embeddings(ds.continuous_inputs(), ds.plot_inputs());
 
     REQUIRE(emb.size(0) == 48);
     REQUIRE(emb.size(1) == predictor.model()->latent_dim());
     REQUIRE(torch::isfinite(emb).all().item<bool>());
+}
+
+TEST_CASE("Predictor::get_embeddings reads every species encoding and the categoricals",
+          "[predictor][embeddings][categorical]") {
+    // The SmallCorpus line with a categorical "soil" column. Each encoding
+    // reads its own species inputs (IDs, vector or pool tensors) and the
+    // categorical codes, so the embedding is the latent predict() returns and
+    // moves when the codes do.
+    const int n_plots = SmallCorpus::kPlots;
+    std::ostringstream hdr;
+    hdr << "plot_id,lon,lat,elev,y,soil\n";
+    const std::vector<std::string> soils = {"clay", "loam", "sand"};
+    for (int i = 0; i < n_plots; ++i) {
+        hdr << "p" << i << "," << (10.0 + 0.1 * i) << "," << (47.0 + 0.1 * i) << ","
+            << (100.0 + 5.0 * i) << "," << (1.0 + 0.25 * i) << ","
+            << soils[static_cast<size_t>(i % 3)] << "\n";
+    }
+    const TempFile header_csv(hdr.str());
+    const TempFile species_csv(cyclic_species_csv(n_plots, SmallCorpus::kSpecies));
+
+    for (const auto mode : all_species_encodings()) {
+        INFO("encoding " << species_encoding_to_string(mode));
+        DatasetConfig dcfg;
+        dcfg.species_encoding = mode;
+        dcfg.use_taxonomy = true;
+        dcfg.hash_dim = 32;
+        auto ds = ResolveDataset::from_csv(
+            header_csv.path(), species_csv.path(),
+            Roles().coordinates().covariates({"elev"}).taxonomy().categoricals({"soil"}),
+            {TargetSpec::regression("y")}, dcfg);
+        REQUIRE(ds.schema().n_categoricals() == 1);
+
+        torch::manual_seed(5);
+        ResolveModel model(ds.schema(), small_encoder_config(mode, {16, 8}));
+        Trainer trainer(model, quiet_train_config());
+        trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/0);
+        Predictor predictor(trainer.model(), trainer.scalers(), trainer.categorical_vocab(),
+                            torch::kCPU);
+
+        const auto parts = ds.continuous_inputs();
+        const auto inputs = ds.plot_inputs();
+        const auto emb = predictor.get_embeddings(parts, inputs, /*batch_size=*/-1);
+        REQUIRE(emb.sizes() == torch::IntArrayRef({n_plots, predictor.model()->latent_dim()}));
+        REQUIRE(emb.device().is_cpu());
+        REQUIRE(torch::isfinite(emb).all().item<bool>());
+
+        const auto via_predict = predictor.predict(ds, /*return_latent=*/true, -1).latent;
+        CHECK(torch::allclose(emb, via_predict, 1e-5, 1e-6));
+        CHECK(torch::allclose(emb, predictor.get_embeddings(parts, inputs, /*batch_size=*/7),
+                              1e-5, 1e-6));
+
+        auto unk = inputs;
+        unk.categorical_ids = torch::zeros_like(inputs.categorical_ids);
+        CHECK_FALSE(torch::allclose(emb, predictor.get_embeddings(parts, unk, -1)));
+    }
 }
 
 // =============================================================================

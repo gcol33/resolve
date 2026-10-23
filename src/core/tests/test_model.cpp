@@ -229,7 +229,7 @@ TEST_CASE("ResolveModel hash mode forward", "[model]") {
     auto genus_ids = torch::randint(0, 20, {8, 3});   // valid ids 0..n_genera-1 (issue #99)
     auto family_ids = torch::randint(0, 10, {8, 3});  // valid ids 0..n_families-1
 
-    auto outputs = model->forward(continuous, genus_ids, family_ids);
+    auto outputs = model->forward({.continuous = continuous, .genus_ids = genus_ids, .family_ids = family_ids});
 
     SECTION("outputs contain all targets") {
         REQUIRE(outputs.count("area") > 0);
@@ -279,7 +279,8 @@ TEST_CASE("ResolveModel embed mode forward", "[model]") {
     auto genus_ids = torch::randint(1, 25, {8, 3});
     auto family_ids = torch::randint(1, 15, {8, 3});
 
-    auto outputs = model->forward(continuous, genus_ids, family_ids, species_ids, {});
+    auto outputs = model->forward({.continuous = continuous, .genus_ids = genus_ids,
+                                   .family_ids = family_ids, .species_ids = species_ids});
 
     REQUIRE(outputs.count("area") > 0);
     REQUIRE(outputs["area"].size(0) == 8);
@@ -308,7 +309,7 @@ TEST_CASE("ResolveModel sparse mode forward", "[model]") {
     auto continuous = torch::randn({8, 4});
     auto species_vector = torch::randn({8, 50});
 
-    auto outputs = model->forward(continuous, {}, {}, {}, species_vector);
+    auto outputs = model->forward({.continuous = continuous, .species_vector = species_vector});
 
     REQUIRE(outputs.count("biomass") > 0);
     REQUIRE(outputs["biomass"].size(0) == 8);
@@ -335,7 +336,7 @@ TEST_CASE("ResolveModel get latent", "[model]") {
 
     // n_continuous = 2 (coords) + 32 (hash) = 34
     auto continuous = torch::randn({8, 34});
-    auto latent = model->get_latent(continuous);
+    auto latent = model->get_latent({.continuous = continuous});
 
     REQUIRE(latent.size(0) == 8);
     REQUIRE(latent.size(1) == 32);  // Last hidden dim

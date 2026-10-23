@@ -266,7 +266,7 @@ TEST_CASE("ResolveModel Forward Benchmarks", "[benchmark][model]") {
         auto family_ids = torch::randint(0, 101, {64, 3}, torch::kInt64);
 
         BENCHMARK("CPU forward") {
-            return model->forward(continuous, genus_ids, family_ids);
+            return model->forward({.continuous = continuous, .genus_ids = genus_ids, .family_ids = family_ids});
         };
 
         if (torch::cuda::is_available()) {
@@ -276,7 +276,7 @@ TEST_CASE("ResolveModel Forward Benchmarks", "[benchmark][model]") {
             auto family_cuda = family_ids.to(torch::kCUDA);
 
             BENCHMARK("GPU forward") {
-                auto result = model->forward(cont_cuda, genus_cuda, family_cuda);
+                auto result = model->forward({.continuous = cont_cuda, .genus_ids = genus_cuda, .family_ids = family_cuda});
                 torch::cuda::synchronize();
                 return result;
             };
@@ -291,7 +291,7 @@ TEST_CASE("ResolveModel Forward Benchmarks", "[benchmark][model]") {
         auto family_ids = torch::randint(0, 101, {256, 3}, torch::kInt64);
 
         BENCHMARK("CPU forward") {
-            return model->forward(continuous, genus_ids, family_ids);
+            return model->forward({.continuous = continuous, .genus_ids = genus_ids, .family_ids = family_ids});
         };
 
         if (torch::cuda::is_available()) {
@@ -301,7 +301,7 @@ TEST_CASE("ResolveModel Forward Benchmarks", "[benchmark][model]") {
             auto family_cuda = family_ids.to(torch::kCUDA);
 
             BENCHMARK("GPU forward") {
-                auto result = model->forward(cont_cuda, genus_cuda, family_cuda);
+                auto result = model->forward({.continuous = cont_cuda, .genus_ids = genus_cuda, .family_ids = family_cuda});
                 torch::cuda::synchronize();
                 return result;
             };
@@ -316,7 +316,7 @@ TEST_CASE("ResolveModel Forward Benchmarks", "[benchmark][model]") {
         auto family_ids = torch::randint(0, 101, {1024, 3}, torch::kInt64);
 
         BENCHMARK("CPU forward") {
-            return model->forward(continuous, genus_ids, family_ids);
+            return model->forward({.continuous = continuous, .genus_ids = genus_ids, .family_ids = family_ids});
         };
 
         if (torch::cuda::is_available()) {
@@ -326,7 +326,7 @@ TEST_CASE("ResolveModel Forward Benchmarks", "[benchmark][model]") {
             auto family_cuda = family_ids.to(torch::kCUDA);
 
             BENCHMARK("GPU forward") {
-                auto result = model->forward(cont_cuda, genus_cuda, family_cuda);
+                auto result = model->forward({.continuous = cont_cuda, .genus_ids = genus_cuda, .family_ids = family_cuda});
                 torch::cuda::synchronize();
                 return result;
             };
@@ -401,21 +401,10 @@ TEST_CASE("End-to-End Training Benchmark Production", "[benchmark][training-prod
             Trainer fresh_trainer(fresh_model, train_config);
 
             fresh_trainer.prepare_data(
-                coordinates,
-                torch::Tensor(),
-                hash_embedding,
-                torch::Tensor(),
-                torch::Tensor(),
-                genus_ids,
-                family_ids,
-                unknown_fraction,
-                torch::Tensor(),
-                targets,
-                {}, {}, {}, {}, {},  // pool_* (not used in hash mode)
-                {},                  // categorical_ids (none in benchmark fixture)
-                0.2f,
-                42
-            );
+                {.coordinates = coordinates, .unknown_fraction = unknown_fraction,
+                 .hash_embedding = hash_embedding},
+                {.genus_ids = genus_ids, .family_ids = family_ids},
+                targets, 0.2f, 42);
 
             meter.measure([&fresh_trainer] {
                 return fresh_trainer.fit();
@@ -438,21 +427,10 @@ TEST_CASE("End-to-End Training Benchmark Production", "[benchmark][training-prod
                 Trainer fresh_trainer(fresh_model, train_config);
 
                 fresh_trainer.prepare_data(
-                    coordinates,
-                    torch::Tensor(),
-                    hash_embedding,
-                    torch::Tensor(),
-                    torch::Tensor(),
-                    genus_ids,
-                    family_ids,
-                    unknown_fraction,
-                    torch::Tensor(),
-                    targets,
-                    {}, {}, {}, {}, {},  // pool_*
-                    {},                  // categorical_ids
-                    0.2f,
-                    42
-                );
+                    {.coordinates = coordinates, .unknown_fraction = unknown_fraction,
+                     .hash_embedding = hash_embedding},
+                    {.genus_ids = genus_ids, .family_ids = family_ids},
+                    targets, 0.2f, 42);
 
                 meter.measure([&fresh_trainer] {
                     auto result = fresh_trainer.fit();
@@ -527,21 +505,10 @@ TEST_CASE("End-to-End Training Benchmark Large", "[benchmark][training-large]") 
             Trainer fresh_trainer(fresh_model, train_config);
 
             fresh_trainer.prepare_data(
-                coordinates,
-                torch::Tensor(),  // no covariates
-                hash_embedding,
-                torch::Tensor(),  // no species_ids
-                torch::Tensor(),  // no species_vector
-                genus_ids,
-                family_ids,
-                unknown_fraction,
-                torch::Tensor(),  // no unknown_count
-                targets,
-                {}, {}, {}, {}, {},  // pool_* (not used in hash mode)
-                {},                  // categorical_ids (none in benchmark fixture)
-                0.2f,
-                42
-            );
+                {.coordinates = coordinates, .unknown_fraction = unknown_fraction,
+                 .hash_embedding = hash_embedding},
+                {.genus_ids = genus_ids, .family_ids = family_ids},
+                targets, 0.2f, 42);
 
             meter.measure([&fresh_trainer] {
                 return fresh_trainer.fit();
@@ -564,21 +531,10 @@ TEST_CASE("End-to-End Training Benchmark Large", "[benchmark][training-large]") 
                 Trainer fresh_trainer(fresh_model, train_config);
 
                 fresh_trainer.prepare_data(
-                    coordinates,
-                    torch::Tensor(),
-                    hash_embedding,
-                    torch::Tensor(),
-                    torch::Tensor(),
-                    genus_ids,
-                    family_ids,
-                    unknown_fraction,
-                    torch::Tensor(),
-                    targets,
-                    {}, {}, {}, {}, {},  // pool_*
-                    {},                  // categorical_ids
-                    0.2f,
-                    42
-                );
+                    {.coordinates = coordinates, .unknown_fraction = unknown_fraction,
+                     .hash_embedding = hash_embedding},
+                    {.genus_ids = genus_ids, .family_ids = family_ids},
+                    targets, 0.2f, 42);
 
                 meter.measure([&fresh_trainer] {
                     auto result = fresh_trainer.fit();
@@ -653,21 +609,10 @@ TEST_CASE("End-to-End Training Benchmark", "[benchmark][training]") {
             Trainer fresh_trainer(fresh_model, train_config);
 
             fresh_trainer.prepare_data(
-                coordinates,
-                torch::Tensor(),  // no covariates
-                hash_embedding,
-                torch::Tensor(),  // no species_ids
-                torch::Tensor(),  // no species_vector
-                genus_ids,
-                family_ids,
-                unknown_fraction,
-                torch::Tensor(),  // no unknown_count
-                targets,
-                {}, {}, {}, {}, {},  // pool_* (not used in hash mode)
-                {},                  // categorical_ids (none in benchmark fixture)
-                0.2f,
-                42
-            );
+                {.coordinates = coordinates, .unknown_fraction = unknown_fraction,
+                 .hash_embedding = hash_embedding},
+                {.genus_ids = genus_ids, .family_ids = family_ids},
+                targets, 0.2f, 42);
 
             meter.measure([&fresh_trainer] {
                 return fresh_trainer.fit();
@@ -690,21 +635,10 @@ TEST_CASE("End-to-End Training Benchmark", "[benchmark][training]") {
                 Trainer fresh_trainer(fresh_model, train_config);
 
                 fresh_trainer.prepare_data(
-                    coordinates,
-                    torch::Tensor(),
-                    hash_embedding,
-                    torch::Tensor(),
-                    torch::Tensor(),
-                    genus_ids,
-                    family_ids,
-                    unknown_fraction,
-                    torch::Tensor(),
-                    targets,
-                    {}, {}, {}, {}, {},  // pool_*
-                    {},                  // categorical_ids
-                    0.2f,
-                    42
-                );
+                    {.coordinates = coordinates, .unknown_fraction = unknown_fraction,
+                     .hash_embedding = hash_embedding},
+                    {.genus_ids = genus_ids, .family_ids = family_ids},
+                    targets, 0.2f, 42);
 
                 meter.measure([&fresh_trainer] {
                     auto result = fresh_trainer.fit();
@@ -755,7 +689,7 @@ TEST_CASE("Training Components Benchmark", "[benchmark][components]") {
 
         BENCHMARK("CPU forward+backward") {
             model->zero_grad();
-            auto output = model->forward(continuous, genus_ids, family_ids);
+            auto output = model->forward({.continuous = continuous, .genus_ids = genus_ids, .family_ids = family_ids});
             auto loss = torch::mse_loss(output["area"].squeeze(), target);
             loss.backward();
             return loss;
@@ -770,7 +704,7 @@ TEST_CASE("Training Components Benchmark", "[benchmark][components]") {
 
             BENCHMARK("GPU forward+backward") {
                 model->zero_grad();
-                auto output = model->forward(cont_cuda, genus_cuda, family_cuda);
+                auto output = model->forward({.continuous = cont_cuda, .genus_ids = genus_cuda, .family_ids = family_cuda});
                 auto loss = torch::mse_loss(output["area"].squeeze(), target_cuda);
                 loss.backward();
                 torch::cuda::synchronize();
@@ -793,7 +727,7 @@ TEST_CASE("Training Components Benchmark", "[benchmark][components]") {
 
         BENCHMARK("CPU forward+backward+step") {
             optimizer.zero_grad();
-            auto output = model->forward(continuous, genus_ids, family_ids);
+            auto output = model->forward({.continuous = continuous, .genus_ids = genus_ids, .family_ids = family_ids});
             auto loss = torch::mse_loss(output["area"].squeeze(), target);
             loss.backward();
             optimizer.step();
@@ -810,7 +744,7 @@ TEST_CASE("Training Components Benchmark", "[benchmark][components]") {
 
             BENCHMARK("GPU forward+backward+step") {
                 optimizer_cuda.zero_grad();
-                auto output = model->forward(cont_cuda, genus_cuda, family_cuda);
+                auto output = model->forward({.continuous = cont_cuda, .genus_ids = genus_cuda, .family_ids = family_cuda});
                 auto loss = torch::mse_loss(output["area"].squeeze(), target_cuda);
                 loss.backward();
                 optimizer_cuda.step();

@@ -517,7 +517,7 @@ void JEPAPretrainer::update_target_encoder(float decay) {
     // gradient-tracked and are not updated by the parameter EMA above. Without
     // this the target encoder — always run in eval() — would normalize with the
     // construction-time init stats (mean 0, var 1) for the entire run, breaking
-    // the "target is a slow copy of the online encoder" invariant (issue #81).
+    // the "target is a slow copy of the online encoder" invariant.
     // BYOL/JEPA copy buffers from the online encoder rather than EMA-ing them.
     auto context_bufs = context_encoder_->named_buffers();
     auto target_bufs = target_encoder_->named_buffers();
@@ -590,6 +590,13 @@ MaskedSpeciesView mask_species_view(
     return v;
 }
 
+// The model inputs of one JEPA / SCARF batch, whose loop inputs are
+// {continuous, genus_ids, family_ids, species_ids, species_vector}.
+PlotInputs plot_inputs_of(const PretrainBatch& batch) {
+    return {.continuous = batch[0], .genus_ids = batch[1], .family_ids = batch[2],
+            .species_ids = batch[3], .species_vector = batch[4]};
+}
+
 }  // namespace
 
 PretrainResult JEPAPretrainer::pretrain(
@@ -640,8 +647,9 @@ PretrainResult JEPAPretrainer::pretrain(
         auto masked_cont = masker_->apply_mask(batch_cont, mask);
         auto sv = mask_species_view(
             batch[1], batch[2], batch[3], batch[4], config_.mask_ratio, rng);
-        auto context_repr = context_encoder_->get_latent(
-            masked_cont, sv.genus, sv.family, sv.species, sv.vector);
+        auto context_repr = context_encoder_->get_latent({
+            .continuous = masked_cont, .genus_ids = sv.genus, .family_ids = sv.family,
+            .species_ids = sv.species, .species_vector = sv.vector});
 
         // Predict target representation from context
         auto predicted_repr = predictor_->forward(context_repr);
@@ -651,8 +659,7 @@ PretrainResult JEPAPretrainer::pretrain(
         {
             torch::NoGradGuard no_grad;
             target_encoder_->eval();
-            target_repr = target_encoder_->get_latent(
-                batch[0], batch[1], batch[2], batch[3], batch[4]);
+            target_repr = target_encoder_->get_latent(plot_inputs_of(batch));
         }
 
         // L2 loss between predicted and target representations
@@ -725,17 +732,16 @@ PretrainResult SCARFPretrainer::pretrain(
         const auto& batch_cont = batch[0];
 
         // View 1: original features -> encoder -> projection
-        auto repr_1 = model_->get_latent(
-            batch_cont, batch[1], batch[2], batch[3], batch[4]);
+        auto repr_1 = model_->get_latent(plot_inputs_of(batch));
         auto z_1 = projection_head_->forward(repr_1);
 
         // View 2: corrupted features -> encoder -> projection. The species
-        // side is masked too (issue #93): for non-hash encoders the species
+        // side is masked too: for non-hash encoders the species
         // composition lives in the ID / explicit-vector tensors, not in
         // `continuous`, so feeding both views identical species tensors
         // makes the InfoNCE positive pair matchable by species identity
         // alone and the encoder degenerates to passing species through.
-        // Mirrors the JEPA mask_species_view fix. (For hash mode the species
+        // Same masking as the JEPA context view. (For hash mode the species
         // hash is inside `continuous` and already corrupted; the species-ID
         // tensors are empty there, so masking is a no-op.)
         auto corrupted_cont = corruptor_->corrupt(batch_cont, rng);
@@ -756,8 +762,10 @@ PretrainResult SCARFPretrainer::pretrain(
         }
         auto masked = mask_species_view(
             batch[1], batch[2], batch[3], batch[4], config_.corruption_rate, rng);
-        auto repr_2 = model_->get_latent(
-            corrupted_cont, masked.genus, masked.family, masked.species, masked.vector);
+        auto repr_2 = model_->get_latent({
+            .continuous = corrupted_cont, .genus_ids = masked.genus,
+            .family_ids = masked.family, .species_ids = masked.species,
+            .species_vector = masked.vector});
         auto z_2 = projection_head_->forward(repr_2);
 
         // Normalize projections
@@ -822,7 +830,7 @@ mask_species_batch(
     // embedding, nullifying the 80/10/10 split entirely).
     auto mask_token_positions = torch::zeros_like(mlm_mask);
 
-    // BERT-style 80/10/10 split, fully vectorized (issue #90). The prior
+    // BERT-style 80/10/10 split, fully vectorized. The prior
     // per-token loop called .item() twice per masked position, forcing a
     // GPU->CPU sync thousands of times per batch and serializing the MLM hot
     // loop on CUDA. Here we draw one action value per masked slot, scatter the

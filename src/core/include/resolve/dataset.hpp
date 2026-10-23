@@ -4,6 +4,8 @@
 #include "resolve/role_mapping.hpp"
 #include "resolve/encoder.hpp"
 #include "resolve/categorical.hpp"
+#include "resolve/continuous_block.hpp"
+#include "resolve/plot_inputs.hpp"
 #include "resolve/species_encoding.hpp"
 #include "resolve/row_source.hpp"
 #include <torch/torch.h>
@@ -27,7 +29,7 @@ struct ColumnIndices {
 
     // Factory method to resolve all indices from any RowSource and RoleMapping
     // (a CSVReader or an in-memory ColumnTable, via InMemoryRowSource). A named
-    // role column that cannot be resolved throws (issue #94). expect_coordinates
+    // role column that cannot be resolved throws. expect_coordinates
     // must be true only for the single-table species loader, where longitude/
     // latitude live in the species source; in the two-file loader they are header
     // roles absent from the species source, so they are not looked up here.
@@ -96,7 +98,7 @@ struct DatasetConfig {
     int pool_species_cap = 0;
 
     // Per-plot species budget for the encodings whose width is not otherwise
-    // fixed: rank_pool, transformer and sparse (issue #113). `selection` picks
+    // fixed: rank_pool, transformer and sparse. `selection` picks
     // which species survive it.
     //
     //   0 (default) : no budget. Every species a plot records is encoded,
@@ -144,8 +146,8 @@ struct DatasetConfig {
 class ResolveDataset;
 
 // Vocabularies fitted at training time, handed to a loader so the dataset it
-// builds lives in the SAME integer-code namespace as the trained model
-// (issue #102). Every non-hash encoder indexes an embedding table by a code
+// builds lives in the SAME integer-code namespace as the trained model.
+// Every non-hash encoder indexes an embedding table by a code
 // that is a function of the file it was fitted on, so an inference dataset that
 // re-fits its own codes looks up the wrong embedding rows.
 //
@@ -175,7 +177,8 @@ struct ExternalVocabs {
 };
 
 // Rebuild the vocabularies a checkpoint's schema carries. `schema.species_vocab`
-// / `genus_vocab` / `family_vocab` are empty on a pre-issue-#102 checkpoint; the
+// / `genus_vocab` / `family_vocab` are empty on a checkpoint that stores
+// only the sizes; the
 // result is then an empty ExternalVocabs, and the loaders that receive it throw
 // rather than silently re-fitting (the failure mode this whole path exists to
 // prevent). The categorical maps are NOT on the schema -- only the column names
@@ -209,7 +212,7 @@ DatasetConfig dataset_config_from_checkpoint(const ResolveSchema& schema,
 //
 // The dataset publishes this, not the requested value, onto its schema, so a
 // checkpoint (and everything that reads one back) cannot report a species
-// selection the run never made (issue #113).
+// selection the run never made.
 SelectionMode effective_selection(const DatasetConfig& config);
 
 // Loaded dataset ready for training
@@ -250,7 +253,7 @@ public:
     );
 
     // Same verb, sourcing the vocabularies from a CHECKPOINT's schema instead of
-    // an in-memory training dataset (issue #102). This is the path for a user
+    // an in-memory training dataset. This is the path for a user
     // who has only a saved model and a new CSV: the training CSVs need not
     // exist, and no dataset has to be rebuilt to recover the vocab.
     //
@@ -260,8 +263,8 @@ public:
     //                  header, species, roles, targets, p.schema(), cfg);
     //   auto out = p.predict(ds);
     //
-    // Throws when the schema carries no species vocabulary (a pre-issue-#102
-    // checkpoint): silently re-fitting is the bug this overload exists to
+    // Throws when the schema carries no species vocabulary (a sizes-only
+    // checkpoint): silently re-fitting is what this overload exists to
     // prevent, so the caller is told to retrain / re-save instead.
     //
     // Categorical covariates: the schema carries column names and vocab sizes
@@ -299,7 +302,7 @@ public:
     );
 
     // Single-table counterpart of from_csv_with_schema: reuse a checkpoint's
-    // vocabularies when scoring a species-only CSV (issue #102). The two-file
+    // vocabularies when scoring a species-only CSV. The two-file
     // loader had a *_with_schema sibling; this one did not, so `resolve predict
     // --species-only` had no way to stay in the model's ID namespace.
     static ResolveDataset from_species_csv_with_schema(
@@ -318,7 +321,7 @@ public:
         const DatasetConfig& config = DatasetConfig{}
     );
 
-    // --- In-memory (DataFrame) loaders (issue #22) ---
+    // --- In-memory (DataFrame) loaders ---
     // The on-disk from_csv* verbs above force a write-to-temp-CSV / re-read
     // round-trip whenever the header must be filtered/subset before a fit. These
     // accept the same data already in RAM as ColumnTable(s) (the cross-binding
@@ -360,7 +363,7 @@ public:
         const DatasetConfig& config = DatasetConfig{}
     );
 
-    // In-memory analog of the checkpoint-schema overload above (issue #102).
+    // In-memory analog of the checkpoint-schema overload above.
     static ResolveDataset from_dataframe_with_schema(
         const ColumnTable& header,
         const ColumnTable& species,
@@ -388,7 +391,7 @@ public:
         const DatasetConfig& config = DatasetConfig{}
     );
 
-    // In-memory analog of from_species_csv_with_schema (issue #102).
+    // In-memory analog of from_species_csv_with_schema.
     static ResolveDataset from_species_dataframe_with_schema(
         const ColumnTable& species,
         const RoleMapping& roles,
@@ -433,6 +436,12 @@ public:
     // missingness flags, the unknown-species columns and, when include_hash is
     // true, the hash embedding. Missing cells are NaN under Indicate.
     [[nodiscard]] torch::Tensor continuous_block(bool include_hash) const;
+    // The parts that block is assembled from, hash embedding included; a
+    // trainer or predictor assembles and standardises them with its scalers.
+    [[nodiscard]] ContinuousInputs continuous_inputs() const;
+    // Every per-plot model input the dataset carries, except `continuous`,
+    // which comes from continuous_inputs().
+    [[nodiscard]] PlotInputs plot_inputs() const;
     // Categorical covariate codes. Shape (n_plots, n_categoricals) int64,
     // values produced by CategoricalVocab (0 = UNK). Empty (undefined or 0
     // columns) when the schema declares no categoricals.
@@ -478,7 +487,7 @@ public:
 
     // Species vocabulary (for embed mode). Ordered: index = integer code,
     // [0] = "<UNK>". Mirrored onto schema().species_vocab so it survives into
-    // the checkpoint (issue #102).
+    // the checkpoint.
     const std::vector<std::string>& species_vocab() const { return species_vocab_; }
 
     // The vocabularies this dataset fitted, in the form the *_with_vocabs
@@ -499,7 +508,7 @@ public:
 private:
     // Single-attempt loader bodies. The public from_* verbs wrap these in
     // io::with_retry<io::IOError> so a transient storage fault re-runs the
-    // whole load into a fresh dataset rather than aborting the run (issue #20).
+    // whole load into a fresh dataset rather than aborting the run.
     static ResolveDataset from_csv_impl(
         const std::string& header_path,
         const std::string& species_path,
@@ -548,7 +557,7 @@ private:
     void adopt_vocabs(const ExternalVocabs& vocabs);
 
     // Copy the fitted species / genus / family vocabularies onto schema_ so they
-    // travel into the checkpoint (issue #102). Called once at the end of
+    // travel into the checkpoint. Called once at the end of
     // encode_species, after every encoding branch has settled its vocab.
     void publish_vocabs_to_schema();
 

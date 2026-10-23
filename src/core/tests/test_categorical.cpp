@@ -364,18 +364,21 @@ TEST_CASE("ResolveModel with categoricals widens n_continuous and passes "
         a[1][0] = 1; a[1][1] = 2;
         a[2][0] = 4; a[2][1] = 3;
         a[3][0] = 2; a[3][1] = 0;
-        auto out = model->forward(continuous, {}, {}, {}, {},
-                                  {}, {}, {}, {}, {}, cat_ids);
+        auto out = model->forward({.continuous = continuous, .categorical_ids = cat_ids});
         REQUIRE(out.count("y") == 1);
         REQUIRE(out["y"].size(0) == B);
     }
 
-    SECTION("forward without categorical_ids pads with zeros (back-compat)") {
+    SECTION("forward without categorical_ids reads every column as UNK") {
         const int64_t B = 3;
         const int64_t n_cont_input = 2 + 2 + 4;
         auto continuous = torch::randn({B, n_cont_input});
-        // No cat_ids supplied — model should fall back to zero padding.
-        auto out = model->forward(continuous);
+        model->eval();
+        torch::NoGradGuard no_grad;
+        auto out = model->forward({.continuous = continuous});
+        auto unk = model->forward({.continuous = continuous,
+                                   .categorical_ids = torch::zeros({B, 2}, torch::kInt64)});
+        REQUIRE(torch::allclose(out.at("y"), unk.at("y")));
         REQUIRE(out.count("y") == 1);
         REQUIRE(out["y"].size(0) == B);
     }
@@ -385,8 +388,7 @@ TEST_CASE("ResolveModel with categoricals widens n_continuous and passes "
         const int64_t n_cont_input = 2 + 2 + 4;
         auto continuous = torch::randn({B, n_cont_input});
         auto bad = torch::zeros({B, 3}, torch::kInt64);  // expected 2
-        REQUIRE_THROWS(model->forward(continuous, {}, {}, {}, {},
-                                      {}, {}, {}, {}, {}, bad));
+        REQUIRE_THROWS(model->forward({.continuous = continuous, .categorical_ids = bad}));
     }
 }
 
@@ -443,8 +445,7 @@ TEST_CASE("ResolveModel adapter + categoricals sizes the numerical block correct
         cfg.tabnet.n_a = 8;
         cfg.tabnet.n_steps = 2;
         ResolveModel model(schema, cfg);
-        auto out = model->forward(continuous, {}, {}, {}, {},
-                                  {}, {}, {}, {}, {}, cat_ids);
+        auto out = model->forward({.continuous = continuous, .categorical_ids = cat_ids});
         REQUIRE(out.count("y") == 1);
         REQUIRE(out["y"].size(0) == B);
     }
@@ -455,8 +456,7 @@ TEST_CASE("ResolveModel adapter + categoricals sizes the numerical block correct
         cfg.excelformer.n_heads = 4;
         cfg.excelformer.n_layers = 2;
         ResolveModel model(schema, cfg);
-        auto out = model->forward(continuous, {}, {}, {}, {},
-                                  {}, {}, {}, {}, {}, cat_ids);
+        auto out = model->forward({.continuous = continuous, .categorical_ids = cat_ids});
         REQUIRE(out.count("y") == 1);
         REQUIRE(out["y"].size(0) == B);
     }

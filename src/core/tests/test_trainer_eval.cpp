@@ -628,17 +628,12 @@ TEST_CASE("Trainer::prepare_data rejects data carrying no targets",
             Catch::Matchers::ContainsSubstring("no targets"));
     }
 
-    SECTION("the raw-tensor overload is the shared body, so it throws too") {
+    SECTION("the tensor overload is the shared body, so it throws too") {
         ResolveModel model(ds.schema(), make_model_config());
         Trainer trainer(model, quiet_train_config());
         REQUIRE_THROWS_AS(
-            trainer.prepare_data(
-                ds.coordinates(), ds.covariates(), ds.hash_embedding(),
-                ds.species_ids(), ds.species_vector(), ds.genus_ids(),
-                ds.family_ids(), ds.unknown_fraction(), ds.unknown_count(),
-                /*targets=*/{}, ds.pool_genus_ids(), ds.pool_family_ids(),
-                ds.pool_weights(), ds.pool_mask(), ds.pool_has_cover(),
-                ds.categorical_ids(), 0.25f, 7),
+            trainer.prepare_data(ds.continuous_inputs(), ds.plot_inputs(),
+                                 /*targets=*/{}, 0.25f, 7),
             std::invalid_argument);
     }
 

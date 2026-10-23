@@ -270,7 +270,7 @@ struct ResolveSchema {
     int pool_species_cap = 0;  // 0 = no cap, -x = p(100 - x), >0 = manual cap
 
     // Remaining DatasetConfig knobs that shape the encoded tensors but are not
-    // recoverable from ModelConfig (issue #102). Persisted so an inference-side
+    // recoverable from ModelConfig. Persisted so an inference-side
     // DatasetConfig can be rebuilt in full from the checkpoint rather than
     // silently reverting to the struct defaults: top_k_species and
     // track_unknown_count change tensor widths (loud shape errors), while
@@ -281,7 +281,7 @@ struct ResolveSchema {
     int top_k_species = 10;
     // The selection the run APPLIED, not the one it was configured with: a
     // rank_pool / transformer / sparse dataset with no species_budget encodes
-    // every record, which is All (issue #113). See effective_selection().
+    // every record, which is All. See effective_selection().
     SelectionMode selection = SelectionMode::Top;
     // Per-plot species budget for the rank_pool / transformer / sparse
     // encodings; 0 = no budget. Mirrors DatasetConfig::species_budget.
@@ -303,8 +303,8 @@ struct ResolveSchema {
     // written before the field existed, which is what its loader did.
     float zero_abundance_as = 0.0f;
 
-    // Ordered species / genus / family vocabularies fitted at training time
-    // (issue #102). Element i is the name that encodes to integer code i, and
+    // Ordered species / genus / family vocabularies fitted at training time.
+    // Element i is the name that encodes to integer code i, and
     // index 0 is always the reserved "<UNK>" slot, so the vector length equals
     // n_species_vocab / n_genera_vocab / n_families_vocab respectively.
     //
@@ -319,8 +319,8 @@ struct ResolveSchema {
     // mismatch detectable (Predictor::predict rejects a dataset whose vocab is
     // not the model's).
     //
-    // Empty on a pre-issue-#102 checkpoint; the loaders warn and fall back to
-    // the size-only guard in that case.
+    // Empty on a checkpoint that stores only the sizes; the size-only guard
+    // applies then, and the loaders that need the names throw.
     std::vector<std::string> species_vocab;
     std::vector<std::string> genus_vocab;
     std::vector<std::string> family_vocab;
@@ -330,7 +330,7 @@ struct ResolveSchema {
         return !categorical_names.empty();
     }
     // Helper: true if the fitted species vocabulary travelled with the schema.
-    // False for a pre-issue-#102 checkpoint (only sizes were persisted).
+    // False for a checkpoint that stores only the vocabulary sizes.
     [[nodiscard]] bool has_species_vocab() const noexcept {
         return !species_vocab.empty();
     }
@@ -360,9 +360,6 @@ struct ResolveSchema {
         return (has_coordinates ? 1 : 0) + static_cast<int64_t>(covariate_names.size());
     }
 };
-
-// Alias for backwards compatibility
-using SpaccSchema = ResolveSchema;
 
 // Mixture of Experts routing type
 enum class MoERoutingType {
@@ -466,12 +463,6 @@ struct SAINTConfig {
     int n_layers = 6;
     float attention_dropout = 0.1f;
     bool use_row_attention = true;  // Enable inter-sample attention
-    // The two fields that used to sit here -- use_contrastive_pretrain and
-    // mixup_alpha -- described SAINT self-supervised pre-training, which a
-    // model configuration cannot run: a pretext task is a training stage, and
-    // the engine runs those through the pretraining API (SCARFPretrainer and
-    // its siblings). Nothing read either field. The mixup augmentation they
-    // named is now PretrainConfig::mixup_alpha, where it acts.
 };
 
 // GNN configuration
@@ -670,8 +661,8 @@ struct TrainConfig {
     std::vector<float> band_thresholds = {0.1f, 0.25f, 0.5f};
 
     // Tolerance band the phase-3 PhasedLoss penalty optimizes toward -- the loss
-    // penalizes predictions whose ratio to the target falls outside [1 - t, 1 + t]
-    // (issue #99). Distinct from band_thresholds above (which only selects which
+    // penalizes predictions whose ratio to the target falls outside [1 - t, 1 + t].
+    // Distinct from band_thresholds above (which only selects which
     // band accuracies are *reported*): the loss optimizes a single band, and it is
     // this knob, not the reporting vector, that changes what training minimizes.
     float band_threshold = 0.25f;
@@ -726,68 +717,6 @@ struct TrainConfig {
     // values are appropriate for memory-bound or sample-efficiency runs.
     int batch_size_floor = 1024;
 };
-
-// Batch of data for training/inference
-struct ResolveBatch {
-    torch::Tensor continuous;      // (batch, n_continuous)
-    torch::Tensor genus_ids;       // (batch, n_taxonomy_slots) or empty
-    torch::Tensor family_ids;      // (batch, n_taxonomy_slots) or empty
-    torch::Tensor species_ids;     // (batch, top_k_species) for embed mode
-    torch::Tensor species_vector;  // (batch, n_species) for sparse mode
-    // Categorical covariates: (batch, n_categoricals) int64 with codes
-    // produced by CategoricalVocab (0 = UNK). Empty when the schema
-    // declares no categorical columns.
-    torch::Tensor categorical_ids;
-    // Pool-style encoder fields (rank_pool / transformer modes)
-    torch::Tensor pool_genus_ids;  // (batch, max_species) or empty
-    torch::Tensor pool_family_ids; // (batch, max_species) or empty
-    torch::Tensor pool_weights;    // (batch, max_species) or empty
-    torch::Tensor pool_mask;       // (batch, max_species) or empty
-    torch::Tensor pool_has_cover;  // (batch,) or empty
-    std::unordered_map<std::string, torch::Tensor> targets;  // target_name -> tensor
-
-    ResolveBatch to(torch::Device device) const {
-        ResolveBatch batch;
-        batch.continuous = continuous.to(device);
-        if (genus_ids.defined()) {
-            batch.genus_ids = genus_ids.to(device);
-        }
-        if (family_ids.defined()) {
-            batch.family_ids = family_ids.to(device);
-        }
-        if (species_ids.defined()) {
-            batch.species_ids = species_ids.to(device);
-        }
-        if (species_vector.defined()) {
-            batch.species_vector = species_vector.to(device);
-        }
-        if (categorical_ids.defined()) {
-            batch.categorical_ids = categorical_ids.to(device);
-        }
-        if (pool_genus_ids.defined()) {
-            batch.pool_genus_ids = pool_genus_ids.to(device);
-        }
-        if (pool_family_ids.defined()) {
-            batch.pool_family_ids = pool_family_ids.to(device);
-        }
-        if (pool_weights.defined()) {
-            batch.pool_weights = pool_weights.to(device);
-        }
-        if (pool_mask.defined()) {
-            batch.pool_mask = pool_mask.to(device);
-        }
-        if (pool_has_cover.defined()) {
-            batch.pool_has_cover = pool_has_cover.to(device);
-        }
-        for (const auto& [name, tensor] : targets) {
-            batch.targets[name] = tensor.to(device);
-        }
-        return batch;
-    }
-};
-
-// Alias for backwards compatibility
-using SpaccBatch = ResolveBatch;
 
 // Baseline comparison metrics for a single target
 // Allows users to understand if the model is actually learning vs naive baselines
@@ -863,7 +792,7 @@ struct TrainResult {
 
     // The batch size this run actually trained at, i.e. the value after any
     // CUDA auto-halve-on-OOM retries. Equal to the requested TrainConfig
-    // batch_size on a clean run; smaller when the retry fired (issue #105).
+    // batch_size on a clean run; smaller when the retry fired.
     //
     // fit() restores config_.batch_size to the requested value before
     // returning -- otherwise a later cross-validation fold would silently
@@ -1009,12 +938,10 @@ public:
     //
     // IDs are assigned in sorted (alphabetical) order so the genus/family ->
     // ID mapping is a pure function of the SET of names, independent of the
-    // order records arrive in. A first-appearance ordering made the IDs depend
-    // on CSV row order: a checkpoint trained on one ordering and scored against
-    // a differently-ordered rebuild (e.g. from_csv_with_schema in another
-    // process) silently misaligned the genus/family embedding lookups. This
-    // mirrors SpeciesVocab::from_records, which is already sorted. Index 0 is
-    // reserved for unknown. See gcol33/resolve#5.
+    // order records arrive in, so a checkpoint scored against a
+    // differently-ordered rebuild (e.g. from_csv_with_schema in another
+    // process) reads the same genus/family embedding rows. Index 0 is
+    // reserved for unknown.
     void fit(const std::vector<SpeciesRecord>& records) {
         genus_to_idx_.clear();
         family_to_idx_.clear();
@@ -1062,8 +989,7 @@ public:
     // integer code i, with index 0 the reserved "<UNK>" slot. This is the
     // canonical serialization form -- save() below writes exactly these, and
     // ResolveSchema::genus_vocab / family_vocab carry them into the checkpoint
-    // so an inference-side dataset can be rebuilt in the model's ID namespace
-    // (issue #102).
+    // so an inference-side dataset can be rebuilt in the model's ID namespace.
     [[nodiscard]] std::vector<std::string> genus_names() const {
         return ordered_names(genus_to_idx_);
     }
@@ -1182,8 +1108,5 @@ private:
     std::unordered_map<std::string, int64_t> genus_to_idx_;
     std::unordered_map<std::string, int64_t> family_to_idx_;
 };
-
-// Alias for backwards compatibility
-using SpaccPredictions = ResolvePredictions;
 
 } // namespace resolve

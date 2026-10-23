@@ -9,6 +9,7 @@
 #include "resolve/role_mapping.hpp"
 #include "resolve/categorical.hpp"
 #include "resolve/dataset.hpp"
+#include "resolve/plot_inputs.hpp"
 #include "resolve/encoder.hpp"
 #include "resolve/model.hpp"
 #include "resolve/trainer.hpp"

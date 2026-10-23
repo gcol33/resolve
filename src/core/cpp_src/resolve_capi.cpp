@@ -99,7 +99,7 @@ struct resolve_value {
 };
 
 // ----------------------------------------------------------------------------
-// Internal builders (used to assemble result trees on the C++ side)
+// Internal builders (assemble result trees on the C++ side)
 // ----------------------------------------------------------------------------
 
 namespace {
@@ -419,7 +419,7 @@ std::vector<std::string> vstr_vec(const resolve_value* v) {
 std::vector<std::string> vstr_vec(const resolve_value* m, const char* k) { return vstr_vec(vget(m, k)); }
 
 // MAP (ordered column name -> STRING_ARRAY) -> ColumnTable. The in-memory
-// DataFrame carrier for issue #22: a data.frame with every cell stringified.
+// DataFrame carrier: a data.frame with every cell stringified.
 // ColumnTable's constructor validates equal-length columns and unique names.
 ColumnTable value_to_column_table(const resolve_value* v, const char* what) {
     if (!v || v->kind != RESOLVE_VALUE_MAP) {
@@ -509,7 +509,7 @@ torch::Tensor value_to_i64(const resolve_value* v) {
 }
 
 // Optional tensor from a map key. Returns an undefined tensor when the key is
-// absent or NULL-kind (mirrors the old Nullable<...> "absent" path).
+// absent or NULL-kind.
 torch::Tensor opt_f32(const resolve_value* m, const char* k) {
     const resolve_value* v = vget(m, k);
     return (v && v->kind != RESOLVE_VALUE_NULL) ? value_to_f32(v) : torch::Tensor();
@@ -579,7 +579,7 @@ namespace {
 // into a config struct and its inverse writes the struct back out, both walking
 // the list in resolve/config_registry.hpp. Neither side can carry a field the
 // other drops, and the enum spellings come from enum_names.hpp, which the CLI
-// and `resolve info` read too (issue #108).
+// and `resolve info` read too.
 
 // Value map -> config struct. An absent key leaves the struct default in place,
 // which is what makes every entry of an R config list optional.
@@ -816,8 +816,7 @@ ModelConfig parse_model_config(const resolve_value* c) {
 // Single source of truth for the value-tree schema keys, consumed by both
 // parse_schema (read) and the dataset "schema" emitter (write) below. A field
 // emitted under one spelling but read under another silently drops on the
-// round-trip — the same field-drop mechanism behind issue #91 — so both sites
-// reference these constants (issue #98).
+// round-trip, so both sites reference these constants.
 namespace schema_tree_keys {
 inline constexpr const char* kNPlots             = "n_plots";
 inline constexpr const char* kNSpecies           = "n_species";
@@ -838,7 +837,7 @@ inline constexpr const char* kCategoricalVocabSizes = "categorical_vocab_sizes";
 inline constexpr const char* kCategoricalEmbedDim   = "categorical_embed_dim";
 inline constexpr const char* kPoolWeighting      = "pool_weighting";
 inline constexpr const char* kPoolSpeciesCap     = "pool_species_cap";
-// Remaining DatasetConfig knobs + the fitted vocabularies (issue #102).
+// Remaining DatasetConfig knobs + the fitted vocabularies.
 inline constexpr const char* kTopKSpecies        = "top_k_species";
 inline constexpr const char* kSelection          = "selection";
 inline constexpr const char* kSpeciesBudget      = "species_budget";
@@ -890,7 +889,7 @@ ResolveSchema parse_schema(const resolve_value* s) {
     if (vhas(s, k::kCategoricalEmbedDim)) schema.categorical_embed_dim = vint(s, k::kCategoricalEmbedDim);
     if (vhas(s, k::kPoolWeighting)) schema.pool_weighting = (int)vint(s, k::kPoolWeighting);
     if (vhas(s, k::kPoolSpeciesCap)) schema.pool_species_cap = (int)vint(s, k::kPoolSpeciesCap);
-    // Remaining loader knobs + the fitted vocabularies (issue #102). The enum
+    // Remaining loader knobs + the fitted vocabularies. The enum
     // fields reuse the DatasetConfig string spellings so one parser serves both
     // trees.
     if (vhas(s, k::kTopKSpecies)) schema.top_k_species = (int)vint(s, k::kTopKSpecies);
@@ -1147,9 +1146,9 @@ resolve_value* scalers_to_value(const Scalers& s) {
     if (s.continuous_scale.defined()) v_put(m, "continuous_scale", tensor_to_vec(s.continuous_scale));
     if (s.continuous_fill.defined()) v_put(m, "continuous_fill", tensor_to_vec(s.continuous_fill));
     // Per-target regression scaling { name -> {mean, scale} }. save_scalers /
-    // load_scalers persist these in the checkpoint, but the accessor marshal
-    // previously dropped them, so trainer$get("scalers") / predictor$get("scalers")
-    // from R (and the nanobind Scalers view) could not see target scaling.
+    // load_scalers persist these in the checkpoint; the accessor carries them so
+    // trainer$get("scalers") / predictor$get("scalers") from R see target
+    // scaling.
     if (!s.target_scalers.empty()) {
         auto* ts = v_map();
         // Deterministic key order (unordered_map iteration is not reproducible).
@@ -1183,8 +1182,8 @@ resolve_value* categorical_vocab_to_value(const CategoricalVocab& vocab) {
 }
 
 // Inverse of categorical_vocab_to_value. Restores the per-column string -> code
-// maps verbatim from the tree the *_with_vocabs dataset loaders receive
-// (issue #102): the codes come from the checkpoint, so they are assigned, not
+// maps verbatim from the tree the *_with_vocabs dataset loaders receive:
+// the codes come from the checkpoint, so they are assigned, not
 // re-derived.
 CategoricalVocab value_to_categorical_vocab(const resolve_value* v) {
     CategoricalVocab vocab;
@@ -1204,7 +1203,7 @@ CategoricalVocab value_to_categorical_vocab(const resolve_value* v) {
 
 // ResolveSchema -> MAP tree. Single source of truth for the emitted schema,
 // shared by the dataset "schema" accessor and the predictor "schema"/"vocabs"
-// accessors (issue #102) -- a field emitted by one but not the other is exactly
+// accessors -- a field emitted by one but not the other is exactly
 // how the vocab would go missing on one binding path.
 resolve_value* schema_to_value(const ResolveSchema& s) {
     namespace k = schema_tree_keys;
@@ -1220,7 +1219,7 @@ resolve_value* schema_to_value(const ResolveSchema& s) {
         v_put(tm, k::kTargetClassWeights, v_double_array(tc.class_weights));
         // Per-class label vocabulary (class_names[code] == label), so
         // R callers can recover the code->label mapping like Python's
-        // TargetConfig.class_names (issue #76).
+        // TargetConfig.class_names.
         v_put(tm, k::kTargetClassNames, v_string_array(tc.class_names));
         v_put(tm, k::kTargetMissing, v_string(target_missing_policy_to_string(tc.missing)));
         v_put(targets_m, tc.name, tm);
@@ -1245,7 +1244,7 @@ resolve_value* schema_to_value(const ResolveSchema& s) {
     v_put(m, k::kCategoricalEmbedDim, v_int(s.categorical_embed_dim));
     v_put(m, k::kPoolWeighting, v_int(s.pool_weighting));
     v_put(m, k::kPoolSpeciesCap, v_int(s.pool_species_cap));
-    // Remaining loader knobs + the fitted vocabularies (issue #102).
+    // Remaining loader knobs + the fitted vocabularies.
     v_put(m, k::kTopKSpecies, v_int(s.top_k_species));
     v_put(m, k::kSelection, v_string(selection_mode_to_string(s.selection)));
     v_put(m, k::kSpeciesBudget, v_int(s.species_budget));
@@ -1287,7 +1286,7 @@ ExternalVocabs value_to_external_vocabs(const resolve_value* v) {
 
 // TrainConfig -> value map. Emits every field the registry carries, so a live
 // trainer's get_config() and a checkpoint's load_train_config() expose the same
-// names and parse_train_config reads either straight back (issue #87). Enums
+// names and parse_train_config reads either straight back. Enums
 // travel as their names; the device, the checkpoint destination and the AMP /
 // cuDNN switches are part of a live config even though save_train_config leaves
 // them out of the archive.
@@ -1686,7 +1685,7 @@ resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* wh
 
         if (w == "schema") return schema_to_value(d.schema());
         // Every vocabulary this dataset fitted, in the carrier the
-        // *_with_vocabs loaders take (issue #102).
+        // *_with_vocabs loaders take.
         if (w == "vocabs") return external_vocabs_to_value(d.external_vocabs());
 
         throw std::runtime_error("dataset_get: unknown accessor '" + w + "'");
@@ -1701,27 +1700,24 @@ resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* wh
 
 namespace {
 
-// Extract the standard model-input tensors from an input map (forward family).
-struct ModelInputs {
-    torch::Tensor continuous, genus_ids, family_ids, species_ids, species_vector,
-                  pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                  categorical_ids;
-};
-ModelInputs extract_model_inputs(const resolve_value* in) {
-    ModelInputs x;
-    x.continuous     = opt_f32(in, "continuous");
-    x.genus_ids      = opt_i64(in, "genus_ids");
-    x.family_ids     = opt_i64(in, "family_ids");
-    x.species_ids    = opt_i64(in, "species_ids");
-    x.species_vector = opt_f32(in, "species_vector");
-    x.pool_genus_ids  = opt_i64(in, "pool_genus_ids");
-    x.pool_family_ids = opt_i64(in, "pool_family_ids");
-    x.pool_weights    = opt_f32(in, "pool_weights");
-    torch::Tensor pm  = opt_i64(in, "pool_mask");
-    x.pool_mask       = pm.defined() ? pm.to(torch::kBool) : pm;
-    x.pool_has_cover  = opt_f32(in, "pool_has_cover");
-    x.categorical_ids = opt_i64(in, "categorical_ids");
+// The PlotInputs fields an input map carries, each under its field name, read
+// in the field's dtype: a float field as float32, an integer or boolean field
+// through int64 (the value tree has no boolean matrix).
+PlotInputs extract_model_inputs(const resolve_value* in) {
+    PlotInputs x;
+    x.for_each([&](const PlotInputField& field, torch::Tensor& t) {
+        t = field.dtype == torch::kFloat32 ? opt_f32(in, field.name)
+                                           : opt_i64(in, field.name);
+        if (t.defined() && t.scalar_type() != field.dtype) t = t.to(field.dtype);
+    });
     return x;
+}
+
+// The ContinuousInputs parts an input map carries, each under its field name.
+ContinuousInputs extract_continuous_parts(const resolve_value* in) {
+    ContinuousInputs parts;
+    parts.for_each([&](const char* name, torch::Tensor& t) { t = opt_f32(in, name); });
+    return parts;
 }
 
 }  // namespace
@@ -1743,30 +1739,20 @@ resolve_value_t* resolve_model_call(resolve_model_t* m, const char* method, cons
     CAPI_BODY_PTR({
         if (!m) throw std::runtime_error("model_call: null handle");
         std::string mt = method ? method : "";
-        ModelInputs in = extract_model_inputs(inputs);
+        const PlotInputs in = extract_model_inputs(inputs);
 
         if (mt == "forward") {
-            auto outputs = m->model->forward(
-                in.continuous, in.genus_ids, in.family_ids, in.species_ids, in.species_vector,
-                in.pool_genus_ids, in.pool_family_ids, in.pool_weights, in.pool_mask,
-                in.pool_has_cover, in.categorical_ids);
-            return target_map_to_value(outputs);
+            return target_map_to_value(m->model->forward(in));
         }
         if (mt == "get_latent") {
-            torch::Tensor latent = m->model->get_latent(
-                in.continuous, in.genus_ids, in.family_ids, in.species_ids, in.species_vector,
-                in.pool_genus_ids, in.pool_family_ids, in.pool_weights, in.pool_mask,
-                in.pool_has_cover, in.categorical_ids);
+            torch::Tensor latent = m->model->get_latent(in);
             // latent is [batch, latent_dim]; return a matrix so R gets per-plot
             // rows (matching Python's 2-D get_latent and encode_with_activations
             // below), not a flat length batch*latent_dim vector with no dims.
             return tensor_to_mat(latent);
         }
         if (mt == "forward_with_aux") {
-            auto result = m->model->forward_with_aux(
-                in.continuous, in.genus_ids, in.family_ids, in.species_ids, in.species_vector,
-                in.pool_genus_ids, in.pool_family_ids, in.pool_weights, in.pool_mask,
-                in.pool_has_cover, in.categorical_ids);
+            auto result = m->model->forward_with_aux(in);
             auto* ret = v_map();
             ValueGuard g(ret);  // frees the partial tree if a conversion throws
             v_put(ret, "outputs", target_map_to_value(result.outputs));
@@ -1775,14 +1761,10 @@ resolve_value_t* resolve_model_call(resolve_model_t* m, const char* method, cons
         }
         if (mt == "forward_single") {
             std::string target = vstr(inputs, "target");
-            auto result = m->model->forward_single(
-                target, in.continuous, in.genus_ids, in.family_ids, in.species_ids,
-                in.species_vector, in.categorical_ids);
-            return tensor_to_vec(result);
+            return tensor_to_vec(m->model->forward_single(target, in));
         }
         if (mt == "encode_with_activations") {
-            auto [latent, activations] = m->model->encode_with_activations(
-                in.continuous, in.genus_ids, in.family_ids, in.categorical_ids);
+            auto [latent, activations] = m->model->encode_with_activations(in);
             auto* ret = v_map();
             ValueGuard g(ret);  // frees the partial tree if a conversion throws
             v_put(ret, "latent", tensor_to_mat(latent));
@@ -1792,8 +1774,7 @@ resolve_value_t* resolve_model_call(resolve_model_t* m, const char* method, cons
             return g.release();
         }
         if (mt == "get_gate_probs") {
-            auto result = m->model->get_gate_probs(in.continuous, in.genus_ids, in.family_ids);
-            return tensor_to_mat(result);
+            return tensor_to_mat(m->model->get_gate_probs(in));
         }
         throw std::runtime_error("model_call: unknown method '" + mt + "'");
     })
@@ -1912,14 +1893,7 @@ void resolve_trainer_free(resolve_trainer_t* t) { delete t; }
 int resolve_trainer_prepare_data(resolve_trainer_t* t, const resolve_value_t* in, double test_size, int seed) {
     CAPI_BODY_INT({
         if (!t) throw std::runtime_error("prepare_data: null handle");
-        ModelInputs x = extract_model_inputs(in);
-        torch::Tensor coordinates = opt_f32(in, "coordinates");
-        torch::Tensor covariates = opt_f32(in, "covariates");
-        torch::Tensor hash_embedding = opt_f32(in, "hash_embedding");
-        torch::Tensor unknown_fraction = opt_f32(in, "unknown_fraction");
-        torch::Tensor unknown_count = opt_f32(in, "unknown_count");
-
-        std::unordered_map<std::string, torch::Tensor> target_map;
+        TensorMap target_map;
         const resolve_value* targets = vget(in, "targets");
         if (targets && targets->kind == RESOLVE_VALUE_MAP) {
             for (size_t i = 0; i < targets->keys.size(); ++i) {
@@ -1927,11 +1901,8 @@ int resolve_trainer_prepare_data(resolve_trainer_t* t, const resolve_value_t* in
             }
         }
 
-        t->trainer->prepare_data(
-            coordinates, covariates, hash_embedding, x.species_ids, x.species_vector,
-            x.genus_ids, x.family_ids, unknown_fraction, unknown_count, target_map,
-            x.pool_genus_ids, x.pool_family_ids, x.pool_weights, x.pool_mask, x.pool_has_cover,
-            x.categorical_ids, (float)test_size, seed);
+        t->trainer->prepare_data(extract_continuous_parts(in), extract_model_inputs(in),
+                                 target_map, (float)test_size, seed);
         return 0;
     })
 }
@@ -2057,12 +2028,7 @@ resolve_value_t* resolve_trainer_cross_validate_spatial(resolve_trainer_t* t, co
 resolve_value_t* resolve_trainer_predict(resolve_trainer_t* t, const resolve_value_t* in) {
     CAPI_BODY_PTR({
         if (!t) throw std::runtime_error("predict: null handle");
-        ModelInputs x = extract_model_inputs(in);
-        auto result = t->trainer->predict(
-            x.continuous, x.genus_ids, x.family_ids, x.species_ids, x.species_vector,
-            x.pool_genus_ids, x.pool_family_ids, x.pool_weights, x.pool_mask, x.pool_has_cover,
-            x.categorical_ids);
-        return target_map_to_value(result);
+        return target_map_to_value(t->trainer->predict(extract_model_inputs(in)));
     })
 }
 
@@ -2112,18 +2078,8 @@ void resolve_predictor_free(resolve_predictor_t* p) { delete p; }
 resolve_value_t* resolve_predictor_predict(resolve_predictor_t* p, const resolve_value_t* in, int return_latent) {
     CAPI_BODY_PTR({
         if (!p) throw std::runtime_error("predict: null handle");
-        ModelInputs x = extract_model_inputs(in);
-        torch::Tensor coordinates = opt_f32(in, "coordinates");
-        torch::Tensor covariates = opt_f32(in, "covariates");
-        torch::Tensor hash_embedding = opt_f32(in, "hash_embedding");
-        torch::Tensor unknown_fraction = opt_f32(in, "unknown_fraction");
-        torch::Tensor unknown_count = opt_f32(in, "unknown_count");
-
-        auto preds = p->predictor.predict(
-            coordinates, covariates, hash_embedding, x.species_ids, x.species_vector,
-            x.genus_ids, x.family_ids, unknown_fraction, unknown_count,
-            x.pool_genus_ids, x.pool_family_ids, x.pool_weights, x.pool_mask, x.pool_has_cover,
-            x.categorical_ids, return_latent != 0);
+        auto preds = p->predictor.predict(extract_continuous_parts(in),
+                                          extract_model_inputs(in), return_latent != 0);
         return predictions_to_value(preds, return_latent != 0);
     })
 }
@@ -2139,17 +2095,8 @@ resolve_value_t* resolve_predictor_predict_dataset(resolve_predictor_t* p, const
 resolve_value_t* resolve_predictor_get_embeddings(resolve_predictor_t* p, const resolve_value_t* in) {
     CAPI_BODY_PTR({
         if (!p) throw std::runtime_error("get_embeddings: null handle");
-        torch::Tensor coordinates = opt_f32(in, "coordinates");
-        torch::Tensor covariates = opt_f32(in, "covariates");
-        torch::Tensor hash_embedding = opt_f32(in, "hash_embedding");
-        torch::Tensor genus_ids = opt_i64(in, "genus_ids");
-        torch::Tensor family_ids = opt_i64(in, "family_ids");
-        torch::Tensor unknown_fraction = opt_f32(in, "unknown_fraction");
-        torch::Tensor unknown_count = opt_f32(in, "unknown_count");
-        torch::Tensor emb = p->predictor.get_embeddings(coordinates, covariates, hash_embedding,
-                                                        genus_ids, family_ids,
-                                                        unknown_fraction, unknown_count);
-        return tensor_to_mat(emb);
+        return tensor_to_mat(p->predictor.get_embeddings(extract_continuous_parts(in),
+                                                         extract_model_inputs(in)));
     })
 }
 
@@ -2169,7 +2116,7 @@ resolve_value_t* resolve_predictor_get(const resolve_predictor_t* p, const char*
         if (w == "device") return v_string(pr.device().is_cuda() ? "cuda" : "cpu");
         if (w == "scalers") return scalers_to_value(pr.scalers());
         if (w == "categorical_vocab") return categorical_vocab_to_value(pr.categorical_vocab());
-        // Issue #102: the checkpoint's schema (loader knobs + fitted species /
+        // The checkpoint's schema (loader knobs + fitted species /
         // taxonomy vocabularies) and the complete vocabulary carrier the
         // *_with_vocabs dataset loaders take. `dataset_config` is the
         // DatasetConfig the checkpoint implies, ready to pass straight to a

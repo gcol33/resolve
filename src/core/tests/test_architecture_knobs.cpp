@@ -133,10 +133,9 @@ ModelConfig gnn_model(GraphConstructionMode mode, bool use_edge_features = false
 }
 
 torch::Tensor gnn_forward(ResolveModel& model, const ResolveDataset& dataset) {
-    return model->forward(dataset.continuous_block(/*include_hash=*/false),
-                          dataset.genus_ids(), dataset.family_ids(),
-                          dataset.species_ids(), dataset.species_vector())
-        .at("y");
+    PlotInputs inputs = dataset.plot_inputs();
+    inputs.continuous = dataset.continuous_block(/*include_hash=*/false);
+    return model->forward(inputs).at("y");
 }
 
 }  // namespace
@@ -237,8 +236,8 @@ TEST_CASE("ExcelFormerConfig::pre_norm chooses the normalization placement",
     // And the two compute different functions: the knob was hardcoded to
     // pre-norm, so asking for post-norm changed nothing at all.
     auto continuous = torch::randn({6, 32});
-    auto pre_out = pre_norm->forward(continuous).at("y");
-    auto post_out = post_norm->forward(continuous).at("y");
+    auto pre_out = pre_norm->forward({.continuous = continuous}).at("y");
+    auto post_out = post_norm->forward({.continuous = continuous}).at("y");
     REQUIRE(pre_out.sizes() == post_out.sizes());
     CHECK_FALSE(torch::allclose(pre_out, post_out, 1e-4, 1e-5));
 }
@@ -377,13 +376,13 @@ TEST_CASE("TabNetConfig::virtual_batch_size reaches the encoder the model builds
     // batch statistics a training forward computes.
     full->eval();
     ghost->eval();
-    CHECK(torch::allclose(full->forward(continuous).at("y"),
-                          ghost->forward(continuous).at("y"), 1e-5, 1e-6));
+    CHECK(torch::allclose(full->forward({.continuous = continuous}).at("y"),
+                          ghost->forward({.continuous = continuous}).at("y"), 1e-5, 1e-6));
 
     full->train();
     ghost->train();
-    auto full_out = full->forward(continuous).at("y");
-    auto ghost_out = ghost->forward(continuous).at("y");
+    auto full_out = full->forward({.continuous = continuous}).at("y");
+    auto ghost_out = ghost->forward({.continuous = continuous}).at("y");
     CHECK_FALSE(torch::allclose(full_out, ghost_out, 1e-4, 1e-5));
 }
 
@@ -491,9 +490,9 @@ TEST_CASE("A graph mode the data cannot supply is refused by name",
     auto taxonomic = model_for(GraphConstructionMode::Taxonomic);
     auto cooccurrence = model_for(GraphConstructionMode::CoOccurrence);
 
-    CHECK_THROWS(spatial->forward(continuous));
-    CHECK_THROWS(taxonomic->forward(continuous));
-    CHECK_THROWS(cooccurrence->forward(continuous));
+    CHECK_THROWS(spatial->forward({.continuous = continuous}));
+    CHECK_THROWS(taxonomic->forward({.continuous = continuous}));
+    CHECK_THROWS(cooccurrence->forward({.continuous = continuous}));
 }
 
 // ============================================================================
@@ -570,7 +569,7 @@ TEST_CASE("TraitNetConfig::interaction_dim is the width the head reads",
     // And it runs: traits in, one value per species out.
     wide->eval();
     wide->set_traits(torch::randn({n_species, trait_dim}));
-    auto out = wide->forward(torch::randn({6, 3})).at("y");
+    auto out = wide->forward({.continuous = torch::randn({6, 3})}).at("y");
     CHECK(out.size(0) == 6);
     CHECK(std::isfinite(out.sum().item<float>()));
 }
@@ -589,7 +588,7 @@ TEST_CASE("Each TraitNet interaction mode is the combination it names",
         model->eval();
         model->set_traits(traits);
         auto shapes = parameter_shapes(*model);
-        auto out = model->forward(env).at("y");
+        auto out = model->forward({.continuous = env}).at("y");
         return std::make_pair(shapes, out);
     };
 
@@ -634,7 +633,7 @@ TEST_CASE("Gradients reach whichever interaction the mode selected",
         ResolveModel model(schema, trait_model(trait_dim, 16, mode));
         model->train();
         model->set_traits(torch::randn({n_species, trait_dim}));
-        auto out = model->forward(torch::randn({6, 3})).at("y");
+        auto out = model->forward({.continuous = torch::randn({6, 3})}).at("y");
         out.sum().backward();
 
         bool reached = false;
@@ -684,8 +683,8 @@ TEST_CASE("shared_trait_encoder chooses one trait encoder or one per species",
           per_species_shape);
     CHECK(per_species_shapes.count("trait_net_encoder.trait_encoder.0.weight") == 0);
 
-    auto shared_out = shared->forward(env).at("y");
-    auto per_species_out = per_species->forward(env).at("y");
+    auto shared_out = shared->forward({.continuous = env}).at("y");
+    auto per_species_out = per_species->forward({.continuous = env}).at("y");
     REQUIRE(shared_out.sizes() == per_species_out.sizes());
     CHECK_FALSE(torch::allclose(shared_out, per_species_out, 1e-4, 1e-5));
 }
@@ -894,7 +893,7 @@ TEST_CASE("A parallel tail trains and round-trips through a checkpoint",
     torch::manual_seed(53);
     ResolveModel model(schema, config);
     model->train();
-    auto out = model->forward(torch::randn({8, 16})).at("y");
+    auto out = model->forward({.continuous = torch::randn({8, 16})}).at("y");
     REQUIRE(out.size(0) == 8);
     out.sum().backward();
 

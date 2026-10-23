@@ -5,6 +5,7 @@
 #include "resolve/adapter.hpp"
 #include "resolve/attention.hpp"
 #include "resolve/categorical.hpp"
+#include "resolve/plot_inputs.hpp"
 #include <torch/torch.h>
 #include <variant>
 
@@ -17,11 +18,13 @@ struct ModelForwardResult {
 };
 
 // Full Resolve model: shared encoder + multiple task heads
-// Supports three encoding modes:
+// Species encodings:
 // - Hash: Feature hashing for species (PlotEncoder)
 // - Embed: Learnable embeddings for top-k species (PlotEncoderEmbed)
 // - Sparse: Explicit species vector input (PlotEncoderSparse)
-// Each mode can optionally use Mixture of Experts (MoE)
+// - RankPool: Weighted pool over every species of the plot (PlotEncoderRankPool)
+// - Transformer: Attention over the plot's species (PlotEncoderTransformer)
+// Each can optionally use Mixture of Experts (MoE)
 class ResolveModelImpl : public torch::nn::Module {
 public:
     ResolveModelImpl(
@@ -29,90 +32,35 @@ public:
         const ModelConfig& config = ModelConfig{}
     );
 
-    // Forward pass for all targets
-    // Use appropriate inputs based on encoding mode:
-    // - Hash: continuous (includes hash embedding), genus_ids, family_ids
+    // Every method below reads the fields of `inputs` its encoder needs:
+    // - Hash: continuous (hash embedding at its tail), genus_ids, family_ids
     // - Embed: continuous, species_ids, genus_ids, family_ids
     // - Sparse: continuous, species_vector, genus_ids, family_ids
     // - RankPool/Transformer: continuous, species_ids, pool_* fields
-    //
-    // categorical_ids is (batch, n_categoricals) int64 with codes produced
-    // by CategoricalVocab (0 = UNK). It is embedded internally and
-    // concatenated to `continuous` before the encoder runs — schemas
-    // without categoricals pass an empty tensor and get the legacy behavior.
-    std::unordered_map<std::string, torch::Tensor> forward(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {},
-        torch::Tensor species_ids = {},
-        torch::Tensor species_vector = {},
-        // Pool-style encoder fields (rank_pool / transformer)
-        torch::Tensor pool_genus_ids = {},
-        torch::Tensor pool_family_ids = {},
-        torch::Tensor pool_weights = {},
-        torch::Tensor pool_mask = {},
-        torch::Tensor pool_has_cover = {},
-        torch::Tensor categorical_ids = {}
-    );
+    // categorical_ids is embedded and concatenated onto `continuous` before
+    // the encoder runs; a model with categorical columns given none reads
+    // every column as UNK.
+
+    // Forward pass for all targets.
+    std::unordered_map<std::string, torch::Tensor> forward(const PlotInputs& inputs);
 
     // Forward pass returning outputs + MoE auxiliary loss (for training with MoE)
-    ModelForwardResult forward_with_aux(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {},
-        torch::Tensor species_ids = {},
-        torch::Tensor species_vector = {},
-        torch::Tensor pool_genus_ids = {},
-        torch::Tensor pool_family_ids = {},
-        torch::Tensor pool_weights = {},
-        torch::Tensor pool_mask = {},
-        torch::Tensor pool_has_cover = {},
-        torch::Tensor categorical_ids = {}
-    );
+    ModelForwardResult forward_with_aux(const PlotInputs& inputs);
 
-    // Forward pass for single target
-    torch::Tensor forward_single(
-        const std::string& target,
-        torch::Tensor continuous,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {},
-        torch::Tensor species_ids = {},
-        torch::Tensor species_vector = {},
-        torch::Tensor categorical_ids = {}
-    );
+    // Forward pass for one target's head.
+    torch::Tensor forward_single(const std::string& target, const PlotInputs& inputs);
 
-    // Get latent representation (without heads)
-    torch::Tensor get_latent(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {},
-        torch::Tensor species_ids = {},
-        torch::Tensor species_vector = {},
-        torch::Tensor pool_genus_ids = {},
-        torch::Tensor pool_family_ids = {},
-        torch::Tensor pool_weights = {},
-        torch::Tensor pool_mask = {},
-        torch::Tensor pool_has_cover = {},
-        torch::Tensor categorical_ids = {}
-    );
+    // Latent representation (without heads).
+    torch::Tensor get_latent(const PlotInputs& inputs);
 
-    // Forward pass that returns intermediate activations (for diagnostics).
-    // Only works with hash encoder for now. `categorical_ids` is fused into
-    // `continuous` via fuse_categoricals_() so the encoder receives the
-    // same input shape it was constructed for.
+    // The latent plus the hidden-layer activations of the encoder, for
+    // diagnostics. Only the hash encoder reports activations; every other
+    // encoder returns its latent with an empty list.
     std::pair<torch::Tensor, std::vector<torch::Tensor>> encode_with_activations(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {},
-        torch::Tensor categorical_ids = {}
-    );
+        const PlotInputs& inputs);
 
-    // Get MoE gating probabilities for analysis (only valid when MoE enabled)
-    torch::Tensor get_gate_probs(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {}
-    );
+    // MoE gating probabilities (batch, n_experts); undefined without MoE.
+    torch::Tensor get_gate_probs(const PlotInputs& inputs);
 
     // Accessors
     [[nodiscard]] const ResolveSchema& schema() const noexcept { return schema_; }
@@ -120,6 +68,12 @@ public:
     [[nodiscard]] int64_t latent_dim() const;
     [[nodiscard]] SpeciesEncodingMode species_encoding() const noexcept { return config_.species_encoding; }
     [[nodiscard]] bool uses_explicit_vector() const noexcept { return config_.uses_explicit_vector; }
+    // Whether the hash embedding is the tail of the continuous block, i.e.
+    // whether ContinuousInputs::hash_embedding is part of what this model reads.
+    [[nodiscard]] bool hash_in_continuous() const noexcept {
+        return config_.species_encoding == SpeciesEncodingMode::Hash &&
+               !config_.uses_explicit_vector;
+    }
     [[nodiscard]] bool uses_moe() const noexcept { return config_.moe_routing != MoERoutingType::None; }
     [[nodiscard]] int n_experts() const noexcept { return uses_moe() ? config_.n_experts : 0; }
 
@@ -129,7 +83,7 @@ public:
     // rather than its true spatial neighbors. Training must therefore forward the
     // full node set in a single batch, so the graph is the global spatial
     // structure -- mirroring the single full-batch inference forward the Predictor
-    // already forces for this architecture (issue #73).
+    // already forces for this architecture.
     [[nodiscard]] bool requires_full_batch_training() const noexcept {
         return config_.encoder_architecture == EncoderArchitecture::GNN;
     }
@@ -151,10 +105,7 @@ public:
     // The species graph a HeterogeneousGNN passes messages on (species_graph.hpp).
     // It is built from the training data once and is part of the trained model,
     // so Trainer::prepare_data builds and sets it, Trainer::save writes it into
-    // the checkpoint and a load restores it -- until this reached the model,
-    // the graph could only be handed to the adapter, which no public surface
-    // exposed, and every HeterogeneousGNN forward threw "Species graph not
-    // set".
+    // the checkpoint and a load restores it.
     void set_species_graph(torch::Tensor edge_index, torch::Tensor edge_type);
     [[nodiscard]] bool has_species_graph() const noexcept;
     [[nodiscard]] torch::Tensor species_graph_edge_index() const;
@@ -185,60 +136,24 @@ private:
     // rather than three copies of the same if-else chain. Encoders with no tail
     // (the adapter architectures and TraitNet) report the latent alone.
     //
-    // `continuous` here is the value AFTER categorical embeddings have been
-    // concatenated; see fuse_categoricals_().
-    TailOutput encode_all(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids,
-        torch::Tensor family_ids,
-        torch::Tensor species_ids,
-        torch::Tensor species_vector,
-        torch::Tensor pool_genus_ids = {},
-        torch::Tensor pool_family_ids = {},
-        torch::Tensor pool_weights = {},
-        torch::Tensor pool_mask = {},
-        torch::Tensor pool_has_cover = {}
-    );
+    // `inputs` here is the value fuse_categoricals_() returned: its
+    // `continuous` already carries the categorical embeddings.
+    TailOutput encode_all(const PlotInputs& inputs);
 
-    // Internal forward through encoder based on mode (returns latent only).
-    // `continuous` here is the value AFTER categorical embeddings have been
-    // concatenated; see fuse_categoricals_().
-    torch::Tensor encode(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids,
-        torch::Tensor family_ids,
-        torch::Tensor species_ids,
-        torch::Tensor species_vector,
-        torch::Tensor pool_genus_ids = {},
-        torch::Tensor pool_family_ids = {},
-        torch::Tensor pool_weights = {},
-        torch::Tensor pool_mask = {},
-        torch::Tensor pool_has_cover = {}
-    );
+    // The latent alone, with the post-placement mixture applied. Same
+    // `inputs` convention as encode_all().
+    torch::Tensor encode(const PlotInputs& inputs);
 
-    // Internal forward with aux loss (for MoE). Same `continuous` convention
-    // as encode() — caller pre-concatenates categorical embeddings.
-    std::pair<torch::Tensor, torch::Tensor> encode_with_aux(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids,
-        torch::Tensor family_ids,
-        torch::Tensor species_ids,
-        torch::Tensor species_vector,
-        torch::Tensor pool_genus_ids = {},
-        torch::Tensor pool_family_ids = {},
-        torch::Tensor pool_weights = {},
-        torch::Tensor pool_mask = {},
-        torch::Tensor pool_has_cover = {}
-    );
+    // The latent and the MoE auxiliary loss (undefined without MoE). Same
+    // `inputs` convention as encode_all().
+    std::pair<torch::Tensor, torch::Tensor> encode_with_aux(const PlotInputs& inputs);
 
-    // Single source of truth for categorical concat. Takes the user-supplied
-    // continuous tensor and (possibly empty) categorical_ids; returns the
-    // continuous tensor that matches the n_continuous the encoders were
-    // constructed with. If the model has no categoricals, returns continuous
-    // unchanged; if it has categoricals but the caller passed an
-    // empty/undefined cat_ids, pads with zeros to keep the encoder shape valid.
-    torch::Tensor fuse_categoricals_(torch::Tensor continuous,
-                                     torch::Tensor categorical_ids);
+    // The one place categorical codes reach the encoder: a copy of `inputs`
+    // whose `continuous` has the categorical embeddings concatenated, so it
+    // matches the width the encoders were constructed with. Unchanged when
+    // the model has no categorical columns; a model that has them but is given
+    // none embeds the all-UNK code.
+    PlotInputs fuse_categoricals_(const PlotInputs& inputs);
 
     ResolveSchema schema_;
     ModelConfig config_;
@@ -269,9 +184,5 @@ private:
 };
 
 TORCH_MODULE(ResolveModel);
-
-// Alias for backwards compatibility
-using SpaccModel = ResolveModel;
-using SpaccModelImpl = ResolveModelImpl;
 
 } // namespace resolve

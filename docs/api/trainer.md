@@ -92,15 +92,13 @@ argument selects the folds, and every fold restarts from the trainer's
 as-constructed weights, so seeding before construction fixes those too.
 
 `prepare_data_raw` takes the tensors directly, for callers assembling their own
-inputs:
+inputs. Every argument is a keyword; `targets` maps each target name to its
+`(n_plots,)` tensor, and the tensor keywords are those of
+[`Predictor.predict`](predictor.md#predicting-on-tensors):
 
 ```
-prepare_data_raw(coordinates, covariates, hash_embedding, species_ids,
-                 species_vector, genus_ids, family_ids,
-                 unknown_fraction, unknown_count, targets,
-                 categorical_ids=None, test_size=0.2, seed=42,
-                 pool_genus_ids=None, pool_family_ids=None, pool_weights=None,
-                 pool_mask=None, pool_has_cover=None)
+prepare_data_raw(*, targets, coordinates=None, covariates=None, ...,
+                 categorical_ids=None, test_size=0.2, seed=42)
 ```
 
 ### Fitting
@@ -179,9 +177,11 @@ is rejected.
 outputs = trainer.predict(continuous, genus_ids=..., family_ids=...)
 ```
 
-Runs the model in eval mode on raw tensors and returns `dict[str, Tensor]`.
-The signature matches `ResolveModel.forward`. For a whole dataset, save a
-checkpoint and use [`Predictor`](predictor.md).
+Runs the model in eval mode on raw tensors and returns `dict[str, Tensor]`:
+regression targets in original units, classification targets as logits.
+`continuous` is the unstandardised block, standardised here with the fitted
+scalers; the other arguments match `ResolveModel.forward`. For a whole dataset,
+save a checkpoint and use [`Predictor`](predictor.md).
 
 ### Checkpoints
 

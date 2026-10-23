@@ -84,41 +84,15 @@ public:
         int seed = 42
     );
 
-    // Prepare data for training (raw tensor API for backwards compatibility)
-    // coordinates: (n_plots, 2) or empty if no coords
-    // covariates: (n_plots, n_covariates) or empty
-    // hash_embedding: (n_plots, hash_dim) for hash mode
-    // species_ids: (n_plots, top_k_species) for embed mode
-    // species_vector: (n_plots, n_species) for sparse mode
-    // genus_ids: (n_plots, n_taxonomy_slots) or empty
-    // family_ids: (n_plots, n_taxonomy_slots) or empty
-    // unknown_fraction: (n_plots,) optional
-    // unknown_count: (n_plots,) optional
-    // pool_genus_ids: (n_plots, max_species_per_plot) for rank_pool/transformer
-    // pool_family_ids: (n_plots, max_species_per_plot) for rank_pool/transformer
-    // pool_weights: (n_plots, max_species_per_plot) for rank_pool/transformer
-    // pool_mask: (n_plots, max_species_per_plot) for rank_pool/transformer
-    // pool_has_cover: (n_plots,) for rank_pool/transformer
-    // targets: map of target_name -> (n_plots,) tensor
+    // Prepare data from tensors: the parts of the continuous block, which this
+    // assembles and standardises as the dataset overloads do, and the other
+    // model inputs (`inputs.continuous` stays empty; an empty field is an
+    // input the data does not carry). `targets` maps each target name to its
+    // (n_plots,) values. A seeded random `test_size` fraction is held out.
     void prepare_data(
-        torch::Tensor coordinates,
-        torch::Tensor covariates,
-        torch::Tensor hash_embedding,
-        torch::Tensor species_ids,
-        torch::Tensor species_vector,
-        torch::Tensor genus_ids,
-        torch::Tensor family_ids,
-        torch::Tensor unknown_fraction,
-        torch::Tensor unknown_count,
-        const std::unordered_map<std::string, torch::Tensor>& targets,
-        torch::Tensor pool_genus_ids = {},
-        torch::Tensor pool_family_ids = {},
-        torch::Tensor pool_weights = {},
-        torch::Tensor pool_mask = {},
-        torch::Tensor pool_has_cover = {},
-        // (n_plots, n_categoricals) int64 codes from CategoricalVocab.
-        // Empty when the dataset has no categorical covariates.
-        torch::Tensor categorical_ids = {},
+        const ContinuousInputs& parts,
+        const PlotInputs& inputs,
+        const TensorMap& targets,
         float test_size = 0.2f,
         int seed = 42
     );
@@ -131,9 +105,7 @@ public:
 
     // Load model and state. Returns model, scalers, and the categorical
     // vocabulary that was captured at prepare_data time. The vocab is empty
-    // for checkpoints from datasets without categorical covariates (and for
-    // older pre-categorical-port checkpoints, via back-compat in
-    // CategoricalVocab::load).
+    // for checkpoints from datasets without categorical covariates.
     // vram_fraction caps the PyTorch CUDA caching allocator on the target
     // device before model weights are uploaded; matches TrainConfig's default
     // (1.0) so dedicated training/inference jobs on a solo GPU use the full
@@ -173,7 +145,7 @@ public:
     // makes config().batch_size unable to report a fallback run. This member is
     // the single source for the effective value: TrainResult::effective_batch_size
     // is a copy of it taken at fit() exit, and save() writes it to the
-    // checkpoint's train_effective_batch_size key (issue #105).
+    // checkpoint's train_effective_batch_size key.
     [[nodiscard]] int effective_batch_size() const noexcept {
         return effective_batch_size_;
     }
@@ -266,22 +238,31 @@ public:
         int seed = 42
     );
 
-    // Predict on data (runs model in eval mode)
-    [[nodiscard]] std::unordered_map<std::string, torch::Tensor> predict(
-        torch::Tensor continuous,
-        torch::Tensor genus_ids = {},
-        torch::Tensor family_ids = {},
-        torch::Tensor species_ids = {},
-        torch::Tensor species_vector = {},
-        torch::Tensor pool_genus_ids = {},
-        torch::Tensor pool_family_ids = {},
-        torch::Tensor pool_weights = {},
-        torch::Tensor pool_mask = {},
-        torch::Tensor pool_has_cover = {},
-        torch::Tensor categorical_ids = {}
-    );
+    // Predict in eval mode. `inputs.continuous` is the raw (unstandardised)
+    // block; it is standardised with the fitted scalers. Regression outputs
+    // come back in original units, classification outputs as logits.
+    [[nodiscard]] TensorMap predict(const PlotInputs& inputs);
 
 private:
+    // Model inputs and targets of a set of plots, with the row operations
+    // every split, batch, device mirror and cross-validation fold goes
+    // through.
+    struct LabelledPlots {
+        PlotInputs inputs;
+        TensorMap targets;
+
+        [[nodiscard]] LabelledPlots index_select(const torch::Tensor& rows) const {
+            return {inputs.index_select(rows), index_select_rows(targets, rows)};
+        }
+        [[nodiscard]] LabelledPlots to(const torch::Device& device) const {
+            return {inputs.to(device), to_device(targets, device)};
+        }
+        [[nodiscard]] static LabelledPlots cat(const LabelledPlots& a, const LabelledPlots& b) {
+            return {PlotInputs::cat({a.inputs, b.inputs}), cat_rows({a.targets, b.targets})};
+        }
+        [[nodiscard]] int64_t n_plots() const { return inputs.n_plots(); }
+    };
+
     // The held-out fold a prepare_data call asks for: a `test_size` fraction
     // drawn by the seeded shuffle (Random), or the caller's plot indices
     // (Explicit), which must outlive the call.
@@ -299,24 +280,11 @@ private:
     // The one split-application path behind every prepare_data overload:
     // validates the inputs, picks the fold (hold_out_indices), fits the
     // scalers on the fitting rows, splits every tensor and records the split
-    // in run_metadata_. Arguments as for the raw-tensor prepare_data.
+    // in run_metadata_. Arguments as for the tensor prepare_data.
     void prepare_split(
-        torch::Tensor coordinates,
-        torch::Tensor covariates,
-        torch::Tensor hash_embedding,
-        torch::Tensor species_ids,
-        torch::Tensor species_vector,
-        torch::Tensor genus_ids,
-        torch::Tensor family_ids,
-        torch::Tensor unknown_fraction,
-        torch::Tensor unknown_count,
-        const std::unordered_map<std::string, torch::Tensor>& targets,
-        torch::Tensor pool_genus_ids,
-        torch::Tensor pool_family_ids,
-        torch::Tensor pool_weights,
-        torch::Tensor pool_mask,
-        torch::Tensor pool_has_cover,
-        torch::Tensor categorical_ids,
+        const ContinuousInputs& parts,
+        const PlotInputs& inputs,
+        const TensorMap& targets,
         const HoldOutRequest& hold_out,
         int seed
     );
@@ -364,27 +332,25 @@ private:
     // a fresh fit_attempt() can be made with a different batch_size.
     void release_training_state();
 
-    // Helper: bundle of pool tensors to avoid repeating 5-line blocks
-    struct PoolTensors {
-        torch::Tensor genus_ids, family_ids, weights, mask, has_cover;
-    };
-    [[nodiscard]] PoolTensors get_test_pool_tensors() const;
-
     // Compute the CUDA hash embedding for the given global plot indices and
     // concatenate it onto `continuous`. Non-CUDA-hash models (and CPU builds)
     // return `continuous` unchanged, since their species representation is
     // already folded into it at prepare_data time. `use_cache` selects the
-    // GPU-resident CSR buffers when the dataset is cached on device. Single
-    // source of truth for the four test-fold forwards (issue #86).
+    // GPU-resident CSR buffers when the dataset is cached on device.
     [[nodiscard]] torch::Tensor append_cuda_hash(
         torch::Tensor continuous, torch::Tensor plot_idx, bool use_cache) const;
 
+    // The held-out fold's model inputs on the training device, CUDA hash
+    // appended: the GPU mirror when `use_cache` (cache_data_to_gpu ran),
+    // otherwise a copy of the host split.
+    [[nodiscard]] PlotInputs held_out_inputs(bool use_cache) const;
+
     // Run the model in eval mode over the held-out test fold and return the
     // per-target prediction map (regression: scaled outputs; classification:
-    // logits). Single source of truth for the test-fold forward pass shared
-    // by compute_residuals / compute_calibration /
+    // logits). The one test-fold forward behind the baselines,
+    // compute_residuals, compute_calibration and
     // compute_classification_predictions.
-    [[nodiscard]] std::unordered_map<std::string, torch::Tensor> forward_test_fold();
+    [[nodiscard]] TensorMap forward_test_fold();
 
     // Map global plot indices to their plot-ID strings via plot_ids_. Returns
     // empty when plot_ids_ is empty (the raw-tensor prepare_data path).
@@ -417,13 +383,13 @@ private:
     // taken in the constructor. cross_validate resets each fold to this pristine
     // init rather than the trainer's current weights, so a cross_validate run
     // after fit() does not warm-start every fold from fully-trained weights whose
-    // training data overlaps the fold's held-out test set (issue #97).
+    // training data overlaps the fold's held-out test set.
     std::string pristine_model_state_;
 
     // The batch size the caller requested at fit() entry, before the CUDA OOM
     // auto-halve retry may have shrunk config_.batch_size. Persisted so a fallback
     // run is detectable (train_effective_batch_size != train_batch_size) and
-    // load_train_config restores the requested value (issue #86).
+    // load_train_config restores the requested value.
     //
     // -1 until fit() runs, which is save_train_config's "no separate request
     // known" sentinel: it then persists config_.batch_size, the size the trainer
@@ -436,7 +402,7 @@ private:
     // config_.batch_size. Read by effective_batch_size(), copied onto
     // TrainResult, and written to the checkpoint by save() -- which is called
     // both inside fit() (best / periodic checkpoints) and after it returns, so
-    // the value cannot come from config_.batch_size (issue #105). 0 until fit
+    // the value cannot come from config_.batch_size. 0 until fit
     // runs.
     int effective_batch_size_ = 0;
 
@@ -458,60 +424,21 @@ private:
     // Raw coordinates stored for spatial CV (before scaling/concatenation)
     torch::Tensor coordinates_;
 
-    // Training data
-    torch::Tensor train_continuous_;
-    torch::Tensor train_genus_ids_;
-    torch::Tensor train_family_ids_;
-    torch::Tensor train_species_ids_;     // For embed mode
-    torch::Tensor train_species_vector_;  // For sparse mode
-    std::unordered_map<std::string, torch::Tensor> train_targets_;
+    // The split prepare_data made, on the host: the fitting rows and the
+    // held-out fold, continuous block standardised, regression targets
+    // scaled. Fields the data does not carry stay undefined.
+    LabelledPlots train_;
+    LabelledPlots test_;
 
-    // Pool-style fields (rank_pool / transformer modes)
-    torch::Tensor train_pool_genus_ids_;
-    torch::Tensor train_pool_family_ids_;
-    torch::Tensor train_pool_weights_;
-    torch::Tensor train_pool_mask_;
-    torch::Tensor train_pool_has_cover_;
-
-    // Categorical covariate codes for the training split. Undefined when
-    // the dataset has no categorical columns. Layout (n_train, n_categoricals)
-    // int64.
-    torch::Tensor train_categorical_ids_;
-
-    torch::Tensor test_continuous_;
-    torch::Tensor test_genus_ids_;
-    torch::Tensor test_family_ids_;
-    torch::Tensor test_species_ids_;
-    torch::Tensor test_species_vector_;
-    std::unordered_map<std::string, torch::Tensor> test_targets_;
-
-    torch::Tensor test_pool_genus_ids_;
-    torch::Tensor test_pool_family_ids_;
-    torch::Tensor test_pool_weights_;
-    torch::Tensor test_pool_mask_;
-    torch::Tensor test_pool_has_cover_;
-    torch::Tensor test_categorical_ids_;
-
-    // Snapshot of every train/test split member plus the scalers and fold
-    // indices. cross_validate / cross_validate_spatial overwrite these per fold;
+    // Snapshot of the split plus the scalers and fold indices.
+    // cross_validate / cross_validate_spatial overwrite these per fold;
     // capturing at entry and restoring at exit keeps the trainer's post-CV state
     // consistent so the checkpoint evaluators (compute_residuals /
     // compute_classification_predictions / test_plot_ids) run against the
     // original split rather than the last fold. Restore also invalidates the GPU
     // cache since the cached tensors no longer match the restored split.
     struct SplitState {
-        torch::Tensor train_continuous, train_genus_ids, train_family_ids,
-            train_species_ids, train_species_vector;
-        torch::Tensor train_pool_genus_ids, train_pool_family_ids,
-            train_pool_weights, train_pool_mask, train_pool_has_cover,
-            train_categorical_ids;
-        std::unordered_map<std::string, torch::Tensor> train_targets;
-        torch::Tensor test_continuous, test_genus_ids, test_family_ids,
-            test_species_ids, test_species_vector;
-        torch::Tensor test_pool_genus_ids, test_pool_family_ids,
-            test_pool_weights, test_pool_mask, test_pool_has_cover,
-            test_categorical_ids;
-        std::unordered_map<std::string, torch::Tensor> test_targets;
+        LabelledPlots train, test;
         torch::Tensor train_indices, test_indices;
         Scalers scalers;
     };
@@ -537,39 +464,12 @@ private:
     // Timestamp when training started (for run metadata)
     std::string created_at_;
 
-    // GPU-cached training data (for fast epochs after first)
+    // Device mirrors of train_ / test_ and the target scalers, uploaded once
+    // by cache_data_to_gpu so an epoch only indexes on the device.
     bool gpu_data_cached_ = false;
-    torch::Tensor gpu_continuous_;
-    torch::Tensor gpu_genus_ids_;
-    torch::Tensor gpu_family_ids_;
-    torch::Tensor gpu_species_ids_;
-    torch::Tensor gpu_species_vector_;
-    std::unordered_map<std::string, torch::Tensor> gpu_targets_;
+    LabelledPlots gpu_train_;
+    LabelledPlots gpu_test_;
     std::unordered_map<std::string, std::pair<torch::Tensor, torch::Tensor>> gpu_scalers_;
-
-    // GPU-cached pool fields (training)
-    torch::Tensor gpu_pool_genus_ids_;
-    torch::Tensor gpu_pool_family_ids_;
-    torch::Tensor gpu_pool_weights_;
-    torch::Tensor gpu_pool_mask_;
-    torch::Tensor gpu_pool_has_cover_;
-    torch::Tensor gpu_categorical_ids_;
-
-    // GPU-cached test data (avoid repeated CPU->GPU transfer in eval)
-    torch::Tensor gpu_test_continuous_;
-    torch::Tensor gpu_test_genus_ids_;
-    torch::Tensor gpu_test_family_ids_;
-    torch::Tensor gpu_test_species_ids_;
-    torch::Tensor gpu_test_species_vector_;
-    std::unordered_map<std::string, torch::Tensor> gpu_test_targets_;
-
-    // GPU-cached pool fields (test)
-    torch::Tensor gpu_test_pool_genus_ids_;
-    torch::Tensor gpu_test_pool_family_ids_;
-    torch::Tensor gpu_test_pool_weights_;
-    torch::Tensor gpu_test_pool_mask_;
-    torch::Tensor gpu_test_pool_has_cover_;
-    torch::Tensor gpu_test_categorical_ids_;
 
     // AMP (Automatic Mixed Precision) state
     bool amp_enabled_ = false;         // Whether AMP is actually enabled (CUDA only)

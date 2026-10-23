@@ -2,14 +2,9 @@
 
 // Field registries for the engine's configuration structs.
 //
-// A configuration field used to be spelled out in five places that shared no
-// source of truth: the struct, the checkpoint writer, the checkpoint reader, the
-// C-ABI value-tree parser/emitter, and the nanobind binding -- plus the JSON
-// sidecar and `resolve info` for the ones those print. Adding a field meant
-// finding all of them, and missing one was silent (issues #37, #38, #91, #102
-// were each an instance of exactly that).
-//
-// Here each struct gets ONE list. A row names the member and the checkpoint key
+// A configuration field is read by the struct, the checkpoint writer and
+// reader, the C-ABI value-tree parser/emitter, the nanobind binding, the JSON
+// sidecar and `resolve info`. Each struct gets ONE list. A row names the member and the checkpoint key
 // it serializes under; the C-ABI value-tree key, the Python attribute name, the
 // JSON key and the `resolve info` label are the member name itself. Every
 // consumer is a visitor over that list:
@@ -39,6 +34,7 @@
 // of an existing checkpoint. The registry supplies those spellings; it does not
 // get to change them.
 
+#include "resolve/aggregate_arity.hpp"
 #include "resolve/types.hpp"
 #include "resolve/dataset.hpp"
 #include "resolve/enum_names.hpp"
@@ -51,51 +47,7 @@
 
 namespace resolve {
 
-// ============================================================================
-// Compile-time arity probe
-// ============================================================================
-
 namespace registry_detail {
-
-// Converts to any type, so a brace-init probe can supply one initializer per
-// aggregate member without naming the member types. Declared and never defined:
-// every use sits inside decltype, which is unevaluated.
-struct AnyInit {
-    template <typename T,
-              typename = std::enable_if_t<!std::is_same_v<std::decay_t<T>, AnyInit>>>
-    constexpr operator T() const;  // NOLINT(google-explicit-constructor)
-};
-
-template <std::size_t>
-using AnyInitAt = AnyInit;
-
-template <typename T, typename... A>
-constexpr auto brace_init_ok(int) -> decltype(T{std::declval<A>()...}, true) {
-    return true;
-}
-template <typename T, typename... A>
-constexpr bool brace_init_ok(...) {
-    return false;
-}
-
-template <typename T, std::size_t... I>
-constexpr bool brace_init_with(std::index_sequence<I...>) {
-    return brace_init_ok<T, AnyInitAt<I>...>(0);
-}
-
-// Number of direct members of an aggregate. Probes brace initialization with an
-// increasing number of universal initializers; the first count that fails to
-// compile is one past the member count. Each member accepts an AnyInit directly
-// (it converts to anything), so brace elision never folds a nested aggregate's
-// members into the outer count -- the number is the DIRECT member count.
-template <typename T, std::size_t N = 0>
-constexpr std::size_t aggregate_field_count() {
-    if constexpr (brace_init_with<T>(std::make_index_sequence<N + 1>{})) {
-        return aggregate_field_count<T, N + 1>();
-    } else {
-        return N;
-    }
-}
 
 // Dependent false, so a visitor's `else static_assert(...)` fallthrough only
 // fires for a type that actually reaches it.
@@ -343,7 +295,7 @@ inline constexpr const char* kRequiredModelConfigKeys[] = {
 // ============================================================================
 //
 // The loader config is not serialized under its own keys: a checkpoint carries
-// these knobs on ResolveSchema (schema_* keys, issue #102) and
+// these knobs on ResolveSchema (schema_* keys) and
 // dataset_config_from_checkpoint reassembles them. The key column is therefore
 // empty, and archive visitors skip empty keys.
 
@@ -419,7 +371,7 @@ RESOLVE_DEFINE_FIELD_REGISTRY(TrainConfig, RESOLVE_TRAIN_CONFIG_FIELDS)
 // The batch size that actually trained the model, which is config_.batch_size
 // after any CUDA auto-halve-on-OOM retry. Not a TrainConfig field (the config
 // carries the REQUESTED value under train_batch_size); written and read beside
-// the registry pass so a fallback run stays detectable (issue #86).
+// the registry pass so a fallback run stays detectable.
 inline constexpr const char* kEffectiveBatchSizeKey = "train_effective_batch_size";
 
 // ============================================================================

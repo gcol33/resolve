@@ -45,6 +45,18 @@ function(resolve_link_cuda_dirs target)
     endif()
 endfunction()
 
+# Force-includes catch_torch_prelude.hpp ahead of every source of a Catch2
+# target, so CHECK is Catch2's assertion whatever order a file includes Catch2
+# and libtorch in (libtorch's logging header defines a CHECK of its own).
+function(resolve_use_catch_prelude target)
+    target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /FIcatch_torch_prelude.hpp)
+    else()
+        target_compile_options(${target} PRIVATE "SHELL:-include catch_torch_prelude.hpp")
+    endif()
+endfunction()
+
 # Test executable. Shared fixtures live in test_support.hpp.
 add_executable(resolve_tests
     test_model.cpp
@@ -95,9 +107,11 @@ add_executable(resolve_tests
     test_suite.cpp
     test_target_masking.cpp
     test_stopping_fold.cpp
+    test_plot_inputs.cpp
 )
 
 resolve_link_cuda_dirs(resolve_tests)
+resolve_use_catch_prelude(resolve_tests)
 
 target_link_libraries(resolve_tests
     PRIVATE
@@ -162,6 +176,7 @@ if(RESOLVE_BUILD_BENCHMARKS)
         benchmark_catch2.cpp
     )
     resolve_link_cuda_dirs(resolve_benchmark_catch2)
+    resolve_use_catch_prelude(resolve_benchmark_catch2)
     target_link_libraries(resolve_benchmark_catch2
         PRIVATE
             resolve_core

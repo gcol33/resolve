@@ -270,10 +270,13 @@ TEST_CASE("ResolveModel with RankPool mode constructs and forwards", "[rank_pool
     auto pool_mask = (species_ids != 0);
     auto pool_has_cover = torch::ones({4});
 
-    auto outputs = model->forward(
-        continuous, {}, {}, species_ids, {},
-        pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover
-    );
+    auto outputs = model->forward({.continuous = continuous,
+                                   .species_ids = species_ids,
+                                   .pool_genus_ids = pool_genus_ids,
+                                   .pool_family_ids = pool_family_ids,
+                                   .pool_weights = pool_weights,
+                                   .pool_mask = pool_mask,
+                                   .pool_has_cover = pool_has_cover});
 
     REQUIRE(outputs.count("area") == 1);
     REQUIRE(outputs["area"].size(0) == 4);

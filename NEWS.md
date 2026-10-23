@@ -13,6 +13,34 @@
 - The R package's pkgdown reference is published at
   <https://gillescolling.com/resolve/r/>, under the documentation site, and the
   site build (`build_docs.py`, `r/build_site.R`) lives in the repository.
+- **Model inputs travel as one value.** In C++ every model method takes a
+  `PlotInputs` (`forward`, `forward_with_aux`, `forward_single`, `get_latent`,
+  `encode_with_activations`, `get_gate_probs`, `Trainer::predict`), and the
+  tensor overloads of `Trainer::prepare_data`, `Predictor::predict` and
+  `Predictor::get_embeddings` take the continuous-block parts as a
+  `ContinuousInputs` beside it. In Python the model methods and
+  `Trainer.predict` keep their arguments; `Predictor.predict`,
+  `Predictor.get_embeddings` and `Trainer.prepare_data_raw` take every tensor
+  by keyword, and an unknown keyword raises `TypeError` on every such method.
+  The `Spacc*` aliases are gone.
+- `Predictor.predict` on tensors chunks the forward like `predict_dataset`
+  (`batch_size`, default 4096) and, like it, returns CPU tensors whatever the
+  device; a one-chunk prediction on CUDA used to return device tensors.
+
+### Fixed
+
+- `Predictor.get_embeddings` read only the coordinates, covariates, hash
+  embedding and taxonomy slots, so it threw or returned a wrong latent for the
+  embed, sparse, rank_pool and transformer encoders and ignored categorical
+  columns. It takes every model input now and is the latent `predict(...,
+  return_latent=True)` returns, for every encoder.
+- `forward_single` and `get_gate_probs` take the species IDs, species vector
+  and pool tensors, so they work for every species encoding instead of
+  refusing the encoders that read composition from them.
+- The Catch2 suite force-includes a prelude that keeps `CHECK` Catch2's
+  assertion: in files that included libtorch after Catch2, libtorch's own
+  `CHECK` macro had replaced it, so those checks were neither counted nor
+  reported.
 
 ## v0.12.0 (2026-10-11)
 

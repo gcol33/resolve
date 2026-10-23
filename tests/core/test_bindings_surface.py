@@ -35,7 +35,7 @@ def _is_enum_member(obj) -> bool:
 
 
 def _is_alias(module, name: str, obj) -> bool:
-    """``m.attr("SpaccModel") = m.attr("ResolveModel")`` -- a second name for a
+    """``m.attr("Alias") = m.attr("ResolveModel")`` -- a second name for a
     type already exported under its own. The object is reachable, so the alias
     is not a missing export.
     """

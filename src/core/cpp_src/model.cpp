@@ -54,12 +54,9 @@ ResolveModelImpl::ResolveModelImpl(
     // Pre-compute the taxonomy embedding-table sizes once (single source of
     // truth for every encoder family). TaxonomyVocab::fit reserves <UNK>=0, so
     // n_genera()/n_families() already count the UNK slot (max id = n_genera - 1)
-    // and the correct table size is exactly n_genera, NOT n_genera + 1. The
-    // hash/sparse/MoE/adapter paths previously passed n_genera + 1 directly and
-    // over-allocated one unused row per table, disagreeing with the embed/pool/
-    // transformer paths that used these locals (issue #99). n_*_vocab (set by the
-    // dataset alongside n_*) is preferred; the bare-n_* fallback covers a
-    // hand-built schema that left n_*_vocab at 0.
+    // and the correct table size is exactly n_genera, NOT n_genera + 1.
+    // n_*_vocab (set by the dataset alongside n_*) is preferred; the bare-n_*
+    // fallback covers a hand-built schema that left n_*_vocab at 0.
     auto genus_vocab_size = schema.has_taxonomy
         ? (schema.n_genera_vocab > 0 ? schema.n_genera_vocab : schema.n_genera) : 0;
     auto family_vocab_size = schema.has_taxonomy
@@ -276,7 +273,7 @@ ResolveModelImpl::ResolveModelImpl(
     for (const auto& target : schema.targets) {
         TaskHead head = nullptr;  // Initialize as null
         if (config.head_hidden_dims.empty()) {
-            // Legacy single-layer head
+            // Single-layer head
             head = register_module(
                 "head_" + target.name,
                 TaskHead(
@@ -305,13 +302,13 @@ ResolveModelImpl::ResolveModelImpl(
     }
 }
 
-torch::Tensor ResolveModelImpl::fuse_categoricals_(
-    torch::Tensor continuous, torch::Tensor categorical_ids
-) {
+PlotInputs ResolveModelImpl::fuse_categoricals_(const PlotInputs& inputs) {
     // No-op when the model has no categorical columns.
     if (!categorical_embedder_) {
-        return continuous;
+        return inputs;
     }
+    const torch::Tensor& continuous = inputs.continuous;
+    torch::Tensor categorical_ids = inputs.categorical_ids;
     if (!continuous.defined() || continuous.dim() != 2) {
         throw std::runtime_error(
             "ResolveModel: fuse_categoricals_ requires a 2-D continuous "
@@ -363,7 +360,9 @@ torch::Tensor ResolveModelImpl::fuse_categoricals_(
         cat_part = categorical_embedder_->forward(categorical_ids);
     }
 
-    return torch::cat({continuous, cat_part}, /*dim=*/1);
+    PlotInputs fused = inputs;
+    fused.continuous = torch::cat({continuous, cat_part}, /*dim=*/1);
+    return fused;
 }
 
 int64_t ResolveModelImpl::latent_dim() const {
@@ -384,73 +383,43 @@ int64_t ResolveModelImpl::latent_dim() const {
     }
 }
 
-TailOutput ResolveModelImpl::encode_all(
-    torch::Tensor continuous,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids,
-    torch::Tensor species_ids,
-    torch::Tensor species_vector,
-    torch::Tensor pool_genus_ids,
-    torch::Tensor pool_family_ids,
-    torch::Tensor pool_weights,
-    torch::Tensor pool_mask,
-    torch::Tensor pool_has_cover
-) {
+TailOutput ResolveModelImpl::encode_all(const PlotInputs& inputs) {
     if (trait_net_encoder_) {
         // TraitNet uses only env features (continuous without hash embedding).
         // Traits are pre-set via set_traits().
-        return {trait_net_encoder_->forward(std::move(continuous)), {}, {}};
+        return {trait_net_encoder_->forward(inputs.continuous), {}, {}};
     }
     if (adapter_) {
-        return {adapter_->forward(std::move(continuous), std::move(genus_ids),
-                                  std::move(family_ids), std::move(species_ids),
-                                  std::move(species_vector)), {}, {}};
+        return {adapter_->forward(inputs.continuous, inputs.genus_ids,
+                                  inputs.family_ids, inputs.species_ids,
+                                  inputs.species_vector), {}, {}};
     }
     if (encoder_rank_pool_) {
         return encoder_rank_pool_->encode(
-            std::move(continuous), std::move(species_ids),
-            std::move(pool_genus_ids), std::move(pool_family_ids),
-            std::move(pool_weights), std::move(pool_mask),
-            std::move(pool_has_cover));
+            inputs.continuous, inputs.species_ids,
+            inputs.pool_genus_ids, inputs.pool_family_ids,
+            inputs.pool_weights, inputs.pool_mask, inputs.pool_has_cover);
     }
     if (encoder_transformer_) {
         return encoder_transformer_->encode(
-            std::move(continuous), std::move(species_ids),
-            std::move(pool_genus_ids), std::move(pool_family_ids),
-            std::move(pool_weights), std::move(pool_mask),
-            std::move(pool_has_cover));
+            inputs.continuous, inputs.species_ids,
+            inputs.pool_genus_ids, inputs.pool_family_ids,
+            inputs.pool_weights, inputs.pool_mask, inputs.pool_has_cover);
     }
     if (encoder_hash_) {
-        return encoder_hash_->encode(std::move(continuous), std::move(genus_ids),
-                                     std::move(family_ids));
+        return encoder_hash_->encode(inputs.continuous, inputs.genus_ids,
+                                     inputs.family_ids);
     }
     if (encoder_embed_) {
-        return encoder_embed_->encode(std::move(continuous), std::move(species_ids),
-                                      std::move(genus_ids), std::move(family_ids));
+        return encoder_embed_->encode(inputs.continuous, inputs.species_ids,
+                                      inputs.genus_ids, inputs.family_ids);
     }
-    return encoder_sparse_->encode(std::move(continuous), std::move(species_vector),
-                                   std::move(genus_ids), std::move(family_ids));
+    return encoder_sparse_->encode(inputs.continuous, inputs.species_vector,
+                                   inputs.genus_ids, inputs.family_ids);
 }
 
-torch::Tensor ResolveModelImpl::encode(
-    torch::Tensor continuous,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids,
-    torch::Tensor species_ids,
-    torch::Tensor species_vector,
-    torch::Tensor pool_genus_ids,
-    torch::Tensor pool_family_ids,
-    torch::Tensor pool_weights,
-    torch::Tensor pool_mask,
-    torch::Tensor pool_has_cover
-) {
-    auto latent = encode_all(
-        std::move(continuous), std::move(genus_ids), std::move(family_ids),
-        std::move(species_ids), std::move(species_vector),
-        std::move(pool_genus_ids), std::move(pool_family_ids),
-        std::move(pool_weights), std::move(pool_mask),
-        std::move(pool_has_cover)).latent;
-
+torch::Tensor ResolveModelImpl::encode(const PlotInputs& inputs) {
+    auto latent = encode_all(inputs).latent;
     if (post_moe_) {
         latent = post_moe_->forward_simple(latent);
     }
@@ -458,29 +427,13 @@ torch::Tensor ResolveModelImpl::encode(
 }
 
 std::pair<torch::Tensor, torch::Tensor> ResolveModelImpl::encode_with_aux(
-    torch::Tensor continuous,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids,
-    torch::Tensor species_ids,
-    torch::Tensor species_vector,
-    torch::Tensor pool_genus_ids,
-    torch::Tensor pool_family_ids,
-    torch::Tensor pool_weights,
-    torch::Tensor pool_mask,
-    torch::Tensor pool_has_cover
+    const PlotInputs& inputs
 ) {
-    auto encoded = encode_all(
-        std::move(continuous), std::move(genus_ids), std::move(family_ids),
-        std::move(species_ids), std::move(species_vector),
-        std::move(pool_genus_ids), std::move(pool_family_ids),
-        std::move(pool_weights), std::move(pool_mask),
-        std::move(pool_has_cover));
+    auto encoded = encode_all(inputs);
 
-    // post_moe_ runs on the training path as well as in encode(). Omitting it
-    // here once left it untrained -- no gradient reached it -- while get_latent
-    // still applied it, so extracted latents diverged from what the heads
-    // trained on. Only one placement is ever built, so the two auxiliary
-    // losses never both exist.
+    // post_moe_ runs on the training path as well as in encode(), so the
+    // latent the heads train on is the one get_latent extracts. Only one
+    // placement is ever built, so the two auxiliary losses never both exist.
     if (post_moe_) {
         auto moe_result = post_moe_->forward(encoded.latent);
         return {moe_result.output, moe_result.aux_loss};
@@ -489,43 +442,13 @@ std::pair<torch::Tensor, torch::Tensor> ResolveModelImpl::encode_with_aux(
 }
 
 std::unordered_map<std::string, torch::Tensor> ResolveModelImpl::forward(
-    torch::Tensor continuous,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids,
-    torch::Tensor species_ids,
-    torch::Tensor species_vector,
-    torch::Tensor pool_genus_ids,
-    torch::Tensor pool_family_ids,
-    torch::Tensor pool_weights,
-    torch::Tensor pool_mask,
-    torch::Tensor pool_has_cover,
-    torch::Tensor categorical_ids
+    const PlotInputs& inputs
 ) {
-    return forward_with_aux(continuous, genus_ids, family_ids, species_ids, species_vector,
-                            pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                            categorical_ids).outputs;
+    return forward_with_aux(inputs).outputs;
 }
 
-ModelForwardResult ResolveModelImpl::forward_with_aux(
-    torch::Tensor continuous,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids,
-    torch::Tensor species_ids,
-    torch::Tensor species_vector,
-    torch::Tensor pool_genus_ids,
-    torch::Tensor pool_family_ids,
-    torch::Tensor pool_weights,
-    torch::Tensor pool_mask,
-    torch::Tensor pool_has_cover,
-    torch::Tensor categorical_ids
-) {
-    // Fuse categorical embeddings into `continuous` before any encoder runs.
-    // No-op when the model has no categorical columns.
-    continuous = fuse_categoricals_(std::move(continuous),
-                                    std::move(categorical_ids));
-
-    auto [latent, aux_loss] = encode_with_aux(continuous, genus_ids, family_ids, species_ids, species_vector,
-                                               pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
+ModelForwardResult ResolveModelImpl::forward_with_aux(const PlotInputs& inputs) {
+    auto [latent, aux_loss] = encode_with_aux(fuse_categoricals_(inputs));
 
     std::unordered_map<std::string, torch::Tensor> outputs;
     for (auto& [name, head] : heads_) {
@@ -537,47 +460,13 @@ ModelForwardResult ResolveModelImpl::forward_with_aux(
 
 torch::Tensor ResolveModelImpl::forward_single(
     const std::string& target,
-    torch::Tensor continuous,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids,
-    torch::Tensor species_ids,
-    torch::Tensor species_vector,
-    torch::Tensor categorical_ids
+    const PlotInputs& inputs
 ) {
-    // forward_single carries no per-species pool tensors, so a rank_pool /
-    // transformer encoder would pool from empty inputs and return a wrong
-    // latent (taxonomy skipped, weighting silently binary). Refuse loudly and
-    // point callers at the full forward() path instead of failing silently.
-    if (config_.species_encoding == SpeciesEncodingMode::RankPool ||
-        config_.species_encoding == SpeciesEncodingMode::Transformer) {
-        throw std::runtime_error(
-            "forward_single does not support rank_pool/transformer encoders "
-            "(no pool tensors). Use forward() / forward_with_aux() with the "
-            "pool_* tensors instead.");
-    }
-    continuous = fuse_categoricals_(std::move(continuous),
-                                    std::move(categorical_ids));
-    auto latent = encode(continuous, genus_ids, family_ids, species_ids, species_vector);
-    return head(target)->forward(latent);
+    return head(target)->forward(encode(fuse_categoricals_(inputs)));
 }
 
-torch::Tensor ResolveModelImpl::get_latent(
-    torch::Tensor continuous,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids,
-    torch::Tensor species_ids,
-    torch::Tensor species_vector,
-    torch::Tensor pool_genus_ids,
-    torch::Tensor pool_family_ids,
-    torch::Tensor pool_weights,
-    torch::Tensor pool_mask,
-    torch::Tensor pool_has_cover,
-    torch::Tensor categorical_ids
-) {
-    continuous = fuse_categoricals_(std::move(continuous),
-                                    std::move(categorical_ids));
-    return encode(continuous, genus_ids, family_ids, species_ids, species_vector,
-                  pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover);
+torch::Tensor ResolveModelImpl::get_latent(const PlotInputs& inputs) {
+    return encode(fuse_categoricals_(inputs));
 }
 
 TaskHead& ResolveModelImpl::head(const std::string& name) {
@@ -597,24 +486,14 @@ const TaskHead& ResolveModelImpl::head(const std::string& name) const {
 }
 
 std::pair<torch::Tensor, std::vector<torch::Tensor>> ResolveModelImpl::encode_with_activations(
-    torch::Tensor continuous,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids,
-    torch::Tensor categorical_ids
+    const PlotInputs& inputs
 ) {
-    // Fuse categorical embeddings into continuous so the encoder sees the
-    // same input shape it was constructed for. No-op for models without
-    // categoricals.
-    continuous = fuse_categoricals_(std::move(continuous),
-                                    std::move(categorical_ids));
-    // Only implemented for hash encoder currently
+    const PlotInputs fused = fuse_categoricals_(inputs);
     if (encoder_hash_) {
-        return encoder_hash_->forward_with_activations(continuous, genus_ids, family_ids);
+        return encoder_hash_->forward_with_activations(
+            fused.continuous, fused.genus_ids, fused.family_ids);
     }
-    // For other encoders (embed, sparse, MoE), return empty tensor and activations
-    // to signal that diagnostics aren't available. We don't call encode() here
-    // because it would require species_ids/species_vector which aren't passed.
-    return {torch::Tensor(), {}};
+    return {encode(fused), {}};
 }
 
 torch::Tensor ResolveModelImpl::get_taxonomy_weights_(
@@ -664,34 +543,13 @@ torch::Tensor ResolveModelImpl::get_species_weights() const {
     return torch::Tensor();
 }
 
-torch::Tensor ResolveModelImpl::get_gate_probs(
-    torch::Tensor continuous,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids
-) {
-    // A hash-mode model routes through here with the species signal already in
-    // `continuous`, which is why this takes no species argument. Under
-    // MoEPlacement::Post the probabilities come from the mixture over the
-    // latent; under Tail they come back with the encoder's own output. An
-    // encoder that needs species IDs or a species vector cannot be driven from
-    // this signature, so it says so rather than reporting nothing -- the
-    // undefined tensor this used to return for every non-hash model was
-    // indistinguishable from "MoE is off".
+torch::Tensor ResolveModelImpl::get_gate_probs(const PlotInputs& inputs) {
+    // Under MoEPlacement::Post the probabilities come from the mixture over
+    // the latent; under Tail they come back with the encoder's own output.
     if (config_.moe_routing == MoERoutingType::None) {
         return torch::Tensor();
     }
-    if (!encoder_hash_ && !trait_net_encoder_ && !adapter_) {
-        throw std::invalid_argument(
-            "get_gate_probs(continuous, genus_ids, family_ids) covers only the "
-            "encoders whose species signal is already inside `continuous` "
-            "(hash) or absent (TraitNet, adapter architectures). For an embed / "
-            "sparse / rank_pool / transformer model, read the gate "
-            "probabilities from forward_with_aux, which takes the species "
-            "inputs those encoders need.");
-    }
-
-    continuous = fuse_categoricals_(std::move(continuous), torch::Tensor());
-    auto encoded = encode_all(continuous, genus_ids, family_ids, {}, {});
+    auto encoded = encode_all(fuse_categoricals_(inputs));
     if (post_moe_) {
         return post_moe_->forward(encoded.latent).gate_probs;
     }

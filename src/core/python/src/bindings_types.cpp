@@ -33,10 +33,9 @@ void bind_config_field(Class& cls, const char* name, T Cfg::*member) {
 // def_rw is not enough here. A nanobind function with no argument annotations
 // takes the SIMPLE vectorcall path, which rejects every None argument before
 // any caster runs ("keyword/None arguments unsupported in simple vectorcall",
-// nb_func.cpp) -- so def_rw on an optional member produced a getter that read
-// back None and a setter that refused it, measured on 0.8.0 (issue #111). The
-// annotation both moves the setter onto the complex path and sets the
-// accepts_none flag that path checks.
+// nb_func.cpp) -- so def_rw on an optional member gives a getter that reads
+// back None and a setter that refuses it. The annotation both moves the
+// setter onto the complex path and sets the accepts_none flag that path checks.
 template <typename Class>
 void bind_optional_role(Class& cls, const char* name,
                         std::optional<std::string> resolve::RoleMapping::*member) {
@@ -64,13 +63,10 @@ void register_types(nb::module_& m) {
             .def_rw("plot_id", &resolve::RoleMapping::plot_id)
             .def_rw("species_id", &resolve::RoleMapping::species_id);
         // The five optional roles are bound explicitly rather than through
-        // def_rw so the setter takes `str | None` and None genuinely clears the
-        // role. def_rw produced a str-only setter here (measured on 0.8.0:
-        // `roles.latitude = None` raised TypeError while the getter already
-        // read back None), which left callers with no unset path at all and
-        // pushed them onto an empty-string sentinel (issue #111). The engine
-        // reads both spellings as unset -- see RoleMapping::as_column -- so ""
-        // keeps working for code that already uses it.
+        // def_rw so the setter takes `str | None` and None clears the role
+        // (def_rw gives a str-only setter, so `roles.latitude = None` would
+        // raise TypeError). The engine reads None and "" both as unset -- see
+        // RoleMapping::as_column.
         bind_optional_role(cls, "abundance", &resolve::RoleMapping::abundance);
         bind_optional_role(cls, "longitude", &resolve::RoleMapping::longitude);
         bind_optional_role(cls, "latitude", &resolve::RoleMapping::latitude);
@@ -156,13 +152,12 @@ void register_types(nb::module_& m) {
         .def_rw("categorical_embed_dim", &resolve::ResolveSchema::categorical_embed_dim)
         .def_rw("pool_weighting", &resolve::ResolveSchema::pool_weighting)
         .def_rw("pool_species_cap", &resolve::ResolveSchema::pool_species_cap)
-        // Remaining DatasetConfig knobs the loader consumed (issue #102). #38
-        // restored pool_weighting only; without these an inference-side
-        // DatasetConfig silently reverted to the struct defaults.
+        // Remaining DatasetConfig knobs the loader consumed; without these an
+        // inference-side DatasetConfig would revert to the struct defaults.
         .def_rw("top_k_species", &resolve::ResolveSchema::top_k_species)
         // The selection the load APPLIED. A rank_pool / transformer / sparse
         // dataset with no species_budget encodes every record, so it reports
-        // All whatever the config asked for (issue #113).
+        // All whatever the config asked for.
         .def_rw("selection", &resolve::ResolveSchema::selection)
         .def_rw("species_budget", &resolve::ResolveSchema::species_budget)
         .def_rw("representation", &resolve::ResolveSchema::representation)
@@ -177,7 +172,7 @@ void register_types(nb::module_& m) {
         .def_rw("zero_abundance_as", &resolve::ResolveSchema::zero_abundance_as)
         .def("missing_flag_width", &resolve::ResolveSchema::missing_flag_width)
         // Fitted species / genus / family vocabularies, index = integer code,
-        // [0] = "<UNK>" (issue #102). Empty on a pre-fix checkpoint.
+        // [0] = "<UNK>". Empty on a checkpoint that stores only the sizes.
         .def_rw("species_vocab", &resolve::ResolveSchema::species_vocab)
         .def_rw("genus_vocab", &resolve::ResolveSchema::genus_vocab)
         .def_rw("family_vocab", &resolve::ResolveSchema::family_vocab)
@@ -186,11 +181,8 @@ void register_types(nb::module_& m) {
         .def("has_species_vocab", &resolve::ResolveSchema::has_species_vocab)
         .def("has_taxonomy_vocab", &resolve::ResolveSchema::has_taxonomy_vocab);
 
-    // ExternalVocabs (issue #102) is registered in register_dataset, after the
+    // ExternalVocabs is registered in register_dataset, after the
     // TaxonomyVocab / CategoricalVocab classes it holds.
-
-    // Alias for backwards compatibility
-    m.attr("SpaccSchema") = m.attr("ResolveSchema");
 
     // Architecture-specific config structs. Each is bound from its field
     // registry, so a hyperparameter added to the struct becomes a Python
@@ -358,8 +350,6 @@ void register_types(nb::module_& m) {
             }
             return nb::none();
         });
-
-    m.attr("SpaccPredictions") = m.attr("ResolvePredictions");
 
     nb::class_<resolve::Scalers>(m, "Scalers")
         .def(nb::init<>())

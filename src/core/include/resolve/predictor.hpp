@@ -32,7 +32,7 @@ public:
     // dataset in the model's namespace to begin with --
     // `ResolveDataset::from_csv_with_vocabs(..., predictor.external_vocabs(), ...)`
     // (or `from_csv_with_schema(..., predictor.schema(), ...)` when the model
-    // has no categorical covariates). See gcol33/resolve#102.
+    // has no categorical covariates).
     Predictor(
         ResolveModel model,
         Scalers scalers,
@@ -69,9 +69,8 @@ public:
     //                                        predictor.model()->config()));
     //
     // A vocabulary mismatch throws std::runtime_error naming the offending
-    // vocabulary. A checkpoint written before gcol33/resolve#102 carries only
-    // the vocabulary SIZES, so only those can be compared; `load()` warns once
-    // in that case.
+    // vocabulary. A checkpoint that stores only the vocabulary SIZES allows
+    // only those to be compared; `load()` warns once in that case.
     //
     // The result carries one `predictions` entry per target (a regression
     // value on the original scale, or a classification target's argmax code)
@@ -81,60 +80,44 @@ public:
     // entropy) off a checkpoint scored on any dataset.
     //
     // `batch_size` controls how the forward pass is chunked along dim 0:
-    //   -1  : single forward pass over the whole dataset (legacy behavior).
-    //          Maximum throughput, but allocates O(n_plots * hidden) of
-    //          device memory in one shot — easy to OOM on large test sets.
-    //   >0  : forward over consecutive chunks of `batch_size` plots, with
-    //          results concatenated on CPU. Default of 4096 keeps peak VRAM
-    //          predictable while still amortising the host->device copy.
+    //   -1  : one forward pass over the whole dataset. Maximum throughput,
+    //          but allocates O(n_plots * hidden) of device memory in one
+    //          shot, easy to OOM on large test sets.
+    //   >0  : forward over consecutive chunks of `batch_size` plots.
     // Only -1 or a positive value is valid; any other value (including 0)
     // raises std::invalid_argument. Use -1, not 0, to opt out of chunking.
+    // Either way every output tensor is on the CPU: each chunk's outputs move
+    // there before the next chunk runs, so peak device memory is one chunk's.
     //
     // The default (4096) matches the trainer's default batch size and keeps
-    // the predictor safe on 16 GiB-class GPUs at typical hidden sizes
-    // (see issue #2 for the OOM symptom that motivated this knob).
+    // the predictor safe on 16 GiB-class GPUs at typical hidden sizes.
     ResolvePredictions predict(
         const ResolveDataset& dataset,
         bool return_latent = false,
         int64_t batch_size = 4096
     );
 
-    // Predict on new data (raw tensor API)
-    // Returns predictions for all targets.
-    // categorical_ids: (n_samples, n_categoricals) int64 codes produced by
-    // CategoricalVocab — undefined/empty when the model has no categoricals
-    // (the model layer pads with zeros in that case).
+    // Predict on tensors: the parts of the continuous block (assembled and
+    // standardised as at training time; a missing coordinate or covariate is
+    // NaN) and the other model inputs, `inputs.continuous` left empty.
+    // unknown_fraction / unknown_count are required when the model reads them
+    // (ResolveSchema::track_unknown_fraction / track_unknown_count); a model
+    // with categorical columns given no categorical_ids reads every column as
+    // UNK. `batch_size` and the output device are as for the dataset overload;
+    // plot_ids are the row numbers.
     ResolvePredictions predict(
-        torch::Tensor coordinates,
-        torch::Tensor covariates,
-        torch::Tensor hash_embedding,
-        torch::Tensor species_ids,
-        torch::Tensor species_vector,
-        torch::Tensor genus_ids,
-        torch::Tensor family_ids,
-        torch::Tensor unknown_fraction,
-        torch::Tensor unknown_count,
-        // Pool-style fields (rank_pool / transformer)
-        torch::Tensor pool_genus_ids = {},
-        torch::Tensor pool_family_ids = {},
-        torch::Tensor pool_weights = {},
-        torch::Tensor pool_mask = {},
-        torch::Tensor pool_has_cover = {},
-        torch::Tensor categorical_ids = {},
-        bool return_latent = false
+        const ContinuousInputs& parts,
+        const PlotInputs& inputs,
+        bool return_latent = false,
+        int64_t batch_size = 4096
     );
 
-    // Get latent embeddings. A missing coordinate or covariate is NaN.
-    // unknown_fraction / unknown_count are required when the model reads them
-    // (ResolveSchema::track_unknown_fraction / track_unknown_count).
+    // The latent embedding (n_plots, latent_dim) of each plot, on the CPU,
+    // from the same inputs and through the same chunked path as predict().
     torch::Tensor get_embeddings(
-        torch::Tensor coordinates,
-        torch::Tensor covariates,
-        torch::Tensor hash_embedding,
-        torch::Tensor genus_ids,
-        torch::Tensor family_ids,
-        torch::Tensor unknown_fraction = {},
-        torch::Tensor unknown_count = {}
+        const ContinuousInputs& parts,
+        const PlotInputs& inputs,
+        int64_t batch_size = 4096
     );
 
     // Get learned embedding weights (averaged across positions)
@@ -161,7 +144,7 @@ public:
     // The model's schema, i.e. everything the checkpoint recorded about the
     // data it was trained on -- including the fitted species / genus / family
     // vocabularies and the loader knobs needed to rebuild a matching
-    // DatasetConfig (issue #102). Pass to
+    // DatasetConfig. Pass to
     // ResolveDataset::from_csv_with_schema / from_species_csv_with_schema to
     // build an inference dataset in this model's ID namespace.
     // Not noexcept: the module holder's operator-> checks for an empty holder,
@@ -172,7 +155,7 @@ public:
 
     // Ordered species vocabulary the model was trained with: element i is the
     // name that encodes to code i, index 0 the reserved "<UNK>" slot. Empty for
-    // a checkpoint written before issue #102 (which stored only the size).
+    // a checkpoint that stores only the vocabulary size.
     [[nodiscard]] const std::vector<std::string>& species_vocab() const {
         return schema().species_vocab;
     }
@@ -194,11 +177,22 @@ public:
 private:
     // Throw when `dataset` was not built in this model's integer-code
     // namespace. Compares the full ordered vocabularies when the checkpoint
-    // carries them, otherwise the vocabulary sizes alone (the pre-issue-#102
-    // fallback). Species IDs are only checked for encoders that actually index
+    // carries them, otherwise the vocabulary sizes alone. Species IDs are only checked for encoders that actually index
     // a species embedding table (hash mode derives its features from the
     // species STRING, so its codes are irrelevant).
     void validate_dataset_vocabs(const ResolveDataset& dataset) const;
+
+    // The one inference path behind predict() and get_embeddings(): slices
+    // the inputs into chunks of `batch_size` plots (one chunk for -1 and for
+    // an encoder whose output depends on its batch-mates), assembles and
+    // standardises each chunk's continuous block, runs it on device_ and
+    // moves what was asked for -- the per-target predictions and
+    // probabilities, the latent, or both -- to the CPU.
+    ResolvePredictions run_inference(const ContinuousInputs& parts,
+                                     const PlotInputs& inputs,
+                                     bool want_outputs,
+                                     bool want_latent,
+                                     int64_t batch_size);
 
     ResolveModel model_;
     Scalers scalers_;

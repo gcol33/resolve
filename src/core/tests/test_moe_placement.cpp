@@ -64,13 +64,6 @@ ModelConfig moe_model(SpeciesEncodingMode mode, MoEPlacement placement,
     return cfg;
 }
 
-// First n rows of a tensor, or the tensor itself when the encoding does not
-// fill it (the pooled encodings leave genus_ids / family_ids undefined).
-torch::Tensor head_rows(const torch::Tensor& t, int64_t n) {
-    if (!t.defined() || t.numel() == 0) return t;
-    return t.index_select(0, torch::arange(n, torch::kInt64));
-}
-
 // Width of the continuous block Trainer::prepare_data assembles for this
 // dataset: its schema's coordinates, covariates, their missingness flags and
 // unknown fraction, and for the hash encoding the hash embedding on top.
@@ -78,22 +71,19 @@ int64_t continuous_width(const ResolveDataset& ds, SpeciesEncodingMode mode) {
     return ds.continuous_block(mode == SpeciesEncodingMode::Hash).size(1);
 }
 
-// Run one batch through forward_with_aux, the path the trainer takes. The
-// species-side tensors come from the dataset; the continuous block is
-// synthetic, since the dataset stores its parts separately.
+// The first n_rows plots' model inputs: the species-side tensors from the
+// dataset, the continuous block synthetic, since the dataset stores its parts
+// separately.
+PlotInputs batch_inputs(const ResolveDataset& ds, SpeciesEncodingMode mode, int64_t n_rows) {
+    PlotInputs inputs = ds.plot_inputs().without_empty().slice(0, n_rows);
+    inputs.continuous = torch::randn({n_rows, continuous_width(ds, mode)});
+    return inputs;
+}
+
+// Run one batch through forward_with_aux, the path the trainer takes.
 ModelForwardResult forward_batch(ResolveModel& model, const ResolveDataset& ds,
                                  SpeciesEncodingMode mode, int64_t n_rows) {
-    const auto rows = torch::arange(n_rows, torch::kInt64);
-    const auto take = [&](const torch::Tensor& t) {
-        return (t.defined() && t.numel() > 0) ? t.index_select(0, rows) : t;
-    };
-    return model->forward_with_aux(
-        torch::randn({n_rows, continuous_width(ds, mode)}),
-        take(ds.genus_ids()), take(ds.family_ids()),
-        take(ds.species_ids()), take(ds.species_vector()),
-        take(ds.pool_genus_ids()), take(ds.pool_family_ids()),
-        take(ds.pool_weights()), take(ds.pool_mask()), take(ds.pool_has_cover()),
-        take(ds.categorical_ids()));
+    return model->forward_with_aux(batch_inputs(ds, mode, n_rows));
 }
 
 }  // namespace
@@ -348,17 +338,10 @@ TEST_CASE("TabM and a mixture cannot both have the tail", "[moe][encoder]") {
 // Gate probabilities
 // ===========================================================================
 
-TEST_CASE("Gate probabilities come back for the encoders this signature drives",
-          "[moe][gates]") {
+TEST_CASE("Gate probabilities come back at either placement", "[moe][gates]") {
     const SmallCorpus corpus;
     auto ds = corpus.load(SpeciesEncodingMode::Hash);
-
-    const auto rows = torch::arange(8, torch::kInt64);
-    const auto slice = [&](const torch::Tensor& t) {
-        return (t.defined() && t.numel() > 0) ? t.index_select(0, rows) : t;
-    };
-    const auto continuous =
-        torch::randn({8, continuous_width(ds, SpeciesEncodingMode::Hash)});
+    const auto inputs = batch_inputs(ds, SpeciesEncodingMode::Hash, 8);
 
     for (auto placement : {MoEPlacement::Tail, MoEPlacement::Post}) {
         INFO("placement " << (placement == MoEPlacement::Tail ? "tail" : "post"));
@@ -366,9 +349,7 @@ TEST_CASE("Gate probabilities come back for the encoders this signature drives",
         ResolveModel model(ds.schema(), moe_model(SpeciesEncodingMode::Hash, placement));
         model->eval();
 
-        auto probs = model->get_gate_probs(continuous,
-                                           slice(ds.genus_ids()),
-                                           slice(ds.family_ids()));
+        auto probs = model->get_gate_probs(inputs);
         REQUIRE(probs.defined());
         REQUIRE(probs.size(0) == 8);
         REQUIRE(probs.size(1) == 3);  // n_experts
@@ -384,29 +365,30 @@ TEST_CASE("Gate probabilities are still empty when there is no mixture",
     auto ds = corpus.load(SpeciesEncodingMode::Hash);
 
     ResolveModel model(ds.schema(), base_model(SpeciesEncodingMode::Hash));
-    auto probs = model->get_gate_probs(
-        torch::randn({8, continuous_width(ds, SpeciesEncodingMode::Hash)}),
-        head_rows(ds.genus_ids(), 8), head_rows(ds.family_ids(), 8));
+    auto probs = model->get_gate_probs(batch_inputs(ds, SpeciesEncodingMode::Hash, 8));
     CHECK_FALSE(probs.defined());
 }
 
-TEST_CASE("An encoder this signature cannot drive says so", "[moe][gates]") {
+TEST_CASE("Gate probabilities come back for every species encoder", "[moe][gates]") {
     const SmallCorpus corpus;
 
-    // The three-argument form carries no species IDs and no species vector, so
-    // it cannot run an embed / sparse / pooled encoder. Returning an undefined
-    // tensor there was indistinguishable from "MoE is off".
+    // The inputs carry the species IDs, the species vector and the pool
+    // tensors, so the encoders that read composition from them report their
+    // gates as the hash encoder does.
     for (auto mode : {SpeciesEncodingMode::Embed, SpeciesEncodingMode::Sparse,
                       SpeciesEncodingMode::RankPool,
                       SpeciesEncodingMode::Transformer}) {
         INFO("encoding " << species_encoding_to_string(mode));
         auto ds = corpus.load(mode);
+        torch::manual_seed(13);
         ResolveModel model(ds.schema(), moe_model(mode, MoEPlacement::Tail));
-        REQUIRE_THROWS_AS(
-            model->get_gate_probs(torch::randn({8, continuous_width(ds, mode)}),
-                                  head_rows(ds.genus_ids(), 8),
-                                  head_rows(ds.family_ids(), 8)),
-            std::invalid_argument);
+        model->eval();
+        auto probs = model->get_gate_probs(batch_inputs(ds, mode, 8));
+        REQUIRE(probs.defined());
+        REQUIRE(probs.size(0) == 8);
+        REQUIRE(probs.size(1) == 3);  // n_experts
+        auto row_sums = probs.sum(/*dim=*/1);
+        CHECK(torch::allclose(row_sums, torch::ones_like(row_sums), 1e-4, 1e-4));
     }
 }
 

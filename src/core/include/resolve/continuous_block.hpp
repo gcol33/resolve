@@ -1,5 +1,6 @@
 #pragma once
 
+#include "resolve/aggregate_arity.hpp"
 #include "resolve/scalers.hpp"
 #include "resolve/types.hpp"
 
@@ -13,14 +14,65 @@ namespace resolve {
 // The per-plot numeric inputs the model reads as one continuous block, before
 // the categorical embeddings are fused onto it. A missing coordinate or
 // covariate is NaN; every tensor is optional (undefined or empty when the data
-// carries no such input).
+// carries no such input). The member name is also the keyword the bindings and
+// the C ABI value map use.
+#define RESOLVE_CONTINUOUS_INPUT_FIELDS(F) \
+    F(coordinates)                         \
+    F(covariates)                          \
+    F(unknown_fraction)                    \
+    F(unknown_count)                       \
+    F(hash_embedding)
+
 struct ContinuousInputs {
     torch::Tensor coordinates;       // (n, 2)
     torch::Tensor covariates;        // (n, n_covariates)
     torch::Tensor unknown_fraction;  // (n,)
     torch::Tensor unknown_count;     // (n,)
     torch::Tensor hash_embedding;    // (n, hash_dim); appended last when present
+
+    // Calls f(name, tensor) for every field in list order.
+    template <typename F>
+    void for_each(F&& f) {
+        visit(*this, f);
+    }
+    template <typename F>
+    void for_each(F&& f) const {
+        visit(*this, f);
+    }
+
+    // Rows [start, end) of every defined field.
+    [[nodiscard]] ContinuousInputs slice(int64_t start, int64_t end) const {
+        ContinuousInputs out = *this;
+        out.for_each([&](const char*, torch::Tensor& t) {
+            if (t.defined() && t.dim() > 0) t = t.slice(/*dim=*/0, start, end);
+        });
+        return out;
+    }
+
+    // The rows of the first non-empty field, 0 when every field is empty.
+    [[nodiscard]] int64_t n_rows() const {
+        int64_t n = -1;
+        for_each([&](const char*, const torch::Tensor& t) {
+            if (n < 0 && t.defined() && t.numel() > 0) n = t.size(0);
+        });
+        return n < 0 ? 0 : n;
+    }
+
+private:
+    template <typename Self, typename F>
+    static void visit(Self& self, F& f) {
+#define RESOLVE_CONTINUOUS_INPUT_VISIT(member) f(#member, self.member);
+        RESOLVE_CONTINUOUS_INPUT_FIELDS(RESOLVE_CONTINUOUS_INPUT_VISIT)
+#undef RESOLVE_CONTINUOUS_INPUT_VISIT
+    }
 };
+
+#define RESOLVE_CONTINUOUS_INPUT_COUNT(member) +1
+static_assert((0 RESOLVE_CONTINUOUS_INPUT_FIELDS(RESOLVE_CONTINUOUS_INPUT_COUNT)) ==
+                  registry_detail::aggregate_field_count<ContinuousInputs>(),
+              "ContinuousInputs has a member with no row in "
+              "RESOLVE_CONTINUOUS_INPUT_FIELDS (or a row with no member).");
+#undef RESOLVE_CONTINUOUS_INPUT_COUNT
 
 // Assemble the continuous block, column order:
 //

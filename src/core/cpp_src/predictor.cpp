@@ -2,7 +2,7 @@
 #include "resolve/dataset.hpp"
 #include "resolve/continuous_block.hpp"
 #include "resolve/encoder.hpp"  // Fp32NormImpl (inference-time BN fusion)
-#include "resolve/utils.hpp"
+#include <algorithm>
 #include <atomic>
 #include <fstream>
 #include <iostream>
@@ -12,17 +12,6 @@
 namespace resolve {
 
 namespace {
-
-// Slice a tensor along dim 0 in [start, end). Returns an empty/undefined
-// tensor if the input is itself undefined (mirrors the "defined or empty"
-// contract every downstream predict() call already handles).
-inline torch::Tensor slice0(const torch::Tensor& t, int64_t start, int64_t end) {
-    // Only pass undefined / scalar tensors through unchanged. A defined but
-    // 0-numel matrix (e.g. (n, 0)) must still be sliced along dim 0, otherwise
-    // the whole n-row tensor comes back for a [start,end) chunk.
-    if (!t.defined() || t.dim() == 0) return t;
-    return t.slice(/*dim=*/0, start, end);
-}
 
 // True when the encoder looks species IDs up in an embedding table, i.e. when a
 // species-code mismatch silently returns another species' row. Hash mode
@@ -43,7 +32,7 @@ bool indexes_species_codes(const ResolveModel& model) {
 }
 
 // Shared body of every vocabulary check: sizes first (cheap, and the only
-// comparison a pre-issue-#102 checkpoint supports), then the ordered name lists
+// comparison a sizes-only checkpoint supports), then the ordered name lists
 // when both sides carry them. `what` names the vocabulary in the error.
 void require_matching_vocab(
     const char* what,
@@ -70,7 +59,7 @@ void require_matching_vocab(
              std::to_string(dataset_size));
     }
     if (model_names.empty() || dataset_names.empty()) {
-        return;  // pre-#102 checkpoint (or an unfit vocab): size check is all there is
+        return;  // sizes-only checkpoint (or an unfit vocab): size check is all there is
     }
     if (model_names.size() != dataset_names.size()) {
         fail("model vocabulary lists " + std::to_string(model_names.size()) +
@@ -118,10 +107,10 @@ Predictor Predictor::load(
     auto [model, scalers, vocab] = Trainer::load(path, device, vram_fraction);
     Predictor predictor(std::move(model), std::move(scalers), std::move(vocab), device);
 
-    // A checkpoint written before gcol33/resolve#102 recorded only the
-    // vocabulary SIZES, so nothing can rebuild an inference dataset in this
-    // model's ID namespace and predict() can only compare sizes. Say so once,
-    // loudly: the failure it guards against is silent wrong predictions.
+    // A checkpoint that recorded only the vocabulary SIZES carries nothing to
+    // rebuild an inference dataset in this model's ID namespace from, and
+    // predict() can only compare sizes. Say so once, loudly: the failure it
+    // guards against is silent wrong predictions.
     if (indexes_species_codes(predictor.model()) &&
         !predictor.schema().has_species_vocab()) {
         std::cerr << "[resolve] warning: this checkpoint does not carry the fitted "
@@ -214,17 +203,77 @@ ResolvePredictions Predictor::predict(
 ) {
     // Reject a dataset whose integer codes are not the model's BEFORE any
     // forward pass: every non-hash encoder would otherwise index the wrong
-    // embedding rows and return plausible, wrong numbers (issue #102).
+    // embedding rows and return plausible, wrong numbers.
     validate_dataset_vocabs(dataset);
 
-    const int64_t n = dataset.n_plots();
+    auto result = predict(dataset.continuous_inputs(), dataset.plot_inputs(),
+                          return_latent, batch_size);
+    result.plot_ids = dataset.plot_ids();
+    // The dataset's targets ride along for residual analysis.
+    result.targets = dataset.targets();
+    return result;
+}
 
+ResolvePredictions Predictor::predict(
+    const ContinuousInputs& parts,
+    const PlotInputs& inputs,
+    bool return_latent,
+    int64_t batch_size
+) {
+    auto result = run_inference(parts, inputs, /*want_outputs=*/true, return_latent, batch_size);
+    const int64_t n = parts.n_rows() > 0 ? parts.n_rows() : inputs.n_plots();
+    result.plot_ids.reserve(static_cast<size_t>(n));
+    for (int64_t i = 0; i < n; ++i) {
+        result.plot_ids.push_back(std::to_string(i));
+    }
+    return result;
+}
+
+torch::Tensor Predictor::get_embeddings(
+    const ContinuousInputs& parts,
+    const PlotInputs& inputs,
+    int64_t batch_size
+) {
+    return run_inference(parts, inputs, /*want_outputs=*/false, /*want_latent=*/true,
+                         batch_size).latent;
+}
+
+ResolvePredictions Predictor::run_inference(
+    const ContinuousInputs& parts,
+    const PlotInputs& inputs,
+    bool want_outputs,
+    bool want_latent,
+    int64_t batch_size
+) {
     // Validate batch_size: -1 (one-shot) or strictly positive. 0 / <-1 reject.
     if (batch_size != -1 && batch_size <= 0) {
         throw std::invalid_argument(
             "Predictor::predict: batch_size must be -1 (whole dataset) "
             "or a positive integer; got " + std::to_string(batch_size));
     }
+    if (inputs.continuous.defined()) {
+        throw std::invalid_argument(
+            "Predictor::predict: PlotInputs::continuous must be empty; the "
+            "continuous block is assembled from the ContinuousInputs parts");
+    }
+
+    const auto& schema = model_->schema();
+    auto present = [](const torch::Tensor& t) { return t.defined() && t.numel() > 0; };
+    if (schema.track_unknown_fraction && !present(parts.unknown_fraction)) {
+        throw std::invalid_argument(
+            "Predictor: the model reads an unknown-species fraction "
+            "(track_unknown_fraction), so pass unknown_fraction");
+    }
+    if (schema.track_unknown_count && !present(parts.unknown_count)) {
+        throw std::invalid_argument(
+            "Predictor: the model reads an unknown-species count "
+            "(track_unknown_count), so pass unknown_count");
+    }
+
+    ContinuousInputs block_parts = parts;
+    if (!model_->hash_in_continuous()) block_parts.hash_embedding = torch::Tensor();
+    const PlotInputs species_inputs = inputs.without_empty();
+    const int64_t n = parts.n_rows() > 0 ? parts.n_rows() : species_inputs.n_plots();
 
     // SAINT (inter-sample attention) and the coordinate-kNN GNN build each
     // plot's representation from the OTHER plots in the same forward batch, so
@@ -245,97 +294,64 @@ ResolvePredictions Predictor::predict(
                          "used. Pass predict batch_size=-1 to silence this.\n";
         }
     }
+    const bool one_chunk = batch_size == -1 || batch_dependent_encoder;
+    const int64_t step = one_chunk ? std::max<int64_t>(n, 1) : batch_size;
 
-    // Single-shot path: legacy behavior. Used when caller opts out of
-    // chunking (-1), when the dataset already fits in one chunk
-    // (n <= batch_size), or for a batch-composition-dependent encoder (above).
-    // The pool-* tensors are threaded through so PlotEncoderRankPool /
-    // PlotEncoderTransformer get the correct (n_plots, max_species) rank-pool
-    // tensors instead of the embed-mode species_ids (shape (n_plots, top_k_species)).
-    if (batch_size == -1 || n <= batch_size || batch_dependent_encoder) {
-        auto result = predict(
-            dataset.coordinates(),
-            dataset.covariates(),
-            dataset.hash_embedding(),
-            dataset.species_ids(),
-            dataset.species_vector(),
-            dataset.genus_ids(),
-            dataset.family_ids(),
-            dataset.unknown_fraction(),
-            dataset.unknown_count(),
-            dataset.pool_genus_ids(),
-            dataset.pool_family_ids(),
-            dataset.pool_weights(),
-            dataset.pool_mask(),
-            dataset.pool_has_cover(),
-            dataset.categorical_ids(),
-            return_latent
-        );
+    torch::NoGradGuard no_grad;
+    model_->eval();
 
-        // Use actual plot IDs from dataset
-        result.plot_ids = dataset.plot_ids();
-
-        // Copy targets from dataset for residual analysis
-        result.targets = dataset.targets();
-
-        return result;
-    }
-
-    // Chunked path: slice every input tensor along dim 0, forward each
-    // chunk on `device_`, move the chunk outputs to CPU, accumulate, and
-    // concat on CPU at the end. Keeping accumulators on CPU is what
-    // bounds peak VRAM to a single chunk's footprint regardless of n.
-    const auto& coordinates       = dataset.coordinates();
-    const auto& covariates        = dataset.covariates();
-    const auto& hash_embedding    = dataset.hash_embedding();
-    const auto& species_ids       = dataset.species_ids();
-    const auto& species_vector    = dataset.species_vector();
-    const auto& genus_ids         = dataset.genus_ids();
-    const auto& family_ids        = dataset.family_ids();
-    const auto& unknown_fraction  = dataset.unknown_fraction();
-    const auto& unknown_count     = dataset.unknown_count();
-    const auto& pool_genus_ids    = dataset.pool_genus_ids();
-    const auto& pool_family_ids   = dataset.pool_family_ids();
-    const auto& pool_weights      = dataset.pool_weights();
-    const auto& pool_mask         = dataset.pool_mask();
-    const auto& pool_has_cover    = dataset.pool_has_cover();
-    const auto& categorical_ids   = dataset.categorical_ids();
-
-    // Per-target lists of CPU chunks to concatenate at the end.
+    // Per-target lists of CPU chunks to concatenate at the end. Keeping the
+    // accumulators on the CPU bounds peak device memory to one chunk.
     std::unordered_map<std::string, std::vector<torch::Tensor>> pred_chunks;
     std::unordered_map<std::string, std::vector<torch::Tensor>> prob_chunks;
     std::vector<torch::Tensor> latent_chunks;
 
-    for (int64_t start = 0; start < n; start += batch_size) {
-        const int64_t end = std::min(start + batch_size, n);
+    // At least one chunk runs, so an empty input still yields every output
+    // with zero rows.
+    for (int64_t start = 0; start == 0 || start < n; start += step) {
+        const int64_t end = std::min(start + step, n);
 
-        auto chunk = predict(
-            slice0(coordinates,      start, end),
-            slice0(covariates,       start, end),
-            slice0(hash_embedding,   start, end),
-            slice0(species_ids,      start, end),
-            slice0(species_vector,   start, end),
-            slice0(genus_ids,        start, end),
-            slice0(family_ids,       start, end),
-            slice0(unknown_fraction, start, end),
-            slice0(unknown_count,    start, end),
-            slice0(pool_genus_ids,   start, end),
-            slice0(pool_family_ids,  start, end),
-            slice0(pool_weights,     start, end),
-            slice0(pool_mask,        start, end),
-            slice0(pool_has_cover,   start, end),
-            slice0(categorical_ids,  start, end),
-            return_latent
-        );
+        // The continuous block, assembled and standardised exactly as the
+        // Trainer did at fit time (continuous_block.hpp).
+        PlotInputs chunk = species_inputs.slice(start, end);
+        chunk.continuous = standardize_continuous(
+            assemble_continuous(block_parts.slice(start, end), schema.missing_values,
+                                end - start),
+            scalers_);
+        chunk = chunk.to(device_);
 
-        for (auto& [name, tensor] : chunk.predictions) {
-            pred_chunks[name].push_back(tensor.detach().to(torch::kCPU));
+        if (want_outputs) {
+            const auto outputs = model_->forward(chunk);
+            for (const auto& cfg : schema.targets) {
+                auto out_it = outputs.find(cfg.name);
+                if (out_it == outputs.end()) continue;
+                auto pred = out_it->second.detach();
+
+                if (cfg.task == TaskType::Classification) {
+                    // The head emits logits; the softmax row is the per-class
+                    // probability and its argmax the predicted code, so the
+                    // two outputs agree by construction.
+                    auto probs = torch::softmax(pred, /*dim=*/1);
+                    pred_chunks[cfg.name].push_back(
+                        torch::argmax(probs, /*dim=*/1).to(torch::kCPU));
+                    prob_chunks[cfg.name].push_back(probs.to(torch::kCPU));
+                } else {
+                    // Unscale and inverse transform
+                    pred = pred.squeeze(-1);
+                    auto scaler_it = scalers_.target_scalers.find(cfg.name);
+                    if (scaler_it != scalers_.target_scalers.end()) {
+                        pred = pred * scaler_it->second.second.to(device_) +
+                               scaler_it->second.first.to(device_);
+                    }
+                    if (cfg.transform == TransformType::Log1p) {
+                        pred = torch::expm1(torch::clamp(pred, kExpClampMin, kExpClampMax));
+                    }
+                    pred_chunks[cfg.name].push_back(pred.to(torch::kCPU));
+                }
+            }
         }
-        for (auto& [name, tensor] : chunk.probabilities) {
-            prob_chunks[name].push_back(tensor.detach().to(torch::kCPU));
-        }
-        if (return_latent && chunk.latent.defined()) {
-            latent_chunks.push_back(chunk.latent.detach().to(torch::kCPU));
+        if (want_latent) {
+            latent_chunks.push_back(model_->get_latent(chunk).detach().to(torch::kCPU));
         }
     }
 
@@ -346,166 +362,10 @@ ResolvePredictions Predictor::predict(
     for (auto& [name, chunks] : prob_chunks) {
         result.probabilities[name] = torch::cat(chunks, /*dim=*/0);
     }
-    if (return_latent && !latent_chunks.empty()) {
+    if (!latent_chunks.empty()) {
         result.latent = torch::cat(latent_chunks, /*dim=*/0);
     }
-
-    // Use actual plot IDs from dataset
-    result.plot_ids = dataset.plot_ids();
-
-    // Copy targets from dataset for residual analysis
-    result.targets = dataset.targets();
-
     return result;
-}
-
-ResolvePredictions Predictor::predict(
-    torch::Tensor coordinates,
-    torch::Tensor covariates,
-    torch::Tensor hash_embedding,
-    torch::Tensor species_ids,
-    torch::Tensor species_vector,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids,
-    torch::Tensor unknown_fraction,
-    torch::Tensor unknown_count,
-    torch::Tensor pool_genus_ids,
-    torch::Tensor pool_family_ids,
-    torch::Tensor pool_weights,
-    torch::Tensor pool_mask,
-    torch::Tensor pool_has_cover,
-    torch::Tensor categorical_ids,
-    bool return_latent
-) {
-    torch::NoGradGuard no_grad;
-    model_->eval();
-
-    // The continuous block, assembled and standardised exactly as the Trainer
-    // did at fit time (continuous_block.hpp).
-    const bool hash_in_block = model_->species_encoding() == SpeciesEncodingMode::Hash &&
-                               !model_->uses_explicit_vector();
-    // The row count, for a model whose block is empty.
-    int64_t n_rows = 0;
-    if (hash_embedding.defined()) n_rows = hash_embedding.size(0);
-    else if (species_ids.defined()) n_rows = species_ids.size(0);
-    else if (species_vector.defined()) n_rows = species_vector.size(0);
-    else if (pool_weights.defined()) n_rows = pool_weights.size(0);
-    auto continuous = assemble_continuous(
-        {coordinates, covariates, unknown_fraction, unknown_count,
-         hash_in_block ? hash_embedding : torch::Tensor()},
-        model_->schema().missing_values, n_rows);
-    auto scaled_continuous = standardize_continuous(continuous, scalers_).to(device_);
-
-    // Move tensors to device
-    genus_ids = to_device_if_defined(genus_ids, device_);
-    family_ids = to_device_if_defined(family_ids, device_);
-    species_ids = to_device_if_defined(species_ids, device_);
-    species_vector = to_device_if_defined(species_vector, device_);
-    pool_genus_ids = to_device_if_defined(pool_genus_ids, device_);
-    pool_family_ids = to_device_if_defined(pool_family_ids, device_);
-    pool_weights = to_device_if_defined(pool_weights, device_);
-    pool_mask = to_device_if_defined(pool_mask, device_);
-    pool_has_cover = to_device_if_defined(pool_has_cover, device_);
-    categorical_ids = to_device_if_defined(categorical_ids, device_);
-
-    // Get predictions using appropriate encoding mode
-    auto outputs = model_->forward(scaled_continuous, genus_ids, family_ids, species_ids, species_vector,
-                                    pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                                    categorical_ids);
-
-    ResolvePredictions result;
-
-    // Process each output
-    for (const auto& cfg : model_->schema().targets) {
-        auto out_it = outputs.find(cfg.name);
-        if (out_it == outputs.end()) continue;
-
-        auto pred = out_it->second;
-
-        if (cfg.task == TaskType::Classification) {
-            // The head emits logits; the softmax row is the per-class
-            // probability and its argmax the predicted code, so the two
-            // outputs agree by construction.
-            auto probs = torch::softmax(pred, /*dim=*/1);
-            result.probabilities[cfg.name] = probs;
-            result.predictions[cfg.name] = torch::argmax(probs, /*dim=*/1);
-        } else {
-            // Unscale and inverse transform
-            pred = pred.squeeze(-1);
-
-            auto scaler_it = scalers_.target_scalers.find(cfg.name);
-            if (scaler_it != scalers_.target_scalers.end()) {
-                pred = pred * scaler_it->second.second.to(device_) + scaler_it->second.first.to(device_);
-            }
-
-            if (cfg.transform == TransformType::Log1p) {
-                pred = torch::expm1(torch::clamp(pred, kExpClampMin, kExpClampMax));
-            }
-
-            result.predictions[cfg.name] = pred;
-        }
-    }
-
-    // Optionally return latent
-    if (return_latent) {
-        result.latent = model_->get_latent(scaled_continuous, genus_ids, family_ids, species_ids, species_vector,
-                                           pool_genus_ids, pool_family_ids, pool_weights, pool_mask, pool_has_cover,
-                                           categorical_ids);
-    }
-
-    // Create plot indices as strings
-    int64_t n_samples = scaled_continuous.size(0);
-    for (int64_t i = 0; i < n_samples; ++i) {
-        result.plot_ids.push_back(std::to_string(i));
-    }
-
-    return result;
-}
-
-torch::Tensor Predictor::get_embeddings(
-    torch::Tensor coordinates,
-    torch::Tensor covariates,
-    torch::Tensor hash_embedding,
-    torch::Tensor genus_ids,
-    torch::Tensor family_ids,
-    torch::Tensor unknown_fraction,
-    torch::Tensor unknown_count
-) {
-    torch::NoGradGuard no_grad;
-    model_->eval();
-
-    const auto& schema = model_->schema();
-    auto present = [](const torch::Tensor& t) { return t.defined() && t.numel() > 0; };
-    if (schema.track_unknown_fraction && !present(unknown_fraction)) {
-        throw std::invalid_argument(
-            "get_embeddings: the model reads an unknown-species fraction "
-            "(track_unknown_fraction), so pass unknown_fraction");
-    }
-    if (schema.track_unknown_count && !present(unknown_count)) {
-        throw std::invalid_argument(
-            "get_embeddings: the model reads an unknown-species count "
-            "(track_unknown_count), so pass unknown_count");
-    }
-    const bool hash_in_block = model_->species_encoding() == SpeciesEncodingMode::Hash &&
-                               !model_->uses_explicit_vector();
-    int64_t n_samples = 0;
-    for (const auto& t : {coordinates, covariates, hash_embedding, genus_ids}) {
-        if (present(t)) { n_samples = t.size(0); break; }
-    }
-    // The same block, in the same column order, that the Trainer fitted.
-    auto continuous = assemble_continuous(
-        {coordinates, covariates, unknown_fraction, unknown_count,
-         hash_in_block ? hash_embedding : torch::Tensor()},
-        schema.missing_values, n_samples);
-    if (continuous.size(1) == 0) {
-        throw std::runtime_error("get_embeddings requires at least one non-empty input tensor");
-    }
-    auto scaled_continuous = standardize_continuous(continuous, scalers_).to(device_);
-
-    genus_ids = to_device_if_defined(genus_ids, device_);
-    family_ids = to_device_if_defined(family_ids, device_);
-
-    return model_->get_latent(scaled_continuous, genus_ids, family_ids);
 }
 
 void Predictor::optimize_for_inference() {
@@ -519,7 +379,7 @@ void Predictor::optimize_for_inference() {
 
         for (size_t i = 0; i + 1 < seq->size(); ++i) {
             auto linear = std::dynamic_pointer_cast<torch::nn::LinearImpl>((*seq)[i]);
-            // Since the fp32-norm guard (gcol33/resolve#21), every norm in the
+            // Since the fp32-norm guard, every norm in the
             // Sequential MLP is wrapped in Fp32Norm, so the child is an
             // Fp32NormImpl, not a bare BatchNorm1dImpl. Unwrap it to reach the
             // inner BatchNorm1d; fall back to a direct cast for any un-wrapped

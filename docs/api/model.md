@@ -53,16 +53,20 @@ forward(continuous, genus_ids=None, family_ids=None,
 Returns `dict[str, Tensor]`, one entry per target. `continuous` is required;
 which of the rest are needed follows the species encoding. `continuous` is the
 concatenation the trainer builds: coordinates, covariates, the unknown-mass
-columns, and the hash embedding in hash mode, in that order.
+columns, and the hash embedding in hash mode, in that order. A model with
+categorical columns given no `categorical_ids` reads every column as unknown.
+
+Every method below takes these same model inputs, positionally in the order
+above or by keyword; an unknown keyword raises `TypeError`.
 
 | Method | Returns |
 |--------|---------|
 | `forward(...)` / `__call__(...)` | `dict[str, Tensor]` |
-| `get_latent(...)` | `Tensor` of shape `(batch, latent_dim)`; same arguments as `forward` |
+| `get_latent(...)` | `Tensor` of shape `(batch, latent_dim)` |
 | `forward_with_aux(...)` | `ModelForwardResult` with `outputs` and `moe_aux_loss` |
-| `forward_single(target, continuous, genus_ids=None, family_ids=None, species_ids=None, species_vector=None, categorical_ids=None)` | `Tensor` for one head; rejects pool encoders |
-| `encode_with_activations(continuous, genus_ids=None, family_ids=None, categorical_ids=None)` | `(latent, [activations])`; activations are non-empty for the hash encoder |
-| `get_gate_probs(continuous, genus_ids=None, family_ids=None)` | `Tensor` of expert gate probabilities, empty without MoE. Covers the encoders whose species signal is already inside `continuous` (hash) or absent (TraitNet, adapter architectures); for an embed / sparse / rank_pool / transformer model it raises, because the signature carries no species input. Read those gates off `forward_with_aux` instead. |
+| `forward_single(target, ...)` | `Tensor` for one head |
+| `encode_with_activations(...)` | `(latent, [activations])`; activations are non-empty for the hash encoder |
+| `get_gate_probs(...)` | `Tensor` of expert gate probabilities `(batch, n_experts)`, `None` without MoE |
 
 The forward passes release the GIL around the compute, so other Python threads
 run during a long pass.
