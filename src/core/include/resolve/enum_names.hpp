@@ -140,6 +140,7 @@ inline constexpr EnumName<LRSchedulerType> kLRSchedulerTypeNames[] = {
     {"none", LRSchedulerType::None},
     {"step", LRSchedulerType::StepLR},
     {"cosine", LRSchedulerType::CosineAnnealing},
+    {"plateau", LRSchedulerType::ReduceOnPlateau},
 };
 
 inline constexpr EnumName<MoERoutingType> kMoERoutingTypeNames[] = {

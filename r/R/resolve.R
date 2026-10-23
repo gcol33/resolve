@@ -848,6 +848,31 @@ resolve.dataset.frame <- function(header,
 #'   `maxEpochs`. The only mode that accepts `testSize = 0`, for a refit on
 #'   every plot.
 #' @param lr Learning rate (default 0.001)
+#' @param lrScheduler Learning-rate schedule (default `"none"`, constant):
+#'   `"step"` multiplies the rate by `lrGamma` every `lrStepSize` epochs,
+#'   `"cosine"` anneals it from `lr` to `lrMin` over `maxEpochs`, and
+#'   `"plateau"` multiplies it by `lrPlateauFactor` when the held-out loss
+#'   that drives early stopping has not improved for more than
+#'   `lrPlateauPatience` epochs (PyTorch's `ReduceLROnPlateau` in mode
+#'   `"min"`). `"plateau"` needs a held-out fold, so it is refused with
+#'   `testSize = 0`.
+#' @param lrStepSize Epochs between decays under `lrScheduler = "step"`
+#'   (default 100).
+#' @param lrGamma Factor of each decay under `lrScheduler = "step"`
+#'   (default 0.1).
+#' @param lrMin The rate the cosine schedule ends at, and the floor a plateau
+#'   never decays below (default 1e-6).
+#' @param lrPlateauFactor Factor a plateau multiplies the rate by, in (0, 1)
+#'   (default 0.1).
+#' @param lrPlateauPatience Epochs without improvement of the held-out loss a
+#'   plateau allows; the next one decays the rate (default 10). Like
+#'   `patience`, an epoch counts only once the loss objective has reached its
+#'   final phase.
+#' @param lrPlateauThreshold Relative improvement on the best held-out loss
+#'   an epoch must make to count as one, in \[0, 1) (default 0: any decrease,
+#'   the rule early stopping and `best_epoch` use; PyTorch's default is 1e-4).
+#' @param lrPlateauCooldown Epochs after a decay during which no epoch counts
+#'   against the rate (default 0).
 #' @param batchSize Batch size (default 4096)
 #' @param device Device: "cpu" or "cuda" (default "cpu")
 #' @param testSize Fraction of the data held out for early stopping (default
@@ -930,7 +955,8 @@ resolve.dataset.frame <- function(header,
 #'
 #' @return A list with `trainer`, `result`, and `dataset`. `result` carries
 #'   `best_epoch`, `train_time_seconds`, `final_metrics`, the loss histories
-#'   `train_loss` and `test_loss` (one value per epoch), their split by target
+#'   `train_loss` and `test_loss` (one value per epoch), the learning rate
+#'   each epoch trained at `lr`, the loss histories' split by target
 #'   `train_loss_by_target` and `test_loss_by_target` (named lists of per-epoch
 #'   vectors: each target's weighted term of the total, so per epoch they add
 #'   up to it), `train_aux_loss` (a named list of the auxiliary terms of
@@ -956,6 +982,14 @@ resolve.train.dataset <- function(dataset,
                                   patience = 50L,
                                   fixedEpochs = 0L,
                                   lr = 1e-3,
+                                  lrScheduler = "none",
+                                  lrStepSize = 100L,
+                                  lrGamma = 0.1,
+                                  lrMin = 1e-6,
+                                  lrPlateauFactor = 0.1,
+                                  lrPlateauPatience = 10L,
+                                  lrPlateauThreshold = 0,
+                                  lrPlateauCooldown = 0L,
                                   batchSize = 4096L,
                                   device = "cpu",
                                   testSize = 0.2,
@@ -1033,6 +1067,10 @@ resolve.train.dataset <- function(dataset,
     if (testSize == 0 && fixedEpochs == 0) {
       stop("testSize = 0 leaves early stopping nothing to watch; set fixedEpochs")
     }
+  }
+  if (!is.character(lrScheduler) || length(lrScheduler) != 1 ||
+      !lrScheduler %in% c("none", "step", "cosine", "plateau")) {
+    stop("lrScheduler must be 'none', 'step', 'cosine', or 'plateau'")
   }
   if (!lossConfig %in% c("mae", "smape", "combined", "nca")) {
     stop("lossConfig must be 'mae', 'smape', 'combined', or 'nca'")
@@ -1120,6 +1158,14 @@ resolve.train.dataset <- function(dataset,
     patience = as.integer(patience),
     fixed_epochs = as.integer(fixedEpochs),
     lr = lr,
+    lr_scheduler = lrScheduler,
+    lr_step_size = as.integer(lrStepSize),
+    lr_gamma = lrGamma,
+    lr_min = lrMin,
+    lr_plateau_factor = lrPlateauFactor,
+    lr_plateau_patience = as.integer(lrPlateauPatience),
+    lr_plateau_threshold = lrPlateauThreshold,
+    lr_plateau_cooldown = as.integer(lrPlateauCooldown),
     device = device,
     loss_config = lossConfig,
     nca_temperature = ncaTemperature,

@@ -358,6 +358,10 @@ inline constexpr const char* kRequiredDatasetConfigKeys[] = {
     F(lr_step_size,        "train_lr_step_size")        \
     F(lr_gamma,            "train_lr_gamma")            \
     F(lr_min,              "train_lr_min")              \
+    F(lr_plateau_factor,   "train_lr_plateau_factor")   \
+    F(lr_plateau_patience, "train_lr_plateau_patience") \
+    F(lr_plateau_threshold, "train_lr_plateau_threshold") \
+    F(lr_plateau_cooldown, "train_lr_plateau_cooldown") \
     F(band_thresholds,     "train_band_thresholds")     \
     F(band_threshold,      "train_band_threshold")      \
     F(nca_temperature,     "train_nca_temperature")     \

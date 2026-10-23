@@ -65,6 +65,7 @@ set(RESOLVE_CORE_HEADERS
     include/resolve/ln_mlp.hpp
     include/resolve/model.hpp
     include/resolve/trainer.hpp
+    include/resolve/lr_schedule.hpp
     include/resolve/predictor.hpp
     include/resolve/loss.hpp
     include/resolve/target_labels.hpp

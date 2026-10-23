@@ -71,6 +71,50 @@ test_that("a step learning-rate schedule round-trips through the checkpoint", {
   ))
 })
 
+test_that("a reduce-on-plateau schedule round-trips through the checkpoint", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  expect_config_round_trip(list(
+    batch_size = 16L,
+    max_epochs = 4L,
+    patience = 10L,
+    lr = 0.01,
+    lr_scheduler = "plateau",
+    lr_min = 0.0001,
+    lr_plateau_factor = 0.5,
+    lr_plateau_patience = 5L,
+    lr_plateau_threshold = 0.0001,
+    lr_plateau_cooldown = 2L
+  ))
+})
+
+test_that("a plateau decays the rate on the held-out loss and needs a fold", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  tables <- signal_tables(60L)
+  dataset <- load_tables(tables, signal_roles(), regression_target())
+  # No epoch can beat its best by 99.9 %, so after the first epoch every epoch
+  # is a bad one: with patience 1 and a cooldown of 1 the rate halves every
+  # third epoch.
+  fit <- resolve.train.dataset(dataset, hiddenDims = c(16L, 8L), maxEpochs = 9L,
+                               patience = 50L, batchSize = 8L, lr = 0.01,
+                               lrScheduler = "plateau", lrPlateauFactor = 0.5,
+                               lrPlateauPatience = 1L, lrPlateauThreshold = 0.999,
+                               lrPlateauCooldown = 1L, verbose = FALSE)
+  expect_length(fit$result$lr, 9L)
+  expect_equal(fit$result$lr, 0.01 * 0.5^(0:8 %/% 3), tolerance = 1e-6)
+
+  expect_error(
+    resolve.train.dataset(dataset, hiddenDims = c(8L), maxEpochs = 2L, fixedEpochs = 2L,
+                          testSize = 0, batchSize = 8L, lrScheduler = "plateau",
+                          verbose = FALSE),
+    "no held-out fold"
+  )
+  expect_error(resolve.train.dataset(dataset, lrScheduler = "exponential"), "lrScheduler")
+})
+
 test_that("A mixture of experts builds at either placement", {
   skip_if_no_backend()
   skip_on_cran()

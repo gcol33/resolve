@@ -395,7 +395,38 @@ TEST_CASE("A flag for a field that does not apply is refused", "[cli][config_fla
     check_refused({{"--cover-dropout", "0.2"}}, "--cover-dropout");
     check_refused({{"--nca-weight", "0.5"}}, "--nca-weight");
     check_refused({{"--lr-gamma", "0.5"}}, "--lr-gamma");
+    check_refused({{"--lr-plateau-patience", "5"}}, "--lr-plateau-patience");
+    check_refused({{"--lr-scheduler", "cosine"}, {"--lr-plateau-factor", "0.5"}},
+                  "--lr-plateau-factor");
+    check_refused({{"--lr-scheduler", "step"}, {"--lr-min", "1e-5"}}, "--lr-min");
     check_refused({{"--checkpoint-every", "5"}}, "--checkpoint-every");
+}
+
+TEST_CASE("The reduce-on-plateau flags land on their fields", "[cli][config_flags]") {
+    auto args = args_with({
+        {"--lr-scheduler", "plateau"},
+        {"--lr-plateau-factor", "0.5"},
+        {"--lr-plateau-patience", "5"},
+        {"--lr-plateau-threshold", "1e-4"},
+        {"--lr-plateau-cooldown", "2"},
+        {"--lr-min", "1e-5"},
+    });
+    DatasetConfig dataset;
+    read_top_level_flags(dataset, args);
+    ModelConfig model;
+    read_top_level_flags(model, args);
+    TrainConfig train;
+    read_top_level_flags(train, args);
+
+    CHECK(train.lr_scheduler == LRSchedulerType::ReduceOnPlateau);
+    CHECK(train.lr_plateau_factor == 0.5f);
+    CHECK(train.lr_plateau_patience == 5);
+    CHECK(train.lr_plateau_threshold == 1e-4f);
+    CHECK(train.lr_plateau_cooldown == 2);
+    CHECK(train.lr_min == 1e-5f);
+
+    const FlagContext context{dataset, model, train};
+    CHECK_NOTHROW(check_flag_gates(train, args, context));
 }
 
 TEST_CASE("A number with trailing characters, a non-number or an int out of range is refused",

@@ -373,7 +373,7 @@ TEST_CASE("Every config struct's registry covers every member", "[config][regist
     CHECK(field_registry_size(static_cast<const ParallelLayersConfig*>(nullptr)) == 5);
     CHECK(field_registry_size(static_cast<const ModelConfig*>(nullptr)) == 46);
     CHECK(field_registry_size(static_cast<const DatasetConfig*>(nullptr)) == 17);
-    CHECK(field_registry_size(static_cast<const TrainConfig*>(nullptr)) == 30);
+    CHECK(field_registry_size(static_cast<const TrainConfig*>(nullptr)) == 34);
 
     // Same comparison the static_assert makes, spelled out once at runtime.
     CHECK(field_registry_size(static_cast<const ModelConfig*>(nullptr)) ==
@@ -604,6 +604,8 @@ TEST_CASE("Checkpoint keys keep the spellings earlier releases wrote",
              "train_phase_boundary_1", "train_phase_boundary_2",
              "train_loss_config", "train_lr_scheduler", "train_lr_step_size",
              "train_lr_gamma", "train_lr_min", "train_vram_fraction",
+             "train_lr_plateau_factor", "train_lr_plateau_patience",
+             "train_lr_plateau_threshold", "train_lr_plateau_cooldown",
              "train_band_thresholds", "train_band_threshold",
              "train_nca_temperature", "train_nca_neighbors", "train_nca_weight",
          }) {

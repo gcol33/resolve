@@ -3,6 +3,7 @@
 #include "resolve/types.hpp"
 #include "resolve/model.hpp"
 #include "resolve/loss.hpp"
+#include "resolve/lr_schedule.hpp"
 #include "resolve/dataset.hpp"
 #include "resolve/scalers.hpp"
 #include <torch/torch.h>
@@ -73,14 +74,19 @@ public:
     // names: a withheld spatial block or database, or the fold a published
     // protocol selects its epoch on. `stopping_indices` are positions in
     // dataset.plot_ids() (ResolveDataset::plot_indices maps plot IDs to them).
-    // Early stopping, best_epoch, final_metrics, the baselines and
-    // test_indices() / test_plot_ids() read exactly these plots, in this
-    // order; every other plot is a fitting row, and the scalers are fitted on
+    // Early stopping, best_epoch, final_metrics, the baselines, a
+    // reduce-on-plateau learning-rate schedule and test_indices() /
+    // test_plot_ids() read exactly these plots, in this order; every other
+    // plot is a fitting row, and the scalers are fitted on
     // those alone. `seed` orders the fitting rows and drives the per-epoch
     // shuffle as under the random split, so a fold equal to the random one
     // reproduces that split row for row. Throws std::invalid_argument for an
     // empty fold, an index outside [0, n_plots), a repeated index, a fold that
     // holds every plot, and a fold without a labelled plot for a masked target.
+    //
+    // Every overload throws std::invalid_argument for a learning-rate schedule
+    // the split cannot drive (validate_lr_schedule): a reduce-on-plateau
+    // schedule with nothing held out, or its knobs out of range.
     void prepare_data(
         const ResolveDataset& dataset,
         const std::vector<int64_t>& stopping_indices,
@@ -108,8 +114,9 @@ public:
     // Continue a run from a checkpoint fit() wrote while it trained: best.pt
     // or checkpoint_<N>.pt under TrainConfig::checkpoint_dir. Those carry the
     // run's progress -- the epochs done, the loss histories, the best epoch's
-    // loss, weights and metrics, the early-stopping patience, the optimizer and
-    // AMP state, the batch size the run had reached and the RNG streams -- and
+    // loss, weights and metrics, the early-stopping patience, the learning
+    // rates and a reduce-on-plateau schedule's state, the optimizer and AMP
+    // state, the batch size the run had reached and the RNG streams -- and
     // resume() picks the run up at the epoch after the checkpoint's, as if it
     // had never stopped. The result covers the whole run;
     // TrainResult::resumed_from_epoch is the epoch it continued from.
@@ -391,11 +398,8 @@ private:
     // The target scalers on the training device: the GPU mirror when cached.
     [[nodiscard]] TargetScalers device_target_scalers() const;
 
-    // Compute learning rate for given epoch based on scheduler config
-    float get_learning_rate(int epoch) const;
-
     // Update optimizer learning rate
-    void update_learning_rate(float lr);
+    void update_learning_rate(double lr);
 
     // Pre-load all data to GPU for faster training
     void cache_data_to_gpu();
@@ -446,6 +450,7 @@ private:
         int next_epoch = 0;                 // first epoch still to run
         float best_loss = std::numeric_limits<float>::infinity();
         int patience_counter = 0;
+        PlateauState plateau;               // the ReduceOnPlateau schedule's state
         TrainResult result;                 // histories, best_epoch, final_metrics so far
         std::string best_weights;           // snapshot_weights() of the best epoch; empty: none
         std::string optimizer_state;        // snapshot_optimizer() to start from; empty: fresh

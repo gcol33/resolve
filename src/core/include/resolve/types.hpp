@@ -107,9 +107,11 @@ enum class LossConfigMode {
 
 // Learning rate scheduler type
 enum class LRSchedulerType {
-    None,           // Constant learning rate
-    StepLR,         // Step decay every N epochs
-    CosineAnnealing // Cosine annealing to min_lr
+    None,            // Constant learning rate
+    StepLR,          // Step decay every N epochs
+    CosineAnnealing, // Cosine annealing to min_lr
+    ReduceOnPlateau  // Decay when the held-out selection loss stops improving
+                     // (lr_schedule.hpp)
 };
 
 // Species selection mode (which species to include)
@@ -795,7 +797,21 @@ struct TrainConfig {
     LRSchedulerType lr_scheduler = LRSchedulerType::None;
     int lr_step_size = 100;      // For StepLR: decay every N epochs
     float lr_gamma = 0.1f;       // For StepLR: multiply LR by gamma
-    float lr_min = 1e-6f;        // For CosineAnnealing: minimum LR
+    float lr_min = 1e-6f;        // CosineAnnealing: final LR; ReduceOnPlateau: floor
+
+    // ReduceOnPlateau, PyTorch's ReduceLROnPlateau in mode "min" on the
+    // held-out fold's selection loss, the value early stopping and best_epoch
+    // read. An epoch improves when its loss is below best * (1 -
+    // lr_plateau_threshold) (threshold_mode "rel"); bad epochs are counted
+    // once the loss objective has settled, as patience is. After more than
+    // lr_plateau_patience bad epochs in a row the LR is multiplied by
+    // lr_plateau_factor, floored at lr_min, and the next lr_plateau_cooldown
+    // epochs count no bad epoch. A threshold of 0 is early stopping's own
+    // rule (strictly below the best); PyTorch's default is 1e-4.
+    float lr_plateau_factor = 0.1f;
+    int lr_plateau_patience = 10;
+    float lr_plateau_threshold = 0.0f;
+    int lr_plateau_cooldown = 0;
 
     // Band accuracy thresholds for regression metrics. Reporting only: each
     // threshold t produces a "band_<100t>" metric (band_10, band_25, band_50).

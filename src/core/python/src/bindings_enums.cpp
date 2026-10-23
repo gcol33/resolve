@@ -55,6 +55,7 @@ void register_enums(nb::module_& m) {
         .value("None_", resolve::LRSchedulerType::None)
         .value("StepLR", resolve::LRSchedulerType::StepLR)
         .value("CosineAnnealing", resolve::LRSchedulerType::CosineAnnealing)
+        .value("ReduceOnPlateau", resolve::LRSchedulerType::ReduceOnPlateau)
         .export_values();
 
     nb::enum_<resolve::MoERoutingType>(m, "MoERoutingType")

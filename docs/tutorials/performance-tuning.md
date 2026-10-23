@@ -27,7 +27,7 @@ Reading the loss curve:
 ### Schedules
 
 No schedule runs by default (`lr_scheduler = LRSchedulerType.None_`); the rate
-stays at `lr` for the whole run. Two schedules are available:
+stays at `lr` for the whole run. Three schedules are available:
 
 ```python
 cfg.lr_scheduler = rc.LRSchedulerType.StepLR
@@ -36,10 +36,16 @@ cfg.lr_gamma     = 0.1      # by this factor
 
 cfg.lr_scheduler = rc.LRSchedulerType.CosineAnnealing
 cfg.lr_min       = 1e-6     # reached on the last epoch
+
+cfg.lr_scheduler        = rc.LRSchedulerType.ReduceOnPlateau
+cfg.lr_plateau_factor   = 0.1   # decay by this factor
+cfg.lr_plateau_patience = 10    # after more than 10 epochs without a new best
 ```
 
 Cosine annealing spans `max_epochs`, so it lands on `lr_min` at the last epoch
-rather than a step short of it.
+rather than a step short of it. `ReduceOnPlateau` needs no run length: it
+follows the held-out loss early stopping reads (see
+[Lowering the learning rate on a plateau](training.md#lowering-the-learning-rate-on-a-plateau)).
 
 ## Batch size
 

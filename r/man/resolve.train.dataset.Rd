@@ -11,6 +11,14 @@ resolve.train.dataset(
   patience = 50L,
   fixedEpochs = 0L,
   lr = 0.001,
+  lrScheduler = "none",
+  lrStepSize = 100L,
+  lrGamma = 0.1,
+  lrMin = 1e-06,
+  lrPlateauFactor = 0.1,
+  lrPlateauPatience = 10L,
+  lrPlateauThreshold = 0,
+  lrPlateauCooldown = 0L,
   batchSize = 4096L,
   device = "cpu",
   testSize = 0.2,
@@ -58,6 +66,39 @@ early stopping). The learning-rate schedule is still laid out over
 every plot.}
 
 \item{lr}{Learning rate (default 0.001)}
+
+\item{lrScheduler}{Learning-rate schedule (default \code{"none"}, constant):
+\code{"step"} multiplies the rate by \code{lrGamma} every \code{lrStepSize} epochs,
+\code{"cosine"} anneals it from \code{lr} to \code{lrMin} over \code{maxEpochs}, and
+\code{"plateau"} multiplies it by \code{lrPlateauFactor} when the held-out loss
+that drives early stopping has not improved for more than
+\code{lrPlateauPatience} epochs (PyTorch's \code{ReduceLROnPlateau} in mode
+\code{"min"}). \code{"plateau"} needs a held-out fold, so it is refused with
+\code{testSize = 0}.}
+
+\item{lrStepSize}{Epochs between decays under \code{lrScheduler = "step"}
+(default 100).}
+
+\item{lrGamma}{Factor of each decay under \code{lrScheduler = "step"}
+(default 0.1).}
+
+\item{lrMin}{The rate the cosine schedule ends at, and the floor a plateau
+never decays below (default 1e-6).}
+
+\item{lrPlateauFactor}{Factor a plateau multiplies the rate by, in (0, 1)
+(default 0.1).}
+
+\item{lrPlateauPatience}{Epochs without improvement of the held-out loss a
+plateau allows; the next one decays the rate (default 10). Like
+\code{patience}, an epoch counts only once the loss objective has reached its
+final phase.}
+
+\item{lrPlateauThreshold}{Relative improvement on the best held-out loss
+an epoch must make to count as one, in [0, 1) (default 0: any decrease,
+the rule early stopping and \code{best_epoch} use; PyTorch's default is 1e-4).}
+
+\item{lrPlateauCooldown}{Epochs after a decay during which no epoch counts
+against the rate (default 0).}
 
 \item{batchSize}{Batch size (default 4096)}
 
@@ -170,7 +211,8 @@ blocks (default 0.1).}
 \value{
 A list with \code{trainer}, \code{result}, and \code{dataset}. \code{result} carries
 \code{best_epoch}, \code{train_time_seconds}, \code{final_metrics}, the loss histories
-\code{train_loss} and \code{test_loss} (one value per epoch), their split by target
+\code{train_loss} and \code{test_loss} (one value per epoch), the learning rate
+each epoch trained at \code{lr}, the loss histories' split by target
 \code{train_loss_by_target} and \code{test_loss_by_target} (named lists of per-epoch
 vectors: each target's weighted term of the total, so per epoch they add
 up to it), \code{train_aux_loss} (a named list of the auxiliary terms of

@@ -308,10 +308,16 @@ inline const char* step_schedule(const FlagContext& c) {
     return c.train.lr_scheduler == resolve::LRSchedulerType::StepLR ? nullptr
                                                                      : "--lr-scheduler step";
 }
-inline const char* cosine_schedule(const FlagContext& c) {
-    return c.train.lr_scheduler == resolve::LRSchedulerType::CosineAnnealing
+inline const char* plateau_schedule(const FlagContext& c) {
+    return c.train.lr_scheduler == resolve::LRSchedulerType::ReduceOnPlateau
                ? nullptr
-               : "--lr-scheduler cosine";
+               : "--lr-scheduler plateau";
+}
+inline const char* floored_schedule(const FlagContext& c) {
+    return c.train.lr_scheduler == resolve::LRSchedulerType::CosineAnnealing ||
+                   c.train.lr_scheduler == resolve::LRSchedulerType::ReduceOnPlateau
+               ? nullptr
+               : "--lr-scheduler cosine or plateau";
 }
 inline const char* nca_loss(const FlagContext& c) {
     return c.train.loss_config == resolve::LossConfigMode::NCA ? nullptr : "--loss-config nca";
@@ -426,10 +432,26 @@ inline constexpr FieldFlag kTrainConfigFlags[] = {
      "Epochs at which the combined loss adds SMAPE,\nthen the band penalty"},
     {"loss_config", nullptr, "Loss recipe"},
     {"device", kNoFlag, nullptr},
-    {"lr_scheduler", nullptr, "Learning rate schedule"},
+    {"lr_scheduler", nullptr,
+     "Learning rate schedule (plateau decays when the\nheld-out loss stops improving)"},
     {"lr_step_size", nullptr, "Epochs between decays", &flag_gates::step_schedule},
     {"lr_gamma", nullptr, "Decay factor", &flag_gates::step_schedule},
-    {"lr_min", nullptr, "Floor learning rate", &flag_gates::cosine_schedule},
+    {"lr_min", nullptr,
+     "Floor learning rate: where the cosine schedule ends,\nbelow which a plateau never decays",
+     &flag_gates::floored_schedule},
+    {"lr_plateau_factor", nullptr,
+     "Factor a plateau multiplies the learning rate by,\nin (0, 1)",
+     &flag_gates::plateau_schedule},
+    {"lr_plateau_patience", nullptr,
+     "Epochs without improvement of the held-out loss\na plateau allows; the next one decays the rate",
+     &flag_gates::plateau_schedule},
+    {"lr_plateau_threshold", nullptr,
+     "Relative improvement on the best held-out loss an\nepoch must make to count as one (0 = any\n"
+     "decrease, as early stopping counts; PyTorch's\ndefault is 1e-4)",
+     &flag_gates::plateau_schedule},
+    {"lr_plateau_cooldown", nullptr,
+     "Epochs after a decay during which no bad epoch\ncounts",
+     &flag_gates::plateau_schedule},
     {"band_thresholds", nullptr,
      "Band accuracies to REPORT. Does not change what\ntraining optimizes"},
     {"band_threshold", nullptr,

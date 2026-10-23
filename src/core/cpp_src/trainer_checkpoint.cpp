@@ -260,6 +260,17 @@ void Trainer::write_progress(torch::serialize::OutputArchive& archive,
 
     archive.write("resume_train_loss", float_tensor(result.train_loss_history));
     archive.write("resume_test_loss", float_tensor(result.test_loss_history));
+    archive.write("resume_lr", float_tensor(result.lr_history));
+
+    // The reduce-on-plateau schedule's state, the rate in double as the
+    // optimizer holds it.
+    const PlateauState& plateau = progress.plateau;
+    archive.write("resume_plateau_best", torch::tensor(plateau.best, torch::kFloat64));
+    archive.write("resume_plateau_bad_epochs",
+                  torch::tensor(static_cast<int64_t>(plateau.bad_epochs)));
+    archive.write("resume_plateau_cooldown",
+                  torch::tensor(static_cast<int64_t>(plateau.cooldown_counter)));
+    archive.write("resume_plateau_lr", torch::tensor(plateau.lr, torch::kFloat64));
     archive.write("resume_train_loss_by_target",
                   history_matrix(result.train_loss_history_by_target, names_of(targets),
                                  result.train_loss_history.size()));
@@ -527,6 +538,12 @@ Trainer::RunProgress Trainer::read_progress(torch::serialize::InputArchive& arch
     result.best_epoch = scalar_int("resume_best_epoch");
     result.train_loss_history = float_vector(read_required(archive, "resume_train_loss", path));
     result.test_loss_history = float_vector(read_required(archive, "resume_test_loss", path));
+    result.lr_history = float_vector(read_required(archive, "resume_lr", path));
+
+    progress.plateau.best = read_required(archive, "resume_plateau_best", path).item<double>();
+    progress.plateau.bad_epochs = scalar_int("resume_plateau_bad_epochs");
+    progress.plateau.cooldown_counter = scalar_int("resume_plateau_cooldown");
+    progress.plateau.lr = read_required(archive, "resume_plateau_lr", path).item<double>();
     result.train_loss_history_by_target =
         history_map(read_required(archive, "resume_train_loss_by_target", path), names_of(targets));
     result.test_loss_history_by_target =

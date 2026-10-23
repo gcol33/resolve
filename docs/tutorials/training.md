@@ -83,7 +83,7 @@ cfg.device       = "cuda"
 | `nca_temperature` | `0.1` | Scale of the NCA stochastic-neighbour softmax |
 | `nca_neighbors` | `32` | Neighbours per sample the NCA term sums over |
 | `nca_weight` | `0.1` | Weight of the NCA term against cross-entropy |
-| `lr_scheduler` | `None_` | `StepLR` or `CosineAnnealing` |
+| `lr_scheduler` | `None_` | `StepLR`, `CosineAnnealing` or `ReduceOnPlateau` |
 | `use_amp` | `False` | Mixed precision on CUDA |
 | `cudnn_benchmark` | `True` | Auto-tune cuDNN algorithms |
 | `allow_tf32` | `True` | TF32 matmuls on Ampere and later |
@@ -188,6 +188,55 @@ read on exactly these plots, and every other plot trains. The checkpoint
 records the split: `load_run_metadata` reports `hold_out` as `explicit` (or
 `random` with its `test_size`), the seed, and the plot counts, and
 `resolve info` prints them.
+
+### Lowering the learning rate on a plateau
+
+The step and cosine schedules are laid out over `max_epochs`, so they need the
+run's length in advance. `ReduceOnPlateau` follows the held-out loss instead,
+the way PyTorch's `ReduceLROnPlateau` does: when the loss early stopping reads
+has not improved for more than `lr_plateau_patience` epochs, the rate is
+multiplied by `lr_plateau_factor`, down to `lr_min`. Paired with a larger
+`patience`, the rate drops on a plateau and training stops on a longer one,
+which is how hdm-framework (Leblanc et al. 2024) trains, with patience 5 for
+the rate and 10 for stopping:
+
+=== "Python"
+
+    ```python
+    cfg.lr_scheduler         = rc.LRSchedulerType.ReduceOnPlateau
+    cfg.lr_plateau_factor    = 0.1
+    cfg.lr_plateau_patience  = 5
+    cfg.lr_plateau_threshold = 1e-4   # PyTorch's default; 0 = any decrease
+    cfg.patience             = 10
+    result = trainer.fit()
+    result.lr_history                 # the rate each epoch trained at
+    ```
+
+=== "R"
+
+    ```r
+    fit <- resolve.train.dataset(dataset, lrScheduler = "plateau",
+                                 lrPlateauFactor = 0.1, lrPlateauPatience = 5L,
+                                 lrPlateauThreshold = 1e-4, patience = 10L)
+    fit$result$lr
+    ```
+
+=== "Command line"
+
+    ```bash
+    resolve train ... --lr-scheduler plateau --lr-plateau-factor 0.1 \
+                      --lr-plateau-patience 5 --lr-plateau-threshold 1e-4 \
+                      --patience 10 --output model.pt
+    ```
+
+An epoch counts against the rate only where it would count against
+`patience`: once the loss objective has reached its final phase, and not while
+`lr_plateau_cooldown` epochs after a decay run. With the default
+`lr_plateau_threshold = 0` an epoch improves exactly when early stopping says
+it does; a positive threshold asks for a relative improvement on the best loss
+before the rate stays. The schedule follows the held-out fold, a named one
+included, so it is refused when nothing is held out (`test_size = 0`, the
+fixed-duration refit). Its state is part of every checkpoint `resume` reads.
 
 ### Loss presets
 

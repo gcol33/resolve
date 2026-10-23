@@ -518,6 +518,7 @@ void Trainer::prepare_split(
     }
 
     auto [fit_rows, held_rows] = hold_out_indices(hold_out, n_plots, seed, targets);
+    validate_lr_schedule(config_, held_rows.numel() > 0);
 
     // The continuous block (continuous_block.hpp), raw; in hash mode the hash
     // embedding rides along at its end.
@@ -968,30 +969,7 @@ std::pair<Trainer::EpochLoss, Trainer::MetricMap> Trainer::eval_epoch() {
     return {std::move(out), std::move(all_metrics)};
 }
 
-float Trainer::get_learning_rate(int epoch) const {
-    switch (config_.lr_scheduler) {
-        case LRSchedulerType::StepLR: {
-            // Step decay: multiply LR by gamma every lr_step_size epochs
-            int n_decays = config_.lr_step_size > 0 ? epoch / config_.lr_step_size : 0;
-            return config_.lr * std::pow(config_.lr_gamma, static_cast<float>(n_decays));
-        }
-        case LRSchedulerType::CosineAnnealing: {
-            // Cosine annealing from lr (epoch 0) to lr_min (final epoch). Divide
-            // by (max_epochs - 1) so progress reaches 1.0 on the last epoch and
-            // the schedule actually lands on lr_min.
-            float progress = config_.max_epochs > 1
-                ? static_cast<float>(epoch) / static_cast<float>(config_.max_epochs - 1)
-                : 1.0f;
-            float cosine = cosine_ramp(progress);
-            return config_.lr_min + (config_.lr - config_.lr_min) * cosine;
-        }
-        case LRSchedulerType::None:
-        default:
-            return config_.lr;
-    }
-}
-
-void Trainer::update_learning_rate(float lr) {
+void Trainer::update_learning_rate(double lr) {
     for (auto& group : optimizer_->param_groups()) {
         static_cast<torch::optim::AdamWOptions&>(group.options()).lr(lr);
     }
@@ -1103,6 +1081,7 @@ TrainResult Trainer::train(const RunProgress* resume_from) {
         start.created_at = iso8601_now();
         start.requested_batch_size = config_.batch_size;
         start.effective_batch_size = config_.batch_size;
+        start.plateau = plateau_start(config_);
     }
     plan.elapsed_before = start.elapsed_seconds;
     created_at_ = start.created_at;
@@ -1242,14 +1221,16 @@ void Trainer::run_epochs(RunProgress& progress, const RunPlan& plan) {
     const int last_epoch = std::max(0, config_.max_epochs - 1);
 
     for (int epoch = progress.next_epoch; epoch < plan.n_epochs; ++epoch) {
-        // The schedule is laid out over max_epochs whatever n_epochs is, so a
-        // fixed-duration run follows a full run's trajectory.
-        float current_lr = get_learning_rate(epoch);
+        // The step and cosine schedules are laid out over max_epochs whatever
+        // n_epochs is, so a fixed-duration run follows a full run's
+        // trajectory.
+        const double current_lr = scheduled_learning_rate(config_, epoch, progress.plateau);
         update_learning_rate(current_lr);
 
         const EpochLoss train = train_epoch(epoch);
         const float train_loss = train.total;
         result.train_loss_history.push_back(train_loss);
+        result.lr_history.push_back(static_cast<float>(current_lr));
         append_by_target(result.train_loss_history_by_target, loss_targets, train.by_target);
         for (size_t i = 0; i < aux_names.size(); ++i) {
             result.train_aux_loss_history[aux_names[i]].push_back(train.aux[i]);
@@ -1270,6 +1251,17 @@ void Trainer::run_epochs(RunProgress& progress, const RunPlan& plan) {
 
         const bool settled = loss_fn_.objective_settled(epoch, last_epoch);
 
+        // A reduce-on-plateau schedule follows the loss early stopping reads,
+        // counting a bad epoch only where patience would, so the rate the
+        // next epoch trains at is decided before any checkpoint of this one.
+        if (config_.lr_scheduler == LRSchedulerType::ReduceOnPlateau &&
+            plateau_step(progress.plateau, config_, test_loss, settled)) {
+            std::ostringstream msg;
+            msg << "Epoch " << epoch << " - held-out loss on a plateau, learning rate "
+                << progress.plateau.lr;
+            config_.log(msg.str());
+        }
+
         if (plan.fixed_duration) {
             // The returned weights are the last epoch's, whatever the
             // held-out loss did, so best_epoch names that epoch and
@@ -1277,7 +1269,7 @@ void Trainer::run_epochs(RunProgress& progress, const RunPlan& plan) {
             result.best_epoch = epoch;
             result.final_metrics = std::move(metrics);
             if (plan.has_held_out) progress.best_loss = test_loss;
-        } else if (test_loss < progress.best_loss) {
+        } else if (improves_on(test_loss, progress.best_loss, /*threshold=*/0.0)) {
             // test_loss is the phase-invariant selection loss (see
             // eval_epoch), so best_loss is comparable across the whole run and
             // the returned model is the global best.

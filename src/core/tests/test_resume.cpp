@@ -75,6 +75,7 @@ std::vector<torch::Tensor> parameters_of(Trainer& trainer) {
 void require_same_run(const TrainResult& a, const TrainResult& b) {
     REQUIRE(a.train_loss_history == b.train_loss_history);
     REQUIRE(a.test_loss_history == b.test_loss_history);
+    REQUIRE(a.lr_history == b.lr_history);
     REQUIRE((a.train_loss_history_by_target == b.train_loss_history_by_target));
     REQUIRE((a.test_loss_history_by_target == b.test_loss_history_by_target));
     REQUIRE(a.best_epoch == b.best_epoch);
@@ -140,6 +141,34 @@ TEST_CASE("A run resumed from best.pt replays the epochs after its best",
 
     // best.pt is the last new best, so the run continues at the epoch after it.
     REQUIRE(run.resumed.resumed_from_epoch == run.full.best_epoch + 1);
+    require_same_run(run.full, run.resumed);
+    require_same_weights(*run.full_trainer, *run.resumed_trainer);
+}
+
+TEST_CASE("A run under a reduce-on-plateau schedule resumes with the schedule's state",
+          "[trainer][resume][lr_schedule]") {
+    // No epoch can beat its best by the threshold, so the rate decays on a
+    // fixed rhythm (two bad epochs, a decay, a cooldown epoch): checkpoint_6
+    // is written right after the second decay with its cooldown pending, and
+    // the epochs after it only match the uninterrupted run if the best, the
+    // bad-epoch count, the cooldown and the rate all come back.
+    const auto ds = resume_dataset();
+    const TempDir dir;
+    TrainConfig tc = resume_train_config(dir.path());
+    tc.max_epochs = 12;
+    tc.lr = 1e-2f;
+    tc.lr_scheduler = LRSchedulerType::ReduceOnPlateau;
+    tc.lr_plateau_factor = 0.5f;
+    tc.lr_plateau_patience = 1;
+    tc.lr_plateau_threshold = 0.999f;
+    tc.lr_plateau_cooldown = 1;
+
+    const auto run = run_and_resume(ds, tc, dir.file("checkpoint_6.pt"));
+
+    REQUIRE(run.resumed.resumed_from_epoch == 6);
+    REQUIRE(run.full.lr_history.size() == 12);
+    REQUIRE(run.full.lr_history.front() == 1e-2f);
+    REQUIRE(run.full.lr_history.back() < run.full.lr_history[6]);
     require_same_run(run.full, run.resumed);
     require_same_weights(*run.full_trainer, *run.resumed_trainer);
 }
