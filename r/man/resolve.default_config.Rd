@@ -24,7 +24,7 @@ takes a config list reads it against these fields, so a key outside them is
 refused, at any level of nesting.
 }
 \examples{
-\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+\dontshow{if (resolveR::resolve.available()) withAutoprint(\{ # examplesIf}
 resolve.default_config("train")$max_epochs
 names(resolve.default_config("model"))
 \dontshow{\}) # examplesIf}

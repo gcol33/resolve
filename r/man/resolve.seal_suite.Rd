@@ -19,7 +19,7 @@ under \code{dir}, validate the whole manifest, and write it back. Afterwards
 \code{\link[=resolve.load_suite]{resolve.load_suite()}} refuses any member file that changes.
 }
 \examples{
-\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+\dontshow{if (resolveR::resolve.available()) withAutoprint(\{ # examplesIf}
 source(system.file("examples", "habitat-suite.R", package = "resolveR"))
 sealed <- resolve.seal_suite(suite_dir)
 sealed$targets[[1]]$members[[1]]$sha256

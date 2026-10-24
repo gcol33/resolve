@@ -39,7 +39,7 @@ blend.
 Make predictions on a ResolveDataset using a trained model.
 }
 \examples{
-\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+\dontshow{if (resolveR::resolve.available()) withAutoprint(\{ # examplesIf}
 plots <- system.file("extdata", "plots.csv", package = "resolveR")
 species <- system.file("extdata", "species.csv", package = "resolveR")
 roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",

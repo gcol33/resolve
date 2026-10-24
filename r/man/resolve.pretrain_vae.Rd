@@ -27,7 +27,7 @@ without labels: a compressed representation of composition learned from the
 plots alone.
 }
 \examples{
-\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+\dontshow{if (resolveR::resolve.available()) withAutoprint(\{ # examplesIf}
 plots <- system.file("extdata", "plots.csv", package = "resolveR")
 species <- system.file("extdata", "species.csv", package = "resolveR")
 roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",

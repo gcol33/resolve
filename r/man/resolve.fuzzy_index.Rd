@@ -39,7 +39,7 @@ adjacent characters each cost one edit. Query it with \code{\link[=resolve.fuzzy
 Settings left \code{NULL} take the engine's defaults.
 }
 \examples{
-\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+\dontshow{if (resolveR::resolve.available()) withAutoprint(\{ # examplesIf}
 index <- resolve.fuzzy_index(c("Quercus robur", "Quercus petraea", "Fagus sylvatica"))
 resolve.fuzzy_match(index, c("Quercus robr", "Fagus silvatica"))
 \dontshow{\}) # examplesIf}

@@ -38,7 +38,7 @@ void check_metric_inputs(NumericVector pred, NumericVector target) {
 //'   the relative band (`resolve_band_accuracy()`), or the share of exactly
 //'   matching class codes (`resolve_accuracy()`).
 //'
-//' @examplesIf resolve.available()
+//' @examplesIf resolveR::resolve.available()
 //' pred <- c(1.0, 2.2, 2.9, 4.1)
 //' obs <- c(1, 2, 3, 4)
 //' resolve_mae(pred, obs)

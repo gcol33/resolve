@@ -53,7 +53,7 @@ be evaluated the same way. The \code{resolve_c} backend must be loaded
 (\code{\link[=resolve.available]{resolve.available()}}).
 }
 \examples{
-\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+\dontshow{if (resolveR::resolve.available()) withAutoprint(\{ # examplesIf}
 pred <- c(1.0, 2.2, 2.9, 4.1)
 obs <- c(1, 2, 3, 4)
 resolve_mae(pred, obs)

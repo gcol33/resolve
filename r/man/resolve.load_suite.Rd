@@ -44,7 +44,7 @@ input contract (its heads, and the columns it was trained to read). Any
 mismatch stops the load.
 }
 \examples{
-\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+\dontshow{if (resolveR::resolve.available()) withAutoprint(\{ # examplesIf}
 source(system.file("examples", "habitat-suite.R", package = "resolveR"))
 resolve.seal_suite(suite_dir)
 suite <- resolve.load_suite(suite_dir)

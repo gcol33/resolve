@@ -179,7 +179,7 @@ resolve.install_backend <- function(version = NULL,
 #'   from its vocabularies (`predictor$vocabs()`), or read its `schema()` /
 #'   `dataset_config()` to see what the checkpoint expects.
 #'
-#' @examplesIf resolve.available()
+#' @examplesIf resolveR::resolve.available()
 #' plots <- system.file("extdata", "plots.csv", package = "resolveR")
 #' species <- system.file("extdata", "species.csv", package = "resolveR")
 #' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
@@ -241,7 +241,7 @@ resolve.load <- function(path, device = "cpu", vram_fraction = 1.0) {
 #' @return A named list of training-configuration fields, the keys and
 #'   spellings `trainConfig` in [resolve.train.dataset()] takes (enums such as
 #'   `loss_config` and `lr_scheduler` by name).
-#' @examplesIf resolve.available()
+#' @examplesIf resolveR::resolve.available()
 #' plots <- system.file("extdata", "plots.csv", package = "resolveR")
 #' species <- system.file("extdata", "species.csv", package = "resolveR")
 #' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
@@ -272,7 +272,7 @@ resolve.load_train_config <- function(path) {
 #' @param path Path to a `.pt` checkpoint.
 #' @return A named list of run-metadata fields, including `final_metrics`, a
 #'   nested list keyed by target then metric (e.g. `$final_metrics$area$rmse`).
-#' @examplesIf resolve.available()
+#' @examplesIf resolveR::resolve.available()
 #' plots <- system.file("extdata", "plots.csv", package = "resolveR")
 #' species <- system.file("extdata", "species.csv", package = "resolveR")
 #' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
@@ -306,7 +306,7 @@ resolve.load_run_metadata <- function(path) {
 #'   `"masked_species"` (the `pretrain` argument of [resolve.train.dataset()]),
 #'   or `"vae"` ([resolve.pretrain_vae()]).
 #' @return A named list, one element per field.
-#' @examplesIf resolve.available()
+#' @examplesIf resolveR::resolve.available()
 #' resolve.default_config("train")$max_epochs
 #' names(resolve.default_config("model"))
 #' @export
@@ -342,7 +342,7 @@ resolve.default_config <- function(which) {
 #'   in row 1 and target in row 2, as 0-based species codes), `edge_type` (0
 #'   same genus, 1 same family, 2 co-occurrence), `n_species` and `n_edges`.
 #'
-#' @examplesIf resolve.available()
+#' @examplesIf resolveR::resolve.available()
 #' plots <- system.file("extdata", "plots.csv", package = "resolveR")
 #' species <- system.file("extdata", "species.csv", package = "resolveR")
 #' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
@@ -389,7 +389,7 @@ resolve.species_graph <- function(dataset,
 #' @return No return value, called for its side effect of writing the
 #'   checkpoint to `path`.
 #'
-#' @examplesIf resolve.available()
+#' @examplesIf resolveR::resolve.available()
 #' plots <- system.file("extdata", "plots.csv", package = "resolveR")
 #' species <- system.file("extdata", "species.csv", package = "resolveR")
 #' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
@@ -568,7 +568,7 @@ resolve.progress <- function(checkpointDir) {
 #'   - plot_ids(): Get plot IDs
 #'   - n_plots(): Get number of plots
 #'
-#' @examplesIf resolve.available()
+#' @examplesIf resolveR::resolve.available()
 #' plots <- system.file("extdata", "plots.csv", package = "resolveR")
 #' species <- system.file("extdata", "species.csv", package = "resolveR")
 #' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
@@ -954,7 +954,7 @@ resolve.dataset.frame <- function(header,
 #'   when the CUDA auto-halve-on-OOM retry fired -- and `resumed_from_epoch`
 #'   (0 unless `resumeFrom` continued the run).
 #'
-#' @examplesIf resolve.available()
+#' @examplesIf resolveR::resolve.available()
 #' plots <- system.file("extdata", "plots.csv", package = "resolveR")
 #' species <- system.file("extdata", "species.csv", package = "resolveR")
 #' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
@@ -1130,7 +1130,7 @@ resolve.train.dataset <- function(dataset,
 #'   and metric, over the folds), `fold_results` (each fold's training result,
 #'   as `result` of [resolve.train.dataset()]) and `total_time_seconds`.
 #'
-#' @examplesIf resolve.available()
+#' @examplesIf resolveR::resolve.available()
 #' plots <- system.file("extdata", "plots.csv", package = "resolveR")
 #' species <- system.file("extdata", "species.csv", package = "resolveR")
 #' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
@@ -1194,7 +1194,7 @@ resolve.cross_validate <- function(dataset, nFolds = 5L, seed = 42L, spatial = N
 #'   and `projection_weights`, the encoder's first layer (one row per unit of
 #'   its first hidden layer, one column per species of the vocabulary).
 #'
-#' @examplesIf resolve.available()
+#' @examplesIf resolveR::resolve.available()
 #' plots <- system.file("extdata", "plots.csv", package = "resolveR")
 #' species <- system.file("extdata", "species.csv", package = "resolveR")
 #' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
@@ -1244,7 +1244,7 @@ resolve.pretrain_vae <- function(dataset, config = list()) {
 #'
 #' @return The predictor, invisibly.
 #'
-#' @examplesIf resolve.available()
+#' @examplesIf resolveR::resolve.available()
 #' plots <- system.file("extdata", "plots.csv", package = "resolveR")
 #' species <- system.file("extdata", "species.csv", package = "resolveR")
 #' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
@@ -1305,7 +1305,7 @@ resolve.retrieval <- function(predictor, reference, kNeighbors = NULL, alpha = N
 #' @return A `FuzzyIndex` object (an Rcpp module class) with methods `size()`,
 #'   `bucket_count()` and `max_supported_distance()`.
 #'
-#' @examplesIf resolve.available()
+#' @examplesIf resolveR::resolve.available()
 #' index <- resolve.fuzzy_index(c("Quercus robur", "Quercus petraea", "Fagus sylvatica"))
 #' resolve.fuzzy_match(index, c("Quercus robr", "Fagus silvatica"))
 #'
@@ -1346,7 +1346,7 @@ resolve.fuzzy_index <- function(entries, maxEditDistance = NULL, caseInsensitive
 #'   position in the index's entries) and `distance`. A needle with no match
 #'   has no row.
 #'
-#' @examplesIf resolve.available()
+#' @examplesIf resolveR::resolve.available()
 #' index <- resolve.fuzzy_index(c("Quercus robur", "Fagus sylvatica"))
 #' resolve.fuzzy_match(index, "Quercus robr", topN = 1)
 #'
@@ -1383,7 +1383,7 @@ resolve.fuzzy_match <- function(index, needles, maxEditDistance = NULL, topN = N
 #' @param deviceIndex CUDA device; -1 (default) is the current device.
 #' @return No return value. Nothing happens on a CPU-only backend or a machine
 #'   without a CUDA device.
-#' @examplesIf resolve.available()
+#' @examplesIf resolveR::resolve.available()
 #' resolve.set_vram_fraction(0.8)
 #' @export
 resolve.set_vram_fraction <- function(fraction, deviceIndex = -1L) {
@@ -1419,7 +1419,7 @@ resolve.set_vram_fraction <- function(fraction, deviceIndex = -1L) {
 #'   set ([resolve.retrieval()]) the predictions and probabilities are the
 #'   blend.
 #'
-#' @examplesIf resolve.available()
+#' @examplesIf resolveR::resolve.available()
 #' plots <- system.file("extdata", "plots.csv", package = "resolveR")
 #' species <- system.file("extdata", "species.csv", package = "resolveR")
 #' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",

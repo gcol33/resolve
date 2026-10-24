@@ -43,7 +43,7 @@ needle.
 Settings left \code{NULL} take the engine's defaults.
 }
 \examples{
-\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+\dontshow{if (resolveR::resolve.available()) withAutoprint(\{ # examplesIf}
 index <- resolve.fuzzy_index(c("Quercus robur", "Fagus sylvatica"))
 resolve.fuzzy_match(index, "Quercus robr", topN = 1)
 \dontshow{\}) # examplesIf}

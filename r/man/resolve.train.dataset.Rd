@@ -250,7 +250,7 @@ the list. The fields that size a model to its data (the species encoding,
 hash width, \code{top_k} and the taxonomy slots) come from the dataset.
 }
 \examples{
-\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+\dontshow{if (resolveR::resolve.available()) withAutoprint(\{ # examplesIf}
 plots <- system.file("extdata", "plots.csv", package = "resolveR")
 species <- system.file("extdata", "species.csv", package = "resolveR")
 roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",

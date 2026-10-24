@@ -74,7 +74,7 @@ calibrated intervals. \code{NA} marks a value that is undefined for the plot (a
 plot with no recorded species has no recognised share).
 }
 \examples{
-\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+\dontshow{if (resolveR::resolve.available()) withAutoprint(\{ # examplesIf}
 source(system.file("examples", "habitat-suite.R", package = "resolveR"))
 resolve.seal_suite(suite_dir)
 suite <- resolve.load_suite(suite_dir)

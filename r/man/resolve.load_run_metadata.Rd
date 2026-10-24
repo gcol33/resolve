@@ -21,7 +21,7 @@ the plots named by \code{stoppingPlots}), best and total epochs, the RESOLVE
 version and timestamps, and the per-target final-metric tree.
 }
 \examples{
-\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+\dontshow{if (resolveR::resolve.available()) withAutoprint(\{ # examplesIf}
 plots <- system.file("extdata", "plots.csv", package = "resolveR")
 species <- system.file("extdata", "species.csv", package = "resolveR")
 roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",

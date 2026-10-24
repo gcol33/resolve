@@ -26,7 +26,7 @@ from its vocabularies (\code{predictor$vocabs()}), or read its \code{schema()} /
 Load a model from a saved checkpoint.
 }
 \examples{
-\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+\dontshow{if (resolveR::resolve.available()) withAutoprint(\{ # examplesIf}
 plots <- system.file("extdata", "plots.csv", package = "resolveR")
 species <- system.file("extdata", "species.csv", package = "resolveR")
 roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
