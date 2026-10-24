@@ -35,8 +35,24 @@ private:
 TORCH_MODULE(RMSNorm);
 
 // =============================================================================
-// fp32 Normalization Under AMP Autocast
+// fp32 Islands Under AMP Autocast
 // =============================================================================
+
+// Run `fn` on `inputs` in float32 while CUDA autocast (AMP/fp16) is active:
+// autocast is disabled for the call and every floating-point input is cast
+// to float32 (integer and boolean inputs, such as a padding mask, pass as they
+// are); autocast is re-enabled on the way out, also when `fn` throws, and the
+// float32 output flows on through the surrounding autocast region, which
+// re-casts it where an op asks for fp16. When autocast is inactive (AMP off or
+// a CPU build) fn(inputs) runs on the inputs unchanged.
+//
+// For an op that is wrong or missing in fp16: a normalization's statistics
+// (run_norm_fp32), and libtorch's multi_head_attention_forward, whose
+// key-padding fill has no Half kernel.
+torch::Tensor run_fp32_under_autocast(
+    const std::function<torch::Tensor(const std::vector<torch::Tensor>&)>& fn,
+    std::vector<torch::Tensor> inputs
+);
 
 // Run a normalization layer in float32 even when CUDA autocast (AMP/fp16) is
 // active, then return its (fp32) output for the surrounding autocast region to

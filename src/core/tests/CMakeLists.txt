@@ -113,6 +113,7 @@ add_executable(resolve_tests
     test_resume.cpp
     test_lr_schedule.cpp
     test_selection_metric.cpp
+    test_amp.cpp
     test_pretrain_inputs.cpp
     test_sparse_rows.cpp
     test_load_scale.cpp

@@ -21,25 +21,40 @@ int groupnorm_groups_for(int requested, int64_t dim) {
 }
 }  // namespace
 
-torch::Tensor run_norm_fp32(
-    const std::function<torch::Tensor(torch::Tensor)>& norm_fwd,
-    torch::Tensor x
+torch::Tensor run_fp32_under_autocast(
+    const std::function<torch::Tensor(const std::vector<torch::Tensor>&)>& fn,
+    std::vector<torch::Tensor> inputs
 ) {
 #ifdef RESOLVE_HAS_CUDA
     if (at::autocast::is_autocast_enabled(at::kCUDA)) {
-        // Locally disable autocast so the normalization (and, for BatchNorm, its
-        // running-statistic update) runs in fp32. The guard re-enables autocast
-        // even if norm_fwd throws; the autocast cast cache is keyed by nesting
-        // level, which is unchanged, so the outer region resumes cleanly.
+        // The guard re-enables autocast even if fn throws; the autocast cast
+        // cache is keyed by nesting level, which is unchanged, so the outer
+        // region resumes cleanly.
         struct ReenableAutocast {
             ~ReenableAutocast() { at::autocast::set_autocast_enabled(at::kCUDA, true); }
         };
         at::autocast::set_autocast_enabled(at::kCUDA, false);
         ReenableAutocast guard;
-        return norm_fwd(x.to(torch::kFloat32));
+        for (auto& input : inputs) {
+            if (input.defined() && input.is_floating_point()) {
+                input = input.to(torch::kFloat32);
+            }
+        }
+        return fn(inputs);
     }
 #endif
-    return norm_fwd(std::move(x));
+    return fn(inputs);
+}
+
+torch::Tensor run_norm_fp32(
+    const std::function<torch::Tensor(torch::Tensor)>& norm_fwd,
+    torch::Tensor x
+) {
+    // The normalization (and, for BatchNorm, its running-statistic update)
+    // runs in fp32.
+    return run_fp32_under_autocast(
+        [&norm_fwd](const std::vector<torch::Tensor>& in) { return norm_fwd(in[0]); },
+        {std::move(x)});
 }
 
 Fp32NormImpl::Fp32NormImpl(torch::nn::AnyModule inner)

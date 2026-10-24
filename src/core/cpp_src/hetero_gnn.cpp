@@ -1,5 +1,5 @@
 #include "resolve/hetero_gnn.hpp"
-#include "resolve/gnn.hpp"    // segment_softmax
+#include "resolve/gnn.hpp"    // segment_softmax, scatter_to_targets
 #include "resolve/types.hpp"  // kBertInitStd, kEpsilon
 #include "resolve/sparse_rows.hpp"
 
@@ -175,8 +175,7 @@ torch::Tensor TypedMessagePassingLayerImpl::forward(
 
     auto weighted_msgs = messages.view({n_edges, n_heads_, head_dim_}) *
         attn_weights.unsqueeze(-1);
-    auto aggregated = torch::zeros({n_nodes, n_heads_, head_dim_}, node_features.options())
-                          .index_add_(0, tgt_idx, weighted_msgs);
+    auto aggregated = scatter_to_targets(weighted_msgs, tgt_idx, n_nodes);
 
     auto out = dropout_->forward(output_->forward(aggregated.reshape({n_nodes, out_features_})));
     if (in_features_ == out_features_) {

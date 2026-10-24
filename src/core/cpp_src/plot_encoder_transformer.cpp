@@ -1,5 +1,6 @@
 #include "resolve/plot_encoder_transformer.hpp"
 
+#include "resolve/encoder.hpp"
 #include "resolve/species_pool.hpp"
 
 #include <stdexcept>
@@ -101,8 +102,14 @@ public:
                     padding);
                 auto query = pool_query_.expand({batch, -1, -1}).transpose(0, 1);
                 auto keys = tokens.transpose(0, 1);
-                auto attended = std::get<0>(
-                    pool_attn_->forward(query, keys, keys, /*key_padding_mask=*/padding));
+                // In float32 under autocast: the key-padding fill of
+                // multi_head_attention_forward has no Half kernel.
+                auto attended = run_fp32_under_autocast(
+                    [this](const std::vector<torch::Tensor>& in) {
+                        return std::get<0>(pool_attn_->forward(in[0], in[1], in[1],
+                                                               /*key_padding_mask=*/in[2]));
+                    },
+                    {query, keys, padding});
                 pooled = pool_norm_->forward(attended.transpose(0, 1).squeeze(1));
                 break;
             }
@@ -167,10 +174,15 @@ private:
     }
 
     // The tokens through the self-attention layers, if any; `padding` is true
-    // where a position is to be ignored.
+    // where a position is to be ignored. In float32 under autocast: the
+    // key-padding fill of multi_head_attention_forward has no Half kernel.
     torch::Tensor self_attend(torch::Tensor tokens, const torch::Tensor& padding) {
         if (!self_attention_) return tokens;
-        return self_attention_->forward(tokens.transpose(0, 1), /*src_mask=*/{}, padding)
+        return run_fp32_under_autocast(
+                   [this](const std::vector<torch::Tensor>& in) {
+                       return self_attention_->forward(in[0], /*src_mask=*/{}, in[1]);
+                   },
+                   {tokens.transpose(0, 1), padding})
             .transpose(0, 1);
     }
 

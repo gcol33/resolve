@@ -8,6 +8,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "resolve/dataset.hpp"
+#include "resolve/json.hpp"
 #include "resolve/model.hpp"
 #include "resolve/trainer.hpp"
 #include "test_support.hpp"
@@ -209,6 +210,44 @@ TEST_CASE("A run selecting by accuracy resumes selecting by accuracy",
         REQUIRE_THROWS_WITH(trainer->resume(dir.file("checkpoint_6.pt")),
                             Catch::Matchers::ContainsSubstring("selection metric"));
     }
+}
+
+TEST_CASE("An early-stopped run checkpoints every epoch it trained, the stopping one too",
+          "[trainer][resume][checkpoint]") {
+    const auto ds = resume_dataset();
+    const TempDir dir;
+    TrainConfig tc = resume_train_config(dir.path());
+    tc.max_epochs = 60;
+    tc.patience = 2;
+    tc.lr = 5e-2f;
+    tc.checkpoint_every = 1;
+    tc.lr_scheduler = LRSchedulerType::None;
+
+    auto trainer = make_trainer(ds, tc, 1);
+    trainer->prepare_data(ds, 0.25f, 17);
+    const auto result = trainer->fit();
+
+    const auto n_epochs = static_cast<int>(result.train_loss_history.size());
+    REQUIRE(n_epochs < tc.max_epochs);
+    for (int e = 1; e <= n_epochs; ++e) {
+        INFO("checkpoint_" << e);
+        CHECK(std::filesystem::exists(dir.file("checkpoint_" + std::to_string(e) + ".pt")));
+    }
+    CHECK_FALSE(
+        std::filesystem::exists(dir.file("checkpoint_" + std::to_string(n_epochs + 1) + ".pt")));
+    const json::Value progress = json::read_file(dir.file("progress.json"));
+    CHECK(progress.at("epoch").as_int() == n_epochs - 1);
+    CHECK(progress.at("epochs_without_improvement").as_int() == tc.patience);
+
+    // The stopping epoch's checkpoint is the run at its end: resumed from it,
+    // nothing more trains and the best epoch's weights come back.
+    auto resumed = make_trainer(ds, tc, 2);
+    resumed->prepare_data(ds, 0.25f, 17);
+    const auto continued =
+        resumed->resume(dir.file("checkpoint_" + std::to_string(n_epochs) + ".pt"));
+    CHECK(continued.resumed_from_epoch == n_epochs);
+    require_same_run(result, continued);
+    require_same_weights(*trainer, *resumed);
 }
 
 TEST_CASE("A fixed-duration run without a held-out fold resumes",

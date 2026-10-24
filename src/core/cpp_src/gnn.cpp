@@ -18,16 +18,14 @@ constexpr float kMinEdgeWeight = 1e-6f;
 // rows is sized so a (block, n_nodes) slab holds about this many.
 constexpr int64_t kKnnBlockEntries = int64_t{1} << 24;
 
-// out[target[e]] += values[e] for every edge, rows of `values` being
-// (n_edges, ...) and the result (n_nodes, ...).
+}  // namespace
+
 torch::Tensor scatter_to_targets(const torch::Tensor& values, const torch::Tensor& target,
                                  int64_t n_nodes) {
     auto shape = values.sizes().vec();
     shape[0] = n_nodes;
     return torch::zeros(shape, values.options()).index_add_(0, target, values);
 }
-
-}  // namespace
 
 // =============================================================================
 // k-NN graph

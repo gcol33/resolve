@@ -53,6 +53,13 @@ KnnGraph build_knn_graph(torch::Tensor features, int64_t k,
 torch::Tensor segment_softmax(const torch::Tensor& scores, const torch::Tensor& target,
                               int64_t n_nodes);
 
+// out[target[e]] += values[e] for every edge, rows of `values` being
+// (n_edges, ...) and the result (n_nodes, ...), accumulated in the dtype of
+// `values` (under autocast a message may be fp32 while the node features it
+// updates are fp16).
+torch::Tensor scatter_to_targets(const torch::Tensor& values, const torch::Tensor& target,
+                                 int64_t n_nodes);
+
 // Graph Convolutional Layer (GCN): out_i = sum_j A_ij (x W)_j over the
 // normalized adjacency.
 class GCNLayerImpl : public torch::nn::Module {

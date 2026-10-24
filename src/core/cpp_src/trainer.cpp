@@ -1233,6 +1233,13 @@ void Trainer::run_epochs(RunProgress& progress, const RunPlan& plan) {
     // targets, from the final phase otherwise.
     const int last_epoch = std::max(0, config_.max_epochs - 1);
 
+    // A run resumed from the checkpoint of the epoch early stopping fired at
+    // has nothing left to train.
+    if (!plan.fixed_duration && progress.patience_counter > 0 &&
+        progress.patience_counter >= config_.patience) {
+        return;
+    }
+
     for (int epoch = progress.next_epoch; epoch < plan.n_epochs; ++epoch) {
         // The step and cosine schedules are laid out over max_epochs whatever
         // n_epochs is, so a fixed-duration run follows a full run's
@@ -1263,6 +1270,7 @@ void Trainer::run_epochs(RunProgress& progress, const RunPlan& plan) {
         progress.elapsed_seconds = plan.elapsed_before + seconds_since(plan.started);
 
         const bool settled = loss_fn_.objective_settled(epoch, last_epoch);
+        bool stopping = false;
 
         // The value the epoch is selected by: the phase-invariant selection
         // loss (see eval_epoch), or the held-out accuracy eval_epoch scored,
@@ -1309,7 +1317,7 @@ void Trainer::run_epochs(RunProgress& progress, const RunPlan& plan) {
             progress.patience_counter++;
             if (progress.patience_counter >= config_.patience) {
                 config_.log("Early stopping at epoch " + std::to_string(epoch));
-                break;
+                stopping = true;
             }
         }
 
@@ -1328,6 +1336,10 @@ void Trainer::run_epochs(RunProgress& progress, const RunPlan& plan) {
                 result.final_metrics
             );
         }
+
+        // The stopping epoch still gets its periodic checkpoint and progress
+        // file above, like every epoch that ran.
+        if (stopping) break;
 
         if (epoch % 10 == 0) {
             std::ostringstream msg;
