@@ -37,10 +37,18 @@ with \code{spatial}, as blocks of a latitude / longitude grid, so a held-out fol
 is a region the model never saw.
 }
 \examples{
-\dontrun{
-cv <- resolve.cross_validate(dataset, nFolds = 5, maxEpochs = 100)
-cv$mean_metrics$area$r2
-blocks <- resolve.cross_validate(dataset, spatial = list(lat_size = 2, lon_size = 2))
-}
+\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+plots <- system.file("extdata", "plots.csv", package = "resolveR")
+species <- system.file("extdata", "species.csv", package = "resolveR")
+roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+              genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+targets <- list(elevation = list(column = "elevation", task = "regression"),
+                habitat = list(column = "habitat", task = "classification"))
+dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets)
+cv <- resolve.cross_validate(dataset, nFolds = 3L, maxEpochs = 10L)
+cv$mean_metrics$elevation$r2
 
+blocks <- resolve.cross_validate(dataset, nFolds = 3L, maxEpochs = 10L,
+                                 spatial = list(lat_size = 0.2, lon_size = 0.3))
+\dontshow{\}) # examplesIf}
 }

@@ -24,11 +24,12 @@
 #'   the manifest as a nested list, `suite$targets()` the loaded targets.
 #'
 #' @seealso [resolve.predict.suite()], [resolve.verify_suite()]
-#' @examples
-#' \dontrun{
-#' suite <- resolve.load_suite("eva_context")
-#' suite$manifest()$inputs
-#' }
+#' @examplesIf resolve.available()
+#' source(system.file("examples", "habitat-suite.R", package = "resolveR"))
+#' resolve.seal_suite(suite_dir)
+#' suite <- resolve.load_suite(suite_dir)
+#' suite$targets()
+#' suite$manifest()$inputs$species
 #' @export
 resolve.load_suite <- function(dir, device = "cpu", vramFraction = 1.0, verify = TRUE,
                                targets = NULL) {
@@ -67,11 +68,11 @@ resolve.load_suite <- function(dir, device = "cpu", vramFraction = 1.0, verify =
 #' @param dir Path to the suite directory.
 #' @return A list with `manifest` (the manifest as a nested list) and `problems`
 #'   (a character vector, empty when every member is intact).
-#' @examples
-#' \dontrun{
-#' check <- resolve.verify_suite("eva_context")
+#' @examplesIf resolve.available()
+#' source(system.file("examples", "habitat-suite.R", package = "resolveR"))
+#' resolve.seal_suite(suite_dir)
+#' check <- resolve.verify_suite(suite_dir)
 #' length(check$problems) == 0
-#' }
 #' @export
 resolve.verify_suite <- function(dir) {
   if (!is.character(dir) || length(dir) != 1) {
@@ -93,11 +94,10 @@ resolve.verify_suite <- function(dir) {
 #'
 #' @param dir Path to the suite directory.
 #' @return The sealed manifest as a nested list, invisibly.
-#' @examples
-#' \dontrun{
-#' jsonlite::write_json(manifest, file.path(dir, "manifest.json"), auto_unbox = TRUE)
-#' resolve.seal_suite(dir)
-#' }
+#' @examplesIf resolve.available()
+#' source(system.file("examples", "habitat-suite.R", package = "resolveR"))
+#' sealed <- resolve.seal_suite(suite_dir)
+#' sealed$targets[[1]]$members[[1]]$sha256
 #' @export
 resolve.seal_suite <- function(dir) {
   if (!is.character(dir) || length(dir) != 1) {
@@ -160,13 +160,13 @@ resolve.seal_suite <- function(dir) {
 #'   [as.data.frame()] flattens it to one row per plot.
 #'
 #' @seealso [resolve.load_suite()]
-#' @examples
-#' \dontrun{
-#' suite <- resolve.load_suite("eva_context")
-#' preds <- resolve.predict.suite(suite, species = species_df, header = plots_df)
-#' preds$targets$eunis$label
+#' @examplesIf resolve.available()
+#' source(system.file("examples", "habitat-suite.R", package = "resolveR"))
+#' resolve.seal_suite(suite_dir)
+#' suite <- resolve.load_suite(suite_dir)
+#' preds <- resolve.predict.suite(suite, species = read.csv(species), header = read.csv(plots))
+#' head(preds$targets$habitat$label)
 #' head(as.data.frame(preds))
-#' }
 #' @export
 resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
                                   batchSize = 4096L, keepMembers = FALSE) {

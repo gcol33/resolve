@@ -55,11 +55,9 @@ through the ordinary \code{device = "cuda"} path of \code{\link[=resolve.train.d
 \code{\link[=resolve.load]{resolve.load()}}.
 }
 \examples{
-\dontrun{
+\dontshow{if (interactive()) withAutoprint(\{ # examplesIf}
 resolve.install_backend()
-resolve.install_backend(variant = "cuda")
-resolve.install_backend(url = "file:///path/to/resolve_c-linux-x86_64-cpu.zip")
-}
+\dontshow{\}) # examplesIf}
 }
 \seealso{
 \code{\link[=resolve.available]{resolve.available()}}

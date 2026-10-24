@@ -18,8 +18,10 @@ Read and validate a suite's manifest without loading any model, then compare
 every member file (presence, size, SHA-256) with it.
 }
 \examples{
-\dontrun{
-check <- resolve.verify_suite("eva_context")
+\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+source(system.file("examples", "habitat-suite.R", package = "resolveR"))
+resolve.seal_suite(suite_dir)
+check <- resolve.verify_suite(suite_dir)
 length(check$problems) == 0
-}
+\dontshow{\}) # examplesIf}
 }

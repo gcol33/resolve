@@ -27,11 +27,16 @@ without labels: a compressed representation of composition learned from the
 plots alone.
 }
 \examples{
-\dontrun{
-ds <- resolve.dataset.csv(header, species, roles, targets,
-                          config = list(species_encoding = "sparse"))
-vae <- resolve.pretrain_vae(ds, list(latent_dim = 16, pretrain_epochs = 50))
+\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+plots <- system.file("extdata", "plots.csv", package = "resolveR")
+species <- system.file("extdata", "species.csv", package = "resolveR")
+roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+              genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+targets <- list(elevation = list(column = "elevation", task = "regression"),
+                habitat = list(column = "habitat", task = "classification"))
+dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets,
+                               config = list(species_encoding = "sparse"))
+vae <- resolve.pretrain_vae(dataset, list(latent_dim = 4, pretrain_epochs = 20))
 plot(vae$loss_history, type = "l")
-}
-
+\dontshow{\}) # examplesIf}
 }

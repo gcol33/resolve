@@ -23,9 +23,19 @@ the model weights. Fields the checkpoint does not persist (device, AMP and
 cuDNN flags) come back at their defaults.
 }
 \examples{
-\dontrun{
-cfg <- resolve.load_train_config("model.pt")
+\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+plots <- system.file("extdata", "plots.csv", package = "resolveR")
+species <- system.file("extdata", "species.csv", package = "resolveR")
+roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+              genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+targets <- list(elevation = list(column = "elevation", task = "regression"),
+                habitat = list(column = "habitat", task = "classification"))
+dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets)
+path <- file.path(tempdir(), "model.pt")
+fit <- resolve.train.dataset(dataset, maxEpochs = 20L, savePath = path, verbose = FALSE)
+
+cfg <- resolve.load_train_config(path)
+cfg$max_epochs
 cfg$batch_size
-cfg$band_thresholds
-}
+\dontshow{\}) # examplesIf}
 }

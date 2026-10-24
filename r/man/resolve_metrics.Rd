@@ -53,12 +53,12 @@ be evaluated the same way. The \code{resolve_c} backend must be loaded
 (\code{\link[=resolve.available]{resolve.available()}}).
 }
 \examples{
-\dontrun{
+\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
 pred <- c(1.0, 2.2, 2.9, 4.1)
 obs <- c(1, 2, 3, 4)
 resolve_mae(pred, obs)
 resolve_rmse(pred, obs)
 resolve_r_squared(pred, obs)
 resolve_band_accuracy(pred, obs, threshold = 0.05)
-}
+\dontshow{\}) # examplesIf}
 }

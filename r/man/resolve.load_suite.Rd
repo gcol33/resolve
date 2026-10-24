@@ -44,10 +44,13 @@ input contract (its heads, and the columns it was trained to read). Any
 mismatch stops the load.
 }
 \examples{
-\dontrun{
-suite <- resolve.load_suite("eva_context")
-suite$manifest()$inputs
-}
+\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+source(system.file("examples", "habitat-suite.R", package = "resolveR"))
+resolve.seal_suite(suite_dir)
+suite <- resolve.load_suite(suite_dir)
+suite$targets()
+suite$manifest()$inputs$species
+\dontshow{\}) # examplesIf}
 }
 \seealso{
 \code{\link[=resolve.predict.suite]{resolve.predict.suite()}}, \code{\link[=resolve.verify_suite]{resolve.verify_suite()}}

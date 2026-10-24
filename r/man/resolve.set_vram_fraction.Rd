@@ -22,7 +22,7 @@ a run leaves headroom for the desktop or other programs on a shared GPU.
 per call; this sets it for the session.
 }
 \examples{
-\dontrun{
+\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
 resolve.set_vram_fraction(0.8)
-}
+\dontshow{\}) # examplesIf}
 }

@@ -19,8 +19,9 @@ under \code{dir}, validate the whole manifest, and write it back. Afterwards
 \code{\link[=resolve.load_suite]{resolve.load_suite()}} refuses any member file that changes.
 }
 \examples{
-\dontrun{
-jsonlite::write_json(manifest, file.path(dir, "manifest.json"), auto_unbox = TRUE)
-resolve.seal_suite(dir)
-}
+\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+source(system.file("examples", "habitat-suite.R", package = "resolveR"))
+sealed <- resolve.seal_suite(suite_dir)
+sealed$targets[[1]]$members[[1]]$sha256
+\dontshow{\}) # examplesIf}
 }

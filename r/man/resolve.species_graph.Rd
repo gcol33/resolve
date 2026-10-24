@@ -40,11 +40,16 @@ heterogeneous-GNN model (\code{modelConfig = list(encoder_architecture = "hetero
 directly only to inspect the graph or to build a variant by hand.
 }
 \examples{
-\dontrun{
-ds <- resolve.dataset.csv(header, species, roles, targets,
-                          config = list(species_encoding = "sparse"))
-graph <- resolve.species_graph(ds)
+\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+plots <- system.file("extdata", "plots.csv", package = "resolveR")
+species <- system.file("extdata", "species.csv", package = "resolveR")
+roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+              genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+targets <- list(elevation = list(column = "elevation", task = "regression"),
+                habitat = list(column = "habitat", task = "classification"))
+dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets,
+                               config = list(species_encoding = "sparse"))
+graph <- resolve.species_graph(dataset)
 graph$n_edges
-}
-
+\dontshow{\}) # examplesIf}
 }

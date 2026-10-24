@@ -48,13 +48,26 @@ Settings left \code{NULL} take the engine's defaults
 scored retrieves itself first.
 }
 \examples{
-\dontrun{
-predictor <- resolve.load("model.pt")
-reference <- resolve.dataset.csv("train_plots.csv", "train_species.csv", roles,
-                                 targets, vocabs = predictor$vocabs(),
-                                 config = predictor$dataset_config())
-resolve.retrieval(predictor, reference, kNeighbors = 32, alpha = 0.3)
-preds <- resolve.predict.dataset(predictor, new_plots)
-}
+\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+plots <- system.file("extdata", "plots.csv", package = "resolveR")
+species <- system.file("extdata", "species.csv", package = "resolveR")
+roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+              genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+targets <- list(elevation = list(column = "elevation", task = "regression"),
+                habitat = list(column = "habitat", task = "classification"))
+dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets)
+path <- file.path(tempdir(), "model.pt")
+fit <- resolve.train.dataset(dataset, maxEpochs = 20L, savePath = path, verbose = FALSE)
 
+predictor <- resolve.load(path)
+new_plots <- resolve.dataset.csv(plots, species, roles = roles,
+                                 vocabs = predictor$vocabs(),
+                                 config = predictor$dataset_config())
+reference <- resolve.dataset.csv(plots, species, roles = roles, targets = targets,
+                                 vocabs = predictor$vocabs(),
+                                 config = predictor$dataset_config())
+resolve.retrieval(predictor, reference, kNeighbors = 8L, alpha = 0.3)
+preds <- resolve.predict.dataset(predictor, new_plots)
+head(preds$predictions$elevation)
+\dontshow{\}) # examplesIf}
 }

@@ -74,12 +74,14 @@ calibrated intervals. \code{NA} marks a value that is undefined for the plot (a
 plot with no recorded species has no recognised share).
 }
 \examples{
-\dontrun{
-suite <- resolve.load_suite("eva_context")
-preds <- resolve.predict.suite(suite, species = species_df, header = plots_df)
-preds$targets$eunis$label
+\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+source(system.file("examples", "habitat-suite.R", package = "resolveR"))
+resolve.seal_suite(suite_dir)
+suite <- resolve.load_suite(suite_dir)
+preds <- resolve.predict.suite(suite, species = read.csv(species), header = read.csv(plots))
+head(preds$targets$habitat$label)
 head(as.data.frame(preds))
-}
+\dontshow{\}) # examplesIf}
 }
 \seealso{
 \code{\link[=resolve.load_suite]{resolve.load_suite()}}

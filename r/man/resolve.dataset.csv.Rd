@@ -147,30 +147,18 @@ covariates, targets) of a header file, one row per plot, and the species
 records of a species file, one row per record.
 }
 \examples{
-\dontrun{
+\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+plots <- system.file("extdata", "plots.csv", package = "resolveR")
+species <- system.file("extdata", "species.csv", package = "resolveR")
+roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+              genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+targets <- list(elevation = list(column = "elevation", task = "regression"),
+                habitat = list(column = "habitat", task = "classification"))
 dataset <- resolve.dataset.csv(
-  header = "plots.csv",
-  species = "species.csv",
-  roles = list(
-    plot_id = "plot_id",
-    species_id = "species",
-    abundance = "cover",
-    longitude = "lon",
-    latitude = "lat"
-  ),
-  targets = list(
-    area = list(column = "area", task = "regression", transform = "log1p"),
-    habitat = list(column = "habitat", task = "classification", num_classes = 9)
-  ),
-  config = list(
-    species_encoding = "hash",
-    hash_dim = 64,
-    top_k = 5
-  )
+  plots, species, roles = roles, targets = targets,
+  config = list(species_encoding = "hash", hash_dim = 64, top_k = 5)
 )
-
-print(dataset$schema())
-print(dataset$n_plots())
-}
-
+dataset$n_plots()
+dataset$schema()$n_species
+\dontshow{\}) # examplesIf}
 }

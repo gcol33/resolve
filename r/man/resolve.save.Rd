@@ -21,9 +21,15 @@ Write a trained model, its scalers and its vocabularies to a checkpoint
 file that \code{\link[=resolve.load]{resolve.load()}} reads back.
 }
 \examples{
-\dontrun{
-fit <- resolve.train.dataset(dataset)
+\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+plots <- system.file("extdata", "plots.csv", package = "resolveR")
+species <- system.file("extdata", "species.csv", package = "resolveR")
+roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+              genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+targets <- list(elevation = list(column = "elevation", task = "regression"),
+                habitat = list(column = "habitat", task = "classification"))
+dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets)
+fit <- resolve.train.dataset(dataset, maxEpochs = 20L, verbose = FALSE)
 resolve.save(fit, file.path(tempdir(), "model.pt"))
-}
-
+\dontshow{\}) # examplesIf}
 }

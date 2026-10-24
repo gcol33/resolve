@@ -23,6 +23,12 @@
   "jepa" | "scarf" | "masked_species", ...)` and `resolve.pretrain_vae()`,
   `resolve.fuzzy_index()` / `resolve.fuzzy_match()`,
   `resolve.set_vram_fraction()` and `resolve.default_config()`.
+- **R examples run.** The package ships a small example survey
+  (`system.file("extdata", "plots.csv", package = "resolveR")` and
+  `species.csv`, 150 synthetic Alpine plots with elevation and habitat), and
+  every help-page example trains, predicts or builds a suite on it whenever the
+  engine is installed (`@examplesIf resolve.available()`), instead of sitting
+  in `\dontrun{}`.
 - `model_config_for_dataset(dataset, config)` (C++, Python, and behind the R
   verbs and `resolve train`) sets the fields that size a model to its data from
   the dataset; `target_specs_from_schema(schema)` lists a checkpoint's targets

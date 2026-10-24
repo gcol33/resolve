@@ -250,11 +250,18 @@ the list. The fields that size a model to its data (the species encoding,
 hash width, \code{top_k} and the taxonomy slots) come from the dataset.
 }
 \examples{
-\dontrun{
-dataset <- resolve.dataset.csv(...)
-result <- resolve.train.dataset(dataset, maxEpochs = 100)
-ft <- resolve.train.dataset(dataset,
-                            modelConfig = list(encoder_architecture = "ft_transformer"))
-}
+\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+plots <- system.file("extdata", "plots.csv", package = "resolveR")
+species <- system.file("extdata", "species.csv", package = "resolveR")
+roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+              genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+targets <- list(elevation = list(column = "elevation", task = "regression"),
+                habitat = list(column = "habitat", task = "classification"))
+dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets)
+fit <- resolve.train.dataset(dataset, maxEpochs = 20L, verbose = FALSE)
+fit$result$final_metrics$elevation$r2
 
+ft <- resolve.train.dataset(dataset, maxEpochs = 5L, verbose = FALSE,
+                            modelConfig = list(encoder_architecture = "ft_transformer"))
+\dontshow{\}) # examplesIf}
 }

@@ -63,12 +63,8 @@ resolve.available <- function() {
 #'   `FALSE`).
 #' @return (Invisibly) the directory the backend was installed into.
 #' @seealso [resolve.available()]
-#' @examples
-#' \dontrun{
+#' @examplesIf interactive()
 #' resolve.install_backend()
-#' resolve.install_backend(variant = "cuda")
-#' resolve.install_backend(url = "file:///path/to/resolve_c-linux-x86_64-cpu.zip")
-#' }
 #' @export
 resolve.install_backend <- function(version = NULL,
                                      variant = "cpu",
@@ -183,17 +179,23 @@ resolve.install_backend <- function(version = NULL,
 #'   from its vocabularies (`predictor$vocabs()`), or read its `schema()` /
 #'   `dataset_config()` to see what the checkpoint expects.
 #'
-#' @examples
-#' \dontrun{
-#' predictor <- resolve.load("model.pt")
-#' dataset <- resolve.dataset.csv(
-#'   header = "new_plots.csv", species = "new_species.csv",
-#'   roles = list(plot_id = "plot_id", species_id = "species"),
-#'   targets = list(),
-#'   vocabs = predictor$vocabs(), config = predictor$dataset_config()
-#' )
-#' preds <- resolve.predict.dataset(predictor, dataset)
-#' }
+#' @examplesIf resolve.available()
+#' plots <- system.file("extdata", "plots.csv", package = "resolveR")
+#' species <- system.file("extdata", "species.csv", package = "resolveR")
+#' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+#'               genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+#' targets <- list(elevation = list(column = "elevation", task = "regression"),
+#'                 habitat = list(column = "habitat", task = "classification"))
+#' dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets)
+#' path <- file.path(tempdir(), "model.pt")
+#' fit <- resolve.train.dataset(dataset, maxEpochs = 20L, savePath = path, verbose = FALSE)
+#'
+#' predictor <- resolve.load(path)
+#' new_plots <- resolve.dataset.csv(plots, species, roles = roles,
+#'                                  vocabs = predictor$vocabs(),
+#'                                  config = predictor$dataset_config())
+#' preds <- resolve.predict.dataset(predictor, new_plots)
+#' head(preds$predictions$elevation)
 #'
 #' @export
 resolve.load <- function(path, device = "cpu", vram_fraction = 1.0) {
@@ -239,12 +241,20 @@ resolve.load <- function(path, device = "cpu", vram_fraction = 1.0) {
 #' @return A named list of training-configuration fields, the keys and
 #'   spellings `trainConfig` in [resolve.train.dataset()] takes (enums such as
 #'   `loss_config` and `lr_scheduler` by name).
-#' @examples
-#' \dontrun{
-#' cfg <- resolve.load_train_config("model.pt")
+#' @examplesIf resolve.available()
+#' plots <- system.file("extdata", "plots.csv", package = "resolveR")
+#' species <- system.file("extdata", "species.csv", package = "resolveR")
+#' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+#'               genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+#' targets <- list(elevation = list(column = "elevation", task = "regression"),
+#'                 habitat = list(column = "habitat", task = "classification"))
+#' dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets)
+#' path <- file.path(tempdir(), "model.pt")
+#' fit <- resolve.train.dataset(dataset, maxEpochs = 20L, savePath = path, verbose = FALSE)
+#'
+#' cfg <- resolve.load_train_config(path)
+#' cfg$max_epochs
 #' cfg$batch_size
-#' cfg$band_thresholds
-#' }
 #' @export
 resolve.load_train_config <- function(path) {
   .resolve_read_checkpoint("train_config", path)
@@ -262,12 +272,20 @@ resolve.load_train_config <- function(path) {
 #' @param path Path to a `.pt` checkpoint.
 #' @return A named list of run-metadata fields, including `final_metrics`, a
 #'   nested list keyed by target then metric (e.g. `$final_metrics$area$rmse`).
-#' @examples
-#' \dontrun{
-#' meta <- resolve.load_run_metadata("model.pt")
+#' @examplesIf resolve.available()
+#' plots <- system.file("extdata", "plots.csv", package = "resolveR")
+#' species <- system.file("extdata", "species.csv", package = "resolveR")
+#' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+#'               genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+#' targets <- list(elevation = list(column = "elevation", task = "regression"),
+#'                 habitat = list(column = "habitat", task = "classification"))
+#' dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets)
+#' path <- file.path(tempdir(), "model.pt")
+#' fit <- resolve.train.dataset(dataset, maxEpochs = 20L, savePath = path, verbose = FALSE)
+#'
+#' meta <- resolve.load_run_metadata(path)
 #' meta$best_epoch
-#' meta$final_metrics$area$rmse
-#' }
+#' meta$final_metrics$elevation$rmse
 #' @export
 resolve.load_run_metadata <- function(path) {
   .resolve_read_checkpoint("run_metadata", path)
@@ -288,11 +306,9 @@ resolve.load_run_metadata <- function(path) {
 #'   `"masked_species"` (the `pretrain` argument of [resolve.train.dataset()]),
 #'   or `"vae"` ([resolve.pretrain_vae()]).
 #' @return A named list, one element per field.
-#' @examples
-#' \dontrun{
+#' @examplesIf resolve.available()
 #' resolve.default_config("train")$max_epochs
 #' names(resolve.default_config("model"))
-#' }
 #' @export
 resolve.default_config <- function(which) {
   if (!is.character(which) || length(which) != 1) {
@@ -326,13 +342,17 @@ resolve.default_config <- function(which) {
 #'   in row 1 and target in row 2, as 0-based species codes), `edge_type` (0
 #'   same genus, 1 same family, 2 co-occurrence), `n_species` and `n_edges`.
 #'
-#' @examples
-#' \dontrun{
-#' ds <- resolve.dataset.csv(header, species, roles, targets,
-#'                           config = list(species_encoding = "sparse"))
-#' graph <- resolve.species_graph(ds)
+#' @examplesIf resolve.available()
+#' plots <- system.file("extdata", "plots.csv", package = "resolveR")
+#' species <- system.file("extdata", "species.csv", package = "resolveR")
+#' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+#'               genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+#' targets <- list(elevation = list(column = "elevation", task = "regression"),
+#'                 habitat = list(column = "habitat", task = "classification"))
+#' dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets,
+#'                                config = list(species_encoding = "sparse"))
+#' graph <- resolve.species_graph(dataset)
 #' graph$n_edges
-#' }
 #'
 #' @export
 resolve.species_graph <- function(dataset,
@@ -369,11 +389,16 @@ resolve.species_graph <- function(dataset,
 #' @return No return value, called for its side effect of writing the
 #'   checkpoint to `path`.
 #'
-#' @examples
-#' \dontrun{
-#' fit <- resolve.train.dataset(dataset)
+#' @examplesIf resolve.available()
+#' plots <- system.file("extdata", "plots.csv", package = "resolveR")
+#' species <- system.file("extdata", "species.csv", package = "resolveR")
+#' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+#'               genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+#' targets <- list(elevation = list(column = "elevation", task = "regression"),
+#'                 habitat = list(column = "habitat", task = "classification"))
+#' dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets)
+#' fit <- resolve.train.dataset(dataset, maxEpochs = 20L, verbose = FALSE)
 #' resolve.save(fit, file.path(tempdir(), "model.pt"))
-#' }
 #'
 #' @export
 resolve.save <- function(trainer, path) {
@@ -543,32 +568,19 @@ resolve.progress <- function(checkpointDir) {
 #'   - plot_ids(): Get plot IDs
 #'   - n_plots(): Get number of plots
 #'
-#' @examples
-#' \dontrun{
+#' @examplesIf resolve.available()
+#' plots <- system.file("extdata", "plots.csv", package = "resolveR")
+#' species <- system.file("extdata", "species.csv", package = "resolveR")
+#' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+#'               genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+#' targets <- list(elevation = list(column = "elevation", task = "regression"),
+#'                 habitat = list(column = "habitat", task = "classification"))
 #' dataset <- resolve.dataset.csv(
-#'   header = "plots.csv",
-#'   species = "species.csv",
-#'   roles = list(
-#'     plot_id = "plot_id",
-#'     species_id = "species",
-#'     abundance = "cover",
-#'     longitude = "lon",
-#'     latitude = "lat"
-#'   ),
-#'   targets = list(
-#'     area = list(column = "area", task = "regression", transform = "log1p"),
-#'     habitat = list(column = "habitat", task = "classification", num_classes = 9)
-#'   ),
-#'   config = list(
-#'     species_encoding = "hash",
-#'     hash_dim = 64,
-#'     top_k = 5
-#'   )
+#'   plots, species, roles = roles, targets = targets,
+#'   config = list(species_encoding = "hash", hash_dim = 64, top_k = 5)
 #' )
-#'
-#' print(dataset$schema())
-#' print(dataset$n_plots())
-#' }
+#' dataset$n_plots()
+#' dataset$schema()$n_species
 #'
 #' @export
 resolve.dataset.csv <- function(header,
@@ -942,13 +954,19 @@ resolve.dataset.frame <- function(header,
 #'   when the CUDA auto-halve-on-OOM retry fired -- and `resumed_from_epoch`
 #'   (0 unless `resumeFrom` continued the run).
 #'
-#' @examples
-#' \dontrun{
-#' dataset <- resolve.dataset.csv(...)
-#' result <- resolve.train.dataset(dataset, maxEpochs = 100)
-#' ft <- resolve.train.dataset(dataset,
+#' @examplesIf resolve.available()
+#' plots <- system.file("extdata", "plots.csv", package = "resolveR")
+#' species <- system.file("extdata", "species.csv", package = "resolveR")
+#' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+#'               genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+#' targets <- list(elevation = list(column = "elevation", task = "regression"),
+#'                 habitat = list(column = "habitat", task = "classification"))
+#' dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets)
+#' fit <- resolve.train.dataset(dataset, maxEpochs = 20L, verbose = FALSE)
+#' fit$result$final_metrics$elevation$r2
+#'
+#' ft <- resolve.train.dataset(dataset, maxEpochs = 5L, verbose = FALSE,
 #'                             modelConfig = list(encoder_architecture = "ft_transformer"))
-#' }
 #'
 #' @export
 resolve.train.dataset <- function(dataset,
@@ -1112,12 +1130,19 @@ resolve.train.dataset <- function(dataset,
 #'   and metric, over the folds), `fold_results` (each fold's training result,
 #'   as `result` of [resolve.train.dataset()]) and `total_time_seconds`.
 #'
-#' @examples
-#' \dontrun{
-#' cv <- resolve.cross_validate(dataset, nFolds = 5, maxEpochs = 100)
-#' cv$mean_metrics$area$r2
-#' blocks <- resolve.cross_validate(dataset, spatial = list(lat_size = 2, lon_size = 2))
-#' }
+#' @examplesIf resolve.available()
+#' plots <- system.file("extdata", "plots.csv", package = "resolveR")
+#' species <- system.file("extdata", "species.csv", package = "resolveR")
+#' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+#'               genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+#' targets <- list(elevation = list(column = "elevation", task = "regression"),
+#'                 habitat = list(column = "habitat", task = "classification"))
+#' dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets)
+#' cv <- resolve.cross_validate(dataset, nFolds = 3L, maxEpochs = 10L)
+#' cv$mean_metrics$elevation$r2
+#'
+#' blocks <- resolve.cross_validate(dataset, nFolds = 3L, maxEpochs = 10L,
+#'                                  spatial = list(lat_size = 0.2, lon_size = 0.3))
 #'
 #' @export
 resolve.cross_validate <- function(dataset, nFolds = 5L, seed = 42L, spatial = NULL, ...) {
@@ -1169,13 +1194,17 @@ resolve.cross_validate <- function(dataset, nFolds = 5L, seed = 42L, spatial = N
 #'   and `projection_weights`, the encoder's first layer (one row per unit of
 #'   its first hidden layer, one column per species of the vocabulary).
 #'
-#' @examples
-#' \dontrun{
-#' ds <- resolve.dataset.csv(header, species, roles, targets,
-#'                           config = list(species_encoding = "sparse"))
-#' vae <- resolve.pretrain_vae(ds, list(latent_dim = 16, pretrain_epochs = 50))
+#' @examplesIf resolve.available()
+#' plots <- system.file("extdata", "plots.csv", package = "resolveR")
+#' species <- system.file("extdata", "species.csv", package = "resolveR")
+#' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+#'               genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+#' targets <- list(elevation = list(column = "elevation", task = "regression"),
+#'                 habitat = list(column = "habitat", task = "classification"))
+#' dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets,
+#'                                config = list(species_encoding = "sparse"))
+#' vae <- resolve.pretrain_vae(dataset, list(latent_dim = 4, pretrain_epochs = 20))
 #' plot(vae$loss_history, type = "l")
-#' }
 #'
 #' @export
 resolve.pretrain_vae <- function(dataset, config = list()) {
@@ -1215,15 +1244,27 @@ resolve.pretrain_vae <- function(dataset, config = list()) {
 #'
 #' @return The predictor, invisibly.
 #'
-#' @examples
-#' \dontrun{
-#' predictor <- resolve.load("model.pt")
-#' reference <- resolve.dataset.csv("train_plots.csv", "train_species.csv", roles,
-#'                                  targets, vocabs = predictor$vocabs(),
+#' @examplesIf resolve.available()
+#' plots <- system.file("extdata", "plots.csv", package = "resolveR")
+#' species <- system.file("extdata", "species.csv", package = "resolveR")
+#' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+#'               genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+#' targets <- list(elevation = list(column = "elevation", task = "regression"),
+#'                 habitat = list(column = "habitat", task = "classification"))
+#' dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets)
+#' path <- file.path(tempdir(), "model.pt")
+#' fit <- resolve.train.dataset(dataset, maxEpochs = 20L, savePath = path, verbose = FALSE)
+#'
+#' predictor <- resolve.load(path)
+#' new_plots <- resolve.dataset.csv(plots, species, roles = roles,
+#'                                  vocabs = predictor$vocabs(),
 #'                                  config = predictor$dataset_config())
-#' resolve.retrieval(predictor, reference, kNeighbors = 32, alpha = 0.3)
+#' reference <- resolve.dataset.csv(plots, species, roles = roles, targets = targets,
+#'                                  vocabs = predictor$vocabs(),
+#'                                  config = predictor$dataset_config())
+#' resolve.retrieval(predictor, reference, kNeighbors = 8L, alpha = 0.3)
 #' preds <- resolve.predict.dataset(predictor, new_plots)
-#' }
+#' head(preds$predictions$elevation)
 #'
 #' @export
 resolve.retrieval <- function(predictor, reference, kNeighbors = NULL, alpha = NULL,
@@ -1264,11 +1305,9 @@ resolve.retrieval <- function(predictor, reference, kNeighbors = NULL, alpha = N
 #' @return A `FuzzyIndex` object (an Rcpp module class) with methods `size()`,
 #'   `bucket_count()` and `max_supported_distance()`.
 #'
-#' @examples
-#' \dontrun{
+#' @examplesIf resolve.available()
 #' index <- resolve.fuzzy_index(c("Quercus robur", "Quercus petraea", "Fagus sylvatica"))
 #' resolve.fuzzy_match(index, c("Quercus robr", "Fagus silvatica"))
-#' }
 #'
 #' @export
 resolve.fuzzy_index <- function(entries, maxEditDistance = NULL, caseInsensitive = NULL,
@@ -1307,11 +1346,9 @@ resolve.fuzzy_index <- function(entries, maxEditDistance = NULL, caseInsensitive
 #'   position in the index's entries) and `distance`. A needle with no match
 #'   has no row.
 #'
-#' @examples
-#' \dontrun{
+#' @examplesIf resolve.available()
 #' index <- resolve.fuzzy_index(c("Quercus robur", "Fagus sylvatica"))
 #' resolve.fuzzy_match(index, "Quercus robr", topN = 1)
-#' }
 #'
 #' @export
 resolve.fuzzy_match <- function(index, needles, maxEditDistance = NULL, topN = NULL,
@@ -1346,10 +1383,8 @@ resolve.fuzzy_match <- function(index, needles, maxEditDistance = NULL, topN = N
 #' @param deviceIndex CUDA device; -1 (default) is the current device.
 #' @return No return value. Nothing happens on a CPU-only backend or a machine
 #'   without a CUDA device.
-#' @examples
-#' \dontrun{
+#' @examplesIf resolve.available()
 #' resolve.set_vram_fraction(0.8)
-#' }
 #' @export
 resolve.set_vram_fraction <- function(fraction, deviceIndex = -1L) {
   if (!is.numeric(fraction) || length(fraction) != 1 || fraction <= 0 || fraction > 1) {
@@ -1384,14 +1419,24 @@ resolve.set_vram_fraction <- function(fraction, deviceIndex = -1L) {
 #'   set ([resolve.retrieval()]) the predictions and probabilities are the
 #'   blend.
 #'
-#' @examples
-#' \dontrun{
-#' predictor <- resolve.load("model.pt")
-#' dataset <- resolve.dataset.csv(...)
-#' preds <- resolve.predict.dataset(predictor, dataset)
-#' preds$predictions$habitat            # predicted class code per plot
-#' preds$probabilities$habitat[1, ]     # that plot's probability over classes
-#' }
+#' @examplesIf resolve.available()
+#' plots <- system.file("extdata", "plots.csv", package = "resolveR")
+#' species <- system.file("extdata", "species.csv", package = "resolveR")
+#' roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+#'               genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+#' targets <- list(elevation = list(column = "elevation", task = "regression"),
+#'                 habitat = list(column = "habitat", task = "classification"))
+#' dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets)
+#' path <- file.path(tempdir(), "model.pt")
+#' fit <- resolve.train.dataset(dataset, maxEpochs = 20L, savePath = path, verbose = FALSE)
+#'
+#' predictor <- resolve.load(path)
+#' new_plots <- resolve.dataset.csv(plots, species, roles = roles,
+#'                                  vocabs = predictor$vocabs(),
+#'                                  config = predictor$dataset_config())
+#' preds <- resolve.predict.dataset(predictor, new_plots)
+#' head(preds$predictions$habitat)   # predicted class code per plot
+#' preds$probabilities$habitat[1, ]  # the first plot's probability over classes
 #'
 #' @export
 resolve.predict.dataset <- function(predictor, dataset, returnLatent = FALSE,

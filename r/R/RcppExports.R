@@ -27,15 +27,13 @@
 #'   the relative band (`resolve_band_accuracy()`), or the share of exactly
 #'   matching class codes (`resolve_accuracy()`).
 #'
-#' @examples
-#' \dontrun{
+#' @examplesIf resolve.available()
 #' pred <- c(1.0, 2.2, 2.9, 4.1)
 #' obs <- c(1, 2, 3, 4)
 #' resolve_mae(pred, obs)
 #' resolve_rmse(pred, obs)
 #' resolve_r_squared(pred, obs)
 #' resolve_band_accuracy(pred, obs, threshold = 0.05)
-#' }
 #' @name resolve_metrics
 #' @rdname resolve_metrics
 #' @export

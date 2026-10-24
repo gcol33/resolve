@@ -21,9 +21,19 @@ the plots named by \code{stoppingPlots}), best and total epochs, the RESOLVE
 version and timestamps, and the per-target final-metric tree.
 }
 \examples{
-\dontrun{
-meta <- resolve.load_run_metadata("model.pt")
+\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+plots <- system.file("extdata", "plots.csv", package = "resolveR")
+species <- system.file("extdata", "species.csv", package = "resolveR")
+roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+              genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+targets <- list(elevation = list(column = "elevation", task = "regression"),
+                habitat = list(column = "habitat", task = "classification"))
+dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets)
+path <- file.path(tempdir(), "model.pt")
+fit <- resolve.train.dataset(dataset, maxEpochs = 20L, savePath = path, verbose = FALSE)
+
+meta <- resolve.load_run_metadata(path)
 meta$best_epoch
-meta$final_metrics$area$rmse
-}
+meta$final_metrics$elevation$rmse
+\dontshow{\}) # examplesIf}
 }

@@ -39,12 +39,23 @@ blend.
 Make predictions on a ResolveDataset using a trained model.
 }
 \examples{
-\dontrun{
-predictor <- resolve.load("model.pt")
-dataset <- resolve.dataset.csv(...)
-preds <- resolve.predict.dataset(predictor, dataset)
-preds$predictions$habitat            # predicted class code per plot
-preds$probabilities$habitat[1, ]     # that plot's probability over classes
-}
+\dontshow{if (resolve.available()) withAutoprint(\{ # examplesIf}
+plots <- system.file("extdata", "plots.csv", package = "resolveR")
+species <- system.file("extdata", "species.csv", package = "resolveR")
+roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+              genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+targets <- list(elevation = list(column = "elevation", task = "regression"),
+                habitat = list(column = "habitat", task = "classification"))
+dataset <- resolve.dataset.csv(plots, species, roles = roles, targets = targets)
+path <- file.path(tempdir(), "model.pt")
+fit <- resolve.train.dataset(dataset, maxEpochs = 20L, savePath = path, verbose = FALSE)
 
+predictor <- resolve.load(path)
+new_plots <- resolve.dataset.csv(plots, species, roles = roles,
+                                 vocabs = predictor$vocabs(),
+                                 config = predictor$dataset_config())
+preds <- resolve.predict.dataset(predictor, new_plots)
+head(preds$predictions$habitat)   # predicted class code per plot
+preds$probabilities$habitat[1, ]  # the first plot's probability over classes
+\dontshow{\}) # examplesIf}
 }
