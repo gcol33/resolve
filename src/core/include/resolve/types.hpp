@@ -110,8 +110,10 @@ enum class LRSchedulerType {
     None,            // Constant learning rate
     StepLR,          // Step decay every N epochs
     CosineAnnealing, // Cosine annealing to min_lr
-    ReduceOnPlateau  // Decay when the held-out selection value stops improving
+    ReduceOnPlateau, // Decay when the held-out selection value stops improving
                      // (lr_schedule.hpp)
+    LinearDecay      // Linear decay per optimizer step from lr, at the end of
+                     // warmup, to lr_min at the last step of max_epochs
 };
 
 // The held-out value early stopping, best_epoch and a ReduceOnPlateau
@@ -831,7 +833,7 @@ struct TrainConfig {
     LRSchedulerType lr_scheduler = LRSchedulerType::None;
     int lr_step_size = 100;      // For StepLR: decay every N epochs
     float lr_gamma = 0.1f;       // For StepLR: multiply LR by gamma
-    float lr_min = 1e-6f;        // CosineAnnealing: final LR; ReduceOnPlateau: floor
+    float lr_min = 1e-6f;        // CosineAnnealing, LinearDecay: final LR; ReduceOnPlateau: floor
 
     // ReduceOnPlateau, PyTorch's ReduceLROnPlateau on the held-out value
     // selection_metric names, the value early stopping and best_epoch read:
@@ -847,6 +849,19 @@ struct TrainConfig {
     int lr_plateau_patience = 10;
     float lr_plateau_threshold = 0.0f;
     int lr_plateau_cooldown = 0;
+
+    // Linear learning-rate warmup over the run's first optimizer steps, set in
+    // steps (warmup_steps) or in epochs (warmup_epochs, each epoch the
+    // ceil(n_train / batch_size) steps it takes); at most one of them is
+    // positive, and 0 for both trains without warmup. Step s < W of the run
+    // trains at the scheduled rate times (s + 1) / W, so the rate climbs from
+    // lr / W to the schedule over W steps and every later step trains at the
+    // schedule itself. An epoch that begins inside the warmup counts no bad
+    // epoch against early stopping's patience or a ReduceOnPlateau schedule,
+    // as an epoch before the loss objective settles does not: its held-out
+    // value still becomes the best when it improves on it.
+    int warmup_steps = 0;
+    int warmup_epochs = 0;
 
     // Band accuracy thresholds for regression metrics. Reporting only: each
     // threshold t produces a "band_<100t>" metric (band_10, band_25, band_50).
@@ -970,7 +985,9 @@ struct TrainResult {
     std::unordered_map<std::string, std::unordered_map<std::string, float>> final_metrics;
     std::vector<float> train_loss_history;
     std::vector<float> test_loss_history;
-    // The learning rate each epoch trained at, one value per epoch.
+    // The learning rate each epoch trained at, one value per epoch: the rate
+    // of its last optimizer step, which is the rate of every step of the epoch
+    // unless warmup or a LinearDecay schedule moves it from step to step.
     std::vector<float> lr_history;
     // The held-out value of TrainConfig::selection_metric each epoch scored,
     // the value early stopping, best_epoch and a ReduceOnPlateau schedule

@@ -373,7 +373,7 @@ TEST_CASE("Every config struct's registry covers every member", "[config][regist
     CHECK(field_registry_size(static_cast<const ParallelLayersConfig*>(nullptr)) == 5);
     CHECK(field_registry_size(static_cast<const ModelConfig*>(nullptr)) == 46);
     CHECK(field_registry_size(static_cast<const DatasetConfig*>(nullptr)) == 17);
-    CHECK(field_registry_size(static_cast<const TrainConfig*>(nullptr)) == 35);
+    CHECK(field_registry_size(static_cast<const TrainConfig*>(nullptr)) == 37);
 
     // Same comparison the static_assert makes, spelled out once at runtime.
     CHECK(field_registry_size(static_cast<const ModelConfig*>(nullptr)) ==
@@ -610,6 +610,7 @@ TEST_CASE("Checkpoint keys keep the spellings earlier releases wrote",
              "train_lr_gamma", "train_lr_min", "train_vram_fraction",
              "train_lr_plateau_factor", "train_lr_plateau_patience",
              "train_lr_plateau_threshold", "train_lr_plateau_cooldown",
+             "train_warmup_steps", "train_warmup_epochs",
              "train_selection_metric",
              "train_band_thresholds", "train_band_threshold",
              "train_nca_temperature", "train_nca_neighbors", "train_nca_weight",
@@ -1010,4 +1011,38 @@ TEST_CASE("The progress file of a run selecting by accuracy names it beside the 
     CHECK(progress.at("selection_metric").as_string() == "accuracy");
     CHECK(progress.at("best_selected").as_number() == 0.5);
     CHECK(progress.at("best_epoch").as_int() == 4);
+}
+
+TEST_CASE("The warmup round-trips through the checkpoint and reads as none before it",
+          "[config][registry][checkpoint][warmup]") {
+    TrainConfig warm;
+    warm.warmup_steps = 250;
+    warm.lr_scheduler = LRSchedulerType::LinearDecay;
+    const TempPath path(".pt");
+    {
+        torch::serialize::OutputArchive archive;
+        save_train_config(archive, warm);
+        archive.save_to(path.path());
+    }
+    {
+        torch::serialize::InputArchive archive;
+        archive.load_from(path.path());
+        const TrainConfig loaded = load_train_config(archive);
+        CHECK(loaded.warmup_steps == 250);
+        CHECK(loaded.warmup_epochs == 0);
+        CHECK(loaded.lr_scheduler == LRSchedulerType::LinearDecay);
+    }
+
+    // A checkpoint written before the warmup existed carries neither key.
+    const TempPath legacy(".pt");
+    {
+        torch::serialize::OutputArchive archive;
+        archive.write("train_lr", torch::tensor(0.01f));
+        archive.save_to(legacy.path());
+    }
+    torch::serialize::InputArchive archive;
+    archive.load_from(legacy.path());
+    const TrainConfig loaded = load_train_config(archive);
+    CHECK(loaded.warmup_steps == 0);
+    CHECK(loaded.warmup_epochs == 0);
 }

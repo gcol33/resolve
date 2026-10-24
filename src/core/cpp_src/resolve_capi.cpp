@@ -1673,6 +1673,7 @@ resolve_value* pretrain_result_to_value(const PretrainResult& r) {
     v_put(g.p, "loss_history", v_double_array(r.loss_history));
     v_put(g.p, "total_time_seconds", v_double(r.total_time_seconds));
     v_put(g.p, "epochs_completed", v_int(r.epochs_completed));
+    v_put(g.p, "effective_batch_size", v_int(r.effective_batch_size));
     return g.release();
 }
 
@@ -1864,6 +1865,7 @@ resolve_value_t* resolve_vae_pretrain(const resolve_dataset_t* ds, const resolve
         v_put(g.p, "kl_loss_history", v_double_array(result.kl_loss_history));
         v_put(g.p, "total_time_seconds", v_double(result.total_time_seconds));
         v_put(g.p, "epochs_completed", v_int(result.epochs_completed));
+        v_put(g.p, "effective_batch_size", v_int(result.effective_batch_size));
         v_put(g.p, "latent_dim", v_int(pretrainer.vae()->latent_dim()));
         v_put(g.p, "projection_weights", tensor_to_mat(pretrainer.vae()->get_projection_weights()));
         return g.release();

@@ -380,8 +380,16 @@ private:
 
     using MetricMap = std::unordered_map<std::string, std::unordered_map<std::string, float>>;
 
-    // Train one epoch
-    EpochLoss train_epoch(int epoch);
+    // Train one epoch, each optimizer step at its step_learning_rate under
+    // `plateau`, the ReduceOnPlateau state the epoch starts from.
+    EpochLoss train_epoch(int epoch, const PlateauState& plateau);
+
+    // The rows of one training batch: config_.batch_size, or the whole
+    // fitting fold for a model that requires_full_batch_training().
+    [[nodiscard]] int64_t training_batch_size() const;
+
+    // The optimizer steps one epoch takes at training_batch_size().
+    [[nodiscard]] int64_t training_steps_per_epoch() const;
 
     // The held-out loss under the selection objective and the metrics of
     // every target.
@@ -397,9 +405,6 @@ private:
 
     // The target scalers on the training device: the GPU mirror when cached.
     [[nodiscard]] TargetScalers device_target_scalers() const;
-
-    // Update optimizer learning rate
-    void update_learning_rate(double lr);
 
     // Pre-load all data to GPU for faster training
     void cache_data_to_gpu();

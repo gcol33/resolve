@@ -65,7 +65,8 @@ void register_pretraining(nb::module_& m) {
     nb::class_<resolve::PretrainResult>(m, "PretrainResult")
         .def_ro("loss_history", &resolve::PretrainResult::loss_history)
         .def_ro("total_time_seconds", &resolve::PretrainResult::total_time_seconds)
-        .def_ro("epochs_completed", &resolve::PretrainResult::epochs_completed);
+        .def_ro("epochs_completed", &resolve::PretrainResult::epochs_completed)
+        .def_ro("effective_batch_size", &resolve::PretrainResult::effective_batch_size);
 
     // JEPAPretrainer
     nb::class_<resolve::JEPAPretrainer>(m, "JEPAPretrainer")
@@ -127,7 +128,8 @@ void register_pretraining(nb::module_& m) {
         .def_ro("recon_loss_history", &resolve::VAEPretrainResult::recon_loss_history)
         .def_ro("kl_loss_history", &resolve::VAEPretrainResult::kl_loss_history)
         .def_ro("total_time_seconds", &resolve::VAEPretrainResult::total_time_seconds)
-        .def_ro("epochs_completed", &resolve::VAEPretrainResult::epochs_completed);
+        .def_ro("epochs_completed", &resolve::VAEPretrainResult::epochs_completed)
+        .def_ro("effective_batch_size", &resolve::VAEPretrainResult::effective_batch_size);
 
     // VAEPretrainer
     nb::class_<resolve::VAEPretrainer>(m, "VAEPretrainer")

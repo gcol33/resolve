@@ -367,6 +367,8 @@ inline constexpr const char* kRequiredDatasetConfigKeys[] = {
     F(lr_plateau_patience, "train_lr_plateau_patience") \
     F(lr_plateau_threshold, "train_lr_plateau_threshold") \
     F(lr_plateau_cooldown, "train_lr_plateau_cooldown") \
+    F(warmup_steps,        "train_warmup_steps")        \
+    F(warmup_epochs,       "train_warmup_epochs")       \
     F(band_thresholds,     "train_band_thresholds")     \
     F(band_threshold,      "train_band_threshold")      \
     F(nca_temperature,     "train_nca_temperature")     \
@@ -420,6 +422,9 @@ RESOLVE_DEFINE_FIELD_REGISTRY(RetrievalConfig, RESOLVE_RETRIEVAL_CONFIG_FIELDS)
     F(device,                "")           \
     F(log,                   "")           \
     F(seed,                  "")           \
+    F(warmup_steps,          "")           \
+    F(batch_size_floor,      "")           \
+    F(vram_fraction,         "")           \
     F(ema_decay,             "")           \
     F(ema_decay_end,         "")           \
     F(predictor_hidden_dim,  "")           \
@@ -440,7 +445,10 @@ RESOLVE_DEFINE_FIELD_REGISTRY(PretrainConfig, RESOLVE_PRETRAIN_CONFIG_FIELDS)
     F(batch_size,            "")              \
     F(device,                "")              \
     F(log,                   "")              \
-    F(seed,                  "")
+    F(seed,                  "")              \
+    F(warmup_steps,          "")              \
+    F(batch_size_floor,      "")              \
+    F(vram_fraction,         "")
 
 RESOLVE_DEFINE_FIELD_REGISTRY(MLMPretrainConfig, RESOLVE_MLM_PRETRAIN_CONFIG_FIELDS)
 
@@ -457,7 +465,10 @@ RESOLVE_DEFINE_FIELD_REGISTRY(MLMPretrainConfig, RESOLVE_MLM_PRETRAIN_CONFIG_FIE
     F(batch_size,            "")           \
     F(device,                "")           \
     F(log,                   "")           \
-    F(seed,                  "")
+    F(seed,                  "")           \
+    F(warmup_steps,          "")           \
+    F(batch_size_floor,      "")           \
+    F(vram_fraction,         "")
 
 RESOLVE_DEFINE_FIELD_REGISTRY(VAEConfig, RESOLVE_VAE_CONFIG_FIELDS)
 

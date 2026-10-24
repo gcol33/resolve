@@ -323,3 +323,29 @@ TEST_CASE("A run resumed on the GPU continues the uninterrupted run",
                 1e-3f * (1.0f + std::abs(run.full.train_loss_history[i])));
     }
 }
+
+TEST_CASE("A run resumed inside its warmup continues the warmup at its step",
+          "[trainer][resume][warmup]") {
+    // 45 fitting plots in batches of 8: six optimizer steps an epoch, so
+    // checkpoint_2.pt is written twelve steps into the run.
+    const auto ds = resume_dataset();
+    const TempDir dir;
+    TrainConfig tc = resume_train_config(dir.path());
+
+    SECTION("a warmup in steps under a cosine schedule") {
+        tc.warmup_steps = 20;
+    }
+    SECTION("a warmup in epochs under a linear schedule") {
+        tc.lr_scheduler = LRSchedulerType::LinearDecay;
+        tc.warmup_epochs = 3;
+    }
+
+    const auto run = run_and_resume(ds, tc, dir.file("checkpoint_2.pt"));
+
+    REQUIRE(run.resumed.resumed_from_epoch == 2);
+    REQUIRE(run.resumed.train_loss_history.size() == 8);
+    require_same_run(run.full, run.resumed);
+    require_same_weights(*run.full_trainer, *run.resumed_trainer);
+    // The rate still climbs from epoch 1 to epoch 2, inside the warmup.
+    CHECK(run.full.lr_history[1] < run.full.lr_history[2]);
+}

@@ -63,30 +63,6 @@ ResolveDataset make_dataset(int64_t n_plots) {
 
 ModelConfig make_model_config() { return hash_mlp_config({8, 4}); }
 
-// A TrainConfig::log callback that raises an out-of-memory error the first
-// `n_failures` times fit() prints an epoch progress line. Every other message
-// (including the retry notice fit() emits after catching) passes through
-// silently.
-class OomInjector {
-public:
-    explicit OomInjector(int n_failures)
-        : remaining_(std::make_shared<int>(n_failures)) {}
-
-    [[nodiscard]] LogCallback callback() const {
-        auto remaining = remaining_;
-        return [remaining](const std::string& msg) {
-            if (msg.rfind("Epoch ", 0) == 0 && *remaining > 0) {
-                --(*remaining);
-                C10_THROW_ERROR(OutOfMemoryError,
-                                "CUDA out of memory (injected by OomInjector)");
-            }
-        };
-    }
-
-private:
-    std::shared_ptr<int> remaining_;
-};
-
 int read_checkpoint_int(const std::string& path, const char* key) {
     torch::serialize::InputArchive archive;
     archive.load_from(path);

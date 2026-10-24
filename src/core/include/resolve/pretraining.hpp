@@ -115,6 +115,18 @@ struct PretrainConfig {
     // advances the global stream through its dropout masks.
     int seed = 42;
 
+    // The run settings every pretext task shares (PretrainLoopSpec):
+    //   warmup_steps: optimizer steps over which the rate climbs linearly
+    //     from pretrain_lr / warmup_steps to pretrain_lr (0 = none).
+    //   batch_size_floor: smallest batch size the auto-halve-on-OOM retry
+    //     may drop to; below it the out-of-memory error is rethrown.
+    //   vram_fraction: fraction of the CUDA device's VRAM the caching
+    //     allocator may use (set_vram_fraction), applied before the run
+    //     allocates on the device; 1.0 leaves the allocator as it is.
+    int warmup_steps = 0;
+    int batch_size_floor = 1024;
+    float vram_fraction = 1.0f;
+
     // T-JEPA specific
     float ema_decay = 0.996f;                 // EMA decay for target encoder
     float ema_decay_end = 1.0f;               // Final EMA decay (cosine schedule)
@@ -303,6 +315,9 @@ struct PretrainResult {
     std::vector<float> loss_history;
     float total_time_seconds = 0.0f;
     int epochs_completed = 0;
+    // The batch size the run trained at: the configured one, or the halved
+    // one the auto-halve-on-OOM retry restarted it at.
+    int effective_batch_size = 0;
 };
 
 // =============================================================================
@@ -338,14 +353,27 @@ struct PretrainLoopHooks {
     // Task-specific tail appended to the shared per-epoch progress line, so all
     // four tasks log from one site (the VAE reports its recon / KL split).
     std::function<std::string(int epoch)> epoch_detail;
+
+    // Before the run starts over at the halved `batch_size` after a CUDA
+    // out-of-memory error, once the loop has put the modules' and side
+    // modules' parameters and buffers back. The task resets the state it
+    // keeps itself: JEPA its EMA step count and schedule length, the VAE its
+    // component histories.
+    std::function<void(int batch_size)> on_restart;
 };
 
 // Everything the shared loop needs that is not the objective itself.
 struct PretrainLoopSpec {
     // Moved to `device` once, then put in train() mode at the top of every
     // epoch. A frozen side module (JEPA's EMA target encoder, always run in
-    // eval()) is deliberately NOT listed here; its owner moves it itself.
+    // eval()) is deliberately NOT listed here; it goes in side_modules.
     std::vector<std::shared_ptr<torch::nn::Module>> modules;
+
+    // Modules the objective reads that the loop neither trains, moves nor
+    // switches to train() (JEPA's EMA target encoder). Their parameters and
+    // buffers are put back with those of `modules` when an out-of-memory
+    // retry starts the run over.
+    std::vector<std::shared_ptr<torch::nn::Module>> side_modules;
 
     // Handed to AdamW and to clip_grad_norm. Collected by the task because
     // only the task knows which of its modules are trainable. Safe to collect
@@ -368,20 +396,52 @@ struct PretrainLoopSpec {
     torch::Device device = torch::kCPU;
     // Seeds the loop's PretrainRng, reseeded per epoch to (seed + epoch + 1).
     int seed = 42;
+    // Linear warmup over the run's first optimizer steps: step s < warmup_steps
+    // (counting the steps taken, not the skipped batches) trains at
+    // lr * (s + 1) / warmup_steps, the warmup_factor the Trainer's schedule
+    // applies. 0 trains every step at lr.
+    int warmup_steps = 0;
+    // The auto-halve-on-OOM retry (retry_halving_on_oom): a CUDA
+    // out-of-memory error halves batch_size and starts the run over from the
+    // modules' starting state, while the halved size is at least this floor.
+    int batch_size_floor = 1024;
+    // The VRAM cap set_vram_fraction applies on a CUDA device before the loop
+    // allocates there; 1.0 leaves the allocator as it is.
+    float vram_fraction = 1.0f;
     LogCallback log = default_log;
     std::string task_name = "pretrain";  // names the task in the progress line
     int log_every = 10;                  // <= 0 silences per-epoch logging
 };
 
-// The single epoch/shuffle/optimizer scaffold behind every pretext task: device
-// move, AdamW over `params`, per-epoch reseed and shuffle, batch slicing of
-// every input, zero_grad / backward / clip / step, loss accumulation on the
-// device (read back once per epoch), progress logging, and the timing + epoch
-// count on the returned result. JEPA, SCARF, MLM and the VAE differ only in
-// their batch_fn (and, for JEPA and the VAE, a hook), so adding a fifth
-// pretext task is one loss lambda. A missing continuous cell (NaN) is filled
-// with its column mean over the given plots, the fill training would compute
-// for the same rows.
+// The single epoch/shuffle/optimizer scaffold behind every pretext task: the
+// VRAM cap, device move, AdamW over `params`, per-epoch reseed and shuffle,
+// batch slicing of every input, zero_grad / backward / clip / warmup rate /
+// step, loss accumulation on the device (read back once per epoch), progress
+// logging, the auto-halve-on-OOM retry, and the timing, epoch count and
+// effective batch size on the returned result. JEPA, SCARF, MLM and the VAE
+// differ only in their batch_fn (and, for JEPA and the VAE, hooks), so adding
+// a fifth pretext task is one loss lambda. A missing continuous cell (NaN) is
+// filled with its column mean over the given plots, the fill training would
+// compute for the same rows. Throws std::invalid_argument for batch_size < 1,
+// warmup_steps < 0 or batch_size_floor < 1.
+// Copies the run settings every pretraining config (PretrainConfig,
+// MLMPretrainConfig, VAEConfig) spells alike onto `spec`: epochs, batch size,
+// learning rate and weight decay, device, seed, log, warmup, out-of-memory
+// floor and VRAM cap.
+template <typename Config>
+void set_run_settings(PretrainLoopSpec& spec, const Config& config) {
+    spec.epochs = config.pretrain_epochs;
+    spec.batch_size = config.batch_size;
+    spec.lr = config.pretrain_lr;
+    spec.weight_decay = config.pretrain_weight_decay;
+    spec.device = config.device;
+    spec.seed = config.seed;
+    spec.log = config.log;
+    spec.warmup_steps = config.warmup_steps;
+    spec.batch_size_floor = config.batch_size_floor;
+    spec.vram_fraction = config.vram_fraction;
+}
+
 PretrainResult run_pretrain_loop(
     PretrainLoopSpec spec,
     const PretrainBatchFn& batch_fn,
@@ -485,6 +545,11 @@ struct MLMPretrainConfig {
     // Seed for the dedicated pretraining RNG; see PretrainConfig::seed for the
     // contract it buys (reproducible run, untouched global RNG stream).
     int seed = 42;
+
+    // Warmup, out-of-memory floor and VRAM cap; see PretrainConfig.
+    int warmup_steps = 0;
+    int batch_size_floor = 1024;
+    float vram_fraction = 1.0f;
 
     // Throws std::invalid_argument if batch_size < 1 or mask_prob not in (0, 1).
     // `seed` is unconstrained.

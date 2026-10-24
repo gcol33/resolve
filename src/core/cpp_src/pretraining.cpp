@@ -1,8 +1,10 @@
 #include "resolve/pretraining.hpp"
 #include "resolve/continuous_block.hpp"
 #include "resolve/dataset.hpp"
+#include "resolve/gpu.hpp"
 #include "resolve/grad_clip.hpp"
 #include "resolve/ln_mlp.hpp"
+#include "resolve/lr_schedule.hpp"
 #include "resolve/sparse_rows.hpp"
 #include "resolve/utils.hpp"
 #include <algorithm>
@@ -358,6 +360,41 @@ PlotInputs mask_species_view(const PlotInputs& inputs, float ratio, PretrainRng&
 // Shared pretraining loop
 // =============================================================================
 
+namespace {
+
+// The parameters and buffers of a set of modules, copied to the host, and
+// their copy back: the state an out-of-memory retry starts the run over from.
+class ModuleStates {
+public:
+    explicit ModuleStates(
+        std::initializer_list<const std::vector<std::shared_ptr<torch::nn::Module>>*> sets) {
+        torch::NoGradGuard no_grad;
+        for (const auto* modules : sets) {
+            for (const auto& module : *modules) {
+                if (!module) continue;
+                for (const auto& tensor : module->parameters()) keep(tensor);
+                for (const auto& tensor : module->buffers()) keep(tensor);
+            }
+        }
+    }
+
+    void restore() const {
+        torch::NoGradGuard no_grad;
+        for (const auto& [live, saved] : slots_) live.copy_(saved);
+    }
+
+private:
+    void keep(const torch::Tensor& tensor) {
+        if (!tensor.defined()) return;
+        slots_.emplace_back(tensor, tensor.detach().to(torch::kCPU, /*non_blocking=*/false,
+                                                       /*copy=*/true));
+    }
+
+    std::vector<std::pair<torch::Tensor, torch::Tensor>> slots_;
+};
+
+}  // namespace
+
 PretrainResult run_pretrain_loop(
     PretrainLoopSpec spec,
     const PretrainBatchFn& batch_fn,
@@ -380,9 +417,26 @@ PretrainResult run_pretrain_loop(
         throw std::invalid_argument(
             "run_pretrain_loop: batch_fn must be callable (it is the objective).");
     }
+    if (spec.warmup_steps < 0) {
+        throw std::invalid_argument(
+            "run_pretrain_loop: warmup_steps must be >= 0 (got " +
+            std::to_string(spec.warmup_steps) + "); it counts optimizer steps.");
+    }
+    if (spec.batch_size_floor < 1) {
+        throw std::invalid_argument(
+            "run_pretrain_loop: batch_size_floor must be >= 1 (got " +
+            std::to_string(spec.batch_size_floor) + ").");
+    }
 
     const auto start_time = std::chrono::steady_clock::now();
     PretrainResult result;
+    const LogCallback log = spec.log ? spec.log : LogCallback(null_log);
+
+    // The VRAM cap goes in before anything reaches the device, as in
+    // Trainer::fit.
+    if (spec.device.is_cuda()) {
+        set_vram_fraction(static_cast<double>(spec.vram_fraction), spec.device.index(), log);
+    }
 
     for (const auto& module : spec.modules) {
         if (module) module->to(spec.device);
@@ -403,67 +457,93 @@ PretrainResult run_pretrain_loop(
                  "filled each with its column mean");
     }
 
-    torch::optim::AdamW optimizer(
-        spec.params,
-        torch::optim::AdamWOptions(spec.lr).weight_decay(spec.weight_decay));
-
-    PretrainRng rng(spec.seed);
     const auto sum_options = torch::TensorOptions().dtype(torch::kFloat32).device(spec.device);
 
-    for (int epoch = 0; epoch < spec.epochs; ++epoch) {
-        rng.seed_epoch(epoch);
+    // A retry after a CUDA out-of-memory error starts the run over from here,
+    // at the halved batch size.
+    const ModuleStates start_state({&spec.modules, &spec.side_modules});
+    const int requested_batch_size = spec.batch_size;
 
-        for (const auto& module : spec.modules) {
-            if (module) module->train();
+    const auto attempt = [&](int n) {
+        if (n > 0) {
+            start_state.restore();
+            if (hooks.on_restart) hooks.on_restart(spec.batch_size);
         }
-        if (hooks.on_epoch_begin) hooks.on_epoch_begin(epoch);
+        result.loss_history.clear();
 
-        // Summed on the device and read back once per epoch, so a batch adds
-        // no host sync.
-        auto epoch_loss = torch::zeros({}, sum_options);
-        int n_batches = 0;
+        torch::optim::AdamW optimizer(
+            spec.params,
+            torch::optim::AdamWOptions(spec.lr).weight_decay(spec.weight_decay));
 
-        auto perm = rng.randperm(n_samples, spec.device);
+        PretrainRng rng(spec.seed);
+        int64_t step = 0;
 
-        for (int64_t start = 0; start < n_samples; start += spec.batch_size) {
-            const int64_t end = std::min(
-                start + static_cast<int64_t>(spec.batch_size), n_samples);
-            const PretrainBatch batch = spec.inputs.index_select(perm.slice(0, start, end));
+        for (int epoch = 0; epoch < spec.epochs; ++epoch) {
+            rng.seed_epoch(epoch);
 
-            auto loss = batch_fn(batch, rng);
-            if (!loss.defined()) continue;  // the task opted out of this batch
-
-            optimizer.zero_grad();
-            loss.backward();
-            if (spec.grad_clip_norm > 0.0f) {
-                clip_grad_norm(spec.params, spec.grad_clip_norm);
+            for (const auto& module : spec.modules) {
+                if (module) module->train();
             }
-            optimizer.step();
+            if (hooks.on_epoch_begin) hooks.on_epoch_begin(epoch);
 
-            if (hooks.on_step_end) hooks.on_step_end();
+            // Summed on the device and read back once per epoch, so a batch
+            // adds no host sync.
+            auto epoch_loss = torch::zeros({}, sum_options);
+            int n_batches = 0;
 
-            epoch_loss.add_(loss.detach().to(sum_options).reshape({}));
-            ++n_batches;
+            auto perm = rng.randperm(n_samples, spec.device);
+
+            for (int64_t start = 0; start < n_samples; start += spec.batch_size) {
+                const int64_t end = std::min(
+                    start + static_cast<int64_t>(spec.batch_size), n_samples);
+                const PretrainBatch batch = spec.inputs.index_select(perm.slice(0, start, end));
+
+                auto loss = batch_fn(batch, rng);
+                if (!loss.defined()) continue;  // the task opted out of this batch
+
+                optimizer.zero_grad();
+                loss.backward();
+                if (spec.grad_clip_norm > 0.0f) {
+                    clip_grad_norm(spec.params, spec.grad_clip_norm);
+                }
+                set_learning_rate(optimizer, static_cast<double>(spec.lr) *
+                                                 warmup_factor(step, spec.warmup_steps));
+                optimizer.step();
+                ++step;
+
+                if (hooks.on_step_end) hooks.on_step_end();
+
+                epoch_loss.add_(loss.detach().to(sum_options).reshape({}));
+                ++n_batches;
+            }
+
+            // Guard an empty (or fully skipped) pretraining set so the history
+            // records 0 rather than NaN from a divide-by-zero.
+            const float avg_loss = (n_batches > 0)
+                ? epoch_loss.item<float>() / static_cast<float>(n_batches) : 0.0f;
+            result.loss_history.push_back(avg_loss);
+
+            if (hooks.on_epoch_end) hooks.on_epoch_end(epoch, avg_loss);
+
+            if (spec.log && spec.log_every > 0 && epoch % spec.log_every == 0) {
+                std::ostringstream msg;
+                msg << "Pretrain epoch " << (epoch + 1) << "/" << spec.epochs
+                    << " - " << spec.task_name << " loss: " << avg_loss;
+                if (hooks.epoch_detail) msg << hooks.epoch_detail(epoch);
+                spec.log(msg.str());
+            }
         }
+    };
 
-        // Guard an empty (or fully skipped) pretraining set so the history
-        // records 0 rather than NaN from a divide-by-zero.
-        const float avg_loss = (n_batches > 0)
-            ? epoch_loss.item<float>() / static_cast<float>(n_batches) : 0.0f;
-        result.loss_history.push_back(avg_loss);
-
-        if (hooks.on_epoch_end) hooks.on_epoch_end(epoch, avg_loss);
-
-        if (spec.log && spec.log_every > 0 && epoch % spec.log_every == 0) {
-            std::ostringstream msg;
-            msg << "Pretrain epoch " << (epoch + 1) << "/" << spec.epochs
-                << " - " << spec.task_name << " loss: " << avg_loss;
-            if (hooks.epoch_detail) msg << hooks.epoch_detail(epoch);
-            spec.log(msg.str());
-        }
-    }
+    // The optimizer, the batch and its graph belong to the failed attempt and
+    // are gone by the time the allocator's free blocks are returned.
+    const std::string where = "pretraining (" + spec.task_name + ")";
+    retry_halving_on_oom(where.c_str(), spec.batch_size, spec.batch_size_floor,
+                         requested_batch_size, log, attempt,
+                         [&]() { release_cached_device_memory(spec.device); });
 
     result.epochs_completed = spec.epochs;
+    result.effective_batch_size = spec.batch_size;
     result.total_time_seconds = std::chrono::duration<float>(
         std::chrono::steady_clock::now() - start_time).count();
 
@@ -586,21 +666,20 @@ PretrainResult JEPAPretrainer::pretrain(const PlotInputs& inputs) {
 
     PretrainLoopSpec spec;
     spec.modules = {context_encoder_.ptr(), predictor_.ptr(), masker_.ptr()};
+    spec.side_modules = {target_encoder_.ptr()};
     for (auto& p : context_encoder_->parameters()) spec.params.push_back(p);
     for (auto& p : predictor_->parameters()) spec.params.push_back(p);
     for (auto& p : masker_->parameters()) spec.params.push_back(p);
     spec.inputs = inputs;
-    spec.epochs = config_.pretrain_epochs;
-    spec.batch_size = config_.batch_size;
-    spec.lr = config_.pretrain_lr;
-    spec.weight_decay = config_.pretrain_weight_decay;
-    spec.device = config_.device;
-    spec.seed = config_.seed;
-    spec.log = config_.log;
+    set_run_settings(spec, config_);
     spec.task_name = "JEPA";
 
-    const int total_steps = config_.pretrain_epochs *
-        static_cast<int>((n_samples + config_.batch_size - 1) / config_.batch_size);
+    // The EMA schedule's length, in the steps of the run's batch size.
+    const auto schedule_steps = [&](int batch_size) {
+        return config_.pretrain_epochs *
+               static_cast<int>(steps_per_epoch(n_samples, batch_size));
+    };
+    int total_steps = schedule_steps(config_.batch_size);
     int global_step = 0;
 
     auto batch_fn = [this](const PretrainBatch& batch, PretrainRng& rng) {
@@ -634,9 +713,13 @@ PretrainResult JEPAPretrainer::pretrain(const PlotInputs& inputs) {
 
     PretrainLoopHooks hooks;
     // Update target encoder via EMA, on the cosine schedule over global steps.
-    hooks.on_step_end = [this, total_steps, &global_step]() {
+    hooks.on_step_end = [this, &total_steps, &global_step]() {
         update_target_encoder(get_ema_decay(global_step, total_steps));
         ++global_step;
+    };
+    hooks.on_restart = [&](int batch_size) {
+        total_steps = schedule_steps(batch_size);
+        global_step = 0;
     };
 
     return run_pretrain_loop(std::move(spec), batch_fn, hooks);
@@ -671,13 +754,7 @@ PretrainResult SCARFPretrainer::pretrain(const PlotInputs& inputs) {
     for (auto& p : model_->parameters()) spec.params.push_back(p);
     for (auto& p : projection_head_->parameters()) spec.params.push_back(p);
     spec.inputs = inputs;
-    spec.epochs = config_.pretrain_epochs;
-    spec.batch_size = config_.batch_size;
-    spec.lr = config_.pretrain_lr;
-    spec.weight_decay = config_.pretrain_weight_decay;
-    spec.device = config_.device;
-    spec.seed = config_.seed;
-    spec.log = config_.log;
+    set_run_settings(spec, config_);
     spec.task_name = "SCARF";
 
     auto batch_fn = [this](const PretrainBatch& batch, PretrainRng& rng) {
@@ -845,15 +922,9 @@ PretrainResult MaskedSpeciesPretrainer::pretrain(const PlotInputs& inputs) {
                    .pool_family_ids = inputs.pool_family_ids,
                    .pool_weights = inputs.pool_weights,
                    .pool_mask = inputs.pool_mask.to(torch::kBool)};
-    spec.epochs = config_.pretrain_epochs;
-    spec.batch_size = config_.batch_size;
-    spec.lr = config_.pretrain_lr;
-    spec.weight_decay = config_.pretrain_weight_decay;
+    set_run_settings(spec, config_);
     // The MLM objective is not gradient-clipped.
     spec.grad_clip_norm = 0.0f;
-    spec.device = config_.device;
-    spec.seed = config_.seed;
-    spec.log = config_.log;
     spec.task_name = "MLM";
     spec.log_every = 1;
 

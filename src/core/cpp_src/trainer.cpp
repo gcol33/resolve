@@ -649,7 +649,20 @@ Trainer::TargetScalers Trainer::device_target_scalers() const {
     return out;
 }
 
-Trainer::EpochLoss Trainer::train_epoch(int epoch) {
+int64_t Trainer::training_batch_size() const {
+    // The coordinate-kNN GNN must see the whole train set in one forward so its
+    // spatial graph spans all plots (their true neighbors), not an arbitrary
+    // mini-batch. Force full-batch training for it, matching the single
+    // full-batch inference forward the Predictor already uses.
+    return model_->requires_full_batch_training() ? train_.n_plots()
+                                                  : static_cast<int64_t>(config_.batch_size);
+}
+
+int64_t Trainer::training_steps_per_epoch() const {
+    return steps_per_epoch(train_.n_plots(), training_batch_size());
+}
+
+Trainer::EpochLoss Trainer::train_epoch(int epoch, const PlateauState& plateau) {
     model_->train();
 
     // Use GPU-cached data if available, otherwise fallback to CPU tensors
@@ -657,12 +670,11 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
     const TargetScalers scalers = device_target_scalers();
 
     int64_t n_train = src.n_plots();
-    // The coordinate-kNN GNN must see the whole train set in one forward so its
-    // spatial graph spans all plots (their true neighbors), not an arbitrary
-    // mini-batch. Force full-batch training for it, matching the single
-    // full-batch inference forward the Predictor already uses.
-    int64_t batch_size = model_->requires_full_batch_training()
-        ? n_train : static_cast<int64_t>(config_.batch_size);
+    const int64_t batch_size = training_batch_size();
+
+    // The run's step count at this epoch's first batch (lr_schedule.hpp).
+    const int64_t epoch_steps = training_steps_per_epoch();
+    const int64_t first_step = static_cast<int64_t>(epoch) * epoch_steps;
 
     // Shuffle training data with a dedicated, seeded generator so the run is
     // reproducible for a fixed seed. Generated on CPU (the permutation is tiny)
@@ -790,6 +802,12 @@ Trainer::EpochLoss Trainer::train_epoch(int epoch) {
             }
         }
 #endif
+
+        // The rate of this batch's optimizer step: the epoch's schedule, the
+        // per-step decay of LinearDecay and the warmup.
+        set_learning_rate(*optimizer_,
+                          step_learning_rate(config_, epoch, first_step + start / batch_size,
+                                             epoch_steps, plateau));
 
         // Forward pass
         optimizer_->zero_grad();
@@ -981,12 +999,6 @@ std::pair<Trainer::EpochLoss, Trainer::MetricMap> Trainer::eval_epoch() {
     return {std::move(out), std::move(all_metrics)};
 }
 
-void Trainer::update_learning_rate(double lr) {
-    for (auto& group : optimizer_->param_groups()) {
-        static_cast<torch::optim::AdamWOptions&>(group.options()).lr(lr);
-    }
-}
-
 void Trainer::cache_data_to_gpu() {
     if (gpu_data_cached_ || !config_.device.is_cuda()) {
         return;  // Already cached or not using CUDA
@@ -1116,7 +1128,12 @@ TrainResult Trainer::train(const RunProgress* resume_from) {
     const std::string start_weights = snapshot_weights();
 
     RunProgress progress;
-    for (;;) {
+    const auto attempt = [&](int n) {
+        if (n > 0) {
+            effective_batch_size_ = config_.batch_size;
+            restore_weights(start_weights);
+        }
+
         // Pre-cache all data on GPU for faster training (post-cap so it
         // respects the allocator fraction).
         cache_data_to_gpu();
@@ -1139,43 +1156,11 @@ TrainResult Trainer::train(const RunProgress* resume_from) {
         restore_rng_states(start);
 
         progress = start;
-        try {
-            run_epochs(progress, plan);
-            break;
-        } catch (const c10::Error& error) {
-            // Only a CUDA out-of-memory error is answered by halving the
-            // batch; every other c10::Error propagates unchanged.
-            if (!is_out_of_memory(error)) {
-                throw;
-            }
-
-            int new_bs = config_.batch_size;
-            std::string log_msg;
-            std::string err_msg;
-            const bool retry = decide_oom_retry(
-                config_.batch_size,
-                config_.batch_size_floor,
-                requested_batch_size_,
-                error.what(),
-                new_bs,
-                log_msg,
-                err_msg
-            );
-
-            // Tear state down regardless: the trainer must be left in a
-            // consistent shape whether we retry or rethrow.
-            release_training_state();
-
-            if (!retry) {
-                throw std::runtime_error(err_msg);
-            }
-
-            config_.log(log_msg);
-            config_.batch_size = new_bs;
-            effective_batch_size_ = new_bs;
-            restore_weights(start_weights);
-        }
-    }
+        run_epochs(progress, plan);
+    };
+    retry_halving_on_oom("Trainer::fit", config_.batch_size, config_.batch_size_floor,
+                         requested_batch_size_, config_.log, attempt,
+                         [this]() { release_training_state(); });
 
     TrainResult result = std::move(progress.result);
     result.resumed_from_epoch = start.next_epoch;
@@ -1240,14 +1225,20 @@ void Trainer::run_epochs(RunProgress& progress, const RunPlan& plan) {
         return;
     }
 
-    for (int epoch = progress.next_epoch; epoch < plan.n_epochs; ++epoch) {
-        // The step and cosine schedules are laid out over max_epochs whatever
-        // n_epochs is, so a fixed-duration run follows a full run's
-        // trajectory.
-        const double current_lr = scheduled_learning_rate(config_, epoch, progress.plateau);
-        update_learning_rate(current_lr);
+    // The step, cosine and linear schedules are laid out over max_epochs
+    // whatever n_epochs is, so a fixed-duration run follows a full run's
+    // trajectory.
+    const int64_t epoch_steps = training_steps_per_epoch();
+    const bool shows_lr = config_.lr_scheduler != LRSchedulerType::None ||
+                          warmup_step_count(config_, epoch_steps) > 0;
 
-        const EpochLoss train = train_epoch(epoch);
+    for (int epoch = progress.next_epoch; epoch < plan.n_epochs; ++epoch) {
+        // The rate of the epoch's last step, the one lr_history records.
+        const double current_lr =
+            step_learning_rate(config_, epoch, (static_cast<int64_t>(epoch) + 1) * epoch_steps - 1,
+                               epoch_steps, progress.plateau);
+
+        const EpochLoss train = train_epoch(epoch, progress.plateau);
         const float train_loss = train.total;
         result.train_loss_history.push_back(train_loss);
         result.lr_history.push_back(static_cast<float>(current_lr));
@@ -1269,7 +1260,10 @@ void Trainer::run_epochs(RunProgress& progress, const RunPlan& plan) {
         progress.next_epoch = epoch + 1;
         progress.elapsed_seconds = plan.elapsed_before + seconds_since(plan.started);
 
-        const bool settled = loss_fn_.objective_settled(epoch, last_epoch);
+        // An epoch counts against patience and the plateau once the loss
+        // objective has settled and the warmup is over.
+        const bool settled = loss_fn_.objective_settled(epoch, last_epoch) &&
+                             !epoch_in_warmup(config_, epoch, epoch_steps);
         bool stopping = false;
 
         // The value the epoch is selected by: the phase-invariant selection
@@ -1347,7 +1341,7 @@ void Trainer::run_epochs(RunProgress& progress, const RunPlan& plan) {
             if (plan.has_held_out) {
                 msg << " Test: " << test_loss;
             }
-            if (config_.lr_scheduler != LRSchedulerType::None) {
+            if (shows_lr) {
                 msg << " LR: " << current_lr;
             }
             if (loss_targets.size() > 1) {

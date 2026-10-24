@@ -315,9 +315,10 @@ inline const char* plateau_schedule(const FlagContext& c) {
 }
 inline const char* floored_schedule(const FlagContext& c) {
     return c.train.lr_scheduler == resolve::LRSchedulerType::CosineAnnealing ||
-                   c.train.lr_scheduler == resolve::LRSchedulerType::ReduceOnPlateau
+                   c.train.lr_scheduler == resolve::LRSchedulerType::ReduceOnPlateau ||
+                   c.train.lr_scheduler == resolve::LRSchedulerType::LinearDecay
                ? nullptr
-               : "--lr-scheduler cosine or plateau";
+               : "--lr-scheduler cosine, plateau or linear";
 }
 inline const char* nca_loss(const FlagContext& c) {
     return c.train.loss_config == resolve::LossConfigMode::NCA ? nullptr : "--loss-config nca";
@@ -436,11 +437,12 @@ inline constexpr FieldFlag kTrainConfigFlags[] = {
     {"loss_config", nullptr, "Loss recipe"},
     {"device", kNoFlag, nullptr},
     {"lr_scheduler", nullptr,
-     "Learning rate schedule (plateau decays when the\nheld-out selection value stops improving)"},
+     "Learning rate schedule (plateau decays when the\nheld-out selection value stops improving; linear\n"
+     "decays per optimizer step from the end of warmup\nto --lr-min at the last step of --max-epochs)"},
     {"lr_step_size", nullptr, "Epochs between decays", &flag_gates::step_schedule},
     {"lr_gamma", nullptr, "Decay factor", &flag_gates::step_schedule},
     {"lr_min", nullptr,
-     "Floor learning rate: where the cosine schedule ends,\nbelow which a plateau never decays",
+     "Floor learning rate: where the cosine and linear\nschedules end, below which a plateau never decays",
      &flag_gates::floored_schedule},
     {"lr_plateau_factor", nullptr,
      "Factor a plateau multiplies the learning rate by,\nin (0, 1)",
@@ -455,6 +457,11 @@ inline constexpr FieldFlag kTrainConfigFlags[] = {
     {"lr_plateau_cooldown", nullptr,
      "Epochs after a decay during which no bad epoch\ncounts",
      &flag_gates::plateau_schedule},
+    {"warmup_steps", nullptr,
+     "Optimizer steps over which the learning rate climbs\nlinearly to the schedule's (0 = no warmup). An epoch\n"
+     "that begins in the warmup counts against neither\n--patience nor a plateau"},
+    {"warmup_epochs", nullptr,
+     "The warmup in epochs instead of steps; give\n--warmup-steps or --warmup-epochs, not both"},
     {"band_thresholds", nullptr,
      "Band accuracies to REPORT. Does not change what\ntraining optimizes"},
     {"band_threshold", nullptr,

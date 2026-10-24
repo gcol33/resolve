@@ -21,6 +21,7 @@ TEST_CASE("decide_oom_retry halves and signals retry above the floor", "[oom_ret
     std::string err_msg;
 
     const bool retry = decide_oom_retry(
+        /*where=*/"Trainer::fit",
         /*prev_bs=*/16384,
         /*floor=*/1024,
         /*original_bs=*/16384,
@@ -48,6 +49,7 @@ TEST_CASE("decide_oom_retry refuses to drop below the floor", "[oom_retry]") {
     // breach floor=1024. Exercise both.
     SECTION("halving exactly to floor is allowed") {
         const bool retry = decide_oom_retry(
+            /*where=*/"Trainer::fit",
             /*prev_bs=*/2048,
             /*floor=*/1024,
             /*original_bs=*/16384,
@@ -63,6 +65,7 @@ TEST_CASE("decide_oom_retry refuses to drop below the floor", "[oom_retry]") {
 
     SECTION("halving below floor rethrows with a diagnostic message") {
         const bool retry = decide_oom_retry(
+            /*where=*/"Trainer::fit",
             /*prev_bs=*/1024,
             /*floor=*/1024,
             /*original_bs=*/16384,
@@ -79,6 +82,7 @@ TEST_CASE("decide_oom_retry refuses to drop below the floor", "[oom_retry]") {
         REQUIRE(err_msg.find("current batch_size=1024") != std::string::npos);
         REQUIRE(err_msg.find("batch_size_floor=1024") != std::string::npos);
         REQUIRE(err_msg.find("CUDA out of memory") != std::string::npos);
+        REQUIRE(err_msg.find("during Trainer::fit") != std::string::npos);
     }
 }
 
@@ -88,6 +92,7 @@ TEST_CASE("decide_oom_retry tolerates a null oom_what pointer", "[oom_retry]") {
     std::string err_msg;
 
     const bool retry = decide_oom_retry(
+        /*where=*/"Trainer::fit",
         /*prev_bs=*/1024,
         /*floor=*/1024,
         /*original_bs=*/16384,

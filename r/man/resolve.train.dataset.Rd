@@ -20,6 +20,8 @@ resolve.train.dataset(
   lrPlateauPatience = NULL,
   lrPlateauThreshold = NULL,
   lrPlateauCooldown = NULL,
+  warmupSteps = NULL,
+  warmupEpochs = NULL,
   batchSize = NULL,
   device = NULL,
   testSize = 0.2,
@@ -80,7 +82,9 @@ plateau follows PyTorch's \code{ReduceLROnPlateau} in mode \code{"max"}).
 
 \item{lrScheduler}{Learning-rate schedule: \code{"none"} (constant), \code{"step"}
 multiplies the rate by \code{lrGamma} every \code{lrStepSize} epochs, \code{"cosine"}
-anneals it from \code{lr} to \code{lrMin} over \code{maxEpochs}, and \code{"plateau"}
+anneals it from \code{lr} to \code{lrMin} over \code{maxEpochs}, \code{"linear"} lowers it
+linearly at every optimizer step, from \code{lr} at the end of the warmup to
+\code{lrMin} at the last step of \code{maxEpochs}, and \code{"plateau"}
 multiplies it by \code{lrPlateauFactor} when the held-out value that drives
 early stopping has not improved for more than \code{lrPlateauPatience} epochs
 (PyTorch's \code{ReduceLROnPlateau}, in mode \code{"min"} on the loss and \code{"max"}
@@ -91,8 +95,8 @@ fold, so it is refused with \code{testSize = 0}.}
 
 \item{lrGamma}{Factor of each decay under \code{lrScheduler = "step"}.}
 
-\item{lrMin}{The rate the cosine schedule ends at, and the floor a plateau
-never decays below.}
+\item{lrMin}{The rate the cosine and linear schedules end at, and the floor
+a plateau never decays below.}
 
 \item{lrPlateauFactor}{Factor a plateau multiplies the rate by, in (0, 1).}
 
@@ -108,6 +112,16 @@ default is 1e-4).}
 
 \item{lrPlateauCooldown}{Epochs after a decay during which no epoch counts
 against the rate.}
+
+\item{warmupSteps}{Optimizer steps over which the rate climbs linearly, from
+\code{lr / warmupSteps} at the first step to the schedule's rate (0, the
+default, is no warmup). The schedule carries on unchanged after it. An
+epoch that begins inside the warmup counts against neither \code{patience} nor
+a \code{"plateau"} schedule; its held-out value can still be the best.}
+
+\item{warmupEpochs}{The warmup in epochs instead of steps (each epoch the
+\code{ceiling(nTrain / batchSize)} steps it takes). Give \code{warmupSteps} or
+\code{warmupEpochs}, not both.}
 
 \item{batchSize}{Batch size.}
 
@@ -229,7 +243,9 @@ A list with \code{trainer}, \code{result}, \code{dataset} and, with \code{pretra
 \code{pretrain} (the pretraining's \code{loss_history}, \code{total_time_seconds} and
 \code{epochs_completed}). \code{result} carries \code{best_epoch}, \code{train_time_seconds},
 \code{final_metrics}, the loss histories \code{train_loss} and \code{test_loss} (one
-value per epoch), the learning rate each epoch trained at \code{lr}, the
+value per epoch), the learning rate each epoch trained at \code{lr} (the rate
+of its last optimizer step, which warmup and \code{"linear"} move within an
+epoch), the
 held-out value of \code{selectionMetric} each epoch scored \code{selection} (the
 held-out loss, or the accuracy; empty when nothing is held out), the loss
 histories' split by target \code{train_loss_by_target} and

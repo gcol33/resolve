@@ -115,6 +115,7 @@ void set_vram_fraction(double fraction, int device_index, LogCallback log) {
 }
 
 bool decide_oom_retry(
+    const char* where,
     int prev_bs,
     int floor,
     int original_bs,
@@ -130,8 +131,8 @@ bool decide_oom_retry(
         // a sub-floor size.
         out_new_batch_size = prev_bs;
         std::ostringstream err;
-        err << "CUDA out of memory during Trainer::fit and the auto-halve "
-               "retry hit the floor. Original batch_size="
+        err << "CUDA out of memory during " << (where == nullptr ? "training" : where)
+            << " and the auto-halve retry hit the floor. Original batch_size="
             << original_bs
             << ", current batch_size=" << prev_bs
             << ", batch_size_floor=" << floor

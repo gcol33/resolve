@@ -11,6 +11,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "resolve/dataset.hpp"
+#include "resolve/enum_names.hpp"
 #include "resolve/lr_schedule.hpp"
 #include "resolve/model.hpp"
 #include "resolve/trainer.hpp"
@@ -437,4 +438,283 @@ TEST_CASE("prepare_data refuses a plateau schedule it cannot drive",
         const auto result = trainer.fit();
         CHECK(result.lr_history.size() == 2);
     }
+}
+
+// =============================================================================
+// Warmup and the per-step rate
+// =============================================================================
+
+TEST_CASE("Warmup ramps the rate linearly over its steps", "[lr_schedule][warmup]") {
+    TrainConfig cfg;
+    cfg.lr = 0.01f;
+    cfg.warmup_steps = 4;
+    const PlateauState plateau = plateau_start(cfg);
+    const double lr = static_cast<double>(cfg.lr);
+
+    // Three steps an epoch: the warmup's four steps span epochs 0 and 1.
+    const std::vector<double> expected{0.25 * lr, 0.5 * lr, 0.75 * lr, lr, lr, lr, lr};
+    for (int64_t step = 0; step < static_cast<int64_t>(expected.size()); ++step) {
+        INFO("step " << step);
+        CHECK(step_learning_rate(cfg, static_cast<int>(step / 3), step, 3, plateau) ==
+              Catch::Approx(expected[static_cast<size_t>(step)]));
+    }
+
+    CHECK(warmup_factor(0, 4) == 0.25);
+    CHECK(warmup_factor(3, 4) == 1.0);
+    CHECK(warmup_factor(40, 4) == 1.0);
+    CHECK(warmup_factor(0, 0) == 1.0);
+
+    // Epoch 1 begins at step 3, inside the warmup; epoch 2 at step 6, after it.
+    CHECK(epoch_in_warmup(cfg, 0, 3));
+    CHECK(epoch_in_warmup(cfg, 1, 3));
+    CHECK_FALSE(epoch_in_warmup(cfg, 2, 3));
+    cfg.warmup_steps = 0;
+    CHECK_FALSE(epoch_in_warmup(cfg, 0, 3));
+}
+
+TEST_CASE("A warmup in epochs is that many epochs of steps", "[lr_schedule][warmup]") {
+    CHECK(steps_per_epoch(10, 4) == 3);
+    CHECK(steps_per_epoch(8, 4) == 2);
+    CHECK(steps_per_epoch(3, 1024) == 1);
+
+    TrainConfig cfg;
+    CHECK(warmup_step_count(cfg, 5) == 0);
+    cfg.warmup_epochs = 2;
+    CHECK(warmup_step_count(cfg, 5) == 10);
+    cfg.warmup_epochs = 0;
+    cfg.warmup_steps = 7;
+    CHECK(warmup_step_count(cfg, 5) == 7);
+
+    // The same warmup given either way sets the same rate at every step.
+    TrainConfig by_steps;
+    by_steps.lr_scheduler = LRSchedulerType::CosineAnnealing;
+    by_steps.max_epochs = 6;
+    by_steps.warmup_steps = 8;
+    TrainConfig by_epochs = by_steps;
+    by_epochs.warmup_steps = 0;
+    by_epochs.warmup_epochs = 2;
+    const PlateauState plateau = plateau_start(by_steps);
+    for (int64_t step = 0; step < 24; ++step) {
+        const int epoch = static_cast<int>(step / 4);
+        CHECK(step_learning_rate(by_steps, epoch, step, 4, plateau) ==
+              step_learning_rate(by_epochs, epoch, step, 4, plateau));
+    }
+}
+
+TEST_CASE("Warmup scales the epoch schedules, which carry on unchanged after it",
+          "[lr_schedule][warmup]") {
+    for (const auto scheduler : {LRSchedulerType::StepLR, LRSchedulerType::CosineAnnealing,
+                                 LRSchedulerType::ReduceOnPlateau}) {
+        TrainConfig cfg;
+        cfg.lr = 0.1f;
+        cfg.lr_min = 0.001f;
+        cfg.max_epochs = 5;
+        cfg.lr_step_size = 2;
+        cfg.lr_gamma = 0.5f;
+        cfg.lr_scheduler = scheduler;
+        cfg.warmup_steps = 5;
+        PlateauState plateau = plateau_start(cfg);
+        plateau.lr = 0.04;
+        for (int epoch = 0; epoch < 5; ++epoch) {
+            for (int64_t step = 2 * epoch; step < 2 * epoch + 2; ++step) {
+                INFO(enum_to_name(scheduler) << " epoch " << epoch << " step " << step);
+                const double ramp = std::min(1.0, static_cast<double>(step + 1) / 5.0);
+                CHECK(step_learning_rate(cfg, epoch, step, 2, plateau) ==
+                      Catch::Approx(scheduled_learning_rate(cfg, epoch, plateau) * ramp));
+            }
+        }
+    }
+}
+
+TEST_CASE("Without warmup every step trains at its epoch's scheduled rate, exactly",
+          "[lr_schedule][warmup]") {
+    for (const auto scheduler : {LRSchedulerType::None, LRSchedulerType::StepLR,
+                                 LRSchedulerType::CosineAnnealing,
+                                 LRSchedulerType::ReduceOnPlateau}) {
+        TrainConfig cfg;
+        cfg.lr = 3e-3f;
+        cfg.max_epochs = 10;
+        cfg.lr_step_size = 3;
+        cfg.lr_scheduler = scheduler;
+        PlateauState plateau = plateau_start(cfg);
+        plateau.lr = 7e-4;
+        for (int epoch = 0; epoch < 10; ++epoch) {
+            for (int64_t step = 4 * epoch; step < 4 * epoch + 4; ++step) {
+                REQUIRE(step_learning_rate(cfg, epoch, step, 4, plateau) ==
+                        scheduled_learning_rate(cfg, epoch, plateau));
+            }
+        }
+    }
+}
+
+TEST_CASE("A linear schedule decays per step from the end of warmup to lr_min",
+          "[lr_schedule][warmup]") {
+    TrainConfig cfg;
+    cfg.lr = 0.1f;
+    cfg.lr_min = 0.0f;
+    cfg.max_epochs = 4;
+    cfg.lr_scheduler = LRSchedulerType::LinearDecay;
+    const PlateauState plateau = plateau_start(cfg);
+    const double lr = static_cast<double>(cfg.lr);
+
+    // Three steps an epoch, twelve in all: without warmup the decay runs from
+    // step 0 to the last step, 11.
+    CHECK(step_learning_rate(cfg, 0, 0, 3, plateau) == Catch::Approx(lr));
+    CHECK(step_learning_rate(cfg, 1, 4, 3, plateau) == Catch::Approx(lr * 7.0 / 11.0));
+    CHECK(step_learning_rate(cfg, 3, 11, 3, plateau) == Catch::Approx(0.0).margin(1e-12));
+
+    // Two warmup steps climb to lr, then the decay runs over steps 2 .. 11.
+    cfg.warmup_steps = 2;
+    CHECK(step_learning_rate(cfg, 0, 0, 3, plateau) == Catch::Approx(lr * 0.5));
+    CHECK(step_learning_rate(cfg, 0, 1, 3, plateau) == Catch::Approx(lr));
+    CHECK(step_learning_rate(cfg, 0, 2, 3, plateau) == Catch::Approx(lr));
+    CHECK(step_learning_rate(cfg, 1, 5, 3, plateau) == Catch::Approx(lr * 6.0 / 9.0));
+    CHECK(step_learning_rate(cfg, 3, 11, 3, plateau) == Catch::Approx(0.0).margin(1e-12));
+
+    cfg.lr_min = 0.01f;
+    CHECK(step_learning_rate(cfg, 3, 11, 3, plateau) ==
+          Catch::Approx(static_cast<double>(cfg.lr_min)));
+}
+
+TEST_CASE("A run records each epoch's last-step rate under warmup",
+          "[lr_schedule][warmup][trainer]") {
+    // 30 fitting plots in batches of 8: four steps an epoch. A ten-step warmup
+    // ends inside epoch 2.
+    const SmallCorpus corpus;
+    TrainConfig cfg = quiet_train_config(6);
+    cfg.loss_config = LossConfigMode::MAE;
+    cfg.lr = 1e-2f;
+    cfg.lr_min = 1e-4f;
+    cfg.lr_scheduler = LRSchedulerType::CosineAnnealing;
+    cfg.warmup_steps = 10;
+
+    const auto warm = plateau_run(corpus, cfg);
+    const auto& r = warm.result;
+    REQUIRE(r.lr_history.size() == 6);
+    const PlateauState plateau = plateau_start(cfg);
+    for (int e = 0; e < 6; ++e) {
+        INFO("epoch " << e);
+        CHECK(r.lr_history[static_cast<size_t>(e)] ==
+              static_cast<float>(step_learning_rate(cfg, e, 4 * e + 3, 4, plateau)));
+    }
+    CHECK(r.lr_history[0] ==
+          static_cast<float>(scheduled_learning_rate(cfg, 0, plateau) * 0.4));
+    CHECK(r.lr_history[2] == static_cast<float>(scheduled_learning_rate(cfg, 2, plateau)));
+
+    // A one-step warmup scales step 0 by 1: the run without warmup, bit for
+    // bit. A longer one trains differently.
+    TrainConfig none = cfg;
+    none.warmup_steps = 0;
+    TrainConfig one = cfg;
+    one.warmup_steps = 1;
+    const auto cold = plateau_run(corpus, none);
+    const auto single = plateau_run(corpus, one);
+    CHECK(single.result.train_loss_history == cold.result.train_loss_history);
+    CHECK(single.result.test_loss_history == cold.result.test_loss_history);
+    CHECK(single.result.lr_history == cold.result.lr_history);
+    CHECK(r.train_loss_history != cold.result.train_loss_history);
+    for (int e = 0; e < 6; ++e) {
+        CHECK(cold.result.lr_history[static_cast<size_t>(e)] ==
+              static_cast<float>(scheduled_learning_rate(none, e, plateau)));
+    }
+}
+
+TEST_CASE("A linear schedule ends the run at lr_min", "[lr_schedule][warmup][trainer]") {
+    const SmallCorpus corpus;
+    TrainConfig cfg = quiet_train_config(5);
+    cfg.loss_config = LossConfigMode::MAE;
+    cfg.lr = 1e-2f;
+    cfg.lr_min = 1e-4f;
+    cfg.lr_scheduler = LRSchedulerType::LinearDecay;
+    cfg.warmup_epochs = 1;
+
+    const auto run = plateau_run(corpus, cfg);
+    const auto& r = run.result;
+    REQUIRE(r.lr_history.size() == 5);
+    // Epoch 0's last step closes the warmup at lr; the decay starts after it.
+    CHECK(r.lr_history.front() == cfg.lr);
+    CHECK(r.lr_history.back() == Catch::Approx(cfg.lr_min));
+    CHECK(std::is_sorted(r.lr_history.rbegin(), r.lr_history.rend()));
+}
+
+TEST_CASE("Epochs that begin in the warmup count against neither patience nor a plateau",
+          "[lr_schedule][warmup][trainer]") {
+    const SmallCorpus corpus;
+
+    SECTION("patience") {
+        // A rate of 0 and no batch statistics leave the model as it is, so
+        // after epoch 0 no held-out loss beats the best: every counted epoch
+        // is a bad one.
+        const auto ds = corpus.load(SpeciesEncodingMode::Hash);
+        ModelConfig model = small_encoder_config(SpeciesEncodingMode::Hash, {16, 8});
+        model.normalization = NormLayerType::None;
+        TrainConfig cfg = quiet_train_config(20);
+        cfg.loss_config = LossConfigMode::MAE;
+        cfg.lr = 0.0f;
+        cfg.patience = 2;
+        auto epochs_run = [&](const TrainConfig& tc) {
+            torch::manual_seed(3);
+            Trainer trainer(ResolveModel(ds.schema(), model), tc);
+            trainer.prepare_data(ds, 0.25f, 11);
+            const auto result = trainer.fit();
+            CHECK(result.best_epoch == 0);
+            return result.train_loss_history.size();
+        };
+        CHECK(epochs_run(cfg) == 3);
+
+        // Epochs 1 .. 3 begin inside a four-epoch warmup and are not counted.
+        cfg.warmup_epochs = 4;
+        CHECK(epochs_run(cfg) == 6);
+    }
+    SECTION("plateau") {
+        TrainConfig cfg = quiet_train_config(8);
+        cfg.loss_config = LossConfigMode::MAE;
+        cfg.lr = 1e-2f;
+        cfg.lr_scheduler = LRSchedulerType::ReduceOnPlateau;
+        cfg.lr_plateau_factor = 0.5f;
+        cfg.lr_plateau_patience = 0;
+        cfg.lr_plateau_threshold = 0.999f;
+        cfg.warmup_epochs = 3;
+        const auto run = plateau_run(corpus, cfg);
+        const auto& r = run.result;
+        REQUIRE(r.lr_history.size() == 8);
+        // The replayed plateau rates count from epoch 3, each scaled by the
+        // warmup factor of its epoch's last step (four steps an epoch, twelve
+        // of them warm).
+        const auto rates = replayed_rates(cfg, r, /*first_counted=*/3);
+        for (int e = 0; e < 8; ++e) {
+            INFO("epoch " << e);
+            const double ramp = std::min(1.0, static_cast<double>(4 * e + 4) / 12.0);
+            CHECK(r.lr_history[static_cast<size_t>(e)] ==
+                  static_cast<float>(static_cast<double>(rates[static_cast<size_t>(e)]) * ramp));
+        }
+        CHECK(r.lr_history[3] == cfg.lr);
+        CHECK(r.lr_history[4] == cfg.lr * 0.5f);
+    }
+}
+
+TEST_CASE("prepare_data refuses an unusable warmup", "[lr_schedule][warmup][trainer]") {
+    const SmallCorpus corpus;
+    const auto ds = corpus.load(SpeciesEncodingMode::Hash);
+    const ModelConfig model = small_encoder_config(SpeciesEncodingMode::Hash, {8});
+    auto refused = [&](const TrainConfig& cfg, const std::string& needle) {
+        Trainer trainer(ResolveModel(ds.schema(), model), cfg);
+        REQUIRE_THROWS_WITH(trainer.prepare_data(ds, 0.25f, 3),
+                            Catch::Matchers::ContainsSubstring(needle));
+    };
+
+    TrainConfig cfg = quiet_train_config(4);
+    cfg.warmup_steps = -1;
+    refused(cfg, "warmup_steps");
+    cfg = quiet_train_config(4);
+    cfg.warmup_epochs = -1;
+    refused(cfg, "warmup_epochs");
+    cfg = quiet_train_config(4);
+    cfg.warmup_steps = 3;
+    cfg.warmup_epochs = 1;
+    refused(cfg, "give one of them");
+    cfg = quiet_train_config(4);
+    cfg.lr_scheduler = LRSchedulerType::LinearDecay;
+    cfg.lr_min = -1e-3f;
+    refused(cfg, "lr_min");
 }

@@ -264,14 +264,16 @@ config = rc.TrainConfig()
 | `nca_temperature` | `float` | `0.1` | Scale of the NCA stochastic-neighbour softmax |
 | `nca_neighbors` | `int` | `32` | Neighbours per sample the NCA term sums over |
 | `nca_weight` | `float` | `0.1` | Weight of the NCA term against cross-entropy |
-| `lr_scheduler` | `LRSchedulerType` | `None_` | `None_`, `StepLR`, `CosineAnnealing`, `ReduceOnPlateau` |
+| `lr_scheduler` | `LRSchedulerType` | `None_` | `None_`, `StepLR`, `CosineAnnealing`, `ReduceOnPlateau`, `LinearDecay` |
 | `lr_step_size` | `int` | `100` | `StepLR` period |
 | `lr_gamma` | `float` | `0.1` | `StepLR` factor |
-| `lr_min` | `float` | `1e-6` | `CosineAnnealing` endpoint; the floor `ReduceOnPlateau` never decays below |
+| `lr_min` | `float` | `1e-6` | `CosineAnnealing` and `LinearDecay` endpoint; the floor `ReduceOnPlateau` never decays below |
 | `lr_plateau_factor` | `float` | `0.1` | `ReduceOnPlateau`: factor each decay multiplies the rate by, in (0, 1) |
 | `lr_plateau_patience` | `int` | `10` | `ReduceOnPlateau`: bad epochs allowed; the next one decays the rate |
 | `lr_plateau_threshold` | `float` | `0.0` | `ReduceOnPlateau`: relative improvement on the best held-out value an epoch must make, in [0, 1); `0` is early stopping's rule |
 | `lr_plateau_cooldown` | `int` | `0` | `ReduceOnPlateau`: epochs after a decay that count no bad epoch |
+| `warmup_steps` | `int` | `0` | Optimizer steps of linear warmup; `0` is none |
+| `warmup_epochs` | `int` | `0` | The warmup in epochs; give it or `warmup_steps`, not both |
 | `use_amp` | `bool` | `False` | Mixed precision on CUDA |
 | `amp_init_scale` | `float` | `65536.0` | Initial gradient scale |
 | `amp_growth_factor` | `float` | `2.0` | Scale growth |
@@ -316,6 +318,22 @@ needs a held-out fold: `prepare_data` refuses it with `test_size=0`. Its state
 (best value, bad epochs, cooldown, rate) travels in the checkpoints `resume`
 reads.
 
+The rate is set at every optimizer step. A run counts its steps from 0, each
+epoch taking `ceil(n_train / batch_size)` of them. With `warmup_steps = W`
+(or `warmup_epochs`, `W` that many epochs of steps), step `s < W` trains at the
+schedule's rate times `(s + 1) / W` and every later step at the schedule's rate
+itself, so the warmup composes with every schedule and `0` trains as before,
+bit for bit. `LRSchedulerType.LinearDecay` lowers the rate linearly per step,
+from `lr` at the first step after the warmup to `lr_min` at the last step of
+`max_epochs` (BERT's warmup-then-linear-decay recipe with `lr_min = 0`). An
+epoch that begins inside the warmup counts no bad epoch against `patience` or
+a `ReduceOnPlateau` schedule, as an epoch before the loss objective settles
+does not; its held-out value still becomes the best when it improves on it.
+`TrainResult.lr_history` records the rate of each epoch's last step. A resumed
+run continues the warmup at its step, which the checkpoint's epoch and
+effective batch size fix; a checkpoint written before the warmup existed reads
+as `warmup_steps = 0`.
+
 ---
 
 ## TrainResult
@@ -326,7 +344,7 @@ reads.
 | `final_metrics` | `dict[str, dict[str, float]]` | Per target, per metric; a target with `missing = Mask` also reports `n_labelled`, the held-out plots it was scored on |
 | `train_loss_history` | `list[float]` | One entry per epoch run |
 | `test_loss_history` | `list[float]` | Same length; empty when nothing is held out |
-| `lr_history` | `list[float]` | The learning rate each epoch trained at |
+| `lr_history` | `list[float]` | The learning rate of each epoch's last optimizer step |
 | `selection_history` | `list[float]` | The held-out value of `selection_metric` each epoch scored: `test_loss_history` under `Loss`, the accuracy under `Accuracy`; empty when nothing is held out |
 | `train_loss_history_by_target` | `dict[str, list[float]]` | `train_loss_history` split by target: per epoch, the term each target adds to the total (its weighted loss, averaged over the epoch's batches like the total; a batch with no labelled row for a masked target adds 0) |
 | `test_loss_history_by_target` | `dict[str, list[float]]` | `test_loss_history` split by target: each target's weighted term of the phase-invariant selection loss; empty when nothing is held out |

@@ -1,5 +1,36 @@
 # RESOLVE Changelog
 
+## Unreleased
+
+### Added
+
+- **Learning-rate warmup.** `TrainConfig.warmup_steps` (or `warmup_epochs`,
+  not both; default 0, no warmup) raises the rate linearly over the run's
+  first optimizer steps, from `lr / warmup_steps` to the schedule's rate, and
+  composes with every schedule. Epochs that begin inside the warmup count
+  against neither `patience` nor a `ReduceOnPlateau` schedule. A resumed run
+  continues the warmup at its step; older checkpoints read as no warmup.
+  CLI `--warmup-steps` / `--warmup-epochs`, R `warmupSteps` / `warmupEpochs`.
+- **Linear decay schedule.** `LRSchedulerType.LinearDecay` (`"linear"`) lowers
+  the rate at every optimizer step, from `lr` at the end of the warmup to
+  `lr_min` at the last step of `max_epochs`.
+- **Warmup, OOM retry and VRAM cap in pretraining.** `MLMPretrainConfig`,
+  `PretrainConfig` and `VAEConfig` take `warmup_steps`, `batch_size_floor`
+  (default 1024) and `vram_fraction` (default 1.0). A CUDA out-of-memory error
+  during pretraining halves the batch size and starts the pretraining over
+  from its initial weights, as `Trainer.fit` does, and the VRAM cap is applied
+  before the pretraining allocates on the device. `PretrainResult` and
+  `VAEPretrainResult` report `effective_batch_size`.
+
+### Changed
+
+- `TrainResult.lr_history` holds the rate of each epoch's last optimizer step;
+  without warmup or `LinearDecay` that is the rate of every step of the epoch,
+  as before.
+- An out-of-memory error that pretraining cannot recover from below
+  `batch_size_floor` is raised as a `RuntimeError` naming the task, the batch
+  sizes and the floor.
+
 ## v1.0.1 (2026-10-24)
 
 ### Added

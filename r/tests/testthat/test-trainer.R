@@ -115,6 +115,27 @@ test_that("a plateau decays the rate on the held-out loss and needs a fold", {
   expect_error(resolve.train.dataset(dataset, lrScheduler = "exponential"), "lr_scheduler")
 })
 
+test_that("a warmup ramps the rate per step and a linear schedule ends at lrMin", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  tables <- signal_tables(60L)
+  dataset <- load_tables(tables, signal_roles(), regression_target())
+  # 48 fitting plots in batches of 8: six steps an epoch, so a twelve-step
+  # warmup closes at the end of epoch 1.
+  fit <- resolve.train.dataset(dataset, hiddenDims = c(8L), maxEpochs = 5L, patience = 50L,
+                               batchSize = 8L, lr = 0.01, lrScheduler = "linear",
+                               lrMin = 0.001, warmupSteps = 12L, verbose = FALSE)
+  expect_length(fit$result$lr, 5L)
+  expect_equal(fit$result$lr[1:2], c(0.005, 0.01), tolerance = 1e-6)
+  expect_equal(fit$result$lr[5], 0.001, tolerance = 1e-6)
+
+  expect_error(resolve.train.dataset(dataset, warmupSteps = -1L), "warmupSteps")
+  expect_error(resolve.train.dataset(dataset, warmupSteps = 4L, warmupEpochs = 1L,
+                                     maxEpochs = 1L, verbose = FALSE),
+               "give one of them")
+})
+
 test_that("selectionMetric = 'accuracy' keeps the epoch of the highest held-out accuracy", {
   skip_if_no_backend()
   skip_on_cran()

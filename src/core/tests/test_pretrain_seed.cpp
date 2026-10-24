@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -11,6 +12,7 @@
 #include "resolve/pretraining.hpp"
 #include "resolve/vae.hpp"
 #include "resolve/plot_encoder_transformer.hpp"
+#include "test_support.hpp"
 
 using namespace resolve;
 using namespace Catch::Matchers;
@@ -798,4 +800,207 @@ TEST_CASE("A pretext task trains through a block with missing cells",
     for (const auto& parameter : model->parameters()) {
         REQUIRE(torch::isnan(parameter).sum().item<int64_t>() == 0);
     }
+}
+
+// =============================================================================
+// Warmup and the out-of-memory retry of the shared loop
+// =============================================================================
+
+TEST_CASE("run_pretrain_loop warms the rate up over its first optimizer steps",
+          "[pretraining][loop][warmup]") {
+    // The objective's gradient is 1 at every step, so each AdamW step (no
+    // weight decay) moves the weight by the step's rate, to within eps.
+    auto run = [](int warmup_steps) {
+        auto weight = torch::zeros({1}, torch::requires_grad(true));
+        PretrainLoopSpec spec;
+        spec.params = {weight};
+        spec.inputs.continuous = torch::randn({12, 2});
+        spec.epochs = 2;
+        spec.batch_size = 4;  // three batches an epoch
+        spec.lr = 0.1f;
+        spec.weight_decay = 0.0f;
+        spec.warmup_steps = warmup_steps;
+        spec.log_every = 0;
+
+        int calls = 0;
+        std::vector<double> moves;
+        double before = 0.0;
+        PretrainLoopHooks hooks;
+        hooks.on_step_end = [&]() {
+            const double now = weight.item<double>();
+            moves.push_back(before - now);
+            before = now;
+        };
+        run_pretrain_loop(
+            spec,
+            [&](const PretrainBatch& batch, PretrainRng&) -> torch::Tensor {
+                // The second batch of the run takes no step and so no warmup step.
+                if (++calls == 2) return {};
+                return weight.sum() + 0.0f * batch.continuous.sum();
+            },
+            hooks);
+        return moves;
+    };
+
+    const auto warm = run(4);
+    const std::vector<double> expected{0.025, 0.05, 0.075, 0.1, 0.1};
+    REQUIRE(warm.size() == expected.size());
+    for (size_t i = 0; i < warm.size(); ++i) {
+        INFO("step " << i);
+        CHECK_THAT(warm[i], WithinRel(expected[i], 1e-5));
+    }
+    for (const double move : run(0)) {
+        CHECK_THAT(move, WithinRel(0.1, 1e-5));
+    }
+}
+
+TEST_CASE("run_pretrain_loop refuses an unusable warmup or floor",
+          "[pretraining][loop][warmup]") {
+    auto noop = [](const PretrainBatch&, PretrainRng&) { return torch::zeros({1}); };
+    PretrainLoopSpec spec;
+    spec.inputs.continuous = torch::randn({4, 2});
+    SECTION("negative warmup") {
+        spec.warmup_steps = -1;
+        REQUIRE_THROWS_AS(run_pretrain_loop(spec, noop), std::invalid_argument);
+    }
+    SECTION("floor below one") {
+        spec.batch_size_floor = 0;
+        REQUIRE_THROWS_AS(run_pretrain_loop(spec, noop), std::invalid_argument);
+    }
+}
+
+TEST_CASE("A masked-species warmup changes the run, a one-step warmup does not",
+          "[pretraining][mlm][warmup]") {
+    const auto in = make_mlm_inputs(96);
+    auto run = [&](int warmup_steps) {
+        torch::manual_seed(kFixtureSeed);
+        auto encoder = make_mlm_encoder();
+        MLMPretrainConfig cfg = base_mlm_config();
+        cfg.warmup_steps = warmup_steps;
+        MaskedSpeciesPretrainer pretrainer(encoder, 60, cfg);
+        return pretrainer.pretrain({.species_ids = in.species, .pool_mask = in.valid})
+            .loss_history;
+    };
+    const auto cold = run(0);
+    CHECK(run(1) == cold);
+    CHECK(run(6) != cold);
+}
+
+namespace {
+
+// One pretext task's run at `batch_size` (floor 16) with `log` as its
+// callback: the loss histories it reports, the batch size it trained at, and
+// the trained parameters (JEPA's EMA target encoder included).
+struct TaskRun {
+    std::vector<std::vector<float>> histories;
+    int effective_batch_size = 0;
+    std::vector<torch::Tensor> weights;
+};
+
+void keep_weights(TaskRun& run, const std::vector<torch::Tensor>& params) {
+    for (const auto& p : params) run.weights.push_back(p.detach().clone());
+}
+
+TaskRun run_task(const std::string& task, int batch_size, const LogCallback& log) {
+    TaskRun run;
+    if (task == "jepa" || task == "scarf") {
+        const auto in = make_embed_inputs(128);
+        torch::manual_seed(kFixtureSeed);
+        ResolveModel model(embed_schema(), embed_model_config());
+        PretrainConfig cfg = base_pretrain_config();
+        cfg.batch_size = batch_size;
+        cfg.batch_size_floor = 16;
+        cfg.log = log;
+        if (task == "jepa") {
+            JEPAPretrainer pretrainer(model, cfg);
+            const auto result = pretrainer.pretrain(plot_inputs_of(in));
+            run.histories = {result.loss_history};
+            run.effective_batch_size = result.effective_batch_size;
+            keep_weights(run, pretrainer.target_encoder()->parameters());
+        } else {
+            SCARFPretrainer pretrainer(model, cfg);
+            const auto result = pretrainer.pretrain(plot_inputs_of(in));
+            run.histories = {result.loss_history};
+            run.effective_batch_size = result.effective_batch_size;
+        }
+        keep_weights(run, model->parameters());
+    } else if (task == "mlm") {
+        const auto in = make_mlm_inputs(96);
+        torch::manual_seed(kFixtureSeed);
+        auto encoder = make_mlm_encoder();
+        MLMPretrainConfig cfg = base_mlm_config();
+        cfg.batch_size = batch_size;
+        cfg.batch_size_floor = 16;
+        cfg.log = log;
+        MaskedSpeciesPretrainer pretrainer(encoder, 60, cfg);
+        const auto result =
+            pretrainer.pretrain({.species_ids = in.species, .pool_mask = in.valid});
+        run.histories = {result.loss_history};
+        run.effective_batch_size = result.effective_batch_size;
+        keep_weights(run, encoder->parameters());
+    } else {
+        const auto vectors = make_species_vectors(96, 40);
+        torch::manual_seed(kFixtureSeed);
+        VAEConfig cfg = base_vae_config();
+        cfg.batch_size = batch_size;
+        cfg.batch_size_floor = 16;
+        cfg.log = log;
+        VAEPretrainer pretrainer(40, cfg);
+        const auto result = pretrainer.pretrain({.species_vector = vectors});
+        run.histories = {result.loss_history, result.recon_loss_history,
+                         result.kl_loss_history};
+        run.effective_batch_size = result.effective_batch_size;
+        keep_weights(run, pretrainer.vae()->parameters());
+    }
+    return run;
+}
+
+}  // namespace
+
+TEST_CASE("An out-of-memory error halves the pretraining batch and starts the run over",
+          "[pretraining][loop][oom_retry]") {
+    // The progress line of the first epoch raises the OOM after that epoch
+    // has trained, so the retry has weights, an optimizer, histories and (for
+    // JEPA) an EMA target encoder to put back: the run it then makes at the
+    // halved batch is the run made at that size from the start.
+    for (const std::string task : {"jepa", "scarf", "mlm", "vae"}) {
+        DYNAMIC_SECTION(task) {
+            resolve::test::OomInjector injector(1, "Pretrain epoch ");
+            std::vector<std::string> messages;
+            const LogCallback inject = injector.callback();
+            const LogCallback log = [&](const std::string& msg) {
+                messages.push_back(msg);
+                inject(msg);
+            };
+            const TaskRun retried = run_task(task, 32, log);
+            const TaskRun direct = run_task(task, 16, null_log);
+
+            CHECK(injector.remaining() == 0);
+            CHECK(retried.effective_batch_size == 16);
+            CHECK(direct.effective_batch_size == 16);
+            CHECK(std::any_of(messages.begin(), messages.end(), [](const std::string& m) {
+                return m.find("retrying at batch_size=16") != std::string::npos;
+            }));
+            REQUIRE(retried.histories == direct.histories);
+            REQUIRE(retried.weights.size() == direct.weights.size());
+            for (size_t i = 0; i < retried.weights.size(); ++i) {
+                REQUIRE(torch::equal(retried.weights[i], direct.weights[i]));
+            }
+        }
+    }
+}
+
+TEST_CASE("An out-of-memory error at the pretraining floor is rethrown with its context",
+          "[pretraining][loop][oom_retry]") {
+    resolve::test::OomInjector injector(4, "Pretrain epoch ");
+    try {
+        run_task("mlm", 16, injector.callback());
+        FAIL("the out-of-memory error was not rethrown");
+    } catch (const std::runtime_error& e) {
+        const std::string what = e.what();
+        CHECK(what.find("pretraining (MLM)") != std::string::npos);
+        CHECK(what.find("batch_size_floor=16") != std::string::npos);
+        CHECK(what.find("injected by OomInjector") != std::string::npos);
+    }
+    CHECK(injector.remaining() == 3);
 }

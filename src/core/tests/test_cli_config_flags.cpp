@@ -522,3 +522,33 @@ TEST_CASE("--device names the device with parse_device's spellings", "[cli][conf
                         ArgError);
     }
 }
+
+TEST_CASE("The warmup and linear-schedule flags land on their fields",
+          "[cli][config_flags][warmup]") {
+    TrainConfig defaults;
+    read_top_level_flags(defaults, args_with({}));
+    CHECK(defaults.warmup_steps == 0);
+    CHECK(defaults.warmup_epochs == 0);
+
+    auto args = args_with({
+        {"--lr-scheduler", "linear"},
+        {"--lr-min", "0"},
+        {"--warmup-steps", "500"},
+    });
+    DatasetConfig dataset;
+    read_top_level_flags(dataset, args);
+    ModelConfig model;
+    read_top_level_flags(model, args);
+    TrainConfig train;
+    read_top_level_flags(train, args);
+
+    CHECK(train.lr_scheduler == LRSchedulerType::LinearDecay);
+    CHECK(train.lr_min == 0.0f);
+    CHECK(train.warmup_steps == 500);
+    const FlagContext context{dataset, model, train};
+    CHECK_NOTHROW(check_flag_gates(train, args, context));
+
+    TrainConfig by_epochs;
+    read_top_level_flags(by_epochs, args_with({{"--warmup-epochs", "2"}}));
+    CHECK(by_epochs.warmup_epochs == 2);
+}

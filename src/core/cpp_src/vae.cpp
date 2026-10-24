@@ -132,13 +132,7 @@ VAEPretrainResult VAEPretrainer::pretrain(const PlotInputs& inputs) {
     spec.modules = {vae_.ptr()};
     spec.params = vae_->parameters();
     spec.inputs = {.species_vector = inputs.species_vector};
-    spec.epochs = config_.pretrain_epochs;
-    spec.batch_size = config_.batch_size;
-    spec.lr = config_.pretrain_lr;
-    spec.weight_decay = config_.pretrain_weight_decay;
-    spec.device = config_.device;
-    spec.seed = config_.seed;
-    spec.log = config_.log;
+    set_run_settings(spec, config_);
     spec.task_name = "VAE";
 
     // The species vectors stay sparse rows; each batch is reconstructed as
@@ -176,6 +170,10 @@ VAEPretrainResult VAEPretrainer::pretrain(const PlotInputs& inputs) {
         result.recon_loss_history.push_back(sums[0].item<float>() * inv_nb);
         result.kl_loss_history.push_back(sums[1].item<float>() * inv_nb);
     };
+    hooks.on_restart = [&](int /*batch_size*/) {
+        result.recon_loss_history.clear();
+        result.kl_loss_history.clear();
+    };
     hooks.epoch_detail = [&](int /*epoch*/) {
         std::ostringstream detail;
         detail << " recon: " << result.recon_loss_history.back()
@@ -187,6 +185,7 @@ VAEPretrainResult VAEPretrainer::pretrain(const PlotInputs& inputs) {
     result.loss_history = std::move(loop.loss_history);
     result.epochs_completed = loop.epochs_completed;
     result.total_time_seconds = loop.total_time_seconds;
+    result.effective_batch_size = loop.effective_batch_size;
 
     return result;
 }

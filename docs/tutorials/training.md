@@ -83,7 +83,8 @@ cfg.device       = "cuda"
 | `nca_temperature` | `0.1` | Scale of the NCA stochastic-neighbour softmax |
 | `nca_neighbors` | `32` | Neighbours per sample the NCA term sums over |
 | `nca_weight` | `0.1` | Weight of the NCA term against cross-entropy |
-| `lr_scheduler` | `None_` | `StepLR`, `CosineAnnealing` or `ReduceOnPlateau` |
+| `lr_scheduler` | `None_` | `StepLR`, `CosineAnnealing`, `ReduceOnPlateau` or `LinearDecay` |
+| `warmup_steps` | `0` | Optimizer steps of linear warmup (or `warmup_epochs`) |
 | `use_amp` | `False` | Mixed precision on CUDA |
 | `cudnn_benchmark` | `True` | Auto-tune cuDNN algorithms |
 | `allow_tf32` | `True` | TF32 matmuls on Ampere and later |
@@ -245,6 +246,44 @@ it does; a positive threshold asks for a relative improvement on the best loss
 before the rate stays. The schedule follows the held-out fold, a named one
 included, so it is refused when nothing is held out (`test_size = 0`, the
 fixed-duration refit). Its state is part of every checkpoint `resume` reads.
+
+### Warming up the learning rate
+
+A large transformer encoder trained at its full rate from the first step can
+collapse onto predicting one class. A warmup starts the rate near zero and
+raises it linearly over the first `warmup_steps` optimizer steps (or
+`warmup_epochs` epochs) to whatever the schedule sets; after it the schedule
+runs as it would have. `LinearDecay` then lowers the rate at every step to
+`lr_min` at the end of `max_epochs`, the warmup-then-linear-decay schedule
+BERT-style encoders are fine-tuned with:
+
+=== "Python"
+
+    ```python
+    cfg.lr_scheduler = rc.LRSchedulerType.LinearDecay
+    cfg.lr_min       = 0.0
+    cfg.warmup_steps = 2000
+    ```
+
+=== "R"
+
+    ```r
+    fit <- resolve.train.dataset(dataset, lrScheduler = "linear", lrMin = 0,
+                                 warmupSteps = 2000L)
+    ```
+
+=== "Command line"
+
+    ```bash
+    resolve train ... --lr-scheduler linear --lr-min 0 --warmup-steps 2000 \
+                      --output model.pt
+    ```
+
+Epochs that begin inside the warmup count against neither `patience` nor a
+plateau, since their held-out values come from a rate still climbing.
+`result.lr_history` holds the rate of each epoch's last step. The masked-species
+pretrainer (`MLMPretrainConfig.warmup_steps`) and the other pretraining configs
+take the same warmup.
 
 ### Loss presets
 

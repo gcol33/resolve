@@ -718,7 +718,8 @@ resolve.dataset.frame <- function(header,
   selectionMetric = "selection_metric", lr = "lr", lrScheduler = "lr_scheduler", lrStepSize = "lr_step_size",
   lrGamma = "lr_gamma", lrMin = "lr_min", lrPlateauFactor = "lr_plateau_factor",
   lrPlateauPatience = "lr_plateau_patience", lrPlateauThreshold = "lr_plateau_threshold",
-  lrPlateauCooldown = "lr_plateau_cooldown", batchSize = "batch_size", device = "device",
+  lrPlateauCooldown = "lr_plateau_cooldown", warmupSteps = "warmup_steps",
+  warmupEpochs = "warmup_epochs", batchSize = "batch_size", device = "device",
   lossConfig = "loss_config", ncaTemperature = "nca_temperature",
   ncaNeighbors = "nca_neighbors", ncaWeight = "nca_weight",
   checkpointDir = "checkpoint_dir", checkpointEvery = "checkpoint_every"
@@ -728,7 +729,7 @@ resolve.dataset.frame <- function(header,
 # every enum name and every config key.
 .resolve_check_numeric_args <- function(args) {
   positive <- c("maxEpochs", "patience", "lr", "batchSize", "ncaTemperature")
-  non_negative <- c("fixedEpochs", "checkpointEvery", "ncaWeight", "moeNoiseStd",
+  non_negative <- c("fixedEpochs", "checkpointEvery", "warmupSteps", "warmupEpochs", "ncaWeight", "moeNoiseStd",
                     "moeAuxLossWeight")
   for (arg in intersect(names(args), c(positive, non_negative, "ncaNeighbors"))) {
     value <- args[[arg]]
@@ -837,7 +838,9 @@ resolve.dataset.frame <- function(header,
 #' @param lr Learning rate.
 #' @param lrScheduler Learning-rate schedule: `"none"` (constant), `"step"`
 #'   multiplies the rate by `lrGamma` every `lrStepSize` epochs, `"cosine"`
-#'   anneals it from `lr` to `lrMin` over `maxEpochs`, and `"plateau"`
+#'   anneals it from `lr` to `lrMin` over `maxEpochs`, `"linear"` lowers it
+#'   linearly at every optimizer step, from `lr` at the end of the warmup to
+#'   `lrMin` at the last step of `maxEpochs`, and `"plateau"`
 #'   multiplies it by `lrPlateauFactor` when the held-out value that drives
 #'   early stopping has not improved for more than `lrPlateauPatience` epochs
 #'   (PyTorch's `ReduceLROnPlateau`, in mode `"min"` on the loss and `"max"`
@@ -845,8 +848,8 @@ resolve.dataset.frame <- function(header,
 #'   fold, so it is refused with `testSize = 0`.
 #' @param lrStepSize Epochs between decays under `lrScheduler = "step"`.
 #' @param lrGamma Factor of each decay under `lrScheduler = "step"`.
-#' @param lrMin The rate the cosine schedule ends at, and the floor a plateau
-#'   never decays below.
+#' @param lrMin The rate the cosine and linear schedules end at, and the floor
+#'   a plateau never decays below.
 #' @param lrPlateauFactor Factor a plateau multiplies the rate by, in (0, 1).
 #' @param lrPlateauPatience Epochs without improvement of the held-out value
 #'   (`selectionMetric`) a plateau allows; the next one decays the rate. Like
@@ -858,6 +861,14 @@ resolve.dataset.frame <- function(header,
 #'   default is 1e-4).
 #' @param lrPlateauCooldown Epochs after a decay during which no epoch counts
 #'   against the rate.
+#' @param warmupSteps Optimizer steps over which the rate climbs linearly, from
+#'   `lr / warmupSteps` at the first step to the schedule's rate (0, the
+#'   default, is no warmup). The schedule carries on unchanged after it. An
+#'   epoch that begins inside the warmup counts against neither `patience` nor
+#'   a `"plateau"` schedule; its held-out value can still be the best.
+#' @param warmupEpochs The warmup in epochs instead of steps (each epoch the
+#'   `ceiling(nTrain / batchSize)` steps it takes). Give `warmupSteps` or
+#'   `warmupEpochs`, not both.
 #' @param batchSize Batch size.
 #' @param device Device to train on: `"cpu"`, `"cuda"` (the current CUDA
 #'   device) or `"cuda:N"`.
@@ -948,7 +959,9 @@ resolve.dataset.frame <- function(header,
 #'   `pretrain` (the pretraining's `loss_history`, `total_time_seconds` and
 #'   `epochs_completed`). `result` carries `best_epoch`, `train_time_seconds`,
 #'   `final_metrics`, the loss histories `train_loss` and `test_loss` (one
-#'   value per epoch), the learning rate each epoch trained at `lr`, the
+#'   value per epoch), the learning rate each epoch trained at `lr` (the rate
+#'   of its last optimizer step, which warmup and `"linear"` move within an
+#'   epoch), the
 #'   held-out value of `selectionMetric` each epoch scored `selection` (the
 #'   held-out loss, or the accuracy; empty when nothing is held out), the loss
 #'   histories' split by target `train_loss_by_target` and
@@ -994,6 +1007,8 @@ resolve.train.dataset <- function(dataset,
                                   lrPlateauPatience = NULL,
                                   lrPlateauThreshold = NULL,
                                   lrPlateauCooldown = NULL,
+                                  warmupSteps = NULL,
+                                  warmupEpochs = NULL,
                                   batchSize = NULL,
                                   device = NULL,
                                   testSize = 0.2,

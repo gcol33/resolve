@@ -56,6 +56,7 @@ void register_enums(nb::module_& m) {
         .value("StepLR", resolve::LRSchedulerType::StepLR)
         .value("CosineAnnealing", resolve::LRSchedulerType::CosineAnnealing)
         .value("ReduceOnPlateau", resolve::LRSchedulerType::ReduceOnPlateau)
+        .value("LinearDecay", resolve::LRSchedulerType::LinearDecay)
         .export_values();
 
     nb::enum_<resolve::SelectionMetric>(m, "SelectionMetric")

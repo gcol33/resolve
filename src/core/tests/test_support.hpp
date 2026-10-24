@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <random>
 #include <set>
 #include <sstream>
@@ -274,6 +275,37 @@ inline TrainConfig quiet_train_config(int epochs = 1) {
     cfg.log = null_log;
     return cfg;
 }
+
+// A log callback that raises a CUDA out-of-memory error the first
+// `n_failures` times a message starting with `prefix` passes through it (the
+// trainer's "Epoch " progress line by default, the pretraining loop's
+// "Pretrain epoch "); every other message passes silently. The progress line
+// is logged inside the run that the auto-halve-on-OOM retry wraps, so the
+// real retry path runs on a CPU build with no fault-injection seam in
+// production code. Copies share the failure count.
+class OomInjector {
+public:
+    explicit OomInjector(int n_failures, std::string prefix = "Epoch ")
+        : remaining_(std::make_shared<int>(n_failures)), prefix_(std::move(prefix)) {}
+
+    [[nodiscard]] LogCallback callback() const {
+        auto remaining = remaining_;
+        auto prefix = prefix_;
+        return [remaining, prefix](const std::string& msg) {
+            if (msg.rfind(prefix, 0) == 0 && *remaining > 0) {
+                --(*remaining);
+                C10_THROW_ERROR(OutOfMemoryError,
+                                "CUDA out of memory (injected by OomInjector)");
+            }
+        };
+    }
+
+    [[nodiscard]] int remaining() const { return *remaining_; }
+
+private:
+    std::shared_ptr<int> remaining_;
+    std::string prefix_;
+};
 
 // The fit-to-convergence schedule of the recovery cases.
 inline TrainConfig recovery_train_config(int max_epochs = 300) {

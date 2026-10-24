@@ -61,13 +61,85 @@ double scheduled_learning_rate(const TrainConfig& config, int epoch,
         }
         case LRSchedulerType::ReduceOnPlateau:
             return plateau.lr;
+        case LRSchedulerType::LinearDecay:
+            // The decay is per step (step_learning_rate); config.lr is its peak.
         case LRSchedulerType::None:
         default:
             return config.lr;
     }
 }
 
+int64_t steps_per_epoch(int64_t n_rows, int64_t batch_size) {
+    if (n_rows <= 0 || batch_size <= 0) return 1;
+    return std::max<int64_t>(1, (n_rows + batch_size - 1) / batch_size);
+}
+
+int64_t warmup_step_count(const TrainConfig& config, int64_t steps_per_epoch) {
+    if (config.warmup_epochs > 0) {
+        return static_cast<int64_t>(config.warmup_epochs) * steps_per_epoch;
+    }
+    return std::max<int64_t>(0, config.warmup_steps);
+}
+
+double warmup_factor(int64_t step, int64_t warmup_steps) {
+    if (warmup_steps <= 0 || step >= warmup_steps) return 1.0;
+    return static_cast<double>(step + 1) / static_cast<double>(warmup_steps);
+}
+
+bool epoch_in_warmup(const TrainConfig& config, int epoch, int64_t steps_per_epoch) {
+    return static_cast<int64_t>(epoch) * steps_per_epoch <
+           warmup_step_count(config, steps_per_epoch);
+}
+
+double step_learning_rate(const TrainConfig& config, int epoch, int64_t step,
+                          int64_t steps_per_epoch, const PlateauState& plateau) {
+    const int64_t warmup = warmup_step_count(config, steps_per_epoch);
+    double rate = scheduled_learning_rate(config, epoch, plateau);
+    if (config.lr_scheduler == LRSchedulerType::LinearDecay && step >= warmup) {
+        // From lr at the first step after warmup to lr_min at the last step of
+        // max_epochs, the convention CosineAnnealing keeps for its epochs.
+        const int64_t last_step =
+            static_cast<int64_t>(std::max(config.max_epochs, 1)) * steps_per_epoch - 1;
+        const int64_t span = last_step - warmup;
+        const double progress = span > 0
+            ? std::clamp(static_cast<double>(step - warmup) / static_cast<double>(span), 0.0, 1.0)
+            : 1.0;
+        const double lr = static_cast<double>(config.lr);
+        const double lr_min = static_cast<double>(config.lr_min);
+        rate = lr - (lr - lr_min) * progress;
+    }
+    return rate * warmup_factor(step, warmup);
+}
+
+void set_learning_rate(torch::optim::AdamW& optimizer, double lr) {
+    for (auto& group : optimizer.param_groups()) {
+        static_cast<torch::optim::AdamWOptions&>(group.options()).lr(lr);
+    }
+}
+
 void validate_lr_schedule(const TrainConfig& config, bool has_held_out) {
+    if (config.warmup_steps < 0) {
+        throw std::invalid_argument(
+            "warmup_steps = " + std::to_string(config.warmup_steps) +
+            "; it counts optimizer steps, so it is 0 (no warmup) or positive");
+    }
+    if (config.warmup_epochs < 0) {
+        throw std::invalid_argument(
+            "warmup_epochs = " + std::to_string(config.warmup_epochs) +
+            "; it counts epochs, so it is 0 (no warmup) or positive");
+    }
+    if (config.warmup_steps > 0 && config.warmup_epochs > 0) {
+        throw std::invalid_argument(
+            "warmup_steps = " + std::to_string(config.warmup_steps) + " and warmup_epochs = " +
+            std::to_string(config.warmup_epochs) + " both set the warmup; give one of them");
+    }
+    const bool floored = config.lr_scheduler == LRSchedulerType::ReduceOnPlateau ||
+                         config.lr_scheduler == LRSchedulerType::LinearDecay;
+    if (floored && !(config.lr_min >= 0.0f)) {
+        throw std::invalid_argument(
+            "lr_min = " + std::to_string(config.lr_min) +
+            "; the learning-rate floor is 0 or positive");
+    }
     if (config.lr_scheduler != LRSchedulerType::ReduceOnPlateau) {
         return;
     }
@@ -97,11 +169,6 @@ void validate_lr_schedule(const TrainConfig& config, bool has_held_out) {
         throw std::invalid_argument(
             "lr_plateau_threshold = " + std::to_string(config.lr_plateau_threshold) +
             "; the relative improvement an epoch must make lies in [0, 1)");
-    }
-    if (!(config.lr_min >= 0.0f)) {
-        throw std::invalid_argument(
-            "lr_min = " + std::to_string(config.lr_min) +
-            "; the learning-rate floor is 0 or positive");
     }
 }
 

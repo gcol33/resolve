@@ -141,6 +141,7 @@ inline constexpr EnumName<LRSchedulerType> kLRSchedulerTypeNames[] = {
     {"step", LRSchedulerType::StepLR},
     {"cosine", LRSchedulerType::CosineAnnealing},
     {"plateau", LRSchedulerType::ReduceOnPlateau},
+    {"linear", LRSchedulerType::LinearDecay},
 };
 
 inline constexpr EnumName<SelectionMetric> kSelectionMetricNames[] = {

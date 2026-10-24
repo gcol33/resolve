@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 
 #include "resolve/types.hpp"
@@ -65,13 +66,14 @@ void set_vram_fraction(
     LogCallback log = default_log
 );
 
-// Decision helper for the auto-halve-on-OOM retry inside Trainer::fit.
+// Decision helper for the auto-halve-on-OOM retry (retry_halving_on_oom) of
+// Trainer::fit and the pretraining loop.
 //
-// Pure logic, no torch dependency: given the batch size that just OOM'd
-// (`prev_bs`), the configured retry `floor`, the batch size originally
-// requested when fit() was entered (`original_bs`), and the OOM's
-// `oom_what()` string, decides whether to retry with `prev_bs/2` or
-// rethrow as a runtime_error.
+// Pure logic, no torch dependency: given the run that failed (`where`, named
+// in the diagnostic), the batch size that just OOM'd (`prev_bs`), the
+// configured retry `floor`, the batch size originally requested when the run
+// was entered (`original_bs`), and the OOM's `oom_what()` string, decides
+// whether to retry with `prev_bs/2` or rethrow as a runtime_error.
 //
 // Returns true and fills `out_log_msg` if the caller should halve to
 // `out_new_batch_size` and retry. Returns false and fills `out_err_msg`
@@ -79,6 +81,7 @@ void set_vram_fraction(
 //
 // A free function so it is testable without exhausting CUDA VRAM.
 bool decide_oom_retry(
+    const char* where,
     int prev_bs,
     int floor,
     int original_bs,
@@ -119,6 +122,45 @@ bool decide_eval_chunk_retry(
 // after an out-of-memory error has the headroom it is retried for. Does
 // nothing for a CPU device or a build without CUDA.
 void release_cached_device_memory(const torch::Device& device);
+
+// The auto-halve-on-OOM retry of a training run, shared by Trainer::fit and
+// the pretraining loop. Calls attempt(n) with n = 0, 1, ... until one returns.
+// When attempt(n) fails with a CUDA out-of-memory error (is_out_of_memory),
+// release() frees what the attempt held and the error is decided by
+// decide_oom_retry(where, batch_size, floor, requested_batch_size, ...): it is
+// thrown as std::runtime_error with that diagnostic, or `batch_size` is
+// halved, the decision logged and attempt(n + 1) runs at the new size. An
+// attempt after the first starts the run over, so it puts back whatever the
+// failed attempt had already changed (weights, histories, counters). Any other
+// error propagates unchanged and without release().
+template <typename Attempt, typename Release>
+void retry_halving_on_oom(const char* where, int& batch_size, int floor,
+                          int requested_batch_size, const LogCallback& log,
+                          Attempt&& attempt, Release&& release) {
+    for (int n = 0;; ++n) {
+        try {
+            attempt(n);
+            return;
+        } catch (const c10::Error& error) {
+            if (!is_out_of_memory(error)) {
+                throw;
+            }
+            int new_bs = batch_size;
+            std::string log_msg;
+            std::string err_msg;
+            const bool retry = decide_oom_retry(where, batch_size, floor, requested_batch_size,
+                                                error.what(), new_bs, log_msg, err_msg);
+            // Torn down whether the run is retried or the error rethrown, so
+            // the caller is left in a consistent state either way.
+            release();
+            if (!retry) {
+                throw std::runtime_error(err_msg);
+            }
+            log(log_msg);
+            batch_size = new_bs;
+        }
+    }
+}
 
 // Whether Trainer::train_epoch runs the side-stream CUDA-hash prefetch, and so
 // whether it acquires the two CUDA streams that path needs.

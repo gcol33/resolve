@@ -242,6 +242,14 @@ fired. The same value is persisted in the checkpoint under both
 `train_batch_size` and `train_effective_batch_size`, alongside
 `train_batch_size_floor`, so downstream tooling can flag fallback runs.
 
+The pretrainers (`JEPAPretrainer`, `SCARFPretrainer`, `MaskedSpeciesPretrainer`,
+`VAEPretrainer`) run the same retry: an out-of-memory error halves their
+`batch_size` and starts the pretraining over from the weights it began with,
+down to their own `batch_size_floor` (default 1024). Their `vram_fraction`
+(default 1.0) caps the allocator before the pretraining allocates on the
+device, and `PretrainResult.effective_batch_size` reports the size the run
+finished at.
+
 On Linux the allocator config delays the OOM by reducing fragmentation; on
 Windows the batch-size halving recovers when fragmentation can no longer be
 papered over.

@@ -32,6 +32,11 @@ struct VAEConfig {
     // decoder dropout layers keep drawing from the global RNG stream, since
     // torch::nn::Dropout takes no generator.
     int seed = 42;
+
+    // Warmup, out-of-memory floor and VRAM cap; see PretrainConfig.
+    int warmup_steps = 0;
+    int batch_size_floor = 1024;
+    float vram_fraction = 1.0f;
 };
 
 // =============================================================================
@@ -123,6 +128,8 @@ struct VAEPretrainResult {
     std::vector<float> kl_loss_history;
     float total_time_seconds = 0.0f;
     int epochs_completed = 0;
+    // See PretrainResult::effective_batch_size.
+    int effective_batch_size = 0;
 };
 
 class VAEPretrainer {
