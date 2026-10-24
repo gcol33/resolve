@@ -279,6 +279,7 @@ void register_types(nb::module_& m) {
         .def_ro("train_loss_history", &resolve::TrainResult::train_loss_history)
         .def_ro("test_loss_history", &resolve::TrainResult::test_loss_history)
         .def_ro("lr_history", &resolve::TrainResult::lr_history)
+        .def_ro("selection_history", &resolve::TrainResult::selection_history)
         .def_ro("train_loss_history_by_target", &resolve::TrainResult::train_loss_history_by_target)
         .def_ro("test_loss_history_by_target", &resolve::TrainResult::test_loss_history_by_target)
         .def_ro("train_aux_loss_history", &resolve::TrainResult::train_aux_loss_history)

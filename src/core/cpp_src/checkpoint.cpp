@@ -2,6 +2,7 @@
 #include "resolve/checkpoint_schema_keys.hpp"
 #include "resolve/config_json.hpp"
 #include "resolve/config_registry.hpp"
+#include "resolve/enum_names.hpp"
 #include "resolve/io_retry.hpp"
 #include "resolve/string_list_archive.hpp"
 #include <algorithm>
@@ -205,6 +206,8 @@ void write_progress_file(
     int max_epochs,
     int best_epoch,
     float best_loss,
+    SelectionMetric selection_metric,
+    float best_selected,
     int epochs_without_improvement,
     const std::unordered_map<std::string, std::unordered_map<std::string, float>>& metrics
 ) {
@@ -238,6 +241,8 @@ void write_progress_file(
     // Infinite until an epoch has been scored (a fixed-duration run without a
     // held-out fold never scores one), which JSON writes as null.
     progress.set("best_loss", best_loss);
+    progress.set("selection_metric", std::string(enum_to_name(selection_metric)));
+    progress.set("best_selected", best_selected);
     progress.set("epochs_without_improvement", epochs_without_improvement);
     progress.set("progress_pct",
                  max_epochs > 0 ? 100.0f * static_cast<float>(epoch) / static_cast<float>(max_epochs)

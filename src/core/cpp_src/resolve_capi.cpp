@@ -1127,6 +1127,7 @@ resolve_value* train_result_to_value(const TrainResult& tr) {
     v_put(m, "train_loss", v_double_array(tr.train_loss_history));
     v_put(m, "test_loss", v_double_array(tr.test_loss_history));
     v_put(m, "lr", v_double_array(tr.lr_history));
+    v_put(m, "selection", v_double_array(tr.selection_history));
     v_put(m, "train_loss_by_target", named_histories_to_value(tr.train_loss_history_by_target));
     v_put(m, "test_loss_by_target", named_histories_to_value(tr.test_loss_history_by_target));
     v_put(m, "train_aux_loss", named_histories_to_value(tr.train_aux_loss_history));

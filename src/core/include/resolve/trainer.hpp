@@ -448,7 +448,9 @@ private:
     // can continue the run.
     struct RunProgress {
         int next_epoch = 0;                 // first epoch still to run
-        float best_loss = std::numeric_limits<float>::infinity();
+        // The best epoch's held-out value of config.selection_metric;
+        // train() starts it at selection_start, so +infinity under Loss.
+        float best_selected = std::numeric_limits<float>::infinity();
         int patience_counter = 0;
         PlateauState plateau;               // the ReduceOnPlateau schedule's state
         TrainResult result;                 // histories, best_epoch, final_metrics so far

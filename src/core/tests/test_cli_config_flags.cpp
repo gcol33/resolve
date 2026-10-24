@@ -431,6 +431,24 @@ TEST_CASE("The reduce-on-plateau flags land on their fields", "[cli][config_flag
     CHECK_NOTHROW(check_flag_gates(train, args, context));
 }
 
+TEST_CASE("The selection-metric flag lands on its field", "[cli][config_flags]") {
+    TrainConfig defaults;
+    read_top_level_flags(defaults, args_with({}));
+    CHECK(defaults.selection_metric == SelectionMetric::Loss);
+
+    auto args = args_with({{"--selection-metric", "accuracy"}});
+    DatasetConfig dataset;
+    read_top_level_flags(dataset, args);
+    ModelConfig model;
+    read_top_level_flags(model, args);
+    TrainConfig train;
+    read_top_level_flags(train, args);
+    CHECK(train.selection_metric == SelectionMetric::Accuracy);
+
+    const FlagContext context{dataset, model, train};
+    CHECK_NOTHROW(check_flag_gates(train, args, context));
+}
+
 TEST_CASE("A number with trailing characters, a non-number or an int out of range is refused",
           "[cli][config_flags]") {
     CHECK_THROWS_AS(parse_int64_value("--n", "256x"), ArgError);

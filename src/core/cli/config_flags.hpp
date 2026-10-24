@@ -426,6 +426,9 @@ inline constexpr FieldFlag kTrainConfigFlags[] = {
      "Train exactly N epochs of the --max-epochs\nschedule, with no early stopping, and keep the\n"
      "final weights (0 = early stopping). The only mode\nthat accepts --test-size 0, for a refit on every\n"
      "plot."},
+    {"selection_metric", nullptr,
+     "Held-out value early stopping, the best epoch and\na plateau schedule follow: loss (lowest wins) or\n"
+     "accuracy of the one classification target\n(highest wins)"},
     {"lr", nullptr, "Learning rate"},
     {"weight_decay", nullptr, "AdamW weight decay"},
     {"phase_boundaries", nullptr,
@@ -433,7 +436,7 @@ inline constexpr FieldFlag kTrainConfigFlags[] = {
     {"loss_config", nullptr, "Loss recipe"},
     {"device", kNoFlag, nullptr},
     {"lr_scheduler", nullptr,
-     "Learning rate schedule (plateau decays when the\nheld-out loss stops improving)"},
+     "Learning rate schedule (plateau decays when the\nheld-out selection value stops improving)"},
     {"lr_step_size", nullptr, "Epochs between decays", &flag_gates::step_schedule},
     {"lr_gamma", nullptr, "Decay factor", &flag_gates::step_schedule},
     {"lr_min", nullptr,
@@ -443,11 +446,11 @@ inline constexpr FieldFlag kTrainConfigFlags[] = {
      "Factor a plateau multiplies the learning rate by,\nin (0, 1)",
      &flag_gates::plateau_schedule},
     {"lr_plateau_patience", nullptr,
-     "Epochs without improvement of the held-out loss\na plateau allows; the next one decays the rate",
+     "Epochs without improvement of the held-out\nselection value a plateau allows; the next one\ndecays the rate",
      &flag_gates::plateau_schedule},
     {"lr_plateau_threshold", nullptr,
-     "Relative improvement on the best held-out loss an\nepoch must make to count as one (0 = any\n"
-     "decrease, as early stopping counts; PyTorch's\ndefault is 1e-4)",
+     "Relative improvement on the best held-out\nselection value an epoch must make to count as one\n"
+     "(0 = any improvement, as early stopping counts;\nPyTorch's default is 1e-4)",
      &flag_gates::plateau_schedule},
     {"lr_plateau_cooldown", nullptr,
      "Epochs after a decay during which no bad epoch\ncounts",

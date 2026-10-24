@@ -24,14 +24,17 @@ void read_checkpoint_archive(torch::serialize::InputArchive& archive, const std:
 void write_checkpoint_archive(torch::serialize::OutputArchive& archive, const std::string& path);
 
 // Write `checkpoint_dir`/progress.json for monitoring a run: the epoch, the
-// best epoch and loss (null until an epoch is scored), the patience count and
-// one band accuracy of the best epoch.
+// best epoch, its held-out loss and its value of the selection metric the run
+// follows (both null until an epoch is scored), the patience count and one
+// band accuracy of the best epoch.
 void write_progress_file(
     const std::string& checkpoint_dir,
     int epoch,
     int max_epochs,
     int best_epoch,
     float best_loss,
+    SelectionMetric selection_metric,
+    float best_selected,
     int epochs_without_improvement,
     const std::unordered_map<std::string, std::unordered_map<std::string, float>>& metrics
 );

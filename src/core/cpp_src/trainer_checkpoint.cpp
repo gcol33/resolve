@@ -4,6 +4,7 @@
 
 #include "resolve/trainer.hpp"
 #include "resolve/checkpoint.hpp"
+#include "resolve/enum_names.hpp"
 #include "resolve/gpu.hpp"
 #include "resolve/io_retry.hpp"
 #include "resolve/string_list_archive.hpp"
@@ -14,6 +15,7 @@
 
 #include <algorithm>
 #include <mutex>
+#include <optional>
 #include <sstream>
 
 namespace resolve {
@@ -135,6 +137,17 @@ bool same_scalers(const Scalers& a, const Scalers& b) {
     return true;
 }
 
+// The selection metric a progress checkpoint's run followed, read from
+// resume_selection_metric. A checkpoint written before the setting existed
+// carries none: its run selected by the loss, its best loss is
+// resume_best_loss and its selected values are its held-out losses.
+std::optional<SelectionMetric> recorded_selection_metric(
+    torch::serialize::InputArchive& archive) {
+    std::string name;
+    if (!try_read_string(archive, "resume_selection_metric", name)) return std::nullopt;
+    return enum_from_name<SelectionMetric>(name);
+}
+
 }  // namespace
 
 // =============================================================================
@@ -251,7 +264,12 @@ void Trainer::write_progress(torch::serialize::OutputArchive& archive,
     const TrainResult& result = progress.result;
 
     archive.write(kProgressKey, torch::tensor(static_cast<int64_t>(progress.next_epoch)));
-    archive.write("resume_best_loss", torch::tensor(progress.best_loss));
+    // The value the run selects by and its best, so a resumed run continues
+    // selecting by the same value in the same direction.
+    write_string(archive, "resume_selection_metric",
+                 std::string(enum_to_name(config_.selection_metric)));
+    archive.write("resume_best_selected", torch::tensor(progress.best_selected));
+    archive.write("resume_selection", float_tensor(progress.result.selection_history));
     archive.write("resume_best_epoch", torch::tensor(static_cast<int64_t>(result.best_epoch)));
     archive.write("resume_patience",
                   torch::tensor(static_cast<int64_t>(progress.patience_counter)));
@@ -527,7 +545,11 @@ Trainer::RunProgress Trainer::read_progress(torch::serialize::InputArchive& arch
 
     RunProgress progress;
     progress.next_epoch = scalar_int(kProgressKey);
-    progress.best_loss = read_required(archive, "resume_best_loss", path).item<float>();
+    const bool records_selection = recorded_selection_metric(archive).has_value();
+    progress.best_selected =
+        read_required(archive, records_selection ? "resume_best_selected" : "resume_best_loss",
+                      path)
+            .item<float>();
     progress.patience_counter = scalar_int("resume_patience");
 
     TrainResult& result = progress.result;
@@ -535,6 +557,9 @@ Trainer::RunProgress Trainer::read_progress(torch::serialize::InputArchive& arch
     result.train_loss_history = float_vector(read_required(archive, "resume_train_loss", path));
     result.test_loss_history = float_vector(read_required(archive, "resume_test_loss", path));
     result.lr_history = float_vector(read_required(archive, "resume_lr", path));
+    result.selection_history =
+        records_selection ? float_vector(read_required(archive, "resume_selection", path))
+                          : result.test_loss_history;
 
     progress.plateau.best = read_required(archive, "resume_plateau_best", path).item<double>();
     progress.plateau.bad_epochs = scalar_int("resume_plateau_bad_epochs");
@@ -635,6 +660,18 @@ TrainResult Trainer::resume(const std::string& checkpoint_path) {
             "Trainer::resume: the prepared data's scalers differ from the run's in '" +
             checkpoint_path + "', so the plots carry different values; prepare the "
             "interrupted run's data.");
+    }
+
+    // The run continues only selecting by the value it selected by: its best
+    // so far is a value of that metric, compared in that metric's direction.
+    const SelectionMetric selected_by =
+        recorded_selection_metric(archive).value_or(SelectionMetric::Loss);
+    if (selected_by != config_.selection_metric) {
+        throw std::invalid_argument(
+            "Trainer::resume: the run in '" + checkpoint_path + "' selected its epochs "
+            "by the held-out " + std::string(enum_to_name(selected_by)) + ", and this "
+            "trainer selects by the " + std::string(enum_to_name(config_.selection_metric)) +
+            " (selection_metric); resume it with the run's selection metric.");
     }
 
     restore_model_state(archive, model_, config_.device);

@@ -373,7 +373,7 @@ TEST_CASE("Every config struct's registry covers every member", "[config][regist
     CHECK(field_registry_size(static_cast<const ParallelLayersConfig*>(nullptr)) == 5);
     CHECK(field_registry_size(static_cast<const ModelConfig*>(nullptr)) == 46);
     CHECK(field_registry_size(static_cast<const DatasetConfig*>(nullptr)) == 17);
-    CHECK(field_registry_size(static_cast<const TrainConfig*>(nullptr)) == 34);
+    CHECK(field_registry_size(static_cast<const TrainConfig*>(nullptr)) == 35);
 
     // Same comparison the static_assert makes, spelled out once at runtime.
     CHECK(field_registry_size(static_cast<const ModelConfig*>(nullptr)) ==
@@ -610,6 +610,7 @@ TEST_CASE("Checkpoint keys keep the spellings earlier releases wrote",
              "train_lr_gamma", "train_lr_min", "train_vram_fraction",
              "train_lr_plateau_factor", "train_lr_plateau_patience",
              "train_lr_plateau_threshold", "train_lr_plateau_cooldown",
+             "train_selection_metric",
              "train_band_thresholds", "train_band_threshold",
              "train_nca_temperature", "train_nca_neighbors", "train_nca_weight",
          }) {
@@ -987,11 +988,26 @@ TEST_CASE("The sidecar describes the schema's loader settings and reads back",
 TEST_CASE("The progress file is valid JSON with an unscored best loss as null",
           "[config][registry][checkpoint]") {
     const TempDir dir;
-    write_progress_file(dir.path(), 3, 10, 0, std::numeric_limits<float>::infinity(), 2,
+    const float inf = std::numeric_limits<float>::infinity();
+    write_progress_file(dir.path(), 3, 10, 0, inf, SelectionMetric::Loss, inf, 2,
                         {{"area", {{"band_50", 0.5f}, {"band_25", 0.25f}}}});
     const json::Value progress = json::read_file(dir.file("progress.json"));
     CHECK(progress.at("best_loss").is_null());
+    CHECK(progress.at("selection_metric").as_string() == "loss");
+    CHECK(progress.at("best_selected").is_null());
     CHECK(progress.at("epoch").as_int() == 3);
     CHECK(progress.at("best_metric_name").as_string() == "area/band_25");
     CHECK(progress.at("best_metric").as_number() == 0.25);
+}
+
+TEST_CASE("The progress file of a run selecting by accuracy names it beside the loss",
+          "[config][registry][checkpoint]") {
+    const TempDir dir;
+    write_progress_file(dir.path(), 5, 10, 4, 0.75f, SelectionMetric::Accuracy, 0.5f, 0,
+                        {{"hab", {{"accuracy", 0.5f}}}});
+    const json::Value progress = json::read_file(dir.file("progress.json"));
+    CHECK(progress.at("best_loss").as_number() == 0.75);
+    CHECK(progress.at("selection_metric").as_string() == "accuracy");
+    CHECK(progress.at("best_selected").as_number() == 0.5);
+    CHECK(progress.at("best_epoch").as_int() == 4);
 }

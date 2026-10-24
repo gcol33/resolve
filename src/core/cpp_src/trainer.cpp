@@ -3,8 +3,10 @@
 #include "resolve/utils.hpp"
 #include "resolve/checkpoint.hpp"
 #include "resolve/continuous_block.hpp"
+#include "resolve/enum_names.hpp"
 #include "resolve/gpu.hpp"
 #include "resolve/grad_clip.hpp"
+#include "resolve/selection_metric.hpp"
 #include "resolve/species_graph.hpp"
 #include "resolve/target_labels.hpp"
 #include "resolve/target_transform.hpp"
@@ -31,6 +33,14 @@
 namespace resolve {
 
 namespace {
+
+// The held-out loss epoch `epoch` scored; +infinity when it scored none.
+float held_out_loss_at(const TrainResult& result, int epoch) {
+    if (epoch < 0 || static_cast<size_t>(epoch) >= result.test_loss_history.size()) {
+        return std::numeric_limits<float>::infinity();
+    }
+    return result.test_loss_history[static_cast<size_t>(epoch)];
+}
 
 // ISO 8601 UTC timestamp ("YYYY-MM-DDTHH:MM:SSZ") for run metadata. Used only
 // for informational created_at/completed_at fields, never for anything the run
@@ -520,6 +530,7 @@ void Trainer::prepare_split(
 
     auto [fit_rows, held_rows] = hold_out_indices(hold_out, n_plots, seed, targets);
     validate_lr_schedule(config_, held_rows.numel() > 0);
+    validate_selection_metric(config_, model_->schema().targets, held_rows.numel() > 0);
 
     // The continuous block (continuous_block.hpp), raw; in hash mode the hash
     // embedding rides along at its end.
@@ -1082,6 +1093,7 @@ TrainResult Trainer::train(const RunProgress* resume_from) {
         start.created_at = iso8601_now();
         start.requested_batch_size = config_.batch_size;
         start.effective_batch_size = config_.batch_size;
+        start.best_selected = selection_start(config_.selection_metric);
         start.plateau = plateau_start(config_);
     }
     plan.elapsed_before = start.elapsed_seconds;
@@ -1252,29 +1264,39 @@ void Trainer::run_epochs(RunProgress& progress, const RunPlan& plan) {
 
         const bool settled = loss_fn_.objective_settled(epoch, last_epoch);
 
-        // A reduce-on-plateau schedule follows the loss early stopping reads,
-        // counting a bad epoch only where patience would, so the rate the
-        // next epoch trains at is decided before any checkpoint of this one.
+        // The value the epoch is selected by: the phase-invariant selection
+        // loss (see eval_epoch), or the held-out accuracy eval_epoch scored,
+        // either comparable across the whole run.
+        const float selected =
+            plan.has_held_out
+                ? selected_value(config_.selection_metric, test_loss, metrics,
+                                 model_->schema().targets)
+                : std::numeric_limits<float>::quiet_NaN();
+        if (plan.has_held_out) result.selection_history.push_back(selected);
+
+        // A reduce-on-plateau schedule follows the value early stopping
+        // reads, counting a bad epoch only where patience would, so the rate
+        // the next epoch trains at is decided before any checkpoint of this
+        // one.
         if (config_.lr_scheduler == LRSchedulerType::ReduceOnPlateau &&
-            plateau_step(progress.plateau, config_, test_loss, settled)) {
+            plateau_step(progress.plateau, config_, selected, settled)) {
             std::ostringstream msg;
-            msg << "Epoch " << epoch << " - held-out loss on a plateau, learning rate "
-                << progress.plateau.lr;
+            msg << "Epoch " << epoch << " - held-out " << enum_to_name(config_.selection_metric)
+                << " on a plateau, learning rate " << progress.plateau.lr;
             config_.log(msg.str());
         }
 
         if (plan.fixed_duration) {
             // The returned weights are the last epoch's, whatever the
-            // held-out loss did, so best_epoch names that epoch and
+            // held-out value did, so best_epoch names that epoch and
             // final_metrics are its scores (none without a fold).
             result.best_epoch = epoch;
             result.final_metrics = std::move(metrics);
-            if (plan.has_held_out) progress.best_loss = test_loss;
-        } else if (improves_on(test_loss, progress.best_loss, /*threshold=*/0.0)) {
-            // test_loss is the phase-invariant selection loss (see
-            // eval_epoch), so best_loss is comparable across the whole run and
-            // the returned model is the global best.
-            progress.best_loss = test_loss;
+            if (plan.has_held_out) progress.best_selected = selected;
+        } else if (improves_on(selected, progress.best_selected, /*threshold=*/0.0,
+                               selection_maximizes(config_.selection_metric))) {
+            // The returned model is the global best of the selected value.
+            progress.best_selected = selected;
             result.best_epoch = epoch;
             result.final_metrics = std::move(metrics);
             progress.patience_counter = 0;
@@ -1301,7 +1323,8 @@ void Trainer::run_epochs(RunProgress& progress, const RunPlan& plan) {
         if (plan.use_checkpoints) {
             write_progress_file(
                 config_.checkpoint_dir, epoch, plan.n_epochs,
-                result.best_epoch, progress.best_loss, progress.patience_counter,
+                result.best_epoch, held_out_loss_at(result, result.best_epoch),
+                config_.selection_metric, progress.best_selected, progress.patience_counter,
                 result.final_metrics
             );
         }
@@ -1389,7 +1412,7 @@ std::unordered_map<std::string, BaselineMetrics> Trainer::compute_baselines() {
             baseline.training_mode = mode_class;
             baseline.baseline_accuracy =
                 (test_y.to(torch::kLong) == mode_class).to(torch::kFloat32).mean().item<float>();
-            baseline.model_accuracy = model_metrics.at("accuracy");
+            baseline.model_accuracy = model_metrics.at(kAccuracyMetric);
             baseline.accuracy_lift = baseline.model_accuracy - baseline.baseline_accuracy;
         }
 

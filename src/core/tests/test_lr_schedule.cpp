@@ -1,9 +1,10 @@
 // The learning-rate schedules (lr_schedule.hpp). ReduceOnPlateau is PyTorch's
-// ReduceLROnPlateau in mode "min" on the held-out selection loss: the scripted
-// traces below are what torch.optim.lr_scheduler.ReduceLROnPlateau (torch
-// 2.13) reports after each step(value) for the same values and knobs. In a
-// run the schedule reads the loss early stopping reads, counts a bad epoch
-// only where patience does, and refuses a split with nothing held out.
+// ReduceLROnPlateau on the held-out selection value, in mode "min" on the
+// loss and in mode "max" on the accuracy: the scripted traces below are what
+// torch.optim.lr_scheduler.ReduceLROnPlateau (torch 2.13 / 2.14) reports after
+// each step(value) for the same values and knobs. In a run the schedule reads
+// the value early stopping reads, counts a bad epoch only where patience
+// does, and refuses a split with nothing held out.
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -38,8 +39,9 @@ struct PlateauStep {
 };
 
 TrainConfig plateau_config(float lr, float factor, int patience, float threshold, int cooldown,
-                           float lr_min) {
+                           float lr_min, SelectionMetric metric = SelectionMetric::Loss) {
     TrainConfig cfg;
+    cfg.selection_metric = metric;
     cfg.lr_scheduler = LRSchedulerType::ReduceOnPlateau;
     cfg.lr = lr;
     cfg.lr_plateau_factor = factor;
@@ -85,14 +87,15 @@ PlateauRun plateau_run(const SmallCorpus& corpus, const TrainConfig& cfg) {
 }
 
 // The rate each epoch of `result` should have trained at: the run's held-out
-// losses replayed through the schedule, epoch e counting from `first_counted`.
+// selection values replayed through the schedule, epoch e counting from
+// `first_counted`.
 std::vector<float> replayed_rates(const TrainConfig& cfg, const TrainResult& result,
                                   int first_counted) {
     std::vector<float> rates;
     PlateauState state = plateau_start(cfg);
-    for (size_t e = 0; e < result.test_loss_history.size(); ++e) {
+    for (size_t e = 0; e < result.selection_history.size(); ++e) {
         rates.push_back(static_cast<float>(state.lr));
-        plateau_step(state, cfg, result.test_loss_history[e],
+        plateau_step(state, cfg, result.selection_history[e],
                      static_cast<int>(e) >= first_counted);
     }
     return rates;
@@ -102,16 +105,16 @@ std::vector<float> replayed_rates(const TrainConfig& cfg, const TrainResult& res
 
 TEST_CASE("improves_on is ReduceLROnPlateau's min / rel rule", "[lr_schedule]") {
     const double inf = std::numeric_limits<double>::infinity();
-    CHECK(improves_on(5.0, inf, 0.0));
-    CHECK(improves_on(5.0, inf, 0.5));
-    CHECK(improves_on(0.99, 1.0, 0.0));
-    CHECK_FALSE(improves_on(1.0, 1.0, 0.0));
-    CHECK_FALSE(improves_on(1.01, 1.0, 0.0));
+    CHECK(improves_on(5.0, inf, 0.0, /*maximize=*/false));
+    CHECK(improves_on(5.0, inf, 0.5, /*maximize=*/false));
+    CHECK(improves_on(0.99, 1.0, 0.0, /*maximize=*/false));
+    CHECK_FALSE(improves_on(1.0, 1.0, 0.0, /*maximize=*/false));
+    CHECK_FALSE(improves_on(1.01, 1.0, 0.0, /*maximize=*/false));
     // 10 % below the best is needed under a 0.1 threshold.
-    CHECK_FALSE(improves_on(0.95, 1.0, 0.1));
-    CHECK(improves_on(0.85, 1.0, 0.1));
-    CHECK_FALSE(improves_on(std::nan(""), 1.0, 0.0));
-    CHECK_FALSE(improves_on(std::nan(""), inf, 0.0));
+    CHECK_FALSE(improves_on(0.95, 1.0, 0.1, /*maximize=*/false));
+    CHECK(improves_on(0.85, 1.0, 0.1, /*maximize=*/false));
+    CHECK_FALSE(improves_on(std::nan(""), 1.0, 0.0, /*maximize=*/false));
+    CHECK_FALSE(improves_on(std::nan(""), inf, 0.0, /*maximize=*/false));
 }
 
 TEST_CASE("A plateau schedule steps as ReduceLROnPlateau with a threshold, cooldown and floor",
@@ -164,6 +167,38 @@ TEST_CASE("Under a zero threshold a plateau counts a tie as a bad epoch", "[lr_s
         {0.89, 1e-4, 0.89, 1, 0},
         {0.89, 1e-5, 0.89, 0, 0},
         {0.89, 1e-5, 0.89, 1, 0},
+    });
+}
+
+TEST_CASE("A plateau on the accuracy steps as ReduceLROnPlateau in mode max",
+          "[lr_schedule][selection_metric]") {
+    // ReduceLROnPlateau(mode="max", factor=0.5, patience=2, threshold=0.1,
+    // threshold_mode="rel", cooldown=1, min_lr=0.2) at lr 1.0: an epoch
+    // improves when it is above best * 1.1, the best starts at -inf.
+    const TrainConfig cfg =
+        plateau_config(1.0f, 0.5f, 2, 0.1f, 1, 0.2f, SelectionMetric::Accuracy);
+    REQUIRE(plateau_start(cfg).best == -std::numeric_limits<double>::infinity());
+    require_trace(cfg, {
+        {0.4, 1.0, 0.4, 0, 0},
+        {0.42, 1.0, 0.4, 1, 0},
+        {0.43, 1.0, 0.4, 2, 0},
+        {0.41, 0.5, 0.4, 0, 1},
+        {0.5, 0.5, 0.5, 0, 0},
+        {0.54, 0.5, 0.5, 1, 0},
+        {0.53, 0.5, 0.5, 2, 0},
+        {0.52, 0.25, 0.5, 0, 1},
+        {0.56, 0.25, 0.56, 0, 0},
+        {0.7, 0.25, 0.7, 0, 0},
+        {0.75, 0.25, 0.7, 1, 0},
+        {0.76, 0.25, 0.7, 2, 0},
+        {0.74, 0.2, 0.7, 0, 1},
+        {0.768, 0.2, 0.7, 0, 0},
+        {0.78, 0.2, 0.78, 0, 0},
+        {0.765, 0.2, 0.78, 1, 0},
+        {0.76, 0.2, 0.78, 2, 0},
+        {0.8, 0.2, 0.78, 0, 1},
+        {0.79, 0.2, 0.78, 0, 0},
+        {0.78, 0.2, 0.78, 1, 0},
     });
 }
 
@@ -307,6 +342,44 @@ TEST_CASE("Early stopping and the plateau read one held-out loss", "[lr_schedule
     }
     CHECK(r.best_epoch == best_epoch);
     CHECK(static_cast<int>(losses.size()) == stop);
+}
+
+TEST_CASE("A plateau on the accuracy follows the run's held-out accuracies",
+          "[lr_schedule][selection_metric][trainer]") {
+    // hdm-framework's protocol (Leblanc et al. 2024) at a smaller scale: the
+    // rate decays by 0.1 after more than 2 epochs without an accuracy 1e-4
+    // above the best, early stopping after 4 epochs without a higher one.
+    const ClassificationCorpus corpus;
+    const auto ds =
+        corpus.load({TargetSpec::classification("cls", ClassificationCorpus::kClasses)});
+    TrainConfig cfg = quiet_train_config(60);
+    cfg.patience = 4;
+    cfg.lr = 5e-2f;
+    cfg.selection_metric = SelectionMetric::Accuracy;
+    cfg.lr_scheduler = LRSchedulerType::ReduceOnPlateau;
+    cfg.lr_plateau_factor = 0.1f;
+    cfg.lr_plateau_patience = 2;
+    cfg.lr_plateau_threshold = 1e-4f;
+
+    torch::manual_seed(3);
+    ModelConfig model = hash_mlp_config({32, 16});
+    model.dropout = 0.3f;
+    Trainer trainer(ResolveModel(ds.schema(), model), cfg);
+    trainer.prepare_data(ds, 0.3f, 11);
+    const auto r = trainer.fit();
+
+    REQUIRE(r.selection_history.size() == r.lr_history.size());
+    REQUIRE(r.lr_history == replayed_rates(cfg, r, /*first_counted=*/0));
+    // The fourth epoch without a higher accuracy stops the run, and the third
+    // has decayed the rate it trains at.
+    REQUIRE(r.lr_history.size() < 60);
+    CHECK(r.lr_history.back() < r.lr_history.front());
+    // The selected values are accuracies, not the losses.
+    CHECK(r.selection_history != r.test_loss_history);
+    for (const float accuracy : r.selection_history) {
+        CHECK(accuracy >= 0.0f);
+        CHECK(accuracy <= 1.0f);
+    }
 }
 
 TEST_CASE("prepare_data refuses a plateau schedule it cannot drive",

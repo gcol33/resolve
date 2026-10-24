@@ -254,6 +254,7 @@ config = rc.TrainConfig()
 | `max_epochs` | `int` | `500` | Hard upper limit |
 | `patience` | `int` | `50` | Epochs without improvement before stopping |
 | `fixed_epochs` | `int` | `0` | Run exactly N epochs of the `max_epochs` schedule and keep the final weights; `0` stops early |
+| `selection_metric` | `SelectionMetric` | `Loss` | The held-out value early stopping, `best_epoch` and `ReduceOnPlateau` follow: `Loss` (lowest wins) or `Accuracy` (the one classification target's, highest wins) |
 | `lr` | `float` | `1e-3` | AdamW learning rate |
 | `weight_decay` | `float` | `1e-4` | AdamW weight decay |
 | `loss_config` | `LossConfigMode` | `Combined` | `MAE`, `SMAPE`, `Combined`, `NCA` |
@@ -269,7 +270,7 @@ config = rc.TrainConfig()
 | `lr_min` | `float` | `1e-6` | `CosineAnnealing` endpoint; the floor `ReduceOnPlateau` never decays below |
 | `lr_plateau_factor` | `float` | `0.1` | `ReduceOnPlateau`: factor each decay multiplies the rate by, in (0, 1) |
 | `lr_plateau_patience` | `int` | `10` | `ReduceOnPlateau`: bad epochs allowed; the next one decays the rate |
-| `lr_plateau_threshold` | `float` | `0.0` | `ReduceOnPlateau`: relative improvement on the best held-out loss an epoch must make, in [0, 1); `0` is early stopping's rule |
+| `lr_plateau_threshold` | `float` | `0.0` | `ReduceOnPlateau`: relative improvement on the best held-out value an epoch must make, in [0, 1); `0` is early stopping's rule |
 | `lr_plateau_cooldown` | `int` | `0` | `ReduceOnPlateau`: epochs after a decay that count no bad epoch |
 | `use_amp` | `bool` | `False` | Mixed precision on CUDA |
 | `amp_init_scale` | `float` | `65536.0` | Initial gradient scale |
@@ -287,10 +288,23 @@ config = rc.TrainConfig()
 Neighbourhood Components Analysis term to every classification target. See
 [Loss presets](../tutorials/training.md#loss-presets).
 
-`LRSchedulerType.ReduceOnPlateau` is PyTorch's `ReduceLROnPlateau` in mode
-`"min"` with `threshold_mode="rel"`, stepped after every epoch with the
-held-out fold's selection loss, the value early stopping and `best_epoch` read.
-An epoch improves when its loss is below `best * (1 - lr_plateau_threshold)`;
+`selection_metric` chooses the held-out value a run selects by. `Loss` (the
+default) is the phase-invariant selection loss: an epoch improves when its loss
+is strictly below the best. `Accuracy` is the held-out accuracy of the
+schema's one classification target (other targets may be regression ones): an
+epoch improves when its accuracy is strictly above the best, and the epoch of
+the highest accuracy is the one kept, as hdm-framework (Leblanc et al. 2024)
+selects. `prepare_data` refuses `Accuracy` with `test_size=0` and for a schema
+without exactly one classification target. `TrainResult.selection_history`
+records the selected value of every epoch; a resumed run must select by the
+metric it started with.
+
+`LRSchedulerType.ReduceOnPlateau` is PyTorch's `ReduceLROnPlateau` with
+`threshold_mode="rel"`, stepped after every epoch with the held-out value
+`selection_metric` names, the value early stopping and `best_epoch` read: in
+mode `"min"` on the loss (an epoch improves when it is below
+`best * (1 - lr_plateau_threshold)`), in mode `"max"` on the accuracy (above
+`best * (1 + lr_plateau_threshold)`, the best starting at minus infinity);
 otherwise it is a bad epoch, counted once the loss objective has reached its
 final phase, as patience is. More than `lr_plateau_patience` bad epochs in a
 row multiply the rate by `lr_plateau_factor`, floored at `lr_min` (a change of
@@ -299,7 +313,7 @@ bad epoch. PyTorch's defaults are `factor=0.1`, `patience=10`,
 `threshold=1e-4`, `cooldown=0`, `min_lr=0`; the engine's threshold defaults to
 `0`, so the schedule and early stopping agree on which epochs improved. It
 needs a held-out fold: `prepare_data` refuses it with `test_size=0`. Its state
-(best loss, bad epochs, cooldown, rate) travels in the checkpoints `resume`
+(best value, bad epochs, cooldown, rate) travels in the checkpoints `resume`
 reads.
 
 ---
@@ -308,11 +322,12 @@ reads.
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `best_epoch` | `int` | Epoch with the best test-fold loss |
+| `best_epoch` | `int` | Epoch with the best held-out value of `selection_metric` (the lowest loss, or the highest accuracy) |
 | `final_metrics` | `dict[str, dict[str, float]]` | Per target, per metric; a target with `missing = Mask` also reports `n_labelled`, the held-out plots it was scored on |
 | `train_loss_history` | `list[float]` | One entry per epoch run |
 | `test_loss_history` | `list[float]` | Same length; empty when nothing is held out |
 | `lr_history` | `list[float]` | The learning rate each epoch trained at |
+| `selection_history` | `list[float]` | The held-out value of `selection_metric` each epoch scored: `test_loss_history` under `Loss`, the accuracy under `Accuracy`; empty when nothing is held out |
 | `train_loss_history_by_target` | `dict[str, list[float]]` | `train_loss_history` split by target: per epoch, the term each target adds to the total (its weighted loss, averaged over the epoch's batches like the total; a batch with no labelled row for a masked target adds 0) |
 | `test_loss_history_by_target` | `dict[str, list[float]]` | `test_loss_history` split by target: each target's weighted term of the phase-invariant selection loss; empty when nothing is held out |
 | `train_aux_loss_history` | `dict[str, list[float]]` | The auxiliary terms of `train_loss_history`, which belong to no target, keyed by name: `moe` (mixture-of-experts load balancing) and `tabnet_sparsity` (TabNet's mask sparsity), each already weighted; empty for a model with neither. Per epoch the train terms plus these add up to the total, and the test terms add up to the test total, within float rounding |

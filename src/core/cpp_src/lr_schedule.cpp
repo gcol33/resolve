@@ -8,18 +8,16 @@
 
 namespace resolve {
 
-bool improves_on(double value, double best, double threshold) noexcept {
-    return value < best * (1.0 - threshold);
-}
-
 PlateauState plateau_start(const TrainConfig& config) {
     PlateauState state;
+    state.best = static_cast<double>(selection_start(config.selection_metric));
     state.lr = static_cast<double>(config.lr);
     return state;
 }
 
 bool plateau_step(PlateauState& state, const TrainConfig& config, double value, bool counts) {
-    if (improves_on(value, state.best, static_cast<double>(config.lr_plateau_threshold))) {
+    if (improves_on(value, state.best, static_cast<double>(config.lr_plateau_threshold),
+                    selection_maximizes(config.selection_metric))) {
         state.best = value;
         state.bad_epochs = 0;
     } else if (counts) {
@@ -76,7 +74,7 @@ void validate_lr_schedule(const TrainConfig& config, bool has_held_out) {
     if (!has_held_out) {
         throw std::invalid_argument(
             "the reduce-on-plateau learning-rate schedule (lr_scheduler = plateau) "
-            "decays on the held-out fold's loss, and the data was prepared with no "
+            "decays on the held-out fold's selection value, and the data was prepared with no "
             "held-out fold (test_size = 0), so it has nothing to follow. Hold out a "
             "fold, or choose a schedule laid out over max_epochs (step, cosine).");
     }

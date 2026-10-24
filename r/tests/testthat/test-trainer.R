@@ -115,6 +115,54 @@ test_that("a plateau decays the rate on the held-out loss and needs a fold", {
   expect_error(resolve.train.dataset(dataset, lrScheduler = "exponential"), "lr_scheduler")
 })
 
+test_that("selectionMetric = 'accuracy' keeps the epoch of the highest held-out accuracy", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  tables <- signal_tables(90L)
+  # Three classes cut from cov1, one plot in seven relabelled, so the held-out
+  # accuracy and loss move apart.
+  cls <- as.integer(cut(tables$header$cov1, c(-Inf, -0.33, 0.33, Inf))) - 1L
+  relabel <- seq_along(cls) %% 7L == 0L
+  cls[relabel] <- (cls[relabel] + 1L) %% 3L
+  tables$header$cls <- cls
+  targets <- list(cls = list(column = "cls", task = "classification", num_classes = 3L))
+  dataset <- load_tables(tables, signal_roles(), targets)
+
+  model_file <- local_model_file()
+  fit <- resolve.train.dataset(dataset, hiddenDims = c(16L, 8L), maxEpochs = 20L,
+                               patience = 100L, batchSize = 8L, lr = 0.05,
+                               selectionMetric = "accuracy", lrScheduler = "plateau",
+                               lrPlateauFactor = 0.5, lrPlateauPatience = 1L,
+                               lrPlateauThreshold = 1e-4, savePath = model_file,
+                               verbose = FALSE)
+  accuracy <- fit$result$selection
+  expect_length(accuracy, 20L)
+  expect_true(all(accuracy >= 0 & accuracy <= 1))
+  # best_epoch is 0-based: the first epoch of the highest accuracy.
+  expect_equal(fit$result$best_epoch, which.max(accuracy) - 1L)
+  expect_equal(fit$result$final_metrics$cls$accuracy, max(accuracy), tolerance = 1e-7)
+  expect_equal(resolve.load_train_config(model_file)$selection_metric, "accuracy")
+
+  by_loss <- resolve.train.dataset(dataset, hiddenDims = c(16L, 8L), maxEpochs = 3L,
+                                   batchSize = 8L, verbose = FALSE)
+  expect_equal(by_loss$result$selection, by_loss$result$test_loss)
+
+  expect_error(
+    resolve.train.dataset(dataset, hiddenDims = c(8L), maxEpochs = 2L, fixedEpochs = 2L,
+                          testSize = 0, batchSize = 8L, selectionMetric = "accuracy",
+                          verbose = FALSE),
+    "no held-out fold"
+  )
+  regression <- load_tables(signal_tables(60L), signal_roles(), regression_target())
+  expect_error(
+    resolve.train.dataset(regression, hiddenDims = c(8L), maxEpochs = 2L, batchSize = 8L,
+                          selectionMetric = "accuracy", verbose = FALSE),
+    "0 classification targets"
+  )
+  expect_error(resolve.train.dataset(dataset, selectionMetric = "f1"), "selection_metric")
+})
+
 test_that("A mixture of experts builds at either placement", {
   skip_if_no_backend()
   skip_on_cran()

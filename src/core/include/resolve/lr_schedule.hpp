@@ -1,22 +1,17 @@
 #pragma once
 
 // The learning rate an epoch trains at. StepLR and CosineAnnealing depend on
-// the epoch alone; ReduceOnPlateau follows the held-out fold's selection loss
-// and so carries state from epoch to epoch (PlateauState), which the run's
-// progress and its checkpoints hold.
+// the epoch alone; ReduceOnPlateau follows the held-out fold's selection value
+// (TrainConfig::selection_metric, selection_metric.hpp) and so carries state
+// from epoch to epoch (PlateauState), which the run's progress and its
+// checkpoints hold.
 
+#include "resolve/selection_metric.hpp"
 #include "resolve/types.hpp"
 
 #include <limits>
 
 namespace resolve {
-
-// Whether `value` improves on `best` by more than the relative `threshold`:
-// value < best * (1 - threshold), the rule of PyTorch's ReduceLROnPlateau in
-// mode "min" with threshold_mode "rel". A threshold of 0 is a strict decrease,
-// the rule early stopping and best_epoch select by. A NaN value never
-// improves.
-[[nodiscard]] bool improves_on(double value, double best, double threshold) noexcept;
 
 // The smallest learning-rate change a plateau decay applies; a decay that
 // would change the rate by this much or less (the rate already at lr_min) is
@@ -24,8 +19,9 @@ namespace resolve {
 inline constexpr double kPlateauMinDecay = 1e-8;
 
 // A ReduceOnPlateau schedule between epochs, ReduceLROnPlateau's state: the
-// best loss so far, the bad epochs counted since the last improvement or
-// decay, the cooldown epochs left, and the rate the next epoch trains at.
+// best selection value so far (plateau_start sets the start for the metric's
+// direction), the bad epochs counted since the last improvement or decay, the
+// cooldown epochs left, and the rate the next epoch trains at.
 struct PlateauState {
     double best = std::numeric_limits<double>::infinity();
     int bad_epochs = 0;
@@ -33,12 +29,14 @@ struct PlateauState {
     double lr = 0.0;
 };
 
-// The state a run starts from: no best yet, the rate config.lr.
+// The state a run starts from: no best yet (selection_start of
+// config.selection_metric), the rate config.lr.
 [[nodiscard]] PlateauState plateau_start(const TrainConfig& config);
 
 // One ReduceLROnPlateau.step(value) at the end of an epoch whose held-out
-// selection loss is `value`. An improvement (improves_on with
-// config.lr_plateau_threshold) becomes the best and clears the bad-epoch
+// selection value is `value`. An improvement (improves_on with
+// config.lr_plateau_threshold, in mode "max" when config.selection_metric
+// maximizes, "min" otherwise) becomes the best and clears the bad-epoch
 // count; otherwise the epoch is a bad one when `counts`. During a cooldown
 // the counter decrements and the bad epochs are dropped. More than
 // config.lr_plateau_patience bad epochs multiply the rate by
@@ -56,7 +54,7 @@ bool plateau_step(PlateauState& state, const TrainConfig& config, double value, 
                                              const PlateauState& plateau);
 
 // Refuses a schedule the run cannot follow, with std::invalid_argument: a
-// ReduceOnPlateau schedule without a held-out fold (there is no loss to
+// ReduceOnPlateau schedule without a held-out fold (there is no value to
 // follow), a plateau factor outside (0, 1), a negative patience or cooldown,
 // a threshold outside [0, 1), and a negative lr_min. Other schedules pass.
 void validate_lr_schedule(const TrainConfig& config, bool has_held_out);

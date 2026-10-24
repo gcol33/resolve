@@ -58,6 +58,11 @@ void register_enums(nb::module_& m) {
         .value("ReduceOnPlateau", resolve::LRSchedulerType::ReduceOnPlateau)
         .export_values();
 
+    nb::enum_<resolve::SelectionMetric>(m, "SelectionMetric")
+        .value("Loss", resolve::SelectionMetric::Loss)
+        .value("Accuracy", resolve::SelectionMetric::Accuracy)
+        .export_values();
+
     nb::enum_<resolve::MoERoutingType>(m, "MoERoutingType")
         .value("None_", resolve::MoERoutingType::None)
         .value("Soft", resolve::MoERoutingType::Soft)

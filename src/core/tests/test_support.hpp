@@ -15,6 +15,7 @@
 
 #include <torch/torch.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -355,6 +356,60 @@ public:
     }
 
 private:
+    TempFile header_;
+    TempFile species_;
+};
+
+// 80 plots with covariates "cov1" / "cov2", a regression target "y" and two
+// classification targets, on disk for the lifetime of the object: "cls"
+// (three classes set by cov1, with one plot in seven relabelled, so the
+// held-out loss and accuracy of a short fit move apart) and "cls2" (two
+// classes). Each plot holds one of ten background species and one species
+// marking its true "cls" class. load() reads the targets a case names, hash
+// encoded.
+class ClassificationCorpus {
+public:
+    static constexpr int kPlots = 80;
+    static constexpr int kClasses = 3;
+
+    ClassificationCorpus() : header_(header_csv()), species_(species_csv()) {}
+
+    [[nodiscard]] ResolveDataset load(std::vector<TargetSpec> targets) const {
+        return ResolveDataset::from_csv(header_.path(), species_.path(),
+                                        Roles().coordinates().covariates({"cov1", "cov2"}),
+                                        std::move(targets), hash_dataset_config());
+    }
+
+    // The class cov1 sets for plot i, before relabelling.
+    [[nodiscard]] static int true_class(int i) {
+        const double c1 = std::sin(0.37 * i);
+        return std::min(kClasses - 1, static_cast<int>((c1 + 1.0) * 0.5 * kClasses));
+    }
+
+private:
+    static std::string header_csv() {
+        std::ostringstream out;
+        out << "plot_id,lat,lon,cov1,cov2,y,cls,cls2\n";
+        for (int i = 0; i < kPlots; ++i) {
+            const double c1 = std::sin(0.37 * i);
+            const double c2 = std::cos(0.11 * i);
+            const int cls = i % 7 == 0 ? (true_class(i) + 1) % kClasses : true_class(i);
+            out << "P" << i << "," << (45.0 + 0.01 * i) << "," << (7.0 + 0.02 * i) << "," << c1
+                << "," << c2 << "," << (3.0 * c1 - c2 + 1.0) << "," << cls << "," << (i % 2)
+                << "\n";
+        }
+        return out.str();
+    }
+    static std::string species_csv() {
+        std::ostringstream out;
+        out << "plot_id,sp,cover\n";
+        for (int i = 0; i < kPlots; ++i) {
+            out << "P" << i << ",sp" << (i % 10) << "," << (1 + i % 4) << "\n";
+            out << "P" << i << ",mark" << true_class(i) << ",1\n";
+        }
+        return out.str();
+    }
+
     TempFile header_;
     TempFile species_;
 };

@@ -492,7 +492,7 @@ std::unordered_map<std::string, float> Metrics::compute(
     std::unordered_map<std::string, float> metrics;
 
     if (task == TaskType::Classification) {
-        metrics["accuracy"] = accuracy(pred, target);
+        metrics[kAccuracyMetric] = accuracy(pred, target);
 
         if (num_classes > 0) {
             auto clf_metrics = classification_metrics(pred, target, num_classes);

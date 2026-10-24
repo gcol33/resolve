@@ -715,7 +715,7 @@ resolve.dataset.frame <- function(header,
 )
 .resolve_train_args <- c(
   maxEpochs = "max_epochs", patience = "patience", fixedEpochs = "fixed_epochs",
-  lr = "lr", lrScheduler = "lr_scheduler", lrStepSize = "lr_step_size",
+  selectionMetric = "selection_metric", lr = "lr", lrScheduler = "lr_scheduler", lrStepSize = "lr_step_size",
   lrGamma = "lr_gamma", lrMin = "lr_min", lrPlateauFactor = "lr_plateau_factor",
   lrPlateauPatience = "lr_plateau_patience", lrPlateauThreshold = "lr_plateau_threshold",
   lrPlateauCooldown = "lr_plateau_cooldown", batchSize = "batch_size", device = "device",
@@ -828,26 +828,34 @@ resolve.dataset.frame <- function(header,
 #'   default, is early stopping). The learning-rate schedule is still laid out
 #'   over `maxEpochs`. The only mode that accepts `testSize = 0`, for a refit
 #'   on every plot.
+#' @param selectionMetric The held-out value early stopping, `best_epoch` (the
+#'   returned weights) and a `"plateau"` schedule follow: `"loss"` (the
+#'   default, the lowest selection loss wins) or `"accuracy"` (the highest
+#'   held-out accuracy of the dataset's one classification target wins, and a
+#'   plateau follows PyTorch's `ReduceLROnPlateau` in mode `"max"`).
+#'   `"accuracy"` needs a held-out fold and exactly one classification target.
 #' @param lr Learning rate.
 #' @param lrScheduler Learning-rate schedule: `"none"` (constant), `"step"`
 #'   multiplies the rate by `lrGamma` every `lrStepSize` epochs, `"cosine"`
 #'   anneals it from `lr` to `lrMin` over `maxEpochs`, and `"plateau"`
-#'   multiplies it by `lrPlateauFactor` when the held-out loss that drives
+#'   multiplies it by `lrPlateauFactor` when the held-out value that drives
 #'   early stopping has not improved for more than `lrPlateauPatience` epochs
-#'   (PyTorch's `ReduceLROnPlateau` in mode `"min"`). `"plateau"` needs a
-#'   held-out fold, so it is refused with `testSize = 0`.
+#'   (PyTorch's `ReduceLROnPlateau`, in mode `"min"` on the loss and `"max"`
+#'   on the accuracy, see `selectionMetric`). `"plateau"` needs a held-out
+#'   fold, so it is refused with `testSize = 0`.
 #' @param lrStepSize Epochs between decays under `lrScheduler = "step"`.
 #' @param lrGamma Factor of each decay under `lrScheduler = "step"`.
 #' @param lrMin The rate the cosine schedule ends at, and the floor a plateau
 #'   never decays below.
 #' @param lrPlateauFactor Factor a plateau multiplies the rate by, in (0, 1).
-#' @param lrPlateauPatience Epochs without improvement of the held-out loss a
-#'   plateau allows; the next one decays the rate. Like `patience`, an epoch
-#'   counts only once the loss objective has reached its final phase.
-#' @param lrPlateauThreshold Relative improvement on the best held-out loss
+#' @param lrPlateauPatience Epochs without improvement of the held-out value
+#'   (`selectionMetric`) a plateau allows; the next one decays the rate. Like
+#'   `patience`, an epoch counts only once the loss objective has reached its
+#'   final phase.
+#' @param lrPlateauThreshold Relative improvement on the best held-out value
 #'   an epoch must make to count as one, in \[0, 1) (the default 0 is any
-#'   decrease, the rule early stopping and `best_epoch` use; PyTorch's default
-#'   is 1e-4).
+#'   improvement, the rule early stopping and `best_epoch` use; PyTorch's
+#'   default is 1e-4).
 #' @param lrPlateauCooldown Epochs after a decay during which no epoch counts
 #'   against the rate.
 #' @param batchSize Batch size.
@@ -940,7 +948,9 @@ resolve.dataset.frame <- function(header,
 #'   `pretrain` (the pretraining's `loss_history`, `total_time_seconds` and
 #'   `epochs_completed`). `result` carries `best_epoch`, `train_time_seconds`,
 #'   `final_metrics`, the loss histories `train_loss` and `test_loss` (one
-#'   value per epoch), the learning rate each epoch trained at `lr`, the loss
+#'   value per epoch), the learning rate each epoch trained at `lr`, the
+#'   held-out value of `selectionMetric` each epoch scored `selection` (the
+#'   held-out loss, or the accuracy; empty when nothing is held out), the loss
 #'   histories' split by target `train_loss_by_target` and
 #'   `test_loss_by_target` (named lists of per-epoch vectors: each target's
 #'   weighted term of the total, so per epoch they add up to it),
@@ -974,6 +984,7 @@ resolve.train.dataset <- function(dataset,
                                   maxEpochs = NULL,
                                   patience = NULL,
                                   fixedEpochs = NULL,
+                                  selectionMetric = NULL,
                                   lr = NULL,
                                   lrScheduler = NULL,
                                   lrStepSize = NULL,

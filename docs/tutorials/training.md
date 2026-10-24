@@ -193,38 +193,46 @@ records the split: `load_run_metadata` reports `hold_out` as `explicit` (or
 
 The step and cosine schedules are laid out over `max_epochs`, so they need the
 run's length in advance. `ReduceOnPlateau` follows the held-out loss instead,
-the way PyTorch's `ReduceLROnPlateau` does: when the loss early stopping reads
-has not improved for more than `lr_plateau_patience` epochs, the rate is
-multiplied by `lr_plateau_factor`, down to `lr_min`. Paired with a larger
-`patience`, the rate drops on a plateau and training stops on a longer one,
-which is how hdm-framework (Leblanc et al. 2024) trains, with patience 5 for
-the rate and 10 for stopping:
+the way PyTorch's `ReduceLROnPlateau` does: when the held-out value early
+stopping reads has not improved for more than `lr_plateau_patience` epochs, the
+rate is multiplied by `lr_plateau_factor`, down to `lr_min`. Paired with a
+larger `patience`, the rate drops on a plateau and training stops on a longer
+one. That value is the held-out loss by default; `selection_metric = Accuracy`
+makes it the held-out accuracy of the one classification target, maximized,
+so the schedule runs in mode `"max"` and the epoch of the highest accuracy is
+kept. This is how hdm-framework (Leblanc et al. 2024) trains, with patience 5
+for the rate and 10 for stopping, both on the accuracy:
 
 === "Python"
 
     ```python
+    cfg.selection_metric     = rc.SelectionMetric.Accuracy
     cfg.lr_scheduler         = rc.LRSchedulerType.ReduceOnPlateau
     cfg.lr_plateau_factor    = 0.1
     cfg.lr_plateau_patience  = 5
-    cfg.lr_plateau_threshold = 1e-4   # PyTorch's default; 0 = any decrease
+    cfg.lr_plateau_threshold = 1e-4   # PyTorch's default; 0 = any improvement
     cfg.patience             = 10
     result = trainer.fit()
     result.lr_history                 # the rate each epoch trained at
+    result.selection_history          # the held-out accuracy of each epoch
     ```
 
 === "R"
 
     ```r
-    fit <- resolve.train.dataset(dataset, lrScheduler = "plateau",
+    fit <- resolve.train.dataset(dataset, selectionMetric = "accuracy",
+                                 lrScheduler = "plateau",
                                  lrPlateauFactor = 0.1, lrPlateauPatience = 5L,
                                  lrPlateauThreshold = 1e-4, patience = 10L)
     fit$result$lr
+    fit$result$selection
     ```
 
 === "Command line"
 
     ```bash
-    resolve train ... --lr-scheduler plateau --lr-plateau-factor 0.1 \
+    resolve train ... --selection-metric accuracy \
+                      --lr-scheduler plateau --lr-plateau-factor 0.1 \
                       --lr-plateau-patience 5 --lr-plateau-threshold 1e-4 \
                       --patience 10 --output model.pt
     ```

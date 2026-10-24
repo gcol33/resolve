@@ -40,6 +40,7 @@ try:
         MoERoutingType,
         MoEPlacement,
         LRSchedulerType,
+        SelectionMetric,
         ActivationType,
         NormLayerType,
         # Pool-style species encoder weighting (rank_pool / transformer modes)
@@ -235,6 +236,7 @@ __all__ = [
     "MoERoutingType",
     "MoEPlacement",
     "LRSchedulerType",
+    "SelectionMetric",
     "ActivationType",
     "NormLayerType",
     "PoolWeighting",

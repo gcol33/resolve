@@ -35,6 +35,7 @@ set(RESOLVE_CORE_SOURCES
     ${RESOLVE_CORE_DIR}/cpp_src/trainer.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/trainer_checkpoint.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/lr_schedule.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/selection_metric.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/predictor.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/retrieval.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/suite.cpp
@@ -97,6 +98,7 @@ set(RESOLVE_CORE_HEADERS
     ${RESOLVE_CORE_DIR}/include/resolve/trainer.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/grad_clip.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/lr_schedule.hpp
+    ${RESOLVE_CORE_DIR}/include/resolve/selection_metric.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/scalers.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/target_transform.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/predictor.hpp

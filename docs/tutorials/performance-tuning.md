@@ -44,7 +44,8 @@ cfg.lr_plateau_patience = 10    # after more than 10 epochs without a new best
 
 Cosine annealing spans `max_epochs`, so it lands on `lr_min` at the last epoch
 rather than a step short of it. `ReduceOnPlateau` needs no run length: it
-follows the held-out loss early stopping reads (see
+follows the held-out value early stopping reads, the loss or, under
+`selection_metric = Accuracy`, the accuracy (see
 [Lowering the learning rate on a plateau](training.md#lowering-the-learning-rate-on-a-plateau)).
 
 ## Batch size

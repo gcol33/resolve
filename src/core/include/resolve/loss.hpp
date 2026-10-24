@@ -207,6 +207,9 @@ struct ConfidenceMetrics {
     int64_t n_total;     // Total number of samples
 };
 
+// The name Metrics::compute reports a classification target's accuracy under.
+inline constexpr const char* kAccuracyMetric = "accuracy";
+
 // Metrics computation
 struct Metrics {
     // Regression metrics

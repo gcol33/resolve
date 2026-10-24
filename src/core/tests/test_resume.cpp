@@ -76,6 +76,7 @@ void require_same_run(const TrainResult& a, const TrainResult& b) {
     REQUIRE(a.train_loss_history == b.train_loss_history);
     REQUIRE(a.test_loss_history == b.test_loss_history);
     REQUIRE(a.lr_history == b.lr_history);
+    REQUIRE(a.selection_history == b.selection_history);
     REQUIRE((a.train_loss_history_by_target == b.train_loss_history_by_target));
     REQUIRE((a.test_loss_history_by_target == b.test_loss_history_by_target));
     REQUIRE(a.best_epoch == b.best_epoch);
@@ -171,6 +172,43 @@ TEST_CASE("A run under a reduce-on-plateau schedule resumes with the schedule's 
     REQUIRE(run.full.lr_history.back() < run.full.lr_history[6]);
     require_same_run(run.full, run.resumed);
     require_same_weights(*run.full_trainer, *run.resumed_trainer);
+}
+
+TEST_CASE("A run selecting by accuracy resumes selecting by accuracy",
+          "[trainer][resume][selection_metric]") {
+    // Selected by the held-out accuracy, with a plateau in mode max: the
+    // epochs after checkpoint_6 only match the uninterrupted run if the best
+    // accuracy (not a loss), its direction and the schedule's state come back.
+    const ClassificationCorpus corpus;
+    const auto ds =
+        corpus.load({TargetSpec::classification("cls", ClassificationCorpus::kClasses)});
+    const TempDir dir;
+    TrainConfig tc = resume_train_config(dir.path());
+    tc.max_epochs = 12;
+    tc.lr = 5e-2f;
+    tc.selection_metric = SelectionMetric::Accuracy;
+    tc.lr_scheduler = LRSchedulerType::ReduceOnPlateau;
+    tc.lr_plateau_factor = 0.5f;
+    tc.lr_plateau_patience = 1;
+    tc.lr_plateau_threshold = 1e-4f;
+
+    const auto run = run_and_resume(ds, tc, dir.file("checkpoint_6.pt"));
+
+    REQUIRE(run.resumed.resumed_from_epoch == 6);
+    REQUIRE(run.full.selection_history.size() == 12);
+    REQUIRE(run.resumed.selection_history == run.full.selection_history);
+    REQUIRE(run.full.selection_history != run.full.test_loss_history);
+    require_same_run(run.full, run.resumed);
+    require_same_weights(*run.full_trainer, *run.resumed_trainer);
+
+    SECTION("resuming it selecting by the loss is refused") {
+        TrainConfig by_loss = tc;
+        by_loss.selection_metric = SelectionMetric::Loss;
+        auto trainer = make_trainer(ds, by_loss, 2);
+        trainer->prepare_data(ds, 0.25f, 17);
+        REQUIRE_THROWS_WITH(trainer->resume(dir.file("checkpoint_6.pt")),
+                            Catch::Matchers::ContainsSubstring("selection metric"));
+    }
 }
 
 TEST_CASE("A fixed-duration run without a held-out fold resumes",

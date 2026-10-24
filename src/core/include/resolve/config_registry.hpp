@@ -353,6 +353,7 @@ inline constexpr const char* kRequiredDatasetConfigKeys[] = {
     F(max_epochs,          "train_max_epochs")          \
     F(patience,            "train_patience")            \
     F(fixed_epochs,        "train_fixed_epochs")        \
+    F(selection_metric,    "train_selection_metric")    \
     F(lr,                  "train_lr")                  \
     F(weight_decay,        "train_weight_decay")        \
     F(phase_boundaries,    "train_phase_boundary_")     \

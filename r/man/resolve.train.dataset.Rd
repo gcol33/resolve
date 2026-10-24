@@ -10,6 +10,7 @@ resolve.train.dataset(
   maxEpochs = NULL,
   patience = NULL,
   fixedEpochs = NULL,
+  selectionMetric = NULL,
   lr = NULL,
   lrScheduler = NULL,
   lrStepSize = NULL,
@@ -68,15 +69,23 @@ default, is early stopping). The learning-rate schedule is still laid out
 over \code{maxEpochs}. The only mode that accepts \code{testSize = 0}, for a refit
 on every plot.}
 
+\item{selectionMetric}{The held-out value early stopping, \code{best_epoch} (the
+returned weights) and a \code{"plateau"} schedule follow: \code{"loss"} (the
+default, the lowest selection loss wins) or \code{"accuracy"} (the highest
+held-out accuracy of the dataset's one classification target wins, and a
+plateau follows PyTorch's \code{ReduceLROnPlateau} in mode \code{"max"}).
+\code{"accuracy"} needs a held-out fold and exactly one classification target.}
+
 \item{lr}{Learning rate.}
 
 \item{lrScheduler}{Learning-rate schedule: \code{"none"} (constant), \code{"step"}
 multiplies the rate by \code{lrGamma} every \code{lrStepSize} epochs, \code{"cosine"}
 anneals it from \code{lr} to \code{lrMin} over \code{maxEpochs}, and \code{"plateau"}
-multiplies it by \code{lrPlateauFactor} when the held-out loss that drives
+multiplies it by \code{lrPlateauFactor} when the held-out value that drives
 early stopping has not improved for more than \code{lrPlateauPatience} epochs
-(PyTorch's \code{ReduceLROnPlateau} in mode \code{"min"}). \code{"plateau"} needs a
-held-out fold, so it is refused with \code{testSize = 0}.}
+(PyTorch's \code{ReduceLROnPlateau}, in mode \code{"min"} on the loss and \code{"max"}
+on the accuracy, see \code{selectionMetric}). \code{"plateau"} needs a held-out
+fold, so it is refused with \code{testSize = 0}.}
 
 \item{lrStepSize}{Epochs between decays under \code{lrScheduler = "step"}.}
 
@@ -87,14 +96,15 @@ never decays below.}
 
 \item{lrPlateauFactor}{Factor a plateau multiplies the rate by, in (0, 1).}
 
-\item{lrPlateauPatience}{Epochs without improvement of the held-out loss a
-plateau allows; the next one decays the rate. Like \code{patience}, an epoch
-counts only once the loss objective has reached its final phase.}
+\item{lrPlateauPatience}{Epochs without improvement of the held-out value
+(\code{selectionMetric}) a plateau allows; the next one decays the rate. Like
+\code{patience}, an epoch counts only once the loss objective has reached its
+final phase.}
 
-\item{lrPlateauThreshold}{Relative improvement on the best held-out loss
+\item{lrPlateauThreshold}{Relative improvement on the best held-out value
 an epoch must make to count as one, in [0, 1) (the default 0 is any
-decrease, the rule early stopping and \code{best_epoch} use; PyTorch's default
-is 1e-4).}
+improvement, the rule early stopping and \code{best_epoch} use; PyTorch's
+default is 1e-4).}
 
 \item{lrPlateauCooldown}{Epochs after a decay during which no epoch counts
 against the rate.}
@@ -219,7 +229,9 @@ A list with \code{trainer}, \code{result}, \code{dataset} and, with \code{pretra
 \code{pretrain} (the pretraining's \code{loss_history}, \code{total_time_seconds} and
 \code{epochs_completed}). \code{result} carries \code{best_epoch}, \code{train_time_seconds},
 \code{final_metrics}, the loss histories \code{train_loss} and \code{test_loss} (one
-value per epoch), the learning rate each epoch trained at \code{lr}, the loss
+value per epoch), the learning rate each epoch trained at \code{lr}, the
+held-out value of \code{selectionMetric} each epoch scored \code{selection} (the
+held-out loss, or the accuracy; empty when nothing is held out), the loss
 histories' split by target \code{train_loss_by_target} and
 \code{test_loss_by_target} (named lists of per-epoch vectors: each target's
 weighted term of the total, so per epoch they add up to it),

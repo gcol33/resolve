@@ -110,8 +110,15 @@ enum class LRSchedulerType {
     None,            // Constant learning rate
     StepLR,          // Step decay every N epochs
     CosineAnnealing, // Cosine annealing to min_lr
-    ReduceOnPlateau  // Decay when the held-out selection loss stops improving
+    ReduceOnPlateau  // Decay when the held-out selection value stops improving
                      // (lr_schedule.hpp)
+};
+
+// The held-out value early stopping, best_epoch and a ReduceOnPlateau
+// schedule follow (selection_metric.hpp).
+enum class SelectionMetric {
+    Loss,     // The phase-invariant selection loss; lower is better
+    Accuracy  // The accuracy of the one classification target; higher is better
 };
 
 // Species selection mode (which species to include)
@@ -806,6 +813,14 @@ struct TrainConfig {
     // (test_size = 0), which is how a model is refitted on every labelled plot
     // for a duration chosen beforehand.
     int fixed_epochs = 0;
+    // The held-out value early stopping, best_epoch (the returned weights and
+    // best.pt) and a ReduceOnPlateau schedule follow. Loss is the
+    // phase-invariant selection loss, minimized. Accuracy is the held-out
+    // accuracy of the schema's one classification target, maximized: an
+    // epoch improves when its accuracy is strictly above the best, and a
+    // plateau follows PyTorch's ReduceLROnPlateau in mode "max". Accuracy
+    // needs a held-out fold and exactly one classification target.
+    SelectionMetric selection_metric = SelectionMetric::Loss;
     float lr = kDefaultLearningRate;
     float weight_decay = kDefaultWeightDecay;
     std::pair<int, int> phase_boundaries = {kDefaultPhase1Epoch, kDefaultPhase2Epoch};
@@ -818,15 +833,16 @@ struct TrainConfig {
     float lr_gamma = 0.1f;       // For StepLR: multiply LR by gamma
     float lr_min = 1e-6f;        // CosineAnnealing: final LR; ReduceOnPlateau: floor
 
-    // ReduceOnPlateau, PyTorch's ReduceLROnPlateau in mode "min" on the
-    // held-out fold's selection loss, the value early stopping and best_epoch
-    // read. An epoch improves when its loss is below best * (1 -
-    // lr_plateau_threshold) (threshold_mode "rel"); bad epochs are counted
+    // ReduceOnPlateau, PyTorch's ReduceLROnPlateau on the held-out value
+    // selection_metric names, the value early stopping and best_epoch read:
+    // in mode "min" on the loss, an epoch improves when it is below best *
+    // (1 - lr_plateau_threshold); in mode "max" on the accuracy, when it is
+    // above best * (1 + lr_plateau_threshold) (threshold_mode "rel"); bad epochs are counted
     // once the loss objective has settled, as patience is. After more than
     // lr_plateau_patience bad epochs in a row the LR is multiplied by
     // lr_plateau_factor, floored at lr_min, and the next lr_plateau_cooldown
     // epochs count no bad epoch. A threshold of 0 is early stopping's own
-    // rule (strictly below the best); PyTorch's default is 1e-4.
+    // rule (a strict improvement on the best); PyTorch's default is 1e-4.
     float lr_plateau_factor = 0.1f;
     int lr_plateau_patience = 10;
     float lr_plateau_threshold = 0.0f;
@@ -956,6 +972,12 @@ struct TrainResult {
     std::vector<float> test_loss_history;
     // The learning rate each epoch trained at, one value per epoch.
     std::vector<float> lr_history;
+    // The held-out value of TrainConfig::selection_metric each epoch scored,
+    // the value early stopping, best_epoch and a ReduceOnPlateau schedule
+    // read: test_loss_history under Loss, the classification target's
+    // accuracy under Accuracy (NaN for an epoch that scored none). Empty when
+    // nothing is held out.
+    std::vector<float> selection_history;
 
     // The two histories above split by target. Per epoch, a target's entry is
     // the term it adds to that epoch's total: its weighted loss, averaged over

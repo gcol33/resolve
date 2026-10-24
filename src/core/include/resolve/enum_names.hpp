@@ -143,6 +143,11 @@ inline constexpr EnumName<LRSchedulerType> kLRSchedulerTypeNames[] = {
     {"plateau", LRSchedulerType::ReduceOnPlateau},
 };
 
+inline constexpr EnumName<SelectionMetric> kSelectionMetricNames[] = {
+    {"loss", SelectionMetric::Loss},
+    {"accuracy", SelectionMetric::Accuracy},
+};
+
 inline constexpr EnumName<MoERoutingType> kMoERoutingTypeNames[] = {
     {"none", MoERoutingType::None},
     {"soft", MoERoutingType::Soft},
@@ -286,6 +291,8 @@ RESOLVE_DECLARE_ENUM_NAMES(LossConfigMode, kLossConfigModeNames,
                            "loss config mode", "combined")
 RESOLVE_DECLARE_ENUM_NAMES(LRSchedulerType, kLRSchedulerTypeNames,
                            "LR scheduler type", "none")
+RESOLVE_DECLARE_ENUM_NAMES(SelectionMetric, kSelectionMetricNames,
+                           "selection metric", "loss")
 RESOLVE_DECLARE_ENUM_NAMES(MoERoutingType, kMoERoutingTypeNames,
                            "MoE routing type", "none")
 RESOLVE_DECLARE_ENUM_NAMES(MoEPlacement, kMoEPlacementNames,
