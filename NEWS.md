@@ -1,5 +1,28 @@
 # RESOLVE Changelog
 
+## v1.0.1 (2026-10-24)
+
+### Added
+
+- **Epochs selected by held-out accuracy.** `TrainConfig.selection_metric`
+  (`SelectionMetric.Loss`, the default, or `SelectionMetric.Accuracy`) sets
+  what early stopping, the plateau scheduler and the kept epoch follow. With
+  `Accuracy`, an epoch is kept only when the held-out accuracy of the single
+  classification target rises. `TrainResult.selection_history` records the
+  selected value per epoch, and `progress.json` records the metric and the
+  best value.
+
+### Fixed
+
+- **Transformer species encoding under mixed precision.** Masked attention
+  and attention pooling run in float32 inside the autocast region, so
+  `use_amp` no longer fails with `masked_fill not implemented for 'Half'`.
+- **Heterogeneous GNN under mixed precision.** Messages are summed in their
+  own type, so `index_add_` no longer mixes Half and Float.
+- **Early stopping writes its own checkpoint.** The epoch early stopping
+  fires at now saves its `checkpoint_<N>.pt` and `progress.json`, like every
+  other epoch; resuming from it trains nothing more.
+
 ## v1.0.0 (2026-10-24)
 
 ### Added
