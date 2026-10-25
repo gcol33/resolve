@@ -379,11 +379,11 @@ TEST_CASE("transformer honours the species budget", "[selection][transformer]") 
     }
 }
 
-TEST_CASE("the species cap slices what the budget left", "[selection][rank_pool]") {
-    // Selection narrows to the budget; the cap then slices the survivors in CSV
-    // row order, which is what pool_species_cap documents. With budget 4 and cap
-    // 2 the row holds two of the four most abundant species, and both are drawn
-    // from that set rather than from the plot at large.
+TEST_CASE("the species cap keeps the most abundant of what the budget left",
+          "[selection][rank_pool]") {
+    // Selection narrows to the budget; the cap then keeps the most abundant
+    // survivors. With budget 4 and cap 2 the row holds the two most abundant
+    // species of the plot.
     constexpr int kPlots = 4;
     TempFile header(header_csv(kPlots));
     TempFile species(species_csv(kPlots));
@@ -396,13 +396,42 @@ TEST_CASE("the species cap slices what the budget left", "[selection][rank_pool]
 
     REQUIRE(ds.species_ids().size(1) == 2);
     for (int64_t p = 0; p < kPlots; ++p) {
-        const auto kept = encoded_species(ds, p);
-        REQUIRE(kept.size() == 2);
-        const auto budgeted = expected_end(static_cast<int>(p), 4, /*top=*/true);
-        for (const auto& name : kept) {
-            REQUIRE(budgeted.count(name) == 1);
+        REQUIRE(encoded_species(ds, p) == expected_end(static_cast<int>(p), 2, /*top=*/true));
+    }
+}
+
+TEST_CASE("the species cap keeps the most abundant species whatever the record order",
+          "[selection][rank_pool]") {
+    // Every plot records its species in the same CSV order while the most
+    // abundant one rotates, so a cap that kept the first records would match
+    // the ranking on the first plot only.
+    constexpr int kPlots = 4;
+    TempFile header(header_csv(kPlots));
+    TempFile species(species_csv(kPlots));
+
+    for (auto mode : {SpeciesEncodingMode::RankPool, SpeciesEncodingMode::Transformer}) {
+        auto cfg = base_config(mode);
+        cfg.pool_species_cap = 3;
+        auto ds = build(header.path(), species.path(), cfg);
+
+        REQUIRE(ds.species_ids().size(1) == 3);
+        for (int64_t p = 0; p < kPlots; ++p) {
+            REQUIRE(encoded_species(ds, p) == expected_end(static_cast<int>(p), 3, /*top=*/true));
         }
     }
+}
+
+TEST_CASE("a record with an empty species name encodes as unknown", "[selection][vocab]") {
+    const auto plots = PlotAssemblages::build(
+        {{"sp_a", "", "", 5.0f, "p0"}, {"", "", "", 9.0f, "p0"}, {"", "", "", 2.0f, "p1"},
+         {"sp_b", "", "", 1.0f, "p1"}},
+        {"p0", "p1"});
+    const auto vocab = SpeciesVocab::fit(plots, /*min_count=*/1);
+
+    REQUIRE(vocab.size() == 3);
+    REQUIRE(vocab.encode("") == 0);
+    REQUIRE(vocab.encode("sp_a") > 0);
+    REQUIRE(vocab.encode("sp_b") > 0);
 }
 
 // ===========================================================================

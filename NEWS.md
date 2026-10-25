@@ -1,5 +1,19 @@
 # RESOLVE Changelog
 
+## v1.0.3 (2026-10-25)
+
+### Fixed
+
+- **`pool_species_cap` keeps the most abundant species.** A plot longer than
+  the cap kept its first records in input order, so which species survived
+  depended on how the source file was sorted. It now keeps the species with
+  the largest summed abundance, ties by name, in plot order, with the weights
+  the whole plot gave them. Plots within the cap are unchanged.
+- **A record with an empty species name encodes as unknown.** The empty name
+  was fitted into the vocabulary as a species of its own, and in a corpus with
+  many unmatched records it became one of the most frequent. It now stays out
+  of the vocabulary and encodes as the unknown species, keeping its abundance.
+
 ## v1.0.2 (2026-10-24)
 
 ### Added

@@ -16,7 +16,7 @@ namespace resolve {
 // Version and constants
 // =============================================================================
 
-inline constexpr const char* VERSION = "1.0.2";
+inline constexpr const char* VERSION = "1.0.3";
 
 // Training defaults
 constexpr int kDefaultBatchSize = 4096;
@@ -282,12 +282,13 @@ struct DatasetConfig {
     //                 plots are truncated to it, printing a one-line summary
     //                 so users see the drop. It is a cap, not "no cap": that
     //                 is 0.
-    //  >0           : manual cap. Truncate longer plots to this many species,
-    //                 kept in plot order (the order of their first record).
+    //  >0           : manual cap. Truncate longer plots to this many species.
     //
-    // Plots shorter than the cap are unaffected. Truncation is a hard slice
-    // (not top-k by abundance); the rank-pool weighting still applies to
-    // whatever survives the slice.
+    // Plots shorter than the cap are unaffected. A longer plot keeps its
+    // species with the largest summed abundance, ties by name, in plot order
+    // (the order of their first record), so the kept set does not depend on
+    // the order the records arrive in. They keep the rank-pool weights the
+    // whole plot gave them.
     int pool_species_cap = 0;
 
     // Per-plot species budget for the encodings whose width is not otherwise
@@ -304,8 +305,8 @@ struct DatasetConfig {
     //
     // SelectionMode::All names no rule for picking a subset, so it encodes
     // every species regardless of the budget. For rank_pool / transformer the
-    // budget narrows the plot BEFORE pool_species_cap slices it, so a cap still
-    // means what it documents: the first `cap` survivors in plot order.
+    // budget narrows the plot BEFORE pool_species_cap is applied, so a cap still
+    // means what it documents: the `cap` most abundant survivors.
     //
     // The species vocabulary is fitted over every species, budget or not, so
     // the integer codes are identical across settings and an ablation's arms

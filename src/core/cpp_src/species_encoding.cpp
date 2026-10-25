@@ -347,12 +347,14 @@ SpeciesVocab::SpeciesVocab(std::vector<std::string> names) : names_(std::move(na
 
 SpeciesVocab SpeciesVocab::fit(const PlotAssemblages& assemblages, int min_count) {
     // A plot lists each species once, so the number of plots a species is
-    // recorded in is its entry count.
+    // recorded in is its entry count. A record with an empty name names no
+    // taxon, so it stays out of the vocabulary and encodes as unknown.
     const auto& plots_with = assemblages.plots_per_species();
     std::vector<int32_t> ranked;
     for (int32_t s = 0; s < assemblages.n_species(); ++s) {
         const int64_t count = plots_with[static_cast<size_t>(s)];
-        if (count > 0 && count >= min_count) ranked.push_back(s);
+        if (count > 0 && count >= min_count && !assemblages.species_name(s).empty())
+            ranked.push_back(s);
     }
     std::sort(ranked.begin(), ranked.end(), [&](int32_t a, int32_t b) {
         const int64_t ca = plots_with[static_cast<size_t>(a)];
@@ -697,6 +699,35 @@ int64_t resolve_species_cap(int species_cap, std::vector<int64_t> lengths, int64
         percentile_linear_trunc(lengths, static_cast<double>(100 + species_cap)), 1);
 }
 
+// Narrows plot p's kept entries, and their weights, to the `width` with the
+// largest summed abundance, ties by species name, left in plot order. The
+// weights keep the shares the whole plot gave them.
+void keep_heaviest(const PlotAssemblages& assemblages, int64_t p, int64_t width,
+                   std::vector<size_t>& kept, std::vector<float>& weights) {
+    const auto species = assemblages.species(p);
+    const auto key = assemblages.ranking(p);
+    std::vector<size_t> order = all_indices(kept.size());
+    std::partial_sort(order.begin(), order.begin() + width, order.end(),
+        [&](size_t a, size_t b) {
+            const size_t ia = kept[a];
+            const size_t ib = kept[b];
+            if (key[ia] != key[ib]) return key[ia] > key[ib];
+            return assemblages.species_rank(species[ia]) < assemblages.species_rank(species[ib]);
+        });
+    order.resize(static_cast<size_t>(width));
+    std::sort(order.begin(), order.end());
+    std::vector<size_t> narrowed;
+    std::vector<float> narrowed_weights;
+    narrowed.reserve(order.size());
+    narrowed_weights.reserve(order.size());
+    for (size_t j : order) {
+        narrowed.push_back(kept[j]);
+        narrowed_weights.push_back(weights[j]);
+    }
+    kept = std::move(narrowed);
+    weights = std::move(narrowed_weights);
+}
+
 }  // namespace
 
 RankPoolEncoder::RankPoolEncoder(PoolWeighting weighting, int min_frequency,
@@ -741,6 +772,10 @@ RankPoolEncodedData RankPoolEncoder::transform(const PlotAssemblages& assemblage
                   << width << " (max=" << widest
                   << ", saves " << static_cast<int>(saved * 100.0 + 0.5)
                   << "% padding)" << std::endl;
+        for (int64_t p = 0; p < n_plots; ++p) {
+            const auto pi = static_cast<size_t>(p);
+            if (lengths[pi] > width) keep_heaviest(assemblages, p, width, kept[pi], weights[pi]);
+        }
     }
 
     RankPoolEncodedData out;

@@ -305,7 +305,9 @@ data_config.pool_species_cap = -1    # auto: 99th percentile, reports the drop
 data_config.pool_species_cap = 256   # manual
 ```
 
-A cap truncates the species list, so it changes what the model sees. Leave it at
+A longer plot keeps its most abundant species, so the kept set does not depend on
+the order of its records. A cap still drops species, so it changes what the
+model sees. Leave it at
 `0` for a result you intend to publish unless the uncapped run does not fit, and
 say what you capped at if it does not.
 
