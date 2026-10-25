@@ -6,7 +6,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "resolve-core"
-version = "1.0.2"
+version = "1.0.3"
 description = "RESOLVE C++ engine: predict sample outcomes from compositional data via learned representations"
 readme = "python/README.md"
 license = {text = "MIT"}
