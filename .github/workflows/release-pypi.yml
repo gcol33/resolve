@@ -27,7 +27,7 @@ jobs:
         # macOS is arm64 only: PyPI carries no macOS x86_64 torch wheel past
         # 2.2.2, and this package requires torch>=2.0 at runtime, so an Intel
         # wheel would install and then fail to import for want of its libtorch.
-        os: [ubuntu-latest, windows-latest, macos-14]
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
