@@ -1,0 +1,276 @@
+{
+ "plot": "A139",
+ "species": [
+  {
+   "name": "Quercus robur",
+   "family": "Fagaceae",
+   "cover": 47.0
+  },
+  {
+   "name": "Dactylis glomerata",
+   "family": "Poaceae",
+   "cover": 43.0
+  },
+  {
+   "name": "Quercus petraea",
+   "family": "Fagaceae",
+   "cover": 30.0
+  },
+  {
+   "name": "Trifolium pratense",
+   "family": "Fabaceae",
+   "cover": 26.0
+  },
+  {
+   "name": "Fagus sylvatica",
+   "family": "Fagaceae",
+   "cover": 22.0
+  },
+  {
+   "name": "Picea abies",
+   "family": "Pinaceae",
+   "cover": 17.0
+  },
+  {
+   "name": "Acer pseudoplatanus",
+   "family": "Sapindaceae",
+   "cover": 14.0
+  },
+  {
+   "name": "Abies alba",
+   "family": "Pinaceae",
+   "cover": 6.0
+  }
+ ],
+ "latent": [
+  1.4831,
+  -0.0762,
+  1.2969,
+  -0.132,
+  -0.1663,
+  -0.1659,
+  -0.1624,
+  -0.1616,
+  -0.1571,
+  -0.1698,
+  -0.1428,
+  1.1782,
+  -0.1636,
+  1.0531,
+  -0.1695,
+  0.11,
+  -0.1636,
+  0.0933,
+  0.9612,
+  1.6322,
+  -0.1698,
+  -0.1679,
+  -0.0614,
+  -0.165,
+  1.1665,
+  -0.1684,
+  -0.1188,
+  1.522,
+  0.3236,
+  1.7691,
+  1.3264,
+  -0.1684,
+  -0.1457,
+  -0.1578,
+  -0.1195,
+  -0.1586,
+  -0.1645,
+  0.059,
+  -0.1568,
+  -0.1565,
+  -0.1698,
+  -0.0868,
+  0.1257,
+  1.5069,
+  -0.1587,
+  1.2362,
+  -0.1695,
+  -0.1525,
+  -0.1691,
+  -0.1617,
+  -0.1691,
+  -0.062,
+  0.7696,
+  0.2736,
+  -0.1391,
+  -0.1492,
+  -0.17,
+  -0.1545,
+  0.9953,
+  -0.1632,
+  1.454,
+  -0.159,
+  0.0897,
+  -0.105
+ ],
+ "habitat_observed": "forest",
+ "habitat_probabilities": {
+  "alpine": 0.0334,
+  "forest": 0.889,
+  "grassland": 0.035,
+  "wetland": 0.0426
+ },
+ "held_out": [
+  {
+   "plot": "A006",
+   "observed": 1799.0,
+   "predicted": 1677.5
+  },
+  {
+   "plot": "A131",
+   "observed": 944.0,
+   "predicted": 770.1
+  },
+  {
+   "plot": "A065",
+   "observed": 1203.0,
+   "predicted": 965.0
+  },
+  {
+   "plot": "A002",
+   "observed": 568.0,
+   "predicted": 879.0
+  },
+  {
+   "plot": "A020",
+   "observed": 1284.0,
+   "predicted": 1336.6
+  },
+  {
+   "plot": "A107",
+   "observed": 1385.0,
+   "predicted": 1463.9
+  },
+  {
+   "plot": "A039",
+   "observed": 733.0,
+   "predicted": 575.2
+  },
+  {
+   "plot": "A098",
+   "observed": 2180.0,
+   "predicted": 2168.7
+  },
+  {
+   "plot": "A070",
+   "observed": 919.0,
+   "predicted": 606.4
+  },
+  {
+   "plot": "A067",
+   "observed": 1245.0,
+   "predicted": 1064.6
+  },
+  {
+   "plot": "A148",
+   "observed": 491.0,
+   "predicted": 739.9
+  },
+  {
+   "plot": "A030",
+   "observed": 1840.0,
+   "predicted": 1653.0
+  },
+  {
+   "plot": "A089",
+   "observed": 507.0,
+   "predicted": 741.8
+  },
+  {
+   "plot": "A051",
+   "observed": 562.0,
+   "predicted": 711.9
+  },
+  {
+   "plot": "A095",
+   "observed": 2354.0,
+   "predicted": 2365.5
+  },
+  {
+   "plot": "A103",
+   "observed": 1375.0,
+   "predicted": 1063.4
+  },
+  {
+   "plot": "A110",
+   "observed": 409.0,
+   "predicted": 1114.4
+  },
+  {
+   "plot": "A139",
+   "observed": 679.0,
+   "predicted": 713.0
+  },
+  {
+   "plot": "A118",
+   "observed": 1647.0,
+   "predicted": 1770.9
+  },
+  {
+   "plot": "A078",
+   "observed": 1482.0,
+   "predicted": 1461.0
+  },
+  {
+   "plot": "A128",
+   "observed": 897.0,
+   "predicted": 732.0
+  },
+  {
+   "plot": "A034",
+   "observed": 1333.0,
+   "predicted": 1297.1
+  },
+  {
+   "plot": "A057",
+   "observed": 2190.0,
+   "predicted": 2370.8
+  },
+  {
+   "plot": "A092",
+   "observed": 1876.0,
+   "predicted": 2185.8
+  },
+  {
+   "plot": "A145",
+   "observed": 1619.0,
+   "predicted": 1591.8
+  },
+  {
+   "plot": "A056",
+   "observed": 1169.0,
+   "predicted": 896.9
+  },
+  {
+   "plot": "A140",
+   "observed": 2078.0,
+   "predicted": 2041.3
+  },
+  {
+   "plot": "A135",
+   "observed": 1892.0,
+   "predicted": 1845.1
+  },
+  {
+   "plot": "A017",
+   "observed": 496.0,
+   "predicted": 596.5
+  },
+  {
+   "plot": "A101",
+   "observed": 1079.0,
+   "predicted": 754.7
+  }
+ ],
+ "metrics": {
+  "elevation_r2": 0.847,
+  "elevation_mae": 172.2,
+  "habitat_accuracy": 0.833
+ },
+ "resolve_core": "1.0.2"
+}
