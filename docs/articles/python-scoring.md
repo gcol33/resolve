@@ -1,0 +1,150 @@
+# Python: scoring
+
+The metrics training reports, for predictions made anywhere, and the
+measures of how much of a plot’s species list a vocabulary recognises.
+
+[All of the Python
+reference](https://gillescolling.com/resolve/articles/python-reference.md)
+
+## Installation
+
+``` r
+
+# install.packages("pak")
+pak::pak("gcol33/resolve/r")
+
+# The engine library, downloaded once
+library(resolveR)
+resolve.install_backend()
+```
+
+``` bash
+pip install resolve-core
+```
+
+## `Metrics`
+
+The metrics `TrainResult.final_metrics` reports, as static functions of
+a prediction tensor `pred` and a tensor of recorded values `target`.
+
+Regression:
+
+- `mae(pred, target)`: the mean absolute error.
+- `rmse(pred, target)`: the root mean squared error.
+- `r_squared(pred, target)`: the coefficient of determination, the share
+  of the variance of `target` the predictions explain.
+- `smape(pred, target, eps=1e-8)`: the symmetric mean absolute
+  percentage error, the mean of `|p - t| / ((|p| + |t|) / 2 + eps)`, in
+  `[0, 2]`.
+- `band_accuracy(pred, target, threshold=0.25)`: the share of
+  predictions within a relative band of `threshold` around the recorded
+  value.
+
+Classification, on int64 class codes:
+
+- `accuracy(pred, target)`: the share of codes predicted correctly.
+- `confusion_matrix(pred, target, num_classes)`: the
+  `(num_classes, num_classes)` counts.
+- `classification_metrics(pred, target, num_classes)`: a
+  `ClassificationMetrics`.
+- `accuracy_at_threshold(pred, target, confidence, threshold)`: a
+  `ConfidenceMetrics` over the predictions whose `confidence` reaches
+  `threshold`, such as the largest class probability.
+- `accuracy_coverage_curve(pred, target, confidence, thresholds=[0.0, 0.5, 0.8, 0.9, 0.95])`:
+  one `ConfidenceMetrics` per threshold.
+
+Every metric of one target:
+
+- `compute(pred, target, task, transform=TransformType.None_, band_thresholds=[0.25, 0.5, 0.75], num_classes=0)`:
+  a `dict` of metric name to value, named as in `final_metrics`
+  (`band_25` for a threshold of 0.25). `transform` is inverted before
+  scoring; `num_classes` is required for the per-class scores of a
+  classification target.
+
+## `ClassificationMetrics`
+
+What `Metrics.classification_metrics` returns: `accuracy`, `macro_f1`
+(the unweighted mean of the per-class F1 scores), `weighted_f1` (their
+mean weighted by class size), `per_class_precision`, `per_class_recall`,
+`per_class_f1`, `per_class_support` (the recorded plots of each class)
+and `confusion_matrix`.
+
+## `ConfidenceMetrics`
+
+The predictions at or above one confidence threshold: `accuracy` (among
+them), `coverage` (their share of all predictions), `n_samples` (their
+number) and `n_total` (the number of predictions).
+
+## `compute_species_recognition()`
+
+``` python
+compute_species_recognition(records, plot_ids, vocab)
+```
+
+How much of each plot’s species list a species vocabulary recognises,
+for the plots `plot_ids`, in that order, from their `SpeciesRecord`s and
+a `SpeciesVocab`, such as the one a model was trained with. The example
+fits a vocabulary on the forest plots of the survey and measures the
+other plots against it. It is reported beside a prediction: a plot whose
+species the model never saw is predicted from less of its list. A
+species’ records within a plot count once.
+
+``` python
+import pandas as pd
+import resolve_core as rc
+
+data = "https://raw.githubusercontent.com/gcol33/resolve/master/r/inst/extdata/"
+plots = pd.read_csv(data + "plots.csv")
+species = pd.read_csv(data + "species.csv")
+
+records = []
+for row in species.itertuples():
+    record = rc.SpeciesRecord()
+    record.plot_id = row.plot_id
+    record.species_id = row.species
+    record.genus = row.genus
+    record.family = row.family
+    record.abundance = float(row.cover)
+    records.append(record)
+
+forest = set(plots.plot_id[plots.habitat == "forest"])
+forest_vocab = rc.SpeciesVocab.from_records(
+    [r for r in records if r.plot_id in forest])
+others = list(plots.plot_id[plots.habitat != "forest"])
+recognised = rc.compute_species_recognition(records, others, forest_vocab)
+recognised.count_share[:5]
+```
+
+## `SpeciesRecognition`
+
+What `compute_species_recognition` returns, each `(n_plots,)` float32:
+`n_species` (the species a plot records), `n_recognised` (how many of
+them the vocabulary holds), `count_share` (`n_recognised / n_species`,
+`NaN` for a plot with none) and `abundance_share` (the recognised share
+of the plot’s abundance, `NaN` where the total is 0, and
+`1 - UnknownSpeciesStats.fraction` wherever both are defined).
+
+## `compute_unknown_species_stats()`
+
+``` python
+compute_unknown_species_stats(records, plot_ids, vocab,
+                              representation=RepresentationMode.Abundance)
+```
+
+The unknown-species columns a dataset adds to the model input, measured
+against a `SpeciesVocab`: each plot’s share of abundance from species
+the vocabulary does not hold (a share of species under
+`PresenceAbsence`), and their number. Both describe a plot’s whole
+species list, before any selection or cap, and read 0 for a plot with no
+records. They are non-zero only where the vocabulary was fitted on other
+plots.
+
+``` python
+unknown = rc.compute_unknown_species_stats(records, others, forest_vocab)
+unknown.fraction[:5]
+```
+
+## `UnknownSpeciesStats`
+
+What `compute_unknown_species_stats` returns, each `(n_plots,)`:
+`fraction` and `count`.

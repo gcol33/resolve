@@ -8,8 +8,8 @@ observed elevation of every held-out plot) and the habitat probabilities.
 
 The fit's numbers are kept in ``tools/figures/hero_fit.json`` so the figure
 redraws without retraining; ``--refit`` retrains and rewrites it (needs
-``resolve_core``). Writes ``docs/assets/hero-light.svg`` and
-``docs/assets/hero-dark.svg``.
+``resolve_core``). Writes ``r/man/figures/resolve-hero.svg``, drawn in mid
+tones that read on the light and the dark page alike.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import json
 import math
 from pathlib import Path
 
-from palette import ASSETS, BLUE, EXAMPLE_DATA, GREEN, GREY, RED, SANS, fmt
+from palette import R_FIGURES, BLUE, EXAMPLE_DATA, GREEN, GREY, RED, SANS, fmt
 
 FIT_CACHE = Path(__file__).with_name("hero_fit.json")
 HABITATS = ["alpine", "forest", "grassland", "wetland"]
@@ -38,25 +38,16 @@ RIGHT_X, RIGHT_W = 1140.0, 380.0
 TITLE = 36
 LABEL = 30
 
-THEMES = {
-    "light": {
-        "text": "#1F2328",
-        "muted": "#5C6166",
-        "rule": "#D0D7DE",
-        "plant": GREEN,
-        "pool": BLUE,
-        "neg": RED,
-        "point": "#8C959F",
-    },
-    "dark": {
-        "text": "#E6EDF3",
-        "muted": "#9198A1",
-        "rule": "#3D444D",
-        "plant": "#7BB86F",
-        "pool": "#6CA6D9",
-        "neg": "#E07A70",
-        "point": "#6E7681",
-    },
+# Mid tones: the image sits on the site's light and dark backgrounds and on
+# GitHub's, so no ink may vanish into either.
+THEME = {
+    "text": "#868C92",
+    "muted": "#8C9298",
+    "rule": "#9AA0A6",
+    "plant": "#4F8C4B",
+    "pool": "#3C80B5",
+    "neg": "#C2554C",
+    "point": "#8C959F",
 }
 
 
@@ -275,8 +266,8 @@ def habitat_panel(fit: dict, th: dict) -> tuple[str, tuple[float, float]]:
     return "".join(out), (x_label - 40, top + step * 1.5)
 
 
-def build(fit: dict, theme: str) -> str:
-    th = THEMES[theme]
+def build(fit: dict) -> str:
+    th = THEME
     species, anchors = species_panel(fit, th)
     latent, x_in, x_out, y_mid = latent_column(fit, th)
     elevation, elev_anchor = elevation_panel(fit, th)
@@ -310,11 +301,10 @@ def main() -> None:
         fit = refit()
         FIT_CACHE.write_text(json.dumps(fit, indent=1) + "\n", encoding="utf-8", newline="\n")
     fit = json.loads(FIT_CACHE.read_text(encoding="utf-8"))
-    ASSETS.mkdir(parents=True, exist_ok=True)
-    for theme in THEMES:
-        path = ASSETS / f"hero-{theme}.svg"
-        path.write_text(build(fit, theme), encoding="utf-8", newline="\n")
-        print(f"wrote {path}")
+    R_FIGURES.mkdir(parents=True, exist_ok=True)
+    path = R_FIGURES / "resolve-hero.svg"
+    path.write_text(build(fit), encoding="utf-8", newline="\n")
+    print(f"wrote {path}")
     m = fit["metrics"]
     print(f"plot {fit['plot']}, R2 {m['elevation_r2']}, accuracy {m['habitat_accuracy']}")
 

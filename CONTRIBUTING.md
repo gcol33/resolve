@@ -45,7 +45,7 @@ configures the extension from `src/core/python`).
 
 This section is focused on development. For regular installation, see the
 [README](./README.md) or the
-[installation guide](https://gillescolling.com/resolve/tutorials/installation/).
+[installation guide](https://gillescolling.com/resolve/articles/installation.html).
 
 ### Obtaining the source
 
@@ -175,25 +175,29 @@ Guidelines:
 
 ## Documentation
 
-The site is MkDocs Material, configured in `mkdocs.yml`, with the R package's
-pkgdown reference published under it at `r/`. `build_docs.py` builds both the
-way the deploy workflow does:
+The site, gillescolling.com/resolve, is the pkgdown site of the R package in
+`r/`, built locally into `docs/` and committed. Its articles show every code
+block in R and in Python, and both halves run at build time, so the build needs
+resolveR and resolve_core at the version in `r/DESCRIPTION`, the engine library
+loaded by resolveR, and the personal build helper `~/.R/build_pkgdown.R`:
 
 ```bash
-pip install "mkdocs>=1.6,<2" mkdocs-material pymdown-extensions
-python build_docs.py           # mkdocs --strict into site/
-python build_docs.py --r       # also the pkgdown site into site/r/ (needs R + pkgdown)
-python build_docs.py --serve   # live preview at http://localhost:8000
-Rscript r/build_site.R         # the pkgdown site alone, into r/docs/
+cd r
+R CMD INSTALL .
+PYTHON=/path/to/python-with-resolve_core Rscript build_site.R
 ```
 
-`--strict` turns every MkDocs warning (a broken link, a page missing from the
-nav) into a failed build.
+`build_site.R` renders `r/README.Rmd` into `r/README.md` (the site's home page)
+and into the repository's `README.md`, runs the Python blocks of the articles
+(`r/tools/python_twins.py`), builds the site and writes a digest of its
+sources to `docs/site-digest.txt`. The deploy workflow publishes `docs/` only
+when that digest matches the sources of the push.
 
-- Tutorials and guides: `docs/tutorials/`
-- API reference: `docs/api/`
-- Package overview: `README.md`
-- Changelog: `NEWS.md`, surfaced on the site as `docs/changelog.md`
+- Get started: `r/vignettes/resolveR.Rmd`
+- Articles and the Python reference: `r/vignettes/articles/`
+- R reference: the roxygen comments in `r/R/`
+- Package overview: `r/README.Rmd`
+- Changelog: `NEWS.md`, copied into the site's news page at build time
 
 Every documented signature has to match the bindings it describes:
 `src/core/python/src/bindings_*.cpp` for Python, `r/R/resolve.R` for R, and

@@ -1,30 +1,44 @@
-# Builds the resolveR pkgdown site.
+# Builds the RESOLVE site, gillescolling.com/resolve/, from this package into ../docs.
 #
-#   Rscript r/build_site.R          into the _pkgdown.yml destination (r/docs/)
-#   Rscript r/build_site.R <dir>    into <dir>; build_docs.py --r passes site/r
+#   Rscript build_site.R            run from r/
 #
-# Sourced from r/, it builds into r/docs/. Reference examples are not run: they
-# call the engine, and a docs build has no resolve_c backend.
+# The articles run their code: the R chunks against the engine in RESOLVE_C_HOME (or the backend
+# resolve.install_backend() installed), the Python blocks against the resolve_core that PYTHON
+# names. Both have to be the version DESCRIPTION carries.
 
-script <- sub("^--file=", "", grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE))
-pkg <- if (length(script)) dirname(normalizePath(script)) else normalizePath(".")
-args <- commandArgs(trailingOnly = TRUE)
-override <- if (length(args)) list(destination = normalizePath(args[[1]], mustWork = FALSE)) else list()
+source("~/.R/build_pkgdown.R")
 
-pkgdown::build_site(pkg, examples = FALSE, override = override, preview = FALSE)
-
-# pkgdown renders every root .md except README, NEWS, LICENSE and
-# cran-comments as a page. One that R CMD build leaves out (.Rbuildignore) is
-# a working note, so the build stops if such a file became a page.
-handled <- c("README.md", "NEWS.md", "LICENSE.md", "LICENCE.md", "cran-comments.md")
-ignore_patterns <- readLines(file.path(pkg, ".Rbuildignore"), warn = FALSE)
-ignore_patterns <- ignore_patterns[nzchar(ignore_patterns) & !startsWith(ignore_patterns, "#")]
-is_ignored <- function(name) any(vapply(ignore_patterns, grepl, logical(1), x = name, perl = TRUE))
-notes <- Filter(is_ignored, setdiff(list.files(pkg, pattern = "\\.md$"), handled))
-destination <- pkgdown::as_pkgdown(pkg, override = override)$dst_path
-leaked <- file.path(destination, sub("\\.md$", ".html", notes))
-leaked <- leaked[file.exists(leaked)]
-if (length(leaked)) {
-  stop("working notes were rendered as site pages: ", paste(leaked, collapse = ", "),
+if (!requireNamespace("resolveR", quietly = TRUE) ||
+    as.character(packageVersion("resolveR")) != read.dcf("DESCRIPTION", "Version")[[1]]) {
+  stop("Install this tree first: R CMD INSTALL r", call. = FALSE)
+}
+if (!resolveR::resolve.available()) {
+  stop("The resolve_c backend is not loaded. Set RESOLVE_C_HOME or run resolveR::resolve.install_backend().",
        call. = FALSE)
 }
+
+python <- Sys.getenv("PYTHON", unset = "python")
+if (system2(python, "tools/python_twins.py") != 0L) {
+  stop("tools/python_twins.py failed under ", python,
+       ". Set PYTHON to the interpreter resolve_core is installed in.", call. = FALSE)
+}
+
+source("tools/build_readme.R")
+
+# The changelog is the engine's, at the repository root. pkgdown reads one release per top-level
+# heading naming the package and version, where the root file has `## v1.0.3 (2026-10-25)` under a
+# `# RESOLVE Changelog` title, so each heading moves up a level on the way.
+news <- readLines("../NEWS.md", encoding = "UTF-8")
+news <- news[!grepl("^# ", news)]
+news <- sub("^## v?([0-9][^ ]*)( .*)?$", "# resolveR \\1", news)
+news <- sub("^#(#{2,5}) ", "\\1 ", news)
+con <- file("NEWS.md", open = "wb")
+writeLines(enc2utf8(news), con, sep = "\n", useBytes = TRUE)
+close(con)
+
+# Marks the site build for the articles; pkgdown/docs_cache.R holds their chunk settings.
+Sys.setenv(RESOLVE_DOCS_CACHE = normalizePath("pkgdown/docs_cache.R"))
+pkgdown::clean_site(quiet = TRUE, force = TRUE)
+build_pkgdown_site()
+# The digest the site workflow checks the committed build against.
+system2("Rscript", c("tools/site_digest.R", "--write"))

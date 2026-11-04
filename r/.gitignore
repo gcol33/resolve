@@ -6,3 +6,5 @@ src/resolve.so
 
 # Local probes / one-off scripts (also Rbuildignored)
 dev_notes/
+NEWS.md
+CITATION.cff

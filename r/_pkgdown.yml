@@ -1,99 +1,180 @@
-url: https://gillescolling.com/resolve/r/
-destination: docs
-
+url: https://gillescolling.com/resolve/
+destination: ../docs
 template:
   bootstrap: 5
   bootswatch: sandstone
-  light-switch: true
-
+  light-switch: yes
+  includes:
+    in_header: |
+      <script>
+      (function () {
+        var D = String.fromCharCode(36);
+        window.MathJax = {
+          tex: {
+            inlineMath: [[D, D], ["\\(", "\\)"]],
+            displayMath: [[D + D, D + D], ["\\[", "\\]"]]
+          },
+          chtml: { linebreaks: { automatic: true, width: "90% container" } },
+          svg: { linebreaks: { automatic: true, width: "90% container" } },
+          options: { renderActions: { addMenu: [] } }
+        };
+      })();
+      </script>
 figures:
-  dev: svg
+  dev: svglite::svglite
   fig.ext: svg
-  bg: "#F5F6F8"
-
+  bg: '#F5F6F8'
 home:
-  title: "resolveR: Predicting Sample Outcomes from Compositional Data"
-  description: >
-    R client for the RESOLVE C++ engine. It calls the engine through its C ABI
-    (the resolve_c shared library, fetched by resolve.install_backend()) to
-    load compositional data, train multi-task models on a learned
-    representation of each sample's composition, and predict with single
-    models or released model suites.
-
+  title: 'RESOLVE: Predicting Sample Attributes from the Species Observed in Them'
+  description: |
+    Learns one representation of each sample's species composition and reads several attributes off it at once, such as the area, elevation and habitat of a vegetation plot. In R, Python and on the command line over one C++ engine on libtorch.
 authors:
   Gilles Colling:
     href: https://github.com/gcol33
-
+redirects:
+- - r/index.html
+  - index.html
+- - r/reference/index.html
+  - reference/index.html
+- - r/articles/getting-started.html
+  - articles/resolveR.html
+- - articles/getting-started.html
+  - articles/resolveR.html
+- - tutorials/quickstart/index.html
+  - articles/resolveR.html
+- - tutorials/installation/index.html
+  - articles/installation.html
+- - tutorials/data-preparation/index.html
+  - articles/data-preparation.html
+- - tutorials/training/index.html
+  - articles/training.html
+- - tutorials/encoding-modes/index.html
+  - articles/encoding.html
+- - tutorials/performance-tuning/index.html
+  - articles/performance.html
+- - tutorials/prediction/index.html
+  - articles/prediction.html
+- - tutorials/embeddings/index.html
+  - articles/embeddings.html
+- - api/dataset/index.html
+  - articles/python-data.html
+- - api/model/index.html
+  - articles/python-training.html
+- - api/trainer/index.html
+  - articles/python-training.html
+- - api/predictor/index.html
+  - articles/python-prediction.html
+- - changelog/index.html
+  - news/index.html
 navbar:
   structure:
-    left:  [intro, reference, articles, news]
-    right: [search, lightswitch, github]
+    left:
+    - intro
+    - reference
+    - articles
+    - news
+    right:
+    - search
+    - github
+    - lightswitch
   components:
-    intro:
-      text: Get Started
-      href: articles/getting-started.html
-    articles:
-      text: Articles
+    reference:
+      text: Reference
       menu:
-        - text: "Getting Started with RESOLVE"
-          href: articles/getting-started.html
+      - text: R reference
+        href: reference/index.html
+      - text: Python reference
+        href: articles/python-reference.html
     github:
-      icon: fab fa-github
+      icon: fa-github
       href: https://github.com/gcol33/resolve
       aria-label: GitHub
-
 reference:
-  - title: "Backend"
-    desc: "Install and inspect the resolve_c engine library the package calls."
-    contents:
-      - resolve.install_backend
-      - resolve.available
-      - resolve.version
-      - resolve.set_vram_fraction
-  - title: "Data"
-    desc: "Load plots and their species records into an engine dataset."
-    contents:
-      - resolve.dataset.csv
-      - resolve.dataset.frame
-      - resolve.species_graph
-  - title: "Training"
-    desc: "Fit a model and follow its progress."
-    contents:
-      - resolve.train.dataset
-      - resolve.cross_validate
-      - resolve.pretrain_vae
-      - resolve.default_config
-      - resolve.progress
-  - title: "Models"
-    desc: "Save, load and inspect trained checkpoints."
-    contents:
-      - resolve.save
-      - resolve.load
-      - resolve.load_train_config
-      - resolve.load_run_metadata
-  - title: "Prediction"
-    desc: "Predict targets for new plots."
-    contents:
-      - resolve.predict.dataset
-      - resolve.retrieval
-  - title: "Model suites"
-    desc: "Released sets of models scored as one."
-    contents:
-      - resolve.load_suite
-      - resolve.verify_suite
-      - resolve.seal_suite
-      - resolve.predict.suite
-      - as.data.frame.resolve_suite_predictions
-  - title: "Name matching"
-    desc: "Find the entries of a list of names within a few edits of a query."
-    contents:
-      - resolve.fuzzy_index
-      - resolve.fuzzy_match
-  - title: "Metrics"
-    desc: "Score predictions against observed values."
-    contents:
-      - resolve_metrics
-
+- title: Loading data
+  desc: |
+    Plots and the species records observed in them, from CSV files or data frames, into an engine dataset.
+  contents:
+  - resolve.dataset.csv
+  - resolve.dataset.frame
+  - resolve.species_graph
+- title: Training
+  desc: |
+    Fitting a model, cross-validating it and pretraining its encoder without labels.
+  contents:
+  - resolve.train.dataset
+  - resolve.cross_validate
+  - resolve.pretrain_vae
+  - resolve.default_config
+  - resolve.progress
+- title: Saving and predicting
+  desc: |
+    Checkpoints, what they record about the run, and predictions for new plots.
+  contents:
+  - resolve.save
+  - resolve.load
+  - resolve.load_train_config
+  - resolve.load_run_metadata
+  - resolve.predict.dataset
+  - resolve.retrieval
+- title: Model suites
+  desc: |
+    Several trained models released as one directory and scored together.
+  contents:
+  - resolve.load_suite
+  - resolve.verify_suite
+  - resolve.seal_suite
+  - resolve.predict.suite
+  - as.data.frame.resolve_suite_predictions
+- title: Scoring
+  desc: |
+    The metrics training reports, for predictions made anywhere.
+  contents: resolve_metrics
+- title: Name matching
+  desc: |
+    The entries of a list of names within a few edits of a query, such as species names with spelling variants.
+  contents:
+  - resolve.fuzzy_index
+  - resolve.fuzzy_match
+- title: The engine
+  desc: |
+    Installing the engine library, checking which one is loaded, and the GPU memory settings.
+  contents:
+  - resolve.install_backend
+  - resolve.available
+  - resolve.version
+  - resolve.set_vram_fraction
+  - resolve_configure_cuda_allocator
+articles:
+- title: Workflows
+  navbar: Workflows
+  desc: |
+    One topic each, with every code block in R and in Python: the input tables, the species encodings, training and the fit, prediction and the latent space.
+  contents:
+  - articles/data-preparation
+  - articles/encoding
+  - articles/training
+  - articles/prediction
+  - articles/embeddings
+- title: Scaling up
+  navbar: Scaling up
+  contents:
+  - articles/performance
+  - articles/command-line
+- title: Setup
+  navbar: Setup
+  contents: articles/installation
+- title: Python reference
+  desc: |
+    The Python package's classes and functions, grouped as the R reference is.
+  navbar: ~
+  contents:
+  - articles/python-reference
+  - articles/python-data
+  - articles/python-training
+  - articles/python-prediction
+  - articles/python-suites
+  - articles/python-scoring
+  - articles/python-engine
 footer:
   structure:
     left: developed_by

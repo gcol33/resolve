@@ -1,0 +1,681 @@
+---
+title: "Predicting new plots"
+---
+
+<!-- Python blocks run by tools/python_twins.py (md5 9b85ceeea326845daadc07b3a80cbb97). -->
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6.5, fig.height = 4.5,
+                      dev.args = list(pointsize = 14))
+library(resolveR)
+if (nzchar(Sys.getenv("RESOLVE_DOCS_CACHE"))) source(Sys.getenv("RESOLVE_DOCS_CACHE"))
+```
+
+A trained model is used on plots it has never seen: a new survey, plots held back from training, or plots whose elevation or habitat was never recorded. Predicting them takes three steps. You load the saved model, encode the new species lists with the species the model was trained on, and read the predictions off the result.
+
+This article covers loading a model, encoding new plots against the training vocabulary, reading regression values and class labels, class probabilities and the confidence measures built from them, writing the predictions to a file, the latent representation of each plot, species the model never saw, prediction in chunks, blending predictions with the labels of similar training plots, and model suites, where several models trained on the same recipe predict together and report how far they agree.
+
+## Installation
+
+::: {.lang-pair}
+```{r, eval = FALSE}
+# install.packages("pak")
+pak::pak("gcol33/resolve/r")
+
+# The engine library, downloaded once
+library(resolveR)
+resolve.install_backend()
+```
+
+```bash
+pip install resolve-core
+```
+:::
+
+## Training plots and new plots
+
+The examples use the survey of 150 plots in the Alps that ships with the R package. `plots` holds one row per plot with its coordinates, elevation in metres and habitat; `species` holds one row per species recorded on a plot, with its genus, family and cover in percent.
+
+Every fifth plot is set aside as a new plot. The model trains on the other 120 and never sees these 30, so its predictions on them can be checked against the recorded values.
+
+::: {.lang-pair}
+```{r data}
+plots <- read.csv(system.file("extdata", "plots.csv", package = "resolveR"))
+species <- read.csv(system.file("extdata", "species.csv", package = "resolveR"))
+
+is_new <- seq_len(nrow(plots)) %% 5 == 0
+train_plots <- plots[!is_new, ]
+new_plots <- plots[is_new, ]
+train_species <- species[species$plot_id %in% train_plots$plot_id, ]
+new_species <- species[species$plot_id %in% new_plots$plot_id, ]
+c(training = nrow(train_plots), new = nrow(new_plots))
+```
+
+```python
+import os
+import tempfile
+
+import pandas as pd
+import resolve_core as rc
+
+data = "https://raw.githubusercontent.com/gcol33/resolve/master/r/inst/extdata/"
+plots = pd.read_csv(data + "plots.csv")
+species = pd.read_csv(data + "species.csv")
+
+is_new = (plots.index + 1) % 5 == 0
+train_plots = plots[~is_new]
+new_plots = plots[is_new]
+train_species = species[species.plot_id.isin(train_plots.plot_id)]
+new_species = species[species.plot_id.isin(new_plots.plot_id)]
+{"training": len(train_plots), "new": len(new_plots)}
+#> {'training': 120, 'new': 30}
+```
+:::
+
+A survey of new plots usually holds species the training plots lack. To show how the model handles them, the first new plot gets one record of *Carex firma*, a sedge the survey never recorded. Its genus, *Carex*, is in the survey.
+
+::: {.lang-pair}
+```{r novel}
+novel <- data.frame(plot_id = new_plots$plot_id[1], species = "Carex firma",
+                    genus = "Carex", family = "Cyperaceae", cover = 20)
+new_species <- rbind(new_species, novel)
+```
+
+```python
+novel = pd.DataFrame({"plot_id": [new_plots.plot_id.iloc[0]],
+                      "species": ["Carex firma"], "genus": ["Carex"],
+                      "family": ["Cyperaceae"], "cover": [20]})
+new_species = pd.concat([new_species, novel], ignore_index=True)
+```
+:::
+
+The model predicts elevation, a regression target, and habitat, a classification target, from the species alone. A *target* is a column the model learns to predict. Setting `track_unknown_count` makes the dataset count, per plot, the species outside the training vocabulary, beside the share of cover they make up, which it records by default. Training saves the model to a checkpoint file at the end.
+
+::: {.lang-pair}
+```{r train}
+roles <- list(plot_id = "plot_id", species_id = "species",
+              abundance = "cover", genus = "genus", family = "family")
+targets <- list(
+  elevation = list(column = "elevation", task = "regression"),
+  habitat = list(column = "habitat", task = "classification")
+)
+dataset <- resolve.dataset.frame(train_plots, train_species,
+                                 roles = roles, targets = targets,
+                                 config = list(track_unknown_count = TRUE))
+
+path <- file.path(tempdir(), "model.pt")
+fit <- resolve.train.dataset(dataset, maxEpochs = 100L,
+                             savePath = path, verbose = FALSE)
+```
+
+```python
+roles = rc.RoleMapping()
+roles.plot_id = "plot_id"
+roles.species_id = "species"
+roles.abundance = "cover"
+roles.genus = "genus"
+roles.family = "family"
+targets = [rc.TargetSpec.regression("elevation"),
+           rc.TargetSpec.classification("habitat", 4)]
+
+config = rc.DatasetConfig()
+config.track_unknown_count = True
+dataset = rc.ResolveDataset.from_pandas(train_plots, train_species,
+                                        roles, targets, config)
+
+model = rc.ResolveModel(dataset.schema, rc.model_config_for_dataset(dataset))
+train_config = rc.TrainConfig()
+train_config.max_epochs = 100
+trainer = rc.Trainer(model, train_config)
+trainer.prepare_data(dataset)
+result = trainer.fit()
+
+path = os.path.join(tempfile.gettempdir(), "model.pt")
+trainer.save(path, trainer.run_metadata)
+```
+:::
+
+[Training and reading the fit](training.html) covers the training settings and the metrics on the held-out plots.
+
+## Loading a model
+
+A checkpoint holds the model's weights, the scaling fitted to its inputs and targets, and every vocabulary it was trained with. Loading it gives a *predictor*, the object that scores datasets.
+
+::: {.lang-pair}
+```{r load}
+predictor <- resolve.load(path)
+predictor$device()
+```
+
+```python
+predictor = rc.Predictor.load(path)
+predictor.device
+#> cpu
+```
+:::
+
+The model loads onto the CPU unless you name another device: `"cuda"` for the current GPU or `"cuda:N"` for GPU number N. The checkpoint is read straight onto that device, so a model trained on a GPU loads on a machine without one. When the GPU is shared with other work, the VRAM fraction caps how much of its memory the model may take, here three quarters.
+
+::: {.lang-r-only}
+```{r load-gpu, eval = FALSE}
+predictor <- resolve.load(path, device = "cuda", vram_fraction = 0.75)
+```
+:::
+
+::: {.lang-py-only}
+```python
+predictor = rc.Predictor.load(path, device="cuda", vram_fraction=0.75)
+```
+:::
+
+These lines are shown and not run here, so the examples below stay on the CPU.
+
+## Encoding new plots against the training vocabulary
+
+The model looks up each species by an integer code, its position in the *vocabulary*, the list of species the model was trained with. A vocabulary fitted afresh on the new plots would give the same species a different code, and the model would read the wrong rows of its tables. New plots are therefore encoded with the vocabularies the predictor carries, and with the loading settings of the training run.
+
+New plots usually arrive as files. Here the 30 new plots are written to two CSV files, the header with the plot identifiers and coordinates only, since a new plot carries no recorded elevation or habitat.
+
+::: {.lang-pair}
+```{r new-files}
+header_csv <- file.path(tempdir(), "new_plots.csv")
+species_csv <- file.path(tempdir(), "new_species.csv")
+write.csv(new_plots[c("plot_id", "lat", "lon")], header_csv, row.names = FALSE)
+write.csv(new_species, species_csv, row.names = FALSE)
+
+new_data <- resolve.dataset.csv(header_csv, species_csv, roles = roles,
+                                vocabs = predictor$vocabs(),
+                                config = predictor$dataset_config())
+new_data$n_plots()
+```
+
+```python
+header_csv = os.path.join(tempfile.gettempdir(), "new_plots.csv")
+species_csv = os.path.join(tempfile.gettempdir(), "new_species.csv")
+new_plots[["plot_id", "lat", "lon"]].to_csv(header_csv, index=False)
+new_species.to_csv(species_csv, index=False)
+
+new_data = rc.ResolveDataset.from_csv_with_vocabs(
+    header_csv, species_csv, roles, [],
+    predictor.external_vocabs, predictor.dataset_config)
+new_data.n_plots
+#> 30
+```
+:::
+
+No targets are named, because the new plots have none to read.
+
+::: {.lang-r-only}
+`resolve.dataset.frame()` takes the same `vocabs` and `config` arguments, so data frames already in memory need no CSV files.
+:::
+
+::: {.lang-py-only}
+`from_pandas()` has no argument for a predictor's vocabularies. Data frames in memory are encoded against a predictor through `from_columns_with_vocabs()`, which takes the column names and the columns as lists of strings, or against a training dataset still in memory through `from_pandas(..., schema_source=dataset)`.
+:::
+
+A dataset that fitted its own vocabulary is refused before anything is predicted, even with the training run's loading settings. Here a batch of five new plots is encoded on its own; it holds fewer genera than the training plots, so its genus codes differ from the model's.
+
+::: {.lang-pair}
+```{r refuse, error = TRUE}
+batch <- new_plots$plot_id[1:5]
+own <- resolve.dataset.frame(
+  new_plots[new_plots$plot_id %in% batch, c("plot_id", "lat", "lon")],
+  new_species[new_species$plot_id %in% batch, ],
+  roles = roles, config = predictor$dataset_config()
+)
+resolve.predict.dataset(predictor, own)
+```
+
+```{.python error=true}
+batch = new_plots.plot_id.iloc[:5]
+own = rc.ResolveDataset.from_pandas(
+    new_plots[new_plots.plot_id.isin(batch)][["plot_id", "lat", "lon"]],
+    new_species[new_species.plot_id.isin(batch)],
+    roles, [], predictor.dataset_config)
+predictor.predict_dataset(own)
+#> RuntimeError: Predictor::predict: the dataset's genus vocabulary is not the one the model was trained with (model has 23 entries, dataset has 17). Its integer codes therefore index the wrong embedding rows, which would produce wrong predictions with no error. Build the dataset in the model's namespace: ResolveDataset::from_csv_with_vocabs(header, species, roles, targets, predictor.external_vocabs(), dataset_config_from_checkpoint(predictor.schema(), predictor.model()->config())).
+```
+:::
+
+The check compares the full ordered vocabularies when the checkpoint carries them. Under the default hash encoding a species is located through its name, so the species vocabulary is exempt; the genus and family codes are still checked.
+
+## Reading the predictions
+
+The result holds the plot identifiers in row order and one entry per target. A regression target comes back in its original units, here metres; a target trained on a log scale is transformed back before it is returned. A classification target comes back as integer class codes, starting at 0, in the order of the class names the checkpoint records.
+
+::: {.lang-pair}
+```{r predict}
+preds <- resolve.predict.dataset(predictor, new_data)
+habitats <- predictor$schema()$targets$habitat$class_names
+habitats
+
+out <- data.frame(plot_id = preds$plot_ids,
+                  elevation = round(preds$predictions$elevation),
+                  habitat = habitats[preds$predictions$habitat + 1])
+out <- merge(out, new_plots[c("plot_id", "elevation", "habitat")],
+             by = "plot_id", suffixes = c("", "_observed"))
+head(out)
+```
+
+```python
+preds = predictor.predict_dataset(new_data)
+habitats = next(t.class_names for t in predictor.schema.targets
+                if t.name == "habitat")
+habitats
+#> ['alpine', 'forest', 'grassland', 'wetland']
+
+out = pd.DataFrame({
+    "plot_id": preds.plot_ids,
+    "elevation": preds.predictions["elevation"].numpy().round(),
+    "habitat": [habitats[c] for c in preds.predictions["habitat"].tolist()],
+})
+out = out.merge(new_plots[["plot_id", "elevation", "habitat"]],
+                on="plot_id", suffixes=("", "_observed"))
+out.head(6)
+#>   plot_id  elevation    habitat  elevation_observed habitat_observed
+#> 0    A005     1886.0  grassland                2145        grassland
+#> 1    A010     1696.0     forest                1632          wetland
+#> 2    A015     2246.0     alpine                2165           alpine
+#> 3    A020     1321.0     forest                1284           forest
+#> 4    A025      990.0  grassland                1235        grassland
+#> 5    A030     1078.0  grassland                1840        grassland
+```
+:::
+
+The predictions are joined to the recorded values by plot identifier. Since the model never saw these plots, the mean absolute error in metres and the share of plots given their recorded habitat measure how it does on new data.
+
+::: {.lang-pair}
+```{r check}
+c(mae = mean(abs(out$elevation - out$elevation_observed)),
+  accuracy = mean(out$habitat == out$habitat_observed))
+```
+
+```python
+{"mae": (out.elevation - out.elevation_observed).abs().mean(),
+ "accuracy": (out.habitat == out.habitat_observed).mean()}
+#> {'mae': np.float64(185.23333333333332), 'accuracy': np.float64(0.8)}
+```
+:::
+
+## Class probabilities
+
+Each classification target also comes with its *class probabilities*: one row per plot and one column per class, the softmax output the predicted code was taken from. Column j holds the probability of class code j, every row sums to one, and the predicted class is the column with the largest value.
+
+::: {.lang-pair}
+```{r probabilities}
+probs <- preds$probabilities$habitat
+round(head(probs, 3), 3)
+range(rowSums(probs))
+all(max.col(probs) - 1 == preds$predictions$habitat)
+```
+
+```python
+probs = preds.probabilities["habitat"]
+probs[:3].round(decimals=3)
+#> tensor([[0.3380, 0.0870, 0.4780, 0.0960],
+#>         [0.1250, 0.5760, 0.1040, 0.1950],
+#>         [0.8300, 0.0580, 0.0590, 0.0530]])
+probs.sum(dim=1).aminmax()
+#> torch.return_types.aminmax(
+#> min=tensor(1.0000),
+#> max=tensor(1.0000))
+bool((probs.argmax(dim=1) == preds.predictions["habitat"]).all())
+#> True
+```
+:::
+
+::: {.lang-r-only}
+The columns are named by the class labels.
+:::
+
+Three measures of how sure the model is about a plot follow from its row: the largest probability, the margin between the two largest, and the entropy, which is 0 when one class takes all the probability and grows as it spreads over more classes.
+
+::: {.lang-pair}
+```{r confidence}
+top2 <- t(apply(probs, 1, sort, decreasing = TRUE))[, 1:2]
+sure <- data.frame(
+  plot_id = preds$plot_ids,
+  confidence = top2[, 1],
+  margin = top2[, 1] - top2[, 2],
+  entropy = -rowSums(probs * log(pmax(probs, 1e-12)))
+)
+head(sure[order(sure$confidence), ], 3)
+```
+
+```python
+top2 = probs.topk(2, dim=1).values
+sure = pd.DataFrame({
+    "plot_id": preds.plot_ids,
+    "confidence": top2[:, 0].numpy(),
+    "margin": (top2[:, 0] - top2[:, 1]).numpy(),
+    "entropy": -(probs * probs.clamp_min(1e-12).log()).sum(dim=1).numpy(),
+})
+sure.sort_values("confidence").head(3)
+#>    plot_id  confidence    margin   entropy
+#> 23    A120    0.332903  0.030494  1.342778
+#> 21    A110    0.340574  0.022809  1.334862
+#> 17    A090    0.473227  0.263681  1.263671
+```
+:::
+
+The rows are computed on whichever plots are scored, so a checkpoint alone is enough to check how well the probabilities match the observed share of correct classes on a labelled set. Regression targets have no probabilities.
+
+## Writing predictions to a file
+
+One row per plot, with the class label, its code and the probability of each class, writes to a CSV file.
+
+::: {.lang-pair}
+```{r write}
+table <- data.frame(plot_id = preds$plot_ids,
+                    elevation = preds$predictions$elevation,
+                    habitat = habitats[preds$predictions$habitat + 1],
+                    habitat_code = preds$predictions$habitat)
+prob_columns <- as.data.frame(probs)
+names(prob_columns) <- paste0("habitat_prob_", habitats)
+table <- cbind(table, prob_columns)
+write.csv(table, file.path(tempdir(), "predictions.csv"), row.names = FALSE)
+names(table)
+```
+
+```python
+table = pd.DataFrame({
+    "plot_id": preds.plot_ids,
+    "elevation": preds.predictions["elevation"].numpy(),
+    "habitat": [habitats[c] for c in preds.predictions["habitat"].tolist()],
+    "habitat_code": preds.predictions["habitat"].numpy(),
+})
+for j, name in enumerate(habitats):
+    table[f"habitat_prob_{name}"] = probs[:, j].numpy()
+table.to_csv(os.path.join(tempfile.gettempdir(), "predictions.csv"), index=False)
+list(table.columns)
+#> ['plot_id', 'elevation', 'habitat', 'habitat_code', 'habitat_prob_alpine', 'habitat_prob_forest', 'habitat_prob_grassland', 'habitat_prob_wetland']
+```
+:::
+
+The probability columns are bound to the predictions in the order of `plot_ids`, which is the row order of both.
+
+The command-line tool writes the same layout from the same checkpoint, and rebuilds the vocabularies from it. `--probabilities` appends the probability columns.
+
+```bash
+resolve predict --model model.pt \
+                --header new_plots.csv --species new_species.csv \
+                --plot-id plot_id --species-id species --abundance cover \
+                --genus genus --family family \
+                --output predictions.csv --probabilities
+```
+
+[The command line](command-line.html) covers its flags.
+
+## Latent representations
+
+The model encodes every plot into one vector, its *latent representation*, and reads every target off that vector. Asking for it returns one row per plot, as wide as the last hidden layer.
+
+::: {.lang-pair}
+```{r latent}
+with_latent <- resolve.predict.dataset(predictor, new_data, returnLatent = TRUE)
+dim(with_latent$latent)
+```
+
+```python
+with_latent = predictor.predict_dataset(new_data, return_latent=True)
+with_latent.latent.shape
+#> torch.Size([30, 64])
+```
+:::
+
+[Latent and species embeddings](embeddings.html) shows what the vectors are used for.
+
+## Species the model never saw
+
+A species outside the training vocabulary still counts in the plot's encoding. Under the default hash encoding it enters through its name; the encodings that keep a table of species map it to one shared entry for unknown species. Its genus and family are read where the vocabulary knows them. The dataset records, per plot, the share of the plot's cover that comes from such species and how many of them there are. Both are counted over the plot's full species list.
+
+::: {.lang-pair}
+```{r unknown}
+unknown <- data.frame(plot_id = new_data$plot_ids(),
+                      fraction = new_data$unknown_fraction(),
+                      count = new_data$unknown_count())
+unknown[unknown$count > 0, ]
+```
+
+```python
+unknown = pd.DataFrame({"plot_id": new_data.plot_ids,
+                        "fraction": new_data.unknown_fraction.numpy(),
+                        "count": new_data.unknown_count.numpy()})
+unknown[unknown["count"] > 0]
+#>   plot_id  fraction  count
+#> 0    A005  0.322581    1.0
+```
+:::
+
+The first new plot is the only one with an unknown species, the *Carex firma* record. A plot whose fraction is high was predicted from a small part of its species list, so its prediction deserves less trust than the rest.
+
+Both values are also inputs to the model: the fraction by default, the count with `track_unknown_count`. Here every training plot was fully known, so both inputs stayed at 0 during training. An input that never varied in training is held at its training value at prediction, and the model's output does not depend on it; the values above are for you to read.
+
+## Predicting in chunks
+
+Prediction runs the model over the plots in chunks of 4096 by default and gathers the results in CPU memory, so the GPU memory a prediction needs does not grow with the number of plots. A smaller chunk suits a wide model on a small GPU; -1 runs all plots in one pass. Each chunk goes through the same forward pass, so the results agree whatever the chunk size, up to the rounding of floating-point arithmetic, which depends on how many rows a matrix product sums at once.
+
+::: {.lang-pair}
+```{r chunks}
+chunked <- resolve.predict.dataset(predictor, new_data, batchSize = 8L)
+whole <- resolve.predict.dataset(predictor, new_data, batchSize = -1L)
+all.equal(chunked$predictions, whole$predictions, tolerance = 1e-6)
+```
+
+```python
+chunked = predictor.predict_dataset(new_data, batch_size=8)
+whole = predictor.predict_dataset(new_data, batch_size=-1)
+all(chunked.predictions[k].allclose(whole.predictions[k], rtol=1e-6)
+    for k in whole.predictions)
+#> True
+```
+:::
+
+Results come back in CPU memory whichever device the predictor runs on.
+
+Optimising a predictor for inference folds its batch-normalisation layers into the linear layers before them, so each forward pass does less work. Call it once after loading, before a large prediction run: `predictor$optimize_for_inference()` in R, `predictor.optimize_for_inference()` in Python.
+
+## Blending with similar training plots
+
+*Retrieval* blends each prediction with the recorded values of the training plots most similar to the plot in the latent space. For each plot, the k reference plots with the highest cosine similarity of their latent vectors are weighted by a softmax of similarity over temperature. A regression prediction becomes (1 - alpha) times the model's value plus alpha times the weighted mean of the neighbours' values, in original units. A classification target blends its probabilities with the neighbours' weighted class shares, and the predicted class is the largest of the blend. The method follows TabR (Gorishniy et al. 2024).
+
+The reference set has to be encoded with the model's vocabularies and carry every target. The training dataset is both.
+
+::: {.lang-pair}
+```{r retrieval}
+resolve.retrieval(predictor, dataset, kNeighbors = 16L, alpha = 0.3)
+unlist(predictor$retrieval())
+
+blended <- resolve.predict.dataset(predictor, new_data)
+head(data.frame(plot_id = preds$plot_ids,
+                model = round(preds$predictions$elevation),
+                blended = round(blended$predictions$elevation)))
+
+resolve.retrieval(predictor, NULL)
+```
+
+```python
+retrieval = rc.RetrievalConfig()
+retrieval.k_neighbors = 16
+retrieval.alpha = 0.3
+predictor.set_retrieval(dataset, retrieval)
+predictor.n_retrieval_reference
+#> 120
+
+blended = predictor.predict_dataset(new_data)
+pd.DataFrame({"plot_id": preds.plot_ids,
+              "model": preds.predictions["elevation"].numpy().round(),
+              "blended": blended.predictions["elevation"].numpy().round()}).head(6)
+#>   plot_id   model  blended
+#> 0    A005  1886.0   1794.0
+#> 1    A010  1696.0   1754.0
+#> 2    A015  2246.0   2263.0
+#> 3    A020  1321.0   1271.0
+#> 4    A025   990.0    979.0
+#> 5    A030  1078.0   1113.0
+
+predictor.clear_retrieval()
+```
+:::
+
+Only neighbours labelled for a target count for it, their weights renormalised; a plot with no labelled neighbour keeps the model's prediction. The latent vectors themselves are not blended. The search is exact: every reference plot is compared, in blocks, on the predictor's device. A reference plot that is also scored finds itself as its own nearest neighbour, so blend new plots against training plots, never against themselves. Settings you leave out take the engine's defaults.
+
+## Model suites
+
+A *model suite* is a directory of models that predict together: for each target, several *members* trained on the same recipe under different seeds. Each plot gets the members' combined prediction and a measure of how far they disagree. A `manifest.json` names the members, the input columns they read and how their predictions combine; here the members vote on the habitat.
+
+::: {.lang-pair}
+```{r suite-build}
+suite_dir <- file.path(tempdir(), "habitat_suite")
+dir.create(suite_dir, showWarnings = FALSE)
+habitat_data <- resolve.dataset.frame(
+  train_plots, train_species, roles = roles,
+  targets = list(habitat = list(column = "habitat", task = "classification"))
+)
+members <- lapply(1:3, function(seed) {
+  file <- sprintf("seed_%d.pt", seed)
+  resolve.train.dataset(habitat_data, maxEpochs = 100L, seed = seed,
+                        savePath = file.path(suite_dir, file), verbose = FALSE)
+  list(seed = seed, file = file)
+})
+
+manifest <- list(
+  format = "resolve-suite", format_version = 1L, name = "habitat_example",
+  description = "Habitat class from species composition",
+  licence = "CC-BY-4.0", engine_version = resolve.version(),
+  taxonomy = "as in the example data",
+  training_scope = "120 synthetic Alpine plots",
+  inputs = list(plot_id = "plot_id", species = "species", abundance = "cover",
+                genus = "genus", family = "family"),
+  targets = list(list(name = "habitat", task = "classification",
+                      combine = "vote", outputs = list("habitat"),
+                      status = "released", members = members))
+)
+jsonlite::write_json(manifest, file.path(suite_dir, "manifest.json"),
+                     auto_unbox = TRUE, pretty = TRUE)
+```
+
+```python
+import json
+
+suite_dir = os.path.join(tempfile.gettempdir(), "habitat_suite")
+os.makedirs(suite_dir, exist_ok=True)
+habitat_data = rc.ResolveDataset.from_pandas(
+    train_plots, train_species, roles,
+    [rc.TargetSpec.classification("habitat", 4)])
+
+members = []
+for seed in [1, 2, 3]:
+    file = f"seed_{seed}.pt"
+    member = rc.ResolveModel(habitat_data.schema,
+                             rc.model_config_for_dataset(habitat_data))
+    member_trainer = rc.Trainer(member, train_config)
+    member_trainer.prepare_data(habitat_data, seed=seed)
+    member_trainer.fit()
+    member_trainer.save(os.path.join(suite_dir, file))
+    members.append({"seed": seed, "file": file})
+
+manifest = {
+    "format": "resolve-suite", "format_version": 1, "name": "habitat_example",
+    "description": "Habitat class from species composition",
+    "licence": "CC-BY-4.0", "engine_version": rc.__version__,
+    "taxonomy": "as in the example data",
+    "training_scope": "120 synthetic Alpine plots",
+    "inputs": {"plot_id": "plot_id", "species": "species", "abundance": "cover",
+               "genus": "genus", "family": "family"},
+    "targets": [{"name": "habitat", "task": "classification",
+                 "combine": "vote", "outputs": ["habitat"],
+                 "status": "released", "members": members}],
+}
+with open(os.path.join(suite_dir, "manifest.json"), "w") as f:
+    json.dump(manifest, f, indent=2)
+```
+:::
+
+*Sealing* the suite writes each member file's size and SHA-256 checksum into the manifest. From then on, loading refuses a member file that has changed, and verifying lists every member that is missing or altered without loading any model.
+
+::: {.lang-pair}
+```{r suite-seal}
+sealed <- resolve.seal_suite(suite_dir)
+substr(sealed$targets[[1]]$members[[1]]$sha256, 1, 16)
+resolve.verify_suite(suite_dir)$problems
+```
+
+```python
+sealed = rc.SuiteManifest.from_json(
+    open(os.path.join(suite_dir, "manifest.json")).read())
+sealed.seal(suite_dir)
+sealed.write(suite_dir)
+sealed.targets[0].members[0].sha256[:16]
+#> 06dc292cc3acf6d2
+rc.SuiteManifest.read(suite_dir).verify(suite_dir)
+#> []
+```
+:::
+
+Loading the suite checks each member against the manifest: its checksum, its prediction heads and the columns it was trained to read. Prediction takes the species table and, when the members read plot-level columns such as coordinates, the header. No target column is read.
+
+::: {.lang-pair}
+```{r suite-predict}
+suite <- resolve.load_suite(suite_dir)
+suite$targets()
+
+suite_preds <- resolve.predict.suite(suite, species = new_species,
+                                     header = new_plots)
+habitat <- suite_preds$targets$habitat
+head(data.frame(plot_id = suite_preds$plot_ids, habitat = habitat$label,
+                agreement = habitat$agreement,
+                recognised = habitat$recognised_share))
+```
+
+```python
+suite = rc.SuitePredictor.load(suite_dir)
+suite.target_names
+#> ['habitat']
+
+suite_preds = suite.predict(new_species, header=new_plots)
+habitat = suite_preds.target("habitat")
+pd.DataFrame({"plot_id": suite_preds.plot_ids,
+              "habitat": [habitat.class_names[c] for c in habitat.value.tolist()],
+              "agreement": habitat.agreement.numpy(),
+              "recognised": habitat.recognition.count_share.numpy()}).head(6)
+#>   plot_id    habitat  agreement  recognised
+#> 0    A005  grassland   1.000000    0.666667
+#> 1    A010    wetland   1.000000    1.000000
+#> 2    A015     alpine   0.666667    1.000000
+#> 3    A020     forest   1.000000    1.000000
+#> 4    A025  grassland   0.666667    1.000000
+#> 5    A030  grassland   1.000000    1.000000
+```
+:::
+
+The *agreement* of a vote is the share of members naming the winning class; a tie goes to the tied class with the higher mean probability. A target combined by a mean reports the members' standard deviation instead, a bearing their circular standard deviation, and a location the median distance in kilometres of the members from the combined point. These measure how far the members disagree and are not calibrated intervals. The recognised share is the share of a plot's distinct species the members' vocabulary knows; the first new plot, with its *Carex firma* record, sits below 1.
+
+The whole result flattens to one row per plot, the table `resolve predict --suite` writes on the command line.
+
+::: {.lang-pair}
+```{r suite-frame}
+suite_table <- as.data.frame(suite_preds)
+names(suite_table)
+```
+
+```python
+suite_table = suite_preds.to_pandas()
+list(suite_table.columns)
+#> ['plot_id', 'habitat', 'habitat_code', 'habitat_agreement', 'habitat_n_species', 'habitat_n_recognised', 'habitat_recognised_share', 'habitat_recognised_abundance_share']
+```
+:::
+
+::: {.lang-r-only}
+`keepMembers = TRUE` adds every member's own prediction, and `as.data.frame(suite_preds, probabilities = TRUE)` adds the members' mean probability of each class.
+:::
+
+::: {.lang-py-only}
+`keep_members=True` adds every member's own prediction, and `suite_preds.to_pandas(probabilities=True)` adds the members' mean probability of each class.
+:::
+
+## Next steps
+
+- [Latent and species embeddings](embeddings.html): the latent space, species and genus embeddings, and what they are used for.
+- [Large data and GPUs](performance.html): prediction on large surveys and on the GPU.
+- [The command line](command-line.html): `resolve predict`, with and without a suite.

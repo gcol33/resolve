@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-ASSETS = REPO / "docs" / "assets"
 R_FIGURES = REPO / "r" / "man" / "figures"
 EXAMPLE_DATA = REPO / "r" / "inst" / "extdata"
 

@@ -1,0 +1,341 @@
+---
+title: "The command line"
+---
+
+<!-- Python blocks run by tools/python_twins.py (md5 cf36e5edb179b48e2b180eb9df889249). -->
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6.5, fig.height = 4.5,
+                      dev.args = list(pointsize = 14))
+library(resolveR)
+if (nzchar(Sys.getenv("RESOLVE_DOCS_CACHE"))) source(Sys.getenv("RESOLVE_DOCS_CACHE"))
+```
+
+```{r shell, include = FALSE}
+# Every chunk writes files a later chunk reads, so none is replayed from a cache.
+# The bash chunks run in one scratch directory, under Git's bash on Windows.
+knitr::opts_chunk$set(cache = FALSE)
+work <- file.path(tempdir(), "resolve-cli")
+dir.create(work, showWarnings = FALSE)
+knitr::opts_knit$set(root.dir = work)
+if (.Platform$OS.type == "windows") {
+  git <- dirname(Sys.which("git"))
+  bash <- normalizePath(file.path(git, "..", "..", "bin", "bash.exe"), "/")
+  knitr::opts_chunk$set(engine.path = list(bash = bash))
+}
+```
+
+The `resolve` executable trains a model, predicts new plots and describes a saved model, all from CSV files and without R or Python. It runs the same engine as the two packages, so a checkpoint written by `resolve train` loads in R with `resolve.load()` and in Python with `Predictor.load()`, and a checkpoint saved from either package scores with `resolve predict`.
+
+This article runs each command on the survey that ships with the R package: training with the column flags and targets, covariates and coordinates, the model settings, the held-out fold and the seed, cross-validation, checkpoints and resuming, devices, prediction and reading a checkpoint.
+
+## Installation
+
+::: {.lang-pair}
+```{r, eval = FALSE}
+# install.packages("pak")
+pak::pak("gcol33/resolve/r")
+
+# The engine library, downloaded once
+library(resolveR)
+resolve.install_backend()
+```
+
+```bash
+pip install resolve-core
+```
+:::
+
+The packages do not install the command line. It is built from source by the engine's CMake project; [Installing the engine](installation.html) gives the build. The commands below assume `resolve` is on the `PATH`:
+
+```{bash version}
+resolve version
+```
+
+`resolve` alone prints every command with its flags, and `--help` after a command prints that command's flags only, with their defaults. That listing is the full reference; this article covers the flags a run usually needs.
+
+## The two tables
+
+The survey has 150 plots in the Alps. `plots.csv` holds one row per plot: its identifier, latitude, longitude, elevation in metres and habitat. `species.csv` holds one row per species recorded on a plot, with the species' genus and family and its cover in percent. Copy both into the directory you run the commands from.
+
+::: {.lang-pair}
+```{r files}
+csv <- system.file("extdata", c("plots.csv", "species.csv"), package = "resolveR")
+file.copy(csv, ".")
+```
+
+```bash
+data=https://raw.githubusercontent.com/gcol33/resolve/master/r/inst/extdata
+curl -O "$data/plots.csv" -O "$data/species.csv"
+```
+:::
+
+```{bash head}
+head -n 3 plots.csv species.csv
+```
+
+## Training a model
+
+`resolve train` reads the two tables, fits a model and saves it. The *roles* name the columns: which one identifies the plot, which one the species, and which optional columns hold the abundance and the taxonomy. Each *target* is a column to predict, with its task: elevation is a regression target and habitat a classification target with four classes.
+
+```{bash train}
+resolve train --header plots.csv --species species.csv \
+  --species-id species --abundance cover --genus genus --family family \
+  --target elevation:regression --target habitat:classification:4 \
+  --max-epochs 100 --output model.pt
+```
+
+The run prints the targets it read, what the loader found in the tables and a line every ten epochs with the training and held-out loss, in total and per target. It ends with the best epoch, the time it took and the metrics of the best epoch on the held-out plots, the 20 % of plots it did not train on. For elevation, `mae` and `rmse` are in metres, `r2` is the share of the variance the predictions explain and `band_10`, `band_25` and `band_50` are the shares of plots predicted within 10, 25 and 50 % of their elevation. For habitat, `accuracy` is the share of plots assigned their recorded habitat, followed by the precision, recall and F1 score of each class code and their macro and weighted means. The metrics are printed in no fixed order.
+
+`--output` names the checkpoint, and a JSON file beside it describes the run in plain text:
+
+```{bash sidecar}
+ls model.*
+```
+
+## Columns
+
+Each role has its own flag. A column flag takes the column's name in the table.
+
+| Flag | Column | Default |
+|------|--------|---------|
+| `--plot-id` | Plot identifier, in both tables | `plot_id` |
+| `--species-id` | Species name, in the species table | `species_id` |
+| `--abundance` | Abundance of the species on the plot, such as cover | not read |
+| `--genus`, `--family` | Genus and family of the species | not read |
+| `--lat`, `--lon` | Coordinates of the plot, in the header table | not read |
+| `--covariate` | A numeric plot-level column; repeat the flag for each one | none |
+| `--categorical` | A plot-level column of labels; repeat the flag for each one | none |
+
+The survey's plot column is already called `plot_id`, so the run above leaves out `--plot-id`. A column the loader cannot find is an error that names the column:
+
+```{bash missing-column, error = TRUE}
+resolve train --header plots.csv --species species.csv \
+  --target elevation --output model.pt
+```
+
+Without `--header`, the species table is read alone, and its rows also carry the plot's targets. Covariates and categorical columns are plot-level columns, so they need the header table.
+
+## Targets
+
+`--target` takes a column and its task, separated by colons: `COL:regression` for a continuous target, `COL:classification:N` for a target with `N` classes. A bare `COL` is a regression target. The fields after the task are modifiers in any order:
+
+- **`log1p`** fits a regression target on `log(1 + y)` and returns predictions in the column's own units.
+- **`mask`** keeps a plot that has no label for this target: it trains the other targets only. The default, `drop`, leaves the plot out of the run.
+- **An integer** sets the number of classes of a classification target.
+
+`resolve train --help` gives the same grammar:
+
+```{bash target-help}
+resolve train --help | grep -A 8 -e "--target SPEC"
+```
+
+A classification target needs its class count:
+
+```{bash target-error, error = TRUE}
+resolve train --header plots.csv --species species.csv \
+  --species-id species --target habitat:classification --output model.pt
+```
+
+A label column may hold text, as `habitat` does: the loader codes the labels as integers, and the checkpoint keeps the labels, so predictions come back as habitat names.
+
+## Covariates and coordinates
+
+Coordinates and covariates enter the same encoder as the species. This run predicts habitat from the species, the plot's coordinates and its elevation as a covariate. `grep -v` leaves out the epoch lines.
+
+```{bash covariates}
+resolve train --header plots.csv --species species.csv \
+  --species-id species --abundance cover --genus genus --family family \
+  --lat lat --lon lon --covariate elevation \
+  --target habitat:classification:4 \
+  --max-epochs 100 --output habitat.pt | grep -v "^Epoch"
+```
+
+A `--categorical` column is coded at load time and gets its own embedding table, for example `--categorical bedrock` for a header column of rock types. A column cannot be both a covariate and a categorical column. A covariate or coordinate cell left empty is filled with the training plots' mean and marked in a column of its own; `--missing-values zero` fills it with zero instead.
+
+## Model and encoding settings
+
+Every field of the loader, model and training configurations is a flag of `resolve train`, named after the field: `--encoding` sets the species encoding, `--hidden-dims` the widths of the encoder's layers, `--lr` the learning rate, and so on. [Encoding the species set](encoding.html) describes the encodings and [Training and reading the fit](training.html) the training settings. This run encodes the species by rank pooling, which pools learned species, genus and family embeddings by a weighted mean:
+
+```{bash rank-pool}
+resolve train --header plots.csv --species species.csv \
+  --species-id species --abundance cover --genus genus --family family \
+  --target elevation --encoding rank_pool --pool-weighting log1p \
+  --max-epochs 100 --output pooled.pt | grep -v "^Epoch"
+```
+
+A flag whose field the run does not read is an error, so a setting cannot be dropped without notice. The transformer's token width, for example, applies to the transformer encoding only:
+
+```{bash gate-error, error = TRUE}
+resolve train --header plots.csv --species species.csv \
+  --species-id species --target elevation --d-model 64 --output model.pt
+```
+
+A flag that is not declared at all, or a number that does not parse whole, is refused the same way.
+
+## The held-out fold and the seed
+
+By default a run holds out 20 % of the plots, drawn at random, and stops when the loss on them has not improved for `--patience` epochs (50 by default). `--test-size` sets the fraction.
+
+`--seed` (42 by default) seeds the starting weights, the held-out draw, the order the training plots are drawn in and the cross-validation folds. On the CPU, two runs with the same flags and seed train the same model, so their predictions match:
+
+```{bash seed}
+for run in a b; do
+  resolve train --header plots.csv --species species.csv \
+    --species-id species --abundance cover --target elevation \
+    --max-epochs 100 --seed 7 --output seed_$run.pt > /dev/null
+  resolve predict --model seed_$run.pt --header plots.csv \
+    --species species.csv --species-id species --abundance cover \
+    --output seed_$run.csv > /dev/null
+done
+cmp seed_a.csv seed_b.csv && echo "same predictions"
+```
+
+On a GPU, also pass `--no-cudnn-benchmark`: it turns off the cuDNN autotuner, which is on by default and can make two runs differ.
+
+`--stopping-plots` holds out the plots a file names instead, one identifier per line: a spatial block, another survey, or the fold a published protocol selects its epoch on. The best epoch and the final metrics are then read on exactly these plots. Here the held-out plots are those north of 47° latitude:
+
+```{bash stopping-plots}
+awk -F, 'NR > 1 && $2 > 47 { gsub(/"/, "", $1); print $1 }' \
+  plots.csv > north.txt
+resolve train --header plots.csv --species species.csv \
+  --species-id species --abundance cover --target elevation \
+  --stopping-plots north.txt --max-epochs 100 \
+  --output north.pt | grep -v "^Epoch"
+```
+
+`--stopping-plots` and `--test-size` exclude each other.
+
+To refit on every plot, fix the length of the run in advance and hold nothing out: `--fixed-epochs N --test-size 0` trains exactly `N` epochs of the `--max-epochs` schedule and keeps the final weights. With nothing held out, the run reports no metrics.
+
+```{bash fixed-epochs}
+resolve train --header plots.csv --species species.csv \
+  --species-id species --abundance cover --target elevation \
+  --max-epochs 100 --fixed-epochs 50 --test-size 0 \
+  --output refit.pt | grep -v "^Epoch"
+```
+
+## Cross-validation
+
+`--cv-folds N` runs an `N`-fold cross-validation before the final fit and prints each fold's metrics with their mean and standard deviation across folds. Each fold starts from the untrained weights, and the final fit afterwards is the same run as one without the flag. `--cv-spatial` makes the folds blocks of `--cv-lat-size` by `--cv-lon-size` degrees, which needs the coordinates; `--cv-balance` assigns the blocks to folds so the folds hold similar numbers of plots.
+
+```{bash cross-validation}
+resolve train --header plots.csv --species species.csv \
+  --species-id species --abundance cover --lat lat --lon lon \
+  --target elevation --max-epochs 100 \
+  --cv-folds 3 --cv-spatial --cv-lat-size 0.25 --cv-lon-size 0.25 \
+  --output cv.pt | grep -v "^Epoch"
+```
+
+Under each fold, the `Train:` and `Test:` counts give how many plots it trained and tested on; with spatial blocks the folds differ in size.
+
+## Checkpoints and resuming
+
+`--checkpoint-dir` makes the run write its best model and a progress file into a directory as it trains, and `--checkpoint-every N` adds a checkpoint every `N` epochs:
+
+```{bash checkpoints}
+resolve train --header plots.csv --species species.csv \
+  --species-id species --abundance cover --target elevation \
+  --max-epochs 100 --checkpoint-dir ckpt --checkpoint-every 25 \
+  --output model_ckpt.pt > /dev/null
+ls ckpt
+```
+
+`--resume` continues the run that wrote a checkpoint at the epoch after it. Pass the run's own data, model and training flags and its seed, so the held-out plots and the settings are the ones it trained with:
+
+```{bash resume}
+resolve train --header plots.csv --species species.csv \
+  --species-id species --abundance cover --target elevation \
+  --max-epochs 100 --checkpoint-dir ckpt --checkpoint-every 25 \
+  --resume ckpt/checkpoint_25.pt --output model_ckpt.pt | grep -v "^Epoch"
+```
+
+`--resume` and `--cv-folds` exclude each other.
+
+## Devices
+
+`--device` selects where the run trains: `cpu` (the default), `cuda` for the current GPU or `cuda:N` for GPU `N`. A CUDA device the machine does not have is an error; the run never falls back to the CPU on its own. `resolve predict` takes the same flag and also defaults to the CPU.
+
+```bash
+resolve train --header plots.csv --species species.csv \
+  --species-id species --abundance cover --target elevation \
+  --device cuda --vram-fraction 0.8 --output model.pt
+```
+
+On a GPU, a batch that does not fit in memory halves the batch size and restarts the run, down to `--batch-size-floor`. `--vram-fraction` caps the share of GPU memory the run may use, which leaves room for a desktop on the same card; it takes effect in a build with the engine's CUDA kernels. `--amp` turns on mixed precision. [Large data and GPUs](performance.html) covers these settings.
+
+## Predicting
+
+`resolve predict` scores a header and a species table with a saved model and writes one row per plot. Here the model predicts the survey's own plots again.
+
+```{bash predict}
+resolve predict --model model.pt --header plots.csv --species species.csv \
+  --species-id species --abundance cover --genus genus --family family \
+  --output predictions.csv
+head -n 4 predictions.csv
+```
+
+The first column is the plot identifier, followed by one column per target. A classification target gets two columns: `habitat` holds the class label and `habitat_code` the integer code the model predicted. `--probabilities` adds one column per class with the probability behind the code; the columns of one target sum to one in every row:
+
+```{bash probabilities}
+resolve predict --model model.pt --header plots.csv --species species.csv \
+  --species-id species --abundance cover --genus genus --family family \
+  --probabilities --output probabilities.csv > /dev/null
+head -n 4 probabilities.csv
+```
+
+The checkpoint carries the species, genus and family vocabularies of its training data, so the new tables are encoded against the same species. It also records the covariate and categorical columns, so a covariate model predicts without `--covariate` flags; pass them only to rename the columns, one flag per column the model was trained on. The abundance, coordinate and taxonomy columns are read only when their flags are given, so pass `resolve predict` the same flags for them as `resolve train`.
+
+`--predict-batch-size` sets how many plots go through the model at once (4096 by default). The retrieval flags blend each prediction with the labels of its nearest plots from a reference set, in the model's latent representation; [Predicting new plots](prediction.html) describes them.
+
+A *model suite* is a directory of several trained models with a `manifest.json` that lists them. `resolve predict --suite DIR` scores every target of the suite, combines its members' predictions and reports how far they agree and how much of each plot's species list the target's vocabulary recognises. `--target` limits the output to some targets, `--members` adds every member's own prediction and `--no-verify` skips checking each member file against the size and SHA-256 checksum in the manifest. `resolve info --suite DIR` prints the manifest and checks every member. [Predicting new plots](prediction.html) covers suites.
+
+## Reading a checkpoint
+
+`resolve info` prints what a checkpoint holds: how the run split the plots, the schema of the data it was trained on, the model, loader and training settings, and the final metrics. The first part reads:
+
+```{bash info}
+resolve info --model north.pt | head -n 40
+```
+
+`hold_out` is `explicit` for a run with `--stopping-plots` and `random` for one with `--test-size`. The schema lists each target with its task, its transform, its missing-label policy and, for a classification target, its class labels. The listing continues with every setting of the run and ends with the number of parameters.
+
+The checkpoint loads in R and in Python like one saved from a package:
+
+::: {.lang-r-only}
+```{r load}
+predictor <- resolve.load("model.pt")
+dataset <- resolve.dataset.csv(
+  header = "plots.csv",
+  species = "species.csv",
+  roles = list(plot_id = "plot_id", species_id = "species",
+               abundance = "cover", genus = "genus", family = "family"),
+  vocabs = predictor$vocabs(),
+  config = predictor$dataset_config()
+)
+preds <- resolve.predict.dataset(predictor, dataset)
+head(round(preds$predictions$elevation))
+```
+:::
+
+::: {.lang-py-only}
+```python
+import resolve_core as rc
+
+predictor = rc.Predictor.load("model.pt")
+roles = rc.RoleMapping()
+roles.plot_id = "plot_id"
+roles.species_id = "species"
+roles.abundance = "cover"
+roles.genus = "genus"
+roles.family = "family"
+
+dataset = rc.ResolveDataset.from_csv_with_vocabs(
+    "plots.csv", "species.csv", roles, [],
+    predictor.external_vocabs, predictor.dataset_config)
+preds = predictor.predict_dataset(dataset)
+print(preds.predictions["elevation"][:6].round())
+```
+:::
+
+The predicted elevations match the `elevation` column of `predictions.csv` above.

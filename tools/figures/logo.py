@@ -7,7 +7,7 @@ plants in proportion to its cover and coloured by growth form. The grid's
 horizontal lines drift towards the viewer by one cell per cycle, so the loop
 closes on its own first frame; everything else is still.
 
-Writes ``docs/assets/logo.svg`` and the identical ``r/man/figures/logo.svg``.
+Writes ``r/man/figures/logo.svg``.
 Run from anywhere: ``python tools/figures/logo.py``.
 """
 
@@ -19,7 +19,6 @@ import random
 from collections import defaultdict
 
 from palette import (
-    ASSETS,
     BLUE,
     BORDER,
     EXAMPLE_DATA,
@@ -250,11 +249,10 @@ def build() -> str:
 
 def main() -> None:
     svg = build()
-    ASSETS.mkdir(parents=True, exist_ok=True)
     R_FIGURES.mkdir(parents=True, exist_ok=True)
-    for path in (ASSETS / "logo.svg", R_FIGURES / "logo.svg"):
-        path.write_text(svg, encoding="utf-8", newline="\n")
-        print(f"wrote {path} ({len(svg.encode()) / 1024:.0f} KB)")
+    path = R_FIGURES / "logo.svg"
+    path.write_text(svg, encoding="utf-8", newline="\n")
+    print(f"wrote {path} ({len(svg.encode()) / 1024:.0f} KB)")
 
 
 if __name__ == "__main__":

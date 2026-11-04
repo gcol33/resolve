@@ -1,0 +1,221 @@
+---
+title: "Installing the engine"
+---
+
+<!-- Python blocks run by tools/python_twins.py (md5 063708ee2ece3aac7ca9395d9099ad8b). -->
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6.5, fig.height = 4.5,
+                      dev.args = list(pointsize = 14))
+library(resolveR)
+if (nzchar(Sys.getenv("RESOLVE_DOCS_CACHE"))) source(Sys.getenv("RESOLVE_DOCS_CACHE"))
+```
+
+RESOLVE is a C++ engine built on libtorch, the C++ library under PyTorch. The R package `resolveR`, the Python package `resolve_core` and the `resolve` command line all call this one engine, so a model trained from one of them loads in the others.
+
+This article covers installing each of them: the R package and the engine library it downloads, the GPU builds, the Python package and the torch it runs on, checking what is installed, building the engine from source, and the messages a failed installation prints.
+
+## Installation
+
+::: {.lang-pair}
+```{r, eval = FALSE}
+# install.packages("pak")
+pak::pak("gcol33/resolve/r")
+
+# The engine library, downloaded once
+library(resolveR)
+resolve.install_backend()
+```
+
+```bash
+pip install resolve-core
+```
+:::
+
+The rest of the article explains what these commands install and the alternatives to them.
+
+## The R package
+
+### Build tools
+
+`pak::pak()` installs the package from its source on GitHub, so it compiles the package's C++ code, the thin client that calls the engine. That needs a C++17 compiler that R can use:
+
+| Platform | Build tools |
+|----------|-------------|
+| Windows | Rtools, in the version that matches your R |
+| macOS | The Xcode command line tools: `xcode-select --install` |
+| Linux | A C++ compiler and the R development headers, such as `r-base-dev` on Debian and Ubuntu |
+
+The package itself does not contain the engine and compiles without libtorch.
+
+### The engine library
+
+The engine reaches R as one shared library, `resolve_c`, with the libtorch libraries beside it. `resolve.install_backend()` downloads it from the release of the package's version on GitHub and loads it. It is installed once, into the package's directory for user data, `tools::R_user_dir("resolveR", "data")`, and loaded from there whenever the package loads. A second call finds it and only loads it again; `force = TRUE` downloads it anew.
+
+The default, `variant = "cpu"`, is the CPU build, with its libtorch inside the download. It exists for Linux and Windows on x86-64 and for macOS on Apple Silicon.
+
+```{r, eval = FALSE}
+resolve.install_backend(force = TRUE)
+```
+
+When the package loads without an engine library, it says so and names the call that installs one. Loading the package works either way; the functions that load data, train and predict stop with an error until the engine library is there.
+
+### GPU builds
+
+The GPU builds run the engine on an NVIDIA graphics card through CUDA, NVIDIA's GPU computing platform. They exist for Linux and Windows on x86-64; macOS has no CUDA.
+
+| `variant` | Build |
+|-----------|-------|
+| `"cpu"` | CPU only (the default) |
+| `"cu128"` | CUDA 12.8 |
+| `"cu130"` | CUDA 13.0 |
+| `"cuda"` | The CUDA line the installed driver supports: `cu130` for a driver that supports CUDA 13.0 or newer, `cu128` for 12.8 or newer |
+
+```{r, eval = FALSE}
+resolve.install_backend(variant = "cuda", force = TRUE)
+```
+
+`"cuda"` reads the driver's CUDA version from `nvidia-smi`. With no NVIDIA card it stops and suggests `variant = "cpu"`, and with a driver older than CUDA 12.8 it stops and asks for a driver update.
+
+A GPU build downloads more than the CPU build. The release holds only the small `resolve_c` library; the call then fetches the libtorch that `resolve_c` was built against from PyTorch's download server, an archive it announces as 2 to 4 GB. On Linux it also fetches NVIDIA's CUDA runtime libraries, which that libtorch needs and does not include. Everything lands in the same directory.
+
+When the package loads the CPU build on a machine with an NVIDIA card, it prints a message that names the call installing the GPU build. Training then runs on the GPU when the training call asks for the `cuda` device (see [Training on a GPU](#training-on-a-gpu)).
+
+### An engine library from elsewhere
+
+`url` installs from another location, such as a mirror, and takes the `.zip` file of the library and its runtime libraries; `dir` installs into another directory.
+
+The environment variable `RESOLVE_C_HOME` names a directory that already holds the library, with libtorch's libraries beside it, for example an engine you built yourself (see [The engine library for R](#the-engine-library-for-r)). The package looks there first, then in the directory `resolve.install_backend()` installs into, and loads the first library it finds. It reads the variable when it loads, so set it before `library(resolveR)`, for instance in your `.Renviron` file:
+
+```bash
+RESOLVE_C_HOME=/path/to/resolve/src/core/build
+```
+
+The engine uses every CPU core by default. `RESOLVE_R_TORCH_THREADS`, set to a positive whole number before the package loads, limits it to that many threads, for example on a shared machine.
+
+## The Python package
+
+`pip install resolve-core` installs a prebuilt wheel. The wheels cover CPython 3.10 to 3.13 on Linux x86-64, Windows x86-64 and macOS on Apple Silicon, and they need numpy, pandas and torch 2.0 or newer, which pip installs with them.
+
+The wheels do not contain libtorch: they use the one inside the installed `torch` package. Whether training can run on a GPU therefore depends on that torch. The torch that pip installs from PyPI on Linux is a CUDA build; on Windows and macOS it is a CPU build. For a GPU on Windows, install the CUDA build of torch from PyTorch's own package index, as the installation page on pytorch.org describes.
+
+## Checking the installation
+
+`resolve.available()` reports whether the engine library is loaded, and `resolve.version()` asks the loaded engine for its version. In Python, `resolve_core.__version__` comes from the compiled engine too, so both report the version of the binary that runs, and `torch.cuda.is_available()` says whether torch sees a GPU.
+
+::: {.lang-pair}
+```{r check}
+library(resolveR)
+resolve.available()
+resolve.version()
+```
+
+```python
+import torch
+import resolve_core as rc
+
+rc.__version__
+#> 1.0.3
+torch.cuda.is_available()
+#> True
+```
+:::
+
+## Training on a GPU
+
+The device is a setting of the training run: `"cpu"` (the default), `"cuda"` for the current GPU or `"cuda:N"` for GPU `N`. A device the machine does not have is an error.
+
+::: {.lang-pair}
+```{r, eval = FALSE}
+fit <- resolve.train.dataset(dataset, device = "cuda")
+```
+
+```python
+cfg = rc.TrainConfig()
+cfg.device = "cuda"
+```
+:::
+
+A saved model loads onto the CPU unless the load names a device, for example `resolve.load(path, device = "cuda")` in R and `Predictor.load(path, device="cuda")` in Python. [Large data and GPUs](performance.html) covers the GPU settings.
+
+## Building from source
+
+### Requirements
+
+A source build needs CMake 3.18 or newer, a C++20 compiler and libtorch; the commands below also use the Ninja build tool. The Python build finds libtorch through the installed `torch` package. The standalone CMake build takes it from `torch` as well, or from a libtorch download from pytorch.org, named by `Torch_DIR`. The project root is `src/core` in the repository:
+
+```bash
+git clone https://github.com/gcol33/resolve.git
+cd resolve/src/core
+```
+
+### The Python package
+
+```bash
+pip install .
+```
+
+pip compiles the extension in an isolated build environment, with a torch it downloads for the build. The extension links the libtorch of that torch. To compile against the torch already installed, for example a CUDA build, install the build tools yourself and turn the isolation off; this is also the quicker route while you change the C++ sources:
+
+```bash
+pip install "scikit-build-core>=0.10" "nanobind>=2.0.0" cmake ninja
+pip install . --no-build-isolation
+```
+
+### The CUDA kernels
+
+Training on a GPU needs only a CUDA build of libtorch: the engine then runs through torch's own CUDA operations. The engine also has CUDA kernels of its own, for hashing species on the GPU during training (`use_cuda_hash`), and the GPU memory cap (`vram_fraction`) takes effect only in a build that has them. The wheels and the CPU builds of the R engine library are built without them; the GPU builds of the R engine library are compiled with them.
+
+A build with `USE_CUDA` on compiles the kernels with nvcc, the compiler of the CUDA toolkit, which therefore has to be installed:
+
+```bash
+pip install . --no-build-isolation -C cmake.define.USE_CUDA=ON
+```
+
+The kernels are compiled for compute capability 8.9 and 12.0, with an entry for newer cards. `RESOLVE_CUDA_ARCHITECTURES` takes CMake's list of architectures to compile for, such as `86-real` for compute capability 8.6:
+
+```bash
+pip install . --no-build-isolation -C cmake.define.USE_CUDA=ON \
+  -C cmake.define.RESOLVE_CUDA_ARCHITECTURES=86-real
+```
+
+A card with no matching architecture fails every launch of these kernels. When nvcc does not run, CMake reports the kernels as disabled and the build continues without them.
+
+### The command line
+
+The `resolve` executable is built by the CMake project in `src/core`, which also builds the engine library for R. Here it takes libtorch from the installed torch package and leaves the CUDA kernels out:
+
+```bash
+torch_cmake=$(python -c "import torch; print(torch.utils.cmake_prefix_path)")
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_CLI=ON -DBUILD_PYTHON=OFF -DBUILD_TESTS=OFF -DUSE_CUDA=OFF \
+  -DCMAKE_PREFIX_PATH="$torch_cmake"
+cmake --build build
+```
+
+This project builds with `USE_CUDA` on unless told otherwise, so leave out `-DUSE_CUDA=OFF` only with the CUDA toolkit installed. To build against a libtorch download instead of the torch package, pass `-DTorch_DIR=/path/to/libtorch/share/cmake/Torch` in place of `CMAKE_PREFIX_PATH`.
+
+The executable is `build/bin/resolve`. It loads libtorch's libraries at start, so their directory has to be on the loader's path: `LD_LIBRARY_PATH` on Linux, `PATH` on Windows. In the torch package it is the `lib` directory inside `torch`. On Windows, a missing library ends the program before it prints anything.
+
+```bash
+export LD_LIBRARY_PATH=/path/to/torch/lib:$LD_LIBRARY_PATH
+./build/bin/resolve version
+```
+
+[The command line](command-line.html) covers its commands.
+
+### The engine library for R
+
+The same CMake build writes the `resolve_c` library into the build directory; on Windows it also copies libtorch's libraries beside it. Point `RESOLVE_C_HOME` at that directory to load it in R (see [An engine library from elsewhere](#an-engine-library-from-elsewhere)).
+
+## When the installation fails
+
+These are the messages the packages print when a step fails, with what to do about each.
+
+- Without an engine library, `library(resolveR)` prints that the backend is not installed, and the functions that load data, train or predict stop with the same message. Run `resolve.install_backend()`, or set `RESOLVE_C_HOME`.
+- When a download fails, `resolve.install_backend()` stops with `cannot open URL` and the address it tried. The file name in the address names the build, `resolve_c-<system>-<architecture>-<variant>.zip`, and `HTTP status was '404 Not Found'` means the release of that version has no such file. The call raises R's download timeout to at least an hour for these files.
+- With `variant = "cuda"`, the call stops when `nvidia-smi` finds no NVIDIA card; install the CPU build. It also stops when the driver supports only a CUDA version older than 12.8; update the driver.
+- On macOS, a GPU variant stops the call, since CUDA builds do not exist there.
+- When the library downloads but does not load, the call stops with `Downloaded resolve_c but could not load it:` and the reason the system's loader gives.
+- With the CPU build loaded on a machine with an NVIDIA card, `library(resolveR)` prints that a GPU was detected and names the call that installs the GPU build.
+- When the Python extension does not import, `import resolve_core` fails with `Failed to import resolve_core C++ extension` and the error underneath it. Reinstall `resolve-core` in the environment whose torch it runs with, or build it there with `--no-build-isolation`.

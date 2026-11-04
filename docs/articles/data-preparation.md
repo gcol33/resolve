@@ -1,0 +1,657 @@
+# Preparing the two tables
+
+RESOLVE reads vegetation plots from two tables: one row per plot, and
+one row per species recorded on a plot. Loading turns them into a
+*dataset*, the encoded form a model trains on and predicts from. The
+loader needs to be told which column plays which part, which columns to
+predict, and what to do with cells that are empty.
+
+This article covers the shape of the two tables and the single long
+table that can replace them, every column role, regression and
+classification targets, the handling of missing values, targets labelled
+on only some plots, loading from files or from data frames, checking
+what was loaded, and encoding new plots against the species vocabulary
+of a training set.
+
+## Installation
+
+``` r
+
+# install.packages("pak")
+pak::pak("gcol33/resolve/r")
+
+# The engine library, downloaded once
+library(resolveR)
+resolve.install_backend()
+```
+
+``` bash
+pip install resolve-core
+```
+
+## The two tables
+
+The examples use a survey of 150 plots in the Alps that ships with the R
+package. The *header* table `plots` holds one row per plot: its
+identifier, latitude and longitude, elevation in metres and habitat. The
+*species* table `species` holds one row per species recorded on a plot,
+with the species’ genus and family and its cover in percent.
+
+``` r
+
+plots <- read.csv(system.file("extdata", "plots.csv", package = "resolveR"))
+species <- read.csv(system.file("extdata", "species.csv", package = "resolveR"))
+head(plots, 3)
+#>   plot_id     lat     lon elevation   habitat
+#> 1    A001 46.6042 11.4453      2188    alpine
+#> 2    A002 47.0674 10.5684       568 grassland
+#> 3    A003 46.6674 11.3040      2129   wetland
+head(species, 3)
+#>   plot_id                  species        genus     family cover
+#> 1    A001 Rhododendron ferrugineum Rhododendron  Ericaceae    54
+#> 2    A001            Carex curvula        Carex Cyperaceae    51
+#> 3    A002          Quercus petraea      Quercus   Fagaceae    16
+```
+
+``` python
+import pandas as pd
+import resolve_core as rc
+
+data = "https://raw.githubusercontent.com/gcol33/resolve/master/r/inst/extdata/"
+plots = pd.read_csv(data + "plots.csv")
+species = pd.read_csv(data + "species.csv")
+print(plots.head(3))
+#>   plot_id      lat      lon  elevation    habitat
+#> 0    A001  46.6042  11.4453       2188     alpine
+#> 1    A002  47.0674  10.5684        568  grassland
+#> 2    A003  46.6674  11.3040       2129    wetland
+print(species.head(3))
+#>   plot_id                   species         genus      family  cover
+#> 0    A001  Rhododendron ferrugineum  Rhododendron   Ericaceae     54
+#> 1    A001             Carex curvula         Carex  Cyperaceae     51
+#> 2    A002           Quercus petraea       Quercus    Fagaceae     16
+```
+
+The plot identifier joins the two tables. A species row whose plot is
+absent from the header is ignored, so subsetting the header is enough to
+subset a dataset; the species table can stay whole.
+
+A dataset needs at least a plot identifier present in both tables, a
+species identifier in the species table, and, for training, one target
+column in the header.
+
+## Roles
+
+A *role* tells the loader what a column means. The plot and species
+identifiers are required; every other role is optional and adds an input
+to the model.
+
+| Role | Effect when present |
+|----|----|
+| `plot_id` | Joins the two tables and labels every prediction |
+| `species_id` | The species whose set describes the plot |
+| `abundance` | Weights each species; without it every species weighs 1 |
+| `latitude`, `longitude` | Two continuous inputs, and the coordinates spatial cross-validation folds are cut on |
+| `genus`, `family` | Taxonomy embeddings, which give a rare or unseen species an identity through its genus and family |
+| `covariates` | Numeric header columns, standardised on the training plots |
+| `categoricals` | Text header columns, coded on load, each with its own embedding |
+
+An *embedding* is a learned vector of numbers that stands for one name,
+here a genus, a family or a level of a categorical column.
+
+In R the roles, the targets and the dataset settings are named lists
+whose keys are the snake_case names in the table. Function arguments,
+such as `schemaSource` below, are camelCase. `plot_id` defaults to
+`"plot_id"` and `species_id` to `"species_id"`.
+
+In Python the roles are the fields of a `RoleMapping`, the targets a
+list of `TargetSpec` and the dataset settings a `DatasetConfig`. A role
+left unset is the empty string.
+
+The roles below read every column of the survey, with elevation as a
+covariate and habitat as the column to predict.
+
+``` r
+
+roles <- list(plot_id = "plot_id", species_id = "species",
+              abundance = "cover", genus = "genus", family = "family",
+              latitude = "lat", longitude = "lon")
+
+dataset <- resolve.dataset.frame(
+  plots, species,
+  roles = c(roles, list(covariates = "elevation")),
+  targets = list(habitat = list(task = "classification"))
+)
+dataset$n_plots()
+#> [1] 150
+```
+
+``` python
+roles = rc.RoleMapping()
+roles.plot_id = "plot_id"
+roles.species_id = "species"
+roles.abundance = "cover"
+roles.genus = "genus"
+roles.family = "family"
+roles.latitude = "lat"
+roles.longitude = "lon"
+roles.covariates = ["elevation"]
+
+targets = [rc.TargetSpec.classification("habitat", 0)]
+dataset = rc.ResolveDataset.from_pandas(plots, species, roles, targets)
+dataset.n_plots
+#> 150
+```
+
+A categorical column works the same way. Here habitat becomes an input
+and elevation the target. A column cannot be both a covariate and a
+categorical.
+
+``` r
+
+by_habitat <- resolve.dataset.frame(
+  plots, species,
+  roles = c(roles, list(categoricals = "habitat")),
+  targets = list(elevation = list(task = "regression"))
+)
+schema <- by_habitat$schema()
+schema$categorical_names
+#> [1] "habitat"
+schema$categorical_vocab_sizes
+#> [1] 5
+```
+
+``` python
+roles.covariates = []
+roles.categoricals = ["habitat"]
+by_habitat = rc.ResolveDataset.from_pandas(
+    plots, species, roles, [rc.TargetSpec.regression("elevation")])
+schema = by_habitat.schema
+schema.categorical_names
+#> ['habitat']
+schema.categorical_vocab_sizes
+#> [5]
+roles.categoricals = []
+```
+
+The vocabulary size counts the four habitats and one reserved slot for a
+value the column did not hold when it was coded.
+
+An optional role is unset by leaving it out or by giving it the empty
+string. A column name the table does not have is an error, so a misspelt
+column stops the load instead of training without the input.
+
+``` r
+
+resolve.dataset.frame(
+  plots, species,
+  roles = c(roles[names(roles) != "genus"], list(genus = "Genus")),
+  targets = list(habitat = list(task = "classification"))
+)
+#> Error:
+#> ! genus column 'Genus' not found in the species table
+```
+
+``` python
+roles.genus = "Genus"
+try:
+    rc.ResolveDataset.from_pandas(plots, species, roles, targets)
+finally:
+    roles.genus = "genus"
+#> RuntimeError: genus column 'Genus' not found in the species table
+```
+
+## Targets
+
+A *target* is a header column the model learns to predict. A regression
+target is a number; a classification target is one class out of a fixed
+set.
+
+A regression target can be transformed on load. With the `log1p`
+transform the model trains on `log(1 + value)`, and every prediction and
+regression metric is transformed back, so all numbers you read are in
+the column’s own units.
+
+A classification column of text is coded in sorted order unless you give
+the codes yourself. The class names are recorded on the dataset’s
+schema, so predicted codes can be turned back into labels.
+
+``` r
+
+two_targets <- resolve.dataset.frame(
+  plots, species, roles = roles,
+  targets = list(
+    elevation = list(task = "regression", transform = "log1p"),
+    habitat = list(task = "classification")
+  )
+)
+str(two_targets$schema()$targets$habitat[c("num_classes", "class_names")])
+#> List of 2
+#>  $ num_classes: int 4
+#>  $ class_names: chr [1:4] "alpine" "forest" "grassland" "wetland"
+```
+
+``` python
+targets = [
+    rc.TargetSpec.regression("elevation", rc.TransformType.Log1p),
+    rc.TargetSpec.classification("habitat", 0),
+]
+two_targets = rc.ResolveDataset.from_pandas(plots, species, roles, targets)
+habitat = two_targets.schema.targets[1]
+habitat.num_classes, habitat.class_names
+#> (4, ['alpine', 'forest', 'grassland', 'wetland'])
+```
+
+The list of targets is keyed by target name, and `column` names the
+column a target reads; without `column` the key names it. `num_classes`
+is optional: left out, the head is sized from the classes found.
+
+`TargetSpec.classification(column, 0)` sizes the head from the classes
+found; a positive `num_classes` smaller than that count is an error.
+
+A *class mapping* fixes the code of each label. A plot whose label is
+outside the mapping is dropped, so a mapping also selects the classes to
+train on. The mapping below leaves out the wetland plots.
+
+``` r
+
+three_habitats <- resolve.dataset.frame(
+  plots, species, roles = roles,
+  targets = list(habitat = list(
+    task = "classification",
+    class_mapping = c(alpine = 0L, forest = 1L, grassland = 2L)
+  ))
+)
+three_habitats$n_plots()
+#> [1] 124
+three_habitats$schema()$targets$habitat$class_names
+#> [1] "alpine"    "forest"    "grassland"
+```
+
+``` python
+mapping = {"alpine": 0, "forest": 1, "grassland": 2}
+three_habitats = rc.ResolveDataset.from_pandas(
+    plots, species, roles,
+    [rc.TargetSpec.classification_with_mapping("habitat", mapping)])
+three_habitats.n_plots
+#> 124
+three_habitats.schema.targets[0].class_names
+#> ['alpine', 'forest', 'grassland']
+```
+
+The species records of a dropped plot are removed before the species,
+genus and family vocabularies are built, so a dropped plot leaves no
+rows behind in an embedding table.
+
+## Missing values
+
+The loader treats an empty cell according to the column it sits in, and
+prints a count for every column it had to fill or every plot it dropped.
+
+| Situation | Result |
+|----|----|
+| Missing or unparseable target value | The plot is dropped (kept under `missing = "mask"`, see below) |
+| Classification label outside a class mapping | The plot is dropped (kept under `missing = "mask"`) |
+| Missing covariate or coordinate cell | Kept as missing; under `missing_values = "indicate"` (default) the model sees a flag for it and the mean of the training plots, under `"zero"` the value 0 |
+| Missing categorical cell | The reserved unknown code 0 |
+| Missing or unparseable abundance cell | Weight 1, a presence, with a warning |
+| Abundance of exactly 0 | The value of `zero_abundance_as` (default 0) |
+
+Below, ten elevation cells are emptied. The covariate matrix keeps them
+as missing values, and the model reads them through the flag.
+
+``` r
+
+gappy <- plots
+gappy$elevation[1:10] <- NA
+with_gaps <- resolve.dataset.frame(
+  gappy, species,
+  roles = c(roles, list(covariates = "elevation")),
+  targets = list(habitat = list(task = "classification"))
+)
+sum(is.na(with_gaps$covariates()))
+#> [1] 10
+```
+
+``` python
+gappy = plots.copy()
+gappy.loc[:9, "elevation"] = None
+roles.covariates = ["elevation"]
+with_gaps = rc.ResolveDataset.from_pandas(
+    gappy, species, roles, [rc.TargetSpec.classification("habitat", 0)])
+roles.covariates = []
+int(with_gaps.covariates.isnan().sum())
+#> 10
+```
+
+An abundance of exactly 0 is read as 0 by default. A table that records
+some species as present with a cover of 0 can set `zero_abundance_as` to
+the weight such a record should carry.
+
+## Targets labelled on some plots
+
+With several targets, the default drops every plot that lacks the label
+of any one of them. In the survey below the habitat labels of the first
+50 plots are removed; with the default only the 100 labelled plots
+remain, elevation labels included.
+
+Setting `missing` to `"mask"` on a target keeps a plot without its
+label. Such a plot trains the shared part of the model through the
+targets it is labelled for, and is left out of the masked target’s loss,
+class list, scaling and metrics. A plot labelled for no target is
+dropped either way.
+
+``` r
+
+partly <- plots
+partly$habitat[1:50] <- NA
+
+dropped <- resolve.dataset.frame(
+  partly, species, roles = roles,
+  targets = list(elevation = list(task = "regression"),
+                 habitat = list(task = "classification"))
+)
+masked <- resolve.dataset.frame(
+  partly, species, roles = roles,
+  targets = list(elevation = list(task = "regression"),
+                 habitat = list(task = "classification", missing = "mask"))
+)
+c(dropped = dropped$n_plots(), masked = masked$n_plots())
+#> dropped  masked 
+#>     100     150
+```
+
+``` python
+partly = plots.copy()
+partly.loc[:49, "habitat"] = None
+
+habitat = rc.TargetSpec.classification("habitat", 0)
+dropped = rc.ResolveDataset.from_pandas(
+    partly, species, roles, [rc.TargetSpec.regression("elevation"), habitat])
+
+habitat.missing = rc.TargetMissingPolicy.Mask
+masked = rc.ResolveDataset.from_pandas(
+    partly, species, roles, [rc.TargetSpec.regression("elevation"), habitat])
+dropped.n_plots, masked.n_plots
+#> (100, 150)
+```
+
+A masked target reports `n_labelled` beside its metrics: the number of
+held-out plots it was scored on. The *held-out* plots are the share of
+plots training sets aside to check the model on; [Training and reading
+the fit](https://gillescolling.com/resolve/articles/training.md)
+describes them.
+
+``` r
+
+fit <- resolve.train.dataset(masked, maxEpochs = 50L, verbose = FALSE)
+fit$result$final_metrics$habitat$n_labelled
+#> [1] 23
+```
+
+``` python
+config = rc.TrainConfig()
+config.max_epochs = 50
+trainer = rc.Trainer(rc.ResolveModel(masked.schema), config)
+trainer.prepare_data(masked)
+result = trainer.fit()
+result.final_metrics["habitat"]["n_labelled"]
+#> 23.0
+```
+
+Within a batch, a masked target’s loss is the mean over the rows that
+carry its label, and a batch without any of them adds nothing for that
+target.
+
+## One long table
+
+When every species row carries its plot’s values, a single table can
+replace the two. The loader reads the plot-level columns, coordinates
+and targets, from each plot’s first row. A single table carries no
+covariates or categoricals; the loader warns and ignores them when the
+roles name any.
+
+``` r
+
+long <- merge(species, plots, by = "plot_id")
+from_long <- resolve.dataset.frame(
+  long, roles = roles,
+  targets = list(elevation = list(task = "regression"))
+)
+from_long$n_plots()
+#> [1] 150
+```
+
+``` python
+long = species.merge(plots, on="plot_id")
+from_long = rc.ResolveDataset.from_pandas(
+    long, None, roles, [rc.TargetSpec.regression("elevation")])
+from_long.n_plots
+#> 150
+```
+
+## Files or data frames
+
+The loader reads CSV files as well as data frames already in memory.
+Both run the same engine code, and a data frame gives the dataset the
+CSV it would be written to would give. Loading from memory saves writing
+a filtered header to disk before each fit. The species table can also
+stay a file path while the header is a data frame; the file is then read
+once from disk.
+
+``` r
+
+elevation <- list(elevation = list(task = "regression"))
+header_csv <- file.path(tempdir(), "plots.csv")
+species_csv <- file.path(tempdir(), "species.csv")
+write.csv(plots, header_csv, row.names = FALSE)
+write.csv(species, species_csv, row.names = FALSE)
+
+from_files <- resolve.dataset.csv(header_csv, species_csv, roles = roles,
+                                  targets = elevation)
+from_frames <- resolve.dataset.frame(plots, species, roles = roles,
+                                     targets = elevation)
+identical(from_files$hash_embedding(), from_frames$hash_embedding())
+#> [1] TRUE
+```
+
+``` python
+import os, tempfile, torch
+
+header_csv = os.path.join(tempfile.gettempdir(), "plots.csv")
+species_csv = os.path.join(tempfile.gettempdir(), "species.csv")
+plots.to_csv(header_csv, index=False)
+species.to_csv(species_csv, index=False)
+
+elevation = [rc.TargetSpec.regression("elevation")]
+from_files = rc.ResolveDataset.from_csv(header_csv, species_csv, roles, elevation)
+from_frames = rc.ResolveDataset.from_pandas(plots, species, roles, elevation)
+torch.equal(from_files.hash_embedding, from_frames.hash_embedding)
+#> True
+```
+
+## Checking what was loaded
+
+The *schema* describes the dataset the loader produced: the plot count
+after any drops, the size of each vocabulary, the inputs and the
+targets. Comparing its plot count with the rows of the header shows how
+many plots were dropped. Every vocabulary count includes the reserved
+unknown slot at index 0.
+
+``` r
+
+schema <- two_targets$schema()
+unlist(schema[c("n_plots", "n_species", "n_species_vocab",
+                "n_genera", "n_families")])
+#>         n_plots       n_species n_species_vocab        n_genera      n_families 
+#>             150              25              26              23              11
+unlist(schema[c("has_coordinates", "has_abundance", "has_taxonomy")])
+#> has_coordinates   has_abundance    has_taxonomy 
+#>            TRUE            TRUE            TRUE
+head(schema$species_vocab, 3)
+#> [1] "<UNK>"               "Acer pseudoplatanus" "Silene acaulis"
+```
+
+``` python
+schema = two_targets.schema
+{name: getattr(schema, name) for name in
+ ["n_plots", "n_species", "n_species_vocab", "n_genera", "n_families"]}
+#> {'n_plots': 150, 'n_species': 25, 'n_species_vocab': 26, 'n_genera': 23, 'n_families': 11}
+{name: getattr(schema, name) for name in
+ ["has_coordinates", "has_abundance", "has_taxonomy"]}
+#> {'has_coordinates': True, 'has_abundance': True, 'has_taxonomy': True}
+schema.species_vocab[:3]
+#> ['<UNK>', 'Acer pseudoplatanus', 'Silene acaulis']
+```
+
+The schema also records the loader settings the dataset was built with,
+under `dataset_config`, and a saved model carries the schema of its
+training data.
+
+## Reusing a training vocabulary
+
+A *vocabulary* lists the names a dataset knows and gives each an integer
+code; the species, genus, family and categorical embeddings are tables
+indexed by these codes. Each dataset builds its own vocabulary, so the
+same species can get different codes in two datasets. New plots
+therefore have to be encoded against the training vocabulary, or a
+species looks up another species’ row.
+
+The split below trains on the first 100 plots and keeps the other 50 as
+new plots. The `embed` encoding, which looks up one embedding per
+species, shows the effect; [Encoding the species
+set](https://gillescolling.com/resolve/articles/encoding.md) describes
+it.
+
+``` r
+
+train_ids <- plots$plot_id[1:100]
+embed <- list(species_encoding = "embed")
+
+train_set <- resolve.dataset.frame(
+  plots[plots$plot_id %in% train_ids, ], species,
+  roles = roles, targets = elevation, config = embed
+)
+own_vocab <- resolve.dataset.frame(
+  plots[!plots$plot_id %in% train_ids, ], species,
+  roles = roles, targets = elevation, config = embed
+)
+train_vocab <- resolve.dataset.frame(
+  plots[!plots$plot_id %in% train_ids, ], species,
+  roles = roles, targets = elevation, config = embed,
+  schemaSource = train_set
+)
+c(train = train_set$n_plots(), new = train_vocab$n_plots())
+#> train   new 
+#>   100    50
+```
+
+``` python
+config = rc.DatasetConfig()
+config.species_encoding = rc.SpeciesEncodingMode.Embed
+elevation = [rc.TargetSpec.regression("elevation")]
+is_train = plots["plot_id"].isin(plots["plot_id"][:100])
+
+train_set = rc.ResolveDataset.from_pandas(
+    plots[is_train], species, roles, elevation, config)
+own_vocab = rc.ResolveDataset.from_pandas(
+    plots[~is_train], species, roles, elevation, config)
+train_vocab = rc.ResolveDataset.from_pandas(
+    plots[~is_train], species, roles, elevation, config,
+    schema_source=train_set)
+train_set.n_plots, train_vocab.n_plots
+#> (100, 50)
+```
+
+A saved model checks the vocabulary of every dataset it predicts. The
+set built with its own vocabulary is refused; the set built against the
+training vocabulary is predicted.
+
+``` r
+
+fit <- resolve.train.dataset(train_set, maxEpochs = 50L, verbose = FALSE)
+model_path <- file.path(tempdir(), "model.pt")
+resolve.save(fit$trainer, model_path)
+predictor <- resolve.load(model_path)
+
+resolve.predict.dataset(predictor, own_vocab)
+#> Error:
+#> ! Predictor::predict: the dataset's species vocabulary is not the one the model was trained with (code 1 is 'Acer pseudoplatanus' in the model but 'Quercus petraea' in the dataset). Its integer codes therefore index the wrong embedding rows, which would produce wrong predictions with no error. Build the dataset in the model's namespace: ResolveDataset::from_csv_with_vocabs(header, species, roles, targets, predictor.external_vocabs(), dataset_config_from_checkpoint(predictor.schema(), predictor.model()->config())).
+```
+
+``` python
+config = rc.TrainConfig()
+config.max_epochs = 50
+model = rc.ResolveModel(
+    train_set.schema,
+    rc.model_config_for_dataset(train_set, rc.ModelConfig()))
+trainer = rc.Trainer(model, config)
+trainer.prepare_data(train_set)
+trainer.fit();
+model_path = os.path.join(tempfile.gettempdir(), "model.pt")
+trainer.save(model_path)
+predictor = rc.Predictor.load(model_path)
+
+predictor.predict_dataset(own_vocab)
+#> RuntimeError: Predictor::predict: the dataset's species vocabulary is not the one the model was trained with (code 1 is 'Acer pseudoplatanus' in the model but 'Quercus petraea' in the dataset). Its integer codes therefore index the wrong embedding rows, which would produce wrong predictions with no error. Build the dataset in the model's namespace: ResolveDataset::from_csv_with_vocabs(header, species, roles, targets, predictor.external_vocabs(), dataset_config_from_checkpoint(predictor.schema(), predictor.model()->config())).
+```
+
+``` r
+
+preds <- resolve.predict.dataset(predictor, train_vocab)
+length(preds$predictions$elevation)
+#> [1] 50
+```
+
+``` python
+preds = predictor.predict_dataset(train_vocab)
+len(preds.predictions["elevation"])
+#> 50
+```
+
+When the training data is no longer at hand, the saved model supplies
+the vocabularies and the loader settings itself. New plots are then
+loaded with them.
+
+``` r
+
+new_csv <- file.path(tempdir(), "new_plots.csv")
+write.csv(plots[!plots$plot_id %in% train_ids, ], new_csv, row.names = FALSE)
+
+new_plots <- resolve.dataset.csv(
+  new_csv, species_csv, roles = roles, targets = list(),
+  vocabs = predictor$vocabs(), config = predictor$dataset_config()
+)
+preds <- resolve.predict.dataset(predictor, new_plots)
+head(round(preds$predictions$elevation))
+#> [1]  901 1088 1092 1538 1333 1040
+```
+
+``` python
+new_csv = os.path.join(tempfile.gettempdir(), "new_plots.csv")
+plots[~is_train].to_csv(new_csv, index=False)
+
+new_plots = rc.ResolveDataset.from_csv_with_vocabs(
+    new_csv, species_csv, roles, [],
+    predictor.external_vocabs, predictor.dataset_config)
+preds = predictor.predict_dataset(new_plots)
+preds.predictions["elevation"][:6].round()
+#> tensor([1022., 1268., 1447., 1570., 1160., 1017.])
+```
+
+A dataset built to be predicted needs no target, so the target list is
+empty here. [Predicting new
+plots](https://gillescolling.com/resolve/articles/prediction.md)
+continues from this point.
+
+## Next steps
+
+- [Encoding the species
+  set](https://gillescolling.com/resolve/articles/encoding.md): the five
+  encodings and the settings of each.
+- [Training and reading the
+  fit](https://gillescolling.com/resolve/articles/training.md): the
+  training settings, the held-out plots and cross-validation.
+- [Predicting new
+  plots](https://gillescolling.com/resolve/articles/prediction.md):
+  output formats, class probabilities and unseen species.

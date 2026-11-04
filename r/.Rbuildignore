@@ -15,3 +15,5 @@
 ^_.*\.(R|log)$
 ^data-raw$
 ^README\.Rmd$
+^vignettes/articles$
+^CITATION\.cff$

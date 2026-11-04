@@ -1,0 +1,24 @@
+pandoc: 3.9.0.2
+pkgdown: 2.2.1
+pkgdown_sha: ~
+articles:
+  articles/command-line: command-line.html
+  articles/data-preparation: data-preparation.html
+  articles/embeddings: embeddings.html
+  articles/encoding: encoding.html
+  articles/installation: installation.html
+  articles/performance: performance.html
+  articles/prediction: prediction.html
+  articles/python-data: python-data.html
+  articles/python-engine: python-engine.html
+  articles/python-prediction: python-prediction.html
+  articles/python-reference: python-reference.html
+  articles/python-scoring: python-scoring.html
+  articles/python-suites: python-suites.html
+  articles/python-training: python-training.html
+  resolveR: resolveR.html
+  articles/training: training.html
+last_built: 2026-11-04T11:51Z
+urls:
+  reference: https://gillescolling.com/resolve/reference
+  article: https://gillescolling.com/resolve/articles

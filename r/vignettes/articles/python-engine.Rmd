@@ -1,0 +1,141 @@
+---
+title: "Python: the engine"
+---
+
+<!-- Python blocks run by tools/python_twins.py (md5 cf36e5edb179b48e2b180eb9df889249). -->
+
+The engine loaded, the GPU memory and thread settings, how a native fault and a storage failure surface, and the index that matches names within a few edits, such as species names with spelling variants.
+
+[All of the Python reference](python-reference.html)
+
+## Installation
+
+::: {.lang-pair}
+```{r, eval = FALSE}
+# install.packages("pak")
+pak::pak("gcol33/resolve/r")
+
+# The engine library, downloaded once
+library(resolveR)
+resolve.install_backend()
+```
+
+```bash
+pip install resolve-core
+```
+:::
+
+[Installing the engine](installation.html) covers the GPU build and building from source; [Large data and GPUs](performance.html) the memory settings in use.
+
+## `__version__` {#__version__}
+
+The version of the engine loaded, read from the compiled extension.
+
+```python
+import resolve_core as rc
+
+rc.__version__
+```
+
+## `set_vram_fraction()` {#set_vram_fraction}
+
+```python
+set_vram_fraction(fraction, device_index=-1)
+```
+
+Caps the PyTorch CUDA caching allocator at `fraction` of the GPU's memory, in `(0, 1]`; `1.0` removes the cap. `device_index=-1` is the current CUDA device. Without a CUDA device it does nothing. The `vram_fraction` settings of `TrainConfig`, the pretraining configs and `Predictor.load` apply the same cap.
+
+```python
+rc.set_vram_fraction(1.0)
+```
+
+## `configure_cuda_allocator()` {#configure_cuda_allocator}
+
+```python
+configure_cuda_allocator(force=False)
+```
+
+Sets the environment variable `PYTORCH_CUDA_ALLOC_CONF`, which the CUDA allocator reads at the first allocation on a GPU, to the engine's default and returns the setting in effect. A value already set is kept unless `force` is true. Importing `resolve_core` calls it, so it takes effect for any process that has not yet used the GPU.
+
+```python
+rc.configure_cuda_allocator()
+```
+
+## `default_cuda_alloc_conf()` {#default_cuda_alloc_conf}
+
+```python
+default_cuda_alloc_conf()
+```
+
+The engine's default `PYTORCH_CUDA_ALLOC_CONF`: unused cached blocks are released once use passes 0.8 of the memory the allocator may take, and blocks above 256 MB are not split, which keep the fragmentation of Windows' display driver model in check, with expandable segments added on other systems.
+
+```python
+rc.default_cuda_alloc_conf()
+```
+
+## `set_thread_pools()` {#set_thread_pools}
+
+```python
+set_thread_pools(intraop_threads, interop_threads=-1)
+```
+
+Sets the number of threads libtorch uses within one operation (`intraop_threads`) and across operations (`interop_threads`); a value of 0 or below keeps the default. Call it at startup, before the first tensor operation.
+
+```python
+rc.set_thread_pools(4)
+```
+
+## `install_crash_handler()` {#install_crash_handler}
+
+```python
+install_crash_handler(shutdown_exit_code=0)
+```
+
+On Windows, installs a handler that ends the process at once with a non-zero exit code when native code faults, where Windows would otherwise wait on its debugger, so a headless worker fails fast. A fault after the work has finished, during the teardown of a clean interpreter exit, exits with `shutdown_exit_code` instead. Importing `resolve_core` installs it and marks the work finished at a clean exit. It does nothing on other systems, and a second call only updates `shutdown_exit_code`.
+
+## `StorageError` {#StorageError}
+
+The exception for a file the engine cannot read or write: a checkpoint `Predictor.load` or `Trainer.load` cannot open, a failed `Trainer.save`, a CSV file that cannot be opened. It is a subclass of `OSError`. The engine retries such I/O a few times before raising, with a backoff that doubles each try; the environment variables `RESOLVE_IO_RETRY_ATTEMPTS` (total tries, default 3) and `RESOLVE_IO_RETRY_BACKOFF_MS` (the first wait, default 100) set them.
+
+```python
+import os
+import tempfile
+
+try:
+    rc.Predictor.load(os.path.join(tempfile.mkdtemp(), "missing.pt"))
+except rc.StorageError as error:
+    isinstance(error, OSError)
+```
+
+## `fuzzy` {#fuzzy}
+
+The submodule of the name index: `fuzzy.FuzzyIndex` and `fuzzy.Match`. It matches strings by Damerau-Levenshtein distance: the number of single-character insertions, deletions, substitutions and swaps of two adjacent characters that turn one string into the other.
+
+## `fuzzy.FuzzyIndex` {#fuzzy.FuzzyIndex}
+
+```python
+fuzzy.FuzzyIndex.build(entries, max_edit_distance=3, bucket_fn=None,
+                       case_insensitive=True, damerau=True)
+```
+
+An index over a list of strings, such as the species names of a vocabulary, that returns the entries within a few edits of a query. `max_edit_distance` is the largest distance a query may ask for. `bucket_fn`, a function of an entry, puts each entry in a bucket, such as its genus; a query that names a bucket searches it first. `case_insensitive` ignores case; `damerau=False` counts a swap of adjacent characters as two edits. The distances are counted in Unicode characters.
+
+Methods:
+
+- `query(needle, max_edit_distance=2, top_n=5, bucket_hint=None)`: the `top_n` entries within `max_edit_distance` of `needle`, as `Match`es sorted by distance, then by entry position. With `bucket_hint`, the matches in that bucket are returned when there are any; otherwise the whole index is searched.
+- `query_batch(needles, max_edit_distance=2, top_n=5, bucket_fn=None, bucket_hint=None)`: `query` over a list of needles, on several threads. `bucket_fn` gives each needle its bucket hint; otherwise `bucket_hint` is used for every needle.
+
+Attributes: `bucket_count` and `max_supported_distance`.
+
+```python
+names = ["Carex curvula", "Carex firma", "Salix herbacea"]
+index = rc.fuzzy.FuzzyIndex.build(names)
+[(m.entry, m.distance) for m in index.query("Carex curvla")]
+
+by_genus = rc.fuzzy.FuzzyIndex.build(names, bucket_fn=lambda s: s.split()[0])
+[m.entry for m in by_genus.query("Carex firmus", bucket_hint="Carex")]
+```
+
+## `fuzzy.Match` {#fuzzy.Match}
+
+One match a query returns: `entry` (the matched string, in its original case), `id` (its position in the list passed to `build`) and `distance`.
