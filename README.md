@@ -298,7 +298,7 @@ Pull requests are welcome; see the [contributing guide](https://github.com/gcol3
 
 > "Software is like sex: it's better when it's free." — Linus Torvalds
 
-I'm a PhD student who builds packages in my free time because I believe good tools should be free and open. I started these projects for my own work and figured others might find them useful too.
+I'm a PhD student who builds R packages in my free time because I believe good tools should be free and open. I started these projects for my own work and figured others might find them useful too.
 
 If this package saved you some time, buying me a coffee is a nice way to say thanks. It helps with my coffee addiction.
 
