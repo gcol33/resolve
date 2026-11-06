@@ -57,8 +57,8 @@ std::pair<double, double> softmax2(double a, double b) {
 
 TEST_CASE("nearest_by_cosine is the exact top k over several reference blocks", "[retrieval]") {
     torch::manual_seed(7);
-    // 5000 queries make a block of 3355 reference rows, so 10000 reference
-    // rows are searched in three blocks.
+    // 5000 queries are searched in two blocks of at most 4096 rows, each
+    // against 10000 reference rows in three blocks of at most 4096.
     const torch::Tensor queries = torch::randn({5000, 8});
     const torch::Tensor reference = torch::randn({10000, 8});
     const int64_t k = 7;
@@ -87,6 +87,82 @@ TEST_CASE("nearest_by_cosine clamps k to the reference and refuses bad shapes", 
                     std::invalid_argument);
     CHECK_THROWS_AS(nearest_by_cosine(torch::ones({3, 2}), compass_latents(), 0),
                     std::invalid_argument);
+    CHECK_THROWS_AS(nearest_by_cosine(torch::ones({3, 2}, torch::kInt64), compass_latents(), 1),
+                    std::invalid_argument);
+    CHECK_THROWS_AS(nearest_by_cosine(torch::ones({3, 2}).to_sparse(), compass_latents(), 1),
+                    std::invalid_argument);
+}
+
+TEST_CASE("nearest_by_cosine leaves each plot out of its own neighbours, never its duplicates",
+          "[retrieval]") {
+    torch::manual_seed(11);
+    // 5000 plots: two blocks of queries and two of reference rows, so the
+    // pairs left out lie in two different blocks. Plot 1 repeats plot 0, and
+    // plot 4500 (second block) repeats plot 3 (first block).
+    torch::Tensor plots = torch::randn({5000, 6}, torch::kFloat64);
+    plots[1].copy_(plots[0]);
+    plots[4500].copy_(plots[3]);
+    const int64_t k = 5;
+
+    const Neighbours found = nearest_by_cosine(plots, plots, k, /*exclude_self=*/true);
+    REQUIRE(found.indices.sizes() == std::vector<int64_t>{5000, k});
+
+    const torch::Tensor unit = torch::nn::functional::normalize(
+        plots.to(torch::kFloat32), torch::nn::functional::NormalizeFuncOptions().dim(1));
+    torch::Tensor all = unit.matmul(unit.t());
+    all.fill_diagonal_(-std::numeric_limits<float>::infinity());
+    const auto [expected_similarities, expected_indices] = all.topk(k, 1);
+
+    const torch::Tensor own_row = torch::arange(5000, torch::kInt64).unsqueeze(1);
+    CHECK_FALSE(found.indices.eq(own_row).any().item<bool>());
+    // A duplicate pair ties for some queries, so the check is that every
+    // returned row has the similarity reported for it and that those are the
+    // k largest, rather than one order of tied rows.
+    CHECK(torch::allclose(all.gather(1, found.indices), found.similarities, 1e-5, 1e-6));
+    CHECK(torch::allclose(found.similarities, expected_similarities, 1e-5, 1e-6));
+
+    CHECK(found.indices[0][0].item<int64_t>() == 1);
+    CHECK(found.indices[1][0].item<int64_t>() == 0);
+    CHECK(found.indices[3][0].item<int64_t>() == 4500);
+    CHECK(found.indices[4500][0].item<int64_t>() == 3);
+    CHECK_THAT(found.similarities[4500][0].item<double>(), WithinAbs(1.0, 1e-5));
+}
+
+TEST_CASE("nearest_by_cosine with exclude_self clamps k below the plot count", "[retrieval]") {
+    const Neighbours found = nearest_by_cosine(compass_latents(), compass_latents(), 10, true);
+    REQUIRE(found.indices.size(1) == 3);
+    // Plot 0 at 0 degrees: its neighbours at 90 and 270 degrees tie, then 180.
+    CHECK(found.indices[0][2].item<int64_t>() == 2);
+    CHECK_FALSE(found.indices.eq(torch::arange(4, torch::kInt64).unsqueeze(1)).any().item<bool>());
+
+    const torch::Tensor single = torch::tensor({1.0f, 0.0f}).reshape({1, 2});
+    CHECK(nearest_by_cosine(single, single, 3, true).indices.sizes() ==
+          std::vector<int64_t>{1, 0});
+    CHECK_THROWS_AS(nearest_by_cosine(single, compass_latents(), 1, true), std::invalid_argument);
+}
+
+TEST_CASE("nearest_by_cosine runs on the reference's device with queries in host memory",
+          "[retrieval]") {
+    if (!torch::cuda::is_available()) SKIP("needs a CUDA device");
+    torch::manual_seed(3);
+    const torch::Tensor queries = torch::randn({300, 16});
+    const torch::Tensor reference = torch::randn({2000, 16});
+    const Neighbours on_host = nearest_by_cosine(queries, reference, 8);
+    // A trained model leaves TF32 on for cuBLAS; the search stays float32.
+    const bool tf32 = at::globalContext().allowTF32CuBLAS();
+    at::globalContext().setAllowTF32CuBLAS(true);
+    const Neighbours on_device = nearest_by_cosine(queries, reference.to(torch::kCUDA), 8);
+    CHECK(at::globalContext().allowTF32CuBLAS());
+    at::globalContext().setAllowTF32CuBLAS(tf32);
+    REQUIRE(on_device.indices.device().is_cuda());
+    CHECK(torch::allclose(on_device.similarities.cpu(), on_host.similarities, 1e-5, 1e-6));
+    CHECK(torch::equal(on_device.indices.cpu(), on_host.indices));
+    const Neighbours left_out =
+        nearest_by_cosine(reference.to(torch::kCUDA), reference.to(torch::kCUDA), 8, true);
+    CHECK_FALSE(left_out.indices.cpu()
+                    .eq(torch::arange(2000, torch::kInt64).unsqueeze(1))
+                    .any()
+                    .item<bool>());
 }
 
 TEST_CASE("RetrievalConfig validates its fields", "[retrieval]") {

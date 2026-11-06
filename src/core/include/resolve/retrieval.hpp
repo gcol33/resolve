@@ -46,18 +46,35 @@ struct RetrievalConfig {
     void validate() const;
 };
 
-// The k rows of `reference` most similar to each row of `queries` by cosine
-// similarity, most similar first. Both are (rows, dim) on one device; k is
-// clamped to the reference size. Exact: the similarities are computed in
-// blocks of at most kBlockElements and merged into a running top k, so memory
-// stays bounded whatever the reference size.
+// The neighbours of each query row, most similar first.
 struct Neighbours {
     torch::Tensor indices;       // (n_queries, k) int64 rows of `reference`
     torch::Tensor similarities;  // (n_queries, k) float32 cosine similarities
 };
+
+// The k rows of `reference` most similar to each row of `queries` by cosine
+// similarity, most similar first. Both are dense (rows, dim) matrices of one
+// dim, any floating type (computed in float32). The search runs on the device
+// `reference` is on, and the result lives there; `queries` may sit elsewhere
+// (a large query set in host memory) and is moved over one block of rows at a
+// time.
+//
+// With `exclude_self`, queries and reference are the same plots in the same
+// order: query row i is reference row i and is never returned as its own
+// neighbour, while any other row, one with identical values included (a plot
+// with the same species list), is. This is the leave-one-out search over one
+// set of plots; pass the same tensor twice.
+//
+// k is clamped to the reference size (one less under `exclude_self`). Exact:
+// the similarities are computed in blocks of at most kQueryBlockRows query rows
+// and kBlockElements values, each merged into a running top k, so memory stays
+// bounded whatever the size of either set. Throws std::invalid_argument for
+// shapes that do not match, a sparse input, k < 1, or `exclude_self` with
+// different row counts.
 [[nodiscard]] Neighbours nearest_by_cosine(const torch::Tensor& queries,
                                            const torch::Tensor& reference,
-                                           int64_t k);
+                                           int64_t k,
+                                           bool exclude_self = false);
 
 // The reference plots of a retrieval: their latents and their labels for each
 // target of a model.
@@ -65,6 +82,9 @@ class RetrievalIndex {
 public:
     // Elements of one block of the similarity matrix (queries x reference).
     static constexpr int64_t kBlockElements = int64_t{1} << 24;
+    // Query rows of one block: fewer queries search the reference in one
+    // pass, more in successive blocks of this many rows.
+    static constexpr int64_t kQueryBlockRows = 4096;
 
     // `latents` (n_reference, latent_dim); `labels` holds for every target of
     // `targets` its (n_reference,) labels: regression values in original units
