@@ -199,6 +199,19 @@ RetrievalConfig()
 
 The settings of `Predictor.set_retrieval`: `k_neighbors` (`int`, default `96`), the reference plots each prediction reads; `alpha` (`float`, default `0.3`), the neighbours' share of the blend; `temperature` (`float`, default `1.0`), of the softmax over cosine similarity. `validate()` raises for a value out of range.
 
+## `nearest_by_cosine()` {#nearest_by_cosine}
+
+```python
+nearest_by_cosine(queries, reference, k, exclude_self=False)
+```
+
+The search `set_retrieval` runs, on any rows: for each row of `queries`, the `k` rows of `reference` most similar to it by cosine similarity, most similar first. Both are dense `(rows, dim)` tensors of one `dim`; a numpy array goes through `torch.from_numpy`. On rows of species presence (1 where a plot records a species) the cosine similarity is the Ochiai index of two species lists. The search is exact and computed in blocks, so memory stays bounded whatever the size of either set. It runs on the device `reference` is on; `queries` may stay in host memory and is moved over a block of rows at a time. With `exclude_self=True`, `queries` and `reference` are the same plots in the same order (pass the same tensor twice): plot `i` is never returned as its own neighbour, while another plot with the same species list still is. `k` is clamped to the reference size, one less with `exclude_self`. Returns `(indices, similarities)`: `(n_queries, k)` int64 rows of `reference` and their float32 similarities, on the CPU.
+
+```python
+rows = torch.from_numpy(presence.astype("float32")).cuda()
+indices, similarities = rc.nearest_by_cosine(rows, rows, 50, exclude_self=True)
+```
+
 ## `Scalers` {#Scalers}
 
 The scaling fitted on the fitting plots, which a predictor applies to new plots: `continuous_mean` and `continuous_scale` (one entry per column of the continuous block), `continuous_fill` (the value a missing cell of each column reads as before scaling; `None` for a checkpoint written before missing cells were filled) and `target_scalers` (`dict` of regression target to its `(mean, scale)`).

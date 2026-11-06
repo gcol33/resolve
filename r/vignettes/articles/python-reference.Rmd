@@ -287,6 +287,9 @@ Checkpoints, what they record about the run, and predictions for new plots.
 [`RetrievalConfig`](python-prediction.html#RetrievalConfig)
 : The settings of retrieval augmentation.
 
+[`nearest_by_cosine()`](python-prediction.html#nearest_by_cosine)
+: The rows of a reference set most similar to each query row by cosine similarity.
+
 [`Scalers`](python-prediction.html#Scalers)
 : The input and target scaling fitted on the training plots.
 

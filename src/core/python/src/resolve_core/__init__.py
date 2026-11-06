@@ -114,6 +114,8 @@ try:
         Trainer,
         # Inference
         Predictor,
+        # Exact cosine nearest-neighbour search
+        nearest_by_cosine,
         # Metrics
         Metrics,
         ClassificationMetrics,
@@ -309,6 +311,8 @@ __all__ = [
     "Trainer",
     # Inference
     "Predictor",
+    # Exact cosine nearest-neighbour search
+    "nearest_by_cosine",
     # Metrics
     "Metrics",
     "ClassificationMetrics",

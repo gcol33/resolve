@@ -8,6 +8,7 @@
 // - bindings_pretraining.cpp: self-supervised pretraining
 // - bindings_fuzzy.cpp: the fuzzy string index
 // - bindings_suite.cpp: model suites, their manifest and results
+// - bindings_retrieval.cpp: the exact cosine nearest-neighbour search
 
 #include "bindings_common.hpp"
 #include "resolve/io_retry.hpp"
@@ -36,6 +37,7 @@ NB_MODULE(_resolve_core, m) {
     register_pretraining(m);
     register_fuzzy(m);
     register_suite(m);
+    register_retrieval(m);
 
     m.def("default_cuda_alloc_conf", &resolve::default_cuda_alloc_conf,
           "The PYTORCH_CUDA_ALLOC_CONF value RESOLVE sets: garbage collection at\n"

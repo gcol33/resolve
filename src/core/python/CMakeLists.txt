@@ -114,6 +114,7 @@ set(BINDING_SOURCES
     src/bindings_pretraining.cpp
     src/bindings_fuzzy.cpp
     src/bindings_suite.cpp
+    src/bindings_retrieval.cpp
 )
 nanobind_add_module(_resolve_core ${BINDING_SOURCES})
 
