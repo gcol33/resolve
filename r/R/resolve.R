@@ -708,7 +708,8 @@ resolve.dataset.frame <- function(header,
   hiddenDims = "hidden_dims", moeRouting = "moe_routing", moePlacement = "moe_placement",
   nExperts = "n_experts", expertHiddenDims = "expert_hidden_dims", moeTopK = "moe_top_k",
   moeNoiseStd = "moe_noise_std", moeAuxLossWeight = "moe_aux_loss_weight",
-  coverDropout = "cover_dropout", freezeComposition = "freeze_composition",
+  coverDropout = "cover_dropout", plotTotals = "plot_totals",
+  plotTotalsDropout = "plot_totals_dropout", freezeComposition = "freeze_composition",
   dModel = "d_model", nHeads = "n_heads", nAttentionLayers = "n_attention_layers",
   transformerFfDim = "transformer_ff_dim", transformerPooling = "transformer_pooling",
   transformerDropout = "transformer_dropout"
@@ -929,6 +930,11 @@ resolve.dataset.frame <- function(header,
 #'   to the task loss.
 #' @param coverDropout Cover-dropout rate applied to species cover values
 #'   in rank-pool / transformer encoding modes.
+#' @param plotTotals Add each plot's combined cover and species count to the
+#'   rank-pool / transformer features, with a flag saying they are present.
+#' @param plotTotalsDropout With \code{plotTotals}, the probability that a
+#'   training plot's totals are withheld, so the model also predicts plots
+#'   given without them (\code{\link{resolve.plot_totals}}).
 #' @param freezeComposition Keep the species, genus and family embedding tables
 #'   at their initialisation instead of learning them.
 #' @param dModel Model dimension for the transformer / rank-pool encoder.
@@ -1030,6 +1036,8 @@ resolve.train.dataset <- function(dataset,
                                   moeNoiseStd = NULL,
                                   moeAuxLossWeight = NULL,
                                   coverDropout = NULL,
+                                  plotTotals = NULL,
+                                  plotTotalsDropout = NULL,
                                   freezeComposition = NULL,
                                   dModel = NULL,
                                   nHeads = NULL,
@@ -1347,6 +1355,29 @@ resolve.fuzzy_index <- function(entries, maxEditDistance = NULL, caseInsensitive
     max_edit_distance = maxEditDistance, case_insensitive = caseInsensitive,
     damerau = damerau, buckets = if (is.null(buckets)) NULL else as.list(unname(buckets))
   )))
+}
+
+#' Give a model each plot's totals, or withhold them
+#'
+#' For a model trained with \code{plotTotals = TRUE}, sets whether
+#' \code{\link{resolve.predict.dataset}} gives it each plot's combined cover and
+#' species count (\code{TRUE}, the default) or withholds them (\code{FALSE}), as
+#' for a plot whose totals are unknown. A model trained with
+#' \code{plotTotalsDropout} has learned to predict both ways. Withholding them
+#' keeps a prediction from depending on how many species a plot records, for an
+#' analysis of species richness. No effect on a model without totals.
+#'
+#' @param predictor A predictor from \code{\link{resolve.load}}.
+#' @param use \code{TRUE} to give the totals, \code{FALSE} to withhold them.
+#' @return The predictor, invisibly.
+#' @export
+resolve.plot_totals <- function(predictor, use = TRUE) {
+  if (!inherits(predictor, "Rcpp_Predictor")) {
+    stop("predictor must be loaded with resolve.load()")
+  }
+  .resolve_require_backend()
+  predictor$set_plot_totals(isTRUE(use))
+  invisible(predictor)
 }
 
 

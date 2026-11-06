@@ -335,10 +335,15 @@ TEST_CASE("Every recorded encoder configuration loads and reproduces its outputs
         };
         int64_t n_model = 0;
         auto load = [&](const std::string& key, const torch::Tensor& t) {
-            ++n_model;
             torch::Tensor recorded;
             INFO(key);
-            REQUIRE(archive.try_read(key, recorded));
+            // A reference-row buffer of an input added after the fixture was
+            // recorded is absent from it, and loads empty, as from a checkpoint.
+            if (!archive.try_read(key, recorded)) {
+                REQUIRE(model->absent_buffer_is_empty(t));
+                return;
+            }
+            ++n_model;
             torch::NoGradGuard no_grad;
             if (is_data_buffer(t)) {
                 t.set_data(recorded.to(t.scalar_type()));

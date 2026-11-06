@@ -138,6 +138,7 @@ RESOLVE_SYM(resolve_value_t*, resolve_predictor_get_embeddings, (resolve_predict
 RESOLVE_SYM(int, resolve_predictor_optimize_for_inference, (resolve_predictor_t* p), (p))
 RESOLVE_SYM(int, resolve_predictor_set_retrieval, (resolve_predictor_t* p, const resolve_dataset_t* reference, const resolve_value_t* config, int64_t batch_size), (p, reference, config, batch_size))
 RESOLVE_SYM(int, resolve_predictor_clear_retrieval, (resolve_predictor_t* p), (p))
+RESOLVE_SYM(int, resolve_predictor_set_plot_totals, (resolve_predictor_t* p, int use), (p, use))
 RESOLVE_SYM(resolve_value_t*, resolve_predictor_get, (const resolve_predictor_t* p, const char* what), (p, what))
 
 /* ---- Model suite ---------------------------------------------------------- */

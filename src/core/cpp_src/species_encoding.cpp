@@ -661,6 +661,26 @@ std::vector<float> dense_rank_weights(const std::vector<float>& values) {
     return weights;
 }
 
+// RankPoolEncodedData::totals: per plot, the random-overlap combined cover of
+// every species it records (0 without cover) and log(1 + its species count).
+torch::Tensor plot_totals(const PlotAssemblages& assemblages, bool has_cover) {
+    const int64_t n_plots = assemblages.n_plots();
+    auto totals = torch::zeros({n_plots, 2}, torch::kFloat32);
+    auto rows = totals.accessor<float, 2>();
+    for (int64_t p = 0; p < n_plots; ++p) {
+        const auto ranking = assemblages.ranking(p);
+        if (has_cover) {
+            double uncovered = 1.0;
+            for (float cover : ranking) {
+                uncovered *= 1.0 - std::clamp(static_cast<double>(cover), 0.0, 100.0) / 100.0;
+            }
+            rows[p][0] = static_cast<float>(1.0 - uncovered);
+        }
+        rows[p][1] = static_cast<float>(std::log1p(static_cast<double>(ranking.size())));
+    }
+    return totals;
+}
+
 std::vector<float> pool_weights(std::vector<float> values, PoolWeighting weighting) {
     switch (weighting) {
         case PoolWeighting::Binary:
@@ -789,6 +809,7 @@ RankPoolEncodedData RankPoolEncoder::transform(const PlotAssemblages& assemblage
     const bool has_cover = has_abundance_column &&
                            assemblages.representation() == RepresentationMode::Abundance;
     out.has_cover = torch::full({n_plots}, has_cover ? 1.0f : 0.0f, torch::kFloat32);
+    out.totals = plot_totals(assemblages, has_cover);
 
     auto species = out.species_ids.accessor<int64_t, 2>();
     auto genus = out.genus_ids.accessor<int64_t, 2>();

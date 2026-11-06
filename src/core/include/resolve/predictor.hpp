@@ -149,6 +149,16 @@ public:
         return retrieval_ ? &*retrieval_ : nullptr;
     }
 
+    // For a model trained with ModelConfig::plot_totals: whether predict()
+    // and get_embeddings() give it each plot's totals (on, the default) or
+    // withhold them, as for a plot whose totals are unknown. A model trained
+    // with plot_totals_dropout has learned to predict both ways; one trained
+    // without has not. Withholding them keeps a prediction from depending on
+    // how many species a plot records, for an analysis of species richness.
+    // No effect on a model without plot_totals.
+    void set_plot_totals(bool use) noexcept { use_plot_totals_ = use; }
+    [[nodiscard]] bool plot_totals() const noexcept { return use_plot_totals_; }
+
     // Optimize model for inference (fuses BatchNorm into Linear layers)
     void optimize_for_inference();
 
@@ -223,6 +233,7 @@ private:
     CategoricalVocab categorical_vocab_;
     torch::Device device_;
     std::optional<RetrievalIndex> retrieval_;
+    bool use_plot_totals_ = true;
 };
 
 } // namespace resolve

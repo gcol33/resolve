@@ -16,7 +16,7 @@ namespace resolve {
 // Version and constants
 // =============================================================================
 
-inline constexpr const char* VERSION = "1.0.3";
+inline constexpr const char* VERSION = "1.1.0";
 
 // Training defaults
 constexpr int kDefaultBatchSize = 4096;
@@ -787,6 +787,17 @@ struct ModelConfig {
 
     // RankPool / Transformer shared
     float cover_dropout = 0.0f;
+
+    // RankPool / Transformer: add the plot's totals (PlotInputs::pool_totals:
+    // combined cover and log(1 + species count)) to the pooled features, with a
+    // flag saying whether they are present. Both encoders otherwise see a
+    // plot's species through weights that do not carry how many there are,
+    // and the rank-pool weights not how much they cover.
+    bool plot_totals = false;
+    // Under plot_totals, the probability that a training plot's totals are
+    // withheld (zeroed, flag cleared), so the model also predicts plots given
+    // without them (Predictor::set_plot_totals).
+    float plot_totals_dropout = 0.0f;
 
     // Keep the species, genus and family tables at their initialisation, so the
     // composition representation is fixed rather than learned

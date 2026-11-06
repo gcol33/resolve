@@ -188,7 +188,11 @@ RCPP_MODULE(resolve_module) {
                 "Blend predictions with the labels of the nearest reference plots")
         .method("clear_retrieval", &RPredictor::clear_retrieval,
                 "Back to the model's own predictions")
-        .method("retrieval", &RPredictor::retrieval, "The retrieval settings, or NULL");
+        .method("retrieval", &RPredictor::retrieval, "The retrieval settings, or NULL")
+        .method("set_plot_totals", &RPredictor::set_plot_totals,
+                "Give predict() each plot's combined cover and species count, or withhold them")
+        .method("plot_totals", &RPredictor::plot_totals,
+                "Whether predict() gives the model each plot's totals");
 
     class_<RFuzzyIndex>("FuzzyIndex")
         .method("query", &RFuzzyIndex::query, "Best matches of each needle")

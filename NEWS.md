@@ -1,5 +1,27 @@
 # RESOLVE Changelog
 
+## v1.1.0 (unreleased)
+
+### Added
+
+- **Plot totals as model inputs.** `ModelConfig.plot_totals` adds two numbers
+  per plot to the rank-pool and transformer features: the combined cover of
+  every species the plot records, taken as overlapping at random
+  (1 - prod(1 - cover / 100)), and log(1 + its species count), with a flag
+  saying they are present. Both are counted before any species budget or cap.
+  The rank-pool encoding's weights sum to one over each plot and the
+  transformer's attention pooling averages over its species, so neither saw
+  how many species a plot holds, and the rank-pool encoding not how much they
+  cover. A plot read without cover (no abundance column, or under cover
+  dropout) has a combined cover of 0. `ModelConfig.plot_totals_dropout`
+  withholds a training plot's totals at the given probability, so the model
+  also predicts without them; `Predictor.plot_totals = False` (Python),
+  `resolve.plot_totals(predictor, FALSE)` (R) or
+  `resolve_predictor_set_plot_totals` (C ABI) then withholds them at
+  prediction. Off by default: a model without it is built and trained exactly
+  as before, and older checkpoints load unchanged.
+  `ResolveDataset.pool_totals` exposes the per-plot values.
+
 ## v1.0.3 (2026-10-25)
 
 ### Fixed

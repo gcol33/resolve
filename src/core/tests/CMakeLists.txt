@@ -72,6 +72,7 @@ add_executable(resolve_tests
     test_data_buffers.cpp
     test_cross_validation.cpp
     test_rank_pool_encoder.cpp
+    test_plot_totals.cpp
     test_transformer_encoder.cpp
     test_mlm_pretrain.cpp
     test_spatial_cv.cpp

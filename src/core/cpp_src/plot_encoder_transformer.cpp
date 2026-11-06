@@ -21,7 +21,9 @@ public:
           d_model_(spec.config.d_model),
           pooling_(spec.config.transformer_pooling),
           aggregation_(spec.aggregation),
-          cover_dropout_(spec.config.cover_dropout) {
+          cover_dropout_(spec.config.cover_dropout),
+          plot_totals_(spec.config.plot_totals),
+          plot_totals_dropout_(spec.config.plot_totals_dropout) {
         const auto& config = spec.config;
         weight_proj_ = owner.register_module(
             "weight_proj", torch::nn::Linear(torch::nn::LinearOptions(1, d_model_).bias(false)));
@@ -83,7 +85,9 @@ public:
         }
     }
 
-    [[nodiscard]] int64_t width() const noexcept override { return d_model_ + 1; }
+    [[nodiscard]] int64_t width() const noexcept override {
+        return d_model_ + 1 + (plot_totals_ ? kPlotTotalsWidth : 0);
+    }
     [[nodiscard]] int d_model() const noexcept { return static_cast<int>(d_model_); }
 
     torch::Tensor forward(const PlotInputs& inputs, bool training) override {
@@ -128,7 +132,12 @@ public:
             }
         }
         if (taxonomy_pooled()) add_taxonomy_summary(pooled, pool);
-        return torch::cat({pooled, pool.has_cover.unsqueeze(-1)}, /*dim=*/1);
+        std::vector<torch::Tensor> parts{pooled, pool.has_cover.unsqueeze(-1)};
+        if (plot_totals_) {
+            pool.apply_totals_dropout(training, plot_totals_dropout_);
+            parts.push_back(pool.totals_features());
+        }
+        return torch::cat(parts, /*dim=*/1);
     }
 
     torch::Tensor forward_tokens(const torch::Tensor& species_ids, const torch::Tensor& genus_ids,
@@ -203,6 +212,8 @@ private:
     TransformerPooling pooling_;
     AggregationMode aggregation_;
     float cover_dropout_;
+    bool plot_totals_;
+    float plot_totals_dropout_;
 
     torch::nn::Linear weight_proj_{nullptr};
     torch::Tensor mask_embedding_;

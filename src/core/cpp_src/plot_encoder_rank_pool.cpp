@@ -12,11 +12,14 @@ public:
         : tables_(owner, spec, spec.config.species_embed_dim, spec.config.genus_emb_dim,
                   spec.config.family_emb_dim),
           aggregation_(spec.aggregation),
-          cover_dropout_(spec.config.cover_dropout) {
+          cover_dropout_(spec.config.cover_dropout),
+          plot_totals_(spec.config.plot_totals),
+          plot_totals_dropout_(spec.config.plot_totals_dropout) {
         width_ = spec.config.species_embed_dim + 1;
         if (tables_.has_taxonomy()) {
             width_ += spec.config.genus_emb_dim + spec.config.family_emb_dim;
         }
+        if (plot_totals_) width_ += kPlotTotalsWidth;
     }
 
     [[nodiscard]] int64_t width() const noexcept override { return width_; }
@@ -34,6 +37,10 @@ public:
             parts.push_back(weighted_pool(pool.family_ids, tables_.family, taxon_w));
         }
         parts.push_back(pool.has_cover.unsqueeze(-1));
+        if (plot_totals_) {
+            pool.apply_totals_dropout(training, plot_totals_dropout_);
+            parts.push_back(pool.totals_features());
+        }
         return torch::cat(parts, /*dim=*/1);
     }
 
@@ -52,6 +59,8 @@ private:
     SpeciesTables tables_;
     AggregationMode aggregation_;
     float cover_dropout_;
+    bool plot_totals_;
+    float plot_totals_dropout_;
     int64_t width_ = 0;
 };
 

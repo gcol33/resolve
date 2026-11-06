@@ -1109,6 +1109,7 @@ PlotInputs ResolveDataset::plot_inputs() const {
     inputs.pool_mask = pool_mask_;
     inputs.pool_has_cover = pool_has_cover_;
     inputs.categorical_ids = categorical_ids_;
+    inputs.pool_totals = pool_totals_;
     return inputs;
 }
 
@@ -1347,6 +1348,7 @@ void ResolveDataset::encode_pool(const PlotAssemblages& assemblages) {
     //   pool_weights_    f32   (n_plots, max_species), see PoolWeighting
     //   pool_mask_       bool  (n_plots, max_species), true where a species sits
     //   pool_has_cover_  f32   (n_plots,)
+    //   pool_totals_     f32   (n_plots, 2), see RankPoolEncodedData::totals
     RankPoolEncoder encoder(config_.pool_weighting, /*min_frequency=*/1,
                             config_.selection, config_.species_budget);
     encoder.set_vocab(vocab_);
@@ -1358,6 +1360,7 @@ void ResolveDataset::encode_pool(const PlotAssemblages& assemblages) {
     pool_weights_ = std::move(encoded.weights);
     pool_mask_ = std::move(encoded.mask);
     pool_has_cover_ = std::move(encoded.has_cover);
+    pool_totals_ = std::move(encoded.totals);
     // The resolved width, so inference truncates every plot to the width the
     // model was trained on even when the cap was a percentile.
     schema_.dataset_config.pool_species_cap = static_cast<int>(species_ids_.size(1));

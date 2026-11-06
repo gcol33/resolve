@@ -335,6 +335,16 @@ std::vector<torch::Tensor> ResolveModelImpl::data_buffers() const {
     return buffers;
 }
 
+bool ResolveModelImpl::absent_buffer_is_empty(const torch::Tensor& buffer) const {
+    bool found = false;
+    if (row_reference_rows_ > 0) {
+        row_reference_.for_each([&](const PlotInputField&, const torch::Tensor& t) {
+            found = found || t.is_same(buffer);
+        });
+    }
+    return found;
+}
+
 PlotEncoderTransformer ResolveModelImpl::transformer_encoder() const {
     auto transformer = encoder_
         ? std::dynamic_pointer_cast<PlotEncoderTransformerImpl>(encoder_.ptr())

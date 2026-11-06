@@ -15,6 +15,10 @@
 
 namespace resolve {
 
+// Columns PoolInputs::totals_features adds: combined cover, log(1 + species
+// count), has_totals.
+inline constexpr int64_t kPlotTotalsWidth = 3;
+
 // A plot batch's pool fields with the omitted ones defaulted: mask = the
 // non-zero species codes, weights = the mask (every species weighs the same),
 // has_cover = 1 per plot.
@@ -25,13 +29,26 @@ struct PoolInputs {
     torch::Tensor weights;      // (batch, max_species) float
     torch::Tensor mask;         // (batch, max_species), true where a species sits
     torch::Tensor has_cover;    // (batch,) float
+    // (batch, 2) float, PlotInputs::pool_totals, zeros when not given.
+    torch::Tensor totals;
+    // (batch,) float, 1 where the plot's totals were given.
+    torch::Tensor has_totals;
 
     [[nodiscard]] static PoolInputs from(const PlotInputs& inputs);
 
     // Under `training`, replaces the weights of a `cover_dropout` fraction of
-    // the plots with their mask and clears their has_cover flag, so the model
-    // learns to read a plot whose covers were not recorded.
+    // the plots with their mask and clears their has_cover flag and their
+    // combined cover, so the model learns to read a plot whose covers were not
+    // recorded.
     void apply_cover_dropout(bool training, float cover_dropout);
+
+    // Under `training`, withholds the totals of a `dropout` fraction of the
+    // plots: zeroed, has_totals cleared.
+    void apply_totals_dropout(bool training, float dropout);
+
+    // (batch, 3): the totals times has_totals, then has_totals. The features
+    // ModelConfig::plot_totals appends.
+    [[nodiscard]] torch::Tensor totals_features() const;
 
     // The mask with position 0 set on every row that holds no species, so an
     // attention softmax over the row has a key to attend to.

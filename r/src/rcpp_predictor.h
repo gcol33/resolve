@@ -82,6 +82,13 @@ public:
     }
     RObject retrieval() const { return get("retrieval"); }
 
+    // For a model trained with plot_totals: give predict() each plot's
+    // combined cover and species count, or withhold them.
+    void set_plot_totals(bool use) {
+        capi_check_status(resolve_predictor_set_plot_totals(predictor_.get(), use ? 1 : 0));
+    }
+    RObject plot_totals() const { return get("plot_totals"); }
+
     RObject device()      const { return get("device"); }
     RObject get_scalers() const { return get("scalers"); }
 

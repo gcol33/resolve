@@ -139,6 +139,12 @@ public:
     // with; every other tensor must match the model's shape exactly.
     [[nodiscard]] std::vector<torch::Tensor> data_buffers() const;
 
+    // Whether a checkpoint without `buffer` loads with it empty: true for
+    // SAINT's reference rows of each model input, one buffer per PlotInputs
+    // field, since an input added after the checkpoint was written is one its
+    // reference rows never held, which an empty buffer already means.
+    [[nodiscard]] bool absent_buffer_is_empty(const torch::Tensor& buffer) const;
+
     // How many training rows SAINT's row attention keeps as the reference set
     // inference attends over (saint.hpp); 0 for every other architecture. The
     // reference rows are captured, as raw model inputs, from the training

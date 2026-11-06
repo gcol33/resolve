@@ -21,16 +21,39 @@ PoolInputs PoolInputs::from(const PlotInputs& inputs) {
     pool.mask = present(inputs.pool_mask) ? inputs.pool_mask : (pool.species_ids != 0);
     pool.weights = present(inputs.pool_weights) ? inputs.pool_weights
                                                 : pool.mask.to(torch::kFloat32);
+    const auto floats = torch::TensorOptions().dtype(torch::kFloat32)
+                            .device(pool.species_ids.device());
+    const bool given = present(inputs.pool_totals);
+    pool.totals = given ? inputs.pool_totals : torch::zeros({batch, 2}, floats);
+    pool.has_totals = torch::full({batch}, given ? 1.0f : 0.0f, floats);
     return pool;
 }
 
+namespace {
+// (batch,) bool, true for a `rate` fraction of the plots.
+torch::Tensor drop_plots(const torch::Tensor& like, float rate) {
+    return torch::rand({like.size(0)}, torch::TensorOptions().device(like.device())) < rate;
+}
+}  // namespace
+
 void PoolInputs::apply_cover_dropout(bool training, float cover_dropout) {
     if (!training || cover_dropout <= 0.0f) return;
-    const auto dropped = torch::rand({species_ids.size(0)},
-                                     torch::TensorOptions().device(species_ids.device())) <
-                         cover_dropout;
+    const auto dropped = drop_plots(species_ids, cover_dropout);
     weights = torch::where(dropped.unsqueeze(1), mask.to(torch::kFloat32), weights);
     has_cover = torch::where(dropped, torch::zeros_like(has_cover), has_cover);
+    // A plot read without cover has no combined cover either (RankPoolEncodedData::totals).
+    const auto no_cover = torch::stack({dropped, torch::zeros_like(dropped)}, /*dim=*/1);
+    totals = torch::where(no_cover, torch::zeros_like(totals), totals);
+}
+
+void PoolInputs::apply_totals_dropout(bool training, float dropout) {
+    if (!training || dropout <= 0.0f) return;
+    const auto dropped = drop_plots(species_ids, dropout);
+    has_totals = torch::where(dropped, torch::zeros_like(has_totals), has_totals);
+}
+
+torch::Tensor PoolInputs::totals_features() const {
+    return torch::cat({totals * has_totals.unsqueeze(-1), has_totals.unsqueeze(-1)}, /*dim=*/1);
 }
 
 torch::Tensor PoolInputs::mask_with_a_key() const {

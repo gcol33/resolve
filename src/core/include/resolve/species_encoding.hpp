@@ -370,6 +370,12 @@ struct RankPoolEncodedData {
     torch::Tensor weights;      // (n_plots, max_species) float32
     torch::Tensor mask;         // (n_plots, max_species) bool
     torch::Tensor has_cover;    // (n_plots,) float32
+    // (n_plots, 2) float32 over every species the plot records, before any
+    // budget or cap: column 0 the combined cover as a fraction,
+    // 1 - prod(1 - min(cover, 100) / 100), the random-overlap total of the
+    // covers (Jennings 2009; Fischer 2015), 0 where has_cover is 0; column 1
+    // log(1 + the number of species).
+    torch::Tensor totals;
 };
 
 class RankPoolEncoder : public SpeciesVocabEncoder {

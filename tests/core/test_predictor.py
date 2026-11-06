@@ -212,6 +212,43 @@ def test_rank_pool_checkpoint_round_trip(tmp_path, pool_dataset):
     assert torch.isfinite(out.predictions["y"]).all()
 
 
+@pytest.mark.parametrize(
+    "encoding", [rc.SpeciesEncodingMode.RankPool, rc.SpeciesEncodingMode.Transformer]
+)
+def test_plot_totals_survive_the_checkpoint_and_switch_off(tmp_path, pool_dataset, encoding):
+    """A model trained with plot totals reloads with them, and the predictor's
+    switch withholds them: on by default, off changes the predictions, back on
+    restores them exactly."""
+    totals = pool_dataset.pool_totals
+    assert totals is not None and totals.shape == (pool_dataset.n_plots, 2)
+    assert bool((totals[:, 1] > 0).all())
+
+    config = make_model_config(encoding)
+    config.plot_totals = True
+    config.plot_totals_dropout = 0.3
+    model = rc.ResolveModel(pool_dataset.schema, config)
+    trainer = rc.Trainer(model, make_train_config(max_epochs=3))
+    trainer.prepare_data(pool_dataset, 0.25, 42)
+    trainer.fit()
+    path = str(tmp_path / "totals.pt")
+    trainer.save(path)
+
+    predictor = rc.Predictor.load(path, device="cpu")
+    assert predictor.model.config.plot_totals
+    assert predictor.model.config.plot_totals_dropout == pytest.approx(0.3)
+    assert predictor.plot_totals
+
+    given = predictor.predict_dataset(pool_dataset, False, 64).predictions["y"]
+    predictor.plot_totals = False
+    withheld = predictor.predict_dataset(pool_dataset, False, 64).predictions["y"]
+    predictor.plot_totals = True
+    again = predictor.predict_dataset(pool_dataset, False, 64).predictions["y"]
+
+    assert torch.isfinite(withheld).all()
+    assert not torch.equal(given, withheld)
+    assert torch.equal(given, again)
+
+
 def test_transformer_checkpoint_round_trip(tmp_path, plot_csvs):
     """Every transformer hyperparameter must round-trip, or the reload resizes."""
     from conftest import make_dataset_config, make_roles, make_targets

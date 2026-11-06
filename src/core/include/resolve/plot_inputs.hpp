@@ -49,7 +49,8 @@ struct PlotInputField {
     F(pool_weights,    torch::kFloat32, Dense)      \
     F(pool_mask,       torch::kBool,    Dense)      \
     F(pool_has_cover,  torch::kFloat32, Dense)      \
-    F(categorical_ids, torch::kInt64,   Dense)
+    F(categorical_ids, torch::kInt64,   Dense)      \
+    F(pool_totals,     torch::kFloat32, Dense)
 
 // `t` in the dtype and layout of `field`: a dense matrix given for a
 // sparse-rows field converts to sparse rows. An undefined tensor, and a dense
@@ -91,6 +92,12 @@ struct PlotInputs {
     torch::Tensor pool_has_cover{};
     // (n, n_categoricals) codes from CategoricalVocab, 0 = UNK.
     torch::Tensor categorical_ids{};
+    // rank_pool / transformer: (n, 2) the plot's totals over every species it
+    // records (RankPoolEncodedData::totals): combined cover as a fraction, 0
+    // when the plot records no cover, and log(1 + species count). Read only by
+    // a model with ModelConfig::plot_totals; left undefined, the model reads
+    // the plot as one whose totals are withheld.
+    torch::Tensor pool_totals{};
 
     // Calls f(const PlotInputField&, tensor) for every field in list order.
     template <typename F>

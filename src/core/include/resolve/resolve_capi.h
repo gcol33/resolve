@@ -479,6 +479,12 @@ RESOLVE_CAPI int resolve_predictor_set_retrieval(
 /* Back to the model's own predictions. 0 / -1. */
 RESOLVE_CAPI int resolve_predictor_clear_retrieval(resolve_predictor_t* p);
 
+/* For a model trained with plot_totals: give predict() each plot's combined
+ * cover and species count (`use` non-zero, the default) or withhold them
+ * (0), as for a plot whose totals are unknown. Read back with accessor
+ * "plot_totals". 0 / -1. */
+RESOLVE_CAPI int resolve_predictor_set_plot_totals(resolve_predictor_t* p, int use);
+
 /* Zero-arg accessor. `what`: device scalers categorical_vocab genus_embeddings
  * family_embeddings species_embeddings schema vocabs species_vocab genus_vocab
  * family_vocab dataset_config model_config retrieval (the RetrievalConfig MAP

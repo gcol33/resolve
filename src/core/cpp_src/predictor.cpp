@@ -264,7 +264,8 @@ ResolvePredictions Predictor::run_inference(
 
     ContinuousInputs block_parts = parts;
     if (!model_->hash_in_continuous()) block_parts.hash_embedding = torch::Tensor();
-    const PlotInputs species_inputs = inputs.without_empty();
+    PlotInputs species_inputs = inputs.without_empty();
+    if (!use_plot_totals_) species_inputs.pool_totals = torch::Tensor();
     const int64_t n = parts.n_rows() > 0 ? parts.n_rows() : species_inputs.n_plots();
 
     // A batch-dependent encoder (architectures.hpp) builds each plot's

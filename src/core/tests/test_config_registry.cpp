@@ -371,7 +371,7 @@ TEST_CASE("Every config struct's registry covers every member", "[config][regist
     CHECK(field_registry_size(static_cast<const TabMConfig*>(nullptr)) == 3);
     CHECK(field_registry_size(static_cast<const ParallelBranchConfig*>(nullptr)) == 5);
     CHECK(field_registry_size(static_cast<const ParallelLayersConfig*>(nullptr)) == 5);
-    CHECK(field_registry_size(static_cast<const ModelConfig*>(nullptr)) == 46);
+    CHECK(field_registry_size(static_cast<const ModelConfig*>(nullptr)) == 48);
     CHECK(field_registry_size(static_cast<const DatasetConfig*>(nullptr)) == 17);
     CHECK(field_registry_size(static_cast<const TrainConfig*>(nullptr)) == 37);
 
@@ -574,7 +574,8 @@ TEST_CASE("Checkpoint keys keep the spellings earlier releases wrote",
              "species_encoding", "uses_explicit_vector", "hash_dim", "hidden_dims",
              "categorical_embed_dim", "encoder_architecture", "head_hidden_dims",
              "moe_routing", "moe_placement", "n_experts", "expert_hidden_dims",
-             "cover_dropout", "freeze_composition", "d_model", "transformer_pooling",
+             "cover_dropout", "plot_totals", "plot_totals_dropout",
+             "freeze_composition", "d_model", "transformer_pooling",
              "ft_d_model", "ft_pre_norm",
              "tabnet_n_steps", "tabnet_use_sparsemax",
              "saint_use_row_attention", "saint_row_attention_rows",

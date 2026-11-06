@@ -281,6 +281,7 @@ void register_dataset(nb::module_& m) {
         .def_prop_ro("pool_weights", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.pool_weights()); })
         .def_prop_ro("pool_mask", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.pool_mask()); })
         .def_prop_ro("pool_has_cover", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.pool_has_cover()); })
+        .def_prop_ro("pool_totals", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.pool_totals()); })
         .def("has_pool_data", &resolve::ResolveDataset::has_pool_data)
         .def_prop_ro("categorical_vocab",
                      [](const resolve::ResolveDataset& self) -> const resolve::CategoricalVocab& {

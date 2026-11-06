@@ -1607,6 +1607,7 @@ resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* wh
         // boolean matrix).
         if (w == "pool_mask") return tensor_or_null(d.pool_mask(), RESOLVE_VALUE_INT_MATRIX);
         if (w == "pool_has_cover") return tensor_or_null(d.pool_has_cover(), RESOLVE_VALUE_DOUBLE_ARRAY);
+        if (w == "pool_totals") return tensor_or_null(d.pool_totals(), RESOLVE_VALUE_DOUBLE_MATRIX);
         if (w == "has_pool_data") return v_bool(d.has_pool_data());
         if (w == "categorical_vocab") return categorical_vocab_to_value(d.categorical_vocab());
         if (w == "targets") return tensor_map_to_value(d.targets(), RESOLVE_VALUE_DOUBLE_ARRAY);
@@ -2143,6 +2144,14 @@ int resolve_predictor_clear_retrieval(resolve_predictor_t* p) {
     })
 }
 
+int resolve_predictor_set_plot_totals(resolve_predictor_t* p, int use) {
+    CAPI_BODY_INT({
+        if (!p) throw std::invalid_argument("set_plot_totals: null handle");
+        p->predictor.set_plot_totals(use != 0);
+        return 0;
+    })
+}
+
 resolve_value_t* resolve_predictor_get(const resolve_predictor_t* p, const char* what) {
     CAPI_BODY_PTR({
         if (!p) throw std::invalid_argument("predictor_get: null handle");
@@ -2164,6 +2173,7 @@ resolve_value_t* resolve_predictor_get(const resolve_predictor_t* p, const char*
             return config_to_value(dataset_config_from_checkpoint(pr.schema(), pr.model()->config()));
         }
         if (w == "model_config") return config_to_value(pr.model()->config());
+        if (w == "plot_totals") return v_bool(pr.plot_totals());
         if (w == "genus_embeddings") return tensor_or_null(pr.get_genus_embeddings(), RESOLVE_VALUE_DOUBLE_MATRIX);
         if (w == "family_embeddings") return tensor_or_null(pr.get_family_embeddings(), RESOLVE_VALUE_DOUBLE_MATRIX);
         if (w == "species_embeddings") return tensor_or_null(pr.get_species_embeddings(), RESOLVE_VALUE_DOUBLE_MATRIX);

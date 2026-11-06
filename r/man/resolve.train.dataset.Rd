@@ -43,6 +43,8 @@ resolve.train.dataset(
   moeNoiseStd = NULL,
   moeAuxLossWeight = NULL,
   coverDropout = NULL,
+  plotTotals = NULL,
+  plotTotalsDropout = NULL,
   freezeComposition = NULL,
   dModel = NULL,
   nHeads = NULL,
@@ -203,6 +205,13 @@ to the task loss.}
 
 \item{coverDropout}{Cover-dropout rate applied to species cover values
 in rank-pool / transformer encoding modes.}
+
+\item{plotTotals}{Add each plot's combined cover and species count to the
+rank-pool / transformer features, with a flag saying they are present.}
+
+\item{plotTotalsDropout}{With \code{plotTotals}, the probability that a
+training plot's totals are withheld, so the model also predicts plots
+given without them (\code{\link{resolve.plot_totals}}).}
 
 \item{freezeComposition}{Keep the species, genus and family embedding tables
 at their initialisation instead of learning them.}

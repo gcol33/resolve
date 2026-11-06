@@ -157,6 +157,8 @@ Heads:
 Pooled and transformer encodings:
 
 - `cover_dropout` (`float`, default `0.0`): the probability of replacing a plot's pool weights with its presence mask during training.
+- `plot_totals` (`bool`, default `False`): add each plot's combined cover and log(1 + species count) to the pooled features, with a flag saying they are present.
+- `plot_totals_dropout` (`float`, default `0.0`): with `plot_totals`, the probability of withholding a training plot's totals, so the model also predicts without them (`Predictor.plot_totals = False`).
 - `freeze_composition` (`bool`, default `False`): keep the species, genus and family tables at their initial values. Needs the MLP architecture and an encoding with such a table.
 - `d_model` (`int`, default `128`), `n_heads` (`int`, default `4`), `n_attention_layers` (`int`, default `0`, pooling alone), `transformer_ff_dim` (`int`, default `256`), `transformer_dropout` (`float`, default `0.1`), `transformer_pooling` (`TransformerPooling`, default `Attention`).
 

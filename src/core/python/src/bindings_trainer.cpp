@@ -247,6 +247,14 @@ void register_trainer(nb::module_& m) {
              "retrieved for it.")
         .def("clear_retrieval", &resolve::Predictor::clear_retrieval,
              "Back to the model's own predictions.")
+        .def_prop_rw("plot_totals", &resolve::Predictor::plot_totals,
+                     &resolve::Predictor::set_plot_totals,
+                     "For a model trained with ModelConfig.plot_totals: whether predict() "
+                     "gives it each plot's combined cover and species count (True, the "
+                     "default) or withholds them (False), as for a plot whose totals are "
+                     "unknown. Withholding them keeps a prediction from depending on how "
+                     "many species a plot records. No effect on a model without "
+                     "plot_totals.")
         .def_prop_ro("retrieval", [](const resolve::Predictor& self) -> std::optional<resolve::RetrievalConfig> {
             if (self.retrieval() == nullptr) return std::nullopt;
             return self.retrieval()->config();

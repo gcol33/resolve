@@ -464,6 +464,8 @@ void Trainer::load_weights_into(torch::serialize::InputArchive& archive, Resolve
                 pair.value().copy_(t);
             }
             ++n_loaded;
+        } else if (model->absent_buffer_is_empty(pair.value())) {
+            ++n_loaded;
         } else {
             note_missing("buffer_" + pair.key());
         }

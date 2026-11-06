@@ -84,7 +84,8 @@ def test_an_argument_given_twice_is_refused(hash_model):
 def test_too_many_positional_arguments_are_refused(hash_model):
     model, continuous = hash_model
     with pytest.raises(TypeError, match="positional"):
-        model.forward(continuous, *([None] * 11))
+        # One more than the inputs after `continuous` (RESOLVE_PLOT_INPUT_FIELDS).
+        model.forward(continuous, *([None] * 12))
 
 
 def test_continuous_is_required(hash_dataset, hash_model):

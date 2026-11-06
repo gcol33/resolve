@@ -14,8 +14,9 @@ class SpeciesTokenFeatures;
 // tokens (none by default); then a pooled d_model vector, by a learned query
 // attending over the tokens (TransformerPooling::Attention) or by a CLS token
 // run through the self-attention with them (Cls, which needs at least one
-// layer). The pooled vector and the plot's has_cover flag are the features;
-// cover dropout (ModelConfig::cover_dropout) applies in training.
+// layer). The pooled vector and the plot's has_cover flag are the features,
+// with the plot's totals under ModelConfig::plot_totals; cover dropout
+// (ModelConfig::cover_dropout) and totals dropout apply in training.
 //
 // Under AggregationMode::Count the genus and family embeddings leave the
 // tokens: the attention reads species and weights, and the plot's genus and
@@ -42,7 +43,8 @@ private:
 
 TORCH_MODULE(PlotEncoderTransformer);
 
-// The transformer encoding's features: [pooled vector | has_cover].
+// The transformer encoding's features: [pooled vector | has_cover], then
+// PoolInputs::totals_features under ModelConfig::plot_totals.
 [[nodiscard]] std::unique_ptr<SpeciesFeatures> make_transformer_features(
     torch::nn::Module& owner, const SpeciesEncoderSpec& spec);
 

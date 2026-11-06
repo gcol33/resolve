@@ -50,7 +50,7 @@ TEST_CASE("The field list covers every PlotInputs member in model order", "[plot
     REQUIRE(names == std::vector<std::string>{
         "continuous", "genus_ids", "family_ids", "species_ids", "species_vector",
         "pool_genus_ids", "pool_family_ids", "pool_weights", "pool_mask",
-        "pool_has_cover", "categorical_ids"});
+        "pool_has_cover", "categorical_ids", "pool_totals"});
     REQUIRE(kPlotInputFields.size() == names.size());
     for (size_t i = 0; i < names.size(); ++i) {
         CHECK(names[i] == kPlotInputFields[i].name);

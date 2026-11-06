@@ -360,6 +360,7 @@ public:
     const torch::Tensor& pool_weights() const { return pool_weights_; }
     const torch::Tensor& pool_mask() const { return pool_mask_; }
     const torch::Tensor& pool_has_cover() const { return pool_has_cover_; }
+    const torch::Tensor& pool_totals() const { return pool_totals_; }
     bool has_pool_data() const { return pool_mask_.defined() && pool_mask_.numel() > 0; }
 
     // Accessors for raw species data (CUDA hash computation)
@@ -498,6 +499,7 @@ private:
     torch::Tensor pool_weights_;     // (n_plots, max_species) float32 - abundance/weight per species
     torch::Tensor pool_mask_;        // (n_plots, max_species) bool - true where species exists
     torch::Tensor pool_has_cover_;   // (n_plots,) float32 - 1.0 if plot has abundance data, 0.0 otherwise
+    torch::Tensor pool_totals_;      // (n_plots, 2) float32 - combined cover, log(1 + species count)
 
     // Whether an abundance/cover column was actually mapped in the roles. Drives
     // the rank-pool has_cover flag by column presence, not by inspecting the

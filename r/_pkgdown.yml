@@ -116,6 +116,7 @@ reference:
   - resolve.load_run_metadata
   - resolve.predict.dataset
   - resolve.retrieval
+  - resolve.plot_totals
 - title: Model suites
   desc: |
     Several trained models released as one directory and scored together.
