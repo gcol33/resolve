@@ -22,6 +22,25 @@
   as before, and older checkpoints load unchanged.
   `ResolveDataset.pool_totals` exposes the per-plot values.
 
+- **Exact cosine nearest neighbours in every binding.** The search retrieval
+  augmentation runs is now public: `resolve_core.nearest_by_cosine(queries,
+  reference, k, exclude_self=False)` (Python, returns `(indices,
+  similarities)`), `resolve.nearest_by_cosine(queries, reference, k,
+  excludeSelf = FALSE, device = "cpu")` (R, 1-based indices) and
+  `resolve_nearest_by_cosine` (C ABI). For each query row it returns the `k`
+  most similar reference rows by cosine similarity, most similar first; on
+  rows of species presence that is the Ochiai index. `exclude_self` is the
+  leave-one-out search over one set of plots: query row i is reference row i
+  and is never its own neighbour, while a plot with an identical species list
+  still is. The search is exact and blocked over both the queries (4096 rows
+  at a time) and the reference, so a set of several hundred thousand plots is
+  searched in bounded memory; it runs on the reference's device, and queries
+  held in host memory are moved over one block at a time. Its products are
+  full float32 on the GPU even after a training run in the same process has
+  turned TF32 on (`TrainConfig.allow_tf32`), which moved similarities by about
+  1e-3 and could reorder near ties; this also holds for the neighbours
+  `Predictor.set_retrieval` blends.
+
 ## v1.0.3 (2026-10-25)
 
 ### Fixed
