@@ -115,6 +115,7 @@ reference:
   - resolve.load_train_config
   - resolve.load_run_metadata
   - resolve.predict.dataset
+  - resolve.nearest_by_cosine
   - resolve.retrieval
   - resolve.plot_totals
 - title: Model suites

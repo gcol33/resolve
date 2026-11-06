@@ -239,6 +239,25 @@ RESOLVE_CAPI int resolve_metric_accuracy     (const double* pred, const double* 
 RESOLVE_CAPI int resolve_metric_r_squared    (const double* pred, const double* target, int64_t n, double* out);
 
 /* ========================================================================== */
+/* Nearest neighbours                                                         */
+/* ========================================================================== */
+
+/* The k rows of `reference` most similar to each row of `queries` by cosine
+ * similarity, most similar first: the engine's exact blocked search
+ * (resolve::nearest_by_cosine). `queries` and `reference` are numeric MATRIX
+ * nodes (rows x dim, one dim), computed in float32 on `device` with memory
+ * bounded whatever their size. With `exclude_self` non-zero, query row i is
+ * reference row i (pass the same matrix twice) and is never returned as its
+ * own neighbour; another row with identical values still is. k (>= 1) is
+ * clamped to the reference size, one less with `exclude_self`. Returns a MAP:
+ * indices (INT_MATRIX n_queries x k, 0-based rows of `reference`) and
+ * similarities (DOUBLE_MATRIX n_queries x k). NULL on failure. */
+RESOLVE_CAPI resolve_value_t* resolve_nearest_by_cosine(const resolve_value_t* queries,
+                                                        const resolve_value_t* reference,
+                                                        int64_t k, int exclude_self,
+                                                        const char* device);
+
+/* ========================================================================== */
 /* Dataset                                                                    */
 /* ========================================================================== */
 

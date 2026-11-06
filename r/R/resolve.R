@@ -1249,6 +1249,66 @@ resolve.pretrain_vae <- function(dataset, config = list()) {
 }
 
 
+#' Nearest Rows by Cosine Similarity
+#'
+#' The engine's exact nearest-neighbour search: for each row of `queries`, the
+#' `k` rows of `reference` most similar to it by cosine similarity, most
+#' similar first. The same search finds the reference plots of
+#' [resolve.retrieval()]. On rows of species presence (1 where a plot records a
+#' species, else 0) the cosine similarity is the Ochiai index of two species
+#' lists. The similarities are computed in blocks, so memory stays bounded
+#' whatever the size of either matrix.
+#'
+#' @param queries Numeric (or logical) matrix, one row per query.
+#' @param reference Numeric (or logical) matrix with as many columns as
+#'   `queries`, one row per candidate neighbour.
+#' @param k Neighbours per query; at most `nrow(reference)` are returned (one
+#'   fewer with `excludeSelf`).
+#' @param excludeSelf `TRUE` when `queries` and `reference` are the same rows in
+#'   the same order (pass the same matrix twice): row i is then never returned
+#'   as its own neighbour, while another row with identical values (a plot with
+#'   the same species list) still is. This is the leave-one-out search over one
+#'   set of plots.
+#' @param device Where the similarities are computed: `"cpu"`, `"cuda"` or
+#'   `"cuda:N"`.
+#'
+#' @return A list with `indices`, an integer matrix of `nrow(queries)` rows and
+#'   one column per neighbour holding rows of `reference` (most similar first),
+#'   and `similarities`, the matching matrix of cosine similarities.
+#'
+#' @examplesIf resolveR::resolve.available()
+#' set.seed(1)
+#' plots <- matrix(rbinom(20 * 12, 1, 0.4), nrow = 20)
+#' found <- resolve.nearest_by_cosine(plots, plots, k = 3L, excludeSelf = TRUE)
+#' found$indices[1:4, ]
+#' round(found$similarities[1:4, ], 3)
+#'
+#' @export
+resolve.nearest_by_cosine <- function(queries, reference, k, excludeSelf = FALSE,
+                                      device = "cpu") {
+  for (arg in c("queries", "reference")) {
+    x <- get(arg)
+    if (!is.matrix(x) || !(is.numeric(x) || is.logical(x))) {
+      stop(arg, " must be a numeric matrix", call. = FALSE)
+    }
+  }
+  if (!is.numeric(k) || length(k) != 1L || is.na(k) || k != round(k)) {
+    stop("k must be a single whole number", call. = FALSE)
+  }
+  if (!is.logical(excludeSelf) || length(excludeSelf) != 1L || is.na(excludeSelf)) {
+    stop("excludeSelf must be TRUE or FALSE", call. = FALSE)
+  }
+  if (!is.character(device) || length(device) != 1L) {
+    stop("device must be a single string", call. = FALSE)
+  }
+  .resolve_require_backend()
+  found <- .resolve_module()$nearest_by_cosine(queries, reference, as.numeric(k),
+                                               excludeSelf, device)
+  found$indices <- found$indices + 1L
+  found
+}
+
+
 #' Blend Predictions With Their Nearest Reference Plots
 #'
 #' Retrieval augmentation (Gorishniy et al. 2024, TabR): from now on every
@@ -1318,6 +1378,29 @@ resolve.retrieval <- function(predictor, reference, kNeighbors = NULL, alpha = N
   invisible(predictor)
 }
 
+#' Give a model each plot's totals, or withhold them
+#'
+#' For a model trained with \code{plotTotals = TRUE}, sets whether
+#' \code{\link{resolve.predict.dataset}} gives it each plot's combined cover and
+#' species count (\code{TRUE}, the default) or withholds them (\code{FALSE}), as
+#' for a plot whose totals are unknown. A model trained with
+#' \code{plotTotalsDropout} has learned to predict both ways. Withholding them
+#' keeps a prediction from depending on how many species a plot records, for an
+#' analysis of species richness. No effect on a model without totals.
+#'
+#' @param predictor A predictor from \code{\link{resolve.load}}.
+#' @param use \code{TRUE} to give the totals, \code{FALSE} to withhold them.
+#' @return The predictor, invisibly.
+#' @export
+resolve.plot_totals <- function(predictor, use = TRUE) {
+  if (!inherits(predictor, "Rcpp_Predictor")) {
+    stop("predictor must be loaded with resolve.load()")
+  }
+  .resolve_require_backend()
+  predictor$set_plot_totals(isTRUE(use))
+  invisible(predictor)
+}
+
 
 #' Fuzzy String Index
 #'
@@ -1355,29 +1438,6 @@ resolve.fuzzy_index <- function(entries, maxEditDistance = NULL, caseInsensitive
     max_edit_distance = maxEditDistance, case_insensitive = caseInsensitive,
     damerau = damerau, buckets = if (is.null(buckets)) NULL else as.list(unname(buckets))
   )))
-}
-
-#' Give a model each plot's totals, or withhold them
-#'
-#' For a model trained with \code{plotTotals = TRUE}, sets whether
-#' \code{\link{resolve.predict.dataset}} gives it each plot's combined cover and
-#' species count (\code{TRUE}, the default) or withholds them (\code{FALSE}), as
-#' for a plot whose totals are unknown. A model trained with
-#' \code{plotTotalsDropout} has learned to predict both ways. Withholding them
-#' keeps a prediction from depending on how many species a plot records, for an
-#' analysis of species richness. No effect on a model without totals.
-#'
-#' @param predictor A predictor from \code{\link{resolve.load}}.
-#' @param use \code{TRUE} to give the totals, \code{FALSE} to withhold them.
-#' @return The predictor, invisibly.
-#' @export
-resolve.plot_totals <- function(predictor, use = TRUE) {
-  if (!inherits(predictor, "Rcpp_Predictor")) {
-    stop("predictor must be loaded with resolve.load()")
-  }
-  .resolve_require_backend()
-  predictor$set_plot_totals(isTRUE(use))
-  invisible(predictor)
 }
 
 

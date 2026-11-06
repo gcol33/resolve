@@ -92,6 +92,9 @@ RESOLVE_SYM(int, resolve_metric_smape,         (const double* pred, const double
 RESOLVE_SYM(int, resolve_metric_accuracy,      (const double* pred, const double* target, int64_t n, double* out), (pred, target, n, out))
 RESOLVE_SYM(int, resolve_metric_r_squared,     (const double* pred, const double* target, int64_t n, double* out), (pred, target, n, out))
 
+/* ---- Nearest neighbours --------------------------------------------------- */
+RESOLVE_SYM(resolve_value_t*, resolve_nearest_by_cosine, (const resolve_value_t* queries, const resolve_value_t* reference, int64_t k, int exclude_self, const char* device), (queries, reference, k, exclude_self, device))
+
 /* ---- Dataset -------------------------------------------------------------- */
 RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_load, (const resolve_value_t* header, const resolve_value_t* species, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* config, const resolve_dataset_t* schema_source, const resolve_value_t* vocabs), (header, species, roles, targets, config, schema_source, vocabs))
 RESOLVE_SYM_VOID(resolve_dataset_free, (resolve_dataset_t* ds), (ds))

@@ -37,6 +37,24 @@ List default_config(std::string which) {
     return as<List>(value_to_r_owned(resolve_default_config(which.c_str())));
 }
 
+// A numeric matrix as a standalone row-major value node.
+ValuePtr matrix_value(const NumericMatrix& x) {
+    const std::vector<double> buf = row_major<double>(x);
+    return owned_value(resolve_value_new_double_matrix(buf.data(), x.nrow(), x.ncol()));
+}
+
+// The engine's exact cosine nearest-neighbour search: list(indices, similarities),
+// the indices 0-based rows of `reference`.
+List nearest_by_cosine(NumericMatrix queries, NumericMatrix reference, double k,
+                       bool exclude_self, std::string device) {
+    capi_require_loaded();
+    const ValuePtr query_rows = matrix_value(queries);
+    const ValuePtr reference_rows = matrix_value(reference);
+    return as<List>(value_to_r_owned(resolve_nearest_by_cosine(
+        query_rows.get(), reference_rows.get(), static_cast<int64_t>(k), exclude_self ? 1 : 0,
+        device.c_str())));
+}
+
 }  // namespace
 
 RCPP_MODULE(resolve_module) {
@@ -89,6 +107,8 @@ RCPP_MODULE(resolve_module) {
              "A model sized for a dataset's plots");
     function("default_config", &default_config,
              "The default of every field of a configuration struct");
+    function("nearest_by_cosine", &nearest_by_cosine,
+             "The k most similar reference rows of each query row by cosine similarity");
 
     class_<RResolveModel>("ResolveModel")
         .constructor<List, List>("Create a ResolveModel")

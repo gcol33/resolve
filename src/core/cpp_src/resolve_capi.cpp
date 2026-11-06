@@ -1514,6 +1514,33 @@ int resolve_metric_r_squared(const double* pred, const double* target, int64_t n
     });
 }
 
+// ============================================================================
+// Nearest neighbours
+// ============================================================================
+
+resolve_value_t* resolve_nearest_by_cosine(const resolve_value_t* queries,
+                                           const resolve_value_t* reference,
+                                           int64_t k,
+                                           int exclude_self,
+                                           const char* device) {
+    CAPI_BODY_PTR({
+        const torch::Device on = device_arg(device);
+        // The engine moves the queries to the reference's device a block of
+        // rows at a time, so only the reference is placed on `on` whole.
+        const torch::Tensor query_rows = value_to_tensor(queries, torch::kFloat32, "queries");
+        const torch::Tensor reference_rows = value_to_tensor(reference, torch::kFloat32, "reference");
+        if (!query_rows.defined() || !reference_rows.defined()) {
+            throw std::invalid_argument("nearest_by_cosine: queries and reference are required");
+        }
+        const Neighbours found =
+            nearest_by_cosine(query_rows, reference_rows.to(on), k, exclude_self != 0);
+        ValueGuard g(v_map());
+        v_put(g.p, "indices", tensor_to_imat(found.indices));
+        v_put(g.p, "similarities", tensor_to_mat(found.similarities));
+        return g.release();
+    })
+}
+
 }  // extern "C"
 
 // ============================================================================
