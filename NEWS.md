@@ -41,6 +41,42 @@
   1e-3 and could reorder near ties; this also holds for the neighbours
   `Predictor.set_retrieval` blends.
 
+- **Gap fitting.** A dataset that records a target on most of its plots and
+  lacks it on some can now fill the gaps from its own complete plots. Gap
+  fitting chooses, on the complete plots, among the complete plots' centre,
+  the raw prediction, the prediction calibrated by least squares, the median
+  of the most similar plots in species composition or of the nearest plots by
+  great-circle distance, and the prediction stacked with those medians, with
+  the neighbour count chosen from 1, 3, 5, 10, 20, 50. The choice is tested at
+  the distance the gaps actually are: each complete plot is predicted with the
+  complete plots nearer to it than a gap is to its nearest complete plot
+  hidden, in species similarity, km and survey years (nearest-neighbour
+  distance matching), and judged by the target's own error (mean absolute
+  error; log1p for a log-scale target; circular error for a bearing; median km
+  for a location). Gaps with and without coordinates choose apart. The raw
+  prediction is never replaced: `<target>_fitted` and `<target>_fit_method`
+  come back beside it, with a report of every candidate's error and the
+  coefficients and neighbour count chosen. Suites:
+  `SuitePredictor.predict(gap_fitting=True, columns={"recorded": {...},
+  "survey_year": ...})` (Python), `resolve.predict.suite(gapFitting = TRUE,
+  columns = list(recorded = ...))` (R), `resolve predict --suite ...
+  --fit-gaps --recorded year=Year` (CLI, report in
+  `<output>.gap_fitting.json`; `--no-spatial` reads composition only). A
+  single model: `resolve_core.fit_prediction_gaps`,
+  `resolve.fit_prediction_gaps`, `resolve predict --model ... --fit-gaps`.
+  On vectors: `resolve_core.fit_gaps`, `resolve.fit_gaps`,
+  `resolve_fit_gaps` (C ABI). Regression targets only. Undated plots that are
+  probably older than the dated ones, and plots without coordinates from an
+  area with no georeferenced plots, are better served by the raw prediction;
+  the article "Filling a dataset's gaps" says why.
+
+- **Great-circle nearest neighbours and restricted searches.**
+  `nearest_by_great_circle` is the exact blocked search by haversine distance
+  (`resolve_core.nearest_by_great_circle`); `nearest_by_cosine` takes sparse
+  rows and, in C++, a per-row hiding rule (similarity above, km or years
+  below a radius per query). A row left with fewer than `k` neighbours lists
+  -1 after the ones it has.
+
 ## v1.0.3 (2026-10-25)
 
 ### Fixed

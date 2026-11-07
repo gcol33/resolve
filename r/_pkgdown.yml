@@ -162,6 +162,7 @@ articles:
   - articles/encoding
   - articles/training
   - articles/prediction
+  - articles/gap-fitting
   - articles/embeddings
 - title: Scaling up
   navbar: Scaling up
@@ -181,6 +182,7 @@ articles:
   - articles/python-training
   - articles/python-prediction
   - articles/python-suites
+  - articles/python-gap-fitting
   - articles/python-scoring
   - articles/python-engine
 footer:
