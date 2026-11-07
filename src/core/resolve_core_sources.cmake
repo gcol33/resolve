@@ -38,6 +38,8 @@ set(RESOLVE_CORE_SOURCES
     ${RESOLVE_CORE_DIR}/cpp_src/selection_metric.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/predictor.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/retrieval.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/geo.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/gap_fitting.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/suite.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/json.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/sha256.cpp
@@ -103,6 +105,9 @@ set(RESOLVE_CORE_HEADERS
     ${RESOLVE_CORE_DIR}/include/resolve/target_transform.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/predictor.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/retrieval.hpp
+    ${RESOLVE_CORE_DIR}/include/resolve/geo.hpp
+    ${RESOLVE_CORE_DIR}/include/resolve/gap_fitting.hpp
+    ${RESOLVE_CORE_DIR}/include/resolve/row_cells.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/suite.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/json.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/sha256.hpp

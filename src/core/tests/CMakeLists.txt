@@ -121,6 +121,8 @@ add_executable(resolve_tests
     test_encoder_parity.cpp
     test_species_encoder.cpp
     test_retrieval.cpp
+    test_geo.cpp
+    test_gap_fitting.cpp
     test_grad_clip.cpp
 )
 

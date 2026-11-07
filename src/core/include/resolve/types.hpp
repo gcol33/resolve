@@ -189,6 +189,28 @@ enum class SuiteTargetStatus {
     Experimental
 };
 
+// How gap fitting (gap_fitting.hpp) lays out a regression target's values:
+// the value itself, log1p of it (a target whose error is measured on that
+// scale), a bearing as its unit vector, or a position projected to a plane.
+enum class GapScale {
+    Linear,
+    Log,
+    Circular,
+    Geographic
+};
+
+// The ways gap fitting can predict a plot whose value is missing, in the order
+// a tie between equal errors is broken.
+enum class GapMethod {
+    LocalConstant,       // the complete plots' centre
+    Resolve,             // the raw prediction
+    OffsetSlope,         // the raw prediction calibrated by least squares
+    KnnSpecies,          // the median of the most similar complete plots
+    StackSpecies,        // raw and the species-neighbour median by least squares
+    KnnSpatial,          // the median of the nearest complete plots
+    StackSpeciesSpatial  // raw and both neighbour medians by least squares
+};
+
 // Activation function type for configurable architecture
 enum class ActivationType {
     ReLU,

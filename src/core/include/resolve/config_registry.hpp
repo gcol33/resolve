@@ -41,6 +41,7 @@
 #include "resolve/types.hpp"
 #include "resolve/dataset.hpp"
 #include "resolve/enum_names.hpp"
+#include "resolve/gap_fitting.hpp"
 #include "resolve/pretraining.hpp"
 #include "resolve/retrieval.hpp"
 #include "resolve/trainer.hpp"
@@ -62,6 +63,13 @@ template <typename>
 inline constexpr bool always_false = false;
 
 }  // namespace registry_detail
+
+// True for a list of one enum's values (a field naming several variants, each
+// spelled through enum_names.hpp wherever the list crosses a text boundary).
+template <typename T>
+inline constexpr bool is_enum_vector_v = false;
+template <typename E>
+inline constexpr bool is_enum_vector_v<std::vector<E>> = std::is_enum_v<E>;
 
 // True for a struct that has a field registry below, i.e. one a visitor can
 // recurse into. Specialized by RESOLVE_DEFINE_FIELD_REGISTRY.
@@ -413,6 +421,14 @@ RESOLVE_DEFINE_FIELD_REGISTRY(SpatialBlockConfig, RESOLVE_SPATIAL_BLOCK_CONFIG_F
     F(temperature, "")
 
 RESOLVE_DEFINE_FIELD_REGISTRY(RetrievalConfig, RESOLVE_RETRIEVAL_CONFIG_FIELDS)
+
+#define RESOLVE_GAP_FITTING_CONFIG_FIELDS(F) \
+    F(candidates,    "")                     \
+    F(k_grid,        "")                     \
+    F(spatial,       "")                     \
+    F(matching_seed, "")
+
+RESOLVE_DEFINE_FIELD_REGISTRY(GapFittingConfig, RESOLVE_GAP_FITTING_CONFIG_FIELDS)
 
 #define RESOLVE_PRETRAIN_CONFIG_FIELDS(F)  \
     F(mask_ratio,            "")           \

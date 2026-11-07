@@ -46,18 +46,63 @@ struct RetrievalConfig {
     void validate() const;
 };
 
-// The neighbours of each query row, most similar first.
+// The neighbours of each query row, most similar first. A row with fewer
+// than k neighbours left (a hiding rule removed the rest) lists them first and
+// -1 after them, with a NaN similarity.
 struct Neighbours {
     torch::Tensor indices;       // (n_queries, k) int64 rows of `reference`
     torch::Tensor similarities;  // (n_queries, k) float32 cosine similarities
 };
 
+// The nearest places of each query row, nearest first; -1 and NaN where a row
+// has fewer than k (a position without coordinates has none).
+struct PlaceNeighbours {
+    torch::Tensor indices;  // (n_queries, k) int64 rows of the reference
+    torch::Tensor km;       // (n_queries, k) float64 great-circle distances
+};
+
+// What a hiding rule reads about one set of plots. Each member is optional;
+// a rule that needs one throws when it is missing.
+struct PlotAxes {
+    // (n, dim) rows compared by cosine similarity: dense, or sparse rows
+    // (sparse_rows.hpp).
+    torch::Tensor species;
+    // (n, 2) latitude and longitude in degrees, NaN where unknown.
+    torch::Tensor coordinates;
+    // (n,) survey years, NaN where unknown.
+    torch::Tensor years;
+};
+
+// Per query row, how near a reference row may be and still be returned. A
+// reference row is hidden from query i when it is more similar than
+// similarity[i], less than km[i] kilometres away, or less than years[i] years
+// apart. A NaN distance or year hides nothing; an undefined radius tensor
+// applies no rule on its axis. Each defined tensor is (n_queries,).
+struct HidingRadii {
+    torch::Tensor similarity;
+    torch::Tensor km;
+    torch::Tensor years;
+};
+
+// A neighbour search restricted per query row: the rules of `radii`, applied
+// with what `queries` and `reference` (the search's own two sets, in the same
+// row order) say about each plot. This is nearest-neighbour distance matching
+// (Mila et al. 2022, "Nearest neighbour distance matching Leave-One-Out
+// Cross-Validation for map validation", Methods in Ecology and Evolution):
+// a plot is predicted from neighbours no nearer than a plot to be predicted
+// is to its own nearest neighbour.
+struct NeighbourHiding {
+    PlotAxes queries;
+    PlotAxes reference;
+    HidingRadii radii;
+};
+
 // The k rows of `reference` most similar to each row of `queries` by cosine
-// similarity, most similar first. Both are dense (rows, dim) matrices of one
-// dim, any floating type (computed in float32). The search runs on the device
-// `reference` is on, and the result lives there; `queries` may sit elsewhere
-// (a large query set in host memory) and is moved over one block of rows at a
-// time.
+// similarity, most similar first. Each is a (rows, dim) matrix of one dim,
+// dense in any floating type or sparse rows (sparse_rows.hpp), computed in
+// float32. The search runs on the device `reference` is on, and the result
+// lives there; `queries` may sit elsewhere (a large query set in host memory)
+// and is moved over one block of rows at a time.
 //
 // With `exclude_self`, queries and reference are the same plots in the same
 // order: query row i is reference row i and is never returned as its own
@@ -65,16 +110,34 @@ struct Neighbours {
 // with the same species list), is. This is the leave-one-out search over one
 // set of plots; pass the same tensor twice.
 //
+// With `hiding`, each query row skips the reference rows its rules hide (the
+// similarity rule reads the two sets' own rows); a row left with fewer than k
+// is padded with -1.
+//
 // k is clamped to the reference size (one less under `exclude_self`). Exact:
 // the similarities are computed in blocks of at most kQueryBlockRows query rows
 // and kBlockElements values, each merged into a running top k, so memory stays
 // bounded whatever the size of either set. Throws std::invalid_argument for
-// shapes that do not match, a sparse input, k < 1, or `exclude_self` with
-// different row counts.
+// shapes that do not match, k < 1, or `exclude_self` with different row
+// counts.
 [[nodiscard]] Neighbours nearest_by_cosine(const torch::Tensor& queries,
                                            const torch::Tensor& reference,
                                            int64_t k,
-                                           bool exclude_self = false);
+                                           bool exclude_self = false,
+                                           const NeighbourHiding* hiding = nullptr);
+
+// The k rows of `reference` nearest to each row of `queries` by great-circle
+// distance, nearest first: the same exact blocked search over (rows, 2)
+// latitude / longitude matrices in degrees, distances by the haversine
+// formula on a sphere of kEarthRadiusKm. A row with a NaN coordinate is never
+// a neighbour and has none. `exclude_self` and `hiding` as for
+// nearest_by_cosine; with `hiding`, the km rule reads these two coordinate
+// sets. Runs on the CPU.
+[[nodiscard]] PlaceNeighbours nearest_by_great_circle(const torch::Tensor& queries,
+                                                      const torch::Tensor& reference,
+                                                      int64_t k,
+                                                      bool exclude_self = false,
+                                                      const NeighbourHiding* hiding = nullptr);
 
 // The reference plots of a retrieval: their latents and their labels for each
 // target of a model.

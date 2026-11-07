@@ -184,6 +184,15 @@ torch::Tensor sparse_rows_normalized(const torch::Tensor& rows, double eps) {
     return sparse_rows_with_values(rows, values / (sums.index_select(0, row_of) + eps));
 }
 
+torch::Tensor sparse_rows_unit_length(const torch::Tensor& rows) {
+    require_sparse_rows(rows, "sparse_rows_unit_length: the rows");
+    const auto values = rows.values();
+    const auto row_of = row_of_entries(rows);
+    const auto squares =
+        torch::zeros({rows.size(0)}, values.options()).index_add_(0, row_of, values * values);
+    return sparse_rows_with_values(rows, values / squares.sqrt().clamp_min(1e-30).index_select(0, row_of));
+}
+
 torch::Tensor sparse_rows_with_values(const torch::Tensor& rows, torch::Tensor values) {
     require_sparse_rows(rows, "sparse_rows_with_values: the rows");
     TORCH_CHECK(values.dim() == 1 && values.numel() == rows.col_indices().numel(),

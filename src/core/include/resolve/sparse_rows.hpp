@@ -79,6 +79,9 @@ void require_sparse_rows(const torch::Tensor& t, const char* what);
 // Each row divided by its sum plus `eps`: the weights of a value-weighted mean.
 [[nodiscard]] torch::Tensor sparse_rows_normalized(const torch::Tensor& rows, double eps);
 
+// Each row divided by its Euclidean length; a row without entries stays empty.
+[[nodiscard]] torch::Tensor sparse_rows_unit_length(const torch::Tensor& rows);
+
 // The same rows and columns carrying `values` (one per entry) instead.
 [[nodiscard]] torch::Tensor sparse_rows_with_values(const torch::Tensor& rows,
                                                     torch::Tensor values);

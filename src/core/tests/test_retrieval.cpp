@@ -9,7 +9,9 @@
 #include "resolve/dataset.hpp"
 #include "resolve/model.hpp"
 #include "resolve/predictor.hpp"
+#include "resolve/geo.hpp"
 #include "resolve/retrieval.hpp"
+#include "resolve/sparse_rows.hpp"
 #include "resolve/target_labels.hpp"
 #include "resolve/trainer.hpp"
 
@@ -372,4 +374,72 @@ TEST_CASE("Predictor retrieval refuses a reference without the model's targets",
     CHECK_THROWS_AS(predictor.set_retrieval(unlabelled), std::invalid_argument);
     CHECK(predictor.retrieval() == nullptr);
     CHECK_THROWS_AS(predictor.set_retrieval(dataset, {0, 0.3f, 1.0f}), std::invalid_argument);
+}
+
+TEST_CASE("nearest_by_cosine over sparse rows is the dense search", "[retrieval]") {
+    torch::manual_seed(13);
+    const torch::Tensor dense = (torch::rand({600, 40}) < 0.15).to(torch::kFloat32);
+    const torch::Tensor queries = dense.slice(0, 0, 200);
+    const Neighbours expected = nearest_by_cosine(queries, dense, 6);
+    const Neighbours found = nearest_by_cosine(to_sparse_rows(queries), to_sparse_rows(dense), 6);
+    CHECK(torch::allclose(found.similarities, expected.similarities, 1e-5, 1e-6));
+    CHECK(torch::allclose(dense.index({found.indices}).mul(queries.unsqueeze(1)).sum(2),
+                          dense.index({expected.indices}).mul(queries.unsqueeze(1)).sum(2)));
+}
+
+TEST_CASE("A hiding rule keeps each query's neighbours beyond its own radius", "[retrieval]") {
+    torch::manual_seed(17);
+    const int64_t n = 500;
+    const torch::Tensor rows = torch::randn({n, 5});
+    const torch::Tensor years = 1950.0 + 70.0 * torch::rand({n}, torch::kFloat64);
+    const torch::Tensor coords = torch::stack({45.0 + 3.0 * torch::rand({n}, torch::kFloat64),
+                                               10.0 + 3.0 * torch::rand({n}, torch::kFloat64)},
+                                              1);
+    NeighbourHiding hiding;
+    hiding.queries = PlotAxes{rows, coords, years};
+    hiding.reference = hiding.queries;
+    hiding.radii.similarity = 0.2 + 0.6 * torch::rand({n}, torch::kFloat64);
+    hiding.radii.km = 50.0 * torch::rand({n}, torch::kFloat64);
+    hiding.radii.years = 10.0 * torch::rand({n}, torch::kFloat64);
+
+    const torch::Tensor unit =
+        torch::nn::functional::normalize(rows, torch::nn::functional::NormalizeFuncOptions().dim(1));
+    const torch::Tensor sim = unit.matmul(unit.t());
+    const torch::Tensor km = great_circle_km(coords.select(1, 0).unsqueeze(1), coords.select(1, 1).unsqueeze(1),
+                                             coords.select(1, 0).unsqueeze(0), coords.select(1, 1).unsqueeze(0));
+    torch::Tensor hidden = (sim.to(torch::kFloat64) > hiding.radii.similarity.unsqueeze(1)) |
+                           (km < hiding.radii.km.unsqueeze(1)) |
+                           ((years.unsqueeze(1) - years.unsqueeze(0)).abs() < hiding.radii.years.unsqueeze(1));
+    hidden.fill_diagonal_(true);
+
+    const Neighbours by_species = nearest_by_cosine(rows, rows, 8, true, &hiding);
+    const auto [best_sim, best_index] =
+        sim.masked_fill(hidden, -std::numeric_limits<float>::infinity()).topk(8, 1);
+    const torch::Tensor expected_index =
+        best_index.masked_fill(torch::isneginf(best_sim), -1);
+    CHECK(torch::equal(by_species.indices, expected_index));
+
+    const PlaceNeighbours by_place = nearest_by_great_circle(coords, coords, 8, true, &hiding);
+    const auto [best_neg, place_index] =
+        (-km).masked_fill(hidden, -std::numeric_limits<double>::infinity()).topk(8, 1);
+    CHECK(torch::equal(by_place.indices, place_index.masked_fill(torch::isneginf(best_neg), -1)));
+    const torch::Tensor has = by_place.indices >= 0;
+    CHECK(torch::allclose(by_place.km.index({has}), (-best_neg).index({has}), 0.0, 1e-9));
+    CHECK(torch::isnan(by_place.km.index({has.logical_not()})).all().item<bool>());
+}
+
+TEST_CASE("nearest_by_great_circle is exact and skips positions without coordinates",
+          "[retrieval]") {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const torch::Tensor reference = torch::tensor({47.0, 14.0, 47.0, 14.0, 47.0, 14.0, 50.0, 14.0, nan, nan},
+                                                  torch::kFloat64)
+                                        .reshape({5, 2});
+    const PlaceNeighbours left_out = nearest_by_great_circle(reference, reference, 2, true);
+    CHECK_FALSE(left_out.indices.eq(torch::arange(5).unsqueeze(1)).any().item<bool>());
+    CHECK(left_out.indices[3][0].item<int64_t>() <= 2);
+    CHECK((left_out.indices[4] == -1).all().item<bool>());
+    CHECK((left_out.indices.slice(0, 0, 4) != 4).all().item<bool>());
+    CHECK_THAT(left_out.km[0][0].item<double>(), WithinAbs(0.0, 1e-9));
+    CHECK_THROWS_AS(nearest_by_great_circle(torch::ones({2, 3}, torch::kFloat64), reference, 1),
+                    std::invalid_argument);
 }

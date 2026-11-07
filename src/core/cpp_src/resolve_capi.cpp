@@ -687,6 +687,13 @@ struct ValueFieldReader {
         } else if constexpr (std::is_enum_v<T>) {
             const std::string& name_text = vstr(v, field);
             value = named(field, [&] { return enum_from_name<T>(name_text); });
+        } else if constexpr (is_enum_vector_v<T>) {
+            value.clear();
+            for (const std::string& name_text : vstr_vec(v, field)) {
+                value.push_back(named(field, [&] {
+                    return enum_from_name<typename T::value_type>(name_text);
+                }));
+            }
         } else if constexpr (std::is_same_v<T, int> || std::is_same_v<T, int64_t> ||
                              std::is_same_v<T, float>) {
             value = vnum<T>(v, field);
@@ -753,6 +760,10 @@ struct ValueFieldWriter {
             v_put(map, name, v_bool(value));
         } else if constexpr (std::is_enum_v<T>) {
             v_put(map, name, v_string(enum_to_name(value)));
+        } else if constexpr (is_enum_vector_v<T>) {
+            std::vector<std::string> names;
+            for (const auto& item : value) names.emplace_back(enum_to_name(item));
+            v_put(map, name, v_string_array(std::move(names)));
         } else if constexpr (std::is_same_v<T, int> || std::is_same_v<T, int64_t>) {
             v_put(map, name, v_int(value));
         } else if constexpr (std::is_same_v<T, float>) {
@@ -1399,6 +1410,7 @@ constexpr DefaultConfig kDefaultConfigs[] = {
     {"train", &default_config_value<TrainConfig>},
     {"spatial_block", &default_config_value<SpatialBlockConfig>},
     {"retrieval", &default_config_value<RetrievalConfig>},
+    {"gap_fitting", &default_config_value<GapFittingConfig>},
     {"pretrain", &default_config_value<PretrainConfig>},
     {"masked_species", &default_config_value<MLMPretrainConfig>},
     {"vae", &default_config_value<VAEConfig>},

@@ -246,6 +246,23 @@ inline constexpr EnumName<SuiteTargetStatus> kSuiteTargetStatusNames[] = {
     {"experimental", SuiteTargetStatus::Experimental},
 };
 
+inline constexpr EnumName<GapScale> kGapScaleNames[] = {
+    {"linear", GapScale::Linear},
+    {"log", GapScale::Log},
+    {"circular", GapScale::Circular},
+    {"geographic", GapScale::Geographic},
+};
+
+inline constexpr EnumName<GapMethod> kGapMethodNames[] = {
+    {"local_constant", GapMethod::LocalConstant},
+    {"resolve", GapMethod::Resolve},
+    {"offset_slope", GapMethod::OffsetSlope},
+    {"knn_species", GapMethod::KnnSpecies},
+    {"stack_species", GapMethod::StackSpecies},
+    {"knn_spatial", GapMethod::KnnSpatial},
+    {"stack_species_spatial", GapMethod::StackSpeciesSpatial},
+};
+
 // ============================================================================
 // Access by type
 // ============================================================================
@@ -322,6 +339,8 @@ RESOLVE_DECLARE_ENUM_NAMES(SuiteCombine, kSuiteCombineNames,
                            "suite combine rule", "mean")
 RESOLVE_DECLARE_ENUM_NAMES(SuiteTargetStatus, kSuiteTargetStatusNames,
                            "suite target status", "released")
+RESOLVE_DECLARE_ENUM_NAMES(GapScale, kGapScaleNames, "gap fitting scale", "linear")
+RESOLVE_DECLARE_ENUM_NAMES(GapMethod, kGapMethodNames, "gap fitting method", "resolve")
 
 #undef RESOLVE_DECLARE_ENUM_NAMES
 

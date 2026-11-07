@@ -5,6 +5,7 @@
 #include "resolve/species_encoding.hpp"
 #include "resolve/io_retry.hpp"
 #include "resolve/name_pool.hpp"
+#include "resolve/row_cells.hpp"
 #include "resolve/sparse_rows.hpp"
 #include "resolve/species_encoder.hpp"
 #include "resolve/target_labels.hpp"
@@ -24,15 +25,6 @@ namespace {
 // It stays NaN in the dataset's tensors; DatasetConfig::missing_values decides
 // how the model reads a coordinate or covariate.
 constexpr float kMissingValue = std::numeric_limits<float>::quiet_NaN();
-
-// Parse a numeric cell. Returns nullopt for empty / NA marker / unparseable /
-// non-finite values, so "missing" is never conflated with an actual zero.
-std::optional<float> parse_numeric_cell(std::string_view s) {
-    if (is_na_string(s)) return std::nullopt;
-    auto v = parse_float_strict(s);  // locale-free, rejects trailing garbage
-    if (!v || !std::isfinite(*v)) return std::nullopt;
-    return v;
-}
 
 // A 1-D tensor that takes ownership of `values` without copying them.
 template <typename T>
@@ -346,37 +338,6 @@ void finalize_masked_labels(
                 "its head to. Check the column '" + targets[t].column_name + "'.");
         }
     }
-}
-
-// The index of a named role column in `source`. A named column the source
-// lacks is a configuration error (typically a typo'd role name), never a
-// silent "no such feature": it would otherwise train a model without the input
-// the caller asked for and bake the wrong feature count into the checkpoint.
-int require_column(const RowSource& source, const std::string& name, const char* role,
-                   const char* table) {
-    const int col = source.column_index(name);
-    if (col < 0) {
-        throw std::runtime_error(std::string(role) + " column '" + name +
-                                 "' not found in the " + table + " table");
-    }
-    return col;
-}
-
-// Index of an optional role, -1 when the role is unset.
-int optional_column(const RowSource& source, const std::optional<std::string>& name,
-                    const char* role, const char* table) {
-    return name ? require_column(source, *name, role, table) : -1;
-}
-
-// The cell of `row` at `col`, or nullopt when the row is too short to hold it.
-std::optional<std::string_view> cell_at(RowFields row, int col) {
-    if (col < 0 || row.size() <= static_cast<size_t>(col)) return std::nullopt;
-    return row[static_cast<size_t>(col)];
-}
-
-std::optional<float> parse_cell_at(RowFields row, int col) {
-    const auto cell = cell_at(row, col);
-    return cell ? parse_numeric_cell(*cell) : std::nullopt;
 }
 
 const char* missing_value_handling(MissingValuePolicy policy) {

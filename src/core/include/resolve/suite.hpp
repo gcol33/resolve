@@ -57,6 +57,8 @@
 // all read that table.
 
 #include "resolve/dataset.hpp"
+#include "resolve/gap_fitting.hpp"
+#include "resolve/geo.hpp"
 #include "resolve/json.hpp"
 #include "resolve/predictor.hpp"
 #include "resolve/row_source.hpp"
@@ -83,9 +85,6 @@ inline constexpr const char* kSuiteFormat = "resolve-suite";
 // member's own zero_abundance_as. A manifest is written as the lowest version
 // that holds it, so an older engine still reads one that uses neither.
 inline constexpr int kSuiteFormatVersion = 3;
-
-// The Earth radius a spherical mean measures member spread with, in km.
-inline constexpr double kEarthRadiusKm = 6371.0;
 
 // The columns a suite reads and how their raw values are interpreted. Column
 // names are the defaults a caller's table is read with; a caller whose table

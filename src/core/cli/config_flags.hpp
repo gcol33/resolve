@@ -192,6 +192,15 @@ struct ConfigFlagWriter {
             } else if constexpr (std::is_enum_v<T>) {
                 row(flag, Arity::Value, "V", resolve::enum_to_name(value),
                     help + ": " + resolve::enum_spellings<T>());
+            } else if constexpr (resolve::is_enum_vector_v<T>) {
+                std::string names;
+                for (const auto& item : value) {
+                    if (!names.empty()) names += ",";
+                    names += resolve::enum_to_name(item);
+                }
+                row(flag, Arity::Value, "LIST", names,
+                    help + ", comma-separated: " +
+                        resolve::enum_spellings<typename T::value_type>());
             } else if constexpr (std::is_same_v<T, int>) {
                 row(flag, Arity::Value, "N", std::to_string(value), help);
             } else if constexpr (std::is_same_v<T, float>) {
@@ -242,6 +251,18 @@ struct ConfigFlagReader {
                     throw ArgError(flag + ": unknown value '" + text + "'; accepted: " +
                                    resolve::enum_spellings<T>());
                 }
+            } else if constexpr (resolve::is_enum_vector_v<T>) {
+                using E = typename T::value_type;
+                T parsed;
+                for (const auto& item : args.get_list(flag)) {
+                    try {
+                        parsed.push_back(resolve::enum_from_name<E>(item));
+                    } catch (const std::exception&) {
+                        throw ArgError(flag + ": unknown value '" + item + "'; accepted: " +
+                                       resolve::enum_spellings<E>());
+                    }
+                }
+                value = std::move(parsed);
             } else if constexpr (std::is_same_v<T, int>) {
                 value = args.get_int(flag);
             } else if constexpr (std::is_same_v<T, float>) {
