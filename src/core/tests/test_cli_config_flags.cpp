@@ -552,3 +552,34 @@ TEST_CASE("The warmup and linear-schedule flags land on their fields",
     read_top_level_flags(by_epochs, args_with({{"--warmup-epochs", "2"}}));
     CHECK(by_epochs.warmup_epochs == 2);
 }
+
+TEST_CASE("The gap-fitting flags of predict land on GapFittingConfig and the recorded columns",
+          "[cli][config_flags][gap_fitting]") {
+    const auto args = parse_args(predict_spec(), {"--fit-gaps", "--recorded", "area=area_rec",
+                                                  "--recorded", "location=lat_rec,lon_rec",
+                                                  "--no-spatial", "--gap-k-grid", "1,5",
+                                                  "--gap-candidates", "resolve,knn_species",
+                                                  "--gap-seed", "11"});
+    const auto config = read_gap_fitting(args);
+    REQUIRE(config.has_value());
+    CHECK_FALSE(config->spatial);
+    CHECK(config->k_grid == std::vector<int64_t>{1, 5});
+    CHECK((config->candidates ==
+           std::vector<resolve::GapMethod>{resolve::GapMethod::Resolve, resolve::GapMethod::KnnSpecies}));
+    CHECK(config->matching_seed == 11);
+    const auto recorded = read_recorded(args);
+    REQUIRE(recorded.size() == 2);
+    CHECK(recorded[1].second == std::vector<std::string>{"lat_rec", "lon_rec"});
+
+    CHECK_FALSE(read_gap_fitting(parse_args(predict_spec(), {})).has_value());
+    CHECK_THROWS_AS(read_gap_fitting(parse_args(predict_spec(), {"--recorded", "a=b"})), ArgError);
+    CHECK_THROWS_AS(read_gap_fitting(parse_args(predict_spec(), {"--fit-gaps"})), ArgError);
+    CHECK_THROWS_AS(read_gap_fitting(parse_args(predict_spec(), {"--fit-gaps", "--recorded", "a=b",
+                                                                 "--gap-candidates", "sideways"})),
+                    ArgError);
+    const auto request = parse_gap_target("aspect=circular:400:asp_sin,asp_cos");
+    CHECK((request.target.scale == resolve::GapScale::Circular));
+    CHECK(request.target.period == 400.0);
+    CHECK(request.outputs == std::vector<std::string>{"asp_sin", "asp_cos"});
+    CHECK_THROWS_AS(parse_gap_target("aspect=sideways:x"), ArgError);
+}

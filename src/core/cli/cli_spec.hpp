@@ -13,6 +13,7 @@
 
 #include "arg_parser.hpp"
 #include "config_flags.hpp"
+#include "gap_flags.hpp"
 
 namespace resolve_cli {
 
@@ -190,6 +191,7 @@ inline const CommandSpec& predict_spec() {
                          "a single table that also carries the targets."});
         append_config_flags(flags, "Retrieval", resolve::RetrievalConfig{},
                             FlagNaming::members(kRetrievalConfigFlags));
+        append_gap_flags(flags);
         flags.push_back({"--probabilities", Arity::Flag, "", "",
                          "Also write each classification target's class\n"
                          "probabilities: one column per class,\n"

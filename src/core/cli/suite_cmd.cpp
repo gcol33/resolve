@@ -14,6 +14,7 @@
 #include "arg_parser.hpp"
 #include "cli_common.hpp"
 #include "csv_output.hpp"
+#include "gap_flags.hpp"
 
 using resolve_cli::csv_field;
 using resolve_cli::csv_number;
@@ -98,6 +99,16 @@ int predict_suite_command(const ParsedArgs& args) {
     // A role flag renames a contract column only when it was given; its table
     // default belongs to `--model`, where no manifest supplies the name.
     predict.columns = resolve_cli::read_suite_columns(args);
+    try {
+        predict.gap_fitting = resolve_cli::read_gap_fitting(args);
+        if (predict.gap_fitting) {
+            predict.columns.recorded = resolve_cli::read_recorded(args);
+            predict.columns.survey_year = resolve_cli::role_flag(args, "--survey-year");
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
 
     std::optional<SuitePredictions> predictions;
     try {
@@ -117,6 +128,24 @@ int predict_suite_command(const ParsedArgs& args) {
 
     std::cout << "Wrote " << predictions->plot_ids.size() << " plots to " << output_path
               << std::endl;
+    if (predict.gap_fitting) {
+        std::vector<std::pair<std::string, const GapFit*>> fits;
+        for (const auto& t : predictions->targets) {
+            if (!t.gap_fit) continue;
+            fits.emplace_back(t.name, &*t.gap_fit);
+            for (const auto& g : t.gap_fit->report.groups) {
+                std::cout << "Gap fitting '" << t.name << "', " << g.n_gaps << " " << g.group
+                          << " gaps: " << enum_to_name(g.method) << std::endl;
+            }
+        }
+        try {
+            std::cout << "Gap-fitting report: " << resolve_cli::write_gap_report(args, output_path, fits)
+                      << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "Error: " << e.what() << std::endl;
+            return 1;
+        }
+    }
     print_limits(*predictions);
     return 0;
 }

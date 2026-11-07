@@ -3,6 +3,7 @@
 // Reads its values from the ParsedArgs produced by the `predict` flag table in
 // cli_spec.hpp.
 
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -15,6 +16,7 @@
 #include "cli_common.hpp"
 #include "config_flags.hpp"
 #include "csv_output.hpp"
+#include "gap_flags.hpp"
 
 using resolve_cli::csv_field;
 using resolve_cli::ParsedArgs;
@@ -30,7 +32,8 @@ int predict_command(const ParsedArgs& args) {
             return 1;
         }
         for (const char* model_only : {"--retrieval-header", "--retrieval-species", "--retrieval-k",
-                                       "--retrieval-alpha", "--retrieval-temperature"}) {
+                                       "--retrieval-alpha", "--retrieval-temperature",
+                                       "--gap-target"}) {
             if (args.has(model_only)) {
                 std::cerr << "Error: " << model_only << " applies to --model only" << std::endl;
                 return 1;
@@ -60,6 +63,14 @@ int predict_command(const ParsedArgs& args) {
 
     if (species_path.empty()) {
         std::cerr << "Error: --species is required" << std::endl;
+        return 1;
+    }
+
+    std::optional<GapFittingConfig> gap_fitting;
+    try {
+        gap_fitting = resolve_cli::read_gap_fitting(args);
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
         return 1;
     }
 
@@ -204,6 +215,51 @@ int predict_command(const ParsedArgs& args) {
     }
     auto& predictions = *predictions_opt;
 
+    // Gap fitting: each --recorded target from the dataset's own complete
+    // plots, read from the same tables in the predictions' plot order.
+    std::vector<GapFit> gap_fits;
+    std::vector<GapFitRequest> gap_requests;
+    if (gap_fitting) {
+        try {
+            GapColumns gap_columns;
+            gap_columns.plot_id = roles.plot_id;
+            gap_columns.species_id = roles.species_id;
+            gap_columns.latitude = roles.latitude;
+            gap_columns.longitude = roles.longitude;
+            gap_columns.survey_year = resolve_cli::role_flag(args, "--survey-year");
+            gap_columns.recorded = resolve_cli::read_recorded(args);
+            std::vector<GapFitRequest> declared;
+            for (const auto& item : args.get_all("--gap-target")) {
+                declared.push_back(resolve_cli::parse_gap_target(item));
+            }
+            for (const auto& [name, cols] : gap_columns.recorded) {
+                const auto it = std::find_if(declared.begin(), declared.end(),
+                                             [&](const GapFitRequest& r) { return r.target.name == name; });
+                if (it != declared.end()) {
+                    gap_requests.push_back(*it);
+                    continue;
+                }
+                GapFitRequest request;
+                request.target.name = name;
+                request.outputs = {name};
+                const auto head = std::find_if(schema.targets.begin(), schema.targets.end(),
+                                               [&](const TargetConfig& t) { return t.name == name; });
+                if (head != schema.targets.end() && head->transform == TransformType::Log1p) {
+                    request.target.scale = GapScale::Log;
+                }
+                gap_requests.push_back(std::move(request));
+            }
+            std::optional<TableSource> header_source;
+            if (!header_path.empty()) header_source = TableSource::csv(header_path);
+            const GapTables tables = read_gap_tables(header_source, TableSource::csv(species_path),
+                                                     gap_columns, predictions.plot_ids);
+            gap_fits = fit_gaps(predictions, tables, gap_requests, *gap_fitting);
+        } catch (const std::exception& e) {
+            std::cerr << "Error fitting gaps: " << e.what() << std::endl;
+            return 1;
+        }
+    }
+
     // Write predictions to CSV
     std::cout << "Writing predictions to: " << output_path << std::endl;
     std::ofstream out(output_path);
@@ -241,6 +297,17 @@ int predict_command(const ParsedArgs& args) {
             }
         }
     }
+    // A gap-fitted target's fitted value (latitude / longitude for a
+    // location) and the method that gave it, after every model output.
+    for (const auto& request : gap_requests) {
+        const std::string& name = request.target.name;
+        if (request.target.scale == GapScale::Geographic) {
+            out << "," << csv_field(name + "_fitted_latitude") << "," << csv_field(name + "_fitted_longitude");
+        } else {
+            out << "," << csv_field(name + "_fitted");
+        }
+        out << "," << csv_field(name + "_fit_method");
+    }
     out << "\n";
 
     // Each target's outputs as contiguous CPU tensors in the dtype the writer
@@ -266,6 +333,15 @@ int predict_command(const ParsedArgs& args) {
             }
         }
         columns.push_back(std::move(col));
+    }
+
+    // Each gap fit as a contiguous (n, 1 or 2) float32 table and its method codes.
+    std::vector<torch::Tensor> gap_fitted;
+    std::vector<torch::Tensor> gap_methods;
+    for (const auto& fit : gap_fits) {
+        const torch::Tensor fitted = fit.fitted.to(torch::kCPU, torch::kFloat32);
+        gap_fitted.push_back((fitted.dim() == 1 ? fitted.unsqueeze(1) : fitted).contiguous());
+        gap_methods.push_back(fit.method.to(torch::kCPU, torch::kInt64).contiguous());
     }
 
     // Write predictions
@@ -299,12 +375,35 @@ int predict_command(const ParsedArgs& args) {
                 out << "," << resolve_cli::csv_number(col.values.data_ptr<float>()[row]);
             }
         }
+        for (std::size_t g = 0; g < gap_fits.size(); ++g) {
+            const torch::Tensor& fitted = gap_fitted[g];
+            const float* values = fitted.data_ptr<float>() + row * fitted.size(1);
+            for (int64_t c = 0; c < fitted.size(1); ++c) out << "," << resolve_cli::csv_number(values[c]);
+            out << "," << csv_field(gap_method_label(gap_methods[g].data_ptr<int64_t>()[row]));
+        }
         out << "\n";
     }
 
     out.close();
     std::cout << "Done! Wrote " << predictions.plot_ids.size() << " predictions."
               << std::endl;
+    if (gap_fitting) {
+        std::vector<std::pair<std::string, const GapFit*>> fits;
+        for (std::size_t i = 0; i < gap_fits.size(); ++i) {
+            fits.emplace_back(gap_requests[i].target.name, &gap_fits[i]);
+            for (const auto& g : gap_fits[i].report.groups) {
+                std::cout << "Gap fitting '" << gap_requests[i].target.name << "', " << g.n_gaps << " "
+                          << g.group << " gaps: " << enum_to_name(g.method) << std::endl;
+            }
+        }
+        try {
+            std::cout << "Gap-fitting report: "
+                      << resolve_cli::write_gap_report(args, output_path, fits) << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "Error: " << e.what() << std::endl;
+            return 1;
+        }
+    }
     if (wrote_labels) {
         std::cout << "Classification targets are written as two columns: "
                      "'<target>' (class label) and '<target>_code' (integer code)."
