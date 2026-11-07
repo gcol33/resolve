@@ -10,7 +10,8 @@ resolve.predict.suite(
   header = NULL,
   columns = NULL,
   batchSize = 4096L,
-  keepMembers = FALSE
+  keepMembers = FALSE,
+  gapFitting = NULL
 )
 }
 \arguments{
@@ -27,12 +28,21 @@ Must be the same kind (data.frame or path) as \code{species}.}
 \item{columns}{Named list renaming the manifest's input columns, with keys
 among \code{plot_id}, \code{species_id}, \code{abundance}, \code{latitude}, \code{longitude},
 \code{genus}, \code{family}, \code{covariates}, \code{categoricals} (another key is an
-error).}
+error), and for gap fitting \code{recorded} (a named list of target ->
+recorded column, \code{c(latitude, longitude)} for a location) and
+\code{survey_year}.}
 
 \item{batchSize}{Forward-pass chunk size per member (default 4096).}
 
 \item{keepMembers}{Also return every member's own prediction (default
 \code{FALSE}).}
+
+\item{gapFitting}{\code{NULL} (default), \code{TRUE}, or a list of gap fitting
+settings (\code{candidates}, \code{k_grid}, \code{spatial}, \code{matching_seed}; see
+\code{\link[=resolve.fit_gaps]{resolve.fit_gaps()}}): fit each target \code{columns$recorded} names from the
+dataset's own complete plots. Adds \verb{<target>_fitted} and
+\verb{<target>_fit_method} to \code{\link[=as.data.frame]{as.data.frame()}} and a \code{gap_fit} (\code{fitted},
+\code{method}, \code{report}) to each fitted target.}
 }
 \value{
 A \code{resolve_suite_predictions} list: \code{plot_ids}, and \code{targets}, a

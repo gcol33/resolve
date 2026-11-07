@@ -2269,17 +2269,61 @@ SuiteLoadOptions parse_suite_load_options(const resolve_value* o) {
     return out;
 }
 
+// Gap fitting's recorded columns: a MAP of target -> STRING or STRING_ARRAY.
+std::vector<std::pair<std::string, std::vector<std::string>>> parse_recorded(const resolve_value* r,
+                                                                             const std::string& what) {
+    std::vector<std::pair<std::string, std::vector<std::string>>> out;
+    if (!r || r->kind == RESOLVE_VALUE_NULL) return out;
+    if (r->kind != RESOLVE_VALUE_MAP) wrong_kind(what, "a map of target name -> column name(s)");
+    for (std::size_t i = 0; i < r->keys.size(); ++i) {
+        out.emplace_back(r->keys[i], vstr_vec(r->vals[i], what + "." + r->keys[i]));
+    }
+    return out;
+}
+
+// A gap-fitting target: MAP name, scale (enum name), period.
+GapTarget parse_gap_target(const resolve_value* t) {
+    if (!t || t->kind != RESOLVE_VALUE_MAP) wrong_kind("gap target", "a map of name, scale, period");
+    reject_unknown_keys(t, "gap target", {"name", "scale", "period", "outputs"});
+    GapTarget out;
+    if (vhas(t, "name")) out.name = vstr(t, "name");
+    if (vhas(t, "scale")) {
+        const std::string scale = vstr(t, "scale");
+        out.scale = named("gap target.scale", [&] { return enum_from_name<GapScale>(scale); });
+    }
+    if (vhas(t, "period")) out.period = vnum<double>(t, "period");
+    return out;
+}
+
+// A gap fit as a MAP: fitted (DOUBLE_ARRAY, or a DOUBLE_MATRIX of latitude /
+// longitude), method (STRING_ARRAY) and report (the JSON report as a tree).
+resolve_value* gap_fit_to_value(const GapFit& fit) {
+    ValueGuard g(v_map());
+    v_put(g.p, "fitted", fit.fitted.dim() == 2 ? tensor_to_mat(fit.fitted) : tensor_to_vec(fit.fitted));
+    std::vector<std::string> methods;
+    const torch::Tensor codes = fit.method.to(torch::kCPU, torch::kInt64).contiguous();
+    for (int64_t i = 0; i < codes.numel(); ++i) methods.push_back(gap_method_label(codes.data_ptr<int64_t>()[i]));
+    v_put(g.p, "method", v_string_array(std::move(methods)));
+    v_put(g.p, "report", json_to_value(gap_fit_report_to_json(fit.report)));
+    return g.release();
+}
+
 SuitePredictOptions parse_suite_predict_options(const resolve_value* o) {
     SuitePredictOptions out;
     if (!o || o->kind == RESOLVE_VALUE_NULL) return out;
-    reject_unknown_keys(o, "suite predict options", {"columns", "batch_size", "keep_members"});
+    reject_unknown_keys(o, "suite predict options",
+                        {"columns", "batch_size", "keep_members", "gap_fitting"});
     if (vhas(o, "batch_size")) out.batch_size = vnum<int64_t>(o, "batch_size");
     if (vhas(o, "keep_members")) out.keep_members = vbool(o, "keep_members");
+    if (vhas(o, "gap_fitting")) {
+        out.gap_fitting = parse_config<GapFittingConfig>(vget(o, "gap_fitting"), "gap_fitting");
+    }
     const resolve_value* c = vget(o, "columns");
     if (c && c->kind != RESOLVE_VALUE_NULL) {
         reject_unknown_keys(c, "suite columns",
                             {"plot_id", "species_id", "abundance", "longitude", "latitude",
-                             "genus", "family", "covariates", "categoricals"});
+                             "genus", "family", "covariates", "categoricals", "recorded",
+                             "survey_year"});
         SuiteColumns& cols = out.columns;
         if (vhas(c, "plot_id")) cols.plot_id = vstr(c, "plot_id");
         if (vhas(c, "species_id")) cols.species_id = vstr(c, "species_id");
@@ -2290,6 +2334,8 @@ SuitePredictOptions parse_suite_predict_options(const resolve_value* o) {
         if (vhas(c, "family")) cols.family = vstr(c, "family");
         if (vhas(c, "covariates")) cols.covariates = vstr_vec(c, "covariates");
         if (vhas(c, "categoricals")) cols.categoricals = vstr_vec(c, "categoricals");
+        if (vhas(c, "recorded")) cols.recorded = parse_recorded(vget(c, "recorded"), "columns.recorded");
+        if (vhas(c, "survey_year")) cols.survey_year = vstr(c, "survey_year");
     }
     return out;
 }
@@ -2338,6 +2384,7 @@ resolve_value* suite_predictions_to_value(const SuitePredictions& p) {
         v_put(m, "recognised_share", defined_or_null(t.recognition.count_share, RESOLVE_VALUE_DOUBLE_ARRAY));
         v_put(m, "recognised_abundance_share",
               defined_or_null(t.recognition.abundance_share, RESOLVE_VALUE_DOUBLE_ARRAY));
+        v_put(m, "gap_fit", t.gap_fit ? gap_fit_to_value(*t.gap_fit) : v_null());
     }
     // The predictions as one row per plot (suite_prediction_columns), the class
     // probabilities included and named, so a binding's data frame holds the
@@ -2410,6 +2457,87 @@ resolve_value_t* resolve_suite_predict_csv(resolve_suite_t* s, const char* heade
         return suite_predictions_to_value(s->suite.predict(
             SuiteInput::csv(header_path ? header_path : "", species_path),
             parse_suite_predict_options(options)));
+    })
+}
+
+resolve_value_t* resolve_fit_gaps(const resolve_value_t* target, const resolve_value_t* raw,
+                                  const resolve_value_t* recorded, const resolve_value_t* species,
+                                  const resolve_value_t* coordinates, const resolve_value_t* years,
+                                  const resolve_value_t* config, const resolve_value_t* radii) {
+    CAPI_BODY_PTR({
+        GapPlots plots;
+        plots.species = value_to_tensor(species, torch::kFloat32, "species");
+        plots.coordinates = value_to_tensor(coordinates, torch::kFloat64, "coordinates");
+        plots.years = value_to_tensor(years, torch::kFloat64, "years");
+        HidingRadii injected;
+        const bool has_radii = radii && radii->kind != RESOLVE_VALUE_NULL;
+        if (has_radii) {
+            reject_unknown_keys(radii, "radii", {"similarity", "km", "years"});
+            injected.similarity = value_to_tensor(vget(radii, "similarity"), torch::kFloat64, "radii.similarity");
+            injected.km = value_to_tensor(vget(radii, "km"), torch::kFloat64, "radii.km");
+            injected.years = value_to_tensor(vget(radii, "years"), torch::kFloat64, "radii.years");
+        }
+        return gap_fit_to_value(fit_gaps(parse_gap_target(target),
+                                         value_to_tensor(raw, torch::kFloat64, "raw"),
+                                         value_to_tensor(recorded, torch::kFloat64, "recorded"), plots,
+                                         parse_config<GapFittingConfig>(config, "gap_fitting"),
+                                         has_radii ? &injected : nullptr));
+    })
+}
+
+resolve_value_t* resolve_fit_prediction_gaps(const resolve_value_t* header,
+                                             const resolve_value_t* species,
+                                             const resolve_value_t* columns,
+                                             const resolve_value_t* predictions,
+                                             const resolve_value_t* requests,
+                                             const resolve_value_t* config) {
+    CAPI_BODY_PTR({
+        const bool has_header = header && header->kind != RESOLVE_VALUE_NULL;
+        const ColumnTable h = has_header ? value_to_column_table(header, "header") : ColumnTable();
+        const ColumnTable sp = value_to_column_table(species, "species");
+        if (!columns || columns->kind != RESOLVE_VALUE_MAP) wrong_kind("columns", "a map");
+        reject_unknown_keys(columns, "gap columns",
+                            {"plot_id", "species_id", "latitude", "longitude", "survey_year", "recorded"});
+        GapColumns cols;
+        cols.plot_id = vstr(columns, "plot_id");
+        cols.species_id = vstr(columns, "species_id");
+        if (vhas(columns, "latitude")) cols.latitude = vstr(columns, "latitude");
+        if (vhas(columns, "longitude")) cols.longitude = vstr(columns, "longitude");
+        if (vhas(columns, "survey_year")) cols.survey_year = vstr(columns, "survey_year");
+        cols.recorded = parse_recorded(vget(columns, "recorded"), "columns.recorded");
+
+        if (!predictions || predictions->kind != RESOLVE_VALUE_MAP) {
+            wrong_kind("predictions", "a map of plot_ids and outputs");
+        }
+        reject_unknown_keys(predictions, "predictions", {"plot_ids", "outputs"});
+        ResolvePredictions p;
+        p.plot_ids = vstr_vec(predictions, "plot_ids");
+        const resolve_value* outputs = vget(predictions, "outputs");
+        if (!outputs || outputs->kind != RESOLVE_VALUE_MAP) wrong_kind("predictions.outputs", "a map");
+        for (std::size_t i = 0; i < outputs->keys.size(); ++i) {
+            p.predictions[outputs->keys[i]] =
+                value_to_tensor(outputs->vals[i], torch::kFloat64, "predictions.outputs." + outputs->keys[i]);
+        }
+
+        if (!requests || requests->kind != RESOLVE_VALUE_LIST) wrong_kind("requests", "a list of target maps");
+        std::vector<GapFitRequest> fit_requests;
+        for (const resolve_value* r : requests->items) {
+            GapFitRequest request{parse_gap_target(r), {}};
+            request.outputs = vhas(r, "outputs") ? vstr_vec(r, "outputs")
+                                                 : std::vector<std::string>{request.target.name};
+            fit_requests.push_back(std::move(request));
+        }
+
+        std::optional<TableSource> header_source;
+        if (has_header) header_source = TableSource::table(h);
+        const GapTables tables = read_gap_tables(header_source, TableSource::table(sp), cols, p.plot_ids);
+        const std::vector<GapFit> fits =
+            fit_gaps(p, tables, fit_requests, parse_config<GapFittingConfig>(config, "gap_fitting"));
+        ValueGuard g(v_map());
+        for (std::size_t i = 0; i < fits.size(); ++i) {
+            v_put(g.p, fit_requests[i].target.name, gap_fit_to_value(fits[i]));
+        }
+        return g.release();
     })
 }
 

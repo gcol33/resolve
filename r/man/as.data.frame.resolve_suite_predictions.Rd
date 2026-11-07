@@ -34,5 +34,7 @@ the prediction (\verb{<target>}; for a vote also \verb{<target>_code} and
 \verb{<target>_circular_sd} for a bearing, \verb{<target>_spread_km} for a spherical
 mean), the four recognition columns, and, when present, \verb{<target>_seed<N>}
 for each member (\verb{<target>_seed<N>_latitude} and \verb{_longitude} for a
-spherical mean).
+spherical mean); a gap-fitted target adds \verb{<target>_fitted}
+(\verb{<target>_fitted_latitude} / \verb{_fitted_longitude}) and
+\verb{<target>_fit_method}.
 }

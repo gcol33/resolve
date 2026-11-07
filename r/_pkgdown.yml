@@ -127,6 +127,12 @@ reference:
   - resolve.seal_suite
   - resolve.predict.suite
   - as.data.frame.resolve_suite_predictions
+- title: Gap fitting
+  desc: |
+    Filling a dataset's missing values from its own complete plots, beside the raw prediction.
+  contents:
+  - resolve.fit_gaps
+  - resolve.fit_prediction_gaps
 - title: Scoring
   desc: |
     The metrics training reports, for predictions made anywhere.

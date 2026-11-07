@@ -55,6 +55,70 @@ List nearest_by_cosine(NumericMatrix queries, NumericMatrix reference, double k,
         device.c_str())));
 }
 
+// A numeric vector as a DOUBLE_ARRAY, a numeric matrix as a row-major
+// DOUBLE_MATRIX, NULL as a NULL-kind node.
+ValuePtr numeric_value(SEXP x, const char* what) {
+    if (Rf_isNull(x)) return owned_value(resolve_value_new_null());
+    if (!Rf_isNumeric(x) && !Rf_isLogical(x)) Rcpp::stop(std::string(what) + " must be numeric");
+    if (Rf_isMatrix(x)) return matrix_value(NumericMatrix(x));
+    const NumericVector v(x);
+    return owned_value(resolve_value_new_double_array(v.begin(), v.size()));
+}
+
+// Gap fitting of one target from vectors (resolve_fit_gaps): list(fitted,
+// method, report).
+List fit_gaps(List target, SEXP raw, SEXP recorded, NumericMatrix species, SEXP coordinates,
+              SEXP years, List config, SEXP radii) {
+    capi_require_loaded();
+    const ValuePtr target_v = owned_value(r_list_to_value_map(target, "target"));
+    const ValuePtr raw_v = numeric_value(raw, "raw");
+    const ValuePtr recorded_v = numeric_value(recorded, "recorded");
+    const ValuePtr species_v = matrix_value(species);
+    const ValuePtr coordinates_v = numeric_value(coordinates, "coordinates");
+    const ValuePtr years_v = numeric_value(years, "years");
+    const ValuePtr config_v = owned_value(r_list_to_value_map(config, "gapFitting"));
+    const ValuePtr radii_v =
+        owned_value(Rf_isNull(radii) ? resolve_value_new_null() : resolve_value_new_map());
+    if (!Rf_isNull(radii)) {
+        const List r(radii);
+        const CharacterVector names = r.names();
+        for (R_xlen_t i = 0; i < r.size(); ++i) {
+            map_put(radii_v.get(), r_string(names[i]), numeric_value(r[i], "radii"));
+        }
+    }
+    return as<List>(value_to_r_owned(resolve_fit_gaps(target_v.get(), raw_v.get(), recorded_v.get(),
+                                                      species_v.get(), coordinates_v.get(),
+                                                      years_v.get(), config_v.get(), radii_v.get())));
+}
+
+// Gap fitting of a single model's targets from its predictions and the
+// dataset's tables (resolve_fit_prediction_gaps).
+List fit_prediction_gaps(List header_cols, List species_cols, List columns, List predictions,
+                         List requests, List config) {
+    capi_require_loaded();
+    const ValuePtr species = owned_value(r_table_to_value(species_cols, "species"));
+    const ValuePtr header = owned_value(header_cols.size() > 0 ? r_table_to_value(header_cols, "header")
+                                                               : resolve_value_new_null());
+    const ValuePtr columns_v = owned_value(r_list_to_value_map(columns, "columns"));
+    ValuePtr predictions_v = owned_value(resolve_value_new_map());
+    map_put(predictions_v.get(), "plot_ids", owned_value(r_to_value(predictions["plot_ids"])));
+    ValuePtr outputs = owned_value(resolve_value_new_map());
+    const List heads = predictions["outputs"];
+    const CharacterVector head_names = heads.names();
+    for (R_xlen_t i = 0; i < heads.size(); ++i) {
+        map_put(outputs.get(), r_string(head_names[i]), numeric_value(heads[i], "predictions"));
+    }
+    map_put(predictions_v.get(), "outputs", std::move(outputs));
+    ValuePtr requests_v = owned_value(resolve_value_new_list());
+    for (R_xlen_t i = 0; i < requests.size(); ++i) {
+        list_put(requests_v.get(), owned_value(r_list_to_value_map(requests[i], "targets")));
+    }
+    const ValuePtr config_v = owned_value(r_list_to_value_map(config, "gapFitting"));
+    return as<List>(value_to_r_owned(resolve_fit_prediction_gaps(
+        header.get(), species.get(), columns_v.get(), predictions_v.get(), requests_v.get(),
+        config_v.get())));
+}
+
 }  // namespace
 
 RCPP_MODULE(resolve_module) {
@@ -109,6 +173,9 @@ RCPP_MODULE(resolve_module) {
              "The default of every field of a configuration struct");
     function("nearest_by_cosine", &nearest_by_cosine,
              "The k most similar reference rows of each query row by cosine similarity");
+    function("fit_gaps", &fit_gaps, "Gap fitting of one target from vectors");
+    function("fit_prediction_gaps", &fit_prediction_gaps,
+             "Gap fitting of a single model's targets from its predictions and tables");
 
     class_<RResolveModel>("ResolveModel")
         .constructor<List, List>("Create a ResolveModel")

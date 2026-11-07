@@ -304,3 +304,57 @@ test_that("each target of a suite reads its own columns; a location is a spheric
     expect_true(col %in% names(flat), info = col)
   }
 })
+
+test_that("suite gap fitting adds fitted columns and a report per fitted target", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  root <- local_dir("suite_gaps_")
+  .build_suite(root)
+  suite <- resolve.load_suite(root)
+  data <- .suite_plots(40L, with_targets = TRUE)
+  header <- data$header
+  header$y_rec <- ifelse(seq_len(nrow(header)) %% 4L == 1L, NA, header$y)
+  header$year <- 1980 + seq_len(nrow(header))
+  header$hab <- NULL
+  header$y <- NULL
+
+  preds <- suppressMessages(resolve.predict.suite(
+    suite, species = data$species, header = header,
+    columns = list(recorded = list(y = "y_rec"), survey_year = "year"), gapFitting = TRUE))
+  fit <- preds$targets$y$gap_fit
+  expect_s3_class(fit, "resolve_gap_fit")
+  expect_equal(fit$report$n_gaps, 10)
+  expect_true(fit$report$axes$years$matched)
+  expect_null(preds$targets$hab$gap_fit)
+  frame <- as.data.frame(preds)
+  expect_true(all(c("y_fitted", "y_fit_method") %in% names(frame)))
+  expect_equal(frame$y_fit_method[2], "recorded")
+  expect_false(frame$y_fit_method[1] == "recorded")
+  expect_equal(frame$y_fitted[2], header$y_rec[2], tolerance = 1e-4)
+
+  restricted <- suppressMessages(resolve.predict.suite(
+    suite, species = data$species, header = header,
+    columns = list(recorded = list(y = "y_rec")),
+    gapFitting = list(candidates = c("local_constant", "offset_slope"), k_grid = c(1, 3))))
+  expect_true(restricted$targets$y$gap_fit$report$groups$located$method %in%
+                c("local_constant", "offset_slope"))
+  expect_error(suppressMessages(resolve.predict.suite(
+    suite, species = data$species, header = header,
+    columns = list(recorded = list(hab = "y_rec")), gapFitting = TRUE)), "regression")
+
+  # The single-model path over one member's predictions.
+  member <- file.path(root, suite$manifest()$targets[[2]]$members[[1]]$file)
+  predictor <- resolve.load(member)
+  cfg <- predictor$dataset_config()
+  cfg$zero_abundance_as <- 1.0
+  ds <- resolve.dataset.frame(header, data$species, roles = .suite_roles, targets = list(),
+                              vocabs = predictor$vocabs(), config = cfg)
+  single <- resolve.fit_prediction_gaps(
+    resolve.predict.dataset(predictor, ds), data$species, header,
+    columns = list(plot_id = "plot", species_id = "taxon", latitude = "lat", longitude = "lon",
+                   recorded = list(y = "y_rec")),
+    targets = list(y = list(scale = "linear")))
+  expect_equal(single$y$report$n_gaps, 10)
+  expect_equal(sum(single$y$method == "recorded"), 30)
+})

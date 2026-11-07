@@ -151,6 +151,10 @@ RESOLVE_SYM(resolve_value_t*, resolve_suite_get, (const resolve_suite_t* s, cons
 RESOLVE_SYM(resolve_value_t*, resolve_suite_predict_dataframe, (resolve_suite_t* s, const resolve_value_t* header, const resolve_value_t* species, const resolve_value_t* options), (s, header, species, options))
 RESOLVE_SYM(resolve_value_t*, resolve_suite_predict_csv, (resolve_suite_t* s, const char* header_path, const char* species_path, const resolve_value_t* options), (s, header_path, species_path, options))
 RESOLVE_SYM(resolve_value_t*, resolve_suite_verify, (const char* dir), (dir))
+
+/* ---- Gap fitting ---------------------------------------------------------- */
+RESOLVE_SYM(resolve_value_t*, resolve_fit_gaps, (const resolve_value_t* target, const resolve_value_t* raw, const resolve_value_t* recorded, const resolve_value_t* species, const resolve_value_t* coordinates, const resolve_value_t* years, const resolve_value_t* config, const resolve_value_t* radii), (target, raw, recorded, species, coordinates, years, config, radii))
+RESOLVE_SYM(resolve_value_t*, resolve_fit_prediction_gaps, (const resolve_value_t* header, const resolve_value_t* species, const resolve_value_t* columns, const resolve_value_t* predictions, const resolve_value_t* requests, const resolve_value_t* config), (header, species, columns, predictions, requests, config))
 RESOLVE_SYM(resolve_value_t*, resolve_suite_seal, (const char* dir), (dir))
 
 /* ---- Fuzzy string index --------------------------------------------------- */

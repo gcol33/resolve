@@ -9,6 +9,8 @@
 
 #include "test_support.hpp"
 
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -428,4 +430,39 @@ TEST_CASE("C ABI: the fuzzy index with buckets and per-needle hints", "[capi]") 
     resolve_map_set_value(clash_options.get(), "buckets", string_array({"a", "b"}));
     CHECK(resolve_fuzzy_build(clash.get(), clash_options.get()) == nullptr);
     CHECK(last_error().find("two different values") != std::string::npos);
+}
+
+TEST_CASE("C ABI: gap fitting fits a target from vectors and reports its choice", "[capi][gap_fitting]") {
+    const int64_t n = 200;
+    std::vector<double> raw(n), recorded(n), species(n * 4, 0.0);
+    for (int64_t i = 0; i < n; ++i) {
+        raw[i] = 10.0 + 0.1 * i;
+        recorded[i] = i % 5 == 0 ? std::numeric_limits<double>::quiet_NaN() : raw[i] + 3.0;
+        species[i * 4 + i % 4] = 1.0;
+    }
+    const Value target(resolve_value_new_map());
+    resolve_map_set_string(target.get(), "name", "y");
+    resolve_map_set_string(target.get(), "scale", "linear");
+    const Value raw_v(resolve_value_new_double_array(raw.data(), n));
+    const Value recorded_v(resolve_value_new_double_array(recorded.data(), n));
+    const Value species_v(resolve_value_new_double_matrix(species.data(), n, 4));
+    const Value fit(resolve_fit_gaps(target.get(), raw_v.get(), recorded_v.get(), species_v.get(),
+                                     nullptr, nullptr, nullptr, nullptr));
+    REQUIRE(fit.get() != nullptr);
+    int64_t len = 0;
+    const double* fitted = resolve_value_as_double_array(resolve_map_get(fit.get(), "fitted"), &len);
+    REQUIRE(len == n);
+    // A constant offset: the calibrated gaps land on the recorded relation.
+    CHECK(std::abs(fitted[0] - (raw[0] + 3.0)) < 1e-6);
+    CHECK(std::string(resolve_value_string_at(resolve_map_get(fit.get(), "method"), 1)) == "recorded");
+    const resolve_value_t* groups = resolve_map_get(resolve_map_get(fit.get(), "report"), "groups");
+    REQUIRE(resolve_map_get(groups, "unlocated") != nullptr);
+
+    const Value bad(resolve_value_new_map());
+    resolve_map_set_string(bad.get(), "scale", "sideways");
+    CHECK(resolve_fit_gaps(bad.get(), raw_v.get(), recorded_v.get(), species_v.get(), nullptr, nullptr,
+                           nullptr, nullptr) == nullptr);
+    CHECK(last_error().find("sideways") != std::string::npos);
+    const Value defaults(resolve_default_config("gap_fitting"));
+    CHECK(resolve_value_kind(resolve_map_get(defaults.get(), "candidates")) == RESOLVE_VALUE_STRING_ARRAY);
 }

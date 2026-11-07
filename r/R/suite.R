@@ -144,10 +144,18 @@ resolve.seal_suite <- function(dir) {
 #' @param columns Named list renaming the manifest's input columns, with keys
 #'   among `plot_id`, `species_id`, `abundance`, `latitude`, `longitude`,
 #'   `genus`, `family`, `covariates`, `categoricals` (another key is an
-#'   error).
+#'   error), and for gap fitting `recorded` (a named list of target ->
+#'   recorded column, `c(latitude, longitude)` for a location) and
+#'   `survey_year`.
 #' @param batchSize Forward-pass chunk size per member (default 4096).
 #' @param keepMembers Also return every member's own prediction (default
 #'   `FALSE`).
+#' @param gapFitting `NULL` (default), `TRUE`, or a list of gap fitting
+#'   settings (`candidates`, `k_grid`, `spatial`, `matching_seed`; see
+#'   [resolve.fit_gaps()]): fit each target `columns$recorded` names from the
+#'   dataset's own complete plots. Adds `<target>_fitted` and
+#'   `<target>_fit_method` to [as.data.frame()] and a `gap_fit` (`fitted`,
+#'   `method`, `report`) to each fitted target.
 #'
 #' @return A `resolve_suite_predictions` list: `plot_ids`, and `targets`, a
 #'   named list with one entry per target holding `value` (the combined
@@ -169,7 +177,7 @@ resolve.seal_suite <- function(dir) {
 #' head(as.data.frame(preds))
 #' @export
 resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
-                                  batchSize = 4096L, keepMembers = FALSE) {
+                                  batchSize = 4096L, keepMembers = FALSE, gapFitting = NULL) {
   if (!inherits(suite, "Rcpp_Suite")) {
     stop("suite must be loaded with resolve.load_suite()")
   }
@@ -185,6 +193,8 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
     if (!is.list(columns)) stop("columns must be a named list")
     options$columns <- columns
   }
+  gap_config <- .resolve_gap_config(gapFitting)
+  if (!is.null(gap_config)) options$gap_fitting <- gap_config
 
   .resolve_require_backend()
   if (is.character(species)) {
@@ -228,7 +238,8 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
       status = t$status,
       limit = t$limit,
       class_names = classes,
-      member_seeds = seeds
+      member_seeds = seeds,
+      gap_fit = if (is.null(t$gap_fit)) NULL else .resolve_gap_fit(t$gap_fit)
     )
     if (identical(t$combine, "vote")) {
       out$value <- as.integer(t$value)
@@ -282,7 +293,9 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
 #' `<target>_circular_sd` for a bearing, `<target>_spread_km` for a spherical
 #' mean), the four recognition columns, and, when present, `<target>_seed<N>`
 #' for each member (`<target>_seed<N>_latitude` and `_longitude` for a
-#' spherical mean).
+#' spherical mean); a gap-fitted target adds `<target>_fitted`
+#' (`<target>_fitted_latitude` / `_fitted_longitude`) and
+#' `<target>_fit_method`.
 #'
 #' @param x A `resolve_suite_predictions` object from [resolve.predict.suite()].
 #' @param row.names,optional Ignored; present for the generic's signature.

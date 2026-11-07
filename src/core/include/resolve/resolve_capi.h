@@ -542,8 +542,14 @@ RESOLVE_CAPI resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const 
  *   columns       MAP  renames the manifest's input columns; keys as in a
  *                      roles tree (plot_id species_id abundance latitude
  *                      longitude genus family covariates categoricals)
+ *                      plus, for gap fitting, recorded (MAP target name ->
+ *                      STRING, or STRING_ARRAY latitude, longitude) and
+ *                      survey_year (STRING)
  *   batch_size    INT  per-member forward chunk (default 4096)
  *   keep_members  BOOL keep every member's own prediction (default false)
+ *   gap_fitting   MAP  a GapFittingConfig (candidates, k_grid, spatial,
+ *                      matching_seed; an empty MAP for the defaults): fit
+ *                      every target columns.recorded names
  * Returns a MAP: "plot_ids" (STRING_ARRAY) and "targets", an ordered MAP of
  * target name -> MAP with name task combine status limit units
  * dispersion_units class_names member_seeds value (INT_ARRAY class codes for a
@@ -551,7 +557,8 @@ RESOLVE_CAPI resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const 
  * longitude in degrees; DOUBLE_ARRAY otherwise) agreement probabilities
  * dispersion members (members x plots; for a spherical mean a MAP of
  * "latitude" and "longitude", each members x plots) n_species n_recognised
- * recognised_share recognised_abundance_share. A statistic the target's
+ * recognised_share recognised_abundance_share gap_fit (NULL-kind, or with gap
+ * fitting a MAP as resolve_fit_gaps returns). A statistic the target's
  * combine rule does not define is NULL-kind; NaN marks an undefined value.
  * "columns" is the same prediction as an ordered MAP of column name -> array,
  * one entry per plot (STRING_ARRAY labels, INT_ARRAY codes, DOUBLE_ARRAY
@@ -566,6 +573,44 @@ RESOLVE_CAPI resolve_value_t* resolve_suite_predict_dataframe(
 RESOLVE_CAPI resolve_value_t* resolve_suite_predict_csv(
     resolve_suite_t* s, const char* header_path, const char* species_path,
     const resolve_value_t* options);
+
+/* ========================================================================== */
+/* Gap fitting                                                                */
+/* ========================================================================== */
+
+/* Fit the gaps of one target from the dataset's own complete plots
+ * (resolve::fit_gaps). `target` is a MAP: name (STRING), scale (STRING:
+ * linear, log, circular, geographic), period (DOUBLE, circular). `raw` and
+ * `recorded` are the prediction and the recorded value per plot in the
+ * target's units: DOUBLE_ARRAY, or a DOUBLE_MATRIX of n rows (latitude,
+ * longitude) for a geographic target; a NaN recorded value marks a gap.
+ * `species` is a numeric MATRIX (plots x species, an entry other than 0 a
+ * species present); `coordinates` a DOUBLE_MATRIX (plots x 2, latitude,
+ * longitude) or NULL; `years` a DOUBLE_ARRAY or NULL. `config` a
+ * GapFittingConfig MAP or NULL; `radii` NULL or a MAP of similarity / km /
+ * years DOUBLE_ARRAYs, one per complete plot, replacing the drawn hiding
+ * distances. Returns a MAP: fitted (as `raw`), method (STRING_ARRAY,
+ * "recorded" for a complete plot), report (MAP). NULL on failure. */
+RESOLVE_CAPI resolve_value_t* resolve_fit_gaps(const resolve_value_t* target, const resolve_value_t* raw,
+                                               const resolve_value_t* recorded, const resolve_value_t* species,
+                                               const resolve_value_t* coordinates, const resolve_value_t* years,
+                                               const resolve_value_t* config, const resolve_value_t* radii);
+
+/* Fit the gaps of a single model's targets from its predictions and the
+ * dataset's own tables. `header` (may be NULL) and `species` are column
+ * tables as for resolve_dataset_load. `columns` is a MAP: plot_id, species_id,
+ * latitude, longitude, survey_year (STRING) and recorded (MAP target name ->
+ * STRING, or STRING_ARRAY latitude, longitude). `predictions` is a MAP:
+ * plot_ids (STRING_ARRAY) and outputs (MAP head -> DOUBLE_ARRAY). `requests`
+ * is a LIST of target MAPs (name, scale, period, outputs: the head(s) read,
+ * default the name). Returns a MAP of target name -> the MAP resolve_fit_gaps
+ * returns. NULL on failure. */
+RESOLVE_CAPI resolve_value_t* resolve_fit_prediction_gaps(const resolve_value_t* header,
+                                                          const resolve_value_t* species,
+                                                          const resolve_value_t* columns,
+                                                          const resolve_value_t* predictions,
+                                                          const resolve_value_t* requests,
+                                                          const resolve_value_t* config);
 
 /* Read and validate the manifest in `dir` without loading any member, then
  * compare every member file with it. Returns a MAP: "manifest" (value tree as
