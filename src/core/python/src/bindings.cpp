@@ -9,6 +9,7 @@
 // - bindings_fuzzy.cpp: the fuzzy string index
 // - bindings_suite.cpp: model suites, their manifest and results
 // - bindings_retrieval.cpp: the exact cosine nearest-neighbour search
+// - bindings_gap_fitting.cpp: gap fitting and the great-circle neighbour search
 
 #include "bindings_common.hpp"
 #include "resolve/io_retry.hpp"
@@ -38,6 +39,7 @@ NB_MODULE(_resolve_core, m) {
     register_fuzzy(m);
     register_suite(m);
     register_retrieval(m);
+    register_gap_fitting(m);
 
     m.def("default_cuda_alloc_conf", &resolve::default_cuda_alloc_conf,
           "The PYTORCH_CUDA_ALLOC_CONF value RESOLVE sets: garbage collection at\n"

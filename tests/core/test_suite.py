@@ -658,3 +658,77 @@ def test_a_member_states_the_zero_abundance_it_was_trained_under(suite_dir):
     assert back.targets[1].members[0].zero_abundance_as == 1.0
     rc.SuitePredictor.load(str(suite_dir))
     assert back.verify(str(suite_dir), targets=["hab"]) == []
+
+
+def _recorded_scoring(tmp_path: Path):
+    """The scoring plots with recorded values: y on all but every fourth plot,
+    the bearing on all but every fifth, and a survey year."""
+    cols, header, species = _plots(40, with_targets=True)
+    h = pd.DataFrame(header, columns=cols)
+    h["y_rec"] = [None if i % 4 == 0 else v for i, v in enumerate(h["y"])]
+    h["asp_rec"] = [
+        None if i % 5 == 0 else (41.0 * i) % 360.0 for i in range(len(h))
+    ]
+    h["year"] = [1980 + i for i in range(len(h))]
+    h = h.drop(columns=["hab", "y", "asp_sin", "asp_cos"])
+    s = pd.DataFrame(species, columns=["plot", "taxon", "cover", "genus", "family"])
+    return h, s
+
+
+def test_suite_gap_fitting_adds_fitted_columns_and_reports(suite_dir, tmp_path):
+    h, s = _recorded_scoring(tmp_path)
+    suite = rc.SuitePredictor.load(str(suite_dir))
+    columns = {"recorded": {"y": "y_rec", "aspect": "asp_rec"}, "survey_year": "year"}
+    out = suite.predict(s, h, columns=columns, gap_fitting=True)
+    y = out.target("y")
+    assert y.gap_fit is not None
+    assert out.target("hab").gap_fit is None
+    report = y.gap_fit.report
+    assert report["n_gaps"] == 10
+    assert report["axes"]["years"]["matched"]
+    assert out.target("aspect").gap_fit.report["scale"] == "circular"
+
+    frame = out.to_pandas()
+    assert {"y_fitted", "y_fit_method", "aspect_fitted", "aspect_fit_method"} <= set(frame.columns)
+    assert frame["y_fit_method"].iloc[1] == "recorded"
+    assert frame["y_fit_method"].iloc[0] != "recorded"
+    assert frame["y_fitted"].iloc[1] == pytest.approx(h["y_rec"].iloc[1], abs=1e-4)
+    # The raw prediction is left as it is.
+    plain = suite.predict(s, h)
+    assert torch.equal(y.value, plain.target("y").value)
+
+    # CSV paths and a dict config score the same.
+    h.to_csv(tmp_path / "rec_header.csv", index=False)
+    s.to_csv(tmp_path / "rec_species.csv", index=False)
+    by_path = suite.predict(
+        tmp_path / "rec_species.csv",
+        tmp_path / "rec_header.csv",
+        columns=columns,
+        gap_fitting={"candidates": ["local_constant", "resolve", "offset_slope"]},
+    )
+    assert by_path.target("y").gap_fit.report["groups"]["located"]["method"] in (
+        "local_constant",
+        "resolve",
+        "offset_slope",
+    )
+    with pytest.raises(ValueError):
+        suite.predict(s, h, columns={"recorded": {"hab": "y_rec"}}, gap_fitting=True)
+
+
+def test_a_single_model_fits_its_gaps_from_its_predictions(suite_dir, tmp_path):
+    h, s = _recorded_scoring(tmp_path)
+    h.to_csv(tmp_path / "rec_header.csv", index=False)
+    s.to_csv(tmp_path / "rec_species.csv", index=False)
+    member = suite_dir / "y" / "seed_3" / "model_final.pt"
+    predictions = _member_predictions(member, tmp_path / "rec_header.csv", tmp_path / "rec_species.csv")
+    cols = rc.GapColumns()
+    cols.plot_id, cols.species_id = "plot", "taxon"
+    cols.latitude, cols.longitude, cols.survey_year = "lat", "lon", "year"
+    cols.recorded = [("y", ["y_rec"])]
+    tables = rc.read_gap_tables_csv(
+        str(tmp_path / "rec_species.csv"), str(tmp_path / "rec_header.csv"), cols,
+        list(predictions.plot_ids))
+    fits = rc.fit_prediction_gaps(predictions, tables, [rc.GapFitRequest(rc.GapTarget("y"), ["y"])])
+    assert len(fits) == 1
+    assert fits[0].report["n_gaps"] == 10
+    assert fits[0].method.count("recorded") == 30

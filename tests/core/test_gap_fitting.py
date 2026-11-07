@@ -1,0 +1,214 @@
+"""Gap fitting through the Python bindings.
+
+Each case simulates complete plots and gaps from a known relation between the
+raw prediction, the plots' neighbours and the truth, and checks that
+``resolve_core.fit_gaps`` recovers it: a calibration slope, a turn of
+bearings, spatial neighbours chosen where the gaps are near and not for a far
+region, and matched neighbours no nearer than the gaps in km and in years.
+"""
+
+from __future__ import annotations
+
+import math
+
+import numpy as np
+import pandas as pd
+import pytest
+import torch
+
+import resolve_core as rc
+
+
+def _gapped(truth: np.ndarray, gaps: np.ndarray) -> torch.Tensor:
+    recorded = truth.astype(float).copy()
+    recorded[gaps] = np.nan
+    return torch.from_numpy(recorded)
+
+
+def _no_species(n: int) -> torch.Tensor:
+    return torch.zeros(n, 1)
+
+
+def _random_species(rng, n: int, n_species: int = 60, per_plot: int = 12) -> torch.Tensor:
+    picks = np.argsort(rng.random((n, n_species)), axis=1)[:, :per_plot]
+    out = np.zeros((n, n_species), np.float32)
+    np.put_along_axis(out, picks, 1.0, axis=1)
+    return torch.from_numpy(out).to_sparse_csr()
+
+
+def _only(*methods) -> rc.GapFittingConfig:
+    cfg = rc.GapFittingConfig()
+    cfg.candidates = list(methods)
+    return cfg
+
+
+@pytest.mark.parametrize("seed", range(5))
+@pytest.mark.parametrize("slope", [0.0, 0.4, 1.0])
+def test_offset_slope_recovers_the_local_relation(seed, slope):
+    rng = np.random.default_rng(seed)
+    pred = rng.uniform(1950, 2020, 3000)
+    truth = 1990 + slope * (pred - pred.mean()) + 8.0 + rng.normal(0, 3, pred.size)
+    gaps = np.arange(3000) >= 2400
+    fit = rc.fit_gaps(rc.GapTarget("year"), torch.from_numpy(pred), _gapped(truth, gaps),
+                      _no_species(3000), config=_only(rc.GapMethod.OffsetSlope))
+    group = fit.report["groups"]["unlocated"]
+    assert group["method"] == "offset_slope"
+    assert abs(group["coefficients"]["resolve"] - slope) < 0.02
+    assert fit.method[:2400] == ["recorded"] * 2400
+    assert set(fit.method[2400:]) == {"offset_slope"}
+    assert np.allclose(fit.fitted.numpy()[:2400], truth[:2400])
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_a_turn_of_bearings_is_recovered(seed):
+    rng = np.random.default_rng(seed)
+    truth = rng.uniform(0, 360, 2000)
+    pred = (truth - 40 + rng.normal(0, 5, truth.size)) % 360
+    gaps = np.arange(2000) >= 1500
+    fit = rc.fit_gaps(rc.GapTarget("aspect", rc.GapScale.Circular, 360.0), torch.from_numpy(pred),
+                      _gapped(truth, gaps), _no_species(2000),
+                      config=_only(rc.GapMethod.OffsetSlope))
+    turn = fit.report["groups"]["unlocated"]["coefficients"]["resolve"]
+    assert abs(turn["angle_deg"] - 40) < 1
+    assert abs(turn["modulus"] - 1) < 0.05
+    d = np.abs(fit.fitted.numpy()[gaps] - truth[gaps]) % 360
+    assert np.minimum(d, 360 - d).mean() < 6
+
+
+def _wavy(rng, n):
+    lat = rng.uniform(45.0, 50.0, n)
+    lon = rng.uniform(14.0, 14.5, n)
+    truth = 1985 + 30 * np.sin(2 * np.pi * lat / 0.5) + rng.normal(0, 1, n)
+    return lat, lon, truth, truth + rng.normal(0, 6, n)
+
+
+def _mae(fit, truth, gaps):
+    return float(np.abs(fit.fitted.numpy()[gaps] - truth[gaps]).mean())
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_spatial_neighbours_only_where_the_gaps_are_near(seed):
+    rng = np.random.default_rng(seed)
+    lat, lon, truth, pred = _wavy(rng, 3000)
+    coords = torch.from_numpy(np.column_stack([lat, lon]))
+    target = rc.GapTarget("altitude")
+
+    gaps = rng.random(3000) < 0.2
+    fit = rc.fit_gaps(target, torch.from_numpy(pred), _gapped(truth, gaps), _no_species(3000),
+                      coordinates=coords)
+    assert fit.report["groups"]["located"]["method"] in ("knn_spatial", "stack_species_spatial")
+    best = min(_mae(rc.fit_gaps(target, torch.from_numpy(pred), _gapped(truth, gaps), _no_species(3000),
+                                coordinates=coords, config=_only(m)), truth, gaps)
+               for m in (rc.GapMethod.KnnSpatial, rc.GapMethod.StackSpeciesSpatial))
+    assert _mae(fit, truth, gaps) <= 1.1 * best
+
+    keep = (lat < 48.5) | (lat > 49.0)
+    t, p, c = truth[keep], pred[keep], coords[torch.from_numpy(keep)]
+    gaps = lat[keep] > 49.0
+    n = int(keep.sum())
+    fit = rc.fit_gaps(target, torch.from_numpy(p), _gapped(t, gaps), _no_species(n), coordinates=c)
+    assert fit.report["groups"]["located"]["method"] != "knn_spatial"
+    n_complete = fit.report["n_complete"]
+    plain = rc.fit_gaps(target, torch.from_numpy(p), _gapped(t, gaps), _no_species(n), coordinates=c,
+                        config=_only(rc.GapMethod.StackSpeciesSpatial),
+                        radii={"similarity": torch.full((n_complete,), 2.0, dtype=torch.float64),
+                               "km": torch.zeros(n_complete, dtype=torch.float64)})
+    calibrated = rc.fit_gaps(target, torch.from_numpy(p), _gapped(t, gaps), _no_species(n),
+                             coordinates=c, config=_only(rc.GapMethod.OffsetSlope))
+    assert _mae(fit, t, gaps) < 0.8 * _mae(plain, t, gaps)
+    assert _mae(fit, t, gaps) <= 1.1 * _mae(calibrated, t, gaps)
+
+
+def test_matched_neighbours_are_no_nearer_than_the_gaps():
+    rng = np.random.default_rng(4)
+    n_cal, n_gap = 800, 200
+    lat = np.concatenate([rng.uniform(45.0, 47.0, n_cal), 47.0 + rng.uniform(0.9, 1.35, n_gap)])
+    lon = rng.uniform(14.0, 15.0, n_cal + n_gap)
+    year = np.concatenate([rng.uniform(1960, 2020, n_cal), rng.uniform(1930, 1940, n_gap)])
+    gaps = np.arange(n_cal + n_gap) >= n_cal
+    coords = torch.from_numpy(np.column_stack([lat, lon]))
+    found = rc.matched_gap_neighbours(rc.GapTarget("altitude"), _gapped(np.zeros(n_cal + n_gap), gaps),
+                                      _random_species(rng, n_cal + n_gap), coordinates=coords,
+                                      years=torch.from_numpy(year))
+    cal = found["complete"].numpy()
+    _, gap_km = rc.nearest_by_great_circle(coords[gaps], coords[cal], 1)
+    gap_years = np.abs(year[gaps][:, None] - year[cal][None, :]).min(axis=1).min()
+    for kind in ("species", "spatial"):
+        nb = found[kind].numpy()
+        i, j = np.nonzero(nb >= 0)
+        assert i.size > 0
+        assert (nb != np.arange(n_cal)[:, None]).all()
+        a, b = cal[i], cal[nb[i, j]]
+        km = 2 * 6371.0 * np.arcsin(np.sqrt(
+            np.sin(np.radians(lat[b] - lat[a]) / 2) ** 2
+            + np.cos(np.radians(lat[a])) * np.cos(np.radians(lat[b]))
+            * np.sin(np.radians(lon[b] - lon[a]) / 2) ** 2))
+        assert km.min() >= gap_km.min().item() - 1e-3
+        assert np.abs(year[a] - year[b]).min() >= gap_years - 1e-9
+
+
+def test_injected_radii_reproduce_the_drawn_fit_and_the_report_is_plain_data():
+    rng = np.random.default_rng(1)
+    n = 400
+    truth = rng.normal(size=n)
+    gaps = rng.random(n) < 0.3
+    species = _random_species(rng, n)
+    raw = torch.from_numpy(truth + 0.1)
+    drawn = rc.fit_gaps(rc.GapTarget("slope"), raw, _gapped(truth, gaps), species)
+    radii = rc.matched_gap_neighbours(rc.GapTarget("slope"), _gapped(truth, gaps), species)["radii"]
+    injected = rc.fit_gaps(rc.GapTarget("slope"), raw, _gapped(truth, gaps), species, radii=radii)
+    assert torch.equal(drawn.fitted, injected.fitted)
+    report = drawn.report
+    assert report["n_gaps"] == int(gaps.sum())
+    assert set(report["axes"]) == {"similarity", "km", "years"}
+    assert report["axes"]["similarity"]["matched"]
+    assert isinstance(report["groups"]["unlocated"]["matched_error"]["resolve"], float)
+    with pytest.raises(ValueError):
+        rc.fit_gaps(rc.GapTarget("slope"), raw, _gapped(truth, gaps), species, radii={"depth": None})
+
+
+def test_the_config_validates_and_lists_its_candidates():
+    cfg = rc.GapFittingConfig()
+    assert cfg.k_grid == [1, 3, 5, 10, 20, 50]
+    assert cfg.spatial and cfg.matching_seed == 20261106
+    assert len(cfg.candidates) == 7
+    cfg.k_grid = [0]
+    with pytest.raises(ValueError):
+        cfg.validate()
+
+
+def test_gap_tables_read_every_named_species_from_dataframes():
+    header = pd.DataFrame({"plot": ["a", "b", "c"], "Year": ["1990", "", "2001"],
+                           "alt": ["300", "NA", "500"]})
+    species = pd.DataFrame({"plot": ["a", "a", "b", "c"],
+                            "taxon": ["Poa annua", "Bellis perennis", "Poa annua", "Abies alba"]})
+    cols = rc.GapColumns()
+    cols.plot_id, cols.species_id, cols.survey_year = "plot", "taxon", "Year"
+    cols.recorded = [("altitude", ["alt"])]
+    tables = rc.read_gap_tables_columns(
+        list(species.columns), [species[c].astype(str).tolist() for c in species.columns],
+        list(header.columns), [header[c].astype(str).tolist() for c in header.columns],
+        cols, ["c", "a", "b"])
+    presence = tables.species.to_dense()
+    assert presence.shape == (3, 3)
+    assert presence.sum(1).tolist() == [1.0, 2.0, 1.0]
+    assert tables.recorded["altitude"].tolist()[0] == 500.0
+    assert math.isnan(tables.years.tolist()[2])
+
+
+def test_nearest_by_great_circle_is_the_brute_force():
+    rng = np.random.default_rng(7)
+    points = np.column_stack([rng.uniform(40, 60, 300), rng.uniform(-5, 25, 300)])
+    points[5] = np.nan
+    idx, km = rc.nearest_by_great_circle(torch.from_numpy(points), torch.from_numpy(points), 4, True)
+    lat, lon = np.radians(points[:, 0]), np.radians(points[:, 1])
+    d = 2 * 6371.0 * np.arcsin(np.sqrt(
+        np.sin((lat[None, :] - lat[:, None]) / 2) ** 2
+        + np.cos(lat[:, None]) * np.cos(lat[None, :]) * np.sin((lon[None, :] - lon[:, None]) / 2) ** 2))
+    d[np.arange(300), np.arange(300)] = np.inf
+    d = np.where(np.isnan(d), np.inf, d)
+    expected = np.argsort(d, axis=1)[:, :4]
+    ok = np.isfinite(points).all(1)
+    assert (idx.numpy()[ok] == expected[ok]).all()
+    assert (idx.numpy()[5] == -1).all()
+    assert np.allclose(km.numpy()[ok], np.take_along_axis(d, expected, 1)[ok])

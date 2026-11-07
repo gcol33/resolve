@@ -227,13 +227,14 @@ struct MatchedGapNeighbours {
                              // without the spatial axis
 };
 
-// The matched neighbours fit_gaps reads for `recorded` (as in fit_gaps), drawn
-// with the config's seed. Throws std::invalid_argument with fewer than two
-// complete plots or no gap.
+// The matched neighbours fit_gaps reads for `recorded` (as in fit_gaps), with
+// the distances drawn with the config's seed or, given `radii`, those. Throws
+// std::invalid_argument with fewer than two complete plots or no gap.
 [[nodiscard]] MatchedGapNeighbours matched_gap_neighbours(const GapTarget& target,
                                                           const torch::Tensor& recorded,
                                                           const GapPlots& plots,
-                                                          const GapFittingConfig& config = {});
+                                                          const GapFittingConfig& config = {},
+                                                          const HidingRadii* radii = nullptr);
 
 // ---------------------------------------------------------------------------
 // Reading what gap fitting needs from a dataset's own tables

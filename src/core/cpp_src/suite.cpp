@@ -614,6 +614,11 @@ ResolveDataset SuiteInput::encode(const RoleMapping& roles, const ExternalVocabs
     return ResolveDataset::load(header_, species_, roles, /*targets=*/{}, config, &vocabs);
 }
 
+GapTables SuiteInput::gap_tables(const GapColumns& columns,
+                                 const std::vector<std::string>& plot_ids) const {
+    return read_gap_tables(header_, species_, columns, plot_ids);
+}
+
 // ============================================================================
 // Combination rules
 // ============================================================================
@@ -922,6 +927,20 @@ std::vector<SuiteColumn> suite_prediction_columns(const SuitePredictions& predic
         }
         if (rule.dispersion_column != nullptr) {
             columns.push_back(number_column(name + rule.dispersion_column, t.dispersion, n));
+        }
+        if (t.gap_fit) {
+            for (std::size_t i = 0; i < rule.n_value_columns(); ++i) {
+                columns.push_back(number_column(name + "_fitted" + rule.value_columns[i],
+                                                value_component(t.gap_fit->fitted, rule, i), n));
+            }
+            SuiteColumn method;
+            method.name = name + "_fit_method";
+            method.kind = SuiteColumn::Kind::Text;
+            const torch::Tensor codes = t.gap_fit->method.to(torch::kCPU, torch::kInt64).contiguous();
+            const int64_t* data = codes.data_ptr<int64_t>();
+            method.text.reserve(static_cast<std::size_t>(codes.numel()));
+            for (int64_t i = 0; i < codes.numel(); ++i) method.text.push_back(gap_method_label(data[i]));
+            columns.push_back(std::move(method));
         }
         columns.push_back(number_column(name + "_n_species", t.recognition.n_species, n));
         columns.push_back(number_column(name + "_n_recognised", t.recognition.n_recognised, n));
@@ -1255,7 +1274,7 @@ std::vector<std::string> SuitePredictor::target_names() const {
     return out;
 }
 
-RoleMapping SuitePredictor::roles_for(const SuiteColumns& columns) const {
+RoleMapping SuitePredictor::roles_for(const SuiteColumns& columns, bool gap_fitting) const {
     const SuiteInputContract& in = manifest_.inputs;
     auto pick = [](const std::optional<std::string>& over, const std::string& base) {
         return over ? *over : base;
@@ -1277,8 +1296,12 @@ RoleMapping SuitePredictor::roles_for(const SuiteColumns& columns) const {
     roles.abundance = optional_role(columns.abundance, in.abundance);
     roles.genus = optional_role(columns.genus, in.genus);
     roles.family = optional_role(columns.family, in.family);
-    roles.latitude = optional_role(columns.latitude, in.latitude);
-    roles.longitude = optional_role(columns.longitude, in.longitude);
+    // A position the members do not read is still read by gap fitting.
+    const bool position_for_gaps_only = gap_fitting && in.latitude.empty();
+    roles.latitude =
+        position_for_gaps_only ? std::nullopt : optional_role(columns.latitude, in.latitude);
+    roles.longitude =
+        position_for_gaps_only ? std::nullopt : optional_role(columns.longitude, in.longitude);
     roles.covariates = columns.covariates ? *columns.covariates : in.covariates;
     roles.categoricals = columns.categoricals ? *columns.categoricals : in.categoricals;
     if (roles.covariates.size() != in.covariates.size()) {
@@ -1328,7 +1351,7 @@ SuitePredictions SuitePredictor::predict(const SuiteInput& input,
             "suite '" + manifest_.name + "' reads plot-level columns (coordinates or "
             "covariates), so a header table is required");
     }
-    const RoleMapping roles = roles_for(options.columns);
+    const RoleMapping roles = roles_for(options.columns, options.gap_fitting.has_value());
 
     SuitePredictions result;
     result.targets.resize(targets_.size());
@@ -1404,7 +1427,89 @@ SuitePredictions SuitePredictor::predict(const SuiteInput& input,
                 reorder(r.count_share, perm, 0), reorder(r.abundance_share, perm, 0)};
         }
     }
+    if (options.gap_fitting) fit_gaps(input, options.columns, *options.gap_fitting, result);
     return result;
+}
+
+void SuitePredictor::fit_gaps(const SuiteInput& input, const SuiteColumns& columns,
+                              const GapFittingConfig& config, SuitePredictions& result) const {
+    config.validate();
+    if (columns.recorded.empty()) {
+        throw std::invalid_argument(
+            "gap fitting: name the column holding each fitted target's recorded value "
+            "(SuiteColumns::recorded)");
+    }
+    const SuiteInputContract& in = manifest_.inputs;
+    GapColumns gap_columns;
+    gap_columns.plot_id = columns.plot_id.value_or(in.plot_id);
+    gap_columns.species_id = columns.species_id.value_or(in.species);
+    const std::string latitude = columns.latitude.value_or(in.latitude);
+    const std::string longitude = columns.longitude.value_or(in.longitude);
+    if (latitude.empty() != longitude.empty()) {
+        throw std::invalid_argument(
+            "gap fitting: name both a latitude and a longitude column, or neither");
+    }
+    if (!latitude.empty()) {
+        gap_columns.latitude = latitude;
+        gap_columns.longitude = longitude;
+    }
+    gap_columns.survey_year = columns.survey_year;
+
+    // Which loaded target each recorded entry fits, and how its values lie.
+    struct Fitted {
+        std::size_t index;
+        GapTarget target;
+    };
+    std::vector<Fitted> fitted;
+    for (const auto& [name, cols] : columns.recorded) {
+        std::size_t t = 0;
+        while (t < targets_.size() && manifest_.targets[targets_[t].spec].name != name) ++t;
+        if (t == targets_.size()) {
+            throw std::invalid_argument("gap fitting: the suite has no loaded target '" + name + "'");
+        }
+        const SuiteTarget& spec = manifest_.targets[targets_[t].spec];
+        GapTarget target;
+        target.name = name;
+        switch (spec.combine) {
+            case SuiteCombine::Vote:
+                throw std::invalid_argument(
+                    "gap fitting: target '" + name + "' is a classification; gap fitting fits "
+                    "regression targets only");
+            case SuiteCombine::SphericalMean: target.scale = GapScale::Geographic; break;
+            case SuiteCombine::CircularMean:
+                target.scale = GapScale::Circular;
+                target.period = spec.period;
+                break;
+            case SuiteCombine::Mean: {
+                // A target whose members learned log1p of the value is fitted
+                // on that scale, the one its error is measured on.
+                const ResolveSchema& schema = targets_[t].members.front().predictor.schema();
+                const auto head = std::find_if(
+                    schema.targets.begin(), schema.targets.end(),
+                    [&](const TargetConfig& c) { return c.name == spec.outputs.front(); });
+                target.scale = head != schema.targets.end() && head->transform == TransformType::Log1p
+                                   ? GapScale::Log
+                                   : GapScale::Linear;
+                break;
+            }
+        }
+        const std::size_t expected = target.scale == GapScale::Geographic ? 2 : 1;
+        if (cols.size() != expected) {
+            throw std::invalid_argument(
+                "gap fitting: target '" + name + "' needs " +
+                (expected == 2 ? "two recorded columns (latitude, longitude)" : "one recorded column") +
+                ", got " + std::to_string(cols.size()));
+        }
+        fitted.push_back({t, std::move(target)});
+    }
+    gap_columns.recorded = columns.recorded;
+
+    const GapTables tables = input.gap_tables(gap_columns, result.plot_ids);
+    for (const Fitted& f : fitted) {
+        SuiteTargetPrediction& out = result.targets[f.index];
+        out.gap_fit = resolve::fit_gaps(f.target, out.value, tables.recorded.at(f.target.name),
+                                        tables.plots, config);
+    }
 }
 
 const SuiteTargetPrediction& SuitePredictions::target(const std::string& name) const {

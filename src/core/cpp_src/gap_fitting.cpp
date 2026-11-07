@@ -742,7 +742,8 @@ Prepared prepare(const GapTarget& target, const torch::Tensor& raw_values,
 }  // namespace
 
 MatchedGapNeighbours matched_gap_neighbours(const GapTarget& target, const torch::Tensor& recorded,
-                                            const GapPlots& plots, const GapFittingConfig& config) {
+                                            const GapPlots& plots, const GapFittingConfig& config,
+                                            const HidingRadii* radii) {
     config.validate();
     validate_inputs(target, torch::Tensor(), recorded, plots);
     const torch::Tensor recorded_values = as_double(recorded);
@@ -752,7 +753,7 @@ MatchedGapNeighbours matched_gap_neighbours(const GapTarget& target, const torch
                                     "and one gap");
     }
     const Prepared prepared =
-        prepare(target, torch::Tensor(), recorded_values, cal_index, test_index, plots, config, nullptr);
+        prepare(target, torch::Tensor(), recorded_values, cal_index, test_index, plots, config, radii);
     MatchedGapNeighbours out;
     out.complete = cal_index;
     out.gaps = test_index;

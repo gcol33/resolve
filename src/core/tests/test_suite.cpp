@@ -1340,3 +1340,81 @@ TEST_CASE("each target reads its own part of the contract", "[suite][predict]") 
                             ContainsSubstring("names coordinates, the checkpoint reads none"));
     }
 }
+
+TEST_CASE("suite gap fitting fits the named targets from the dataset's complete plots",
+          "[suite][predict][gap_fitting]") {
+    TempDir dir;
+    build_suite(dir);
+    const ScoringFiles in = scoring_files(dir);
+    // The same plots with recorded values: y on every plot but every fourth,
+    // the bearing on every plot but every fifth.
+    const auto plots = corpus();
+    std::ostringstream header;
+    header << "plot,lat,lon,cov1,y_rec,asp_rec,year\n";
+    for (size_t i = 0; i < plots.size(); ++i) {
+        const auto& p = plots[i];
+        header << p.id << "," << p.lat << "," << p.lon << "," << p.cov << ","
+               << (i % 4 == 0 ? std::string("NA") : std::to_string(p.y)) << ","
+               << (i % 5 == 0 ? std::string("") : std::to_string(p.bearing)) << ","
+               << (1980 + i) << "\n";
+    }
+    dir.write("score/header_rec.csv", header.str());
+    dir.write("score/species_rec.csv", species_csv(plots));
+    const SuiteInput input =
+        SuiteInput::csv(dir.file("score/header_rec.csv"), dir.file("score/species_rec.csv"));
+
+    SuitePredictor suite = SuitePredictor::load(dir.path());
+    SuitePredictOptions opts;
+    opts.gap_fitting = GapFittingConfig{};
+    opts.columns.recorded = {{"y", {"y_rec"}}, {"aspect", {"asp_rec"}}};
+    opts.columns.survey_year = "year";
+    const SuitePredictions out = suite.predict(input, opts);
+
+    const auto& y = out.target("y");
+    const auto& asp = out.target("aspect");
+    REQUIRE(y.gap_fit.has_value());
+    REQUIRE(asp.gap_fit.has_value());
+    CHECK_FALSE(out.target("hab").gap_fit.has_value());
+    CHECK(y.gap_fit->report.n_gaps == 8);
+    CHECK(asp.gap_fit->report.n_gaps == 6);
+    CHECK(asp.gap_fit->report.scale == GapScale::Circular);
+
+    // The suite's fit is the free function's over the combined prediction.
+    GapColumns columns;
+    columns.plot_id = "plot";
+    columns.species_id = "taxon";
+    columns.latitude = "lat";
+    columns.longitude = "lon";
+    columns.survey_year = "year";
+    columns.recorded = {{"y", {"y_rec"}}};
+    const GapTables tables = read_gap_tables(TableSource::csv(dir.file("score/header_rec.csv")),
+                                             TableSource::csv(dir.file("score/species_rec.csv")),
+                                             columns, out.plot_ids);
+    const GapFit direct = fit_gaps({"y"}, y.value, tables.recorded.at("y"), tables.plots);
+    CHECK(torch::allclose(direct.fitted, y.gap_fit->fitted, 0.0, 1e-12, /*equal_nan=*/true));
+    CHECK(torch::equal(direct.method, y.gap_fit->method));
+    // Complete plots keep their record; the raw prediction is untouched.
+    CHECK_THAT(y.gap_fit->fitted[1].item<double>(), WithinAbs(plots[1].y, 1e-4));
+    CHECK(torch::equal(y.value, suite.predict(input, SuitePredictOptions{}).target("y").value));
+
+    const auto table = suite_prediction_columns(out, false);
+    auto column = [&](const std::string& name) -> const SuiteColumn& {
+        for (const auto& c : table) {
+            if (c.name == name) return c;
+        }
+        FAIL("no column " << name);
+        return table.front();
+    };
+    CHECK(column("y_fitted").numbers.size() == 30);
+    CHECK(column("y_fit_method").text[1] == "recorded");
+    CHECK(column("y_fit_method").text[0] != "recorded");
+    CHECK(column("aspect_fit_method").text[0] != "recorded");
+
+    // Gap fitting reads regression targets only, and needs the recorded column.
+    SuitePredictOptions vote = opts;
+    vote.columns.recorded = {{"hab", {"y_rec"}}};
+    CHECK_THROWS_AS(suite.predict(input, vote), std::invalid_argument);
+    SuitePredictOptions none = opts;
+    none.columns.recorded.clear();
+    CHECK_THROWS_AS(suite.predict(input, none), std::invalid_argument);
+}

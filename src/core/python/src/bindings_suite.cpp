@@ -269,7 +269,12 @@ void register_suite(nb::module_& m) {
         .def_rw("latitude", &SuiteColumns::latitude)
         .def_rw("longitude", &SuiteColumns::longitude)
         .def_rw("covariates", &SuiteColumns::covariates)
-        .def_rw("categoricals", &SuiteColumns::categoricals);
+        .def_rw("categoricals", &SuiteColumns::categoricals)
+        .def_rw("recorded", &SuiteColumns::recorded,
+                "Gap fitting: per target fitted, (target, [column]) or (target, [latitude, "
+                "longitude]) naming its recorded value.")
+        .def_rw("survey_year", &SuiteColumns::survey_year,
+                "Gap fitting: the survey-year column of the time axis.");
 
     nb::class_<SuiteTargetPrediction>(m, "SuiteTargetPrediction")
         .def_ro("name", &SuiteTargetPrediction::name)
@@ -287,7 +292,9 @@ void register_suite(nb::module_& m) {
                      [](const SuiteTargetPrediction& t) { return tensor_or_none(t.probabilities); })
         .def_prop_ro("dispersion", [](const SuiteTargetPrediction& t) { return tensor_or_none(t.dispersion); })
         .def_prop_ro("members", [](const SuiteTargetPrediction& t) { return tensor_or_none(t.members); })
-        .def_ro("recognition", &SuiteTargetPrediction::recognition);
+        .def_ro("recognition", &SuiteTargetPrediction::recognition)
+        .def_ro("gap_fit", &SuiteTargetPrediction::gap_fit,
+                "The GapFit of a gap-fitted target (fitted, method, report), or None.");
 
     nb::class_<SuitePredictions>(m, "SuitePredictions")
         .def_ro("plot_ids", &SuitePredictions::plot_ids)
@@ -348,23 +355,26 @@ void register_suite(nb::module_& m) {
         .def_prop_ro("n_encodings", &SuitePredictor::n_encodings)
         .def("predict_csv",
              [](SuitePredictor& s, const std::string& species_path, const std::string& header_path,
-                const SuiteColumns& columns, int64_t batch_size, bool keep_members) {
+                const SuiteColumns& columns, int64_t batch_size, bool keep_members,
+                std::optional<GapFittingConfig> gap_fitting) {
                  SuitePredictOptions options;
                  options.columns = columns;
                  options.batch_size = batch_size;
                  options.keep_members = keep_members;
+                 options.gap_fitting = std::move(gap_fitting);
                  nb::gil_scoped_release nogil;
                  return s.predict(SuiteInput::csv(header_path, species_path), options);
              },
              nb::arg("species_path"), nb::arg("header_path") = "",
              nb::arg("columns") = SuiteColumns{}, nb::arg("batch_size") = 4096,
-             nb::arg("keep_members") = false)
+             nb::arg("keep_members") = false, nb::arg("gap_fitting") = nb::none())
         .def("predict_columns",
              [](SuitePredictor& s, std::vector<std::string> species_names,
                 std::vector<std::vector<std::string>> species_columns,
                 std::optional<std::vector<std::string>> header_names,
                 std::optional<std::vector<std::vector<std::string>>> header_columns,
-                const SuiteColumns& columns, int64_t batch_size, bool keep_members) {
+                const SuiteColumns& columns, int64_t batch_size, bool keep_members,
+                std::optional<GapFittingConfig> gap_fitting) {
                  if (header_names.has_value() != header_columns.has_value()) {
                      throw std::invalid_argument("pass header_names and header_columns together");
                  }
@@ -372,6 +382,7 @@ void register_suite(nb::module_& m) {
                  options.columns = columns;
                  options.batch_size = batch_size;
                  options.keep_members = keep_members;
+                 options.gap_fitting = std::move(gap_fitting);
                  nb::gil_scoped_release nogil;
                  const ColumnTable species(std::move(species_names), std::move(species_columns));
                  std::optional<ColumnTable> header;
@@ -381,7 +392,7 @@ void register_suite(nb::module_& m) {
              nb::arg("species_names"), nb::arg("species_columns"),
              nb::arg("header_names") = nb::none(), nb::arg("header_columns") = nb::none(),
              nb::arg("columns") = SuiteColumns{}, nb::arg("batch_size") = 4096,
-             nb::arg("keep_members") = false,
+             nb::arg("keep_members") = false, nb::arg("gap_fitting") = nb::none(),
              "Low-level entry point over string columns; SuitePredictor.predict wraps it "
              "for pandas DataFrames.");
 }

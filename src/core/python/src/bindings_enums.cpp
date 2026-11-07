@@ -174,6 +174,21 @@ void register_enums(nb::module_& m) {
         .value("CircularMean", resolve::SuiteCombine::CircularMean)
         .value("SphericalMean", resolve::SuiteCombine::SphericalMean);
 
+    nb::enum_<resolve::GapScale>(m, "GapScale")
+        .value("Linear", resolve::GapScale::Linear)
+        .value("Log", resolve::GapScale::Log)
+        .value("Circular", resolve::GapScale::Circular)
+        .value("Geographic", resolve::GapScale::Geographic);
+
+    nb::enum_<resolve::GapMethod>(m, "GapMethod")
+        .value("LocalConstant", resolve::GapMethod::LocalConstant)
+        .value("Resolve", resolve::GapMethod::Resolve)
+        .value("OffsetSlope", resolve::GapMethod::OffsetSlope)
+        .value("KnnSpecies", resolve::GapMethod::KnnSpecies)
+        .value("StackSpecies", resolve::GapMethod::StackSpecies)
+        .value("KnnSpatial", resolve::GapMethod::KnnSpatial)
+        .value("StackSpeciesSpatial", resolve::GapMethod::StackSpeciesSpatial);
+
     nb::enum_<resolve::SuiteTargetStatus>(m, "SuiteTargetStatus")
         .value("Released", resolve::SuiteTargetStatus::Released)
         .value("Experimental", resolve::SuiteTargetStatus::Experimental);

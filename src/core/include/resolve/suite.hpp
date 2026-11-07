@@ -225,6 +225,14 @@ struct SuiteColumns {
     // length, since the members' input width is fixed.
     std::optional<std::vector<std::string>> covariates;
     std::optional<std::vector<std::string>> categoricals;
+    // Gap fitting (SuitePredictOptions::gap_fitting) only: per target fitted,
+    // the column(s) holding its recorded value -- one, or latitude and
+    // longitude for a position -- and the survey-year column of the time
+    // axis. Gap fitting reads positions from latitude / longitude above, or
+    // the contract's; a suite that reads no coordinates may still name them
+    // here for gap fitting alone.
+    std::vector<std::pair<std::string, std::vector<std::string>>> recorded;
+    std::optional<std::string> survey_year;
 };
 
 // The plots to score: a header table (one row per plot; required when the
@@ -242,6 +250,10 @@ public:
     // Encode the plots in a model's namespace.
     [[nodiscard]] ResolveDataset encode(const RoleMapping& roles, const ExternalVocabs& vocabs,
                                         const DatasetConfig& config) const;
+
+    // What gap fitting reads about the plots `plot_ids` (read_gap_tables).
+    [[nodiscard]] GapTables gap_tables(const GapColumns& columns,
+                                       const std::vector<std::string>& plot_ids) const;
 
 private:
     SuiteInput(std::optional<TableSource> header, TableSource species)
@@ -269,6 +281,9 @@ struct SuitePredictOptions {
     int64_t batch_size = 4096;  // per-member forward chunk, as Predictor::predict
     // Keep every member's own prediction in SuiteTargetPrediction::members.
     bool keep_members = false;
+    // Gap fitting (gap_fitting.hpp) after combining, for every target
+    // columns.recorded names; unset fits nothing.
+    std::optional<GapFittingConfig> gap_fitting;
 };
 
 struct SuiteTargetPrediction {
@@ -306,6 +321,10 @@ struct SuiteTargetPrediction {
     torch::Tensor members;
     // Recognition of each plot by the target's vocabulary.
     SpeciesRecognition recognition;
+    // With gap fitting for this target: `value` combined with the dataset's
+    // own complete plots, the method per plot and the report. `value` itself
+    // is left as the members' combined prediction.
+    std::optional<GapFit> gap_fit;
 };
 
 struct SuitePredictions {
@@ -431,7 +450,9 @@ struct SuiteColumn {
 // (`<t>_sd`, `<t>_circular_sd`, `<t>_spread_km`), `<t>_n_species`,
 // `<t>_n_recognised`, `<t>_recognised_share`, `<t>_recognised_abundance_share`,
 // and with kept members `<t>_seed<N>` per member (a label for a vote,
-// `_latitude` / `_longitude` for a spherical mean). A class code is labelled
+// `_latitude` / `_longitude` for a spherical mean). A gap-fitted target adds
+// `<t>_fitted` (`<t>_fitted_latitude` / `<t>_fitted_longitude`) and
+// `<t>_fit_method` after its prediction and dispersion. A class code is labelled
 // by class_label. The CLI writes this table, and the Python and R data frames
 // are built from it.
 [[nodiscard]] std::vector<SuiteColumn> suite_prediction_columns(const SuitePredictions& predictions,
@@ -465,8 +486,14 @@ private:
 
     SuitePredictor();
 
-    // The caller's columns for the whole contract.
-    [[nodiscard]] RoleMapping roles_for(const SuiteColumns& columns) const;
+    // The caller's columns for the whole contract. With `gap_fitting`, a
+    // latitude / longitude the contract does not read may be named: gap
+    // fitting reads it, the members do not.
+    [[nodiscard]] RoleMapping roles_for(const SuiteColumns& columns, bool gap_fitting) const;
+    // Gap fitting over the combined predictions of every target the columns
+    // name a recorded value for.
+    void fit_gaps(const SuiteInput& input, const SuiteColumns& columns,
+                  const GapFittingConfig& config, SuitePredictions& result) const;
     // The part of `roles` an encoding's members read.
     [[nodiscard]] RoleMapping roles_for(const RoleMapping& roles, const Encoding& encoding) const;
 

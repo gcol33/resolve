@@ -116,6 +116,21 @@ try:
         Predictor,
         # Exact cosine nearest-neighbour search
         nearest_by_cosine,
+        # Gap fitting and the great-circle neighbour search
+        GapScale,
+        GapMethod,
+        GapFittingConfig,
+        GapTarget,
+        GapFit,
+        GapColumns,
+        GapTables,
+        GapFitRequest,
+        fit_gaps,
+        matched_gap_neighbours,
+        read_gap_tables_csv,
+        read_gap_tables_columns,
+        fit_prediction_gaps,
+        nearest_by_great_circle,
         # Metrics
         Metrics,
         ClassificationMetrics,
@@ -313,6 +328,21 @@ __all__ = [
     "Predictor",
     # Exact cosine nearest-neighbour search
     "nearest_by_cosine",
+    # Gap fitting and the great-circle neighbour search
+    "GapScale",
+    "GapMethod",
+    "GapFittingConfig",
+    "GapTarget",
+    "GapFit",
+    "GapColumns",
+    "GapTables",
+    "GapFitRequest",
+    "fit_gaps",
+    "matched_gap_neighbours",
+    "read_gap_tables_csv",
+    "read_gap_tables_columns",
+    "fit_prediction_gaps",
+    "nearest_by_great_circle",
     # Metrics
     "Metrics",
     "ClassificationMetrics",
