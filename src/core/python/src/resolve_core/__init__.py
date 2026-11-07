@@ -129,7 +129,7 @@ try:
         matched_gap_neighbours,
         read_gap_tables_csv,
         read_gap_tables_columns,
-        fit_prediction_gaps,
+        fit_prediction_gaps_tables,
         nearest_by_great_circle,
         # Metrics
         Metrics,
@@ -231,6 +231,9 @@ _from_pandas_mod.install()
 from . import _suite as _suite_mod
 
 _suite_mod.install()
+
+# The single-model gap-fitting front door over DataFrames or CSV paths.
+from ._gap_fitting import fit_prediction_gaps, read_gap_tables  # noqa: E402
 
 # Report the version of the engine actually loaded, not a literal that can go
 # stale against the .pyd. bindings.cpp sets this from resolve::VERSION, which
@@ -342,6 +345,8 @@ __all__ = [
     "read_gap_tables_csv",
     "read_gap_tables_columns",
     "fit_prediction_gaps",
+    "fit_prediction_gaps_tables",
+    "read_gap_tables",
     "nearest_by_great_circle",
     # Metrics
     "Metrics",

@@ -721,14 +721,18 @@ def test_a_single_model_fits_its_gaps_from_its_predictions(suite_dir, tmp_path):
     s.to_csv(tmp_path / "rec_species.csv", index=False)
     member = suite_dir / "y" / "seed_3" / "model_final.pt"
     predictions = _member_predictions(member, tmp_path / "rec_header.csv", tmp_path / "rec_species.csv")
-    cols = rc.GapColumns()
-    cols.plot_id, cols.species_id = "plot", "taxon"
-    cols.latitude, cols.longitude, cols.survey_year = "lat", "lon", "year"
-    cols.recorded = [("y", ["y_rec"])]
-    tables = rc.read_gap_tables_csv(
-        str(tmp_path / "rec_species.csv"), str(tmp_path / "rec_header.csv"), cols,
-        list(predictions.plot_ids))
-    fits = rc.fit_prediction_gaps(predictions, tables, [rc.GapFitRequest(rc.GapTarget("y"), ["y"])])
-    assert len(fits) == 1
-    assert fits[0].report["n_gaps"] == 10
-    assert fits[0].method.count("recorded") == 30
+    columns = {"plot_id": "plot", "species_id": "taxon", "latitude": "lat", "longitude": "lon",
+               "survey_year": "year", "recorded": {"y": "y_rec"}}
+    fits = rc.fit_prediction_gaps(predictions, s, h, columns=columns, targets={"y": {}})
+    assert set(fits) == {"y"}
+    assert fits["y"].report["n_gaps"] == 10
+    assert fits["y"].method.count("recorded") == 30
+    # CSV paths read the same tables; the low-level pair gives the same fit.
+    by_path = rc.fit_prediction_gaps(predictions, tmp_path / "rec_species.csv",
+                                     tmp_path / "rec_header.csv", columns=columns,
+                                     targets={"y": {"scale": "linear", "outputs": ["y"]}})
+    assert torch.equal(by_path["y"].fitted, fits["y"].fitted)
+    tables = rc.read_gap_tables(s, h, columns, list(predictions.plot_ids))
+    low = rc.fit_prediction_gaps_tables(predictions, tables,
+                                        [rc.GapFitRequest(rc.GapTarget("y"), ["y"])])
+    assert torch.equal(low[0].fitted, fits["y"].fitted)

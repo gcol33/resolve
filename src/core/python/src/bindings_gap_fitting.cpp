@@ -231,7 +231,7 @@ void register_gap_fitting(nb::module_& m) {
         .def_rw("outputs", &GapFitRequest::outputs);
 
     m.def(
-        "fit_prediction_gaps",
+        "fit_prediction_gaps_tables",
         [](const ResolvePredictions& predictions, const GapTables& tables,
            const std::vector<GapFitRequest>& requests, const GapFittingConfig& config) {
             nb::gil_scoped_release release;
