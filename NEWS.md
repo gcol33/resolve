@@ -4,6 +4,44 @@
 
 ### Added
 
+- **Terrain correction: altitude and slope combined with an elevation
+  model.** An elevation model read at a precise coordinate is close to a
+  plot's recorded altitude, and far off where the coordinate is coarse or
+  wrong; a prediction from species composition errs the other way round. A
+  suite target can now ship a correction (manifest format 4) that learns,
+  per plot, how much to trust each: a small network returns softmax weights
+  over the suite's prediction, the elevation-model descriptor at the
+  coordinate and the same descriptor over 1 km, plus a bounded offset, from
+  the prediction, the descriptors, the recorded location uncertainty, the
+  members' spread and species recognition, fitted by the mean absolute
+  error. The descriptors come from the elevation model the suite ships, from
+  elevation grids, or from the caller's own columns:
+  `resolve.predict.suite(terrain = "field" | "columns" | list(source =
+  "grids", grids = dir))`, `SuitePredictor.predict(terrain=...)`,
+  `resolve predict --suite --terrain field|grids|columns`. The prediction is
+  never replaced: `<target>_terrain` comes back beside it with the weight of
+  each source (`<target>_terrain_w_resolve`, `_w_dem`, `_w_dem_1km`) and the
+  descriptors read (`<target>_dem`, `<target>_dem_1km`). A plot without a
+  descriptor keeps its prediction.
+- **Terrain fields: an elevation model a suite can ship.** Four descriptors
+  (elevation, the 1 km mean, the four-neighbour slope of the nearest cell and
+  the inclination of the 1 km square) are read through one definition from
+  elevation grids (`.npy` tiles listed in a `tiles.json`) or from a terrain
+  field file. The shipped format codes each tile with a bounded error, as the
+  SZ compressor does: cells rounded to multiples of twice `max_error`,
+  Lorenzo prediction in 64 x 64 blocks, Golomb-Rice codes with a run mode
+  for flat ground, no compression library; on the GLO-30 tiles measured,
+  0.76 to 1.97 bits per cell at a 2 m bound (1.15 m RMSE), against 32 for
+  the delivered floats. A neural format (a multiresolution hash encoding per
+  tile) is built too; at equal size it stayed 4 to 10 times further from the
+  grid, without a bound, and is kept as a format, not shipped.
+  `resolve.terrain_descriptors()`, `resolve.encode_terrain_grids()`,
+  `resolve.fit_terrain_correction()`, `resolve.terrain_correction()`,
+  `resolve.fit_terrain_tile()`, `resolve.assemble_terrain_field()`; the same
+  in Python and the C ABI; `resolve terrain encode | fit-field | assemble |
+  describe | fit-correction`. See the article *Correcting altitude and slope
+  with an elevation model*.
+
 - **Species names resolved before prediction.** A model reads a plot's
   species by matching names exactly against the names its training records
   were resolved to, so a species written as it was entered in the field, by a

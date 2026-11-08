@@ -131,6 +131,82 @@ List fit_prediction_gaps(List header_cols, List species_cols, List columns, List
         config_v.get())));
 }
 
+// A named list of per-plot numeric vectors as a MAP of DOUBLE_ARRAYs (NULL
+// entries left out): the inputs of a terrain correction.
+ValuePtr numeric_map(const List& x, const char* what) {
+    ValuePtr out = owned_value(resolve_value_new_map());
+    if (x.size() == 0) return out;
+    const CharacterVector names = x.names();
+    for (R_xlen_t i = 0; i < x.size(); ++i) {
+        if (Rf_isNull(x[i])) continue;
+        map_put(out.get(), r_string(names[i]), numeric_value(x[i], what));
+    }
+    return out;
+}
+
+// Elevation-model descriptors at coordinates (resolve_terrain_descriptors):
+// list(elevation, elevation_1km, slope, slope_1km).
+List terrain_descriptors(List source, SEXP latitude, SEXP longitude) {
+    capi_require_loaded();
+    const ValuePtr source_v = owned_value(r_list_to_value_map(source, "terrain source"));
+    const ValuePtr lat = numeric_value(latitude, "latitude");
+    const ValuePtr lon = numeric_value(longitude, "longitude");
+    return as<List>(value_to_r_owned(resolve_terrain_descriptors(source_v.get(), lat.get(), lon.get())));
+}
+
+// One tile of an elevation model whole (resolve_terrain_grid):
+// list(tile, elevation).
+List terrain_grid(List source, std::string tile) {
+    capi_require_loaded();
+    const ValuePtr source_v = owned_value(r_list_to_value_map(source, "terrain source"));
+    return as<List>(value_to_r_owned(resolve_terrain_grid(source_v.get(), tile.c_str())));
+}
+
+// Fit a terrain correction and save it (resolve_fit_terrain_correction): the
+// fit's report.
+List fit_terrain_correction(std::string target, std::string descriptor, List inputs, SEXP truth, List config,
+                            std::string path) {
+    capi_require_loaded();
+    const ValuePtr inputs_v = numeric_map(inputs, "terrain inputs");
+    const ValuePtr truth_v = numeric_value(truth, "truth");
+    const ValuePtr config_v = owned_value(r_list_to_value_map(config, "config"));
+    return as<List>(value_to_r_owned(resolve_fit_terrain_correction(
+        target.c_str(), descriptor.c_str(), inputs_v.get(), truth_v.get(), config_v.get(), path.c_str())));
+}
+
+// Apply a saved terrain correction (resolve_terrain_correction_apply).
+List terrain_correction_apply(std::string path, List inputs, std::string device) {
+    capi_require_loaded();
+    const ValuePtr inputs_v = numeric_map(inputs, "terrain inputs");
+    return as<List>(value_to_r_owned(resolve_terrain_correction_apply(path.c_str(), inputs_v.get(), device.c_str())));
+}
+
+// Fit one tile of an elevation grid into a terrain tile pack
+// (resolve_fit_terrain_tile): the tile's metrics.
+List fit_terrain_tile(std::string grids, std::string tile, List config, std::string path) {
+    capi_require_loaded();
+    const ValuePtr config_v = owned_value(r_list_to_value_map(config, "config"));
+    return as<List>(value_to_r_owned(
+        resolve_fit_terrain_tile(grids.c_str(), tile.c_str(), config_v.get(), path.c_str())));
+}
+
+// Code elevation grids into one coded terrain field (resolve_encode_terrain_grids):
+// a named list of tile -> metrics.
+List encode_terrain_grids(std::string grids, List config, std::string path, CharacterVector tiles) {
+    capi_require_loaded();
+    const ValuePtr config_v = owned_value(r_list_to_value_map(config, "config"));
+    const ValuePtr tiles_v = owned_value(tiles.size() == 0 ? resolve_value_new_null() : r_to_value(tiles));
+    return as<List>(value_to_r_owned(
+        resolve_encode_terrain_grids(grids.c_str(), config_v.get(), path.c_str(), tiles_v.get())));
+}
+
+// Merge tile packs into one terrain field file (resolve_assemble_terrain_field).
+void assemble_terrain_field(CharacterVector tiles, std::string path) {
+    capi_require_loaded();
+    const ValuePtr tiles_v = owned_value(r_to_value(tiles));
+    capi_check_status(resolve_assemble_terrain_field(tiles_v.get(), path.c_str()));
+}
+
 }  // namespace
 
 RCPP_MODULE(resolve_module) {
@@ -191,6 +267,13 @@ RCPP_MODULE(resolve_module) {
     function("names_resolve", &names_resolve, "Resolve species names against a vocabulary");
     function("fit_prediction_gaps", &fit_prediction_gaps,
              "Gap fitting of a single model's targets from its predictions and tables");
+    function("terrain_descriptors", &terrain_descriptors, "Elevation-model descriptors at coordinates");
+    function("terrain_grid", &terrain_grid, "One tile of an elevation model whole");
+    function("fit_terrain_correction", &fit_terrain_correction, "Fit and save a terrain correction");
+    function("terrain_correction_apply", &terrain_correction_apply, "Apply a saved terrain correction");
+    function("fit_terrain_tile", &fit_terrain_tile, "Fit one tile of a terrain field");
+    function("assemble_terrain_field", &assemble_terrain_field, "Merge terrain tile packs into a field file");
+    function("encode_terrain_grids", &encode_terrain_grids, "Code elevation grids into a coded terrain field");
 
     class_<RResolveModel>("ResolveModel")
         .constructor<List, List>("Create a ResolveModel")

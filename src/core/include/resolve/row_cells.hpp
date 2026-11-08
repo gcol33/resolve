@@ -18,10 +18,13 @@
 namespace resolve {
 
 // A numeric cell, or nullopt for an empty / NA marker / unparseable /
-// non-finite value.
-inline std::optional<float> parse_numeric_cell(std::string_view s) {
+// non-finite value. T is float (the loaders' tensors) or double (values read
+// for a step after prediction, such as coordinates read off an elevation
+// model, where float32's 0.4 m resolution in latitude would show).
+template <typename T = float>
+std::optional<T> parse_numeric_cell(std::string_view s) {
     if (is_na_string(s)) return std::nullopt;
-    auto v = parse_float_strict(s);  // locale-free, rejects trailing garbage
+    auto v = parse_decimal_strict<T>(s);  // locale-free, rejects trailing garbage
     if (!v || !std::isfinite(*v)) return std::nullopt;
     return v;
 }
@@ -52,9 +55,10 @@ inline std::optional<std::string_view> cell_at(RowFields row, int col) {
     return row[static_cast<size_t>(col)];
 }
 
-inline std::optional<float> parse_cell_at(RowFields row, int col) {
+template <typename T = float>
+std::optional<T> parse_cell_at(RowFields row, int col) {
     const auto cell = cell_at(row, col);
-    return cell ? parse_numeric_cell(*cell) : std::nullopt;
+    return cell ? parse_numeric_cell<T>(*cell) : std::nullopt;
 }
 
 }  // namespace resolve

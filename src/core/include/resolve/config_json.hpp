@@ -47,7 +47,7 @@ struct JsonFieldWriter {
             json::Value out = json::Value::array();
             for (const auto& branch : value) out.push_back(to_json(branch));
             return out;
-        } else if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, int> ||
+        } else if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, int> || std::is_same_v<T, int64_t> ||
                              std::is_same_v<T, float> || std::is_same_v<T, std::string>) {
             return json::Value(value);
         } else if constexpr (std::is_enum_v<T>) {
@@ -114,6 +114,8 @@ struct JsonFieldReader {
             value = v.as_bool();
         } else if constexpr (std::is_same_v<T, int>) {
             value = static_cast<int>(v.as_int());
+        } else if constexpr (std::is_same_v<T, int64_t>) {
+            value = v.as_int();
         } else if constexpr (std::is_same_v<T, float>) {
             value = number_or_nan(v);
         } else if constexpr (std::is_same_v<T, std::string>) {

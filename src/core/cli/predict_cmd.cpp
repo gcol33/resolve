@@ -42,7 +42,9 @@ int predict_command(const ParsedArgs& args) {
         }
         return predict_suite_command(args);
     }
-    for (const char* suite_only : {"--target", "--members", "--no-verify"}) {
+    for (const char* suite_only : {"--target", "--members", "--no-verify", "--terrain", "--terrain-grids",
+                                   "--terrain-elevation", "--terrain-elevation-1km", "--terrain-slope",
+                                   "--terrain-slope-1km", "--location-uncertainty"}) {
         if (args.has(suite_only)) {
             std::cerr << "Error: " << suite_only << " applies to --suite only" << std::endl;
             return 1;

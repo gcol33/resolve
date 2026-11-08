@@ -44,6 +44,9 @@
 #include "resolve/gap_fitting.hpp"
 #include "resolve/pretraining.hpp"
 #include "resolve/retrieval.hpp"
+#include "resolve/terrain_correction.hpp"
+#include "resolve/terrain_codec.hpp"
+#include "resolve/terrain_field.hpp"
 #include "resolve/trainer.hpp"
 #include "resolve/vae.hpp"
 
@@ -429,6 +432,49 @@ RESOLVE_DEFINE_FIELD_REGISTRY(RetrievalConfig, RESOLVE_RETRIEVAL_CONFIG_FIELDS)
     F(matching_seed, "")
 
 RESOLVE_DEFINE_FIELD_REGISTRY(GapFittingConfig, RESOLVE_GAP_FITTING_CONFIG_FIELDS)
+
+// Persisted in the terrain correction file (terrain_correction.hpp), so the
+// keys carry the settings a fitted correction was trained with.
+#define RESOLVE_TERRAIN_CORRECTION_CONFIG_FIELDS(F)           \
+    F(scale,           "terrain_correction_scale")            \
+    F(offset_fraction, "terrain_correction_offset_fraction")  \
+    F(hidden_dim,      "terrain_correction_hidden_dim")       \
+    F(n_layers,        "terrain_correction_n_layers")         \
+    F(epochs,          "terrain_correction_epochs")           \
+    F(batch_size,      "terrain_correction_batch_size")       \
+    F(lr,              "terrain_correction_lr")               \
+    F(weight_decay,    "terrain_correction_weight_decay")     \
+    F(dem_1km_dropout, "terrain_correction_dem_1km_dropout")  \
+    F(seed,            "terrain_correction_seed")             \
+    F(device,          "")
+
+RESOLVE_DEFINE_FIELD_REGISTRY(TerrainCorrectionConfig, RESOLVE_TERRAIN_CORRECTION_CONFIG_FIELDS)
+
+// Persisted in every terrain tile pack and field file (terrain_field.hpp).
+#define RESOLVE_TERRAIN_FIELD_CONFIG_FIELDS(F) \
+    F(levels,               "terrain_field_levels")              \
+    F(log2_table_size,      "terrain_field_log2_table_size")     \
+    F(features,             "terrain_field_features")            \
+    F(coarsest_resolution,  "terrain_field_coarsest_resolution") \
+    F(finest_fraction,      "terrain_field_finest_fraction")     \
+    F(hidden_dim,           "terrain_field_hidden_dim")          \
+    F(n_layers,             "terrain_field_n_layers")            \
+    F(base_cells,           "terrain_field_base_cells")          \
+    F(steps,                "terrain_field_steps")               \
+    F(batch_size,           "terrain_field_batch_size")          \
+    F(lr,                   "terrain_field_lr")                  \
+    F(gradient_weight,      "terrain_field_gradient_weight")     \
+    F(seed,                 "terrain_field_seed")                \
+    F(device,               "")
+
+RESOLVE_DEFINE_FIELD_REGISTRY(TerrainFieldConfig, RESOLVE_TERRAIN_FIELD_CONFIG_FIELDS)
+
+// Persisted in every coded terrain field (terrain_codec.hpp).
+#define RESOLVE_TERRAIN_CODEC_CONFIG_FIELDS(F)       \
+    F(max_error, "terrain_codec_max_error")          \
+    F(block,     "terrain_codec_block")
+
+RESOLVE_DEFINE_FIELD_REGISTRY(TerrainCodecConfig, RESOLVE_TERRAIN_CODEC_CONFIG_FIELDS)
 
 #define RESOLVE_PRETRAIN_CONFIG_FIELDS(F)  \
     F(mask_ratio,            "")           \

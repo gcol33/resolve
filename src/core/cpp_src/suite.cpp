@@ -3,7 +3,9 @@
 #include "resolve/config_registry.hpp"
 #include "resolve/enum_names.hpp"
 #include "resolve/number_text.hpp"
+#include "resolve/plot_columns.hpp"
 #include "resolve/sha256.hpp"
+#include "resolve/terrain_codec.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -184,6 +186,61 @@ fs::path member_location(const std::string& dir, const std::string& file) {
     return fs::path(dir) / fs::path(file);
 }
 
+json::Value suite_file_to_json(const SuiteFile& f) {
+    json::Value o = json::Value::object();
+    o.set("file", f.file);
+    o.set("sha256", f.sha256);
+    o.set("bytes", f.bytes);
+    return o;
+}
+
+SuiteFile suite_file_from_json(const json::Value& value, const std::string& where) {
+    ObjectReader r(value, where);
+    SuiteFile f;
+    f.file = r.string("file", true);
+    f.sha256 = r.string("sha256", false);
+    f.bytes = r.integer("bytes", false);
+    r.finish();
+    return f;
+}
+
+// The problems of a terrain file's manifest entry, added under `where`.
+template <typename Problems>
+void suite_file_problems(const SuiteFile& f, const std::string& where, Problems& problems) {
+    if (const std::string p = member_path_problem(f.file); !p.empty()) problems.add(where + ".file", p);
+    if (!is_hex_digest(f.sha256)) {
+        problems.add(where + ".sha256", "must be 64 lower-case hex digits (seal the manifest to fill it)");
+    }
+    if (f.bytes <= 0) problems.add(where + ".bytes", "must be positive (seal the manifest)");
+}
+
+void seal_file(const std::string& dir, const std::string& label, SuiteFile& f) {
+    if (const std::string p = member_path_problem(f.file); !p.empty()) {
+        throw std::runtime_error("suite " + label + " file '" + f.file + "' " + p);
+    }
+    const fs::path where = member_location(dir, f.file);
+    if (!fs::exists(where)) {
+        throw std::runtime_error("suite " + label + ": no file at '" + where.string() + "'");
+    }
+    f.bytes = static_cast<int64_t>(fs::file_size(where));
+    f.sha256 = sha256_file(where.string());
+}
+
+// What is wrong with a file on disk against its manifest entry; empty when
+// it matches.
+std::string file_problem(const std::string& dir, const std::string& label, const std::string& file,
+                         int64_t bytes_recorded, const std::string& sha_recorded) {
+    const fs::path where = member_location(dir, file);
+    if (!fs::exists(where)) return label + ": file missing";
+    const auto bytes = static_cast<int64_t>(fs::file_size(where));
+    if (bytes != bytes_recorded) {
+        return label + ": " + std::to_string(bytes) + " bytes, the manifest records " + std::to_string(bytes_recorded);
+    }
+    const std::string digest = sha256_file(where.string());
+    if (digest != sha_recorded) return label + ": SHA-256 " + digest + ", the manifest records " + sha_recorded;
+    return {};
+}
+
 json::Value inputs_to_json(const SuiteInputContract& in) {
     json::Value o = json::Value::object();
     o.set("plot_id", in.plot_id);
@@ -260,6 +317,7 @@ json::Value target_to_json(const SuiteTarget& t) {
         members.push_back(std::move(mo));
     }
     o.set("members", std::move(members));
+    if (t.terrain_correction) o.set("terrain_correction", suite_file_to_json(*t.terrain_correction));
     o.set("training", t.training);
     o.set("validation", t.validation);
     return o;
@@ -294,6 +352,9 @@ SuiteTarget target_from_json(const json::Value& value, const std::string& where)
         mr.finish();
         t.members.push_back(std::move(m));
     }
+    if (const json::Value* tc = r.get("terrain_correction")) {
+        t.terrain_correction = suite_file_from_json(*tc, r.path("terrain_correction"));
+    }
     t.training = r.object_or_empty("training");
     t.validation = r.object_or_empty("validation");
     r.finish();
@@ -316,6 +377,7 @@ json::Value SuiteManifest::to_json() const {
     json::Value ts = json::Value::array();
     for (const auto& t : targets) ts.push_back(target_to_json(t));
     o.set("targets", std::move(ts));
+    if (terrain_field) o.set("terrain_field", suite_file_to_json(*terrain_field));
     return o;
 }
 
@@ -345,12 +407,13 @@ SuiteManifest SuiteManifest::from_json(const json::Value& value) {
         m.targets.push_back(
             target_from_json(targets.items()[i], "targets[" + std::to_string(i) + "]"));
     }
+    if (const json::Value* tf = r.get("terrain_field")) m.terrain_field = suite_file_from_json(*tf, "terrain_field");
     r.finish();
     if (version < m.format_version()) {
         r.fail("format_version", "is " + std::to_string(version) + ", but the manifest uses "
                "features that need version " + std::to_string(m.format_version()) +
                " (per-target inputs and the spherical mean need version 2, a member's own "
-               "zero_abundance_as version 3)");
+               "zero_abundance_as version 3, a terrain field or correction version 4)");
     }
     return m;
 }
@@ -368,7 +431,9 @@ int SuiteManifest::format_version() const {
         for (const auto& m : t.members) {
             if (m.zero_abundance_as) version = std::max(version, 3);
         }
+        if (t.terrain_correction) version = std::max(version, 4);
     }
+    if (terrain_field) version = std::max(version, 4);
     return version;
 }
 
@@ -455,6 +520,14 @@ void SuiteManifest::validate() const {
             }
         }
 
+        if (t.terrain_correction) {
+            suite_file_problems(*t.terrain_correction, where + ".terrain_correction", problems);
+            if (t.combine != SuiteCombine::Mean) {
+                problems.add(where + ".terrain_correction",
+                             "corrects a mean-combined target (altitude, slope) only");
+            }
+        }
+
         if (t.inputs) {
             const SuiteTargetInputs& in = *t.inputs;
             if (in.coordinates && !inputs.reads_coordinates()) {
@@ -504,6 +577,8 @@ void SuiteManifest::validate() const {
         }
     }
 
+    if (terrain_field) suite_file_problems(*terrain_field, "terrain_field", problems);
+
     if (!problems.empty()) problems.raise("suite manifest '" + name + "' is invalid:");
 }
 
@@ -547,27 +622,17 @@ void SuiteManifest::seal(const std::string& dir) {
             m.bytes = static_cast<int64_t>(fs::file_size(where));
             m.sha256 = sha256_file(where.string());
         }
+        if (t.terrain_correction) seal_file(dir, "target '" + t.name + "' terrain correction", *t.terrain_correction);
     }
+    if (terrain_field) seal_file(dir, "terrain field", *terrain_field);
 }
 
 namespace {
 
 std::string member_problem(const std::string& dir, const std::string& target,
                            const SuiteMember& m) {
-    const fs::path where = member_location(dir, m.file);
-    const std::string label = "target '" + target + "' seed " + std::to_string(m.seed) +
-                              " (" + m.file + ")";
-    if (!fs::exists(where)) return label + ": file missing";
-    const auto bytes = static_cast<int64_t>(fs::file_size(where));
-    if (bytes != m.bytes) {
-        return label + ": " + std::to_string(bytes) + " bytes, the manifest records " +
-               std::to_string(m.bytes);
-    }
-    const std::string digest = sha256_file(where.string());
-    if (digest != m.sha256) {
-        return label + ": SHA-256 " + digest + ", the manifest records " + m.sha256;
-    }
-    return {};
+    return file_problem(dir, "target '" + target + "' seed " + std::to_string(m.seed) + " (" + m.file + ")", m.file,
+                        m.bytes, m.sha256);
 }
 
 }  // namespace
@@ -583,6 +648,20 @@ std::vector<std::string> SuiteManifest::verify(const std::string& dir,
             if (std::string p = member_problem(dir, t.name, m); !p.empty()) {
                 problems.push_back(std::move(p));
             }
+        }
+        if (const auto& f = t.terrain_correction) {
+            if (std::string p = file_problem(dir, "target '" + t.name + "' terrain correction (" + f->file + ")",
+                                             f->file, f->bytes, f->sha256);
+                !p.empty()) {
+                problems.push_back(std::move(p));
+            }
+        }
+    }
+    if (terrain_field) {
+        if (std::string p = file_problem(dir, "terrain field (" + terrain_field->file + ")", terrain_field->file,
+                                         terrain_field->bytes, terrain_field->sha256);
+            !p.empty()) {
+            problems.push_back(std::move(p));
         }
     }
     return problems;
@@ -612,6 +691,13 @@ ResolveDataset SuiteInput::encode(const RoleMapping& roles, const ExternalVocabs
     // No targets: the plots to score carry none, and a loader asked for one
     // would drop every plot where it is missing.
     return ResolveDataset::load(header_, species_, roles, /*targets=*/{}, config, &vocabs, names);
+}
+
+std::vector<std::vector<double>> SuiteInput::plot_columns(const std::string& plot_id_column,
+                                                          const std::vector<std::string>& columns,
+                                                          const std::vector<std::string>& plot_ids,
+                                                          const char* role) const {
+    return read_plot_columns(header_, species_, plot_id_column, columns, plot_ids, role);
 }
 
 GapTables SuiteInput::gap_tables(const GapColumns& columns,
@@ -942,6 +1028,17 @@ std::vector<SuiteColumn> suite_prediction_columns(const SuitePredictions& predic
             for (int64_t i = 0; i < codes.numel(); ++i) method.text.push_back(gap_method_label(data[i]));
             columns.push_back(std::move(method));
         }
+        if (t.terrain) {
+            const TerrainCorrectionResult& r = t.terrain->result;
+            columns.push_back(number_column(name + "_terrain", r.corrected, n));
+            const auto& weights = terrain_weight_names();
+            for (std::size_t k = 0; k < weights.size(); ++k) {
+                columns.push_back(number_column(name + "_terrain_w_" + weights[k],
+                                                r.weights.select(1, static_cast<int64_t>(k)), n));
+            }
+            columns.push_back(number_column(name + "_dem", t.terrain->dem, n));
+            columns.push_back(number_column(name + "_dem_1km", t.terrain->dem_1km, n));
+        }
         columns.push_back(number_column(name + "_n_species", t.recognition.n_species, n));
         columns.push_back(number_column(name + "_n_recognised", t.recognition.n_recognised, n));
         columns.push_back(number_column(name + "_recognised_share", t.recognition.count_share, n));
@@ -986,6 +1083,7 @@ struct SuitePredictor::LoadedTarget {
     std::size_t encoding = 0;   // index into encodings_
     std::vector<Member> members;
     std::vector<std::string> class_names;
+    std::optional<TerrainCorrection> terrain;  // the manifest's terrain correction
 };
 
 SuitePredictor::SuitePredictor() = default;
@@ -1263,6 +1361,10 @@ SuitePredictor SuitePredictor::load(const std::string& dir, const SuiteLoadOptio
             loaded.members.push_back(Member{member.seed, std::move(predictor)});
         }
         loaded.encoding = *encoding;
+        if (spec.terrain_correction) {
+            loaded.terrain = TerrainCorrection::load(member_location(dir, spec.terrain_correction->file).string(),
+                                                     options.device);
+        }
         suite.targets_.push_back(std::move(loaded));
     }
     return suite;
@@ -1440,6 +1542,7 @@ SuitePredictions SuitePredictor::predict(const SuiteInput& input,
         }
     }
     if (options.gap_fitting) fit_gaps(input, options.columns, *options.gap_fitting, result);
+    if (options.terrain) correct_terrain(input, options.columns, *options.terrain, result);
     return result;
 }
 
@@ -1521,6 +1624,99 @@ void SuitePredictor::fit_gaps(const SuiteInput& input, const SuiteColumns& colum
         SuiteTargetPrediction& out = result.targets[f.index];
         out.gap_fit = resolve::fit_gaps(f.target, out.value, tables.recorded.at(f.target.name),
                                         tables.plots, config);
+    }
+}
+
+void SuitePredictor::correct_terrain(const SuiteInput& input, const SuiteColumns& columns,
+                                     const SuiteTerrainOptions& options, SuitePredictions& result) const {
+    std::vector<std::size_t> corrected;
+    for (std::size_t t = 0; t < targets_.size(); ++t) {
+        if (targets_[t].terrain) corrected.push_back(t);
+    }
+    if (corrected.empty()) {
+        throw std::invalid_argument("terrain correction: suite '" + manifest_.name +
+                                    "' gives no loaded target a terrain correction");
+    }
+    const SuiteInputContract& in = manifest_.inputs;
+    const std::string plot_id = columns.plot_id.value_or(in.plot_id);
+    const auto n = static_cast<int64_t>(result.plot_ids.size());
+    const auto as_tensor = [](const std::vector<double>& v) { return torch::tensor(v, torch::kFloat64); };
+    const auto read = [&](const std::vector<std::string>& names) {
+        return input.plot_columns(plot_id, names, result.plot_ids, "terrain correction");
+    };
+    const torch::Tensor nan = torch::full({n}, std::numeric_limits<double>::quiet_NaN(), torch::kFloat64);
+
+    torch::Tensor uncertainty = nan;
+    if (columns.terrain.uncertainty) uncertainty = as_tensor(read({*columns.terrain.uncertainty})[0]);
+
+    // The descriptors of each kind the corrected targets read.
+    std::optional<TerrainDescriptors> descriptors;
+    if (options.source == TerrainSourceKind::Columns) {
+        TerrainDescriptors d{nan, nan, nan, nan};
+        const auto column = [&](const std::optional<std::string>& name) {
+            return name ? as_tensor(read({*name})[0]) : nan;
+        };
+        d.elevation = column(columns.terrain.elevation);
+        d.elevation_1km = column(columns.terrain.elevation_1km);
+        d.slope = column(columns.terrain.slope);
+        d.slope_1km = column(columns.terrain.slope_1km);
+        descriptors = std::move(d);
+    } else {
+        const std::string latitude = columns.latitude.value_or(in.latitude);
+        const std::string longitude = columns.longitude.value_or(in.longitude);
+        if (latitude.empty() || longitude.empty()) {
+            throw std::invalid_argument("terrain correction: the " + std::string(enum_to_name(options.source)) +
+                                        " source reads the plots' coordinates; name the latitude and "
+                                        "longitude columns");
+        }
+        const auto coords = read({latitude, longitude});
+        std::shared_ptr<TerrainSource> source;
+        if (options.source == TerrainSourceKind::Grids) {
+            if (options.grids.empty()) {
+                throw std::invalid_argument("terrain correction: the grids source needs the grids directory");
+            }
+            source = std::make_shared<TerrainGrids>(options.grids);
+        } else {
+            if (!manifest_.terrain_field) {
+                throw std::invalid_argument("terrain correction: suite '" + manifest_.name +
+                                            "' ships no terrain field; read the descriptors from grids or "
+                                            "columns");
+            }
+            if (!terrain_field_ || terrain_field_device_ != options.device) {
+                terrain_field_ =
+                    open_terrain_field(member_location(dir_, manifest_.terrain_field->file).string(), options.device);
+                terrain_field_device_ = options.device;
+            }
+            source = terrain_field_;
+        }
+        descriptors = terrain_descriptors(*source, as_tensor(coords[0]), as_tensor(coords[1]));
+    }
+
+    for (const std::size_t t : corrected) {
+        const TerrainCorrection& correction = *targets_[t].terrain;
+        SuiteTargetPrediction& out = result.targets[t];
+        const bool elevation = correction.descriptor() == TerrainDescriptor::Elevation;
+        SuiteTerrainPrediction p;
+        p.descriptor = correction.descriptor();
+        p.source = options.source;
+        p.dem = elevation ? descriptors->elevation : descriptors->slope;
+        p.dem_1km = elevation ? descriptors->elevation_1km : descriptors->slope_1km;
+        if (options.source == TerrainSourceKind::Columns &&
+            !(elevation ? columns.terrain.elevation : columns.terrain.slope)) {
+            throw std::invalid_argument("terrain correction: target '" + out.name + "' reads the " +
+                                        (elevation ? "elevation" : "slope") +
+                                        " column; name it (SuiteColumns::terrain)");
+        }
+        TerrainCorrectionInputs inputs;
+        inputs.prediction = out.value.to(torch::kFloat64);
+        inputs.dem = p.dem;
+        inputs.dem_1km = p.dem_1km;
+        inputs.uncertainty_m = uncertainty;
+        inputs.spread = out.dispersion.defined() ? out.dispersion.to(torch::kFloat64) : torch::Tensor();
+        inputs.recognised_share = out.recognition.count_share.to(torch::kFloat64);
+        inputs.n_species = out.recognition.n_species.to(torch::kFloat64);
+        p.result = correction.apply(inputs);
+        out.terrain = std::move(p);
     }
 }
 

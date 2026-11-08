@@ -35,9 +35,10 @@ inline std::string_view trim_c_space(std::string_view s) noexcept {
 // '.', so a process LC_NUMERIC using a comma decimal separator (common on
 // European Windows) cannot change how coordinates, abundances, covariates or
 // regression targets parse. Spelled-out infinities and NaNs, hexadecimal
-// numbers and values outside the float range are rejected as well; the empty
-// cell is nullopt.
-inline std::optional<float> parse_float_strict(std::string_view s) {
+// numbers and values outside the type's range are rejected as well; the empty
+// cell is nullopt. T is float or double.
+template <typename T>
+std::optional<T> parse_decimal_strict(std::string_view s) {
     s = detail::trim_c_space(s);
     if (!s.empty() && s.front() == '+') {
         s.remove_prefix(1);
@@ -52,10 +53,13 @@ inline std::optional<float> parse_float_strict(std::string_view s) {
             return std::nullopt;
         }
     }
-    float value = 0.0f;
+    T value = 0;
     if (!decimal_to_number(s, value)) return std::nullopt;
     return value;
 }
+
+inline std::optional<float> parse_float_strict(std::string_view s) { return parse_decimal_strict<float>(s); }
+inline std::optional<double> parse_double_strict(std::string_view s) { return parse_decimal_strict<double>(s); }
 
 // Strict base-10 int64 parse of a whole cell: optional leading whitespace, an
 // optional sign, digits, and nothing after them (trailing whitespace

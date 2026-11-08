@@ -186,6 +186,15 @@ void register_enums(nb::module_& m) {
         .value("Spelling", resolve::NameRoute::Spelling)
         .value("Unresolved", resolve::NameRoute::Unresolved);
 
+    nb::enum_<resolve::TerrainDescriptor>(m, "TerrainDescriptor")
+        .value("Elevation", resolve::TerrainDescriptor::Elevation)
+        .value("Slope", resolve::TerrainDescriptor::Slope);
+
+    nb::enum_<resolve::TerrainSourceKind>(m, "TerrainSourceKind")
+        .value("Field", resolve::TerrainSourceKind::Field)
+        .value("Grids", resolve::TerrainSourceKind::Grids)
+        .value("Columns", resolve::TerrainSourceKind::Columns);
+
     nb::enum_<resolve::GapMethod>(m, "GapMethod")
         .value("LocalConstant", resolve::GapMethod::LocalConstant)
         .value("Resolve", resolve::GapMethod::Resolve)

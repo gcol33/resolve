@@ -565,6 +565,13 @@ RESOLVE_CAPI resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const 
  *                      every target columns.recorded names
  *   names         MAP  resolve the species names against each target's
  *                      vocabulary first, as resolve_dataset_load's names
+ *   terrain       MAP  correct every target the manifest gives a terrain
+ *                      correction: source (STRING field, grids or columns;
+ *                      default field), grids (STRING, the grids directory
+ *                      of the grids source), device (STRING). The columns
+ *                      map then also reads terrain (MAP elevation
+ *                      elevation_1km slope slope_1km uncertainty, each a
+ *                      STRING column name)
  * Returns a MAP: "plot_ids" (STRING_ARRAY) and "targets", an ordered MAP of
  * target name -> MAP with name task combine status limit units
  * dispersion_units class_names member_seeds value (INT_ARRAY class codes for a
@@ -573,7 +580,9 @@ RESOLVE_CAPI resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const 
  * dispersion members (members x plots; for a spherical mean a MAP of
  * "latitude" and "longitude", each members x plots) n_species n_recognised
  * recognised_share recognised_abundance_share gap_fit (NULL-kind, or with gap
- * fitting a MAP as resolve_fit_gaps returns) species_names (as
+ * fitting a MAP as resolve_fit_gaps returns) terrain (NULL-kind, or with
+ * terrain correction a MAP: descriptor source dem dem_1km and the MAP
+ * resolve_terrain_correction_apply returns under "result") species_names (as
  * resolve_dataset_get's species_names; empty without names). A statistic the target's
  * combine rule does not define is NULL-kind; NaN marks an undefined value.
  * "columns" is the same prediction as an ordered MAP of column name -> array,
@@ -627,6 +636,66 @@ RESOLVE_CAPI resolve_value_t* resolve_fit_prediction_gaps(const resolve_value_t*
                                                           const resolve_value_t* predictions,
                                                           const resolve_value_t* requests,
                                                           const resolve_value_t* config);
+
+/* ========================================================================== */
+/* Terrain                                                                    */
+/* ========================================================================== */
+
+/* The terrain descriptors at plot coordinates (resolve::terrain_descriptors).
+ * `source` is a MAP: grids (STRING, a directory holding tiles.json) or field
+ * (STRING, a terrain field file, neural or coded) and, for a neural field,
+ * device (STRING).
+ * `latitude` / `longitude` are DOUBLE_ARRAYs in degrees. Returns a MAP of
+ * elevation, elevation_1km, slope, slope_1km (DOUBLE_ARRAYs, NaN where the
+ * source holds nothing). NULL on failure. */
+RESOLVE_CAPI resolve_value_t* resolve_terrain_descriptors(const resolve_value_t* source,
+                                                          const resolve_value_t* latitude,
+                                                          const resolve_value_t* longitude);
+
+/* One tile of a terrain source whole (resolve::TerrainSource::grid). `source`
+ * is a MAP as for resolve_terrain_descriptors, `tile` the tile's name. Returns
+ * a MAP of tile (MAP: name STRING; rows, cols, lat_first, lon_first, dlat,
+ * dlon DOUBLEs; cell (r, c) centred at lat_first - r * dlat,
+ * lon_first + c * dlon) and elevation (DOUBLE_ARRAY, rows x cols, row-major
+ * from north to south). NULL on failure. */
+RESOLVE_CAPI resolve_value_t* resolve_terrain_grid(const resolve_value_t* source, const char* tile);
+
+/* Fit a terrain correction (resolve::fit_terrain_correction) and save it to
+ * `path`. `descriptor` is "elevation" or "slope". `inputs` is a MAP of
+ * DOUBLE_ARRAYs, one value per plot: prediction and dem (required), dem_1km,
+ * uncertainty_m, spread, recognised_share, n_species (optional); `truth` a
+ * DOUBLE_ARRAY (NaN: unrecorded); `config` a TerrainCorrectionConfig MAP or
+ * NULL. Returns the fit's report (MAP). NULL on failure. */
+RESOLVE_CAPI resolve_value_t* resolve_fit_terrain_correction(const char* target, const char* descriptor,
+                                                             const resolve_value_t* inputs,
+                                                             const resolve_value_t* truth,
+                                                             const resolve_value_t* config, const char* path);
+
+/* Apply the terrain correction saved at `path` to `inputs` (as for
+ * resolve_fit_terrain_correction) on `device` (NULL: cpu). Returns a MAP:
+ * target, descriptor, report, corrected (DOUBLE_ARRAY), weights
+ * (DOUBLE_MATRIX, plots x 3: resolve, dem, dem_1km), offset (DOUBLE_ARRAY)
+ * and applied (BOOL per plot as an INT_ARRAY of 0 / 1). NULL on failure. */
+RESOLVE_CAPI resolve_value_t* resolve_terrain_correction_apply(const char* path, const resolve_value_t* inputs,
+                                                               const char* device);
+
+/* Fit tile `tile` of the grids in `grids` into a terrain tile pack at `path`
+ * (resolve::fit_terrain_tile). `config` is a TerrainFieldConfig MAP or NULL.
+ * Returns the tile's metrics (MAP). NULL on failure. */
+RESOLVE_CAPI resolve_value_t* resolve_fit_terrain_tile(const char* grids, const char* tile,
+                                                       const resolve_value_t* config, const char* path);
+
+/* Code the tiles of the grids in `grids` (all, or those `tiles` names, a
+ * STRING_ARRAY or NULL) into one coded terrain field at `path`
+ * (resolve::encode_terrain_grids). `config` is a TerrainCodecConfig MAP
+ * (max_error, block) or NULL. Returns a MAP of tile name -> its metrics.
+ * NULL on failure. */
+RESOLVE_CAPI resolve_value_t* resolve_encode_terrain_grids(const char* grids, const resolve_value_t* config,
+                                                           const char* path, const resolve_value_t* tiles);
+
+/* Merge tile packs (`tiles`, a STRING_ARRAY of paths) into one terrain field
+ * file at `path`. Returns 0 / -1. */
+RESOLVE_CAPI int resolve_assemble_terrain_field(const resolve_value_t* tiles, const char* path);
 
 /* Read and validate the manifest in `dir` without loading any member, then
  * compare every member file with it. Returns a MAP: "manifest" (value tree as

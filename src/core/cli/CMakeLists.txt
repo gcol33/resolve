@@ -9,6 +9,7 @@ set(CLI_SOURCES
     predict_cmd.cpp
     suite_cmd.cpp
     info_cmd.cpp
+    terrain_cmd.cpp
     arg_parser.hpp
     cli_common.hpp
     cli_spec.hpp
@@ -17,6 +18,7 @@ set(CLI_SOURCES
     csv_output.hpp
     gap_flags.hpp
     names_flags.hpp
+    terrain_flags.hpp
 )
 
 add_executable(resolve_cli ${CLI_SOURCES})

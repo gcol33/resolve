@@ -42,6 +42,7 @@ NB_MODULE(_resolve_core, m) {
     register_retrieval(m);
     register_gap_fitting(m);
     register_names(m);
+    register_terrain(m);
 
     m.def("default_cuda_alloc_conf", &resolve::default_cuda_alloc_conf,
           "The PYTORCH_CUDA_ALLOC_CONF value RESOLVE sets: garbage collection at\n"

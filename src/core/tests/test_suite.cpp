@@ -26,6 +26,7 @@
 #include "resolve/sha256.hpp"
 #include "resolve/species_encoding.hpp"
 #include "resolve/suite.hpp"
+#include "resolve/terrain_field.hpp"
 #include "resolve/trainer.hpp"
 #include "test_support.hpp"
 
@@ -38,6 +39,7 @@
 #include <iterator>
 #include <map>
 #include <numbers>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -1476,4 +1478,199 @@ TEST_CASE("suite names resolve per target vocabulary and predict as the tokens w
     CHECK(y.route[1] == NameRoute::Spelling);
     CHECK(y.via[1] == "sp_e");
     CHECK(y.distance[1] == 1);
+}
+
+// =============================================================================
+// Terrain correction
+// =============================================================================
+
+namespace {
+
+// The plane-terrain degree squares the corpus' coordinates (45.0..47.9 N,
+// 8.55..10.0 E) and their 1 km windows fall in; 44 N holds the cells on
+// 45 N, a tile's southern edge.
+const std::vector<std::pair<int, int>> kCorpusSquares = {{44, 8}, {44, 9}, {44, 10}, {45, 8}, {45, 9}, {45, 10}, {46, 8}, {46, 9},
+                                                          {46, 10}, {47, 8}, {47, 9}, {47, 10}};
+
+// The three-target suite with a terrain correction on "y", fitted on
+// synthetic plots, and a terrain field of the plane terrain, written under
+// `dir`; the plane grids sit in `<dir>/grids`.
+SuiteManifest build_terrain_suite(const TempDir& dir, const TempDir& grids_dir) {
+    SuiteManifest m = build_suite(dir);
+    write_plane_terrain(grids_dir, kCorpusSquares, 24);
+
+    auto gen = at::make_generator<at::CPUGeneratorImpl>(41);
+    const int64_t n = 400;
+    TerrainCorrectionInputs in;
+    const torch::Tensor truth = 10.0 * torch::rand({n}, gen, torch::kFloat64);
+    in.prediction = truth + torch::randn({n}, gen, torch::kFloat64);
+    in.dem = truth + 0.1 * torch::randn({n}, gen, torch::kFloat64);
+    in.dem_1km = truth + 0.5 * torch::randn({n}, gen, torch::kFloat64);
+    in.spread = torch::rand({n}, gen, torch::kFloat64);
+    TerrainCorrectionConfig config;
+    config.scale = 10.0f;
+    config.epochs = 3;
+    config.batch_size = 64;
+    config.hidden_dim = 16;
+    fs::create_directories(dir.file("y"));
+    fit_terrain_correction("y", TerrainDescriptor::Elevation, in, truth, config).save(dir.file("y/terrain.pack"));
+
+    TerrainFieldConfig field;
+    field.levels = 4;
+    field.log2_table_size = 8;
+    field.coarsest_resolution = 4;
+    field.hidden_dim = 8;
+    field.base_cells = 4;
+    field.steps = 30;
+    field.batch_size = 256;
+    const TerrainGrids grids(grids_dir.path());
+    std::vector<std::string> tiles;
+    fs::create_directories(dir.file("terrain"));
+    for (int64_t t = 0; t < grids.index().size(); ++t) {
+        const TerrainTile& tile = grids.index().tiles()[static_cast<size_t>(t)];
+        tiles.push_back(dir.file("terrain/" + tile.name + ".tile"));
+        fit_terrain_tile(grids.grid(t), tile, field, tiles.back());
+    }
+    assemble_terrain_field(tiles, dir.file("terrain/field.bin"));
+    for (const auto& t : tiles) fs::remove(t);
+
+    for (auto& t : m.targets) {
+        if (t.name == "y") t.terrain_correction = SuiteFile{"y/terrain.pack", "", 0};
+    }
+    m.terrain_field = SuiteFile{"terrain/field.bin", "", 0};
+    m.seal(dir.path());
+    m.write(dir.path());
+    return m;
+}
+
+}  // namespace
+
+TEST_CASE("a terrain field and terrain correction are format 4, round-trip and are checked like members",
+          "[suite][manifest][terrain]") {
+    TempDir dir, grids;
+    const SuiteManifest m = build_terrain_suite(dir, grids);
+    CHECK(m.format_version() == 4);
+    const SuiteManifest back = SuiteManifest::from_json(m.to_json());
+    REQUIRE(back.terrain_field.has_value());
+    CHECK(back.terrain_field->sha256 == m.terrain_field->sha256);
+    CHECK(back.target("y").terrain_correction->file == "y/terrain.pack");
+    CHECK_FALSE(back.target("hab").terrain_correction.has_value());
+    CHECK(m.verify(dir.path()).empty());
+
+    // A changed correction file fails the checksum, like a member.
+    {
+        std::ofstream out(dir.file("y/terrain.pack"), std::ios::binary | std::ios::app);
+        out << "x";
+    }
+    const auto problems = m.verify(dir.path(), {"y"});
+    REQUIRE(problems.size() == 1);
+    CHECK_THAT(problems[0], Catch::Matchers::ContainsSubstring("terrain correction"));
+
+    SuiteManifest vote = m;
+    for (auto& t : vote.targets) {
+        if (t.name == "hab") t.terrain_correction = m.target("y").terrain_correction;
+    }
+    CHECK_THROWS_WITH(vote.validate(), Catch::Matchers::ContainsSubstring("mean-combined target"));
+}
+
+TEST_CASE("suite terrain correction reads the descriptors from columns, grids or the shipped field",
+          "[suite][predict][terrain]") {
+    TempDir dir, grids;
+    build_terrain_suite(dir, grids);
+    const auto plots = corpus();
+    std::ostringstream header;
+    header << "plot,lat,lon,cov1,elev,elev1km,unc\n";
+    for (size_t i = 0; i < plots.size(); ++i) {
+        const auto& p = plots[i];
+        header << p.id << "," << p.lat << "," << p.lon << "," << p.cov << "," << terrain_plane(p.lat, p.lon)
+               << "," << (i % 3 == 0 ? std::string("NA") : std::to_string(terrain_plane(p.lat, p.lon) + 2.0))
+               << "," << (i % 2 == 0 ? std::string("") : std::to_string(10.0 * (i + 1))) << "\n";
+    }
+    dir.write("score/header_terrain.csv", header.str());
+    dir.write("score/species_terrain.csv", species_csv(plots));
+    const SuiteInput input =
+        SuiteInput::csv(dir.file("score/header_terrain.csv"), dir.file("score/species_terrain.csv"));
+    SuitePredictor suite = SuitePredictor::load(dir.path());
+
+    SuitePredictOptions columns;
+    columns.terrain = SuiteTerrainOptions{TerrainSourceKind::Columns, "", torch::kCPU};
+    columns.columns.terrain.elevation = "elev";
+    columns.columns.terrain.elevation_1km = "elev1km";
+    columns.columns.terrain.uncertainty = "unc";
+    const SuitePredictions out = suite.predict(input, columns);
+    const auto& y = out.target("y");
+    REQUIRE(y.terrain.has_value());
+    CHECK_FALSE(out.target("hab").terrain.has_value());
+    CHECK(y.terrain->source == TerrainSourceKind::Columns);
+    CHECK(y.terrain->result.applied.all().item<bool>());
+    // The suite's correction is the stored correction applied to the combined
+    // prediction with the columns' values.
+    const std::map<std::string, int64_t> row = index_of(out.plot_ids);
+    std::vector<double> elev(out.plot_ids.size()), elev1(out.plot_ids.size()), unc(out.plot_ids.size());
+    for (size_t i = 0; i < plots.size(); ++i) {
+        const auto r = static_cast<size_t>(row.at(plots[i].id));
+        elev[r] = terrain_plane(plots[i].lat, plots[i].lon);
+        elev1[r] = i % 3 == 0 ? std::nan("") : elev[r] + 2.0;
+        unc[r] = i % 2 == 0 ? std::nan("") : 10.0 * static_cast<double>(i + 1);
+    }
+    TerrainCorrectionInputs direct;
+    direct.prediction = y.value.to(torch::kFloat64);
+    direct.dem = torch::tensor(elev, torch::kFloat64);
+    direct.dem_1km = torch::tensor(elev1, torch::kFloat64);
+    direct.uncertainty_m = torch::tensor(unc, torch::kFloat64);
+    direct.spread = y.dispersion.to(torch::kFloat64);
+    direct.recognised_share = y.recognition.count_share.to(torch::kFloat64);
+    direct.n_species = y.recognition.n_species.to(torch::kFloat64);
+    const TerrainCorrectionResult expected = TerrainCorrection::load(dir.file("y/terrain.pack")).apply(direct);
+    CHECK(torch::allclose(expected.corrected, y.terrain->result.corrected, 1e-6, 1e-6));
+    CHECK(torch::allclose(direct.dem, y.terrain->dem, 0.0, 1e-3));
+    // The raw prediction is left as it was.
+    CHECK(torch::equal(y.value, suite.predict(input, SuitePredictOptions{}).target("y").value));
+
+    // The grids source reads the plane at the plots' coordinates.
+    SuitePredictOptions from_grids;
+    from_grids.terrain = SuiteTerrainOptions{TerrainSourceKind::Grids, grids.path(), torch::kCPU};
+    const SuitePredictions g = suite.predict(input, from_grids);
+    const TerrainGrids grid_source(grids.path());
+    std::vector<double> lat(out.plot_ids.size()), lon(out.plot_ids.size());
+    for (const auto& p : plots) {
+        lat[static_cast<size_t>(row.at(p.id))] = p.lat;
+        lon[static_cast<size_t>(row.at(p.id))] = p.lon;
+    }
+    const TerrainDescriptors d =
+        terrain_descriptors(grid_source, torch::tensor(lat, torch::kFloat64), torch::tensor(lon, torch::kFloat64));
+    CHECK(torch::allclose(g.target("y").terrain->dem, d.elevation, 0.0, 1e-6));
+    CHECK(torch::allclose(g.target("y").terrain->dem_1km, d.elevation_1km, 0.0, 1e-6));
+
+    // The shipped field: every plot inside its tiles gets descriptors.
+    SuitePredictOptions from_field;
+    from_field.terrain = SuiteTerrainOptions{};
+    const SuitePredictions f = suite.predict(input, from_field);
+    CHECK(torch::isfinite(f.target("y").terrain->dem).all().item<bool>());
+    CHECK(f.target("y").terrain->result.applied.all().item<bool>());
+
+    const auto table = suite_prediction_columns(out, false);
+    std::set<std::string> names;
+    for (const auto& c : table) names.insert(c.name);
+    for (const char* c : {"y_terrain", "y_terrain_w_resolve", "y_terrain_w_dem", "y_terrain_w_dem_1km", "y_dem",
+                          "y_dem_1km"}) {
+        CHECK(names.count(c) == 1);
+    }
+    CHECK(names.count("hab_terrain") == 0);
+
+    // Columns source without the elevation column named is refused.
+    SuitePredictOptions unnamed;
+    unnamed.terrain = SuiteTerrainOptions{TerrainSourceKind::Columns, "", torch::kCPU};
+    CHECK_THROWS_AS(suite.predict(input, unnamed), std::invalid_argument);
+}
+
+TEST_CASE("terrain correction on a suite without one is refused", "[suite][predict][terrain]") {
+    TempDir dir;
+    build_suite(dir);
+    const ScoringFiles in = scoring_files(dir);
+    SuitePredictor suite = SuitePredictor::load(dir.path());
+    SuitePredictOptions opts;
+    opts.terrain = SuiteTerrainOptions{};
+    CHECK_THROWS_WITH(suite.predict(SuiteInput::csv(in.header, in.species), opts),
+                      Catch::Matchers::ContainsSubstring("no loaded target a terrain correction"));
 }

@@ -11,6 +11,7 @@
 #include "resolve/enum_names.hpp"
 #include "resolve/role_mapping.hpp"
 #include "resolve/species_encoder.hpp"
+#include "resolve/terrain_source.hpp"
 #include "resolve/types.hpp"
 
 #include <torch/torch.h>
@@ -494,6 +495,47 @@ inline double pearson(const std::vector<float>& a, const std::vector<float>& b) 
     }
     if (saa <= 0 || sbb <= 0) return 0.0;
     return sab / std::sqrt(saa * sbb);
+}
+
+// ============================================================================
+// Terrain
+// ============================================================================
+
+// The surface the plane terrain grids hold: metres above sea level, linear in
+// latitude and longitude, so bilinear reads, the slope stencil, the 1 km mean
+// and the 1 km plane all have closed forms.
+inline double terrain_plane(double lat, double lon) {
+    return 100.0 + 1000.0 * (lat - 46.0) + 500.0 * (lon - 10.0);
+}
+
+// Grid tiles of terrain_plane on the degree squares (south, west) in
+// `squares`, written under `dir` with a tiles.json, laid out as GLO-30 lays
+// its own: pixel is point, a tile's first row on its northern edge and its
+// first column on its western edge, `cells` cells per degree.
+inline void write_plane_terrain(const TempDir& dir, const std::vector<std::pair<int, int>>& squares,
+                                int64_t cells = 60) {
+    std::ostringstream index;
+    index.precision(17);
+    index << R"({"format": "resolve-terrain-grids", "version": 1, "tiles": [)";
+    const double d = 1.0 / static_cast<double>(cells);
+    for (size_t k = 0; k < squares.size(); ++k) {
+        const auto [s, w] = squares[k];
+        torch::Tensor g = torch::empty({cells, cells}, torch::kFloat32);
+        auto a = g.accessor<float, 2>();
+        for (int64_t r = 0; r < cells; ++r) {
+            for (int64_t c = 0; c < cells; ++c) {
+                a[r][c] = static_cast<float>(terrain_plane(s + 1.0 - static_cast<double>(r) * d,
+                                                           w + static_cast<double>(c) * d));
+            }
+        }
+        const std::string name = "T" + std::to_string(s) + "_" + std::to_string(w);
+        write_npy_grid(dir.file(name + ".npy"), g);
+        index << (k ? ", " : "") << R"({"name": ")" << name << R"(", "file": ")" << name
+              << R"(.npy", "rows": )" << cells << R"(, "cols": )" << cells << R"(, "lat_first": )" << (s + 1)
+              << R"(, "lon_first": )" << w << R"(, "dlat": )" << d << R"(, "dlon": )" << d << "}";
+    }
+    index << "]}";
+    dir.write("tiles.json", index.str());
 }
 
 }  // namespace resolve::test

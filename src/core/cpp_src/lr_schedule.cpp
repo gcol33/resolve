@@ -86,6 +86,16 @@ double warmup_factor(int64_t step, int64_t warmup_steps) {
     return static_cast<double>(step + 1) / static_cast<double>(warmup_steps);
 }
 
+double warmup_linear_decay_rate(int64_t step, int64_t total_steps, int64_t warmup_steps,
+                                double peak) {
+    if (step < warmup_steps) return peak * warmup_factor(step, warmup_steps);
+    const int64_t decay_steps = total_steps - std::max<int64_t>(warmup_steps, 0);
+    if (decay_steps <= 1) return peak;
+    const double done = static_cast<double>(step - std::max<int64_t>(warmup_steps, 0)) /
+                        static_cast<double>(decay_steps - 1);
+    return peak * std::max(0.0, 1.0 - done);
+}
+
 bool epoch_in_warmup(const TrainConfig& config, int epoch, int64_t steps_per_epoch) {
     return static_cast<int64_t>(epoch) * steps_per_epoch <
            warmup_step_count(config, steps_per_epoch);

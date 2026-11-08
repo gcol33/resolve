@@ -211,6 +211,21 @@ enum class GapMethod {
     StackSpeciesSpatial  // raw and both neighbour medians by least squares
 };
 
+// The elevation-model descriptor a terrain-corrected target reads
+// (terrain_correction.hpp, terrain_source.hpp).
+enum class TerrainDescriptor {
+    Elevation,  // elevation / elevation_1km: an altitude target, in m
+    Slope       // slope / slope_1km: a slope target, in degrees
+};
+
+// Where a suite's terrain correction reads the elevation-model descriptors
+// (suite.hpp, terrain_source.hpp).
+enum class TerrainSourceKind {
+    Field,   // the terrain field the suite ships, read at the plots' coordinates
+    Grids,   // a directory of elevation grids, read at the plots' coordinates
+    Columns  // columns of the caller's header table holding the descriptors
+};
+
 // How a species name reached its vocabulary token (name_resolution.hpp).
 enum class NameRoute {
     Exact,      // the vocabulary holds the name

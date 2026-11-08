@@ -18,6 +18,7 @@
 
 #include "arg_parser.hpp"
 #include "cli_spec.hpp"
+#include "terrain_flags.hpp"
 
 using resolve_cli::ParsedArgs;
 
@@ -26,6 +27,11 @@ using resolve_cli::ParsedArgs;
 int train_command(const ParsedArgs& args);
 int predict_command(const ParsedArgs& args);
 int info_command(const ParsedArgs& args);
+int terrain_fit_field_command(const ParsedArgs& args);
+int terrain_assemble_command(const ParsedArgs& args);
+int terrain_encode_command(const ParsedArgs& args);
+int terrain_describe_command(const ParsedArgs& args);
+int terrain_fit_correction_command(const ParsedArgs& args);
 
 namespace {
 
@@ -76,6 +82,11 @@ Pass --help after a subcommand for that command's flags only.
     std::cout << resolve_cli::render_usage(resolve_cli::train_spec()) << "\n";
     std::cout << resolve_cli::render_usage(resolve_cli::predict_spec()) << "\n";
     std::cout << resolve_cli::render_usage(resolve_cli::info_spec()) << "\n";
+    std::cout << resolve_cli::render_usage(resolve_cli::terrain_fit_field_spec()) << "\n";
+    std::cout << resolve_cli::render_usage(resolve_cli::terrain_assemble_spec()) << "\n";
+    std::cout << resolve_cli::render_usage(resolve_cli::terrain_encode_spec()) << "\n";
+    std::cout << resolve_cli::render_usage(resolve_cli::terrain_describe_spec()) << "\n";
+    std::cout << resolve_cli::render_usage(resolve_cli::terrain_fit_correction_spec()) << "\n";
     std::cout << R"(Prediction output columns:
   plot_id, then one column per schema target in schema order. A classification
   target gets TWO columns: <target> carries the original class label from the
@@ -139,6 +150,21 @@ int run_cli(int argc, char* argv[]) {
     }
     if (cmd == "info") {
         return run_command(resolve_cli::info_spec(), tokens, &info_command);
+    }
+    if (cmd == "terrain") {
+        // `resolve terrain <action> [flags]`: one flag table per action.
+        const std::string action = tokens.empty() ? "" : tokens.front();
+        const std::vector<std::string> rest(tokens.empty() ? tokens.end() : tokens.begin() + 1, tokens.end());
+        if (action == "fit-field") return run_command(resolve_cli::terrain_fit_field_spec(), rest, &terrain_fit_field_command);
+        if (action == "assemble") return run_command(resolve_cli::terrain_assemble_spec(), rest, &terrain_assemble_command);
+        if (action == "encode") return run_command(resolve_cli::terrain_encode_spec(), rest, &terrain_encode_command);
+        if (action == "describe") return run_command(resolve_cli::terrain_describe_spec(), rest, &terrain_describe_command);
+        if (action == "fit-correction") {
+            return run_command(resolve_cli::terrain_fit_correction_spec(), rest, &terrain_fit_correction_command);
+        }
+        std::cerr << "Unknown terrain action: '" << action
+                  << "'; one of encode, fit-field, assemble, describe, fit-correction" << std::endl;
+        return 1;
     }
     if (cmd == "version" || cmd == "--version") {
         std::cout << "resolve " << resolve::VERSION << std::endl;

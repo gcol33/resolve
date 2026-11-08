@@ -270,6 +270,17 @@ inline constexpr EnumName<GapMethod> kGapMethodNames[] = {
     {"stack_species_spatial", GapMethod::StackSpeciesSpatial},
 };
 
+inline constexpr EnumName<TerrainDescriptor> kTerrainDescriptorNames[] = {
+    {"elevation", TerrainDescriptor::Elevation},
+    {"slope", TerrainDescriptor::Slope},
+};
+
+inline constexpr EnumName<TerrainSourceKind> kTerrainSourceKindNames[] = {
+    {"field", TerrainSourceKind::Field},
+    {"grids", TerrainSourceKind::Grids},
+    {"columns", TerrainSourceKind::Columns},
+};
+
 // ============================================================================
 // Access by type
 // ============================================================================
@@ -349,6 +360,9 @@ RESOLVE_DECLARE_ENUM_NAMES(SuiteTargetStatus, kSuiteTargetStatusNames,
 RESOLVE_DECLARE_ENUM_NAMES(NameRoute, kNameRouteNames, "name route", "unresolved")
 RESOLVE_DECLARE_ENUM_NAMES(GapScale, kGapScaleNames, "gap fitting scale", "linear")
 RESOLVE_DECLARE_ENUM_NAMES(GapMethod, kGapMethodNames, "gap fitting method", "resolve")
+RESOLVE_DECLARE_ENUM_NAMES(TerrainDescriptor, kTerrainDescriptorNames, "terrain descriptor",
+                           "elevation")
+RESOLVE_DECLARE_ENUM_NAMES(TerrainSourceKind, kTerrainSourceKindNames, "terrain source", "field")
 
 #undef RESOLVE_DECLARE_ENUM_NAMES
 

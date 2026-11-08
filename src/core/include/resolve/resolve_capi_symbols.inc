@@ -157,6 +157,15 @@ RESOLVE_SYM(resolve_value_t*, resolve_fit_gaps, (const resolve_value_t* target, 
 RESOLVE_SYM(resolve_value_t*, resolve_fit_prediction_gaps, (const resolve_value_t* header, const resolve_value_t* species, const resolve_value_t* columns, const resolve_value_t* predictions, const resolve_value_t* requests, const resolve_value_t* config), (header, species, columns, predictions, requests, config))
 RESOLVE_SYM(resolve_value_t*, resolve_suite_seal, (const char* dir), (dir))
 
+/* ---- Terrain -------------------------------------------------------------- */
+RESOLVE_SYM(resolve_value_t*, resolve_terrain_descriptors, (const resolve_value_t* source, const resolve_value_t* latitude, const resolve_value_t* longitude), (source, latitude, longitude))
+RESOLVE_SYM(resolve_value_t*, resolve_terrain_grid, (const resolve_value_t* source, const char* tile), (source, tile))
+RESOLVE_SYM(resolve_value_t*, resolve_fit_terrain_correction, (const char* target, const char* descriptor, const resolve_value_t* inputs, const resolve_value_t* truth, const resolve_value_t* config, const char* path), (target, descriptor, inputs, truth, config, path))
+RESOLVE_SYM(resolve_value_t*, resolve_terrain_correction_apply, (const char* path, const resolve_value_t* inputs, const char* device), (path, inputs, device))
+RESOLVE_SYM(resolve_value_t*, resolve_fit_terrain_tile, (const char* grids, const char* tile, const resolve_value_t* config, const char* path), (grids, tile, config, path))
+RESOLVE_SYM(resolve_value_t*, resolve_encode_terrain_grids, (const char* grids, const resolve_value_t* config, const char* path, const resolve_value_t* tiles), (grids, config, path, tiles))
+RESOLVE_SYM(int, resolve_assemble_terrain_field, (const resolve_value_t* tiles, const char* path), (tiles, path))
+
 /* ---- Fuzzy string index --------------------------------------------------- */
 RESOLVE_SYM(resolve_fuzzy_t*, resolve_fuzzy_build, (const resolve_value_t* entries, const resolve_value_t* options), (entries, options))
 RESOLVE_SYM_VOID(resolve_fuzzy_free, (resolve_fuzzy_t* f), (f))

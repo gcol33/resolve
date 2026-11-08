@@ -201,7 +201,7 @@ struct ConfigFlagWriter {
                 row(flag, Arity::Value, "LIST", names,
                     help + ", comma-separated: " +
                         resolve::enum_spellings<typename T::value_type>());
-            } else if constexpr (std::is_same_v<T, int>) {
+            } else if constexpr (std::is_same_v<T, int> || std::is_same_v<T, int64_t>) {
                 row(flag, Arity::Value, "N", std::to_string(value), help);
             } else if constexpr (std::is_same_v<T, float>) {
                 row(flag, Arity::Value, "FLOAT", config_flags_detail::value_text(value), help);
@@ -265,6 +265,8 @@ struct ConfigFlagReader {
                 value = std::move(parsed);
             } else if constexpr (std::is_same_v<T, int>) {
                 value = args.get_int(flag);
+            } else if constexpr (std::is_same_v<T, int64_t>) {
+                value = args.get_int64(flag);
             } else if constexpr (std::is_same_v<T, float>) {
                 value = args.get_float(flag);
             } else if constexpr (std::is_same_v<T, std::string>) {

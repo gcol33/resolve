@@ -552,3 +552,94 @@ TEST_CASE("C ABI: names resolve against a vocabulary with their routes", "[capi]
     CHECK(resolve_names_resolve(vocabulary.get(), names.get(), options.get()) == nullptr);
     CHECK(last_error().find("max_edit_distance") != std::string::npos);
 }
+
+TEST_CASE("C ABI: terrain descriptors, a terrain correction and a coded field through the boundary",
+          "[capi][terrain]") {
+    TempDir dir;
+    write_plane_terrain(dir, {{46, 9}, {45, 9}}, 30);
+    const std::vector<double> lat = {46.31, 46.72};
+    const std::vector<double> lon = {9.42, 9.6};
+    const Value lat_v(resolve_value_new_double_array(lat.data(), 2));
+    const Value lon_v(resolve_value_new_double_array(lon.data(), 2));
+    const Value grids(resolve_value_new_map());
+    resolve_map_set_string(grids.get(), "grids", dir.path().c_str());
+    const Value d(resolve_terrain_descriptors(grids.get(), lat_v.get(), lon_v.get()));
+    REQUIRE(d.get() != nullptr);
+    int64_t len = 0;
+    const double* elevation = resolve_value_as_double_array(resolve_map_get(d.get(), "elevation"), &len);
+    REQUIRE(len == 2);
+    CHECK(std::abs(elevation[0] - terrain_plane(46.31, 9.42)) < 1e-3);
+
+    const Value codec(resolve_value_new_map());
+    resolve_map_set_double(codec.get(), "max_error", 0.5);
+    const std::string coded = dir.file("coded.bin");
+    const Value metrics(resolve_encode_terrain_grids(dir.path().c_str(), codec.get(), coded.c_str(), nullptr));
+    REQUIRE(metrics.get() != nullptr);
+    CHECK(resolve_map_get(metrics.get(), "T46_9") != nullptr);
+    const Value field(resolve_value_new_map());
+    resolve_map_set_string(field.get(), "field", coded.c_str());
+    const Value f(resolve_terrain_descriptors(field.get(), lat_v.get(), lon_v.get()));
+    REQUIRE(f.get() != nullptr);
+    const double* field_elevation = resolve_value_as_double_array(resolve_map_get(f.get(), "elevation"), &len);
+    CHECK(std::abs(field_elevation[1] - elevation[1]) <= 0.5 + 1e-3);
+
+    // One tile whole, from the grids and from the coded field, by name.
+    const Value grid_tile(resolve_terrain_grid(grids.get(), "T46_9"));
+    const Value field_tile(resolve_terrain_grid(field.get(), "T46_9"));
+    REQUIRE(grid_tile.get() != nullptr);
+    REQUIRE(field_tile.get() != nullptr);
+    const resolve_value_t* geometry = resolve_map_get(grid_tile.get(), "tile");
+    CHECK(std::string(resolve_value_as_string(resolve_map_get(geometry, "name"))) == "T46_9");
+    CHECK(resolve_value_as_double(resolve_map_get(geometry, "rows")) == 30.0);
+    int64_t cells = 0;
+    int64_t field_cells = 0;
+    const double* stored = resolve_value_as_double_array(resolve_map_get(grid_tile.get(), "elevation"), &cells);
+    const double* decoded = resolve_value_as_double_array(resolve_map_get(field_tile.get(), "elevation"), &field_cells);
+    REQUIRE(cells == 30 * 30);
+    REQUIRE(field_cells == cells);
+    const double lat_first = resolve_value_as_double(resolve_map_get(geometry, "lat_first"));
+    const double dlat = resolve_value_as_double(resolve_map_get(geometry, "dlat"));
+    const double lon_first = resolve_value_as_double(resolve_map_get(geometry, "lon_first"));
+    const double dlon = resolve_value_as_double(resolve_map_get(geometry, "dlon"));
+    // Row-major from north to south: cell (2, 5).
+    CHECK(std::abs(stored[2 * 30 + 5] - terrain_plane(lat_first - 2 * dlat, lon_first + 5 * dlon)) < 1e-2);
+    double largest = 0.0;
+    for (int64_t i = 0; i < cells; ++i) largest = std::max(largest, std::abs(decoded[i] - stored[i]));
+    CHECK(largest <= 0.5 + 1e-3);
+    CHECK(resolve_terrain_grid(grids.get(), "T10_10") == nullptr);
+    CHECK(last_error().find("T10_10") != std::string::npos);
+
+    const int64_t n = 300;
+    std::vector<double> truth(n), prediction(n), dem(n);
+    for (int64_t i = 0; i < n; ++i) {
+        truth[i] = 100.0 + 3.0 * static_cast<double>(i);
+        prediction[i] = truth[i] + (i % 2 ? 40.0 : -40.0);
+        dem[i] = truth[i] + (i % 7 == 0 ? 300.0 : 0.5);
+    }
+    const Value inputs(resolve_value_new_map());
+    resolve_map_set_double_array(inputs.get(), "prediction", prediction.data(), n);
+    resolve_map_set_double_array(inputs.get(), "dem", dem.data(), n);
+    const Value truth_v(resolve_value_new_double_array(truth.data(), n));
+    const Value config(resolve_value_new_map());
+    resolve_map_set_int(config.get(), "epochs", 2);
+    resolve_map_set_int(config.get(), "batch_size", 64);
+    const std::string path = dir.file("altitude.terrain");
+    const Value report(resolve_fit_terrain_correction("altitude", "elevation", inputs.get(), truth_v.get(),
+                                                      config.get(), path.c_str()));
+    REQUIRE(report.get() != nullptr);
+    const Value applied(resolve_terrain_correction_apply(path.c_str(), inputs.get(), nullptr));
+    REQUIRE(applied.get() != nullptr);
+    CHECK(std::string(resolve_value_as_string(resolve_map_get(applied.get(), "descriptor"))) == "elevation");
+    resolve_value_as_double_array(resolve_map_get(applied.get(), "corrected"), &len);
+    CHECK(len == n);
+
+    CHECK(resolve_fit_terrain_correction("altitude", "aspect", inputs.get(), truth_v.get(), nullptr, path.c_str()) ==
+          nullptr);
+    CHECK(last_error().find("aspect") != std::string::npos);
+    const Value bad_key(resolve_value_new_map());
+    resolve_map_set_int(bad_key.get(), "epoch", 2);
+    CHECK(resolve_fit_terrain_correction("altitude", "elevation", inputs.get(), truth_v.get(), bad_key.get(),
+                                         path.c_str()) == nullptr);
+    const Value defaults(resolve_default_config("terrain_codec"));
+    CHECK(resolve_value_kind(resolve_map_get(defaults.get(), "max_error")) == RESOLVE_VALUE_DOUBLE);
+}

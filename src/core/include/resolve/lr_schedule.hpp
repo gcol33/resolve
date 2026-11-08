@@ -86,6 +86,13 @@ bool plateau_step(PlateauState& state, const TrainConfig& config, double value, 
 [[nodiscard]] double step_learning_rate(const TrainConfig& config, int epoch, int64_t step,
                                         int64_t steps_per_epoch, const PlateauState& plateau);
 
+// The rate of step `step` (0-based) of a run of `total_steps` steps that
+// rises linearly to `peak` over `warmup_steps` steps (warmup_factor) and then
+// falls linearly to 0 at the last step: the schedule of the small fits that
+// run outside a TrainConfig (terrain correction, terrain field tiles).
+[[nodiscard]] double warmup_linear_decay_rate(int64_t step, int64_t total_steps,
+                                              int64_t warmup_steps, double peak);
+
 // Sets the rate every parameter group of `optimizer` steps at.
 void set_learning_rate(torch::optim::AdamW& optimizer, double lr);
 

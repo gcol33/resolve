@@ -13,7 +13,8 @@ resolve.predict.suite(
   keepMembers = FALSE,
   gapFitting = NULL,
   names = NULL,
-  maxEditDistance = 1L
+  maxEditDistance = 1L,
+  terrain = NULL
 )
 }
 \arguments{
@@ -30,9 +31,11 @@ Must be the same kind (data.frame or path) as \code{species}.}
 \item{columns}{Named list renaming the manifest's input columns, with keys
 among \code{plot_id}, \code{species_id}, \code{abundance}, \code{latitude}, \code{longitude},
 \code{genus}, \code{family}, \code{covariates}, \code{categoricals} (another key is an
-error), and for gap fitting \code{recorded} (a named list of target ->
+error), for gap fitting \code{recorded} (a named list of target ->
 recorded column, \code{c(latitude, longitude)} for a location) and
-\code{survey_year}.}
+\code{survey_year}, and for terrain correction \code{terrain} (a named list of
+\code{elevation}, \code{elevation_1km}, \code{slope}, \code{slope_1km} and \code{uncertainty}
+column names).}
 
 \item{batchSize}{Forward-pass chunk size per member (default 4096).}
 
@@ -56,6 +59,15 @@ data.frame of the names not found as written and the route each took
 \item{maxEditDistance}{With \code{names}: the edits a misspelled name may be
 away from a known name (default 1; 0 turns the spelling step off; 2 can
 also rename species the models never saw).}
+
+\item{terrain}{\code{NULL} (default), or correct every target the suite gives a
+terrain correction (altitude, slope) by an elevation model read at the
+plots: \code{"field"} (or \code{TRUE}) reads the suite's terrain field at the
+coordinates, \code{list(source = "grids", grids = dir)} elevation grids,
+\code{"columns"} your own values named in \code{columns$terrain}. Adds
+\verb{<target>_terrain}, the weight of each source and the descriptors read to
+\code{\link[=as.data.frame]{as.data.frame()}}, and a \code{terrain} result to each corrected target (see
+\code{\link[=resolve.terrain_correction]{resolve.terrain_correction()}}).}
 }
 \value{
 A \code{resolve_suite_predictions} list: \code{plot_ids}, and \code{targets}, a

@@ -62,6 +62,8 @@
 #include "resolve/json.hpp"
 #include "resolve/predictor.hpp"
 #include "resolve/row_source.hpp"
+#include "resolve/terrain_correction.hpp"
+#include "resolve/terrain_source.hpp"
 #include "resolve/types.hpp"
 
 #include <torch/torch.h>
@@ -82,9 +84,10 @@ namespace resolve {
 inline constexpr const char* kSuiteManifestFile = "manifest.json";
 inline constexpr const char* kSuiteFormat = "resolve-suite";
 // Version 2 adds per-target inputs and the spherical mean, version 3 a
-// member's own zero_abundance_as. A manifest is written as the lowest version
-// that holds it, so an older engine still reads one that uses neither.
-inline constexpr int kSuiteFormatVersion = 3;
+// member's own zero_abundance_as, version 4 the terrain field and the
+// per-target terrain correction. A manifest is written as the lowest version
+// that holds it, so an older engine still reads one that uses none of these.
+inline constexpr int kSuiteFormatVersion = 4;
 
 // The columns a suite reads and how their raw values are interpreted. Column
 // names are the defaults a caller's table is read with; a caller whose table
@@ -140,6 +143,14 @@ struct SuiteMember {
     std::optional<float> zero_abundance_as = std::nullopt;
 };
 
+// A file of the release other than a member: its path relative to the suite
+// directory ('/'-separated), SHA-256 and size, checked like a member's.
+struct SuiteFile {
+    std::string file;
+    std::string sha256;  // lower-case hex
+    int64_t bytes = 0;
+};
+
 // One released target.
 struct SuiteTarget {
     std::string name;             // the suite's name for it, e.g. "aspect"
@@ -157,6 +168,10 @@ struct SuiteTarget {
     SuiteTargetStatus status = SuiteTargetStatus::Released;
     std::string limit;            // required for an experimental target
     std::vector<SuiteMember> members;
+    // The terrain correction of this target (terrain_correction.hpp): a
+    // mean-combined altitude or slope target corrected by an elevation model
+    // read at the plot's coordinates. Unset: none.
+    std::optional<SuiteFile> terrain_correction;
     json::Value training = json::Value::object();    // free-form record
     json::Value validation = json::Value::object();  // regime -> metrics
 };
@@ -170,6 +185,10 @@ struct SuiteManifest {
     std::string training_scope;   // which plots the members were trained on
     SuiteInputContract inputs;
     std::vector<SuiteTarget> targets;
+    // The elevation model the terrain corrections read by default: a terrain
+    // field file, neural (terrain_field.hpp) or coded (terrain_codec.hpp).
+    // Unset: a caller supplies the descriptors (grids or columns).
+    std::optional<SuiteFile> terrain_field;
 
     // Structural validation: every required field present and well-formed,
     // target names unique, combine rule consistent with task and outputs,
@@ -185,9 +204,10 @@ struct SuiteManifest {
     // What a target's members read: its declared inputs, or the whole contract.
     [[nodiscard]] SuiteTargetInputs inputs_of(const SuiteTarget& target) const;
 
-    // The lowest format version that holds this manifest: 3 when a member
-    // states its zero_abundance_as, 2 when a target declares its inputs or
-    // combines by a spherical mean, else 1.
+    // The lowest format version that holds this manifest: 4 with a terrain
+    // field or a terrain correction, 3 when a member states its
+    // zero_abundance_as, 2 when a target declares its inputs or combines by a
+    // spherical mean, else 1.
     [[nodiscard]] int format_version() const;
 
     // Read `<dir>/manifest.json` and validate it.
@@ -195,13 +215,16 @@ struct SuiteManifest {
     // Validate, then write `<dir>/manifest.json`.
     void write(const std::string& dir) const;
 
-    // Fill every member's sha256 and byte count from the files under `dir`.
+    // Fill every member's and terrain file's sha256 and byte count from the
+    // files under `dir`.
     // What a release builder calls after listing the files and seeds.
     void seal(const std::string& dir);
 
-    // Problems with the files under `dir`: a member that is missing, of the
-    // wrong size, or whose digest differs. Empty when the suite is intact.
-    // `targets` (suite names) narrows the check to those targets' members.
+    // Problems with the files under `dir`: a member or terrain file that is
+    // missing, of the wrong size, or whose digest differs. Empty when the
+    // suite is intact. `targets` (suite names) narrows the check to those
+    // targets' members and terrain corrections (the terrain field is always
+    // checked).
     [[nodiscard]] std::vector<std::string> verify(
         const std::string& dir, const std::vector<std::string>& targets = {}) const;
 };
@@ -233,6 +256,19 @@ struct SuiteColumns {
     // here for gap fitting alone.
     std::vector<std::pair<std::string, std::vector<std::string>>> recorded;
     std::optional<std::string> survey_year;
+    // Terrain correction (SuitePredictOptions::terrain) only: the columns
+    // holding the elevation-model descriptors (TerrainSourceKind::Columns; an
+    // altitude target reads elevation and, when named, elevation_1km, a slope
+    // target slope and slope_1km) and the recorded location uncertainty in
+    // metres (any source; unset reads every plot as not recorded). The field
+    // and grids sources read latitude / longitude above, or the contract's.
+    struct Terrain {
+        std::optional<std::string> elevation;
+        std::optional<std::string> elevation_1km;
+        std::optional<std::string> slope;
+        std::optional<std::string> slope_1km;
+        std::optional<std::string> uncertainty;
+    } terrain;
 };
 
 // The plots to score: a header table (one row per plot; required when the
@@ -256,6 +292,11 @@ public:
     // What gap fitting reads about the plots `plot_ids` (read_gap_tables).
     [[nodiscard]] GapTables gap_tables(const GapColumns& columns,
                                        const std::vector<std::string>& plot_ids) const;
+    // Numeric plot-level columns of the plots `plot_ids` (read_plot_columns).
+    [[nodiscard]] std::vector<std::vector<double>> plot_columns(const std::string& plot_id_column,
+                                                                const std::vector<std::string>& columns,
+                                                                const std::vector<std::string>& plot_ids,
+                                                                const char* role) const;
 
 private:
     SuiteInput(std::optional<TableSource> header, TableSource species)
@@ -278,6 +319,24 @@ struct SuiteLoadOptions {
     std::vector<std::string> targets;
 };
 
+// Where the terrain corrections read their elevation-model descriptors.
+struct SuiteTerrainOptions {
+    TerrainSourceKind source = TerrainSourceKind::Field;
+    // Grids: the directory holding tiles.json (terrain_source.hpp).
+    std::string grids;
+    // The device the terrain field and the corrections run on.
+    torch::Device device = torch::kCPU;
+};
+
+// A target's terrain correction: the descriptors it read and its result.
+struct SuiteTerrainPrediction {
+    TerrainDescriptor descriptor = TerrainDescriptor::Elevation;
+    TerrainSourceKind source = TerrainSourceKind::Field;
+    torch::Tensor dem;      // (n_plots,) float64, the descriptor at the coordinate
+    torch::Tensor dem_1km;  // (n_plots,) float64, the descriptor over 1 km (NaN: not read)
+    TerrainCorrectionResult result;
+};
+
 struct SuitePredictOptions {
     SuiteColumns columns;
     int64_t batch_size = 4096;  // per-member forward chunk, as Predictor::predict
@@ -291,6 +350,9 @@ struct SuitePredictOptions {
     // a misspelling may be away. Unset reads every name as written. Gap
     // fitting compares the table's own plots and reads the names as written.
     std::optional<SpeciesNames> names;
+    // Terrain correction after combining, for every loaded target the
+    // manifest gives one; unset corrects nothing.
+    std::optional<SuiteTerrainOptions> terrain;
 };
 
 struct SuiteTargetPrediction {
@@ -336,6 +398,9 @@ struct SuiteTargetPrediction {
     // own complete plots, the method per plot and the report. `value` itself
     // is left as the members' combined prediction.
     std::optional<GapFit> gap_fit;
+    // With terrain correction for this target: the corrected value beside
+    // `value`, the weight each source received and the descriptors read.
+    std::optional<SuiteTerrainPrediction> terrain;
 };
 
 struct SuitePredictions {
@@ -463,7 +528,9 @@ struct SuiteColumn {
 // and with kept members `<t>_seed<N>` per member (a label for a vote,
 // `_latitude` / `_longitude` for a spherical mean). A gap-fitted target adds
 // `<t>_fitted` (`<t>_fitted_latitude` / `<t>_fitted_longitude`) and
-// `<t>_fit_method` after its prediction and dispersion. A class code is labelled
+// `<t>_fit_method` after its prediction and dispersion; a terrain-corrected target
+// `<t>_terrain`, `<t>_terrain_w_resolve`, `<t>_terrain_w_dem`,
+// `<t>_terrain_w_dem_1km`, `<t>_dem` and `<t>_dem_1km` after those. A class code is labelled
 // by class_label. The CLI writes this table, and the Python and R data frames
 // are built from it.
 [[nodiscard]] std::vector<SuiteColumn> suite_prediction_columns(const SuitePredictions& predictions,
@@ -508,6 +575,9 @@ private:
     // name a recorded value for.
     void fit_gaps(const SuiteInput& input, const SuiteColumns& columns,
                   const GapFittingConfig& config, SuitePredictions& result) const;
+    // Terrain correction of every loaded target the manifest gives one.
+    void correct_terrain(const SuiteInput& input, const SuiteColumns& columns,
+                         const SuiteTerrainOptions& options, SuitePredictions& result) const;
     // The part of `roles` an encoding's members read.
     [[nodiscard]] RoleMapping roles_for(const RoleMapping& roles, const Encoding& encoding) const;
 
@@ -515,6 +585,10 @@ private:
     SuiteManifest manifest_;
     std::vector<std::unique_ptr<Encoding>> encodings_;
     std::vector<LoadedTarget> targets_;
+    // The suite's terrain field, opened at the first terrain correction that
+    // reads it, on the device that correction asked for.
+    mutable std::shared_ptr<TerrainSource> terrain_field_;
+    mutable torch::Device terrain_field_device_ = torch::kCPU;
 };
 
 }  // namespace resolve

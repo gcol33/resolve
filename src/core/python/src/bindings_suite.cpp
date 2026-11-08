@@ -258,6 +258,39 @@ void register_suite(nb::module_& m) {
 
     // --- prediction ------------------------------------------------------------
 
+    nb::class_<SuiteColumns::Terrain>(m, "SuiteTerrainColumns",
+                                      "Terrain correction: the columns holding the elevation-model descriptors "
+                                      "(source 'columns') and the location uncertainty (m, any source).")
+        .def(nb::init<>())
+        .def_rw("elevation", &SuiteColumns::Terrain::elevation)
+        .def_rw("elevation_1km", &SuiteColumns::Terrain::elevation_1km)
+        .def_rw("slope", &SuiteColumns::Terrain::slope)
+        .def_rw("slope_1km", &SuiteColumns::Terrain::slope_1km)
+        .def_rw("uncertainty", &SuiteColumns::Terrain::uncertainty);
+
+    nb::class_<SuiteTerrainOptions>(m, "SuiteTerrainOptions",
+                                    "Where the terrain corrections read their descriptors: the suite's field, "
+                                    "a grids directory, or the caller's columns.")
+        .def(
+            "__init__",
+            [](SuiteTerrainOptions* self, TerrainSourceKind source, std::string grids, const std::string& device) {
+                new (self) SuiteTerrainOptions{source, std::move(grids), parse_device(device)};
+            },
+            nb::arg("source") = TerrainSourceKind::Field, nb::arg("grids") = "", nb::arg("device") = "cpu")
+        .def_rw("source", &SuiteTerrainOptions::source)
+        .def_rw("grids", &SuiteTerrainOptions::grids)
+        .def_prop_rw(
+            "device", [](const SuiteTerrainOptions& o) { return device_name(o.device); },
+            [](SuiteTerrainOptions& o, const std::string& d) { o.device = parse_device(d); });
+
+    nb::class_<SuiteTerrainPrediction>(m, "SuiteTerrainPrediction",
+                                       "A target's terrain correction: the descriptors read and the result.")
+        .def_ro("descriptor", &SuiteTerrainPrediction::descriptor)
+        .def_ro("source", &SuiteTerrainPrediction::source)
+        .def_prop_ro("dem", [](const SuiteTerrainPrediction& t) { return tensor_or_none(t.dem); })
+        .def_prop_ro("dem_1km", [](const SuiteTerrainPrediction& t) { return tensor_or_none(t.dem_1km); })
+        .def_ro("result", &SuiteTerrainPrediction::result);
+
     nb::class_<SuiteColumns>(m, "SuiteColumns",
                              "Renames the manifest's input columns; None keeps the manifest's.")
         .def(nb::init<>())
@@ -274,7 +307,9 @@ void register_suite(nb::module_& m) {
                 "Gap fitting: per target fitted, (target, [column]) or (target, [latitude, "
                 "longitude]) naming its recorded value.")
         .def_rw("survey_year", &SuiteColumns::survey_year,
-                "Gap fitting: the survey-year column of the time axis.");
+                "Gap fitting: the survey-year column of the time axis.")
+        .def_rw("terrain", &SuiteColumns::terrain,
+                "Terrain correction: the descriptor and uncertainty columns (SuiteTerrainColumns).");
 
     nb::class_<SuiteTargetPrediction>(m, "SuiteTargetPrediction")
         .def_ro("name", &SuiteTargetPrediction::name)
@@ -295,6 +330,8 @@ void register_suite(nb::module_& m) {
         .def_ro("recognition", &SuiteTargetPrediction::recognition)
         .def_ro("gap_fit", &SuiteTargetPrediction::gap_fit,
                 "The GapFit of a gap-fitted target (fitted, method, report), or None.")
+        .def_ro("terrain", &SuiteTargetPrediction::terrain,
+                "The SuiteTerrainPrediction of a terrain-corrected target, or None.")
         .def_ro("species_names", &SuiteTargetPrediction::species_names,
                 "With names: the species names this target's vocabulary did not find as "
                 "written (SpeciesNameReport).");
@@ -361,27 +398,30 @@ void register_suite(nb::module_& m) {
         .def("predict_csv",
              [](SuitePredictor& s, const std::string& species_path, const std::string& header_path,
                 const SuiteColumns& columns, int64_t batch_size, bool keep_members,
-                std::optional<GapFittingConfig> gap_fitting, std::optional<SpeciesNames> names) {
+                std::optional<GapFittingConfig> gap_fitting, std::optional<SpeciesNames> names,
+                std::optional<SuiteTerrainOptions> terrain) {
                  SuitePredictOptions options;
                  options.columns = columns;
                  options.batch_size = batch_size;
                  options.keep_members = keep_members;
                  options.gap_fitting = std::move(gap_fitting);
                  options.names = std::move(names);
+                 options.terrain = std::move(terrain);
                  nb::gil_scoped_release nogil;
                  return s.predict(SuiteInput::csv(header_path, species_path), options);
              },
              nb::arg("species_path"), nb::arg("header_path") = "",
              nb::arg("columns") = SuiteColumns{}, nb::arg("batch_size") = 4096,
              nb::arg("keep_members") = false, nb::arg("gap_fitting") = nb::none(),
-             nb::arg("names") = nb::none())
+             nb::arg("names") = nb::none(), nb::arg("terrain") = nb::none())
         .def("predict_columns",
              [](SuitePredictor& s, std::vector<std::string> species_names,
                 std::vector<std::vector<std::string>> species_columns,
                 std::optional<std::vector<std::string>> header_names,
                 std::optional<std::vector<std::vector<std::string>>> header_columns,
                 const SuiteColumns& columns, int64_t batch_size, bool keep_members,
-                std::optional<GapFittingConfig> gap_fitting, std::optional<SpeciesNames> names) {
+                std::optional<GapFittingConfig> gap_fitting, std::optional<SpeciesNames> names,
+                std::optional<SuiteTerrainOptions> terrain) {
                  if (header_names.has_value() != header_columns.has_value()) {
                      throw std::invalid_argument("pass header_names and header_columns together");
                  }
@@ -391,6 +431,7 @@ void register_suite(nb::module_& m) {
                  options.keep_members = keep_members;
                  options.gap_fitting = std::move(gap_fitting);
                  options.names = std::move(names);
+                 options.terrain = std::move(terrain);
                  nb::gil_scoped_release nogil;
                  const ColumnTable species(std::move(species_names), std::move(species_columns));
                  std::optional<ColumnTable> header;
@@ -401,7 +442,7 @@ void register_suite(nb::module_& m) {
              nb::arg("header_names") = nb::none(), nb::arg("header_columns") = nb::none(),
              nb::arg("columns") = SuiteColumns{}, nb::arg("batch_size") = 4096,
              nb::arg("keep_members") = false, nb::arg("gap_fitting") = nb::none(),
-             nb::arg("names") = nb::none(),
+             nb::arg("names") = nb::none(), nb::arg("terrain") = nb::none(),
              "Low-level entry point over string columns; SuitePredictor.predict wraps it "
              "for pandas DataFrames.");
 }

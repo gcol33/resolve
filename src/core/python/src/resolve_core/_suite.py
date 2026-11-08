@@ -34,8 +34,56 @@ def _columns(columns):
             value = [str(v) for v in value]
         if key == "recorded":
             value = _recorded(value)
+        if key == "terrain":
+            value = _terrain_columns(value)
         setattr(out, key, value)
     return out
+
+
+def _terrain_columns(value):
+    """SuiteTerrainColumns from itself or a dict of elevation, elevation_1km,
+    slope, slope_1km and uncertainty column names."""
+    if isinstance(value, _core.SuiteTerrainColumns):
+        return value
+    if not isinstance(value, dict):
+        raise TypeError("columns['terrain'] must be a SuiteTerrainColumns or a dict")
+    out = _core.SuiteTerrainColumns()
+    fields = ["elevation", "elevation_1km", "slope", "slope_1km", "uncertainty"]
+    unknown = sorted(set(value) - set(fields))
+    if unknown:
+        raise ValueError(f"columns['terrain']: unknown key(s) {unknown}; accepted: {fields}")
+    for key, column in value.items():
+        setattr(out, key, None if column is None else str(column))
+    return out
+
+
+_TERRAIN_SOURCES = {"field": "Field", "grids": "Grids", "columns": "Columns"}
+
+
+def _terrain(terrain):
+    """SuiteTerrainOptions from None, True (the suite's field), a source name
+    ('field', 'grids', 'columns'), a dict of source / grids / device, or the
+    options themselves; None and False correct nothing."""
+    if terrain is None or terrain is False:
+        return None
+    if isinstance(terrain, _core.SuiteTerrainOptions):
+        return terrain
+    if terrain is True:
+        return _core.SuiteTerrainOptions()
+    if isinstance(terrain, str):
+        terrain = {"source": terrain}
+    if not isinstance(terrain, dict):
+        raise TypeError("terrain must be SuiteTerrainOptions, a source name, a dict, True or None")
+    unknown = sorted(set(terrain) - {"source", "grids", "device"})
+    if unknown:
+        raise ValueError(f"terrain: unknown key(s) {unknown}; accepted: ['device', 'grids', 'source']")
+    source = terrain.get("source", "field")
+    if isinstance(source, str):
+        if source not in _TERRAIN_SOURCES:
+            raise ValueError(f"terrain: unknown source '{source}'; accepted: {sorted(_TERRAIN_SOURCES)}")
+        source = getattr(_core.TerrainSourceKind, _TERRAIN_SOURCES[source])
+    grids = terrain.get("grids", "")
+    return _core.SuiteTerrainOptions(source, "" if grids is None else os.fspath(grids), terrain.get("device", "cpu"))
 
 
 def _recorded(value):
@@ -93,6 +141,7 @@ def predict(
     gap_fitting=None,
     names=None,
     max_edit_distance=1,
+    terrain=None,
 ):
     """Score plots with every loaded target of the suite.
 
@@ -107,9 +156,11 @@ def predict(
     columns : SuiteColumns or dict, optional
         Renames the manifest's input columns (keys ``plot_id``, ``species_id``,
         ``abundance``, ``genus``, ``family``, ``latitude``, ``longitude``,
-        ``covariates``, ``categoricals``), and for gap fitting ``recorded``
+        ``covariates``, ``categoricals``), for gap fitting ``recorded``
         (``{target: column}``, ``{"location": [lat, lon]}``) and
-        ``survey_year``.
+        ``survey_year``, and for terrain correction ``terrain``
+        (``{"elevation": col, "elevation_1km": col, "slope": col,
+        "slope_1km": col, "uncertainty": col}``).
     batch_size : int
         Per-member forward chunk (-1 for one pass).
     keep_members : bool
@@ -130,6 +181,15 @@ def predict(
         With ``names``: the edits a misspelled name may be away from a known
         name (default 1; 0 turns the spelling step off; 2 can also rename
         species the models never saw).
+    terrain : str or dict or SuiteTerrainOptions or bool, optional
+        Correct every target the suite gives a terrain correction (altitude,
+        slope) by an elevation model read at the plots: ``"field"`` (or
+        ``True``) reads the suite's terrain field at the coordinates,
+        ``{"source": "grids", "grids": dir}`` elevation grids,
+        ``"columns"`` your own values named in ``columns["terrain"]``. Adds
+        ``<target>_terrain``, the weight of each source and the descriptors
+        read to ``to_pandas``, and a ``terrain`` result to each corrected
+        target.
 
     Returns
     -------
@@ -150,6 +210,7 @@ def predict(
             keep_members,
             _gap_fitting(gap_fitting),
             resolve,
+            _terrain(terrain),
         )
     s_names, s_cols = _df_to_columns(species, "species")
     if header is None:
@@ -163,6 +224,7 @@ def predict(
             keep_members,
             _gap_fitting(gap_fitting),
             resolve,
+            _terrain(terrain),
         )
     h_names, h_cols = _df_to_columns(header, "header")
     return self.predict_columns(
@@ -175,6 +237,7 @@ def predict(
         keep_members,
         _gap_fitting(gap_fitting),
         resolve,
+        _terrain(terrain),
     )
 
 
@@ -190,7 +253,9 @@ def to_pandas(self, probabilities=False):
     per member when the members were kept (``<target>_seed<N>_latitude`` and
     ``_longitude`` for a spherical mean); a gap-fitted target adds
     ``<target>_fitted`` (``_fitted_latitude`` / ``_fitted_longitude``) and
-    ``<target>_fit_method``. The table is the engine's
+    ``<target>_fit_method``; a terrain-corrected target ``<target>_terrain``,
+    ``<target>_terrain_w_resolve``, ``_w_dem``, ``_w_dem_1km``, ``<target>_dem``
+    and ``<target>_dem_1km``. The table is the engine's
     (``suite_prediction_columns``).
     """
     import pandas as pd

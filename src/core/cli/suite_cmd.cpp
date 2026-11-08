@@ -16,6 +16,7 @@
 #include "csv_output.hpp"
 #include "gap_flags.hpp"
 #include "names_flags.hpp"
+#include "terrain_flags.hpp"
 
 using resolve_cli::csv_field;
 using resolve_cli::csv_number;
@@ -107,6 +108,7 @@ int predict_suite_command(const ParsedArgs& args) {
             predict.columns.survey_year = resolve_cli::role_flag(args, "--survey-year");
         }
         predict.names = resolve_cli::read_species_names(args);
+        predict.terrain = resolve_cli::read_terrain(args, predict.columns, load.device);
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;
@@ -161,6 +163,15 @@ int predict_suite_command(const ParsedArgs& args) {
         } catch (const std::exception& e) {
             std::cerr << "Error: " << e.what() << std::endl;
             return 1;
+        }
+    }
+    if (predict.terrain) {
+        for (const auto& t : predictions->targets) {
+            if (!t.terrain) continue;
+            const auto applied = t.terrain->result.applied.sum().item<int64_t>();
+            std::cout << "Terrain correction '" << t.name << "' (" << enum_to_name(t.terrain->source)
+                      << "): applied to " << applied << " of " << predictions->plot_ids.size() << " plots"
+                      << std::endl;
         }
     }
     print_limits(*predictions);
@@ -219,6 +230,9 @@ int info_suite_command(const ParsedArgs& args) {
                 std::cout << std::endl;
             }
             if (!t.limit.empty()) std::cout << "    limit: " << t.limit << std::endl;
+            if (t.terrain_correction) {
+                std::cout << "    terrain correction: " << t.terrain_correction->file << std::endl;
+            }
             for (const auto& member : t.members) {
                 if (member.zero_abundance_as) {
                     std::cout << "    seed " << member.seed << " read a recorded abundance of 0 as "
@@ -230,6 +244,8 @@ int info_suite_command(const ParsedArgs& args) {
                           << std::endl;
             }
         }
+
+        if (m.terrain_field) std::cout << "\nTerrain field: " << m.terrain_field->file << std::endl;
 
         const auto problems = m.verify(suite_dir);
         std::cout << "\nMembers: ";

@@ -133,6 +133,16 @@ reference:
   contents:
   - resolve.fit_gaps
   - resolve.fit_prediction_gaps
+- title: Terrain correction
+  desc: |
+    Altitude and slope combined with an elevation model read at the plots, and the compressed elevation model a suite ships.
+  contents:
+  - resolve.terrain_descriptors
+  - resolve.terrain_grid
+  - resolve.fit_terrain_correction
+  - resolve.terrain_correction
+  - resolve.encode_terrain_grids
+  - resolve.fit_terrain_tile
 - title: Scoring
   desc: |
     The metrics training reports, for predictions made anywhere.
@@ -164,6 +174,7 @@ articles:
   - articles/training
   - articles/prediction
   - articles/gap-fitting
+  - articles/terrain-correction
   - articles/embeddings
 - title: Scaling up
   navbar: Scaling up
@@ -184,6 +195,7 @@ articles:
   - articles/python-prediction
   - articles/python-suites
   - articles/python-gap-fitting
+  - articles/python-terrain-correction
   - articles/python-names
   - articles/python-scoring
   - articles/python-engine

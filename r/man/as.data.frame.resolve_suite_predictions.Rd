@@ -36,5 +36,7 @@ mean), the four recognition columns, and, when present, \verb{<target>_seed<N>}
 for each member (\verb{<target>_seed<N>_latitude} and \verb{_longitude} for a
 spherical mean); a gap-fitted target adds \verb{<target>_fitted}
 (\verb{<target>_fitted_latitude} / \verb{_fitted_longitude}) and
-\verb{<target>_fit_method}.
+\verb{<target>_fit_method}; a terrain-corrected target \verb{<target>_terrain},
+\verb{<target>_terrain_w_resolve}, \verb{_w_dem}, \verb{_w_dem_1km}, \verb{<target>_dem} and
+\verb{<target>_dem_1km}.
 }

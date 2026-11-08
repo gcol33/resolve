@@ -403,6 +403,28 @@ Filling a dataset's missing values from its own complete plots, beside the raw p
 [`GapColumns`](python-gap-fitting.html#GapColumns), [`GapTables`](python-gap-fitting.html#GapTables), [`GapFitRequest`](python-gap-fitting.html#GapFitRequest)
 : The low-level columns, tables and requests the functions above build.
 
+## [Terrain correction](python-terrain-correction.html)
+
+Altitude and slope combined with an elevation model read at the plots, and the elevation model a suite ships.
+
+[`TerrainGrids`, `open_terrain_field()`, `TerrainCodedField`, `TerrainField`](python-terrain-correction.html#sources)
+: Elevation grids on disk and terrain field files, as sources of elevations.
+
+[`terrain_descriptors()`](python-terrain-correction.html#terrain_descriptors)
+: The elevation, the 1 km mean, the slope and the 1 km inclination at coordinates.
+
+[`encode_terrain_grids()`](python-terrain-correction.html#encode_terrain_grids)
+: Elevation grids coded into a terrain field with a bounded error per cell.
+
+[`fit_terrain_tile()`, `assemble_terrain_field()`](python-terrain-correction.html#fit_terrain_tile)
+: The neural terrain field format, tile by tile.
+
+[`fit_terrain_correction()`](python-terrain-correction.html#fit_terrain_correction)
+: The gated correction of one target, fitted on plots with recorded values.
+
+[`TerrainCorrection`](python-terrain-correction.html#TerrainCorrection)
+: A fitted correction: apply, save, load.
+
 [`nearest_by_great_circle()`](python-gap-fitting.html#nearest_by_great_circle)
 : The nearest rows of a reference set by great-circle distance.
 

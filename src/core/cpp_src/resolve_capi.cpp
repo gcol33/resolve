@@ -1411,6 +1411,9 @@ constexpr DefaultConfig kDefaultConfigs[] = {
     {"spatial_block", &default_config_value<SpatialBlockConfig>},
     {"retrieval", &default_config_value<RetrievalConfig>},
     {"gap_fitting", &default_config_value<GapFittingConfig>},
+    {"terrain_correction", &default_config_value<TerrainCorrectionConfig>},
+    {"terrain_field", &default_config_value<TerrainFieldConfig>},
+    {"terrain_codec", &default_config_value<TerrainCodecConfig>},
     {"pretrain", &default_config_value<PretrainConfig>},
     {"masked_species", &default_config_value<MLMPretrainConfig>},
     {"vae", &default_config_value<VAEConfig>},
@@ -2355,23 +2358,67 @@ resolve_value* gap_fit_to_value(const GapFit& fit) {
     return g.release();
 }
 
+// The inputs of a terrain correction: a MAP of DOUBLE_ARRAYs.
+TerrainCorrectionInputs parse_terrain_inputs(const resolve_value* in) {
+    if (!in || in->kind != RESOLVE_VALUE_MAP) wrong_kind("terrain inputs", "a map of per-plot arrays");
+    reject_unknown_keys(in, "terrain inputs",
+                        {"prediction", "dem", "dem_1km", "uncertainty_m", "spread", "recognised_share", "n_species"});
+    const auto column = [&](const char* key) {
+        return vhas(in, key) ? value_to_tensor(vget(in, key), torch::kFloat64, std::string("terrain inputs.") + key)
+                             : torch::Tensor();
+    };
+    TerrainCorrectionInputs out;
+    out.prediction = column("prediction");
+    out.dem = column("dem");
+    out.dem_1km = column("dem_1km");
+    out.uncertainty_m = column("uncertainty_m");
+    out.spread = column("spread");
+    out.recognised_share = column("recognised_share");
+    out.n_species = column("n_species");
+    return out;
+}
+
+resolve_value* terrain_result_to_value(const TerrainCorrectionResult& r) {
+    ValueGuard g(v_map());
+    v_put(g.p, "corrected", tensor_to_vec(r.corrected));
+    v_put(g.p, "weights", tensor_to_mat(r.weights));
+    v_put(g.p, "offset", tensor_to_vec(r.offset));
+    v_put(g.p, "applied", tensor_to_ivec(r.applied.to(torch::kInt64)));
+    return g.release();
+}
+
+SuiteTerrainOptions parse_terrain_options(const resolve_value* t) {
+    SuiteTerrainOptions out;
+    if (!t || t->kind == RESOLVE_VALUE_NULL) return out;
+    if (t->kind != RESOLVE_VALUE_MAP) wrong_kind("terrain", "a map of source, grids, device");
+    reject_unknown_keys(t, "terrain", {"source", "grids", "device"});
+    if (vhas(t, "source")) {
+        const std::string source = vstr(t, "source");
+        out.source = named("terrain.source", [&] { return enum_from_name<TerrainSourceKind>(source); });
+    }
+    if (vhas(t, "grids")) out.grids = vstr(t, "grids");
+    if (vhas(t, "device")) out.device = parse_device(vstr(t, "device"));
+    return out;
+}
+
 SuitePredictOptions parse_suite_predict_options(const resolve_value* o) {
     SuitePredictOptions out;
     if (!o || o->kind == RESOLVE_VALUE_NULL) return out;
     reject_unknown_keys(o, "suite predict options",
-                        {"columns", "batch_size", "keep_members", "gap_fitting", "names"});
+                        {"columns", "batch_size", "keep_members", "gap_fitting", "names", "terrain"});
     out.names = parse_species_names(vget(o, "names"), "suite predict names");
     if (vhas(o, "batch_size")) out.batch_size = vnum<int64_t>(o, "batch_size");
     if (vhas(o, "keep_members")) out.keep_members = vbool(o, "keep_members");
     if (vhas(o, "gap_fitting")) {
         out.gap_fitting = parse_config<GapFittingConfig>(vget(o, "gap_fitting"), "gap_fitting");
     }
+    if (vhas(o, "terrain")) out.terrain = parse_terrain_options(vget(o, "terrain"));
     const resolve_value* c = vget(o, "columns");
     if (c && c->kind != RESOLVE_VALUE_NULL) {
         reject_unknown_keys(c, "suite columns",
                             {"plot_id", "species_id", "abundance", "longitude", "latitude",
                              "genus", "family", "covariates", "categoricals", "recorded",
-                             "survey_year"});
+                             "survey_year", "terrain"});
         SuiteColumns& cols = out.columns;
         if (vhas(c, "plot_id")) cols.plot_id = vstr(c, "plot_id");
         if (vhas(c, "species_id")) cols.species_id = vstr(c, "species_id");
@@ -2384,6 +2431,16 @@ SuitePredictOptions parse_suite_predict_options(const resolve_value* o) {
         if (vhas(c, "categoricals")) cols.categoricals = vstr_vec(c, "categoricals");
         if (vhas(c, "recorded")) cols.recorded = parse_recorded(vget(c, "recorded"), "columns.recorded");
         if (vhas(c, "survey_year")) cols.survey_year = vstr(c, "survey_year");
+        if (const resolve_value* t = vget(c, "terrain"); t && t->kind != RESOLVE_VALUE_NULL) {
+            if (t->kind != RESOLVE_VALUE_MAP) wrong_kind("columns.terrain", "a map of column names");
+            reject_unknown_keys(t, "columns.terrain",
+                                {"elevation", "elevation_1km", "slope", "slope_1km", "uncertainty"});
+            if (vhas(t, "elevation")) cols.terrain.elevation = vstr(t, "elevation");
+            if (vhas(t, "elevation_1km")) cols.terrain.elevation_1km = vstr(t, "elevation_1km");
+            if (vhas(t, "slope")) cols.terrain.slope = vstr(t, "slope");
+            if (vhas(t, "slope_1km")) cols.terrain.slope_1km = vstr(t, "slope_1km");
+            if (vhas(t, "uncertainty")) cols.terrain.uncertainty = vstr(t, "uncertainty");
+        }
     }
     return out;
 }
@@ -2433,6 +2490,17 @@ resolve_value* suite_predictions_to_value(const SuitePredictions& p) {
         v_put(m, "recognised_abundance_share",
               defined_or_null(t.recognition.abundance_share, RESOLVE_VALUE_DOUBLE_ARRAY));
         v_put(m, "gap_fit", t.gap_fit ? gap_fit_to_value(*t.gap_fit) : v_null());
+        if (t.terrain) {
+            auto* tm = v_map();
+            v_put(m, "terrain", tm);
+            v_put(tm, "descriptor", v_string(enum_to_name(t.terrain->descriptor)));
+            v_put(tm, "source", v_string(enum_to_name(t.terrain->source)));
+            v_put(tm, "dem", tensor_to_vec(t.terrain->dem));
+            v_put(tm, "dem_1km", tensor_to_vec(t.terrain->dem_1km));
+            v_put(tm, "result", terrain_result_to_value(t.terrain->result));
+        } else {
+            v_put(m, "terrain", v_null());
+        }
         v_put(m, "species_names", species_name_report_to_value(t.species_names));
     }
     // The predictions as one row per plot (suite_prediction_columns), the class
@@ -2457,6 +2525,18 @@ resolve_value* suite_predictions_to_value(const SuitePredictions& p) {
     }
     v_put(result, "probability_columns", v_string_array(probability_columns));
     return g.release();
+}
+
+// A terrain source MAP (grids or field, and a field's device) opened.
+std::shared_ptr<TerrainSource> open_terrain_source(const resolve_value_t* source) {
+    if (!source || source->kind != RESOLVE_VALUE_MAP) wrong_kind("terrain source", "a map of grids or field");
+    reject_unknown_keys(source, "terrain source", {"grids", "field", "device"});
+    if (vhas(source, "grids") == vhas(source, "field")) {
+        throw std::invalid_argument("terrain source: name grids or field (one of them)");
+    }
+    if (vhas(source, "grids")) return std::make_shared<TerrainGrids>(vstr(source, "grids"));
+    const torch::Device device = vhas(source, "device") ? parse_device(vstr(source, "device")) : torch::kCPU;
+    return open_terrain_field(vstr(source, "field"), device);
 }
 
 }  // namespace
@@ -2594,6 +2674,108 @@ resolve_value_t* resolve_fit_prediction_gaps(const resolve_value_t* header,
             v_put(g.p, fit_requests[i].target.name, gap_fit_to_value(fits[i]));
         }
         return g.release();
+    })
+}
+
+resolve_value_t* resolve_terrain_descriptors(const resolve_value_t* source, const resolve_value_t* latitude,
+                                             const resolve_value_t* longitude) {
+    CAPI_BODY_PTR({
+        const std::shared_ptr<TerrainSource> s = open_terrain_source(source);
+        const TerrainDescriptors d = terrain_descriptors(*s, value_to_tensor(latitude, torch::kFloat64, "latitude"),
+                                                         value_to_tensor(longitude, torch::kFloat64, "longitude"));
+        ValueGuard g(v_map());
+        v_put(g.p, "elevation", tensor_to_vec(d.elevation));
+        v_put(g.p, "elevation_1km", tensor_to_vec(d.elevation_1km));
+        v_put(g.p, "slope", tensor_to_vec(d.slope));
+        v_put(g.p, "slope_1km", tensor_to_vec(d.slope_1km));
+        return g.release();
+    })
+}
+
+resolve_value_t* resolve_terrain_grid(const resolve_value_t* source, const char* tile) {
+    CAPI_BODY_PTR({
+        if (!tile) throw std::invalid_argument("terrain_grid: null tile");
+        const std::shared_ptr<TerrainSource> s = open_terrain_source(source);
+        const auto& tiles = s->index().tiles();
+        const auto it = std::find_if(tiles.begin(), tiles.end(), [&](const TerrainTile& t) { return t.name == tile; });
+        if (it == tiles.end()) throw std::invalid_argument(std::string("terrain_grid: no tile '") + tile + "'");
+        const torch::Tensor g = s->grid(static_cast<int64_t>(it - tiles.begin()));
+        ValueGuard out(v_map());
+        v_put(out.p, "tile", json_to_value(terrain_tile_to_json(*it)));
+        v_put(out.p, "elevation", tensor_to_vec(g.reshape({-1})));
+        return out.release();
+    })
+}
+
+resolve_value_t* resolve_fit_terrain_correction(const char* target, const char* descriptor,
+                                                const resolve_value_t* inputs, const resolve_value_t* truth,
+                                                const resolve_value_t* config, const char* path) {
+    CAPI_BODY_PTR({
+        if (!target || !descriptor || !path) throw std::invalid_argument("fit_terrain_correction: null argument");
+        const std::string d = descriptor;
+        const TerrainDescriptor kind =
+            named("descriptor", [&] { return enum_from_name<TerrainDescriptor>(d); });
+        const TerrainCorrection model =
+            fit_terrain_correction(target, kind, parse_terrain_inputs(inputs),
+                                   value_to_tensor(truth, torch::kFloat64, "truth"),
+                                   parse_config<TerrainCorrectionConfig>(config, "terrain_correction"));
+        model.save(path);
+        return json_to_value(terrain_correction_report_to_json(model.report()));
+    })
+}
+
+resolve_value_t* resolve_terrain_correction_apply(const char* path, const resolve_value_t* inputs,
+                                                  const char* device) {
+    CAPI_BODY_PTR({
+        if (!path) throw std::invalid_argument("terrain_correction_apply: null path");
+        const TerrainCorrection model =
+            TerrainCorrection::load(path, device ? parse_device(device) : torch::Device(torch::kCPU));
+        resolve_value* out = terrain_result_to_value(model.apply(parse_terrain_inputs(inputs)));
+        ValueGuard g(out);
+        v_put(out, "target", v_string(model.target()));
+        v_put(out, "descriptor", v_string(enum_to_name(model.descriptor())));
+        v_put(out, "report", json_to_value(terrain_correction_report_to_json(model.report())));
+        return g.release();
+    })
+}
+
+resolve_value_t* resolve_fit_terrain_tile(const char* grids, const char* tile, const resolve_value_t* config,
+                                          const char* path) {
+    CAPI_BODY_PTR({
+        if (!grids || !tile || !path) throw std::invalid_argument("fit_terrain_tile: null argument");
+        const TerrainGrids source(grids, 1);
+        const std::string name = tile;
+        for (int64_t t = 0; t < source.index().size(); ++t) {
+            const TerrainTile& entry = source.index().tiles()[static_cast<size_t>(t)];
+            if (entry.name != name) continue;
+            const TerrainTileMetrics m = fit_terrain_tile(
+                source.grid(t), entry, parse_config<TerrainFieldConfig>(config, "terrain_field"), path);
+            return json_to_value(terrain_tile_metrics_to_json(m));
+        }
+        throw std::invalid_argument("fit_terrain_tile: the grids hold no tile '" + name + "'");
+    })
+}
+
+resolve_value_t* resolve_encode_terrain_grids(const char* grids, const resolve_value_t* config,
+                                              const char* path, const resolve_value_t* tiles) {
+    CAPI_BODY_PTR({
+        if (!grids || !path) throw std::invalid_argument("encode_terrain_grids: null argument");
+        const TerrainGrids source(grids, 1);
+        const std::vector<std::string> names =
+            tiles && tiles->kind != RESOLVE_VALUE_NULL ? vstr_vec(tiles, std::string("tiles")) : std::vector<std::string>{};
+        const auto metrics =
+            encode_terrain_grids(source, parse_config<TerrainCodecConfig>(config, "terrain_codec"), path, names);
+        ValueGuard g(v_map());
+        for (const auto& [name, m] : metrics) v_put(g.p, name, json_to_value(terrain_tile_metrics_to_json(m)));
+        return g.release();
+    })
+}
+
+int resolve_assemble_terrain_field(const resolve_value_t* tiles, const char* path) {
+    CAPI_BODY_INT({
+        if (!path) throw std::invalid_argument("assemble_terrain_field: null path");
+        assemble_terrain_field(vstr_vec(tiles, std::string("tiles")), path);
+        return 0;
     })
 }
 

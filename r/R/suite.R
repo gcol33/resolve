@@ -144,9 +144,11 @@ resolve.seal_suite <- function(dir) {
 #' @param columns Named list renaming the manifest's input columns, with keys
 #'   among `plot_id`, `species_id`, `abundance`, `latitude`, `longitude`,
 #'   `genus`, `family`, `covariates`, `categoricals` (another key is an
-#'   error), and for gap fitting `recorded` (a named list of target ->
+#'   error), for gap fitting `recorded` (a named list of target ->
 #'   recorded column, `c(latitude, longitude)` for a location) and
-#'   `survey_year`.
+#'   `survey_year`, and for terrain correction `terrain` (a named list of
+#'   `elevation`, `elevation_1km`, `slope`, `slope_1km` and `uncertainty`
+#'   column names).
 #' @param batchSize Forward-pass chunk size per member (default 4096).
 #' @param keepMembers Also return every member's own prediction (default
 #'   `FALSE`).
@@ -165,6 +167,14 @@ resolve.seal_suite <- function(dir) {
 #' @param maxEditDistance With `names`: the edits a misspelled name may be
 #'   away from a known name (default 1; 0 turns the spelling step off; 2 can
 #'   also rename species the models never saw).
+#' @param terrain `NULL` (default), or correct every target the suite gives a
+#'   terrain correction (altitude, slope) by an elevation model read at the
+#'   plots: `"field"` (or `TRUE`) reads the suite's terrain field at the
+#'   coordinates, `list(source = "grids", grids = dir)` elevation grids,
+#'   `"columns"` your own values named in `columns$terrain`. Adds
+#'   `<target>_terrain`, the weight of each source and the descriptors read to
+#'   [as.data.frame()], and a `terrain` result to each corrected target (see
+#'   [resolve.terrain_correction()]).
 #'
 #' @return A `resolve_suite_predictions` list: `plot_ids`, and `targets`, a
 #'   named list with one entry per target holding `value` (the combined
@@ -187,7 +197,7 @@ resolve.seal_suite <- function(dir) {
 #' @export
 resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
                                   batchSize = 4096L, keepMembers = FALSE, gapFitting = NULL,
-                                  names = NULL, maxEditDistance = 1L) {
+                                  names = NULL, maxEditDistance = 1L, terrain = NULL) {
   if (!inherits(suite, "Rcpp_Suite")) {
     stop("suite must be loaded with resolve.load_suite()")
   }
@@ -207,6 +217,8 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
   if (!is.null(gap_config)) options$gap_fitting <- gap_config
   names_option <- .resolve_names_option(names, maxEditDistance)
   if (!is.null(names_option)) options$names <- names_option
+  terrain_option <- .resolve_terrain_option(terrain)
+  if (!is.null(terrain_option)) options$terrain <- terrain_option
 
   .resolve_require_backend()
   if (is.character(species)) {
@@ -252,6 +264,10 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
       class_names = classes,
       member_seeds = seeds,
       gap_fit = if (is.null(t$gap_fit)) NULL else .resolve_gap_fit(t$gap_fit),
+      terrain = if (is.null(t$terrain)) NULL
+                else c(list(descriptor = t$terrain$descriptor, source = t$terrain$source,
+                            dem = .resolve_na_real(t$terrain$dem), dem_1km = .resolve_na_real(t$terrain$dem_1km)),
+                       .resolve_terrain_result(t$terrain$result)),
       species_names = if (length(unlist(t$species_names$name)) == 0) NULL
                       else .resolve_name_frame(t$species_names)
     )
@@ -309,7 +325,9 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
 #' for each member (`<target>_seed<N>_latitude` and `_longitude` for a
 #' spherical mean); a gap-fitted target adds `<target>_fitted`
 #' (`<target>_fitted_latitude` / `_fitted_longitude`) and
-#' `<target>_fit_method`.
+#' `<target>_fit_method`; a terrain-corrected target `<target>_terrain`,
+#' `<target>_terrain_w_resolve`, `_w_dem`, `_w_dem_1km`, `<target>_dem` and
+#' `<target>_dem_1km`.
 #'
 #' @param x A `resolve_suite_predictions` object from [resolve.predict.suite()].
 #' @param row.names,optional Ignored; present for the generic's signature.

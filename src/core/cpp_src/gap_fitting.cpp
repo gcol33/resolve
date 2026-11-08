@@ -2,6 +2,7 @@
 
 #include "resolve/enum_names.hpp"
 #include "resolve/geo.hpp"
+#include "resolve/plot_columns.hpp"
 #include "resolve/plot_neighbours.hpp"
 #include "resolve/row_cells.hpp"
 #include "resolve/sparse_rows.hpp"
@@ -999,42 +1000,8 @@ GapTables read_gap_tables(const std::optional<TableSource>& header, const TableS
         recorded_cols.push_back(std::move(at));
     }
 
-    std::vector<std::vector<double>> values(names.size(), std::vector<double>(plot_ids.size(), kNaN));
-    std::vector<char> seen(plot_ids.size(), 0);
-    const char* table = header ? "header" : "species";
-    const auto read_plot_columns = [&](RowSource& source, bool first_row_only) {
-        const int plot_col = require_column(source, columns.plot_id, "plot_id", table);
-        std::vector<int> cols;
-        for (const auto& name : names) cols.push_back(require_column(source, name, "gap fitting", table));
-        source.read_rows([&](size_t, RowFields row) {
-            const auto id = cell_at(row, plot_col);
-            if (!id) return;
-            const auto it = plot_of.find(std::string(*id));
-            if (it == plot_of.end()) return;
-            const auto p = static_cast<std::size_t>(it->second);
-            if (seen[p]) {
-                if (first_row_only) return;
-                throw std::runtime_error("Duplicate plot_id '" + std::string(*id) + "' in header data.");
-            }
-            seen[p] = 1;
-            for (std::size_t c = 0; c < cols.size(); ++c) {
-                if (const auto v = parse_cell_at(row, cols[c])) values[c][p] = *v;
-            }
-        });
-    };
-    if (header) {
-        const auto source = header->open();
-        read_plot_columns(*source, /*first_row_only=*/false);
-    } else {
-        const auto source = species.open();
-        read_plot_columns(*source, /*first_row_only=*/true);
-    }
-    for (std::size_t p = 0; p < plot_ids.size(); ++p) {
-        if (!seen[p]) {
-            throw std::runtime_error("gap fitting: plot '" + plot_ids[p] + "' is not in the " + table +
-                                     " table");
-        }
-    }
+    const std::vector<std::vector<double>> values =
+        read_plot_columns(header, species, columns.plot_id, names, plot_ids, "gap fitting");
 
     // Presence of every named species, merged per plot.
     PlotAssemblages::Builder builder;
