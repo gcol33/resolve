@@ -204,21 +204,19 @@ struct SetNeighbourGraph::State {
         return lhs > rhs || (lhs == rhs && a.plot < b.plot);
     }
 
-    // The slot keeps e if it is not there yet and ranks within the top k.
-    void insert(int64_t slot, Entry e) {
+    // The slot keeps e if it ranks within the top k, is not there yet and,
+    // given a rule, is not hidden from plot u by it. The rank is checked
+    // first: most proposals fall below a full list's last entry.
+    void insert(int64_t slot, Entry e, int64_t u, const SimilarityHiding* rule) {
         std::atomic_flag& lock = locks[static_cast<std::size_t>(slot)];
         while (lock.test_and_set(std::memory_order_acquire)) {
         }
         Entry* list = &lists[static_cast<std::size_t>(slot * k)];
         int32_t& c = counts[static_cast<std::size_t>(slot)];
-        bool seen = false;
-        for (int32_t m = 0; m < c; ++m) {
-            if (list[m].plot == e.plot) {
-                seen = true;
-                break;
-            }
-        }
-        if (!seen && (c < k || better(e, list[c - 1]))) {
+        bool keep = c < k || better(e, list[c - 1]);
+        for (int32_t m = 0; keep && m < c; ++m) keep = list[m].plot != e.plot;
+        if (keep && rule != nullptr) keep = !(*rule)(u, e.plot, similarity(u, e.plot, e.overlap));
+        if (keep) {
             int64_t pos = c < k ? c : k - 1;
             while (pos > 0 && better(e, list[pos - 1])) {
                 list[pos] = list[pos - 1];
@@ -235,8 +233,8 @@ struct SetNeighbourGraph::State {
     void propose(int64_t u, int64_t v, int32_t shared) {
         if (u == v || v >= n_candidates || shared == 0) return;
         const Entry e{static_cast<int32_t>(v), shared};
-        insert(u, e);
-        if (u < n_hidden && !(*hides)(u, v, similarity(u, v, shared))) insert(n + u, e);
+        insert(u, e, u, nullptr);
+        if (u < n_hidden) insert(n + u, e, u, hides);
     }
 };
 
@@ -353,21 +351,29 @@ void SetNeighbourGraph::descend() {
             std::vector<int32_t> only_old;
             std::set_difference(old_plots.begin(), old_plots.end(), fresh_plots.begin(), fresh_plots.end(),
                                 std::back_inserter(only_old));
+            // The species of u marked once, each partner's shared species
+            // counted against the marks.
+            thread_local std::vector<uint8_t> marks;
+            marks.resize(static_cast<std::size_t>(sets_.posting_offsets_.size() - 1), 0);
+            auto shared_with = [&](int32_t v) {
+                const int32_t* species = sets_.species(v);
+                int32_t shared = 0;
+                for (int32_t j = 0; j < sets_.count(v); ++j) shared += marks[static_cast<std::size_t>(species[j])];
+                return shared;
+            };
+            auto join = [&](int32_t u, int32_t v) {
+                if (u >= n_candidates_ && v >= n_candidates_) return;
+                const int32_t shared = shared_with(v);
+                st.propose(u, v, shared);
+                st.propose(v, u, shared);
+            };
             for (std::size_t a = 0; a < fresh_plots.size(); ++a) {
                 const int32_t u = fresh_plots[a];
-                for (std::size_t b = a + 1; b < fresh_plots.size(); ++b) {
-                    const int32_t v = fresh_plots[b];
-                    if (u >= n_candidates_ && v >= n_candidates_) continue;
-                    const int32_t shared = sets_.overlap(u, v);
-                    st.propose(u, v, shared);
-                    st.propose(v, u, shared);
-                }
-                for (const int32_t v : only_old) {
-                    if (u >= n_candidates_ && v >= n_candidates_) continue;
-                    const int32_t shared = sets_.overlap(u, v);
-                    st.propose(u, v, shared);
-                    st.propose(v, u, shared);
-                }
+                const int32_t* species = sets_.species(u);
+                for (int32_t j = 0; j < sets_.count(u); ++j) marks[static_cast<std::size_t>(species[j])] = 1;
+                for (std::size_t b = a + 1; b < fresh_plots.size(); ++b) join(u, fresh_plots[b]);
+                for (const int32_t v : only_old) join(u, v);
+                for (int32_t j = 0; j < sets_.count(u); ++j) marks[static_cast<std::size_t>(species[j])] = 0;
             }
         });
 

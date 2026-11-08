@@ -108,9 +108,9 @@
   unrestricted graph that leads the search past the hidden plots. The lists
   are the same on any thread count. Its spatial neighbours come from an exact
   k-d tree over positions on the sphere. On EVA's altitude, with its own
-  blanks as the gaps, 50,000 plots took 8.9 s against 106 s for the exact
+  blanks as the gaps, 50,000 plots took 3.9 s against 106 s for the exact
   search, with the same method and `k` on every gap and the fitted values a
-  median 0.15 m apart (95% within 0.47 m); all 1,485,542 plots took 415 s on
+  median 0.15 m apart (95% within 0.47 m); all 1,485,542 plots took 212 s on
   one workstation. A plot sharing a species with fewer than `k` complete
   plots lists the lowest-row plots sharing none after them, as before.
 
