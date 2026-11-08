@@ -44,6 +44,29 @@ def test_predictor_reproduces_the_trainers_predictions(saved_model, fitted_train
     )
 
 
+def test_half_checkpoint_loads_into_float32_and_keeps_the_predictions(
+    tmp_path, saved_model, fitted_trainer
+):
+    """Weights stored as float16 are cast back on load: the arithmetic stays
+    float32, only the weights' rounding differs."""
+    half = tmp_path / "model_half.pt"
+    assert rc.write_half_checkpoint(saved_model, half) > 0
+    stored = dict(torch.jit.load(str(half), map_location="cpu").named_parameters())
+    weights = [t for name, t in stored.items() if name.startswith("param_")]
+    assert weights and all(t.dtype == torch.float16 for t in weights if t.is_floating_point())
+
+    dataset = fitted_trainer.dataset
+    full = rc.Predictor.load(saved_model, device="cpu").predict_dataset(dataset, False, 64)
+    reloaded = rc.Predictor.load(str(half), device="cpu").predict_dataset(dataset, False, 64)
+
+    assert reloaded.predictions["y"].dtype == torch.float32
+    y_full, y_half = full.predictions["y"].numpy(), reloaded.predictions["y"].numpy()
+    np.testing.assert_allclose(y_half, y_full, rtol=0, atol=2e-3 * float(np.std(y_full)))
+    np.testing.assert_allclose(
+        reloaded.probabilities["hab"].numpy(), full.probabilities["hab"].numpy(), atol=2e-3
+    )
+
+
 def test_predict_dataset_returns_every_target(saved_model, fitted_trainer):
     predictor = rc.Predictor.load(saved_model, device="cpu")
     out = predictor.predict_dataset(fitted_trainer.dataset, False, 64)

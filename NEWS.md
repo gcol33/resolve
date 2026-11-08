@@ -4,6 +4,18 @@
 
 ### Added
 
+- **Checkpoints with their weights in half precision.**
+  `resolve_core.write_half_checkpoint(source, destination)` stores a
+  checkpoint's float32 weights as float16 and keeps every other entry
+  (configuration, scalers, vocabularies) as written. Loading casts each
+  weight back into the float32 model, so the arithmetic is unchanged and only
+  the weights' rounding differs; a released member's file halves (24.8 to
+  12.7 MB). On the released suites' seed-0 members, each on 3,594 to 14,802
+  plots, the half-precision checkpoints give the same EUNIS class on every
+  plot and move altitude by a median 0.13 m (at most 1 m), survey year by at
+  most 0.3 years, latitude and longitude by at most 0.09 degrees and plot
+  area by a median 0.02 m2.
+
 - **Terrain correction: altitude and slope combined with an elevation
   model.** An elevation model read at a precise coordinate is close to a
   plot's recorded altitude, and far off where the coordinate is coarse or

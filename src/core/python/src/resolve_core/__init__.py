@@ -274,6 +274,9 @@ _names_mod.install()
 # The single-model gap-fitting front door over DataFrames or CSV paths.
 from ._gap_fitting import fit_prediction_gaps, read_gap_tables  # noqa: E402
 
+# A checkpoint with its weights stored in float16, loaded into float32.
+from ._checkpoint import write_half_checkpoint  # noqa: E402
+
 # Report the version of the engine actually loaded, not a literal that can go
 # stale against the .pyd. bindings.cpp sets this from resolve::VERSION, which
 # tools/version.py keeps equal to the repo-root VERSION file.
@@ -387,6 +390,8 @@ __all__ = [
     "fit_prediction_gaps_tables",
     "read_gap_tables",
     "nearest_by_great_circle",
+    # Checkpoints
+    "write_half_checkpoint",
     # Terrain correction and the terrain field
     "TerrainDescriptor",
     "TerrainSourceKind",
