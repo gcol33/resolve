@@ -133,14 +133,42 @@ TEST_CASE("nearest_by_cosine leaves each plot out of its own neighbours, never i
 TEST_CASE("nearest_by_cosine with exclude_self clamps k below the plot count", "[retrieval]") {
     const Neighbours found = nearest_by_cosine(compass_latents(), compass_latents(), 10, true);
     REQUIRE(found.indices.size(1) == 3);
-    // Plot 0 at 0 degrees: its neighbours at 90 and 270 degrees tie, then 180.
-    CHECK(found.indices[0][2].item<int64_t>() == 2);
+    // Plot 0 at 0 degrees: its neighbours at 90 and 270 degrees tie, the lower
+    // row first, then 180.
+    CHECK(torch::equal(found.indices[0], torch::tensor({int64_t{1}, int64_t{3}, int64_t{2}})));
     CHECK_FALSE(found.indices.eq(torch::arange(4, torch::kInt64).unsqueeze(1)).any().item<bool>());
 
     const torch::Tensor single = torch::tensor({1.0f, 0.0f}).reshape({1, 2});
     CHECK(nearest_by_cosine(single, single, 3, true).indices.sizes() ==
           std::vector<int64_t>{1, 0});
     CHECK_THROWS_AS(nearest_by_cosine(single, compass_latents(), 1, true), std::invalid_argument);
+}
+
+TEST_CASE("A tie between equal scores goes to the lower reference row, across blocks",
+          "[retrieval]") {
+    // 10000 reference rows in three blocks: every third row holds the query's
+    // species, so 3334 rows tie at similarity 1 across all blocks, the rest at 0.
+    torch::Tensor reference = torch::zeros({10000, 4});
+    for (int64_t r = 0; r < 10000; ++r) reference[r][r % 3 == 0 ? 0 : 1] = 1.0f;
+    const torch::Tensor query = torch::tensor({1.0f, 0.0f, 0.0f, 0.0f}).reshape({1, 4});
+    const Neighbours found = nearest_by_cosine(query, reference, 5);
+    CHECK(torch::equal(found.indices[0],
+                       torch::tensor({int64_t{0}, int64_t{3}, int64_t{6}, int64_t{9}, int64_t{12}})));
+    // The same over the sparse layout, and below the ties: rows at 0 in row order.
+    const Neighbours sparse = nearest_by_cosine(query, to_sparse_rows(reference), 5);
+    CHECK(torch::equal(sparse.indices, found.indices));
+    const torch::Tensor other = torch::tensor({0.0f, 0.0f, 1.0f, 0.0f}).reshape({1, 4});
+    CHECK(torch::equal(nearest_by_cosine(other, reference, 3).indices[0],
+                       torch::tensor({int64_t{0}, int64_t{1}, int64_t{2}})));
+
+    // Plots at one position: the nearest are the lowest rows among them.
+    torch::Tensor places = torch::zeros({9000, 2}, torch::kFloat64);
+    places.select(1, 0).fill_(48.0);
+    places.select(1, 1).fill_(16.0);
+    places[2][0] = 50.0;
+    const torch::Tensor here = torch::tensor({48.0, 16.0}, torch::kFloat64).reshape({1, 2});
+    CHECK(torch::equal(nearest_by_great_circle(here, places, 4).indices[0],
+                       torch::tensor({int64_t{0}, int64_t{1}, int64_t{3}, int64_t{4}})));
 }
 
 TEST_CASE("nearest_by_cosine runs on the reference's device with queries in host memory",

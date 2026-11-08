@@ -105,6 +105,16 @@
   below a radius per query). A row left with fewer than `k` neighbours lists
   -1 after the ones it has.
 
+### Fixed
+
+- **Tied neighbours go to the lower row.** `nearest_by_cosine` and
+  `nearest_by_great_circle` took torch's `topk`, which leaves the order of
+  equal scores to the platform, so a plot with several equally similar plots
+  (presence rows sharing as many species, plots at one position) could get
+  other neighbours on another machine, and gap fitting another median. A tie
+  now goes to the lower reference row, within a block and across blocks, still
+  without sorting a whole row. Retrieval blending reads the same search.
+
 ## v1.0.3 (2026-10-25)
 
 ### Fixed

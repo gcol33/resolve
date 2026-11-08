@@ -52,6 +52,33 @@ void mask_self_pairs(torch::Tensor& scores, int64_t q0, int64_t q1, int64_t r0, 
     scores.index_put_({rows - q0, rows - r0}, kHidden);
 }
 
+// The k largest scores of each row, largest first, a tie between equal scores
+// going to the lower column: (values, columns). torch's topk leaves the order
+// of tied scores to the platform's selection algorithm, so the neighbours of a
+// plot with several equally similar plots (presence rows, plots at one
+// position) would differ between machines. The k-th largest score sets the
+// threshold; every larger score is kept, and of the scores equal to it the
+// lowest columns, as many as the k leave room for. Linear in the row length:
+// no full sort of the row.
+std::pair<torch::Tensor, torch::Tensor> top_k_lowest_ties(const torch::Tensor& scores, int64_t k) {
+    const int64_t width = scores.size(1);
+    const torch::Tensor threshold = std::get<0>(scores.topk(k, /*dim=*/1)).select(1, k - 1).unsqueeze(1);
+    const torch::Tensor above = scores > threshold;
+    const torch::Tensor equal = scores == threshold;
+    const torch::Tensor room = k - above.sum(1, /*keepdim=*/true);
+    const torch::Tensor kept = above | (equal & (equal.cumsum(1) <= room));
+    // The kept columns in increasing order: a distinct key per column, larger
+    // for a lower one, so this topk has no ties to order.
+    const torch::Tensor key = torch::where(
+        kept, width - torch::arange(width, scores.options().dtype(torch::kInt64)).unsqueeze(0),
+        torch::zeros({1, 1}, scores.options().dtype(torch::kInt64)));
+    const torch::Tensor columns = std::get<1>(key.topk(k, /*dim=*/1));
+    const torch::Tensor values = scores.gather(1, columns);
+    // Largest first; a stable sort keeps tied scores in column order.
+    const auto [sorted, order] = values.sort(/*stable=*/true, /*dim=*/1, /*descending=*/true);
+    return {sorted, columns.gather(1, order)};
+}
+
 // A block of scores no hiding rule touches.
 struct NoMask {
     void operator()(torch::Tensor&, int64_t, int64_t) const {}
@@ -101,17 +128,19 @@ Neighbours blocked_top_k(int64_t n_queries,
             torch::Tensor scores = score_block(queries, r0, r1);
             if (exclude_self) mask_self_pairs(scores, q0, q1, r0, r1);
             mask_block(scores, r0, r1);
-            auto [block_similarities, block_indices] = scores.topk(std::min(k, r1 - r0), /*dim=*/1);
+            auto [block_similarities, block_indices] = top_k_lowest_ties(scores, std::min(k, r1 - r0));
             block_indices.add_(r0);
             if (!best_similarities.defined()) {
                 best_similarities = std::move(block_similarities);
                 best_indices = std::move(block_indices);
                 continue;
             }
+            // The running top k holds lower reference rows than the block, each
+            // in tie order, so a tie between them goes to the earlier position.
             const torch::Tensor merged_similarities =
                 torch::cat({best_similarities, block_similarities}, 1);
             const torch::Tensor merged_indices = torch::cat({best_indices, block_indices}, 1);
-            auto [kept_similarities, position] = merged_similarities.topk(k, /*dim=*/1);
+            auto [kept_similarities, position] = top_k_lowest_ties(merged_similarities, k);
             best_similarities = std::move(kept_similarities);
             best_indices = merged_indices.gather(1, position);
         }
