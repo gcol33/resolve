@@ -166,6 +166,13 @@
   context suite's altitude and slope for 5,000 EVA plots, with terrain
   correction, take 2.75 s on the CPU instead of 6.2 s.
 
+- **Python 3.14.** The wheels cover CPython 3.10 to 3.14 (cibuildwheel
+  4.3.5; the free-threaded 3.14t build is not made), and CI runs the
+  `resolve_core` suite on 3.11 to 3.14. The extension compiles with the
+  nanobind that pip installs for the interpreter (2.11 or newer, a build
+  requirement) instead of a copy fetched from git at v2.4.0; the suite passes
+  on 3.14.4 with nanobind 3.0.1, torch 2.14 and pandas 3.0.
+
 ### Fixed
 
 - **Tied neighbours go to the lower row.** `nearest_by_cosine` and

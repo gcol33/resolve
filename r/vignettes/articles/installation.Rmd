@@ -95,7 +95,7 @@ The engine uses every CPU core by default. `RESOLVE_R_TORCH_THREADS`, set to a p
 
 ## The Python package
 
-`pip install resolve-core` installs a prebuilt wheel. The wheels cover CPython 3.10 to 3.13 on Linux x86-64, Windows x86-64 and macOS on Apple Silicon, and they need numpy, pandas and torch 2.0 or newer, which pip installs with them.
+`pip install resolve-core` installs a prebuilt wheel. The wheels cover CPython 3.10 to 3.14 on Linux x86-64, Windows x86-64 and macOS on Apple Silicon, and they need numpy, pandas and torch 2.0 or newer, which pip installs with them.
 
 The wheels do not contain libtorch: they use the one inside the installed `torch` package. Whether training can run on a GPU therefore depends on that torch. The torch that pip installs from PyPI on Linux is a CUDA build; on Windows and macOS it is a CPU build. For a GPU on Windows, install the CUDA build of torch from PyTorch's own package index, as the installation page on pytorch.org describes.
 

@@ -93,14 +93,19 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/../resolve_warnings.cmake)
 # Python bindings using nanobind
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 
-# Fetch nanobind
-include(FetchContent)
-FetchContent_Declare(
-    nanobind
-    GIT_REPOSITORY https://github.com/wjakob/nanobind.git
-    GIT_TAG v2.4.0
+# nanobind from the interpreter's installed package (a build requirement in
+# pyproject.toml), so the version that compiles the bindings is the one pip
+# resolved for that Python.
+execute_process(
+    COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
+    OUTPUT_VARIABLE nanobind_ROOT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE RESOLVE_NB_PROBE_RC
 )
-FetchContent_MakeAvailable(nanobind)
+if(NOT RESOLVE_NB_PROBE_RC EQUAL 0)
+    message(FATAL_ERROR "nanobind is not installed for ${Python_EXECUTABLE}; pip install \"nanobind>=2.11\"")
+endif()
+find_package(nanobind CONFIG REQUIRED)
 
 # Build the extension module
 set(BINDING_SOURCES
@@ -134,8 +139,8 @@ endif()
 
 target_link_libraries(_resolve_core PRIVATE resolve_warnings)
 
-# nanobind reaches the binding sources through a FetchContent target, which is
-# not IMPORTED, so CMake does not mark its headers SYSTEM the way it does
+# nanobind's support library is a plain target built from its sources, not an
+# IMPORTED one, so CMake does not mark its headers SYSTEM the way it does
 # libtorch's. Promote them, otherwise /W4 and -Wall report nanobind's internals
 # instead of our bindings. Which target carries them depends on the
 # nanobind_add_module mode (static / shared / abi3 variants), so read it off

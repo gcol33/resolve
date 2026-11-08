@@ -27,7 +27,7 @@ runs:
         set -euo pipefail
         python -m pip install --upgrade pip
         pip install "torch>=2.0" --index-url https://download.pytorch.org/whl/cpu
-        pip install build "scikit-build-core>=0.10" "nanobind>=2.0.0" cmake ninja
+        pip install build "scikit-build-core>=0.10" "nanobind>=2.11" cmake ninja
 
     - name: Build the sdist
       id: sdist

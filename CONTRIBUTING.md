@@ -69,7 +69,7 @@ source .venv/bin/activate      # Linux/macOS
 .venv\Scripts\activate         # Windows
 
 pip install "torch>=2.0"
-pip install "scikit-build-core>=0.10" "nanobind>=2.0.0" cmake ninja pandas numpy
+pip install "scikit-build-core>=0.10" "nanobind>=2.11" cmake ninja pandas numpy
 pip install pytest pytest-cov
 
 pip install ./src/core --no-build-isolation

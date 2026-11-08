@@ -76,7 +76,7 @@ resolve.available()
 
 ### Python
 
-The Python package needs [Python](https://www.python.org/downloads/) 3.10 to 3.13:
+The Python package needs [Python](https://www.python.org/downloads/) 3.10 to 3.14:
 
 ```bash
 pip install resolve-core
