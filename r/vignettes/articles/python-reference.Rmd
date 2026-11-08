@@ -406,6 +406,31 @@ Filling a dataset's missing values from its own complete plots, beside the raw p
 [`nearest_by_great_circle()`](python-gap-fitting.html#nearest_by_great_circle)
 : The nearest rows of a reference set by great-circle distance.
 
+## [Species names](python-names.html)
+
+Species names read as the names a model learnt.
+
+[`resolve_names()`](python-names.html#resolve_names)
+: Resolve species names against a model's vocabulary, with the route each takes.
+
+[`NameTable`](python-names.html#NameTable)
+: The release's name table: entered names and synonyms with the token each stands for.
+
+[`SpeciesNames`](python-names.html#SpeciesNames)
+: How a load or a suite prediction resolves species names.
+
+[`NameResolver`](python-names.html#NameResolver)
+: Resolves names against one vocabulary.
+
+[`ResolvedName`](python-names.html#ResolvedName)
+: What the resolver gives for one name.
+
+[`NameRoute`](python-names.html#NameRoute)
+: Exact, alias, spelling or unresolved.
+
+[`SpeciesNameReport`](python-names.html#SpeciesNameReport)
+: The names a load or a suite target did not find as written.
+
 ## [Scoring](python-scoring.html)
 
 The metrics training reports, for predictions made anywhere.

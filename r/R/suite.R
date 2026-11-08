@@ -156,6 +156,15 @@ resolve.seal_suite <- function(dir) {
 #'   dataset's own complete plots. Adds `<target>_fitted` and
 #'   `<target>_fit_method` to [as.data.frame()] and a `gap_fit` (`fitted`,
 #'   `method`, `report`) to each fitted target.
+#' @param names Resolve the species names against each target's vocabulary
+#'   before encoding: the path of the release's `names.json`, which maps
+#'   entered names and synonyms to the names the models learnt, or `TRUE` for
+#'   the vocabularies alone. Each target then carries `species_names`, a
+#'   data.frame of the names not found as written and the route each took
+#'   (see [resolve.names()]). `NULL` (default) reads every name as written.
+#' @param maxEditDistance With `names`: the edits a misspelled name may be
+#'   away from a known name (default 1; 0 turns the spelling step off; 2 can
+#'   also rename species the models never saw).
 #'
 #' @return A `resolve_suite_predictions` list: `plot_ids`, and `targets`, a
 #'   named list with one entry per target holding `value` (the combined
@@ -177,7 +186,8 @@ resolve.seal_suite <- function(dir) {
 #' head(as.data.frame(preds))
 #' @export
 resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
-                                  batchSize = 4096L, keepMembers = FALSE, gapFitting = NULL) {
+                                  batchSize = 4096L, keepMembers = FALSE, gapFitting = NULL,
+                                  names = NULL, maxEditDistance = 1L) {
   if (!inherits(suite, "Rcpp_Suite")) {
     stop("suite must be loaded with resolve.load_suite()")
   }
@@ -195,6 +205,8 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
   }
   gap_config <- .resolve_gap_config(gapFitting)
   if (!is.null(gap_config)) options$gap_fitting <- gap_config
+  names_option <- .resolve_names_option(names, maxEditDistance)
+  if (!is.null(names_option)) options$names <- names_option
 
   .resolve_require_backend()
   if (is.character(species)) {
@@ -239,7 +251,9 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
       limit = t$limit,
       class_names = classes,
       member_seeds = seeds,
-      gap_fit = if (is.null(t$gap_fit)) NULL else .resolve_gap_fit(t$gap_fit)
+      gap_fit = if (is.null(t$gap_fit)) NULL else .resolve_gap_fit(t$gap_fit),
+      species_names = if (length(unlist(t$species_names$name)) == 0) NULL
+                      else .resolve_name_frame(t$species_names)
     )
     if (identical(t$combine, "vote")) {
       out$value <- as.integer(t$value)

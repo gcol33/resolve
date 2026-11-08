@@ -247,9 +247,11 @@ public:
 
     [[nodiscard]] bool has_header() const noexcept;
 
-    // Encode the plots in a model's namespace.
+    // Encode the plots in a model's namespace, with `names` resolving the
+    // species names against its vocabulary first (ResolveDataset::load).
     [[nodiscard]] ResolveDataset encode(const RoleMapping& roles, const ExternalVocabs& vocabs,
-                                        const DatasetConfig& config) const;
+                                        const DatasetConfig& config,
+                                        const SpeciesNames* names = nullptr) const;
 
     // What gap fitting reads about the plots `plot_ids` (read_gap_tables).
     [[nodiscard]] GapTables gap_tables(const GapColumns& columns,
@@ -284,6 +286,11 @@ struct SuitePredictOptions {
     // Gap fitting (gap_fitting.hpp) after combining, for every target
     // columns.recorded names; unset fits nothing.
     std::optional<GapFittingConfig> gap_fitting;
+    // Resolve the species names against each target's vocabulary before
+    // encoding (name_resolution.hpp): the release's name table and the edits
+    // a misspelling may be away. Unset reads every name as written. Gap
+    // fitting compares the table's own plots and reads the names as written.
+    std::optional<SpeciesNames> names;
 };
 
 struct SuiteTargetPrediction {
@@ -319,8 +326,12 @@ struct SuiteTargetPrediction {
     // With keep_members: (n_members, n_plots) -- (n_members, n_plots, 2) for a
     // spherical mean -- each member's own prediction in the form of `value`.
     torch::Tensor members;
-    // Recognition of each plot by the target's vocabulary.
+    // Recognition of each plot by the target's vocabulary, after the names
+    // were resolved.
     SpeciesRecognition recognition;
+    // With SuitePredictOptions::names: the names the target's vocabulary read
+    // as another token or left unresolved.
+    SpeciesNameReport species_names;
     // With gap fitting for this target: `value` combined with the dataset's
     // own complete plots, the method per plot and the report. `value` itself
     // is left as the members' combined prediction.
@@ -471,6 +482,9 @@ public:
     [[nodiscard]] std::vector<std::string> target_names() const;
     // How many distinct encodings the loaded members need (one dataset each).
     [[nodiscard]] std::size_t n_encodings() const noexcept { return encodings_.size(); }
+    // The species vocabulary a loaded target's members read, as a checkpoint
+    // orders it ([0] = "<UNK>"): what its names resolve against.
+    [[nodiscard]] const std::vector<std::string>& species_vocabulary(const std::string& target) const;
 
     [[nodiscard]] SuitePredictions predict(const SuiteInput& input,
                                            const SuitePredictOptions& options = {});

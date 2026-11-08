@@ -177,6 +177,13 @@ try:
         compute_species_recognition,
         sha256_file,
         suite_prediction_columns,
+        # Name resolution
+        NameRoute,
+        NameTable,
+        NameResolver,
+        ResolvedName,
+        SpeciesNames,
+        SpeciesNameReport,
         # Storage failures (an OSError), GPU memory and process hardening
         StorageError,
         default_cuda_alloc_conf,
@@ -231,6 +238,13 @@ _from_pandas_mod.install()
 from . import _suite as _suite_mod
 
 _suite_mod.install()
+
+# Name resolution over Python inputs: resolve_names and
+# SpeciesNameReport.to_pandas.
+from . import _names as _names_mod  # noqa: E402
+from ._names import resolve_names  # noqa: E402
+
+_names_mod.install()
 
 # The single-model gap-fitting front door over DataFrames or CSV paths.
 from ._gap_fitting import fit_prediction_gaps, read_gap_tables  # noqa: E402
@@ -394,6 +408,14 @@ __all__ = [
     "compute_species_recognition",
     "sha256_file",
     "suite_prediction_columns",
+    # Name resolution
+    "NameRoute",
+    "NameTable",
+    "NameResolver",
+    "ResolvedName",
+    "SpeciesNames",
+    "SpeciesNameReport",
+    "resolve_names",
     # Storage failures
     "StorageError",
     # GPU memory management

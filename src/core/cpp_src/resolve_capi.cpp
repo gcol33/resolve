@@ -1577,6 +1577,49 @@ std::optional<TableSource> table_source(const resolve_value* v, const char* what
     wrong_kind(what, "a CSV path (string) or a column table (map of column -> strings)");
 }
 
+// A names option: a MAP {table, max_edit_distance}. `table` is a STRING, the
+// path of the release's names.json (read once per process, NameTable::open),
+// a MAP {name, token, source} of STRING_ARRAYs, or absent / NULL for no table.
+// NULL or absent as a whole: the names are read as written.
+std::optional<SpeciesNames> parse_species_names(const resolve_value* v, const std::string& what) {
+    if (v == nullptr || v->kind == RESOLVE_VALUE_NULL) return std::nullopt;
+    if (v->kind != RESOLVE_VALUE_MAP) wrong_kind(what, "a map");
+    reject_unknown_keys(v, what, {"table", "max_edit_distance"});
+    SpeciesNames out;
+    if (vhas(v, "max_edit_distance")) {
+        out.options.max_edit_distance = vnum<int>(v, "max_edit_distance");
+    }
+    const resolve_value* table = vget(v, "table");
+    if (table == nullptr || table->kind == RESOLVE_VALUE_NULL) return out;
+    if (table->kind == RESOLVE_VALUE_STRING) {
+        out.table = NameTable::open(table->s);
+    } else if (table->kind == RESOLVE_VALUE_MAP) {
+        reject_unknown_keys(table, what + ".table", {"name", "token", "source"});
+        out.table = std::make_shared<const NameTable>(NameTable::from_columns(
+            vstr_vec(table, "name"), vstr_vec(table, "token"), vstr_vec(table, "source")));
+    } else {
+        wrong_kind(what + ".table", "a path (string) or a map of name, token and source");
+    }
+    return out;
+}
+
+// Resolved names as a MAP of parallel columns: name, token, route, source, via
+// (STRING_ARRAY), distance (INT_ARRAY) and, for a load's report, n_records.
+resolve_value* species_name_report_to_value(const SpeciesNameReport& report, bool with_records = true) {
+    ValueGuard g(v_map());
+    std::vector<std::string> routes;
+    routes.reserve(report.size());
+    for (const NameRoute r : report.route) routes.emplace_back(enum_to_name(r));
+    v_put(g.p, "name", v_string_array(report.name));
+    v_put(g.p, "token", v_string_array(report.token));
+    v_put(g.p, "route", v_string_array(std::move(routes)));
+    v_put(g.p, "source", v_string_array(report.source));
+    v_put(g.p, "via", v_string_array(report.via));
+    v_put(g.p, "distance", v_int_array(std::vector<int64_t>(report.distance.begin(), report.distance.end())));
+    if (with_records) v_put(g.p, "n_records", v_int_array(report.n_records));
+    return g.release();
+}
+
 }  // namespace
 
 extern "C" {
@@ -1585,7 +1628,8 @@ resolve_dataset_t* resolve_dataset_load(
     const resolve_value_t* header, const resolve_value_t* species,
     const resolve_value_t* roles, const resolve_value_t* targets,
     const resolve_value_t* config,
-    const resolve_dataset_t* schema_source, const resolve_value_t* vocabs) {
+    const resolve_dataset_t* schema_source, const resolve_value_t* vocabs,
+    const resolve_value_t* names) {
     CAPI_BODY_PTR({
         std::optional<ColumnTable> header_table;
         std::optional<ColumnTable> species_table;
@@ -1599,9 +1643,11 @@ resolve_dataset_t* resolve_dataset_load(
         std::optional<ExternalVocabs> adopted;
         if (schema_source != nullptr) adopted = schema_source->ds.external_vocabs();
         if (has_vocabs) adopted = value_to_external_vocabs(vocabs);
+        const std::optional<SpeciesNames> resolve_names = parse_species_names(names, "dataset_load names");
         return new resolve_dataset{ResolveDataset::load(
             header_source, *species_source, parse_roles(roles), parse_targets(targets),
-            parse_dataset_config(config), adopted ? &*adopted : nullptr)};
+            parse_dataset_config(config), adopted ? &*adopted : nullptr,
+            resolve_names ? &*resolve_names : nullptr)};
     })
 }
 
@@ -1638,6 +1684,7 @@ resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* wh
         if (w == "family_ids") return tensor_or_null(d.family_ids(), RESOLVE_VALUE_INT_MATRIX);
         if (w == "unknown_fraction") return tensor_or_null(d.unknown_fraction(), RESOLVE_VALUE_DOUBLE_ARRAY);
         if (w == "unknown_count") return tensor_or_null(d.unknown_count(), RESOLVE_VALUE_DOUBLE_ARRAY);
+        if (w == "species_names") return species_name_report_to_value(d.species_names());
         if (w == "categorical_ids") return tensor_or_null(d.categorical_ids(), RESOLVE_VALUE_INT_MATRIX);
         if (w == "pool_genus_ids") return tensor_or_null(d.pool_genus_ids(), RESOLVE_VALUE_INT_MATRIX);
         if (w == "pool_family_ids") return tensor_or_null(d.pool_family_ids(), RESOLVE_VALUE_INT_MATRIX);
@@ -2312,7 +2359,8 @@ SuitePredictOptions parse_suite_predict_options(const resolve_value* o) {
     SuitePredictOptions out;
     if (!o || o->kind == RESOLVE_VALUE_NULL) return out;
     reject_unknown_keys(o, "suite predict options",
-                        {"columns", "batch_size", "keep_members", "gap_fitting"});
+                        {"columns", "batch_size", "keep_members", "gap_fitting", "names"});
+    out.names = parse_species_names(vget(o, "names"), "suite predict names");
     if (vhas(o, "batch_size")) out.batch_size = vnum<int64_t>(o, "batch_size");
     if (vhas(o, "keep_members")) out.keep_members = vbool(o, "keep_members");
     if (vhas(o, "gap_fitting")) {
@@ -2385,6 +2433,7 @@ resolve_value* suite_predictions_to_value(const SuitePredictions& p) {
         v_put(m, "recognised_abundance_share",
               defined_or_null(t.recognition.abundance_share, RESOLVE_VALUE_DOUBLE_ARRAY));
         v_put(m, "gap_fit", t.gap_fit ? gap_fit_to_value(*t.gap_fit) : v_null());
+        v_put(m, "species_names", species_name_report_to_value(t.species_names));
     }
     // The predictions as one row per plot (suite_prediction_columns), the class
     // probabilities included and named, so a binding's data frame holds the
@@ -2430,6 +2479,13 @@ resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const char* what) {
         if (w == "manifest") return json_to_value(s->suite.manifest().to_json());
         if (w == "targets") return v_string_array(s->suite.target_names());
         if (w == "n_encodings") return v_int(static_cast<int64_t>(s->suite.n_encodings()));
+        if (w == "species_vocabularies") {
+            ValueGuard g(v_map());
+            for (const auto& target : s->suite.target_names()) {
+                v_put(g.p, target, v_string_array(s->suite.species_vocabulary(target)));
+            }
+            return g.release();
+        }
         if (w == "directory") return v_string(s->suite.directory());
         throw std::invalid_argument("suite_get: unknown accessor '" + w + "'");
     })
@@ -2679,6 +2735,20 @@ resolve_value_t* resolve_fuzzy_get(const resolve_fuzzy_t* f, const char* what) {
         if (w == "bucket_count") return v_int(static_cast<int64_t>(f->index.bucket_count()));
         if (w == "max_supported_distance") return v_int(f->index.max_supported_distance());
         throw std::invalid_argument("fuzzy_get: unknown accessor '" + w + "'");
+    })
+}
+
+resolve_value_t* resolve_names_resolve(const resolve_value_t* vocabulary, const resolve_value_t* names,
+                                       const resolve_value_t* options) {
+    CAPI_BODY_PTR({
+        const std::vector<std::string> vocab = vstr_vec(vocabulary, std::string("names_resolve vocabulary"));
+        const std::vector<std::string> written = vstr_vec(names, std::string("names_resolve names"));
+        const SpeciesNames setting =
+            parse_species_names(options, "names_resolve options").value_or(SpeciesNames{});
+        const NameResolver resolver(vocab, setting.table, setting.options);
+        SpeciesNameReport report;
+        for (const auto& name : written) report.add(name, resolver.resolve(name), 0);
+        return species_name_report_to_value(report, /*with_records=*/false);
     })
 }
 

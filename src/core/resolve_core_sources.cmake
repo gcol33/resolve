@@ -56,6 +56,7 @@ set(RESOLVE_CORE_SOURCES
     ${RESOLVE_CORE_DIR}/cpp_src/fuzzy_index.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/fuzzy_search.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/fuzzy_automaton.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/name_resolution.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/gpu.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/process.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/fuzzy_internal.h
@@ -131,6 +132,7 @@ set(RESOLVE_CORE_HEADERS
     ${RESOLVE_CORE_DIR}/include/resolve/pretraining.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/vae.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/fuzzy.hpp
+    ${RESOLVE_CORE_DIR}/include/resolve/name_resolution.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/gpu.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/process.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/cuda/feature_hash.hpp

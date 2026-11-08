@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace resolve::json {
 
@@ -92,15 +93,19 @@ private:
         Value object = Value::object();
         skip_whitespace();
         if (peek() == '}') { ++pos_; return object; }
+        // Member names seen so far: a hash lookup per member keeps a large
+        // object (a release's name table holds ~300,000) linear to read.
+        std::unordered_set<std::string> seen;
         while (true) {
             skip_whitespace();
             if (peek() != '"') fail("expected a member name");
             std::string key = parse_string();
-            if (object.contains(key)) fail("duplicate member '" + key + "'");
+            if (!seen.insert(key).second) fail("duplicate member '" + key + "'");
             skip_whitespace();
             expect(':');
             skip_whitespace();
-            object.set(key, parse_value(depth + 1));
+            Value value = parse_value(depth + 1);
+            object.members().emplace_back(std::move(key), std::move(value));
             skip_whitespace();
             if (peek() == ',') { ++pos_; continue; }
             expect('}');
@@ -388,6 +393,11 @@ Value::Items& Value::items() {
 }
 
 const Value::Members& Value::members() const {
+    if (kind_ != Kind::Object) wrong_kind("an object", kind_);
+    return members_;
+}
+
+Value::Members& Value::members() {
     if (kind_ != Kind::Object) wrong_kind("an object", kind_);
     return members_;
 }

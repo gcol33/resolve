@@ -79,6 +79,7 @@ add_executable(resolve_tests
     test_species_encoders.cpp
     test_hash_core.cpp
     test_fuzzy.cpp
+    test_name_resolution.cpp
     test_categorical.cpp
     test_gpu.cpp
     test_predictor.cpp

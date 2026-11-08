@@ -211,6 +211,14 @@ enum class GapMethod {
     StackSpeciesSpatial  // raw and both neighbour medians by least squares
 };
 
+// How a species name reached its vocabulary token (name_resolution.hpp).
+enum class NameRoute {
+    Exact,      // the vocabulary holds the name
+    Alias,      // the name table maps it to a token the vocabulary holds
+    Spelling,   // the nearest token or table name within the edits allowed
+    Unresolved  // none of these: the name stays as written
+};
+
 // Activation function type for configurable architecture
 enum class ActivationType {
     ReLU,

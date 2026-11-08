@@ -65,6 +65,18 @@ ValuePtr numeric_value(SEXP x, const char* what) {
     return owned_value(resolve_value_new_double_array(v.begin(), v.size()));
 }
 
+// Species names resolved against a vocabulary (resolve_names_resolve): a list
+// of name, token, route, source, via, distance.
+RObject names_resolve(CharacterVector vocabulary, CharacterVector names, SEXP options) {
+    capi_require_loaded();
+    const ValuePtr vocabulary_v = owned_value(r_to_value(vocabulary));
+    const ValuePtr names_v = owned_value(r_to_value(names));
+    const ValuePtr options_v = owned_value(Rf_isNull(options)
+                                               ? resolve_value_new_null()
+                                               : r_list_to_value_map(List(options), "names"));
+    return value_to_r_owned(resolve_names_resolve(vocabulary_v.get(), names_v.get(), options_v.get()));
+}
+
 // Gap fitting of one target from vectors (resolve_fit_gaps): list(fitted,
 // method, report).
 List fit_gaps(List target, SEXP raw, SEXP recorded, NumericMatrix species, SEXP coordinates,
@@ -148,6 +160,8 @@ RCPP_MODULE(resolve_module) {
         .method("has_pool_data", &RResolveDataset::has_pool_data, "Check if rank-pool tensors are present")
         .method("unknown_fraction", &RResolveDataset::unknown_fraction, "Get unknown species fraction")
         .method("unknown_count", &RResolveDataset::unknown_count, "Get unknown species count")
+        .method("species_names", &RResolveDataset::species_names,
+                "The species names a load with names did not find as written")
         .method("targets", &RResolveDataset::targets, "Get target values as list")
         .method("schema", &RResolveDataset::schema, "Get dataset schema")
         .method("plot_ids", &RResolveDataset::plot_ids, "Get plot IDs")
@@ -174,6 +188,7 @@ RCPP_MODULE(resolve_module) {
     function("nearest_by_cosine", &nearest_by_cosine,
              "The k most similar reference rows of each query row by cosine similarity");
     function("fit_gaps", &fit_gaps, "Gap fitting of one target from vectors");
+    function("names_resolve", &names_resolve, "Resolve species names against a vocabulary");
     function("fit_prediction_gaps", &fit_prediction_gaps,
              "Gap fitting of a single model's targets from its predictions and tables");
 
@@ -295,6 +310,8 @@ RCPP_MODULE(resolve_module) {
         .method("targets", &RSuite::targets, "The suite targets loaded, in manifest order")
         .method("n_encodings", &RSuite::n_encodings, "Distinct input encodings the loaded members need")
         .method("directory", &RSuite::directory, "The directory the suite was loaded from")
+        .method("species_vocabularies", &RSuite::species_vocabularies,
+                "Target name -> the species vocabulary its names resolve against")
         .method("predict_frame", &RSuite::predict_frame, "Score in-memory tables")
         .method("predict_csv", &RSuite::predict_csv, "Score CSV files")
         ;

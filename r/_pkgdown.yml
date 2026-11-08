@@ -139,8 +139,9 @@ reference:
   contents: resolve_metrics
 - title: Name matching
   desc: |
-    The entries of a list of names within a few edits of a query, such as species names with spelling variants.
+    Species names read as the names a model learnt, and the entries of a list of names within a few edits of a query.
   contents:
+  - resolve.names
   - resolve.fuzzy_index
   - resolve.fuzzy_match
 - title: The engine
@@ -183,6 +184,7 @@ articles:
   - articles/python-prediction
   - articles/python-suites
   - articles/python-gap-fitting
+  - articles/python-names
   - articles/python-scoring
   - articles/python-engine
 footer:

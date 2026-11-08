@@ -557,6 +557,18 @@ resolve.progress <- function(checkpointDir) {
 #'   exclusive with \code{schemaSource}. A vocabulary list without a species
 #'   vocabulary (a checkpoint that stores only the vocabulary sizes) is
 #'   refused.
+#' @param names Resolve the species names against the vocabulary of
+#'   \code{vocabs} (or \code{schemaSource}) before encoding: the path of the
+#'   release's \code{names.json}, which maps entered names and synonyms to the
+#'   names the model learnt, or \code{TRUE} for the vocabulary alone. A name
+#'   is taken as written where the vocabulary holds it, else through the
+#'   table, else as the nearest known name within \code{maxEditDistance}
+#'   edits; \code{dataset$species_names()} then lists the names not found as
+#'   written, with the route each took. \code{NULL} (default) reads every name
+#'   as written.
+#' @param maxEditDistance With \code{names}: the edits a misspelled name may be
+#'   away from a known name (default 1; 0 turns the spelling step off; 2 can
+#'   also rename species the models never saw).
 #'
 #' @return A ResolveDataset object (an Rcpp module class) with methods:
 #'   - coordinates(): Get coordinate matrix
@@ -567,6 +579,8 @@ resolve.progress <- function(checkpointDir) {
 #'   - schema(): Get dataset schema
 #'   - plot_ids(): Get plot IDs
 #'   - n_plots(): Get number of plots
+#'   - species_names(): with \code{names}, the names not found as written (a
+#'     list of name, token, route, source, via, distance, n_records)
 #'
 #' @examplesIf resolveR::resolve.available()
 #' plots <- system.file("extdata", "plots.csv", package = "resolveR")
@@ -589,7 +603,9 @@ resolve.dataset.csv <- function(header,
                                 targets = list(),
                                 config = list(),
                                 schemaSource = NULL,
-                                vocabs = NULL) {
+                                vocabs = NULL,
+                                names = NULL,
+                                maxEditDistance = 1L) {
   for (arg in c("header", "species")) {
     path <- get(arg)
     if (!is.character(path) || length(path) != 1) {
@@ -599,7 +615,8 @@ resolve.dataset.csv <- function(header,
       stop(sprintf("%s file does not exist: %s", arg, path))
     }
   }
-  .resolve_load_dataset(header, species, roles, targets, config, schemaSource, vocabs)
+  .resolve_load_dataset(header, species, roles, targets, config, schemaSource, vocabs,
+                        .resolve_names_option(names, maxEditDistance))
 }
 
 # The one loader behind resolve.dataset.csv() and resolve.dataset.frame():
@@ -607,7 +624,7 @@ resolve.dataset.csv <- function(header,
 # character columns. The engine validates the roles, targets and config, and
 # the vocabulary source.
 .resolve_load_dataset <- function(header, species, roles, targets, config,
-                                  schemaSource, vocabs) {
+                                  schemaSource, vocabs, names = NULL) {
   for (arg in c("roles", "targets", "config")) {
     if (!is.list(get(arg))) stop(sprintf("%s must be a named list", arg))
   }
@@ -622,7 +639,7 @@ resolve.dataset.csv <- function(header,
   if (is.null(roles$species_id)) roles$species_id <- "species_id"
   .resolve_require_backend()
   .resolve_module()$ResolveDataset_load(header, species, roles, targets, config,
-                                        schemaSource, vocabs)
+                                        schemaSource, vocabs, names)
 }
 
 # Coerce a data.frame to a named list of character columns with NA -> "" (CSV
@@ -663,6 +680,8 @@ resolve.dataset.csv <- function(header,
 #'   mappings are reused (see [resolve.dataset.csv()]).
 #' @param vocabs Optional vocabulary list from \code{predictor$vocabs()} (see
 #'   [resolve.dataset.csv()]). Mutually exclusive with \code{schemaSource}.
+#' @param names,maxEditDistance Resolve the species names first (see
+#'   [resolve.dataset.csv()]).
 #'
 #' @return A ResolveDataset object.
 #' @seealso [resolve.dataset.csv()]
@@ -673,11 +692,14 @@ resolve.dataset.frame <- function(header,
                                   targets = list(),
                                   config = list(),
                                   schemaSource = NULL,
-                                  vocabs = NULL) {
+                                  vocabs = NULL,
+                                  names = NULL,
+                                  maxEditDistance = 1L) {
+  names_option <- .resolve_names_option(names, maxEditDistance)
   if (is.null(species)) {
     # Single-table mode: `header` is the long-format species frame.
     return(.resolve_load_dataset(NULL, .resolve_df_to_columns(header, "species frame"),
-                                 roles, targets, config, schemaSource, vocabs))
+                                 roles, targets, config, schemaSource, vocabs, names_option))
   }
   if (is.character(species)) {
     if (length(species) != 1) {
@@ -690,7 +712,7 @@ resolve.dataset.frame <- function(header,
     species <- .resolve_df_to_columns(species, "species")
   }
   .resolve_load_dataset(.resolve_df_to_columns(header, "header"), species, roles, targets,
-                        config, schemaSource, vocabs)
+                        config, schemaSource, vocabs, names_option)
 }
 
 # A ResolveDataset argument.

@@ -608,10 +608,10 @@ SuiteInput SuiteInput::tables(const ColumnTable* header, const ColumnTable& spec
 bool SuiteInput::has_header() const noexcept { return header_.has_value(); }
 
 ResolveDataset SuiteInput::encode(const RoleMapping& roles, const ExternalVocabs& vocabs,
-                                  const DatasetConfig& config) const {
+                                  const DatasetConfig& config, const SpeciesNames* names) const {
     // No targets: the plots to score carry none, and a loader asked for one
     // would drop every plot where it is missing.
-    return ResolveDataset::load(header_, species_, roles, /*targets=*/{}, config, &vocabs);
+    return ResolveDataset::load(header_, species_, roles, /*targets=*/{}, config, &vocabs, names);
 }
 
 GapTables SuiteInput::gap_tables(const GapColumns& columns,
@@ -1344,6 +1344,15 @@ RoleMapping SuitePredictor::roles_for(const RoleMapping& roles, const Encoding& 
     return out;
 }
 
+const std::vector<std::string>& SuitePredictor::species_vocabulary(const std::string& target) const {
+    for (const LoadedTarget& loaded : targets_) {
+        if (manifest_.targets[loaded.spec].name == target) {
+            return encodings_[loaded.encoding]->vocabs.species_vocab;
+        }
+    }
+    throw std::invalid_argument("suite '" + manifest_.name + "' has no loaded target '" + target + "'");
+}
+
 SuitePredictions SuitePredictor::predict(const SuiteInput& input,
                                          const SuitePredictOptions& options) {
     if (manifest_.inputs.needs_header() && !input.has_header()) {
@@ -1367,7 +1376,9 @@ SuitePredictions SuitePredictor::predict(const SuiteInput& input,
         if (users.empty()) continue;
 
         const Encoding& enc = *encodings_[e];
-        const ResolveDataset dataset = input.encode(roles_for(roles, enc), enc.vocabs, enc.config);
+        const ResolveDataset dataset =
+            input.encode(roles_for(roles, enc), enc.vocabs, enc.config,
+                         options.names ? &*options.names : nullptr);
 
         torch::Tensor perm;
         if (!have_reference) {
@@ -1425,6 +1436,7 @@ SuitePredictions SuitePredictor::predict(const SuiteInput& input,
             out.recognition = SpeciesRecognition{
                 reorder(r.n_species, perm, 0), reorder(r.n_recognised, perm, 0),
                 reorder(r.count_share, perm, 0), reorder(r.abundance_share, perm, 0)};
+            out.species_names = dataset.species_names();
         }
     }
     if (options.gap_fitting) fit_gaps(input, options.columns, *options.gap_fitting, result);

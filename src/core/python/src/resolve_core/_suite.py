@@ -13,6 +13,7 @@ import os
 
 from . import _resolve_core as _core
 from ._from_pandas import _df_to_columns
+from ._names import species_names
 
 
 def _columns(columns):
@@ -90,6 +91,8 @@ def predict(
     batch_size=4096,
     keep_members=False,
     gap_fitting=None,
+    names=None,
+    max_edit_distance=1,
 ):
     """Score plots with every loaded target of the suite.
 
@@ -117,12 +120,23 @@ def predict(
         ``candidates``, ``k_grid``, ``spatial``, ``matching_seed``). Adds
         ``<target>_fitted`` and ``<target>_fit_method`` to ``to_pandas`` and
         a ``gap_fit`` (with its ``report``) to each fitted target.
+    names : str or os.PathLike or NameTable or SpeciesNames or bool, optional
+        Resolve the species names against each target's vocabulary before
+        encoding: the release's ``names.json`` (a path) or a ``NameTable``
+        maps entered names and synonyms to the tokens, ``True`` uses the
+        vocabulary alone. Each target's ``species_names`` then reports the
+        names not found as written. ``None`` reads every name as written.
+    max_edit_distance : int
+        With ``names``: the edits a misspelled name may be away from a known
+        name (default 1; 0 turns the spelling step off; 2 can also rename
+        species the models never saw).
 
     Returns
     -------
     SuitePredictions
     """
     cols = _columns(columns)
+    resolve = species_names(names, max_edit_distance)
     if isinstance(species, (str, os.PathLike)):
         if header is not None and not isinstance(header, (str, os.PathLike)):
             raise TypeError(
@@ -135,11 +149,20 @@ def predict(
             batch_size,
             keep_members,
             _gap_fitting(gap_fitting),
+            resolve,
         )
     s_names, s_cols = _df_to_columns(species, "species")
     if header is None:
         return self.predict_columns(
-            s_names, s_cols, None, None, cols, batch_size, keep_members, _gap_fitting(gap_fitting)
+            s_names,
+            s_cols,
+            None,
+            None,
+            cols,
+            batch_size,
+            keep_members,
+            _gap_fitting(gap_fitting),
+            resolve,
         )
     h_names, h_cols = _df_to_columns(header, "header")
     return self.predict_columns(
@@ -151,6 +174,7 @@ def predict(
         batch_size,
         keep_members,
         _gap_fitting(gap_fitting),
+        resolve,
     )
 
 

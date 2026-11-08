@@ -17,6 +17,7 @@
 #include "config_flags.hpp"
 #include "csv_output.hpp"
 #include "gap_flags.hpp"
+#include "names_flags.hpp"
 
 using resolve_cli::csv_field;
 using resolve_cli::ParsedArgs;
@@ -67,8 +68,10 @@ int predict_command(const ParsedArgs& args) {
     }
 
     std::optional<GapFittingConfig> gap_fitting;
+    std::optional<SpeciesNames> names;
     try {
         gap_fitting = resolve_cli::read_gap_fitting(args);
+        names = resolve_cli::read_species_names(args);
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;
@@ -158,12 +161,18 @@ int predict_command(const ParsedArgs& args) {
     }
     const ExternalVocabs vocabs =
         reuse_vocabs ? predictor.external_vocabs() : ExternalVocabs{};
+    if (names && !reuse_vocabs) {
+        std::cerr << "Error: --names needs a checkpoint that carries its species vocabulary"
+                  << std::endl;
+        return 1;
+    }
+    const SpeciesNames* resolve_names = names ? &*names : nullptr;
 
     std::optional<ResolveDataset> dataset_opt;
     try {
         dataset_opt = resolve_cli::load_dataset(header_path, species_path, roles, targets,
                                                 dataset_config,
-                                                reuse_vocabs ? &vocabs : nullptr);
+                                                reuse_vocabs ? &vocabs : nullptr, resolve_names);
     } catch (const std::exception& e) {
         std::cerr << "Error loading data: " << e.what() << std::endl;
         return 1;
@@ -171,6 +180,9 @@ int predict_command(const ParsedArgs& args) {
     auto& dataset = *dataset_opt;
 
     std::cout << "Loaded " << dataset.n_plots() << " plots" << std::endl;
+    if (names) {
+        std::cout << "Names: " << resolve_cli::names_summary(dataset.species_names()) << std::endl;
+    }
 
     // Retrieval: the reference plots, read with the model's targets in its
     // namespace (their class labels coded as at training), blend every
@@ -185,7 +197,7 @@ int predict_command(const ParsedArgs& args) {
             for (auto& spec : reference_targets) spec.missing = TargetMissingPolicy::Mask;
             const ResolveDataset reference = resolve_cli::load_dataset(
                 retrieval_header, retrieval_species, roles, reference_targets, dataset_config,
-                reuse_vocabs ? &vocabs : nullptr);
+                reuse_vocabs ? &vocabs : nullptr, resolve_names);
             predictor.set_retrieval(reference, retrieval, predict_batch_size);
             std::cout << "Retrieval: " << reference.n_plots() << " reference plots, k = "
                       << retrieval.k_neighbors << ", alpha = " << retrieval.alpha << std::endl;
@@ -387,6 +399,19 @@ int predict_command(const ParsedArgs& args) {
     out.close();
     std::cout << "Done! Wrote " << predictions.plot_ids.size() << " predictions."
               << std::endl;
+    if (names) {
+        // One vocabulary reads every target of a single model: the target
+        // cell is left empty.
+        try {
+            std::cout << "Names report: "
+                      << resolve_cli::write_names_report(args, output_path,
+                                                         {{"", &dataset.species_names()}})
+                      << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "Error: " << e.what() << std::endl;
+            return 1;
+        }
+    }
     if (gap_fitting) {
         std::vector<std::pair<std::string, const GapFit*>> fits;
         for (std::size_t i = 0; i < gap_fits.size(); ++i) {

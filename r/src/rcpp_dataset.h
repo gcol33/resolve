@@ -19,9 +19,12 @@ public:
     // The one loader (resolve_dataset_load). `header` and `species` are each
     // NULL (header only: a single species table), a CSV path, or a named list
     // of character columns; `schema_source` (an RResolveDataset) or `vocabs`
-    // (a vocabulary list) encodes the dataset in a trained model's namespace.
+    // (a vocabulary list) encodes the dataset in a trained model's namespace;
+    // `names_list` (NULL or a list of table / max_edit_distance) resolves the
+    // species names against that vocabulary first.
     static RResolveDataset load(SEXP header, SEXP species, List roles_list, List targets_list,
-                                List config_list, SEXP schema_source, SEXP vocabs_list) {
+                                List config_list, SEXP schema_source, SEXP vocabs_list,
+                                SEXP names_list) {
         capi_require_loaded();
         const resolve_dataset_t* source = nullptr;
         if (!Rf_isNull(schema_source)) {
@@ -36,9 +39,13 @@ public:
         ValuePtr vocabs = Rf_isNull(vocabs_list)
                               ? owned_value(resolve_value_new_null())
                               : owned_value(r_list_to_value_map(vocabs_list, "vocabs"));
+        ValuePtr names = Rf_isNull(names_list)
+                             ? owned_value(resolve_value_new_null())
+                             : owned_value(r_list_to_value_map(names_list, "names"));
         RResolveDataset w;
         w.ds_ = capi_own(resolve_dataset_load(header_value.get(), species_value.get(), roles.get(),
-                                              targets.get(), config.get(), source, vocabs.get()),
+                                              targets.get(), config.get(), source, vocabs.get(),
+                                              names.get()),
                          resolve_dataset_free);
         return w;
     }
@@ -64,6 +71,9 @@ public:
     RObject species_family_ids() const { return get("species_family_ids"); }
     RObject unknown_fraction() const { return get("unknown_fraction"); }
     RObject unknown_count()    const { return get("unknown_count"); }
+    // The species names a load with names did not find as written: a list of
+    // name, token, route, source, via, distance, n_records.
+    RObject species_names()    const { return get("species_names"); }
     RObject categorical_ids()  const { return get("categorical_ids"); }
     // Rank-pool / transformer encoder tensors.
     RObject pool_genus_ids()   const { return get("pool_genus_ids"); }

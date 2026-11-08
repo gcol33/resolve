@@ -96,7 +96,7 @@ struct Corpus {
         const Value t(targets());
         const Value c(config != nullptr ? config : resolve_value_new_map());
         return Dataset(resolve_dataset_load(header_path.get(), species_path.get(), r.get(), t.get(),
-                                            c.get(), nullptr, nullptr),
+                                            c.get(), nullptr, nullptr, nullptr),
                        &resolve_dataset_free);
     }
 };
@@ -259,7 +259,7 @@ TEST_CASE("C ABI: one loader reads paths and in-memory tables", "[capi]") {
     const Value roles(Corpus::roles());
     const Value targets(Corpus::targets());
     const Dataset mixed(resolve_dataset_load(header.get(), species.get(), roles.get(), targets.get(),
-                                             nullptr, nullptr, nullptr),
+                                             nullptr, nullptr, nullptr, nullptr),
                         &resolve_dataset_free);
     REQUIRE(mixed != nullptr);
     const Value csv_hash(resolve_dataset_get(from_csv.get(), "hash_embedding"));
@@ -274,14 +274,58 @@ TEST_CASE("C ABI: one loader reads paths and in-memory tables", "[capi]") {
     // Its own vocabularies, by dataset or by tree; never both.
     const Value vocabs(resolve_dataset_get(from_csv.get(), "vocabs"));
     const Dataset by_vocabs(resolve_dataset_load(header.get(), species.get(), roles.get(), targets.get(),
-                                                 nullptr, nullptr, vocabs.get()),
+                                                 nullptr, nullptr, vocabs.get(), nullptr),
                             &resolve_dataset_free);
     CHECK(by_vocabs != nullptr);
+
+    // With names, an entered name reads as its token: sp_0 written otherwise
+    // hashes as sp_0 again, and the report counts its records.
+    {
+        std::vector<std::string> written = sp;
+        for (auto& name : written) {
+            if (name == "sp_0") name = "Sp zero entered";
+        }
+        const Value renamed(resolve_value_new_map());
+        resolve_map_set_value(renamed.get(), "plot_id", string_array(plot));
+        resolve_map_set_value(renamed.get(), "sp", string_array(written));
+        resolve_map_set_value(renamed.get(), "cover", string_array(cover));
+        resolve_map_set_value(renamed.get(), "genus", string_array(genus));
+        resolve_map_set_value(renamed.get(), "family", string_array(family));
+        const Value names(resolve_value_new_map());
+        resolve_value_t* table = resolve_value_new_map();
+        resolve_map_set_value(table, "name", string_array({"Sp zero entered"}));
+        resolve_map_set_value(table, "token", string_array({"sp_0"}));
+        resolve_map_set_value(table, "source", string_array({"eva"}));
+        resolve_map_set_value(names.get(), "table", table);
+        const Dataset resolved(resolve_dataset_load(header.get(), renamed.get(), roles.get(),
+                                                    targets.get(), nullptr, nullptr, vocabs.get(),
+                                                    names.get()),
+                               &resolve_dataset_free);
+        REQUIRE(resolved != nullptr);
+        const Value resolved_hash(resolve_dataset_get(resolved.get(), "hash_embedding"));
+        const double* r = resolve_value_as_double_matrix(resolved_hash.get(), &nr2, &nc2);
+        CHECK(std::equal(a, a + nr * nc, r));
+        const Value report(resolve_dataset_get(resolved.get(), "species_names"));
+        REQUIRE(resolve_value_string_array_size(resolve_map_get(report.get(), "name")) == 1);
+        CHECK(std::string(resolve_value_string_at(resolve_map_get(report.get(), "token"), 0)) == "sp_0");
+        CHECK(std::string(resolve_value_string_at(resolve_map_get(report.get(), "route"), 0)) == "alias");
+        int64_t n = 0;
+        CHECK(resolve_value_as_int_array(resolve_map_get(report.get(), "n_records"), &n)[0] == 20);
+
+        // Names need a vocabulary to resolve against.
+        CHECK(resolve_dataset_load(header.get(), renamed.get(), roles.get(), targets.get(), nullptr,
+                                   nullptr, nullptr, names.get()) == nullptr);
+        CHECK(last_error().find("vocab") != std::string::npos);
+        const Value bad(resolve_value_new_map());
+        resolve_map_set_int(bad.get(), "edits", 1);
+        CHECK(resolve_dataset_load(header.get(), renamed.get(), roles.get(), targets.get(), nullptr,
+                                   nullptr, vocabs.get(), bad.get()) == nullptr);
+    }
     CHECK(resolve_dataset_load(header.get(), species.get(), roles.get(), targets.get(), nullptr,
-                               from_csv.get(), vocabs.get()) == nullptr);
+                               from_csv.get(), vocabs.get(), nullptr) == nullptr);
     CHECK(last_error().find("not both") != std::string::npos);
     CHECK(resolve_dataset_load(header.get(), nullptr, roles.get(), targets.get(), nullptr, nullptr,
-                               nullptr) == nullptr);
+                               nullptr, nullptr) == nullptr);
 
     SECTION("a target named twice is refused") {
         const Value twice(resolve_value_new_map());
@@ -292,7 +336,7 @@ TEST_CASE("C ABI: one loader reads paths and in-memory tables", "[capi]") {
         resolve_map_set_value(twice.get(), "y", first);
         resolve_map_set_value(twice.get(), "y", second);
         CHECK(resolve_dataset_load(header.get(), species.get(), roles.get(), twice.get(), nullptr,
-                                   nullptr, nullptr) == nullptr);
+                                   nullptr, nullptr, nullptr) == nullptr);
         CHECK(last_error().find("given twice") != std::string::npos);
     }
 }
@@ -465,4 +509,46 @@ TEST_CASE("C ABI: gap fitting fits a target from vectors and reports its choice"
     CHECK(last_error().find("sideways") != std::string::npos);
     const Value defaults(resolve_default_config("gap_fitting"));
     CHECK(resolve_value_kind(resolve_map_get(defaults.get(), "candidates")) == RESOLVE_VALUE_STRING_ARRAY);
+}
+
+TEST_CASE("C ABI: names resolve against a vocabulary with their routes", "[capi][names]") {
+    const Value vocabulary(string_array({"<UNK>", "Quercus robur", "Anemone altaica"}));
+    const Value names(string_array({"Quercus robur", "Quercus robru", "Anemone nemorosa", "Poa annua"}));
+    const Value options(resolve_value_new_map());
+    resolve_value_t* table = resolve_value_new_map();
+    resolve_map_set_value(table, "name", string_array({"Anemone nemorosa"}));
+    resolve_map_set_value(table, "token", string_array({"Anemone altaica"}));
+    resolve_map_set_value(table, "source", string_array({"eva"}));
+    resolve_map_set_value(options.get(), "table", table);
+    resolve_map_set_int(options.get(), "max_edit_distance", 1);
+
+    const Value out(resolve_names_resolve(vocabulary.get(), names.get(), options.get()));
+    REQUIRE(out.get() != nullptr);
+    const resolve_value_t* route = resolve_map_get(out.get(), "route");
+    const resolve_value_t* token = resolve_map_get(out.get(), "token");
+    REQUIRE(resolve_value_string_array_size(route) == 4);
+    CHECK(std::string(resolve_value_string_at(route, 0)) == "exact");
+    CHECK(std::string(resolve_value_string_at(route, 1)) == "spelling");
+    CHECK(std::string(resolve_value_string_at(token, 1)) == "Quercus robur");
+    CHECK(std::string(resolve_value_string_at(route, 2)) == "alias");
+    CHECK(std::string(resolve_value_string_at(token, 2)) == "Anemone altaica");
+    CHECK(std::string(resolve_value_string_at(resolve_map_get(out.get(), "source"), 2)) == "eva");
+    CHECK(std::string(resolve_value_string_at(route, 3)) == "unresolved");
+    CHECK(resolve_map_get(out.get(), "n_records") == nullptr);
+
+    // No options: no table, one edit.
+    const Value plain(resolve_names_resolve(vocabulary.get(), names.get(), nullptr));
+    CHECK(std::string(resolve_value_string_at(resolve_map_get(plain.get(), "route"), 2)) == "unresolved");
+
+    // A table by path is the release file.
+    const TempFile file(R"({"source": "t", "aliases": {"Anemone nemorosa": ["Anemone altaica", "eva"]}})",
+                        ".json", WriteMode::Binary);
+    const Value by_path(resolve_value_new_map());
+    resolve_map_set_string(by_path.get(), "table", file.path().c_str());
+    const Value read(resolve_names_resolve(vocabulary.get(), names.get(), by_path.get()));
+    CHECK(std::string(resolve_value_string_at(resolve_map_get(read.get(), "route"), 2)) == "alias");
+
+    resolve_map_set_int(options.get(), "max_edit_distance", 9);
+    CHECK(resolve_names_resolve(vocabulary.get(), names.get(), options.get()) == nullptr);
+    CHECK(last_error().find("max_edit_distance") != std::string::npos);
 }

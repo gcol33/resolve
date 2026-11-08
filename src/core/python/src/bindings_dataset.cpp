@@ -81,18 +81,30 @@ void register_dataset(nb::module_& m) {
                     "predictor.external_vocabs to from_csv_with_vocabs instead "
                     "when the model has categorical covariates.")
         .def_static("from_csv_with_vocabs",
-                    &resolve::ResolveDataset::from_csv_with_vocabs,
+                    [](const std::string& header_path, const std::string& species_path,
+                       const resolve::RoleMapping& roles,
+                       const std::vector<resolve::TargetSpec>& targets,
+                       const resolve::ExternalVocabs& vocabs, const resolve::DatasetConfig& config,
+                       const std::optional<resolve::SpeciesNames>& names) {
+                        return resolve::ResolveDataset::load(
+                            resolve::TableSource::csv(header_path),
+                            resolve::TableSource::csv(species_path), roles, targets, config,
+                            &vocabs, names ? &*names : nullptr);
+                    },
                     nb::arg("header_path"),
                     nb::arg("species_path"),
                     nb::arg("roles"),
                     nb::arg("targets"),
                     nb::arg("vocabs"),
                     nb::arg("config") = resolve::DatasetConfig{},
+                    nb::arg("names") = nb::none(),
                     nb::call_guard<nb::gil_scoped_release>(),
                     "Load dataset with every vocabulary supplied explicitly "
                     "(ExternalVocabs). The complete form: use with "
                     "predictor.external_vocabs, whose categorical maps live on "
-                    "the Predictor rather than the schema.")
+                    "the Predictor rather than the schema. `names` (SpeciesNames) "
+                    "resolves each species name against the vocabulary first; "
+                    "species_names then reports those not found as written.")
         .def_static("from_species_csv", &resolve::ResolveDataset::from_species_csv,
                     nb::arg("species_path"),
                     nb::arg("roles"),
@@ -111,12 +123,20 @@ void register_dataset(nb::module_& m) {
                     "Single-table counterpart of from_csv_with_schema: reuse a "
                     "checkpoint's vocabularies when scoring a species-only CSV.")
         .def_static("from_species_csv_with_vocabs",
-                    &resolve::ResolveDataset::from_species_csv_with_vocabs,
+                    [](const std::string& species_path, const resolve::RoleMapping& roles,
+                       const std::vector<resolve::TargetSpec>& targets,
+                       const resolve::ExternalVocabs& vocabs, const resolve::DatasetConfig& config,
+                       const std::optional<resolve::SpeciesNames>& names) {
+                        return resolve::ResolveDataset::load(
+                            std::nullopt, resolve::TableSource::csv(species_path), roles, targets,
+                            config, &vocabs, names ? &*names : nullptr);
+                    },
                     nb::arg("species_path"),
                     nb::arg("roles"),
                     nb::arg("targets"),
                     nb::arg("vocabs"),
                     nb::arg("config") = resolve::DatasetConfig{},
+                    nb::arg("names") = nb::none(),
                     nb::call_guard<nb::gil_scoped_release>(),
                     "Single-table counterpart of from_csv_with_vocabs.")
         // --- In-memory (DataFrame) loaders ---
@@ -217,19 +237,22 @@ void register_dataset(nb::module_& m) {
                        const resolve::RoleMapping& roles,
                        const std::vector<resolve::TargetSpec>& targets,
                        const resolve::ExternalVocabs& vocabs,
-                       const resolve::DatasetConfig& config) {
+                       const resolve::DatasetConfig& config,
+                       const std::optional<resolve::SpeciesNames>& names) {
                         resolve::ColumnTable header(std::move(header_names),
                                                     std::move(header_columns));
                         resolve::ColumnTable species(std::move(species_names),
                                                      std::move(species_columns));
-                        return resolve::ResolveDataset::from_dataframe_with_vocabs(
-                            header, species, roles, targets, vocabs, config);
+                        return resolve::ResolveDataset::load(
+                            resolve::TableSource::table(header), resolve::TableSource::table(species),
+                            roles, targets, config, &vocabs, names ? &*names : nullptr);
                     },
                     nb::arg("header_names"), nb::arg("header_columns"),
                     nb::arg("species_names"), nb::arg("species_columns"),
                     nb::arg("roles"), nb::arg("targets"),
                     nb::arg("vocabs"),
                     nb::arg("config") = resolve::DatasetConfig{},
+                    nb::arg("names") = nb::none(),
                     nb::call_guard<nb::gil_scoped_release>(),
                     "In-memory analog of from_csv_with_vocabs.")
         .def_static("from_species_columns_with_vocabs",
@@ -238,16 +261,19 @@ void register_dataset(nb::module_& m) {
                        const resolve::RoleMapping& roles,
                        const std::vector<resolve::TargetSpec>& targets,
                        const resolve::ExternalVocabs& vocabs,
-                       const resolve::DatasetConfig& config) {
+                       const resolve::DatasetConfig& config,
+                       const std::optional<resolve::SpeciesNames>& names) {
                         resolve::ColumnTable species(std::move(species_names),
                                                      std::move(species_columns));
-                        return resolve::ResolveDataset::from_species_dataframe_with_vocabs(
-                            species, roles, targets, vocabs, config);
+                        return resolve::ResolveDataset::load(
+                            std::nullopt, resolve::TableSource::table(species), roles, targets,
+                            config, &vocabs, names ? &*names : nullptr);
                     },
                     nb::arg("species_names"), nb::arg("species_columns"),
                     nb::arg("roles"), nb::arg("targets"),
                     nb::arg("vocabs"),
                     nb::arg("config") = resolve::DatasetConfig{},
+                    nb::arg("names") = nb::none(),
                     nb::call_guard<nb::gil_scoped_release>(),
                     "In-memory analog of from_species_csv_with_vocabs.")
         // Tensor accessors go through tensor_or_none (bindings_common.hpp).
@@ -267,6 +293,10 @@ void register_dataset(nb::module_& m) {
         .def_prop_ro("family_ids", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.family_ids()); })
         .def_prop_ro("unknown_fraction", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.unknown_fraction()); })
         .def_prop_ro("unknown_count", [](const resolve::ResolveDataset& self) { return tensor_or_none(self.unknown_count()); })
+        .def_prop_ro("species_names",
+                     [](const resolve::ResolveDataset& self) { return self.species_names(); },
+                     "The species names a load with `names` did not find as written "
+                     "(SpeciesNameReport).")
         .def("continuous_block", [](const resolve::ResolveDataset& self, bool include_hash) {
             return tensor_or_none(self.continuous_block(include_hash));
         }, nb::arg("include_hash"),

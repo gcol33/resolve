@@ -443,13 +443,16 @@ int resolved_species_width(const ResolveSchema& schema) {
 // PlotAssemblages::Builder, whose names are interned on arrival. A missing /
 // NA / unparseable abundance cell is read as 1.0, a presence, and counted so
 // the loader warns about it; a parsed abundance of exactly 0 is read as
-// DatasetConfig::zero_abundance_as.
+// DatasetConfig::zero_abundance_as. With a NameResolver each distinct species
+// name is resolved once and its records carry the token it resolves to.
 class ResolveDataset::SpeciesRows {
 public:
-    SpeciesRows(const RowSource& source, const RoleMapping& roles, float zero_abundance_as)
+    SpeciesRows(const RowSource& source, const RoleMapping& roles, float zero_abundance_as,
+                const NameResolver* names)
         : cols_(source, roles),
           zero_abundance_as_(zero_abundance_as),
-          min_width_(static_cast<size_t>(std::max(cols_.plot, cols_.species)) + 1) {}
+          min_width_(static_cast<size_t>(std::max(cols_.plot, cols_.species)) + 1),
+          names_(names) {}
 
     // The plot `row` names, or nullopt for a row too short to name its plot
     // and species.
@@ -471,12 +474,23 @@ public:
             }
         }
         if (plot < 0) return;
-        builder_.add(plot, row[static_cast<size_t>(cols_.species)], abundance,
+        builder_.add(plot, species_name(row[static_cast<size_t>(cols_.species)]), abundance,
                      cell_at(row, cols_.genus).value_or(std::string_view{}),
                      cell_at(row, cols_.family).value_or(std::string_view{}));
     }
 
     [[nodiscard]] bool has_abundance_column() const noexcept { return cols_.abundance >= 0; }
+
+    // The names that were not exact, in the order they first appeared, with
+    // the records of kept plots that carried each.
+    [[nodiscard]] SpeciesNameReport name_report() const {
+        SpeciesNameReport report;
+        for (const auto* name : name_order_) {
+            const Resolved& r = resolved_.find(*name)->second;
+            report.add(*name, r.name, r.records);
+        }
+        return report;
+    }
 
     // The records grouped into the assemblages of `n_plots` plots (plot_of maps
     // a plot code to its plot, -1 drops it), after warning about coerced
@@ -494,11 +508,33 @@ public:
     }
 
 private:
+    struct Resolved {
+        ResolvedName name;
+        int64_t records = 0;
+    };
+
+    // The token a record of species `written` carries: the name itself
+    // without a resolver or where it is exact, else what it resolves to.
+    std::string_view species_name(std::string_view written) {
+        if (names_ == nullptr) return written;
+        auto it = resolved_.find(written);
+        if (it == resolved_.end()) {
+            it = resolved_.emplace(std::string(written), Resolved{names_->resolve(written)}).first;
+            if (it->second.name.route != NameRoute::Exact) name_order_.push_back(&it->first);
+        }
+        ++it->second.records;
+        return it->second.name.token;
+    }
+
     ColumnIndices cols_;
     float zero_abundance_as_;
     size_t min_width_;
     int64_t n_coerced_ = 0;
     PlotAssemblages::Builder builder_;
+    const NameResolver* names_;
+    // Node-based, so the keys name_order_ points at stay put.
+    std::unordered_map<std::string, Resolved, NameHash, std::equal_to<>> resolved_;
+    std::vector<const std::string*> name_order_;
 };
 
 // =============================================================================
@@ -711,6 +747,7 @@ void ResolveDataset::finish_load(SpeciesRows& rows, PlotColumns& columns,
         plot_of[static_cast<size_t>(kept[i])] = static_cast<int32_t>(i);
     }
     has_abundance_column_ = rows.has_abundance_column();
+    species_names_ = rows.name_report();
     encode_species(rows.finish(schema_.n_plots, plot_of, config_.representation));
     plot_ids_ = columns.plots.release();
     keep_rows(plot_ids_, kept);
@@ -734,7 +771,8 @@ ResolveDataset ResolveDataset::load_tables(
     const RoleMapping& roles,
     const std::vector<TargetSpec>& targets,
     const DatasetConfig& config,
-    const ExternalVocabs* vocabs
+    const ExternalVocabs* vocabs,
+    const NameResolver* names
 ) {
     ResolveDataset dataset;
     dataset.config_ = config;
@@ -760,7 +798,7 @@ ResolveDataset ResolveDataset::load_tables(
     const std::vector<int64_t> kept = dataset.absorb_plot_columns(plots, n_skipped);
 
     // A record of a plot the header does not list belongs to no plot.
-    SpeciesRows rows(species, roles, config.zero_abundance_as);
+    SpeciesRows rows(species, roles, config.zero_abundance_as, names);
     species.read_rows([&](size_t, RowFields row) {
         if (const auto plot_id = rows.plot_id(row)) rows.add(row, plots.plots.find(*plot_id));
     });
@@ -773,7 +811,8 @@ ResolveDataset ResolveDataset::load_table(
     const RoleMapping& roles,
     const std::vector<TargetSpec>& targets,
     const DatasetConfig& config,
-    const ExternalVocabs* vocabs
+    const ExternalVocabs* vocabs,
+    const NameResolver* names
 ) {
     ResolveDataset dataset;
     dataset.config_ = config;
@@ -791,7 +830,7 @@ ResolveDataset ResolveDataset::load_table(
                   << std::endl;
     }
 
-    SpeciesRows rows(source, roles, config.zero_abundance_as);
+    SpeciesRows rows(source, roles, config.zero_abundance_as, names);
     PlotColumns plots(source, roles, specs, /*read_covariates=*/false, "species");
     source.read_rows([&](size_t, RowFields row) {
         if (const auto plot_id = rows.plot_id(row)) rows.add(row, plots.add(row, *plot_id).first);
@@ -815,13 +854,28 @@ ResolveDataset ResolveDataset::load(
     const RoleMapping& roles,
     const std::vector<TargetSpec>& targets,
     const DatasetConfig& config,
-    const ExternalVocabs* vocabs
+    const ExternalVocabs* vocabs,
+    const SpeciesNames* names
 ) {
+    // Names resolve to the tokens of the vocabulary the load encodes with; a
+    // vocabulary fitted on the table itself holds every name as written.
+    if (names != nullptr && vocabs == nullptr) {
+        throw std::invalid_argument(
+            "ResolveDataset::load: resolving species names needs the vocabulary a model was "
+            "trained with (vocabs)");
+    }
+    std::unique_ptr<NameResolver> resolver;
+    if (names != nullptr) {
+        resolver = std::make_unique<NameResolver>(vocabs->species_vocab, names->table, names->options);
+    }
     auto run = [&] {
         const std::unique_ptr<RowSource> species_source = species.open();
-        if (!header) return load_table(*species_source, roles, targets, config, vocabs);
+        if (!header) {
+            return load_table(*species_source, roles, targets, config, vocabs, resolver.get());
+        }
         const std::unique_ptr<RowSource> header_source = header->open();
-        return load_tables(*header_source, *species_source, roles, targets, config, vocabs);
+        return load_tables(*header_source, *species_source, roles, targets, config, vocabs,
+                           resolver.get());
     };
     const bool reads_file = species.is_csv() || (header && header->is_csv());
     if (!reads_file) return run();

@@ -15,6 +15,7 @@
 #include "cli_common.hpp"
 #include "csv_output.hpp"
 #include "gap_flags.hpp"
+#include "names_flags.hpp"
 
 using resolve_cli::csv_field;
 using resolve_cli::csv_number;
@@ -105,6 +106,7 @@ int predict_suite_command(const ParsedArgs& args) {
             predict.columns.recorded = resolve_cli::read_recorded(args);
             predict.columns.survey_year = resolve_cli::role_flag(args, "--survey-year");
         }
+        predict.names = resolve_cli::read_species_names(args);
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;
@@ -128,6 +130,21 @@ int predict_suite_command(const ParsedArgs& args) {
 
     std::cout << "Wrote " << predictions->plot_ids.size() << " plots to " << output_path
               << std::endl;
+    if (predict.names) {
+        std::vector<std::pair<std::string, const SpeciesNameReport*>> reports;
+        for (const auto& t : predictions->targets) {
+            reports.emplace_back(t.name, &t.species_names);
+            std::cout << "Names '" << t.name << "': " << resolve_cli::names_summary(t.species_names)
+                      << std::endl;
+        }
+        try {
+            std::cout << "Names report: " << resolve_cli::write_names_report(args, output_path, reports)
+                      << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "Error: " << e.what() << std::endl;
+            return 1;
+        }
+    }
     if (predict.gap_fitting) {
         std::vector<std::pair<std::string, const GapFit*>> fits;
         for (const auto& t : predictions->targets) {

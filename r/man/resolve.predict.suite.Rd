@@ -11,7 +11,9 @@ resolve.predict.suite(
   columns = NULL,
   batchSize = 4096L,
   keepMembers = FALSE,
-  gapFitting = NULL
+  gapFitting = NULL,
+  names = NULL,
+  maxEditDistance = 1L
 )
 }
 \arguments{
@@ -43,6 +45,17 @@ settings (\code{candidates}, \code{k_grid}, \code{spatial}, \code{matching_seed}
 dataset's own complete plots. Adds \verb{<target>_fitted} and
 \verb{<target>_fit_method} to \code{\link[=as.data.frame]{as.data.frame()}} and a \code{gap_fit} (\code{fitted},
 \code{method}, \code{report}) to each fitted target.}
+
+\item{names}{Resolve the species names against each target's vocabulary
+before encoding: the path of the release's \code{names.json}, which maps
+entered names and synonyms to the names the models learnt, or \code{TRUE} for
+the vocabularies alone. Each target then carries \code{species_names}, a
+data.frame of the names not found as written and the route each took
+(see \code{\link[=resolve.names]{resolve.names()}}). \code{NULL} (default) reads every name as written.}
+
+\item{maxEditDistance}{With \code{names}: the edits a misspelled name may be
+away from a known name (default 1; 0 turns the spelling step off; 2 can
+also rename species the models never saw).}
 }
 \value{
 A \code{resolve_suite_predictions} list: \code{plot_ids}, and \code{targets}, a

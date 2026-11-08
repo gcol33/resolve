@@ -4,6 +4,34 @@
 
 ### Added
 
+- **Species names resolved before prediction.** A model reads a plot's
+  species by matching names exactly against the names its training records
+  were resolved to, so a species written as it was entered in the field, by a
+  current accepted name, or misspelled counted as a species the model never
+  saw. With `names`, each name is read as written where the vocabulary holds
+  it, else through the release's name table (`names.json`: EVA's entered
+  names, then the synonymy of the plant backbones, each row naming its
+  source), else as the nearest token or table name within
+  `max_edit_distance` edits (Damerau-Levenshtein, letter case ignored, the
+  name's genus first; default 1, 0 turns it off), used only when every
+  nearest name stands for one species, and otherwise left as written. The
+  names not found as written are reported with their route, the name a
+  spelling was read via, its distance and their record counts. Every load
+  that encodes against a trained vocabulary takes it
+  (`ResolveDataset::load(..., names)`), and a suite resolves each target
+  against its own vocabulary (`SuitePredictOptions::names`,
+  `SuiteTargetPrediction::species_names`). Python:
+  `SuitePredictor.predict(names=path, max_edit_distance=1)`,
+  `ResolveDataset.from_csv_with_vocabs(..., names=SpeciesNames(...))`,
+  `resolve_names()`, `NameTable`, `NameResolver`. R:
+  `resolve.predict.suite(names = path)`, `resolve.dataset.csv(names = )` /
+  `resolve.dataset.frame(names = )`, `dataset$species_names()`,
+  `resolve.names()`. CLI: `resolve predict --names names.json`
+  (`--spelling-only`, `--max-edit-distance`, `--names-report`). C ABI:
+  `resolve_dataset_load` takes a `names` argument, suite predict a `names`
+  option, `resolve_names_resolve` resolves a list. Without `names` every name
+  is read as written and the encoding is unchanged.
+
 - **Plot totals as model inputs.** `ModelConfig.plot_totals` adds two numbers
   per plot to the rank-pool and transformer features: the combined cover of
   every species the plot records, taken as overlapping at random

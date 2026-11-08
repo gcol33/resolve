@@ -125,3 +125,4 @@ void register_fuzzy(nb::module_& m);
 void register_suite(nb::module_& m);
 void register_retrieval(nb::module_& m);
 void register_gap_fitting(nb::module_& m);
+void register_names(nb::module_& m);

@@ -451,6 +451,22 @@ The first new plot is the only one with an unknown species, the *Carex firma* re
 
 Both values are also inputs to the model: the fraction by default, the count with `track_unknown_count`. Here every training plot was fully known, so both inputs stayed at 0 during training. An input that never varied in training is held at its training value at prediction, and the model's output does not depend on it; the values above are for you to read.
 
+## Species names a model knows by another name {#species-names}
+
+A model knows each species by the name its training records were resolved to, and reads a plot's species by matching names exactly. A table may name a species as it was entered in the field, by a current accepted name, or misspelled, and each of these counts as a species the model never saw. The `names` argument of the loaders and of suite prediction reads each name first as written, then through the release's name table (`names.json`, which maps the names EVA's records were entered under and the synonymy of the plant backbones to the names the models learnt), then as the nearest known name within one edit, and otherwise leaves it as written. The dataset then lists the names it did not find as written and the route each took. Without the release's table, `TRUE` (R) or `True` (Python) resolves spellings against the vocabulary alone.
+
+::: {.lang-pair}
+```{r names}
+resolve.names(c("Silene acaulis", "Silene acualis", "Carex firma"), predictor)
+```
+
+```python
+rc.resolve_names(["Silene acaulis", "Silene acualis", "Carex firma"], predictor)
+```
+:::
+
+*Silene acaulis*, which the training plots record, is `exact`; its misspelling, two letters swapped, is one edit away and read `via` the right name; *Carex firma*, which no training plot records, is `unresolved`. At one edit, misspelled copies of the example plots' names resolved 99.5% to the right species and none to a wrong one; `maxEditDistance = 2` (R) or `max_edit_distance=2` (Python) also renames some species the models never saw to a different species. A model suite resolves each target against that target's own vocabulary and reports per target (`species_names`).
+
 ## Predicting in chunks
 
 Prediction runs the model over the plots in chunks of 4096 by default and gathers the results in CPU memory, so the GPU memory a prediction needs does not grow with the number of plots. A smaller chunk suits a wide model on a small GPU; -1 runs all plots in one pass. Each chunk goes through the same forward pass, so the results agree whatever the chunk size, up to the rounding of floating-point arithmetic, which depends on how many rows a matrix product sums at once.

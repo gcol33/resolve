@@ -89,11 +89,12 @@ inline resolve::ResolveDataset load_dataset(const std::string& header_path,
                                             const resolve::RoleMapping& roles,
                                             const std::vector<resolve::TargetSpec>& targets,
                                             const resolve::DatasetConfig& config,
-                                            const resolve::ExternalVocabs* vocabs = nullptr) {
+                                            const resolve::ExternalVocabs* vocabs = nullptr,
+                                            const resolve::SpeciesNames* names = nullptr) {
     std::optional<resolve::TableSource> header;
     if (!header_path.empty()) header = resolve::TableSource::csv(header_path);
     return resolve::ResolveDataset::load(header, resolve::TableSource::csv(species_path), roles,
-                                         targets, config, vocabs);
+                                         targets, config, vocabs, names);
 }
 
 }  // namespace resolve_cli

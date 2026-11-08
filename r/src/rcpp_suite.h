@@ -18,6 +18,8 @@ public:
     RObject targets() const { return get("targets"); }
     RObject n_encodings() const { return get("n_encodings"); }
     RObject directory() const { return get("directory"); }
+    // Target name -> the species vocabulary its names resolve against.
+    RObject species_vocabularies() const { return get("species_vocabularies"); }
 
     // `header_cols` may be an empty list when the suite reads no header column.
     RObject predict_frame(List header_cols, List species_cols, List options) {

@@ -11,7 +11,9 @@ resolve.dataset.frame(
   targets = list(),
   config = list(),
   schemaSource = NULL,
-  vocabs = NULL
+  vocabs = NULL,
+  names = NULL,
+  maxEditDistance = 1L
 )
 }
 \arguments{
@@ -36,6 +38,9 @@ mappings are reused (see \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()
 
 \item{vocabs}{Optional vocabulary list from \code{predictor$vocabs()} (see
 \code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}}). Mutually exclusive with \code{schemaSource}.}
+
+\item{names, maxEditDistance}{Resolve the species names first (see
+\code{\link[=resolve.dataset.csv]{resolve.dataset.csv()}}).}
 }
 \value{
 A ResolveDataset object.

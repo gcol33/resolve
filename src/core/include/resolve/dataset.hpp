@@ -6,6 +6,7 @@
 #include "resolve/categorical.hpp"
 #include "resolve/continuous_block.hpp"
 #include "resolve/plot_inputs.hpp"
+#include "resolve/name_resolution.hpp"
 #include "resolve/species_encoding.hpp"
 #include "resolve/row_source.hpp"
 #include <torch/torch.h>
@@ -125,16 +126,21 @@ public:
     // categoricals need a header), and the species records of `species` (one
     // row per record). With `vocabs` the dataset is encoded in their namespace
     // and classification class mappings are replayed from them; without, its
-    // vocabularies are fitted on this data. A load that reads a CSV file runs
-    // inside io::with_retry<io::IOError>, so a transient storage fault re-runs
-    // it while a parse error does not; a fully in-memory load is not retried.
+    // vocabularies are fitted on this data. With `names` (which needs
+    // `vocabs`) each species name is resolved against vocabs->species_vocab
+    // before it is read (name_resolution.hpp) and species_names() reports
+    // every name that was not exact; without, names are read as written. A
+    // load that reads a CSV file runs inside io::with_retry<io::IOError>, so
+    // a transient storage fault re-runs it while a parse error does not; a
+    // fully in-memory load is not retried.
     static ResolveDataset load(
         const std::optional<TableSource>& header,
         const TableSource& species,
         const RoleMapping& roles,
         const std::vector<TargetSpec>& targets,
         const DatasetConfig& config = DatasetConfig{},
-        const ExternalVocabs* vocabs = nullptr
+        const ExternalVocabs* vocabs = nullptr,
+        const SpeciesNames* names = nullptr
     );
 
     // Load from two CSV files: header data (one row per plot) and species data (multiple rows per plot)
@@ -333,6 +339,10 @@ public:
     // vocabulary fitted elsewhere (*_with_schema / *_with_vocabs); undefined
     // tensors otherwise, where every species is recognised by construction.
     const SpeciesRecognition& species_recognition() const { return species_recognition_; }
+    // The species names a load with SpeciesNames read as another token or
+    // left unresolved, with the route and the records of each (load()). Empty
+    // for a load without names, and when every name was exact.
+    const SpeciesNameReport& species_names() const { return species_names_; }
     // The unstandardised continuous block a model built from this dataset's
     // schema reads (continuous_block.hpp): coordinates, covariates, their
     // missingness flags, the unknown-species columns and, when include_hash is
@@ -422,14 +432,16 @@ private:
         const RoleMapping& roles,
         const std::vector<TargetSpec>& targets,
         const DatasetConfig& config,
-        const ExternalVocabs* vocabs
+        const ExternalVocabs* vocabs,
+        const NameResolver* names
     );
     static ResolveDataset load_table(
         RowSource& source,
         const RoleMapping& roles,
         const std::vector<TargetSpec>& targets,
         const DatasetConfig& config,
-        const ExternalVocabs* vocabs
+        const ExternalVocabs* vocabs,
+        const NameResolver* names
     );
 
     // Validates the config, adopts `vocabs` when given, and returns the target
@@ -488,6 +500,7 @@ private:
     torch::Tensor unknown_fraction_; // (n_plots,)
     torch::Tensor unknown_count_;    // (n_plots,)
     SpeciesRecognition species_recognition_;
+    SpeciesNameReport species_names_;
     torch::Tensor categorical_ids_; // (n_plots, n_categoricals) int64
     CategoricalVocab categorical_vocab_;  // per-column string->code maps
     std::unordered_map<std::string, torch::Tensor> targets_;

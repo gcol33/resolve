@@ -16,6 +16,7 @@ set(CLI_SOURCES
     config_report.hpp
     csv_output.hpp
     gap_flags.hpp
+    names_flags.hpp
 )
 
 add_executable(resolve_cli ${CLI_SOURCES})

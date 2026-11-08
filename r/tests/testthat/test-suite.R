@@ -358,3 +358,49 @@ test_that("suite gap fitting adds fitted columns and a report per fitted target"
   expect_equal(single$y$report$n_gaps, 10)
   expect_equal(sum(single$y$method == "recorded"), 30)
 })
+
+test_that("suite and dataset names resolve per vocabulary and predict as the tokens", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  root <- local_dir("suite_names_")
+  .build_suite(root)
+  suite <- resolve.load_suite(root)
+  score <- .suite_plots(40L, with_targets = FALSE, extra = TRUE)
+  written <- score$species
+  written$taxon[written$taxon == "sp1"] <- "Species one entered"
+  written$taxon[written$taxon == "sp_late"] <- "sp_latte"
+  table <- local_csv("")
+  writeLines('{"source": "test", "aliases": {"Species one entered": ["sp1", "eva"]}}', table)
+
+  expected <- suppressMessages(resolve.predict.suite(suite, score$species, score$header))
+  resolved <- suppressMessages(resolve.predict.suite(suite, written, score$header,
+                                                     names = table))
+  plain <- suppressMessages(resolve.predict.suite(suite, written, score$header))
+  for (target in c("hab", "y")) {
+    expect_equal(resolved$targets[[target]]$value, expected$targets[[target]]$value)
+    expect_null(plain$targets[[target]]$species_names)
+  }
+  hab <- resolved$targets$hab$species_names
+  expect_equal(hab$name, c("Species one entered", "sp_latte", "sp_unseen"))
+  expect_equal(hab$route, c("alias", "unresolved", "unresolved"))
+  y <- resolved$targets$y$species_names
+  expect_equal(y$token, c("sp1", "sp_late", "sp_unseen"))
+  expect_equal(y$route, c("alias", "spelling", "unresolved"))
+  expect_equal(y$n_records[2], sum(score$species$taxon == "sp_late"))
+  expect_equal(resolve.names("sp_latte", suite, target = "y")$token, "sp_late")
+  expect_equal(resolve.names("sp_latte", suite, target = "hab")$route, "unresolved")
+  expect_error(resolve.names("sp_latte", suite), "target")
+
+  member <- file.path(root, suite$manifest()$targets[[2]]$members[[1]]$file)
+  predictor <- resolve.load(member)
+  cfg <- predictor$dataset_config()
+  cfg$zero_abundance_as <- 1.0
+  ds <- resolve.dataset.frame(score$header, written, roles = .suite_roles, targets = list(),
+                              vocabs = predictor$vocabs(), config = cfg, names = table)
+  report <- ds$species_names()
+  expect_equal(unlist(report$route), c("alias", "spelling", "unresolved"))
+  expect_equal(resolve.names("sp_latte", predictor)$token, "sp_late")
+  expect_error(resolve.dataset.frame(score$header, written, roles = .suite_roles,
+                                     targets = list(), config = cfg, names = table), "vocab")
+})

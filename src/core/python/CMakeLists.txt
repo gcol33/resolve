@@ -113,6 +113,7 @@ set(BINDING_SOURCES
     src/bindings_metrics.cpp
     src/bindings_pretraining.cpp
     src/bindings_fuzzy.cpp
+    src/bindings_names.cpp
     src/bindings_suite.cpp
     src/bindings_retrieval.cpp
     src/bindings_gap_fitting.cpp

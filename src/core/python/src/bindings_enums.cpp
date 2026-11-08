@@ -180,6 +180,12 @@ void register_enums(nb::module_& m) {
         .value("Circular", resolve::GapScale::Circular)
         .value("Geographic", resolve::GapScale::Geographic);
 
+    nb::enum_<resolve::NameRoute>(m, "NameRoute")
+        .value("Exact", resolve::NameRoute::Exact)
+        .value("Alias", resolve::NameRoute::Alias)
+        .value("Spelling", resolve::NameRoute::Spelling)
+        .value("Unresolved", resolve::NameRoute::Unresolved);
+
     nb::enum_<resolve::GapMethod>(m, "GapMethod")
         .value("LocalConstant", resolve::GapMethod::LocalConstant)
         .value("Resolve", resolve::GapMethod::Resolve)

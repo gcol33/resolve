@@ -274,12 +274,19 @@ RESOLVE_CAPI resolve_value_t* resolve_nearest_by_cosine(const resolve_value_t* q
  * code that is a function of the file its vocab was fitted on, so data scored
  * by a trained model must be loaded with its vocabularies. NULL on error,
  * including when `vocabs` carries no species vocabulary (a checkpoint that
- * stores only the vocabulary sizes). */
+ * stores only the vocabulary sizes). `names` (NULL: names read as written)
+ * resolves each species name against the adopted vocabulary before it is read
+ * (name_resolution.hpp), and needs a vocabulary source: a MAP
+ * {table, max_edit_distance}, `table` the path (STRING) of the release's
+ * names.json, a MAP of name / token / source STRING_ARRAYs, or NULL for none;
+ * max_edit_distance (INT, default 1, 0 = no spelling step). The names that
+ * were not exact are then resolve_dataset_get(ds, "species_names"). */
 RESOLVE_CAPI resolve_dataset_t* resolve_dataset_load(
     const resolve_value_t* header, const resolve_value_t* species,
     const resolve_value_t* roles, const resolve_value_t* targets,
     const resolve_value_t* config,
-    const resolve_dataset_t* schema_source, const resolve_value_t* vocabs);
+    const resolve_dataset_t* schema_source, const resolve_value_t* vocabs,
+    const resolve_value_t* names);
 
 RESOLVE_CAPI void resolve_dataset_free(resolve_dataset_t* ds);
 
@@ -287,7 +294,7 @@ RESOLVE_CAPI void resolve_dataset_free(resolve_dataset_t* ds);
  * frees), or NULL on error. `what` is one of:
  *   coordinates covariates hash_embedding species_ids species_vector
  *   species_vector_dense genus_ids family_ids unknown_fraction
- *   unknown_count categorical_ids
+ *   unknown_count categorical_ids species_names
  *   categorical_vocab targets schema vocabs plot_ids species_vocab n_plots
  *   config has_raw_species_data raw_species_ids raw_weights plot_offsets
  *   taxonomy_vocab pool_genus_ids pool_family_ids pool_weights pool_mask
@@ -296,6 +303,10 @@ RESOLVE_CAPI void resolve_dataset_free(resolve_dataset_t* ds);
  * values, n_species}: plot p holds species[row_offsets[p] ..
  * row_offsets[p + 1]) with their values; species_vector_dense is the
  * (n_plots, n_species) matrix.
+ * species_names is a MAP of parallel arrays, one row per species name a load
+ * with names did not find as written, in the order they first appear: name
+ * token route source via (STRING_ARRAY; route exact, alias, spelling or
+ * unresolved) distance n_records (INT_ARRAY).
  * Optional-tensor accessors return a NULL-kind value when the tensor is
  * undefined/empty. */
 RESOLVE_CAPI resolve_value_t* resolve_dataset_get(const resolve_dataset_t* ds, const char* what);
@@ -533,7 +544,9 @@ RESOLVE_CAPI void resolve_suite_free(resolve_suite_t* s);
 
 /* Zero-arg accessor. `what`: manifest (the manifest as a value tree: MAPs,
  * LISTs, STRINGs, DOUBLEs, BOOLs and NULLs, key order kept), targets
- * (STRING_ARRAY of the loaded targets), n_encodings (INT), directory (STRING).
+ * (STRING_ARRAY of the loaded targets), n_encodings (INT), directory (STRING),
+ * species_vocabularies (MAP target name -> STRING_ARRAY, the vocabulary each
+ * target's names resolve against, [0] = "<UNK>").
  * Returns value / NULL. */
 RESOLVE_CAPI resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const char* what);
 
@@ -550,6 +563,8 @@ RESOLVE_CAPI resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const 
  *   gap_fitting   MAP  a GapFittingConfig (candidates, k_grid, spatial,
  *                      matching_seed; an empty MAP for the defaults): fit
  *                      every target columns.recorded names
+ *   names         MAP  resolve the species names against each target's
+ *                      vocabulary first, as resolve_dataset_load's names
  * Returns a MAP: "plot_ids" (STRING_ARRAY) and "targets", an ordered MAP of
  * target name -> MAP with name task combine status limit units
  * dispersion_units class_names member_seeds value (INT_ARRAY class codes for a
@@ -558,7 +573,8 @@ RESOLVE_CAPI resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const 
  * dispersion members (members x plots; for a spherical mean a MAP of
  * "latitude" and "longitude", each members x plots) n_species n_recognised
  * recognised_share recognised_abundance_share gap_fit (NULL-kind, or with gap
- * fitting a MAP as resolve_fit_gaps returns). A statistic the target's
+ * fitting a MAP as resolve_fit_gaps returns) species_names (as
+ * resolve_dataset_get's species_names; empty without names). A statistic the target's
  * combine rule does not define is NULL-kind; NaN marks an undefined value.
  * "columns" is the same prediction as an ordered MAP of column name -> array,
  * one entry per plot (STRING_ARRAY labels, INT_ARRAY codes, DOUBLE_ARRAY
@@ -651,6 +667,20 @@ RESOLVE_CAPI resolve_value_t* resolve_fuzzy_query(const resolve_fuzzy_t* f,
 
 /* Zero-arg accessor. `what`: size bucket_count max_supported_distance. */
 RESOLVE_CAPI resolve_value_t* resolve_fuzzy_get(const resolve_fuzzy_t* f, const char* what);
+
+/* ========================================================================== */
+/* Name resolution                                                            */
+/* ========================================================================== */
+
+/* Resolve species names (STRING_ARRAY) against a species `vocabulary`
+ * (STRING_ARRAY as a checkpoint orders it, [0] = "<UNK>"; a suite target's is
+ * resolve_suite_get(s, "species_vocabularies")). `options` is NULL or a MAP as
+ * resolve_dataset_load's names. Returns a MAP of parallel arrays, one row per
+ * name in the order given: name token route source via (STRING_ARRAY)
+ * distance (INT_ARRAY); NULL on error. */
+RESOLVE_CAPI resolve_value_t* resolve_names_resolve(const resolve_value_t* vocabulary,
+                                                    const resolve_value_t* names,
+                                                    const resolve_value_t* options);
 
 #endif /* !RESOLVE_CAPI_DYNLOAD */
 

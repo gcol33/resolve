@@ -68,6 +68,7 @@ public:
     [[nodiscard]] const Items& items() const;
     [[nodiscard]] Items& items();
     [[nodiscard]] const Members& members() const;
+    [[nodiscard]] Members& members();
 
     // Object access. `find` returns null when the key is absent; `at` throws
     // naming the key. `set` replaces an existing member in place, so a member's

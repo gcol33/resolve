@@ -19,6 +19,7 @@
 #include "resolve/dataset.hpp"
 #include "resolve/json.hpp"
 #include "resolve/model.hpp"
+#include "resolve/name_resolution.hpp"
 #include "resolve/number_text.hpp"
 #include "resolve/predictor.hpp"
 #include "resolve/role_mapping.hpp"
@@ -1417,4 +1418,62 @@ TEST_CASE("suite gap fitting fits the named targets from the dataset's complete 
     SuitePredictOptions none = opts;
     none.columns.recorded.clear();
     CHECK_THROWS_AS(suite.predict(input, none), std::invalid_argument);
+}
+
+TEST_CASE("suite names resolve per target vocabulary and predict as the tokens would",
+          "[suite][predict][names]") {
+    TempDir dir;
+    build_suite(dir);
+    const ScoringFiles in = scoring_files(dir);
+
+    // The scoring species written with an entered name for sp_a and a
+    // misspelling of sp_e, which only y's and aspect's vocabularies hold.
+    std::ifstream file(in.species, std::ios::binary);
+    std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    auto replace_all = [&text](const std::string& from, const std::string& to) {
+        for (auto at = text.find(from); at != std::string::npos; at = text.find(from, at + to.size())) {
+            text.replace(at, from.size(), to);
+        }
+    };
+    replace_all(",sp_a,", ",Species a entered,");
+    replace_all(",sp_e,", ",sp_ex,");
+    dir.write("score/species_written.csv", text);
+    const std::string written = dir.file("score/species_written.csv");
+
+    SuitePredictor suite = SuitePredictor::load(dir.path());
+    const SuitePredictions expected = suite.predict(SuiteInput::csv(in.header, in.species));
+    SuitePredictOptions opts;
+    opts.names = SpeciesNames{std::make_shared<const NameTable>(NameTable::from_columns(
+                                  {"Species a entered"}, {"sp_a"}, {"eva"})),
+                              NameResolverOptions{}};
+    const SuitePredictions resolved = suite.predict(SuiteInput::csv(in.header, written), opts);
+    const SuitePredictions plain = suite.predict(SuiteInput::csv(in.header, written));
+
+    REQUIRE(resolved.plot_ids == expected.plot_ids);
+    for (const std::string name : {"hab", "y", "aspect"}) {
+        INFO(name);
+        CHECK(torch::equal(resolved.target(name).value, expected.target(name).value));
+        CHECK(torch::equal(resolved.target(name).recognition.n_recognised,
+                           expected.target(name).recognition.n_recognised));
+        CHECK(plain.target(name).species_names.size() == 0);
+        CHECK(plain.target(name).recognition.n_recognised.sum().item<float>() <
+              expected.target(name).recognition.n_recognised.sum().item<float>());
+    }
+
+    const SpeciesNameReport& hab = resolved.target("hab").species_names;
+    // sp_z, one edit from every token, stays as written everywhere.
+    REQUIRE(hab.size() == 3);
+    CHECK(hab.name == std::vector<std::string>{"Species a entered", "sp_ex", "sp_z"});
+    CHECK(hab.token == std::vector<std::string>{"sp_a", "sp_ex", "sp_z"});
+    CHECK(hab.route[0] == NameRoute::Alias);
+    CHECK(hab.route[1] == NameRoute::Unresolved);
+    CHECK(hab.route[2] == NameRoute::Unresolved);
+    CHECK(hab.n_records == std::vector<int64_t>{31, 10, 1});
+
+    const SpeciesNameReport& y = resolved.target("y").species_names;
+    REQUIRE(y.size() == 3);
+    CHECK(y.token == std::vector<std::string>{"sp_a", "sp_e", "sp_z"});
+    CHECK(y.route[1] == NameRoute::Spelling);
+    CHECK(y.via[1] == "sp_e");
+    CHECK(y.distance[1] == 1);
 }

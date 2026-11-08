@@ -246,6 +246,13 @@ inline constexpr EnumName<SuiteTargetStatus> kSuiteTargetStatusNames[] = {
     {"experimental", SuiteTargetStatus::Experimental},
 };
 
+inline constexpr EnumName<NameRoute> kNameRouteNames[] = {
+    {"exact", NameRoute::Exact},
+    {"alias", NameRoute::Alias},
+    {"spelling", NameRoute::Spelling},
+    {"unresolved", NameRoute::Unresolved},
+};
+
 inline constexpr EnumName<GapScale> kGapScaleNames[] = {
     {"linear", GapScale::Linear},
     {"log", GapScale::Log},
@@ -339,6 +346,7 @@ RESOLVE_DECLARE_ENUM_NAMES(SuiteCombine, kSuiteCombineNames,
                            "suite combine rule", "mean")
 RESOLVE_DECLARE_ENUM_NAMES(SuiteTargetStatus, kSuiteTargetStatusNames,
                            "suite target status", "released")
+RESOLVE_DECLARE_ENUM_NAMES(NameRoute, kNameRouteNames, "name route", "unresolved")
 RESOLVE_DECLARE_ENUM_NAMES(GapScale, kGapScaleNames, "gap fitting scale", "linear")
 RESOLVE_DECLARE_ENUM_NAMES(GapMethod, kGapMethodNames, "gap fitting method", "resolve")
 

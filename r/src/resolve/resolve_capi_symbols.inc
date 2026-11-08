@@ -96,7 +96,7 @@ RESOLVE_SYM(int, resolve_metric_r_squared,     (const double* pred, const double
 RESOLVE_SYM(resolve_value_t*, resolve_nearest_by_cosine, (const resolve_value_t* queries, const resolve_value_t* reference, int64_t k, int exclude_self, const char* device), (queries, reference, k, exclude_self, device))
 
 /* ---- Dataset -------------------------------------------------------------- */
-RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_load, (const resolve_value_t* header, const resolve_value_t* species, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* config, const resolve_dataset_t* schema_source, const resolve_value_t* vocabs), (header, species, roles, targets, config, schema_source, vocabs))
+RESOLVE_SYM(resolve_dataset_t*, resolve_dataset_load, (const resolve_value_t* header, const resolve_value_t* species, const resolve_value_t* roles, const resolve_value_t* targets, const resolve_value_t* config, const resolve_dataset_t* schema_source, const resolve_value_t* vocabs, const resolve_value_t* names), (header, species, roles, targets, config, schema_source, vocabs, names))
 RESOLVE_SYM_VOID(resolve_dataset_free, (resolve_dataset_t* ds), (ds))
 RESOLVE_SYM(resolve_value_t*, resolve_dataset_get, (const resolve_dataset_t* ds, const char* what), (ds, what))
 
@@ -162,3 +162,6 @@ RESOLVE_SYM(resolve_fuzzy_t*, resolve_fuzzy_build, (const resolve_value_t* entri
 RESOLVE_SYM_VOID(resolve_fuzzy_free, (resolve_fuzzy_t* f), (f))
 RESOLVE_SYM(resolve_value_t*, resolve_fuzzy_query, (const resolve_fuzzy_t* f, const resolve_value_t* needles, const resolve_value_t* options), (f, needles, options))
 RESOLVE_SYM(resolve_value_t*, resolve_fuzzy_get, (const resolve_fuzzy_t* f, const char* what), (f, what))
+
+/* ---- Name resolution ------------------------------------------------------ */
+RESOLVE_SYM(resolve_value_t*, resolve_names_resolve, (const resolve_value_t* vocabulary, const resolve_value_t* names, const resolve_value_t* options), (vocabulary, names, options))

@@ -11,7 +11,9 @@ resolve.dataset.csv(
   targets = list(),
   config = list(),
   schemaSource = NULL,
-  vocabs = NULL
+  vocabs = NULL,
+  names = NULL,
+  maxEditDistance = 1L
 )
 }
 \arguments{
@@ -126,6 +128,20 @@ rejects it. Pair with \code{config = predictor$dataset_config()}. Mutually
 exclusive with \code{schemaSource}. A vocabulary list without a species
 vocabulary (a checkpoint that stores only the vocabulary sizes) is
 refused.}
+
+\item{names}{Resolve the species names against the vocabulary of
+\code{vocabs} (or \code{schemaSource}) before encoding: the path of the
+release's \code{names.json}, which maps entered names and synonyms to the
+names the model learnt, or \code{TRUE} for the vocabulary alone. A name
+is taken as written where the vocabulary holds it, else through the
+table, else as the nearest known name within \code{maxEditDistance}
+edits; \code{dataset$species_names()} then lists the names not found as
+written, with the route each took. \code{NULL} (default) reads every name
+as written.}
+
+\item{maxEditDistance}{With \code{names}: the edits a misspelled name may be
+away from a known name (default 1; 0 turns the spelling step off; 2 can
+also rename species the models never saw).}
 }
 \value{
 A ResolveDataset object (an Rcpp module class) with methods:
@@ -138,6 +154,8 @@ A ResolveDataset object (an Rcpp module class) with methods:
 \item schema(): Get dataset schema
 \item plot_ids(): Get plot IDs
 \item n_plots(): Get number of plots
+\item species_names(): with \code{names}, the names not found as written (a
+list of name, token, route, source, via, distance, n_records)
 }
 }
 \description{
