@@ -114,7 +114,7 @@ card with `device = "cuda"`.
 ### Python
 
 The Python package needs [Python](https://www.python.org/downloads/)
-3.10 to 3.13:
+3.10 to 3.14:
 
 ``` bash
 pip install resolve-core
@@ -174,9 +174,9 @@ fit <- resolve.train.dataset(dataset, verbose = FALSE)
 metrics <- fit$result$final_metrics
 round(unlist(metrics$elevation[c("mae", "r2")]), 3)
 #>     mae      r2 
-#> 294.586   0.587
+#> 277.306   0.626
 round(metrics$habitat$accuracy, 3)
-#> [1] 0.633
+#> [1] 0.7
 ```
 
 Training holds out 20 % of the plots and stops when their loss no longer
@@ -325,7 +325,7 @@ If you use RESOLVE, please cite it as below.
 
 ``` text
 Colling G (2026). _resolveR: Predicting Sample Outcomes from
-Compositional Data_. R package version 1.0.3,
+Compositional Data_. R package version 1.1.0,
 <https://github.com/gcol33/resolve>.
 ```
 
@@ -337,7 +337,7 @@ BibTeX:
   author = {Gilles Colling},
   year = {2026},
   url = {https://github.com/gcol33/resolve},
-  note = {R package version 1.0.3},
+  note = {R package version 1.1.0},
 }
 ```
 

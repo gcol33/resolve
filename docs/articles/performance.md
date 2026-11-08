@@ -705,7 +705,7 @@ model_config = rc.model_config_for_dataset(quick_data, model_config)
 quick = rc.Trainer(rc.ResolveModel(quick_data.schema, model_config), cfg)
 quick.prepare_data(quick_data, test_size=0.2, seed=42)
 round(quick.fit().final_metrics["habitat"]["accuracy"], 3)
-#> 0.733
+#> 0.767
 ```
 
 Standard training: a mid-size encoder and a longer run.
@@ -716,7 +716,7 @@ standard <- resolve.train.dataset(quick_data, hiddenDims = c(512L, 256L, 128L),
                                   maxEpochs = 200L, patience = 30L,
                                   batchSize = 4096L, verbose = FALSE)
 round(standard$result$final_metrics$habitat$accuracy, 3)
-#> [1] 0.8
+#> [1] 0.767
 ```
 
 ``` python

@@ -106,7 +106,7 @@ card with `device = "cuda"`.
 ### Python
 
 The Python package needs [Python](https://www.python.org/downloads/)
-3.10 to 3.13:
+3.10 to 3.14:
 
 ``` bash
 pip install resolve-core
@@ -175,9 +175,9 @@ fit <- resolve.train.dataset(dataset, verbose = FALSE)
 metrics <- fit$result$final_metrics
 round(unlist(metrics$elevation[c("mae", "r2")]), 3)
 #>     mae      r2 
-#> 294.586   0.587
+#> 277.306   0.626
 round(metrics$habitat$accuracy, 3)
-#> [1] 0.633
+#> [1] 0.7
 ```
 
 Training holds out 20 % of the plots and stops when their loss no longer
@@ -328,7 +328,7 @@ If you use RESOLVE, please cite it as below.
 
 ``` text
 Colling G (2026). _resolveR: Predicting Sample Outcomes from
-Compositional Data_. R package version 1.0.3,
+Compositional Data_. R package version 1.1.0,
 <https://github.com/gcol33/resolve>.
 ```
 
@@ -340,7 +340,7 @@ BibTeX:
   author = {Gilles Colling},
   year = {2026},
   url = {https://github.com/gcol33/resolve},
-  note = {R package version 1.0.3},
+  note = {R package version 1.1.0},
 }
 ```
 
@@ -393,8 +393,12 @@ plots.
   : Recover the Run Metadata From a Checkpoint
 - [`resolve.predict.dataset()`](https://gillescolling.com/resolve/reference/resolve.predict.dataset.md)
   : Predict with Dataset (C++ API)
+- [`resolve.nearest_by_cosine()`](https://gillescolling.com/resolve/reference/resolve.nearest_by_cosine.md)
+  : Nearest Rows by Cosine Similarity
 - [`resolve.retrieval()`](https://gillescolling.com/resolve/reference/resolve.retrieval.md)
   : Blend Predictions With Their Nearest Reference Plots
+- [`resolve.plot_totals()`](https://gillescolling.com/resolve/reference/resolve.plot_totals.md)
+  : Give a model each plot's totals, or withhold them
 
 ## Model suites
 
@@ -411,6 +415,36 @@ Several trained models released as one directory and scored together.
 - [`as.data.frame(`*`<resolve_suite_predictions>`*`)`](https://gillescolling.com/resolve/reference/as.data.frame.resolve_suite_predictions.md)
   : Flatten Suite Predictions to One Row per Plot
 
+## Gap fitting
+
+Filling a dataset’s missing values from its own complete plots, beside
+the raw prediction.
+
+- [`resolve.fit_gaps()`](https://gillescolling.com/resolve/reference/resolve.fit_gaps.md)
+  : Fit a Dataset's Gaps From Its Own Complete Plots
+- [`resolve.fit_prediction_gaps()`](https://gillescolling.com/resolve/reference/resolve.fit_prediction_gaps.md)
+  : Fit a Single Model's Gaps From Its Predictions and the Dataset's
+  Tables
+
+## Terrain correction
+
+Altitude and slope combined with an elevation model read at the plots,
+and the compressed elevation model a suite ships.
+
+- [`resolve.terrain_descriptors()`](https://gillescolling.com/resolve/reference/resolve.terrain_descriptors.md)
+  : Read Elevation-Model Descriptors at Plot Coordinates
+- [`resolve.terrain_grid()`](https://gillescolling.com/resolve/reference/resolve.terrain_grid.md)
+  : Read One Tile of an Elevation Model
+- [`resolve.fit_terrain_correction()`](https://gillescolling.com/resolve/reference/resolve.fit_terrain_correction.md)
+  : Fit a Terrain Correction
+- [`resolve.terrain_correction()`](https://gillescolling.com/resolve/reference/resolve.terrain_correction.md)
+  : Apply a Saved Terrain Correction
+- [`resolve.encode_terrain_grids()`](https://gillescolling.com/resolve/reference/resolve.encode_terrain_grids.md)
+  : Code Elevation Grids Into a Coded Terrain Field
+- [`resolve.fit_terrain_tile()`](https://gillescolling.com/resolve/reference/resolve.fit_terrain_tile.md)
+  [`resolve.assemble_terrain_field()`](https://gillescolling.com/resolve/reference/resolve.fit_terrain_tile.md)
+  : Fit and Assemble a Terrain Field
+
 ## Scoring
 
 The metrics training reports, for predictions made anywhere.
@@ -425,9 +459,11 @@ The metrics training reports, for predictions made anywhere.
 
 ## Name matching
 
-The entries of a list of names within a few edits of a query, such as
-species names with spelling variants.
+Species names read as the names a model learnt, and the entries of a
+list of names within a few edits of a query.
 
+- [`resolve.names()`](https://gillescolling.com/resolve/reference/resolve.names.md)
+  : Resolve Species Names Against a Model's Vocabulary
 - [`resolve.fuzzy_index()`](https://gillescolling.com/resolve/reference/resolve.fuzzy_index.md)
   : Fuzzy String Index
 - [`resolve.fuzzy_match()`](https://gillescolling.com/resolve/reference/resolve.fuzzy_match.md)
@@ -465,6 +501,10 @@ latent space.
   fit](https://gillescolling.com/resolve/articles/training.md):
 - [Predicting new
   plots](https://gillescolling.com/resolve/articles/prediction.md):
+- [Filling a dataset's
+  gaps](https://gillescolling.com/resolve/articles/gap-fitting.md):
+- [Correcting altitude and slope with an elevation
+  model](https://gillescolling.com/resolve/articles/terrain-correction.md):
 - [Latent and species
   embeddings](https://gillescolling.com/resolve/articles/embeddings.md):
 
@@ -495,6 +535,12 @@ is.
   predicting](https://gillescolling.com/resolve/articles/python-prediction.md):
 - [Python: model
   suites](https://gillescolling.com/resolve/articles/python-suites.md):
+- [Python: gap
+  fitting](https://gillescolling.com/resolve/articles/python-gap-fitting.md):
+- [Python: terrain
+  correction](https://gillescolling.com/resolve/articles/python-terrain-correction.md):
+- [Python: species
+  names](https://gillescolling.com/resolve/articles/python-names.md):
 - [Python:
   scoring](https://gillescolling.com/resolve/articles/python-scoring.md):
 - [Python: the

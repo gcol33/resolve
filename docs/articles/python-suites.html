@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">resolveR</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.0.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -57,7 +57,7 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="active nav-item dropdown">
+<li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><hr class="dropdown-divider"></li>
@@ -66,6 +66,8 @@
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
+    <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Scaling up</h6></li>
@@ -79,6 +81,9 @@
     <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
     <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
     <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
+    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
+    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
+    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
     <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
     <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
   </ul>
@@ -394,7 +399,8 @@ members need.</p>
 <h3 id="SuitePredictor-predict">
 <code>predict()</code><a class="anchor" aria-label="anchor" href="#SuitePredictor-predict"></a>
 </h3>
-<div class="sourceCode" id="cb10"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a>predict(species, header<span class="op">=</span><span class="va">None</span>, columns<span class="op">=</span><span class="va">None</span>, batch_size<span class="op">=</span><span class="dv">4096</span>, keep_members<span class="op">=</span><span class="va">False</span>)</span></code></pre></div>
+<div class="sourceCode" id="cb10"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a>predict(species, header<span class="op">=</span><span class="va">None</span>, columns<span class="op">=</span><span class="va">None</span>, batch_size<span class="op">=</span><span class="dv">4096</span>, keep_members<span class="op">=</span><span class="va">False</span>,</span>
+<span id="cb10-2"><a href="#cb10-2" tabindex="-1"></a>        gap_fitting<span class="op">=</span><span class="va">None</span>, names<span class="op">=</span><span class="va">None</span>, max_edit_distance<span class="op">=</span><span class="dv">1</span>, terrain<span class="op">=</span><span class="va">None</span>)</span></code></pre></div>
 <p>Scores plots with every loaded target and returns
 <code>SuitePredictions</code>. <code>species</code> is the species
 table, one row per record, as a data frame or a CSV path.
@@ -405,10 +411,21 @@ given it decides which plots are scored and in what order.
 of its fields, renames the contract’s columns for a table that spells
 them differently. <code>batch_size</code> is the forward chunk of each
 member; <code>keep_members</code> keeps every member’s own prediction.
-No target column is read.</p>
-<p><code>predict_columns(species_names, species_columns, header_names=None, header_columns=None, columns=SuiteColumns(), batch_size=4096, keep_members=False)</code>
+No target column is read, except with <code>gap_fitting</code>
+(<code>True</code>, a <code>GapFittingConfig</code> or a
+<code>dict</code> of its fields): each target
+<code>columns["recorded"]</code> names is then fitted from the dataset’s
+own complete plots (<a href="gap-fitting.html">Filling a dataset’s
+gaps</a>). With <code>terrain</code> (<code>"field"</code> or
+<code>True</code>, <code>"columns"</code>, a <code>dict</code> of
+<code>source</code>, <code>grids</code> and <code>device</code>, or a
+<code>SuiteTerrainOptions</code>), every target the manifest gives a
+terrain correction is corrected by an elevation model read at the plots
+(<a href="terrain-correction.html">Correcting altitude and slope with an
+elevation model</a>).</p>
+<p><code>predict_columns(species_names, species_columns, header_names=None, header_columns=None, columns=SuiteColumns(), batch_size=4096, keep_members=False, gap_fitting=None, names=None, terrain=None)</code>
 and
-<code>predict_csv(species_path, header_path="", columns=SuiteColumns(), batch_size=4096, keep_members=False)</code>
+<code>predict_csv(species_path, header_path="", columns=SuiteColumns(), batch_size=4096, keep_members=False, gap_fitting=None, names=None, terrain=None)</code>
 are the forms over string columns and CSV paths that
 <code>predict</code> calls.</p>
 <div class="sourceCode" id="cb11"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb11-1"><a href="#cb11-1" tabindex="-1"></a>scored <span class="op">=</span> suite.predict(species)</span>
@@ -427,7 +444,14 @@ are the forms over string columns and CSV paths that
 <code>abundance</code>, <code>genus</code>, <code>family</code>,
 <code>latitude</code>, <code>longitude</code>, and
 <code>covariates</code> and <code>categoricals</code>, which replace the
-whole list and must match its length.</p>
+whole list and must match its length. For gap fitting,
+<code>recorded</code> lists <code>(target, [column])</code> pairs,
+<code>(target, [latitude, longitude])</code> for a location (a
+<code>dict</code> passed to <code>predict</code> may give
+<code>{target: column}</code>), and <code>survey_year</code> names the
+survey-year column; a suite that reads no coordinates may still name
+<code>latitude</code> and <code>longitude</code> for gap fitting
+alone.</p>
 </div>
 <div class="section level2">
 <h2 id="SuitePredictions">
@@ -498,6 +522,10 @@ own prediction, <code>(n_members, n_plots)</code> or
 <li>
 <code>recognition</code> (<code>SpeciesRecognition</code>): how much
 of each plot the target’s vocabulary recognises.</li>
+<li>
+<code>gap_fit</code> (<code>GapFit</code> or <code>None</code>):
+with gap fitting, the fitted values, the method per plot and the report
+(<a href="python-gap-fitting.html#GapFit"><code>GapFit</code></a>).</li>
 </ul>
 <p>None of these is combined into a single level of support, and none is
 a calibrated interval: the spread across seeds measures how much the

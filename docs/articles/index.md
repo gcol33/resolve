@@ -14,6 +14,10 @@ latent space.
   fit](https://gillescolling.com/resolve/articles/training.md):
 - [Predicting new
   plots](https://gillescolling.com/resolve/articles/prediction.md):
+- [Filling a dataset's
+  gaps](https://gillescolling.com/resolve/articles/gap-fitting.md):
+- [Correcting altitude and slope with an elevation
+  model](https://gillescolling.com/resolve/articles/terrain-correction.md):
 - [Latent and species
   embeddings](https://gillescolling.com/resolve/articles/embeddings.md):
 
@@ -44,6 +48,12 @@ is.
   predicting](https://gillescolling.com/resolve/articles/python-prediction.md):
 - [Python: model
   suites](https://gillescolling.com/resolve/articles/python-suites.md):
+- [Python: gap
+  fitting](https://gillescolling.com/resolve/articles/python-gap-fitting.md):
+- [Python: terrain
+  correction](https://gillescolling.com/resolve/articles/python-terrain-correction.md):
+- [Python: species
+  names](https://gillescolling.com/resolve/articles/python-names.md):
 - [Python:
   scoring](https://gillescolling.com/resolve/articles/python-scoring.md):
 - [Python: the

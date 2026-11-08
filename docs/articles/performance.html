@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">resolveR</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.0.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -57,7 +57,7 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="active nav-item dropdown">
+<li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><hr class="dropdown-divider"></li>
@@ -66,6 +66,8 @@
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
+    <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Scaling up</h6></li>
@@ -79,6 +81,9 @@
     <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
     <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
     <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
+    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
+    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
+    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
     <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
     <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
   </ul>
@@ -842,7 +847,7 @@ encoder and a short run.</p>
 <span id="cb32-14"><a href="#cb32-14" tabindex="-1"></a>quick <span class="op">=</span> rc.Trainer(rc.ResolveModel(quick_data.schema, model_config), cfg)</span>
 <span id="cb32-15"><a href="#cb32-15" tabindex="-1"></a>quick.prepare_data(quick_data, test_size<span class="op">=</span><span class="fl">0.2</span>, seed<span class="op">=</span><span class="dv">42</span>)</span>
 <span id="cb32-16"><a href="#cb32-16" tabindex="-1"></a><span class="bu">round</span>(quick.fit().final_metrics[<span class="st">"habitat"</span>][<span class="st">"accuracy"</span>], <span class="dv">3</span>)</span>
-<span id="cb32-17"><a href="#cb32-17" tabindex="-1"></a><span class="co">#&gt; 0.733</span></span></code></pre></div>
+<span id="cb32-17"><a href="#cb32-17" tabindex="-1"></a><span class="co">#&gt; 0.767</span></span></code></pre></div>
 </div>
 <p>Standard training: a mid-size encoder and a longer run.</p>
 <div class="lang-pair">
@@ -851,7 +856,7 @@ encoder and a short run.</p>
 <span>                                  maxEpochs <span class="op">=</span> <span class="fl">200L</span>, patience <span class="op">=</span> <span class="fl">30L</span>,</span>
 <span>                                  batchSize <span class="op">=</span> <span class="fl">4096L</span>, verbose <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">standard</span><span class="op">$</span><span class="va">result</span><span class="op">$</span><span class="va">final_metrics</span><span class="op">$</span><span class="va">habitat</span><span class="op">$</span><span class="va">accuracy</span>, <span class="fl">3</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] 0.8</span></span></code></pre></div>
+<span><span class="co">#&gt; [1] 0.767</span></span></code></pre></div>
 <div class="sourceCode" id="cb34"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb34-1"><a href="#cb34-1" tabindex="-1"></a>model_config <span class="op">=</span> rc.ModelConfig()</span>
 <span id="cb34-2"><a href="#cb34-2" tabindex="-1"></a>model_config.hidden_dims <span class="op">=</span> [<span class="dv">512</span>, <span class="dv">256</span>, <span class="dv">128</span>]</span>
 <span id="cb34-3"><a href="#cb34-3" tabindex="-1"></a>cfg <span class="op">=</span> rc.TrainConfig()</span>

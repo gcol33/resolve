@@ -2,7 +2,7 @@
 title: "Predicting new plots"
 ---
 
-<!-- Python blocks run by tools/python_twins.py (md5 9b85ceeea326845daadc07b3a80cbb97). -->
+<!-- Python blocks run by tools/python_twins.py (md5 0790a52dce390aab8007bc72b250294c). -->
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6.5, fig.height = 4.5,
@@ -273,12 +273,12 @@ out = out.merge(new_plots[["plot_id", "elevation", "habitat"]],
                 on="plot_id", suffixes=("", "_observed"))
 out.head(6)
 #>   plot_id  elevation    habitat  elevation_observed habitat_observed
-#> 0    A005     1886.0  grassland                2145        grassland
-#> 1    A010     1696.0     forest                1632          wetland
-#> 2    A015     2246.0     alpine                2165           alpine
-#> 3    A020     1321.0     forest                1284           forest
-#> 4    A025      990.0  grassland                1235        grassland
-#> 5    A030     1078.0  grassland                1840        grassland
+#> 0    A005     2036.0     alpine                2145        grassland
+#> 1    A010     1620.0    wetland                1632          wetland
+#> 2    A015     2016.0     alpine                2165           alpine
+#> 3    A020     1094.0     forest                1284           forest
+#> 4    A025     1060.0  grassland                1235        grassland
+#> 5    A030     1882.0     alpine                1840        grassland
 ```
 :::
 
@@ -293,7 +293,7 @@ c(mae = mean(abs(out$elevation - out$elevation_observed)),
 ```python
 {"mae": (out.elevation - out.elevation_observed).abs().mean(),
  "accuracy": (out.habitat == out.habitat_observed).mean()}
-#> {'mae': np.float64(185.23333333333332), 'accuracy': np.float64(0.8)}
+#> {'mae': np.float64(199.73333333333332), 'accuracy': np.float64(0.6333333333333333)}
 ```
 :::
 
@@ -312,9 +312,9 @@ all(max.col(probs) - 1 == preds$predictions$habitat)
 ```python
 probs = preds.probabilities["habitat"]
 probs[:3].round(decimals=3)
-#> tensor([[0.3380, 0.0870, 0.4780, 0.0960],
-#>         [0.1250, 0.5760, 0.1040, 0.1950],
-#>         [0.8300, 0.0580, 0.0590, 0.0530]])
+#> tensor([[0.4110, 0.0970, 0.4060, 0.0850],
+#>         [0.1560, 0.3310, 0.1550, 0.3570],
+#>         [0.4650, 0.2020, 0.1630, 0.1700]])
 probs.sum(dim=1).aminmax()
 #> torch.return_types.aminmax(
 #> min=tensor(1.0000),
@@ -352,9 +352,9 @@ sure = pd.DataFrame({
 })
 sure.sort_values("confidence").head(3)
 #>    plot_id  confidence    margin   entropy
-#> 23    A120    0.332903  0.030494  1.342778
-#> 21    A110    0.340574  0.022809  1.334862
-#> 17    A090    0.473227  0.263681  1.263671
+#> 17    A090    0.330615  0.010530  1.331286
+#> 16    A085    0.347894  0.100572  1.357081
+#> 1     A010    0.357241  0.026313  1.313200
 ```
 :::
 
@@ -462,6 +462,10 @@ resolve.names(c("Silene acaulis", "Silene acualis", "Carex firma"), predictor)
 
 ```python
 rc.resolve_names(["Silene acaulis", "Silene acualis", "Carex firma"], predictor)
+#>              name           token       route source             via  distance
+#> 0  Silene acaulis  Silene acaulis       exact                                0
+#> 1  Silene acualis  Silene acaulis    spelling         Silene acaulis         1
+#> 2     Carex firma     Carex firma  unresolved                                0
 ```
 :::
 
@@ -523,12 +527,12 @@ pd.DataFrame({"plot_id": preds.plot_ids,
               "model": preds.predictions["elevation"].numpy().round(),
               "blended": blended.predictions["elevation"].numpy().round()}).head(6)
 #>   plot_id   model  blended
-#> 0    A005  1886.0   1794.0
-#> 1    A010  1696.0   1754.0
-#> 2    A015  2246.0   2263.0
-#> 3    A020  1321.0   1271.0
-#> 4    A025   990.0    979.0
-#> 5    A030  1078.0   1113.0
+#> 0    A005  2036.0   2068.0
+#> 1    A010  1620.0   1683.0
+#> 2    A015  2016.0   2081.0
+#> 3    A020  1094.0   1069.0
+#> 4    A025  1060.0   1017.0
+#> 5    A030  1882.0   1997.0
 
 predictor.clear_retrieval()
 ```
@@ -623,7 +627,7 @@ sealed = rc.SuiteManifest.from_json(
 sealed.seal(suite_dir)
 sealed.write(suite_dir)
 sealed.targets[0].members[0].sha256[:16]
-#> 06dc292cc3acf6d2
+#> 14547c892d39deeb
 rc.SuiteManifest.read(suite_dir).verify(suite_dir)
 #> []
 ```
@@ -657,11 +661,11 @@ pd.DataFrame({"plot_id": suite_preds.plot_ids,
               "recognised": habitat.recognition.count_share.numpy()}).head(6)
 #>   plot_id    habitat  agreement  recognised
 #> 0    A005  grassland   1.000000    0.666667
-#> 1    A010    wetland   1.000000    1.000000
-#> 2    A015     alpine   0.666667    1.000000
+#> 1    A010     forest   0.666667    1.000000
+#> 2    A015     alpine   0.333333    1.000000
 #> 3    A020     forest   1.000000    1.000000
-#> 4    A025  grassland   0.666667    1.000000
-#> 5    A030  grassland   1.000000    1.000000
+#> 4    A025  grassland   1.000000    1.000000
+#> 5    A030  grassland   0.666667    1.000000
 ```
 :::
 

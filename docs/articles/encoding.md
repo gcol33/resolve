@@ -248,6 +248,21 @@ probability, each epoch. The model also receives a flag saying whether a
 plot’s weights carry cover, so a model trained with cover dropout learns
 to predict plots that come without abundances.
 
+*Plot totals* (`plotTotals` in R, `plot_totals` in Python, default off)
+add two numbers per plot to the pooled features: the combined cover of
+all its species, taken as overlapping at random, and the logarithm of
+one plus its species count. The weighted mean of the rank-pool encoding
+carries neither, and the attention pooling of the transformer not the
+count, although both can matter: the EUNIS expert system, for one,
+assigns most sparsely vegetated habitats only below 30% total cover.
+With *totals dropout* (`plotTotalsDropout`, `plot_totals_dropout`) a
+training plot’s totals are withheld at the given probability, and the
+model learns to predict without them as well;
+`resolve.plot_totals(predictor, FALSE)` (R) or
+`predictor.plot_totals = False` (Python) then withholds them at
+prediction, so that a prediction does not depend on how many species a
+plot records, as an analysis of species richness may require.
+
 A sum ignores the order of the species, so the encoding holds which
 species are present and how strongly, and nothing about how they
 combine. Use it when species richness varies widely, when rare species
@@ -284,7 +299,7 @@ fit <- resolve.train.dataset(attended, dModel = 64L, nHeads = 4L,
                              nAttentionLayers = 2L, transformerFfDim = 128L,
                              lr = 3e-4, maxEpochs = 100L, verbose = FALSE)
 fit$result$best_epoch
-#> [1] 96
+#> [1] 99
 ```
 
 ``` python
@@ -303,7 +318,7 @@ train_config.max_epochs = 100
 trainer = rc.Trainer(model, train_config)
 trainer.prepare_data(attended)
 trainer.fit().best_epoch
-#> 93
+#> 90
 ```
 
 `best_epoch` is the epoch whose weights the fit kept. The cost of
@@ -405,7 +420,7 @@ fit <- resolve.train.dataset(
   modelConfig = list(encoder_architecture = "ft_transformer")
 )
 round(fit$result$final_metrics$habitat$accuracy, 3)
-#> [1] 0.767
+#> [1] 0.9
 ```
 
 ``` python
@@ -418,7 +433,7 @@ train_config.max_epochs = 50
 trainer = rc.Trainer(model, train_config)
 trainer.prepare_data(hashed)
 round(trainer.fit().final_metrics["habitat"]["accuracy"], 3)
-#> 0.867
+#> 0.8
 ```
 
 [Training and reading the
@@ -443,7 +458,7 @@ mae <- sapply(encodings, function(encoding) {
 })
 round(mae)
 #>        hash       embed      sparse   rank_pool transformer 
-#>         189         259         208         183         189
+#>         231         238         232         148         193
 ```
 
 ``` python
@@ -461,7 +476,7 @@ def held_out_mae(encoding):
 encodings = ["Hash", "Embed", "Sparse", "RankPool", "Transformer"]
 {name: round(held_out_mae(getattr(rc.SpeciesEncodingMode, name)))
  for name in encodings}
-#> {'Hash': 242, 'Embed': 234, 'Sparse': 304, 'RankPool': 159, 'Transformer': 142}
+#> {'Hash': 218, 'Embed': 222, 'Sparse': 225, 'RankPool': 170, 'Transformer': 149}
 ```
 
 These numbers say little about the encodings. The survey has 150 plots

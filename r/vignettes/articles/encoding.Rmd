@@ -244,7 +244,7 @@ train_config.max_epochs = 100
 trainer = rc.Trainer(model, train_config)
 trainer.prepare_data(attended)
 trainer.fit().best_epoch
-#> 93
+#> 90
 ```
 :::
 
@@ -322,7 +322,7 @@ train_config.max_epochs = 50
 trainer = rc.Trainer(model, train_config)
 trainer.prepare_data(hashed)
 round(trainer.fit().final_metrics["habitat"]["accuracy"], 3)
-#> 0.867
+#> 0.8
 ```
 :::
 
@@ -358,7 +358,7 @@ def held_out_mae(encoding):
 encodings = ["Hash", "Embed", "Sparse", "RankPool", "Transformer"]
 {name: round(held_out_mae(getattr(rc.SpeciesEncodingMode, name)))
  for name in encodings}
-#> {'Hash': 242, 'Embed': 234, 'Sparse': 304, 'RankPool': 159, 'Transformer': 142}
+#> {'Hash': 218, 'Embed': 222, 'Sparse': 225, 'RankPool': 170, 'Transformer': 149}
 ```
 :::
 

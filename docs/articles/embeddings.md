@@ -293,8 +293,8 @@ genera <- genus_table[-1, ]
 rownames(genera) <- genus_names[-1]
 similarity <- cosine(genera)
 round(sort(similarity["Quercus", ], decreasing = TRUE)[2:6], 3)
-#> Sesleria     Acer    Abies    Salix    Larix 
-#>    0.585    0.460    0.421    0.343    0.298
+#>   Sesleria Eriophorum  Vaccinium       Acer      Pinus 
+#>      0.429      0.406      0.368      0.182      0.141
 ```
 
 ``` python
@@ -306,11 +306,11 @@ genera = pd.DataFrame(genus_table[1:], index=genus_names[1:])
 similarity = pd.DataFrame(cosine(genera.to_numpy()),
                           index=genera.index, columns=genera.index)
 similarity["Quercus"].drop("Quercus").sort_values(ascending=False).head(5).round(3)
-#> Eriophorum    0.489
-#> Abies         0.389
-#> Salix         0.381
-#> Carex         0.311
-#> Trifolium     0.292
+#> Acer          0.805
+#> Dactylis      0.669
+#> Fagus         0.597
+#> Molinia       0.298
+#> Ranunculus    0.255
 #> Name: Quercus, dtype: float32
 ```
 
@@ -354,8 +354,8 @@ The species table compares the same way.
 known <- species_table[-1, ]
 rownames(known) <- species_names[-1]
 round(sort(cosine(known)["Carex curvula", ], decreasing = TRUE)[2:4], 3)
-#>   Acer pseudoplatanus Arrhenatherum elatius          Pinus cembra 
-#>                 0.360                 0.287                 0.198
+#> Vaccinium myrtillus Acer pseudoplatanus  Dactylis glomerata 
+#>               0.361               0.310               0.252
 ```
 
 ``` python
@@ -363,9 +363,9 @@ known = species_table[1:]
 names = pd.Index(species_names[1:])
 row = cosine(known)[names.get_loc("Carex curvula")]
 pd.Series(row, index=names).drop("Carex curvula").nlargest(3).round(3)
-#> Festuca rubra       0.333
-#> Quercus petraea     0.299
-#> Caltha palustris    0.293
+#> Fagus sylvatica     0.298
+#> Pinus cembra        0.275
+#> Molinia caerulea    0.221
 #> dtype: float32
 ```
 
@@ -400,19 +400,19 @@ have the highest cosine similarity to its vector.
 rownames(latent) <- out$plot_ids
 plot_similarity <- cosine(latent)
 round(sort(plot_similarity["A001", ], decreasing = TRUE)[2:6], 3)
-#>  A015  A149  A063  A121  A134 
-#> 0.998 0.996 0.995 0.995 0.994
+#>  A015  A121  A095  A132  A149 
+#> 0.995 0.995 0.994 0.994 0.993
 ```
 
 ``` python
 plot_similarity = pd.DataFrame(cosine(latent), index=out.plot_ids,
                                columns=out.plot_ids)
 plot_similarity["A001"].drop("A001").nlargest(5).round(3)
-#> A063    0.997
-#> A149    0.996
-#> A015    0.995
-#> A121    0.995
-#> A045    0.995
+#> A015    0.998
+#> A063    0.998
+#> A121    0.998
+#> A045    0.997
+#> A111    0.997
 #> Name: A001, dtype: float32
 ```
 
@@ -431,18 +431,18 @@ neighbours ranks the plots by how isolated they are.
 
 nearest <- apply(plot_similarity, 1, function(s) mean(sort(s, decreasing = TRUE)[2:6]))
 round(sort(nearest)[1:5], 3)
-#>  A048  A145  A082  A122  A096 
-#> 0.713 0.770 0.794 0.804 0.805
+#>  A048  A067  A150  A110  A145 
+#> 0.722 0.775 0.787 0.796 0.816
 ```
 
 ``` python
 nearest = plot_similarity.apply(lambda s: s.nlargest(6).iloc[1:].mean())
 nearest.nsmallest(5).round(3)
-#> A140    0.791
-#> A067    0.807
-#> A096    0.808
-#> A082    0.810
-#> A145    0.826
+#> A067    0.752
+#> A062    0.789
+#> A033    0.845
+#> A096    0.845
+#> A107    0.905
 #> dtype: float32
 ```
 
@@ -459,19 +459,19 @@ correlates with a target is a gradient along that target.
 
 round(summary(pcs)$importance["Proportion of Variance", 1:3], 3)
 #>   PC1   PC2   PC3 
-#> 0.378 0.288 0.183
+#> 0.378 0.280 0.183
 elevation <- plots$elevation[match(out$plot_ids, plots$plot_id)]
 round(cor(pcs$x[, 1:3], elevation)[, 1], 3)
 #>    PC1    PC2    PC3 
-#> -0.774  0.205 -0.017
+#> -0.763 -0.134  0.160
 ```
 
 ``` python
 np.round(s[:3] ** 2 / np.sum(s ** 2), 3)
-#> array([0.37 , 0.294, 0.148], dtype=float32)
+#> array([0.421, 0.245, 0.195], dtype=float32)
 elevation = pd.Series(out.plot_ids).map(plots.set_index("plot_id").elevation)
 [round(np.corrcoef(pcs[:, i], elevation)[0, 1], 3) for i in range(3)]
-#> [np.float64(-0.747), np.float64(-0.259), np.float64(-0.29)]
+#> [np.float64(-0.749), np.float64(-0.024), np.float64(-0.076)]
 ```
 
 ## Embeddings from the encoded inputs

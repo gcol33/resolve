@@ -1,0 +1,339 @@
+# Correcting altitude and slope with an elevation model
+
+A plot with coordinates can be read off a digital elevation model: the
+elevation at the coordinate, and the slope of the ground around it.
+Where the coordinate is precise, that reading is close to the altitude a
+surveyor would record. Where it is coarse, or wrong, the elevation model
+reads a different hillside, and the reading can be off by hundreds of
+metres. A prediction from species composition errs the other way round:
+it never reads the wrong hillside, but it cannot tell two plots with the
+same species apart by a few metres of altitude.
+
+*Terrain correction* combines the two per plot. It learns, from plots
+whose altitude or slope was recorded, how much to trust each source
+given what the plot shows about itself: how precise its coordinate is,
+how far the two sources disagree, how much the members of a suite
+disagree among themselves. The suite’s prediction is never replaced; the
+corrected value comes back beside it, with the weight each source
+received.
+
+This article covers what the correction reads, fitting and applying one,
+the correction a released suite ships and the elevation model that comes
+with it, what it changes on the European Vegetation Archive, the command
+line, and its limits.
+
+## Installation
+
+``` r
+
+# install.packages("pak")
+pak::pak("gcol33/resolve/r")
+
+# The engine library, downloaded once
+library(resolveR)
+resolve.install_backend()
+```
+
+``` bash
+pip install resolve-core
+```
+
+## What the correction reads
+
+Four *descriptors* are read from the elevation model at each plot’s
+coordinate:
+
+- `elevation`: the elevation at the coordinate, interpolated between the
+  four surrounding cell centres;
+- `elevation_1km`: the mean elevation over the 1 km square centred on
+  the coordinate;
+- `slope`: the slope of the cell nearest the coordinate, from its four
+  edge neighbours (as Earth Engine’s `ee.Terrain.slope` computes it);
+- `slope_1km`: the inclination of the plane fitted through the 1 km
+  square.
+
+An altitude target reads the two elevations, a slope target the two
+slopes. The 1 km descriptor is what the ground around a plot looks like
+when its coordinate is only known to within a kilometre.
+
+The correction is a small network that returns three weights summing to
+one, for the suite’s prediction, the descriptor at the coordinate and
+the descriptor over 1 km, and a small bounded offset. A weight of one
+returns a source exactly, so where the coordinate is precise and the two
+sources agree, the correction can return the elevation model’s reading
+unchanged. It reads, per plot: the prediction and both descriptors with
+their differences from the prediction, the recorded location
+uncertainty, the spread of the suite’s members, the share of the plot’s
+species the suite recognises, and the number of species. It is fitted by
+the mean absolute error.
+
+## Fitting and applying a correction
+
+A simulated survey shows the mechanics. Each plot has a true altitude;
+its elevation-model reading is right to a few metres, except on a share
+of plots that grows with the location uncertainty, where it reads a
+hillside hundreds of metres away; its prediction errs by tens of metres,
+more where the members disagree.
+
+``` r
+
+set.seed(4)
+survey <- function(n) {
+  altitude <- runif(n, 200, 1700)
+  uncertainty <- 10^runif(n, 0, 3.5)
+  wrong <- runif(n) < 0.05 + 0.15 * log10(uncertainty)
+  dem <- altitude + rnorm(n, 0, 2) + ifelse(wrong, rnorm(n, 0, 300), 0)
+  spread <- runif(n, 5, 45)
+  data.frame(altitude = altitude, uncertainty = uncertainty, spread = spread,
+             prediction = altitude + rnorm(n, 0, spread),
+             dem = dem, dem_1km = dem + rnorm(n, 0, 15))
+}
+recorded <- survey(6000)
+new_plots <- survey(2000)
+c(prediction = mean(abs(new_plots$prediction - new_plots$altitude)),
+  elevation_model = mean(abs(new_plots$dem - new_plots$altitude)))
+#>      prediction elevation_model 
+#>        19.59923        77.21113
+```
+
+``` python
+import numpy as np
+import torch
+import resolve_core as rc
+
+rng = np.random.default_rng(4)
+
+
+def survey(n):
+    altitude = rng.uniform(200, 1700, n)
+    uncertainty = 10 ** rng.uniform(0, 3.5, n)
+    wrong = rng.random(n) < 0.05 + 0.15 * np.log10(uncertainty)
+    dem = altitude + rng.normal(0, 2, n) + np.where(wrong, rng.normal(0, 300, n), 0)
+    spread = rng.uniform(5, 45, n)
+    t = lambda x: torch.tensor(x, dtype=torch.float64)
+    return dict(altitude=t(altitude), uncertainty_m=t(uncertainty), spread=t(spread),
+                prediction=t(altitude + rng.normal(0, spread)), dem=t(dem),
+                dem_1km=t(dem + rng.normal(0, 15, n)))
+
+
+recorded = survey(6000)
+new_plots = survey(2000)
+mae = lambda x: (x - new_plots["altitude"]).abs().mean().item()
+print(f"prediction {mae(new_plots['prediction']):.1f} m, elevation model {mae(new_plots['dem']):.1f} m")
+#> prediction 19.6 m, elevation model 73.1 m
+```
+
+The correction is fitted on the plots with a recorded altitude and saved
+to a file; `scale` is the target’s scale, 500 m for altitude (20 degrees
+for slope).
+
+``` r
+
+path <- file.path(tempdir(), "altitude.terrain")
+report <- resolve.fit_terrain_correction(
+  "altitude", "elevation", recorded$prediction, recorded$dem, recorded$altitude, path,
+  dem1km = recorded$dem_1km, uncertainty = recorded$uncertainty, spread = recorded$spread,
+  config = list(scale = 500, epochs = 80L, batch_size = 256L))
+corrected <- resolve.terrain_correction(path, new_plots$prediction, new_plots$dem,
+                                        dem1km = new_plots$dem_1km,
+                                        uncertainty = new_plots$uncertainty,
+                                        spread = new_plots$spread)
+mean(abs(corrected$corrected - new_plots$altitude))
+#> [1] 8.95824
+```
+
+``` python
+import os, tempfile
+
+cfg = rc.TerrainCorrectionConfig()
+cfg.scale, cfg.epochs, cfg.batch_size = 500.0, 80, 256
+inputs = lambda s: {k: v for k, v in s.items() if k != "altitude"}
+model = rc.fit_terrain_correction("altitude", rc.TerrainDescriptor.Elevation,
+                                  truth=recorded["altitude"], config=cfg, **inputs(recorded))
+model.save(os.path.join(tempfile.gettempdir(), "altitude.terrain"))
+corrected = model.apply(**inputs(new_plots))
+print(f"corrected {mae(corrected.corrected):.1f} m")
+#> corrected 8.2 m
+```
+
+The weights show where it trusts which source: the elevation model where
+the coordinate is precise, the prediction where the coordinate is
+coarse.
+
+``` r
+
+precision <- cut(new_plots$uncertainty, c(0, 10, 100, 1000, Inf),
+                 labels = c("up to 10 m", "10-100 m", "100 m-1 km", "over 1 km"))
+round(aggregate(corrected$weights, list(uncertainty = precision), mean)[, -1], 2)
+#>   resolve  dem dem_1km
+#> 1    0.13 0.86    0.00
+#> 2    0.26 0.73    0.00
+#> 3    0.38 0.62    0.01
+#> 4    0.51 0.48    0.01
+```
+
+``` python
+w = corrected.weights.numpy()
+u = new_plots["uncertainty_m"].numpy()
+for label, lo, hi in [("up to 10 m", 0, 10), ("10-100 m", 10, 100),
+                      ("100 m-1 km", 100, 1000), ("over 1 km", 1000, np.inf)]:
+    m = (u > lo) & (u <= hi)
+    print(label, np.round(w[m].mean(axis=0), 2))
+#> up to 10 m [0.14 0.84 0.01]
+#> 10-100 m [0.22 0.76 0.01]
+#> 100 m-1 km [0.37 0.62 0.02]
+#> over 1 km [0.49 0.5  0.01]
+```
+
+A plot without a reading keeps its prediction, and a plot without the 1
+km descriptor or the uncertainty is still corrected: a caller who has
+the elevation at the coordinate alone is served.
+
+## Your own elevation model
+
+The descriptors can come from your own elevation model, read at your
+plots in a GIS: name the header columns that hold them. A suite then
+corrects every target it ships a correction for:
+
+``` r
+
+suite <- resolve.load_suite("eva_context")
+preds <- resolve.predict.suite(
+  suite, species = species, header = plots,
+  columns = list(terrain = list(elevation = "dem_elevation", slope = "dem_slope",
+                                uncertainty = "coordinate_uncertainty_m")),
+  terrain = "columns")
+head(as.data.frame(preds)[, c("altitude", "altitude_terrain", "altitude_terrain_w_dem")])
+```
+
+[`resolve.terrain_descriptors()`](https://gillescolling.com/resolve/reference/resolve.terrain_descriptors.md)
+reads the four descriptors from elevation grids on disk (a `tiles.json`
+and its tiles) or from a terrain field file, at any coordinates.
+
+## The elevation model a suite ships
+
+A released suite can ship the elevation model its correction was trained
+on, so a caller with coordinates needs nothing else: `terrain = "field"`
+(or `TRUE`) reads it at the plots’ coordinates.
+
+``` r
+
+preds <- resolve.predict.suite(suite, species = species, header = plots, terrain = "field")
+```
+
+The Copernicus GLO-30 elevation model over the archive’s extent is about
+50 GB as delivered. The suite ships it coded with a bounded error
+instead: every cell is rounded to a multiple of 4 m, so no cell moves by
+more than 2 m, and each 64 x 64 block of cells is coded on its own by
+the prediction scheme of the SZ error-bounded compressor (each cell
+predicted from its west, north and north-west neighbours, the small
+residuals written with Golomb-Rice codes, runs of zeros on flat ground
+written as run lengths). On the tiles measured for the design this takes
+0.8 to 2 bits per cell, against 32 bits for the delivered floats.
+[`resolve.encode_terrain_grids()`](https://gillescolling.com/resolve/reference/resolve.encode_terrain_grids.md)
+codes your own grids the same way. A query reads and decodes only the
+blocks its plots fall in, so 5,000 plots spread across Europe read their
+four descriptors from the 1.95 GB file in about a second on a
+solid-state disk;
+[`resolve.terrain_grid()`](https://gillescolling.com/resolve/reference/resolve.terrain_grid.md)
+returns one tile whole, from the grids or from a field, to compare the
+two cell by cell.
+
+A neural representation of the terrain was built and measured too
+([`resolve.fit_terrain_tile()`](https://gillescolling.com/resolve/reference/resolve.fit_terrain_tile.md),
+a multiresolution hash encoding per tile): at the same size it stayed 4
+to 10 times further from the grid, without a bound on its error, and
+took minutes of GPU time per tile where the coded field takes a second
+and a half on one core. It is kept as a field format; the coded field is
+what suites ship.
+
+## What it changes on the archive
+
+The released context suite (species, coordinates and date) predicts each
+archive plot from models that never saw it: in a random split, and in
+two splits that hold out whole 100 km blocks. On those held-out
+predictions the correction was fitted in five folds, grouped by 100 km
+block, and scored on the fold it did not see, with the descriptors read
+from the coded field the suite ships. Mean absolute error:
+
+| Split | Target | Plots | Prediction | Elevation model | Corrected |
+|----|----|---:|---:|---:|---:|
+| random | altitude (m) | 346,597 | 42.9 | 33.9 | 22.6 |
+| 100 km blocks, seed 42 | altitude (m) | 363,880 | 99.5 | 40.7 | 37.6 |
+| 100 km blocks, seed 7 | altitude (m) | 363,049 | 76.0 | 32.1 | 28.1 |
+| random | slope (degrees) | 119,738 | 5.42 | 10.94 | 5.41 |
+| 100 km blocks, seed 42 | slope (degrees) | 128,817 | 7.20 | 11.05 | 7.14 |
+| 100 km blocks, seed 7 | slope (degrees) | 129,064 | 7.91 | 11.25 | 7.72 |
+
+For altitude, the corrected value is closer to the recorded one than
+either source in every split. The recorded location uncertainty shows
+where the gain comes from (random split):
+
+| Location uncertainty |   Plots | Prediction | Elevation model | Corrected |
+|----------------------|--------:|-----------:|----------------:|----------:|
+| up to 10 m           | 124,476 |       20.3 |             8.0 |       7.0 |
+| 10 m to 100 m        |  26,979 |       49.4 |            23.8 |      19.0 |
+| 100 m to 1 km        |  30,658 |       64.7 |            51.9 |      39.6 |
+| over 1 km            |  46,241 |       63.5 |           100.1 |      49.9 |
+| not recorded         | 118,243 |       51.4 |            33.0 |      24.7 |
+
+Where the coordinate is precise, the corrected value stays close to the
+elevation model; where it is coarser than a kilometre, the elevation
+model errs by 100 m on average, and the corrected value by half of that,
+below the prediction alone.
+
+For slope, the elevation model’s reading at the coordinate errs by about
+twice as much as the prediction, at every location uncertainty, and the
+correction keeps the prediction nearly unchanged: the gain is at most
+two tenths of a degree. A slope read from a 30 m elevation model may
+describe a different patch of ground than the few square metres a plot
+covers.
+
+The descriptors read from the original grids give the same picture:
+altitude 22.6, 37.7 and 28.0 m, slope 5.41, 7.10 and 7.71 degrees. The
+coded field (1.95 GB for the 1,368 tiles over the archive’s extent, 1.09
+bits per cell, root mean square error 0.99 m against the grids, no cell
+off by more than 2 m) changes the corrected error by at most 0.13 m and
+0.04 degrees. The corrections the suite ships were fitted on the three
+splits pooled.
+
+## The command line
+
+``` bash
+# A suite's altitude and slope corrected by the field it ships
+resolve predict --suite eva_context --header plots.csv --species species.csv \
+  --terrain field --location-uncertainty coordinate_uncertainty_m
+
+# ... or by your own values
+resolve predict --suite eva_context --header plots.csv --species species.csv \
+  --terrain columns --terrain-elevation dem_elevation --terrain-slope dem_slope
+
+# The descriptors at coordinates, and a coded field from your own grids
+resolve terrain describe --field terrain_field.bin --header plots.csv --lat lat --lon lon
+resolve terrain encode --grids my_grids/ --out my_field.bin --max-error 2
+```
+
+## Settings
+
+[`resolve.fit_terrain_correction()`](https://gillescolling.com/resolve/reference/resolve.fit_terrain_correction.md)
+takes `scale` (the target’s scale; values are divided by it before the
+network reads them), `offset_fraction` (the bound of the free offset, as
+a fraction of `scale`), `hidden_dim` and `n_layers` of the network,
+`epochs`, `batch_size`, `lr` and `weight_decay` of the fit,
+`dem_1km_dropout` (the share of plots whose 1 km descriptor is hidden
+each epoch, so that callers without it are served), `seed` and `device`.
+`resolve.default_config("terrain_correction")` lists their defaults.
+
+## Limits
+
+- The correction covers altitude and slope. Aspect is a bearing with its
+  own error, and is not corrected.
+- GLO-30 is a surface model: in forest its elevation includes the
+  canopy, metres to tens of metres above the ground a surveyor stands
+  on. The correction learned what that costs on the archive’s plots; an
+  elevation model of the bare ground would need a correction trained on
+  it.
+- A plot outside the field’s tiles, or without coordinates, keeps its
+  prediction (`applied` is `FALSE`).
+- The weights describe how the correction combined the sources on a
+  plot; they are not probabilities that a source is right.

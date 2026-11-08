@@ -180,8 +180,8 @@ fits = rc.fit_prediction_gaps(preds, my_species, my_plots, columns=columns,
                               targets={"elevation": {"scale": "linear"}})
 elevation = fits["elevation"]
 pd.Series(elevation.method).value_counts()
-#> recorded         60
-#> stack_species    15
+#> recorded                 60
+#> stack_species_spatial    15
 #> Name: count, dtype: int64
 ```
 :::
@@ -205,7 +205,7 @@ raw = preds.predictions["elevation"].numpy()
 fitted = elevation.fitted.numpy()
 {"model": float(np.abs(raw[gaps] - truth[gaps]).mean()),
  "fitted": float(np.abs(fitted[gaps] - truth[gaps]).mean())}
-#> {'model': 157.7350830078125, 'fitted': 112.00346970887854}
+#> {'model': 238.97451985677083, 'fitted': 154.8316109681892}
 ```
 :::
 
@@ -224,11 +224,11 @@ elevation$report$axes$km$gap_distance$median
 ```python
 located = elevation.report["groups"]["located"]
 located["method"]
-#> stack_species
+#> stack_species_spatial
 {m: round(e, 1) for m, e in located["matched_error"].items()}
-#> {'local_constant': 559.9, 'resolve': 176.9, 'offset_slope': 167.7, 'knn_species': 183.8, 'stack_species': 136.6, 'knn_spatial': 609.3, 'stack_species_spatial': 136.7}
+#> {'local_constant': 559.9, 'resolve': 188.8, 'offset_slope': 191.9, 'knn_species': 173.0, 'stack_species': 150.0, 'knn_spatial': 609.3, 'stack_species_spatial': 149.0}
 elevation.report["axes"]["km"]["gap_distance"]["median"]
-#> 7.379975889724689
+#> 7.379891561267665
 ```
 :::
 

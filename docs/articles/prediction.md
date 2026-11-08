@@ -295,12 +295,12 @@ out <- merge(out, new_plots[c("plot_id", "elevation", "habitat")],
              by = "plot_id", suffixes = c("", "_observed"))
 head(out)
 #>   plot_id elevation   habitat elevation_observed habitat_observed
-#> 1    A005      2035 grassland               2145        grassland
-#> 2    A010      1785    forest               1632          wetland
-#> 3    A015      2240    alpine               2165           alpine
-#> 4    A020      1279    forest               1284           forest
-#> 5    A025       927    forest               1235        grassland
-#> 6    A030      1627 grassland               1840        grassland
+#> 1    A005      2024 grassland               2145        grassland
+#> 2    A010      2023   wetland               1632          wetland
+#> 3    A015      2339    alpine               2165           alpine
+#> 4    A020      1418    forest               1284           forest
+#> 5    A025      1185 grassland               1235        grassland
+#> 6    A030      1530 grassland               1840        grassland
 ```
 
 ``` python
@@ -319,12 +319,12 @@ out = out.merge(new_plots[["plot_id", "elevation", "habitat"]],
                 on="plot_id", suffixes=("", "_observed"))
 out.head(6)
 #>   plot_id  elevation    habitat  elevation_observed habitat_observed
-#> 0    A005     1886.0  grassland                2145        grassland
-#> 1    A010     1696.0     forest                1632          wetland
-#> 2    A015     2246.0     alpine                2165           alpine
-#> 3    A020     1321.0     forest                1284           forest
-#> 4    A025      990.0  grassland                1235        grassland
-#> 5    A030     1078.0  grassland                1840        grassland
+#> 0    A005     2036.0     alpine                2145        grassland
+#> 1    A010     1620.0    wetland                1632          wetland
+#> 2    A015     2016.0     alpine                2165           alpine
+#> 3    A020     1094.0     forest                1284           forest
+#> 4    A025     1060.0  grassland                1235        grassland
+#> 5    A030     1882.0     alpine                1840        grassland
 ```
 
 The predictions are joined to the recorded values by plot identifier.
@@ -337,13 +337,13 @@ on new data.
 c(mae = mean(abs(out$elevation - out$elevation_observed)),
   accuracy = mean(out$habitat == out$habitat_observed))
 #>         mae    accuracy 
-#> 176.6333333   0.7333333
+#> 225.2333333   0.8333333
 ```
 
 ``` python
 {"mae": (out.elevation - out.elevation_observed).abs().mean(),
  "accuracy": (out.habitat == out.habitat_observed).mean()}
-#> {'mae': np.float64(185.23333333333332), 'accuracy': np.float64(0.8)}
+#> {'mae': np.float64(199.73333333333332), 'accuracy': np.float64(0.6333333333333333)}
 ```
 
 ## Class probabilities
@@ -359,9 +359,9 @@ with the largest value.
 probs <- preds$probabilities$habitat
 round(head(probs, 3), 3)
 #>      alpine forest grassland wetland
-#> [1,]  0.126  0.160     0.648   0.066
-#> [2,]  0.043  0.867     0.030   0.060
-#> [3,]  0.688  0.249     0.030   0.033
+#> [1,]  0.136  0.065     0.729   0.069
+#> [2,]  0.319  0.114     0.195   0.371
+#> [3,]  0.840  0.038     0.079   0.043
 range(rowSums(probs))
 #> [1] 0.9999999 1.0000001
 all(max.col(probs) - 1 == preds$predictions$habitat)
@@ -371,9 +371,9 @@ all(max.col(probs) - 1 == preds$predictions$habitat)
 ``` python
 probs = preds.probabilities["habitat"]
 probs[:3].round(decimals=3)
-#> tensor([[0.3380, 0.0870, 0.4780, 0.0960],
-#>         [0.1250, 0.5760, 0.1040, 0.1950],
-#>         [0.8300, 0.0580, 0.0590, 0.0530]])
+#> tensor([[0.4110, 0.0970, 0.4060, 0.0850],
+#>         [0.1560, 0.3310, 0.1550, 0.3570],
+#>         [0.4650, 0.2020, 0.1630, 0.1700]])
 probs.sum(dim=1).aminmax()
 #> torch.return_types.aminmax(
 #> min=tensor(1.0000),
@@ -400,9 +400,9 @@ sure <- data.frame(
 )
 head(sure[order(sure$confidence), ], 3)
 #>    plot_id confidence     margin  entropy
-#> 18    A090  0.4459195 0.06407756 1.148627
-#> 25    A125  0.5554017 0.25820446 1.068260
-#> 5     A025  0.6036218 0.39240986 1.059231
+#> 2     A010  0.3712301 0.05209187 1.299356
+#> 8     A040  0.4356640 0.09497643 1.214994
+#> 17    A085  0.4502355 0.22537930 1.284760
 ```
 
 ``` python
@@ -415,9 +415,9 @@ sure = pd.DataFrame({
 })
 sure.sort_values("confidence").head(3)
 #>    plot_id  confidence    margin   entropy
-#> 23    A120    0.332903  0.030494  1.342778
-#> 21    A110    0.340574  0.022809  1.334862
-#> 17    A090    0.473227  0.263681  1.263671
+#> 17    A090    0.330615  0.010530  1.331286
+#> 16    A085    0.347894  0.100572  1.357081
+#> 1     A010    0.357241  0.026313  1.313200
 ```
 
 The rows are computed on whichever plots are scored, so a checkpoint
@@ -543,6 +543,49 @@ varied in training is held at its training value at prediction, and the
 model’s output does not depend on it; the values above are for you to
 read.
 
+## Species names a model knows by another name
+
+A model knows each species by the name its training records were
+resolved to, and reads a plot’s species by matching names exactly. A
+table may name a species as it was entered in the field, by a current
+accepted name, or misspelled, and each of these counts as a species the
+model never saw. The `names` argument of the loaders and of suite
+prediction reads each name first as written, then through the release’s
+name table (`names.json`, which maps the names EVA’s records were
+entered under and the synonymy of the plant backbones to the names the
+models learnt), then as the nearest known name within one edit, and
+otherwise leaves it as written. The dataset then lists the names it did
+not find as written and the route each took. Without the release’s
+table, `TRUE` (R) or `True` (Python) resolves spellings against the
+vocabulary alone.
+
+``` r
+
+resolve.names(c("Silene acaulis", "Silene acualis", "Carex firma"), predictor)
+#>             name          token      route source            via distance
+#> 1 Silene acaulis Silene acaulis      exact                              0
+#> 2 Silene acualis Silene acaulis   spelling        Silene acaulis        1
+#> 3    Carex firma    Carex firma unresolved                              0
+```
+
+``` python
+rc.resolve_names(["Silene acaulis", "Silene acualis", "Carex firma"], predictor)
+#>              name           token       route source             via  distance
+#> 0  Silene acaulis  Silene acaulis       exact                                0
+#> 1  Silene acualis  Silene acaulis    spelling         Silene acaulis         1
+#> 2     Carex firma     Carex firma  unresolved                                0
+```
+
+*Silene acaulis*, which the training plots record, is `exact`; its
+misspelling, two letters swapped, is one edit away and read `via` the
+right name; *Carex firma*, which no training plot records, is
+`unresolved`. At one edit, misspelled copies of the example plots’ names
+resolved 99.5% to the right species and none to a wrong one;
+`maxEditDistance = 2` (R) or `max_edit_distance=2` (Python) also renames
+some species the models never saw to a different species. A model suite
+resolves each target against that target’s own vocabulary and reports
+per target (`species_names`).
+
 ## Predicting in chunks
 
 Prediction runs the model over the plots in chunks of 4096 by default
@@ -551,7 +594,11 @@ needs does not grow with the number of plots. A smaller chunk suits a
 wide model on a small GPU; -1 runs all plots in one pass. Each chunk
 goes through the same forward pass, so the results agree whatever the
 chunk size, up to the rounding of floating-point arithmetic, which
-depends on how many rows a matrix product sums at once.
+depends on how many rows a matrix product sums at once. A rank_pool or
+transformer model pads each plot’s species list to the widest plot, so
+its plots go through in order of how many species they hold, in chunks
+of at most 512 cut to each chunk’s widest plot, and come back in the
+order given; the forward then spends little on padding.
 
 ``` r
 
@@ -604,12 +651,12 @@ head(data.frame(plot_id = preds$plot_ids,
                 model = round(preds$predictions$elevation),
                 blended = round(blended$predictions$elevation)))
 #>   plot_id model blended
-#> 1    A005  2035    1900
-#> 2    A010  1785    1820
-#> 3    A015  2240    2247
-#> 4    A020  1279    1268
-#> 5    A025   927     865
-#> 6    A030  1627    1572
+#> 1    A005  2024    1866
+#> 2    A010  2023    1994
+#> 3    A015  2339    2325
+#> 4    A020  1418    1407
+#> 5    A025  1185    1104
+#> 6    A030  1530    1504
 
 resolve.retrieval(predictor, NULL)
 ```
@@ -627,12 +674,12 @@ pd.DataFrame({"plot_id": preds.plot_ids,
               "model": preds.predictions["elevation"].numpy().round(),
               "blended": blended.predictions["elevation"].numpy().round()}).head(6)
 #>   plot_id   model  blended
-#> 0    A005  1886.0   1794.0
-#> 1    A010  1696.0   1754.0
-#> 2    A015  2246.0   2263.0
-#> 3    A020  1321.0   1271.0
-#> 4    A025   990.0    979.0
-#> 5    A030  1078.0   1113.0
+#> 0    A005  2036.0   2068.0
+#> 1    A010  1620.0   1683.0
+#> 2    A015  2016.0   2081.0
+#> 3    A020  1094.0   1069.0
+#> 4    A025  1060.0   1017.0
+#> 5    A030  1882.0   1997.0
 
 predictor.clear_retrieval()
 ```
@@ -730,7 +777,7 @@ without loading any model.
 
 sealed <- resolve.seal_suite(suite_dir)
 substr(sealed$targets[[1]]$members[[1]]$sha256, 1, 16)
-#> [1] "8d94cdf39b9609f7"
+#> [1] "d1f76038d78893a1"
 resolve.verify_suite(suite_dir)$problems
 #> character(0)
 ```
@@ -741,7 +788,7 @@ sealed = rc.SuiteManifest.from_json(
 sealed.seal(suite_dir)
 sealed.write(suite_dir)
 sealed.targets[0].members[0].sha256[:16]
-#> 06dc292cc3acf6d2
+#> 14547c892d39deeb
 rc.SuiteManifest.read(suite_dir).verify(suite_dir)
 #> []
 ```
@@ -764,11 +811,11 @@ head(data.frame(plot_id = suite_preds$plot_ids, habitat = habitat$label,
                 agreement = habitat$agreement,
                 recognised = habitat$recognised_share))
 #>   plot_id   habitat agreement recognised
-#> 1    A005 grassland 0.6666667  0.6666667
-#> 2    A010   wetland 1.0000000  1.0000000
-#> 3    A015    alpine 0.3333333  1.0000000
+#> 1    A005 grassland 0.3333333  0.6666667
+#> 2    A010   wetland 0.6666667  1.0000000
+#> 3    A015    alpine 1.0000000  1.0000000
 #> 4    A020    forest 1.0000000  1.0000000
-#> 5    A025 grassland 1.0000000  1.0000000
+#> 5    A025    forest 0.6666667  1.0000000
 #> 6    A030 grassland 0.6666667  1.0000000
 ```
 
@@ -785,11 +832,11 @@ pd.DataFrame({"plot_id": suite_preds.plot_ids,
               "recognised": habitat.recognition.count_share.numpy()}).head(6)
 #>   plot_id    habitat  agreement  recognised
 #> 0    A005  grassland   1.000000    0.666667
-#> 1    A010    wetland   1.000000    1.000000
-#> 2    A015     alpine   0.666667    1.000000
+#> 1    A010     forest   0.666667    1.000000
+#> 2    A015     alpine   0.333333    1.000000
 #> 3    A020     forest   1.000000    1.000000
-#> 4    A025  grassland   0.666667    1.000000
-#> 5    A030  grassland   1.000000    1.000000
+#> 4    A025  grassland   1.000000    1.000000
+#> 5    A030  grassland   0.666667    1.000000
 ```
 
 The *agreement* of a vote is the share of members naming the winning

@@ -125,7 +125,7 @@ fit <- resolve.train.dataset(dataset, verbose = FALSE)
 metrics <- fit$result$final_metrics
 round(unlist(metrics$elevation[c("mae", "rmse", "r2", "band_25")]), 3)
 #>     mae    rmse      r2 band_25 
-#> 252.971 324.927   0.676   0.567
+#> 225.809 292.077   0.738   0.533
 round(metrics$habitat$accuracy, 3)
 #> [1] 0.833
 ```
@@ -137,9 +137,9 @@ trainer.prepare_data(dataset)
 result = trainer.fit()
 metrics = result.final_metrics
 {name: round(metrics["elevation"][name], 3) for name in ["mae", "rmse", "r2", "band_25"]}
-#> {'mae': 269.617, 'rmse': 317.141, 'r2': 0.691, 'band_25': 0.6}
+#> {'mae': 190.343, 'rmse': 266.092, 'r2': 0.783, 'band_25': 0.667}
 round(metrics["habitat"]["accuracy"], 3)
-#> 0.8
+#> 0.867
 ```
 
 For elevation, `mae` and `rmse` are in metres, `r2` is the share of the
@@ -169,12 +169,12 @@ head(data.frame(plot = preds$plot_ids,
                 elevation = round(preds$predictions$elevation),
                 observed = plots$elevation[match(preds$plot_ids, plots$plot_id)]))
 #>   plot elevation observed
-#> 1 A001      2336     2188
-#> 2 A002       872      568
-#> 3 A003      1939     2129
-#> 4 A004      2326     2267
-#> 5 A005      2112     2145
-#> 6 A006      1608     1799
+#> 1 A001      2357     2188
+#> 2 A002       949      568
+#> 3 A003      1891     2129
+#> 4 A004      2391     2267
+#> 5 A005      2226     2145
+#> 6 A006      1716     1799
 ```
 
 ``` python
@@ -190,12 +190,12 @@ out = pd.DataFrame({"plot": preds.plot_ids,
 out.merge(plots[["plot_id", "elevation"]], left_on="plot", right_on="plot_id",
           suffixes=("", "_observed")).drop(columns="plot_id").head(6)
 #>    plot  elevation  elevation_observed
-#> 0  A001       2218                2188
-#> 1  A002       1127                 568
-#> 2  A003       1897                2129
-#> 3  A004       2269                2267
-#> 4  A005       2043                2145
-#> 5  A006       1459                1799
+#> 0  A001       2368                2188
+#> 1  A002       1012                 568
+#> 2  A003       2044                2129
+#> 3  A004       2353                2267
+#> 4  A005       2097                2145
+#> 5  A006       1800                1799
 ```
 
 A plot with a species the model never saw still gets a prediction: the

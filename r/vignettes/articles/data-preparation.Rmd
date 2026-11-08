@@ -546,7 +546,7 @@ new_plots = rc.ResolveDataset.from_csv_with_vocabs(
     predictor.external_vocabs, predictor.dataset_config)
 preds = predictor.predict_dataset(new_plots)
 preds.predictions["elevation"][:6].round()
-#> tensor([1022., 1268., 1447., 1570., 1160., 1017.])
+#> tensor([1002., 1025., 1342., 1585., 1187.,  888.])
 ```
 :::
 

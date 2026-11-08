@@ -45,7 +45,7 @@
 
     <a class="navbar-brand me-2" href="index.html">resolveR</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.0.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -71,6 +71,8 @@
     <li><a class="dropdown-item" href="articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="articles/gap-fitting.html">Filling a dataset's gaps</a></li>
+    <li><a class="dropdown-item" href="articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="articles/embeddings.html">Latent and species embeddings</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Scaling up</h6></li>
@@ -84,6 +86,9 @@
     <li><a class="dropdown-item" href="articles/python-training.html">Python: training</a></li>
     <li><a class="dropdown-item" href="articles/python-prediction.html">Python: saving and predicting</a></li>
     <li><a class="dropdown-item" href="articles/python-suites.html">Python: model suites</a></li>
+    <li><a class="dropdown-item" href="articles/python-gap-fitting.html">Python: gap fitting</a></li>
+    <li><a class="dropdown-item" href="articles/python-terrain-correction.html">Python: terrain correction</a></li>
+    <li><a class="dropdown-item" href="articles/python-names.html">Python: species names</a></li>
     <li><a class="dropdown-item" href="articles/python-scoring.html">Python: scoring</a></li>
     <li><a class="dropdown-item" href="articles/python-engine.html">Python: the engine</a></li>
   </ul>
@@ -201,7 +206,7 @@
 <div class="section level3">
 <h3 id="python">Python<a class="anchor" aria-label="anchor" href="#python"></a>
 </h3>
-<p>The Python package needs <a href="https://www.python.org/downloads/" class="external-link">Python</a> 3.10 to 3.13:</p>
+<p>The Python package needs <a href="https://www.python.org/downloads/" class="external-link">Python</a> 3.10 to 3.14:</p>
 <div class="sourceCode" id="cb4"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a><span class="ex">pip</span> install resolve-core</span></code></pre></div>
 <p>The wheels cover Linux x86-64, Windows x86-64 and macOS on Apple Silicon. They link the libtorch inside the <code>torch</code> package, which pip installs with them. On Linux the default PyPI torch is the CUDA build; on Windows and macOS it is the processor build, and the CUDA build on Windows comes from PyTorch’s own index, as set up in <a href="https://gillescolling.com/resolve/articles/installation.html">Installing the engine</a>. Check what loaded with:</p>
 <div class="sourceCode" id="cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a><span class="ex">python</span> <span class="at">-c</span> <span class="st">"import resolve_core, torch; print(resolve_core.__version__, torch.cuda.is_available())"</span></span></code></pre></div>
@@ -242,9 +247,9 @@
 <span><span class="va">metrics</span> <span class="op">&lt;-</span> <span class="va">fit</span><span class="op">$</span><span class="va">result</span><span class="op">$</span><span class="va">final_metrics</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="va">metrics</span><span class="op">$</span><span class="va">elevation</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"mae"</span>, <span class="st">"r2"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt;     mae      r2 </span></span>
-<span><span class="co">#&gt; 294.586   0.587</span></span>
+<span><span class="co">#&gt; 277.306   0.626</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">metrics</span><span class="op">$</span><span class="va">habitat</span><span class="op">$</span><span class="va">accuracy</span>, <span class="fl">3</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] 0.633</span></span></code></pre></div>
+<span><span class="co">#&gt; [1] 0.7</span></span></code></pre></div>
 <p>Training holds out 20 % of the plots and stops when their loss no longer improves; the metrics are computed on these plots, the mean absolute error (<code>mae</code>) in metres. <code>resolve.save(fit$trainer, "model.pt")</code> writes a checkpoint that carries the species vocabulary, so <code><a href="reference/resolve.predict.dataset.html">resolve.predict.dataset()</a></code> encodes a new table against the species the model was trained on.</p>
 <p>The same run in Python:</p>
 <div class="sourceCode" id="cb7"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a><span class="im">import</span> pandas <span class="im">as</span> pd</span>
@@ -337,7 +342,7 @@
 </h2>
 <p>If you use RESOLVE, please cite it as below.</p>
 <pre class="text"><code>Colling G (2026). _resolveR: Predicting Sample Outcomes from
-Compositional Data_. R package version 1.0.3,
+Compositional Data_. R package version 1.1.0,
 &lt;https://github.com/gcol33/resolve&gt;.</code></pre>
 <p>BibTeX:</p>
 <div class="sourceCode" id="cb9"><pre class="sourceCode bibtex"><code class="sourceCode bibtex"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a><span class="va">@Manual</span>{<span class="ot">colling2026resolver</span>,</span>
@@ -345,7 +350,7 @@ Compositional Data_. R package version 1.0.3,
 <span id="cb9-3"><a href="#cb9-3" tabindex="-1"></a>  <span class="dt">author</span> = {Gilles Colling},</span>
 <span id="cb9-4"><a href="#cb9-4" tabindex="-1"></a>  <span class="dt">year</span> = {2026},</span>
 <span id="cb9-5"><a href="#cb9-5" tabindex="-1"></a>  <span class="dt">url</span> = {https://github.com/gcol33/resolve},</span>
-<span id="cb9-6"><a href="#cb9-6" tabindex="-1"></a>  <span class="dt">note</span> = {R package version 1.0.3},</span>
+<span id="cb9-6"><a href="#cb9-6" tabindex="-1"></a>  <span class="dt">note</span> = {R package version 1.1.0},</span>
 <span id="cb9-7"><a href="#cb9-7" tabindex="-1"></a>}</span></code></pre></div>
 <p>Download the citation as <a href="https://gillescolling.com/resolve/resolveR.bib">BibTeX</a> or <a href="https://gillescolling.com/resolve/resolveR.ris">RIS</a>.</p>
 </div>

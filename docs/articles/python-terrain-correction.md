@@ -1,0 +1,176 @@
+# Python: terrain correction
+
+Altitude and slope combined with an elevation model read at the plots:
+the terrain sources and the descriptors read from them, the coded and
+neural terrain fields, and the correction itself. [Correcting altitude
+and slope with an elevation
+model](https://gillescolling.com/resolve/articles/terrain-correction.md)
+walks through a fit; a model suite corrects its targets through
+[`SuitePredictor.predict(terrain=...)`](https://gillescolling.com/resolve/articles/python-suites.html#SuitePredictor.predict).
+
+[All of the Python
+reference](https://gillescolling.com/resolve/articles/python-reference.md)
+
+## Installation
+
+``` r
+
+# install.packages("pak")
+pak::pak("gcol33/resolve/r")
+
+# The engine library, downloaded once
+library(resolveR)
+resolve.install_backend()
+```
+
+``` bash
+pip install resolve-core
+```
+
+## Terrain sources
+
+``` python
+TerrainGrids(dir, cache_tiles=16)
+open_terrain_field(path, device="cpu")
+TerrainCodedField(path, cache_blocks=4096)
+TerrainField(path, device="cpu", cache_tiles=64)
+```
+
+A `TerrainSource` answers the elevation at any coordinate.
+`TerrainGrids` reads elevation grids on disk: a `tiles.json` listing
+float32 `.npy` tiles, each with its shape, the position of its first
+cell centre and its cell spacing (pixel is point, rows from north to
+south). `open_terrain_field` opens a terrain field file of either format
+from its header: a `TerrainCodedField`, coded with a bounded error per
+cell, or a `TerrainField`, one neural field per tile. Every source has
+`elevation(lat, lon)` (bilinear between cell centres, `NaN` outside
+every tile), `tiles` (the `TerrainTile` geometry of each tile) and
+`describe()`; a field also has `config` and `metrics` (per tile, how
+closely it reproduced the grid when it was coded or fitted: RMSE, mean,
+99th-percentile and largest error in m, slope error in degrees, seconds,
+bytes). Tiles are read when a query first reaches them, and the most
+recently used are kept. A coded field reads and decodes only the blocks
+of 64 x 64 cells its queries fall in, on all threads, and keeps at most
+`cache_blocks` decoded blocks for later queries, so plots scattered over
+a continent cost a few blocks each, never a whole tile. `grid(tile)`
+returns one tile whole from any source: the stored cells of grids, the
+decoded cells of a coded field, the evaluated cells of a neural field
+(in R,
+[`resolve.terrain_grid()`](https://gillescolling.com/resolve/reference/resolve.terrain_grid.md),
+by tile name).
+
+## `terrain_descriptors()`
+
+``` python
+terrain_descriptors(source, lat, lon, chunk=4096)
+```
+
+The four descriptors at each coordinate, read through one definition for
+every source: `elevation`, `elevation_1km` (the mean over the 1 km
+square centred on the coordinate, a 33 x 33 lattice), `slope` (the cell
+nearest the coordinate, from its four edge neighbours, as
+`ee.Terrain.slope`) and `slope_1km` (the inclination of the
+least-squares plane through the 1 km square), as `(n,)` float64 tensors
+in a `TerrainDescriptors`; `NaN` where the source holds nothing.
+
+## `encode_terrain_grids()`
+
+``` python
+encode_terrain_grids(grids, config=TerrainCodecConfig(), path, tiles=[])
+```
+
+Codes the tiles of a `TerrainGrids` (all, or those named in `tiles`)
+into one coded terrain field file. `TerrainCodecConfig` has `max_error`
+(m, default 2: every cell is rounded to a multiple of twice this, so
+none moves by more) and `block` (cells per side of an independently
+coded block, default 64). Returns a `dict` of tile name to its metrics.
+
+## `fit_terrain_tile()` and `assemble_terrain_field()`
+
+``` python
+fit_terrain_tile(grid, tile, config=TerrainFieldConfig(), path)
+assemble_terrain_field(tiles, path)
+```
+
+The neural field format: one tile’s grid fitted by a multiresolution
+hash encoding and a small network for the detail above a coarse base,
+written as a tile pack; `assemble_terrain_field` merges tile packs into
+one field file. `TerrainFieldConfig` holds the encoding (`levels`,
+`log2_table_size`, `features`, `coarsest_resolution`,
+`finest_fraction`), the network (`hidden_dim`, `n_layers`), `base_cells`
+and the fit (`steps`, `batch_size`, `lr`, `gradient_weight`, `seed`,
+`device`). At equal size it measured 4 to 10 times further from the grid
+than the coded field; suites ship the coded field.
+
+## `fit_terrain_correction()`
+
+``` python
+fit_terrain_correction(target, descriptor, prediction, dem, truth, dem_1km=None,
+                       uncertainty_m=None, spread=None, recognised_share=None,
+                       n_species=None, config=TerrainCorrectionConfig())
+```
+
+Fits the gated correction of one target on plots whose recorded value is
+`truth` (`NaN`: unrecorded, left out). `descriptor` is
+`TerrainDescriptor.Elevation` (an altitude target) or
+`TerrainDescriptor.Slope`. Every input is an `(n,)` tensor, one value
+per plot: the prediction, the descriptor at the coordinate and over 1
+km, the recorded location uncertainty in m, the members’ standard
+deviation, the share of species recognised and the number of species.
+`TerrainCorrectionConfig` has `scale` (the target’s scale: 500 for
+altitude in m, 20 for slope in degrees), `offset_fraction`,
+`hidden_dim`, `n_layers`, `epochs`, `batch_size`, `lr`, `weight_decay`,
+`dem_1km_dropout`, `seed` and `device`. Returns a `TerrainCorrection`.
+
+## `TerrainCorrection`
+
+``` python
+TerrainCorrection.load(path, device="cpu")
+correction.apply(prediction, dem, dem_1km=None, uncertainty_m=None, spread=None,
+                 recognised_share=None, n_species=None)
+correction.save(path)
+```
+
+`apply` returns a `TerrainCorrectionResult`: `corrected` (the prediction
+where the correction cannot apply: no prediction or no descriptor),
+`weights` (`(n, 3)`, the weight of the prediction, the descriptor and
+the 1 km descriptor; `TerrainCorrection.weight_names`), `offset` and
+`applied`. An input not given reads as the training plots’ median. The
+correction also has `target`, `descriptor`, `config` and `report` (the
+training plots and the mean absolute error of the prediction, the
+descriptor and the corrected value on them).
+
+``` python
+import numpy as np
+import torch
+import resolve_core as rc
+
+rng = np.random.default_rng(1)
+n = 4000
+altitude = rng.uniform(200, 1700, n)
+uncertainty = 10 ** rng.uniform(0, 3.5, n)
+wrong = rng.random(n) < 0.05 + 0.15 * np.log10(uncertainty)
+t = lambda x: torch.tensor(x, dtype=torch.float64)
+inputs = dict(prediction=t(altitude + rng.normal(0, 30, n)),
+              dem=t(altitude + rng.normal(0, 2, n) + np.where(wrong, rng.normal(0, 300, n), 0)),
+              uncertainty_m=t(uncertainty))
+cfg = rc.TerrainCorrectionConfig()
+cfg.epochs, cfg.batch_size = 60, 256
+model = rc.fit_terrain_correction("altitude", rc.TerrainDescriptor.Elevation, truth=t(altitude),
+                                  config=cfg, **inputs)
+print({k: round(v, 1) for k, v in model.report.items() if k.startswith("mae")})
+```
+
+## In a suite
+
+`SuitePredictor.predict(..., terrain=...)` corrects every loaded target
+the manifest gives a terrain correction: `"field"` (or `True`) reads the
+suite’s terrain field at the plots’ coordinates,
+`{"source": "grids", "grids": dir}` elevation grids, `"columns"` the
+caller’s columns named in `columns["terrain"]` (`elevation`,
+`elevation_1km`, `slope`, `slope_1km`, `uncertainty`; the last is read
+by every source). Each corrected target gets `terrain`, a
+`SuiteTerrainPrediction` (`descriptor`, `source`, `dem`, `dem_1km` and
+the `result`), and `to_pandas()` adds `<target>_terrain`,
+`<target>_terrain_w_resolve`, `_w_dem`, `_w_dem_1km`, `<target>_dem` and
+`<target>_dem_1km`.

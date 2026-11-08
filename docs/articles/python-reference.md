@@ -256,6 +256,9 @@ plots.
   The predictions and class probabilities for every plot.
 - [`RetrievalConfig`](https://gillescolling.com/resolve/articles/python-prediction.html#RetrievalConfig):
   The settings of retrieval augmentation.
+- [`nearest_by_cosine()`](https://gillescolling.com/resolve/articles/python-prediction.html#nearest_by_cosine):
+  The rows of a reference set most similar to each query row by cosine
+  similarity.
 - [`Scalers`](https://gillescolling.com/resolve/articles/python-prediction.html#Scalers):
   The input and target scaling fitted on the training plots.
 - [`RunMetadata`](https://gillescolling.com/resolve/articles/python-prediction.html#RunMetadata):
@@ -314,6 +317,85 @@ Several trained models released as one directory and scored together.
   The Earth radius the spherical mean measures distances with.
 - [`sha256_file()`](https://gillescolling.com/resolve/articles/python-suites.html#sha256_file):
   The SHA-256 digest of a file.
+
+## [Gap fitting](https://gillescolling.com/resolve/articles/python-gap-fitting.md)
+
+Filling a dataset’s missing values from its own complete plots, beside
+the raw prediction.
+
+- [`fit_gaps()`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#fit_gaps):
+  One target’s gaps from the raw prediction, the recorded values and the
+  plots’ composition, positions and years.
+- [`fit_prediction_gaps()`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#fit_prediction_gaps):
+  A single model’s gaps from its predictions and the dataset’s tables.
+- [`read_gap_tables()`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#read_gap_tables):
+  What gap fitting reads about a dataset’s plots, from DataFrames or CSV
+  paths.
+- [`GapFittingConfig`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapFittingConfig):
+  The candidates, the neighbour counts, spatial neighbours on or off and
+  the matching seed.
+- [`GapTarget`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapTarget):
+  A target’s name, scale and period.
+- [`GapScale`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapScale):
+  How a target’s values lie: linear, log, circular or geographic.
+- [`GapMethod`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapMethod):
+  The methods a gap can be predicted by.
+- [`GapFit`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapFit):
+  The fitted values, the method per plot and the report.
+- [`matched_gap_neighbours()`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#matched_gap_neighbours):
+  The neighbours the choice is tested with.
+- [`GapColumns`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapColumns),
+  [`GapTables`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapTables),
+  [`GapFitRequest`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapFitRequest)
+  : The low-level columns, tables and requests the functions above
+  build.
+
+## [Terrain correction](https://gillescolling.com/resolve/articles/python-terrain-correction.md)
+
+Altitude and slope combined with an elevation model read at the plots,
+and the elevation model a suite ships.
+
+- [`TerrainGrids`, `open_terrain_field()`, `TerrainCodedField`,
+  `TerrainField`](https://gillescolling.com/resolve/articles/python-terrain-correction.html#sources):
+  Elevation grids on disk and terrain field files, as sources of
+  elevations.
+- [`terrain_descriptors()`](https://gillescolling.com/resolve/articles/python-terrain-correction.html#terrain_descriptors):
+  The elevation, the 1 km mean, the slope and the 1 km inclination at
+  coordinates.
+- [`encode_terrain_grids()`](https://gillescolling.com/resolve/articles/python-terrain-correction.html#encode_terrain_grids):
+  Elevation grids coded into a terrain field with a bounded error per
+  cell.
+- [`fit_terrain_tile()`,
+  `assemble_terrain_field()`](https://gillescolling.com/resolve/articles/python-terrain-correction.html#fit_terrain_tile):
+  The neural terrain field format, tile by tile.
+- [`fit_terrain_correction()`](https://gillescolling.com/resolve/articles/python-terrain-correction.html#fit_terrain_correction):
+  The gated correction of one target, fitted on plots with recorded
+  values.
+- [`TerrainCorrection`](https://gillescolling.com/resolve/articles/python-terrain-correction.html#TerrainCorrection):
+  A fitted correction: apply, save, load.
+- [`nearest_by_great_circle()`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#nearest_by_great_circle):
+  The nearest rows of a reference set by great-circle distance.
+
+## [Species names](https://gillescolling.com/resolve/articles/python-names.md)
+
+Species names read as the names a model learnt.
+
+- [`resolve_names()`](https://gillescolling.com/resolve/articles/python-names.html#resolve_names):
+  Resolve species names against a model’s vocabulary, with the route
+  each takes.
+- [`NameTable`](https://gillescolling.com/resolve/articles/python-names.html#NameTable):
+  The release’s name table: entered names and synonyms with the token
+  each stands for.
+- [`SpeciesNames`](https://gillescolling.com/resolve/articles/python-names.html#SpeciesNames):
+  How a load or a suite prediction resolves species names.
+- [`NameResolver`](https://gillescolling.com/resolve/articles/python-names.html#NameResolver):
+  Resolves names against one vocabulary.
+- [`ResolvedName`](https://gillescolling.com/resolve/articles/python-names.html#ResolvedName):
+  What the resolver gives for one name.
+- [`NameRoute`](https://gillescolling.com/resolve/articles/python-names.html#NameRoute):
+  Exact, alias, spelling or unresolved.
+- [`SpeciesNameReport`](https://gillescolling.com/resolve/articles/python-names.html#SpeciesNameReport):
+  The names a load or a suite target did not find as written.
 
 ## [Scoring](https://gillescolling.com/resolve/articles/python-scoring.md)
 

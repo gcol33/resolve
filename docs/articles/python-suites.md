@@ -246,7 +246,8 @@ suite.target_names
 ### `predict()`
 
 ``` python
-predict(species, header=None, columns=None, batch_size=4096, keep_members=False)
+predict(species, header=None, columns=None, batch_size=4096, keep_members=False,
+        gap_fitting=None, names=None, max_edit_distance=1, terrain=None)
 ```
 
 Scores plots with every loaded target and returns `SuitePredictions`.
@@ -257,11 +258,20 @@ given it decides which plots are scored and in what order. `columns`, a
 `SuiteColumns` or a `dict` of its fields, renames the contract’s columns
 for a table that spells them differently. `batch_size` is the forward
 chunk of each member; `keep_members` keeps every member’s own
-prediction. No target column is read.
+prediction. No target column is read, except with `gap_fitting` (`True`,
+a `GapFittingConfig` or a `dict` of its fields): each target
+`columns["recorded"]` names is then fitted from the dataset’s own
+complete plots ([Filling a dataset’s
+gaps](https://gillescolling.com/resolve/articles/gap-fitting.md)). With
+`terrain` (`"field"` or `True`, `"columns"`, a `dict` of `source`,
+`grids` and `device`, or a `SuiteTerrainOptions`), every target the
+manifest gives a terrain correction is corrected by an elevation model
+read at the plots ([Correcting altitude and slope with an elevation
+model](https://gillescolling.com/resolve/articles/terrain-correction.md)).
 
-`predict_columns(species_names, species_columns, header_names=None, header_columns=None, columns=SuiteColumns(), batch_size=4096, keep_members=False)`
+`predict_columns(species_names, species_columns, header_names=None, header_columns=None, columns=SuiteColumns(), batch_size=4096, keep_members=False, gap_fitting=None, names=None, terrain=None)`
 and
-`predict_csv(species_path, header_path="", columns=SuiteColumns(), batch_size=4096, keep_members=False)`
+`predict_csv(species_path, header_path="", columns=SuiteColumns(), batch_size=4096, keep_members=False, gap_fitting=None, names=None, terrain=None)`
 are the forms over string columns and CSV paths that `predict` calls.
 
 ``` python
@@ -280,7 +290,12 @@ Renames the manifest’s input columns at prediction time; a field left
 `None` keeps the manifest’s name. The fields follow `RoleMapping`:
 `plot_id`, `species_id`, `abundance`, `genus`, `family`, `latitude`,
 `longitude`, and `covariates` and `categoricals`, which replace the
-whole list and must match its length.
+whole list and must match its length. For gap fitting, `recorded` lists
+`(target, [column])` pairs, `(target, [latitude, longitude])` for a
+location (a `dict` passed to `predict` may give `{target: column}`), and
+`survey_year` names the survey-year column; a suite that reads no
+coordinates may still name `latitude` and `longitude` for gap fitting
+alone.
 
 ## `SuitePredictions`
 
@@ -332,6 +347,9 @@ One target’s predictions for every plot.
   `(n_members, n_plots)` or `(n_members, n_plots, 2)`.
 - `recognition` (`SpeciesRecognition`): how much of each plot the
   target’s vocabulary recognises.
+- `gap_fit` (`GapFit` or `None`): with gap fitting, the fitted values,
+  the method per plot and the report
+  ([`GapFit`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapFit)).
 
 None of these is combined into a single level of support, and none is a
 calibrated interval: the spread across seeds measures how much the

@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">resolveR</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.0.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -49,7 +49,7 @@
 
     <div id="navbar" class="collapse navbar-collapse ms-3">
       <ul class="navbar-nav me-auto">
-<li class="active nav-item"><a class="nav-link" href="../articles/resolveR.html">Get started</a></li>
+<li class="nav-item"><a class="nav-link" href="../articles/resolveR.html">Get started</a></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-reference" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Reference</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-reference">
@@ -66,6 +66,8 @@
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
+    <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Scaling up</h6></li>
@@ -79,6 +81,9 @@
     <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
     <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
     <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
+    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
+    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
+    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
     <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
     <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
   </ul>
@@ -232,7 +237,7 @@ are computed on these held-out plots.</p>
 <span><span class="va">metrics</span> <span class="op">&lt;-</span> <span class="va">fit</span><span class="op">$</span><span class="va">result</span><span class="op">$</span><span class="va">final_metrics</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="va">metrics</span><span class="op">$</span><span class="va">elevation</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"mae"</span>, <span class="st">"rmse"</span>, <span class="st">"r2"</span>, <span class="st">"band_25"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt;     mae    rmse      r2 band_25 </span></span>
-<span><span class="co">#&gt; 252.971 324.927   0.676   0.567</span></span>
+<span><span class="co">#&gt; 225.809 292.077   0.738   0.533</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">metrics</span><span class="op">$</span><span class="va">habitat</span><span class="op">$</span><span class="va">accuracy</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 0.833</span></span></code></pre></div>
 <div class="sourceCode" id="cb8"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a>model <span class="op">=</span> rc.ResolveModel(dataset.schema, rc.model_config_for_dataset(dataset))</span>
@@ -241,9 +246,9 @@ are computed on these held-out plots.</p>
 <span id="cb8-4"><a href="#cb8-4" tabindex="-1"></a>result <span class="op">=</span> trainer.fit()</span>
 <span id="cb8-5"><a href="#cb8-5" tabindex="-1"></a>metrics <span class="op">=</span> result.final_metrics</span>
 <span id="cb8-6"><a href="#cb8-6" tabindex="-1"></a>{name: <span class="bu">round</span>(metrics[<span class="st">"elevation"</span>][name], <span class="dv">3</span>) <span class="cf">for</span> name <span class="kw">in</span> [<span class="st">"mae"</span>, <span class="st">"rmse"</span>, <span class="st">"r2"</span>, <span class="st">"band_25"</span>]}</span>
-<span id="cb8-7"><a href="#cb8-7" tabindex="-1"></a><span class="co">#&gt; {'mae': 269.617, 'rmse': 317.141, 'r2': 0.691, 'band_25': 0.6}</span></span>
+<span id="cb8-7"><a href="#cb8-7" tabindex="-1"></a><span class="co">#&gt; {'mae': 190.343, 'rmse': 266.092, 'r2': 0.783, 'band_25': 0.667}</span></span>
 <span id="cb8-8"><a href="#cb8-8" tabindex="-1"></a><span class="bu">round</span>(metrics[<span class="st">"habitat"</span>][<span class="st">"accuracy"</span>], <span class="dv">3</span>)</span>
-<span id="cb8-9"><a href="#cb8-9" tabindex="-1"></a><span class="co">#&gt; 0.8</span></span></code></pre></div>
+<span id="cb8-9"><a href="#cb8-9" tabindex="-1"></a><span class="co">#&gt; 0.867</span></span></code></pre></div>
 </div>
 <p>For elevation, <code>mae</code> and <code>rmse</code> are in metres,
 <code>r2</code> is the share of the variance the predictions explain,
@@ -274,12 +279,12 @@ the survey’s own plots again.</p>
 <span>                elevation <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">preds</span><span class="op">$</span><span class="va">predictions</span><span class="op">$</span><span class="va">elevation</span><span class="op">)</span>,</span>
 <span>                observed <span class="op">=</span> <span class="va">plots</span><span class="op">$</span><span class="va">elevation</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/match.html" class="external-link">match</a></span><span class="op">(</span><span class="va">preds</span><span class="op">$</span><span class="va">plot_ids</span>, <span class="va">plots</span><span class="op">$</span><span class="va">plot_id</span><span class="op">)</span><span class="op">]</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   plot elevation observed</span></span>
-<span><span class="co">#&gt; 1 A001      2336     2188</span></span>
-<span><span class="co">#&gt; 2 A002       872      568</span></span>
-<span><span class="co">#&gt; 3 A003      1939     2129</span></span>
-<span><span class="co">#&gt; 4 A004      2326     2267</span></span>
-<span><span class="co">#&gt; 5 A005      2112     2145</span></span>
-<span><span class="co">#&gt; 6 A006      1608     1799</span></span></code></pre></div>
+<span><span class="co">#&gt; 1 A001      2357     2188</span></span>
+<span><span class="co">#&gt; 2 A002       949      568</span></span>
+<span><span class="co">#&gt; 3 A003      1891     2129</span></span>
+<span><span class="co">#&gt; 4 A004      2391     2267</span></span>
+<span><span class="co">#&gt; 5 A005      2226     2145</span></span>
+<span><span class="co">#&gt; 6 A006      1716     1799</span></span></code></pre></div>
 <div class="sourceCode" id="cb10"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a><span class="im">import</span> os, tempfile</span>
 <span id="cb10-2"><a href="#cb10-2" tabindex="-1"></a></span>
 <span id="cb10-3"><a href="#cb10-3" tabindex="-1"></a>path <span class="op">=</span> os.path.join(tempfile.gettempdir(), <span class="st">"model.pt"</span>)</span>
@@ -292,12 +297,12 @@ the survey’s own plots again.</p>
 <span id="cb10-10"><a href="#cb10-10" tabindex="-1"></a>out.merge(plots[[<span class="st">"plot_id"</span>, <span class="st">"elevation"</span>]], left_on<span class="op">=</span><span class="st">"plot"</span>, right_on<span class="op">=</span><span class="st">"plot_id"</span>,</span>
 <span id="cb10-11"><a href="#cb10-11" tabindex="-1"></a>          suffixes<span class="op">=</span>(<span class="st">""</span>, <span class="st">"_observed"</span>)).drop(columns<span class="op">=</span><span class="st">"plot_id"</span>).head(<span class="dv">6</span>)</span>
 <span id="cb10-12"><a href="#cb10-12" tabindex="-1"></a><span class="co">#&gt;    plot  elevation  elevation_observed</span></span>
-<span id="cb10-13"><a href="#cb10-13" tabindex="-1"></a><span class="co">#&gt; 0  A001       2218                2188</span></span>
-<span id="cb10-14"><a href="#cb10-14" tabindex="-1"></a><span class="co">#&gt; 1  A002       1127                 568</span></span>
-<span id="cb10-15"><a href="#cb10-15" tabindex="-1"></a><span class="co">#&gt; 2  A003       1897                2129</span></span>
-<span id="cb10-16"><a href="#cb10-16" tabindex="-1"></a><span class="co">#&gt; 3  A004       2269                2267</span></span>
-<span id="cb10-17"><a href="#cb10-17" tabindex="-1"></a><span class="co">#&gt; 4  A005       2043                2145</span></span>
-<span id="cb10-18"><a href="#cb10-18" tabindex="-1"></a><span class="co">#&gt; 5  A006       1459                1799</span></span></code></pre></div>
+<span id="cb10-13"><a href="#cb10-13" tabindex="-1"></a><span class="co">#&gt; 0  A001       2368                2188</span></span>
+<span id="cb10-14"><a href="#cb10-14" tabindex="-1"></a><span class="co">#&gt; 1  A002       1012                 568</span></span>
+<span id="cb10-15"><a href="#cb10-15" tabindex="-1"></a><span class="co">#&gt; 2  A003       2044                2129</span></span>
+<span id="cb10-16"><a href="#cb10-16" tabindex="-1"></a><span class="co">#&gt; 3  A004       2353                2267</span></span>
+<span id="cb10-17"><a href="#cb10-17" tabindex="-1"></a><span class="co">#&gt; 4  A005       2097                2145</span></span>
+<span id="cb10-18"><a href="#cb10-18" tabindex="-1"></a><span class="co">#&gt; 5  A006       1800                1799</span></span></code></pre></div>
 </div>
 <p>A plot with a species the model never saw still gets a prediction:
 the unknown species is encoded through its genus and family where those

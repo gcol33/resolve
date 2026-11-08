@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">resolveR</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.0.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -57,7 +57,7 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="active nav-item dropdown">
+<li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><hr class="dropdown-divider"></li>
@@ -66,6 +66,8 @@
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
+    <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Scaling up</h6></li>
@@ -79,6 +81,9 @@
     <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
     <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
     <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
+    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
+    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
+    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
     <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
     <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
   </ul>
@@ -392,6 +397,33 @@ the blend; <code>temperature</code> (<code>float</code>, default
 <code>validate()</code> raises for a value out of range.</p>
 </div>
 <div class="section level2">
+<h2 id="nearest_by_cosine">
+<code>nearest_by_cosine()</code><a class="anchor" aria-label="anchor" href="#nearest_by_cosine"></a>
+</h2>
+<div class="sourceCode" id="cb16"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb16-1"><a href="#cb16-1" tabindex="-1"></a>nearest_by_cosine(queries, reference, k, exclude_self<span class="op">=</span><span class="va">False</span>)</span></code></pre></div>
+<p>The search <code>set_retrieval</code> runs, on any rows: for each row
+of <code>queries</code>, the <code>k</code> rows of
+<code>reference</code> most similar to it by cosine similarity, most
+similar first. Both are dense <code>(rows, dim)</code> tensors of one
+<code>dim</code>; a numpy array goes through
+<code>torch.from_numpy</code>. On rows of species presence (1 where a
+plot records a species) the cosine similarity is the Ochiai index of two
+species lists. The search is exact and computed in blocks, so memory
+stays bounded whatever the size of either set. It runs on the device
+<code>reference</code> is on; <code>queries</code> may stay in host
+memory and is moved over a block of rows at a time. With
+<code>exclude_self=True</code>, <code>queries</code> and
+<code>reference</code> are the same plots in the same order (pass the
+same tensor twice): plot <code>i</code> is never returned as its own
+neighbour, while another plot with the same species list still is.
+<code>k</code> is clamped to the reference size, one less with
+<code>exclude_self</code>. Returns <code>(indices, similarities)</code>:
+<code>(n_queries, k)</code> int64 rows of <code>reference</code> and
+their float32 similarities, on the CPU.</p>
+<div class="sourceCode" id="cb17"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb17-1"><a href="#cb17-1" tabindex="-1"></a>rows <span class="op">=</span> torch.from_numpy(presence.astype(<span class="st">"float32"</span>)).cuda()</span>
+<span id="cb17-2"><a href="#cb17-2" tabindex="-1"></a>indices, similarities <span class="op">=</span> rc.nearest_by_cosine(rows, rows, <span class="dv">50</span>, exclude_self<span class="op">=</span><span class="va">True</span>)</span></code></pre></div>
+</div>
+<div class="section level2">
 <h2 id="Scalers">
 <code>Scalers</code><a class="anchor" aria-label="anchor" href="#Scalers"></a>
 </h2>
@@ -403,7 +435,7 @@ column reads as before scaling; <code>None</code> for a checkpoint
 written before missing cells were filled) and
 <code>target_scalers</code> (<code>dict</code> of regression target to
 its <code>(mean, scale)</code>).</p>
-<div class="sourceCode" id="cb16"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb16-1"><a href="#cb16-1" tabindex="-1"></a>predictor.scalers.target_scalers</span></code></pre></div>
+<div class="sourceCode" id="cb18"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb18-1"><a href="#cb18-1" tabindex="-1"></a>predictor.scalers.target_scalers</span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="RunMetadata">
@@ -430,8 +462,8 @@ seed, which also seeds the epoch shuffle).</li>
 (<code>int</code>) and <code>final_metrics</code>
 (<code>dict[str, dict[str, float]]</code>).</li>
 </ul>
-<div class="sourceCode" id="cb17"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb17-1"><a href="#cb17-1" tabindex="-1"></a>record <span class="op">=</span> rc.Trainer.load_run_metadata(path)</span>
-<span id="cb17-2"><a href="#cb17-2" tabindex="-1"></a>record.hold_out, record.n_plots_test</span></code></pre></div>
+<div class="sourceCode" id="cb19"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb19-1"><a href="#cb19-1" tabindex="-1"></a>record <span class="op">=</span> rc.Trainer.load_run_metadata(path)</span>
+<span id="cb19-2"><a href="#cb19-2" tabindex="-1"></a>record.hold_out, record.n_plots_test</span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="HoldOutMode">
@@ -446,20 +478,20 @@ seed, which also seeds the epoch shuffle).</li>
 <h2 id="dataset_config_from_checkpoint">
 <code>dataset_config_from_checkpoint()</code><a class="anchor" aria-label="anchor" href="#dataset_config_from_checkpoint"></a>
 </h2>
-<div class="sourceCode" id="cb18"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb18-1"><a href="#cb18-1" tabindex="-1"></a>dataset_config_from_checkpoint(schema, model_config)</span></code></pre></div>
+<div class="sourceCode" id="cb20"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb20-1"><a href="#cb20-1" tabindex="-1"></a>dataset_config_from_checkpoint(schema, model_config)</span></code></pre></div>
 <p>The <code>DatasetConfig</code> a checkpoint was loaded with, rebuilt
 from its schema and model settings: <code>species_encoding</code>,
 <code>hash_dim</code> and <code>top_k</code> from the
 <code>ModelConfig</code>, because they size the model, and every other
 loader setting from the schema. <code>use_cuda_hash</code> is not
 restored. <code>Predictor.dataset_config</code> returns the same.</p>
-<div class="sourceCode" id="cb19"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb19-1"><a href="#cb19-1" tabindex="-1"></a>rc.dataset_config_from_checkpoint(predictor.schema, predictor.model.config).species_encoding</span></code></pre></div>
+<div class="sourceCode" id="cb21"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb21-1"><a href="#cb21-1" tabindex="-1"></a>rc.dataset_config_from_checkpoint(predictor.schema, predictor.model.config).species_encoding</span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="target_specs_from_schema">
 <code>target_specs_from_schema()</code><a class="anchor" aria-label="anchor" href="#target_specs_from_schema"></a>
 </h2>
-<div class="sourceCode" id="cb20"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb20-1"><a href="#cb20-1" tabindex="-1"></a>target_specs_from_schema(schema)</span></code></pre></div>
+<div class="sourceCode" id="cb22"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb22-1"><a href="#cb22-1" tabindex="-1"></a>target_specs_from_schema(schema)</span></code></pre></div>
 <p>The targets a checkpoint was trained on, as <code>TargetSpec</code>s
 each reading the column of its own name: the targets a retrieval
 reference set is loaded with. The <code>*_with_vocabs</code> loaders

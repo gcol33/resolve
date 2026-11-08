@@ -2,6 +2,8 @@
 title: "Python: species names"
 ---
 
+<!-- Python blocks run by tools/python_twins.py (md5 cf36e5edb179b48e2b180eb9df889249). -->
+
 Reading a table's species names as the names a model learnt: the release's name table, the resolver, the setting a load or a suite prediction takes, and the report of the names not found as written. [Species names a model knows by another name](prediction.html#species-names) walks through it.
 
 [All of the Python reference](python-reference.html)

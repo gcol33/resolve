@@ -171,7 +171,7 @@ fit <- resolve.train.dataset(dataset, maxEpochs = 200L, patience = 30L,
                              testSize = 0.2, seed = 42L, verbose = FALSE)
 result <- fit$result
 result$best_epoch
-#> [1] 91
+#> [1] 76
 length(result$train_loss)
 #> [1] 130
 ```
@@ -185,9 +185,9 @@ trainer = rc.Trainer(model, cfg)
 trainer.prepare_data(dataset, test_size=0.2, seed=42)
 result = trainer.fit()
 result.best_epoch
-#> 121
+#> 61
 len(result.train_loss_history)
-#> 152
+#> 130
 ```
 
 The model is built from the dataset’s schema, so the width of its input
@@ -248,7 +248,7 @@ result$train_time_seconds > 0
 #> [1] TRUE
 round(unlist(result$final_metrics$elevation), 3)
 #> band_10 band_25 band_50     mae      r2    rmse   smape 
-#>   0.367   0.533   0.900 261.876   0.637 343.906   0.257
+#>   0.333   0.500   0.933 271.604   0.619 352.514   0.273
 round(unlist(result$final_metrics$habitat), 3)
 #>    accuracy        f1_0        f1_1        f1_2        f1_3    macro_f1 
 #>       0.833       0.857       0.870       0.941       0.615       0.821 
@@ -262,9 +262,9 @@ round(unlist(result$final_metrics$habitat), 3)
 result.train_time_seconds > 0
 #> True
 {name: round(value, 3) for name, value in result.final_metrics["elevation"].items()}
-#> {'band_25': 0.633, 'band_10': 0.433, 'mae': 218.991, 'rmse': 297.215, 'r2': 0.729, 'smape': 0.219, 'band_50': 0.9}
+#> {'band_25': 0.6, 'band_10': 0.4, 'mae': 249.315, 'rmse': 300.05, 'r2': 0.724, 'smape': 0.246, 'band_50': 0.833}
 {name: round(value, 3) for name, value in result.final_metrics["habitat"].items()}
-#> {'recall_1': 0.909, 'accuracy': 0.833, 'f1_2': 0.889, 'macro_f1': 0.821, 'precision_0': 0.75, 'weighted_f1': 0.827, 'f1_0': 0.857, 'recall_0': 1.0, 'precision_1': 0.833, 'f1_1': 0.87, 'precision_2': 0.889, 'recall_2': 0.889, 'precision_3': 0.8, 'recall_3': 0.571, 'f1_3': 0.667}
+#> {'recall_1': 1.0, 'accuracy': 0.867, 'f1_2': 0.875, 'macro_f1': 0.881, 'precision_0': 1.0, 'weighted_f1': 0.865, 'f1_0': 1.0, 'recall_0': 1.0, 'precision_1': 0.786, 'f1_1': 0.88, 'precision_2': 1.0, 'recall_2': 0.778, 'precision_3': 0.833, 'recall_3': 0.714, 'f1_3': 0.769}
 ```
 
 ### Metrics
@@ -315,7 +315,7 @@ baseline’s.
 elevation <- result$baselines$elevation
 round(unlist(elevation[c("baseline_mae", "model_mae", "skill_score")]), 3)
 #> baseline_mae    model_mae  skill_score 
-#>      531.731      261.876        0.695
+#>      531.731      271.604        0.680
 habitat <- result$baselines$habitat
 round(unlist(habitat[c("baseline_accuracy", "model_accuracy",
                        "accuracy_lift")]), 3)
@@ -328,12 +328,12 @@ elevation = result.baselines["elevation"]
 {"baseline_mae": round(elevation.baseline_mae, 3),
  "model_mae": round(elevation.model_mae, 3),
  "skill_score": round(elevation.skill_score, 3)}
-#> {'baseline_mae': 531.731, 'model_mae': 218.991, 'skill_score': 0.772}
+#> {'baseline_mae': 531.731, 'model_mae': 249.315, 'skill_score': 0.768}
 habitat = result.baselines["habitat"]
 {"baseline_accuracy": round(habitat.baseline_accuracy, 3),
  "model_accuracy": round(habitat.model_accuracy, 3),
  "accuracy_lift": round(habitat.accuracy_lift, 3)}
-#> {'baseline_accuracy': 0.367, 'model_accuracy': 0.833, 'accuracy_lift': 0.467}
+#> {'baseline_accuracy': 0.367, 'model_accuracy': 0.867, 'accuracy_lift': 0.5}
 ```
 
 ### Loss by target
@@ -349,14 +349,14 @@ the terms add up to the total.
 held_out <- result$test_loss_by_target
 sapply(held_out, function(h) round(c(first = h[1], last = h[length(h)]), 3))
 #>       elevation habitat
-#> first     0.909   1.397
-#> last      0.450   0.945
+#> first     0.917   1.416
+#> last      0.448   0.736
 ```
 
 ``` python
 {target: (round(history[0], 3), round(history[-1], 3))
  for target, history in result.test_loss_history_by_target.items()}
-#> {'elevation': (0.903, 0.388), 'habitat': (1.384, 0.696)}
+#> {'elevation': (0.944, 0.413), 'habitat': (1.383, 0.619)}
 ```
 
 A mixture of experts adds a load-balancing term to the training loss and
@@ -418,7 +418,7 @@ plateau = rc.Trainer(model, cfg)
 plateau.prepare_data(dataset, test_size=0.2, seed=42)
 plateau_result = plateau.fit()
 sorted({float(f"{rate:.3g}") for rate in plateau_result.lr_history}, reverse=True)
-#> [0.001, 0.0001]
+#> [0.001, 0.0001, 1e-05]
 max(plateau_result.selection_history) <= 1
 #> True
 ```
@@ -452,7 +452,7 @@ fit_warm <- resolve.train.dataset(dataset, maxEpochs = 100L, verbose = FALSE,
                                   lrScheduler = "linear", lrMin = 0,
                                   warmupEpochs = 10L)
 round(fit_warm$result$lr[c(1, 5, 10, 50, 100)], 6)
-#> [1] 0.000100 0.000500 0.001000 0.000562 0.000000
+#> [1] 0.000100 0.000500 0.001000 0.000562       NA
 ```
 
 ``` python
@@ -585,7 +585,7 @@ fit_nca <- resolve.train.dataset(dataset, maxEpochs = 100L, verbose = FALSE,
                                  lossConfig = "nca", ncaTemperature = 0.2,
                                  ncaNeighbors = 16L, ncaWeight = 0.3)
 round(fit_nca$result$final_metrics$habitat$accuracy, 3)
-#> [1] 0.8
+#> [1] 0.833
 ```
 
 ``` python
@@ -599,7 +599,7 @@ model = rc.ResolveModel(dataset.schema, rc.model_config_for_dataset(dataset))
 nca = rc.Trainer(model, cfg)
 nca.prepare_data(dataset, test_size=0.2, seed=42)
 round(nca.fit().final_metrics["habitat"]["accuracy"], 3)
-#> 0.833
+#> 0.867
 ```
 
 ## Refitting on every plot
@@ -787,7 +787,7 @@ fit_small <- resolve.train.dataset(
                      normalization = "layer_norm", use_residual = TRUE)
 )
 round(fit_small$result$final_metrics$elevation$mae)
-#> [1] 224
+#> [1] 301
 ```
 
 ``` python
@@ -803,7 +803,7 @@ model_config = rc.model_config_for_dataset(dataset, model_config)
 small = rc.Trainer(rc.ResolveModel(dataset.schema, model_config), cfg)
 small.prepare_data(dataset, test_size=0.2, seed=42)
 round(small.fit().final_metrics["elevation"]["mae"])
-#> 241
+#> 236
 ```
 
 ### Encoder architectures
@@ -831,7 +831,7 @@ fit_ft <- resolve.train.dataset(
                      ft_transformer = list(d_model = 64L, n_layers = 2L))
 )
 round(fit_ft$result$final_metrics$habitat$accuracy, 3)
-#> [1] 0.767
+#> [1] 0.8
 ```
 
 ``` python
@@ -845,7 +845,7 @@ model_config = rc.model_config_for_dataset(dataset, model_config)
 ft = rc.Trainer(rc.ResolveModel(dataset.schema, model_config), cfg)
 ft.prepare_data(dataset, test_size=0.2, seed=42)
 round(ft.fit().final_metrics["habitat"]["accuracy"], 3)
-#> 0.767
+#> 0.667
 ```
 
 `resolve.default_config("model")` lists every nested field with its
@@ -988,7 +988,7 @@ residuals.
 res <- fit$trainer$compute_residuals("elevation")
 round(unlist(res[c("mean_residual", "std_residual", "q05", "q50", "q95")]))
 #> mean_residual  std_residual           q05           q50           q95 
-#>            40           347          -629            46           492
+#>            62           353          -575            59           529
 
 lims <- range(res$actuals, res$predictions)
 plot(res$actuals, res$predictions, pch = 19, xlim = lims, ylim = lims,
@@ -1003,7 +1003,7 @@ plots.](training_files/figure-html/residuals-1.svg)
 res = trainer.compute_residuals("elevation")
 {name: round(getattr(res, name))
  for name in ["mean_residual", "std_residual", "q05", "q50", "q95"]}
-#> {'mean_residual': -27, 'std_residual': 301, 'q05': -657, 'q50': 21, 'q95': 335}
+#> {'mean_residual': 4, 'std_residual': 305, 'q05': -498, 'q50': 17, 'q95': 424}
 
 observed, predicted = list(res.actuals), list(res.predictions)
 lims = (min(observed + predicted), max(observed + predicted))
@@ -1048,9 +1048,9 @@ pd.crosstab(pd.Series([names[i] for i in cls.actuals], name="observed"),
 #> predicted  alpine  forest  grassland  wetland
 #> observed
 #> alpine          3       0          0        0
-#> forest          0      10          1        0
-#> grassland       0       0          8        1
-#> wetland         1       2          0        4
+#> forest          0      11          0        0
+#> grassland       0       1          7        1
+#> wetland         0       2          0        5
 tuple(cls.probabilities.shape)
 #> (30, 4)
 ```
@@ -1071,31 +1071,31 @@ cal <- fit$trainer$compute_calibration("habitat", 5L)
 round(c(ece = cal$expected_calibration_error,
         mce = cal$max_calibration_error), 3)
 #>   ece   mce 
-#> 0.109 0.605
+#> 0.082 0.493
 bins <- do.call(rbind, lapply(cal$bins, as.data.frame))
 round(bins, 2)
 #>   bin_start bin_end mean_predicted_prob actual_frequency count
 #> 1       0.0     0.2                0.00             0.00     0
-#> 2       0.2     0.4                0.39             1.00     1
-#> 3       0.4     0.6                0.54             0.67     3
-#> 4       0.6     0.8                0.73             0.67     3
-#> 5       0.8     1.0                0.96             0.87    23
+#> 2       0.2     0.4                0.00             0.00     0
+#> 3       0.4     0.6                0.49             0.00     1
+#> 4       0.6     0.8                0.70             0.67     3
+#> 5       0.8     1.0                0.96             0.88    26
 ```
 
 ``` python
 cal = trainer.compute_calibration("habitat", n_bins=5)
 round(cal.expected_calibration_error, 3), round(cal.max_calibration_error, 3)
-#> (0.08, 0.236)
+#> (0.061, 0.611)
 pd.DataFrame([{"bin_start": b.bin_start, "bin_end": b.bin_end,
                "mean_predicted_prob": b.mean_predicted_prob,
                "actual_frequency": b.actual_frequency, "count": b.count}
               for b in cal.bins]).round(2)
 #>    bin_start  bin_end  mean_predicted_prob  actual_frequency  count
 #> 0        0.0      0.2                 0.00              0.00      0
-#> 1        0.2      0.4                 0.00              0.00      0
-#> 2        0.4      0.6                 0.45              0.50      2
-#> 3        0.6      0.8                 0.74              0.50      2
-#> 4        0.8      1.0                 0.95              0.88     26
+#> 1        0.2      0.4                 0.39              1.00      1
+#> 2        0.4      0.6                 0.54              0.00      1
+#> 3        0.6      0.8                 0.71              0.50      2
+#> 4        0.8      1.0                 0.93              0.92     26
 ```
 
 A regression target returns no bins.
@@ -1163,10 +1163,10 @@ cv$n_folds
 #> [1] 5
 round(unlist(cv$mean_metrics$elevation[c("mae", "r2")]), 3)
 #>     mae      r2 
-#> 197.560   0.812
+#> 169.284   0.851
 round(unlist(cv$std_metrics$elevation[c("mae", "r2")]), 3)
 #>    mae     r2 
-#> 34.233  0.059
+#> 16.713  0.046
 ```
 
 ``` python
@@ -1179,9 +1179,9 @@ cv = cv_trainer.cross_validate(n_folds=5, seed=42)
 cv.n_folds
 #> 5
 {name: round(cv.mean_metrics["elevation"][name], 3) for name in ["mae", "r2"]}
-#> {'mae': 190.514, 'r2': 0.838}
+#> {'mae': 185.015, 'r2': 0.837}
 {name: round(cv.std_metrics["elevation"][name], 3) for name in ["mae", "r2"]}
-#> {'mae': 31.06, 'r2': 0.044}
+#> {'mae': 42.259, 'r2': 0.085}
 ```
 
 The per-fold results, each a training result like the one above, are in
@@ -1210,7 +1210,7 @@ blocks <- resolve.cross_validate(
 )
 round(unlist(blocks$mean_metrics$elevation[c("mae", "r2")]), 3)
 #>     mae      r2 
-#> 190.167   0.839
+#> 188.242   0.847
 ```
 
 ``` python
@@ -1227,7 +1227,7 @@ block_trainer = rc.Trainer(model, cfg)
 block_trainer.prepare_data(located, test_size=0.2, seed=42)
 blocks = block_trainer.cross_validate_spatial(spatial, n_folds=5, seed=42)
 {name: round(blocks.mean_metrics["elevation"][name], 3) for name in ["mae", "r2"]}
-#> {'mae': 179.593, 'r2': 0.852}
+#> {'mae': 198.007, 'r2': 0.835}
 ```
 
 Block sizes are in degrees. `balance` assigns the blocks to folds so the
@@ -1253,7 +1253,7 @@ resolve.load_train_config(path)$max_epochs
 meta <- resolve.load_run_metadata(path)
 str(meta[c("best_epoch", "n_plots_train", "n_plots_test", "hold_out")])
 #> List of 4
-#>  $ best_epoch   : int 91
+#>  $ best_epoch   : int 76
 #>  $ n_plots_train: int 120
 #>  $ n_plots_test : int 30
 #>  $ hold_out     : chr "random"
@@ -1269,7 +1269,7 @@ rc.Trainer.load_train_config(path).max_epochs
 meta = rc.Trainer.load_run_metadata(path)
 {"best_epoch": meta.best_epoch, "n_plots_train": meta.n_plots_train,
  "n_plots_test": meta.n_plots_test, "hold_out": meta.hold_out}
-#> {'best_epoch': 121, 'n_plots_train': 120, 'n_plots_test': 30, 'hold_out': HoldOutMode.Random}
+#> {'best_epoch': 61, 'n_plots_train': 120, 'n_plots_test': 30, 'hold_out': HoldOutMode.Random}
 ```
 
 `resolve.train.dataset(..., savePath = path)` saves with the metadata at

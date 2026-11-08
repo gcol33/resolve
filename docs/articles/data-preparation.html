@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">resolveR</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.0.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -57,7 +57,7 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="active nav-item dropdown">
+<li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><hr class="dropdown-divider"></li>
@@ -66,6 +66,8 @@
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
+    <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Scaling up</h6></li>
@@ -79,6 +81,9 @@
     <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
     <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
     <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
+    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
+    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
+    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
     <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
     <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
   </ul>
@@ -743,7 +748,7 @@ loaded with them.</p>
 <span><span class="op">)</span></span>
 <span><span class="va">preds</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/resolve.predict.dataset.html">resolve.predict.dataset</a></span><span class="op">(</span><span class="va">predictor</span>, <span class="va">new_plots</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">preds</span><span class="op">$</span><span class="va">predictions</span><span class="op">$</span><span class="va">elevation</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1]  901 1088 1092 1538 1333 1040</span></span></code></pre></div>
+<span><span class="co">#&gt; [1] 1162 1173 1451 1549 1228  922</span></span></code></pre></div>
 <div class="sourceCode" id="cb34"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb34-1"><a href="#cb34-1" tabindex="-1"></a>new_csv <span class="op">=</span> os.path.join(tempfile.gettempdir(), <span class="st">"new_plots.csv"</span>)</span>
 <span id="cb34-2"><a href="#cb34-2" tabindex="-1"></a>plots[<span class="op">~</span>is_train].to_csv(new_csv, index<span class="op">=</span><span class="va">False</span>)</span>
 <span id="cb34-3"><a href="#cb34-3" tabindex="-1"></a></span>
@@ -752,7 +757,7 @@ loaded with them.</p>
 <span id="cb34-6"><a href="#cb34-6" tabindex="-1"></a>    predictor.external_vocabs, predictor.dataset_config)</span>
 <span id="cb34-7"><a href="#cb34-7" tabindex="-1"></a>preds <span class="op">=</span> predictor.predict_dataset(new_plots)</span>
 <span id="cb34-8"><a href="#cb34-8" tabindex="-1"></a>preds.predictions[<span class="st">"elevation"</span>][:<span class="dv">6</span>].<span class="bu">round</span>()</span>
-<span id="cb34-9"><a href="#cb34-9" tabindex="-1"></a><span class="co">#&gt; tensor([1022., 1268., 1447., 1570., 1160., 1017.])</span></span></code></pre></div>
+<span id="cb34-9"><a href="#cb34-9" tabindex="-1"></a><span class="co">#&gt; tensor([1002., 1025., 1342., 1585., 1187.,  888.])</span></span></code></pre></div>
 </div>
 <p>A dataset built to be predicted needs no target, so the target list
 is empty here. <a href="prediction.html">Predicting new plots</a>

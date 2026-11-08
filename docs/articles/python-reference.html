@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">resolveR</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.0.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -50,7 +50,7 @@
     <div id="navbar" class="collapse navbar-collapse ms-3">
       <ul class="navbar-nav me-auto">
 <li class="nav-item"><a class="nav-link" href="../articles/resolveR.html">Get started</a></li>
-<li class="active nav-item dropdown">
+<li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-reference" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Reference</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-reference">
 <li><a class="dropdown-item" href="../reference/index.html">R reference</a></li>
@@ -66,6 +66,8 @@
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
+    <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Scaling up</h6></li>
@@ -79,6 +81,9 @@
     <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
     <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
     <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
+    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
+    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
+    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
     <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
     <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
   </ul>
@@ -515,6 +520,11 @@ The predictions and class probabilities for every plot.
 <dd>
 The settings of retrieval augmentation.
 </dd>
+<dt><a href="python-prediction.html#nearest_by_cosine"><code>nearest_by_cosine()</code></a></dt>
+<dd>
+The rows of a reference set most similar to each query row by cosine
+similarity.
+</dd>
 <dt><a href="python-prediction.html#Scalers"><code>Scalers</code></a></dt>
 <dd>
 The input and target scaling fitted on the training plots.
@@ -626,6 +636,144 @@ The Earth radius the spherical mean measures distances with.
 <dt><a href="python-suites.html#sha256_file"><code>sha256_file()</code></a></dt>
 <dd>
 The SHA-256 digest of a file.
+</dd>
+</dl>
+</div>
+<div class="section level2">
+<h2 id="gap-fitting">
+<a href="python-gap-fitting.html">Gap fitting</a><a class="anchor" aria-label="anchor" href="#gap-fitting"></a>
+</h2>
+<p>Filling a dataset’s missing values from its own complete plots,
+beside the raw prediction.</p>
+<dl>
+<dt><a href="python-gap-fitting.html#fit_gaps"><code>fit_gaps()</code></a></dt>
+<dd>
+One target’s gaps from the raw prediction, the recorded values and the
+plots’ composition, positions and years.
+</dd>
+<dt><a href="python-gap-fitting.html#fit_prediction_gaps"><code>fit_prediction_gaps()</code></a></dt>
+<dd>
+A single model’s gaps from its predictions and the dataset’s tables.
+</dd>
+<dt><a href="python-gap-fitting.html#read_gap_tables"><code>read_gap_tables()</code></a></dt>
+<dd>
+What gap fitting reads about a dataset’s plots, from DataFrames or CSV
+paths.
+</dd>
+<dt><a href="python-gap-fitting.html#GapFittingConfig"><code>GapFittingConfig</code></a></dt>
+<dd>
+The candidates, the neighbour counts, spatial neighbours on or off and
+the matching seed.
+</dd>
+<dt><a href="python-gap-fitting.html#GapTarget"><code>GapTarget</code></a></dt>
+<dd>
+A target’s name, scale and period.
+</dd>
+<dt><a href="python-gap-fitting.html#GapScale"><code>GapScale</code></a></dt>
+<dd>
+How a target’s values lie: linear, log, circular or geographic.
+</dd>
+<dt><a href="python-gap-fitting.html#GapMethod"><code>GapMethod</code></a></dt>
+<dd>
+The methods a gap can be predicted by.
+</dd>
+<dt><a href="python-gap-fitting.html#GapFit"><code>GapFit</code></a></dt>
+<dd>
+The fitted values, the method per plot and the report.
+</dd>
+<dt><a href="python-gap-fitting.html#matched_gap_neighbours"><code>matched_gap_neighbours()</code></a></dt>
+<dd>
+The neighbours the choice is tested with.
+</dd>
+<dt>
+<a href="python-gap-fitting.html#GapColumns"><code>GapColumns</code></a>,
+<a href="python-gap-fitting.html#GapTables"><code>GapTables</code></a>,
+<a href="python-gap-fitting.html#GapFitRequest"><code>GapFitRequest</code></a>
+</dt>
+<dd>
+The low-level columns, tables and requests the functions above build.
+</dd>
+</dl>
+</div>
+<div class="section level2">
+<h2 id="terrain-correction">
+<a href="python-terrain-correction.html">Terrain correction</a><a class="anchor" aria-label="anchor" href="#terrain-correction"></a>
+</h2>
+<p>Altitude and slope combined with an elevation model read at the
+plots, and the elevation model a suite ships.</p>
+<dl>
+<dt><a href="python-terrain-correction.html#sources"><code>TerrainGrids</code>,
+<code>open_terrain_field()</code>, <code>TerrainCodedField</code>,
+<code>TerrainField</code></a></dt>
+<dd>
+Elevation grids on disk and terrain field files, as sources of
+elevations.
+</dd>
+<dt><a href="python-terrain-correction.html#terrain_descriptors"><code>terrain_descriptors()</code></a></dt>
+<dd>
+The elevation, the 1 km mean, the slope and the 1 km inclination at
+coordinates.
+</dd>
+<dt><a href="python-terrain-correction.html#encode_terrain_grids"><code>encode_terrain_grids()</code></a></dt>
+<dd>
+Elevation grids coded into a terrain field with a bounded error per
+cell.
+</dd>
+<dt><a href="python-terrain-correction.html#fit_terrain_tile"><code>fit_terrain_tile()</code>,
+<code>assemble_terrain_field()</code></a></dt>
+<dd>
+The neural terrain field format, tile by tile.
+</dd>
+<dt><a href="python-terrain-correction.html#fit_terrain_correction"><code>fit_terrain_correction()</code></a></dt>
+<dd>
+The gated correction of one target, fitted on plots with recorded
+values.
+</dd>
+<dt><a href="python-terrain-correction.html#TerrainCorrection"><code>TerrainCorrection</code></a></dt>
+<dd>
+A fitted correction: apply, save, load.
+</dd>
+<dt><a href="python-gap-fitting.html#nearest_by_great_circle"><code>nearest_by_great_circle()</code></a></dt>
+<dd>
+The nearest rows of a reference set by great-circle distance.
+</dd>
+</dl>
+</div>
+<div class="section level2">
+<h2 id="species-names">
+<a href="python-names.html">Species names</a><a class="anchor" aria-label="anchor" href="#species-names"></a>
+</h2>
+<p>Species names read as the names a model learnt.</p>
+<dl>
+<dt><a href="python-names.html#resolve_names"><code>resolve_names()</code></a></dt>
+<dd>
+Resolve species names against a model’s vocabulary, with the route each
+takes.
+</dd>
+<dt><a href="python-names.html#NameTable"><code>NameTable</code></a></dt>
+<dd>
+The release’s name table: entered names and synonyms with the token each
+stands for.
+</dd>
+<dt><a href="python-names.html#SpeciesNames"><code>SpeciesNames</code></a></dt>
+<dd>
+How a load or a suite prediction resolves species names.
+</dd>
+<dt><a href="python-names.html#NameResolver"><code>NameResolver</code></a></dt>
+<dd>
+Resolves names against one vocabulary.
+</dd>
+<dt><a href="python-names.html#ResolvedName"><code>ResolvedName</code></a></dt>
+<dd>
+What the resolver gives for one name.
+</dd>
+<dt><a href="python-names.html#NameRoute"><code>NameRoute</code></a></dt>
+<dd>
+Exact, alias, spelling or unresolved.
+</dd>
+<dt><a href="python-names.html#SpeciesNameReport"><code>SpeciesNameReport</code></a></dt>
+<dd>
+The names a load or a suite target did not find as written.
 </dd>
 </dl>
 </div>

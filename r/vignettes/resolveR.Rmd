@@ -130,9 +130,9 @@ trainer.prepare_data(dataset)
 result = trainer.fit()
 metrics = result.final_metrics
 {name: round(metrics["elevation"][name], 3) for name in ["mae", "rmse", "r2", "band_25"]}
-#> {'mae': 269.617, 'rmse': 317.141, 'r2': 0.691, 'band_25': 0.6}
+#> {'mae': 190.343, 'rmse': 266.092, 'r2': 0.783, 'band_25': 0.667}
 round(metrics["habitat"]["accuracy"], 3)
-#> 0.8
+#> 0.867
 ```
 :::
 
@@ -167,12 +167,12 @@ out = pd.DataFrame({"plot": preds.plot_ids,
 out.merge(plots[["plot_id", "elevation"]], left_on="plot", right_on="plot_id",
           suffixes=("", "_observed")).drop(columns="plot_id").head(6)
 #>    plot  elevation  elevation_observed
-#> 0  A001       2218                2188
-#> 1  A002       1127                 568
-#> 2  A003       1897                2129
-#> 3  A004       2269                2267
-#> 4  A005       2043                2145
-#> 5  A006       1459                1799
+#> 0  A001       2368                2188
+#> 1  A002       1012                 568
+#> 2  A003       2044                2129
+#> 3  A004       2353                2267
+#> 4  A005       2097                2145
+#> 5  A006       1800                1799
 ```
 :::
 

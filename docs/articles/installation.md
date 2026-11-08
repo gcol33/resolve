@@ -134,7 +134,7 @@ that many threads, for example on a shared machine.
 ## The Python package
 
 `pip install resolve-core` installs a prebuilt wheel. The wheels cover
-CPython 3.10 to 3.13 on Linux x86-64, Windows x86-64 and macOS on Apple
+CPython 3.10 to 3.14 on Linux x86-64, Windows x86-64 and macOS on Apple
 Silicon, and they need numpy, pandas and torch 2.0 or newer, which pip
 installs with them.
 
@@ -161,7 +161,7 @@ library(resolveR)
 resolve.available()
 #> [1] TRUE
 resolve.version()
-#> [1] "1.0.3"
+#> [1] "1.1.0"
 ```
 
 ``` python
@@ -169,7 +169,7 @@ import torch
 import resolve_core as rc
 
 rc.__version__
-#> 1.0.3
+#> 1.1.0
 torch.cuda.is_available()
 #> True
 ```

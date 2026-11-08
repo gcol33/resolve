@@ -6,19 +6,24 @@ articles:
   articles/data-preparation: data-preparation.html
   articles/embeddings: embeddings.html
   articles/encoding: encoding.html
+  articles/gap-fitting: gap-fitting.html
   articles/installation: installation.html
   articles/performance: performance.html
   articles/prediction: prediction.html
   articles/python-data: python-data.html
   articles/python-engine: python-engine.html
+  articles/python-gap-fitting: python-gap-fitting.html
+  articles/python-names: python-names.html
   articles/python-prediction: python-prediction.html
   articles/python-reference: python-reference.html
   articles/python-scoring: python-scoring.html
   articles/python-suites: python-suites.html
+  articles/python-terrain-correction: python-terrain-correction.html
   articles/python-training: python-training.html
   resolveR: resolveR.html
+  articles/terrain-correction: terrain-correction.html
   articles/training: training.html
-last_built: 2026-11-04T11:51Z
+last_built: 2026-11-08T20:17Z
 urls:
   reference: https://gillescolling.com/resolve/reference
   article: https://gillescolling.com/resolve/articles
