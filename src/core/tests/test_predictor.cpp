@@ -417,6 +417,84 @@ TEST_CASE("Predictor::get_embeddings reads every species encoding and the catego
     }
 }
 
+TEST_CASE("Predictor::predict reads pooled plots of different sizes as the padded forward does",
+          "[predictor][batch_size][pool]") {
+    // Plots of one to nine species in a scrambled order. A pooled encoding
+    // takes them by length in chunks cut to each chunk's widest plot; every
+    // plot comes back in the caller's order with the latent of the forward
+    // over all plots padded to the widest, and extra padding changes nothing.
+    const int n_plots = 40;
+    std::ostringstream hdr;
+    std::ostringstream spc;
+    hdr << "plot_id,lon,lat,elev,y\n";
+    spc << "plot_id,sp,cover,genus,family\n";
+    for (int i = 0; i < n_plots; ++i) {
+        hdr << "p" << i << "," << (10.0 + 0.1 * i) << "," << (47.0 + 0.05 * i) << ","
+            << (100.0 + 7.0 * (i % 5)) << "," << (1.0 + 0.25 * i) << "\n";
+        const int n_species = 1 + (i * 7) % 9;
+        for (int j = 0; j < n_species; ++j) {
+            const int s = (i + 2 * j) % 17;
+            spc << "p" << i << ",sp_" << s << "," << (j + 1) << ",gen_" << (s % 4) << ",fam_"
+                << (s % 2) << "\n";
+        }
+    }
+    const TempFile header_csv(hdr.str());
+    const TempFile species_csv(spc.str());
+
+    for (const auto mode : {SpeciesEncodingMode::RankPool, SpeciesEncodingMode::Transformer}) {
+        INFO("encoding " << species_encoding_to_string(mode));
+        DatasetConfig dcfg;
+        dcfg.species_encoding = mode;
+        dcfg.use_taxonomy = true;
+        auto ds = ResolveDataset::from_csv(header_csv.path(), species_csv.path(),
+                                           Roles().coordinates().covariates({"elev"}).taxonomy(),
+                                           {TargetSpec::regression("y")}, dcfg);
+        torch::manual_seed(11);
+        ResolveModel model(ds.schema(), small_encoder_config(mode, {16, 8}));
+        Trainer trainer(model, quiet_train_config());
+        trainer.prepare_data(ds, /*test_size=*/0.25f, /*seed=*/0);
+        Predictor predictor(trainer.model(), trainer.scalers(), trainer.categorical_vocab(),
+                            torch::kCPU);
+
+        auto parts = ds.continuous_inputs();
+        parts.hash_embedding = torch::Tensor();
+        const auto inputs = ds.plot_inputs();
+        const auto widths = pool_slot_widths(inputs);
+        REQUIRE(widths.min().item<int64_t>() < widths.max().item<int64_t>());
+        REQUIRE(widths.max().item<int64_t>() == inputs.species_ids.size(1));
+
+        auto padded = inputs.without_empty();
+        if (!predictor.model()->config().plot_totals) padded.pool_totals = torch::Tensor();
+        padded.continuous = standardize_continuous(
+            assemble_continuous(parts, ds.schema().dataset_config.missing_values, n_plots),
+            predictor.scalers());
+        torch::Tensor expected;
+        {
+            torch::NoGradGuard no_grad;
+            predictor.model()->eval();
+            expected = predictor.model()->get_latent(padded);
+        }
+
+        auto wider = inputs;
+        for (torch::Tensor* t : {&wider.species_ids, &wider.pool_genus_ids,
+                                 &wider.pool_family_ids, &wider.pool_weights, &wider.pool_mask}) {
+            if (t->defined() && t->numel() > 0) {
+                *t = torch::cat({*t, torch::zeros({t->size(0), 4}, t->options())}, /*dim=*/1);
+            }
+        }
+        for (const int64_t batch : {int64_t{-1}, int64_t{7}, int64_t{1}}) {
+            INFO("batch_size " << batch);
+            CHECK(torch::allclose(predictor.predict(parts, inputs, true, batch).latent, expected,
+                                  1e-5, 1e-6));
+            CHECK(torch::allclose(predictor.predict(parts, wider, true, batch).latent, expected,
+                                  1e-5, 1e-6));
+        }
+        const auto one_shot = predictor.predict(parts, inputs, false, -1).predictions.at("y");
+        CHECK(torch::allclose(predictor.predict(parts, inputs, false, 3).predictions.at("y"),
+                              one_shot, 1e-5, 1e-6));
+    }
+}
+
 // =============================================================================
 // 9. Checkpoint deserialization targets the REQUESTED device
 // =============================================================================

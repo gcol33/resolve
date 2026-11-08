@@ -16,6 +16,11 @@ namespace resolve {
 
 namespace {
 
+// Plots per chunk under length bucketing: small enough that a chunk's widest
+// plot is close to its narrowest, large enough that each chunk still fills the
+// matrix kernels.
+constexpr int64_t kPoolBucketRows = 512;
+
 // True when the encoder reads species as vocabulary codes (embedding rows or
 // species-vector columns), so a species-code mismatch silently returns another
 // species' row. Hash mode derives its features from the species STRING, so the
@@ -284,7 +289,28 @@ ResolvePredictions Predictor::run_inference(
         }
     }
     const bool one_chunk = batch_size == -1 || batch_dependent_encoder;
-    const int64_t step = one_chunk ? std::max<int64_t>(n, 1) : batch_size;
+
+    // Length bucketing. A pooled encoding reads each plot's species as a
+    // masked set padded to the widest plot, so most of its per-token work
+    // (embedding, attention, feed-forward) goes to padding when plot sizes
+    // vary. The plots are taken in order of the pool columns they reach, each
+    // chunk is cut to its own widest plot (PlotInputs::narrow_pool), and the
+    // outputs are put back in the caller's order at the end; every plot's
+    // prediction is the one the padded forward gives.
+    const bool bucket = !batch_dependent_encoder && n > 0 &&
+                        species_inputs.species_ids.defined() &&
+                        species_encoding_traits(model_->effective_species_encoding()).pooled;
+    torch::Tensor order;
+    torch::Tensor widths;
+    if (bucket) {
+        widths = pool_slot_widths(species_inputs).to(torch::kCPU);
+        order = torch::argsort(widths, /*stable=*/true);
+        species_inputs = species_inputs.index_select(order);
+        block_parts = block_parts.index_select(order);
+        widths = widths.index_select(0, order);
+    }
+    const int64_t whole = one_chunk ? std::max<int64_t>(n, 1) : batch_size;
+    const int64_t step = bucket ? std::min(whole, kPoolBucketRows) : whole;
 
     torch::NoGradGuard no_grad;
     model_->eval();
@@ -303,6 +329,10 @@ ResolvePredictions Predictor::run_inference(
         // The continuous block, assembled and standardised exactly as the
         // Trainer did at fit time (continuous_block.hpp).
         PlotInputs chunk = species_inputs.slice(start, end);
+        if (bucket) {
+            chunk = chunk.narrow_pool(
+                std::max<int64_t>(widths.slice(0, start, end).max().item<int64_t>(), 1));
+        }
         chunk.continuous = standardize_continuous(
             assemble_continuous(block_parts.slice(start, end), schema.dataset_config.missing_values,
                                 end - start),
@@ -359,6 +389,15 @@ ResolvePredictions Predictor::run_inference(
     }
     if (!latent_chunks.empty()) {
         result.latent = torch::cat(latent_chunks, /*dim=*/0);
+    }
+    if (bucket) {
+        auto caller_order = torch::empty_like(order);
+        caller_order.index_put_({order}, torch::arange(n, order.options()));
+        for (auto& [name, values] : result.predictions) values = values.index_select(0, caller_order);
+        for (auto& [name, values] : result.probabilities) {
+            values = values.index_select(0, caller_order);
+        }
+        if (result.latent.defined()) result.latent = result.latent.index_select(0, caller_order);
     }
     return result;
 }

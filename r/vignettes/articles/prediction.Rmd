@@ -469,7 +469,7 @@ rc.resolve_names(["Silene acaulis", "Silene acualis", "Carex firma"], predictor)
 
 ## Predicting in chunks
 
-Prediction runs the model over the plots in chunks of 4096 by default and gathers the results in CPU memory, so the GPU memory a prediction needs does not grow with the number of plots. A smaller chunk suits a wide model on a small GPU; -1 runs all plots in one pass. Each chunk goes through the same forward pass, so the results agree whatever the chunk size, up to the rounding of floating-point arithmetic, which depends on how many rows a matrix product sums at once.
+Prediction runs the model over the plots in chunks of 4096 by default and gathers the results in CPU memory, so the GPU memory a prediction needs does not grow with the number of plots. A smaller chunk suits a wide model on a small GPU; -1 runs all plots in one pass. Each chunk goes through the same forward pass, so the results agree whatever the chunk size, up to the rounding of floating-point arithmetic, which depends on how many rows a matrix product sums at once. A rank_pool or transformer model pads each plot's species list to the widest plot, so its plots go through in order of how many species they hold, in chunks of at most 512 cut to each chunk's widest plot, and come back in the order given; the forward then spends little on padding.
 
 ::: {.lang-pair}
 ```{r chunks}

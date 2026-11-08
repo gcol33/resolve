@@ -49,6 +49,17 @@ struct ContinuousInputs {
         return out;
     }
 
+    // The rows `rows` (int64 indices) of every field.
+    [[nodiscard]] ContinuousInputs index_select(const torch::Tensor& rows) const {
+        ContinuousInputs out = *this;
+        out.for_each([&](const char*, torch::Tensor& t) {
+            if (t.defined() && t.dim() > 0 && t.numel() > 0) {
+                t = t.index_select(/*dim=*/0, rows.to(t.device()));
+            }
+        });
+        return out;
+    }
+
     // The rows of the first non-empty field, 0 when every field is empty.
     [[nodiscard]] int64_t n_rows() const {
         int64_t n = -1;

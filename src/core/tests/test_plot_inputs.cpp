@@ -156,6 +156,40 @@ TEST_CASE("ContinuousInputs slices and counts rows of its present parts",
     CHECK(names == std::vector<std::string>{"coordinates", "covariates", "unknown_fraction",
                                             "unknown_count", "hash_embedding"});
     CHECK(ContinuousInputs{}.n_rows() == 0);
+
+    const auto rows = torch::tensor({4, 0, 2}, torch::kInt64);
+    const auto picked = parts.index_select(rows);
+    CHECK(picked.n_rows() == 3);
+    CHECK(torch::equal(picked.coordinates, parts.coordinates.index_select(0, rows)));
+    CHECK(torch::equal(picked.unknown_fraction, parts.unknown_fraction.index_select(0, rows)));
+    CHECK_FALSE(picked.covariates.defined());
+}
+
+TEST_CASE("pool_slot_widths and narrow_pool read the columns each plot's pool reaches",
+          "[plot_inputs][pool]") {
+    PlotInputs in;
+    in.species_ids = torch::tensor({3, 5, 0, 0, 0, 0, 7, 0, 0}, torch::kInt64).reshape({3, 3});
+    in.pool_mask = in.species_ids.ne(0);
+    in.pool_mask[1][1] = true;  // a species outside the vocabulary: code 0, still in the pool
+    in.pool_weights = in.pool_mask.to(torch::kFloat32);
+    in.pool_genus_ids = in.species_ids.clone();
+    in.continuous = torch::ones({3, 4});
+
+    CHECK(torch::equal(pool_slot_widths(in), torch::tensor({2, 2, 1}, torch::kInt64)));
+    PlotInputs unmasked = in;
+    unmasked.pool_mask = torch::Tensor();
+    CHECK(torch::equal(pool_slot_widths(unmasked), torch::tensor({2, 0, 1}, torch::kInt64)));
+    CHECK_FALSE(pool_slot_widths(PlotInputs{}).defined());
+
+    const auto narrow = in.narrow_pool(2);
+    for (const auto* t : {&narrow.species_ids, &narrow.pool_mask, &narrow.pool_weights,
+                          &narrow.pool_genus_ids}) {
+        CHECK(t->sizes() == torch::IntArrayRef({3, 2}));
+    }
+    CHECK(torch::equal(narrow.species_ids, in.species_ids.narrow(1, 0, 2)));
+    CHECK(narrow.continuous.sizes() == in.continuous.sizes());
+    CHECK_FALSE(narrow.pool_family_ids.defined());
+    CHECK(in.narrow_pool(5).species_ids.size(1) == 3);
 }
 
 TEST_CASE("forward_single reads the pool inputs a rank_pool model needs",

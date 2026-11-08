@@ -157,6 +157,15 @@
   (`resolve_core.nearest_by_great_circle`), and `nearest_by_cosine` takes
   sparse rows. A row without coordinates has no neighbours and lists -1.
 
+- **Faster prediction for rank_pool and transformer models.** These
+  encodings pad every plot's species list to the widest plot of the
+  dataset, so a forward over plots of mixed size spent most of its work on
+  padding. Prediction now takes the plots in order of how many species they
+  hold, in chunks of at most 512 cut to each chunk's widest plot, and hands
+  the results back in the input order; the predictions are unchanged. The
+  context suite's altitude and slope for 5,000 EVA plots, with terrain
+  correction, take 2.75 s on the CPU instead of 6.2 s.
+
 ### Fixed
 
 - **Tied neighbours go to the lower row.** `nearest_by_cosine` and

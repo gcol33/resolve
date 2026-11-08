@@ -175,6 +175,22 @@ struct PlotInputs {
         return out;
     }
 
+    // The first `width` columns of the pool fields (species_ids and pool_genus_ids,
+    // pool_family_ids, pool_weights, pool_mask): for a pooled encoding
+    // (SpeciesEncodingTraits::pooled), which reads each plot's species as a
+    // masked set, a copy that drops padding columns no plot reaches gives the
+    // same forward. Fields already at most `width` wide are kept as they are.
+    [[nodiscard]] PlotInputs narrow_pool(int64_t width) const {
+        PlotInputs out = *this;
+        for (torch::Tensor* t : {&out.species_ids, &out.pool_genus_ids, &out.pool_family_ids,
+                                 &out.pool_weights, &out.pool_mask}) {
+            if (t->defined() && t->dim() == 2 && t->size(1) > width) {
+                *t = t->narrow(/*dim=*/1, /*start=*/0, width);
+            }
+        }
+        return out;
+    }
+
     // The number of plots: the rows of the first defined field, 0 when none is.
     [[nodiscard]] int64_t n_plots() const {
         int64_t n = -1;
@@ -216,6 +232,21 @@ static_assert(kPlotInputFields.size() ==
               "PlotInputs has a member with no row in RESOLVE_PLOT_INPUT_FIELDS "
               "(or a row with no member). The list drives every copy, slice, "
               "device move and binding of the model inputs.");
+
+// (n,) int64 on the inputs' device: for each plot, the pool columns its species
+// reach, i.e. one past its last valid slot (pool_mask, or a nonzero species code
+// where no mask is given), 0 for a plot with none. Undefined species_ids give an
+// undefined tensor.
+[[nodiscard]] inline torch::Tensor pool_slot_widths(const PlotInputs& inputs) {
+    if (!inputs.species_ids.defined()) return {};
+    const auto& ids = inputs.species_ids;
+    const auto valid = (inputs.pool_mask.defined() && inputs.pool_mask.numel() > 0)
+                           ? inputs.pool_mask.to(torch::kBool)
+                           : ids.ne(0);
+    if (ids.size(1) == 0) return torch::zeros({ids.size(0)}, ids.options().dtype(torch::kInt64));
+    const auto columns = torch::arange(1, ids.size(1) + 1, ids.options().dtype(torch::kInt64));
+    return (valid.to(torch::kInt64) * columns.unsqueeze(0)).amax(/*dim=*/1);
+}
 
 // A per-target tensor map (targets, or a forward's outputs) keyed by name, with
 // the row operations PlotInputs has.
