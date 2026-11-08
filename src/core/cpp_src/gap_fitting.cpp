@@ -2,6 +2,7 @@
 
 #include "resolve/enum_names.hpp"
 #include "resolve/geo.hpp"
+#include "resolve/plot_neighbours.hpp"
 #include "resolve/row_cells.hpp"
 #include "resolve/sparse_rows.hpp"
 #include "resolve/species_encoding.hpp"
@@ -12,7 +13,9 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <numbers>
+#include <numeric>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -328,8 +331,6 @@ struct Fold {
     torch::Tensor truth_cal;
     torch::Tensor raw_cal;
     torch::Tensor raw_test;
-    torch::Tensor species_cal;
-    torch::Tensor species_test;
     torch::Tensor coords_cal;  // (n_cal, 2), undefined without positions
     torch::Tensor coords_test;
     torch::Tensor years_cal;   // undefined without years
@@ -340,11 +341,6 @@ struct Fold {
     [[nodiscard]] int64_t n_cal() const { return truth_cal.size(0); }
     [[nodiscard]] int64_t n_test() const { return raw_test.size(0); }
     [[nodiscard]] bool circular() const { return plane.scale() == GapScale::Circular; }
-
-    [[nodiscard]] int64_t k_max(NeighbourKind kind, const std::vector<int64_t>& grid) const {
-        const int64_t usable = kind == kSpecies ? n_cal() : finite_rows(coords_cal).sum().item<int64_t>();
-        return std::min(*std::max_element(grid.begin(), grid.end()), usable - 1);
-    }
 };
 
 // Each gap's distance to its nearest complete plot on every axis.
@@ -367,17 +363,6 @@ torch::Tensor nearest_year_gap(const torch::Tensor& years, const torch::Tensor& 
     const torch::Tensor below = ref.index({(pos - 1).clamp(0, last)});
     const torch::Tensor above = ref.index({pos.clamp(0, last)});
     out.index_put_({ok}, torch::minimum((y - below).abs(), (y - above).abs()));
-    return out;
-}
-
-GapDistances gap_distances(const Fold& fold) {
-    GapDistances out;
-    out.similarity = as_double(
-        nearest_by_cosine(fold.species_test, fold.species_cal, 1).similarities.select(1, 0));
-    if (fold.spatial_axis) {
-        out.km = nearest_by_great_circle(fold.coords_test, fold.coords_cal, 1).km.select(1, 0);
-    }
-    if (fold.time_axis) out.years = nearest_year_gap(fold.years_test, fold.years_cal);
     return out;
 }
 
@@ -410,46 +395,136 @@ GapAxisSummary summarise_axis(const char* axis, const torch::Tensor& distances, 
     return out;
 }
 
-// Each complete plot's neighbours among the complete plots no nearer to it
-// than its drawn gap distance on every axis: by species (always) and by
-// great-circle distance (with the spatial axis).
-std::vector<torch::Tensor> matched_neighbours(const Fold& fold, const HidingRadii& radii,
-                                              const std::vector<int64_t>& grid) {
-    NeighbourHiding hiding;
-    hiding.queries = PlotAxes{fold.species_cal, fold.coords_cal, fold.years_cal};
-    hiding.reference = hiding.queries;
-    hiding.radii.similarity = radii.similarity;
-    if (fold.spatial_axis) hiding.radii.km = radii.km;
-    if (fold.time_axis) hiding.radii.years = radii.years;
-
-    std::vector<torch::Tensor> out(kNeighbourKinds);
-    const int64_t k_species = fold.k_max(kSpecies, grid);
-    if (k_species >= 1) {
-        out[kSpecies] = nearest_by_cosine(fold.species_cal, fold.species_cal, k_species,
-                                          /*exclude_self=*/true, &hiding)
-                            .indices;
+// Whether a complete plot is hidden from another by the matched test's
+// radii: more similar, nearer in km or in years than the radius drawn for it.
+// A search passes what it computed itself, NaN for what it did not.
+class HidingRules {
+public:
+    HidingRules(const Fold& fold, const PresenceSets& sets, const HidingRadii& radii) : sets_(sets) {
+        auto values = [](const torch::Tensor& t) {
+            if (!t.defined()) return std::vector<double>();
+            const torch::Tensor c = as_double(t).contiguous();
+            return std::vector<double>(c.data_ptr<double>(), c.data_ptr<double>() + c.numel());
+        };
+        similarity_ = values(radii.similarity);
+        km_ = values(radii.km);
+        years_ = values(radii.years);
+        if (!km_.empty()) {
+            lat_ = values(fold.coords_cal.select(1, 0));
+            lon_ = values(fold.coords_cal.select(1, 1));
+        }
+        if (!years_.empty()) plot_years_ = values(fold.years_cal);
     }
-    if (fold.spatial_axis) {
-        const int64_t k_spatial = fold.k_max(kSpatial, grid);
-        if (k_spatial >= 1) {
-            out[kSpatial] = nearest_by_great_circle(fold.coords_cal, fold.coords_cal, k_spatial,
-                                                    /*exclude_self=*/true, &hiding)
-                                .indices;
+
+    [[nodiscard]] bool hides(int64_t u, int64_t v, double similarity, double km) const {
+        if (!similarity_.empty()) {
+            if (std::isnan(similarity)) similarity = sets_.cosine(u, v);
+            if (similarity > similarity_[u]) return true;
+        }
+        if (!km_.empty()) {
+            if (std::isnan(km)) km = great_circle_km(lat_[u], lon_[u], lat_[v], lon_[v]);
+            if (km < km_[u]) return true;
+        }
+        return !years_.empty() && std::abs(plot_years_[u] - plot_years_[v]) < years_[u];
+    }
+
+    // Per complete plot, the km within which every other plot is hidden.
+    [[nodiscard]] const std::vector<double>& km_radius() const noexcept { return km_; }
+
+private:
+    const PresenceSets& sets_;
+    std::vector<double> similarity_;
+    std::vector<double> km_;
+    std::vector<double> years_;
+    std::vector<double> lat_;
+    std::vector<double> lon_;
+    std::vector<double> plot_years_;
+};
+
+// The neighbour searches of one fold over its plots, the complete plots first
+// (rows [0, n_cal)) and the gaps after them: by species over a neighbour
+// graph, by position over a k-d tree. Only complete plots are neighbours.
+class FoldSearch {
+public:
+    FoldSearch(const Fold& fold, const torch::Tensor& species_cal, const torch::Tensor& species_test,
+               const std::vector<int64_t>& grid)
+        : n_cal_(species_cal.size(0)),
+          n_test_(species_test.size(0)),
+          sets_(concat_rows({species_cal, species_test})),
+          k_species_(std::min(*std::max_element(grid.begin(), grid.end()), n_cal_ - 1)),
+          graph_(sets_, n_cal_, SetGraphConfig{std::max<int64_t>(1, k_species_)}),
+          open_(graph_.open()) {
+        if (fold.spatial_axis) {
+            places_.emplace(torch::cat({fold.coords_cal, fold.coords_test}, 0), n_cal_);
+            const int64_t located = finite_rows(fold.coords_cal).sum().item<int64_t>();
+            k_spatial_ = std::min(*std::max_element(grid.begin(), grid.end()), located - 1);
         }
     }
-    return out;
-}
 
-// The gaps' neighbours among the complete plots, of one kind.
-torch::Tensor gap_neighbours(const Fold& fold, NeighbourKind kind, int64_t k) {
-    if (kind == kSpecies) return nearest_by_cosine(fold.species_test, fold.species_cal, k).indices;
-    return nearest_by_great_circle(fold.coords_test, fold.coords_cal, k).indices;
-}
+    // Each gap's distance to its nearest complete plot on every axis; a gap
+    // sharing no species with any complete plot is at similarity 0.
+    [[nodiscard]] GapDistances distances(const Fold& fold) const {
+        GapDistances out;
+        out.similarity = torch::nan_to_num(open_.similarities.slice(0, n_cal_).select(1, 0), 0.0);
+        if (places_) out.km = places_->nearest(gap_rows(), 1).km.select(1, 0);
+        if (fold.time_axis) out.years = nearest_year_gap(fold.years_test, fold.years_cal);
+        return out;
+    }
+
+    // Each complete plot's neighbours among the complete plots the rules
+    // leave visible: by species (always) and by distance (with the spatial
+    // axis).
+    [[nodiscard]] std::vector<torch::Tensor> matched(const Fold& fold, const HidingRadii& radii) {
+        const HidingRules rules(fold, sets_, radii);
+        std::vector<torch::Tensor> out(kNeighbourKinds);
+        if (k_species_ >= 1) {
+            out[kSpecies] = graph_
+                                .hidden(n_cal_,
+                                        [&](int64_t u, int64_t v, double similarity) {
+                                            return rules.hides(u, v, similarity, kNaN);
+                                        })
+                                .indices.slice(1, 0, k_species_);
+        }
+        if (places_ && k_spatial_ >= 1) {
+            std::vector<int64_t> rows(static_cast<std::size_t>(n_cal_));
+            std::iota(rows.begin(), rows.end(), 0);
+            out[kSpatial] =
+                places_
+                    ->nearest(rows, k_spatial_,
+                              [&](int64_t u, int64_t v, double km) { return rules.hides(u, v, kNaN, km); },
+                              rules.km_radius())
+                    .indices;
+        }
+        return out;
+    }
+
+    // The gaps' k neighbours among the complete plots, of one kind.
+    [[nodiscard]] torch::Tensor gap_neighbours(NeighbourKind kind, int64_t k) const {
+        if (kind == kSpecies) return open_.indices.slice(0, n_cal_).slice(1, 0, k);
+        return places_->nearest(gap_rows(), k).indices;
+    }
+
+private:
+    [[nodiscard]] std::vector<int64_t> gap_rows() const {
+        std::vector<int64_t> rows(static_cast<std::size_t>(n_test_));
+        std::iota(rows.begin(), rows.end(), n_cal_);
+        return rows;
+    }
+
+    int64_t n_cal_;
+    int64_t n_test_;
+    PresenceSets sets_;
+    int64_t k_species_;
+    int64_t k_spatial_ = 0;
+    SetNeighbourGraph graph_;
+    SetNeighbours open_;
+    std::optional<PlaceIndex> places_;
+};
 
 // Choose k by the headline error on the complete plots that have matched
 // neighbours; nullopt when the grid holds no k the neighbours allow.
-std::optional<NeighbourTerm> neighbour_term(const Fold& fold, NeighbourKind kind,
-                                            const torch::Tensor& matched,
+std::optional<NeighbourTerm> neighbour_term(const Fold& fold, const FoldSearch& search,
+                                            NeighbourKind kind, const torch::Tensor& matched,
                                             const std::vector<int64_t>& grid) {
     if (!matched.defined()) return std::nullopt;
     const int64_t width = matched.size(1);
@@ -477,7 +552,7 @@ std::optional<NeighbourTerm> neighbour_term(const Fold& fold, NeighbourKind kind
     }
     if (!any) return std::nullopt;
     term.cal = neighbour_median(fold.truth_cal, matched, term.choice.k, circular);
-    term.test = neighbour_median(fold.truth_cal, gap_neighbours(fold, kind, width), term.choice.k,
+    term.test = neighbour_median(fold.truth_cal, search.gap_neighbours(kind, width), term.choice.k,
                                  circular);
     return term;
 }
@@ -540,14 +615,6 @@ void require_values(const GapTarget& target, const torch::Tensor& t, const char*
             (two ? "a (n_plots, 2) latitude / longitude matrix" : "a (n_plots,) vector") +
             " over the " + std::to_string(n) + " plots");
     }
-}
-
-// Presence of each species: an entry other than 0 counts once.
-torch::Tensor presence_of(const torch::Tensor& species) {
-    if (is_sparse_rows(species)) {
-        return sparse_rows_with_values(species, (species.values() != 0).to(torch::kFloat32));
-    }
-    return (species != 0).to(torch::kFloat32);
 }
 
 }  // namespace
@@ -671,6 +738,7 @@ std::pair<torch::Tensor, torch::Tensor> divide(const torch::Tensor& recorded_val
 // each complete plot's matched neighbours.
 struct Prepared {
     Fold fold;
+    std::unique_ptr<FoldSearch> search;
     GapDistances distances;
     HidingRadii radii;
     std::vector<torch::Tensor> matched;
@@ -682,7 +750,7 @@ Prepared prepare(const GapTarget& target, const torch::Tensor& raw_values,
                  const HidingRadii* injected) {
     const torch::Tensor recorded_cal = recorded_values.index({cal_index});
     const Plane plane(target, recorded_cal);
-    const torch::Tensor species = presence_of(plots.species.to(torch::kCPU));
+    const torch::Tensor species = plots.species.to(torch::kCPU);
     const torch::Tensor coords = plots.coordinates.defined() ? as_double(plots.coordinates) : torch::Tensor();
     const torch::Tensor years = plots.years.defined() ? as_double(plots.years) : torch::Tensor();
     auto rows = [](const torch::Tensor& t, const torch::Tensor& index) {
@@ -693,12 +761,11 @@ Prepared prepare(const GapTarget& target, const torch::Tensor& raw_values,
                       plane.to(recorded_cal),
                       raw_values.defined() ? plane.to(raw_values.index({cal_index})) : torch::Tensor(),
                       raw_values.defined() ? plane.to(raw_values.index({test_index})) : torch::Tensor(),
-                      select_rows(species, cal_index),
-                      select_rows(species, test_index),
                       rows(coords, cal_index),
                       rows(coords, test_index),
                       rows(years, cal_index),
                       rows(years, test_index)},
+                 {},
                  {},
                  {},
                  {}};
@@ -711,7 +778,9 @@ Prepared prepare(const GapTarget& target, const torch::Tensor& raw_values,
     fold.time_axis = years.defined() && torch::isfinite(fold.years_cal).any().item<bool>() &&
                      torch::isfinite(fold.years_test).any().item<bool>();
 
-    out.distances = gap_distances(fold);
+    out.search = std::make_unique<FoldSearch>(fold, select_rows(species, cal_index),
+                                              select_rows(species, test_index), config.k_grid);
+    out.distances = out.search->distances(fold);
     if (injected != nullptr) {
         auto take = [&](const torch::Tensor& t, const char* axis) {
             if (!t.defined()) return torch::Tensor();
@@ -735,7 +804,7 @@ Prepared prepare(const GapTarget& target, const torch::Tensor& raw_values,
         if (fold.spatial_axis) out.radii.km = drawn(out.distances.km, fold.n_cal(), generator);
         if (fold.time_axis) out.radii.years = drawn(out.distances.years, fold.n_cal(), generator);
     }
-    out.matched = matched_neighbours(fold, out.radii, config.k_grid);
+    out.matched = out.search->matched(fold, out.radii);
     return out;
 }
 
@@ -802,8 +871,8 @@ GapFit fit_gaps(const GapTarget& target, const torch::Tensor& raw, const torch::
 
     std::vector<std::optional<NeighbourTerm>> terms(kNeighbourKinds);
     for (std::size_t kind = 0; kind < kNeighbourKinds; ++kind) {
-        terms[kind] = neighbour_term(fold, static_cast<NeighbourKind>(kind), prepared.matched[kind],
-                                     config.k_grid);
+        terms[kind] = neighbour_term(fold, *prepared.search, static_cast<NeighbourKind>(kind),
+                                     prepared.matched[kind], config.k_grid);
         if (terms[kind]) out.report.neighbours.push_back(terms[kind]->choice);
     }
 

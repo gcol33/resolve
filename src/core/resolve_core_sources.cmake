@@ -37,6 +37,7 @@ set(RESOLVE_CORE_SOURCES
     ${RESOLVE_CORE_DIR}/cpp_src/lr_schedule.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/selection_metric.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/predictor.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/plot_neighbours.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/retrieval.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/geo.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/gap_fitting.cpp
@@ -70,6 +71,7 @@ set(RESOLVE_CORE_HEADERS
     ${RESOLVE_CORE_DIR}/include/resolve/config_json.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/architectures.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/plot_inputs.hpp
+    ${RESOLVE_CORE_DIR}/include/resolve/plot_neighbours.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/aggregate_arity.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/utils.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/env.hpp

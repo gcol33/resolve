@@ -27,6 +27,16 @@ torch::Tensor great_circle_km(const torch::Tensor& lat1, const torch::Tensor& lo
     return 2.0 * kEarthRadiusKm * torch::asin(torch::sqrt(torch::clamp(a, 0.0, 1.0)));
 }
 
+double great_circle_km(double lat1, double lon1, double lat2, double lon2) {
+    const double p1 = lat1 * kRadians;
+    const double p2 = lat2 * kRadians;
+    const double dl = (lon2 - lon1) * kRadians;
+    const double s1 = std::sin((p2 - p1) / 2);
+    const double s2 = std::sin(dl / 2);
+    const double a = s1 * s1 + std::cos(p1) * std::cos(p2) * s2 * s2;
+    return 2.0 * kEarthRadiusKm * std::asin(std::sqrt(std::clamp(a, 0.0, 1.0)));
+}
+
 std::pair<double, double> geographic_median(const torch::Tensor& lat, const torch::Tensor& lon,
                                             int iterations) {
     const torch::Tensor la = as_double(lat).reshape({-1});

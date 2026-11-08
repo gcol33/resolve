@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <limits>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -79,23 +78,17 @@ std::pair<torch::Tensor, torch::Tensor> top_k_lowest_ties(const torch::Tensor& s
     return {sorted, columns.gather(1, order)};
 }
 
-// A block of scores no hiding rule touches.
-struct NoMask {
-    void operator()(torch::Tensor&, int64_t, int64_t) const {}
-};
-
 // The k largest scores of each query row over the reference rows, largest
 // first. The queries are taken at most `query_rows_cap` rows at a time
 // (`query_block(q0, q1)` returns them ready for scoring) and each block is
 // scored against kBlockElements / its rows reference rows at a time
-// (`score_block(queries, r0, r1)` returns the (q1 - q0, r1 - r0) scores, and
-// `mask_block(scores, r0, r1)` may set hidden pairs to -inf), each block's top
-// k merged into the running top k, so memory stays bounded and the result is
-// exact. k is at most the reference size, one less with `exclude_self`, so
-// the masked self pair is never among the k kept. A kept score of -inf (a row
-// with fewer than k visible reference rows) is returned as index -1 with a
-// NaN score.
-template <typename QueryBlock, typename ScoreBlock, typename MaskBlock = NoMask>
+// (`score_block(queries, r0, r1)` returns the (q1 - q0, r1 - r0) scores, -inf
+// for a pair that cannot be neighbours), each block's top k merged into the
+// running top k, so memory stays bounded and the result is exact. k is at most
+// the reference size, one less with `exclude_self`, so the masked self pair is
+// never among the k kept. A kept score of -inf (a row with fewer than k
+// possible neighbours) is returned as index -1 with a NaN score.
+template <typename QueryBlock, typename ScoreBlock>
 Neighbours blocked_top_k(int64_t n_queries,
                          int64_t n_reference,
                          int64_t k,
@@ -103,7 +96,6 @@ Neighbours blocked_top_k(int64_t n_queries,
                          const torch::Device& device,
                          QueryBlock query_block,
                          ScoreBlock score_block,
-                         MaskBlock mask_block = {},
                          int64_t query_rows_cap = RetrievalIndex::kQueryBlockRows) {
     k = std::max<int64_t>(0, std::min(k, exclude_self ? n_reference - 1 : n_reference));
     const auto index_options = torch::TensorOptions().dtype(torch::kInt64).device(device);
@@ -127,7 +119,6 @@ Neighbours blocked_top_k(int64_t n_queries,
             const int64_t r1 = std::min(r0 + reference_rows, n_reference);
             torch::Tensor scores = score_block(queries, r0, r1);
             if (exclude_self) mask_self_pairs(scores, q0, q1, r0, r1);
-            mask_block(scores, r0, r1);
             auto [block_similarities, block_indices] = top_k_lowest_ties(scores, std::min(k, r1 - r0));
             block_indices.add_(r0);
             if (!best_similarities.defined()) {
@@ -238,110 +229,6 @@ torch::Tensor block_km(const torch::Tensor& query_rows, const torch::Tensor& ref
                            reference_rows.select(1, 1).unsqueeze(0));
 }
 
-// The rules of one NeighbourHiding, evaluated block by block. A search hands
-// over what it already computed for its own score (the similarities of a
-// cosine search, the distances of a great-circle one); every other rule is
-// computed here from the hiding's axes.
-class HidingMask {
-public:
-    HidingMask(const NeighbourHiding& hiding, int64_t n_queries, int64_t n_reference,
-               const torch::Device& device, bool own_similarity, bool own_km)
-        : hiding_(hiding), device_(device) {
-        const HidingRadii& r = hiding.radii;
-        auto check_radius = [&](const torch::Tensor& radius, const char* axis) {
-            if (radius.defined() && (radius.dim() != 1 || radius.size(0) != n_queries)) {
-                throw std::invalid_argument(std::string("neighbour hiding: the ") + axis +
-                                            " radius must hold one value per query row");
-            }
-        };
-        check_radius(r.similarity, "similarity");
-        check_radius(r.km, "km");
-        check_radius(r.years, "years");
-        auto check_axis = [&](const torch::Tensor& q, const torch::Tensor& ref, const char* axis) {
-            if (!q.defined() || !ref.defined() || q.size(0) != n_queries ||
-                ref.size(0) != n_reference) {
-                throw std::invalid_argument(std::string("neighbour hiding: the ") + axis +
-                                            " rule needs the " + axis +
-                                            " of every query and reference row");
-            }
-        };
-        if (r.similarity.defined() && !own_similarity) {
-            check_axis(hiding.queries.species, hiding.reference.species, "species");
-            similarity_.emplace(hiding.queries.species, hiding.reference.species, device_);
-        }
-        if (r.km.defined() && !own_km) {
-            check_axis(hiding.queries.coordinates, hiding.reference.coordinates, "coordinates");
-            query_coordinates_ = hiding.queries.coordinates.to(torch::kCPU, torch::kFloat64);
-            reference_coordinates_ = hiding.reference.coordinates.to(torch::kCPU, torch::kFloat64);
-        }
-        if (r.years.defined()) {
-            check_axis(hiding.queries.years, hiding.reference.years, "years");
-            query_years_ = hiding.queries.years.to(device_, torch::kFloat64);
-            reference_years_ = hiding.reference.years.to(device_, torch::kFloat64).unsqueeze(0);
-        }
-    }
-
-    // Starts a block of query rows [q0, q1).
-    void begin_queries(int64_t q0, int64_t q1) {
-        const HidingRadii& r = hiding_.radii;
-        q0_ = q0;
-        q1_ = q1;
-        if (similarity_) block_species_ = similarity_->query_block(q0, q1);
-        if (r.similarity.defined()) {
-            similarity_radius_ = r.similarity.slice(0, q0, q1).to(device_, torch::kFloat32).unsqueeze(1);
-        }
-        if (r.km.defined()) {
-            km_radius_ = r.km.slice(0, q0, q1).to(torch::kCPU, torch::kFloat64).unsqueeze(1);
-        }
-        if (r.years.defined()) {
-            years_radius_ = r.years.slice(0, q0, q1).to(device_, torch::kFloat64).unsqueeze(1);
-        }
-    }
-
-    // Sets the scores of the pairs (current query block) x [r0, r1) the rules
-    // hide to -inf. `similarity` and `km` are the search's own values for the
-    // block when it has them, undefined otherwise.
-    void apply(torch::Tensor& scores, int64_t r0, int64_t r1, const torch::Tensor& similarity,
-               const torch::Tensor& km) const {
-        const HidingRadii& r = hiding_.radii;
-        torch::Tensor hidden = torch::zeros(scores.sizes(), scores.options().dtype(torch::kBool));
-        if (r.similarity.defined()) {
-            const torch::Tensor s =
-                similarity.defined() ? similarity : similarity_->score(block_species_, r0, r1);
-            hidden |= s > similarity_radius_;
-        }
-        if (r.km.defined()) {
-            const torch::Tensor d =
-                km.defined() ? km
-                             : block_km(query_coordinates_.slice(0, q0_, q1_),
-                                        reference_coordinates_.slice(0, r0, r1));
-            hidden |= (d < km_radius_).to(scores.device());
-        }
-        if (r.years.defined()) {
-            const torch::Tensor gap = (query_years_.slice(0, q0_, q1_).unsqueeze(1) -
-                                       reference_years_.slice(1, r0, r1))
-                                          .abs();
-            hidden |= gap < years_radius_;
-        }
-        scores.masked_fill_(hidden, kHidden);
-    }
-
-private:
-    const NeighbourHiding& hiding_;
-    torch::Device device_;
-    std::optional<CosineScores> similarity_;
-    torch::Tensor query_coordinates_;
-    torch::Tensor reference_coordinates_;
-    torch::Tensor query_years_;
-    torch::Tensor reference_years_;
-    int64_t q0_ = 0;
-    int64_t q1_ = 0;
-    torch::Tensor block_species_;
-    torch::Tensor similarity_radius_;
-    torch::Tensor km_radius_;
-    torch::Tensor years_radius_;
-};
-
 void require_coordinates(const torch::Tensor& t, const char* name) {
     if (!t.defined() || t.dim() != 2 || t.size(1) != 2 || !t.is_floating_point()) {
         throw std::invalid_argument(std::string("nearest_by_great_circle: ") + name +
@@ -369,28 +256,15 @@ void RetrievalConfig::validate() const {
 Neighbours nearest_by_cosine(const torch::Tensor& queries,
                              const torch::Tensor& reference,
                              int64_t k,
-                             bool exclude_self,
-                             const NeighbourHiding* hiding) {
+                             bool exclude_self) {
     require_search_shapes(queries, reference, k, exclude_self, "nearest_by_cosine");
     const torch::Device device = reference.device();
     const CosineScores scores(queries, reference, device);
-    std::optional<HidingMask> mask;
-    if (hiding != nullptr) {
-        mask.emplace(*hiding, queries.size(0), reference.size(0), device, /*own_similarity=*/true,
-                     /*own_km=*/false);
-    }
     return blocked_top_k(
         queries.size(0), reference.size(0), k, exclude_self, device,
-        [&](int64_t q0, int64_t q1) {
-            if (mask) mask->begin_queries(q0, q1);
-            return scores.query_block(q0, q1);
-        },
+        [&](int64_t q0, int64_t q1) { return scores.query_block(q0, q1); },
         [&](const torch::Tensor& query_rows, int64_t r0, int64_t r1) {
             return scores.score(query_rows, r0, r1);
-        },
-        [&](torch::Tensor& block, int64_t r0, int64_t r1) {
-            // The similarity rule reads the block before any pair is hidden.
-            if (mask) mask->apply(block, r0, r1, /*similarity=*/block.clone(), /*km=*/{});
         },
         scores.query_rows_cap());
 }
@@ -398,35 +272,21 @@ Neighbours nearest_by_cosine(const torch::Tensor& queries,
 PlaceNeighbours nearest_by_great_circle(const torch::Tensor& queries,
                                         const torch::Tensor& reference,
                                         int64_t k,
-                                        bool exclude_self,
-                                        const NeighbourHiding* hiding) {
+                                        bool exclude_self) {
     require_coordinates(queries, "queries");
     require_coordinates(reference, "reference");
     require_search_shapes(queries, reference, k, exclude_self, "nearest_by_great_circle");
     const torch::Device device = torch::kCPU;
     const torch::Tensor query_positions = queries.to(device, torch::kFloat64);
     const torch::Tensor reference_positions = reference.to(device, torch::kFloat64);
-    std::optional<HidingMask> mask;
-    if (hiding != nullptr) {
-        mask.emplace(*hiding, queries.size(0), reference.size(0), device, /*own_similarity=*/false,
-                     /*own_km=*/true);
-    }
-    // The block's distances, read by the hiding rule; the score is their
-    // negative, -inf where a coordinate is missing.
-    torch::Tensor block_distances;
+    // The score is the negative distance, -inf where a coordinate is missing.
     const Neighbours found = blocked_top_k(
         queries.size(0), reference.size(0), k, exclude_self, device,
-        [&](int64_t q0, int64_t q1) {
-            if (mask) mask->begin_queries(q0, q1);
-            return query_positions.slice(0, q0, q1);
-        },
+        [&](int64_t q0, int64_t q1) { return query_positions.slice(0, q0, q1); },
         [&](const torch::Tensor& query_rows, int64_t r0, int64_t r1) {
-            block_distances = block_km(query_rows, reference_positions.slice(0, r0, r1));
-            return torch::nan_to_num(-block_distances, /*nan=*/-std::numeric_limits<double>::infinity())
+            return torch::nan_to_num(-block_km(query_rows, reference_positions.slice(0, r0, r1)),
+                                     /*nan=*/-std::numeric_limits<double>::infinity())
                 .to(torch::kFloat32);
-        },
-        [&](torch::Tensor& block, int64_t r0, int64_t r1) {
-            if (mask) mask->apply(block, r0, r1, /*similarity=*/{}, block_distances);
         });
     // The distances of the neighbours kept, recomputed in float64 from the
     // positions rather than read back from the float32 scores.

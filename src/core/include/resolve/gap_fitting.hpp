@@ -59,7 +59,7 @@
 // dataset's own labelled plots must not shift what a plot is called.
 
 #include "resolve/json.hpp"
-#include "resolve/retrieval.hpp"
+#include "resolve/plot_neighbours.hpp"
 #include "resolve/row_source.hpp"
 #include "resolve/types.hpp"
 

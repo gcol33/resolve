@@ -124,6 +124,7 @@ add_executable(resolve_tests
     test_retrieval.cpp
     test_geo.cpp
     test_gap_fitting.cpp
+    test_plot_neighbours.cpp
     test_grad_clip.cpp
 )
 

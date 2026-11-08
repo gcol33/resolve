@@ -29,6 +29,10 @@ inline constexpr double kGrs80InverseFlattening = 298.257222101;
                                             const torch::Tensor& lat2,
                                             const torch::Tensor& lon2);
 
+// The haversine distance in km between two positions in degrees, by the same
+// formula; NaN when a coordinate is NaN.
+[[nodiscard]] double great_circle_km(double lat1, double lon1, double lat2, double lon2);
+
 // The point minimising the mean great-circle distance to (lat, lon), by
 // Weiszfeld's iteration on unit vectors started from their normalised mean.
 // Positions with a NaN coordinate are left out. Returns (latitude, longitude)

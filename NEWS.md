@@ -98,12 +98,26 @@
   area with no georeferenced plots, are better served by the raw prediction;
   the article "Filling a dataset's gaps" says why.
 
-- **Great-circle nearest neighbours and restricted searches.**
-  `nearest_by_great_circle` is the exact blocked search by haversine distance
-  (`resolve_core.nearest_by_great_circle`); `nearest_by_cosine` takes sparse
-  rows and, in C++, a per-row hiding rule (similarity above, km or years
-  below a radius per query). A row left with fewer than `k` neighbours lists
-  -1 after the ones it has.
+- **Gap fitting reaches a continent's plots.** The matched test compares
+  every complete plot with the others, and by species an exact search does
+  that pair by pair: at the similarities plots share (the 50th neighbour near
+  0.45 in EVA) no bound prunes enough to change it. Gap fitting now finds its
+  species neighbours in a neighbour graph built by nearest-neighbour descent
+  (Dong, Charikar & Li 2011): each plot's neighbours' neighbours are compared
+  with it, round after round, under each plot's hiding rules, beside an
+  unrestricted graph that leads the search past the hidden plots. The lists
+  are the same on any thread count. Its spatial neighbours come from an exact
+  k-d tree over positions on the sphere. On EVA's altitude, with its own
+  blanks as the gaps, 50,000 plots took 8.9 s against 106 s for the exact
+  search, with the same method and `k` on every gap and the fitted values a
+  median 0.15 m apart (95% within 0.47 m); all 1,485,542 plots took 415 s on
+  one workstation. A plot sharing a species with fewer than `k` complete
+  plots lists the lowest-row plots sharing none after them, as before.
+
+- **Great-circle nearest neighbours.** `nearest_by_great_circle` is the
+  exact blocked search by haversine distance
+  (`resolve_core.nearest_by_great_circle`), and `nearest_by_cosine` takes
+  sparse rows. A row without coordinates has no neighbours and lists -1.
 
 ### Fixed
 
