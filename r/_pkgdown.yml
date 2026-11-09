@@ -190,7 +190,6 @@ articles:
   navbar: Setup
   contents: articles/installation
 - title: internal
-  navbar: ~
   contents: articles/app
 - title: Python reference
   desc: |
