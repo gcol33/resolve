@@ -85,6 +85,10 @@ venv.bak/
 !src/core/tests/fixtures/*.csv
 # The example survey the R help pages load (written by r/data-raw/example_data.R).
 !r/inst/extdata/*.csv
+# The browser app's example tables (written by resolve-2026 app/build_example.py),
+# in the site's sources and in the built site.
+!r/pkgdown/assets/app/examples/*.csv
+!docs/app/examples/*.csv
 # Recorded models the encoder parity case loads (test_encoder_parity.cpp).
 !src/core/tests/fixtures/encoder_parity/*.pt
 
