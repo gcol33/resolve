@@ -48,7 +48,21 @@ std::string dl_error() {
 #else
 using lib_handle_t = void*;
 
-lib_handle_t dl_open(const char* path) { return ::dlopen(path, RTLD_NOW | RTLD_LOCAL); }
+// libtorch_cpu exports the BLAS of the MKL it links statically (sgemm_,
+// cblas_sgemm_batch, ...) and calls them through its own PLT. R has already
+// put its BLAS (libRblas, or the system libblas.so.3 such as OpenBLAS) in the
+// global scope, which glibc searches first, so without RTLD_DEEPBIND those
+// calls bind to R's BLAS; OpenBLAS 0.3.32's cblas_sgemm_batch then crashes
+// every batched matmul (bmm in attention). RTLD_DEEPBIND makes resolve_c and
+// the libraries it loads search their own scope first, so libtorch calls its
+// own MKL. macOS two-level namespaces and Windows imports already bind that
+// way; RTLD_DEEPBIND is a glibc extension, absent on musl.
+#  if defined(RTLD_DEEPBIND)
+constexpr int kDlopenFlags = RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND;
+#  else
+constexpr int kDlopenFlags = RTLD_NOW | RTLD_LOCAL;
+#  endif
+lib_handle_t dl_open(const char* path) { return ::dlopen(path, kDlopenFlags); }
 void* dl_sym(lib_handle_t h, const char* name) { return ::dlsym(h, name); }
 void dl_close(lib_handle_t h) { ::dlclose(h); }
 std::string dl_error() {

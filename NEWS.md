@@ -206,6 +206,13 @@
 
 ### Fixed
 
+- **Training in R on Linux with a system BLAS.** libtorch calls the BLAS of
+  the MKL it carries, but R had already loaded its own BLAS, and on Linux the
+  backend's calls bound to that one. With OpenBLAS 0.3.32 (Ubuntu 26.04) every
+  batched matrix product crashed, so an FT-Transformer fit ended in a
+  segfault. The R package now loads the backend so that libtorch's calls stay
+  inside libtorch (`RTLD_DEEPBIND`, as the torch package loads lantern); a
+  test preloads a stand-in BLAS and checks the fit never reaches it.
 - **Terrain descriptors near 50, 60, 70 and 80 degrees north.** GLO-30's
   tiles widen their columns at these parallels (3,600 to 2,400 columns per
   degree at 50 N, and so on). A cell one row past a tile's edge kept its
