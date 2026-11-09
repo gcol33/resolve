@@ -176,6 +176,13 @@ TerrainCells TerrainTileIndex::normalise(const torch::Tensor& tile, const torch:
                     t[i] = -1;
                     break;
                 }
+                // A tile north or south may space its columns differently
+                // (GLO-30 widens them at 50, 60, 70 and 80 degrees): the
+                // column is the one nearest the same longitude there.
+                if (axis == 0 && nt.dlon != tt.dlon) {
+                    c[i] = static_cast<int64_t>(
+                        std::llround((tt.lon_first + static_cast<double>(c[i]) * tt.dlon - nt.lon_first) / nt.dlon));
+                }
                 t[i] = next;
             }
         }
@@ -221,32 +228,57 @@ torch::Tensor bilinear_elevation(const TerrainTileIndex& index, const torch::Ten
     torch::Tensor ccol = torch::empty({4 * n}, torch::kInt64);
     torch::Tensor weight = torch::zeros({4 * n}, torch::kFloat64);
     {
+        // The two rows around each point, each placed in the tile that holds
+        // it: a row past the tile's edge lies in the tile north or south,
+        // which may space its columns differently.
         const auto a = la.accessor<double, 1>();
-        const auto o = lo.accessor<double, 1>();
         const auto t = tile.accessor<int64_t, 1>();
+        const auto& tiles = index.tiles();
+        torch::Tensor rtile = torch::full({2 * n}, int64_t{-1}, torch::kInt64);
+        torch::Tensor rrow = torch::zeros({2 * n}, torch::kInt64);
+        torch::Tensor wrow = torch::zeros({2 * n}, torch::kFloat64);
+        auto rt = rtile.accessor<int64_t, 1>();
+        auto rr = rrow.accessor<int64_t, 1>();
+        auto wl = wrow.accessor<double, 1>();
+        at::parallel_for(0, n, kTerrainParallelGrain, [&](int64_t begin, int64_t end) {
+            for (int64_t i = begin; i < end; ++i) {
+                if (t[i] < 0) continue;
+                const auto& tt = tiles[static_cast<size_t>(t[i])];
+                const double fr = (tt.lat_first - a[i]) / tt.dlat;
+                const double r0 = std::floor(fr);
+                const double wr = fr - r0;
+                for (int dr = 0; dr < 2; ++dr) {
+                    rt[2 * i + dr] = t[i];
+                    rr[2 * i + dr] = static_cast<int64_t>(r0) + dr;
+                    wl[2 * i + dr] = dr ? wr : 1.0 - wr;
+                }
+            }
+        });
+        const TerrainCells rows = index.normalise(rtile, rrow, torch::zeros({2 * n}, torch::kInt64));
+        const auto nt = rows.tile.accessor<int64_t, 1>();
+        const auto nr = rows.row.accessor<int64_t, 1>();
+        const auto o = lo.accessor<double, 1>();
         auto ct = ctile.accessor<int64_t, 1>();
         auto cr = crow.accessor<int64_t, 1>();
         auto cc = ccol.accessor<int64_t, 1>();
         auto w = weight.accessor<double, 1>();
-        const auto& tiles = index.tiles();
         at::parallel_for(0, n, kTerrainParallelGrain, [&](int64_t begin, int64_t end) {
             for (int64_t i = begin; i < end; ++i) {
                 for (int k = 0; k < 4; ++k) ct[4 * i + k] = -1;
-                if (t[i] < 0) continue;
-                const auto& tt = tiles[static_cast<size_t>(t[i])];
-                const double fr = (tt.lat_first - a[i]) / tt.dlat;
-                const double fc = (o[i] - tt.lon_first) / tt.dlon;
-                const double r0 = std::floor(fr);
-                const double c0 = std::floor(fc);
-                const double wr = fr - r0;
-                const double wc = fc - c0;
-                for (int k = 0; k < 4; ++k) {
-                    const int dr = k >> 1;
-                    const int dc = k & 1;
-                    ct[4 * i + k] = t[i];
-                    cr[4 * i + k] = static_cast<int64_t>(r0) + dr;
-                    cc[4 * i + k] = static_cast<int64_t>(c0) + dc;
-                    w[4 * i + k] = (dr ? wr : 1.0 - wr) * (dc ? wc : 1.0 - wc);
+                for (int dr = 0; dr < 2; ++dr) {
+                    const int64_t rt_i = nt[2 * i + dr];
+                    if (rt_i < 0) continue;
+                    const auto& tt = tiles[static_cast<size_t>(rt_i)];
+                    const double fc = (o[i] - tt.lon_first) / tt.dlon;
+                    const double c0 = std::floor(fc);
+                    const double wc = fc - c0;
+                    for (int dc = 0; dc < 2; ++dc) {
+                        const int k = 2 * dr + dc;
+                        ct[4 * i + k] = rt_i;
+                        cr[4 * i + k] = nr[2 * i + dr];
+                        cc[4 * i + k] = static_cast<int64_t>(c0) + dc;
+                        w[4 * i + k] = wl[2 * i + dr] * (dc ? wc : 1.0 - wc);
+                    }
                 }
             }
         });

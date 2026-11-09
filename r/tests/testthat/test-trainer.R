@@ -329,3 +329,25 @@ test_that("the pooled encodings train under aggregation = \"count\"", {
     expect_length(fit$result$train_loss, 1L)
   }
 })
+
+test_that("a fit after the same seed gives the same model", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  tables <- signal_tables(60L)
+  dataset <- load_tables(tables, signal_roles(), regression_target())
+  fit_after_seed <- function(seed) {
+    resolve.manual_seed(seed)
+    model <- new(.resolve_module()$ResolveModel, dataset$schema(),
+                 list(species_encoding = "hash", hash_dim = 4L, top_k = 2L,
+                      hidden_dims = c(16L, 8L)))
+    trainer <- new(.resolve_module()$Trainer, model, list(max_epochs = 3L, batch_size = 16L))
+    trainer$prepare_data_from_dataset(dataset, 0.25, 3L)
+    trainer$fit()
+  }
+  first <- fit_after_seed(5)
+  expect_identical(fit_after_seed(5)$test_loss, first$test_loss)
+  expect_false(identical(fit_after_seed(6)$test_loss, first$test_loss))
+  expect_error(resolve.manual_seed(-1), "whole number")
+  expect_error(resolve.manual_seed(1.5), "whole number")
+})

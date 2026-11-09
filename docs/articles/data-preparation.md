@@ -624,7 +624,7 @@ new_plots <- resolve.dataset.csv(
 )
 preds <- resolve.predict.dataset(predictor, new_plots)
 head(round(preds$predictions$elevation))
-#> [1] 1162 1173 1451 1549 1228  922
+#> [1]  940 1106 1351 1445  912  568
 ```
 
 ``` python
@@ -636,7 +636,7 @@ new_plots = rc.ResolveDataset.from_csv_with_vocabs(
     predictor.external_vocabs, predictor.dataset_config)
 preds = predictor.predict_dataset(new_plots)
 preds.predictions["elevation"][:6].round()
-#> tensor([1002., 1025., 1342., 1585., 1187.,  888.])
+#> tensor([1185., 1046., 1497., 1670., 1024., 1076.])
 ```
 
 A dataset built to be predicted needs no target, so the target list is

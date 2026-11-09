@@ -511,28 +511,32 @@ inline double terrain_plane(double lat, double lon) {
 // Grid tiles of terrain_plane on the degree squares (south, west) in
 // `squares`, written under `dir` with a tiles.json, laid out as GLO-30 lays
 // its own: pixel is point, a tile's first row on its northern edge and its
-// first column on its western edge, `cells` cells per degree.
+// first column on its western edge, `cells` cells per degree. A square from
+// `north_of` northward has `cells_north` columns per degree instead, as
+// GLO-30 widens its columns at 50 degrees and beyond.
 inline void write_plane_terrain(const TempDir& dir, const std::vector<std::pair<int, int>>& squares,
-                                int64_t cells = 60) {
+                                int64_t cells = 60, int north_of = 1000, int64_t cells_north = 0) {
     std::ostringstream index;
     index.precision(17);
     index << R"({"format": "resolve-terrain-grids", "version": 1, "tiles": [)";
     const double d = 1.0 / static_cast<double>(cells);
     for (size_t k = 0; k < squares.size(); ++k) {
         const auto [s, w] = squares[k];
-        torch::Tensor g = torch::empty({cells, cells}, torch::kFloat32);
+        const int64_t cols = s >= north_of ? cells_north : cells;
+        const double dc = 1.0 / static_cast<double>(cols);
+        torch::Tensor g = torch::empty({cells, cols}, torch::kFloat32);
         auto a = g.accessor<float, 2>();
         for (int64_t r = 0; r < cells; ++r) {
-            for (int64_t c = 0; c < cells; ++c) {
+            for (int64_t c = 0; c < cols; ++c) {
                 a[r][c] = static_cast<float>(terrain_plane(s + 1.0 - static_cast<double>(r) * d,
-                                                           w + static_cast<double>(c) * d));
+                                                           w + static_cast<double>(c) * dc));
             }
         }
         const std::string name = "T" + std::to_string(s) + "_" + std::to_string(w);
         write_npy_grid(dir.file(name + ".npy"), g);
         index << (k ? ", " : "") << R"({"name": ")" << name << R"(", "file": ")" << name
-              << R"(.npy", "rows": )" << cells << R"(, "cols": )" << cells << R"(, "lat_first": )" << (s + 1)
-              << R"(, "lon_first": )" << w << R"(, "dlat": )" << d << R"(, "dlon": )" << d << "}";
+              << R"(.npy", "rows": )" << cells << R"(, "cols": )" << cols << R"(, "lat_first": )" << (s + 1)
+              << R"(, "lon_first": )" << w << R"(, "dlat": )" << d << R"(, "dlon": )" << dc << "}";
     }
     index << "]}";
     dir.write("tiles.json", index.str());

@@ -105,6 +105,16 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// resolve_manual_seed
+void resolve_manual_seed(double seed);
+RcppExport SEXP _resolveR_resolve_manual_seed(SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type seed(seedSEXP);
+    resolve_manual_seed(seed);
+    return R_NilValue;
+END_RCPP
+}
 // resolve_set_thread_pools
 void resolve_set_thread_pools(int intraop_threads, int interop_threads);
 RcppExport SEXP _resolveR_resolve_set_thread_pools(SEXP intraop_threadsSEXP, SEXP interop_threadsSEXP) {
@@ -189,6 +199,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_resolveR_resolve_r_squared", (DL_FUNC) &_resolveR_resolve_r_squared, 2},
     {"_resolveR_resolve_version", (DL_FUNC) &_resolveR_resolve_version, 0},
     {"_resolveR_resolve_set_vram_fraction", (DL_FUNC) &_resolveR_resolve_set_vram_fraction, 2},
+    {"_resolveR_resolve_manual_seed", (DL_FUNC) &_resolveR_resolve_manual_seed, 1},
     {"_resolveR_resolve_set_thread_pools", (DL_FUNC) &_resolveR_resolve_set_thread_pools, 2},
     {"_resolveR_resolve_install_crash_handler", (DL_FUNC) &_resolveR_resolve_install_crash_handler, 1},
     {"_resolveR_resolve_signal_work_complete", (DL_FUNC) &_resolveR_resolve_signal_work_complete, 0},

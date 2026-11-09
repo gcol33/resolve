@@ -1,6 +1,16 @@
 #pragma once
 
+#include <cstdint>
+
 namespace resolve {
+
+// Seed libtorch's random number generators: the CPU generator and, when CUDA
+// devices are present, each device's generator (torch::manual_seed). Weight
+// initialization, dropout and every other torch draw read these generators,
+// so a model built and trained after the same seed, on the same device, build
+// and data, is the same model. The split, the per-epoch shuffle and the
+// cross-validation folds take their own seed argument and do not read them.
+void manual_seed(uint64_t seed);
 
 // Limit libtorch's intra-op (OpenMP / c10 thread pool) and inter-op
 // (std::thread launch pool) parallelism.

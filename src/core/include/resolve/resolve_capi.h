@@ -210,6 +210,11 @@ RESOLVE_CAPI resolve_value_t* resolve_capi_configure_cuda_allocator(int force);
  * masked_species vae. NULL for an unknown name. */
 RESOLVE_CAPI resolve_value_t* resolve_default_config(const char* which);
 
+/* Seed libtorch's CPU and CUDA random number generators, which weight
+ * initialization and dropout draw from; the split and shuffle seeds are
+ * separate arguments. */
+RESOLVE_CAPI int resolve_capi_manual_seed(uint64_t seed);
+
 /* Pin libtorch's intra-op / inter-op thread pools (<=0 keeps the default).
  * Best-effort: removes the worker threads whose teardown join crashes the
  * Rscript.exe launcher on Windows. Call at startup. */

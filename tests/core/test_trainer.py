@@ -432,3 +432,27 @@ def test_device_names_round_trip_through_the_config():
     pretrain = rc.PretrainConfig()
     pretrain.device = "cuda:1"
     assert pretrain.device == "cuda:1"
+
+
+# ---------------------------------------------------------------------------
+# Seeding
+# ---------------------------------------------------------------------------
+
+
+def _fit_after_seed(dataset, seed):
+    rc.manual_seed(seed)
+    model = rc.ResolveModel(dataset.schema, make_model_config())
+    trainer = rc.Trainer(model, make_train_config(max_epochs=3))
+    trainer.prepare_data(dataset, 0.25, 42)
+    result = trainer.fit()
+    weights = [p.detach().clone() for p in trainer.model.parameters()]
+    return list(result.test_loss_history), weights
+
+
+def test_a_fit_after_the_same_seed_gives_the_same_model(hash_dataset):
+    loss, weights = _fit_after_seed(hash_dataset, 5)
+    loss_again, weights_again = _fit_after_seed(hash_dataset, 5)
+    _, weights_other = _fit_after_seed(hash_dataset, 6)
+    assert loss == loss_again
+    assert all(torch.equal(a, b) for a, b in zip(weights, weights_again))
+    assert not all(torch.equal(a, b) for a, b in zip(weights, weights_other))

@@ -3,6 +3,7 @@
 #include <atomic>
 
 #include <ATen/Parallel.h>
+#include <torch/utils.h>
 
 #if defined(_WIN32)
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -39,6 +40,10 @@ unsigned int crash_exit_code(
     }
     // No usable NTSTATUS but a real mid-run fault: never report success.
     return 3U;
+}
+
+void manual_seed(uint64_t seed) {
+    torch::manual_seed(seed);
 }
 
 void set_thread_pools(int intraop_threads, int interop_threads) {

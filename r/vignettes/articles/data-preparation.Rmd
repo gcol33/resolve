@@ -9,6 +9,7 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6.5, fig.heig
                       dev.args = list(pointsize = 14))
 library(resolveR)
 if (nzchar(Sys.getenv("RESOLVE_DOCS_CACHE"))) source(Sys.getenv("RESOLVE_DOCS_CACHE"))
+if (resolve.available()) resolve.manual_seed(42)
 ```
 
 RESOLVE reads vegetation plots from two tables: one row per plot, and one row per species recorded on a plot. Loading turns them into a *dataset*, the encoded form a model trains on and predicts from. The loader needs to be told which column plays which part, which columns to predict, and what to do with cells that are empty.
@@ -546,7 +547,7 @@ new_plots = rc.ResolveDataset.from_csv_with_vocabs(
     predictor.external_vocabs, predictor.dataset_config)
 preds = predictor.predict_dataset(new_plots)
 preds.predictions["elevation"][:6].round()
-#> tensor([1002., 1025., 1342., 1585., 1187.,  888.])
+#> tensor([1185., 1046., 1497., 1670., 1024., 1076.])
 ```
 :::
 

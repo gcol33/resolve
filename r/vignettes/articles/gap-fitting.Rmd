@@ -9,6 +9,7 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6.5, fig.heig
                       dev.args = list(pointsize = 14))
 library(resolveR)
 if (nzchar(Sys.getenv("RESOLVE_DOCS_CACHE"))) source(Sys.getenv("RESOLVE_DOCS_CACHE"))
+if (resolve.available()) resolve.manual_seed(42)
 ```
 
 A dataset rarely lacks a variable on every plot. Most plots carry a survey year, coordinates or an elevation, and some do not. The plots that carry it are labelled examples from the same surveys, recorded by the same people, as the plots that lack it. *Gap fitting* reads them: on the plots where the value is recorded (the *complete plots*) it chooses how to combine the model's prediction with the dataset's own neighbours, and applies that choice to the plots where it is missing (the *gaps*). The model's prediction is never replaced; the fitted value comes back beside it, with a report of what was chosen and why.
@@ -205,7 +206,7 @@ raw = preds.predictions["elevation"].numpy()
 fitted = elevation.fitted.numpy()
 {"model": float(np.abs(raw[gaps] - truth[gaps]).mean()),
  "fitted": float(np.abs(fitted[gaps] - truth[gaps]).mean())}
-#> {'model': 238.97451985677083, 'fitted': 154.8316109681892}
+#> {'model': 252.3594970703125, 'fitted': 141.37301726696327}
 ```
 :::
 
@@ -226,7 +227,7 @@ located = elevation.report["groups"]["located"]
 located["method"]
 #> stack_species_spatial
 {m: round(e, 1) for m, e in located["matched_error"].items()}
-#> {'local_constant': 559.9, 'resolve': 188.8, 'offset_slope': 191.9, 'knn_species': 173.0, 'stack_species': 150.0, 'knn_spatial': 609.3, 'stack_species_spatial': 149.0}
+#> {'local_constant': 559.9, 'resolve': 167.7, 'offset_slope': 167.2, 'knn_species': 173.0, 'stack_species': 134.9, 'knn_spatial': 609.3, 'stack_species_spatial': 131.0}
 elevation.report["axes"]["km"]["gap_distance"]["median"]
 #> 7.379891561267665
 ```

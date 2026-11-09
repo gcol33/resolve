@@ -214,6 +214,7 @@ try:
         default_cuda_alloc_conf,
         set_vram_fraction,
         set_thread_pools,
+        manual_seed,
         install_crash_handler,
         _configure_cuda_allocator,
         _signal_work_complete,
@@ -477,6 +478,8 @@ __all__ = [
     "set_vram_fraction",
     "configure_cuda_allocator",
     "default_cuda_alloc_conf",
+    # Random numbers
+    "manual_seed",
     # Process hardening (Windows teardown and crashes)
     "set_thread_pools",
     "install_crash_handler",

@@ -9,6 +9,7 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6.5, fig.heig
                       dev.args = list(pointsize = 14))
 library(resolveR)
 if (nzchar(Sys.getenv("RESOLVE_DOCS_CACHE"))) source(Sys.getenv("RESOLVE_DOCS_CACHE"))
+if (resolve.available()) resolve.manual_seed(42)
 ```
 
 A survey of a few hundred plots trains in seconds on a laptop with the default settings. An archive of a million plots takes the settings this article covers: the learning rate and its schedule, the batch size, the size of the model, the encoding settings that bound memory, and the GPU settings, from mixed precision to what happens when the GPU runs out of memory.
@@ -570,7 +571,7 @@ model_config = rc.model_config_for_dataset(quick_data, model_config)
 quick = rc.Trainer(rc.ResolveModel(quick_data.schema, model_config), cfg)
 quick.prepare_data(quick_data, test_size=0.2, seed=42)
 round(quick.fit().final_metrics["habitat"]["accuracy"], 3)
-#> 0.767
+#> 0.8
 ```
 :::
 
@@ -595,7 +596,7 @@ model_config = rc.model_config_for_dataset(quick_data, model_config)
 standard = rc.Trainer(rc.ResolveModel(quick_data.schema, model_config), cfg)
 standard.prepare_data(quick_data, test_size=0.2, seed=42)
 round(standard.fit().final_metrics["habitat"]["accuracy"], 3)
-#> 0.767
+#> 0.833
 ```
 :::
 

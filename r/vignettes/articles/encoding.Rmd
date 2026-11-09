@@ -9,6 +9,7 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6.5, fig.heig
                       dev.args = list(pointsize = 14))
 library(resolveR)
 if (nzchar(Sys.getenv("RESOLVE_DOCS_CACHE"))) source(Sys.getenv("RESOLVE_DOCS_CACHE"))
+if (resolve.available()) resolve.manual_seed(42)
 ```
 
 A plot's species list has no fixed length: one plot records three species, the next forty. A neural network reads inputs of a fixed width, so the list has to be turned into numbers first. This step is the *species encoding*. RESOLVE has five encodings; they differ in how many of a plot's species they keep, whether two species can end up in the same input, and how much of the representation is learned.
@@ -244,7 +245,7 @@ train_config.max_epochs = 100
 trainer = rc.Trainer(model, train_config)
 trainer.prepare_data(attended)
 trainer.fit().best_epoch
-#> 90
+#> 95
 ```
 :::
 
@@ -322,7 +323,7 @@ train_config.max_epochs = 50
 trainer = rc.Trainer(model, train_config)
 trainer.prepare_data(hashed)
 round(trainer.fit().final_metrics["habitat"]["accuracy"], 3)
-#> 0.8
+#> 0.867
 ```
 :::
 
@@ -358,7 +359,7 @@ def held_out_mae(encoding):
 encodings = ["Hash", "Embed", "Sparse", "RankPool", "Transformer"]
 {name: round(held_out_mae(getattr(rc.SpeciesEncodingMode, name)))
  for name in encodings}
-#> {'Hash': 218, 'Embed': 222, 'Sparse': 225, 'RankPool': 170, 'Transformer': 149}
+#> {'Hash': 222, 'Embed': 173, 'Sparse': 228, 'RankPool': 179, 'Transformer': 152}
 ```
 :::
 

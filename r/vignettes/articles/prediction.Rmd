@@ -2,13 +2,14 @@
 title: "Predicting new plots"
 ---
 
-<!-- Python blocks run by tools/python_twins.py (md5 0790a52dce390aab8007bc72b250294c). -->
+<!-- Python blocks run by tools/python_twins.py (md5 d5e79e39459e9f07ef2be6593aaaf710). -->
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6.5, fig.height = 4.5,
                       dev.args = list(pointsize = 14))
 library(resolveR)
 if (nzchar(Sys.getenv("RESOLVE_DOCS_CACHE"))) source(Sys.getenv("RESOLVE_DOCS_CACHE"))
+if (resolve.available()) resolve.manual_seed(42)
 ```
 
 A trained model is used on plots it has never seen: a new survey, plots held back from training, or plots whose elevation or habitat was never recorded. Predicting them takes three steps. You load the saved model, encode the new species lists with the species the model was trained on, and read the predictions off the result.
@@ -273,12 +274,12 @@ out = out.merge(new_plots[["plot_id", "elevation", "habitat"]],
                 on="plot_id", suffixes=("", "_observed"))
 out.head(6)
 #>   plot_id  elevation    habitat  elevation_observed habitat_observed
-#> 0    A005     2036.0     alpine                2145        grassland
-#> 1    A010     1620.0    wetland                1632          wetland
-#> 2    A015     2016.0     alpine                2165           alpine
-#> 3    A020     1094.0     forest                1284           forest
-#> 4    A025     1060.0  grassland                1235        grassland
-#> 5    A030     1882.0     alpine                1840        grassland
+#> 0    A005     2217.0     alpine                2145        grassland
+#> 1    A010     1802.0     forest                1632          wetland
+#> 2    A015     2288.0     alpine                2165           alpine
+#> 3    A020     1276.0     forest                1284           forest
+#> 4    A025      670.0  grassland                1235        grassland
+#> 5    A030     1570.0  grassland                1840        grassland
 ```
 :::
 
@@ -293,7 +294,7 @@ c(mae = mean(abs(out$elevation - out$elevation_observed)),
 ```python
 {"mae": (out.elevation - out.elevation_observed).abs().mean(),
  "accuracy": (out.habitat == out.habitat_observed).mean()}
-#> {'mae': np.float64(199.73333333333332), 'accuracy': np.float64(0.6333333333333333)}
+#> {'mae': np.float64(206.2), 'accuracy': np.float64(0.7666666666666667)}
 ```
 :::
 
@@ -312,9 +313,9 @@ all(max.col(probs) - 1 == preds$predictions$habitat)
 ```python
 probs = preds.probabilities["habitat"]
 probs[:3].round(decimals=3)
-#> tensor([[0.4110, 0.0970, 0.4060, 0.0850],
-#>         [0.1560, 0.3310, 0.1550, 0.3570],
-#>         [0.4650, 0.2020, 0.1630, 0.1700]])
+#> tensor([[0.7450, 0.0440, 0.1500, 0.0610],
+#>         [0.1900, 0.5470, 0.1170, 0.1450],
+#>         [0.9210, 0.0360, 0.0180, 0.0250]])
 probs.sum(dim=1).aminmax()
 #> torch.return_types.aminmax(
 #> min=tensor(1.0000),
@@ -352,9 +353,9 @@ sure = pd.DataFrame({
 })
 sure.sort_values("confidence").head(3)
 #>    plot_id  confidence    margin   entropy
-#> 17    A090    0.330615  0.010530  1.331286
-#> 16    A085    0.347894  0.100572  1.357081
-#> 1     A010    0.357241  0.026313  1.313200
+#> 22    A115    0.371325  0.033685  1.292142
+#> 21    A110    0.469217  0.181195  1.222800
+#> 29    A150    0.546224  0.330326  1.167729
 ```
 :::
 
@@ -527,12 +528,12 @@ pd.DataFrame({"plot_id": preds.plot_ids,
               "model": preds.predictions["elevation"].numpy().round(),
               "blended": blended.predictions["elevation"].numpy().round()}).head(6)
 #>   plot_id   model  blended
-#> 0    A005  2036.0   2068.0
-#> 1    A010  1620.0   1683.0
-#> 2    A015  2016.0   2081.0
-#> 3    A020  1094.0   1069.0
-#> 4    A025  1060.0   1017.0
-#> 5    A030  1882.0   1997.0
+#> 0    A005  2217.0   2247.0
+#> 1    A010  1802.0   1844.0
+#> 2    A015  2288.0   2308.0
+#> 3    A020  1276.0   1232.0
+#> 4    A025   670.0    714.0
+#> 5    A030  1570.0   1542.0
 
 predictor.clear_retrieval()
 ```
@@ -617,7 +618,7 @@ with open(os.path.join(suite_dir, "manifest.json"), "w") as f:
 ::: {.lang-pair}
 ```{r suite-seal}
 sealed <- resolve.seal_suite(suite_dir)
-substr(sealed$targets[[1]]$members[[1]]$sha256, 1, 16)
+nchar(sealed$targets[[1]]$members[[1]]$sha256)
 resolve.verify_suite(suite_dir)$problems
 ```
 
@@ -626,8 +627,8 @@ sealed = rc.SuiteManifest.from_json(
     open(os.path.join(suite_dir, "manifest.json")).read())
 sealed.seal(suite_dir)
 sealed.write(suite_dir)
-sealed.targets[0].members[0].sha256[:16]
-#> 14547c892d39deeb
+len(sealed.targets[0].members[0].sha256)
+#> 64
 rc.SuiteManifest.read(suite_dir).verify(suite_dir)
 #> []
 ```
@@ -660,12 +661,12 @@ pd.DataFrame({"plot_id": suite_preds.plot_ids,
               "agreement": habitat.agreement.numpy(),
               "recognised": habitat.recognition.count_share.numpy()}).head(6)
 #>   plot_id    habitat  agreement  recognised
-#> 0    A005  grassland   1.000000    0.666667
-#> 1    A010     forest   0.666667    1.000000
+#> 0    A005     alpine   0.666667    0.666667
+#> 1    A010    wetland   0.666667    1.000000
 #> 2    A015     alpine   0.333333    1.000000
 #> 3    A020     forest   1.000000    1.000000
-#> 4    A025  grassland   1.000000    1.000000
-#> 5    A030  grassland   0.666667    1.000000
+#> 4    A025  grassland   0.666667    1.000000
+#> 5    A030  grassland   1.000000    1.000000
 ```
 :::
 

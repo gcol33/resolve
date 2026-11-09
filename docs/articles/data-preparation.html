@@ -57,7 +57,7 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="nav-item dropdown">
+<li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><hr class="dropdown-divider"></li>
@@ -748,7 +748,7 @@ loaded with them.</p>
 <span><span class="op">)</span></span>
 <span><span class="va">preds</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/resolve.predict.dataset.html">resolve.predict.dataset</a></span><span class="op">(</span><span class="va">predictor</span>, <span class="va">new_plots</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">preds</span><span class="op">$</span><span class="va">predictions</span><span class="op">$</span><span class="va">elevation</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] 1162 1173 1451 1549 1228  922</span></span></code></pre></div>
+<span><span class="co">#&gt; [1]  940 1106 1351 1445  912  568</span></span></code></pre></div>
 <div class="sourceCode" id="cb34"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb34-1"><a href="#cb34-1" tabindex="-1"></a>new_csv <span class="op">=</span> os.path.join(tempfile.gettempdir(), <span class="st">"new_plots.csv"</span>)</span>
 <span id="cb34-2"><a href="#cb34-2" tabindex="-1"></a>plots[<span class="op">~</span>is_train].to_csv(new_csv, index<span class="op">=</span><span class="va">False</span>)</span>
 <span id="cb34-3"><a href="#cb34-3" tabindex="-1"></a></span>
@@ -757,7 +757,7 @@ loaded with them.</p>
 <span id="cb34-6"><a href="#cb34-6" tabindex="-1"></a>    predictor.external_vocabs, predictor.dataset_config)</span>
 <span id="cb34-7"><a href="#cb34-7" tabindex="-1"></a>preds <span class="op">=</span> predictor.predict_dataset(new_plots)</span>
 <span id="cb34-8"><a href="#cb34-8" tabindex="-1"></a>preds.predictions[<span class="st">"elevation"</span>][:<span class="dv">6</span>].<span class="bu">round</span>()</span>
-<span id="cb34-9"><a href="#cb34-9" tabindex="-1"></a><span class="co">#&gt; tensor([1002., 1025., 1342., 1585., 1187.,  888.])</span></span></code></pre></div>
+<span id="cb34-9"><a href="#cb34-9" tabindex="-1"></a><span class="co">#&gt; tensor([1185., 1046., 1497., 1670., 1024., 1076.])</span></span></code></pre></div>
 </div>
 <p>A dataset built to be predicted needs no target, so the target list
 is empty here. <a href="prediction.html">Predicting new plots</a>

@@ -14,8 +14,9 @@ An article shows a block in both languages by wrapping the R chunk and its Pytho
     :::
 
 The R chunk is knitted when the site is built. The Python block is run here, every block of an
-article in one namespace in the order it stands, and its output is written back under each
-statement, the way a knitted R chunk shows it. A block's info string takes ``error=true`` (the block
+article in one namespace in the order it stands, after ``resolve_core.manual_seed(42)`` as the R
+chunks run after ``resolve.manual_seed(42)`` in the setup chunk, and its output is written back
+under each statement, the way a knitted R chunk shows it. A block's info string takes ``error=true`` (the block
 must raise, and the error is its output) and ``fig-alt="..."``. A figure a block leaves open is
 saved as SVG beside the article and drawn under the block; the ``<img>`` line is this tool's.
 
@@ -274,6 +275,8 @@ def render(name: str, path: Path) -> tuple[str, dict[str, str]]:
     found = blocks(lines)
     os.environ.setdefault("MPLBACKEND", "Agg")
     namespace: dict = {"__name__": "__article__"}
+    import resolve_core
+    resolve_core.manual_seed(42)
     figures: dict[str, str] = {}
     out: list[str] = []
     cursor = 0

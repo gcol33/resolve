@@ -57,7 +57,7 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="nav-item dropdown">
+<li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><hr class="dropdown-divider"></li>
@@ -509,7 +509,7 @@ weights are learned.</p>
 <span>                             nAttentionLayers <span class="op">=</span> <span class="fl">2L</span>, transformerFfDim <span class="op">=</span> <span class="fl">128L</span>,</span>
 <span>                             lr <span class="op">=</span> <span class="fl">3e-4</span>, maxEpochs <span class="op">=</span> <span class="fl">100L</span>, verbose <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span>
 <span><span class="va">fit</span><span class="op">$</span><span class="va">result</span><span class="op">$</span><span class="va">best_epoch</span></span>
-<span><span class="co">#&gt; [1] 99</span></span></code></pre></div>
+<span><span class="co">#&gt; [1] 87</span></span></code></pre></div>
 <div class="sourceCode" id="cb14"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb14-1"><a href="#cb14-1" tabindex="-1"></a>attended <span class="op">=</span> load_with(species_encoding<span class="op">=</span>rc.SpeciesEncodingMode.Transformer)</span>
 <span id="cb14-2"><a href="#cb14-2" tabindex="-1"></a>model_config <span class="op">=</span> rc.ModelConfig()</span>
 <span id="cb14-3"><a href="#cb14-3" tabindex="-1"></a>model_config.d_model <span class="op">=</span> <span class="dv">64</span></span>
@@ -525,7 +525,7 @@ weights are learned.</p>
 <span id="cb14-13"><a href="#cb14-13" tabindex="-1"></a>trainer <span class="op">=</span> rc.Trainer(model, train_config)</span>
 <span id="cb14-14"><a href="#cb14-14" tabindex="-1"></a>trainer.prepare_data(attended)</span>
 <span id="cb14-15"><a href="#cb14-15" tabindex="-1"></a>trainer.fit().best_epoch</span>
-<span id="cb14-16"><a href="#cb14-16" tabindex="-1"></a><span class="co">#&gt; 90</span></span></code></pre></div>
+<span id="cb14-16"><a href="#cb14-16" tabindex="-1"></a><span class="co">#&gt; 95</span></span></code></pre></div>
 </div>
 <p><code>best_epoch</code> is the epoch whose weights the fit kept. The
 cost of attention grows with the square of the number of species per
@@ -681,7 +681,7 @@ roles.</p>
 <span>  modelConfig <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>encoder_architecture <span class="op">=</span> <span class="st">"ft_transformer"</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">fit</span><span class="op">$</span><span class="va">result</span><span class="op">$</span><span class="va">final_metrics</span><span class="op">$</span><span class="va">habitat</span><span class="op">$</span><span class="va">accuracy</span>, <span class="fl">3</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] 0.9</span></span></code></pre></div>
+<span><span class="co">#&gt; [1] 0.767</span></span></code></pre></div>
 <div class="sourceCode" id="cb18"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb18-1"><a href="#cb18-1" tabindex="-1"></a>model_config <span class="op">=</span> rc.ModelConfig()</span>
 <span id="cb18-2"><a href="#cb18-2" tabindex="-1"></a>model_config.encoder_architecture <span class="op">=</span> rc.EncoderArchitecture.FTTransformer</span>
 <span id="cb18-3"><a href="#cb18-3" tabindex="-1"></a>model <span class="op">=</span> rc.ResolveModel(hashed.schema,</span>
@@ -691,7 +691,7 @@ roles.</p>
 <span id="cb18-7"><a href="#cb18-7" tabindex="-1"></a>trainer <span class="op">=</span> rc.Trainer(model, train_config)</span>
 <span id="cb18-8"><a href="#cb18-8" tabindex="-1"></a>trainer.prepare_data(hashed)</span>
 <span id="cb18-9"><a href="#cb18-9" tabindex="-1"></a><span class="bu">round</span>(trainer.fit().final_metrics[<span class="st">"habitat"</span>][<span class="st">"accuracy"</span>], <span class="dv">3</span>)</span>
-<span id="cb18-10"><a href="#cb18-10" tabindex="-1"></a><span class="co">#&gt; 0.8</span></span></code></pre></div>
+<span id="cb18-10"><a href="#cb18-10" tabindex="-1"></a><span class="co">#&gt; 0.867</span></span></code></pre></div>
 </div>
 <p><a href="training.html">Training and reading the fit</a> lists the
 settings of each architecture and the mixture of experts that can sit
@@ -714,7 +714,7 @@ and never fits on.</p>
 <span><span class="op">}</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">mae</span><span class="op">)</span></span>
 <span><span class="co">#&gt;        hash       embed      sparse   rank_pool transformer </span></span>
-<span><span class="co">#&gt;         231         238         232         148         193</span></span></code></pre></div>
+<span><span class="co">#&gt;         261         205         215         177         185</span></span></code></pre></div>
 <div class="sourceCode" id="cb20"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb20-1"><a href="#cb20-1" tabindex="-1"></a><span class="kw">def</span> held_out_mae(encoding):</span>
 <span id="cb20-2"><a href="#cb20-2" tabindex="-1"></a>    dataset <span class="op">=</span> load_with(species_encoding<span class="op">=</span>encoding)</span>
 <span id="cb20-3"><a href="#cb20-3" tabindex="-1"></a>    model <span class="op">=</span> rc.ResolveModel(dataset.schema,</span>
@@ -729,7 +729,7 @@ and never fits on.</p>
 <span id="cb20-12"><a href="#cb20-12" tabindex="-1"></a>encodings <span class="op">=</span> [<span class="st">"Hash"</span>, <span class="st">"Embed"</span>, <span class="st">"Sparse"</span>, <span class="st">"RankPool"</span>, <span class="st">"Transformer"</span>]</span>
 <span id="cb20-13"><a href="#cb20-13" tabindex="-1"></a>{name: <span class="bu">round</span>(held_out_mae(<span class="bu">getattr</span>(rc.SpeciesEncodingMode, name)))</span>
 <span id="cb20-14"><a href="#cb20-14" tabindex="-1"></a> <span class="cf">for</span> name <span class="kw">in</span> encodings}</span>
-<span id="cb20-15"><a href="#cb20-15" tabindex="-1"></a><span class="co">#&gt; {'Hash': 218, 'Embed': 222, 'Sparse': 225, 'RankPool': 170, 'Transformer': 149}</span></span></code></pre></div>
+<span id="cb20-15"><a href="#cb20-15" tabindex="-1"></a><span class="co">#&gt; {'Hash': 222, 'Embed': 173, 'Sparse': 228, 'RankPool': 179, 'Transformer': 152}</span></span></code></pre></div>
 </div>
 <p>These numbers say little about the encodings. The survey has 150
 plots and 25 species, the held-out fold is 30 plots, and the starting

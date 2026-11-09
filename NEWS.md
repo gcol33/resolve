@@ -4,6 +4,16 @@
 
 ### Added
 
+- **Seeding the starting weights from R and Python.** Training seeds its
+  split and shuffle with its `seed` argument, but a new model's weights and
+  its dropout draw from torch's own generator, which only the CLI seeded, so
+  two identical runs from R or Python ended at different numbers.
+  `resolve.manual_seed()` (R), `resolve_core.manual_seed()` (Python) and
+  `resolve_capi_manual_seed()` (C ABI) seed it, the CPU and CUDA generators
+  alike, and `resolve train --seed` goes through the same function. A fit after
+  the same seed now ends at the same weights. The documentation's examples run
+  after `manual_seed(42)`, so their numbers stay put from one site build to
+  the next.
 - **Checkpoints with their weights in half precision.**
   `resolve_core.write_half_checkpoint(source, destination)` stores a
   checkpoint's float32 weights as float16 and keeps every other entry
@@ -187,6 +197,22 @@
 
 ### Fixed
 
+- **Terrain descriptors near 50, 60, 70 and 80 degrees north.** GLO-30's
+  tiles widen their columns at these parallels (3,600 to 2,400 columns per
+  degree at 50 N, and so on). A cell one row past a tile's edge kept its
+  column number in the tile beyond, which spaces its columns differently, so
+  it stood for a cell up to a third of a degree further east; and a point on
+  the parallel was interpolated with the northern tile's column spacing in
+  the southern tile's row. A moved cell now keeps its longitude, and each of
+  the two rows around a point is read in the tile that holds it. Of the
+  2,209 located EVA plots within 1 km of these parallels, the point
+  elevation changes on 123 (by up to 456 m), the slope on 212 (up to 73
+  degrees) and the 1 km descriptors on 1,128 (up to 14 m and 2.6 degrees);
+  20,000 plots drawn at random elsewhere read the same values as before.
+  The context suite's altitude and slope corrections are refit on the
+  fixed descriptors; their training error stays at 28.5 m and 6.73
+  degrees, and the 100 km grouped cross-fits move by 0.02 m or less
+  except one fold split (37.6 to 38.2 m).
 - **Tied neighbours go to the lower row.** `nearest_by_cosine` and
   `nearest_by_great_circle` took torch's `topk`, which leaves the order of
   equal scores to the platform, so a plot with several equally similar plots

@@ -9,6 +9,7 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6.5, fig.heig
                       dev.args = list(pointsize = 14))
 library(resolveR)
 if (nzchar(Sys.getenv("RESOLVE_DOCS_CACHE"))) source(Sys.getenv("RESOLVE_DOCS_CACHE"))
+if (resolve.available()) resolve.manual_seed(42)
 ```
 
 RESOLVE is a C++ engine built on libtorch, the C++ library under PyTorch. The R package `resolveR`, the Python package `resolve_core` and the `resolve` command line all call this one engine, so a model trained from one of them loads in the others.

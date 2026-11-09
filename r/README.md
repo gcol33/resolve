@@ -170,21 +170,23 @@ dataset <- resolve.dataset.frame(
   )
 )
 
+resolve.manual_seed(42)
 fit <- resolve.train.dataset(dataset, verbose = FALSE)
 metrics <- fit$result$final_metrics
 round(unlist(metrics$elevation[c("mae", "r2")]), 3)
 #>     mae      r2 
-#> 277.306   0.626
+#> 285.938   0.625
 round(metrics$habitat$accuracy, 3)
-#> [1] 0.7
+#> [1] 0.733
 ```
 
 Training holds out 20 % of the plots and stops when their loss no longer
 improves; the metrics are computed on these plots, the mean absolute
-error (`mae`) in metres. `resolve.save(fit$trainer, "model.pt")` writes
-a checkpoint that carries the species vocabulary, so
-`resolve.predict.dataset()` encodes a new table against the species the
-model was trained on.
+error (`mae`) in metres. `resolve.manual_seed()` fixes the model’s
+starting weights, so the run ends at the same numbers each time.
+`resolve.save(fit$trainer, "model.pt")` writes a checkpoint that carries
+the species vocabulary, so `resolve.predict.dataset()` encodes a new
+table against the species the model was trained on.
 
 The same run in Python:
 
@@ -205,6 +207,7 @@ targets = [rc.TargetSpec.regression("elevation"),
            rc.TargetSpec.classification("habitat", 4)]
 dataset = rc.ResolveDataset.from_pandas(plots, species, roles, targets)
 
+rc.manual_seed(42)
 model = rc.ResolveModel(dataset.schema, rc.model_config_for_dataset(dataset))
 trainer = rc.Trainer(model, rc.TrainConfig())
 trainer.prepare_data(dataset)

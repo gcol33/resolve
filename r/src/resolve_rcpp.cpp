@@ -428,6 +428,14 @@ void resolve_set_vram_fraction(double fraction, int device_index = -1) {
     capi_check_status(resolve_capi_set_vram_fraction(fraction, device_index));
 }
 
+// Seed libtorch's CPU and CUDA random number generators. The seed arrives as a
+// double so the whole range R can hold exactly (0 to 2^53) reaches the engine.
+// [[Rcpp::export]]
+void resolve_manual_seed(double seed) {
+    capi_require_loaded();
+    capi_check_status(resolve_capi_manual_seed(static_cast<uint64_t>(seed)));
+}
+
 // Pin libtorch's intra-op / inter-op thread pools. intraop / interop <= 0 keep
 // libtorch's default. Best-effort; call at load before the first op. Removes
 // the worker threads whose teardown join crashes the Rscript.exe launcher on

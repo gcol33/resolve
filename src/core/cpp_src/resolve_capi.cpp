@@ -1436,6 +1436,13 @@ int resolve_capi_set_vram_fraction(double fraction, int device_index) {
     })
 }
 
+int resolve_capi_manual_seed(uint64_t seed) {
+    CAPI_BODY_INT({
+        resolve::manual_seed(seed);
+        return 0;
+    })
+}
+
 int resolve_capi_set_thread_pools(int intraop_threads, int interop_threads) {
     CAPI_BODY_INT({
         resolve::set_thread_pools(intraop_threads, interop_threads);

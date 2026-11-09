@@ -295,12 +295,12 @@ out <- merge(out, new_plots[c("plot_id", "elevation", "habitat")],
              by = "plot_id", suffixes = c("", "_observed"))
 head(out)
 #>   plot_id elevation   habitat elevation_observed habitat_observed
-#> 1    A005      2024 grassland               2145        grassland
-#> 2    A010      2023   wetland               1632          wetland
-#> 3    A015      2339    alpine               2165           alpine
-#> 4    A020      1418    forest               1284           forest
-#> 5    A025      1185 grassland               1235        grassland
-#> 6    A030      1530 grassland               1840        grassland
+#> 1    A005      2126    alpine               2145        grassland
+#> 2    A010      1695    forest               1632          wetland
+#> 3    A015      2193    alpine               2165           alpine
+#> 4    A020      1369    forest               1284           forest
+#> 5    A025      1028 grassland               1235        grassland
+#> 6    A030      1597 grassland               1840        grassland
 ```
 
 ``` python
@@ -319,12 +319,12 @@ out = out.merge(new_plots[["plot_id", "elevation", "habitat"]],
                 on="plot_id", suffixes=("", "_observed"))
 out.head(6)
 #>   plot_id  elevation    habitat  elevation_observed habitat_observed
-#> 0    A005     2036.0     alpine                2145        grassland
-#> 1    A010     1620.0    wetland                1632          wetland
-#> 2    A015     2016.0     alpine                2165           alpine
-#> 3    A020     1094.0     forest                1284           forest
-#> 4    A025     1060.0  grassland                1235        grassland
-#> 5    A030     1882.0     alpine                1840        grassland
+#> 0    A005     2217.0     alpine                2145        grassland
+#> 1    A010     1802.0     forest                1632          wetland
+#> 2    A015     2288.0     alpine                2165           alpine
+#> 3    A020     1276.0     forest                1284           forest
+#> 4    A025      670.0  grassland                1235        grassland
+#> 5    A030     1570.0  grassland                1840        grassland
 ```
 
 The predictions are joined to the recorded values by plot identifier.
@@ -337,13 +337,13 @@ on new data.
 c(mae = mean(abs(out$elevation - out$elevation_observed)),
   accuracy = mean(out$habitat == out$habitat_observed))
 #>         mae    accuracy 
-#> 225.2333333   0.8333333
+#> 205.0333333   0.7333333
 ```
 
 ``` python
 {"mae": (out.elevation - out.elevation_observed).abs().mean(),
  "accuracy": (out.habitat == out.habitat_observed).mean()}
-#> {'mae': np.float64(199.73333333333332), 'accuracy': np.float64(0.6333333333333333)}
+#> {'mae': np.float64(206.2), 'accuracy': np.float64(0.7666666666666667)}
 ```
 
 ## Class probabilities
@@ -359,9 +359,9 @@ with the largest value.
 probs <- preds$probabilities$habitat
 round(head(probs, 3), 3)
 #>      alpine forest grassland wetland
-#> [1,]  0.136  0.065     0.729   0.069
-#> [2,]  0.319  0.114     0.195   0.371
-#> [3,]  0.840  0.038     0.079   0.043
+#> [1,]  0.586  0.081     0.202   0.131
+#> [2,]  0.169  0.578     0.122   0.132
+#> [3,]  0.639  0.198     0.072   0.090
 range(rowSums(probs))
 #> [1] 0.9999999 1.0000001
 all(max.col(probs) - 1 == preds$predictions$habitat)
@@ -371,9 +371,9 @@ all(max.col(probs) - 1 == preds$predictions$habitat)
 ``` python
 probs = preds.probabilities["habitat"]
 probs[:3].round(decimals=3)
-#> tensor([[0.4110, 0.0970, 0.4060, 0.0850],
-#>         [0.1560, 0.3310, 0.1550, 0.3570],
-#>         [0.4650, 0.2020, 0.1630, 0.1700]])
+#> tensor([[0.7450, 0.0440, 0.1500, 0.0610],
+#>         [0.1900, 0.5470, 0.1170, 0.1450],
+#>         [0.9210, 0.0360, 0.0180, 0.0250]])
 probs.sum(dim=1).aminmax()
 #> torch.return_types.aminmax(
 #> min=tensor(1.0000),
@@ -399,10 +399,10 @@ sure <- data.frame(
   entropy = -rowSums(probs * log(pmax(probs, 1e-12)))
 )
 head(sure[order(sure$confidence), ], 3)
-#>    plot_id confidence     margin  entropy
-#> 2     A010  0.3712301 0.05209187 1.299356
-#> 8     A040  0.4356640 0.09497643 1.214994
-#> 17    A085  0.4502355 0.22537930 1.284760
+#>    plot_id confidence      margin  entropy
+#> 23    A115  0.3018674 0.032638878 1.365252
+#> 29    A145  0.3158222 0.002814889 1.351019
+#> 17    A085  0.3432915 0.035432905 1.337810
 ```
 
 ``` python
@@ -415,9 +415,9 @@ sure = pd.DataFrame({
 })
 sure.sort_values("confidence").head(3)
 #>    plot_id  confidence    margin   entropy
-#> 17    A090    0.330615  0.010530  1.331286
-#> 16    A085    0.347894  0.100572  1.357081
-#> 1     A010    0.357241  0.026313  1.313200
+#> 22    A115    0.371325  0.033685  1.292142
+#> 21    A110    0.469217  0.181195  1.222800
+#> 29    A150    0.546224  0.330326  1.167729
 ```
 
 The rows are computed on whichever plots are scored, so a checkpoint
@@ -651,12 +651,12 @@ head(data.frame(plot_id = preds$plot_ids,
                 model = round(preds$predictions$elevation),
                 blended = round(blended$predictions$elevation)))
 #>   plot_id model blended
-#> 1    A005  2024    1866
-#> 2    A010  2023    1994
-#> 3    A015  2339    2325
-#> 4    A020  1418    1407
-#> 5    A025  1185    1104
-#> 6    A030  1530    1504
+#> 1    A005  2126    2156
+#> 2    A010  1695    1723
+#> 3    A015  2193    2219
+#> 4    A020  1369    1320
+#> 5    A025  1028     978
+#> 6    A030  1597    1492
 
 resolve.retrieval(predictor, NULL)
 ```
@@ -674,12 +674,12 @@ pd.DataFrame({"plot_id": preds.plot_ids,
               "model": preds.predictions["elevation"].numpy().round(),
               "blended": blended.predictions["elevation"].numpy().round()}).head(6)
 #>   plot_id   model  blended
-#> 0    A005  2036.0   2068.0
-#> 1    A010  1620.0   1683.0
-#> 2    A015  2016.0   2081.0
-#> 3    A020  1094.0   1069.0
-#> 4    A025  1060.0   1017.0
-#> 5    A030  1882.0   1997.0
+#> 0    A005  2217.0   2247.0
+#> 1    A010  1802.0   1844.0
+#> 2    A015  2288.0   2308.0
+#> 3    A020  1276.0   1232.0
+#> 4    A025   670.0    714.0
+#> 5    A030  1570.0   1542.0
 
 predictor.clear_retrieval()
 ```
@@ -776,8 +776,8 @@ without loading any model.
 ``` r
 
 sealed <- resolve.seal_suite(suite_dir)
-substr(sealed$targets[[1]]$members[[1]]$sha256, 1, 16)
-#> [1] "d1f76038d78893a1"
+nchar(sealed$targets[[1]]$members[[1]]$sha256)
+#> [1] 64
 resolve.verify_suite(suite_dir)$problems
 #> character(0)
 ```
@@ -787,8 +787,8 @@ sealed = rc.SuiteManifest.from_json(
     open(os.path.join(suite_dir, "manifest.json")).read())
 sealed.seal(suite_dir)
 sealed.write(suite_dir)
-sealed.targets[0].members[0].sha256[:16]
-#> 14547c892d39deeb
+len(sealed.targets[0].members[0].sha256)
+#> 64
 rc.SuiteManifest.read(suite_dir).verify(suite_dir)
 #> []
 ```
@@ -811,12 +811,12 @@ head(data.frame(plot_id = suite_preds$plot_ids, habitat = habitat$label,
                 agreement = habitat$agreement,
                 recognised = habitat$recognised_share))
 #>   plot_id   habitat agreement recognised
-#> 1    A005 grassland 0.3333333  0.6666667
-#> 2    A010   wetland 0.6666667  1.0000000
-#> 3    A015    alpine 1.0000000  1.0000000
-#> 4    A020    forest 1.0000000  1.0000000
-#> 5    A025    forest 0.6666667  1.0000000
-#> 6    A030 grassland 0.6666667  1.0000000
+#> 1    A005 grassland 0.6666667  0.6666667
+#> 2    A010    forest 0.6666667  1.0000000
+#> 3    A015    forest 0.3333333  1.0000000
+#> 4    A020    forest 0.6666667  1.0000000
+#> 5    A025 grassland 1.0000000  1.0000000
+#> 6    A030 grassland 1.0000000  1.0000000
 ```
 
 ``` python
@@ -831,12 +831,12 @@ pd.DataFrame({"plot_id": suite_preds.plot_ids,
               "agreement": habitat.agreement.numpy(),
               "recognised": habitat.recognition.count_share.numpy()}).head(6)
 #>   plot_id    habitat  agreement  recognised
-#> 0    A005  grassland   1.000000    0.666667
-#> 1    A010     forest   0.666667    1.000000
+#> 0    A005     alpine   0.666667    0.666667
+#> 1    A010    wetland   0.666667    1.000000
 #> 2    A015     alpine   0.333333    1.000000
 #> 3    A020     forest   1.000000    1.000000
-#> 4    A025  grassland   1.000000    1.000000
-#> 5    A030  grassland   0.666667    1.000000
+#> 4    A025  grassland   0.666667    1.000000
+#> 5    A030  grassland   1.000000    1.000000
 ```
 
 The *agreement* of a vote is the share of members naming the winning

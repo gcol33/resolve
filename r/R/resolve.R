@@ -1535,6 +1535,31 @@ resolve.set_vram_fraction <- function(fraction, deviceIndex = -1L) {
 }
 
 
+#' Seed the Engine's Random Numbers
+#'
+#' Seed the random number generators of the engine's torch, which draw a new
+#' model's starting weights and its dropout. Training holds out its plots and
+#' shuffles them by its own `seed` argument, so a model built and trained after
+#' the same `resolve.manual_seed()`, with the same data, settings, device and
+#' engine build, ends at the same weights and metrics. R's [set.seed()] does not
+#' reach the engine.
+#'
+#' @param seed A whole number from 0 to 2^53.
+#' @return No return value.
+#' @examplesIf resolveR::resolve.available()
+#' resolve.manual_seed(42)
+#' @export
+resolve.manual_seed <- function(seed) {
+  if (!is.numeric(seed) || length(seed) != 1 || is.na(seed) || seed < 0 ||
+      seed > 2^53 || seed != floor(seed)) {
+    stop("seed must be a single whole number from 0 to 2^53")
+  }
+  .resolve_require_backend()
+  resolve_manual_seed(as.double(seed))
+  invisible(NULL)
+}
+
+
 #' Predict with Dataset (C++ API)
 #'
 #' Make predictions on a ResolveDataset using a trained model.

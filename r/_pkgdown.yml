@@ -156,11 +156,12 @@ reference:
   - resolve.fuzzy_match
 - title: The engine
   desc: |
-    Installing the engine library, checking which one is loaded, and the GPU memory settings.
+    Installing the engine library, checking which one is loaded, seeding its random numbers, and the GPU memory settings.
   contents:
   - resolve.install_backend
   - resolve.available
   - resolve.version
+  - resolve.manual_seed
   - resolve.set_vram_fraction
   - resolve_configure_cuda_allocator
 articles:

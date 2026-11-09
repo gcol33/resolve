@@ -299,7 +299,7 @@ fit <- resolve.train.dataset(attended, dModel = 64L, nHeads = 4L,
                              nAttentionLayers = 2L, transformerFfDim = 128L,
                              lr = 3e-4, maxEpochs = 100L, verbose = FALSE)
 fit$result$best_epoch
-#> [1] 99
+#> [1] 87
 ```
 
 ``` python
@@ -318,7 +318,7 @@ train_config.max_epochs = 100
 trainer = rc.Trainer(model, train_config)
 trainer.prepare_data(attended)
 trainer.fit().best_epoch
-#> 90
+#> 95
 ```
 
 `best_epoch` is the epoch whose weights the fit kept. The cost of
@@ -420,7 +420,7 @@ fit <- resolve.train.dataset(
   modelConfig = list(encoder_architecture = "ft_transformer")
 )
 round(fit$result$final_metrics$habitat$accuracy, 3)
-#> [1] 0.9
+#> [1] 0.767
 ```
 
 ``` python
@@ -433,7 +433,7 @@ train_config.max_epochs = 50
 trainer = rc.Trainer(model, train_config)
 trainer.prepare_data(hashed)
 round(trainer.fit().final_metrics["habitat"]["accuracy"], 3)
-#> 0.8
+#> 0.867
 ```
 
 [Training and reading the
@@ -458,7 +458,7 @@ mae <- sapply(encodings, function(encoding) {
 })
 round(mae)
 #>        hash       embed      sparse   rank_pool transformer 
-#>         231         238         232         148         193
+#>         261         205         215         177         185
 ```
 
 ``` python
@@ -476,7 +476,7 @@ def held_out_mae(encoding):
 encodings = ["Hash", "Embed", "Sparse", "RankPool", "Transformer"]
 {name: round(held_out_mae(getattr(rc.SpeciesEncodingMode, name)))
  for name in encodings}
-#> {'Hash': 218, 'Embed': 222, 'Sparse': 225, 'RankPool': 170, 'Transformer': 149}
+#> {'Hash': 222, 'Embed': 173, 'Sparse': 228, 'RankPool': 179, 'Transformer': 152}
 ```
 
 These numbers say little about the encodings. The survey has 150 plots

@@ -57,7 +57,7 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="nav-item dropdown">
+<li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><hr class="dropdown-divider"></li>
@@ -124,7 +124,7 @@
 
     
     
-<!-- Python blocks run by tools/python_twins.py (md5 0790a52dce390aab8007bc72b250294c). -->
+<!-- Python blocks run by tools/python_twins.py (md5 d5e79e39459e9f07ef2be6593aaaf710). -->
 <p>A trained model is used on plots it has never seen: a new survey,
 plots held back from training, or plots whose elevation or habitat was
 never recorded. Predicting them takes three steps. You load the saved
@@ -388,12 +388,12 @@ records.</p>
 <span>             by <span class="op">=</span> <span class="st">"plot_id"</span>, suffixes <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">""</span>, <span class="st">"_observed"</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">out</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   plot_id elevation   habitat elevation_observed habitat_observed</span></span>
-<span><span class="co">#&gt; 1    A005      2024 grassland               2145        grassland</span></span>
-<span><span class="co">#&gt; 2    A010      2023   wetland               1632          wetland</span></span>
-<span><span class="co">#&gt; 3    A015      2339    alpine               2165           alpine</span></span>
-<span><span class="co">#&gt; 4    A020      1418    forest               1284           forest</span></span>
-<span><span class="co">#&gt; 5    A025      1185 grassland               1235        grassland</span></span>
-<span><span class="co">#&gt; 6    A030      1530 grassland               1840        grassland</span></span></code></pre></div>
+<span><span class="co">#&gt; 1    A005      2126    alpine               2145        grassland</span></span>
+<span><span class="co">#&gt; 2    A010      1695    forest               1632          wetland</span></span>
+<span><span class="co">#&gt; 3    A015      2193    alpine               2165           alpine</span></span>
+<span><span class="co">#&gt; 4    A020      1369    forest               1284           forest</span></span>
+<span><span class="co">#&gt; 5    A025      1028 grassland               1235        grassland</span></span>
+<span><span class="co">#&gt; 6    A030      1597 grassland               1840        grassland</span></span></code></pre></div>
 <div class="sourceCode" id="cb18"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb18-1"><a href="#cb18-1" tabindex="-1"></a>preds <span class="op">=</span> predictor.predict_dataset(new_data)</span>
 <span id="cb18-2"><a href="#cb18-2" tabindex="-1"></a>habitats <span class="op">=</span> <span class="bu">next</span>(t.class_names <span class="cf">for</span> t <span class="kw">in</span> predictor.schema.targets</span>
 <span id="cb18-3"><a href="#cb18-3" tabindex="-1"></a>                <span class="cf">if</span> t.name <span class="op">==</span> <span class="st">"habitat"</span>)</span>
@@ -409,12 +409,12 @@ records.</p>
 <span id="cb18-13"><a href="#cb18-13" tabindex="-1"></a>                on<span class="op">=</span><span class="st">"plot_id"</span>, suffixes<span class="op">=</span>(<span class="st">""</span>, <span class="st">"_observed"</span>))</span>
 <span id="cb18-14"><a href="#cb18-14" tabindex="-1"></a>out.head(<span class="dv">6</span>)</span>
 <span id="cb18-15"><a href="#cb18-15" tabindex="-1"></a><span class="co">#&gt;   plot_id  elevation    habitat  elevation_observed habitat_observed</span></span>
-<span id="cb18-16"><a href="#cb18-16" tabindex="-1"></a><span class="co">#&gt; 0    A005     2036.0     alpine                2145        grassland</span></span>
-<span id="cb18-17"><a href="#cb18-17" tabindex="-1"></a><span class="co">#&gt; 1    A010     1620.0    wetland                1632          wetland</span></span>
-<span id="cb18-18"><a href="#cb18-18" tabindex="-1"></a><span class="co">#&gt; 2    A015     2016.0     alpine                2165           alpine</span></span>
-<span id="cb18-19"><a href="#cb18-19" tabindex="-1"></a><span class="co">#&gt; 3    A020     1094.0     forest                1284           forest</span></span>
-<span id="cb18-20"><a href="#cb18-20" tabindex="-1"></a><span class="co">#&gt; 4    A025     1060.0  grassland                1235        grassland</span></span>
-<span id="cb18-21"><a href="#cb18-21" tabindex="-1"></a><span class="co">#&gt; 5    A030     1882.0     alpine                1840        grassland</span></span></code></pre></div>
+<span id="cb18-16"><a href="#cb18-16" tabindex="-1"></a><span class="co">#&gt; 0    A005     2217.0     alpine                2145        grassland</span></span>
+<span id="cb18-17"><a href="#cb18-17" tabindex="-1"></a><span class="co">#&gt; 1    A010     1802.0     forest                1632          wetland</span></span>
+<span id="cb18-18"><a href="#cb18-18" tabindex="-1"></a><span class="co">#&gt; 2    A015     2288.0     alpine                2165           alpine</span></span>
+<span id="cb18-19"><a href="#cb18-19" tabindex="-1"></a><span class="co">#&gt; 3    A020     1276.0     forest                1284           forest</span></span>
+<span id="cb18-20"><a href="#cb18-20" tabindex="-1"></a><span class="co">#&gt; 4    A025      670.0  grassland                1235        grassland</span></span>
+<span id="cb18-21"><a href="#cb18-21" tabindex="-1"></a><span class="co">#&gt; 5    A030     1570.0  grassland                1840        grassland</span></span></code></pre></div>
 </div>
 <p>The predictions are joined to the recorded values by plot identifier.
 Since the model never saw these plots, the mean absolute error in metres
@@ -425,10 +425,10 @@ on new data.</p>
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>mae <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/mean.html" class="external-link">mean</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/MathFun.html" class="external-link">abs</a></span><span class="op">(</span><span class="va">out</span><span class="op">$</span><span class="va">elevation</span> <span class="op">-</span> <span class="va">out</span><span class="op">$</span><span class="va">elevation_observed</span><span class="op">)</span><span class="op">)</span>,</span>
 <span>  accuracy <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/mean.html" class="external-link">mean</a></span><span class="op">(</span><span class="va">out</span><span class="op">$</span><span class="va">habitat</span> <span class="op">==</span> <span class="va">out</span><span class="op">$</span><span class="va">habitat_observed</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt;         mae    accuracy </span></span>
-<span><span class="co">#&gt; 225.2333333   0.8333333</span></span></code></pre></div>
+<span><span class="co">#&gt; 205.0333333   0.7333333</span></span></code></pre></div>
 <div class="sourceCode" id="cb20"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb20-1"><a href="#cb20-1" tabindex="-1"></a>{<span class="st">"mae"</span>: (out.elevation <span class="op">-</span> out.elevation_observed).<span class="bu">abs</span>().mean(),</span>
 <span id="cb20-2"><a href="#cb20-2" tabindex="-1"></a> <span class="st">"accuracy"</span>: (out.habitat <span class="op">==</span> out.habitat_observed).mean()}</span>
-<span id="cb20-3"><a href="#cb20-3" tabindex="-1"></a><span class="co">#&gt; {'mae': np.float64(199.73333333333332), 'accuracy': np.float64(0.6333333333333333)}</span></span></code></pre></div>
+<span id="cb20-3"><a href="#cb20-3" tabindex="-1"></a><span class="co">#&gt; {'mae': np.float64(206.2), 'accuracy': np.float64(0.7666666666666667)}</span></span></code></pre></div>
 </div>
 </div>
 <div class="section level2">
@@ -444,18 +444,18 @@ class is the column with the largest value.</p>
 <code class="sourceCode R"><span><span class="va">probs</span> <span class="op">&lt;-</span> <span class="va">preds</span><span class="op">$</span><span class="va">probabilities</span><span class="op">$</span><span class="va">habitat</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">probs</span>, <span class="fl">3</span><span class="op">)</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt;      alpine forest grassland wetland</span></span>
-<span><span class="co">#&gt; [1,]  0.136  0.065     0.729   0.069</span></span>
-<span><span class="co">#&gt; [2,]  0.319  0.114     0.195   0.371</span></span>
-<span><span class="co">#&gt; [3,]  0.840  0.038     0.079   0.043</span></span>
+<span><span class="co">#&gt; [1,]  0.586  0.081     0.202   0.131</span></span>
+<span><span class="co">#&gt; [2,]  0.169  0.578     0.122   0.132</span></span>
+<span><span class="co">#&gt; [3,]  0.639  0.198     0.072   0.090</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/range.html" class="external-link">range</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/colSums.html" class="external-link">rowSums</a></span><span class="op">(</span><span class="va">probs</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 0.9999999 1.0000001</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/all.html" class="external-link">all</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/maxCol.html" class="external-link">max.col</a></span><span class="op">(</span><span class="va">probs</span><span class="op">)</span> <span class="op">-</span> <span class="fl">1</span> <span class="op">==</span> <span class="va">preds</span><span class="op">$</span><span class="va">predictions</span><span class="op">$</span><span class="va">habitat</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] TRUE</span></span></code></pre></div>
 <div class="sourceCode" id="cb22"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb22-1"><a href="#cb22-1" tabindex="-1"></a>probs <span class="op">=</span> preds.probabilities[<span class="st">"habitat"</span>]</span>
 <span id="cb22-2"><a href="#cb22-2" tabindex="-1"></a>probs[:<span class="dv">3</span>].<span class="bu">round</span>(decimals<span class="op">=</span><span class="dv">3</span>)</span>
-<span id="cb22-3"><a href="#cb22-3" tabindex="-1"></a><span class="co">#&gt; tensor([[0.4110, 0.0970, 0.4060, 0.0850],</span></span>
-<span id="cb22-4"><a href="#cb22-4" tabindex="-1"></a><span class="co">#&gt;         [0.1560, 0.3310, 0.1550, 0.3570],</span></span>
-<span id="cb22-5"><a href="#cb22-5" tabindex="-1"></a><span class="co">#&gt;         [0.4650, 0.2020, 0.1630, 0.1700]])</span></span>
+<span id="cb22-3"><a href="#cb22-3" tabindex="-1"></a><span class="co">#&gt; tensor([[0.7450, 0.0440, 0.1500, 0.0610],</span></span>
+<span id="cb22-4"><a href="#cb22-4" tabindex="-1"></a><span class="co">#&gt;         [0.1900, 0.5470, 0.1170, 0.1450],</span></span>
+<span id="cb22-5"><a href="#cb22-5" tabindex="-1"></a><span class="co">#&gt;         [0.9210, 0.0360, 0.0180, 0.0250]])</span></span>
 <span id="cb22-6"><a href="#cb22-6" tabindex="-1"></a>probs.<span class="bu">sum</span>(dim<span class="op">=</span><span class="dv">1</span>).aminmax()</span>
 <span id="cb22-7"><a href="#cb22-7" tabindex="-1"></a><span class="co">#&gt; torch.return_types.aminmax(</span></span>
 <span id="cb22-8"><a href="#cb22-8" tabindex="-1"></a><span class="co">#&gt; min=tensor(1.0000),</span></span>
@@ -480,10 +480,10 @@ grows as it spreads over more classes.</p>
 <span>  entropy <span class="op">=</span> <span class="op">-</span><span class="fu"><a href="https://rdrr.io/r/base/colSums.html" class="external-link">rowSums</a></span><span class="op">(</span><span class="va">probs</span> <span class="op">*</span> <span class="fu"><a href="https://rdrr.io/r/base/Log.html" class="external-link">log</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/Extremes.html" class="external-link">pmax</a></span><span class="op">(</span><span class="va">probs</span>, <span class="fl">1e-12</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">sure</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/order.html" class="external-link">order</a></span><span class="op">(</span><span class="va">sure</span><span class="op">$</span><span class="va">confidence</span><span class="op">)</span>, <span class="op">]</span>, <span class="fl">3</span><span class="op">)</span></span>
-<span><span class="co">#&gt;    plot_id confidence     margin  entropy</span></span>
-<span><span class="co">#&gt; 2     A010  0.3712301 0.05209187 1.299356</span></span>
-<span><span class="co">#&gt; 8     A040  0.4356640 0.09497643 1.214994</span></span>
-<span><span class="co">#&gt; 17    A085  0.4502355 0.22537930 1.284760</span></span></code></pre></div>
+<span><span class="co">#&gt;    plot_id confidence      margin  entropy</span></span>
+<span><span class="co">#&gt; 23    A115  0.3018674 0.032638878 1.365252</span></span>
+<span><span class="co">#&gt; 29    A145  0.3158222 0.002814889 1.351019</span></span>
+<span><span class="co">#&gt; 17    A085  0.3432915 0.035432905 1.337810</span></span></code></pre></div>
 <div class="sourceCode" id="cb24"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb24-1"><a href="#cb24-1" tabindex="-1"></a>top2 <span class="op">=</span> probs.topk(<span class="dv">2</span>, dim<span class="op">=</span><span class="dv">1</span>).values</span>
 <span id="cb24-2"><a href="#cb24-2" tabindex="-1"></a>sure <span class="op">=</span> pd.DataFrame({</span>
 <span id="cb24-3"><a href="#cb24-3" tabindex="-1"></a>    <span class="st">"plot_id"</span>: preds.plot_ids,</span>
@@ -493,9 +493,9 @@ grows as it spreads over more classes.</p>
 <span id="cb24-7"><a href="#cb24-7" tabindex="-1"></a>})</span>
 <span id="cb24-8"><a href="#cb24-8" tabindex="-1"></a>sure.sort_values(<span class="st">"confidence"</span>).head(<span class="dv">3</span>)</span>
 <span id="cb24-9"><a href="#cb24-9" tabindex="-1"></a><span class="co">#&gt;    plot_id  confidence    margin   entropy</span></span>
-<span id="cb24-10"><a href="#cb24-10" tabindex="-1"></a><span class="co">#&gt; 17    A090    0.330615  0.010530  1.331286</span></span>
-<span id="cb24-11"><a href="#cb24-11" tabindex="-1"></a><span class="co">#&gt; 16    A085    0.347894  0.100572  1.357081</span></span>
-<span id="cb24-12"><a href="#cb24-12" tabindex="-1"></a><span class="co">#&gt; 1     A010    0.357241  0.026313  1.313200</span></span></code></pre></div>
+<span id="cb24-10"><a href="#cb24-10" tabindex="-1"></a><span class="co">#&gt; 22    A115    0.371325  0.033685  1.292142</span></span>
+<span id="cb24-11"><a href="#cb24-11" tabindex="-1"></a><span class="co">#&gt; 21    A110    0.469217  0.181195  1.222800</span></span>
+<span id="cb24-12"><a href="#cb24-12" tabindex="-1"></a><span class="co">#&gt; 29    A150    0.546224  0.330326  1.167729</span></span></code></pre></div>
 </div>
 <p>The rows are computed on whichever plots are scored, so a checkpoint
 alone is enough to check how well the probabilities match the observed
@@ -701,12 +701,12 @@ carry every target. The training dataset is both.</p>
 <span>                model <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">preds</span><span class="op">$</span><span class="va">predictions</span><span class="op">$</span><span class="va">elevation</span><span class="op">)</span>,</span>
 <span>                blended <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">blended</span><span class="op">$</span><span class="va">predictions</span><span class="op">$</span><span class="va">elevation</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   plot_id model blended</span></span>
-<span><span class="co">#&gt; 1    A005  2024    1866</span></span>
-<span><span class="co">#&gt; 2    A010  2023    1994</span></span>
-<span><span class="co">#&gt; 3    A015  2339    2325</span></span>
-<span><span class="co">#&gt; 4    A020  1418    1407</span></span>
-<span><span class="co">#&gt; 5    A025  1185    1104</span></span>
-<span><span class="co">#&gt; 6    A030  1530    1504</span></span>
+<span><span class="co">#&gt; 1    A005  2126    2156</span></span>
+<span><span class="co">#&gt; 2    A010  1695    1723</span></span>
+<span><span class="co">#&gt; 3    A015  2193    2219</span></span>
+<span><span class="co">#&gt; 4    A020  1369    1320</span></span>
+<span><span class="co">#&gt; 5    A025  1028     978</span></span>
+<span><span class="co">#&gt; 6    A030  1597    1492</span></span>
 <span></span>
 <span><span class="fu"><a href="../reference/resolve.retrieval.html">resolve.retrieval</a></span><span class="op">(</span><span class="va">predictor</span>, <span class="cn">NULL</span><span class="op">)</span></span></code></pre></div>
 <div class="sourceCode" id="cb37"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb37-1"><a href="#cb37-1" tabindex="-1"></a>retrieval <span class="op">=</span> rc.RetrievalConfig()</span>
@@ -721,12 +721,12 @@ carry every target. The training dataset is both.</p>
 <span id="cb37-10"><a href="#cb37-10" tabindex="-1"></a>              <span class="st">"model"</span>: preds.predictions[<span class="st">"elevation"</span>].numpy().<span class="bu">round</span>(),</span>
 <span id="cb37-11"><a href="#cb37-11" tabindex="-1"></a>              <span class="st">"blended"</span>: blended.predictions[<span class="st">"elevation"</span>].numpy().<span class="bu">round</span>()}).head(<span class="dv">6</span>)</span>
 <span id="cb37-12"><a href="#cb37-12" tabindex="-1"></a><span class="co">#&gt;   plot_id   model  blended</span></span>
-<span id="cb37-13"><a href="#cb37-13" tabindex="-1"></a><span class="co">#&gt; 0    A005  2036.0   2068.0</span></span>
-<span id="cb37-14"><a href="#cb37-14" tabindex="-1"></a><span class="co">#&gt; 1    A010  1620.0   1683.0</span></span>
-<span id="cb37-15"><a href="#cb37-15" tabindex="-1"></a><span class="co">#&gt; 2    A015  2016.0   2081.0</span></span>
-<span id="cb37-16"><a href="#cb37-16" tabindex="-1"></a><span class="co">#&gt; 3    A020  1094.0   1069.0</span></span>
-<span id="cb37-17"><a href="#cb37-17" tabindex="-1"></a><span class="co">#&gt; 4    A025  1060.0   1017.0</span></span>
-<span id="cb37-18"><a href="#cb37-18" tabindex="-1"></a><span class="co">#&gt; 5    A030  1882.0   1997.0</span></span>
+<span id="cb37-13"><a href="#cb37-13" tabindex="-1"></a><span class="co">#&gt; 0    A005  2217.0   2247.0</span></span>
+<span id="cb37-14"><a href="#cb37-14" tabindex="-1"></a><span class="co">#&gt; 1    A010  1802.0   1844.0</span></span>
+<span id="cb37-15"><a href="#cb37-15" tabindex="-1"></a><span class="co">#&gt; 2    A015  2288.0   2308.0</span></span>
+<span id="cb37-16"><a href="#cb37-16" tabindex="-1"></a><span class="co">#&gt; 3    A020  1276.0   1232.0</span></span>
+<span id="cb37-17"><a href="#cb37-17" tabindex="-1"></a><span class="co">#&gt; 4    A025   670.0    714.0</span></span>
+<span id="cb37-18"><a href="#cb37-18" tabindex="-1"></a><span class="co">#&gt; 5    A030  1570.0   1542.0</span></span>
 <span id="cb37-19"><a href="#cb37-19" tabindex="-1"></a></span>
 <span id="cb37-20"><a href="#cb37-20" tabindex="-1"></a>predictor.clear_retrieval()</span></code></pre></div>
 </div>
@@ -819,16 +819,16 @@ altered without loading any model.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb40"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">sealed</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/resolve.seal_suite.html">resolve.seal_suite</a></span><span class="op">(</span><span class="va">suite_dir</span><span class="op">)</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/substr.html" class="external-link">substr</a></span><span class="op">(</span><span class="va">sealed</span><span class="op">$</span><span class="va">targets</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span><span class="op">$</span><span class="va">members</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span><span class="op">$</span><span class="va">sha256</span>, <span class="fl">1</span>, <span class="fl">16</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] "d1f76038d78893a1"</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/nchar.html" class="external-link">nchar</a></span><span class="op">(</span><span class="va">sealed</span><span class="op">$</span><span class="va">targets</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span><span class="op">$</span><span class="va">members</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span><span class="op">$</span><span class="va">sha256</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] 64</span></span>
 <span><span class="fu"><a href="../reference/resolve.verify_suite.html">resolve.verify_suite</a></span><span class="op">(</span><span class="va">suite_dir</span><span class="op">)</span><span class="op">$</span><span class="va">problems</span></span>
 <span><span class="co">#&gt; character(0)</span></span></code></pre></div>
 <div class="sourceCode" id="cb41"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb41-1"><a href="#cb41-1" tabindex="-1"></a>sealed <span class="op">=</span> rc.SuiteManifest.from_json(</span>
 <span id="cb41-2"><a href="#cb41-2" tabindex="-1"></a>    <span class="bu">open</span>(os.path.join(suite_dir, <span class="st">"manifest.json"</span>)).read())</span>
 <span id="cb41-3"><a href="#cb41-3" tabindex="-1"></a>sealed.seal(suite_dir)</span>
 <span id="cb41-4"><a href="#cb41-4" tabindex="-1"></a>sealed.write(suite_dir)</span>
-<span id="cb41-5"><a href="#cb41-5" tabindex="-1"></a>sealed.targets[<span class="dv">0</span>].members[<span class="dv">0</span>].sha256[:<span class="dv">16</span>]</span>
-<span id="cb41-6"><a href="#cb41-6" tabindex="-1"></a><span class="co">#&gt; 14547c892d39deeb</span></span>
+<span id="cb41-5"><a href="#cb41-5" tabindex="-1"></a><span class="bu">len</span>(sealed.targets[<span class="dv">0</span>].members[<span class="dv">0</span>].sha256)</span>
+<span id="cb41-6"><a href="#cb41-6" tabindex="-1"></a><span class="co">#&gt; 64</span></span>
 <span id="cb41-7"><a href="#cb41-7" tabindex="-1"></a>rc.SuiteManifest.read(suite_dir).verify(suite_dir)</span>
 <span id="cb41-8"><a href="#cb41-8" tabindex="-1"></a><span class="co">#&gt; []</span></span></code></pre></div>
 </div>
@@ -849,12 +849,12 @@ columns such as coordinates, the header. No target column is read.</p>
 <span>                agreement <span class="op">=</span> <span class="va">habitat</span><span class="op">$</span><span class="va">agreement</span>,</span>
 <span>                recognised <span class="op">=</span> <span class="va">habitat</span><span class="op">$</span><span class="va">recognised_share</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   plot_id   habitat agreement recognised</span></span>
-<span><span class="co">#&gt; 1    A005 grassland 0.3333333  0.6666667</span></span>
-<span><span class="co">#&gt; 2    A010   wetland 0.6666667  1.0000000</span></span>
-<span><span class="co">#&gt; 3    A015    alpine 1.0000000  1.0000000</span></span>
-<span><span class="co">#&gt; 4    A020    forest 1.0000000  1.0000000</span></span>
-<span><span class="co">#&gt; 5    A025    forest 0.6666667  1.0000000</span></span>
-<span><span class="co">#&gt; 6    A030 grassland 0.6666667  1.0000000</span></span></code></pre></div>
+<span><span class="co">#&gt; 1    A005 grassland 0.6666667  0.6666667</span></span>
+<span><span class="co">#&gt; 2    A010    forest 0.6666667  1.0000000</span></span>
+<span><span class="co">#&gt; 3    A015    forest 0.3333333  1.0000000</span></span>
+<span><span class="co">#&gt; 4    A020    forest 0.6666667  1.0000000</span></span>
+<span><span class="co">#&gt; 5    A025 grassland 1.0000000  1.0000000</span></span>
+<span><span class="co">#&gt; 6    A030 grassland 1.0000000  1.0000000</span></span></code></pre></div>
 <div class="sourceCode" id="cb43"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb43-1"><a href="#cb43-1" tabindex="-1"></a>suite <span class="op">=</span> rc.SuitePredictor.load(suite_dir)</span>
 <span id="cb43-2"><a href="#cb43-2" tabindex="-1"></a>suite.target_names</span>
 <span id="cb43-3"><a href="#cb43-3" tabindex="-1"></a><span class="co">#&gt; ['habitat']</span></span>
@@ -866,12 +866,12 @@ columns such as coordinates, the header. No target column is read.</p>
 <span id="cb43-9"><a href="#cb43-9" tabindex="-1"></a>              <span class="st">"agreement"</span>: habitat.agreement.numpy(),</span>
 <span id="cb43-10"><a href="#cb43-10" tabindex="-1"></a>              <span class="st">"recognised"</span>: habitat.recognition.count_share.numpy()}).head(<span class="dv">6</span>)</span>
 <span id="cb43-11"><a href="#cb43-11" tabindex="-1"></a><span class="co">#&gt;   plot_id    habitat  agreement  recognised</span></span>
-<span id="cb43-12"><a href="#cb43-12" tabindex="-1"></a><span class="co">#&gt; 0    A005  grassland   1.000000    0.666667</span></span>
-<span id="cb43-13"><a href="#cb43-13" tabindex="-1"></a><span class="co">#&gt; 1    A010     forest   0.666667    1.000000</span></span>
+<span id="cb43-12"><a href="#cb43-12" tabindex="-1"></a><span class="co">#&gt; 0    A005     alpine   0.666667    0.666667</span></span>
+<span id="cb43-13"><a href="#cb43-13" tabindex="-1"></a><span class="co">#&gt; 1    A010    wetland   0.666667    1.000000</span></span>
 <span id="cb43-14"><a href="#cb43-14" tabindex="-1"></a><span class="co">#&gt; 2    A015     alpine   0.333333    1.000000</span></span>
 <span id="cb43-15"><a href="#cb43-15" tabindex="-1"></a><span class="co">#&gt; 3    A020     forest   1.000000    1.000000</span></span>
-<span id="cb43-16"><a href="#cb43-16" tabindex="-1"></a><span class="co">#&gt; 4    A025  grassland   1.000000    1.000000</span></span>
-<span id="cb43-17"><a href="#cb43-17" tabindex="-1"></a><span class="co">#&gt; 5    A030  grassland   0.666667    1.000000</span></span></code></pre></div>
+<span id="cb43-16"><a href="#cb43-16" tabindex="-1"></a><span class="co">#&gt; 4    A025  grassland   0.666667    1.000000</span></span>
+<span id="cb43-17"><a href="#cb43-17" tabindex="-1"></a><span class="co">#&gt; 5    A030  grassland   1.000000    1.000000</span></span></code></pre></div>
 </div>
 <p>The <em>agreement</em> of a vote is the share of members naming the
 winning class; a tie goes to the tied class with the higher mean

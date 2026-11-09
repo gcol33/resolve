@@ -128,6 +128,45 @@ TEST_CASE("The tile index finds tiles and moves cells across tile edges", "[terr
     CHECK(off.tile.item<int64_t>() == -1);
 }
 
+TEST_CASE("A cell moved into a tile with wider columns keeps its longitude", "[terrain]") {
+    // North of 46 N the tiles hold 40 columns per degree, south of it 60, as
+    // GLO-30's tiles widen at 50 N.
+    TempDir dir;
+    write_plane_terrain(dir, {{46, 10}, {45, 10}, {46, 11}, {45, 11}}, 60, 46, 40);
+    const TerrainGrids grids(dir.path());
+    const auto& index = grids.index();
+    const int64_t north = index.find(46, 10);
+    const int64_t south = index.find(45, 10);
+    // Column 36 of the southern tile lies at 10.6 E, as column 24 of the northern.
+    const TerrainCells up = index.normalise(torch::tensor({south}), torch::tensor({int64_t{-1}}),
+                                            torch::tensor({int64_t{36}}));
+    CHECK(up.tile.item<int64_t>() == north);
+    CHECK(up.row.item<int64_t>() == 59);
+    CHECK(up.col.item<int64_t>() == 24);
+    const TerrainCells down = index.normalise(torch::tensor({north}), torch::tensor({int64_t{60}}),
+                                              torch::tensor({int64_t{24}}));
+    CHECK(down.tile.item<int64_t>() == south);
+    CHECK(down.row.item<int64_t>() == 0);
+    CHECK(down.col.item<int64_t>() == 36);
+    // Column 40 of the northern tile (11 E) is column 60 of the southern one,
+    // which lies in the tile east of it.
+    const TerrainCells east = index.normalise(torch::tensor({north}), torch::tensor({int64_t{60}}),
+                                              torch::tensor({int64_t{40}}));
+    CHECK(east.tile.item<int64_t>() == index.find(45, 11));
+    CHECK(east.col.item<int64_t>() == 0);
+
+    // The slope stencil of a point just south of 46 N reads its northern
+    // neighbour in the northern tile; the 1 km plane and mean straddle the edge.
+    const double lat = 46.0 - 1.0 / 180.0;
+    const TerrainDescriptors t = terrain_descriptors(grids, deg({lat}), deg({10.6}));
+    CHECK_THAT(t.slope.item<double>(), WithinAbs(plane_slope(lat), 1e-3));
+    CHECK_THAT(t.elevation.item<double>(), WithinAbs(terrain_plane(lat, 10.6), 1e-3));
+    // Corners moved across the edge sit within half a southern column (1/120
+    // degree, about 4 m of this plane) of their longitude.
+    CHECK_THAT(t.elevation_1km.item<double>(), WithinAbs(terrain_plane(lat, 10.6), 5.0));
+    CHECK_THAT(t.slope_1km.item<double>(), WithinAbs(plane_slope(lat), 0.2));
+}
+
 TEST_CASE("Grids interpolate a plane exactly, across tile edges too, and hold nothing outside their tiles",
           "[terrain]") {
     TempDir dir;

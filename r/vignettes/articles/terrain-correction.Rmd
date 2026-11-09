@@ -9,6 +9,7 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6.5, fig.heig
                       dev.args = list(pointsize = 14))
 library(resolveR)
 if (nzchar(Sys.getenv("RESOLVE_DOCS_CACHE"))) source(Sys.getenv("RESOLVE_DOCS_CACHE"))
+if (resolve.available()) resolve.manual_seed(42)
 ```
 
 A plot with coordinates can be read off a digital elevation model: the elevation at the coordinate, and the slope of the ground around it. Where the coordinate is precise, that reading is close to the altitude a surveyor would record. Where it is coarse, or wrong, the elevation model reads a different hillside, and the reading can be off by hundreds of metres. A prediction from species composition errs the other way round: it never reads the wrong hillside, but it cannot tell two plots with the same species apart by a few metres of altitude.

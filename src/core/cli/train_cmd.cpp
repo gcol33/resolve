@@ -296,7 +296,7 @@ int train_command(const ParsedArgs& args) {
     // invocations different models. The same seed drives the train/test split,
     // the per-epoch shuffle, and the cross-validation folds below.
     const int seed = args.get_int("--seed");
-    torch::manual_seed(static_cast<uint64_t>(seed));
+    resolve::manual_seed(static_cast<uint64_t>(seed));
 
     // ---------------------------------------------------------------- model
     model_config = model_config_for_dataset(dataset, model_config);

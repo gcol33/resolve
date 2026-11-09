@@ -121,25 +121,27 @@ computed on these held-out plots.
 
 ``` r
 
+resolve.manual_seed(42)
 fit <- resolve.train.dataset(dataset, verbose = FALSE)
 metrics <- fit$result$final_metrics
 round(unlist(metrics$elevation[c("mae", "rmse", "r2", "band_25")]), 3)
 #>     mae    rmse      r2 band_25 
-#> 225.809 292.077   0.738   0.533
+#> 247.110 317.298   0.691   0.600
 round(metrics$habitat$accuracy, 3)
-#> [1] 0.833
+#> [1] 0.8
 ```
 
 ``` python
+rc.manual_seed(42)
 model = rc.ResolveModel(dataset.schema, rc.model_config_for_dataset(dataset))
 trainer = rc.Trainer(model, rc.TrainConfig())
 trainer.prepare_data(dataset)
 result = trainer.fit()
 metrics = result.final_metrics
 {name: round(metrics["elevation"][name], 3) for name in ["mae", "rmse", "r2", "band_25"]}
-#> {'mae': 190.343, 'rmse': 266.092, 'r2': 0.783, 'band_25': 0.667}
+#> {'mae': 260.756, 'rmse': 301.784, 'r2': 0.721, 'band_25': 0.433}
 round(metrics["habitat"]["accuracy"], 3)
-#> 0.867
+#> 0.8
 ```
 
 For elevation, `mae` and `rmse` are in metres, `r2` is the share of the
@@ -147,10 +149,13 @@ variance the predictions explain, and `band_25` is the share of plots
 predicted within 25 % of their elevation; `band_10` and `band_50` give
 the same at 10 and 50 %. For habitat, `accuracy` is the share of plots
 assigned their recorded habitat, and the per-class precision, recall and
-F1 scores sit beside it in the same list. The seed fixes the held-out
-plots and the order the training plots are drawn in, while the starting
-weights come from torch’s own random number generator, so two runs, like
-the R and the Python one here, end at slightly different numbers.
+F1 scores sit beside it in the same list. Training’s own seed fixes the
+held-out plots and the order the training plots are drawn in, and
+[`resolve.manual_seed()`](https://gillescolling.com/resolve/reference/resolve.manual_seed.md)
+(`rc.manual_seed()` in Python) fixes the starting weights, so the same
+run on the same machine ends at the same numbers. The R and the Python
+run here still end at slightly different numbers, since each reaches the
+engine through its own torch build.
 
 ## Predicting new plots
 
@@ -169,12 +174,12 @@ head(data.frame(plot = preds$plot_ids,
                 elevation = round(preds$predictions$elevation),
                 observed = plots$elevation[match(preds$plot_ids, plots$plot_id)]))
 #>   plot elevation observed
-#> 1 A001      2357     2188
-#> 2 A002       949      568
-#> 3 A003      1891     2129
-#> 4 A004      2391     2267
-#> 5 A005      2226     2145
-#> 6 A006      1716     1799
+#> 1 A001      2258     2188
+#> 2 A002      1283      568
+#> 3 A003      1969     2129
+#> 4 A004      2284     2267
+#> 5 A005      2074     2145
+#> 6 A006      1785     1799
 ```
 
 ``` python
@@ -190,12 +195,12 @@ out = pd.DataFrame({"plot": preds.plot_ids,
 out.merge(plots[["plot_id", "elevation"]], left_on="plot", right_on="plot_id",
           suffixes=("", "_observed")).drop(columns="plot_id").head(6)
 #>    plot  elevation  elevation_observed
-#> 0  A001       2368                2188
-#> 1  A002       1012                 568
-#> 2  A003       2044                2129
-#> 3  A004       2353                2267
-#> 4  A005       2097                2145
-#> 5  A006       1800                1799
+#> 0  A001       2248                2188
+#> 1  A002       1002                 568
+#> 2  A003       2105                2129
+#> 3  A004       2319                2267
+#> 4  A005       2004                2145
+#> 5  A006       1950                1799
 ```
 
 A plot with a species the model never saw still gets a prediction: the

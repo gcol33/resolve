@@ -79,6 +79,10 @@ resolve_set_vram_fraction <- function(fraction, device_index = -1L) {
     invisible(.Call(`_resolveR_resolve_set_vram_fraction`, fraction, device_index))
 }
 
+resolve_manual_seed <- function(seed) {
+    invisible(.Call(`_resolveR_resolve_manual_seed`, seed))
+}
+
 resolve_set_thread_pools <- function(intraop_threads, interop_threads = -1L) {
     invisible(.Call(`_resolveR_resolve_set_thread_pools`, intraop_threads, interop_threads))
 }

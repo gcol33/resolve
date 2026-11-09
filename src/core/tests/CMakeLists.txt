@@ -88,6 +88,7 @@ add_executable(resolve_tests
     test_oom_retry.cpp
     test_csv_utils.cpp
     test_process.cpp
+    test_seed.cpp
     test_io_retry.cpp
     test_amp_norm.cpp
     test_dataframe.cpp

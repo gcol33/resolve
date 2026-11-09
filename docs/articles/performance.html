@@ -57,7 +57,7 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="nav-item dropdown">
+<li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><hr class="dropdown-divider"></li>
@@ -830,7 +830,7 @@ encoder and a short run.</p>
 <span>                               maxEpochs <span class="op">=</span> <span class="fl">50L</span>, patience <span class="op">=</span> <span class="fl">10L</span>,</span>
 <span>                               batchSize <span class="op">=</span> <span class="fl">4096L</span>, verbose <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">quick</span><span class="op">$</span><span class="va">result</span><span class="op">$</span><span class="va">final_metrics</span><span class="op">$</span><span class="va">habitat</span><span class="op">$</span><span class="va">accuracy</span>, <span class="fl">3</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] 0.8</span></span></code></pre></div>
+<span><span class="co">#&gt; [1] 0.767</span></span></code></pre></div>
 <div class="sourceCode" id="cb32"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb32-1"><a href="#cb32-1" tabindex="-1"></a>data_config <span class="op">=</span> rc.DatasetConfig()</span>
 <span id="cb32-2"><a href="#cb32-2" tabindex="-1"></a>data_config.species_encoding <span class="op">=</span> rc.SpeciesEncodingMode.Hash</span>
 <span id="cb32-3"><a href="#cb32-3" tabindex="-1"></a>data_config.hash_dim <span class="op">=</span> <span class="dv">64</span></span>
@@ -847,7 +847,7 @@ encoder and a short run.</p>
 <span id="cb32-14"><a href="#cb32-14" tabindex="-1"></a>quick <span class="op">=</span> rc.Trainer(rc.ResolveModel(quick_data.schema, model_config), cfg)</span>
 <span id="cb32-15"><a href="#cb32-15" tabindex="-1"></a>quick.prepare_data(quick_data, test_size<span class="op">=</span><span class="fl">0.2</span>, seed<span class="op">=</span><span class="dv">42</span>)</span>
 <span id="cb32-16"><a href="#cb32-16" tabindex="-1"></a><span class="bu">round</span>(quick.fit().final_metrics[<span class="st">"habitat"</span>][<span class="st">"accuracy"</span>], <span class="dv">3</span>)</span>
-<span id="cb32-17"><a href="#cb32-17" tabindex="-1"></a><span class="co">#&gt; 0.767</span></span></code></pre></div>
+<span id="cb32-17"><a href="#cb32-17" tabindex="-1"></a><span class="co">#&gt; 0.8</span></span></code></pre></div>
 </div>
 <p>Standard training: a mid-size encoder and a longer run.</p>
 <div class="lang-pair">
@@ -856,7 +856,7 @@ encoder and a short run.</p>
 <span>                                  maxEpochs <span class="op">=</span> <span class="fl">200L</span>, patience <span class="op">=</span> <span class="fl">30L</span>,</span>
 <span>                                  batchSize <span class="op">=</span> <span class="fl">4096L</span>, verbose <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">standard</span><span class="op">$</span><span class="va">result</span><span class="op">$</span><span class="va">final_metrics</span><span class="op">$</span><span class="va">habitat</span><span class="op">$</span><span class="va">accuracy</span>, <span class="fl">3</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] 0.767</span></span></code></pre></div>
+<span><span class="co">#&gt; [1] 0.833</span></span></code></pre></div>
 <div class="sourceCode" id="cb34"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb34-1"><a href="#cb34-1" tabindex="-1"></a>model_config <span class="op">=</span> rc.ModelConfig()</span>
 <span id="cb34-2"><a href="#cb34-2" tabindex="-1"></a>model_config.hidden_dims <span class="op">=</span> [<span class="dv">512</span>, <span class="dv">256</span>, <span class="dv">128</span>]</span>
 <span id="cb34-3"><a href="#cb34-3" tabindex="-1"></a>cfg <span class="op">=</span> rc.TrainConfig()</span>
@@ -867,7 +867,7 @@ encoder and a short run.</p>
 <span id="cb34-8"><a href="#cb34-8" tabindex="-1"></a>standard <span class="op">=</span> rc.Trainer(rc.ResolveModel(quick_data.schema, model_config), cfg)</span>
 <span id="cb34-9"><a href="#cb34-9" tabindex="-1"></a>standard.prepare_data(quick_data, test_size<span class="op">=</span><span class="fl">0.2</span>, seed<span class="op">=</span><span class="dv">42</span>)</span>
 <span id="cb34-10"><a href="#cb34-10" tabindex="-1"></a><span class="bu">round</span>(standard.fit().final_metrics[<span class="st">"habitat"</span>][<span class="st">"accuracy"</span>], <span class="dv">3</span>)</span>
-<span id="cb34-11"><a href="#cb34-11" tabindex="-1"></a><span class="co">#&gt; 0.767</span></span></code></pre></div>
+<span id="cb34-11"><a href="#cb34-11" tabindex="-1"></a><span class="co">#&gt; 0.833</span></span></code></pre></div>
 </div>
 <p>A longer run with the rank-pool encoding on a GPU: log-weighted
 pooling, cover dropout (<code>cover_dropout</code>, which during

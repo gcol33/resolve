@@ -239,7 +239,7 @@ gaps <- is.na(my_plots$elevation_recorded[order])
 c(model = mean(abs(preds$predictions$elevation[gaps] - truth[gaps])),
   fitted = mean(abs(elevation$fitted[gaps] - truth[gaps])))
 #>    model   fitted 
-#> 178.9421 146.6450
+#> 274.8799 162.6798
 ```
 
 ``` python
@@ -250,7 +250,7 @@ raw = preds.predictions["elevation"].numpy()
 fitted = elevation.fitted.numpy()
 {"model": float(np.abs(raw[gaps] - truth[gaps]).mean()),
  "fitted": float(np.abs(fitted[gaps] - truth[gaps]).mean())}
-#> {'model': 238.97451985677083, 'fitted': 154.8316109681892}
+#> {'model': 252.3594970703125, 'fitted': 141.37301726696327}
 ```
 
 ## Reading the report
@@ -268,11 +268,11 @@ located$method
 #> [1] "stack_species_spatial"
 round(unlist(located$matched_error), 1)
 #>        local_constant               resolve          offset_slope 
-#>                 559.9                 163.6                 161.5 
+#>                 559.9                 158.6                 155.9 
 #>           knn_species         stack_species           knn_spatial 
-#>                 173.0                 142.8                 609.3 
+#>                 173.0                 135.1                 609.3 
 #> stack_species_spatial 
-#>                 140.5
+#>                 128.8
 elevation$report$axes$km$gap_distance$median
 #> [1] 7.379892
 ```
@@ -282,7 +282,7 @@ located = elevation.report["groups"]["located"]
 located["method"]
 #> stack_species_spatial
 {m: round(e, 1) for m, e in located["matched_error"].items()}
-#> {'local_constant': 559.9, 'resolve': 188.8, 'offset_slope': 191.9, 'knn_species': 173.0, 'stack_species': 150.0, 'knn_spatial': 609.3, 'stack_species_spatial': 149.0}
+#> {'local_constant': 559.9, 'resolve': 167.7, 'offset_slope': 167.2, 'knn_species': 173.0, 'stack_species': 134.9, 'knn_spatial': 609.3, 'stack_species_spatial': 131.0}
 elevation.report["axes"]["km"]["gap_distance"]["median"]
 #> 7.379891561267665
 ```

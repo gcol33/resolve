@@ -70,6 +70,15 @@ NB_MODULE(_resolve_core, m) {
         "CUDA device is present."
     );
 
+    m.def(
+        "manual_seed",
+        [](uint64_t seed) { resolve::manual_seed(seed); },
+        nb::arg("seed"),
+        "Seed the engine's torch random number generators (CPU and CUDA),\n"
+        "which weight initialization and dropout draw from. Call before\n"
+        "building a model; the split and shuffle take their own seed."
+    );
+
     // Pin libtorch's host thread pools, which avoids worker-thread teardown
     // races on Windows; harmless elsewhere. <=0 keeps libtorch's default for
     // the corresponding pool.
