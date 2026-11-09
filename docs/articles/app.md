@@ -25,10 +25,8 @@ family. Columns are matched by name (Darwin Core names too); change them
 below if needed.
 
 Header table (optional): one row per plot, with plot ID, latitude and
-longitude (WGS84), and year and month or a date. Where the header
-records survey year, coordinates, altitude, slope or plot area on only
-some plots, the missing values are imputed from the plots that record
-them.
+longitude (WGS84), and year and month or a date. A header with gaps in
+some columns is calibrated on its own plots (opt-out).
 
 Fuzzy match species names off up to 1 edit up to 2 edits up to 3 edits
 
@@ -38,11 +36,15 @@ Models
 
 Terrain correction of altitude and slope
 
-Gap fitting of variables recorded on some plots
+Calibrate to the header: variables recorded on some plots are imputed on
+the others from the plots that record them
 
 Impute
 
 Workers
+
+![](data:image/svg+xml;base64,PHN2ZyBpZD0iYnVzeS1wdWxzZSIgdmlld2JveD0iLTYgLTYgMTIgMTIiIGFyaWEtaGlkZGVuPSJ0cnVlIj48cGF0aCBkPSJNMCAtNC42VjQuNk0tNCAtMi4zTDQgMi4zTS00IDIuM0w0IC0yLjMiIC8+PC9zdmc+)
+·
 
 plots
 

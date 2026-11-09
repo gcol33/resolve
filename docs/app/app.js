@@ -310,7 +310,8 @@ function renderFields(which) {
   const box = $(`${which}-fields`), src = which === "header" ? headerSource() : raw.species;
   if (!src || !chosen[which]) { box.innerHTML = ""; return; }
   box.innerHTML = FIELDS[which].map((f) =>
-    `<label>${escape(f.label)} <select class="form-select form-select-sm" data-role="${escape(f.role)}">` +
+    `<label><span>${escape(f.label)}${f.role === COLUMNS.plot ? '<span class="plot-link" hidden></span>' : ""}</span>` +
+    ` <select class="form-select form-select-sm" data-role="${escape(f.role)}">` +
     `<option value="">${f.required ? "(choose a column)" : "(none)"}</option>` +
     src.cols.map((c) => `<option value="${escape(c)}"${c === chosen[which][f.role] ? " selected" : ""}>${escape(c)}</option>`).join("") +
     "</select></label>").join("");
@@ -476,17 +477,71 @@ function chosenTargets() {
   return targetNames().filter((n) => on.has(n)).map(chosenModel).filter(Boolean);
 }
 
+// How the plot IDs of the two tables meet. The header lists the plots that
+// are imputed (resolve.js, encode): a species record of a plot the header
+// lacks is left out, and a header plot without records has no species
+// composition. Null without a header table or a chosen plot ID column.
+function plotLink() {
+  const species = state.tables.species, header = state.tables.header;
+  if (!species || !header || header.fromSpecies || !chosen.species[COLUMNS.plot] || !chosen.header[COLUMNS.plot]) {
+    return null;
+  }
+  const inSpecies = new Set(species.rows.map((r) => String(r[COLUMNS.plot])));
+  const inHeader = new Set(header.rows.map((r) => String(r[COLUMNS.plot])));
+  let shared = 0;
+  for (const id of inHeader) if (inSpecies.has(id)) shared++;
+  const noRecords = inHeader.size - shared, noHeader = inSpecies.size - shared;
+  const kind = shared === 0 ? "broken" : noRecords === 0 && noHeader === 0 ? "linked" : "partial";
+  const notes = kind !== "partial" ? [] : [
+    ...(noRecords ? [`${noRecords.toLocaleString()} without species records`] : []),
+    ...(noHeader ? [`${noHeader.toLocaleString()} plots of the species table are not in the header and are left out`] : []),
+  ];
+  const title = kind === "linked" ? `Plot IDs link the tables: all ${shared.toLocaleString()} plots are in both`
+    : kind === "broken" ? "No plot ID is in both tables"
+    : `${shared.toLocaleString()} plots are in both tables; ${notes.join("; ")}`;
+  return { state: kind, notes, title };
+}
+
+// Chain icons after Lucide's link and unlink (ISC licence).
+const LINK_ICON = {
+  linked: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>' +
+          '<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  broken: '<path d="m18.84 12.25 1.72-1.71h-.02a5 5 0 0 0-.12-7.07 5 5 0 0 0-6.95 0l-1.72 1.71"/>' +
+          '<path d="m5.17 11.75-1.71 1.71a5 5 0 0 0 .12 7.07 5 5 0 0 0 6.95 0l1.71-1.71"/>' +
+          '<path d="M8 2v3M2 8h3M16 22v-3M22 16h-3"/>',
+};
+LINK_ICON.partial = LINK_ICON.linked;
+
+// The link icon beside both tables' plot ID field; returns plotLink().
+function renderPlotLink() {
+  const link = plotLink();
+  for (const span of document.querySelectorAll("#resolve-app .plot-link")) {
+    span.hidden = !link;
+    if (!link) continue;
+    span.className = `plot-link ${link.state}`;
+    span.title = link.title;
+    span.setAttribute("role", "img");
+    span.setAttribute("aria-label", link.title);
+    span.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ` +
+      `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${LINK_ICON[link.state]}</svg>`;
+  }
+  return link;
+}
+
 function refreshInputs() {
   const species = state.tables.species, header = state.tables.header;
   $("species-info").textContent = species ? `${species.rows.length.toLocaleString()} records` + quantityNote() : "";
+  const link = renderPlotLink();
   $("header-info").textContent = !header ? ""
     : header.fromSpecies ? `No header table: ${header.rows.length.toLocaleString()} plots, their fields read from the species table (first record per plot)`
-    : `${header.rows.length.toLocaleString()} plots`;
+    : [`${header.rows.length.toLocaleString()} plots`, ...(link?.notes ?? [])].join("; ");
   const missing = species && !(chosen.species[COLUMNS.plot] && chosen.species[COLUMNS.species]);
   const missingHeader = header && !header.fromSpecies && !chosen.header[COLUMNS.plot];
+  const unlinked = link?.state === "broken";
   $("species-error").textContent = missing ? "Choose the plot ID and species columns of the species table." : "";
-  $("header-error").textContent = missingHeader ? "Choose the plot ID column of the header table." : "";
-  $("run").disabled = !species || missing || missingHeader;
+  $("header-error").textContent = missingHeader ? "Choose the plot ID column of the header table."
+    : unlinked ? "No plot ID is in both tables: choose the plot ID columns that identify the same plots." : "";
+  $("run").disabled = !species || missing || missingHeader || unlinked;
   if (state.suites) {
     renderTargets();
     if (state.tablesRead) startPreload();
@@ -593,17 +648,45 @@ const VERBS = [
   "Sorting the seedlings", "Cross-checking Ellenberg", "Pacing out the plot", "Germinating",
 ];
 
-const busy = { timer: null, members: [], start: new Map(), done: 0, partial: new Map(), targets: 0, combined: 0 };
+// The heartbeat beside the verb: an asterisk that turns and breathes once
+// per PULSE_PERIOD, set every PULSE_MS, and the time since the run started.
+// It is driven from the page's own event loop, never a CSS animation, so it
+// stops when the page hangs and keeps going only while the page is alive.
+// The asterisk turns to the warning colour once the share done has not moved
+// for STALL_MS.
+const PULSE_MS = 80, PULSE_PERIOD = 1600, VERB_MS = 2800, STALL_MS = 10000;
+const STILL = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+const busy = { timer: null, members: [], start: new Map(), done: 0, partial: new Map(), targets: 0, combined: 0,
+               t0: 0, lastMove: 0, share: -1, tick: 0 };
+
+const elapsed = (ms) => {
+  const s = Math.floor(ms / 1000);
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
+};
+
+function beat() {
+  const now = performance.now();
+  if (busy.tick % Math.round(VERB_MS / PULSE_MS) === 0) {
+    $("busy-verb").textContent = `${VERBS[Math.floor(Math.random() * VERBS.length)]}…`;
+  }
+  const pulse = $("busy-pulse"), phase = ((now - busy.t0) % PULSE_PERIOD) / PULSE_PERIOD;
+  pulse.style.transform = STILL.matches ? ""
+    : `rotate(${60 * phase}deg) scale(${0.75 + 0.25 * Math.sin(Math.PI * phase)})`;
+  pulse.classList.toggle("stalled", now - busy.lastMove > STALL_MS);
+  $("busy-time").textContent = elapsed(now - busy.t0);
+  busy.tick += 1;
+}
 
 function startBusy(members, targets) {
+  const now = performance.now();
   Object.assign(busy, { members, start: new Map(members.map((m) => [m, receivedOf(m)])), done: 0,
-                        partial: new Map(), targets, combined: 0 });
+                        partial: new Map(), targets, combined: 0, t0: now, lastMove: now, share: -1, tick: 0 });
   $("busy").hidden = false;
   $("status").hidden = true;
   $("download-status").hidden = true;
-  const pick = () => { $("busy-verb").textContent = `${VERBS[Math.floor(Math.random() * VERBS.length)]}…`; };
-  pick();
-  busy.timer = setInterval(pick, 2800);
+  beat();
+  busy.timer = setInterval(beat, PULSE_MS);
   showBusy();
 }
 
@@ -623,6 +706,7 @@ function showBusy() {
     done += Math.max(0, receivedOf(m) - r0) / (1 - r0);
   }
   const share = Math.min(1, done / Math.max(1, steps));
+  if (share !== busy.share) Object.assign(busy, { share, lastMove: performance.now() });
   const percent = Math.floor(100 * share);
   $("busy-bar").style.width = `${percent}%`;
   $("busy-bar").parentElement.setAttribute("aria-valuenow", percent);

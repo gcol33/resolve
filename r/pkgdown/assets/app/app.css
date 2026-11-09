@@ -8,9 +8,18 @@ main#main + aside { display: none; }
 #resolve-app code { font-size: 0.85em; }
 
 #resolve-app .tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px 24px; }
-#resolve-app .fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; align-items: center; margin-top: 10px; }
+/* Each table's description, file input, fields, info and error share rows
+   with the other table's, so the file inputs line up under descriptions of
+   different lengths. */
+#resolve-app .tables > div { display: grid; grid-row: span 5; grid-template-rows: subgrid; row-gap: 0; }
+#resolve-app .fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; align-items: center; align-content: start; margin-top: 10px; }
 #resolve-app .fields label { display: contents; }
 #resolve-app .fields select { min-width: 0; max-width: 16rem; }
+#resolve-app .plot-link { display: inline-flex; vertical-align: -2px; margin-left: 5px; cursor: help; }
+#resolve-app .plot-link svg { width: 15px; height: 15px; }
+#resolve-app .plot-link.linked { color: var(--bs-success); }
+#resolve-app .plot-link.partial { color: var(--bs-warning); }
+#resolve-app .plot-link.broken { color: var(--bs-danger); }
 #resolve-app .info { min-height: 1.3em; margin-top: 6px; overflow-wrap: anywhere; }
 #resolve-app .error { color: var(--bs-danger); min-height: 1.3em; }
 
@@ -31,7 +40,10 @@ main#main + aside { display: none; }
 #resolve-app #o-workers { width: 6.5rem; margin: 0 6px 0 4px; }
 #resolve-app #status.error, #resolve-app #download-status.error { color: var(--bs-danger); }
 #resolve-app .busy-line { display: flex; justify-content: space-between; gap: 12px; color: var(--bs-secondary-color); margin-bottom: 4px; }
-#resolve-app #busy-share { font-variant-numeric: tabular-nums; }
+#resolve-app #busy-share, #resolve-app #busy-time { font-variant-numeric: tabular-nums; }
+#resolve-app #busy-pulse { width: 1em; height: 1em; margin-right: 0.4em; vertical-align: -0.125em; overflow: visible;
+  stroke: var(--bs-primary); stroke-width: 1.7; stroke-linecap: round; transition: stroke 0.6s; }
+#resolve-app #busy-pulse.stalled { stroke: var(--bs-warning); }
 #resolve-app .progress { height: 6px; background-color: var(--bs-secondary-bg); }
 #resolve-app .progress-bar { transition: width 0.2s linear; }
 @media (prefers-reduced-motion: reduce) { #resolve-app .progress-bar { transition: none; } }
