@@ -55,8 +55,9 @@ public:
     [[nodiscard]] double cosine(int64_t a, int64_t b) const noexcept;
 
     // A plot's species as ranks, rarest first among these plots (ties by
-    // species column).
-    [[nodiscard]] const int32_t* species(int64_t plot) const noexcept { return &ranks_[offsets_[plot]]; }
+    // species column). A plot without species points one past its
+    // predecessor's last rank, which may be the end of the ranks.
+    [[nodiscard]] const int32_t* species(int64_t plot) const noexcept { return ranks_.data() + offsets_[plot]; }
 
 private:
     friend class SetNeighbourGraph;

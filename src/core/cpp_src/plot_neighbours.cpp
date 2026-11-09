@@ -120,8 +120,8 @@ PresenceSets::PresenceSets(const torch::Tensor& species) {
 }
 
 int32_t PresenceSets::overlap(int64_t a, int64_t b) const noexcept {
-    const int32_t* x = &ranks_[offsets_[a]];
-    const int32_t* y = &ranks_[offsets_[b]];
+    const int32_t* x = species(a);
+    const int32_t* y = species(b);
     const int32_t* x_end = x + count(a);
     const int32_t* y_end = y + count(b);
     int32_t shared = 0;

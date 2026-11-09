@@ -130,6 +130,25 @@ TEST_CASE("PresenceSets measures cosine of presence, dense or sparse", "[plot_ne
     CHECK(dense.count(7) == 0);
 }
 
+TEST_CASE("PresenceSets handles a last plot without species and plots without any", "[plot_neighbours]") {
+    torch::Tensor species = community_plots(20, 30, 3);
+    species[19].zero_();
+    const PresenceSets last_empty(species);
+    CHECK(last_empty.count(19) == 0);
+    for (int64_t a = 0; a < 20; ++a) {
+        CHECK(last_empty.overlap(a, 19) == 0);
+        CHECK(last_empty.overlap(19, a) == 0);
+        CHECK(last_empty.cosine(a, 19) == 0.0);
+    }
+
+    const PresenceSets none(torch::zeros({5, 30}));
+    for (int64_t a = 0; a < 5; ++a) {
+        CHECK(none.count(a) == 0);
+        CHECK(none.overlap(a, (a + 1) % 5) == 0);
+        CHECK(none.cosine(a, a) == 0.0);
+    }
+}
+
 TEST_CASE("The neighbour descent finds the nearest candidates by species", "[plot_neighbours]") {
     const int64_t n = 700;
     const int64_t n_candidates = 560;

@@ -44,8 +44,8 @@ struct SelectedRun {
     TrainResult result;
 };
 
-SelectedRun selected_run(const ResolveDataset& ds, const TrainConfig& cfg) {
-    torch::manual_seed(5);
+SelectedRun selected_run(const ResolveDataset& ds, const TrainConfig& cfg, uint64_t seed = 5) {
+    torch::manual_seed(seed);
     ModelConfig model = hash_mlp_config({32, 16});
     model.dropout = 0.3f;
     SelectedRun run;
@@ -135,7 +135,8 @@ TEST_CASE("Selecting by accuracy keeps the epoch of the highest held-out accurac
     // Patience longer than the run, so both runs train every epoch on the
     // same weights and differ only in the epoch they keep: the first lowest
     // held-out loss under Loss, the first highest held-out accuracy under
-    // Accuracy. On this corpus the two are different epochs.
+    // Accuracy. The trajectory depends on the CPU's reduction order, so the
+    // test takes the first seed whose two selections are different epochs.
     const ClassificationCorpus corpus;
     const auto ds = corpus.load(class_target());
     TrainConfig by_loss = noisy_train_config(30, SelectionMetric::Loss);
@@ -143,8 +144,13 @@ TEST_CASE("Selecting by accuracy keeps the epoch of the highest held-out accurac
     TrainConfig by_accuracy = by_loss;
     by_accuracy.selection_metric = SelectionMetric::Accuracy;
 
-    const auto loss_run = selected_run(ds, by_loss);
-    const auto accuracy_run = selected_run(ds, by_accuracy);
+    SelectedRun loss_run;
+    SelectedRun accuracy_run;
+    for (uint64_t seed = 5; seed < 15; ++seed) {
+        loss_run = selected_run(ds, by_loss, seed);
+        accuracy_run = selected_run(ds, by_accuracy, seed);
+        if (accuracy_run.result.best_epoch != loss_run.result.best_epoch) break;
+    }
     const auto& l = loss_run.result;
     const auto& a = accuracy_run.result;
 
