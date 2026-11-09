@@ -95,3 +95,39 @@ export class Laea {
             this.lon0 + Math.atan2(x * sc, d * rho * cb0 * cc - d * d * y * sb0 * sc) / RAD];
   }
 }
+
+// ---------------------------------------------------------------------------
+// The EEA reference grid: squares of a whole number of kilometres in
+// ETRS89-LAEA (EPSG:3035), the projection centred at 52° N 10° E with false
+// easting 4,321,000 m and false northing 3,210,000 m. A cell is named by its
+// size and its lower-left corner in units of that size, as in 10kmE432N321.
+// ---------------------------------------------------------------------------
+
+const EPSG_3035 = new Laea(52, 10);
+const FALSE_EASTING = 4321000, FALSE_NORTHING = 3210000;
+
+// The cell holding a position, as its column and row in units of the size.
+export function eeaCell(lat, lon, km) {
+  const [x, y] = EPSG_3035.forward(lat, lon);
+  const size = 1000 * km;
+  return [Math.floor((x + FALSE_EASTING) / size), Math.floor((y + FALSE_NORTHING) / size)];
+}
+
+export const eeaCellCode = (e, n, km) => `${km}kmE${e}N${n}`;
+
+// A cell's outline in latitude and longitude, counterclockwise from its
+// lower-left corner, each side cut into `steps` pieces so that the drawn
+// outline follows the projected square.
+export function eeaCellOutline(e, n, km, steps = 4) {
+  const size = 1000 * km, x0 = e * size - FALSE_EASTING, y0 = n * size - FALSE_NORTHING;
+  const corners = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  const ring = [];
+  for (let side = 0; side < 4; side++) {
+    const [a, b] = [corners[side], corners[(side + 1) % 4]];
+    for (let s = 0; s < steps; s++) {
+      const t = s / steps;
+      ring.push(EPSG_3035.inverse(x0 + size * (a[0] + (b[0] - a[0]) * t), y0 + size * (a[1] + (b[1] - a[1]) * t)));
+    }
+  }
+  return ring;
+}

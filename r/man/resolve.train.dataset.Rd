@@ -275,13 +275,13 @@ Build a model for a dataset loaded with \code{\link[=resolve.dataset.csv]{resolv
 fold of its plots for early stopping, and train.
 }
 \details{
-Every model and training setting has the engine's default
+Every model and training setting has the RESOLVE engine's default
 (\code{\link[=resolve.default_config]{resolve.default_config()}} \code{"model"} / \code{"train"}). The named arguments below
 set the common ones; \code{modelConfig} and \code{trainConfig} reach every field of
-the engine's \code{ModelConfig} and \code{TrainConfig}, nested architecture configs
+the RESOLVE engine's \code{ModelConfig} and \code{TrainConfig}, nested architecture configs
 included (\code{encoder_architecture}, \code{ft_transformer}, \code{tabnet}, \code{saint}, \code{gnn},
 \code{trait_net}, \code{excelformer}, \code{heterogeneous_gnn}, \code{tabm}, \code{parallel_layers},
-and the activation, normalization and head settings). A key the engine does
+and the activation, normalization and head settings). A key the RESOLVE engine does
 not know is an error, and so is a field set both by a named argument and in
 the list. The fields that size a model to its data (the species encoding,
 hash width, \code{top_k} and the taxonomy slots) come from the dataset.

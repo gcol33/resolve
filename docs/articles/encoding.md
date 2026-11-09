@@ -19,7 +19,7 @@ encodings on a small survey.
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```

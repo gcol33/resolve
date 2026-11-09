@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Installing the engine • RESOLVE</title>
+<title>Installing the RESOLVE engine • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="../favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
@@ -16,7 +16,7 @@
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><link href="../extra.css" rel="stylesheet">
-<script src="../extra.js"></script><meta property="og:title" content="Installing the engine">
+<script src="../extra.js"></script><meta property="og:title" content="Installing the RESOLVE engine">
 <script>
 (function () {
   var D = String.fromCharCode(36);
@@ -75,7 +75,7 @@
     <li><a class="dropdown-item" href="../articles/command-line.html">The command line</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
-    <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
+    <li><a class="dropdown-item" href="../articles/installation.html">Installing the RESOLVE engine</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -106,7 +106,7 @@
 
 <div class="row">
   <main id="main" class="col-md-9"><div class="page-header">
-      <img src="../logo.svg" class="logo" alt=""><h1>Installing the engine</h1>
+      <img src="../logo.svg" class="logo" alt=""><h1>Installing the RESOLVE engine</h1>
             
       
       <small class="dont-index">Source: <a href="https://github.com/gcol33/resolve/blob/HEAD/vignettes/articles/installation.Rmd" class="external-link"><code>vignettes/articles/installation.Rmd</code></a></small>
@@ -116,15 +116,16 @@
     
     
 <!-- Python blocks run by tools/python_twins.py (md5 063708ee2ece3aac7ca9395d9099ad8b). -->
-<p>RESOLVE is a C++ engine built on libtorch, the C++ library under
-PyTorch. The R package <code>resolveR</code>, the Python package
+<p>The RESOLVE engine is written in C++ on libtorch, the C++ library
+under PyTorch. The R package <code>resolveR</code>, the Python package
 <code>resolve_core</code> and the <code>resolve</code> command line all
-call this one engine, so a model trained from one of them loads in the
-others.</p>
+call the RESOLVE engine, so a model trained from one of them loads in
+the others.</p>
 <p>This article covers installing each of them: the R package and the
-engine library it downloads, the GPU builds, the Python package and the
-torch it runs on, checking what is installed, building the engine from
-source, and the messages a failed installation prints.</p>
+RESOLVE engine library it downloads, the GPU builds, the Python package
+and the torch it runs on, checking what is installed, building the
+RESOLVE engine from source, and the messages a failed installation
+prints.</p>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
 </h2>
@@ -133,7 +134,7 @@ source, and the messages a failed installation prints.</p>
 <code class="sourceCode R"><span><span class="co"># install.packages("pak")</span></span>
 <span><span class="fu">pak</span><span class="fu">::</span><span class="fu"><a href="https://pak.r-lib.org/reference/pak.html" class="external-link">pak</a></span><span class="op">(</span><span class="st">"gcol33/resolve/r"</span><span class="op">)</span></span>
 <span></span>
-<span><span class="co"># The engine library, downloaded once</span></span>
+<span><span class="co"># The RESOLVE engine library, downloaded once</span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://gillescolling.com/resolve/">resolveR</a></span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/resolve.install_backend.html">resolve.install_backend</a></span><span class="op">(</span><span class="op">)</span></span></code></pre></div>
 <div class="sourceCode" id="cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="ex">pip</span> install resolve-core</span></code></pre></div>
@@ -149,7 +150,8 @@ alternatives to them.</p>
 </h3>
 <p><code><a href="https://pak.r-lib.org/reference/pak.html" class="external-link">pak::pak()</a></code> installs the package from its source on
 GitHub, so it compiles the package’s C++ code, the thin client that
-calls the engine. That needs a C++17 compiler that R can use:</p>
+calls the RESOLVE engine. That needs a C++17 compiler that R can
+use:</p>
 <table class="table">
 <colgroup>
 <col width="43%">
@@ -177,14 +179,14 @@ calls the engine. That needs a C++17 compiler that R can use:</p>
 </tr>
 </tbody>
 </table>
-<p>The package itself does not contain the engine and compiles without
-libtorch.</p>
+<p>The package itself does not contain the RESOLVE engine and compiles
+without libtorch.</p>
 </div>
 <div class="section level3">
-<h3 id="the-engine-library">The engine library<a class="anchor" aria-label="anchor" href="#the-engine-library"></a>
+<h3 id="the-resolve-engine-library">The RESOLVE engine library<a class="anchor" aria-label="anchor" href="#the-resolve-engine-library"></a>
 </h3>
-<p>The engine reaches R as one shared library, <code>resolve_c</code>,
-with the libtorch libraries beside it.
+<p>The RESOLVE engine reaches R as one shared library,
+<code>resolve_c</code>, with the libtorch libraries beside it.
 <code><a href="../reference/resolve.install_backend.html">resolve.install_backend()</a></code> downloads it from the release of
 the package’s version on GitHub and loads it. It is installed once, into
 the package’s directory for user data,
@@ -196,17 +198,17 @@ libtorch inside the download. It exists for Linux and Windows on x86-64
 and for macOS on Apple Silicon.</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/resolve.install_backend.html">resolve.install_backend</a></span><span class="op">(</span>force <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div>
-<p>When the package loads without an engine library, it says so and
-names the call that installs one. Loading the package works either way;
-the functions that load data, train and impute stop with an error until
-the engine library is there.</p>
+<p>When the package loads without a RESOLVE engine library, it says so
+and names the call that installs one. Loading the package works either
+way; the functions that load data, train and impute stop with an error
+until the RESOLVE engine library is there.</p>
 </div>
 <div class="section level3">
 <h3 id="gpu-builds">GPU builds<a class="anchor" aria-label="anchor" href="#gpu-builds"></a>
 </h3>
-<p>The GPU builds run the engine on an NVIDIA graphics card through
-CUDA, NVIDIA’s GPU computing platform. They exist for Linux and Windows
-on x86-64; macOS has no CUDA.</p>
+<p>The GPU builds run the RESOLVE engine on an NVIDIA graphics card
+through CUDA, NVIDIA’s GPU computing platform. They exist for Linux and
+Windows on x86-64; macOS has no CUDA.</p>
 <table class="table">
 <colgroup>
 <col width="61%">
@@ -256,21 +258,21 @@ Training then runs on the GPU when the training call asks for the
 GPU</a>).</p>
 </div>
 <div class="section level3">
-<h3 id="an-engine-library-from-elsewhere">An engine library from elsewhere<a class="anchor" aria-label="anchor" href="#an-engine-library-from-elsewhere"></a>
+<h3 id="a-resolve-engine-library-from-elsewhere">A RESOLVE engine library from elsewhere<a class="anchor" aria-label="anchor" href="#a-resolve-engine-library-from-elsewhere"></a>
 </h3>
 <p><code>url</code> installs from another location, such as a mirror,
 and takes the <code>.zip</code> file of the library and its runtime
 libraries; <code>dir</code> installs into another directory.</p>
 <p>The environment variable <code>RESOLVE_C_HOME</code> names a
 directory that already holds the library, with libtorch’s libraries
-beside it, for example an engine you built yourself (see <a href="#the-engine-library-for-r">The engine library for R</a>). The
-package looks there first, then in the directory
+beside it, for example a RESOLVE engine you built yourself (see <a href="#the-resolve-engine-library-for-r">The RESOLVE engine library for
+R</a>). The package looks there first, then in the directory
 <code><a href="../reference/resolve.install_backend.html">resolve.install_backend()</a></code> installs into, and loads the
 first library it finds. It reads the variable when it loads, so set it
 before <code><a href="https://gillescolling.com/resolve/">library(resolveR)</a></code>, for instance in your
 <code>.Renviron</code> file:</p>
 <div class="sourceCode" id="cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a><span class="va">RESOLVE_C_HOME</span><span class="op">=</span>/path/to/resolve/src/core/build</span></code></pre></div>
-<p>The engine uses every CPU core by default.
+<p>The RESOLVE engine uses every CPU core by default.
 <code>RESOLVE_R_TORCH_THREADS</code>, set to a positive whole number
 before the package loads, limits it to that many threads, for example on
 a shared machine.</p>
@@ -293,12 +295,13 @@ package index, as the installation page on pytorch.org describes.</p>
 <div class="section level2">
 <h2 id="checking-the-installation">Checking the installation<a class="anchor" aria-label="anchor" href="#checking-the-installation"></a>
 </h2>
-<p><code><a href="../reference/resolve.available.html">resolve.available()</a></code> reports whether the engine library
-is loaded, and <code><a href="../reference/resolve.version.html">resolve.version()</a></code> asks the loaded engine for
-its version. In Python, <code>resolve_core.__version__</code> comes from
-the compiled engine too, so both report the version of the binary that
-runs, and <code>torch.cuda.is_available()</code> says whether torch sees
-a GPU.</p>
+<p><code><a href="../reference/resolve.available.html">resolve.available()</a></code> reports whether the RESOLVE engine
+library is loaded, and <code><a href="../reference/resolve.version.html">resolve.version()</a></code> asks the loaded
+RESOLVE engine for its version. In Python,
+<code>resolve_core.__version__</code> comes from the compiled RESOLVE
+engine too, so both report the version of the binary that runs, and
+<code>torch.cuda.is_available()</code> says whether torch sees a
+GPU.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://gillescolling.com/resolve/">resolveR</a></span><span class="op">)</span></span>
@@ -365,13 +368,14 @@ sources:</p>
 <div class="section level3">
 <h3 id="the-cuda-kernels">The CUDA kernels<a class="anchor" aria-label="anchor" href="#the-cuda-kernels"></a>
 </h3>
-<p>Training on a GPU needs only a CUDA build of libtorch: the engine
-then runs through torch’s own CUDA operations. The engine also has CUDA
-kernels of its own, for hashing species on the GPU during training
-(<code>use_cuda_hash</code>), and the GPU memory cap
+<p>Training on a GPU needs only a CUDA build of libtorch: the RESOLVE
+engine then runs through torch’s own CUDA operations. The RESOLVE engine
+also has CUDA kernels of its own, for hashing species on the GPU during
+training (<code>use_cuda_hash</code>), and the GPU memory cap
 (<code>vram_fraction</code>) takes effect only in a build that has them.
-The wheels and the CPU builds of the R engine library are built without
-them; the GPU builds of the R engine library are compiled with them.</p>
+The wheels and the CPU builds of the RESOLVE engine library for R are
+built without them; the GPU builds of the RESOLVE engine library for R
+are compiled with them.</p>
 <p>A build with <code>USE_CUDA</code> on compiles the kernels with nvcc,
 the compiler of the CUDA toolkit, which therefore has to be
 installed:</p>
@@ -390,9 +394,9 @@ and the build continues without them.</p>
 <h3 id="the-command-line">The command line<a class="anchor" aria-label="anchor" href="#the-command-line"></a>
 </h3>
 <p>The <code>resolve</code> executable is built by the CMake project in
-<code>src/core</code>, which also builds the engine library for R. Here
-it takes libtorch from the installed torch package and leaves the CUDA
-kernels out:</p>
+<code>src/core</code>, which also builds the RESOLVE engine library for
+R. Here it takes libtorch from the installed torch package and leaves
+the CUDA kernels out:</p>
 <div class="sourceCode" id="cb15"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a><span class="va">torch_cmake</span><span class="op">=</span><span class="va">$(</span><span class="ex">python</span> <span class="at">-c</span> <span class="st">"import torch; print(torch.utils.cmake_prefix_path)"</span><span class="va">)</span></span>
 <span id="cb15-2"><a href="#cb15-2" tabindex="-1"></a><span class="fu">cmake</span> <span class="at">-B</span> build <span class="at">-G</span> Ninja <span class="at">-DCMAKE_BUILD_TYPE</span><span class="op">=</span>Release <span class="dt">\</span></span>
 <span id="cb15-3"><a href="#cb15-3" tabindex="-1"></a>  <span class="at">-DBUILD_CLI</span><span class="op">=</span>ON <span class="at">-DBUILD_PYTHON</span><span class="op">=</span>OFF <span class="at">-DBUILD_TESTS</span><span class="op">=</span>OFF <span class="at">-DUSE_CUDA</span><span class="op">=</span>OFF <span class="dt">\</span></span>
@@ -416,13 +420,13 @@ before it prints anything.</p>
 commands.</p>
 </div>
 <div class="section level3">
-<h3 id="the-engine-library-for-r">The engine library for R<a class="anchor" aria-label="anchor" href="#the-engine-library-for-r"></a>
+<h3 id="the-resolve-engine-library-for-r">The RESOLVE engine library for R<a class="anchor" aria-label="anchor" href="#the-resolve-engine-library-for-r"></a>
 </h3>
 <p>The same CMake build writes the <code>resolve_c</code> library into
 the build directory; on Windows it also copies libtorch’s libraries
 beside it. Point <code>RESOLVE_C_HOME</code> at that directory to load
-it in R (see <a href="#an-engine-library-from-elsewhere">An engine
-library from elsewhere</a>).</p>
+it in R (see <a href="#a-resolve-engine-library-from-elsewhere">A
+RESOLVE engine library from elsewhere</a>).</p>
 </div>
 </div>
 <div class="section level2">
@@ -431,9 +435,9 @@ library from elsewhere</a>).</p>
 <p>These are the messages the packages print when a step fails, with
 what to do about each.</p>
 <ul>
-<li>Without an engine library, <code><a href="https://gillescolling.com/resolve/">library(resolveR)</a></code> prints
-that the backend is not installed, and the functions that load data,
-train or impute stop with the same message. Run
+<li>Without a RESOLVE engine library, <code><a href="https://gillescolling.com/resolve/">library(resolveR)</a></code>
+prints that the backend is not installed, and the functions that load
+data, train or impute stop with the same message. Run
 <code><a href="../reference/resolve.install_backend.html">resolve.install_backend()</a></code>, or set
 <code>RESOLVE_C_HOME</code>.</li>
 <li>When a download fails, <code><a href="../reference/resolve.install_backend.html">resolve.install_backend()</a></code> stops

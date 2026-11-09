@@ -377,18 +377,18 @@ auto-halve-on-OOM retry fired – and `resumed_from_epoch` (0 unless
 
 ## Details
 
-Every model and training setting has the engine's default
+Every model and training setting has the RESOLVE engine's default
 ([`resolve.default_config()`](https://gillescolling.com/resolve/reference/resolve.default_config.md)
 `"model"` / `"train"`). The named arguments below set the common ones;
-`modelConfig` and `trainConfig` reach every field of the engine's
-`ModelConfig` and `TrainConfig`, nested architecture configs included
-(`encoder_architecture`, `ft_transformer`, `tabnet`, `saint`, `gnn`,
-`trait_net`, `excelformer`, `heterogeneous_gnn`, `tabm`,
+`modelConfig` and `trainConfig` reach every field of the RESOLVE
+engine's `ModelConfig` and `TrainConfig`, nested architecture configs
+included (`encoder_architecture`, `ft_transformer`, `tabnet`, `saint`,
+`gnn`, `trait_net`, `excelformer`, `heterogeneous_gnn`, `tabm`,
 `parallel_layers`, and the activation, normalization and head settings).
-A key the engine does not know is an error, and so is a field set both
-by a named argument and in the list. The fields that size a model to its
-data (the species encoding, hash width, `top_k` and the taxonomy slots)
-come from the dataset.
+A key the RESOLVE engine does not know is an error, and so is a field
+set both by a named argument and in the list. The fields that size a
+model to its data (the species encoding, hash width, `top_k` and the
+taxonomy slots) come from the dataset.
 
 ## Examples
 

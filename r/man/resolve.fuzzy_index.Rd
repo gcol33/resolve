@@ -36,7 +36,7 @@ an insertion, a deletion, a substitution and, with \code{damerau}, a swap of two
 adjacent characters each cost one edit. Query it with \code{\link[=resolve.fuzzy_match]{resolve.fuzzy_match()}}.
 }
 \details{
-Settings left \code{NULL} take the engine's defaults.
+Settings left \code{NULL} take the RESOLVE engine's defaults.
 }
 \examples{
 \dontshow{if (resolveR::resolve.available()) withAutoprint(\{ # examplesIf}

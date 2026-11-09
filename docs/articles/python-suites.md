@@ -15,7 +15,7 @@ reference](https://gillescolling.com/resolve/articles/python-reference.md)
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -102,8 +102,8 @@ Methods:
   of the contract a target’s members read.
 
 Attributes: `name`, `description`, `licence`, `engine_version` (the
-engine that trained the members), `taxonomy` (the species naming the
-vocabularies follow), `training_scope` (the plots the members were
+RESOLVE engine that trained the members), `taxonomy` (the species naming
+the vocabularies follow), `training_scope` (the plots the members were
 trained on), `inputs` (`SuiteInputContract`), `targets`
 (`list[SuiteTarget]`, a copy: assign a whole list to change them) and
 `format_version`, the lowest manifest format that holds the manifest.
@@ -150,7 +150,7 @@ suite loads.
 - `covariates`, `categoricals` (`list[str]`): the plot-table columns, in
   the members’ order.
 - `abundance_units` (`str`): what an abundance measures, such as
-  `"percent cover"`; the engine does not convert units.
+  `"percent cover"`; the RESOLVE engine does not convert units.
 - `zero_abundance_as` (`float`): the abundance a recorded 0 is read at
   (`DatasetConfig.zero_abundance_as`).
 - `notes` (`str`): anything else a caller has to know about the inputs.

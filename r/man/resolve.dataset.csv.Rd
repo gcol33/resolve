@@ -64,7 +64,7 @@ is an error. A dataset for training needs at least one target; one built
 to be scored needs none.}
 
 \item{config}{Named list of dataset configuration options; a field left out
-takes the engine's default (\code{resolve.default_config("dataset")}), and a key
+takes the RESOLVE engine's default (\code{resolve.default_config("dataset")}), and a key
 outside these fields is an error:
 \itemize{
 \item species_encoding: "hash", "embed", "sparse", "rank_pool" or

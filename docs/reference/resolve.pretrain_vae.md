@@ -23,8 +23,8 @@ resolve.pretrain_vae(dataset, config = list())
   Named list of VAE settings (`latent_dim`, `encoder_dims`,
   `decoder_dims`, `dropout`, `kl_weight`, `kl_anneal_epochs`,
   `pretrain_epochs`, `pretrain_lr`, `pretrain_weight_decay`,
-  `batch_size`, `device`, `seed`); a field left out takes the engine's
-  default
+  `batch_size`, `device`, `seed`); a field left out takes the RESOLVE
+  engine's default
   ([`resolve.default_config()`](https://gillescolling.com/resolve/reference/resolve.default_config.md)
   `"vae"`).
 

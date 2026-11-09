@@ -26,7 +26,7 @@ It also covers the ways a run can be shaped: resuming an interrupted run, refitt
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -94,11 +94,11 @@ A run is described by three groups of settings, each owning one stage:
 The dataset settings are passed when the data is loaded, as `config` of `resolve.dataset.frame()` in R and as a `DatasetConfig` in Python; [Encoding the species set](encoding.html) covers them. The model sizes its input layers from the dataset, so the fields that depend on the encoding (the encoding itself, the hash width, the species budget) come from the data.
 
 ::: {.lang-r-only}
-In R, `resolve.train.dataset()` takes the common model and training settings as named arguments in camelCase (`maxEpochs`, `hiddenDims`, `lrScheduler`). Every other field goes into the `modelConfig` and `trainConfig` lists, under its snake_case name (`list(weight_decay = 1e-4)`). A field given both ways is an error, and so is a name the engine does not know. `resolve.default_config("train")` and `resolve.default_config("model")` list every field with its default.
+In R, `resolve.train.dataset()` takes the common model and training settings as named arguments in camelCase (`maxEpochs`, `hiddenDims`, `lrScheduler`). Every other field goes into the `modelConfig` and `trainConfig` lists, under its snake_case name (`list(weight_decay = 1e-4)`). A field given both ways is an error, and so is a name the RESOLVE engine does not know. `resolve.default_config("train")` and `resolve.default_config("model")` list every field with its default.
 :::
 
 ::: {.lang-py-only}
-In Python, the model settings are a `ModelConfig` and the training settings a `TrainConfig`. Each starts at the engine's defaults; set a field by assigning to it. `rc.model_config_for_dataset(dataset, model_config)` copies the fields that depend on the encoding from the dataset into a `ModelConfig`; build every model through it.
+In Python, the model settings are a `ModelConfig` and the training settings a `TrainConfig`. Each starts at the RESOLVE engine's defaults; set a field by assigning to it. `rc.model_config_for_dataset(dataset, model_config)` copies the fields that depend on the encoding from the dataset into a `ModelConfig`; build every model through it.
 :::
 
 ::: {.lang-pair}
@@ -1008,7 +1008,7 @@ round(fresh.compute_residuals("elevation").mean_residual) == round(res.mean_resi
 
 ## GPU training
 
-Set the device to `cuda` to train on a GPU; this needs the CUDA build of the engine ([Installing the engine](installation.html)). [Large data and GPUs](performance.html) covers mixed precision, the memory cap and what happens when the GPU runs out of memory.
+Set the device to `cuda` to train on a GPU; this needs the CUDA build of the RESOLVE engine ([Installing the RESOLVE engine](installation.html)). [Large data and GPUs](performance.html) covers mixed precision, the memory cap and what happens when the GPU runs out of memory.
 
 ## Next steps
 

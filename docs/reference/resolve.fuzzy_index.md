@@ -50,7 +50,7 @@ A `FuzzyIndex` object (an Rcpp module class) with methods `size()`,
 
 ## Details
 
-Settings left `NULL` take the engine's defaults.
+Settings left `NULL` take the RESOLVE engine's defaults.
 
 ## Examples
 

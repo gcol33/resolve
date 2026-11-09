@@ -13,7 +13,7 @@ Description: Predict sample-level outcomes from compositional data (species
     over the sample, or by a transformer encoder following Vaswani et al.
     (2017) <doi:10.48550/arXiv.1706.03762>, and regression and classification targets are
     fitted jointly with held-out evaluation, cross-validation and calibration
-    diagnostics. The model is a C++ engine built on 'libtorch'. It is not
+    diagnostics. The model runs in the RESOLVE engine, written in C++ on 'libtorch'. It is not
     compiled into this package: resolve.install_backend() fetches a prebuilt
     build into the user data directory on request, with optional graphics
     processing unit (GPU) acceleration through 'CUDA'.

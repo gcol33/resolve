@@ -12,7 +12,7 @@ library(resolveR)
 if (nzchar(Sys.getenv("RESOLVE_DOCS_CACHE"))) source(Sys.getenv("RESOLVE_DOCS_CACHE"))
 ```
 
-The released models were trained on species names in the European Vegetation Archive (EVA) standardized to the World Flora Online (WFO) taxonomic backbone (21 June 2026). A table of new plots names its species as they were entered in the field, by a current accepted name, or by a name from another checklist, and the models read a name only when it is exactly one they learnt. The name table, `names.json`, maps the names a user may write to the names the models learnt. This article explains where its links come from, which taxonomic backbones it reads, and how a name is matched through it. Reading a table's names through it during imputation is covered in [Imputing new plots](prediction.html#species-names); installation in [Installing the engine](installation.html).
+The released models were trained on species names in the European Vegetation Archive (EVA) standardized to the World Flora Online (WFO) taxonomic backbone (21 June 2026). A table of new plots names its species as they were entered in the field, by a current accepted name, or by a name from another checklist, and the models read a name only when it is exactly one they learnt. The name table, `names.json`, maps the names a user may write to the names the models learnt. This article explains where its links come from, which taxonomic backbones it reads, and how a name is matched through it. Reading a table's names through it during imputation is covered in [Imputing new plots](prediction.html#species-names); installation in [Installing the RESOLVE engine](installation.html).
 
 ## Why a name can differ from the model's name
 

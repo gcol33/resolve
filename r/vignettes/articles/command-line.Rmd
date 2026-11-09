@@ -26,7 +26,7 @@ if (.Platform$OS.type == "windows") {
 }
 ```
 
-The `resolve` executable trains a model, imputes new plots and describes a saved model, all from CSV files and without R or Python. It runs the same engine as the two packages, so a checkpoint written by `resolve train` loads in R with `resolve.load()` and in Python with `Predictor.load()`, and a checkpoint saved from either package scores with `resolve predict`.
+The `resolve` executable trains a model, imputes new plots and describes a saved model, all from CSV files and without R or Python. It runs the same RESOLVE engine as the two packages, so a checkpoint written by `resolve train` loads in R with `resolve.load()` and in Python with `Predictor.load()`, and a checkpoint saved from either package scores with `resolve predict`.
 
 This article runs each command on the survey that ships with the R package: training with the column flags and targets, covariates and coordinates, the model settings, the held-out fold and the seed, cross-validation, checkpoints and resuming, devices, imputation and reading a checkpoint.
 
@@ -37,7 +37,7 @@ This article runs each command on the survey that ships with the R package: trai
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -47,7 +47,7 @@ pip install resolve-core
 ```
 :::
 
-The packages do not install the command line. It is built from source by the engine's CMake project; [Installing the engine](installation.html) gives the build. The commands below assume `resolve` is on the `PATH`:
+The packages do not install the command line. It is built from source by the RESOLVE engine's CMake project; [Installing the RESOLVE engine](installation.html) gives the build. The commands below assume `resolve` is on the `PATH`:
 
 ```{bash version}
 resolve version
@@ -263,7 +263,7 @@ resolve train --header plots.csv --species species.csv \
   --device cuda --vram-fraction 0.8 --output model.pt
 ```
 
-On a GPU, a batch that does not fit in memory halves the batch size and restarts the run, down to `--batch-size-floor`. `--vram-fraction` caps the share of GPU memory the run may use, which leaves room for a desktop on the same card; it takes effect in a build with the engine's CUDA kernels. `--amp` turns on mixed precision. [Large data and GPUs](performance.html) covers these settings.
+On a GPU, a batch that does not fit in memory halves the batch size and restarts the run, down to `--batch-size-floor`. `--vram-fraction` caps the share of GPU memory the run may use, which leaves room for a desktop on the same card; it takes effect in a build with the RESOLVE engine's CUDA kernels. `--amp` turns on mixed precision. [Large data and GPUs](performance.html) covers these settings.
 
 ## Imputing
 

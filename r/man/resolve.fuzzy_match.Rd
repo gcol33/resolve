@@ -40,7 +40,7 @@ each needle, nearest first (ties by entry position), at most \code{topN} per
 needle.
 }
 \details{
-Settings left \code{NULL} take the engine's defaults.
+Settings left \code{NULL} take the RESOLVE engine's defaults.
 }
 \examples{
 \dontshow{if (resolveR::resolve.available()) withAutoprint(\{ # examplesIf}

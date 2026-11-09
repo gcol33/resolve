@@ -61,7 +61,7 @@ The predictor, invisibly.
 
 ## Details
 
-Settings left `NULL` take the engine's defaults
+Settings left `NULL` take the RESOLVE engine's defaults
 ([`resolve.default_config()`](https://gillescolling.com/resolve/reference/resolve.default_config.md)
 `"retrieval"`). A reference plot that is also scored retrieves itself
 first.

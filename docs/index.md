@@ -14,10 +14,10 @@ area, altitude, slope, aspect, survey year, location and EUNIS habitat.
 Species composition reflects site conditions and how a plot was
 surveyed, so the released RESOLVE models, trained on 1.94 million
 European vegetation plots from EVA, impute the missing values from
-composition alone or together with coordinates and survey date. The same
-model fits any sample recorded as a list of names with an amount for
-each, such as the insects caught in a trap or the birds counted at a
-site.
+composition alone or together with coordinates and survey date. The
+RESOLVE engine can be used to train a model on any sample recorded as a
+list of names with an amount for each, such as the insects caught in a
+trap or the birds counted at a site.
 
 A plot can hold any number of species, so the model pools them, each
 weighted by its cover, into one vector and imputes every variable from
@@ -44,16 +44,16 @@ RESOLVE lets you:
 - **Score with several models at once.** A suite of trained models
   reports, per plot, the combined imputed value and how far its members
   agree.
-- **Use R, Python or the command line.** The engine is a C++ library on
-  libtorch, the C++ core of [PyTorch](https://pytorch.org/). The R
-  package, the Python package and the `resolve` executable call it, so a
-  model trained in one loads in the others.
+- **Use R, Python or the command line.** The RESOLVE engine is a C++
+  library on libtorch, the C++ core of [PyTorch](https://pytorch.org/).
+  The R package, the Python package and the `resolve` executable call
+  it, so a model trained in one loads in the others.
 
 On every push the [tests
 workflow](https://github.com/gcol33/resolve/actions/workflows/tests.yml)
-builds the engine and runs the C++ tests, the command-line end-to-end
-tests and the Python binding tests; the R package goes through R CMD
-check. Feature hashing follows [Weinberger et
+builds the RESOLVE engine and runs the C++ tests, the command-line
+end-to-end tests and the Python binding tests; the R package goes
+through R CMD check. Feature hashing follows [Weinberger et
 al. (2009)](https://doi.org/10.1145/1553374.1553516), the transformer
 encoder [Vaswani et
 al. (2017)](https://doi.org/10.48550/arXiv.1706.03762). Report the
@@ -94,10 +94,10 @@ Then install from GitHub:
 pak::pak("gcol33/resolve/r")
 ```
 
-### The engine in R
+### The RESOLVE engine in R
 
-The engine is a shared library that bundles libtorch and is not compiled
-into the package.
+The RESOLVE engine is a shared library that bundles libtorch and is not
+compiled into the package.
 [`resolve.install_backend()`](https://gillescolling.com/resolve/reference/resolve.install_backend.md)
 downloads a prebuilt build into the package’s user data directory once,
 and
@@ -131,6 +131,7 @@ Silicon. They link the libtorch inside the `torch` package, which pip
 installs with them. On Linux the default PyPI torch is the CUDA build;
 on Windows and macOS it is the processor build, and the CUDA build on
 Windows comes from PyTorch’s own index, as set up in [Installing the
+RESOLVE
 engine](https://gillescolling.com/resolve/articles/installation.html).
 Check what loaded with:
 
@@ -140,8 +141,8 @@ python -c "import resolve_core, torch; print(resolve_core.__version__, torch.cud
 
 ### Command line
 
-The `resolve` executable builds from the engine’s CMake project, as set
-up in [Installing the
+The `resolve` executable builds from the RESOLVE engine’s CMake project,
+as set up in [Installing the RESOLVE
 engine](https://gillescolling.com/resolve/articles/installation.html).
 
 ## Usage
@@ -262,12 +263,12 @@ embeddings](https://gillescolling.com/resolve/articles/embeddings.html).
 
 ## Large data and GPUs
 
-The engine runs on CUDA when its build has it. A run that exhausts
-device memory halves its batch size and retries; an interrupted run
-resumes from its last checkpoint. Batch size, learning-rate schedules,
-mixed precision and the memory settings are in [Large data and
-GPUs](https://gillescolling.com/resolve/articles/performance.html). [The
-command
+The RESOLVE engine runs on CUDA when its build has it. A run that
+exhausts device memory halves its batch size and retries; an interrupted
+run resumes from its last checkpoint. Batch size, learning-rate
+schedules, mixed precision and the memory settings are in [Large data
+and GPUs](https://gillescolling.com/resolve/articles/performance.html).
+[The command
 line](https://gillescolling.com/resolve/articles/command-line.html)
 trains and imputes with no R or Python installed.
 
@@ -302,7 +303,7 @@ opens with Python selected.
   [The command
   line](https://gillescolling.com/resolve/articles/command-line.html):
   scaling a run up.
-- [Installing the
+- [Installing the RESOLVE
   engine](https://gillescolling.com/resolve/articles/installation.html):
   the GPU builds, building from source and the command line.
 - [R reference](https://gillescolling.com/resolve/reference/index.html)

@@ -4,7 +4,7 @@ title: "Python: loading data"
 
 <!-- Python blocks run by tools/python_twins.py (md5 cf36e5edb179b48e2b180eb9df889249). -->
 
-Plots and the species records observed in them, from CSV files or data frames, into an engine dataset: the roles that name the columns, the targets, the loader settings, the dataset and its schema, the vocabularies that code species, genera and families as integers, and the species graph.
+Plots and the species records observed in them, from CSV files or data frames, into a RESOLVE engine dataset: the roles that name the columns, the targets, the loader settings, the dataset and its schema, the vocabularies that code species, genera and families as integers, and the species graph.
 
 [All of the Python reference](python-reference.html)
 
@@ -15,7 +15,7 @@ Plots and the species records observed in them, from CSV files or data frames, i
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -342,7 +342,7 @@ Attributes:
 - `has_coordinates`, `has_abundance`, `has_taxonomy` (`bool`): what the data carried.
 - `species_vocab`, `genus_vocab`, `family_vocab` (`list[str]`): the vocabularies in code order, `"<UNK>"` first.
 - `dataset_config` (`DatasetConfig`): the loader settings the dataset was coded with. `selection` is the selection applied (`effective_selection`), and `pool_species_cap` the width a pooled load truncated to.
-- `unrecorded_dataset_settings` (`list[str]`): the `DatasetConfig` fields a checkpoint written before they existed does not carry; each reads as the engine's behaviour before the setting existed. Empty for a dataset's own schema.
+- `unrecorded_dataset_settings` (`list[str]`): the `DatasetConfig` fields a checkpoint written before they existed does not carry; each reads as the RESOLVE engine's behaviour before the setting existed. Empty for a dataset's own schema.
 
 Methods: `has_categoricals()`, `n_categoricals()`, `has_species_vocab()` and `has_taxonomy_vocab()` (false for a checkpoint written before vocabularies travelled with it), and `missing_flag_width()`, the number of missingness columns the continuous block holds.
 

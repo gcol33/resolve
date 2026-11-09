@@ -294,7 +294,7 @@ resolve.load_run_metadata <- function(path) {
 
 #' Default Configuration Values
 #'
-#' The engine's default for every field of a configuration: the values a field
+#' The RESOLVE engine's default for every field of a configuration: the values a field
 #' takes when a config list or a `NULL` argument leaves it out. Every verb that
 #' takes a config list reads it against these fields, so a key outside them is
 #' refused, at any level of nesting.
@@ -497,7 +497,7 @@ resolve.progress <- function(checkpointDir) {
 #'   is an error. A dataset for training needs at least one target; one built
 #'   to be scored needs none.
 #' @param config Named list of dataset configuration options; a field left out
-#'   takes the engine's default (`resolve.default_config("dataset")`), and a key
+#'   takes the RESOLVE engine's default (`resolve.default_config("dataset")`), and a key
 #'   outside these fields is an error:
 #'   - species_encoding: "hash", "embed", "sparse", "rank_pool" or
 #'     "transformer". hash folds each plot's species into a fixed-width vector
@@ -832,13 +832,13 @@ resolve.dataset.frame <- function(header,
 #' Build a model for a dataset loaded with [resolve.dataset.csv()], hold out a
 #' fold of its plots for early stopping, and train.
 #'
-#' Every model and training setting has the engine's default
+#' Every model and training setting has the RESOLVE engine's default
 #' ([resolve.default_config()] `"model"` / `"train"`). The named arguments below
 #' set the common ones; `modelConfig` and `trainConfig` reach every field of
-#' the engine's `ModelConfig` and `TrainConfig`, nested architecture configs
+#' the RESOLVE engine's `ModelConfig` and `TrainConfig`, nested architecture configs
 #' included (`encoder_architecture`, `ft_transformer`, `tabnet`, `saint`, `gnn`,
 #' `trait_net`, `excelformer`, `heterogeneous_gnn`, `tabm`, `parallel_layers`,
-#' and the activation, normalization and head settings). A key the engine does
+#' and the activation, normalization and head settings). A key the RESOLVE engine does
 #' not know is an error, and so is a field set both by a named argument and in
 #' the list. The fields that size a model to its data (the species encoding,
 #' hash width, `top_k` and the taxonomy slots) come from the dataset.
@@ -1176,7 +1176,7 @@ resolve.train.dataset <- function(dataset,
 #'   spatial block settings: `lat_size` and `lon_size` (block size in degrees)
 #'   and `balance` (`TRUE` assigns blocks to folds by greedy bin-packing for
 #'   folds of similar size, `FALSE` round-robin); a field left out takes the
-#'   engine's default ([resolve.default_config()] `"spatial_block"`). Needs
+#'   RESOLVE engine's default ([resolve.default_config()] `"spatial_block"`). Needs
 #'   coordinates.
 #' @param ... The model and training arguments of [resolve.train.dataset()]
 #'   (`hiddenDims`, `maxEpochs`, `lr`, `modelConfig`, `trainConfig`,
@@ -1242,7 +1242,7 @@ resolve.cross_validate <- function(dataset, nFolds = 5L, seed = 42L, spatial = N
 #' @param config Named list of VAE settings (`latent_dim`, `encoder_dims`,
 #'   `decoder_dims`, `dropout`, `kl_weight`, `kl_anneal_epochs`,
 #'   `pretrain_epochs`, `pretrain_lr`, `pretrain_weight_decay`, `batch_size`,
-#'   `device`, `seed`); a field left out takes the engine's default
+#'   `device`, `seed`); a field left out takes the RESOLVE engine's default
 #'   ([resolve.default_config()] `"vae"`).
 #'
 #' @return A list with the per-epoch `loss_history`, `recon_loss_history` and
@@ -1273,7 +1273,7 @@ resolve.pretrain_vae <- function(dataset, config = list()) {
 
 #' Nearest Rows by Cosine Similarity
 #'
-#' The engine's exact nearest-neighbour search: for each row of `queries`, the
+#' The RESOLVE engine's exact nearest-neighbour search: for each row of `queries`, the
 #' `k` rows of `reference` most similar to it by cosine similarity, most
 #' similar first. The same search finds the reference plots of
 #' [resolve.retrieval()]. On rows of species presence (1 where a plot records a
@@ -1354,7 +1354,7 @@ resolve.nearest_by_cosine <- function(queries, reference, k, excludeSelf = FALSE
 #' @param batchSize Chunk size of the forward pass that encodes the reference
 #'   plots (default 4096).
 #'
-#' @details Settings left `NULL` take the engine's defaults
+#' @details Settings left `NULL` take the RESOLVE engine's defaults
 #'   ([resolve.default_config()] `"retrieval"`). A reference plot that is also
 #'   scored retrieves itself first.
 #'
@@ -1439,7 +1439,7 @@ resolve.plot_totals <- function(predictor, use = TRUE) {
 #'   a species name, say): a query given a bucket hint searches that bucket
 #'   first and falls back to the whole vocabulary when it finds nothing there.
 #'
-#' @details Settings left `NULL` take the engine's defaults.
+#' @details Settings left `NULL` take the RESOLVE engine's defaults.
 #'
 #' @return A `FuzzyIndex` object (an Rcpp module class) with methods `size()`,
 #'   `bucket_count()` and `max_supported_distance()`.
@@ -1478,7 +1478,7 @@ resolve.fuzzy_index <- function(entries, maxEditDistance = NULL, caseInsensitive
 #' @param bucketHints A bucket per needle to search first (a character vector
 #'   as long as `needles`); not combined with `bucketHint`.
 #'
-#' @details Settings left `NULL` take the engine's defaults.
+#' @details Settings left `NULL` take the RESOLVE engine's defaults.
 #'
 #' @return A data.frame with one row per match: `needle` (its position in
 #'   `needles`), `query` (the needle), `entry` (the matched entry), `id` (its
@@ -1511,7 +1511,7 @@ resolve.fuzzy_match <- function(index, needles, maxEditDistance = NULL, topN = N
 }
 
 
-#' Cap the GPU Memory the Engine May Use
+#' Cap the GPU Memory the RESOLVE Engine May Use
 #'
 #' Cap the PyTorch CUDA caching allocator at a fraction of a device's VRAM, so
 #' a run leaves headroom for the desktop or other programs on a shared GPU.
@@ -1535,14 +1535,14 @@ resolve.set_vram_fraction <- function(fraction, deviceIndex = -1L) {
 }
 
 
-#' Seed the Engine's Random Numbers
+#' Seed the RESOLVE Engine's Random Numbers
 #'
-#' Seed the random number generators of the engine's torch, which draw a new
+#' Seed the random number generators of the RESOLVE engine's torch, which draw a new
 #' model's starting weights and its dropout. Training holds out its plots and
 #' shuffles them by its own `seed` argument, so a model built and trained after
 #' the same `resolve.manual_seed()`, with the same data, settings, device and
-#' engine build, ends at the same weights and metrics. R's [set.seed()] does not
-#' reach the engine.
+#' RESOLVE engine build, ends at the same weights and metrics. R's [set.seed()] does not
+#' reach the RESOLVE engine.
 #'
 #' @param seed A whole number from 0 to 2^53.
 #' @return No return value.

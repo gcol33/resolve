@@ -22,7 +22,7 @@ if (requireNamespace("resolveR", quietly = TRUE)) suppressPackageStartupMessages
 
 <p align="center"><img src="man/figures/resolve-hero.svg" alt="Species and cover of held-out example plot A139 pooled into one latent vector, read out as elevation (imputed 713 m, observed 679 m; R squared 0.85 over 30 held-out plots) and habitat (observed forest, probability 0.89)" width="100%"></p>
 
-Vegetation plots record species composition and the cover-abundance of each species, but gaps in their metadata limit their use: in the European Vegetation Archive (EVA), only 13% of plots record all of plot area, altitude, slope, aspect, survey year, location and EUNIS habitat. Species composition reflects site conditions and how a plot was surveyed, so the released RESOLVE models, trained on 1.94 million European vegetation plots from EVA, impute the missing values from composition alone or together with coordinates and survey date. The same model fits any sample recorded as a list of names with an amount for each, such as the insects caught in a trap or the birds counted at a site.
+Vegetation plots record species composition and the cover-abundance of each species, but gaps in their metadata limit their use: in the European Vegetation Archive (EVA), only 13% of plots record all of plot area, altitude, slope, aspect, survey year, location and EUNIS habitat. Species composition reflects site conditions and how a plot was surveyed, so the released RESOLVE models, trained on 1.94 million European vegetation plots from EVA, impute the missing values from composition alone or together with coordinates and survey date. The RESOLVE engine can be used to train a model on any sample recorded as a list of names with an amount for each, such as the insects caught in a trap or the birds counted at a site.
 
 A plot can hold any number of species, so the model pools them, each weighted by its cover, into one vector and imputes every variable from it: continuous ones such as altitude and categorical ones such as habitat, in one model. Training withholds part of the plots and reports each variable's error on them, so you can compare encodings and inputs on your own data before choosing a model.
 
@@ -33,9 +33,9 @@ RESOLVE lets you:
 - **Add covariates, coordinates and taxonomy.** Numeric covariates, string covariates and coordinates go into the same encoder. Genus and family stand in for a species that was absent from the training data.
 - **Pretrain without labels.** Self-supervised tasks fit the encoder on species lists alone before the supervised fit.
 - **Score with several models at once.** A suite of trained models reports, per plot, the combined imputed value and how far its members agree.
-- **Use R, Python or the command line.** The engine is a C++ library on libtorch, the C++ core of [PyTorch](https://pytorch.org/). The R package, the Python package and the `resolve` executable call it, so a model trained in one loads in the others.
+- **Use R, Python or the command line.** The RESOLVE engine is a C++ library on libtorch, the C++ core of [PyTorch](https://pytorch.org/). The R package, the Python package and the `resolve` executable call it, so a model trained in one loads in the others.
 
-On every push the [tests workflow](https://github.com/gcol33/resolve/actions/workflows/tests.yml) builds the engine and runs the C++ tests, the command-line end-to-end tests and the Python binding tests; the R package goes through R CMD check. Feature hashing follows [Weinberger et al. (2009)](https://doi.org/10.1145/1553374.1553516), the transformer encoder [Vaswani et al. (2017)](https://doi.org/10.48550/arXiv.1706.03762). Report the RESOLVE version with an analysis, since defaults have changed between versions.
+On every push the [tests workflow](https://github.com/gcol33/resolve/actions/workflows/tests.yml) builds the RESOLVE engine and runs the C++ tests, the command-line end-to-end tests and the Python binding tests; the R package goes through R CMD check. Feature hashing follows [Weinberger et al. (2009)](https://doi.org/10.1145/1553374.1553516), the transformer encoder [Vaswani et al. (2017)](https://doi.org/10.48550/arXiv.1706.03762). Report the RESOLVE version with an analysis, since defaults have changed between versions.
 
 The [RESOLVE App](https://gillescolling.com/resolve/articles/app.html) runs the released models in your browser, without installing anything. It imputes the EUNIS habitat, altitude, slope, plot area, survey year and location of the example plots or of your own tables, and maps the plots.
 
@@ -64,9 +64,9 @@ Then install from GitHub:
 pak::pak("gcol33/resolve/r")
 ```
 
-### The engine in R
+### The RESOLVE engine in R
 
-The engine is a shared library that bundles libtorch and is not compiled into the package. `resolve.install_backend()` downloads a prebuilt build into the package's user data directory once, and `resolve.available()` reports whether it is loaded:
+The RESOLVE engine is a shared library that bundles libtorch and is not compiled into the package. `resolve.install_backend()` downloads a prebuilt build into the package's user data directory once, and `resolve.available()` reports whether it is loaded:
 
 ```r
 library(resolveR)
@@ -84,7 +84,7 @@ The Python package needs [Python](https://www.python.org/downloads/) 3.10 to 3.1
 pip install resolve-core
 ```
 
-The wheels cover Linux x86-64, Windows x86-64 and macOS on Apple Silicon. They link the libtorch inside the `torch` package, which pip installs with them. On Linux the default PyPI torch is the CUDA build; on Windows and macOS it is the processor build, and the CUDA build on Windows comes from PyTorch's own index, as set up in [Installing the engine](https://gillescolling.com/resolve/articles/installation.html). Check what loaded with:
+The wheels cover Linux x86-64, Windows x86-64 and macOS on Apple Silicon. They link the libtorch inside the `torch` package, which pip installs with them. On Linux the default PyPI torch is the CUDA build; on Windows and macOS it is the processor build, and the CUDA build on Windows comes from PyTorch's own index, as set up in [Installing the RESOLVE engine](https://gillescolling.com/resolve/articles/installation.html). Check what loaded with:
 
 ```bash
 python -c "import resolve_core, torch; print(resolve_core.__version__, torch.cuda.is_available())"
@@ -92,7 +92,7 @@ python -c "import resolve_core, torch; print(resolve_core.__version__, torch.cud
 
 ### Command line
 
-The `resolve` executable builds from the engine's CMake project, as set up in [Installing the engine](https://gillescolling.com/resolve/articles/installation.html).
+The `resolve` executable builds from the RESOLVE engine's CMake project, as set up in [Installing the RESOLVE engine](https://gillescolling.com/resolve/articles/installation.html).
 
 ## Usage
 
@@ -165,7 +165,7 @@ The trainer keeps the held-out plots and gives their residuals, class probabilit
 
 ## Large data and GPUs
 
-The engine runs on CUDA when its build has it. A run that exhausts device memory halves its batch size and retries; an interrupted run resumes from its last checkpoint. Batch size, learning-rate schedules, mixed precision and the memory settings are in [Large data and GPUs](https://gillescolling.com/resolve/articles/performance.html). [The command line](https://gillescolling.com/resolve/articles/command-line.html) trains and imputes with no R or Python installed.
+The RESOLVE engine runs on CUDA when its build has it. A run that exhausts device memory halves its batch size and retries; an interrupted run resumes from its last checkpoint. Batch size, learning-rate schedules, mixed precision and the memory settings are in [Large data and GPUs](https://gillescolling.com/resolve/articles/performance.html). [The command line](https://gillescolling.com/resolve/articles/command-line.html) trains and imputes with no R or Python installed.
 
 ## Documentation
 
@@ -177,7 +177,7 @@ Start with [Imputing plot attributes from species lists](https://gillescolling.c
 - [Imputing new plots](https://gillescolling.com/resolve/articles/prediction.html): output formats, class probabilities, new species and model suites.
 - [Latent and species embeddings](https://gillescolling.com/resolve/articles/embeddings.html): the latent space and the learned species tables.
 - [Large data and GPUs](https://gillescolling.com/resolve/articles/performance.html) and [The command line](https://gillescolling.com/resolve/articles/command-line.html): scaling a run up.
-- [Installing the engine](https://gillescolling.com/resolve/articles/installation.html): the GPU builds, building from source and the command line.
+- [Installing the RESOLVE engine](https://gillescolling.com/resolve/articles/installation.html): the GPU builds, building from source and the command line.
 - [R reference](https://gillescolling.com/resolve/reference/index.html) and [Python reference](https://gillescolling.com/resolve/articles/python-reference.html): every function and class, grouped by job.
 
 ## Getting help

@@ -12,7 +12,7 @@ resolve.pretrain_vae(dataset, config = list())
 \item{config}{Named list of VAE settings (\code{latent_dim}, \code{encoder_dims},
 \code{decoder_dims}, \code{dropout}, \code{kl_weight}, \code{kl_anneal_epochs},
 \code{pretrain_epochs}, \code{pretrain_lr}, \code{pretrain_weight_decay}, \code{batch_size},
-\code{device}, \code{seed}); a field left out takes the engine's default
+\code{device}, \code{seed}); a field left out takes the RESOLVE engine's default
 (\code{\link[=resolve.default_config]{resolve.default_config()}} \code{"vae"}).}
 }
 \value{

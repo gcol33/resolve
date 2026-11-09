@@ -56,7 +56,7 @@ has no row.
 
 ## Details
 
-Settings left `NULL` take the engine's defaults.
+Settings left `NULL` take the RESOLVE engine's defaults.
 
 ## Examples
 

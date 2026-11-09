@@ -54,13 +54,17 @@ species names not recognised
 
 to impute
 
-Summary
-
 Plots
+
+Cells by zoom 10 km cells 50 km cells 100 km cells
+
+Points Grid
 
 Download map (SVG)
 
-Habitats
+‹
+
+›
 
 Imputed values
 

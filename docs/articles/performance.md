@@ -7,11 +7,11 @@ size of the model, the encoding settings that bound memory, and the GPU
 settings, from mixed precision to what happens when the GPU runs out of
 memory.
 
-Each section says what a setting does in the engine. The examples run on
-the small survey that ships with the R package, so they show the calls
-and what they return; the speed and memory effects only appear on large
-data. The GPU settings need the CUDA build of the engine and are shown
-without being run.
+Each section says what a setting does in the RESOLVE engine. The
+examples run on the small survey that ships with the R package, so they
+show the calls and what they return; the speed and memory effects only
+appear on large data. The GPU settings need the CUDA build of the
+RESOLVE engine and are shown without being run.
 
 ## Installation
 
@@ -20,7 +20,7 @@ without being run.
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -29,7 +29,7 @@ resolve.install_backend()
 pip install resolve-core
 ```
 
-[Installing the
+[Installing the RESOLVE
 engine](https://gillescolling.com/resolve/articles/installation.md)
 covers the GPU build.
 
@@ -445,9 +445,9 @@ attn.fit().best_epoch >= 0
 
 ## GPU settings
 
-Training on a GPU needs the CUDA build of the engine:
+Training on a GPU needs the CUDA build of the RESOLVE engine:
 `resolve.install_backend(variant = "cuda")` in R, and the CUDA wheel in
-Python ([Installing the
+Python ([Installing the RESOLVE
 engine](https://gillescolling.com/resolve/articles/installation.md)).
 The code in this section is shown without being run, since this site is
 built on a machine without a GPU.
@@ -594,8 +594,8 @@ line](https://gillescolling.com/resolve/articles/command-line.md)).
 
 PyTorch reads the settings of its GPU memory cache from the environment
 variable `PYTORCH_CUDA_ALLOC_CONF` when it first allocates on a GPU.
-Importing resolve_core sets it to the engine’s default, unless it is
-already set; in R,
+Importing resolve_core sets it to the RESOLVE engine’s default, unless
+it is already set; in R,
 [`resolve_configure_cuda_allocator()`](https://gillescolling.com/resolve/reference/resolve_configure_cuda_allocator.md)
 sets it. The default depends on the platform:
 
@@ -606,7 +606,7 @@ sets it. The default depends on the platform:
 
 `expandable_segments` lets the cache grow and release its memory in
 place, which keeps it from fragmenting; PyTorch does not support it on
-Windows, so the engine leaves it out there.
+Windows, so the RESOLVE engine leaves it out there.
 `garbage_collection_threshold:0.8` makes the cache free unused blocks
 when it holds more than 80 % of its cap, and `max_split_size_mb:256`
 keeps it from splitting large free blocks into small pieces. On Windows

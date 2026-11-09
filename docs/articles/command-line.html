@@ -75,7 +75,7 @@
     <li><a class="dropdown-item" href="../articles/command-line.html">The command line</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
-    <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
+    <li><a class="dropdown-item" href="../articles/installation.html">Installing the RESOLVE engine</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -118,10 +118,11 @@
 <!-- Python blocks run by tools/python_twins.py (md5 cf36e5edb179b48e2b180eb9df889249). -->
 <p>The <code>resolve</code> executable trains a model, imputes new plots
 and describes a saved model, all from CSV files and without R or Python.
-It runs the same engine as the two packages, so a checkpoint written by
-<code>resolve train</code> loads in R with <code><a href="../reference/resolve.load.html">resolve.load()</a></code>
-and in Python with <code>Predictor.load()</code>, and a checkpoint saved
-from either package scores with <code>resolve predict</code>.</p>
+It runs the same RESOLVE engine as the two packages, so a checkpoint
+written by <code>resolve train</code> loads in R with
+<code><a href="../reference/resolve.load.html">resolve.load()</a></code> and in Python with
+<code>Predictor.load()</code>, and a checkpoint saved from either
+package scores with <code>resolve predict</code>.</p>
 <p>This article runs each command on the survey that ships with the R
 package: training with the column flags and targets, covariates and
 coordinates, the model settings, the held-out fold and the seed,
@@ -135,15 +136,15 @@ reading a checkpoint.</p>
 <code class="sourceCode R"><span><span class="co"># install.packages("pak")</span></span>
 <span><span class="fu">pak</span><span class="fu">::</span><span class="fu"><a href="https://pak.r-lib.org/reference/pak.html" class="external-link">pak</a></span><span class="op">(</span><span class="st">"gcol33/resolve/r"</span><span class="op">)</span></span>
 <span></span>
-<span><span class="co"># The engine library, downloaded once</span></span>
+<span><span class="co"># The RESOLVE engine library, downloaded once</span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://gillescolling.com/resolve/">resolveR</a></span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/resolve.install_backend.html">resolve.install_backend</a></span><span class="op">(</span><span class="op">)</span></span></code></pre></div>
 <div class="sourceCode" id="cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="ex">pip</span> install resolve-core</span></code></pre></div>
 </div>
 <p>The packages do not install the command line. It is built from source
-by the engine’s CMake project; <a href="installation.html">Installing
-the engine</a> gives the build. The commands below assume
-<code>resolve</code> is on the <code>PATH</code>:</p>
+by the RESOLVE engine’s CMake project; <a href="installation.html">Installing the RESOLVE engine</a> gives the
+build. The commands below assume <code>resolve</code> is on the
+<code>PATH</code>:</p>
 <div class="sourceCode" id="cb3"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="ex">resolve</span> version</span>
 <span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a><span class="co">#&gt; resolve 1.1.0</span></span></code></pre></div>
 <p><code>resolve</code> alone prints every command with its flags, and
@@ -221,7 +222,7 @@ classification target with four classes.</p>
 <span id="cb7-32"><a href="#cb7-32" tabindex="-1"></a><span class="co">#&gt; ================</span></span>
 <span id="cb7-33"><a href="#cb7-33" tabindex="-1"></a><span class="co">#&gt; Training complete!</span></span>
 <span id="cb7-34"><a href="#cb7-34" tabindex="-1"></a><span class="co">#&gt; Best epoch: 50</span></span>
-<span id="cb7-35"><a href="#cb7-35" tabindex="-1"></a><span class="co">#&gt; Training time: 2.47106s</span></span>
+<span id="cb7-35"><a href="#cb7-35" tabindex="-1"></a><span class="co">#&gt; Training time: 2.11832s</span></span>
 <span id="cb7-36"><a href="#cb7-36" tabindex="-1"></a><span class="co">#&gt; Effective batch size: 4096</span></span>
 <span id="cb7-37"><a href="#cb7-37" tabindex="-1"></a><span class="co">#&gt; </span></span>
 <span id="cb7-38"><a href="#cb7-38" tabindex="-1"></a><span class="co">#&gt; Final metrics:</span></span>
@@ -420,7 +421,7 @@ lines.</p>
 <span id="cb12-24"><a href="#cb12-24" tabindex="-1"></a><span class="co">#&gt; ================</span></span>
 <span id="cb12-25"><a href="#cb12-25" tabindex="-1"></a><span class="co">#&gt; Training complete!</span></span>
 <span id="cb12-26"><a href="#cb12-26" tabindex="-1"></a><span class="co">#&gt; Best epoch: 19</span></span>
-<span id="cb12-27"><a href="#cb12-27" tabindex="-1"></a><span class="co">#&gt; Training time: 1.6652s</span></span>
+<span id="cb12-27"><a href="#cb12-27" tabindex="-1"></a><span class="co">#&gt; Training time: 1.44583s</span></span>
 <span id="cb12-28"><a href="#cb12-28" tabindex="-1"></a><span class="co">#&gt; Effective batch size: 4096</span></span>
 <span id="cb12-29"><a href="#cb12-29" tabindex="-1"></a><span class="co">#&gt; </span></span>
 <span id="cb12-30"><a href="#cb12-30" tabindex="-1"></a><span class="co">#&gt; Final metrics:</span></span>
@@ -484,7 +485,7 @@ mean:</p>
 <span id="cb13-20"><a href="#cb13-20" tabindex="-1"></a><span class="co">#&gt; ================</span></span>
 <span id="cb13-21"><a href="#cb13-21" tabindex="-1"></a><span class="co">#&gt; Training complete!</span></span>
 <span id="cb13-22"><a href="#cb13-22" tabindex="-1"></a><span class="co">#&gt; Best epoch: 99</span></span>
-<span id="cb13-23"><a href="#cb13-23" tabindex="-1"></a><span class="co">#&gt; Training time: 2.51178s</span></span>
+<span id="cb13-23"><a href="#cb13-23" tabindex="-1"></a><span class="co">#&gt; Training time: 2.15973s</span></span>
 <span id="cb13-24"><a href="#cb13-24" tabindex="-1"></a><span class="co">#&gt; Effective batch size: 4096</span></span>
 <span id="cb13-25"><a href="#cb13-25" tabindex="-1"></a><span class="co">#&gt; </span></span>
 <span id="cb13-26"><a href="#cb13-26" tabindex="-1"></a><span class="co">#&gt; Final metrics:</span></span>
@@ -563,7 +564,7 @@ held-out plots are those north of 47° latitude:</p>
 <span id="cb16-22"><a href="#cb16-22" tabindex="-1"></a><span class="co">#&gt; ================</span></span>
 <span id="cb16-23"><a href="#cb16-23" tabindex="-1"></a><span class="co">#&gt; Training complete!</span></span>
 <span id="cb16-24"><a href="#cb16-24" tabindex="-1"></a><span class="co">#&gt; Best epoch: 41</span></span>
-<span id="cb16-25"><a href="#cb16-25" tabindex="-1"></a><span class="co">#&gt; Training time: 2.22448s</span></span>
+<span id="cb16-25"><a href="#cb16-25" tabindex="-1"></a><span class="co">#&gt; Training time: 1.96366s</span></span>
 <span id="cb16-26"><a href="#cb16-26" tabindex="-1"></a><span class="co">#&gt; Effective batch size: 4096</span></span>
 <span id="cb16-27"><a href="#cb16-27" tabindex="-1"></a><span class="co">#&gt; </span></span>
 <span id="cb16-28"><a href="#cb16-28" tabindex="-1"></a><span class="co">#&gt; Final metrics:</span></span>
@@ -605,7 +606,7 @@ metrics.</p>
 <span id="cb17-18"><a href="#cb17-18" tabindex="-1"></a><span class="co">#&gt; ================</span></span>
 <span id="cb17-19"><a href="#cb17-19" tabindex="-1"></a><span class="co">#&gt; Training complete!</span></span>
 <span id="cb17-20"><a href="#cb17-20" tabindex="-1"></a><span class="co">#&gt; Best epoch: 49</span></span>
-<span id="cb17-21"><a href="#cb17-21" tabindex="-1"></a><span class="co">#&gt; Training time: 0.895813s</span></span>
+<span id="cb17-21"><a href="#cb17-21" tabindex="-1"></a><span class="co">#&gt; Training time: 0.794807s</span></span>
 <span id="cb17-22"><a href="#cb17-22" tabindex="-1"></a><span class="co">#&gt; Effective batch size: 4096</span></span>
 <span id="cb17-23"><a href="#cb17-23" tabindex="-1"></a><span class="co">#&gt; </span></span>
 <span id="cb17-24"><a href="#cb17-24" tabindex="-1"></a><span class="co">#&gt; Final metrics:</span></span>
@@ -650,9 +651,9 @@ the blocks to folds so the folds hold similar numbers of plots.</p>
 <span id="cb18-24"><a href="#cb18-24" tabindex="-1"></a><span class="co">#&gt; Early stopping at epoch 74</span></span>
 <span id="cb18-25"><a href="#cb18-25" tabindex="-1"></a><span class="co">#&gt; Cross-validation fold 3/3</span></span>
 <span id="cb18-26"><a href="#cb18-26" tabindex="-1"></a><span class="co">#&gt;   Train: 97 plots, Test: 53 plots</span></span>
-<span id="cb18-27"><a href="#cb18-27" tabindex="-1"></a><span class="co">#&gt; Spatial CV complete (3 folds, 6.308876s)</span></span>
+<span id="cb18-27"><a href="#cb18-27" tabindex="-1"></a><span class="co">#&gt; Spatial CV complete (3 folds, 5.569140s)</span></span>
 <span id="cb18-28"><a href="#cb18-28" tabindex="-1"></a><span class="co">#&gt; </span></span>
-<span id="cb18-29"><a href="#cb18-29" tabindex="-1"></a><span class="co">#&gt; Cross-validation (3 folds, 6.30888s):</span></span>
+<span id="cb18-29"><a href="#cb18-29" tabindex="-1"></a><span class="co">#&gt; Cross-validation (3 folds, 5.56914s):</span></span>
 <span id="cb18-30"><a href="#cb18-30" tabindex="-1"></a><span class="co">#&gt;   Fold 1 (best epoch 42):</span></span>
 <span id="cb18-31"><a href="#cb18-31" tabindex="-1"></a><span class="co">#&gt;     elevation:</span></span>
 <span id="cb18-32"><a href="#cb18-32" tabindex="-1"></a><span class="co">#&gt;       mae: 179.673</span></span>
@@ -695,7 +696,7 @@ the blocks to folds so the folds hold similar numbers of plots.</p>
 <span id="cb18-69"><a href="#cb18-69" tabindex="-1"></a><span class="co">#&gt; ================</span></span>
 <span id="cb18-70"><a href="#cb18-70" tabindex="-1"></a><span class="co">#&gt; Training complete!</span></span>
 <span id="cb18-71"><a href="#cb18-71" tabindex="-1"></a><span class="co">#&gt; Best epoch: 73</span></span>
-<span id="cb18-72"><a href="#cb18-72" tabindex="-1"></a><span class="co">#&gt; Training time: 2.54265s</span></span>
+<span id="cb18-72"><a href="#cb18-72" tabindex="-1"></a><span class="co">#&gt; Training time: 1.88775s</span></span>
 <span id="cb18-73"><a href="#cb18-73" tabindex="-1"></a><span class="co">#&gt; Effective batch size: 4096</span></span>
 <span id="cb18-74"><a href="#cb18-74" tabindex="-1"></a><span class="co">#&gt; </span></span>
 <span id="cb18-75"><a href="#cb18-75" tabindex="-1"></a><span class="co">#&gt; Final metrics:</span></span>
@@ -758,7 +759,7 @@ trained with:</p>
 <span id="cb20-20"><a href="#cb20-20" tabindex="-1"></a><span class="co">#&gt; ================</span></span>
 <span id="cb20-21"><a href="#cb20-21" tabindex="-1"></a><span class="co">#&gt; Training complete!</span></span>
 <span id="cb20-22"><a href="#cb20-22" tabindex="-1"></a><span class="co">#&gt; Best epoch: 18</span></span>
-<span id="cb20-23"><a href="#cb20-23" tabindex="-1"></a><span class="co">#&gt; Training time: 3.10601s</span></span>
+<span id="cb20-23"><a href="#cb20-23" tabindex="-1"></a><span class="co">#&gt; Training time: 2.4241s</span></span>
 <span id="cb20-24"><a href="#cb20-24" tabindex="-1"></a><span class="co">#&gt; Effective batch size: 4096</span></span>
 <span id="cb20-25"><a href="#cb20-25" tabindex="-1"></a><span class="co">#&gt; </span></span>
 <span id="cb20-26"><a href="#cb20-26" tabindex="-1"></a><span class="co">#&gt; Final metrics:</span></span>
@@ -792,9 +793,9 @@ to the CPU.</p>
 and restarts the run, down to <code>--batch-size-floor</code>.
 <code>--vram-fraction</code> caps the share of GPU memory the run may
 use, which leaves room for a desktop on the same card; it takes effect
-in a build with the engine’s CUDA kernels. <code>--amp</code> turns on
-mixed precision. <a href="performance.html">Large data and GPUs</a>
-covers these settings.</p>
+in a build with the RESOLVE engine’s CUDA kernels. <code>--amp</code>
+turns on mixed precision. <a href="performance.html">Large data and
+GPUs</a> covers these settings.</p>
 </div>
 <div class="section level2">
 <h2 id="imputing">Imputing<a class="anchor" aria-label="anchor" href="#imputing"></a>
@@ -874,9 +875,9 @@ reads:</p>
 <span id="cb24-5"><a href="#cb24-5" tabindex="-1"></a><span class="co">#&gt; </span></span>
 <span id="cb24-6"><a href="#cb24-6" tabindex="-1"></a><span class="co">#&gt; Run:</span></span>
 <span id="cb24-7"><a href="#cb24-7" tabindex="-1"></a><span class="co">#&gt;   resolve_version: 1.1.0</span></span>
-<span id="cb24-8"><a href="#cb24-8" tabindex="-1"></a><span class="co">#&gt;   created_at: 2026-11-09T13:27:31Z</span></span>
-<span id="cb24-9"><a href="#cb24-9" tabindex="-1"></a><span class="co">#&gt;   completed_at: 2026-11-09T13:27:33Z</span></span>
-<span id="cb24-10"><a href="#cb24-10" tabindex="-1"></a><span class="co">#&gt;   train_time_seconds: 2.22448</span></span>
+<span id="cb24-8"><a href="#cb24-8" tabindex="-1"></a><span class="co">#&gt;   created_at: 2026-11-09T14:49:02Z</span></span>
+<span id="cb24-9"><a href="#cb24-9" tabindex="-1"></a><span class="co">#&gt;   completed_at: 2026-11-09T14:49:03Z</span></span>
+<span id="cb24-10"><a href="#cb24-10" tabindex="-1"></a><span class="co">#&gt;   train_time_seconds: 1.9636607</span></span>
 <span id="cb24-11"><a href="#cb24-11" tabindex="-1"></a><span class="co">#&gt;   n_plots_train: 107</span></span>
 <span id="cb24-12"><a href="#cb24-12" tabindex="-1"></a><span class="co">#&gt;   n_plots_test: 43</span></span>
 <span id="cb24-13"><a href="#cb24-13" tabindex="-1"></a><span class="co">#&gt;   hold_out: explicit</span></span>

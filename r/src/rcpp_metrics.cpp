@@ -14,7 +14,7 @@ void check_metric_inputs(NumericVector pred, NumericVector target) {
 
 //' Prediction metrics
 //'
-//' The engine's metric functions, computed over a vector of predictions and
+//' The RESOLVE engine's metric functions, computed over a vector of predictions and
 //' the matching vector of observed values. They are the metrics
 //' [resolve.train.dataset()] reports for each target, made available so a
 //' prediction scored elsewhere (a reloaded checkpoint, a held-out survey) can

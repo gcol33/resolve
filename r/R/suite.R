@@ -324,7 +324,7 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
 
 #' Flatten Suite Predictions to One Row per Plot
 #'
-#' The engine's prediction table, the columns `resolve predict --suite` writes:
+#' The RESOLVE engine's prediction table, the columns `resolve predict --suite` writes:
 #' `plot_id`, then per target
 #' the prediction (`<target>`; for a vote also `<target>_code` and
 #' `<target>_agreement`; for a spherical mean `<target>_latitude` and

@@ -1,8 +1,8 @@
-# Python: the engine
+# Python: the RESOLVE engine
 
-The engine loaded, the GPU memory and thread settings, how a native
-fault and a storage failure surface, and the index that matches names
-within a few edits, such as species names with spelling variants.
+The RESOLVE engine loaded, the GPU memory and thread settings, how a
+native fault and a storage failure surface, and the index that matches
+names within a few edits, such as species names with spelling variants.
 
 [All of the Python
 reference](https://gillescolling.com/resolve/articles/python-reference.md)
@@ -14,7 +14,7 @@ reference](https://gillescolling.com/resolve/articles/python-reference.md)
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -23,7 +23,7 @@ resolve.install_backend()
 pip install resolve-core
 ```
 
-[Installing the
+[Installing the RESOLVE
 engine](https://gillescolling.com/resolve/articles/installation.md)
 covers the GPU build and building from source; [Large data and
 GPUs](https://gillescolling.com/resolve/articles/performance.md) the
@@ -31,7 +31,8 @@ memory settings in use.
 
 ## `__version__`
 
-The version of the engine loaded, read from the compiled extension.
+The version of the RESOLVE engine loaded, read from the compiled
+extension.
 
 ``` python
 import resolve_core as rc
@@ -62,10 +63,10 @@ configure_cuda_allocator(force=False)
 ```
 
 Sets the environment variable `PYTORCH_CUDA_ALLOC_CONF`, which the CUDA
-allocator reads at the first allocation on a GPU, to the engine’s
-default and returns the setting in effect. A value already set is kept
-unless `force` is true. Importing `resolve_core` calls it, so it takes
-effect for any process that has not yet used the GPU.
+allocator reads at the first allocation on a GPU, to the RESOLVE
+engine’s default and returns the setting in effect. A value already set
+is kept unless `force` is true. Importing `resolve_core` calls it, so it
+takes effect for any process that has not yet used the GPU.
 
 ``` python
 rc.configure_cuda_allocator()
@@ -77,11 +78,11 @@ rc.configure_cuda_allocator()
 default_cuda_alloc_conf()
 ```
 
-The engine’s default `PYTORCH_CUDA_ALLOC_CONF`: unused cached blocks are
-released once use passes 0.8 of the memory the allocator may take, and
-blocks above 256 MB are not split, which keep the fragmentation of
-Windows’ display driver model in check, with expandable segments added
-on other systems.
+The RESOLVE engine’s default `PYTORCH_CUDA_ALLOC_CONF`: unused cached
+blocks are released once use passes 0.8 of the memory the allocator may
+take, and blocks above 256 MB are not split, which keep the
+fragmentation of Windows’ display driver model in check, with expandable
+segments added on other systems.
 
 ``` python
 rc.default_cuda_alloc_conf()
@@ -118,13 +119,13 @@ on other systems, and a second call only updates `shutdown_exit_code`.
 
 ## `StorageError`
 
-The exception for a file the engine cannot read or write: a checkpoint
-`Predictor.load` or `Trainer.load` cannot open, a failed `Trainer.save`,
-a CSV file that cannot be opened. It is a subclass of `OSError`. The
-engine retries such I/O a few times before raising, with a backoff that
-doubles each try; the environment variables `RESOLVE_IO_RETRY_ATTEMPTS`
-(total tries, default 3) and `RESOLVE_IO_RETRY_BACKOFF_MS` (the first
-wait, default 100) set them.
+The exception for a file the RESOLVE engine cannot read or write: a
+checkpoint `Predictor.load` or `Trainer.load` cannot open, a failed
+`Trainer.save`, a CSV file that cannot be opened. It is a subclass of
+`OSError`. The RESOLVE engine retries such I/O a few times before
+raising, with a backoff that doubles each try; the environment variables
+`RESOLVE_IO_RETRY_ATTEMPTS` (total tries, default 3) and
+`RESOLVE_IO_RETRY_BACKOFF_MS` (the first wait, default 100) set them.
 
 ``` python
 import os

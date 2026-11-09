@@ -2,7 +2,7 @@
 
 The `resolve` executable trains a model, imputes new plots and describes
 a saved model, all from CSV files and without R or Python. It runs the
-same engine as the two packages, so a checkpoint written by
+same RESOLVE engine as the two packages, so a checkpoint written by
 `resolve train` loads in R with
 [`resolve.load()`](https://gillescolling.com/resolve/reference/resolve.load.md)
 and in Python with `Predictor.load()`, and a checkpoint saved from
@@ -21,7 +21,7 @@ reading a checkpoint.
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -31,7 +31,7 @@ pip install resolve-core
 ```
 
 The packages do not install the command line. It is built from source by
-the engine’s CMake project; [Installing the
+the RESOLVE engine’s CMake project; [Installing the RESOLVE
 engine](https://gillescolling.com/resolve/articles/installation.md)
 gives the build. The commands below assume `resolve` is on the `PATH`:
 
@@ -121,7 +121,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 50
-#> Training time: 2.47106s
+#> Training time: 2.11832s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -286,7 +286,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 19
-#> Training time: 1.6652s
+#> Training time: 1.44583s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -353,7 +353,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 99
-#> Training time: 2.51178s
+#> Training time: 2.15973s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -444,7 +444,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 41
-#> Training time: 2.22448s
+#> Training time: 1.96366s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -489,7 +489,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 49
-#> Training time: 0.895813s
+#> Training time: 0.794807s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -535,9 +535,9 @@ resolve train --header plots.csv --species species.csv \
 #> Early stopping at epoch 74
 #> Cross-validation fold 3/3
 #>   Train: 97 plots, Test: 53 plots
-#> Spatial CV complete (3 folds, 6.308876s)
+#> Spatial CV complete (3 folds, 5.569140s)
 #> 
-#> Cross-validation (3 folds, 6.30888s):
+#> Cross-validation (3 folds, 5.56914s):
 #>   Fold 1 (best epoch 42):
 #>     elevation:
 #>       mae: 179.673
@@ -580,7 +580,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 73
-#> Training time: 2.54265s
+#> Training time: 1.88775s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -647,7 +647,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 18
-#> Training time: 3.10601s
+#> Training time: 2.4241s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -682,8 +682,8 @@ resolve train --header plots.csv --species species.csv \
 On a GPU, a batch that does not fit in memory halves the batch size and
 restarts the run, down to `--batch-size-floor`. `--vram-fraction` caps
 the share of GPU memory the run may use, which leaves room for a desktop
-on the same card; it takes effect in a build with the engine’s CUDA
-kernels. `--amp` turns on mixed precision. [Large data and
+on the same card; it takes effect in a build with the RESOLVE engine’s
+CUDA kernels. `--amp` turns on mixed precision. [Large data and
 GPUs](https://gillescolling.com/resolve/articles/performance.md) covers
 these settings.
 
@@ -773,9 +773,9 @@ resolve info --model north.pt | head -n 40
 #> 
 #> Run:
 #>   resolve_version: 1.1.0
-#>   created_at: 2026-11-09T13:27:31Z
-#>   completed_at: 2026-11-09T13:27:33Z
-#>   train_time_seconds: 2.22448
+#>   created_at: 2026-11-09T14:49:02Z
+#>   completed_at: 2026-11-09T14:49:03Z
+#>   train_time_seconds: 1.9636607
 #>   n_plots_train: 107
 #>   n_plots_test: 43
 #>   hold_out: explicit

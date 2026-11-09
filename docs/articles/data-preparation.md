@@ -20,7 +20,7 @@ of a training set.
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -433,11 +433,11 @@ from_long.n_plots
 ## Files or data frames
 
 The loader reads CSV files as well as data frames already in memory.
-Both run the same engine code, and a data frame gives the dataset the
-CSV it would be written to would give. Loading from memory saves writing
-a filtered header to disk before each fit. The species table can also
-stay a file path while the header is a data frame; the file is then read
-once from disk.
+Both run the same RESOLVE engine code, and a data frame gives the
+dataset the CSV it would be written to would give. Loading from memory
+saves writing a filtered header to disk before each fit. The species
+table can also stay a file path while the header is a data frame; the
+file is then read once from disk.
 
 ``` r
 

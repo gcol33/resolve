@@ -22,7 +22,7 @@ report how far they agree.
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -690,8 +690,8 @@ imputed value. The latent vectors themselves are not blended. The search
 is exact: every reference plot is compared, in blocks, on the
 predictor’s device. A reference plot that is also scored finds itself as
 its own nearest neighbour, so blend new plots against training plots,
-never against themselves. Settings you leave out take the engine’s
-defaults.
+never against themselves. Settings you leave out take the RESOLVE
+engine’s defaults.
 
 ## Model suites
 

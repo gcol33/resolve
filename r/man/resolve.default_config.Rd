@@ -18,7 +18,7 @@ or \code{"vae"} (\code{\link[=resolve.pretrain_vae]{resolve.pretrain_vae()}}).}
 A named list, one element per field.
 }
 \description{
-The engine's default for every field of a configuration: the values a field
+The RESOLVE engine's default for every field of a configuration: the values a field
 takes when a config list or a \code{NULL} argument leaves it out. Every verb that
 takes a config list reads it against these fields, so a key outside them is
 refused, at any level of nesting.

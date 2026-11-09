@@ -23,7 +23,7 @@ This article covers loading a model, encoding new plots against the training voc
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -539,7 +539,7 @@ predictor.clear_retrieval()
 ```
 :::
 
-Only neighbours labelled for a target count for it, their weights renormalised; a plot with no labelled neighbour keeps the model's imputed value. The latent vectors themselves are not blended. The search is exact: every reference plot is compared, in blocks, on the predictor's device. A reference plot that is also scored finds itself as its own nearest neighbour, so blend new plots against training plots, never against themselves. Settings you leave out take the engine's defaults.
+Only neighbours labelled for a target count for it, their weights renormalised; a plot with no labelled neighbour keeps the model's imputed value. The latent vectors themselves are not blended. The search is exact: every reference plot is compared, in blocks, on the predictor's device. A reference plot that is also scored finds itself as its own nearest neighbour, so blend new plots against training plots, never against themselves. Settings you leave out take the RESOLVE engine's defaults.
 
 ## Model suites
 

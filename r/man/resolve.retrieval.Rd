@@ -43,7 +43,7 @@ class the most probable one. Only the neighbours labelled for a target
 count for it; a plot with none keeps the model's prediction.
 }
 \details{
-Settings left \code{NULL} take the engine's defaults
+Settings left \code{NULL} take the RESOLVE engine's defaults
 (\code{\link[=resolve.default_config]{resolve.default_config()}} \code{"retrieval"}). A reference plot that is also
 scored retrieves itself first.
 }

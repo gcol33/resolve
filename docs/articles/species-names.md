@@ -11,7 +11,7 @@ explains where its links come from, which taxonomic backbones it reads,
 and how a name is matched through it. Reading a table’s names through it
 during imputation is covered in [Imputing new
 plots](https://gillescolling.com/resolve/articles/prediction.html#species-names);
-installation in [Installing the
+installation in [Installing the RESOLVE
 engine](https://gillescolling.com/resolve/articles/installation.md).
 
 ## Why a name can differ from the model’s name

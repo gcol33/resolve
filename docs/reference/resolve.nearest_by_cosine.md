@@ -1,8 +1,9 @@
 # Nearest Rows by Cosine Similarity
 
-The engine's exact nearest-neighbour search: for each row of `queries`,
-the `k` rows of `reference` most similar to it by cosine similarity,
-most similar first. The same search finds the reference plots of
+The RESOLVE engine's exact nearest-neighbour search: for each row of
+`queries`, the `k` rows of `reference` most similar to it by cosine
+similarity, most similar first. The same search finds the reference
+plots of
 [`resolve.retrieval()`](https://gillescolling.com/resolve/reference/resolve.retrieval.md).
 On rows of species presence (1 where a plot records a species, else 0)
 the cosine similarity is the Ochiai index of two species lists. The

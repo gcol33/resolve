@@ -53,7 +53,7 @@ fold of its plots for early stopping, and train."><meta property="og:image" cont
     <li><a class="dropdown-item" href="../articles/command-line.html">The command line</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
-    <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
+    <li><a class="dropdown-item" href="../articles/installation.html">Installing the RESOLVE engine</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
@@ -460,13 +460,13 @@ when the CUDA auto-halve-on-OOM retry fired – and <code>resumed_from_epoch</co
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>Every model and training setting has the engine's default
+    <p>Every model and training setting has the RESOLVE engine's default
 (<code><a href="resolve.default_config.html">resolve.default_config()</a></code> <code>"model"</code> / <code>"train"</code>). The named arguments below
 set the common ones; <code>modelConfig</code> and <code>trainConfig</code> reach every field of
-the engine's <code>ModelConfig</code> and <code>TrainConfig</code>, nested architecture configs
+the RESOLVE engine's <code>ModelConfig</code> and <code>TrainConfig</code>, nested architecture configs
 included (<code>encoder_architecture</code>, <code>ft_transformer</code>, <code>tabnet</code>, <code>saint</code>, <code>gnn</code>,
 <code>trait_net</code>, <code>excelformer</code>, <code>heterogeneous_gnn</code>, <code>tabm</code>, <code>parallel_layers</code>,
-and the activation, normalization and head settings). A key the engine does
+and the activation, normalization and head settings). A key the RESOLVE engine does
 not know is an error, and so is a field set both by a named argument and in
 the list. The fields that size a model to its data (the species encoding,
 hash width, <code>top_k</code> and the taxonomy slots) come from the dataset.</p>

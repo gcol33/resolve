@@ -43,7 +43,7 @@ latent space.
 
 ### Setup
 
-- [Installing the
+- [Installing the RESOLVE
   engine](https://gillescolling.com/resolve/articles/installation.md):
 
 ### Python reference
@@ -69,5 +69,5 @@ is.
   names](https://gillescolling.com/resolve/articles/python-names.md):
 - [Python:
   scoring](https://gillescolling.com/resolve/articles/python-scoring.md):
-- [Python: the
+- [Python: the RESOLVE
   engine](https://gillescolling.com/resolve/articles/python-engine.md):

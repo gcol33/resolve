@@ -75,7 +75,7 @@
     <li><a class="dropdown-item" href="../articles/command-line.html">The command line</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
-    <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
+    <li><a class="dropdown-item" href="../articles/installation.html">Installing the RESOLVE engine</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -117,10 +117,10 @@
     
 <!-- Python blocks run by tools/python_twins.py (md5 cf36e5edb179b48e2b180eb9df889249). -->
 <p>Plots and the species records observed in them, from CSV files or
-data frames, into an engine dataset: the roles that name the columns,
-the targets, the loader settings, the dataset and its schema, the
-vocabularies that code species, genera and families as integers, and the
-species graph.</p>
+data frames, into a RESOLVE engine dataset: the roles that name the
+columns, the targets, the loader settings, the dataset and its schema,
+the vocabularies that code species, genera and families as integers, and
+the species graph.</p>
 <p><a href="python-reference.html">All of the Python reference</a></p>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
@@ -130,7 +130,7 @@ species graph.</p>
 <code class="sourceCode R"><span><span class="co"># install.packages("pak")</span></span>
 <span><span class="fu">pak</span><span class="fu">::</span><span class="fu"><a href="https://pak.r-lib.org/reference/pak.html" class="external-link">pak</a></span><span class="op">(</span><span class="st">"gcol33/resolve/r"</span><span class="op">)</span></span>
 <span></span>
-<span><span class="co"># The engine library, downloaded once</span></span>
+<span><span class="co"># The RESOLVE engine library, downloaded once</span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://gillescolling.com/resolve/">resolveR</a></span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/resolve.install_backend.html">resolve.install_backend</a></span><span class="op">(</span><span class="op">)</span></span></code></pre></div>
 <div class="sourceCode" id="cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="ex">pip</span> install resolve-core</span></code></pre></div>
@@ -727,8 +727,8 @@ selection applied (<code>effective_selection</code>), and
 <li>
 <code>unrecorded_dataset_settings</code> (<code>list[str]</code>):
 the <code>DatasetConfig</code> fields a checkpoint written before they
-existed does not carry; each reads as the engine’s behaviour before the
-setting existed. Empty for a dataset’s own schema.</li>
+existed does not carry; each reads as the RESOLVE engine’s behaviour
+before the setting existed. Empty for a dataset’s own schema.</li>
 </ul>
 <p>Methods: <code>has_categoricals()</code>,
 <code>n_categoricals()</code>, <code>has_species_vocab()</code> and

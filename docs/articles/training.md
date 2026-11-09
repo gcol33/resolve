@@ -20,7 +20,7 @@ GPUs](https://gillescolling.com/resolve/articles/performance.md).
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -105,13 +105,13 @@ takes the common model and training settings as named arguments in
 camelCase (`maxEpochs`, `hiddenDims`, `lrScheduler`). Every other field
 goes into the `modelConfig` and `trainConfig` lists, under its
 snake_case name (`list(weight_decay = 1e-4)`). A field given both ways
-is an error, and so is a name the engine does not know.
+is an error, and so is a name the RESOLVE engine does not know.
 `resolve.default_config("train")` and `resolve.default_config("model")`
 list every field with its default.
 
 In Python, the model settings are a `ModelConfig` and the training
-settings a `TrainConfig`. Each starts at the engine’s defaults; set a
-field by assigning to it.
+settings a `TrainConfig`. Each starts at the RESOLVE engine’s defaults;
+set a field by assigning to it.
 `rc.model_config_for_dataset(dataset, model_config)` copies the fields
 that depend on the encoding from the dataset into a `ModelConfig`; build
 every model through it.
@@ -1308,7 +1308,7 @@ what to do with the loaded model.
 ## GPU training
 
 Set the device to `cuda` to train on a GPU; this needs the CUDA build of
-the engine ([Installing the
+the RESOLVE engine ([Installing the RESOLVE
 engine](https://gillescolling.com/resolve/articles/installation.md)).
 [Large data and
 GPUs](https://gillescolling.com/resolve/articles/performance.md) covers

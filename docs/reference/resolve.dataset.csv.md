@@ -93,8 +93,8 @@ resolve.dataset.csv(
 - config:
 
   Named list of dataset configuration options; a field left out takes
-  the engine's default (`resolve.default_config("dataset")`), and a key
-  outside these fields is an error:
+  the RESOLVE engine's default (`resolve.default_config("dataset")`),
+  and a key outside these fields is an error:
 
   - species_encoding: "hash", "embed", "sparse", "rank_pool" or
     "transformer". hash folds each plot's species into a fixed-width

@@ -14,7 +14,7 @@ if (resolve.available()) resolve.manual_seed(42)
 
 A survey of a few hundred plots trains in seconds on a laptop with the default settings. An archive of a million plots takes the settings this article covers: the learning rate and its schedule, the batch size, the size of the model, the encoding settings that bound memory, and the GPU settings, from mixed precision to what happens when the GPU runs out of memory.
 
-Each section says what a setting does in the engine. The examples run on the small survey that ships with the R package, so they show the calls and what they return; the speed and memory effects only appear on large data. The GPU settings need the CUDA build of the engine and are shown without being run.
+Each section says what a setting does in the RESOLVE engine. The examples run on the small survey that ships with the R package, so they show the calls and what they return; the speed and memory effects only appear on large data. The GPU settings need the CUDA build of the RESOLVE engine and are shown without being run.
 
 ## Installation
 
@@ -23,7 +23,7 @@ Each section says what a setting does in the engine. The examples run on the sma
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -33,7 +33,7 @@ pip install resolve-core
 ```
 :::
 
-[Installing the engine](installation.html) covers the GPU build.
+[Installing the RESOLVE engine](installation.html) covers the GPU build.
 
 ## The survey
 
@@ -361,7 +361,7 @@ attn.fit().best_epoch >= 0
 
 ## GPU settings
 
-Training on a GPU needs the CUDA build of the engine: `resolve.install_backend(variant = "cuda")` in R, and the CUDA wheel in Python ([Installing the engine](installation.html)). The code in this section is shown without being run, since this site is built on a machine without a GPU.
+Training on a GPU needs the CUDA build of the RESOLVE engine: `resolve.install_backend(variant = "cuda")` in R, and the CUDA wheel in Python ([Installing the RESOLVE engine](installation.html)). The code in this section is shown without being run, since this site is built on a machine without a GPU.
 
 ### Device and mixed precision
 
@@ -483,14 +483,14 @@ On a machine without a GPU, setting the cap does nothing. The command line takes
 
 ### Allocator configuration
 
-PyTorch reads the settings of its GPU memory cache from the environment variable `PYTORCH_CUDA_ALLOC_CONF` when it first allocates on a GPU. Importing resolve_core sets it to the engine's default, unless it is already set; in R, `resolve_configure_cuda_allocator()` sets it. The default depends on the platform:
+PyTorch reads the settings of its GPU memory cache from the environment variable `PYTORCH_CUDA_ALLOC_CONF` when it first allocates on a GPU. Importing resolve_core sets it to the RESOLVE engine's default, unless it is already set; in R, `resolve_configure_cuda_allocator()` sets it. The default depends on the platform:
 
 | Platform | Setting |
 |----------|---------|
 | Linux, macOS | `expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:256` |
 | Windows | `garbage_collection_threshold:0.8,max_split_size_mb:256` |
 
-`expandable_segments` lets the cache grow and release its memory in place, which keeps it from fragmenting; PyTorch does not support it on Windows, so the engine leaves it out there. `garbage_collection_threshold:0.8` makes the cache free unused blocks when it holds more than 80 % of its cap, and `max_split_size_mb:256` keeps it from splitting large free blocks into small pieces. On Windows these two reduce fragmentation less than `expandable_segments` does on Linux, so a job close to the memory cap there may need a smaller batch.
+`expandable_segments` lets the cache grow and release its memory in place, which keeps it from fragmenting; PyTorch does not support it on Windows, so the RESOLVE engine leaves it out there. `garbage_collection_threshold:0.8` makes the cache free unused blocks when it holds more than 80 % of its cap, and `max_split_size_mb:256` keeps it from splitting large free blocks into small pieces. On Windows these two reduce fragmentation less than `expandable_segments` does on Linux, so a job close to the memory cap there may need a smaller batch.
 
 The function returns the setting in effect; `force` overwrites a value set elsewhere. It acts only when it runs before the first GPU allocation of the process, so in R call it before the first training run on a GPU.
 

@@ -33,7 +33,7 @@ resolve.cross_validate(dataset, nFolds = 5L, seed = 42L, spatial = NULL, ...)
   block settings: `lat_size` and `lon_size` (block size in degrees) and
   `balance` (`TRUE` assigns blocks to folds by greedy bin-packing for
   folds of similar size, `FALSE` round-robin); a field left out takes
-  the engine's default
+  the RESOLVE engine's default
   ([`resolve.default_config()`](https://gillescolling.com/resolve/reference/resolve.default_config.md)
   `"spatial_block"`). Needs coordinates.
 

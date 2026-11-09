@@ -36,7 +36,7 @@ one column per neighbour holding rows of \code{reference} (most similar first),
 and \code{similarities}, the matching matrix of cosine similarities.
 }
 \description{
-The engine's exact nearest-neighbour search: for each row of \code{queries}, the
+The RESOLVE engine's exact nearest-neighbour search: for each row of \code{queries}, the
 \code{k} rows of \code{reference} most similar to it by cosine similarity, most
 similar first. The same search finds the reference plots of
 \code{\link[=resolve.retrieval]{resolve.retrieval()}}. On rows of species presence (1 where a plot records a

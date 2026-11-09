@@ -17,7 +17,7 @@ resolve.cross_validate(dataset, nFolds = 5L, seed = 42L, spatial = NULL, ...)
 spatial block settings: \code{lat_size} and \code{lon_size} (block size in degrees)
 and \code{balance} (\code{TRUE} assigns blocks to folds by greedy bin-packing for
 folds of similar size, \code{FALSE} round-robin); a field left out takes the
-engine's default (\code{\link[=resolve.default_config]{resolve.default_config()}} \code{"spatial_block"}). Needs
+RESOLVE engine's default (\code{\link[=resolve.default_config]{resolve.default_config()}} \code{"spatial_block"}). Needs
 coordinates.}
 
 \item{...}{The model and training arguments of \code{\link[=resolve.train.dataset]{resolve.train.dataset()}}

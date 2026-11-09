@@ -15,7 +15,7 @@ Several trained models released as one directory and scored together: the suite 
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -83,7 +83,7 @@ Methods:
 - `verify(dir, targets=[])`: the problems with the member files under `dir`, a file that is missing, of the wrong size or with another digest; empty when the suite is intact. `targets` narrows the check to those targets.
 - `to_json(indent=2)`, `target(name)` and `inputs_of(target)`, the part of the contract a target's members read.
 
-Attributes: `name`, `description`, `licence`, `engine_version` (the engine that trained the members), `taxonomy` (the species naming the vocabularies follow), `training_scope` (the plots the members were trained on), `inputs` (`SuiteInputContract`), `targets` (`list[SuiteTarget]`, a copy: assign a whole list to change them) and `format_version`, the lowest manifest format that holds the manifest.
+Attributes: `name`, `description`, `licence`, `engine_version` (the RESOLVE engine that trained the members), `taxonomy` (the species naming the vocabularies follow), `training_scope` (the plots the members were trained on), `inputs` (`SuiteInputContract`), `targets` (`list[SuiteTarget]`, a copy: assign a whole list to change them) and `format_version`, the lowest manifest format that holds the manifest.
 
 ```python
 manifest = rc.SuiteManifest.from_json(json.dumps({
@@ -120,7 +120,7 @@ The columns a suite reads and how their values are read, `SuiteManifest.inputs`.
 - `abundance`, `genus`, `family` (`str`): the species-table columns read; empty for none.
 - `latitude`, `longitude` (`str`): the coordinate columns; empty when the members read no coordinates.
 - `covariates`, `categoricals` (`list[str]`): the plot-table columns, in the members' order.
-- `abundance_units` (`str`): what an abundance measures, such as `"percent cover"`; the engine does not convert units.
+- `abundance_units` (`str`): what an abundance measures, such as `"percent cover"`; the RESOLVE engine does not convert units.
 - `zero_abundance_as` (`float`): the abundance a recorded 0 is read at (`DatasetConfig.zero_abundance_as`).
 - `notes` (`str`): anything else a caller has to know about the inputs.
 

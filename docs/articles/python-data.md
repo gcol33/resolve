@@ -1,8 +1,8 @@
 # Python: loading data
 
 Plots and the species records observed in them, from CSV files or data
-frames, into an engine dataset: the roles that name the columns, the
-targets, the loader settings, the dataset and its schema, the
+frames, into a RESOLVE engine dataset: the roles that name the columns,
+the targets, the loader settings, the dataset and its schema, the
 vocabularies that code species, genera and families as integers, and the
 species graph.
 
@@ -16,7 +16,7 @@ reference](https://gillescolling.com/resolve/articles/python-reference.md)
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -503,8 +503,8 @@ Attributes:
   load truncated to.
 - `unrecorded_dataset_settings` (`list[str]`): the `DatasetConfig`
   fields a checkpoint written before they existed does not carry; each
-  reads as the engine’s behaviour before the setting existed. Empty for
-  a dataset’s own schema.
+  reads as the RESOLVE engine’s behaviour before the setting existed.
+  Empty for a dataset’s own schema.
 
 Methods: `has_categoricals()`, `n_categoricals()`, `has_species_vocab()`
 and `has_taxonomy_vocab()` (false for a checkpoint written before

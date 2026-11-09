@@ -6,6 +6,7 @@
 import { COLUMNS, combineMean, combineSpherical, combineVote, encode, parseDouble, parseNumber, parseTable,
          resolveName, sumByAncestor } from "./resolve.js";
 import { gapMethodLabel } from "./gaps.js";
+import { eeaCell, eeaCellCode, eeaCellOutline } from "./geo.js";
 import { HttpRangeSource, HttpStatusError, TerrainCorrection, TerrainField, describePlots, fetchRange,
          withRetry } from "./terrain.js";
 
@@ -725,7 +726,7 @@ async function run() {
   const header = headerRows(), species = state.tables.species.rows;
   $("run").disabled = true;
   status("Starting…");
-  const result = { plotIds: null, columns: [], recognised: null, coords: null, eunis: null };
+  const result = { plotIds: null, columns: [], recognised: null, coords: null };
   state.result = result;
   const started = performance.now();
   $("s-time").textContent = "…";
@@ -794,20 +795,23 @@ async function predictTargets(result, targets, header, species) {
   }
 }
 
-// A target the tables record on some plots but not all, whose gaps were not
-// fitted: whether each plot records it, in the prediction's plot order, as the
-// engine's `<target>_recorded` column (TRUE / FALSE). A gap fit's method
-// column says it otherwise, and a target recorded on no plot is imputed on
-// every one.
-function pushRecorded(result, target) {
+// Whether each plot records a target in the tables, in the prediction's plot
+// order (1 / 0); null where the tables record it on no plot.
+function recordedMask(result, target) {
   const count = recordedCount(target);
-  if (!count || count.recorded === 0 || count.recorded === count.total) return;
+  if (!count || count.recorded === 0) return null;
   const { num } = gapPlots(result);
   const values = target.outputs.map(num);
-  result.columns.push({
-    name: `${label(target)}, recorded`,
-    values: Array.from(values[0], (_, p) => (values.every((v) => Number.isFinite(v[p])) ? "TRUE" : "FALSE")),
-  });
+  return Uint8Array.from(values[0], (_, p) => values.every((v) => Number.isFinite(v[p])));
+}
+
+// A target the tables record on some plots but not all, whose gaps were not
+// fitted: whether each plot records it, as the engine's `<target>_recorded`
+// column (TRUE / FALSE). A gap fit's method column says it otherwise, and a
+// target recorded on no plot is imputed on every one.
+function pushRecorded(result, target, mask = recordedMask(result, target)) {
+  if (!mask || mask.every(Boolean)) return;
+  result.columns.push({ name: `${label(target)}, recorded`, values: Array.from(mask, (m) => (m ? "TRUE" : "FALSE")) });
 }
 
 // A unit as the manifest writes it (m^2), in the page's typography (m²).
@@ -822,13 +826,12 @@ async function addTarget(result, target, meta, outputs, encoded) {
     const classes = coarse ? coarse.classes : head.classes;
     const probs = outputs.map((o) => (coarse ? sumByAncestor(o[head.name], n, coarse.index, classes.length) : o[head.name]));
     const c = combineVote(probs, classes.length, n);
-    result.eunis = { classes, value: c.value, names: coarse ? coarse.names : target.class_names ?? {} };
     result.columns.push({ name: `${label(target)}`, values: Array.from(c.value, (v) => classes[v]) },
                         { name: `${label(target)} seed agreement`, values: Array.from(c.agreement), digits: 2 },
                         { name: `${label(target)} probability`, digits: 3,
                           values: Array.from(c.value, (v, p) => c.mean[p * classes.length + v]) });
-    (result.summary ??= []).push({ kind: "class", label: label(target), classes, value: c.value,
-                                   names: result.eunis.names, agreement: c.agreement });
+    (result.summary ??= []).push({ kind: "class", name: target.name, label: label(target), classes, value: c.value,
+                                   names: coarse ? coarse.names : target.class_names ?? {} });
   } else if (target.combine === "spherical_mean") {
     const [latName, lonName] = target.outputs;
     const c = combineSpherical(outputs.map((o) => o[latName]), outputs.map((o) => o[lonName]), n);
@@ -836,7 +839,6 @@ async function addTarget(result, target, meta, outputs, encoded) {
                         { name: "Imputed longitude", values: Array.from(c.lon), digits: 4 },
                         { name: "Location seed spread (km)", values: Array.from(c.km), digits: 1 });
     result.predictedCoords = Array.from(c.lat, (la, p) => [la, c.lon[p]]);
-    (result.summary ??= []).push({ kind: "location", label: "Location", spread: c.km });
     const raw = new Float64Array(2 * n);
     c.lat.forEach((la, p) => { raw[2 * p] = la; raw[2 * p + 1] = c.lon[p]; });
     const fit = await fillGaps(result, target, "geographic", raw);
@@ -853,15 +855,23 @@ async function addTarget(result, target, meta, outputs, encoded) {
     const c = combineMean(outputs.map((o) => o[name]), n);
     result.columns.push({ name: `${label(target)}${units}`, values: Array.from(c.value), digits: 1 },
                         { name: `${label(target)} seed SD`, values: Array.from(c.sd), digits: 1 });
-    (result.summary ??= []).push({ kind: "number", label: label(target), units: unitText(target.units ?? ""), value: c.value,
-                                   spread: c.sd });
+    const entry = { kind: "number", name: target.name, label: label(target), units: unitText(target.units ?? ""),
+                    value: c.value };
+    (result.summary ??= []).push(entry);
     const fit = await fillGaps(result, target, meta.targets[0].log1p ? "log" : "linear", c.value);
+    const mask = recordedMask(result, target);
     if (fit) {
       result.columns.push({ name: `${label(target)}${units}, gaps filled`, values: Array.from(fit.fitted), digits: 1 },
                           { name: `${label(target)}, gap method`, values: Array.from(fit.method, gapMethodLabel) });
     } else {
-      pushRecorded(result, target);
+      pushRecorded(result, target, mask);
     }
+    // Each plot's value as the map shows it: the recorded one where the
+    // tables hold it, else the gap fit's, else the combined prediction.
+    const recorded = mask && gapPlots(result).num(target.outputs[0]);
+    const imputed = fit ? fit.fitted : c.value;
+    Object.assign(entry, { recorded: mask,
+                           plotValue: Float64Array.from(imputed, (v, p) => (mask?.[p] ? recorded[p] : v)) });
     if (target.terrain && terrainOn()) await addTerrain(result, target, c, encoded, units);
   }
 }
@@ -1013,6 +1023,7 @@ async function fillGaps(result, target, scale, raw) {
 const LABELS = { eunis: "EUNIS habitat", eunis_l2: "EUNIS habitat, level 2", eunis_l3: "EUNIS habitat, level 3",
                  altitude: "Altitude", slope: "Slope", area: "Plot area", year: "Survey year", location: "Location" };
 const label = (t) => (t.readAt ? `EUNIS habitat, level ${t.readAt}` : LABELS[t.name] ?? t.name);
+const habitatName = (code, names) => (names[code] ? `${code} (${names[code]})` : code);
 
 function status(text) { $("status").textContent = text; }
 
@@ -1063,8 +1074,7 @@ function render() {
   showTablePage(0);
   $("results").hidden = false;
   renderStats(r);
-  renderOverview(r);
-  renderSummary(r);
+  renderVariable(r);
   renderGaps(r);
   renderUnknown(r);
   renderMoved(r);
@@ -1203,47 +1213,12 @@ function renderMoved(r) {
     (moved.length > 200 ? `<li class="count">and ${(moved.length - 200).toLocaleString()} more</li>` : "");
 }
 
-// The map and habitat panels share a row; a panel with nothing to show is
+// The map and variable panels share a row; a panel with nothing to show is
 // hidden and the other takes the whole row.
 function showPanel(id, shown) {
   $(id).hidden = !shown;
-  const panels = ["map-panel", "habitat-panel"].map($);
+  const panels = ["map-panel", "variable-panel"].map($);
   for (const p of panels) p.classList.toggle("col-lg-12", panels.some((q) => q.hidden));
-}
-
-// The value below which a share q of the finite values lies (linear
-// interpolation between order statistics), or NaN without finite values.
-function quantile(values, q) {
-  const v = Array.from(values).filter(Number.isFinite).sort((a, b) => a - b);
-  if (!v.length) return NaN;
-  const at = q * (v.length - 1), lo = Math.floor(at), hi = Math.ceil(at);
-  return v[lo] + (v[hi] - v[lo]) * (at - lo);
-}
-
-// One row per variable imputed: its typical value over the plots, the range
-// holding the middle 80% of them, and how far the five seeds part.
-function renderOverview(r) {
-  const fmt = (x, digits = 1) => (Number.isFinite(x) ? x.toLocaleString(undefined, { maximumFractionDigits: digits }) : "");
-  const rows = (r.summary ?? []).map((s) => {
-    if (s.kind === "class") {
-      const counts = new Map();
-      for (const v of s.value) counts.set(v, (counts.get(v) ?? 0) + 1);
-      const [top, k] = [...counts].sort((a, b) => b[1] - a[1])[0] ?? [];
-      const code = s.classes[top];
-      const typical = code === undefined ? "" : `${code} ${s.names[code] ?? ""} (${((100 * k) / s.value.length).toFixed(1)}% of plots)`;
-      let agreement = 0;
-      for (const a of s.agreement) agreement += a;
-      return [s.label, typical.trim(), "", `agreement ${fmt(agreement / s.agreement.length, 2)} (mean)`];
-    }
-    if (s.kind === "location") return [s.label, "", "", `${fmt(quantile(s.spread, 0.5))} km (median)`];
-    const u = s.units ? ` ${s.units}` : "";
-    return [s.label, `${fmt(quantile(s.value, 0.5))}${u} (median)`,
-            `${fmt(quantile(s.value, 0.1))} to ${fmt(quantile(s.value, 0.9))}${u}`,
-            `SD ${fmt(quantile(s.spread, 0.5))}${u} (median)`];
-  });
-  $("overview").innerHTML = "<thead><tr><th>Variable</th><th>Typical value</th><th>Middle 80% of plots</th>" +
-    "<th>Spread across seeds</th></tr></thead><tbody>" +
-    rows.map((row) => `<tr>${row.map((cell) => `<td>${escape(cell)}</td>`).join("")}</tr>`).join("") + "</tbody>";
 }
 
 function renderStats(r) {
@@ -1253,35 +1228,255 @@ function renderStats(r) {
   $("s-unknown").textContent = r.unknown.length.toLocaleString();
 }
 
-// The habitats predicted, most plots first, each with its share of the plots
-// as a bar scaled to the most frequent.
-function renderSummary(r) {
-  showPanel("habitat-panel", !!r.eunis);
-  if (!r.eunis) { $("summary").innerHTML = ""; return; }
-  const counts = new Map(r.eunis.classes.map((c) => [c, 0]));
-  for (const v of r.eunis.value) counts.set(r.eunis.classes[v], counts.get(r.eunis.classes[v]) + 1);
-  const n = r.eunis.value.length;
-  const present = [...counts].filter(([, k]) => k > 0).sort((a, b) => b[1] - a[1]);
-  const most = present[0]?.[1] ?? 1;
-  $("summary").innerHTML = present
-    .map(([c, k]) => `<li><span class="sw" style="background:${colour(c)}"></span><b>${escape(c)}</b>` +
-                     `<span class="mid"><span class="nm">${escape(r.eunis.names[c] ?? "")}</span>` +
+// ---------------------------------------------------------------------------
+// Map variables: the panel beside the map and the map's colours show one
+// imputed variable at a time, chosen with the panel's arrows.
+// ---------------------------------------------------------------------------
+
+// A habitat's colour is its level-1 group's, the first letter of its code.
+const PALETTE = { M: "#2b6cb0", N: "#d69e2e", P: "#3182ce", Q: "#2c7a7b", R: "#68a33f",
+                  S: "#b7791f", T: "#276749", U: "#a0aec0", V: "#c05621" };
+const colour = (c) => PALETTE[c?.[0]] ?? "#718096";
+const NO_VALUE = "#4a5568";
+
+// Fixed class breaks per target, in its units, so that a colour stands for
+// the same values in every run: plot area on a roughly logarithmic scale,
+// survey years by decade. A target without an entry is cut at round numbers
+// over its range (roundBreaks); aspect is cut into eight compass sectors.
+const BREAKS = {
+  altitude: { breaks: [200, 500, 1000, 1500, 2000, 2500] },
+  slope: { breaks: [2, 5, 10, 20, 30, 45] },
+  area: { breaks: [1, 4, 10, 25, 100, 400, 1000] },
+  year: { breaks: [1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020],
+          label: (lo, hi) => (lo === null ? `before ${hi}` : `${lo}s`) },
+};
+const SECTORS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+
+// About six breaks at multiples of 1, 2 or 5 times a power of ten, strictly
+// inside the range of the finite values.
+function roundBreaks(values) {
+  let lo = Infinity, hi = -Infinity;
+  for (const v of values) if (Number.isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  if (!(hi > lo)) return [];
+  const raw = (hi - lo) / 6, power = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 5, 10].map((m) => m * power).find((s) => s >= raw);
+  const breaks = [];
+  for (let b = Math.floor(lo / step + 1) * step; b < hi; b += step) breaks.push(Number(b.toPrecision(12)));
+  return breaks;
+}
+
+// Viridis from its dark end to 90% of the way to its light end, so the
+// lightest class still shows on the map tiles.
+const VIRIDIS = ["#440154", "#482878", "#3e4989", "#31688e", "#26828e", "#1f9e89", "#35b779", "#6ece58", "#b5de2b", "#fde725"];
+function sequential(n) {
+  const channel = (hex, j) => parseInt(hex.slice(1 + 2 * j, 3 + 2 * j), 16);
+  return Array.from({ length: n }, (_, k) => {
+    const x = (n === 1 ? 0.45 : (0.9 * k) / (n - 1)) * (VIRIDIS.length - 1);
+    const i = Math.min(Math.floor(x), VIRIDIS.length - 2), f = x - i;
+    return `#${[0, 1, 2].map((j) => Math.round(channel(VIRIDIS[i], j) * (1 - f) + channel(VIRIDIS[i + 1], j) * f)
+      .toString(16).padStart(2, "0")).join("")}`;
+  });
+}
+
+// A unit as written after a number in a class label or tooltip: degrees as
+// °, years without a unit.
+const binUnit = (u) => ({ degrees: "°", years: "" })[u] ?? u;
+const withUnit = (text, u) => (!u ? text : u === "°" ? `${text}°` : `${text} ${u}`);
+
+// The classes of a numeric variable, each with its label and colour, and the
+// class of a value (-1 when it is not finite).
+function numberClasses(s) {
+  if (s.name === "aspect") {
+    return { classes: SECTORS.map((label, k) => ({ label, colour: `hsl(${45 * k}, 60%, 45%)` })),
+             classify: (v) => (Number.isFinite(v) ? Math.floor((((v % 360) + 360) % 360 + 22.5) / 45) % 8 : -1) };
+  }
+  const spec = BREAKS[s.name] ?? { breaks: roundBreaks(s.plotValue) };
+  const b = spec.breaks, u = binUnit(s.units);
+  const text = spec.label ?? ((lo, hi) => (lo === null ? `< ${withUnit(hi.toLocaleString(), u)}`
+    : hi === null ? `≥ ${withUnit(lo.toLocaleString(), u)}` : withUnit(`${lo.toLocaleString()}–${hi.toLocaleString()}`, u)));
+  const classes = sequential(b.length + 1)
+    .map((c, k) => ({ label: text(k ? b[k - 1] : null, k < b.length ? b[k] : null), colour: c }));
+  return { classes, classify: (v) => (Number.isFinite(v) ? b.filter((x) => x <= v).length : -1) };
+}
+
+// A variable as the panel and the map draw it: its classes in the order the
+// panel lists them (habitats by plots, numeric classes by value), each with
+// the legend entry it falls under (a habitat's level-1 group, a numeric class
+// itself); per plot its class (-1 without a value), its tooltip text and
+// whether the tables record it. A numeric variable also carries each plot's
+// value, the class of any value and a value written with its unit.
+function variableView(s) {
+  if (s.kind === "class") {
+    const groups = new Map();
+    const classes = s.classes.map((c) => {
+      if (!groups.has(c[0])) groups.set(c[0], { label: habitatName(c[0], s.names), colour: colour(c) });
+      return { code: c, label: s.names[c] ?? "", colour: colour(c), group: groups.get(c[0]) };
+    });
+    return { kind: "class", label: s.label, byCount: true, classes, classOf: Int32Array.from(s.value), recorded: null,
+             tip: (p) => habitatName(s.classes[s.value[p]], s.names) };
+  }
+  const { classes, classify } = numberClasses(s);
+  for (const c of classes) c.group = c;
+  const u = binUnit(s.units);
+  const format = { maximumFractionDigits: s.name === "year" ? 0 : 1, useGrouping: s.name !== "year" };
+  const text = (v) => withUnit(v.toLocaleString(undefined, format), u);
+  return {
+    kind: "number", label: s.label, byCount: false, classes, classOf: Int32Array.from(s.plotValue, classify),
+    recorded: s.recorded, value: s.plotValue, classify, text, circular: s.name === "aspect",
+    tip: (p) => (Number.isFinite(s.plotValue[p]) ? `${s.label} ${text(s.plotValue[p])}${s.recorded?.[p] ? ", recorded" : ""}` : ""),
+  };
+}
+
+// The variables that can colour the map: every one imputed but the location,
+// which places the plots. The one shown is kept by label across runs.
+const mapVariables = (r) => r.summary ?? [];
+let variableShown = null;
+function shownView(r) {
+  const all = mapVariables(r);
+  const s = all.find((x) => x.label === variableShown) ?? all[0];
+  return s ? variableView(s) : null;
+}
+
+function stepVariable(by) {
+  const r = state.result, all = r ? mapVariables(r) : [];
+  if (all.length < 2) return;
+  const at = Math.max(0, all.findIndex((x) => x.label === variableShown));
+  variableShown = all[(at + by + all.length) % all.length].label;
+  renderVariable(r);
+  renderMap(r, false);
+}
+
+// The shown variable's classes with the number of plots in each and their
+// share of all plots, as a bar scaled to the fullest class.
+function renderVariable(r) {
+  const view = shownView(r);
+  showPanel("variable-panel", !!view);
+  $("variable-step").hidden = mapVariables(r).length < 2;
+  if (!view) { $("summary").innerHTML = ""; return; }
+  $("variable-title").textContent = view.label;
+  const counts = new Array(view.classes.length).fill(0);
+  for (const k of view.classOf) if (k >= 0) counts[k] += 1;
+  const n = r.plotIds.length;
+  const rows = view.classes.map((c, k) => [c, counts[k]]).filter(([, k]) => k > 0);
+  if (view.byCount) rows.sort((a, b) => b[1] - a[1]);
+  const most = Math.max(1, ...rows.map(([, k]) => k));
+  $("summary").classList.toggle("bins", !view.byCount);
+  $("summary").innerHTML = rows
+    .map(([c, k]) => `<li><span class="sw" style="background:${c.colour}"></span>${c.code ? `<b>${escape(c.code)}</b>` : ""}` +
+                     `<span class="mid"><span class="nm">${escape(c.label)}</span>` +
                      `<span class="bar" style="width:${((100 * k) / most).toFixed(1)}%"></span></span>` +
                      `<span class="n">${k.toLocaleString()} <span class="count">(${((100 * k) / n).toFixed(1)}%)</span></span></li>`)
     .join("");
 }
 
-// The level-1 habitat groups among the given plots, most plots first, as the
-// map legend shows them.
-function habitatGroups(r, plots) {
-  if (!r.eunis) return [];
-  const present = new Map();
-  for (const p of plots) {
-    const group = r.eunis.classes[r.eunis.value[p]][0];
-    present.set(group, (present.get(group) ?? 0) + 1);
+// ---------------------------------------------------------------------------
+// Map marks: the plots one by one, or summarised on the EEA reference grid
+// (geo.js) at a cell size chosen or set by the zoom.
+// ---------------------------------------------------------------------------
+
+const GRID_KM = [10, 50, 100];
+const CELL_EDGE = "#1a202c";
+const mapMode = () => document.querySelector('#resolve-app input[name="map-view"]:checked')?.value ?? "points";
+const tally = (counts, key, by) => counts.set(key, (counts.get(key) ?? 0) + by);
+
+// The map's scale at its centre, in metres per pixel.
+const metresPerPixel = () => 40075016.686 * Math.cos(map.getCenter().lat * Math.PI / 180) / (256 * 2 ** map.getZoom());
+
+// The cell size in kilometres: the one chosen, or the smallest whose cells
+// span at least 12 pixels at the map's centre.
+function gridKm() {
+  const chosen = $("grid-size").value;
+  if (chosen !== "auto") return Number(chosen);
+  return GRID_KM.find((km) => (1000 * km) / metresPerPixel() >= 12) ?? GRID_KM[GRID_KM.length - 1];
+}
+
+// The mean direction of angles in degrees, in [0, 360).
+function circularMean(degrees) {
+  let s = 0, c = 0;
+  for (const d of degrees) { s += Math.sin(d * Math.PI / 180); c += Math.cos(d * Math.PI / 180); }
+  return ((Math.atan2(s, c) * 180) / Math.PI + 360) % 360;
+}
+
+// The legend entries under the counted marks: habitat groups by plots,
+// numeric classes by value.
+function legendGroups(view, counts) {
+  if (!view) return [];
+  return view.byCount ? [...counts].sort((a, b) => b[1] - a[1]).map(([g]) => g)
+    : [...new Set(view.classes.map((c) => c.group))].filter((g) => counts.has(g));
+}
+
+// What the map draws of the located plots that `keep` accepts, in latitude
+// and longitude, with its legend: the groups shown and the keys to the marks.
+function mapMarks(r, view, coords, keep = () => true) {
+  const located = [];
+  coords.forEach(([la, lo], p) => { if (Number.isFinite(la) && Number.isFinite(lo) && keep(p)) located.push(p); });
+  return mapMode() === "grid" ? gridMarks(view, coords, located, gridKm()) : plotMarks(r, view, coords, located);
+}
+
+// One mark per plot in its class's colour: a dot, or a ring where the tables
+// record the value; the two are keyed only where both occur.
+function plotMarks(r, view, coords, located) {
+  const counts = new Map();
+  let rings = false, dots = false;
+  const marks = located.map((p) => {
+    const k = view ? view.classOf[p] : -1;
+    const ring = !!view?.recorded?.[p];
+    if (ring) rings = true; else dots = true;
+    if (k >= 0) tally(counts, view.classes[k].group, 1);
+    const tip = view?.tip(p);
+    return { kind: ring ? "ring" : "dot", at: coords[p], fill: k >= 0 ? view.classes[k].colour : NO_VALUE,
+             tip: `${r.plotIds[p]}${tip ? `: ${tip}` : ""}` };
+  });
+  const keys = rings ? [...(dots ? [{ shape: "dot", label: "imputed" }] : []), { shape: "ring", label: "recorded" }] : [];
+  return { marks, legend: { groups: legendGroups(view, counts), keys } };
+}
+
+// One mark per grid cell holding plots. A habitat cell takes the colour of
+// its most frequent level-1 group, paler the smaller that group's share; a
+// numeric cell the class of its plots' median value (their mean direction for
+// aspect), outlined where the tables record the value on at least half of its
+// plots. Outlined cells come last, so that no fill covers an outline.
+function gridMarks(view, coords, located, km) {
+  const cells = new Map();
+  for (const p of located) {
+    const [e, n] = eeaCell(coords[p][0], coords[p][1], km);
+    const code = eeaCellCode(e, n, km);
+    if (!cells.has(code)) cells.set(code, { e, n, plots: [] });
+    cells.get(code).plots.push(p);
   }
-  return [...present].sort((a, b) => b[1] - a[1])
-    .map(([group]) => ({ colour: colour(group), label: `${group} ${r.eunis.names[group] ?? ""}`.trim() }));
+  const counts = new Map();
+  let outlined = false, plain = false;
+  const marks = [...cells].map(([code, { e, n, plots }]) => {
+    const head = `${code}: ${plots.length.toLocaleString()} plot${plots.length === 1 ? "" : "s"}`;
+    const mark = { kind: "cell", outline: eeaCellOutline(e, n, km), fill: NO_VALUE, opacity: 0.75, recorded: false, tip: head };
+    const valued = view ? plots.filter((p) => view.classOf[p] >= 0) : [];
+    if (!valued.length) return mark;
+    let group;
+    if (view.kind === "class") {
+      const within = new Map();
+      for (const p of valued) tally(within, view.classes[view.classOf[p]].group, 1);
+      const [top, k] = [...within].sort((a, b) => b[1] - a[1])[0];
+      group = top;
+      Object.assign(mark, { fill: top.colour, opacity: 0.3 + (0.6 * k) / valued.length,
+                            tip: `${head}; ${Math.round((100 * k) / valued.length)}% ${top.label}` });
+    } else {
+      const values = valued.map((p) => view.value[p]);
+      const centre = view.circular ? circularMean(values) : quantile(values, 0.5);
+      group = view.classes[view.classify(centre)];
+      const recorded = view.recorded ? plots.filter((p) => view.recorded[p]).length : 0;
+      Object.assign(mark, {
+        fill: group.colour, recorded: !!view.recorded && 2 * recorded >= plots.length,
+        tip: `${head}${view.recorded ? `, ${recorded.toLocaleString()} recorded` : ""}; ` +
+             `${view.circular ? "mean direction" : "median"} ${view.text(centre)}`,
+      });
+      if (view.recorded) { if (mark.recorded) outlined = true; else plain = true; }
+    }
+    tally(counts, group, valued.length);
+    return mark;
+  }).sort((a, b) => a.recorded - b.recorded);
+  const keys = outlined ? [...(plain ? [{ shape: "cell", label: "most plots imputed" }] : []),
+                           { shape: "cell-recorded", label: "most plots recorded" }] : [];
+  return { marks, legend: { groups: legendGroups(view, counts), keys } };
 }
 
 // Per fitted target: how many gaps, which method filled them and its error on
@@ -1305,13 +1500,11 @@ function renderGaps(r) {
   box.hidden = !box.innerHTML;
 }
 
-// A habitat's colour is its level-1 group's, the first letter of its code.
-const PALETTE = { M: "#2b6cb0", N: "#d69e2e", P: "#3182ce", Q: "#2c7a7b", R: "#68a33f",
-                  S: "#b7791f", T: "#276749", U: "#a0aec0", V: "#c05621" };
-const colour = (c) => PALETTE[c?.[0]] ?? "#718096";
-
+// The plots on the map in the chosen variable's colours, one by one or on
+// the grid; `fit` zooms to them. On the grid with the cell size set by the
+// zoom, a zoom redraws the cells.
 let map = null, layer = null;
-function renderMap(r) {
+function renderMap(r, fit = true) {
   const coords = r.filledCoords ?? r.coords ?? r.predictedCoords;
   showPanel("map-panel", !!coords && !!window.L);
   if (!coords || !window.L) return;
@@ -1319,22 +1512,32 @@ function renderMap(r) {
     map = L.map("map", { preferCanvas: true });
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
                 { maxZoom: 18, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
+    map.on("zoomend", () => {
+      if (state.result && mapMode() === "grid" && $("grid-size").value === "auto") renderMap(state.result, false);
+    });
   }
+  const pts = coords.filter(([la, lo]) => Number.isFinite(la) && Number.isFinite(lo));
+  if (fit && pts.length) map.fitBounds(pts, { padding: [16, 16], maxZoom: 9 });
+  map.invalidateSize();
   layer?.remove();
   layer = L.layerGroup().addTo(map);
-  const pts = [];
-  coords.forEach(([la, lo], p) => {
-    if (!Number.isFinite(la) || !Number.isFinite(lo)) return;
-    const cls = r.eunis ? r.eunis.classes[r.eunis.value[p]] : null;
-    L.circleMarker([la, lo], { radius: 3, weight: 0, fillOpacity: 0.8, fillColor: cls ? colour(cls) : "#4a5568" })
-      .bindTooltip(`${r.plotIds[p]}${cls ? `: ${cls}` : ""}`).addTo(layer);
-    pts.push([la, lo]);
-  });
-  if (pts.length) map.fitBounds(pts, { padding: [16, 16], maxZoom: 9 });
-  map.invalidateSize();
-  const located = coords.flatMap(([la, lo], p) => (Number.isFinite(la) && Number.isFinite(lo) ? [p] : []));
-  $("legend").innerHTML = habitatGroups(r, located)
-    .map((l) => `<span><i style="background:${l.colour}"></i>${escape(l.label)}</span>`).join("");
+  const view = shownView(r);
+  const grid = mapMode() === "grid";
+  $("grid-size").hidden = !grid;
+  const { marks, legend } = mapMarks(r, view, coords);
+  for (const m of marks) {
+    const shape = m.kind === "cell"
+      ? L.polygon(m.outline, { fillColor: m.fill, fillOpacity: m.opacity, color: CELL_EDGE, opacity: 0.9, weight: m.recorded ? 1.5 : 0 })
+      : m.kind === "ring" ? L.circleMarker(m.at, { radius: 3, weight: 1.5, color: m.fill, opacity: 0.9, fill: false })
+      : L.circleMarker(m.at, { radius: 3, weight: 0, fillOpacity: 0.8, fillColor: m.fill });
+    shape.bindTooltip(m.tip).addTo(layer);
+  }
+  $("map").setAttribute("aria-label", `Map of the plots${grid ? ` on a ${gridKm()} km grid` : ""}${view ? `, coloured by ${view.label}` : ""}`);
+  $("legend").classList.toggle("grid", grid);
+  $("legend").innerHTML = [
+    ...legend.groups.map((l) => `<span><i style="background:${l.colour}"></i>${escape(l.label)}</span>`),
+    ...legend.keys.map((k) => `<span class="key"><i class="${k.shape}"></i>${escape(k.label)}</span>`),
+  ].join("");
   $("download-map").disabled = !pts.length;
 }
 
@@ -1384,10 +1587,19 @@ function outlinePaths(geojson, W, H) {
   return paths;
 }
 
-// The map as it is shown, as an SVG: the country outlines, the plots in their
-// habitat's colour and the legend. Plots on the same spot in the same colour
-// are drawn once, and each colour is one path of round dots, so the file stays
-// small with many plots.
+// The legend's symbol for a shape at height y: a dot, ring, grid cell or
+// outlined grid cell.
+function legendSymbol(shape, fill, y) {
+  if (shape === "ring") return `<circle cx="6" cy="${y}" r="3.5" fill="none" stroke="${fill}" stroke-width="1.5"/>`;
+  if (shape === "dot") return `<circle cx="6" cy="${y}" r="4" fill="${fill}"/>`;
+  const edge = shape === "cell-recorded" ? ` stroke="${CELL_EDGE}" stroke-width="1.5"` : "";
+  return `<rect x="1.5" y="${y - 4.5}" width="9" height="9" fill="${fill}" fill-opacity="0.75"${edge}/>`;
+}
+
+// The map as it is shown, as an SVG: the country outlines, the marks of the
+// plots in view in the shown variable's colours, and the legend. Marks with
+// the same style share one path and a spot is drawn once per style, so the
+// file stays small with many plots.
 async function downloadMap() {
   const r = state.result;
   if (!map || !r) return;
@@ -1395,24 +1607,37 @@ async function downloadMap() {
   button.disabled = true;
   try {
     const { x: W, y: H } = map.getSize();
-    const centre = map.getCenter();
-    const metresPerPixel = 40075016.686 * Math.cos(centre.lat * Math.PI / 180) / (256 * 2 ** map.getZoom());
-    const scale = GISCO_SCALES.find(([m]) => metresPerPixel >= m)[1];
+    const scale = GISCO_SCALES.find(([m]) => metresPerPixel() >= m)[1];
     const land = outlinePaths(await countryOutlines(scale), W, H);
     const coords = r.filledCoords ?? r.coords ?? r.predictedCoords;
-    const spots = new Map();
-    const inView = [];
-    coords.forEach(([la, lo], p) => {
-      if (!Number.isFinite(la) || !Number.isFinite(lo)) return;
-      const cls = r.eunis ? r.eunis.classes[r.eunis.value[p]] : null;
-      const fill = cls ? colour(cls) : "#4a5568";
-      const q = map.latLngToContainerPoint([la, lo]);
-      if (q.x < -4 || q.y < -4 || q.x > W + 4 || q.y > H + 4) return;
-      if (!spots.has(fill)) spots.set(fill, new Set());
-      spots.get(fill).add(`${q.x.toFixed(1)} ${q.y.toFixed(1)}`);
-      inView.push(p);
-    });
-    const items = habitatGroups(r, inView);
+    const view = shownView(r);
+    const inView = (p) => {
+      const q = map.latLngToContainerPoint(coords[p]);
+      return q.x >= -4 && q.y >= -4 && q.x <= W + 4 && q.y <= H + 4;
+    };
+    const { marks, legend } = mapMarks(r, view, coords, inView);
+    const styles = new Map();
+    const at = (latLon) => { const q = map.latLngToContainerPoint(latLon); return `${q.x.toFixed(1)} ${q.y.toFixed(1)}`; };
+    for (const m of marks) {
+      let style, d;
+      if (m.kind === "cell") {
+        style = `fill="${m.fill}" fill-opacity="${m.opacity.toFixed(2)}"` +
+                (m.recorded ? ` stroke="${CELL_EDGE}" stroke-width="1.5" stroke-opacity="0.9" stroke-linejoin="round"` : "");
+        d = `M${m.outline.map(at).join("L")}Z`;
+      } else if (m.kind === "ring") {
+        const q = map.latLngToContainerPoint(m.at);
+        style = `fill="none" stroke="${m.fill}" stroke-width="1.5" stroke-opacity="0.9"`;
+        d = `M${(q.x - 3).toFixed(1)} ${q.y.toFixed(1)}a3 3 0 1 0 6 0a3 3 0 1 0-6 0`;
+      } else {
+        style = `fill="none" stroke="${m.fill}" stroke-width="6" stroke-linecap="round" stroke-opacity="0.85"`;
+        d = `M${at(m.at)}h0`;
+      }
+      if (!styles.has(style)) styles.set(style, new Set());
+      styles.get(style).add(d);
+    }
+    const grid = mapMode() === "grid";
+    const items = [...legend.groups.map((g) => ({ label: g.label, colour: g.colour, shape: grid ? "cell" : "dot" })),
+                   ...legend.keys.map((k) => ({ label: k.label, colour: "#6b7178", shape: k.shape }))];
     const notice = "© EuroGeographics for the administrative boundaries";
     const total = H + 12 + 16 * (items.length + 1) + 6;
     const source = `Country boundaries: Eurostat GISCO, ${notice}`;
@@ -1424,11 +1649,11 @@ async function downloadMap() {
       `<g clip-path="url(#view)">`,
       `<rect width="${W}" height="${H}" fill="#e6edf2"/>`,
       `<g fill="#fbfbf8" stroke="#9aa4ad" stroke-width="0.6" stroke-linejoin="round" fill-rule="evenodd">${land.map((d) => `<path d="${d}"/>`).join("")}</g>`,
-      `<g fill="none" stroke-linecap="round" stroke-width="6">`,
-      ...[...spots].map(([fill, set]) => `<path stroke="${fill}" stroke-opacity="0.85" d="${[...set].map((p) => `M${p}h0`).join("")}"/>`),
-      "</g></g>",
+      ...[...styles].map(([style, set]) => `<path ${style} d="${[...set].join("")}"/>`),
+      "</g>",
       `<g transform="translate(0 ${H + 12})" font-size="11">`,
-      ...items.map((l, k) => `<circle cx="6" cy="${4 + 16 * k}" r="4" fill="${l.colour}"/><text x="16" y="${8 + 16 * k}" fill="#333">${escape(l.label)}</text>`),
+      ...items.map((l, k) => legendSymbol(l.shape, l.colour, 4 + 16 * k) +
+                             `<text x="16" y="${8 + 16 * k}" fill="#333">${escape(l.label)}</text>`),
       `<text x="0" y="${8 + 16 * items.length}" font-size="9" fill="#6b7178">${escape(source)}</text>`,
       "</g>",
       "</svg>",
@@ -1582,6 +1807,11 @@ async function start() {
   $("pager-next").addEventListener("click", () => showTablePage(tablePage.page + 1));
   $("pager-last").addEventListener("click", () => showTablePage(tablePageCount() - 1));
   $("download-map").addEventListener("click", () => downloadMap());
+  $("variable-prev").addEventListener("click", () => stepVariable(-1));
+  $("variable-next").addEventListener("click", () => stepVariable(1));
+  for (const control of document.querySelectorAll('#resolve-app input[name="map-view"], #grid-size')) {
+    control.addEventListener("change", () => { if (state.result) renderMap(state.result, false); });
+  }
   try {
     state.suites = JSON.parse(new TextDecoder().decode(await file("suites.json"))).suites;
   } catch (e) {

@@ -45,7 +45,7 @@ the relative band (\code{resolve_band_accuracy()}), or the share of exactly
 matching class codes (\code{resolve_accuracy()}).
 }
 \description{
-The engine's metric functions, computed over a vector of predictions and
+The RESOLVE engine's metric functions, computed over a vector of predictions and
 the matching vector of observed values. They are the metrics
 \code{\link[=resolve.train.dataset]{resolve.train.dataset()}} reports for each target, made available so a
 prediction scored elsewhere (a reloaded checkpoint, a held-out survey) can

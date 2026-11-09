@@ -23,7 +23,7 @@ This article covers the candidates gap fitting chooses among, how the choice is 
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```

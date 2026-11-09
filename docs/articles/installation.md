@@ -1,14 +1,15 @@
-# Installing the engine
+# Installing the RESOLVE engine
 
-RESOLVE is a C++ engine built on libtorch, the C++ library under
+The RESOLVE engine is written in C++ on libtorch, the C++ library under
 PyTorch. The R package `resolveR`, the Python package `resolve_core` and
-the `resolve` command line all call this one engine, so a model trained
-from one of them loads in the others.
+the `resolve` command line all call the RESOLVE engine, so a model
+trained from one of them loads in the others.
 
 This article covers installing each of them: the R package and the
-engine library it downloads, the GPU builds, the Python package and the
-torch it runs on, checking what is installed, building the engine from
-source, and the messages a failed installation prints.
+RESOLVE engine library it downloads, the GPU builds, the Python package
+and the torch it runs on, checking what is installed, building the
+RESOLVE engine from source, and the messages a failed installation
+prints.
 
 ## Installation
 
@@ -17,7 +18,7 @@ source, and the messages a failed installation prints.
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -35,8 +36,8 @@ alternatives to them.
 
 [`pak::pak()`](https://pak.r-lib.org/reference/pak.html) installs the
 package from its source on GitHub, so it compiles the package’s C++
-code, the thin client that calls the engine. That needs a C++17 compiler
-that R can use:
+code, the thin client that calls the RESOLVE engine. That needs a C++17
+compiler that R can use:
 
 | Platform | Build tools |
 |----|----|
@@ -44,13 +45,13 @@ that R can use:
 | macOS | The Xcode command line tools: `xcode-select --install` |
 | Linux | A C++ compiler and the R development headers, such as `r-base-dev` on Debian and Ubuntu |
 
-The package itself does not contain the engine and compiles without
-libtorch.
+The package itself does not contain the RESOLVE engine and compiles
+without libtorch.
 
-### The engine library
+### The RESOLVE engine library
 
-The engine reaches R as one shared library, `resolve_c`, with the
-libtorch libraries beside it.
+The RESOLVE engine reaches R as one shared library, `resolve_c`, with
+the libtorch libraries beside it.
 [`resolve.install_backend()`](https://gillescolling.com/resolve/reference/resolve.install_backend.md)
 downloads it from the release of the package’s version on GitHub and
 loads it. It is installed once, into the package’s directory for user
@@ -67,16 +68,16 @@ macOS on Apple Silicon.
 resolve.install_backend(force = TRUE)
 ```
 
-When the package loads without an engine library, it says so and names
-the call that installs one. Loading the package works either way; the
-functions that load data, train and impute stop with an error until the
-engine library is there.
+When the package loads without a RESOLVE engine library, it says so and
+names the call that installs one. Loading the package works either way;
+the functions that load data, train and impute stop with an error until
+the RESOLVE engine library is there.
 
 ### GPU builds
 
-The GPU builds run the engine on an NVIDIA graphics card through CUDA,
-NVIDIA’s GPU computing platform. They exist for Linux and Windows on
-x86-64; macOS has no CUDA.
+The GPU builds run the RESOLVE engine on an NVIDIA graphics card through
+CUDA, NVIDIA’s GPU computing platform. They exist for Linux and Windows
+on x86-64; macOS has no CUDA.
 
 | `variant` | Build |
 |----|----|
@@ -106,17 +107,17 @@ it prints a message that names the call installing the GPU build.
 Training then runs on the GPU when the training call asks for the `cuda`
 device (see [Training on a GPU](#training-on-a-gpu)).
 
-### An engine library from elsewhere
+### A RESOLVE engine library from elsewhere
 
 `url` installs from another location, such as a mirror, and takes the
 `.zip` file of the library and its runtime libraries; `dir` installs
 into another directory.
 
 The environment variable `RESOLVE_C_HOME` names a directory that already
-holds the library, with libtorch’s libraries beside it, for example an
-engine you built yourself (see [The engine library for
-R](#the-engine-library-for-r)). The package looks there first, then in
-the directory
+holds the library, with libtorch’s libraries beside it, for example a
+RESOLVE engine you built yourself (see [The RESOLVE engine library for
+R](#the-resolve-engine-library-for-r)). The package looks there first,
+then in the directory
 [`resolve.install_backend()`](https://gillescolling.com/resolve/reference/resolve.install_backend.md)
 installs into, and loads the first library it finds. It reads the
 variable when it loads, so set it before
@@ -127,9 +128,10 @@ in your `.Renviron` file:
 RESOLVE_C_HOME=/path/to/resolve/src/core/build
 ```
 
-The engine uses every CPU core by default. `RESOLVE_R_TORCH_THREADS`,
-set to a positive whole number before the package loads, limits it to
-that many threads, for example on a shared machine.
+The RESOLVE engine uses every CPU core by default.
+`RESOLVE_R_TORCH_THREADS`, set to a positive whole number before the
+package loads, limits it to that many threads, for example on a shared
+machine.
 
 ## The Python package
 
@@ -148,11 +150,11 @@ index, as the installation page on pytorch.org describes.
 ## Checking the installation
 
 [`resolve.available()`](https://gillescolling.com/resolve/reference/resolve.available.md)
-reports whether the engine library is loaded, and
+reports whether the RESOLVE engine library is loaded, and
 [`resolve.version()`](https://gillescolling.com/resolve/reference/resolve.version.md)
-asks the loaded engine for its version. In Python,
-`resolve_core.__version__` comes from the compiled engine too, so both
-report the version of the binary that runs, and
+asks the loaded RESOLVE engine for its version. In Python,
+`resolve_core.__version__` comes from the compiled RESOLVE engine too,
+so both report the version of the binary that runs, and
 `torch.cuda.is_available()` says whether torch sees a GPU.
 
 ``` r
@@ -231,13 +233,13 @@ pip install . --no-build-isolation
 
 ### The CUDA kernels
 
-Training on a GPU needs only a CUDA build of libtorch: the engine then
-runs through torch’s own CUDA operations. The engine also has CUDA
-kernels of its own, for hashing species on the GPU during training
-(`use_cuda_hash`), and the GPU memory cap (`vram_fraction`) takes effect
-only in a build that has them. The wheels and the CPU builds of the R
-engine library are built without them; the GPU builds of the R engine
-library are compiled with them.
+Training on a GPU needs only a CUDA build of libtorch: the RESOLVE
+engine then runs through torch’s own CUDA operations. The RESOLVE engine
+also has CUDA kernels of its own, for hashing species on the GPU during
+training (`use_cuda_hash`), and the GPU memory cap (`vram_fraction`)
+takes effect only in a build that has them. The wheels and the CPU
+builds of the RESOLVE engine library for R are built without them; the
+GPU builds of the RESOLVE engine library for R are compiled with them.
 
 A build with `USE_CUDA` on compiles the kernels with nvcc, the compiler
 of the CUDA toolkit, which therefore has to be installed:
@@ -263,8 +265,9 @@ and the build continues without them.
 ### The command line
 
 The `resolve` executable is built by the CMake project in `src/core`,
-which also builds the engine library for R. Here it takes libtorch from
-the installed torch package and leaves the CUDA kernels out:
+which also builds the RESOLVE engine library for R. Here it takes
+libtorch from the installed torch package and leaves the CUDA kernels
+out:
 
 ``` bash
 torch_cmake=$(python -c "import torch; print(torch.utils.cmake_prefix_path)")
@@ -295,19 +298,20 @@ export LD_LIBRARY_PATH=/path/to/torch/lib:$LD_LIBRARY_PATH
 line](https://gillescolling.com/resolve/articles/command-line.md) covers
 its commands.
 
-### The engine library for R
+### The RESOLVE engine library for R
 
 The same CMake build writes the `resolve_c` library into the build
 directory; on Windows it also copies libtorch’s libraries beside it.
-Point `RESOLVE_C_HOME` at that directory to load it in R (see [An engine
-library from elsewhere](#an-engine-library-from-elsewhere)).
+Point `RESOLVE_C_HOME` at that directory to load it in R (see [A RESOLVE
+engine library from
+elsewhere](#a-resolve-engine-library-from-elsewhere)).
 
 ## When the installation fails
 
 These are the messages the packages print when a step fails, with what
 to do about each.
 
-- Without an engine library,
+- Without a RESOLVE engine library,
   [`library(resolveR)`](https://gillescolling.com/resolve/) prints that
   the backend is not installed, and the functions that load data, train
   or impute stop with the same message. Run

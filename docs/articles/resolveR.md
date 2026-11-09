@@ -17,7 +17,7 @@ imputes plots it did not train on, and imputing new plots.
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -26,7 +26,7 @@ resolve.install_backend()
 pip install resolve-core
 ```
 
-[Installing the
+[Installing the RESOLVE
 engine](https://gillescolling.com/resolve/articles/installation.md)
 covers the GPU build, building from source and the command line.
 
@@ -154,7 +154,7 @@ held-out plots and the order the training plots are drawn in, and
 (`rc.manual_seed()` in Python) fixes the starting weights, so the same
 run on the same machine ends at the same numbers. The R and the Python
 run here still end at slightly different numbers, since each reaches the
-engine through its own torch build.
+RESOLVE engine through its own torch build.
 
 ## Imputing new plots
 

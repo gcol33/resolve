@@ -75,7 +75,7 @@
     <li><a class="dropdown-item" href="../articles/command-line.html">The command line</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
-    <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
+    <li><a class="dropdown-item" href="../articles/installation.html">Installing the RESOLVE engine</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -209,18 +209,22 @@ from Eurostat GISCO.</p>
 </div>
       </div>
 
-      <div class="card mt-3">
-        <div class="card-body">
-          <p class="card-title h5">Summary</p>
-          <div class="tablewrap"><table class="table table table-sm mb-0" id="overview"></table></div>
-        </div>
-      </div>
-
       <div class="row g-3 mt-0">
         <div class="col-lg-7" id="map-panel"><div class="card h-100">
           <div class="card-body">
-            <p class="card-title h5">Plots</p>
-            <div id="map" role="region" aria-label="Map of the plots coloured by habitat"></div>
+            <div class="tablehead">
+              <p class="card-title h5 mb-0">Plots</p>
+              <div class="map-controls">
+                <select class="form-select form-select-sm" id="grid-size" aria-label="Grid cell size" hidden><option value="auto" selected>Cells by zoom</option>
+<option value="10">10 km cells</option>
+<option value="50">50 km cells</option>
+<option value="100">100 km cells</option></select><div class="btn-group btn-group-sm" role="group" aria-label="Map view">
+                  <input type="radio" class="btn-check" name="map-view" id="map-view-points" value="points" autocomplete="off" checked><label class="btn btn-outline-secondary" for="map-view-points">Points</label>
+                  <input type="radio" class="btn-check" name="map-view" id="map-view-grid" value="grid" autocomplete="off"><label class="btn btn-outline-secondary" for="map-view-grid">Grid</label>
+                </div>
+              </div>
+            </div>
+            <div id="map" role="region" aria-label="Map of the plots"></div>
             <div class="legend" id="legend"></div>
             <div class="actions">
               <button type="button" class="btn btn-outline-primary btn-sm" id="download-map" disabled>Download map (SVG)</button>
@@ -228,9 +232,15 @@ from Eurostat GISCO.</p>
           </div>
         </div></div>
 
-        <div class="col-lg-5" id="habitat-panel"><div class="card h-100">
+        <div class="col-lg-5" id="variable-panel"><div class="card h-100">
           <div class="card-body">
-            <p class="card-title h5">Habitats</p>
+            <div class="tablehead">
+              <p class="card-title h5 mb-0" id="variable-title" aria-live="polite"></p>
+              <div class="btn-group btn-group-sm" id="variable-step" hidden>
+                <button type="button" class="btn btn-outline-secondary" id="variable-prev" aria-label="Previous variable">‹</button>
+                <button type="button" class="btn btn-outline-secondary" id="variable-next" aria-label="Next variable">›</button>
+              </div>
+            </div>
             <ul class="types" id="summary"></ul>
 </div>
         </div></div>

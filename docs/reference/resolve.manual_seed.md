@@ -1,12 +1,12 @@
 # Seed the Engine's Random Numbers
 
-Seed the random number generators of the engine's torch, which draw a
-new model's starting weights and its dropout. Training holds out its
-plots and shuffles them by its own `seed` argument, so a model built and
-trained after the same `resolve.manual_seed()`, with the same data,
-settings, device and engine build, ends at the same weights and metrics.
-R's [`set.seed()`](https://rdrr.io/r/base/Random.html) does not reach
-the engine.
+Seed the random number generators of the RESOLVE engine's torch, which
+draw a new model's starting weights and its dropout. Training holds out
+its plots and shuffles them by its own `seed` argument, so a model built
+and trained after the same `resolve.manual_seed()`, with the same data,
+settings, device and RESOLVE engine build, ends at the same weights and
+metrics. R's [`set.seed()`](https://rdrr.io/r/base/Random.html) does not
+reach the RESOLVE engine.
 
 ## Usage
 

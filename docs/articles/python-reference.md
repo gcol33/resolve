@@ -15,7 +15,7 @@ runs them on the survey that ships with the R package.
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -27,7 +27,7 @@ pip install resolve-core
 ## [Loading data](https://gillescolling.com/resolve/articles/python-data.md)
 
 Plots and the species records observed in them, from CSV files or data
-frames, into an engine dataset.
+frames, into a RESOLVE engine dataset.
 
 - [`RoleMapping`](https://gillescolling.com/resolve/articles/python-data.html#RoleMapping):
   Names the columns of the two tables by the part they play in a
@@ -418,25 +418,26 @@ The metrics training reports, for values imputed anywhere.
 - [`UnknownSpeciesStats`](https://gillescolling.com/resolve/articles/python-scoring.html#UnknownSpeciesStats):
   Each plot’s unknown share of abundance and number of unknown species.
 
-## [The engine](https://gillescolling.com/resolve/articles/python-engine.md)
+## [The RESOLVE engine](https://gillescolling.com/resolve/articles/python-engine.md)
 
-The engine loaded, its memory and thread settings, its errors, and the
-index that matches names within a few edits.
+The RESOLVE engine loaded, its memory and thread settings, its errors,
+and the index that matches names within a few edits.
 
 - [`__version__`](https://gillescolling.com/resolve/articles/python-engine.html#__version__):
-  The version of the engine loaded.
+  The version of the RESOLVE engine loaded.
 - [`set_vram_fraction()`](https://gillescolling.com/resolve/articles/python-engine.html#set_vram_fraction):
-  Caps the share of GPU memory the engine may use.
+  Caps the share of GPU memory the RESOLVE engine may use.
 - [`configure_cuda_allocator()`](https://gillescolling.com/resolve/articles/python-engine.html#configure_cuda_allocator):
-  Sets the CUDA allocator’s configuration to the engine’s default.
+  Sets the CUDA allocator’s configuration to the RESOLVE engine’s
+  default.
 - [`default_cuda_alloc_conf()`](https://gillescolling.com/resolve/articles/python-engine.html#default_cuda_alloc_conf):
-  The engine’s default CUDA allocator configuration.
+  The RESOLVE engine’s default CUDA allocator configuration.
 - [`set_thread_pools()`](https://gillescolling.com/resolve/articles/python-engine.html#set_thread_pools):
   Sets the number of threads libtorch uses.
 - [`install_crash_handler()`](https://gillescolling.com/resolve/articles/python-engine.html#install_crash_handler):
   Makes a native fault end the process at once on Windows.
 - [`StorageError`](https://gillescolling.com/resolve/articles/python-engine.html#StorageError):
-  The exception for a file the engine cannot read or write.
+  The exception for a file the RESOLVE engine cannot read or write.
 - [`fuzzy`](https://gillescolling.com/resolve/articles/python-engine.html#fuzzy):
   The submodule of the name index.
 - [`fuzzy.FuzzyIndex`](https://gillescolling.com/resolve/articles/python-engine.html#fuzzy.FuzzyIndex):

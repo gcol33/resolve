@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Python: the engine • RESOLVE</title>
+<title>Python: the RESOLVE engine • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="../favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
@@ -16,7 +16,7 @@
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><link href="../extra.css" rel="stylesheet">
-<script src="../extra.js"></script><meta property="og:title" content="Python: the engine">
+<script src="../extra.js"></script><meta property="og:title" content="Python: the RESOLVE engine">
 <script>
 (function () {
   var D = String.fromCharCode(36);
@@ -75,7 +75,7 @@
     <li><a class="dropdown-item" href="../articles/command-line.html">The command line</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
-    <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
+    <li><a class="dropdown-item" href="../articles/installation.html">Installing the RESOLVE engine</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -106,7 +106,7 @@
 
 <div class="row">
   <main id="main" class="col-md-9"><div class="page-header">
-      <img src="../logo.svg" class="logo" alt=""><h1>Python: the engine</h1>
+      <img src="../logo.svg" class="logo" alt=""><h1>Python: the RESOLVE engine</h1>
             
       
       <small class="dont-index">Source: <a href="https://github.com/gcol33/resolve/blob/HEAD/vignettes/articles/python-engine.Rmd" class="external-link"><code>vignettes/articles/python-engine.Rmd</code></a></small>
@@ -116,9 +116,10 @@
     
     
 <!-- Python blocks run by tools/python_twins.py (md5 cf36e5edb179b48e2b180eb9df889249). -->
-<p>The engine loaded, the GPU memory and thread settings, how a native
-fault and a storage failure surface, and the index that matches names
-within a few edits, such as species names with spelling variants.</p>
+<p>The RESOLVE engine loaded, the GPU memory and thread settings, how a
+native fault and a storage failure surface, and the index that matches
+names within a few edits, such as species names with spelling
+variants.</p>
 <p><a href="python-reference.html">All of the Python reference</a></p>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
@@ -128,20 +129,20 @@ within a few edits, such as species names with spelling variants.</p>
 <code class="sourceCode R"><span><span class="co"># install.packages("pak")</span></span>
 <span><span class="fu">pak</span><span class="fu">::</span><span class="fu"><a href="https://pak.r-lib.org/reference/pak.html" class="external-link">pak</a></span><span class="op">(</span><span class="st">"gcol33/resolve/r"</span><span class="op">)</span></span>
 <span></span>
-<span><span class="co"># The engine library, downloaded once</span></span>
+<span><span class="co"># The RESOLVE engine library, downloaded once</span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://gillescolling.com/resolve/">resolveR</a></span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/resolve.install_backend.html">resolve.install_backend</a></span><span class="op">(</span><span class="op">)</span></span></code></pre></div>
 <div class="sourceCode" id="cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="ex">pip</span> install resolve-core</span></code></pre></div>
 </div>
-<p><a href="installation.html">Installing the engine</a> covers the GPU
-build and building from source; <a href="performance.html">Large data
-and GPUs</a> the memory settings in use.</p>
+<p><a href="installation.html">Installing the RESOLVE engine</a> covers
+the GPU build and building from source; <a href="performance.html">Large
+data and GPUs</a> the memory settings in use.</p>
 </div>
 <div class="section level2">
 <h2 id="id___version__">
 <code>__version__</code><a class="anchor" aria-label="anchor" href="#id___version__"></a>
 </h2>
-<p>The version of the engine loaded, read from the compiled
+<p>The version of the RESOLVE engine loaded, read from the compiled
 extension.</p>
 <div class="sourceCode" id="cb3"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="im">import</span> resolve_core <span class="im">as</span> rc</span>
 <span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a></span>
@@ -167,8 +168,8 @@ CUDA device it does nothing. The <code>vram_fraction</code> settings of
 <div class="sourceCode" id="cb6"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>configure_cuda_allocator(force<span class="op">=</span><span class="va">False</span>)</span></code></pre></div>
 <p>Sets the environment variable <code>PYTORCH_CUDA_ALLOC_CONF</code>,
 which the CUDA allocator reads at the first allocation on a GPU, to the
-engine’s default and returns the setting in effect. A value already set
-is kept unless <code>force</code> is true. Importing
+RESOLVE engine’s default and returns the setting in effect. A value
+already set is kept unless <code>force</code> is true. Importing
 <code>resolve_core</code> calls it, so it takes effect for any process
 that has not yet used the GPU.</p>
 <div class="sourceCode" id="cb7"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a>rc.configure_cuda_allocator()</span></code></pre></div>
@@ -178,8 +179,8 @@ that has not yet used the GPU.</p>
 <code>default_cuda_alloc_conf()</code><a class="anchor" aria-label="anchor" href="#default_cuda_alloc_conf"></a>
 </h2>
 <div class="sourceCode" id="cb8"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a>default_cuda_alloc_conf()</span></code></pre></div>
-<p>The engine’s default <code>PYTORCH_CUDA_ALLOC_CONF</code>: unused
-cached blocks are released once use passes 0.8 of the memory the
+<p>The RESOLVE engine’s default <code>PYTORCH_CUDA_ALLOC_CONF</code>:
+unused cached blocks are released once use passes 0.8 of the memory the
 allocator may take, and blocks above 256 MB are not split, which keep
 the fragmentation of Windows’ display driver model in check, with
 expandable segments added on other systems.</p>
@@ -214,14 +215,15 @@ updates <code>shutdown_exit_code</code>.</p>
 <h2 id="StorageError">
 <code>StorageError</code><a class="anchor" aria-label="anchor" href="#StorageError"></a>
 </h2>
-<p>The exception for a file the engine cannot read or write: a
+<p>The exception for a file the RESOLVE engine cannot read or write: a
 checkpoint <code>Predictor.load</code> or <code>Trainer.load</code>
 cannot open, a failed <code>Trainer.save</code>, a CSV file that cannot
-be opened. It is a subclass of <code>OSError</code>. The engine retries
-such I/O a few times before raising, with a backoff that doubles each
-try; the environment variables <code>RESOLVE_IO_RETRY_ATTEMPTS</code>
-(total tries, default 3) and <code>RESOLVE_IO_RETRY_BACKOFF_MS</code>
-(the first wait, default 100) set them.</p>
+be opened. It is a subclass of <code>OSError</code>. The RESOLVE engine
+retries such I/O a few times before raising, with a backoff that doubles
+each try; the environment variables
+<code>RESOLVE_IO_RETRY_ATTEMPTS</code> (total tries, default 3) and
+<code>RESOLVE_IO_RETRY_BACKOFF_MS</code> (the first wait, default 100)
+set them.</p>
 <div class="sourceCode" id="cb13"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb13-1"><a href="#cb13-1" tabindex="-1"></a><span class="im">import</span> os</span>
 <span id="cb13-2"><a href="#cb13-2" tabindex="-1"></a><span class="im">import</span> tempfile</span>
 <span id="cb13-3"><a href="#cb13-3" tabindex="-1"></a></span>

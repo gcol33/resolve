@@ -13,12 +13,12 @@ resolve.manual_seed(seed)
 No return value.
 }
 \description{
-Seed the random number generators of the engine's torch, which draw a new
+Seed the random number generators of the RESOLVE engine's torch, which draw a new
 model's starting weights and its dropout. Training holds out its plots and
 shuffles them by its own \code{seed} argument, so a model built and trained after
 the same \code{resolve.manual_seed()}, with the same data, settings, device and
-engine build, ends at the same weights and metrics. R's \code{\link[=set.seed]{set.seed()}} does not
-reach the engine.
+RESOLVE engine build, ends at the same weights and metrics. R's \code{\link[=set.seed]{set.seed()}} does not
+reach the RESOLVE engine.
 }
 \examples{
 \dontshow{if (resolveR::resolve.available()) withAutoprint(\{ # examplesIf}

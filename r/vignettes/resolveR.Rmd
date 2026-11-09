@@ -10,7 +10,7 @@ vignette: >
 <!-- Python blocks run by tools/python_twins.py (md5 be737b29addfdf0e7c190110ae4a67fe). -->
 
 ```{r setup, include = FALSE}
-# The code needs the engine library, which a CRAN check does not have: the chunks run when the
+# The code needs the RESOLVE engine library, which a CRAN check does not have: the chunks run when the
 # site is built (build_site.R) and are shown, not run, everywhere else.
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>",
                       eval = nzchar(Sys.getenv("RESOLVE_DOCS_CACHE")))
@@ -31,7 +31,7 @@ This article runs the whole path on a small survey that ships with the R package
 # install.packages("pak")
 pak::pak("gcol33/resolve/r")
 
-# The engine library, downloaded once
+# The RESOLVE engine library, downloaded once
 library(resolveR)
 resolve.install_backend()
 ```
@@ -41,7 +41,7 @@ pip install resolve-core
 ```
 :::
 
-[Installing the engine](installation.html) covers the GPU build, building from source and the command line.
+[Installing the RESOLVE engine](installation.html) covers the GPU build, building from source and the command line.
 
 ## Two tables
 
@@ -138,7 +138,7 @@ round(metrics["habitat"]["accuracy"], 3)
 ```
 :::
 
-For elevation, `mae` and `rmse` are in metres, `r2` is the share of the variance the imputed values explain, and `band_25` is the share of plots imputed within 25 % of their elevation; `band_10` and `band_50` give the same at 10 and 50 %. For habitat, `accuracy` is the share of plots assigned their recorded habitat, and the per-class precision, recall and F1 scores sit beside it in the same list. Training's own seed fixes the held-out plots and the order the training plots are drawn in, and `resolve.manual_seed()` (`rc.manual_seed()` in Python) fixes the starting weights, so the same run on the same machine ends at the same numbers. The R and the Python run here still end at slightly different numbers, since each reaches the engine through its own torch build.
+For elevation, `mae` and `rmse` are in metres, `r2` is the share of the variance the imputed values explain, and `band_25` is the share of plots imputed within 25 % of their elevation; `band_10` and `band_50` give the same at 10 and 50 %. For habitat, `accuracy` is the share of plots assigned their recorded habitat, and the per-class precision, recall and F1 scores sit beside it in the same list. Training's own seed fixes the held-out plots and the order the training plots are drawn in, and `resolve.manual_seed()` (`rc.manual_seed()` in Python) fixes the starting weights, so the same run on the same machine ends at the same numbers. The R and the Python run here still end at slightly different numbers, since each reaches the RESOLVE engine through its own torch build.
 
 ## Imputing new plots
 

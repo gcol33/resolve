@@ -3,7 +3,7 @@
 ## Loading data
 
 Plots and the species records observed in them, from CSV files or data
-frames, into an engine dataset.
+frames, into a RESOLVE engine dataset.
 
 - [`resolve.dataset.csv()`](https://gillescolling.com/resolve/reference/resolve.dataset.csv.md)
   : Load a Dataset From CSV Files
@@ -119,10 +119,10 @@ list of names within a few edits of a query.
 - [`resolve.fuzzy_match()`](https://gillescolling.com/resolve/reference/resolve.fuzzy_match.md)
   : Match Strings Against a Fuzzy Index
 
-## The engine
+## The RESOLVE engine
 
-Installing the engine library, checking which one is loaded, seeding its
-random numbers, and the GPU memory settings.
+Installing the RESOLVE engine library, checking which one is loaded,
+seeding its random numbers, and the GPU memory settings.
 
 - [`resolve.install_backend()`](https://gillescolling.com/resolve/reference/resolve.install_backend.md)
   : Download and install the resolve_c backend
