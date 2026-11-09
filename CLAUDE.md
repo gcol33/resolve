@@ -86,6 +86,18 @@ The research paper using RESOLVE spans two repos:
 Read `resolve-2026/PROVENANCE.md` before quoting any manuscript number. The J:
 drive the paper used to live on is retired.
 
+## Terms and ecological language (docs, README, app, help pages)
+
+Write in the vocabulary of vegetation ecology and of the paper, never a plain-language paraphrase of a standard term. A paraphrase ("which species grow at a site and how much ground each covers") reads as AI-written to an ecologist.
+
+- **impute**, never "predict", "fill in" or "read from", for what RESOLVE does with missing values. Function names (`resolve.predict.dataset()`) stay as they are.
+- **metadata** for the seven targets, grouped as in the paper: habitat (EUNIS), site metadata (altitude, slope, aspect), survey metadata (plot area, survey year) and location. Name all seven when listing them, never a subset.
+- **species composition** and **cover-abundance** (or **cover**), never "species list with amounts" in ecological text. The general-sample sentence (any list of names with an amount) is the one place outside ecology.
+- **vegetation plot** / **plot**, never "relevé" or "survey" for the plot itself; **plot area**, never "relevé area"; **contributing databases** for EVA's sources; **European Vegetation Archive (EVA)**.
+- Take the wording from `paper_resolve_2026/abstract.md` and `introduction.md` before inventing one; the tagline is *Imputing metadata of vegetation surveys*.
+
+Why: 2026-11-09 the README tagline listed three of seven targets, used "read from its species list", and paraphrased cover as "how much ground each covers"; the user asked for the paper's terms throughout.
+
 ## Key Directories
 
 - src/core/ - C++ libtorch engine

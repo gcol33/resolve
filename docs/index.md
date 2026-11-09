@@ -3,28 +3,32 @@
 *Imputing metadata of vegetation surveys*
 
 ![Species and cover of held-out example plot A139 pooled into one latent
-vector, read out as elevation (predicted 713 m, observed 679 m; R
-squared 0.85 over 30 held-out plots) and habitat (observed forest,
-probability 0.89)](reference/figures/resolve-hero.svg)
+vector, read out as elevation (imputed 713 m, observed 679 m; R squared
+0.85 over 30 held-out plots) and habitat (observed forest, probability
+0.89)](reference/figures/resolve-hero.svg)
 
-RESOLVE predicts properties of a vegetation plot from the species
-recorded in it: the plot’s area, elevation, slope, aspect, survey year,
-location or habitat type, from the species list and, where recorded, the
-cover of each species. The same model works for any sample recorded as a
-list of names with an amount for each, such as the insects caught in a
-trap or the birds counted at a site.
+Vegetation plots record species composition and the cover-abundance of
+each species, but gaps in their metadata limit their use: in the
+European Vegetation Archive (EVA), only 13% of plots record all of plot
+area, altitude, slope, aspect, survey year, location and EUNIS habitat.
+Species composition reflects site conditions and how a plot was
+surveyed, so the released RESOLVE models, trained on 1.94 million
+European vegetation plots from EVA, impute the missing values from
+composition alone or together with coordinates and survey date. The same
+model fits any sample recorded as a list of names with an amount for
+each, such as the insects caught in a trap or the birds counted at a
+site.
 
-A species list has no fixed length, so the model pools the species of a
-plot, each weighted by its cover, into one vector and reads every target
-off that vector. Elevation (a regression) and habitat (a classification)
-are then fitted by one model. Training holds out a share of the plots
-and reports each target’s error on them, which is how you compare
-encodings and inputs on your own data before deciding which model to
-keep.
+A plot can hold any number of species, so the model pools them, each
+weighted by its cover, into one vector and imputes every variable from
+it: continuous ones such as altitude and categorical ones such as
+habitat, in one model. Training withholds part of the plots and reports
+each variable’s error on them, so you can compare encodings and inputs
+on your own data before choosing a model.
 
 RESOLVE lets you:
 
-- **Predict several targets from one encoder.** Regression and
+- **Impute several targets from one encoder.** Regression and
   classification targets share the pooled vector. A target labelled on
   part of the plots can be masked where the label is missing, and those
   plots still train the other targets.
@@ -38,7 +42,7 @@ RESOLVE lets you:
 - **Pretrain without labels.** Self-supervised tasks fit the encoder on
   species lists alone before the supervised fit.
 - **Score with several models at once.** A suite of trained models
-  reports, per plot, the combined prediction and how far its members
+  reports, per plot, the combined imputed value and how far its members
   agree.
 - **Use R, Python or the command line.** The engine is a C++ library on
   libtorch, the C++ core of [PyTorch](https://pytorch.org/). The R
@@ -58,7 +62,7 @@ versions.
 
 The [RESOLVE App](https://gillescolling.com/resolve/articles/app.html)
 runs the released models in your browser, without installing anything.
-It predicts the EUNIS habitat, altitude, slope, plot area, survey year
+It imputes the EUNIS habitat, altitude, slope, plot area, survey year
 and location of the example plots or of your own tables, and maps the
 plots.
 
@@ -157,7 +161,7 @@ engine](https://gillescolling.com/resolve/articles/installation.html).
     [`resolve.save()`](https://gillescolling.com/resolve/reference/resolve.save.md),
     then load it with
     [`resolve.load()`](https://gillescolling.com/resolve/reference/resolve.load.md)
-    and predict with
+    and impute with
     [`resolve.predict.dataset()`](https://gillescolling.com/resolve/reference/resolve.predict.dataset.md).
 
 This example uses the survey that ships with the package: 150 plots in
@@ -265,14 +269,15 @@ mixed precision and the memory settings are in [Large data and
 GPUs](https://gillescolling.com/resolve/articles/performance.html). [The
 command
 line](https://gillescolling.com/resolve/articles/command-line.html)
-trains and predicts with no R or Python installed.
+trains and imputes with no R or Python installed.
 
 ## Documentation
 
-Start with [Predicting plot attributes from species
+Start with [Imputing plot attributes from species
 lists](https://gillescolling.com/resolve/articles/resolveR.html): one
-path from two tables to a trained model and its predictions. Every code
-block on the site has an R and a Python version; the [Python view of Get
+path from two tables to a trained model and its imputed values. Every
+code block on the site has an R and a Python version; the [Python view
+of Get
 started](https://gillescolling.com/resolve/articles/resolveR.html?lang=python)
 opens with Python selected.
 
@@ -286,7 +291,7 @@ opens with Python selected.
   fit](https://gillescolling.com/resolve/articles/training.html):
   training settings, the held-out fold, cross-validation and
   checkpoints.
-- [Predicting new
+- [Imputing new
   plots](https://gillescolling.com/resolve/articles/prediction.html):
   output formats, class probabilities, new species and model suites.
 - [Latent and species

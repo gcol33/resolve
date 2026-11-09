@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>RESOLVE: Predicting Sample Attributes from the Species Observed in Them • resolveR</title>
+<title>RESOLVE: Imputing Sample Attributes from the Species Observed in Them • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
@@ -16,7 +16,7 @@
 <script src="deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="deps/headroom-0.11.0/headroom.min.js"></script><script src="deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="deps/search-1.0.0/fuse.min.js"></script><script src="deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="pkgdown.js"></script><link href="extra.css" rel="stylesheet">
-<script src="extra.js"></script><meta property="og:title" content="RESOLVE: Predicting Sample Attributes from the Species Observed in Them">
+<script src="extra.js"></script><meta property="og:title" content="RESOLVE: Imputing Sample Attributes from the Species Observed in Them">
 <meta name="description" content="Learns one representation of each sample's species composition and reads several attributes off it at once, such as the area, elevation and habitat of a vegetation plot. In R, Python and on the command line over one C++ engine on libtorch.
 ">
 <meta property="og:description" content="Learns one representation of each sample's species composition and reads several attributes off it at once, such as the area, elevation and habitat of a vegetation plot. In R, Python and on the command line over one C++ engine on libtorch.
@@ -43,7 +43,7 @@
 
     <nav class="navbar navbar-expand-lg fixed-top " aria-label="Site navigation"><div class="container">
 
-    <a class="navbar-brand me-2" href="index.html">resolveR</a>
+    <a class="navbar-brand me-2" href="index.html">RESOLVE</a>
 
     <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
@@ -65,12 +65,11 @@
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
+<li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
     <li><a class="dropdown-item" href="articles/data-preparation.html">Preparing the two tables</a></li>
     <li><a class="dropdown-item" href="articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="articles/training.html">Training and reading the fit</a></li>
-    <li><a class="dropdown-item" href="articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="articles/prediction.html">Imputing new plots</a></li>
     <li><a class="dropdown-item" href="articles/gap-fitting.html">Filling a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="articles/embeddings.html">Latent and species embeddings</a></li>
@@ -81,18 +80,6 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
     <li><a class="dropdown-item" href="articles/installation.html">Installing the engine</a></li>
-    <li><a class="dropdown-item" href="articles/python-reference.html">Python reference</a></li>
-    <li><a class="dropdown-item" href="articles/python-data.html">Python: loading data</a></li>
-    <li><a class="dropdown-item" href="articles/python-training.html">Python: training</a></li>
-    <li><a class="dropdown-item" href="articles/python-prediction.html">Python: saving and predicting</a></li>
-    <li><a class="dropdown-item" href="articles/python-suites.html">Python: model suites</a></li>
-    <li><a class="dropdown-item" href="articles/python-gap-fitting.html">Python: gap fitting</a></li>
-    <li><a class="dropdown-item" href="articles/python-terrain-correction.html">Python: terrain correction</a></li>
-    <li><a class="dropdown-item" href="articles/python-names.html">Python: species names</a></li>
-    <li><a class="dropdown-item" href="articles/python-scoring.html">Python: scoring</a></li>
-    <li><a class="dropdown-item" href="articles/python-engine.html">Python: the engine</a></li>
-    <li><hr class="dropdown-divider"></li>
-    <li><a class="dropdown-item" href="articles/index.html">More articles...</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="news/index.html">Changelog</a></li>
@@ -127,13 +114,13 @@
 <!-- badges: start -->
 
 <p align="center">
-<img src="reference/figures/resolve-hero.svg" alt="Species and cover of held-out example plot A139 pooled into one latent vector, read out as elevation (predicted 713 m, observed 679 m; R squared 0.85 over 30 held-out plots) and habitat (observed forest, probability 0.89)" width="100%"></p>
-<p>RESOLVE predicts properties of a vegetation plot from the species recorded in it: the plot’s area, elevation, slope, aspect, survey year, location or habitat type, from the species list and, where recorded, the cover of each species. The same model works for any sample recorded as a list of names with an amount for each, such as the insects caught in a trap or the birds counted at a site.</p>
-<p>A species list has no fixed length, so the model pools the species of a plot, each weighted by its cover, into one vector and reads every target off that vector. Elevation (a regression) and habitat (a classification) are then fitted by one model. Training holds out a share of the plots and reports each target’s error on them, which is how you compare encodings and inputs on your own data before deciding which model to keep.</p>
+<img src="reference/figures/resolve-hero.svg" alt="Species and cover of held-out example plot A139 pooled into one latent vector, read out as elevation (imputed 713 m, observed 679 m; R squared 0.85 over 30 held-out plots) and habitat (observed forest, probability 0.89)" width="100%"></p>
+<p>Vegetation plots record species composition and the cover-abundance of each species, but gaps in their metadata limit their use: in the European Vegetation Archive (EVA), only 13% of plots record all of plot area, altitude, slope, aspect, survey year, location and EUNIS habitat. Species composition reflects site conditions and how a plot was surveyed, so the released RESOLVE models, trained on 1.94 million European vegetation plots from EVA, impute the missing values from composition alone or together with coordinates and survey date. The same model fits any sample recorded as a list of names with an amount for each, such as the insects caught in a trap or the birds counted at a site.</p>
+<p>A plot can hold any number of species, so the model pools them, each weighted by its cover, into one vector and imputes every variable from it: continuous ones such as altitude and categorical ones such as habitat, in one model. Training withholds part of the plots and reports each variable’s error on them, so you can compare encodings and inputs on your own data before choosing a model.</p>
 <p>RESOLVE lets you:</p>
 <ul>
 <li>
-<strong>Predict several targets from one encoder.</strong> Regression and classification targets share the pooled vector. A target labelled on part of the plots can be masked where the label is missing, and those plots still train the other targets.</li>
+<strong>Impute several targets from one encoder.</strong> Regression and classification targets share the pooled vector. A target labelled on part of the plots can be masked where the label is missing, and those plots still train the other targets.</li>
 <li>
 <strong>Encode the species list five ways.</strong> Feature hashing, learned species embeddings, a cover vector over the vocabulary, rank pooling over species, genus and family tables, or a transformer over species tokens.</li>
 <li>
@@ -141,12 +128,12 @@
 <li>
 <strong>Pretrain without labels.</strong> Self-supervised tasks fit the encoder on species lists alone before the supervised fit.</li>
 <li>
-<strong>Score with several models at once.</strong> A suite of trained models reports, per plot, the combined prediction and how far its members agree.</li>
+<strong>Score with several models at once.</strong> A suite of trained models reports, per plot, the combined imputed value and how far its members agree.</li>
 <li>
 <strong>Use R, Python or the command line.</strong> The engine is a C++ library on libtorch, the C++ core of <a href="https://pytorch.org/" class="external-link">PyTorch</a>. The R package, the Python package and the <code>resolve</code> executable call it, so a model trained in one loads in the others.</li>
 </ul>
 <p>On every push the <a href="https://github.com/gcol33/resolve/actions/workflows/tests.yml" class="external-link">tests workflow</a> builds the engine and runs the C++ tests, the command-line end-to-end tests and the Python binding tests; the R package goes through R CMD check. Feature hashing follows <a href="https://doi.org/10.1145/1553374.1553516" class="external-link">Weinberger et al. (2009)</a>, the transformer encoder <a href="https://doi.org/10.48550/arXiv.1706.03762" class="external-link">Vaswani et al. (2017)</a>. Report the RESOLVE version with an analysis, since defaults have changed between versions.</p>
-<p>The <a href="https://gillescolling.com/resolve/articles/app.html">RESOLVE App</a> runs the released models in your browser, without installing anything. It predicts the EUNIS habitat, altitude, slope, plot area, survey year and location of the example plots or of your own tables, and maps the plots.</p>
+<p>The <a href="https://gillescolling.com/resolve/articles/app.html">RESOLVE App</a> runs the released models in your browser, without installing anything. It imputes the EUNIS habitat, altitude, slope, plot area, survey year and location of the example plots or of your own tables, and maps the plots.</p>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
 </h2>
@@ -219,7 +206,7 @@
 <li>Prepare two tables: a header table with one row per sample and its targets, and a species table with one row per species observed in a sample.</li>
 <li>Name the columns with <code>roles</code>, declare each target, and load the tables with <code><a href="reference/resolve.dataset.frame.html">resolve.dataset.frame()</a></code> or <code><a href="reference/resolve.dataset.csv.html">resolve.dataset.csv()</a></code>.</li>
 <li>Fit the model with <code><a href="reference/resolve.train.dataset.html">resolve.train.dataset()</a></code> and read its metrics on the held-out plots.</li>
-<li>Save it with <code><a href="reference/resolve.save.html">resolve.save()</a></code>, then load it with <code><a href="reference/resolve.load.html">resolve.load()</a></code> and predict with <code><a href="reference/resolve.predict.dataset.html">resolve.predict.dataset()</a></code>.</li>
+<li>Save it with <code><a href="reference/resolve.save.html">resolve.save()</a></code>, then load it with <code><a href="reference/resolve.load.html">resolve.load()</a></code> and impute with <code><a href="reference/resolve.predict.dataset.html">resolve.predict.dataset()</a></code>.</li>
 </ol>
 <p>This example uses the survey that ships with the package: 150 plots in the Alps, their 638 species records and each plot’s elevation and habitat.</p>
 <div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
@@ -284,12 +271,12 @@
 <div class="section level2">
 <h2 id="large-data-and-gpus">Large data and GPUs<a class="anchor" aria-label="anchor" href="#large-data-and-gpus"></a>
 </h2>
-<p>The engine runs on CUDA when its build has it. A run that exhausts device memory halves its batch size and retries; an interrupted run resumes from its last checkpoint. Batch size, learning-rate schedules, mixed precision and the memory settings are in <a href="https://gillescolling.com/resolve/articles/performance.html">Large data and GPUs</a>. <a href="https://gillescolling.com/resolve/articles/command-line.html">The command line</a> trains and predicts with no R or Python installed.</p>
+<p>The engine runs on CUDA when its build has it. A run that exhausts device memory halves its batch size and retries; an interrupted run resumes from its last checkpoint. Batch size, learning-rate schedules, mixed precision and the memory settings are in <a href="https://gillescolling.com/resolve/articles/performance.html">Large data and GPUs</a>. <a href="https://gillescolling.com/resolve/articles/command-line.html">The command line</a> trains and imputes with no R or Python installed.</p>
 </div>
 <div class="section level2">
 <h2 id="documentation">Documentation<a class="anchor" aria-label="anchor" href="#documentation"></a>
 </h2>
-<p>Start with <a href="https://gillescolling.com/resolve/articles/resolveR.html">Predicting plot attributes from species lists</a>: one path from two tables to a trained model and its predictions. Every code block on the site has an R and a Python version; the <a href="https://gillescolling.com/resolve/articles/resolveR.html?lang=python">Python view of Get started</a> opens with Python selected.</p>
+<p>Start with <a href="https://gillescolling.com/resolve/articles/resolveR.html">Imputing plot attributes from species lists</a>: one path from two tables to a trained model and its imputed values. Every code block on the site has an R and a Python version; the <a href="https://gillescolling.com/resolve/articles/resolveR.html?lang=python">Python view of Get started</a> opens with Python selected.</p>
 <ul>
 <li>
 <a href="https://gillescolling.com/resolve/articles/data-preparation.html">Preparing the two tables</a>: roles, targets, missing values and reusing a training vocabulary.</li>
@@ -298,7 +285,7 @@
 <li>
 <a href="https://gillescolling.com/resolve/articles/training.html">Training and reading the fit</a>: training settings, the held-out fold, cross-validation and checkpoints.</li>
 <li>
-<a href="https://gillescolling.com/resolve/articles/prediction.html">Predicting new plots</a>: output formats, class probabilities, new species and model suites.</li>
+<a href="https://gillescolling.com/resolve/articles/prediction.html">Imputing new plots</a>: output formats, class probabilities, new species and model suites.</li>
 <li>
 <a href="https://gillescolling.com/resolve/articles/embeddings.html">Latent and species embeddings</a>: the latent space and the learned species tables.</li>
 <li>
