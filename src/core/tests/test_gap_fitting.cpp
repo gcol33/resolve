@@ -53,7 +53,7 @@ GapFittingConfig only(std::vector<GapMethod> candidates) {
     return config;
 }
 
-const GapGroupChoice& group(const GapFit& fit, const std::string& name) {
+GapGroupChoice group(const GapFit& fit, const std::string& name) {
     for (const auto& g : fit.report.groups) {
         if (g.group == name) return g;
     }
@@ -109,9 +109,9 @@ TEST_CASE("offset_slope recovers the local relation of raw prediction and truth"
     const torch::Tensor pred = 1950.0 + 70.0 * torch::rand({n}, kDouble);
     const torch::Tensor truth = 1990.0 + slope * (pred - pred.mean()) + 8.0 + 3.0 * torch::randn({n}, kDouble);
     const torch::Tensor gaps = torch::arange(n) >= 2400;
-    const GapFit fit = fit_gaps({"year"}, pred, with_gaps(truth, gaps), {no_species(n)},
+    const GapFit fit = fit_gaps({"year"}, pred, with_gaps(truth, gaps), {no_species(n), {}, {}},
                                 only({GapMethod::OffsetSlope}));
-    const GapGroupChoice& g = group(fit, "unlocated");
+    const GapGroupChoice g = group(fit, "unlocated");
     CHECK(g.method == GapMethod::OffsetSlope);
     CHECK_THAT(coefficient(g, "resolve"), WithinAbs(slope, 0.02));
     CHECK(g.n_fitted == 2400);
@@ -130,8 +130,8 @@ TEST_CASE("A bearing offset is recovered as a complex coefficient: a turn and no
     const torch::Tensor pred = torch::remainder(truth - 40.0 + 5.0 * torch::randn({n}, kDouble), 360.0);
     const torch::Tensor gaps = torch::arange(n) >= 1500;
     const GapFit fit = fit_gaps({"aspect", GapScale::Circular, 360.0}, pred, with_gaps(truth, gaps),
-                                {no_species(n)}, only({GapMethod::OffsetSlope}));
-    const GapGroupChoice& g = group(fit, "unlocated");
+                                {no_species(n), {}, {}}, only({GapMethod::OffsetSlope}));
+    const GapGroupChoice g = group(fit, "unlocated");
     REQUIRE(g.coefficients.size() == 1);
     REQUIRE(g.coefficients[0].complex);
     CHECK_THAT(g.coefficients[0].angle_deg, WithinAbs(40.0, 1.0));
@@ -150,9 +150,9 @@ TEST_CASE("The species stack recovers the weights of the raw prediction and the 
     const torch::Tensor truth = 1985.0 + 0.5 * (pred - 1985.0) + 0.8 * (c.year - 1985.0) +
                                 torch::randn({n}, kDouble);
     const torch::Tensor gaps = torch::rand({n}) < 0.2;
-    const GapFit fit = fit_gaps({"year"}, pred, with_gaps(truth, gaps), {campaign_species(c.campaign)},
+    const GapFit fit = fit_gaps({"year"}, pred, with_gaps(truth, gaps), {campaign_species(c.campaign), {}, {}},
                                 only({GapMethod::StackSpecies}));
-    const GapGroupChoice& g = group(fit, "unlocated");
+    const GapGroupChoice g = group(fit, "unlocated");
     CHECK_THAT(coefficient(g, "resolve"), WithinAbs(0.5, 0.05));
     // The neighbour median is of recorded values, which already carry the
     // campaign component at its weight, so it enters at weight 1.
@@ -169,9 +169,9 @@ TEST_CASE("The spatial stack recovers the weight of the nearest plots", "[gap_fi
                                 torch::randn({n}, kDouble);
     const torch::Tensor gaps = torch::rand({n}) < 0.2;
     const GapFit fit = fit_gaps({"altitude"}, pred, with_gaps(truth, gaps),
-                                {random_species(n), c.coordinates},
+                                {random_species(n), c.coordinates, {}},
                                 only({GapMethod::StackSpeciesSpatial}));
-    const GapGroupChoice& g = group(fit, "located");
+    const GapGroupChoice g = group(fit, "located");
     CHECK(g.method == GapMethod::StackSpeciesSpatial);
     CHECK_THAT(coefficient(g, "resolve"), WithinAbs(0.5, 0.05));
     CHECK_THAT(coefficient(g, "spatial"), WithinAbs(1.0, 0.05));
@@ -191,7 +191,7 @@ TEST_CASE("Matched neighbours are no nearer in km than the gaps are to the compl
     const torch::Tensor coords = torch::stack({lat, lon}, 1);
     const torch::Tensor gaps = torch::arange(n) >= n_cal;
     const torch::Tensor recorded = with_gaps(torch::zeros({n}, kDouble), gaps);
-    const GapPlots plots{random_species(n), coords};
+    const GapPlots plots{random_species(n), coords, {}};
 
     const MatchedGapNeighbours m = matched_gap_neighbours({"altitude"}, recorded, plots);
     REQUIRE(m.spatial.defined());
@@ -224,7 +224,7 @@ TEST_CASE("Matched neighbours are no nearer in survey year than the gaps", "[gap
     const torch::Tensor year = torch::cat({1960.0 + 60.0 * torch::rand({n_cal}, kDouble),
                                            1930.0 + 10.0 * torch::rand({n_gap}, kDouble)});
     const torch::Tensor gaps = torch::arange(n) >= n_cal;
-    GapPlots plots{random_species(n)};
+    GapPlots plots{random_species(n), {}, {}};
     plots.years = year;
     const MatchedGapNeighbours m =
         matched_gap_neighbours({"altitude"}, with_gaps(torch::zeros({n}, kDouble), gaps), plots);
@@ -260,10 +260,10 @@ TEST_CASE("Spatial neighbours are chosen where the gaps are near and not for a f
     // Scattered gaps: a gap's nearest complete plot is a few km away.
     {
         const torch::Tensor gaps = torch::rand({n}) < 0.2;
-        const GapPlots plots{no_species(n), coords};
+        const GapPlots plots{no_species(n), coords, {}};
         const torch::Tensor recorded = with_gaps(truth, gaps);
         const GapFit fit = fit_gaps({"altitude"}, pred, recorded, plots);
-        const GapGroupChoice& g = group(fit, "located");
+        const GapGroupChoice g = group(fit, "located");
         CHECK((g.method == GapMethod::KnnSpatial || g.method == GapMethod::StackSpeciesSpatial));
         const double best_spatial = std::min(
             gap_mae(fit_gaps({"altitude"}, pred, recorded, plots, only({GapMethod::KnnSpatial})), truth, gaps),
@@ -281,10 +281,10 @@ TEST_CASE("Spatial neighbours are chosen where the gaps are near and not for a f
         const torch::Tensor t = truth.index({idx});
         const torch::Tensor p = pred.index({idx});
         const torch::Tensor gaps = lat.index({idx}) > 49.0;
-        const GapPlots plots{no_species(m), coords.index({idx})};
+        const GapPlots plots{no_species(m), coords.index({idx}), {}};
         const torch::Tensor recorded = with_gaps(t, gaps);
         const GapFit fit = fit_gaps({"altitude"}, p, recorded, plots);
-        const GapGroupChoice& g = group(fit, "located");
+        const GapGroupChoice g = group(fit, "located");
         // The nearest complete plots are not read as they are: the spatial
         // median alone is never chosen, and a stack chosen at the gaps'
         // distance gives it little weight.
@@ -316,10 +316,10 @@ TEST_CASE("A position target is fitted in the plane by species neighbours, never
     const torch::Tensor recorded = with_gaps(c.coordinates, gaps);
     // The caller passes the recorded position as the plots' coordinates too:
     // the gaps carry none, so no spatial axis is read.
-    const GapPlots plots{campaign_species(c.campaign), recorded};
+    const GapPlots plots{campaign_species(c.campaign), recorded, {}};
     const GapFit fit = fit_gaps({"location", GapScale::Geographic}, raw, recorded, plots);
     REQUIRE(fit.report.groups.size() == 1);
-    const GapGroupChoice& g = group(fit, "unlocated");
+    const GapGroupChoice g = group(fit, "unlocated");
     CHECK((g.method == GapMethod::KnnSpecies || g.method == GapMethod::StackSpecies));
     CHECK_FALSE(fit.report.axes[1].matched);
     const torch::Tensor fitted = fit.fitted.index({gaps});
@@ -338,7 +338,7 @@ TEST_CASE("A year target reads no survey-year axis: its gaps carry no year", "[g
     const torch::Tensor truth = 1950.0 + 60.0 * torch::rand({n}, kDouble);
     const torch::Tensor gaps = torch::rand({n}) < 0.2;
     const torch::Tensor recorded = with_gaps(truth, gaps);
-    GapPlots plots{random_species(n)};
+    GapPlots plots{random_species(n), {}, {}};
     plots.years = recorded;
     const GapFit fit = fit_gaps({"year"}, truth + 5.0 * torch::randn({n}, kDouble), recorded, plots);
     CHECK(fit.report.axes[2].axis == "years");
@@ -353,18 +353,18 @@ TEST_CASE("Gap fitting without gaps or without complete plots, and its determini
     const torch::Tensor truth = torch::randn({n}, kDouble);
     const torch::Tensor raw = truth + 0.1;
 
-    const GapFit none = fit_gaps({"slope"}, raw, truth, {no_species(n)});
+    const GapFit none = fit_gaps({"slope"}, raw, truth, {no_species(n), {}, {}});
     CHECK(torch::equal(none.fitted, truth));
     CHECK(none.report.groups.empty());
 
     torch::Tensor one = torch::full({n}, kNaN, kDouble);
     one[0] = 1.0;
-    const GapFit skipped = fit_gaps({"slope"}, raw, one, {no_species(n)});
+    const GapFit skipped = fit_gaps({"slope"}, raw, one, {no_species(n), {}, {}});
     CHECK_FALSE(skipped.report.skipped.empty());
     CHECK(torch::equal(skipped.fitted.slice(0, 1), raw.slice(0, 1)));
 
     const torch::Tensor recorded = with_gaps(truth, torch::rand({n}) < 0.3);
-    const GapPlots plots{random_species(n)};
+    const GapPlots plots{random_species(n), {}, {}};
     const GapFit a = fit_gaps({"slope"}, raw, recorded, plots);
     const GapFit b = fit_gaps({"slope"}, raw, recorded, plots);
     CHECK(torch::equal(a.fitted, b.fitted));

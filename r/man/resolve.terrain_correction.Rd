@@ -20,6 +20,8 @@ resolve.terrain_correction(
 \item{path}{The correction file written by \code{\link[=resolve.fit_terrain_correction]{resolve.fit_terrain_correction()}}
 (or shipped in a suite).}
 
+\item{prediction}{The prediction per plot.}
+
 \item{dem}{The descriptor at each plot's coordinate (\code{elevation} or
 \code{slope} of \code{\link[=resolve.terrain_descriptors]{resolve.terrain_descriptors()}}).}
 

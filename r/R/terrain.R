@@ -114,6 +114,7 @@ resolve.fit_terrain_correction <- function(target, descriptor, prediction, dem, 
 #' Apply a Saved Terrain Correction
 #'
 #' @inheritParams resolve.fit_terrain_correction
+#' @param prediction The prediction per plot.
 #' @param path The correction file written by [resolve.fit_terrain_correction()]
 #'   (or shipped in a suite).
 #' @param device `"cpu"`, `"cuda"` or `"cuda:N"`.
