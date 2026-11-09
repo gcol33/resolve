@@ -8,12 +8,13 @@
 #   Rscript tools/site_digest.R --write    write it to docs/site-digest.txt
 #   Rscript tools/site_digest.R --check    compare docs/site-digest.txt with the sources
 
-# The sources are the files git tracks under these paths, so a file present in one working tree
-# only (a backup, an editor's scratch file) changes neither the local digest nor the workflow's.
+# The sources are the files under these paths that git tracks or would track (not ignored), so a
+# new article counts before its first commit, and an ignored file (an editor backup) never does.
 site_sources <- function(root = ".") {
   roots <- c("R", "man", "vignettes", "pkgdown", "inst/CITATION", "../NEWS.md",
              "README.md", "_pkgdown.yml", "DESCRIPTION")
-  files <- system2("git", c("-C", shQuote(root), "-c", "core.quotepath=off", "ls-files", "--", roots),
+  files <- system2("git", c("-C", shQuote(root), "-c", "core.quotepath=off", "ls-files", "--cached", "--others",
+                          "--exclude-standard", "--", roots),
                    stdout = TRUE)
   if (!is.null(attr(files, "status"))) stop("git ls-files failed in ", root)
   files <- files[file.exists(file.path(root, files))]

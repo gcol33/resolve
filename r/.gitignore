@@ -8,3 +8,4 @@ src/resolve.so
 dev_notes/
 NEWS.md
 CITATION.cff
+*.backup
