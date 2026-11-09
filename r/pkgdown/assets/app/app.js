@@ -53,12 +53,18 @@ await isolate();
 // Where the page's files are: the model pack and its index, the terrain field
 // and the example data, named on the page's element (data-models-pack,
 // data-models-index, data-terrain-field, data-examples) or, for a check
-// against other files, in the address (?pack=, ?index=, ?terrain=).
+// against other files, in the address (?pack=, ?index=, ?terrain=). The pack
+// and its index may each name several addresses, separated by spaces, one per
+// mirror and in the same order: the page reads from the first mirror that
+// answers and moves on to the next when it fails.
 const PARAMS = new URLSearchParams(location.search);
 const PLACES = document.getElementById("resolve-app").dataset;
-const place = (param, key) => new URL(PARAMS.get(param) ?? PLACES[key], location.href).href;
-const PACK = place("pack", "modelsPack");
-const PACK_INDEX = place("index", "modelsIndex");
+const given = (param, key) => PARAMS.get(param) ?? PLACES[key];
+const place = (param, key) => new URL(given(param, key), location.href).href;
+const places = (param, key) => given(param, key).trim().split(/\s+/).map((u) => new URL(u, location.href).href);
+const PACKS = places("pack", "modelsPack");
+const PACK_INDEXES = places("index", "modelsIndex");
+const MIRRORS = PACKS.map((pack, i) => ({ pack, index: PACK_INDEXES[i] }));
 const TERRAIN_FIELD = place("terrain", "terrainField");
 const EXAMPLES = place("examples", "examples");
 const CACHE = "resolve-models";
@@ -79,15 +85,61 @@ const within = (promise, ms) =>
 // the experiment repository): its index gives each file's offset and length
 // in the tar and the tar's SHA-256 as the pack's version, and each file is
 // read as one range of the tar.
-let packOpened;
-const openPack = () => (packOpened ??= withRetry(async () => {
-  const response = await fetch(PACK_INDEX, { cache: "no-store" });
-  if (!response.ok) throw new HttpStatusError(PACK_INDEX, response.status, 200);
-  return response.json();
-}).then((index) => {
+async function readIndex(mirror) {
+  const index = await withRetry(async () => {
+    const response = await fetch(mirror.index, { cache: "no-store" });
+    if (!response.ok) throw new HttpStatusError(mirror.index, response.status, 200);
+    return response.json();
+  });
   if (index.format !== 1) throw new Error(`model pack format ${index.format} is not one this page reads`);
   return index;
-}).catch((e) => { packOpened = null; throw e; }));
+}
+
+// The index of the first mirror that answers; that mirror is the one read.
+let packOpened;
+let mirrorInUse = 0;
+const openPack = () => (packOpened ??= (async () => {
+  if (PACKS.length !== PACK_INDEXES.length) {
+    throw new Error(`${PACKS.length} model pack addresses and ${PACK_INDEXES.length} index addresses; each mirror needs both`);
+  }
+  for (let m = 0; ; m++) {
+    try {
+      const index = await readIndex(MIRRORS[m]);
+      mirrorInUse = m;
+      return index;
+    } catch (e) {
+      if (m + 1 >= MIRRORS.length) throw e;
+    }
+  }
+})().catch((e) => { packOpened = null; throw e; }));
+
+// A read of the pack (`read(url)`) from the mirror in use. When it fails, the
+// read is repeated on the next mirror whose index names the same version, so
+// every range comes from the same tar; a mirror holding another version is
+// skipped.
+async function fromPack(read) {
+  const { version } = await openPack();
+  for (;;) {
+    const m = mirrorInUse;
+    try {
+      return await read(MIRRORS[m].pack);
+    } catch (e) {
+      if (!(await nextMirror(m, version))) throw e;
+    }
+  }
+}
+
+async function nextMirror(failed, version) {
+  if (mirrorInUse !== failed) return true;
+  for (let m = failed + 1; m < MIRRORS.length; m++) {
+    const index = await readIndex(MIRRORS[m]).catch(() => null);
+    if (index?.version === version) {
+      if (mirrorInUse === failed) mirrorInUse = m;
+      return true;
+    }
+  }
+  return false;
+}
 
 // Where a file lies in the pack, as [begin, end).
 async function packRange(path) {
@@ -102,7 +154,8 @@ const packPath = (relative, from) => new URL(relative, `https://pack/${from}`).p
 
 // Model files are kept in IndexedDB, which a page has over plain HTTP as well
 // as HTTPS, under the pack's version, so a file read once is read from the
-// browser while the pack stays the same.
+// browser while the pack stays the same. A file is stored under the first
+// mirror's address whichever mirror it came from.
 let storeOpened;
 const openStore = () => (storeOpened ??= "indexedDB" in window ? within(new Promise((resolve, reject) => {
   const request = indexedDB.open(CACHE, 1);
@@ -119,7 +172,7 @@ const stored = (db, mode, op) => new Promise((resolve, reject) => {
 
 async function cached(path, onBytes) {
   const { version } = await openPack();
-  const key = `${PACK}#${path}`;
+  const key = `${MIRRORS[0].pack}#${path}`;
   const db = await openStore();
   const kept = db && await within(stored(db, "readonly", (s) => s.get(key)), 2000);
   if (kept?.version === version) {
@@ -127,7 +180,7 @@ async function cached(path, onBytes) {
     return kept.bytes;
   }
   const [begin, end] = await packRange(path);
-  const bytes = (await withRetry(() => fetchRange(fetch, PACK, `bytes=${begin}-${end - 1}`, { onBytes }))).buffer;
+  const bytes = (await fromPack((url) => withRetry(() => fetchRange(fetch, url, `bytes=${begin}-${end - 1}`, { onBytes })))).buffer;
   if (bytes.byteLength !== end - begin) throw new Error(`${path}: ${bytes.byteLength} bytes read from the pack, not ${end - begin}`);
   if (db) stored(db, "readwrite", (s) => s.put({ version, bytes }, key)).catch(() => { /* quota */ });
   return bytes;
@@ -889,8 +942,8 @@ async function terrainField(suite) {
   if (state.terrain?.suite === suite.name) return state.terrain.field;
   const index = JSON.parse(new TextDecoder().decode(await file(suite.terrain_field)));
   const [lengthsAt] = await packRange(packPath(index.lengths.file, suite.terrain_field));
-  const field = new TerrainField(index, new HttpRangeSource(TERRAIN_FIELD),
-                                 new HttpRangeSource(PACK, { offset: lengthsAt }));
+  const lengths = { read: (ranges) => fromPack((url) => new HttpRangeSource(url, { offset: lengthsAt }).read(ranges)) };
+  const field = new TerrainField(index, new HttpRangeSource(TERRAIN_FIELD), lengths);
   state.terrain = { suite: suite.name, field };
   return field;
 }
