@@ -8,8 +8,8 @@ observed elevation of every held-out plot) and the habitat probabilities.
 
 The fit's numbers are kept in ``tools/figures/hero_fit.json`` so the figure
 redraws without retraining; ``--refit`` retrains and rewrites it (needs
-``resolve_core``). Writes ``r/man/figures/resolve-hero.svg``, drawn in mid
-tones that read on the light and the dark page alike.
+``resolve_core``). Writes ``r/man/figures/resolve-hero.svg``, dark ink on a
+white background.
 """
 
 from __future__ import annotations
@@ -38,16 +38,17 @@ RIGHT_X, RIGHT_W = 1140.0, 380.0
 TITLE = 36
 LABEL = 30
 
-# Mid tones: the image sits on the site's light and dark backgrounds and on
-# GitHub's, so no ink may vanish into either.
+# Dark ink on a white page; the image carries its own background, so it reads
+# the same on every site theme.
 THEME = {
-    "text": "#868C92",
-    "muted": "#8C9298",
-    "rule": "#9AA0A6",
-    "plant": "#4F8C4B",
-    "pool": "#3C80B5",
-    "neg": "#C2554C",
-    "point": "#8C959F",
+    "background": "#FFFFFF",
+    "text": GREY,
+    "muted": "#8A9097",
+    "rule": "#C9CDD2",
+    "plant": GREEN,
+    "pool": BLUE,
+    "neg": RED,
+    "point": "#8A9097",
 }
 
 
@@ -231,7 +232,7 @@ def elevation_panel(fit: dict, th: dict) -> tuple[str, tuple[float, float]]:
         f'<rect x="{fmt(x0)}" y="{fmt(y0)}" width="{fmt(width)}" height="{fmt(height)}" fill="none" stroke="{th["rule"]}" stroke-width="2"/>',
         f'<path d="M{fmt(sx(lo))} {fmt(sy(lo))}L{fmt(sx(hi))} {fmt(sy(hi))}" stroke="{th["rule"]}" stroke-width="2" stroke-dasharray="8 7"/>',
     ]
-    out.append(text(x0, rows_top + 4, "elevation", TITLE, th["text"], weight="bold"))
+    out.append(text(x0, rows_top + 4, "elevation", TITLE, th["text"]))
     shown = None
     for p in fit["held_out"]:
         cx, cy = sx(p["observed"]), sy(p["predicted"])
@@ -262,7 +263,7 @@ def habitat_panel(fit: dict, th: dict) -> tuple[str, tuple[float, float]]:
         out.append(text(x_label, y + 10, h, LABEL, th["text"]))
         out.append(f'<rect x="{fmt(x_bar)}" y="{fmt(y - 12)}" width="{fmt(length)}" height="24" rx="4" fill="{th["rule"]}" fill-opacity="0.5"/>')
         out.append(f'<rect x="{fmt(x_bar)}" y="{fmt(y - 12)}" width="{fmt(max(length * p, 3))}" height="24" rx="4" fill="{colour}"/>')
-    out.append(text(x_label, top - 48, "habitat", TITLE, th["text"], weight="bold"))
+    out.append(text(x_label, top - 48, "habitat", TITLE, th["text"]))
     return "".join(out), (x_label - 40, top + step * 1.5)
 
 
@@ -282,6 +283,7 @@ def build(fit: dict) -> str:
     )
     return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" role="img" aria-label="{alt}" font-family="{SANS}">
 <title>{alt}</title>
+<rect width="{W}" height="{H}" fill="{th["background"]}"/>
 {pooling_curves(anchors, x_in, y_mid, th)}
 {readout_curve(x_out, y_mid, elev_anchor[0], elev_anchor[1], th)}
 {readout_curve(x_out, y_mid, hab_anchor[0], hab_anchor[1], th)}

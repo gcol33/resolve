@@ -34,6 +34,11 @@ article is current without running anything and without the compiled core:
     python tools/python_twins.py            run every article that holds a pair
     python tools/python_twins.py NAME       run vignettes/articles/NAME.Rmd alone
     python tools/python_twins.py --check    exit 1 if an article is older than its Python
+    python tools/python_twins.py --force    run every article even if nothing changed
+
+An article is run again only when its Python changed or the engine it runs against did:
+``pkgdown/_cache/python_twins.json`` keeps, per article, the fingerprint of the engine (its
+version and compiled module) and of the example data from its last run.
 """
 
 from __future__ import annotations
@@ -41,6 +46,7 @@ from __future__ import annotations
 import argparse
 import ast
 import contextlib
+import json
 import hashlib
 import html
 import io
@@ -59,6 +65,8 @@ BANNER = re.compile(r"^<!-- Python blocks run by tools/python_twins.py \(md5 ([0
 BANNER_TEXT = "<!-- Python blocks run by tools/python_twins.py (md5 {digest}). -->"
 FIGURE = re.compile(r'^<img src="[^"]*py-figure-\d+\.svg" alt="[^"]*" />$')
 FIGURE_NAME = "py-figure-"
+RUNS = ROOT / "pkgdown" / "_cache" / "python_twins.json"
+EXTDATA = ROOT / "inst" / "extdata"
 SPAN = re.compile(r'\[([^\[\]\n]*)\]\{\.lang-py-only py="([^"]*)"\}')
 
 
@@ -170,6 +178,35 @@ def check_install() -> None:
         raise SystemExit(f"the resolve_core {sys.executable} imports is "
                          f"{resolve_core.__version__} at {resolve_core.__file__}, and this tree "
                          f"is {wanted}. Build the engine first.")
+
+
+def file_md5(path: Path) -> str:
+    return hashlib.md5(path.read_bytes()).hexdigest()
+
+
+def engine_fingerprint() -> str:
+    """What an article's output depends on besides its Python: resolve_core's version, the
+    compiled module it loads and the example data the blocks read."""
+    import resolve_core
+    from resolve_core import _resolve_core
+
+    parts = [resolve_core.__version__, file_md5(Path(_resolve_core.__file__))]
+    parts += [f"{f.relative_to(EXTDATA).as_posix()}:{file_md5(f)}"
+              for f in sorted(EXTDATA.rglob("*")) if f.is_file()]
+    return digest("\n".join(parts))
+
+
+def read_runs() -> dict[str, str]:
+    try:
+        return json.loads(RUNS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def write_runs(runs: dict[str, str]) -> None:
+    RUNS.parent.mkdir(parents=True, exist_ok=True)
+    RUNS.write_text(json.dumps(runs, indent=1, sort_keys=True) + "\n", encoding="utf-8",
+                    newline="\n")
 
 
 def sources() -> dict[str, Path]:
@@ -315,6 +352,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("names", nargs="*")
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
     available = sources()
@@ -337,8 +375,15 @@ def main() -> int:
         return 0
 
     check_install()
+    engine = engine_fingerprint()
+    runs = read_runs()
     for name in names:
         path = available[name]
+        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+        current = recorded(lines) == article_digest(blocks(lines), lines)
+        if current and runs.get(name) == engine and not args.force:
+            print(f"unchanged {path.relative_to(ROOT).as_posix()}")
+            continue
         article, figures = render(name, path)
         folder = path.parent
         for old in (folder / f"{name}_files").glob(f"{FIGURE_NAME}*.svg"):
@@ -348,6 +393,8 @@ def main() -> int:
             (folder / rel).parent.mkdir(parents=True, exist_ok=True)
             (folder / rel).write_text(svg, encoding="utf-8", newline="\n")
         path.write_text(article, encoding="utf-8", newline="\n")
+        runs[name] = engine
+        write_runs(runs)
         print(f"wrote {path.relative_to(ROOT).as_posix()}")
     return 0
 

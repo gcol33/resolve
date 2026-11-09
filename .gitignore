@@ -142,3 +142,6 @@ benchmarks/results_*.json
 !src/core/build_cuda/launch_build.ps1
 !tools/crash_smoke_drive.ps1
 !dev_notes/fuzzy_index_plan.md
+
+# Local site-build cache (r/build_site.R)
+r/pkgdown/_cache/
