@@ -21,9 +21,21 @@ site_sources <- function(root = ".") {
   sort(files, method = "radix")
 }
 
+# A file's MD5 with every CRLF read as LF: git may check a file out with either line ending (a
+# Windows working tree keeps CRLF where the index holds LF), and both are the same source.
+content_md5 <- function(path) {
+  bytes <- readBin(path, "raw", file.size(path))
+  n <- length(bytes)
+  if (n > 1L) {
+    cr <- which(bytes[-n] == as.raw(13L) & bytes[-1L] == as.raw(10L))
+    if (length(cr)) bytes <- bytes[-cr]
+  }
+  tools::md5sum(bytes = bytes)
+}
+
 site_digest <- function(root = ".") {
   files <- site_sources(root)
-  sums <- unname(tools::md5sum(file.path(root, files)))
+  sums <- vapply(file.path(root, files), content_md5, character(1), USE.NAMES = FALSE)
   listing <- tempfile()
   on.exit(unlink(listing), add = TRUE)
   con <- file(listing, open = "wb")
