@@ -174,8 +174,7 @@ from Eurostat GISCO.</p>
         <div class="choices" id="targets"></div>
         <div class="options">
           <label class="form-check-label" id="terrain-option" hidden><input class="form-check-input" type="checkbox" id="o-terrain" checked> Terrain correction of altitude and slope</label>
-          <label class="form-check-label" id="gaps-option" hidden><input class="form-check-input" type="checkbox" id="o-gaps" checked> Calibrate to the header: variables recorded on some plots are imputed on
-            the others from the plots that record them</label>
+          <label class="form-check-label" id="gaps-option" hidden><input class="form-check-input" type="checkbox" id="o-gaps" checked> Calibrate gaps to input data</label>
         </div>
         <div class="actions">
           <button type="button" class="btn btn-primary" id="run" disabled>Impute</button>
@@ -215,12 +214,7 @@ from Eurostat GISCO.</p>
             <div class="tablehead">
               <p class="card-title h5 mb-0">Plots</p>
               <div class="map-controls">
-                <select class="form-select form-select-sm" id="grid-size" aria-label="Grid cell size" hidden><option value="auto" selected>Cells by zoom</option>
-<option value="10">10 km cells</option>
-<option value="50">50 km cells</option>
-<option value="100">100 km cells</option>
-<option value="200">200 km cells</option>
-<option value="500">500 km cells</option></select><div class="btn-group btn-group-sm" role="group" aria-label="Map view">
+                <div class="btn-group btn-group-sm" role="group" aria-label="Map view">
                   <input type="radio" class="btn-check" name="map-view" id="map-view-points" value="points" autocomplete="off" checked><label class="btn btn-outline-secondary" for="map-view-points">Points</label>
                   <input type="radio" class="btn-check" name="map-view" id="map-view-grid" value="grid" autocomplete="off"><label class="btn btn-outline-secondary" for="map-view-grid">Grid</label>
                 </div>

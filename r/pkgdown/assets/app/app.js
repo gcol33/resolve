@@ -1374,19 +1374,17 @@ function renderVariable(r) {
 // (geo.js) at a cell size chosen or set by the zoom.
 // ---------------------------------------------------------------------------
 
-const GRID_KM = [10, 50, 100, 200, 500];
-const CELL_EDGE = "#1a202c";
+const GRID_KM = [2, 5, 10, 25, 50, 100, 200];
+const CELL_EDGE = "#000000";
 const mapMode = () => document.querySelector('#resolve-app input[name="map-view"]:checked')?.value ?? "points";
 const tally = (counts, key, by) => counts.set(key, (counts.get(key) ?? 0) + by);
 
 // The map's scale at its centre, in metres per pixel.
 const metresPerPixel = () => 40075016.686 * Math.cos(map.getCenter().lat * Math.PI / 180) / (256 * 2 ** map.getZoom());
 
-// The cell size in kilometres: the one chosen, or the smallest whose cells
-// span at least 12 pixels at the map's centre.
+// The cell size in kilometres: the smallest whose cells span at least 12
+// pixels at the map's centre.
 function gridKm() {
-  const chosen = $("grid-size").value;
-  if (chosen !== "auto") return Number(chosen);
   return GRID_KM.find((km) => (1000 * km) / metresPerPixel() >= 12) ?? GRID_KM[GRID_KM.length - 1];
 }
 
@@ -1444,12 +1442,11 @@ function plotMarks(r, view, coords, located) {
   return { marks, legend: { groups: legendGroups(view, counts), keys } };
 }
 
-// One mark per grid cell holding plots. A habitat cell takes the colour of
-// its most frequent level-1 group, paler the smaller that group's share; a
-// numeric cell the class of its plots' median value (their mean direction for
-// aspect), outlined where the tables record the value on at least half of its
-// plots. Outlined cells come last, so that no fill covers an outline; the
-// outline's width follows the cell's size on screen in pixels.
+// One mark per grid cell holding plots, outlined in black. A habitat cell
+// takes the colour of its most frequent level-1 group, paler the smaller that
+// group's share; a numeric cell the class of its plots' median value (their
+// mean direction for aspect). The outline's width follows the cell's size on
+// screen in pixels.
 function gridMarks(view, coords, located, km, pixels) {
   const cells = new Map();
   for (const p of located) {
@@ -1459,10 +1456,9 @@ function gridMarks(view, coords, located, km, pixels) {
     cells.get(code).plots.push(p);
   }
   const counts = new Map();
-  let outlined = false, plain = false;
   const marks = [...cells].map(([code, { e, n, plots }]) => {
     const head = `${code}: ${plots.length.toLocaleString()} plot${plots.length === 1 ? "" : "s"}`;
-    const mark = { kind: "cell", outline: eeaCellOutline(e, n, km), fill: NO_VALUE, opacity: 0.75, recorded: false,
+    const mark = { kind: "cell", outline: eeaCellOutline(e, n, km), fill: NO_VALUE, opacity: 0.75,
                    edge: cellEdge(pixels), tip: head };
     const valued = view ? plots.filter((p) => view.classOf[p] >= 0) : [];
     if (!valued.length) return mark;
@@ -1480,18 +1476,15 @@ function gridMarks(view, coords, located, km, pixels) {
       group = view.classes[view.classify(centre)];
       const recorded = view.recorded ? plots.filter((p) => view.recorded[p]).length : 0;
       Object.assign(mark, {
-        fill: group.colour, recorded: !!view.recorded && 2 * recorded >= plots.length,
+        fill: group.colour,
         tip: `${head}${view.recorded ? `, ${recorded.toLocaleString()} recorded` : ""}; ` +
              `${view.circular ? "mean direction" : "median"} ${view.text(centre)}`,
       });
-      if (view.recorded) { if (mark.recorded) outlined = true; else plain = true; }
     }
     tally(counts, group, valued.length);
     return mark;
-  }).sort((a, b) => a.recorded - b.recorded);
-  const keys = outlined ? [...(plain ? [{ shape: "cell", label: "most plots imputed" }] : []),
-                           { shape: "cell-recorded", label: "most plots recorded" }] : [];
-  return { marks, legend: { groups: legendGroups(view, counts), keys } };
+  });
+  return { marks, legend: { groups: legendGroups(view, counts), keys: [] } };
 }
 
 // Per fitted target: how many gaps, which method filled them and its error on
@@ -1528,7 +1521,7 @@ function renderMap(r, fit = true) {
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
                 { maxZoom: 18, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
     map.on("zoomend", () => {
-      if (state.result && mapMode() === "grid" && $("grid-size").value === "auto") renderMap(state.result, false);
+      if (state.result && mapMode() === "grid") renderMap(state.result, false);
     });
   }
   const pts = coords.filter(([la, lo]) => Number.isFinite(la) && Number.isFinite(lo));
@@ -1538,11 +1531,10 @@ function renderMap(r, fit = true) {
   layer = L.layerGroup().addTo(map);
   const view = shownView(r);
   const grid = mapMode() === "grid";
-  $("grid-size").hidden = !grid;
   const { marks, legend } = mapMarks(r, view, coords);
   for (const m of marks) {
     const shape = m.kind === "cell"
-      ? L.polygon(m.outline, { fillColor: m.fill, fillOpacity: m.opacity, color: CELL_EDGE, opacity: 0.9, weight: m.recorded ? m.edge : 0 })
+      ? L.polygon(m.outline, { fillColor: m.fill, fillOpacity: m.opacity, color: CELL_EDGE, opacity: 1, weight: m.edge })
       : m.kind === "ring" ? L.circleMarker(m.at, { radius: 3, weight: 1.5, color: m.fill, opacity: 0.9, fill: false })
       : L.circleMarker(m.at, { radius: 3, weight: 0, fillOpacity: 0.8, fillColor: m.fill });
     shape.bindTooltip(m.tip).addTo(layer);
@@ -1602,13 +1594,11 @@ function outlinePaths(geojson, W, H) {
   return paths;
 }
 
-// The legend's symbol for a shape at height y: a dot, ring, grid cell or
-// outlined grid cell.
+// The legend's symbol for a shape at height y: a dot, ring or grid cell.
 function legendSymbol(shape, fill, y) {
   if (shape === "ring") return `<circle cx="6" cy="${y}" r="3.5" fill="none" stroke="${fill}" stroke-width="1.5"/>`;
   if (shape === "dot") return `<circle cx="6" cy="${y}" r="4" fill="${fill}"/>`;
-  const edge = shape === "cell-recorded" ? ` stroke="${CELL_EDGE}" stroke-width="1.5"` : "";
-  return `<rect x="1.5" y="${y - 4.5}" width="9" height="9" fill="${fill}" fill-opacity="0.75"${edge}/>`;
+  return `<rect x="1.5" y="${y - 4.5}" width="9" height="9" fill="${fill}" fill-opacity="0.75" stroke="${CELL_EDGE}" stroke-width="1"/>`;
 }
 
 // The map as it is shown, as an SVG: the country outlines, the marks of the
@@ -1636,8 +1626,8 @@ async function downloadMap() {
     for (const m of marks) {
       let style, d;
       if (m.kind === "cell") {
-        style = `fill="${m.fill}" fill-opacity="${m.opacity.toFixed(2)}"` +
-                (m.recorded ? ` stroke="${CELL_EDGE}" stroke-width="${m.edge.toFixed(2)}" stroke-opacity="0.9" stroke-linejoin="round"` : "");
+        style = `fill="${m.fill}" fill-opacity="${m.opacity.toFixed(2)}" stroke="${CELL_EDGE}" ` +
+                `stroke-width="${m.edge.toFixed(2)}" stroke-linejoin="round"`;
         d = `M${m.outline.map(at).join("L")}Z`;
       } else if (m.kind === "ring") {
         const q = map.latLngToContainerPoint(m.at);
@@ -1824,7 +1814,7 @@ async function start() {
   $("download-map").addEventListener("click", () => downloadMap());
   $("variable-prev").addEventListener("click", () => stepVariable(-1));
   $("variable-next").addEventListener("click", () => stepVariable(1));
-  for (const control of document.querySelectorAll('#resolve-app input[name="map-view"], #grid-size')) {
+  for (const control of document.querySelectorAll('#resolve-app input[name="map-view"]')) {
     control.addEventListener("change", () => { if (state.result) renderMap(state.result, false); });
   }
   try {

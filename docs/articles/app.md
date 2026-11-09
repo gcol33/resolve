@@ -36,8 +36,7 @@ Models
 
 Terrain correction of altitude and slope
 
-Calibrate to the header: variables recorded on some plots are imputed on
-the others from the plots that record them
+Calibrate gaps to input data
 
 Impute
 
@@ -55,9 +54,6 @@ species names not recognised
 to impute
 
 Plots
-
-Cells by zoom 10 km cells 50 km cells 100 km cells 200 km cells 500 km
-cells
 
 Points Grid
 

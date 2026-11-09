@@ -75,15 +75,11 @@ main#main + aside { display: none; }
 #resolve-app .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; font-size: 0.85rem; color: var(--bs-secondary-color); }
 #resolve-app .legend:empty { display: none; }
 #resolve-app .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
-#resolve-app .legend.grid i { border-radius: 2px; }
+#resolve-app .legend.grid i { border-radius: 2px; border: 1px solid #000; }
 #resolve-app .legend .key i.dot { background: var(--bs-secondary-color); }
 #resolve-app .legend .key i.ring { border: 1.5px solid var(--bs-secondary-color); }
-#resolve-app .legend .key i.cell { background: var(--bs-secondary-color); opacity: 0.6; }
-#resolve-app .legend .key i.cell-recorded { background: rgba(128, 128, 128, 0.45); border: 1.5px solid var(--bs-body-color); }
 #resolve-app #variable-step[hidden] { display: none; }
 #resolve-app .map-controls { display: flex; gap: 8px; align-items: center; }
-#resolve-app .map-controls .form-select { width: auto; }
-#resolve-app .map-controls .form-select[hidden] { display: none; }
 
 #resolve-app .types { list-style: none; margin: 0; padding: 0; max-height: 420px; overflow-y: auto; }
 #resolve-app .types li { display: grid; grid-template-columns: 14px 3.4rem minmax(0, 1fr) auto; gap: 8px; align-items: center;
