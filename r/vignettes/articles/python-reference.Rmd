@@ -371,7 +371,7 @@ Several trained models released as one directory and scored together.
 
 ## [Gap fitting](python-gap-fitting.html)
 
-Filling a dataset's missing values from its own complete plots, beside the raw imputed value.
+Imputing a dataset's missing values from its own complete plots, beside the raw imputed value.
 
 [`fit_gaps()`](python-gap-fitting.html#fit_gaps)
 : One target's gaps from the raw imputed value, the recorded values and the plots' composition, positions and years.

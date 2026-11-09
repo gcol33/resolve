@@ -896,9 +896,9 @@ async function addTarget(result, target, meta, outputs, encoded) {
     c.lat.forEach((la, p) => { raw[2 * p] = la; raw[2 * p + 1] = c.lon[p]; });
     const fit = await fillGaps(result, target, "geographic", raw);
     if (fit) {
-      result.columns.push({ name: "Latitude, gaps filled", values: Array.from(c.lat, (_, p) => fit.fitted[2 * p]), digits: 4 },
-                          { name: "Longitude, gaps filled", values: Array.from(c.lat, (_, p) => fit.fitted[2 * p + 1]), digits: 4 },
-                          { name: "Location, gap method", values: Array.from(fit.method, gapMethodLabel) });
+      result.columns.push({ name: "Imputed latitude, calibrated", values: Array.from(c.lat, (_, p) => fit.fitted[2 * p]), digits: 4 },
+                          { name: "Imputed longitude, calibrated", values: Array.from(c.lat, (_, p) => fit.fitted[2 * p + 1]), digits: 4 },
+                          { name: "Location, calibration method", values: Array.from(fit.method, gapMethodLabel) });
       result.filledCoords = Array.from(c.lat, (_, p) => [fit.fitted[2 * p], fit.fitted[2 * p + 1]]);
     } else {
       pushRecorded(result, target);
@@ -914,8 +914,8 @@ async function addTarget(result, target, meta, outputs, encoded) {
     const fit = await fillGaps(result, target, meta.targets[0].log1p ? "log" : "linear", c.value);
     const mask = recordedMask(result, target);
     if (fit) {
-      result.columns.push({ name: `${label(target)}${units}, gaps filled`, values: Array.from(fit.fitted), digits: 1 },
-                          { name: `${label(target)}, gap method`, values: Array.from(fit.method, gapMethodLabel) });
+      result.columns.push({ name: `${label(target)}${units}, calibrated`, values: Array.from(fit.fitted), digits: 1 },
+                          { name: `${label(target)}, calibration method`, values: Array.from(fit.method, gapMethodLabel) });
     } else {
       pushRecorded(result, target, mask);
     }
@@ -1066,7 +1066,7 @@ async function fillGaps(result, target, scale, raw) {
   const recorded = new Float64Array(raw.length);
   const d = columns.length;
   for (let p = 0; p < raw.length / d; p++) for (let j = 0; j < d; j++) recorded[p * d + j] = columns[j][p];
-  status(`Fitting the gaps of ${label(target).toLowerCase()}…`);
+  status(`Calibrating the imputed ${label(target).toLowerCase()} on the plots recording it…`);
   const fit = await fitInWorker({ target: { name: target.name, scale, period: target.period ?? 360 },
                                   raw: Float64Array.from(raw), recorded, plots });
   (result.gaps ??= []).push({ target, scale, report: fit.report });
@@ -1549,7 +1549,7 @@ function renderGaps(r) {
                    circular: "°", geographic: " km (median)" }[scale];
     const digits = scale === "log" ? 3 : 1;
     const head = `${label(target)}: ${report.n_gaps.toLocaleString()} of ${(report.n_gaps + report.n_complete).toLocaleString()} plots without it`;
-    if (report.skipped) return `<li>${escape(head)}, filled with the model's value (${escape(report.skipped)})</li>`;
+    if (report.skipped) return `<li>${escape(head)}, imputed with the model's value (${escape(report.skipped)})</li>`;
     const groups = report.groups.map((g) => {
       const err = (m) => g.matched_error.find(([x]) => x === m)?.[1];
       const where = report.groups.length > 1 ? `${g.n_gaps.toLocaleString()} ${g.group === "located" ? "with" : "without"} coordinates: ` : "";
@@ -1760,7 +1760,7 @@ function renderTargets() {
   box.innerHTML = models.map(([name, t]) => {
     const c = partlyRecorded(t) ? recordedCount(t) : null;
     const gaps = c && gapsOn()
-      ? `; ${(c.total - c.recorded).toLocaleString()} gaps fitted on the ${c.recorded.toLocaleString()} plots recording it` : "";
+      ? `; ${(c.total - c.recorded).toLocaleString()} imputed values calibrated on the ${c.recorded.toLocaleString()} plots recording it` : "";
     return `<label class="choice"><input class="form-check-input" type="checkbox" name="target" value="${escape(name)}"` +
       `${off.has(name) ? "" : " checked"}> ${escape(LABELS[name] ?? name)}` +
       `<span class="hint">from ${escape(reads(t))}${escape(gaps)}</span>` +

@@ -184,7 +184,7 @@
   `resolve_fit_gaps` (C ABI). Regression targets only. Undated plots that are
   probably older than the dated ones, and plots without coordinates from an
   area with no georeferenced plots, are better served by the raw prediction;
-  the article "Filling a dataset's gaps" says why.
+  the article "Imputing a dataset's gaps" says why.
 
 - **Gap fitting reaches a continent's plots.** The matched test compares
   every complete plot with the others, and by species an exact search does

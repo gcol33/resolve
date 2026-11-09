@@ -4,7 +4,7 @@ title: "Python: gap fitting"
 
 <!-- Python blocks run by tools/python_twins.py (md5 cf36e5edb179b48e2b180eb9df889249). -->
 
-Filling a dataset's missing values from its own complete plots: the functions that fit one target or a single model's targets, their settings, the result and its report, and the neighbour searches the choice is tested with. [Filling a dataset's gaps](gap-fitting.html) walks through a fit; a model suite fits its targets through [`SuitePredictor.predict(gap_fitting=...)`](python-suites.html#SuitePredictor.predict).
+Imputing a dataset's missing values from its own complete plots: the functions that fit one target or a single model's targets, their settings, the result and its report, and the neighbour searches the choice is tested with. [Imputing a dataset's gaps](gap-fitting.html) walks through a fit; a model suite fits its targets through [`SuitePredictor.predict(gap_fitting=...)`](python-suites.html#SuitePredictor.predict).
 
 [All of the Python reference](python-reference.html)
 

@@ -104,7 +104,7 @@ navbar:
         href: articles/prediction.html
       - text: Species names and the name table
         href: articles/species-names.html
-      - text: Filling a dataset's gaps
+      - text: Imputing a dataset's gaps
         href: articles/gap-fitting.html
       - text: Correcting altitude and slope with an elevation model
         href: articles/terrain-correction.html
@@ -164,7 +164,7 @@ reference:
   - as.data.frame.resolve_suite_predictions
 - title: Gap fitting
   desc: |
-    Filling a dataset's missing values from its own complete plots, beside the raw imputed value.
+    Imputing a dataset's missing values from its own complete plots, beside the raw imputed value.
   contents:
   - resolve.fit_gaps
   - resolve.fit_prediction_gaps
