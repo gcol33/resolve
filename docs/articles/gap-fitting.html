@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Filling a dataset's gaps • RESOLVE</title>
+<title>Imputing a dataset's gaps • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="../favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
@@ -16,7 +16,7 @@
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><link href="../extra.css" rel="stylesheet">
-<script src="../extra.js"></script><meta property="og:title" content="Filling a dataset's gaps">
+<script src="../extra.js"></script><meta property="og:title" content="Imputing a dataset's gaps">
 <script>
 (function () {
   var D = String.fromCharCode(36);
@@ -57,7 +57,7 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="active nav-item dropdown">
+<li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
@@ -66,7 +66,7 @@
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
     <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
-    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
+    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Imputing a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
     <li><hr class="dropdown-divider"></li>
@@ -106,7 +106,7 @@
 
 <div class="row">
   <main id="main" class="col-md-9"><div class="page-header">
-      <img src="../logo.svg" class="logo" alt=""><h1>Filling a dataset's gaps</h1>
+      <img src="../logo.svg" class="logo" alt=""><h1>Imputing a dataset's gaps</h1>
             
       
       <small class="dont-index">Source: <a href="https://github.com/gcol33/resolve/blob/HEAD/vignettes/articles/gap-fitting.Rmd" class="external-link"><code>vignettes/articles/gap-fitting.Rmd</code></a></small>
@@ -115,7 +115,7 @@
 
     
     
-<!-- Python blocks run by tools/python_twins.py (md5 b028330052e28498f603147072b73ac3). -->
+<!-- Python blocks run by tools/python_twins.py (md5 1d3c189344311c6a853839c2a5ab917d). -->
 <p>A dataset rarely lacks a variable on every plot. Most plots carry a
 survey year, coordinates or an elevation, and some do not. The plots
 that carry it are labelled examples from the same surveys, recorded by
@@ -185,18 +185,33 @@ complete plots are to one another. A gap can be much farther from them:
 a region nobody georeferenced, or the oldest surveys. Judging the
 neighbours by how well they impute a complete plot from its own nearest
 plots would trust them more than they deserve at the gaps.</p>
-<p>Gap fitting therefore measures each gap’s distance to its nearest
-complete plot on every axis it can be measured on: species similarity,
-km where the gaps carry coordinates, and survey years where they carry a
-year. Each complete plot is then imputed with the complete plots nearer
-to it than a gap is to its nearest complete plot hidden, one gap
-distance drawn per complete plot and axis (nearest-neighbour distance
-matching, Milà et al. 2022). A complete plot left with no neighbour at
-that distance counts as imputed by the local constant, which is all the
-dataset says about it there. Each candidate is scored on the complete
-plots by the target’s own error: the mean absolute error, on a log scale
-that of log1p, the circular error of a bearing, the median distance in
-km for a location. The best candidate imputes the gaps.</p>
+<p>Gap fitting therefore judges the candidates by cross-validation over
+the complete plots, with folds laid out so that a held-out plot lies as
+far from the plots it may read as a gap lies from the complete plots
+(k-fold nearest-neighbour distance matching, Linnenbrink et al. 2024).
+Each gap’s distance to its nearest complete plot is measured on every
+axis it can be measured on: species similarity, km where the gaps carry
+coordinates, and survey years where they carry a year. The complete
+plots are grouped into squares of an equal-area map, into survey-year
+periods, into both, or one by one, at a range of sizes, and the groups
+are dealt out to ten folds. Where the gaps lie farther away than any
+fold can, a held-out plot also loses every plot within a buffer, and
+each plot’s buffer is the distances of one gap drawn at random. The
+layout whose held-out plots match the gaps’ distances most closely is
+the one used.</p>
+<p>Every fitted part is fitted on the other folds: a held-out plot’s
+neighbours, the least-squares coefficients and <code>k</code>. A
+complete plot left with no neighbour counts as imputed by the local
+constant, which is all the dataset says about it there. Each candidate
+is scored on the out-of-fold values by the target’s own error: the mean
+absolute error, on a log scale that of log1p, the circular error of a
+bearing, the median distance in km for a location. The candidate with
+the lowest error is fitted again on every complete plot and imputes the
+gaps.</p>
+<p>The lowest of seven errors reads lower than the error the chosen
+method then makes. The report therefore estimates the error of the whole
+choice by repeating it with each fold held out and scoring it on that
+fold (nested cross-validation).</p>
 <p>Gaps with coordinates and gaps without them choose apart: the second
 group only among the candidates that read no position.</p>
 </div>
@@ -298,7 +313,7 @@ on.</p>
 </div>
 </div>
 <div class="section level2">
-<h2 id="fitting-the-gaps-of-a-single-model">Fitting the gaps of a single model<a class="anchor" aria-label="anchor" href="#fitting-the-gaps-of-a-single-model"></a>
+<h2 id="gap-fitting-with-a-single-model">Gap fitting with a single model<a class="anchor" aria-label="anchor" href="#gap-fitting-with-a-single-model"></a>
 </h2>
 <p>Gap fitting reads the dataset’s own tables: the species records, for
 composition over every species they name, whatever the model’s
@@ -325,8 +340,8 @@ here elevation on its own scale.</p>
 <span id="cb10-5"><a href="#cb10-5" tabindex="-1"></a>                              targets<span class="op">=</span>{<span class="st">"elevation"</span>: {<span class="st">"scale"</span>: <span class="st">"linear"</span>}})</span>
 <span id="cb10-6"><a href="#cb10-6" tabindex="-1"></a>elevation <span class="op">=</span> fits[<span class="st">"elevation"</span>]</span>
 <span id="cb10-7"><a href="#cb10-7" tabindex="-1"></a>pd.Series(elevation.method).value_counts()</span>
-<span id="cb10-8"><a href="#cb10-8" tabindex="-1"></a><span class="co">#&gt; recorded                 60</span></span>
-<span id="cb10-9"><a href="#cb10-9" tabindex="-1"></a><span class="co">#&gt; stack_species_spatial    15</span></span>
+<span id="cb10-8"><a href="#cb10-8" tabindex="-1"></a><span class="co">#&gt; recorded         60</span></span>
+<span id="cb10-9"><a href="#cb10-9" tabindex="-1"></a><span class="co">#&gt; stack_species    15</span></span>
 <span id="cb10-10"><a href="#cb10-10" tabindex="-1"></a><span class="co">#&gt; Name: count, dtype: int64</span></span></code></pre></div>
 </div>
 <p>A complete plot keeps its recorded value (<code>recorded</code>);
@@ -341,7 +356,7 @@ beside the model’s own imputed value.</p>
 <span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>model <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/mean.html" class="external-link">mean</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/MathFun.html" class="external-link">abs</a></span><span class="op">(</span><span class="va">preds</span><span class="op">$</span><span class="va">predictions</span><span class="op">$</span><span class="va">elevation</span><span class="op">[</span><span class="va">gaps</span><span class="op">]</span> <span class="op">-</span> <span class="va">truth</span><span class="op">[</span><span class="va">gaps</span><span class="op">]</span><span class="op">)</span><span class="op">)</span>,</span>
 <span>  fitted <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/mean.html" class="external-link">mean</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/MathFun.html" class="external-link">abs</a></span><span class="op">(</span><span class="va">elevation</span><span class="op">$</span><span class="va">fitted</span><span class="op">[</span><span class="va">gaps</span><span class="op">]</span> <span class="op">-</span> <span class="va">truth</span><span class="op">[</span><span class="va">gaps</span><span class="op">]</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt;    model   fitted </span></span>
-<span><span class="co">#&gt; 274.8799 162.6798</span></span></code></pre></div>
+<span><span class="co">#&gt; 274.8799 154.4564</span></span></code></pre></div>
 <div class="sourceCode" id="cb12"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb12-1"><a href="#cb12-1" tabindex="-1"></a>order <span class="op">=</span> pd.Index(my_plots.plot_id.astype(<span class="bu">str</span>)).get_indexer(<span class="bu">list</span>(preds.plot_ids))</span>
 <span id="cb12-2"><a href="#cb12-2" tabindex="-1"></a>truth <span class="op">=</span> my_plots.elevation.to_numpy()[order]</span>
 <span id="cb12-3"><a href="#cb12-3" tabindex="-1"></a>gaps <span class="op">=</span> my_plots.elevation_recorded.isna().to_numpy()[order]</span>
@@ -349,7 +364,7 @@ beside the model’s own imputed value.</p>
 <span id="cb12-5"><a href="#cb12-5" tabindex="-1"></a>fitted <span class="op">=</span> elevation.fitted.numpy()</span>
 <span id="cb12-6"><a href="#cb12-6" tabindex="-1"></a>{<span class="st">"model"</span>: <span class="bu">float</span>(np.<span class="bu">abs</span>(raw[gaps] <span class="op">-</span> truth[gaps]).mean()),</span>
 <span id="cb12-7"><a href="#cb12-7" tabindex="-1"></a> <span class="st">"fitted"</span>: <span class="bu">float</span>(np.<span class="bu">abs</span>(fitted[gaps] <span class="op">-</span> truth[gaps]).mean())}</span>
-<span id="cb12-8"><a href="#cb12-8" tabindex="-1"></a><span class="co">#&gt; {'model': 252.3594970703125, 'fitted': 141.37301726696327}</span></span></code></pre></div>
+<span id="cb12-8"><a href="#cb12-8" tabindex="-1"></a><span class="co">#&gt; {'model': 252.3594970703125, 'fitted': 150.94150117990975}</span></span></code></pre></div>
 </div>
 </div>
 <div class="section level2">
@@ -357,31 +372,43 @@ beside the model’s own imputed value.</p>
 </h2>
 <p>The report says what was chosen and why: the number of complete plots
 and gaps, the gaps’ distance to their nearest complete plot on each
-axis, the <code>k</code> each kind of neighbour chose, and per group of
-gaps every candidate’s error on the complete plots at the gaps’
-distance, the method chosen and what it fitted.</p>
+axis, the fold layout, the <code>k</code> each kind of neighbour chose,
+and per group of gaps every candidate’s cross-validated error
+(<code>cv_error</code>), the error estimated for the whole choice
+(<code>estimated_error</code>), the method chosen and what it
+fitted.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">located</span> <span class="op">&lt;-</span> <span class="va">elevation</span><span class="op">$</span><span class="va">report</span><span class="op">$</span><span class="va">groups</span><span class="op">$</span><span class="va">located</span></span>
 <span><span class="va">located</span><span class="op">$</span><span class="va">method</span></span>
 <span><span class="co">#&gt; [1] "stack_species_spatial"</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="va">located</span><span class="op">$</span><span class="va">matched_error</span><span class="op">)</span>, <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="va">located</span><span class="op">$</span><span class="va">cv_error</span><span class="op">)</span>, <span class="fl">1</span><span class="op">)</span></span>
 <span><span class="co">#&gt;        local_constant               resolve          offset_slope </span></span>
-<span><span class="co">#&gt;                 559.9                 158.6                 155.9 </span></span>
+<span><span class="co">#&gt;                 576.0                 158.6                 160.4 </span></span>
 <span><span class="co">#&gt;           knn_species         stack_species           knn_spatial </span></span>
-<span><span class="co">#&gt;                 173.0                 135.1                 609.3 </span></span>
+<span><span class="co">#&gt;                 121.5                 109.5                 580.8 </span></span>
 <span><span class="co">#&gt; stack_species_spatial </span></span>
-<span><span class="co">#&gt;                 128.8</span></span>
+<span><span class="co">#&gt;                 108.4</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">located</span><span class="op">$</span><span class="va">estimated_error</span>, <span class="fl">1</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] 111.2</span></span>
 <span><span class="va">elevation</span><span class="op">$</span><span class="va">report</span><span class="op">$</span><span class="va">axes</span><span class="op">$</span><span class="va">km</span><span class="op">$</span><span class="va">gap_distance</span><span class="op">$</span><span class="va">median</span></span>
 <span><span class="co">#&gt; [1] 7.379892</span></span></code></pre></div>
 <div class="sourceCode" id="cb14"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb14-1"><a href="#cb14-1" tabindex="-1"></a>located <span class="op">=</span> elevation.report[<span class="st">"groups"</span>][<span class="st">"located"</span>]</span>
 <span id="cb14-2"><a href="#cb14-2" tabindex="-1"></a>located[<span class="st">"method"</span>]</span>
-<span id="cb14-3"><a href="#cb14-3" tabindex="-1"></a><span class="co">#&gt; stack_species_spatial</span></span>
-<span id="cb14-4"><a href="#cb14-4" tabindex="-1"></a>{m: <span class="bu">round</span>(e, <span class="dv">1</span>) <span class="cf">for</span> m, e <span class="kw">in</span> located[<span class="st">"matched_error"</span>].items()}</span>
-<span id="cb14-5"><a href="#cb14-5" tabindex="-1"></a><span class="co">#&gt; {'local_constant': 559.9, 'resolve': 167.7, 'offset_slope': 167.2, 'knn_species': 173.0, 'stack_species': 134.9, 'knn_spatial': 609.3, 'stack_species_spatial': 131.0}</span></span>
-<span id="cb14-6"><a href="#cb14-6" tabindex="-1"></a>elevation.report[<span class="st">"axes"</span>][<span class="st">"km"</span>][<span class="st">"gap_distance"</span>][<span class="st">"median"</span>]</span>
-<span id="cb14-7"><a href="#cb14-7" tabindex="-1"></a><span class="co">#&gt; 7.379891561267665</span></span></code></pre></div>
+<span id="cb14-3"><a href="#cb14-3" tabindex="-1"></a><span class="co">#&gt; stack_species</span></span>
+<span id="cb14-4"><a href="#cb14-4" tabindex="-1"></a>{m: <span class="bu">round</span>(e, <span class="dv">1</span>) <span class="cf">for</span> m, e <span class="kw">in</span> located[<span class="st">"cv_error"</span>].items()}</span>
+<span id="cb14-5"><a href="#cb14-5" tabindex="-1"></a><span class="co">#&gt; {'local_constant': 576.0, 'resolve': 167.7, 'offset_slope': 171.9, 'knn_species': 121.5, 'stack_species': 114.4, 'knn_spatial': 580.8, 'stack_species_spatial': 115.6}</span></span>
+<span id="cb14-6"><a href="#cb14-6" tabindex="-1"></a><span class="bu">round</span>(located[<span class="st">"estimated_error"</span>], <span class="dv">1</span>)</span>
+<span id="cb14-7"><a href="#cb14-7" tabindex="-1"></a><span class="co">#&gt; 119.3</span></span>
+<span id="cb14-8"><a href="#cb14-8" tabindex="-1"></a>elevation.report[<span class="st">"axes"</span>][<span class="st">"km"</span>][<span class="st">"gap_distance"</span>][<span class="st">"median"</span>]</span>
+<span id="cb14-9"><a href="#cb14-9" tabindex="-1"></a><span class="co">#&gt; 7.379891561267665</span></span></code></pre></div>
 </div>
+<p><code>folds</code> gives the layout the choice was judged on: the
+number of folds, the side of the squares (<code>block_km</code>) and the
+length of the survey-year periods (<code>block_years</code>), the median
+buffer in km and in years, and how far the held-out plots’ distances
+still lie from the gaps’ on each axis (<code>mismatch</code>, 0 where
+they match).</p>
 <p>A chosen least-squares method also reports its coefficients
 (<code>coefficients</code>, one per term: <code>resolve</code>,
 <code>species</code>, <code>spatial</code>), the complete plots it was
@@ -450,7 +477,7 @@ the plot records the target, <code>FALSE</code> where
 <div class="section level2">
 <h2 id="settings">Settings<a class="anchor" aria-label="anchor" href="#settings"></a>
 </h2>
-<p>Four settings change the choice (<code>gapFitting</code> in R,
+<p>Seven settings change the choice (<code>gapFitting</code> in R,
 <code>gap_fitting</code> in Python, the <code>--gap-*</code> flags on
 the command line):</p>
 <ul>
@@ -464,8 +491,17 @@ from;</li>
 <code>spatial = FALSE</code> (<code>--no-spatial</code>):
 composition only, no spatial neighbours;</li>
 <li>
-<code>matching_seed</code>: the seed of the draw of one gap distance
-per complete plot.</li>
+<code>n_folds</code>: the number of folds, 10 by default; the
+estimated error needs at least 3;</li>
+<li>
+<code>max_fold_share</code>: the largest share of the complete plots
+one fold may hold, 0.5 by default;</li>
+<li>
+<code>matching_sample</code>: the number of complete plots the
+layouts are compared on, 1000 by default;</li>
+<li>
+<code>matching_seed</code>: the seed of the order the groups are
+dealt out in, the buffers drawn and the complete plots compared.</li>
 </ul>
 <div class="lang-pair">
 <div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
@@ -506,9 +542,10 @@ allows for it.</li>
 <li>
 <strong>Plots without coordinates that probably come from an area
 with no georeferenced plots.</strong> A location’s gaps have no
-position, so the test hides plots by species and survey year only, and a
-missing region still looks near in species terms. Such plots are better
-served by the model’s imputed value, or by the species stack alone.</li>
+position, so the folds are matched in species similarity and survey year
+only, and a missing region still looks near in species terms. Such plots
+are better served by the model’s imputed value, or by the species stack
+alone.</li>
 </ul>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

@@ -1,4 +1,4 @@
-# Seed the Engine's Random Numbers
+# Seed the RESOLVE Engine's Random Numbers
 
 Seed the random number generators of the RESOLVE engine's torch, which
 draw a new model's starting weights and its dropout. Training holds out

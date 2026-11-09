@@ -317,6 +317,16 @@ to do about each.
   or impute stop with the same message. Run
   [`resolve.install_backend()`](https://gillescolling.com/resolve/reference/resolve.install_backend.md),
   or set `RESOLVE_C_HOME`.
+- When a library is found but does not load,
+  [`library(resolveR)`](https://gillescolling.com/resolve/) prints its
+  path and the loader’s reason instead, and the functions stop with the
+  same text. `is missing symbols:` followed by function names means the
+  library was built before the installed resolveR and lacks functions
+  the package calls; reinstall it with
+  `resolve.install_backend(force = TRUE)`.
+  [`resolve.install_backend()`](https://gillescolling.com/resolve/reference/resolve.install_backend.md)
+  without `force` warns with this text when the library it finds does
+  not load.
 - When a download fails,
   [`resolve.install_backend()`](https://gillescolling.com/resolve/reference/resolve.install_backend.md)
   stops with `cannot open URL` and the address it tried. The file name

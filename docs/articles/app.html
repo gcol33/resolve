@@ -66,7 +66,7 @@
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
     <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
-    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
+    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Imputing a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
     <li><hr class="dropdown-divider"></li>
@@ -93,7 +93,7 @@
     <li><button class="dropdown-item" data-bs-theme-value="auto"><span class="fa fa-adjust"></span> Auto</button></li>
   </ul>
 </li>
-<li class="active nav-item"><a class="nav-link" href="../articles/app.html">RESOLVE App ✨</a></li>
+<li class="nav-item"><a class="nav-link" href="../articles/app.html">RESOLVE App ✨</a></li>
       </ul>
 </div>
 
@@ -150,8 +150,9 @@ from Eurostat GISCO.</p>
           </div>
           <div>
             <label class="form-label small d-block" for="header-file">Header table (optional): one row per plot, with
-              plot ID, latitude and longitude (WGS84), and year and month or a date. A header with gaps in
-              some columns is calibrated on its own plots (opt-out).</label>
+              plot ID, latitude and longitude (WGS84), and year and month or a date. Where a header
+              column is missing on some plots, the imputed values are calibrated on the plots that record it
+              (opt-out).</label>
             <input class="form-control form-control-sm" type="file" id="header-file" accept=".csv,.tsv,.txt"><div class="fields small" id="header-fields"></div>
             <div class="info small text-body-secondary" id="header-info"></div>
             <div class="error small" id="header-error"></div>
@@ -174,7 +175,7 @@ from Eurostat GISCO.</p>
         <div class="choices" id="targets"></div>
         <div class="options">
           <label class="form-check-label" id="terrain-option" hidden><input class="form-check-input" type="checkbox" id="o-terrain" checked> Terrain correction of altitude and slope</label>
-          <label class="form-check-label" id="gaps-option" hidden><input class="form-check-input" type="checkbox" id="o-gaps" checked> Calibrate gaps to input data</label>
+          <label class="form-check-label" id="gaps-option" hidden><input class="form-check-input" type="checkbox" id="o-gaps" checked> Calibrate imputed values to input data</label>
         </div>
         <div class="actions">
           <button type="button" class="btn btn-primary" id="run" disabled>Impute</button>

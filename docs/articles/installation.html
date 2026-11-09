@@ -57,7 +57,7 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="active nav-item dropdown">
+<li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
@@ -66,7 +66,7 @@
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
     <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
-    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
+    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Imputing a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
     <li><hr class="dropdown-divider"></li>
@@ -440,6 +440,15 @@ prints that the backend is not installed, and the functions that load
 data, train or impute stop with the same message. Run
 <code><a href="../reference/resolve.install_backend.html">resolve.install_backend()</a></code>, or set
 <code>RESOLVE_C_HOME</code>.</li>
+<li>When a library is found but does not load,
+<code><a href="https://gillescolling.com/resolve/">library(resolveR)</a></code> prints its path and the loader’s reason
+instead, and the functions stop with the same text.
+<code>is missing symbols:</code> followed by function names means the
+library was built before the installed resolveR and lacks functions the
+package calls; reinstall it with
+<code>resolve.install_backend(force = TRUE)</code>.
+<code><a href="../reference/resolve.install_backend.html">resolve.install_backend()</a></code> without <code>force</code> warns
+with this text when the library it finds does not load.</li>
 <li>When a download fails, <code><a href="../reference/resolve.install_backend.html">resolve.install_backend()</a></code> stops
 with <code>cannot open URL</code> and the address it tried. The file
 name in the address names the build,

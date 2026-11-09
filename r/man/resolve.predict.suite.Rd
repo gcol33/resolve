@@ -45,7 +45,8 @@ column names).}
 \code{FALSE}).}
 
 \item{gapFitting}{\code{NULL} (default), \code{TRUE}, or a list of gap fitting
-settings (\code{candidates}, \code{k_grid}, \code{spatial}, \code{matching_seed}; see
+settings (\code{candidates}, \code{k_grid}, \code{spatial}, \code{matching_seed}, \code{n_folds},
+\code{max_fold_share}, \code{matching_sample}; see
 \code{\link[=resolve.fit_gaps]{resolve.fit_gaps()}}): fit each target \code{columns$recorded} names from the
 dataset's own complete plots. Adds \verb{<target>_fitted} and
 \verb{<target>_fit_method} to \code{\link[=as.data.frame]{as.data.frame()}} and a \code{gap_fit} (\code{fitted},

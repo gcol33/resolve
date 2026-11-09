@@ -262,7 +262,7 @@ value. No target column is read, except the ones `columns["recorded"]`
 names: each such target gets `recorded` (`True` where the plot records
 it) and a `<target>_recorded` column in `to_pandas`, or with
 `gap_fitting` (`True`, a `GapFittingConfig` or a `dict` of its fields)
-is fitted from the dataset’s own complete plots instead ([Filling a
+is fitted from the dataset’s own complete plots instead ([Imputing a
 dataset’s
 gaps](https://gillescolling.com/resolve/articles/gap-fitting.md)). With
 `terrain` (`"field"` or `True`, `"columns"`, a `dict` of `source`,

@@ -67,7 +67,7 @@ Several trained models released as one directory and scored together.
 
 ## Gap fitting
 
-Filling a dataset’s missing values from its own complete plots, beside
+Imputing a dataset’s missing values from its own complete plots, beside
 the raw imputed value.
 
 - [`resolve.fit_gaps()`](https://gillescolling.com/resolve/reference/resolve.fit_gaps.md)
@@ -131,8 +131,8 @@ seeding its random numbers, and the GPU memory settings.
 - [`resolve.version()`](https://gillescolling.com/resolve/reference/resolve.version.md)
   : Get RESOLVE version
 - [`resolve.manual_seed()`](https://gillescolling.com/resolve/reference/resolve.manual_seed.md)
-  : Seed the Engine's Random Numbers
+  : Seed the RESOLVE Engine's Random Numbers
 - [`resolve.set_vram_fraction()`](https://gillescolling.com/resolve/reference/resolve.set_vram_fraction.md)
-  : Cap the GPU Memory the Engine May Use
+  : Cap the GPU Memory the RESOLVE Engine May Use
 - [`resolve_configure_cuda_allocator()`](https://gillescolling.com/resolve/reference/resolve_configure_cuda_allocator.md)
   : Configure the PyTorch CUDA caching allocator

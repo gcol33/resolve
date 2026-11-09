@@ -17,16 +17,21 @@
 //   knn_spatial            the median over the k nearest complete plots;
 //   stack_species_spatial  raw and both medians by least squares.
 //
-// The choice is made at the distance the gaps are from the complete plots:
-// one distance per axis (species similarity, km, survey years) is drawn per
-// complete plot from the gaps' own distances, and each complete plot is
-// predicted with the complete plots nearer to it than that hidden
-// (nearest-neighbour distance matching, Mila et al. 2022, Methods in Ecology
-// and Evolution). Each candidate is scored by the target's headline error and
-// the best predicts the gaps; gaps with and without coordinates choose apart.
+// The choice is judged by cross-validation over the complete plots, with folds
+// laid out to hold plots out the way the gaps are held out (k-fold
+// nearest-neighbour distance matching, Linnenbrink et al. 2024, Geoscientific
+// Model Development): squares of the equal-area plane, survey-year periods,
+// both, or plot by plot, at a range of sizes, the layout whose held-out plots
+// lie from the other folds as the gaps lie from the complete plots (relative
+// Wasserstein distance of the nearest-neighbour distances in species
+// dissimilarity, km and years). Every fitted part is fitted on the other folds;
+// the candidate with the lowest out-of-fold error is refitted on every
+// complete plot and predicts the gaps, and the whole procedure, repeated with
+// each fold held out, gives the error it is reported with (nested
+// cross-validation). Gaps with and without coordinates choose apart.
 
 import { geographicMedian, greatCircleKm, Laea } from "./geo.js";
-import { HidingRules, PlaceIndex, PresenceSets, RowPool, SetNeighbourGraph } from "./plot_neighbours.js";
+import { FoldRules, PlaceIndex, PresenceSets, RowPool, SetNeighbourGraph, foldHiding, overlaps } from "./plot_neighbours.js";
 
 export const GAP_METHODS = ["local_constant", "resolve", "offset_slope", "knn_species",
                             "stack_species", "knn_spatial", "stack_species_spatial"];
@@ -47,7 +52,28 @@ const CANDIDATES = [
   { method: 6, combination: "least_squares", reads: [true, true] },
 ];
 
-export const gapMethodLabel = (code) => (code === GAP_RECORDED ? "recorded" : GAP_METHODS[code]);
+// Where a plot's calibrated value comes from: its own record or the fit.
+export const gapSource = (code) => (code === GAP_RECORDED ? "recorded" : "imputed");
+
+// The chosen method in words, with the k it chose per neighbour kind
+// ([kind, k] pairs, as in the report) and the centre the scale takes.
+export function describeGapMethod(method, k, scale) {
+  const kOf = (kind) => k.find(([name]) => name === kind)?.[1];
+  const similar = `the ${kOf("species")} plots most similar in species composition`;
+  const nearest = `the ${kOf("spatial")} nearest plots`;
+  const centre = { log: "median", geographic: "geographic median", circular: "mean direction" }[scale] ?? "mean";
+  switch (GAP_METHODS[method]) {
+    case "local_constant": return `the ${centre} of the plots recording it`;
+    case "resolve": return "the model's value";
+    case "offset_slope": return "the model's value rescaled to the plots recording it";
+    case "knn_species": return `the median of ${similar}`;
+    case "knn_spatial": return `the median of ${nearest}`;
+    case "stack_species": return `the model's value combined with ${similar}`;
+    case "stack_species_spatial":
+      return `the model's value combined with the ${kOf("species")} most similar and the ${kOf("spatial")} nearest plots`;
+    default: throw new Error(`gap fitting: unknown method ${method}`);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Small numerics
@@ -85,41 +111,6 @@ function narrowed(lists, width) {
 
 const mean = (values) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : NaN);
 const remainder = (x, p) => x - p * Math.floor(x / p);
-
-// ---------------------------------------------------------------------------
-// The random draw: torch's CPU generator (mt19937) and randint
-// ---------------------------------------------------------------------------
-
-class Mt19937 {
-  constructor(seed) {
-    this.mt = new Uint32Array(624);
-    this.mt[0] = seed >>> 0;
-    for (let i = 1; i < 624; i++) {
-      const prev = this.mt[i - 1] ^ (this.mt[i - 1] >>> 30);
-      this.mt[i] = (Math.imul(1812433253, prev) + i) >>> 0;
-    }
-    this.index = 624;
-  }
-
-  next() {
-    if (this.index >= 624) {
-      for (let i = 0; i < 624; i++) {
-        const y = (this.mt[i] & 0x80000000) | (this.mt[(i + 1) % 624] & 0x7fffffff);
-        this.mt[i] = this.mt[(i + 397) % 624] ^ (y >>> 1) ^ (y & 1 ? 0x9908b0df : 0);
-      }
-      this.index = 0;
-    }
-    let y = this.mt[this.index++];
-    y ^= y >>> 11;
-    y ^= (y << 7) & 0x9d2c5680;
-    y ^= (y << 15) & 0xefc60000;
-    y ^= y >>> 18;
-    return y >>> 0;
-  }
-
-  // torch.randint(0, high, (1,)) for high < 2^32: one 32-bit draw modulo high.
-  below(high) { return this.next() % high; }
-}
 
 // ---------------------------------------------------------------------------
 // The plane values are fitted in
@@ -185,10 +176,15 @@ class Plane {
   // The headline over plots: the median km of a position, the mean otherwise.
   aggregate(errors) { return this.scale === "geographic" ? median(errors) : mean(Array.from(errors)); }
 
-  // The local constant: the plane's origin (geographic median), the median on
-  // a log scale, the mean otherwise (of sine and cosine for a bearing).
+  // The local constant of some plane rows: their geographic median, the median
+  // on a log scale, the mean otherwise (of sine and cosine for a bearing).
   centre(truth) {
-    if (this.scale === "geographic") return new Float64Array(2);
+    if (this.scale === "geographic") {
+      const lats = [], lons = [];
+      for (let i = 0; i < truth.n; i++) { const [la, lo] = this.backRow(truth, i); lats.push(la); lons.push(lo); }
+      const [e, nn] = this.projection.forward(...geographicMedian(lats, lons));
+      return Float64Array.of(e / 1000, nn / 1000);
+    }
     const col = (j) => Array.from({ length: truth.n }, (_, i) => truth.v[i * truth.d + j]);
     if (this.scale === "log") return Float64Array.of(median(col(0)));
     return Float64Array.from({ length: this.d }, (_, j) => mean(col(j)));
@@ -374,12 +370,6 @@ function nearestYearGap(years, reference) {
   });
 }
 
-function drawn(distances, n, generator) {
-  const known = distances.filter(Number.isFinite);
-  if (!known.length) return new Float64Array(n);
-  return Float64Array.from({ length: n }, () => known[generator.below(known.length)]);
-}
-
 function summariseAxis(axis, distances, matched) {
   const out = { axis, matched, n: 0, quantiles: [NaN, NaN, NaN, NaN, NaN] };
   if (!distances) return out;
@@ -388,6 +378,533 @@ function summariseAxis(axis, distances, matched) {
   if (known.length) out.quantiles = [0, 0.25, 0.5, 0.75, 1].map((q) => quantile(known, q));
   return out;
 }
+
+const range = (n, first = 0) => Array.from({ length: n }, (_, i) => first + i);
+
+// ---------------------------------------------------------------------------
+// The fold layout
+// ---------------------------------------------------------------------------
+
+// murmur3's finaliser over the words in turn, as the engine hashes them.
+function mix32(h) {
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+function hashWords(seed, words) {
+  let h = mix32(seed >>> 0);
+  for (const w of words) h = mix32((((h ^ w) >>> 0) + 0x9e3779b9) >>> 0);
+  return h;
+}
+const lowWord = (v) => v >>> 0;
+const highWord = (v) => Math.floor(v / 4294967296) >>> 0;
+
+const GROUP_STREAM = 1, SAMPLE_STREAM = 2, BUFFER_STREAM = 3;
+const BLOCK_SIZES = 10, PERIOD_LENGTHS = 8, SIMILAR_LIST = 256;
+
+// The area between two samples' empirical distribution functions, divided by
+// the sum of their means; 0 when both are all zero, NaN when either is empty.
+function relativeWasserstein(a, b) {
+  if (!a.length || !b.length) return NaN;
+  a = Float64Array.from(a).sort();
+  b = Float64Array.from(b).sort();
+  let i = 0, j = 0, area = 0, x = Math.min(a[0], b[0]);
+  while (i < a.length || j < b.length) {
+    const next = j >= b.length || (i < a.length && a[i] <= b[j]) ? a[i] : b[j];
+    area += Math.abs(i / a.length - j / b.length) * (next - x);
+    x = next;
+    while (i < a.length && a[i] === x) i++;
+    while (j < b.length && b[j] === x) j++;
+  }
+  const means = a.reduce((s, v) => s + v, 0) / a.length + b.reduce((s, v) => s + v, 0) / b.length;
+  return means > 0 ? area / means : 0;
+}
+
+const moreSimilar = (x, y) => (x[0] !== y[0] ? y[0] - x[0] : x[1] - y[1]);
+
+class LayoutMatcher {
+  constructor(split, search, gaps, { seed, matchingSample }) {
+    this.split = split;
+    this.search = search;
+    this.n = split.nCal;
+    this.seed = seed >>> 0;
+    this.positions();
+    this.surveyYears();
+    this.sample(matchingSample);
+    this.gapDissimilarity = Array.from(gaps.similarity, (s) => 1 - s);
+    const nGaps = gaps.similarity.length;
+    this.gapKmAll = split.kmAxis ? Array.from(gaps.km) : new Array(nGaps).fill(NaN);
+    this.gapYearsAll = split.timeAxis ? Array.from(gaps.years) : new Array(nGaps).fill(NaN);
+    this.gapKm = this.gapKmAll.filter(Number.isFinite);
+    this.gapYears = this.gapYearsAll.filter(Number.isFinite);
+  }
+
+  specs() {
+    const spec = (blockKm, blockYears, buffer = "none") => ({ blockKm, blockYears, buffer });
+    const out = [spec(NaN, NaN)];
+    for (const s of this.blockSizes) out.push(spec(s, NaN));
+    for (const w of this.periodLengths) out.push(spec(NaN, w));
+    for (const s of this.blockSizes) for (const w of this.periodLengths) out.push(spec(s, w));
+    if (this.gapKm.length) out.push(spec(NaN, NaN, "km"));
+    if (this.gapYears.length) out.push(spec(NaN, NaN, "years"));
+    if (this.gapKm.length && this.gapYears.length) out.push(spec(NaN, NaN, "both"));
+    return out;
+  }
+
+  // The buffers of spec added to its folds: each complete plot takes the
+  // distances of one gap drawn by the hash of its row, among the gaps with a
+  // distance on the buffer's axes (with both, the gap's two together).
+  withBuffers(folds, spec) {
+    const layout = { folds, bufferKm: null, bufferYears: null };
+    if (spec.buffer === "none") return layout;
+    const km = spec.buffer !== "years", years = spec.buffer !== "km";
+    const pool = range(this.gapKmAll.length).filter((g) =>
+      (km && Number.isFinite(this.gapKmAll[g])) || (years && Number.isFinite(this.gapYearsAll[g])));
+    if (km) layout.bufferKm = new Float64Array(this.n).fill(NaN);
+    if (years) layout.bufferYears = new Float64Array(this.n).fill(NaN);
+    for (let i = 0; i < this.n; i++) {
+      const g = pool[hashWords(this.seed, [BUFFER_STREAM, lowWord(i), highWord(i)]) % pool.length];
+      if (km) layout.bufferKm[i] = this.gapKmAll[g];
+      if (years) layout.bufferYears[i] = this.gapYearsAll[g];
+    }
+    return layout;
+  }
+
+  // The groups under `spec` dealt to nFolds folds: largest first (ties by
+  // hash, then first plot), each to the fold holding fewest plots (ties to the
+  // lower); empty folds dropped and the rest numbered in order.
+  deal(spec, nFolds) {
+    const space = !Number.isNaN(spec.blockKm), time = !Number.isNaN(spec.blockYears);
+    const index = new Map(), groups = [], groupOf = new Int32Array(this.n);
+    for (let i = 0; i < this.n; i++) {
+      let key = [0, 0, 0, -1], own = !space && !time;
+      if (space) {
+        if (Number.isFinite(this.east[i]) && Number.isFinite(this.north[i])) {
+          key[0] = Math.floor(this.east[i] / spec.blockKm);
+          key[1] = Math.floor(this.north[i] / spec.blockKm);
+        } else own = true;
+      }
+      if (time) {
+        if (Number.isFinite(this.years[i])) key[2] = Math.floor((this.years[i] - this.yearOrigin) / spec.blockYears);
+        else own = true;
+      }
+      if (own) key = [0, 0, 0, i];
+      const id = key.join(",");
+      let g = index.get(id);
+      if (g === undefined) { g = groups.length; index.set(id, g); groups.push({ key, size: 0, first: i, hash: 0 }); }
+      groups[g].size++;
+      groupOf[i] = g;
+    }
+    for (const g of groups) {
+      g.hash = hashWords(this.seed, [GROUP_STREAM, ...g.key.flatMap((v) => [lowWord(v), highWord(v)])]);
+    }
+    const order = range(groups.length).sort((x, y) => {
+      const gx = groups[x], gy = groups[y];
+      if (gx.size !== gy.size) return gy.size - gx.size;
+      if (gx.hash !== gy.hash) return gx.hash - gy.hash;
+      return gx.first - gy.first;
+    });
+    const counts = new Array(nFolds).fill(0), foldOfGroup = new Int32Array(groups.length);
+    for (const g of order) {
+      let f = 0;
+      for (let c = 1; c < nFolds; c++) if (counts[c] < counts[f]) f = c;
+      foldOfGroup[g] = f;
+      counts[f] += groups[g].size;
+    }
+    const renumber = new Int32Array(nFolds).fill(-1);
+    let next = 0;
+    for (let f = 0; f < nFolds; f++) if (counts[f] > 0) renumber[f] = next++;
+    const folds = Int32Array.from(groupOf, (g) => renumber[foldOfGroup[g]]);
+    return { folds, largest: Math.max(...counts) };
+  }
+
+  async mismatch(layout) {
+    const rules = foldRules(this.split, layout, -1), hides = foldHiding(rules);
+    const out = [["similarity", relativeWasserstein(this.heldDissimilarity(hides), this.gapDissimilarity)]];
+    if (this.split.kmAxis) out.push(["km", relativeWasserstein(await this.heldKm(rules), this.gapKm)]);
+    if (this.split.timeAxis) out.push(["years", relativeWasserstein(this.heldYears(hides), this.gapYears)]);
+    return out;
+  }
+
+  positions() {
+    const n = this.n, c = this.split.coordsCal;
+    this.east = new Float64Array(n).fill(NaN);
+    this.north = new Float64Array(n).fill(NaN);
+    this.blockSizes = [];
+    if (!c) return;
+    const lats = [], lons = [];
+    for (let i = 0; i < n; i++) if (rowFinite(c, i)) { lats.push(c.v[2 * i]); lons.push(c.v[2 * i + 1]); }
+    if (lats.length < 2) return;
+    const projection = new Laea(...geographicMedian(lats, lons));
+    let loE = Infinity, hiE = -Infinity, loN = Infinity, hiN = -Infinity;
+    for (let i = 0; i < n; i++) {
+      if (!rowFinite(c, i)) continue;
+      const [e, nn] = projection.forward(c.v[2 * i], c.v[2 * i + 1]);
+      this.east[i] = e / 1000;
+      this.north[i] = nn / 1000;
+      if (!Number.isFinite(this.east[i]) || !Number.isFinite(this.north[i])) continue;
+      loE = Math.min(loE, this.east[i]); hiE = Math.max(hiE, this.east[i]);
+      loN = Math.min(loN, this.north[i]); hiN = Math.max(hiN, this.north[i]);
+    }
+    const extent = Math.max(hiE - loE, hiN - loN);
+    if (!(extent > 0)) return;
+    let side = extent;
+    for (let j = 0; j < BLOCK_SIZES; j++) this.blockSizes.push(side /= 2);
+  }
+
+  surveyYears() {
+    const y = this.split.yearsCal;
+    this.years = y ? Float64Array.from(y) : new Float64Array(this.n).fill(NaN);
+    this.yearOrigin = 0;
+    this.periodLengths = [];
+    if (!y) return;
+    let lo = Infinity, hi = -Infinity, known = 0;
+    for (const v of this.years) if (Number.isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); known++; }
+    if (known < 2) return;
+    this.yearOrigin = lo;
+    let length = hi - lo;
+    for (let j = 0; j < PERIOD_LENGTHS; j++) {
+      length /= 2;
+      if (length < 1) break;
+      this.periodLengths.push(length);
+    }
+  }
+
+  // The complete plots the layouts' distances are measured on: all, or the
+  // `size` with the lowest hash of their row.
+  sample(size) {
+    let rows = range(this.n);
+    if (this.n > size) {
+      const h = Uint32Array.from(rows, (i) => hashWords(this.seed, [SAMPLE_STREAM, lowWord(i), highWord(i)]));
+      rows.sort((a, b) => (h[a] !== h[b] ? h[a] - h[b] : a - b));
+      rows = rows.slice(0, size).sort((a, b) => a - b);
+    }
+    this.sampleRows = rows;
+    this.similar = [];
+    this.whole = [];
+    for (const plot of rows) {
+      const list = this.similarities(plot).sort(moreSimilar);
+      this.whole.push(list.length <= SIMILAR_LIST);
+      this.similar.push(list.length <= SIMILAR_LIST ? list : list.slice(0, SIMILAR_LIST));
+    }
+    this.byYear = range(this.n).filter((i) => Number.isFinite(this.years[i]))
+      .sort((a, b) => (this.years[a] !== this.years[b] ? this.years[a] - this.years[b] : a - b));
+    this.yearRank = new Int32Array(this.n).fill(-1);
+    this.byYear.forEach((plot, r) => { this.yearRank[plot] = r; });
+  }
+
+  similarities(plot) {
+    const sets = this.search.sets, own = sets.count(plot);
+    return overlaps(sets, plot, this.n).map(([other, shared]) => [shared / Math.sqrt(own * sets.count(other)), other]);
+  }
+
+  // Each matching plot's dissimilarity to the most similar plot the rule
+  // leaves it (1 when it shares no species with any).
+  heldDissimilarity(hides) {
+    return this.sampleRows.map((plot, s) => {
+      let best = NaN;
+      for (const [similarity, other] of this.similar[s]) if (!hides(plot, other, NaN, NaN)) { best = similarity; break; }
+      if (Number.isNaN(best)) {
+        best = 0;
+        if (!this.whole[s]) {
+          for (const [similarity, other] of this.similarities(plot)) if (!hides(plot, other, NaN, NaN)) best = Math.max(best, similarity);
+        }
+      }
+      return 1 - best;
+    });
+  }
+
+  // Each located matching plot's km to the nearest plot the rules leave it.
+  async heldKm(rules) {
+    const rows = this.sampleRows.filter((plot) => Number.isFinite(this.east[plot]) && Number.isFinite(this.north[plot]));
+    if (!rows.length) return [];
+    const found = await this.search.places.nearest(rows, 1, rules);
+    return Array.from(found.km).filter(Number.isFinite);
+  }
+
+  // Each dated matching plot's years to the nearest plot in time the rule
+  // leaves it.
+  heldYears(hides) {
+    const out = [];
+    for (const plot of this.sampleRows) {
+      const r = this.yearRank[plot];
+      if (r < 0) continue;
+      const year = this.years[plot];
+      let best = Infinity;
+      for (let q = r - 1; q >= 0; q--) {
+        const other = this.byYear[q];
+        if (!hides(plot, other, NaN, NaN)) { best = Math.min(best, year - this.years[other]); break; }
+      }
+      for (let q = r + 1; q < this.byYear.length; q++) {
+        const other = this.byYear[q];
+        if (!hides(plot, other, NaN, NaN)) { best = Math.min(best, this.years[other] - year); break; }
+      }
+      if (Number.isFinite(best)) out.push(best);
+    }
+    return out;
+  }
+}
+
+// The matched layout: the candidate with the smallest total mismatch among
+// those whose largest fold holds at most maxFoldShare of the complete plots
+// (the plot-by-plot layout always qualifies).
+async function matchLayout(split, search, gaps, config) {
+  const matcher = new LayoutMatcher(split, search, gaps, config);
+  const n = split.nCal, nFolds = Math.min(config.nFolds, n);
+  const report = { n_folds: 0, block_km: NaN, block_years: NaN, buffer_km: NaN, buffer_years: NaN, injected: false,
+                   mismatch: [], total_mismatch: NaN, n_layouts: 0, n_matching_plots: matcher.sampleRows.length };
+  const medianOf = (v) => (v ? median(Array.from(v).filter((x) => !Number.isNaN(x))) : NaN);
+  let best = null;
+  for (const spec of matcher.specs()) {
+    const { folds, largest } = matcher.deal(spec, nFolds);
+    const used = folds.reduce((m, f) => Math.max(m, f), -1) + 1;
+    const plotByPlot = Number.isNaN(spec.blockKm) && Number.isNaN(spec.blockYears);
+    if (!plotByPlot && (used < 2 || largest > config.maxFoldShare * n)) continue;
+    report.n_layouts++;
+    const layout = matcher.withBuffers(folds, spec);
+    const mismatch = await matcher.mismatch(layout);
+    const total = mismatch.reduce((sum, [, w]) => (Number.isFinite(w) ? sum + w : sum), 0);
+    if (!best || total < report.total_mismatch) {
+      best = layout;
+      Object.assign(report, { n_folds: used, block_km: spec.blockKm, block_years: spec.blockYears,
+                              buffer_km: medianOf(layout.bufferKm), buffer_years: medianOf(layout.bufferYears),
+                              mismatch, total_mismatch: total });
+    }
+  }
+  return { layout: best, report };
+}
+
+// A layout's hiding rules over the complete plots, `held` hidden too.
+function foldRules(split, layout, held) {
+  return new FoldRules(layout.folds, held, { bufferKm: layout.bufferKm, bufferYears: layout.bufferYears,
+                                            coordinates: split.coordsCal && split.coordsCal.v, years: split.yearsCal });
+}
+
+// Injected folds as the layout: one per complete plot, every fold from 0 to
+// the largest holding a plot.
+function injectedLayout(folds, n) {
+  if (!folds || folds.length !== n) throw new Error(`gap fitting: the injected folds must hold one fold per complete plot (${n})`);
+  const out = Int32Array.from(folds);
+  const counts = new Array(out.reduce((m, f) => Math.max(m, f), 0) + 1).fill(0);
+  for (const v of out) {
+    if (v < 0) throw new Error("gap fitting: an injected fold is negative");
+    counts[v]++;
+  }
+  if (counts.includes(0) || counts.length < 2) {
+    throw new Error("gap fitting: the injected folds must number at least two, each from 0 to the largest holding a plot");
+  }
+  return { layout: { folds: out, bufferKm: null, bufferYears: null },
+           report: { n_folds: counts.length, block_km: NaN, block_years: NaN, buffer_km: NaN, buffer_years: NaN,
+                     injected: true, mismatch: [], total_mismatch: NaN, n_layouts: 0, n_matching_plots: 0 } };
+}
+
+// ---------------------------------------------------------------------------
+// The searches
+// ---------------------------------------------------------------------------
+
+// The neighbour searches of one target, complete plots first and the gaps
+// after them: by species over a neighbour graph, by position over a k-d tree;
+// only complete plots are neighbours.
+class PlotSearch {
+  static async build(split, speciesCal, speciesTest, kGrid, pool) {
+    const s = new PlotSearch();
+    s.split = split;
+    s.nCal = speciesCal.length;
+    s.nTest = speciesTest.length;
+    s.pool = pool;
+    s.sets = new PresenceSets([...speciesCal, ...speciesTest]);
+    const maxK = Math.max(...kGrid);
+    s.kSpecies = Math.min(maxK, s.nCal - 1);
+    s.graph = await SetNeighbourGraph.build(s.sets, s.nCal, { k: Math.max(1, s.kSpecies) }, pool);
+    s.open = await s.graph.open(s.nCal, s.nTest);
+    s.places = split.spatialAxis || split.kmAxis
+      ? new PlaceIndex(Float64Array.from([...split.coordsCal.v, ...split.coordsTest.v]), s.nCal, pool) : null;
+    let located = 0;
+    if (split.spatialAxis) for (let i = 0; i < s.nCal; i++) if (rowFinite(split.coordsCal, i)) located++;
+    s.kSpatial = split.spatialAxis ? Math.min(maxK, located - 1) : 0;
+    return s;
+  }
+
+  gapRows() { return range(this.nTest, this.nCal); }
+
+  // Each gap's distance to its nearest complete plot on every axis; a gap
+  // sharing no species with any complete plot is at similarity 0.
+  async distances(split) {
+    const k = this.open.k;
+    const out = { similarity: Float64Array.from({ length: this.nTest }, (_, g) => {
+      const s = this.open.similarities[g * k];
+      return Number.isNaN(s) ? 0 : s;
+    }), km: null, years: null };
+    if (split.kmAxis) out.km = (await this.places.nearest(this.gapRows(), 1)).km;
+    if (split.timeAxis) out.years = nearestYearGap(split.yearsTest, split.yearsCal);
+    return out;
+  }
+
+  // Each complete plot's neighbours among the complete plots the layout
+  // leaves it: of the other folds, the fold `held` (or -1) hidden from every
+  // plot too, outside its buffers. Per kind { indices, width } or null.
+  async outOfFold(layout, held) {
+    const out = [null, null];
+    const rules = foldRules(this.split, layout, held);
+    if (this.kSpecies >= 1) {
+      const lists = await this.graph.hidden(this.nCal, rules);
+      out[SPECIES] = { indices: narrowed(lists, this.kSpecies), width: this.kSpecies };
+    }
+    if (this.places && this.kSpatial >= 1) {
+      const found = await this.places.nearest(range(this.nCal), this.kSpatial, rules);
+      out[SPATIAL] = { indices: found.indices, width: this.kSpatial };
+    }
+    return out;
+  }
+
+  // The gaps' neighbours among the complete plots, of one kind.
+  async gapNeighbours(kind, width) {
+    if (kind === SPECIES) return { indices: narrowed({ indices: this.open.indices, k: this.open.k }, width), width };
+    return { indices: (await this.places.nearest(this.gapRows(), width)).indices, width };
+  }
+}
+
+// The rows `index` of (rows, width) neighbour lists.
+function neighbourRows(lists, index) {
+  const out = new Int32Array(index.length * lists.width);
+  index.forEach((i, r) => out.set(lists.indices.subarray(i * lists.width, (i + 1) * lists.width), r * lists.width));
+  return { indices: out, width: lists.width };
+}
+
+// ---------------------------------------------------------------------------
+// Cross-validation
+// ---------------------------------------------------------------------------
+
+// Element-wise: m's value where finite, else the fallback's (rows, or one row).
+function orFallback(m, fallback, oneRow = false) {
+  const out = rowsOf(m.n, m.d);
+  for (let i = 0; i < m.v.length; i++) {
+    out.v[i] = Number.isFinite(m.v[i]) ? m.v[i] : oneRow ? fallback[i % m.d] : fallback.v[i];
+  }
+  return out;
+}
+
+// One cross-validation over the training plots (rows of the complete plots)
+// predicting a set of query plots:
+//   run { train, trainFolds, trainNeighbours: [species, spatial],
+//         queryNeighbours: [species, spatial], queryRaw }
+class CrossValidation {
+  constructor(split, run, config) {
+    this.split = split;
+    this.run = run;
+    this.config = config;
+    this.truth = pick(split.truthCal, run.train);
+    this.raw = pick(split.rawCal, run.train);
+    const folds = [...new Set(run.trainFolds)].sort((a, b) => a - b);
+    this.held = folds.map((f) => run.train.map((_, r) => r).filter((r) => run.trainFolds[r] === f));
+    this.rest = folds.map((f) => run.train.map((_, r) => r).filter((r) => run.trainFolds[r] !== f));
+    const plane = split.plane;
+    this.constantTrain = rowsOf(this.truth.n, this.truth.d);
+    this.held.forEach((rows, g) => {
+      const c = plane.centre(pick(this.truth, this.rest[g]));
+      for (const r of rows) for (let j = 0; j < c.length; j++) this.constantTrain.v[r * this.truth.d + j] = c[j];
+    });
+    this.centre = plane.centre(this.truth);
+  }
+
+  neighbourTerm(kind) {
+    const train = this.run.trainNeighbours[kind];
+    if (!train) return null;
+    const { width } = train, circular = this.split.circular, plane = this.split.plane;
+    const has = range(this.truth.n).filter((r) => train.indices[r * width] >= 0);
+    const truthHas = pick(this.truth, has);
+    const choice = { kind: KIND_NAMES[kind], k: 0, cv_error: [] };
+    let best = NaN, any = false;
+    for (const k of this.config.kGrid) {
+      if (k > width) continue;
+      const error = plane.aggregate(plane.errors(neighbourMedian(this.split.truthCal, train.indices, width, has, k, circular), truthHas));
+      choice.cv_error.push([k, error]);
+      if (!any || error < best) { best = error; choice.k = k; }
+      any = true;
+    }
+    if (!any) return null;
+    const query = this.run.queryNeighbours[kind];
+    return { choice,
+             train: neighbourMedian(this.split.truthCal, train.indices, width, range(this.truth.n), choice.k, circular),
+             query: neighbourMedian(this.split.truthCal, query.indices, width, range(query.indices.length / width), choice.k, circular) };
+  }
+
+  fit(spec, terms) {
+    const circular = this.split.circular, nQ = this.run.queryRaw.n;
+    if (spec.combination === "constant") {
+      const query = rowsOf(nQ, this.centre.length);
+      for (let i = 0; i < nQ; i++) query.v.set(this.centre, i * this.centre.length);
+      return { train: this.constantTrain, query, k: [], coefficients: [], nFitted: 0 };
+    }
+    if (spec.combination === "raw") return { train: this.raw, query: this.run.queryRaw, k: [], coefficients: [], nFitted: 0 };
+    if (spec.combination === "neighbours") {
+      const kind = spec.reads[SPECIES] ? SPECIES : SPATIAL;
+      return { train: terms[kind].train, query: terms[kind].query, k: [[KIND_NAMES[kind], terms[kind].choice.k]],
+               coefficients: [], nFitted: 0 };
+    }
+    const train = [this.raw], query = [this.run.queryRaw], names = ["resolve"], k = [];
+    for (const kind of [SPECIES, SPATIAL]) {
+      if (!spec.reads[kind]) continue;
+      train.push(terms[kind].train); query.push(terms[kind].query); names.push(KIND_NAMES[kind]);
+      k.push([KIND_NAMES[kind], terms[kind].choice.k]);
+    }
+    const out = rowsOf(this.truth.n, this.truth.d);
+    this.held.forEach((rows, g) => {
+      const rest = this.rest[g];
+      const ls = leastSquares(pick(this.truth, rest), train.map((x) => pick(x, rest)), train.map((x) => pick(x, rows)), circular);
+      rows.forEach((r, i) => { for (let j = 0; j < this.truth.d; j++) out.v[r * this.truth.d + j] = ls.test.v[i * this.truth.d + j]; });
+    });
+    const all = leastSquares(this.truth, train, query, circular);
+    return { train: out, query: all.test, k, nFitted: all.nFitted,
+             coefficients: names.map((name, j) => describeCoefficient(name, all.coefficients[j])) };
+  }
+
+  // groups: [{ name, spatial, judged: train row indices, predicted: query row indices }]
+  choose(groups) {
+    const terms = [this.neighbourTerm(SPECIES), this.neighbourTerm(SPATIAL)];
+    const neighbours = terms.filter(Boolean).map((t) => t.choice);
+    const usable = [];
+    for (const spec of CANDIDATES) {
+      const asked = !this.config.candidates || this.config.candidates.includes(GAP_METHODS[spec.method]);
+      if (!asked) continue;
+      if (spec.reads[SPATIAL] && !this.split.spatialAxis) continue;
+      if (spec.reads.some((r, kind) => r && !terms[kind])) continue;
+      usable.push({ spec, fit: this.fit(spec, terms) });
+    }
+    const plane = this.split.plane, d = this.truth.d, nQ = this.run.queryRaw.n;
+    const results = groups.map((group) => {
+      const truth = pick(this.truth, group.judged);
+      const fallback = pick(this.constantTrain, group.judged);
+      const choice = { group: group.name, n_complete: truth.n, n_gaps: group.predicted.length, method: 1,
+                       cv_error: [], estimated_error: NaN, n_estimated: 0, coefficients: [], n_fitted: 0, k: [] };
+      let best = null, bestError = NaN;
+      for (const u of usable) {
+        if (u.spec.reads[SPATIAL] && !group.spatial) continue;
+        const error = plane.aggregate(plane.errors(orFallback(pick(u.fit.train, group.judged), fallback), truth));
+        choice.cv_error.push([u.spec.method, error]);
+        if (!best || error < bestError) { best = u; bestError = error; }
+      }
+      if (!best) {
+        throw new Error(`gap fitting: ${choice.n_gaps} ${group.name} gaps and no candidate for them` +
+                        (group.spatial ? "" : "; gaps without coordinates need a candidate that reads no position"));
+      }
+      Object.assign(choice, { method: best.spec.method, coefficients: best.fit.coefficients, n_fitted: best.fit.nFitted,
+                              k: best.fit.k });
+      const filled = orFallback(best.fit.query, this.centre, true);
+      const query = rowsOf(nQ, d);
+      for (const q of group.predicted) for (let j = 0; j < d; j++) query.v[q * d + j] = filled.v[q * d + j];
+      return { choice, query };
+    });
+    return { neighbours, groups: results };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fitting
+// ---------------------------------------------------------------------------
 
 // Fit the gaps of one target.
 //
@@ -398,16 +915,19 @@ function summariseAxis(axis, distances, matched) {
 //   plots     { species: per plot the sorted ids of the species present,
 //               coordinates?: Float64Array(2n) latitude / longitude, NaN
 //               where unknown, years?: Float64Array(n), NaN where unknown }
-//   options   { spatial = true, seed = GAP_SEED, kGrid, radii?, pool? } where
-//             radii ({ similarity, km?, years? }, one value per complete
-//             plot) replace the drawn hiding distances and pool (a RowPool)
-//             runs the neighbour searches, on this thread without one
+//   options   { spatial = true, seed = GAP_SEED, kGrid, nFolds = 10,
+//               maxFoldShare = 0.5, matchingSample = 1000, candidates?,
+//               folds?, pool? } where folds (one per complete plot, numbered
+//             from 0) replaces the matched layout and pool (a RowPool) runs
+//             the neighbour searches, on this thread without one
 //
-// Resolves to { fitted, method, report } as the engine's GapFit: fitted laid out
-// as raw, a complete plot carrying its recorded value and a gap the chosen
-// method's; method GAP_RECORDED or the index into GAP_METHODS.
+// Resolves to { fitted, method, report, folds } as the engine's GapFit:
+// fitted laid out as raw, a complete plot carrying its recorded value and a
+// gap the chosen method's; method GAP_RECORDED or the index into GAP_METHODS.
 export async function fitGaps(target, raw, recorded, plots, options = {}) {
-  const { spatial = true, seed = GAP_SEED, kGrid = K_GRID, radii: injected = null, pool = new RowPool() } = options;
+  const { spatial = true, seed = GAP_SEED, kGrid = K_GRID, nFolds = 10, maxFoldShare = 0.5, matchingSample = 1000,
+          candidates = null, folds: injected = null, pool = new RowPool() } = options;
+  const config = { spatial, seed, kGrid, nFolds, maxFoldShare, matchingSample, candidates };
   const n = plots.species.length;
   const d = target.scale === "geographic" ? 2 : 1;
   if (raw.length !== n * d || recorded.length !== n * d) {
@@ -418,190 +938,104 @@ export async function fitGaps(target, raw, recorded, plots, options = {}) {
   for (let i = 0; i < n; i++) (rowFinite(rec, i) ? cal : test).push(i);
 
   const report = { target: target.name, scale: target.scale, n_complete: cal.length, n_gaps: test.length,
-                   skipped: "", axes: [], neighbours: [], groups: [] };
+                   skipped: "", axes: [], folds: null, neighbours: [], groups: [] };
   const fitted = Float64Array.from(recorded);
   const method = new Int32Array(n).fill(GAP_RECORDED);
-  if (!test.length) return { fitted, method, report };
+  if (!test.length) return { fitted, method, report, folds: null };
   if (cal.length < 2) {
     report.skipped = "fewer than two complete plots";
     for (const i of test) { for (let j = 0; j < d; j++) fitted[i * d + j] = raw[i * d + j]; method[i] = 1; }
-    return { fitted, method, report };
+    return { fitted, method, report, folds: null };
   }
 
-  // The fold: complete plots (cal) and gaps (test) in the plane.
+  // The complete plots (cal) and the gaps (test) in the plane.
   const plane = new Plane(target, pick(rec, cal));
-  const truth = plane.to(pick(rec, cal));
-  const rawCal = plane.to(pick(rawRows, cal)), rawTest = plane.to(pick(rawRows, test));
-  const speciesCal = cal.map((i) => plots.species[i]), speciesTest = test.map((i) => plots.species[i]);
   const coords = plots.coordinates ? { n, d: 2, v: plots.coordinates } : null;
-  const coordsCal = coords && pick(coords, cal), coordsTest = coords && pick(coords, test);
-  const yearsCal = plots.years ? cal.map((i) => plots.years[i]) : null;
-  const yearsTest = plots.years ? test.map((i) => plots.years[i]) : null;
-  const nCal = cal.length, nTest = test.length;
-  const located = (m, i) => m && rowFinite(m, i);
-  let nCalLocated = 0;
-  for (let i = 0; i < nCal; i++) if (located(coordsCal, i)) nCalLocated++;
-  const spatialAxis = spatial && target.scale !== "geographic" && !!coords && nCalLocated >= 2;
-  const timeAxis = !!plots.years && yearsCal.some(Number.isFinite) && yearsTest.some(Number.isFinite);
-  const circular = target.scale === "circular";
+  const years = plots.years ?? null;
+  const split = {
+    plane, nCal: cal.length, nTest: test.length, circular: target.scale === "circular",
+    truthCal: plane.to(pick(rec, cal)), rawCal: plane.to(pick(rawRows, cal)), rawTest: plane.to(pick(rawRows, test)),
+    coordsCal: coords && pick(coords, cal), coordsTest: coords && pick(coords, test),
+    yearsCal: years ? cal.map((i) => years[i]) : null, yearsTest: years ? test.map((i) => years[i]) : null,
+  };
+  let locatedCal = 0;
+  if (coords) for (let i = 0; i < split.nCal; i++) if (rowFinite(split.coordsCal, i)) locatedCal++;
+  const anyLocatedTest = !!coords && range(split.nTest).some((g) => rowFinite(split.coordsTest, g));
+  split.spatialAxis = spatial && target.scale !== "geographic" && locatedCal >= 2;
+  split.kmAxis = target.scale !== "geographic" && locatedCal >= 2 && anyLocatedTest;
+  split.timeAxis = !!years && split.yearsCal.some(Number.isFinite) && split.yearsTest.some(Number.isFinite);
 
-  // The fold's searches over its plots, complete plots first and the gaps
-  // after them: by species over a neighbour graph, by position over a k-d
-  // tree; only complete plots are neighbours.
-  const maxK = Math.max(...kGrid);
-  const kSpecies = Math.min(maxK, nCal - 1);
-  const kSpatial = spatialAxis ? Math.min(maxK, nCalLocated - 1) : 0;
-  const sets = new PresenceSets([...speciesCal, ...speciesTest]);
-  const graph = await SetNeighbourGraph.build(sets, nCal, { k: Math.max(1, kSpecies) }, pool);
-  const open = await graph.open(nCal, nTest);
-  const places = spatialAxis ? new PlaceIndex(Float64Array.from([...coordsCal.v, ...coordsTest.v]), nCal, pool) : null;
-  const calRows = Array.from({ length: nCal }, (_, i) => i);
-  const gapRows = Array.from({ length: nTest }, (_, g) => nCal + g);
+  const search = await PlotSearch.build(split, cal.map((i) => plots.species[i]), test.map((i) => plots.species[i]), kGrid, pool);
+  const distances = await search.distances(split);
+  const { layout: foldLayout, report: layout } = injected ? injectedLayout(injected, split.nCal)
+    : await matchLayout(split, search, distances, config);
+  const folds = foldLayout.folds;
+  const matched = !layout.injected;
+  report.axes.push(summariseAxis("similarity", Array.from(distances.similarity), matched));
+  report.axes.push(summariseAxis("km", distances.km && Array.from(distances.km), matched && split.kmAxis));
+  report.axes.push(summariseAxis("years", distances.years, matched && split.timeAxis));
+  report.folds = layout;
 
-  // Each gap's distance to its nearest complete plot on every axis; a gap
-  // sharing no species with any complete plot is at similarity 0.
-  const simGap = Float64Array.from({ length: nTest }, (_, g) => {
-    const s = open.similarities[g * open.k];
-    return Number.isNaN(s) ? 0 : s;
-  });
-  const kmGap = places ? (await places.nearest(gapRows, 1)).km : null;
-  const yearsGap = timeAxis ? nearestYearGap(yearsTest, yearsCal) : null;
-
-  // One hiding distance per complete plot and axis.
-  let radii;
-  if (injected) {
-    radii = { similarity: Float64Array.from(injected.similarity),
-              km: injected.km ? Float64Array.from(injected.km) : null,
-              years: injected.years ? Float64Array.from(injected.years) : null };
-  } else {
-    const generator = new Mt19937(seed);
-    radii = { similarity: drawn(Array.from(simGap), nCal, generator),
-              km: spatialAxis ? drawn(Array.from(kmGap), nCal, generator) : null,
-              years: timeAxis ? drawn(yearsGap, nCal, generator) : null };
-  }
-  if (!spatialAxis) radii.km = null;
-  if (!timeAxis) radii.years = null;
-
-  // The rules hiding a complete plot from another at the drawn radii.
-  const rules = new HidingRules(radii, coordsCal && coordsCal.v, yearsCal);
-
-  // Each complete plot's neighbours among the complete plots the radii leave
-  // visible (leave-one-out), by species and by place.
-  const matched = [
-    kSpecies >= 1 ? await graph.hidden(nCal, rules) : null,
-    places && kSpatial >= 1 ? await places.nearest(calRows, kSpatial, rules, sets) : null,
-  ];
-
-  // The gaps' neighbours among the complete plots, of one kind: (nTest, width).
-  const gapNeighbours = async (kind, width) => {
-    if (kind === SPATIAL) return (await places.nearest(gapRows, width)).indices;
-    const out = new Int32Array(nTest * width);
-    for (let g = 0; g < nTest; g++) out.set(open.indices.subarray(g * open.k, g * open.k + width), g * width);
+  const nCal = split.nCal, nTest = split.nTest;
+  const located = range(nTest).map((g) => split.spatialAxis && rowFinite(split.coordsTest, g));
+  const calLocated = range(nCal).map((i) => !split.spatialAxis || rowFinite(split.coordsCal, i));
+  const anyLocated = located.some(Boolean), anyUnlocated = located.some((l) => !l);
+  const where = (flags) => flags.flatMap((f, i) => (f ? [i] : []));
+  const groupsFor = (trainLocated, queryLocated, queryUnlocated) => {
+    const out = [];
+    if (anyLocated) out.push({ name: "located", spatial: true, judged: where(trainLocated), predicted: where(queryLocated) });
+    if (anyUnlocated) out.push({ name: "unlocated", spatial: false, judged: range(trainLocated.length), predicted: where(queryUnlocated) });
     return out;
   };
 
-  // Choose k by the headline error of the leave-one-out median at the gaps'
-  // distance; the first k of the grid wins a tie.
-  const allCal = Array.from({ length: nCal }, (_, i) => i);
-  const allTest = Array.from({ length: nTest }, (_, i) => i);
-  const terms = [null, null];
-  for (const kind of [SPECIES, SPATIAL]) {
-    if (!matched[kind]) continue;
-    const width = kind === SPECIES ? kSpecies : kSpatial;
-    const nb = matched[kind].k === width ? matched[kind].indices : narrowed(matched[kind], width);
-    const has = allCal.filter((i) => nb[i * width] >= 0);
-    const truthHas = pick(truth, has);
-    const choice = { kind: KIND_NAMES[kind], k: 0, matched_error: [] };
-    let best = NaN, any = false;
-    for (const k of kGrid) {
-      if (k > width) continue;
-      const error = plane.aggregate(plane.errors(neighbourMedian(truth, nb, width, has, k, circular), truthHas));
-      choice.matched_error.push([k, error]);
-      if (!any || error < best) { best = error; choice.k = k; }
-      any = true;
+  // Every complete plot predicted from the other folds; the gaps from all.
+  const topNeighbours = await search.outOfFold(foldLayout, -1);
+  const top = { train: range(nCal), trainFolds: Array.from(folds), trainNeighbours: topNeighbours,
+                queryNeighbours: await Promise.all(topNeighbours.map((nb, kind) => (nb ? search.gapNeighbours(kind, nb.width) : null))),
+                queryRaw: split.rawTest };
+  const chosen = new CrossValidation(split, top, config).choose(groupsFor(calLocated, located, located.map((l) => !l)));
+  report.neighbours = chosen.neighbours;
+
+  // The whole procedure repeated with each fold held out, scored on it.
+  const estimate = chosen.groups.map(() => rowsOf(nCal, split.truthCal.d));
+  if (layout.n_folds >= 3) {
+    for (let f = 0; f < layout.n_folds; f++) {
+      const heldRows = range(nCal).filter((i) => folds[i] === f), restRows = range(nCal).filter((i) => folds[i] !== f);
+      const neighbours = await search.outOfFold(foldLayout, f);
+      const run = { train: restRows, trainFolds: restRows.map((i) => folds[i]),
+                    trainNeighbours: neighbours.map((nb) => nb && neighbourRows(nb, restRows)),
+                    queryNeighbours: neighbours.map((nb) => nb && neighbourRows(nb, heldRows)),
+                    queryRaw: pick(split.rawCal, heldRows) };
+      const heldLocated = heldRows.map((i) => calLocated[i]);
+      const nested = new CrossValidation(split, run, config)
+        .choose(groupsFor(restRows.map((i) => calLocated[i]), heldLocated, heldLocated.map(() => true)));
+      nested.groups.forEach(({ query }, g) => {
+        heldRows.forEach((row, q) => {
+          if (!rowFinite(query, q)) return;
+          for (let j = 0; j < query.d; j++) estimate[g].v[row * query.d + j] = query.v[q * query.d + j];
+        });
+      });
     }
-    if (!any) continue;
-    terms[kind] = { choice,
-                    cal: neighbourMedian(truth, nb, width, allCal, choice.k, circular),
-                    test: neighbourMedian(truth, await gapNeighbours(kind, width), width, allTest, choice.k, circular) };
-    report.neighbours.push(choice);
   }
 
-  report.axes.push(summariseAxis("similarity", Array.from(simGap), true));
-  report.axes.push(summariseAxis("km", kmGap && Array.from(kmGap),
-                                 spatialAxis && !!radii.km && Array.from(kmGap).some(Number.isFinite)));
-  report.axes.push(summariseAxis("years", yearsGap, timeAxis && !!radii.years));
-
-  // Every candidate this fit can evaluate, in tie-break order.
-  const centre = plane.centre(truth);
-  const constant = (m) => { const out = rowsOf(m, centre.length); for (let i = 0; i < m; i++) out.v.set(centre, i * centre.length); return out; };
-  const usable = [];
-  for (const spec of CANDIDATES) {
-    if (spec.reads[SPATIAL] && !spatialAxis) continue;
-    if (spec.reads.some((r, kind) => r && !terms[kind])) continue;
-    let fit;
-    if (spec.combination === "constant") fit = { cal: constant(nCal), test: constant(nTest) };
-    else if (spec.combination === "raw") fit = { cal: rawCal, test: rawTest };
-    else if (spec.combination === "neighbours") {
-      const kind = spec.reads[SPECIES] ? SPECIES : SPATIAL;
-      fit = { cal: terms[kind].cal, test: terms[kind].test, k: [[KIND_NAMES[kind], terms[kind].choice.k]] };
-    } else {
-      const calX = [rawCal], testX = [rawTest], names = ["resolve"], k = [];
-      for (const kind of [SPECIES, SPATIAL]) {
-        if (!spec.reads[kind]) continue;
-        calX.push(terms[kind].cal); testX.push(terms[kind].test); names.push(KIND_NAMES[kind]);
-        k.push([KIND_NAMES[kind], terms[kind].choice.k]);
-      }
-      const ls = leastSquares(truth, calX, testX, circular);
-      fit = { cal: ls.cal, test: ls.test, k, nFitted: ls.nFitted,
-              coefficients: names.map((name, j) => describeCoefficient(name, ls.coefficients[j])) };
-    }
-    usable.push({ spec, fit });
-  }
-
-  // Gaps with and without coordinates choose apart; each is judged on the
-  // complete plots it resembles, a complete plot without a neighbour at the
-  // gaps' distance read as the local constant.
-  const testRows = rowsOf(nTest, plane.d);
+  const testRows = rowsOf(nTest, split.truthCal.d);
   const testMethod = new Int32Array(nTest).fill(GAP_RECORDED);
-  const groups = [
-    { name: "located", gaps: allTest.filter((g) => spatialAxis && located(coordsTest, g)),
-      rows: allCal.filter((i) => !spatialAxis || located(coordsCal, i)), spatial: true },
-    { name: "unlocated", gaps: allTest.filter((g) => !(spatialAxis && located(coordsTest, g))),
-      rows: allCal, spatial: false },
-  ];
-  for (const group of groups) {
-    if (!group.gaps.length) continue;
-    const groupTruth = pick(truth, group.rows);
-    const choice = { group: group.name, n_complete: group.rows.length, n_gaps: group.gaps.length,
-                     method: 1, matched_error: [], coefficients: [], n_fitted: 0, k: [] };
-    let best = null, bestError = NaN;
-    for (const u of usable) {
-      if (u.spec.reads[SPATIAL] && !group.spatial) continue;
-      const judged = pick(u.fit.cal, group.rows);
-      for (let i = 0; i < judged.v.length; i++) if (!Number.isFinite(judged.v[i])) judged.v[i] = centre[i % centre.length];
-      const error = plane.aggregate(plane.errors(judged, groupTruth));
-      choice.matched_error.push([u.spec.method, error]);
-      if (!best || error < bestError) { best = u; bestError = error; }
-    }
-    if (!best) throw new Error(`gap fitting: target '${target.name}' has ${group.gaps.length} ${group.name} gaps and no candidate for them`);
-    choice.method = best.spec.method;
-    choice.coefficients = best.fit.coefficients ?? [];
-    choice.n_fitted = best.fit.nFitted ?? 0;
-    choice.k = best.fit.k ?? [];
-    for (const g of group.gaps) {
-      for (let j = 0; j < plane.d; j++) testRows.v[g * plane.d + j] = best.fit.test.v[g * plane.d + j];
-      testMethod[g] = choice.method;
+  chosen.groups.forEach(({ choice, query }, g) => {
+    const scored = range(nCal).filter((i) => rowFinite(estimate[g], i));
+    choice.n_estimated = scored.length;
+    if (scored.length) choice.estimated_error = plane.aggregate(plane.errors(pick(estimate[g], scored), pick(split.truthCal, scored)));
+    for (let q = 0; q < nTest; q++) {
+      if (!rowFinite(query, q)) continue;
+      for (let j = 0; j < query.d; j++) testRows.v[q * query.d + j] = query.v[q * query.d + j];
+      testMethod[q] = choice.method;
     }
     report.groups.push(choice);
-  }
+  });
 
   test.forEach((i, g) => {
     const value = plane.backRow(testRows, g);
     if (d === 2) { fitted[2 * i] = value[0]; fitted[2 * i + 1] = value[1]; } else fitted[i] = value;
     method[i] = testMethod[g];
   });
-  const widthOf = (kind, width) => (matched[kind] ? narrowed(matched[kind], width) : null);
-  return { fitted, method, report, radii,
-           matched: { species: widthOf(SPECIES, kSpecies), spatial: widthOf(SPATIAL, kSpatial), kSpecies, kSpatial } };
+  return { fitted, method, report, folds };
 }

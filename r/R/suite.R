@@ -155,7 +155,8 @@ resolve.seal_suite <- function(dir) {
 #' @param keepMembers Also return every member's own prediction (default
 #'   `FALSE`).
 #' @param gapFitting `NULL` (default), `TRUE`, or a list of gap fitting
-#'   settings (`candidates`, `k_grid`, `spatial`, `matching_seed`; see
+#'   settings (`candidates`, `k_grid`, `spatial`, `matching_seed`, `n_folds`,
+#'   `max_fold_share`, `matching_sample`; see
 #'   [resolve.fit_gaps()]): fit each target `columns$recorded` names from the
 #'   dataset's own complete plots. Adds `<target>_fitted` and
 #'   `<target>_fit_method` to [as.data.frame()] and a `gap_fit` (`fitted`,

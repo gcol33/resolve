@@ -4,7 +4,8 @@ Each case simulates complete plots and gaps from a known relation between the
 raw prediction, the plots' neighbours and the truth, and checks that
 ``resolve_core.fit_gaps`` recovers it: a calibration slope, a turn of
 bearings, spatial neighbours chosen where the gaps are near and not for a far
-region, and matched neighbours no nearer than the gaps in km and in years.
+region, fold layouts of squares and of survey-year periods for gaps far in km
+and in years, and an estimated error that meets the gaps' error.
 """
 
 from __future__ import annotations
@@ -108,18 +109,16 @@ def test_spatial_neighbours_only_where_the_gaps_are_near(seed):
     n = int(keep.sum())
     fit = rc.fit_gaps(target, torch.from_numpy(p), _gapped(t, gaps), _no_species(n), coordinates=c)
     assert fit.report["groups"]["located"]["method"] != "knn_spatial"
-    n_complete = fit.report["n_complete"]
+    plot_by_plot = torch.arange(fit.report["n_complete"]) % 10
     plain = rc.fit_gaps(target, torch.from_numpy(p), _gapped(t, gaps), _no_species(n), coordinates=c,
-                        config=_only(rc.GapMethod.StackSpeciesSpatial),
-                        radii={"similarity": torch.full((n_complete,), 2.0, dtype=torch.float64),
-                               "km": torch.zeros(n_complete, dtype=torch.float64)})
+                        config=_only(rc.GapMethod.StackSpeciesSpatial), folds=plot_by_plot)
     calibrated = rc.fit_gaps(target, torch.from_numpy(p), _gapped(t, gaps), _no_species(n),
                              coordinates=c, config=_only(rc.GapMethod.OffsetSlope))
     assert _mae(fit, t, gaps) < 0.8 * _mae(plain, t, gaps)
     assert _mae(fit, t, gaps) <= 1.1 * _mae(calibrated, t, gaps)
 
 
-def test_matched_neighbours_are_no_nearer_than_the_gaps():
+def test_far_gaps_are_matched_by_a_buffer_in_km_and_in_years():
     rng = np.random.default_rng(4)
     n_cal, n_gap = 800, 200
     lat = np.concatenate([rng.uniform(45.0, 47.0, n_cal), 47.0 + rng.uniform(0.9, 1.35, n_gap)])
@@ -127,52 +126,69 @@ def test_matched_neighbours_are_no_nearer_than_the_gaps():
     year = np.concatenate([rng.uniform(1960, 2020, n_cal), rng.uniform(1930, 1940, n_gap)])
     gaps = np.arange(n_cal + n_gap) >= n_cal
     coords = torch.from_numpy(np.column_stack([lat, lon]))
-    found = rc.matched_gap_neighbours(rc.GapTarget("altitude"), _gapped(np.zeros(n_cal + n_gap), gaps),
-                                      _random_species(rng, n_cal + n_gap), coordinates=coords,
-                                      years=torch.from_numpy(year))
-    cal = found["complete"].numpy()
-    _, gap_km = rc.nearest_by_great_circle(coords[gaps], coords[cal], 1)
-    gap_years = np.abs(year[gaps][:, None] - year[cal][None, :]).min(axis=1).min()
-    for kind in ("species", "spatial"):
-        nb = found[kind].numpy()
-        i, j = np.nonzero(nb >= 0)
-        assert i.size > 0
-        assert (nb != np.arange(n_cal)[:, None]).all()
-        a, b = cal[i], cal[nb[i, j]]
-        km = 2 * 6371.0 * np.arcsin(np.sqrt(
-            np.sin(np.radians(lat[b] - lat[a]) / 2) ** 2
-            + np.cos(np.radians(lat[a])) * np.cos(np.radians(lat[b]))
-            * np.sin(np.radians(lon[b] - lon[a]) / 2) ** 2))
-        assert km.min() >= gap_km.min().item() - 1e-3
-        assert np.abs(year[a] - year[b]).min() >= gap_years - 1e-9
+    found = rc.gap_folds(rc.GapTarget("altitude"), _gapped(np.zeros(n_cal + n_gap), gaps),
+                         _random_species(rng, n_cal + n_gap), coordinates=coords, years=torch.from_numpy(year))
+    layout = found["layout"]
+    assert found["folds"].shape == (n_cal,)
+    assert found["complete"].numpy().tolist() == list(range(n_cal))
+    assert np.bincount(found["folds"].numpy()).max() <= 0.5 * n_cal
+    assert layout["n_folds"] >= 2
+    # The gaps lie beyond the complete plots in space and in time: a buffer
+    # drawn from their distances on both axes reaches them.
+    assert layout["buffer_km"] > 90 and layout["buffer_years"] > 15
+    assert set(layout["mismatch"]) == {"similarity", "km", "years"}
+    assert layout["mismatch"]["km"] < 0.2 and layout["mismatch"]["years"] < 0.2
 
 
-def test_injected_radii_reproduce_the_drawn_fit_and_the_report_is_plain_data():
+def test_injected_folds_reproduce_the_matched_fit_and_the_report_is_plain_data():
     rng = np.random.default_rng(1)
     n = 400
     truth = rng.normal(size=n)
     gaps = rng.random(n) < 0.3
     species = _random_species(rng, n)
     raw = torch.from_numpy(truth + 0.1)
-    drawn = rc.fit_gaps(rc.GapTarget("slope"), raw, _gapped(truth, gaps), species)
-    radii = rc.matched_gap_neighbours(rc.GapTarget("slope"), _gapped(truth, gaps), species)["radii"]
-    injected = rc.fit_gaps(rc.GapTarget("slope"), raw, _gapped(truth, gaps), species, radii=radii)
-    assert torch.equal(drawn.fitted, injected.fitted)
-    report = drawn.report
+    matched = rc.fit_gaps(rc.GapTarget("slope"), raw, _gapped(truth, gaps), species)
+    folds = rc.gap_folds(rc.GapTarget("slope"), _gapped(truth, gaps), species)["folds"]
+    injected = rc.fit_gaps(rc.GapTarget("slope"), raw, _gapped(truth, gaps), species, folds=folds)
+    assert torch.equal(matched.fitted, injected.fitted)
+    assert injected.report["folds"]["injected"]
+    report = matched.report
     assert report["n_gaps"] == int(gaps.sum())
     assert set(report["axes"]) == {"similarity", "km", "years"}
     assert report["axes"]["similarity"]["matched"]
-    assert isinstance(report["groups"]["unlocated"]["matched_error"]["resolve"], float)
+    group = report["groups"]["unlocated"]
+    assert isinstance(group["cv_error"]["resolve"], float)
+    assert isinstance(group["estimated_error"], float)
+    assert group["n_estimated"] == report["n_complete"]
     with pytest.raises(ValueError):
-        rc.fit_gaps(rc.GapTarget("slope"), raw, _gapped(truth, gaps), species, radii={"depth": None})
+        rc.fit_gaps(rc.GapTarget("slope"), raw, _gapped(truth, gaps), species, folds=torch.zeros(3, dtype=torch.int64))
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_the_estimated_error_meets_the_gaps_error(seed):
+    rng = np.random.default_rng(seed)
+    n = 3000
+    truth = 1985 + rng.normal(0, 15, n)
+    pred = truth + rng.normal(0, 6, n)
+    gaps = rng.random(n) < 0.2
+    coords = torch.from_numpy(np.column_stack([rng.uniform(45, 48, n), rng.uniform(14, 17, n)]))
+    fit = rc.fit_gaps(rc.GapTarget("year"), torch.from_numpy(pred), _gapped(truth, gaps),
+                      _random_species(rng, n), coordinates=coords)
+    group = fit.report["groups"]["located"]
+    assert abs(group["estimated_error"] - _mae(fit, truth, gaps)) < 0.5
 
 
 def test_the_config_validates_and_lists_its_candidates():
     cfg = rc.GapFittingConfig()
     assert cfg.k_grid == [1, 3, 5, 10, 20, 50]
     assert cfg.spatial and cfg.matching_seed == 20261106
+    assert cfg.n_folds == 10 and cfg.max_fold_share == 0.5 and cfg.matching_sample == 1000
     assert len(cfg.candidates) == 7
     cfg.k_grid = [0]
+    with pytest.raises(ValueError):
+        cfg.validate()
+    cfg = rc.GapFittingConfig()
+    cfg.n_folds = 1
     with pytest.raises(ValueError):
         cfg.validate()
 

@@ -1,9 +1,9 @@
 # Python: gap fitting
 
-Filling a dataset’s missing values from its own complete plots: the
+Imputing a dataset’s missing values from its own complete plots: the
 functions that fit one target or a single model’s targets, their
 settings, the result and its report, and the neighbour searches the
-choice is tested with. [Filling a dataset’s
+choice is tested with. [Imputing a dataset’s
 gaps](https://gillescolling.com/resolve/articles/gap-fitting.md) walks
 through a fit; a model suite fits its targets through
 [`SuitePredictor.predict(gap_fitting=...)`](https://gillescolling.com/resolve/articles/python-suites.html#SuitePredictor.predict).
@@ -31,7 +31,7 @@ pip install resolve-core
 
 ``` python
 fit_gaps(target, raw, recorded, species, coordinates=None, years=None,
-         config=GapFittingConfig(), radii=None)
+         config=GapFittingConfig(), folds=None)
 ```
 
 Fits one target’s gaps. `target` is a `GapTarget`. `raw` and `recorded`
@@ -41,12 +41,12 @@ longitude for a geographic target; a `NaN` recorded value marks a gap.
 `species` is the `(n, n_species)` composition, dense or sparse CSR, an
 entry other than 0 a species present. `coordinates` is `(n, 2)` latitude
 and longitude (`NaN` where unknown) and `years` `(n,)` survey years;
-either may be `None`. `radii`, a `dict` of `similarity`, `km` and
-`years` tensors with one value per complete plot, replaces the drawn
-hiding distances, so a fit reproduces another implementation’s draw.
-Returns a `GapFit`. With no gap the recorded values come back; with
-fewer than two complete plots the gaps keep the raw imputed value and
-the report says why.
+either may be `None`. `folds`, an int64 tensor with the fold of each
+complete plot in plot order (numbered from 0), replaces the matched
+layout, so a fit reproduces another implementation’s layout. Returns a
+`GapFit`. With no gap the recorded values come back; with fewer than two
+complete plots the gaps keep the raw imputed value and the report says
+why.
 
 ``` python
 import numpy as np
@@ -114,10 +114,18 @@ GapFittingConfig()
   counts `k` is chosen from.
 - `spatial` (`bool`, default `True`): spatial neighbours as candidates;
   `False` reads composition only.
-- `matching_seed` (`int`, default `20261106`): the seed of the draw of
-  one gap distance per complete plot and axis.
+- `matching_seed` (`int`, default `20261106`): the seed of the order the
+  fold layout deals its groups in, the buffers it draws and the complete
+  plots it is compared on.
+- `n_folds` (`int`, default `10`): the folds of the cross-validation;
+  the estimated error needs at least 3.
+- `max_fold_share` (`float`, default `0.5`): the largest share of the
+  complete plots one fold of a layout may hold.
+- `matching_sample` (`int`, default `1000`): the complete plots whose
+  distances the layouts are compared on.
 
-`validate()` raises for an empty grid or a `k` below 1.
+`validate()` raises for an empty grid, a `k` below 1, fewer than 2 folds
+or a `max_fold_share` outside (1 / `n_folds`, 1\].
 
 ## `GapTarget`
 
@@ -157,28 +165,29 @@ The methods, in the order a tie between equal errors is broken:
   name for a gap; `method_codes` is the same as an int64 tensor, -1 for
   a complete plot.
 - `report` (`dict`): `target`, `scale`, `n_complete`, `n_gaps`; `axes`,
-  per axis (`similarity`, `km`, `years`) whether the test hid by it and
-  the quantiles of the gaps’ distance to their nearest complete plot;
-  `neighbours`, per kind the `k` chosen and the error of each `k`;
-  `groups`, per group of gaps (`located`, `unlocated`) the method
-  chosen, every candidate’s error on the complete plots at the gaps’
-  distance (`matched_error`), and for the method chosen its
-  `coefficients`, `n_fitted` and `k`. `skipped` says why nothing was
-  chosen when that happened.
+  per axis (`similarity`, `km`, `years`) whether the fold layout was
+  matched on it and the quantiles of the gaps’ distance to their nearest
+  complete plot; `folds`, the layout (`n_folds`, `block_km`,
+  `block_years`, `buffer_km`, `buffer_years`, `mismatch` per axis,
+  `total_mismatch`, `n_layouts`, `n_matching_plots`, `injected`);
+  `neighbours`, per kind the `k` chosen and the cross-validated error of
+  each `k`; `groups`, per group of gaps (`located`, `unlocated`) the
+  method chosen, every candidate’s cross-validated error (`cv_error`),
+  the error estimated for the whole choice by nested cross-validation
+  (`estimated_error`, over `n_estimated` complete plots), and for the
+  method chosen its `coefficients`, `n_fitted` and `k`. `skipped` says
+  why nothing was chosen when that happened.
 
-## `matched_gap_neighbours()`
+## `gap_folds()`
 
 ``` python
-matched_gap_neighbours(target, recorded, species, coordinates=None, years=None,
-                       config=GapFittingConfig(), radii=None)
+gap_folds(target, recorded, species, coordinates=None, years=None,
+          config=GapFittingConfig())
 ```
 
-The neighbours the choice is tested with, for inspecting a fit: a `dict`
-of `complete` and `gaps` (the plots’ rows), `radii` (the distances drawn
-per complete plot and axis), and `species` and `spatial`, each complete
-plot’s neighbours among the complete plots no nearer to it than its
-drawn distance (`(n_complete, k)` indices into `complete`, -1 after the
-last; `spatial` is `None` without the spatial axis).
+The fold layout the choice is judged on, for inspecting a fit: a `dict`
+of `complete` and `gaps` (the plots’ rows), `folds` (the fold of each
+complete plot, an int64 tensor) and `layout` (as the report’s `folds`).
 
 ## `GapColumns`
 

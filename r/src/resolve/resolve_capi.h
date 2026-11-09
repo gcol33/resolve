@@ -567,7 +567,8 @@ RESOLVE_CAPI resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const 
  *   batch_size    INT  per-member forward chunk (default 4096)
  *   keep_members  BOOL keep every member's own prediction (default false)
  *   gap_fitting   MAP  a GapFittingConfig (candidates, k_grid, spatial,
- *                      matching_seed; an empty MAP for the defaults): fit
+ *                      matching_seed, n_folds, max_fold_share,
+ *                      matching_sample; an empty MAP for the defaults): fit
  *                      every target columns.recorded names
  *   names         MAP  resolve the species names against each target's
  *                      vocabulary first, as resolve_dataset_load's names
@@ -621,14 +622,14 @@ RESOLVE_CAPI resolve_value_t* resolve_suite_predict_csv(
  * `species` is a numeric MATRIX (plots x species, an entry other than 0 a
  * species present); `coordinates` a DOUBLE_MATRIX (plots x 2, latitude,
  * longitude) or NULL; `years` a DOUBLE_ARRAY or NULL. `config` a
- * GapFittingConfig MAP or NULL; `radii` NULL or a MAP of similarity / km /
- * years DOUBLE_ARRAYs, one per complete plot, replacing the drawn hiding
- * distances. Returns a MAP: fitted (as `raw`), method (STRING_ARRAY,
+ * GapFittingConfig MAP or NULL; `folds` NULL or an INT_ARRAY, the fold of
+ * each complete plot in plot order (numbered from 0), replacing the matched
+ * layout. Returns a MAP: fitted (as `raw`), method (STRING_ARRAY,
  * "recorded" for a complete plot), report (MAP). NULL on failure. */
 RESOLVE_CAPI resolve_value_t* resolve_fit_gaps(const resolve_value_t* target, const resolve_value_t* raw,
                                                const resolve_value_t* recorded, const resolve_value_t* species,
                                                const resolve_value_t* coordinates, const resolve_value_t* years,
-                                               const resolve_value_t* config, const resolve_value_t* radii);
+                                               const resolve_value_t* config, const resolve_value_t* folds);
 
 /* Fit the gaps of a single model's targets from its predictions and the
  * dataset's own tables. `header` (may be NULL) and `species` are column

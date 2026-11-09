@@ -5,7 +5,7 @@
 
 import { COLUMNS, combineMean, combineSpherical, combineVote, encode, parseDouble, parseNumber, parseTable,
          resolveName, sumByAncestor } from "./resolve.js";
-import { gapMethodLabel } from "./gaps.js";
+import { describeGapMethod, gapSource } from "./gaps.js";
 import { eeaCell, eeaCellCode, eeaCellOutline } from "./geo.js";
 import { HttpRangeSource, HttpStatusError, TerrainCorrection, TerrainField, describePlots, fetchRange,
          withRetry } from "./terrain.js";
@@ -898,7 +898,7 @@ async function addTarget(result, target, meta, outputs, encoded) {
     if (fit) {
       result.columns.push({ name: "Imputed latitude, calibrated", values: Array.from(c.lat, (_, p) => fit.fitted[2 * p]), digits: 4 },
                           { name: "Imputed longitude, calibrated", values: Array.from(c.lat, (_, p) => fit.fitted[2 * p + 1]), digits: 4 },
-                          { name: "Location, calibration method", values: Array.from(fit.method, gapMethodLabel) });
+                          { name: "Location, source", values: Array.from(fit.method, gapSource) });
       result.filledCoords = Array.from(c.lat, (_, p) => [fit.fitted[2 * p], fit.fitted[2 * p + 1]]);
     } else {
       pushRecorded(result, target);
@@ -915,7 +915,7 @@ async function addTarget(result, target, meta, outputs, encoded) {
     const mask = recordedMask(result, target);
     if (fit) {
       result.columns.push({ name: `${label(target)}${units}, calibrated`, values: Array.from(fit.fitted), digits: 1 },
-                          { name: `${label(target)}, calibration method`, values: Array.from(fit.method, gapMethodLabel) });
+                          { name: `${label(target)}, source`, values: Array.from(fit.method, gapSource) });
     } else {
       pushRecorded(result, target, mask);
     }
@@ -1540,8 +1540,9 @@ function gridMarks(view, coords, located, km, pixels) {
   return { marks, legend: { groups: legendGroups(view, counts), keys: [] } };
 }
 
-// Per fitted target: how many gaps, which method filled them and its error on
-// the complete plots at the gaps' distance, beside the raw prediction's.
+// Per fitted target: how many gaps, which method filled them, and the error
+// estimated for the whole choice (nested cross-validation on the plots
+// recording the value) beside the model's own cross-validated error.
 function renderGaps(r) {
   const box = $("gaps");
   box.innerHTML = (r.gaps ?? []).map(({ target, scale, report }) => {
@@ -1551,10 +1552,12 @@ function renderGaps(r) {
     const head = `${label(target)}: ${report.n_gaps.toLocaleString()} of ${(report.n_gaps + report.n_complete).toLocaleString()} plots without it`;
     if (report.skipped) return `<li>${escape(head)}, imputed with the model's value (${escape(report.skipped)})</li>`;
     const groups = report.groups.map((g) => {
-      const err = (m) => g.matched_error.find(([x]) => x === m)?.[1];
+      const modelError = g.cv_error.find(([m]) => m === 1)?.[1];
       const where = report.groups.length > 1 ? `${g.n_gaps.toLocaleString()} ${g.group === "located" ? "with" : "without"} coordinates: ` : "";
-      const k = g.k.length ? ` (k = ${g.k.map(([, v]) => v).join(", ")})` : "";
-      return `${where}${gapMethodLabel(g.method)}${k}, error ${err(g.method).toFixed(digits)}${unit} against ${err(1).toFixed(digits)} for the model's value`;
+      const how = `${where}imputed from ${describeGapMethod(g.method, g.k, scale)}`;
+      if (!Number.isFinite(g.estimated_error)) return how;
+      const versus = g.method === 1 || !Number.isFinite(modelError) ? "" : ` against ${modelError.toFixed(digits)} for the model's value`;
+      return `${how}, estimated error ${g.estimated_error.toFixed(digits)}${unit}${versus}`;
     });
     return `<li>${escape(head)}; ${escape(groups.join("; "))}, judged on the ${report.n_complete.toLocaleString()} plots recording it</li>`;
   }).join("");

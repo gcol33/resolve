@@ -50,7 +50,7 @@
     <div id="navbar" class="collapse navbar-collapse ms-3">
       <ul class="navbar-nav me-auto">
 <li class="nav-item"><a class="nav-link" href="../articles/resolveR.html">Get started</a></li>
-<li class="active nav-item dropdown">
+<li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-reference" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Reference</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-reference">
 <li><a class="dropdown-item" href="../reference/index.html">R reference</a></li>
@@ -66,7 +66,7 @@
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
     <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
-    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
+    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Imputing a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
     <li><hr class="dropdown-divider"></li>
@@ -634,7 +634,7 @@ The SHA-256 digest of a file.
 <h2 id="gap-fitting">
 <a href="python-gap-fitting.html">Gap fitting</a><a class="anchor" aria-label="anchor" href="#gap-fitting"></a>
 </h2>
-<p>Filling a dataset’s missing values from its own complete plots,
+<p>Imputing a dataset’s missing values from its own complete plots,
 beside the raw imputed value.</p>
 <dl>
 <dt><a href="python-gap-fitting.html#fit_gaps"><code>fit_gaps()</code></a></dt>
@@ -653,8 +653,9 @@ paths.
 </dd>
 <dt><a href="python-gap-fitting.html#GapFittingConfig"><code>GapFittingConfig</code></a></dt>
 <dd>
-The candidates, the neighbour counts, spatial neighbours on or off and
-the matching seed.
+The candidates, the neighbour counts, spatial neighbours on or off, the
+folds and the fold layout’s seed, largest fold share and matching
+sample.
 </dd>
 <dt><a href="python-gap-fitting.html#GapTarget"><code>GapTarget</code></a></dt>
 <dd>
@@ -672,9 +673,9 @@ The methods a gap can be imputed by.
 <dd>
 The fitted values, the method per plot and the report.
 </dd>
-<dt><a href="python-gap-fitting.html#matched_gap_neighbours"><code>matched_gap_neighbours()</code></a></dt>
+<dt><a href="python-gap-fitting.html#gap_folds"><code>gap_folds()</code></a></dt>
 <dd>
-The neighbours the choice is tested with.
+The fold layout the choice is judged on.
 </dd>
 <dt>
 <a href="python-gap-fitting.html#GapColumns"><code>GapColumns</code></a>,

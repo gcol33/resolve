@@ -109,7 +109,8 @@ def fit_prediction_gaps(predictions, species, header=None, columns=None, targets
         heads).
     gap_fitting : GapFittingConfig or dict or None
         The settings (``candidates``, ``k_grid``, ``spatial``,
-        ``matching_seed``); None for the defaults.
+        ``matching_seed``, ``n_folds``, ``max_fold_share``,
+        ``matching_sample``); None for the defaults.
 
     Returns
     -------

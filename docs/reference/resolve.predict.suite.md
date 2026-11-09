@@ -66,7 +66,8 @@ resolve.predict.suite(
 - gapFitting:
 
   `NULL` (default), `TRUE`, or a list of gap fitting settings
-  (`candidates`, `k_grid`, `spatial`, `matching_seed`; see
+  (`candidates`, `k_grid`, `spatial`, `matching_seed`, `n_folds`,
+  `max_fold_share`, `matching_sample`; see
   [`resolve.fit_gaps()`](https://gillescolling.com/resolve/reference/resolve.fit_gaps.md)):
   fit each target `columns$recorded` names from the dataset's own
   complete plots. Adds `<target>_fitted` and `<target>_fit_method` to

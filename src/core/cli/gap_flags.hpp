@@ -25,11 +25,17 @@ inline constexpr FieldFlag kGapFittingConfigFlags[] = {
     {"candidates", "--gap-candidates",
      "With --fit-gaps: the methods the choice is made\namong (default all)"},
     {"k_grid", "--gap-k-grid",
-     "With --fit-gaps: the neighbour counts k is chosen\nfrom by the matched leave-one-out"},
+     "With --fit-gaps: the neighbour counts k is chosen\nfrom by the out-of-fold error"},
     {"spatial", "--spatial",
      "With --fit-gaps: spatial neighbours as candidates\nwhere the gaps carry coordinates; --no-spatial\nreads composition only"},
     {"matching_seed", "--gap-seed",
-     "With --fit-gaps: seed of the draw of the gaps'\ndistances the matched test hides by"},
+     "With --fit-gaps: seed of the fold layout (the order\ngroups are dealt in, the plots it is matched on)"},
+    {"n_folds", "--gap-folds",
+     "With --fit-gaps: folds of the cross-validation the\nchoice is judged by (the error estimate needs 3)"},
+    {"max_fold_share", "--gap-max-fold-share",
+     "With --fit-gaps: the largest share of the complete\nplots one fold of a candidate layout may hold"},
+    {"matching_sample", "--gap-matching-sample",
+     "With --fit-gaps: complete plots the layouts'\ndistances are compared with the gaps' on"},
 };
 
 // The gap-fitting rows of the `predict` flag table.
@@ -45,9 +51,9 @@ inline void append_gap_flags(std::vector<FlagSpec>& flags) {
                      "location. Repeat per target. Adds '<target>_recorded'\n"
                      "(TRUE / FALSE), or with --fit-gaps the gap fit."});
     flags.push_back({"--survey-year", Arity::Value, "COL", "",
-                     "With --fit-gaps: the survey-year column; the\n"
-                     "matched test then also hides plots closer in time\n"
-                     "than the gaps are."});
+                     "With --fit-gaps: the survey-year column; the fold\n"
+                     "layout is then also matched to how far in time the\n"
+                     "gaps are from the complete plots."});
     flags.push_back({"--gap-target", Arity::Repeatable, "T=SCALE[:PERIOD]:HEADS", "",
                      "With --fit-gaps and --model: how target T's values\n"
                      "lie and the head(s) it reads, e.g.\n"
@@ -89,7 +95,8 @@ inline std::optional<resolve::GapFittingConfig> read_gap_fitting(const ParsedArg
     if (!args.has("--fit-gaps")) {
         for (const char* flag : {"--survey-year", "--gap-target", "--gap-report",
                                  "--gap-candidates", "--gap-k-grid", "--spatial", "--no-spatial",
-                                 "--gap-seed"}) {
+                                 "--gap-seed", "--gap-folds", "--gap-max-fold-share",
+                                 "--gap-matching-sample"}) {
             if (args.has(flag)) throw ArgError(std::string(flag) + " needs --fit-gaps");
         }
         return std::nullopt;

@@ -214,6 +214,7 @@ The same CMake build writes the `resolve_c` library into the build directory; on
 These are the messages the packages print when a step fails, with what to do about each.
 
 - Without a RESOLVE engine library, `library(resolveR)` prints that the backend is not installed, and the functions that load data, train or impute stop with the same message. Run `resolve.install_backend()`, or set `RESOLVE_C_HOME`.
+- When a library is found but does not load, `library(resolveR)` prints its path and the loader's reason instead, and the functions stop with the same text. `is missing symbols:` followed by function names means the library was built before the installed resolveR and lacks functions the package calls; reinstall it with `resolve.install_backend(force = TRUE)`. `resolve.install_backend()` without `force` warns with this text when the library it finds does not load.
 - When a download fails, `resolve.install_backend()` stops with `cannot open URL` and the address it tried. The file name in the address names the build, `resolve_c-<system>-<architecture>-<variant>.zip`, and `HTTP status was '404 Not Found'` means the release of that version has no such file. The call raises R's download timeout to at least an hour for these files.
 - With `variant = "cuda"`, the call stops when `nvidia-smi` finds no NVIDIA card; install the CPU build. It also stops when the driver supports only a CUDA version older than 12.8; update the driver.
 - On macOS, a GPU variant stops the call, since CUDA builds do not exist there.

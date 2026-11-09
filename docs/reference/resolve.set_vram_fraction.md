@@ -1,4 +1,4 @@
-# Cap the GPU Memory the Engine May Use
+# Cap the GPU Memory the RESOLVE Engine May Use
 
 Cap the PyTorch CUDA caching allocator at a fraction of a device's VRAM,
 so a run leaves headroom for the desktop or other programs on a shared

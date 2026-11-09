@@ -24,7 +24,7 @@ resolve.fit_gaps(
   years = NULL,
   gapFitting = NULL,
   name = "",
-  radii = NULL
+  folds = NULL
 )
 ```
 
@@ -68,38 +68,48 @@ resolve.fit_gaps(
 
   `NULL` for the defaults, or a list of settings: `candidates` (method
   names), `k_grid` (the neighbour counts k is chosen from, default 1, 3,
-  5, 10, 20, 50), `spatial` (`FALSE` reads composition only) and
-  `matching_seed`.
+  5, 10, 20, 50), `spatial` (`FALSE` reads composition only),
+  `matching_seed`, `n_folds` (default 10), `max_fold_share` (the largest
+  share of the complete plots one fold may hold, default 0.5) and
+  `matching_sample` (complete plots the layouts are compared on, default
+  1000).
 
 - name:
 
   The target's name, as the report states it.
 
-- radii:
+- folds:
 
-  `NULL`, or a list of `similarity`, `km`, `years`: one hiding distance
-  per complete plot replacing the drawn ones (to reproduce another
-  implementation's draw).
+  `NULL`, or an integer fold per complete plot (in plot order, numbered
+  from 0) replacing the matched layout (to reproduce another
+  implementation's layout).
 
 ## Value
 
 A `resolve_gap_fit` list: `fitted` (as `raw`; a complete plot keeps its
 recorded value), `method` (per plot, `"recorded"` for a complete plot)
-and `report` (the gaps' distance per axis, the k chosen per neighbour
-kind, every candidate's matched error and the chosen method's
-coefficients, per group of gaps).
+and `report` (the gaps' distance per axis, the fold layout, the k chosen
+per neighbour kind, and per group of gaps every candidate's
+cross-validated error, the estimated error of the whole choice and the
+chosen method's coefficients).
 
 ## Details
 
-Each candidate is judged on the complete plots at the distance the gaps
-actually are: every complete plot is predicted with the complete plots
-nearer to it than a gap is to its nearest complete plot hidden, in
-species similarity, in km and in survey years (nearest-neighbour
-distance matching, Mila et al. 2022), by the target's own error (mean
-absolute error; on a log scale that of log1p; the circular error of a
-bearing; the median km of a location). Gaps with and without coordinates
-choose apart. The raw prediction is never replaced: the fitted values
-come back beside it.
+Each candidate is judged by cross-validation over the complete plots,
+with folds laid out to hold plots out the way the gaps are held out
+(k-fold nearest-neighbour distance matching, Linnenbrink et al. 2024):
+squares of an equal-area plane, survey-year periods, both, or plot by
+plot, the last also with buffers drawn from the gaps' distances,
+whichever leaves the held-out plots as far from the rest, in species
+similarity, in km and in survey years, as the gaps are from the complete
+plots. Every fitted part (k, least-squares coefficients) is fitted on
+the other folds, and the candidate with the lowest out-of-fold error, by
+the target's own error (mean absolute error; on a log scale that of
+log1p; the circular error of a bearing; the median km of a location),
+predicts the gaps. The whole choice, repeated with each fold held out,
+gives the error reported for it (`estimated_error`, nested
+cross-validation). Gaps with and without coordinates choose apart. The
+raw prediction is never replaced: the fitted values come back beside it.
 
 Undated plots that are probably older than the dated ones, and plots
 without coordinates that probably come from an area with no

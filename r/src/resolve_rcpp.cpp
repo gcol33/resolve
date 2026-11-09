@@ -80,7 +80,7 @@ RObject names_resolve(CharacterVector vocabulary, CharacterVector names, SEXP op
 // Gap fitting of one target from vectors (resolve_fit_gaps): list(fitted,
 // method, report).
 List fit_gaps(List target, SEXP raw, SEXP recorded, NumericMatrix species, SEXP coordinates,
-              SEXP years, List config, SEXP radii) {
+              SEXP years, List config, SEXP folds) {
     capi_require_loaded();
     const ValuePtr target_v = owned_value(r_list_to_value_map(target, "target"));
     const ValuePtr raw_v = numeric_value(raw, "raw");
@@ -89,18 +89,17 @@ List fit_gaps(List target, SEXP raw, SEXP recorded, NumericMatrix species, SEXP 
     const ValuePtr coordinates_v = numeric_value(coordinates, "coordinates");
     const ValuePtr years_v = numeric_value(years, "years");
     const ValuePtr config_v = owned_value(r_list_to_value_map(config, "gapFitting"));
-    const ValuePtr radii_v =
-        owned_value(Rf_isNull(radii) ? resolve_value_new_null() : resolve_value_new_map());
-    if (!Rf_isNull(radii)) {
-        const List r(radii);
-        const CharacterVector names = r.names();
-        for (R_xlen_t i = 0; i < r.size(); ++i) {
-            map_put(radii_v.get(), r_string(names[i]), numeric_value(r[i], "radii"));
-        }
+    std::vector<int64_t> fold_values;
+    if (!Rf_isNull(folds)) {
+        const IntegerVector f(folds);
+        fold_values.assign(f.begin(), f.end());
     }
+    const ValuePtr folds_v = owned_value(
+        Rf_isNull(folds) ? resolve_value_new_null()
+                         : resolve_value_new_int_array(fold_values.data(), static_cast<int64_t>(fold_values.size())));
     return as<List>(value_to_r_owned(resolve_fit_gaps(target_v.get(), raw_v.get(), recorded_v.get(),
                                                       species_v.get(), coordinates_v.get(),
-                                                      years_v.get(), config_v.get(), radii_v.get())));
+                                                      years_v.get(), config_v.get(), folds_v.get())));
 }
 
 // Gap fitting of a single model's targets from its predictions and the

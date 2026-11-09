@@ -71,10 +71,7 @@ build_site <- function() {
       as.character(packageVersion("resolveR")) != read.dcf("DESCRIPTION", "Version")[[1]]) {
     stop("Install this tree first: R CMD INSTALL r", call. = FALSE)
   }
-  if (!resolveR::resolve.available()) {
-    stop("The resolve_c backend is not loaded. Set RESOLVE_C_HOME or run resolveR::resolve.install_backend().",
-         call. = FALSE)
-  }
+  if (!resolveR::resolve.available()) stop(resolveR:::.resolve_backend_message(), call. = FALSE)
 
   python <- Sys.getenv("PYTHON", unset = "python")
   if (run_logged(python, "tools/python_twins.py") != 0L) {

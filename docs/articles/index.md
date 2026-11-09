@@ -25,7 +25,7 @@ latent space.
   the name table built from EVA’s records and the synonymy of eleven
   taxonomic backbones, and how a name is matched through it.
 
-- [Filling a dataset's
+- [Imputing a dataset's
   gaps](https://gillescolling.com/resolve/articles/gap-fitting.md):
 
 - [Correcting altitude and slope with an elevation

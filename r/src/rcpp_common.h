@@ -31,12 +31,11 @@ using namespace Rcpp;
 // =============================================================================
 
 // Raise a clean R error (never a NULL-pointer call) when the resolve_c backend
-// has not been loaded.
+// has not been loaded, with the text of .resolve_backend_message().
 inline void capi_require_loaded() {
     if (!resolve_capi_available()) {
-        stop("The resolve_c backend is not installed. Install it with "
-             "resolve.install_backend(), or set RESOLVE_C_HOME to a directory "
-             "containing the resolve_c shared library.");
+        Function message = Environment::namespace_env("resolveR")[".resolve_backend_message"];
+        stop(as<std::string>(message()));
     }
 }
 

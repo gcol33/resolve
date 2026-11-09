@@ -139,6 +139,24 @@ int32_t PresenceSets::overlap(int64_t a, int64_t b) const noexcept {
     return shared;
 }
 
+std::vector<std::pair<int64_t, int32_t>> PresenceSets::overlaps(int64_t plot, int64_t n_candidates) const {
+    std::vector<int32_t> shared(static_cast<std::size_t>(n_candidates), 0);
+    std::vector<int64_t> touched;
+    for (int64_t e = offsets_[plot]; e < offsets_[plot + 1]; ++e) {
+        const int32_t s = ranks_[static_cast<std::size_t>(e)];
+        for (int64_t p = posting_offsets_[s]; p < posting_offsets_[s + 1]; ++p) {
+            const int64_t other = postings_[static_cast<std::size_t>(p)];
+            if (other >= n_candidates || other == plot) continue;
+            if (shared[static_cast<std::size_t>(other)]++ == 0) touched.push_back(other);
+        }
+    }
+    std::sort(touched.begin(), touched.end());
+    std::vector<std::pair<int64_t, int32_t>> out;
+    out.reserve(touched.size());
+    for (const int64_t other : touched) out.emplace_back(other, shared[static_cast<std::size_t>(other)]);
+    return out;
+}
+
 double PresenceSets::cosine(int64_t a, int64_t b) const noexcept {
     const int32_t shared = overlap(a, b);
     if (shared == 0) return 0.0;

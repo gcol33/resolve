@@ -559,7 +559,9 @@ TEST_CASE("The gap-fitting flags of predict land on GapFittingConfig and the rec
                                                   "--recorded", "location=lat_rec,lon_rec",
                                                   "--no-spatial", "--gap-k-grid", "1,5",
                                                   "--gap-candidates", "resolve,knn_species",
-                                                  "--gap-seed", "11"});
+                                                  "--gap-seed", "11", "--gap-folds", "5",
+                                                  "--gap-max-fold-share", "0.4",
+                                                  "--gap-matching-sample", "300"});
     const auto config = read_gap_fitting(args);
     REQUIRE(config.has_value());
     CHECK_FALSE(config->spatial);
@@ -567,6 +569,9 @@ TEST_CASE("The gap-fitting flags of predict land on GapFittingConfig and the rec
     CHECK((config->candidates ==
            std::vector<resolve::GapMethod>{resolve::GapMethod::Resolve, resolve::GapMethod::KnnSpecies}));
     CHECK(config->matching_seed == 11);
+    CHECK(config->n_folds == 5);
+    CHECK(config->max_fold_share == 0.4f);
+    CHECK(config->matching_sample == 300);
     const auto recorded = read_recorded(args);
     REQUIRE(recorded.size() == 2);
     CHECK(recorded[1].second == std::vector<std::string>{"lat_rec", "lon_rec"});

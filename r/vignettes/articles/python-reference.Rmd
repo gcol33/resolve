@@ -383,7 +383,7 @@ Imputing a dataset's missing values from its own complete plots, beside the raw 
 : What gap fitting reads about a dataset's plots, from DataFrames or CSV paths.
 
 [`GapFittingConfig`](python-gap-fitting.html#GapFittingConfig)
-: The candidates, the neighbour counts, spatial neighbours on or off and the matching seed.
+: The candidates, the neighbour counts, spatial neighbours on or off, the folds and the fold layout's seed, largest fold share and matching sample.
 
 [`GapTarget`](python-gap-fitting.html#GapTarget)
 : A target's name, scale and period.
@@ -397,8 +397,8 @@ Imputing a dataset's missing values from its own complete plots, beside the raw 
 [`GapFit`](python-gap-fitting.html#GapFit)
 : The fitted values, the method per plot and the report.
 
-[`matched_gap_neighbours()`](python-gap-fitting.html#matched_gap_neighbours)
-: The neighbours the choice is tested with.
+[`gap_folds()`](python-gap-fitting.html#gap_folds)
+: The fold layout the choice is judged on.
 
 [`GapColumns`](python-gap-fitting.html#GapColumns), [`GapTables`](python-gap-fitting.html#GapTables), [`GapFitRequest`](python-gap-fitting.html#GapFitRequest)
 : The low-level columns, tables and requests the functions above build.

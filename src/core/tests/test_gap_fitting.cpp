@@ -1,8 +1,9 @@
 // Gap fitting (gap_fitting.hpp): recovery of known relations between the raw
-// prediction, the neighbours and the truth; matched neighbours no nearer than
-// the gaps in km and in years; the choice of spatial neighbours where the gaps
-// are near and not where they are a far region; bearings and positions; the
-// tables reader and the single-model entry point.
+// prediction, the neighbours and the truth; fold layouts of squares and of
+// survey-year periods for gaps far in km and in years; the estimated error
+// against the gaps' error; the choice of spatial neighbours where the gaps are
+// near and not where they are a far region; bearings and positions; injected
+// folds; the tables reader and the single-model entry point.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -178,8 +179,22 @@ TEST_CASE("The spatial stack recovers the weight of the nearest plots", "[gap_fi
     CHECK(std::abs(coefficient(g, "species")) < 0.1);
 }
 
-TEST_CASE("Matched neighbours are no nearer in km than the gaps are to the complete plots",
-          "[gap_fitting]") {
+// Each fold's share of the complete plots, largest first.
+static std::vector<double> fold_shares(const GapFolds& f) {
+    const torch::Tensor counts = torch::bincount(f.folds).to(torch::kFloat64);
+    const torch::Tensor shares = std::get<0>((counts / counts.sum()).sort(0, /*descending=*/true));
+    return {shares.data_ptr<double>(), shares.data_ptr<double>() + shares.numel()};
+}
+
+static double axis_mismatch(const GapFoldLayout& layout, const std::string& axis) {
+    for (const auto& [name, w] : layout.mismatch) {
+        if (name == axis) return w;
+    }
+    FAIL("no mismatch on " << axis);
+    return kNaN;
+}
+
+TEST_CASE("Gaps far from the complete plots in km are matched by a buffer", "[gap_fitting]") {
     torch::manual_seed(4);
     // Complete plots fill a band; every gap lies 100-150 km north of it.
     const int64_t n_cal = 800;
@@ -193,29 +208,20 @@ TEST_CASE("Matched neighbours are no nearer in km than the gaps are to the compl
     const torch::Tensor recorded = with_gaps(torch::zeros({n}, kDouble), gaps);
     const GapPlots plots{random_species(n), coords, {}};
 
-    const MatchedGapNeighbours m = matched_gap_neighbours({"altitude"}, recorded, plots);
-    REQUIRE(m.spatial.defined());
-    const torch::Tensor cal = coords.index({m.complete});
-    const double gap_km_min =
-        nearest_by_great_circle(coords.index({m.gaps}), cal, 1).km.min().item<double>();
-    REQUIRE(gap_km_min > 90.0);
-    for (const torch::Tensor& nb : {m.species, m.spatial}) {
-        const torch::Tensor own = torch::arange(n_cal).unsqueeze(1);
-        CHECK_FALSE(nb.eq(own).any().item<bool>());
-        const torch::Tensor has = nb >= 0;
-        REQUIRE(has.any().item<bool>());
-        const torch::Tensor i = own.expand_as(nb).index({has});
-        const torch::Tensor j = nb.index({has});
-        const torch::Tensor km = great_circle_km(cal.index({i, 0}), cal.index({i, 1}), cal.index({j, 0}),
-                                                 cal.index({j, 1}));
-        CHECK(km.min().item<double>() >= gap_km_min - 1e-3);
-    }
-    // Without the hiding, each complete plot's nearest neighbour is far nearer.
-    const PlaceNeighbours plain = nearest_by_great_circle(cal, cal, 1, /*exclude_self=*/true);
-    CHECK(plain.km.max().item<double>() < gap_km_min);
+    const GapFolds f = gap_folds({"altitude"}, recorded, plots);
+    CHECK(f.layout.n_folds >= 2);
+    CHECK(f.layout.n_matching_plots == n_cal);
+    CHECK(fold_shares(f).front() <= 0.5 + 1e-12);
+    // Plot by plot without a buffer, a held-out plot's nearest complete plot
+    // would be a few km away against the gaps' 100 km and more; the gaps lie
+    // beyond the band, so only a buffer reaches their distance.
+    CHECK(std::isfinite(f.layout.buffer_km));
+    CHECK(f.layout.buffer_km > 90.0);
+    CHECK(std::isnan(f.layout.block_years));
+    CHECK(axis_mismatch(f.layout, "km") < 0.2);
 }
 
-TEST_CASE("Matched neighbours are no nearer in survey year than the gaps", "[gap_fitting]") {
+TEST_CASE("Gaps surveyed long before the complete plots are matched in years", "[gap_fitting]") {
     torch::manual_seed(5);
     // The gaps were surveyed 1930-1940, the complete plots 1960-2020.
     const int64_t n_cal = 600;
@@ -226,21 +232,64 @@ TEST_CASE("Matched neighbours are no nearer in survey year than the gaps", "[gap
     const torch::Tensor gaps = torch::arange(n) >= n_cal;
     GapPlots plots{random_species(n), {}, {}};
     plots.years = year;
-    const MatchedGapNeighbours m =
-        matched_gap_neighbours({"altitude"}, with_gaps(torch::zeros({n}, kDouble), gaps), plots);
-    CHECK_FALSE(m.spatial.defined());
-    REQUIRE(m.radii.years.defined());
-    const torch::Tensor cal_year = year.index({m.complete});
-    const double gap_years_min = (year.index({m.gaps}).unsqueeze(1) - cal_year.unsqueeze(0))
-                                     .abs()
-                                     .amin(1)
-                                     .min()
-                                     .item<double>();
-    const torch::Tensor has = m.species >= 0;
-    REQUIRE(has.any().item<bool>());
-    const torch::Tensor i = torch::arange(n_cal).unsqueeze(1).expand_as(m.species).index({has});
-    const torch::Tensor j = m.species.index({has});
-    CHECK((cal_year.index({i}) - cal_year.index({j})).abs().min().item<double>() >= gap_years_min - 1e-9);
+    const GapFolds f = gap_folds({"altitude"}, with_gaps(torch::zeros({n}, kDouble), gaps), plots);
+    CHECK(std::isnan(f.layout.block_km));
+    CHECK(std::isnan(f.layout.buffer_km));
+    // The gaps lie 20-30 years before the earliest complete plot: periods
+    // of the complete plots' own span reach that only with a buffer.
+    CHECK((std::isfinite(f.layout.block_years) || std::isfinite(f.layout.buffer_years)));
+    CHECK(axis_mismatch(f.layout, "years") < 0.2);
+}
+
+TEST_CASE("Scattered gaps are matched by a fine layout and the estimated error meets the gaps' error",
+          "[gap_fitting]") {
+    const int seed = GENERATE(0, 1, 2);
+    torch::manual_seed(seed);
+    const int64_t n = 3000;
+    const torch::Tensor lat = 45.0 + 3.0 * torch::rand({n}, kDouble);
+    const torch::Tensor lon = 14.0 + 3.0 * torch::rand({n}, kDouble);
+    const torch::Tensor truth = 1985.0 + 15.0 * torch::randn({n}, kDouble);
+    const torch::Tensor pred = truth + 6.0 * torch::randn({n}, kDouble);
+    const torch::Tensor gaps = torch::rand({n}) < 0.2;
+    const GapPlots plots{random_species(n), torch::stack({lat, lon}, 1), {}};
+    const GapFit fit = fit_gaps({"year"}, pred, with_gaps(truth, gaps), plots);
+    // Scattered gaps sit as near the complete plots as plots in squares much
+    // smaller than the region, or dealt plot by plot.
+    CHECK((std::isnan(fit.report.folds.block_km) || fit.report.folds.block_km < 30.0));
+    const GapGroupChoice g = group(fit, "located");
+    REQUIRE(std::isfinite(g.estimated_error));
+    CHECK(g.n_estimated == fit.report.n_complete);
+    // Nothing but the raw prediction carries the truth, so the procedure's
+    // error is the raw prediction's (MAE of N(0, 6) is 4.8) on the gaps too.
+    CHECK_THAT(g.estimated_error, WithinAbs(gap_mae(fit, truth, gaps), 0.5));
+    double lowest = std::numeric_limits<double>::infinity();
+    for (const auto& [method, error] : g.cv_error) lowest = std::min(lowest, error);
+    CHECK(lowest <= g.estimated_error + 0.25);
+}
+
+TEST_CASE("Injected folds are checked", "[gap_fitting]") {
+    torch::manual_seed(3);
+    const int64_t n = 100;
+    const torch::Tensor truth = torch::randn({n}, kDouble);
+    const torch::Tensor recorded = with_gaps(truth, torch::arange(n) >= 80);
+    const GapPlots plots{random_species(n), {}, {}};
+    const torch::Tensor raw = truth + 0.1;
+    torch::Tensor short_folds = torch::zeros({10}, torch::kInt64);
+    CHECK_THROWS_AS(fit_gaps({"slope"}, raw, recorded, plots, {}, &short_folds), std::invalid_argument);
+    torch::Tensor one_fold = torch::zeros({80}, torch::kInt64);
+    CHECK_THROWS_AS(fit_gaps({"slope"}, raw, recorded, plots, {}, &one_fold), std::invalid_argument);
+    torch::Tensor skipping = torch::arange(80, torch::kInt64) % 2 * 2;  // folds 0 and 2
+    CHECK_THROWS_AS(fit_gaps({"slope"}, raw, recorded, plots, {}, &skipping), std::invalid_argument);
+    // Two folds: no nested estimate.
+    torch::Tensor two = torch::arange(80, torch::kInt64) % 2;
+    const GapFit fit = fit_gaps({"slope"}, raw, recorded, plots, {}, &two);
+    CHECK(std::isnan(fit.report.groups.front().estimated_error));
+    GapFittingConfig bad;
+    bad.n_folds = 1;
+    CHECK_THROWS_AS(fit_gaps({"slope"}, raw, recorded, plots, bad), std::invalid_argument);
+    bad = {};
+    bad.max_fold_share = 0.05f;
+    CHECK_THROWS_AS(fit_gaps({"slope"}, raw, recorded, plots, bad), std::invalid_argument);
 }
 
 TEST_CASE("Spatial neighbours are chosen where the gaps are near and not for a far region",
@@ -292,13 +341,10 @@ TEST_CASE("Spatial neighbours are chosen where the gaps are near and not for a f
         if (g.method == GapMethod::StackSpeciesSpatial) {
             CHECK(std::abs(coefficient(g, "spatial")) < 0.25);
         }
-        // The same stack judged by plain leave-one-out (nothing hidden).
-        const int64_t n_complete = fit.report.n_complete;
-        HidingRadii nothing_hidden;
-        nothing_hidden.similarity = torch::full({n_complete}, 2.0, kDouble);
-        nothing_hidden.km = torch::zeros({n_complete}, kDouble);
+        // The same stack judged with the plots dealt to folds one by one.
+        torch::Tensor plot_by_plot = torch::arange(fit.report.n_complete, torch::kInt64) % 10;
         const GapFit plain = fit_gaps({"altitude"}, p, recorded, plots,
-                                      only({GapMethod::StackSpeciesSpatial}), &nothing_hidden);
+                                      only({GapMethod::StackSpeciesSpatial}), &plot_by_plot);
         const GapFit calibrated = fit_gaps({"altitude"}, p, recorded, plots, only({GapMethod::OffsetSlope}));
         CHECK(gap_mae(fit, t, gaps) < 0.8 * gap_mae(plain, t, gaps));
         CHECK(gap_mae(fit, t, gaps) <= 1.1 * gap_mae(calibrated, t, gaps));
@@ -368,9 +414,9 @@ TEST_CASE("Gap fitting without gaps or without complete plots, and its determini
     const GapFit a = fit_gaps({"slope"}, raw, recorded, plots);
     const GapFit b = fit_gaps({"slope"}, raw, recorded, plots);
     CHECK(torch::equal(a.fitted, b.fitted));
-    // The drawn radii, injected, reproduce the fit.
-    const MatchedGapNeighbours m = matched_gap_neighbours({"slope"}, recorded, plots);
-    const GapFit c = fit_gaps({"slope"}, raw, recorded, plots, {}, &m.radii);
+    // The matched layout, injected, reproduces the fit.
+    const GapFolds folds = gap_folds({"slope"}, recorded, plots);
+    const GapFit c = fit_gaps({"slope"}, raw, recorded, plots, {}, &folds.folds);
     CHECK(torch::equal(a.fitted, c.fitted));
 
     CHECK_THROWS_AS(fit_gaps({"slope"}, raw.slice(0, 1), recorded, plots), std::invalid_argument);

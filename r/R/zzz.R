@@ -326,7 +326,12 @@ NULL
 .onAttach <- function(libname, pkgname) {
   have <- isTRUE(tryCatch(resolve_capi_is_available(), error = function(e) FALSE))
   gpu <- .resolve_has_nvidia_gpu()
-  if (!have) {
+  if (!have && nzchar(.resolve_find_backend())) {
+    packageStartupMessage(
+      "resolve: training / dataset / prediction verbs are unavailable.\n",
+      .resolve_backend_message()
+    )
+  } else if (!have) {
     hint <- if (gpu) "resolve.install_backend(variant = \"cuda\")  # GPU build for your NVIDIA card"
             else     "resolve.install_backend()"
     packageStartupMessage(

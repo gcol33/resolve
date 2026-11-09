@@ -2,7 +2,7 @@
 % Please edit documentation in R/resolve.R
 \name{resolve.manual_seed}
 \alias{resolve.manual_seed}
-\title{Seed the Engine's Random Numbers}
+\title{Seed the RESOLVE Engine's Random Numbers}
 \usage{
 resolve.manual_seed(seed)
 }

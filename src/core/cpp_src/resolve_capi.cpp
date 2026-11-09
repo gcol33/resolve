@@ -2614,25 +2614,19 @@ resolve_value_t* resolve_suite_predict_csv(resolve_suite_t* s, const char* heade
 resolve_value_t* resolve_fit_gaps(const resolve_value_t* target, const resolve_value_t* raw,
                                   const resolve_value_t* recorded, const resolve_value_t* species,
                                   const resolve_value_t* coordinates, const resolve_value_t* years,
-                                  const resolve_value_t* config, const resolve_value_t* radii) {
+                                  const resolve_value_t* config, const resolve_value_t* folds) {
     CAPI_BODY_PTR({
         GapPlots plots;
         plots.species = value_to_tensor(species, torch::kFloat32, "species");
         plots.coordinates = value_to_tensor(coordinates, torch::kFloat64, "coordinates");
         plots.years = value_to_tensor(years, torch::kFloat64, "years");
-        HidingRadii injected;
-        const bool has_radii = radii && radii->kind != RESOLVE_VALUE_NULL;
-        if (has_radii) {
-            reject_unknown_keys(radii, "radii", {"similarity", "km", "years"});
-            injected.similarity = value_to_tensor(vget(radii, "similarity"), torch::kFloat64, "radii.similarity");
-            injected.km = value_to_tensor(vget(radii, "km"), torch::kFloat64, "radii.km");
-            injected.years = value_to_tensor(vget(radii, "years"), torch::kFloat64, "radii.years");
-        }
+        const bool has_folds = folds && folds->kind != RESOLVE_VALUE_NULL;
+        const torch::Tensor injected = has_folds ? value_to_tensor(folds, torch::kInt64, "folds") : torch::Tensor();
         return gap_fit_to_value(fit_gaps(parse_gap_target(target),
                                          value_to_tensor(raw, torch::kFloat64, "raw"),
                                          value_to_tensor(recorded, torch::kFloat64, "recorded"), plots,
                                          parse_config<GapFittingConfig>(config, "gap_fitting"),
-                                         has_radii ? &injected : nullptr));
+                                         has_folds ? &injected : nullptr));
     })
 }
 

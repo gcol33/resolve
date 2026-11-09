@@ -2,7 +2,7 @@
 % Please edit documentation in R/resolve.R
 \name{resolve.set_vram_fraction}
 \alias{resolve.set_vram_fraction}
-\title{Cap the GPU Memory the Engine May Use}
+\title{Cap the GPU Memory the RESOLVE Engine May Use}
 \usage{
 resolve.set_vram_fraction(fraction, deviceIndex = -1L)
 }

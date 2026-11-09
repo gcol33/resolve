@@ -170,7 +170,8 @@ def predict(
     gap_fitting : GapFittingConfig or dict or bool, optional
         Fit each target ``columns["recorded"]`` names from the dataset's own
         complete plots (``True`` for the defaults; a dict sets
-        ``candidates``, ``k_grid``, ``spatial``, ``matching_seed``). Adds
+        ``candidates``, ``k_grid``, ``spatial``, ``matching_seed``,
+        ``n_folds``, ``max_fold_share``, ``matching_sample``). Adds
         ``<target>_fitted`` and ``<target>_fit_method`` to ``to_pandas`` and
         a ``gap_fit`` (with its ``report``) to each fitted target.
     names : str or os.PathLike or NameTable or SpeciesNames or bool, optional

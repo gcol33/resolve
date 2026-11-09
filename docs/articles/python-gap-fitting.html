@@ -66,7 +66,7 @@
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
     <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
-    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
+    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Imputing a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
     <li><hr class="dropdown-divider"></li>
@@ -116,10 +116,10 @@
     
     
 <!-- Python blocks run by tools/python_twins.py (md5 cf36e5edb179b48e2b180eb9df889249). -->
-<p>Filling a dataset’s missing values from its own complete plots: the
+<p>Imputing a dataset’s missing values from its own complete plots: the
 functions that fit one target or a single model’s targets, their
 settings, the result and its report, and the neighbour searches the
-choice is tested with. <a href="gap-fitting.html">Filling a dataset’s
+choice is tested with. <a href="gap-fitting.html">Imputing a dataset’s
 gaps</a> walks through a fit; a model suite fits its targets through <a href="python-suites.html#SuitePredictor.predict"><code>SuitePredictor.predict(gap_fitting=...)</code></a>.</p>
 <p><a href="python-reference.html">All of the Python reference</a></p>
 <div class="section level2">
@@ -141,7 +141,7 @@ gaps</a> walks through a fit; a model suite fits its targets through <a href="py
 <code>fit_gaps()</code><a class="anchor" aria-label="anchor" href="#fit_gaps"></a>
 </h2>
 <div class="sourceCode" id="cb3"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a>fit_gaps(target, raw, recorded, species, coordinates<span class="op">=</span><span class="va">None</span>, years<span class="op">=</span><span class="va">None</span>,</span>
-<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a>         config<span class="op">=</span>GapFittingConfig(), radii<span class="op">=</span><span class="va">None</span>)</span></code></pre></div>
+<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a>         config<span class="op">=</span>GapFittingConfig(), folds<span class="op">=</span><span class="va">None</span>)</span></code></pre></div>
 <p>Fits one target’s gaps. <code>target</code> is a
 <code>GapTarget</code>. <code>raw</code> and <code>recorded</code> are
 the model’s imputed value and the dataset’s recorded value per plot in
@@ -152,13 +152,12 @@ recorded value marks a gap. <code>species</code> is the
 other than 0 a species present. <code>coordinates</code> is
 <code>(n, 2)</code> latitude and longitude (<code>NaN</code> where
 unknown) and <code>years</code> <code>(n,)</code> survey years; either
-may be <code>None</code>. <code>radii</code>, a <code>dict</code> of
-<code>similarity</code>, <code>km</code> and <code>years</code> tensors
-with one value per complete plot, replaces the drawn hiding distances,
-so a fit reproduces another implementation’s draw. Returns a
-<code>GapFit</code>. With no gap the recorded values come back; with
-fewer than two complete plots the gaps keep the raw imputed value and
-the report says why.</p>
+may be <code>None</code>. <code>folds</code>, an int64 tensor with the
+fold of each complete plot in plot order (numbered from 0), replaces the
+matched layout, so a fit reproduces another implementation’s layout.
+Returns a <code>GapFit</code>. With no gap the recorded values come
+back; with fewer than two complete plots the gaps keep the raw imputed
+value and the report says why.</p>
 <div class="sourceCode" id="cb4"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a><span class="im">import</span> numpy <span class="im">as</span> np</span>
 <span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a><span class="im">import</span> torch</span>
 <span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a><span class="im">import</span> resolve_core <span class="im">as</span> rc</span>
@@ -234,11 +233,25 @@ spatial neighbours as candidates; <code>False</code> reads composition
 only.</li>
 <li>
 <code>matching_seed</code> (<code>int</code>, default
-<code>20261106</code>): the seed of the draw of one gap distance per
-complete plot and axis.</li>
+<code>20261106</code>): the seed of the order the fold layout deals its
+groups in, the buffers it draws and the complete plots it is compared
+on.</li>
+<li>
+<code>n_folds</code> (<code>int</code>, default <code>10</code>):
+the folds of the cross-validation; the estimated error needs at least
+3.</li>
+<li>
+<code>max_fold_share</code> (<code>float</code>, default
+<code>0.5</code>): the largest share of the complete plots one fold of a
+layout may hold.</li>
+<li>
+<code>matching_sample</code> (<code>int</code>, default
+<code>1000</code>): the complete plots whose distances the layouts are
+compared on.</li>
 </ul>
-<p><code>validate()</code> raises for an empty grid or a <code>k</code>
-below 1.</p>
+<p><code>validate()</code> raises for an empty grid, a <code>k</code>
+below 1, fewer than 2 folds or a <code>max_fold_share</code> outside (1
+/ <code>n_folds</code>, 1].</p>
 </div>
 <div class="section level2">
 <h2 id="GapTarget">
@@ -294,31 +307,35 @@ complete plot.</li>
 <code>report</code> (<code>dict</code>): <code>target</code>,
 <code>scale</code>, <code>n_complete</code>, <code>n_gaps</code>;
 <code>axes</code>, per axis (<code>similarity</code>, <code>km</code>,
-<code>years</code>) whether the test hid by it and the quantiles of the
-gaps’ distance to their nearest complete plot; <code>neighbours</code>,
-per kind the <code>k</code> chosen and the error of each <code>k</code>;
-<code>groups</code>, per group of gaps (<code>located</code>,
-<code>unlocated</code>) the method chosen, every candidate’s error on
-the complete plots at the gaps’ distance (<code>matched_error</code>),
-and for the method chosen its <code>coefficients</code>,
+<code>years</code>) whether the fold layout was matched on it and the
+quantiles of the gaps’ distance to their nearest complete plot;
+<code>folds</code>, the layout (<code>n_folds</code>,
+<code>block_km</code>, <code>block_years</code>, <code>buffer_km</code>,
+<code>buffer_years</code>, <code>mismatch</code> per axis,
+<code>total_mismatch</code>, <code>n_layouts</code>,
+<code>n_matching_plots</code>, <code>injected</code>);
+<code>neighbours</code>, per kind the <code>k</code> chosen and the
+cross-validated error of each <code>k</code>; <code>groups</code>, per
+group of gaps (<code>located</code>, <code>unlocated</code>) the method
+chosen, every candidate’s cross-validated error (<code>cv_error</code>),
+the error estimated for the whole choice by nested cross-validation
+(<code>estimated_error</code>, over <code>n_estimated</code> complete
+plots), and for the method chosen its <code>coefficients</code>,
 <code>n_fitted</code> and <code>k</code>. <code>skipped</code> says why
 nothing was chosen when that happened.</li>
 </ul>
 </div>
 <div class="section level2">
-<h2 id="matched_gap_neighbours">
-<code>matched_gap_neighbours()</code><a class="anchor" aria-label="anchor" href="#matched_gap_neighbours"></a>
+<h2 id="gap_folds">
+<code>gap_folds()</code><a class="anchor" aria-label="anchor" href="#gap_folds"></a>
 </h2>
-<div class="sourceCode" id="cb9"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a>matched_gap_neighbours(target, recorded, species, coordinates<span class="op">=</span><span class="va">None</span>, years<span class="op">=</span><span class="va">None</span>,</span>
-<span id="cb9-2"><a href="#cb9-2" tabindex="-1"></a>                       config<span class="op">=</span>GapFittingConfig(), radii<span class="op">=</span><span class="va">None</span>)</span></code></pre></div>
-<p>The neighbours the choice is tested with, for inspecting a fit: a
+<div class="sourceCode" id="cb9"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a>gap_folds(target, recorded, species, coordinates<span class="op">=</span><span class="va">None</span>, years<span class="op">=</span><span class="va">None</span>,</span>
+<span id="cb9-2"><a href="#cb9-2" tabindex="-1"></a>          config<span class="op">=</span>GapFittingConfig())</span></code></pre></div>
+<p>The fold layout the choice is judged on, for inspecting a fit: a
 <code>dict</code> of <code>complete</code> and <code>gaps</code> (the
-plots’ rows), <code>radii</code> (the distances drawn per complete plot
-and axis), and <code>species</code> and <code>spatial</code>, each
-complete plot’s neighbours among the complete plots no nearer to it than
-its drawn distance (<code>(n_complete, k)</code> indices into
-<code>complete</code>, -1 after the last; <code>spatial</code> is
-<code>None</code> without the spatial axis).</p>
+plots’ rows), <code>folds</code> (the fold of each complete plot, an
+int64 tensor) and <code>layout</code> (as the report’s
+<code>folds</code>).</p>
 </div>
 <div class="section level2">
 <h2 id="GapColumns">

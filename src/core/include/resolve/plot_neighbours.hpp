@@ -24,20 +24,10 @@
 
 #include <cstdint>
 #include <functional>
+#include <utility>
 #include <vector>
 
 namespace resolve {
-
-// Per plot, how near another plot may be and still be its neighbour. A plot
-// is hidden from plot i when it is more similar than similarity[i], less than
-// km[i] kilometres away, or less than years[i] years apart. A NaN radius,
-// position or year hides nothing; an undefined tensor applies no rule on its
-// axis. Each defined tensor holds one value per plot the rules apply to.
-struct HidingRadii {
-    torch::Tensor similarity;
-    torch::Tensor km;
-    torch::Tensor years;
-};
 
 // The species of each plot as a set: an entry other than 0 counts once.
 class PresenceSets {
@@ -51,6 +41,10 @@ public:
     }
     // Species the two plots share.
     [[nodiscard]] int32_t overlap(int64_t a, int64_t b) const noexcept;
+    // The species `plot` shares with every plot of [0, n_candidates) other
+    // than itself that shares any: (candidate, overlap) pairs by increasing
+    // candidate row, walked through the species' postings.
+    [[nodiscard]] std::vector<std::pair<int64_t, int32_t>> overlaps(int64_t plot, int64_t n_candidates) const;
     // overlap / sqrt(count(a) count(b)); 0 when either plot has no species.
     [[nodiscard]] double cosine(int64_t a, int64_t b) const noexcept;
 

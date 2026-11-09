@@ -16,18 +16,38 @@ resolve.available <- function() {
   isTRUE(tryCatch(resolve_capi_is_available(), error = function(e) FALSE))
 }
 
+# Why the backend is not loaded, with what to do about it. A library that is
+# found but does not bind (a build older than the package lacks the C ABI
+# functions the package calls, or a runtime library beside it is missing) is
+# reported with the loader's reason, never as "not installed". The one source
+# of this text for .onAttach, the engine verbs and the C++ guard.
+.resolve_backend_message <- function() {
+  path <- .resolve_find_backend()
+  if (!nzchar(path)) {
+    return(paste0(
+      "The resolve_c backend is not installed.\n",
+      "Install it with resolve.install_backend(), or set RESOLVE_C_HOME to a ",
+      "directory containing the resolve_c shared library."
+    ))
+  }
+  reason <- tryCatch(resolve_capi_load_error(), error = function(e) "")
+  paste0(
+    "The resolve_c backend at ", path, " could not be loaded",
+    if (nzchar(reason)) paste0(":\n", reason) else ".",
+    if (grepl("missing symbols", reason, fixed = TRUE)) {
+      paste0("\nIt was built before resolveR ", as.character(utils::packageVersion("resolveR")),
+             " and lacks functions the package calls.")
+    },
+    "\nReinstall it with resolve.install_backend(force = TRUE), ",
+    "or set RESOLVE_C_HOME to a build of this version."
+  )
+}
+
 # Stop with a consistent, actionable error when an engine verb is called with no
 # backend loaded. Called after a verb's pure-R input validation so argument
 # errors still surface first.
 .resolve_require_backend <- function() {
-  if (!resolve.available()) {
-    stop(
-      "The resolve_c backend is not installed.\n",
-      "Install it with resolve.install_backend(), or set RESOLVE_C_HOME to a ",
-      "directory containing the resolve_c shared library.",
-      call. = FALSE
-    )
-  }
+  if (!resolve.available()) stop(.resolve_backend_message(), call. = FALSE)
 }
 
 #' Download and install the resolve_c backend
@@ -93,7 +113,9 @@ resolve.install_backend <- function(version = NULL,
               " (use force = TRUE to reinstall).")
     }
     .resolve_prepend_loader_path(dir)
-    invisible(tryCatch(resolve_capi_load_lib(dest_lib), error = function(e) FALSE))
+    if (!isTRUE(tryCatch(resolve_capi_load_lib(dest_lib), error = function(e) FALSE))) {
+      warning(.resolve_backend_message(), call. = FALSE)
+    }
     return(invisible(dir))
   }
 

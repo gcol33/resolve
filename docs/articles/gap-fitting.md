@@ -1,4 +1,4 @@
-# Filling a dataset's gaps
+# Imputing a dataset's gaps
 
 A dataset rarely lacks a variable on every plot. Most plots carry a
 survey year, coordinates or an elevation, and some do not. The plots
@@ -64,18 +64,34 @@ nobody georeferenced, or the oldest surveys. Judging the neighbours by
 how well they impute a complete plot from its own nearest plots would
 trust them more than they deserve at the gaps.
 
-Gap fitting therefore measures each gap’s distance to its nearest
-complete plot on every axis it can be measured on: species similarity,
-km where the gaps carry coordinates, and survey years where they carry a
-year. Each complete plot is then imputed with the complete plots nearer
-to it than a gap is to its nearest complete plot hidden, one gap
-distance drawn per complete plot and axis (nearest-neighbour distance
-matching, Milà et al. 2022). A complete plot left with no neighbour at
-that distance counts as imputed by the local constant, which is all the
-dataset says about it there. Each candidate is scored on the complete
-plots by the target’s own error: the mean absolute error, on a log scale
-that of log1p, the circular error of a bearing, the median distance in
-km for a location. The best candidate imputes the gaps.
+Gap fitting therefore judges the candidates by cross-validation over the
+complete plots, with folds laid out so that a held-out plot lies as far
+from the plots it may read as a gap lies from the complete plots (k-fold
+nearest-neighbour distance matching, Linnenbrink et al. 2024). Each
+gap’s distance to its nearest complete plot is measured on every axis it
+can be measured on: species similarity, km where the gaps carry
+coordinates, and survey years where they carry a year. The complete
+plots are grouped into squares of an equal-area map, into survey-year
+periods, into both, or one by one, at a range of sizes, and the groups
+are dealt out to ten folds. Where the gaps lie farther away than any
+fold can, a held-out plot also loses every plot within a buffer, and
+each plot’s buffer is the distances of one gap drawn at random. The
+layout whose held-out plots match the gaps’ distances most closely is
+the one used.
+
+Every fitted part is fitted on the other folds: a held-out plot’s
+neighbours, the least-squares coefficients and `k`. A complete plot left
+with no neighbour counts as imputed by the local constant, which is all
+the dataset says about it there. Each candidate is scored on the
+out-of-fold values by the target’s own error: the mean absolute error,
+on a log scale that of log1p, the circular error of a bearing, the
+median distance in km for a location. The candidate with the lowest
+error is fitted again on every complete plot and imputes the gaps.
+
+The lowest of seven errors reads lower than the error the chosen method
+then makes. The report therefore estimates the error of the whole choice
+by repeating it with each fold held out and scoring it on that fold
+(nested cross-validation).
 
 Gaps with coordinates and gaps without them choose apart: the second
 group only among the candidates that read no position.
@@ -189,7 +205,7 @@ my_data = rc.ResolveDataset.from_csv_with_vocabs(
 preds = predictor.predict_dataset(my_data)
 ```
 
-## Fitting the gaps of a single model
+## Gap fitting with a single model
 
 Gap fitting reads the dataset’s own tables: the species records, for
 composition over every species they name, whatever the model’s
@@ -220,8 +236,8 @@ fits = rc.fit_prediction_gaps(preds, my_species, my_plots, columns=columns,
                               targets={"elevation": {"scale": "linear"}})
 elevation = fits["elevation"]
 pd.Series(elevation.method).value_counts()
-#> recorded                 60
-#> stack_species_spatial    15
+#> recorded         60
+#> stack_species    15
 #> Name: count, dtype: int64
 ```
 
@@ -238,7 +254,7 @@ gaps <- is.na(my_plots$elevation_recorded[order])
 c(model = mean(abs(preds$predictions$elevation[gaps] - truth[gaps])),
   fitted = mean(abs(elevation$fitted[gaps] - truth[gaps])))
 #>    model   fitted 
-#> 274.8799 162.6798
+#> 274.8799 154.4564
 ```
 
 ``` python
@@ -249,29 +265,32 @@ raw = preds.predictions["elevation"].numpy()
 fitted = elevation.fitted.numpy()
 {"model": float(np.abs(raw[gaps] - truth[gaps]).mean()),
  "fitted": float(np.abs(fitted[gaps] - truth[gaps]).mean())}
-#> {'model': 252.3594970703125, 'fitted': 141.37301726696327}
+#> {'model': 252.3594970703125, 'fitted': 150.94150117990975}
 ```
 
 ## Reading the report
 
 The report says what was chosen and why: the number of complete plots
 and gaps, the gaps’ distance to their nearest complete plot on each
-axis, the `k` each kind of neighbour chose, and per group of gaps every
-candidate’s error on the complete plots at the gaps’ distance, the
-method chosen and what it fitted.
+axis, the fold layout, the `k` each kind of neighbour chose, and per
+group of gaps every candidate’s cross-validated error (`cv_error`), the
+error estimated for the whole choice (`estimated_error`), the method
+chosen and what it fitted.
 
 ``` r
 
 located <- elevation$report$groups$located
 located$method
 #> [1] "stack_species_spatial"
-round(unlist(located$matched_error), 1)
+round(unlist(located$cv_error), 1)
 #>        local_constant               resolve          offset_slope 
-#>                 559.9                 158.6                 155.9 
+#>                 576.0                 158.6                 160.4 
 #>           knn_species         stack_species           knn_spatial 
-#>                 173.0                 135.1                 609.3 
+#>                 121.5                 109.5                 580.8 
 #> stack_species_spatial 
-#>                 128.8
+#>                 108.4
+round(located$estimated_error, 1)
+#> [1] 111.2
 elevation$report$axes$km$gap_distance$median
 #> [1] 7.379892
 ```
@@ -279,12 +298,20 @@ elevation$report$axes$km$gap_distance$median
 ``` python
 located = elevation.report["groups"]["located"]
 located["method"]
-#> stack_species_spatial
-{m: round(e, 1) for m, e in located["matched_error"].items()}
-#> {'local_constant': 559.9, 'resolve': 167.7, 'offset_slope': 167.2, 'knn_species': 173.0, 'stack_species': 134.9, 'knn_spatial': 609.3, 'stack_species_spatial': 131.0}
+#> stack_species
+{m: round(e, 1) for m, e in located["cv_error"].items()}
+#> {'local_constant': 576.0, 'resolve': 167.7, 'offset_slope': 171.9, 'knn_species': 121.5, 'stack_species': 114.4, 'knn_spatial': 580.8, 'stack_species_spatial': 115.6}
+round(located["estimated_error"], 1)
+#> 119.3
 elevation.report["axes"]["km"]["gap_distance"]["median"]
 #> 7.379891561267665
 ```
+
+`folds` gives the layout the choice was judged on: the number of folds,
+the side of the squares (`block_km`) and the length of the survey-year
+periods (`block_years`), the median buffer in km and in years, and how
+far the held-out plots’ distances still lie from the gaps’ on each axis
+(`mismatch`, 0 where they match).
 
 A chosen least-squares method also reports its coefficients
 (`coefficients`, one per term: `resolve`, `species`, `spatial`), the
@@ -354,7 +381,7 @@ the recorded columns alone (`columns$recorded` in R,
 
 ## Settings
 
-Four settings change the choice (`gapFitting` in R, `gap_fitting` in
+Seven settings change the choice (`gapFitting` in R, `gap_fitting` in
 Python, the `--gap-*` flags on the command line):
 
 - `candidates`: the methods to choose among, by name; the gaps without
@@ -362,8 +389,14 @@ Python, the `--gap-*` flags on the command line):
 - `k_grid`: the neighbour counts `k` is chosen from;
 - `spatial = FALSE` (`--no-spatial`): composition only, no spatial
   neighbours;
-- `matching_seed`: the seed of the draw of one gap distance per complete
-  plot.
+- `n_folds`: the number of folds, 10 by default; the estimated error
+  needs at least 3;
+- `max_fold_share`: the largest share of the complete plots one fold may
+  hold, 0.5 by default;
+- `matching_sample`: the number of complete plots the layouts are
+  compared on, 1000 by default;
+- `matching_seed`: the seed of the order the groups are dealt out in,
+  the buffers drawn and the complete plots compared.
 
 ``` r
 
@@ -404,7 +437,8 @@ the gaps resemble them. Two kinds of gap do not:
   them. For other targets an old survey is visible through the
   survey-year axis, and gap fitting allows for it.
 - **Plots without coordinates that probably come from an area with no
-  georeferenced plots.** A location’s gaps have no position, so the test
-  hides plots by species and survey year only, and a missing region
-  still looks near in species terms. Such plots are better served by the
-  model’s imputed value, or by the species stack alone.
+  georeferenced plots.** A location’s gaps have no position, so the
+  folds are matched in species similarity and survey year only, and a
+  missing region still looks near in species terms. Such plots are
+  better served by the model’s imputed value, or by the species stack
+  alone.

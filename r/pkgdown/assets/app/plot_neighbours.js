@@ -120,37 +120,55 @@ function cosine(sets, a, b) {
   return same === 0 ? 0 : similarity(sets, a, b, same);
 }
 
+// The species `plot` shares with every plot of [0, nCandidates) other than
+// itself that shares any: [candidate, overlap] pairs by increasing candidate,
+// walked through the species' postings.
+export function overlaps(sets, plot, nCandidates) {
+  const counts = new Int32Array(nCandidates), touched = [];
+  for (let e = sets.offsets[plot]; e < sets.offsets[plot + 1]; e++) {
+    const s = sets.ranks[e];
+    for (let p = sets.postingOffsets[s]; p < sets.postingOffsets[s + 1]; p++) {
+      const other = sets.postings[p];
+      if (other >= nCandidates || other === plot) continue;
+      if (counts[other]++ === 0) touched.push(other);
+    }
+  }
+  touched.sort((a, b) => a - b);
+  return touched.map((other) => [other, counts[other]]);
+}
+
 // ---------------------------------------------------------------------------
-// Hiding rules
+// Fold rules
 // ---------------------------------------------------------------------------
 
-// Per plot u, the radii within which other plots are hidden from it: more
-// similar in species than radii.similarity[u], nearer than radii.km[u] km,
-// fewer than radii.years[u] survey years apart. `coordinates` (latitude /
-// longitude pairs) and `years` are the plots' own, read only with km and
-// years radii.
-export class HidingRules {
-  constructor(radii, coordinates = null, years = null) {
-    this.similarity = shared(Float64Array, radii.similarity);
-    this.km = radii.km ? shared(Float64Array, radii.km) : null;
-    this.years = radii.years ? shared(Float64Array, radii.years) : null;
-    this.coordinates = this.km ? shared(Float64Array, coordinates) : null;
-    this.yearsOf = this.years ? shared(Float64Array, years) : null;
+// Plot v is hidden from plot u when it lies in u's own fold or in the fold
+// `held` (-1 for none), or within u's buffer: nearer than bufferKm[u] km or
+// fewer than bufferYears[u] survey years apart (NaN: no buffer). `folds` and
+// the buffers hold one value per plot the rules apply to; `coordinates`
+// (latitude / longitude pairs) and `years` are those plots' own.
+export class FoldRules {
+  constructor(folds, held = -1, { bufferKm = null, bufferYears = null, coordinates = null, years = null } = {}) {
+    this.folds = shared(Int32Array, folds);
+    this.held = held;
+    this.bufferKm = bufferKm ? shared(Float64Array, bufferKm) : null;
+    this.bufferYears = bufferYears ? shared(Float64Array, bufferYears) : null;
+    this.coordinates = bufferKm ? shared(Float64Array, coordinates) : null;
+    this.years = bufferYears ? shared(Float64Array, years) : null;
   }
 }
 
-// Whether `rules` hide plot v from plot u; a search passes the similarity or
-// km it computed itself, NaN for one it did not.
-function hidingTest(rules, sets) {
-  const { similarity: maxSimilarity, km: minKm, years: minYears, coordinates: c, yearsOf } = rules;
-  return (u, v, s, km) => {
-    if (Number.isNaN(s)) s = cosine(sets, u, v);
-    if (s > maxSimilarity[u]) return true;
-    if (minKm) {
-      if (Number.isNaN(km)) km = greatCircleKm(c[2 * u], c[2 * u + 1], c[2 * v], c[2 * v + 1]);
-      if (km < minKm[u]) return true;
+// Whether `rules` hide plot v from plot u; a search passes the km it computed
+// itself, NaN when it did not.
+export function foldHiding(rules) {
+  const { folds, held, bufferKm, bufferYears, coordinates: c, years } = rules;
+  return (u, v, _similarity, km) => {
+    const f = folds[v];
+    if (f === folds[u] || f === held) return true;
+    if (bufferKm && !Number.isNaN(bufferKm[u])) {
+      if (km === undefined || Number.isNaN(km)) km = greatCircleKm(c[2 * u], c[2 * u + 1], c[2 * v], c[2 * v + 1]);
+      if (km < bufferKm[u]) return true;
     }
-    return !!minYears && Math.abs(yearsOf[u] - yearsOf[v]) < minYears[u];
+    return !!bufferYears && Math.abs(years[u] - years[v]) < bufferYears[u];
   };
 }
 
@@ -174,7 +192,7 @@ function runRows(name, state, nRows, args, counter) {
   const kernel = KERNELS[name];
   const sets = state.sets ?? args.sets ?? null;
   const rules = state.rules ?? args.rules ?? null;
-  const ctx = { hides: rules ? hidingTest(rules, sets) : null,
+  const ctx = { hides: rules ? foldHiding(rules) : null,
                 scratch: scratchFor(sets ? sets.postingOffsets.length - 1 : 0, state.k ?? args.k ?? 1) };
   let total = 0;
   for (;;) {
@@ -559,7 +577,7 @@ export class SetNeighbourGraph {
   // The open lists of plots [first, first + count).
   open(first = 0, count = this.st.n - first) { return this.lists(first, count); }
 
-  // The neighbours of plots [0, nQueries) that `rules` (HidingRules) leave
+  // The neighbours of plots [0, nQueries) that `rules` (FoldRules) leave
   // visible, by continuing the descent beside the open lists.
   async hidden(nQueries, rules) {
     const st = this.st;
@@ -642,24 +660,23 @@ export class PlaceIndex {
   }
 
   // For every row of `queries`, its k nearest candidates, nearest first, ties
-  // to the lower row, never itself. Given `rules` (HidingRules over these
-  // rows) and the `sets` their similarity reads, the candidates they hide
-  // from a query are skipped, and none is sought within its km radius.
+  // to the lower row, never itself. Given `rules` (FoldRules over these rows),
+  // the candidates they hide from a query are skipped.
   // Returns { indices: Int32Array, km: Float64Array, k }, (queries, k) row-major.
-  async nearest(queries, k, rules = null, sets = null) {
+  async nearest(queries, k, rules = null) {
     const nQueries = queries.length;
     const indices = allocate(Int32Array, nQueries * k).fill(-1), km = allocate(Float64Array, nQueries * k).fill(NaN);
     if (k < 1 || !this.index.nodes) return { indices, km, k };
-    await this.pool.run("nearest", this.index, nQueries, { queries: shared(Int32Array, queries), k, indices, km, rules, sets });
+    await this.pool.run("nearest", this.index, nQueries, { queries: shared(Int32Array, queries), k, indices, km, rules });
     return { indices, km, k };
   }
 }
 
-function placeNearest(index, lo, hi, { queries, k, indices, km: kmOut, rules }, ctx) {
+function placeNearest(index, lo, hi, { queries, k, indices, km: kmOut }, ctx) {
   const { lat, lon, xyz, order, lo: boxLo, hi: boxHi, left, right, begin, end } = index;
   const hides = ctx.hides;
   const foundKm = ctx.scratch.km, foundRow = ctx.scratch.rows;
-  let q = 0, px = 0, py = 0, pz = 0, hiddenWithin = NaN, found = 0;
+  let q = 0, px = 0, py = 0, pz = 0, found = 0;
   const boxKm = (id, far) => {
     let s = 0;
     for (let d = 0; d < 3; d++) {
@@ -671,7 +688,6 @@ function placeNearest(index, lo, hi, { queries, k, indices, km: kmOut, rules }, 
   };
   const visit = (id) => {
     if (boxKm(id, false) - BOUND_SLACK_KM > (found === k ? foundKm[k - 1] : Infinity)) return;
-    if (Number.isFinite(hiddenWithin) && boxKm(id, true) + BOUND_SLACK_KM < hiddenWithin) return;
     if (left[id] < 0) {
       for (let i = begin[id]; i < end[id]; i++) {
         const v = order[i];
@@ -695,7 +711,6 @@ function placeNearest(index, lo, hi, { queries, k, indices, km: kmOut, rules }, 
     q = queries[qi];
     if (!Number.isFinite(lat[q]) || !Number.isFinite(lon[q])) continue;
     px = xyz[3 * q]; py = xyz[3 * q + 1]; pz = xyz[3 * q + 2];
-    hiddenWithin = rules && rules.km ? rules.km[q] : NaN;
     found = 0;
     visit(0);
     for (let m = 0; m < found; m++) { indices[qi * k + m] = foundRow[m]; kmOut[qi * k + m] = foundKm[m]; }

@@ -9,10 +9,10 @@
 #include "resolve/species_encoding.hpp"
 #include "resolve/suite.hpp"
 
-#include <ATen/CPUGeneratorImpl.h>
-
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <numbers>
@@ -47,6 +47,12 @@ double median_of(const torch::Tensor& values) {
     if (n == 0) return kNaN;
     const auto a = v.accessor<double, 1>();
     return n % 2 == 1 ? a[n / 2] : 0.5 * (a[n / 2 - 1] + a[n / 2]);
+}
+
+std::vector<double> values_of(const torch::Tensor& t) {
+    if (!t.defined()) return {};
+    const torch::Tensor c = as_double(t).contiguous();
+    return {c.data_ptr<double>(), c.data_ptr<double>() + c.numel()};
 }
 
 // ---------------------------------------------------------------------------
@@ -131,12 +137,16 @@ public:
         return errors.numel() == 0 ? kNaN : errors.mean().item<double>();
     }
 
-    // The local constant in the plane: the geographic median (the plane's
-    // origin), the mean direction of a bearing, the median on a log scale
-    // (the constant with the lowest absolute error there), the mean otherwise.
+    // The local constant of some plane rows: their geographic median, the
+    // mean direction of a bearing, the median on a log scale (the constant
+    // with the lowest absolute error there), the mean otherwise.
     [[nodiscard]] torch::Tensor centre(const torch::Tensor& truth) const {
         switch (scale_) {
-            case GapScale::Geographic: return torch::zeros({truth.size(1)}, kDouble);
+            case GapScale::Geographic: {
+                const torch::Tensor position = back(truth);
+                const auto [lat, lon] = geographic_median(position.select(1, 0), position.select(1, 1));
+                return to(torch::tensor({{lat, lon}}, kDouble)).squeeze(0);
+            }
             case GapScale::Log: return torch::full({1}, median_of(truth), kDouble);
             case GapScale::Linear:
             case GapScale::Circular: return truth.mean(0);
@@ -306,28 +316,11 @@ const CandidateSpec& candidate_spec(GapMethod method) {
                                 std::to_string(static_cast<int>(method)));
 }
 
-// One neighbour kind's median at the k the matched leave-one-out chose: on
-// the complete plots (out of sample, at the gaps' distance) and on the gaps.
-struct NeighbourTerm {
-    torch::Tensor cal;
-    torch::Tensor test;
-    GapNeighbourChoice choice;
-};
-
-// A candidate's values in the plane and what it fitted.
-struct CandidateFit {
-    torch::Tensor cal;
-    torch::Tensor test;
-    std::vector<GapCoefficient> coefficients;
-    int64_t n_fitted = 0;
-    std::vector<std::pair<std::string, int64_t>> k;
-};
-
 // ---------------------------------------------------------------------------
 // One target divided into complete plots and gaps, in the plane
 // ---------------------------------------------------------------------------
 
-struct Fold {
+struct Split {
     Plane plane;
     torch::Tensor truth_cal;
     torch::Tensor raw_cal;
@@ -336,18 +329,20 @@ struct Fold {
     torch::Tensor coords_test;
     torch::Tensor years_cal;   // undefined without years
     torch::Tensor years_test;
-    bool spatial_axis = false;
-    bool time_axis = false;
+    bool spatial_axis = false;  // spatial neighbours are candidates
+    bool km_axis = false;       // the fold layout is matched in km
+    bool time_axis = false;     // the fold layout is matched in survey years
+
+    int64_t n_test = 0;
 
     [[nodiscard]] int64_t n_cal() const { return truth_cal.size(0); }
-    [[nodiscard]] int64_t n_test() const { return raw_test.size(0); }
     [[nodiscard]] bool circular() const { return plane.scale() == GapScale::Circular; }
 };
 
 // Each gap's distance to its nearest complete plot on every axis.
 struct GapDistances {
     torch::Tensor similarity;  // (n_test,)
-    torch::Tensor km;          // undefined without the spatial axis
+    torch::Tensor km;          // undefined without the km axis
     torch::Tensor years;       // undefined without the time axis
 };
 
@@ -365,14 +360,6 @@ torch::Tensor nearest_year_gap(const torch::Tensor& years, const torch::Tensor& 
     const torch::Tensor above = ref.index({pos.clamp(0, last)});
     out.index_put_({ok}, torch::minimum((y - below).abs(), (y - above).abs()));
     return out;
-}
-
-// One distance per complete plot drawn from the gaps' known distances, zeros
-// when none is known.
-torch::Tensor drawn(const torch::Tensor& distances, int64_t n, at::Generator& generator) {
-    const torch::Tensor known = distances.index({torch::isfinite(distances)});
-    if (known.size(0) == 0) return torch::zeros({n}, kDouble);
-    return known.index({torch::randint(0, known.size(0), {n}, generator, kLong)});
 }
 
 GapAxisSummary summarise_axis(const char* axis, const torch::Tensor& distances, bool matched) {
@@ -396,58 +383,47 @@ GapAxisSummary summarise_axis(const char* axis, const torch::Tensor& distances, 
     return out;
 }
 
-// Whether a complete plot is hidden from another by the matched test's
-// radii: more similar, nearer in km or in years than the radius drawn for it.
-// A search passes what it computed itself, NaN for what it did not.
-class HidingRules {
-public:
-    HidingRules(const Fold& fold, const PresenceSets& sets, const HidingRadii& radii) : sets_(sets) {
-        auto values = [](const torch::Tensor& t) {
-            if (!t.defined()) return std::vector<double>();
-            const torch::Tensor c = as_double(t).contiguous();
-            return std::vector<double>(c.data_ptr<double>(), c.data_ptr<double>() + c.numel());
-        };
-        similarity_ = values(radii.similarity);
-        km_ = values(radii.km);
-        years_ = values(radii.years);
-        if (!km_.empty()) {
-            lat_ = values(fold.coords_cal.select(1, 0));
-            lon_ = values(fold.coords_cal.select(1, 1));
+// What hides one complete plot from another in a fold layout: the same fold,
+// the held fold, or a buffer around the plot in km or in years (NaN: none). A
+// search passes the km it computed itself, NaN when it did not.
+struct FoldHiding {
+    const std::vector<int64_t>& folds;
+    int64_t held;
+    // Per complete plot, its buffer in km and in years (NaN: none); null for
+    // no buffer on the axis.
+    const std::vector<double>* buffer_km;
+    const std::vector<double>* buffer_years;
+    const std::vector<double>& lat;
+    const std::vector<double>& lon;
+    const std::vector<double>& years;
+
+    [[nodiscard]] bool hides(int64_t u, int64_t v, double km) const {
+        const auto a = static_cast<std::size_t>(u), b = static_cast<std::size_t>(v);
+        if (folds[b] == folds[a] || folds[b] == held) return true;
+        if (buffer_km != nullptr && !std::isnan((*buffer_km)[a])) {
+            if (std::isnan(km)) km = great_circle_km(lat[a], lon[a], lat[b], lon[b]);
+            if (km < (*buffer_km)[a]) return true;
         }
-        if (!years_.empty()) plot_years_ = values(fold.years_cal);
+        return buffer_years != nullptr && std::abs(years[a] - years[b]) < (*buffer_years)[a];
     }
-
-    [[nodiscard]] bool hides(int64_t u, int64_t v, double similarity, double km) const {
-        if (!similarity_.empty()) {
-            if (std::isnan(similarity)) similarity = sets_.cosine(u, v);
-            if (similarity > similarity_[u]) return true;
-        }
-        if (!km_.empty()) {
-            if (std::isnan(km)) km = great_circle_km(lat_[u], lon_[u], lat_[v], lon_[v]);
-            if (km < km_[u]) return true;
-        }
-        return !years_.empty() && std::abs(plot_years_[u] - plot_years_[v]) < years_[u];
-    }
-
-    // Per complete plot, the km within which every other plot is hidden.
-    [[nodiscard]] const std::vector<double>& km_radius() const noexcept { return km_; }
-
-private:
-    const PresenceSets& sets_;
-    std::vector<double> similarity_;
-    std::vector<double> km_;
-    std::vector<double> years_;
-    std::vector<double> lat_;
-    std::vector<double> lon_;
-    std::vector<double> plot_years_;
 };
 
-// The neighbour searches of one fold over its plots, the complete plots first
-// (rows [0, n_cal)) and the gaps after them: by species over a neighbour
+// A fold layout: each complete plot's fold, and its buffers (empty: none).
+struct Layout {
+    std::vector<int64_t> folds;
+    std::vector<double> buffer_km;
+    std::vector<double> buffer_years;
+
+    [[nodiscard]] const std::vector<double>* km() const { return buffer_km.empty() ? nullptr : &buffer_km; }
+    [[nodiscard]] const std::vector<double>* yrs() const { return buffer_years.empty() ? nullptr : &buffer_years; }
+};
+
+// The neighbour searches of one target over its plots, the complete plots
+// first (rows [0, n_cal)) and the gaps after them: by species over a neighbour
 // graph, by position over a k-d tree. Only complete plots are neighbours.
-class FoldSearch {
+class PlotSearch {
 public:
-    FoldSearch(const Fold& fold, const torch::Tensor& species_cal, const torch::Tensor& species_test,
+    PlotSearch(const Split& split, const torch::Tensor& species_cal, const torch::Tensor& species_test,
                const std::vector<int64_t>& grid)
         : n_cal_(species_cal.size(0)),
           n_test_(species_test.size(0)),
@@ -455,45 +431,60 @@ public:
           k_species_(std::min(*std::max_element(grid.begin(), grid.end()), n_cal_ - 1)),
           graph_(sets_, n_cal_, SetGraphConfig{std::max<int64_t>(1, k_species_)}),
           open_(graph_.open()) {
-        if (fold.spatial_axis) {
-            places_.emplace(torch::cat({fold.coords_cal, fold.coords_test}, 0), n_cal_);
-            const int64_t located = finite_rows(fold.coords_cal).sum().item<int64_t>();
+        lat_.assign(static_cast<std::size_t>(n_cal_), kNaN);
+        lon_.assign(static_cast<std::size_t>(n_cal_), kNaN);
+        years_.assign(static_cast<std::size_t>(n_cal_), kNaN);
+        if (split.coords_cal.defined()) {
+            lat_ = values_of(split.coords_cal.select(1, 0));
+            lon_ = values_of(split.coords_cal.select(1, 1));
+        }
+        if (split.years_cal.defined()) years_ = values_of(split.years_cal);
+        if (split.spatial_axis || split.km_axis) {
+            places_.emplace(torch::cat({split.coords_cal, split.coords_test}, 0), n_cal_);
+        }
+        if (split.spatial_axis) {
+            const int64_t located = finite_rows(split.coords_cal).sum().item<int64_t>();
             k_spatial_ = std::min(*std::max_element(grid.begin(), grid.end()), located - 1);
         }
     }
 
+    [[nodiscard]] const PresenceSets& sets() const noexcept { return sets_; }
+    [[nodiscard]] const PlaceIndex* places() const noexcept { return places_ ? &*places_ : nullptr; }
+
+    // The hiding rule of a layout over the complete plots.
+    [[nodiscard]] FoldHiding hiding(const std::vector<int64_t>& folds, int64_t held,
+                                    const std::vector<double>* buffer_km,
+                                    const std::vector<double>* buffer_years) const {
+        return {folds, held, buffer_km, buffer_years, lat_, lon_, years_};
+    }
+
     // Each gap's distance to its nearest complete plot on every axis; a gap
     // sharing no species with any complete plot is at similarity 0.
-    [[nodiscard]] GapDistances distances(const Fold& fold) const {
+    [[nodiscard]] GapDistances distances(const Split& split) const {
         GapDistances out;
         out.similarity = torch::nan_to_num(open_.similarities.slice(0, n_cal_).select(1, 0), 0.0);
-        if (places_) out.km = places_->nearest(gap_rows(), 1).km.select(1, 0);
-        if (fold.time_axis) out.years = nearest_year_gap(fold.years_test, fold.years_cal);
+        if (split.km_axis) out.km = places_->nearest(gap_rows(), 1).km.select(1, 0);
+        if (split.time_axis) out.years = nearest_year_gap(split.years_test, split.years_cal);
         return out;
     }
 
-    // Each complete plot's neighbours among the complete plots the rules
-    // leave visible: by species (always) and by distance (with the spatial
-    // axis).
-    [[nodiscard]] std::vector<torch::Tensor> matched(const Fold& fold, const HidingRadii& radii) {
-        const HidingRules rules(fold, sets_, radii);
+    // Each complete plot's neighbours among the complete plots the layout
+    // leaves it: those of the other folds, `held` (a fold, or -1) hidden from
+    // every plot too, outside its buffers. By species (always) and by distance
+    // (with the spatial axis).
+    [[nodiscard]] std::vector<torch::Tensor> out_of_fold(const Layout& layout, int64_t held) {
+        const FoldHiding rule = hiding(layout.folds, held, layout.km(), layout.yrs());
         std::vector<torch::Tensor> out(kNeighbourKinds);
         if (k_species_ >= 1) {
-            out[kSpecies] = graph_
-                                .hidden(n_cal_,
-                                        [&](int64_t u, int64_t v, double similarity) {
-                                            return rules.hides(u, v, similarity, kNaN);
-                                        })
-                                .indices.slice(1, 0, k_species_);
+            out[kSpecies] =
+                graph_.hidden(n_cal_, [&](int64_t u, int64_t v, double) { return rule.hides(u, v, kNaN); })
+                    .indices.slice(1, 0, k_species_);
         }
         if (places_ && k_spatial_ >= 1) {
             std::vector<int64_t> rows(static_cast<std::size_t>(n_cal_));
             std::iota(rows.begin(), rows.end(), 0);
             out[kSpatial] =
-                places_
-                    ->nearest(rows, k_spatial_,
-                              [&](int64_t u, int64_t v, double km) { return rules.hides(u, v, kNaN, km); },
-                              rules.km_radius())
+                places_->nearest(rows, k_spatial_, [&](int64_t u, int64_t v, double km) { return rule.hides(u, v, km); })
                     .indices;
         }
         return out;
@@ -520,88 +511,766 @@ private:
     SetNeighbourGraph graph_;
     SetNeighbours open_;
     std::optional<PlaceIndex> places_;
+    std::vector<double> lat_, lon_, years_;  // the complete plots'
 };
 
-// Choose k by the headline error on the complete plots that have matched
-// neighbours; nullopt when the grid holds no k the neighbours allow.
-std::optional<NeighbourTerm> neighbour_term(const Fold& fold, const FoldSearch& search,
-                                            NeighbourKind kind, const torch::Tensor& matched,
-                                            const std::vector<int64_t>& grid) {
-    if (!matched.defined()) return std::nullopt;
-    const int64_t width = matched.size(1);
-    const bool circular = fold.circular();
-    const torch::Tensor has = matched.select(1, 0) >= 0;
-    const torch::Tensor matched_has = matched.index({has});
-    const torch::Tensor truth_has = fold.truth_cal.index({has});
-    NeighbourTerm term;
-    term.choice.kind = kKindNames[kind];
-    double best_error = kNaN;
-    bool any = false;
-    for (const int64_t k : grid) {
-        if (k > width) continue;
-        const double error =
-            fold.plane.aggregate(fold.plane.errors(neighbour_median(fold.truth_cal, matched_has, k, circular),
-                                                   truth_has));
-        term.choice.matched_error.emplace_back(k, error);
-        // The first k of the grid wins a tie, and stands when no complete
-        // plot has a matched neighbour (every error NaN).
-        if (!any || error < best_error) {
-            best_error = error;
-            term.choice.k = k;
-        }
-        any = true;
-    }
-    if (!any) return std::nullopt;
-    term.cal = neighbour_median(fold.truth_cal, matched, term.choice.k, circular);
-    term.test = neighbour_median(fold.truth_cal, search.gap_neighbours(kind, width), term.choice.k,
-                                 circular);
-    return term;
+// ---------------------------------------------------------------------------
+// The fold layout
+// ---------------------------------------------------------------------------
+
+// Portable 32-bit hashing (the murmur3 finaliser over the words in turn), so
+// every implementation deals the same layout from the same seed.
+uint32_t mix32(uint32_t h) {
+    h ^= h >> 16;
+    h *= 0x85ebca6bu;
+    h ^= h >> 13;
+    h *= 0xc2b2ae35u;
+    h ^= h >> 16;
+    return h;
 }
 
-CandidateFit fit_candidate(const Fold& fold, const CandidateSpec& spec, const torch::Tensor& centre,
-                           const std::vector<std::optional<NeighbourTerm>>& terms) {
-    CandidateFit fit;
-    switch (spec.combination) {
-        case Combination::Constant:
-            fit.cal = centre.unsqueeze(0).expand({fold.n_cal(), centre.size(0)}).clone();
-            fit.test = centre.unsqueeze(0).expand({fold.n_test(), centre.size(0)}).clone();
-            return fit;
-        case Combination::Raw:
-            fit.cal = fold.raw_cal;
-            fit.test = fold.raw_test;
-            return fit;
-        case Combination::Neighbours: {
-            const std::size_t kind = spec.reads[kSpecies] ? kSpecies : kSpatial;
-            const NeighbourTerm& term = *terms[kind];
-            fit.cal = term.cal;
-            fit.test = term.test;
-            fit.k.emplace_back(kKindNames[kind], term.choice.k);
-            return fit;
+uint32_t hash_words(uint32_t seed, std::initializer_list<uint32_t> words) {
+    uint32_t h = mix32(seed);
+    for (const uint32_t w : words) h = mix32((h ^ w) + 0x9e3779b9u);
+    return h;
+}
+
+uint32_t low_word(int64_t v) { return static_cast<uint32_t>(static_cast<uint64_t>(v)); }
+uint32_t high_word(int64_t v) { return static_cast<uint32_t>(static_cast<uint64_t>(v) >> 32); }
+
+// The streams the seed is hashed into.
+constexpr uint32_t kGroupStream = 1;
+constexpr uint32_t kSampleStream = 2;
+
+// Squares of the equal-area plane per side, from half the complete plots'
+// extent down by halving, and survey-year periods likewise down to one year.
+constexpr int kBlockSizes = 10;
+constexpr int kPeriodLengths = 8;
+
+// Similar complete plots kept per matching plot before a fold layout falls
+// back to recounting the plot's overlaps.
+constexpr std::size_t kSimilarListLength = 256;
+
+constexpr uint32_t kBufferStream = 3;
+
+// The axes a layout's buffers lie on.
+enum class Buffer { None, Km, Years, Both };
+
+// What a layout groups the complete plots by, and the buffers it hides within.
+struct LayoutSpec {
+    double block_km = kNaN;
+    double block_years = kNaN;
+    Buffer buffer = Buffer::None;
+};
+
+double median_of(std::vector<double> values) {
+    values.erase(std::remove_if(values.begin(), values.end(), [](double v) { return std::isnan(v); }), values.end());
+    if (values.empty()) return kNaN;
+    std::sort(values.begin(), values.end());
+    const std::size_t n = values.size();
+    return n % 2 == 1 ? values[n / 2] : 0.5 * (values[n / 2 - 1] + values[n / 2]);
+}
+
+class LayoutMatcher {
+public:
+    LayoutMatcher(const Split& split, const PlotSearch& search, const GapDistances& gaps,
+                  const GapFittingConfig& config)
+        : split_(split), search_(search), n_(split.n_cal()), seed_(static_cast<uint32_t>(config.matching_seed)) {
+        positions();
+        survey_years();
+        sample(config.matching_sample);
+        gap_side(gaps);
+    }
+
+    // The candidate layouts, plot by plot first (ties go to the earlier):
+    // squares, periods and both; then plot by plot with buffers drawn from
+    // the gaps' distances in km, in years, and in both.
+    [[nodiscard]] std::vector<LayoutSpec> specs() const {
+        std::vector<LayoutSpec> out{{}};
+        for (const double s : block_sizes_) out.push_back({s, kNaN, Buffer::None});
+        for (const double w : period_lengths_) out.push_back({kNaN, w, Buffer::None});
+        for (const double s : block_sizes_) {
+            for (const double w : period_lengths_) out.push_back({s, w, Buffer::None});
         }
-        case Combination::LeastSquares: {
-            std::vector<torch::Tensor> cal{fold.raw_cal};
-            std::vector<torch::Tensor> test{fold.raw_test};
-            std::vector<std::string> names{"resolve"};
-            for (std::size_t kind = 0; kind < kNeighbourKinds; ++kind) {
-                if (!spec.reads[kind]) continue;
-                cal.push_back(terms[kind]->cal);
-                test.push_back(terms[kind]->test);
-                names.emplace_back(kKindNames[kind]);
-                fit.k.emplace_back(kKindNames[kind], terms[kind]->choice.k);
+        if (!gap_km_.empty()) out.push_back({kNaN, kNaN, Buffer::Km});
+        if (!gap_years_.empty()) out.push_back({kNaN, kNaN, Buffer::Years});
+        if (!gap_km_.empty() && !gap_years_.empty()) out.push_back({kNaN, kNaN, Buffer::Both});
+        return out;
+    }
+
+    // The buffers of `spec` added to its folds: each complete plot takes the
+    // distances of one gap drawn by the hash of its row, among the gaps with
+    // a distance on the buffer's axes (with both, the gap's two distances
+    // together; a missing one buffers nothing on its axis).
+    [[nodiscard]] Layout with_buffers(std::vector<int64_t> folds, const LayoutSpec& spec) const {
+        Layout out{std::move(folds), {}, {}};
+        if (spec.buffer == Buffer::None) return out;
+        const bool km = spec.buffer != Buffer::Years, years = spec.buffer != Buffer::Km;
+        std::vector<int64_t> pool;
+        for (std::size_t g = 0; g < gap_km_all_.size(); ++g) {
+            const bool has_km = std::isfinite(gap_km_all_[g]), has_years = std::isfinite(gap_years_all_[g]);
+            if ((km && has_km) || (years && has_years)) pool.push_back(static_cast<int64_t>(g));
+        }
+        if (km) out.buffer_km.assign(static_cast<std::size_t>(n_), kNaN);
+        if (years) out.buffer_years.assign(static_cast<std::size_t>(n_), kNaN);
+        for (int64_t i = 0; i < n_; ++i) {
+            const uint32_t h = hash_words(seed_, {kBufferStream, low_word(i), high_word(i)});
+            const auto g = static_cast<std::size_t>(pool[h % static_cast<uint32_t>(pool.size())]);
+            if (km) out.buffer_km[static_cast<std::size_t>(i)] = gap_km_all_[g];
+            if (years) out.buffer_years[static_cast<std::size_t>(i)] = gap_years_all_[g];
+        }
+        return out;
+    }
+
+    // Deal the complete plots' groups under `spec` to `n_folds` folds: the
+    // largest groups first (ties by hash, then by first plot), each to the
+    // fold holding fewest plots (ties to the lower fold); empty folds are
+    // dropped and the rest numbered in order. Returns the folds and the
+    // largest fold's plot count.
+    [[nodiscard]] std::pair<std::vector<int64_t>, int64_t> deal(const LayoutSpec& spec, int64_t n_folds) const {
+        struct Key {
+            int64_t a, b, c, own;
+            bool operator==(const Key& o) const { return a == o.a && b == o.b && c == o.c && own == o.own; }
+        };
+        struct KeyHash {
+            std::size_t operator()(const Key& k) const {
+                return std::hash<int64_t>()(k.a) ^ (std::hash<int64_t>()(k.b) * 31) ^
+                       (std::hash<int64_t>()(k.c) * 961) ^ (std::hash<int64_t>()(k.own) * 29791);
             }
-            const LeastSquares ls = least_squares(fold.truth_cal, cal, test, fold.circular());
-            fit.cal = ls.cal;
-            fit.test = ls.test;
-            fit.n_fitted = ls.n_fitted;
-            for (std::size_t j = 0; j < names.size(); ++j) {
-                fit.coefficients.push_back(
-                    describe_coefficient(names[j], ls.coefficients[static_cast<int64_t>(j)]));
+        };
+        struct Group {
+            Key key;
+            int64_t size = 0;
+            int64_t first = 0;
+            uint32_t hash = 0;
+        };
+        const bool space = !std::isnan(spec.block_km);
+        const bool time = !std::isnan(spec.block_years);
+        std::unordered_map<Key, int64_t, KeyHash> index;
+        std::vector<Group> groups;
+        std::vector<int64_t> group_of(static_cast<std::size_t>(n_));
+        for (int64_t i = 0; i < n_; ++i) {
+            const auto u = static_cast<std::size_t>(i);
+            Key key{0, 0, 0, -1};
+            bool own = !space && !time;
+            if (space) {
+                if (std::isfinite(east_[u]) && std::isfinite(north_[u])) {
+                    key.a = static_cast<int64_t>(std::floor(east_[u] / spec.block_km));
+                    key.b = static_cast<int64_t>(std::floor(north_[u] / spec.block_km));
+                } else {
+                    own = true;
+                }
             }
-            return fit;
+            if (time) {
+                if (std::isfinite(years_[u])) {
+                    key.c = static_cast<int64_t>(std::floor((years_[u] - year_origin_) / spec.block_years));
+                } else {
+                    own = true;
+                }
+            }
+            if (own) key = Key{0, 0, 0, i};
+            const auto [it, added] = index.emplace(key, static_cast<int64_t>(groups.size()));
+            if (added) groups.push_back({key, 0, i, 0});
+            ++groups[static_cast<std::size_t>(it->second)].size;
+            group_of[u] = it->second;
+        }
+        for (Group& g : groups) {
+            g.hash = hash_words(seed_, {kGroupStream, low_word(g.key.a), high_word(g.key.a), low_word(g.key.b),
+                                        high_word(g.key.b), low_word(g.key.c), high_word(g.key.c),
+                                        low_word(g.key.own), high_word(g.key.own)});
+        }
+        std::vector<int64_t> order(groups.size());
+        std::iota(order.begin(), order.end(), 0);
+        std::sort(order.begin(), order.end(), [&](int64_t x, int64_t y) {
+            const Group& gx = groups[static_cast<std::size_t>(x)];
+            const Group& gy = groups[static_cast<std::size_t>(y)];
+            if (gx.size != gy.size) return gx.size > gy.size;
+            if (gx.hash != gy.hash) return gx.hash < gy.hash;
+            return gx.first < gy.first;
+        });
+        std::vector<int64_t> counts(static_cast<std::size_t>(n_folds), 0);
+        std::vector<int64_t> fold_of_group(groups.size());
+        for (const int64_t g : order) {
+            const auto f = std::min_element(counts.begin(), counts.end()) - counts.begin();
+            fold_of_group[static_cast<std::size_t>(g)] = f;
+            counts[static_cast<std::size_t>(f)] += groups[static_cast<std::size_t>(g)].size;
+        }
+        std::vector<int64_t> renumber(static_cast<std::size_t>(n_folds), -1);
+        int64_t next = 0;
+        for (int64_t f = 0; f < n_folds; ++f) {
+            if (counts[static_cast<std::size_t>(f)] > 0) renumber[static_cast<std::size_t>(f)] = next++;
+        }
+        std::vector<int64_t> folds(static_cast<std::size_t>(n_));
+        for (int64_t i = 0; i < n_; ++i) {
+            folds[static_cast<std::size_t>(i)] =
+                renumber[static_cast<std::size_t>(fold_of_group[static_cast<std::size_t>(group_of[static_cast<std::size_t>(i)])])];
+        }
+        return {std::move(folds), *std::max_element(counts.begin(), counts.end())};
+    }
+
+    // Per matched axis, the relative Wasserstein distance between the
+    // matching plots' distances to the other folds and the gaps' distances to
+    // the complete plots.
+    [[nodiscard]] std::vector<std::pair<std::string, double>> mismatch(const Layout& layout) const {
+        const FoldHiding rule = search_.hiding(layout.folds, -1, layout.km(), layout.yrs());
+        std::vector<std::pair<std::string, double>> out;
+        out.emplace_back("similarity", relative_wasserstein(held_dissimilarity(rule), gap_dissimilarity_));
+        if (split_.km_axis) out.emplace_back("km", relative_wasserstein(held_km(rule), gap_km_));
+        if (split_.time_axis) out.emplace_back("years", relative_wasserstein(held_years(rule), gap_years_));
+        return out;
+    }
+
+    [[nodiscard]] int64_t n_matching() const noexcept { return static_cast<int64_t>(sample_.size()); }
+
+private:
+    void positions() {
+        east_.assign(static_cast<std::size_t>(n_), kNaN);
+        north_.assign(static_cast<std::size_t>(n_), kNaN);
+        if (!split_.coords_cal.defined()) return;
+        const torch::Tensor located = finite_rows(split_.coords_cal);
+        if (located.sum().item<int64_t>() < 2) return;
+        const torch::Tensor known = split_.coords_cal.index({located});
+        const auto [lat, lon] = geographic_median(known.select(1, 0), known.select(1, 1));
+        const LambertAzimuthalEqualArea projection(lat, lon);
+        const auto [east, north] = projection.forward(split_.coords_cal.select(1, 0), split_.coords_cal.select(1, 1));
+        east_ = values_of(east / 1000.0);
+        north_ = values_of(north / 1000.0);
+        double lo_e = std::numeric_limits<double>::infinity(), hi_e = -lo_e, lo_n = lo_e, hi_n = -lo_e;
+        for (int64_t i = 0; i < n_; ++i) {
+            const auto u = static_cast<std::size_t>(i);
+            if (!std::isfinite(east_[u]) || !std::isfinite(north_[u])) continue;
+            lo_e = std::min(lo_e, east_[u]);
+            hi_e = std::max(hi_e, east_[u]);
+            lo_n = std::min(lo_n, north_[u]);
+            hi_n = std::max(hi_n, north_[u]);
+        }
+        const double extent = std::max(hi_e - lo_e, hi_n - lo_n);
+        if (!(extent > 0.0)) return;
+        double side = extent;
+        for (int j = 0; j < kBlockSizes; ++j) block_sizes_.push_back(side /= 2.0);
+    }
+
+    void survey_years() {
+        years_.assign(static_cast<std::size_t>(n_), kNaN);
+        if (!split_.years_cal.defined()) return;
+        years_ = values_of(split_.years_cal);
+        double lo = std::numeric_limits<double>::infinity(), hi = -lo;
+        int64_t known = 0;
+        for (const double y : years_) {
+            if (!std::isfinite(y)) continue;
+            lo = std::min(lo, y);
+            hi = std::max(hi, y);
+            ++known;
+        }
+        if (known < 2) return;
+        year_origin_ = lo;
+        double length = hi - lo;
+        for (int j = 0; j < kPeriodLengths; ++j) {
+            length /= 2.0;
+            if (length < 1.0) break;
+            period_lengths_.push_back(length);
         }
     }
-    throw std::logic_error("gap fitting: unknown combination");
+
+    // The complete plots the layouts' distances are measured on: all of them,
+    // or the `size` with the lowest hash of their row.
+    void sample(int64_t size) {
+        std::vector<int64_t> rows(static_cast<std::size_t>(n_));
+        std::iota(rows.begin(), rows.end(), 0);
+        if (n_ > size) {
+            std::vector<uint32_t> h(static_cast<std::size_t>(n_));
+            for (int64_t i = 0; i < n_; ++i) {
+                h[static_cast<std::size_t>(i)] = hash_words(seed_, {kSampleStream, low_word(i), high_word(i)});
+            }
+            std::sort(rows.begin(), rows.end(), [&](int64_t a, int64_t b) {
+                const uint32_t ha = h[static_cast<std::size_t>(a)], hb = h[static_cast<std::size_t>(b)];
+                return ha != hb ? ha < hb : a < b;
+            });
+            rows.resize(static_cast<std::size_t>(size));
+            std::sort(rows.begin(), rows.end());
+        }
+        sample_ = std::move(rows);
+
+        // Each matching plot's most similar complete plots, ties to the lower
+        // row, and whether the list holds every plot sharing a species.
+        similar_.resize(sample_.size());
+        whole_.assign(sample_.size(), true);
+        for (std::size_t s = 0; s < sample_.size(); ++s) {
+            std::vector<std::pair<double, int64_t>> list = similarities(sample_[s]);
+            if (list.size() > kSimilarListLength) {
+                std::partial_sort(list.begin(), list.begin() + kSimilarListLength, list.end(), more_similar);
+                list.resize(kSimilarListLength);
+                whole_[s] = false;
+            } else {
+                std::sort(list.begin(), list.end(), more_similar);
+            }
+            similar_[s] = std::move(list);
+        }
+
+        // The complete plots in order of survey year (ties by row).
+        for (int64_t i = 0; i < n_; ++i) {
+            if (std::isfinite(years_[static_cast<std::size_t>(i)])) by_year_.push_back(i);
+        }
+        std::sort(by_year_.begin(), by_year_.end(), [&](int64_t a, int64_t b) {
+            const double ya = years_[static_cast<std::size_t>(a)], yb = years_[static_cast<std::size_t>(b)];
+            return ya != yb ? ya < yb : a < b;
+        });
+        year_rank_.assign(static_cast<std::size_t>(n_), -1);
+        for (std::size_t r = 0; r < by_year_.size(); ++r) year_rank_[static_cast<std::size_t>(by_year_[r])] = static_cast<int64_t>(r);
+    }
+
+    void gap_side(const GapDistances& gaps) {
+        const std::size_t n_gaps = static_cast<std::size_t>(gaps.similarity.size(0));
+        for (const double s : values_of(gaps.similarity)) gap_dissimilarity_.push_back(1.0 - s);
+        gap_km_all_ = split_.km_axis ? values_of(gaps.km) : std::vector<double>(n_gaps, kNaN);
+        gap_years_all_ = split_.time_axis ? values_of(gaps.years) : std::vector<double>(n_gaps, kNaN);
+        for (const double km : gap_km_all_) {
+            if (std::isfinite(km)) gap_km_.push_back(km);
+        }
+        for (const double y : gap_years_all_) {
+            if (std::isfinite(y)) gap_years_.push_back(y);
+        }
+    }
+
+    static bool more_similar(const std::pair<double, int64_t>& a, const std::pair<double, int64_t>& b) {
+        return a.first != b.first ? a.first > b.first : a.second < b.second;
+    }
+
+    // A complete plot's similarity to every other complete plot it shares a
+    // species with, as PresenceSets::cosine computes it.
+    [[nodiscard]] std::vector<std::pair<double, int64_t>> similarities(int64_t plot) const {
+        const PresenceSets& sets = search_.sets();
+        std::vector<std::pair<double, int64_t>> out;
+        const double own = sets.count(plot);
+        for (const auto& [other, shared] : sets.overlaps(plot, n_)) {
+            out.emplace_back(shared / std::sqrt(own * sets.count(other)), other);
+        }
+        return out;
+    }
+
+    // Each matching plot's dissimilarity to the most similar plot the rule
+    // leaves it (1 when it shares no species with any).
+    [[nodiscard]] std::vector<double> held_dissimilarity(const FoldHiding& rule) const {
+        std::vector<double> out;
+        out.reserve(sample_.size());
+        for (std::size_t s = 0; s < sample_.size(); ++s) {
+            const int64_t plot = sample_[s];
+            double best = kNaN;
+            for (const auto& [similarity, other] : similar_[s]) {
+                if (!rule.hides(plot, other, kNaN)) {
+                    best = similarity;
+                    break;
+                }
+            }
+            if (std::isnan(best)) {
+                best = 0.0;
+                if (!whole_[s]) {
+                    for (const auto& [similarity, other] : similarities(plot)) {
+                        if (!rule.hides(plot, other, kNaN)) best = std::max(best, similarity);
+                    }
+                }
+            }
+            out.push_back(1.0 - best);
+        }
+        return out;
+    }
+
+    // Each located matching plot's km to the nearest plot the rule leaves it.
+    [[nodiscard]] std::vector<double> held_km(const FoldHiding& rule) const {
+        std::vector<int64_t> rows;
+        for (const int64_t plot : sample_) {
+            const auto u = static_cast<std::size_t>(plot);
+            if (std::isfinite(east_[u]) && std::isfinite(north_[u])) rows.push_back(plot);
+        }
+        std::vector<double> out;
+        if (rows.empty()) return out;
+        const PlaceNeighbours found = search_.places()->nearest(
+            rows, 1, [&](int64_t u, int64_t v, double km) { return rule.hides(u, v, km); });
+        for (const double km : values_of(found.km.select(1, 0))) {
+            if (std::isfinite(km)) out.push_back(km);
+        }
+        return out;
+    }
+
+    // Each dated matching plot's years to the nearest plot in time the rule
+    // leaves it.
+    [[nodiscard]] std::vector<double> held_years(const FoldHiding& rule) const {
+        std::vector<double> out;
+        const auto n_ranked = static_cast<int64_t>(by_year_.size());
+        for (const int64_t plot : sample_) {
+            const int64_t r = year_rank_[static_cast<std::size_t>(plot)];
+            if (r < 0) continue;
+            const double year = years_[static_cast<std::size_t>(plot)];
+            double best = std::numeric_limits<double>::infinity();
+            for (int64_t q = r - 1; q >= 0; --q) {
+                const int64_t other = by_year_[static_cast<std::size_t>(q)];
+                if (!rule.hides(plot, other, kNaN)) {
+                    best = std::min(best, year - years_[static_cast<std::size_t>(other)]);
+                    break;
+                }
+            }
+            for (int64_t q = r + 1; q < n_ranked; ++q) {
+                const int64_t other = by_year_[static_cast<std::size_t>(q)];
+                if (!rule.hides(plot, other, kNaN)) {
+                    best = std::min(best, years_[static_cast<std::size_t>(other)] - year);
+                    break;
+                }
+            }
+            if (std::isfinite(best)) out.push_back(best);
+        }
+        return out;
+    }
+
+    // The area between two samples' empirical distribution functions, divided
+    // by the sum of their means; 0 when both are all zero, NaN when either is
+    // empty.
+    static double relative_wasserstein(std::vector<double> a, std::vector<double> b) {
+        if (a.empty() || b.empty()) return kNaN;
+        std::sort(a.begin(), a.end());
+        std::sort(b.begin(), b.end());
+        const double na = static_cast<double>(a.size()), nb = static_cast<double>(b.size());
+        std::size_t i = 0, j = 0;
+        double area = 0.0;
+        double x = std::min(a.front(), b.front());
+        while (i < a.size() || j < b.size()) {
+            const double next = j >= b.size() || (i < a.size() && a[i] <= b[j]) ? a[i] : b[j];
+            area += std::abs(static_cast<double>(i) / na - static_cast<double>(j) / nb) * (next - x);
+            x = next;
+            while (i < a.size() && a[i] == x) ++i;
+            while (j < b.size() && b[j] == x) ++j;
+        }
+        const double means = std::accumulate(a.begin(), a.end(), 0.0) / na +
+                             std::accumulate(b.begin(), b.end(), 0.0) / nb;
+        return means > 0.0 ? area / means : 0.0;
+    }
+
+    const Split& split_;
+    const PlotSearch& search_;
+    int64_t n_;
+    uint32_t seed_;
+    std::vector<double> east_, north_, years_;
+    double year_origin_ = 0.0;
+    std::vector<double> block_sizes_, period_lengths_;
+    std::vector<int64_t> sample_;
+    std::vector<std::vector<std::pair<double, int64_t>>> similar_;
+    std::vector<bool> whole_;
+    std::vector<int64_t> by_year_;
+    std::vector<int64_t> year_rank_;
+    std::vector<double> gap_dissimilarity_, gap_km_, gap_years_;
+    std::vector<double> gap_km_all_, gap_years_all_;  // per gap, NaN where unknown
+};
+
+// The matched layout: the candidate with the smallest total mismatch among
+// those whose largest fold holds at most max_fold_share of the complete
+// plots (the plot-by-plot layout always qualifies).
+Layout match_layout(const Split& split, const PlotSearch& search, const GapDistances& gaps,
+                    const GapFittingConfig& config, GapFoldLayout& report) {
+    const LayoutMatcher matcher(split, search, gaps, config);
+    const int64_t n = split.n_cal();
+    const int64_t n_folds = std::min(config.n_folds, n);
+    const std::vector<LayoutSpec> specs = matcher.specs();
+    std::optional<Layout> best;
+    report.n_layouts = 0;
+    report.n_matching_plots = matcher.n_matching();
+    for (std::size_t s = 0; s < specs.size(); ++s) {
+        auto [folds, largest] = matcher.deal(specs[s], n_folds);
+        const int64_t used = *std::max_element(folds.begin(), folds.end()) + 1;
+        const bool plot_by_plot = std::isnan(specs[s].block_km) && std::isnan(specs[s].block_years);
+        if (!plot_by_plot &&
+            (used < 2 || static_cast<double>(largest) > static_cast<double>(config.max_fold_share) * static_cast<double>(n))) {
+            continue;
+        }
+        ++report.n_layouts;
+        Layout layout = matcher.with_buffers(std::move(folds), specs[s]);
+        auto mismatch = matcher.mismatch(layout);
+        double total = 0.0;
+        for (const auto& [axis, w] : mismatch) {
+            if (std::isfinite(w)) total += w;
+        }
+        if (!best || total < report.total_mismatch) {
+            report.n_folds = used;
+            report.block_km = specs[s].block_km;
+            report.block_years = specs[s].block_years;
+            report.buffer_km = median_of(layout.buffer_km);
+            report.buffer_years = median_of(layout.buffer_years);
+            report.mismatch = std::move(mismatch);
+            report.total_mismatch = total;
+            best = std::move(layout);
+        }
+    }
+    return std::move(*best);
 }
+
+// Injected folds as the layout: one per complete plot, every fold from 0 to
+// the largest holding a plot.
+Layout injected_layout(const torch::Tensor& folds, int64_t n, GapFoldLayout& report) {
+    if (!folds.defined() || folds.dim() != 1 || folds.size(0) != n) {
+        throw std::invalid_argument("gap fitting: the injected folds must hold one fold per complete plot (" +
+                                    std::to_string(n) + ")");
+    }
+    const torch::Tensor f = folds.to(torch::kCPU, torch::kInt64).contiguous();
+    std::vector<int64_t> out(f.data_ptr<int64_t>(), f.data_ptr<int64_t>() + n);
+    const int64_t largest = *std::max_element(out.begin(), out.end());
+    std::vector<int64_t> counts(static_cast<std::size_t>(std::max<int64_t>(largest, 0) + 1), 0);
+    for (const int64_t v : out) {
+        if (v < 0) throw std::invalid_argument("gap fitting: an injected fold is negative");
+        ++counts[static_cast<std::size_t>(v)];
+    }
+    if (std::find(counts.begin(), counts.end(), 0) != counts.end() || counts.size() < 2) {
+        throw std::invalid_argument("gap fitting: the injected folds must number at least two, each from 0 to the "
+                                    "largest holding a plot");
+    }
+    report.injected = true;
+    report.n_folds = static_cast<int64_t>(counts.size());
+    return Layout{std::move(out), {}, {}};
+}
+
+// ---------------------------------------------------------------------------
+// Cross-validation
+// ---------------------------------------------------------------------------
+
+// One cross-validation over the training plots (rows of the complete plots),
+// predicting a set of query plots.
+struct Run {
+    torch::Tensor train;        // (n_t,) int64 complete rows
+    torch::Tensor train_folds;  // (n_t,) int64
+    // Per neighbour kind, (n_t, width) complete rows from the other folds,
+    // and (n_q, width) complete rows among the training plots; undefined
+    // without the kind.
+    std::vector<torch::Tensor> train_neighbours;
+    std::vector<torch::Tensor> query_neighbours;
+    torch::Tensor query_raw;  // (n_q, d)
+};
+
+// A group of query plots choosing together: the training plots it is judged
+// on and the query plots it predicts.
+struct RunGroup {
+    const char* name;
+    bool spatial;
+    torch::Tensor judged;     // (n_t,) bool
+    torch::Tensor predicted;  // (n_q,) bool
+};
+
+struct RunChoice {
+    GapGroupChoice choice;
+    torch::Tensor query;  // (n_q, d), the chosen method's value on the predicted rows
+};
+
+struct RunResult {
+    std::vector<GapNeighbourChoice> neighbours;
+    std::vector<RunChoice> groups;
+};
+
+// One neighbour kind's median at the k the out-of-fold error chose: on the
+// training plots (out of fold) and on the query plots.
+struct NeighbourTerm {
+    torch::Tensor train;
+    torch::Tensor query;
+    GapNeighbourChoice choice;
+};
+
+// A candidate's out-of-fold values on the training plots, its values on the
+// query plots fitted on all of them, and what that fit holds.
+struct CandidateFit {
+    torch::Tensor train;
+    torch::Tensor query;
+    std::vector<GapCoefficient> coefficients;
+    int64_t n_fitted = 0;
+    std::vector<std::pair<std::string, int64_t>> k;
+};
+
+class CrossValidation {
+public:
+    CrossValidation(const Split& split, const Run& run, const GapFittingConfig& config)
+        : split_(split), run_(run), config_(config) {
+        truth_ = split.truth_cal.index({run.train});
+        raw_ = split.raw_cal.index({run.train});
+        std::vector<int64_t> folds = values_of_long(run.train_folds);
+        std::sort(folds.begin(), folds.end());
+        folds.erase(std::unique(folds.begin(), folds.end()), folds.end());
+        for (const int64_t f : folds) held_.push_back(run.train_folds == f);
+        constant_train_ = torch::full({truth_.size(0), truth_.size(1)}, kNaN, kDouble);
+        for (const torch::Tensor& rows : held_) {
+            constant_train_.index_put_({rows}, split.plane.centre(truth_.index({rows.logical_not()})));
+        }
+        centre_ = split.plane.centre(truth_);
+    }
+
+    [[nodiscard]] RunResult choose(const std::vector<RunGroup>& groups) {
+        RunResult out;
+        std::vector<std::optional<NeighbourTerm>> terms(kNeighbourKinds);
+        for (std::size_t kind = 0; kind < kNeighbourKinds; ++kind) {
+            terms[kind] = neighbour_term(static_cast<NeighbourKind>(kind));
+            if (terms[kind]) out.neighbours.push_back(terms[kind]->choice);
+        }
+
+        // The candidates this fit can evaluate, in GapMethod order.
+        std::vector<const CandidateSpec*> usable;
+        for (const auto& spec : kCandidates) {
+            const bool asked = config_.candidates.empty() ||
+                               std::find(config_.candidates.begin(), config_.candidates.end(), spec.method) !=
+                                   config_.candidates.end();
+            if (!asked) continue;
+            if (spec.reads[kSpatial] && !split_.spatial_axis) continue;
+            bool available = true;
+            for (std::size_t kind = 0; kind < kNeighbourKinds; ++kind) {
+                if (spec.reads[kind] && !terms[kind]) available = false;
+            }
+            if (available) usable.push_back(&spec);
+        }
+        std::vector<CandidateFit> fits;
+        fits.reserve(usable.size());
+        for (const CandidateSpec* spec : usable) fits.push_back(fit(*spec, terms));
+
+        const Plane& plane = split_.plane;
+        const int64_t d = truth_.size(1);
+        for (const RunGroup& group : groups) {
+            // A plot without neighbours in the other folds is read as the
+            // local constant, which is all the training plots say about it.
+            const torch::Tensor truth = truth_.index({group.judged});
+            const torch::Tensor fallback = constant_train_.index({group.judged});
+            RunChoice result;
+            GapGroupChoice& choice = result.choice;
+            choice.group = group.name;
+            choice.n_complete = truth.size(0);
+            choice.n_gaps = group.predicted.sum().item<int64_t>();
+            std::optional<std::size_t> best;
+            double best_error = kNaN;
+            for (std::size_t c = 0; c < usable.size(); ++c) {
+                if (usable[c]->reads[kSpatial] && !group.spatial) continue;
+                const torch::Tensor values = fits[c].train.index({group.judged});
+                const torch::Tensor judged = torch::where(torch::isfinite(values), values, fallback);
+                const double error = plane.aggregate(plane.errors(judged, truth));
+                choice.cv_error.emplace_back(usable[c]->method, error);
+                if (!best || error < best_error) {
+                    best = c;
+                    best_error = error;
+                }
+            }
+            if (!best) {
+                throw std::invalid_argument(
+                    std::string("gap fitting: ") + std::to_string(choice.n_gaps) + " " + group.name +
+                    " gaps and no candidate for them" +
+                    (group.spatial ? "" : "; gaps without coordinates need a candidate that reads no position"));
+            }
+            const CandidateFit& chosen = fits[*best];
+            choice.method = usable[*best]->method;
+            choice.coefficients = chosen.coefficients;
+            choice.n_fitted = chosen.n_fitted;
+            choice.k = chosen.k;
+            const torch::Tensor query = torch::where(torch::isfinite(chosen.query), chosen.query,
+                                                     centre_.unsqueeze(0).expand_as(chosen.query));
+            result.query = torch::full({query.size(0), d}, kNaN, kDouble);
+            result.query.index_put_({group.predicted}, query.index({group.predicted}));
+            out.groups.push_back(std::move(result));
+        }
+        return out;
+    }
+
+private:
+    static std::vector<int64_t> values_of_long(const torch::Tensor& t) {
+        const torch::Tensor c = t.to(torch::kCPU, torch::kInt64).contiguous();
+        return {c.data_ptr<int64_t>(), c.data_ptr<int64_t>() + c.numel()};
+    }
+
+    // Choose k by the out-of-fold error on the training plots that have
+    // neighbours in the other folds; nullopt when the grid holds no k the
+    // neighbours allow.
+    [[nodiscard]] std::optional<NeighbourTerm> neighbour_term(NeighbourKind kind) const {
+        const torch::Tensor& train = run_.train_neighbours[kind];
+        if (!train.defined()) return std::nullopt;
+        const int64_t width = train.size(1);
+        const bool circular = split_.circular();
+        const torch::Tensor has = train.select(1, 0) >= 0;
+        const torch::Tensor train_has = train.index({has});
+        const torch::Tensor truth_has = truth_.index({has});
+        NeighbourTerm term;
+        term.choice.kind = kKindNames[kind];
+        double best_error = kNaN;
+        bool any = false;
+        for (const int64_t k : config_.k_grid) {
+            if (k > width) continue;
+            const double error = split_.plane.aggregate(
+                split_.plane.errors(neighbour_median(split_.truth_cal, train_has, k, circular), truth_has));
+            term.choice.cv_error.emplace_back(k, error);
+            // The first k of the grid wins a tie, and stands when no training
+            // plot has a neighbour in the other folds (every error NaN).
+            if (!any || error < best_error) {
+                best_error = error;
+                term.choice.k = k;
+            }
+            any = true;
+        }
+        if (!any) return std::nullopt;
+        term.train = neighbour_median(split_.truth_cal, train, term.choice.k, circular);
+        term.query = neighbour_median(split_.truth_cal, run_.query_neighbours[kind], term.choice.k, circular);
+        return term;
+    }
+
+    [[nodiscard]] CandidateFit fit(const CandidateSpec& spec, const std::vector<std::optional<NeighbourTerm>>& terms) const {
+        CandidateFit out;
+        const int64_t n_q = run_.query_raw.size(0);
+        switch (spec.combination) {
+            case Combination::Constant:
+                out.train = constant_train_;
+                out.query = centre_.unsqueeze(0).expand({n_q, centre_.size(0)}).clone();
+                return out;
+            case Combination::Raw:
+                out.train = raw_;
+                out.query = run_.query_raw;
+                return out;
+            case Combination::Neighbours: {
+                const std::size_t kind = spec.reads[kSpecies] ? kSpecies : kSpatial;
+                out.train = terms[kind]->train;
+                out.query = terms[kind]->query;
+                out.k.emplace_back(kKindNames[kind], terms[kind]->choice.k);
+                return out;
+            }
+            case Combination::LeastSquares: {
+                std::vector<torch::Tensor> train{raw_};
+                std::vector<torch::Tensor> query{run_.query_raw};
+                std::vector<std::string> names{"resolve"};
+                for (std::size_t kind = 0; kind < kNeighbourKinds; ++kind) {
+                    if (!spec.reads[kind]) continue;
+                    train.push_back(terms[kind]->train);
+                    query.push_back(terms[kind]->query);
+                    names.emplace_back(kKindNames[kind]);
+                    out.k.emplace_back(kKindNames[kind], terms[kind]->choice.k);
+                }
+                // Out of fold: each fold predicted by the coefficients the
+                // other folds fit.
+                out.train = torch::full({truth_.size(0), truth_.size(1)}, kNaN, kDouble);
+                for (const torch::Tensor& rows : held_) {
+                    const torch::Tensor rest = rows.logical_not();
+                    std::vector<torch::Tensor> fit_x, held_x;
+                    for (const torch::Tensor& x : train) {
+                        fit_x.push_back(x.index({rest}));
+                        held_x.push_back(x.index({rows}));
+                    }
+                    out.train.index_put_({rows},
+                                         least_squares(truth_.index({rest}), fit_x, held_x, split_.circular()).test);
+                }
+                const LeastSquares all = least_squares(truth_, train, query, split_.circular());
+                out.query = all.test;
+                out.n_fitted = all.n_fitted;
+                for (std::size_t j = 0; j < names.size(); ++j) {
+                    out.coefficients.push_back(describe_coefficient(names[j], all.coefficients[static_cast<int64_t>(j)]));
+                }
+                return out;
+            }
+        }
+        throw std::logic_error("gap fitting: unknown combination");
+    }
+
+    const Split& split_;
+    const Run& run_;
+    const GapFittingConfig& config_;
+    torch::Tensor truth_;
+    torch::Tensor raw_;
+    std::vector<torch::Tensor> held_;  // per fold, (n_t,) bool
+    torch::Tensor constant_train_;
+    torch::Tensor centre_;
+};
 
 int64_t rows_of(const torch::Tensor& t) { return t.defined() ? t.size(0) : -1; }
 
@@ -633,6 +1302,17 @@ void GapFittingConfig::validate() const {
         }
     }
     for (const GapMethod method : candidates) (void)candidate_spec(method);
+    if (n_folds < 2) {
+        throw std::invalid_argument("gap fitting: n_folds must be at least 2, got " + std::to_string(n_folds));
+    }
+    if (!(static_cast<double>(max_fold_share) > 1.0 / static_cast<double>(n_folds) && max_fold_share <= 1.0f)) {
+        throw std::invalid_argument("gap fitting: max_fold_share must lie in (1 / n_folds, 1], got " +
+                                    std::to_string(max_fold_share));
+    }
+    if (matching_sample < 1) {
+        throw std::invalid_argument("gap fitting: matching_sample must be at least 1, got " +
+                                    std::to_string(matching_sample));
+    }
 }
 
 torch::Tensor recorded_plots(const torch::Tensor& recorded) {
@@ -666,13 +1346,30 @@ json::Value gap_fit_report_to_json(const GapFitReport& report) {
         axes.set(axis.axis, std::move(a));
     }
     out.set("axes", std::move(axes));
+    if (report.folds.n_folds > 0) {
+        const GapFoldLayout& layout = report.folds;
+        json::Value f = json::Value::object();
+        f.set("n_folds", layout.n_folds);
+        f.set("block_km", layout.block_km);
+        f.set("block_years", layout.block_years);
+        f.set("buffer_km", layout.buffer_km);
+        f.set("buffer_years", layout.buffer_years);
+        f.set("injected", layout.injected);
+        json::Value mismatch = json::Value::object();
+        for (const auto& [axis, w] : layout.mismatch) mismatch.set(axis, w);
+        f.set("mismatch", std::move(mismatch));
+        f.set("total_mismatch", layout.total_mismatch);
+        f.set("n_layouts", layout.n_layouts);
+        f.set("n_matching_plots", layout.n_matching_plots);
+        out.set("folds", std::move(f));
+    }
     json::Value neighbours = json::Value::object();
     for (const auto& choice : report.neighbours) {
         json::Value c = json::Value::object();
         c.set("k", choice.k);
         json::Value errors = json::Value::object();
-        for (const auto& [k, error] : choice.matched_error) errors.set(std::to_string(k), error);
-        c.set("matched_error", std::move(errors));
+        for (const auto& [k, error] : choice.cv_error) errors.set(std::to_string(k), error);
+        c.set("cv_error", std::move(errors));
         neighbours.set(choice.kind, std::move(c));
     }
     out.set("neighbours", std::move(neighbours));
@@ -683,8 +1380,10 @@ json::Value gap_fit_report_to_json(const GapFitReport& report) {
         g.set("n_complete", group.n_complete);
         g.set("n_gaps", group.n_gaps);
         json::Value errors = json::Value::object();
-        for (const auto& [method, error] : group.matched_error) errors.set(enum_to_name(method), error);
-        g.set("matched_error", std::move(errors));
+        for (const auto& [method, error] : group.cv_error) errors.set(enum_to_name(method), error);
+        g.set("cv_error", std::move(errors));
+        g.set("estimated_error", group.estimated_error);
+        g.set("n_estimated", group.n_estimated);
         if (!group.coefficients.empty()) {
             json::Value coefficients = json::Value::object();
             for (const auto& c : group.coefficients) {
@@ -741,20 +1440,20 @@ std::pair<torch::Tensor, torch::Tensor> divide(const torch::Tensor& recorded_val
     return {complete.nonzero().select(1, 0), complete.logical_not().nonzero().select(1, 0)};
 }
 
-// One target's plots in the plane, with the matched test's hiding radii and
-// each complete plot's matched neighbours.
+// One target's plots in the plane, its searches, the gaps' distances and the
+// fold layout.
 struct Prepared {
-    Fold fold;
-    std::unique_ptr<FoldSearch> search;
+    Split split;
+    std::unique_ptr<PlotSearch> search;
     GapDistances distances;
-    HidingRadii radii;
-    std::vector<torch::Tensor> matched;
+    Layout folds;
+    GapFoldLayout layout;
 };
 
 Prepared prepare(const GapTarget& target, const torch::Tensor& raw_values,
                  const torch::Tensor& recorded_values, const torch::Tensor& cal_index,
                  const torch::Tensor& test_index, const GapPlots& plots, const GapFittingConfig& config,
-                 const HidingRadii* injected) {
+                 const torch::Tensor* injected) {
     const torch::Tensor recorded_cal = recorded_values.index({cal_index});
     const Plane plane(target, recorded_cal);
     const torch::Tensor species = plots.species.to(torch::kCPU);
@@ -764,83 +1463,61 @@ Prepared prepare(const GapTarget& target, const torch::Tensor& raw_values,
         return t.defined() ? t.index({index}) : torch::Tensor();
     };
 
-    Prepared out{Fold{plane,
-                      plane.to(recorded_cal),
-                      raw_values.defined() ? plane.to(raw_values.index({cal_index})) : torch::Tensor(),
-                      raw_values.defined() ? plane.to(raw_values.index({test_index})) : torch::Tensor(),
-                      rows(coords, cal_index),
-                      rows(coords, test_index),
-                      rows(years, cal_index),
-                      rows(years, test_index)},
+    Prepared out{Split{plane,
+                       plane.to(recorded_cal),
+                       raw_values.defined() ? plane.to(raw_values.index({cal_index})) : torch::Tensor(),
+                       raw_values.defined() ? plane.to(raw_values.index({test_index})) : torch::Tensor(),
+                       rows(coords, cal_index),
+                       rows(coords, test_index),
+                       rows(years, cal_index),
+                       rows(years, test_index)},
                  {},
                  {},
                  {},
                  {}};
-    Fold& fold = out.fold;
+    Split& split = out.split;
+    split.n_test = test_index.size(0);
     // Plots are near or far in space unless the target is the position itself
     // (whose gaps have none), and near or far in time where both sides carry
     // survey years (a year target's gaps carry none).
-    fold.spatial_axis = config.spatial && target.scale != GapScale::Geographic && coords.defined() &&
-                        finite_rows(fold.coords_cal).sum().item<int64_t>() >= 2;
-    fold.time_axis = years.defined() && torch::isfinite(fold.years_cal).any().item<bool>() &&
-                     torch::isfinite(fold.years_test).any().item<bool>();
+    const bool located_cal = coords.defined() && finite_rows(split.coords_cal).sum().item<int64_t>() >= 2;
+    split.spatial_axis = config.spatial && target.scale != GapScale::Geographic && located_cal;
+    split.km_axis = target.scale != GapScale::Geographic && located_cal &&
+                    finite_rows(split.coords_test).any().item<bool>();
+    split.time_axis = years.defined() && torch::isfinite(split.years_cal).any().item<bool>() &&
+                      torch::isfinite(split.years_test).any().item<bool>();
 
-    out.search = std::make_unique<FoldSearch>(fold, select_rows(species, cal_index),
+    out.search = std::make_unique<PlotSearch>(split, select_rows(species, cal_index),
                                               select_rows(species, test_index), config.k_grid);
-    out.distances = out.search->distances(fold);
-    if (injected != nullptr) {
-        auto take = [&](const torch::Tensor& t, const char* axis) {
-            if (!t.defined()) return torch::Tensor();
-            if (t.dim() != 1 || t.size(0) != fold.n_cal()) {
-                throw std::invalid_argument(std::string("gap fitting: the injected ") + axis +
-                                            " radii must hold one value per complete plot (" +
-                                            std::to_string(fold.n_cal()) + ")");
-            }
-            return as_double(t);
-        };
-        out.radii.similarity = take(injected->similarity, "similarity");
-        out.radii.km = take(injected->km, "km");
-        out.radii.years = take(injected->years, "years");
-        if (!out.radii.similarity.defined()) {
-            throw std::invalid_argument("gap fitting: injected radii need the similarity axis");
-        }
-    } else {
-        at::Generator generator =
-            at::detail::createCPUGenerator(static_cast<uint64_t>(config.matching_seed));
-        out.radii.similarity = drawn(out.distances.similarity, fold.n_cal(), generator);
-        if (fold.spatial_axis) out.radii.km = drawn(out.distances.km, fold.n_cal(), generator);
-        if (fold.time_axis) out.radii.years = drawn(out.distances.years, fold.n_cal(), generator);
-    }
-    out.matched = out.search->matched(fold, out.radii);
+    out.distances = out.search->distances(split);
+    out.folds = injected != nullptr ? injected_layout(*injected, split.n_cal(), out.layout)
+                                    : match_layout(split, *out.search, out.distances, config, out.layout);
     return out;
 }
 
 }  // namespace
 
-MatchedGapNeighbours matched_gap_neighbours(const GapTarget& target, const torch::Tensor& recorded,
-                                            const GapPlots& plots, const GapFittingConfig& config,
-                                            const HidingRadii* radii) {
+GapFolds gap_folds(const GapTarget& target, const torch::Tensor& recorded, const GapPlots& plots,
+                   const GapFittingConfig& config) {
     config.validate();
     validate_inputs(target, torch::Tensor(), recorded, plots);
     const torch::Tensor recorded_values = as_double(recorded);
     const auto [cal_index, test_index] = divide(recorded_values);
     if (cal_index.size(0) < 2 || test_index.size(0) == 0) {
-        throw std::invalid_argument("gap fitting: the matched test needs at least two complete plots "
-                                    "and one gap");
+        throw std::invalid_argument("gap fitting: a fold layout needs at least two complete plots and one gap");
     }
     const Prepared prepared =
-        prepare(target, torch::Tensor(), recorded_values, cal_index, test_index, plots, config, radii);
-    MatchedGapNeighbours out;
+        prepare(target, torch::Tensor(), recorded_values, cal_index, test_index, plots, config, nullptr);
+    GapFolds out;
     out.complete = cal_index;
     out.gaps = test_index;
-    out.radii = prepared.radii;
-    out.species = prepared.matched[kSpecies];
-    out.spatial = prepared.matched[kSpatial];
+    out.folds = torch::tensor(prepared.folds.folds, kLong);
+    out.layout = prepared.layout;
     return out;
 }
 
 GapFit fit_gaps(const GapTarget& target, const torch::Tensor& raw, const torch::Tensor& recorded,
-                const GapPlots& plots, const GapFittingConfig& config, const HidingRadii* radii) {
+                const GapPlots& plots, const GapFittingConfig& config, const torch::Tensor* folds) {
     config.validate();
     if (!raw.defined()) throw std::invalid_argument("gap fitting: the raw prediction is required");
     validate_inputs(target, raw, recorded, plots);
@@ -864,100 +1541,104 @@ GapFit fit_gaps(const GapTarget& target, const torch::Tensor& raw, const torch::
         return out;
     }
 
-    const Prepared prepared =
-        prepare(target, raw_values, recorded_values, cal_index, test_index, plots, config, radii);
-    const Fold& fold = prepared.fold;
-    const Plane& plane = fold.plane;
-    out.report.axes.push_back(summarise_axis("similarity", prepared.distances.similarity, true));
-    out.report.axes.push_back(summarise_axis(
-        "km", prepared.distances.km,
-        fold.spatial_axis && prepared.radii.km.defined() &&
-            torch::isfinite(prepared.distances.km).any().item<bool>()));
-    out.report.axes.push_back(summarise_axis("years", prepared.distances.years,
-                                             fold.time_axis && prepared.radii.years.defined()));
+    Prepared prepared = prepare(target, raw_values, recorded_values, cal_index, test_index, plots, config, folds);
+    const Split& split = prepared.split;
+    const Plane& plane = split.plane;
+    const bool layout_matched = !prepared.layout.injected;
+    out.report.axes.push_back(summarise_axis("similarity", prepared.distances.similarity, layout_matched));
+    out.report.axes.push_back(
+        summarise_axis("km", prepared.distances.km, layout_matched && split.km_axis));
+    out.report.axes.push_back(
+        summarise_axis("years", prepared.distances.years, layout_matched && split.time_axis));
+    out.report.folds = prepared.layout;
 
-    std::vector<std::optional<NeighbourTerm>> terms(kNeighbourKinds);
-    for (std::size_t kind = 0; kind < kNeighbourKinds; ++kind) {
-        terms[kind] = neighbour_term(fold, *prepared.search, static_cast<NeighbourKind>(kind),
-                                     prepared.matched[kind], config.k_grid);
-        if (terms[kind]) out.report.neighbours.push_back(terms[kind]->choice);
-    }
-
-    // The candidates this fit can evaluate, in GapMethod order.
-    std::vector<const CandidateSpec*> usable;
-    for (const auto& spec : kCandidates) {
-        const bool asked = config.candidates.empty() ||
-                           std::find(config.candidates.begin(), config.candidates.end(), spec.method) !=
-                               config.candidates.end();
-        if (!asked) continue;
-        if (spec.reads[kSpatial] && !fold.spatial_axis) continue;
-        bool available = true;
-        for (std::size_t kind = 0; kind < kNeighbourKinds; ++kind) {
-            if (spec.reads[kind] && !terms[kind]) available = false;
-        }
-        if (available) usable.push_back(&spec);
-    }
-    const torch::Tensor centre = plane.centre(fold.truth_cal);
-    std::vector<CandidateFit> fits;
-    fits.reserve(usable.size());
-    for (const CandidateSpec* spec : usable) fits.push_back(fit_candidate(fold, *spec, centre, terms));
-
+    const int64_t n_cal = split.n_cal();
+    const int64_t n_test = split.n_test;
+    const std::vector<int64_t>& layout = prepared.folds.folds;
+    const torch::Tensor fold_of = torch::tensor(layout, kLong);
     const torch::Tensor located =
-        fold.spatial_axis ? finite_rows(fold.coords_test) : torch::zeros({fold.n_test()}, torch::kBool);
+        split.spatial_axis ? finite_rows(split.coords_test) : torch::zeros({n_test}, torch::kBool);
     const torch::Tensor cal_located =
-        fold.spatial_axis ? finite_rows(fold.coords_cal) : torch::ones({fold.n_cal()}, torch::kBool);
-    torch::Tensor test_rows = torch::full({fold.n_test(), fold.truth_cal.size(1)}, kNaN, kDouble);
-    torch::Tensor test_method = torch::full({fold.n_test()}, kGapRecorded, kLong);
+        split.spatial_axis ? finite_rows(split.coords_cal) : torch::ones({n_cal}, torch::kBool);
+    const bool any_located = located.any().item<bool>();
+    const bool any_unlocated = located.logical_not().any().item<bool>();
 
-    struct Group {
-        const char* name;
-        torch::Tensor gaps;
-        torch::Tensor rows;
-        bool spatial;
+    // The groups of plots choosing together for the given query plots: those
+    // with a position (judged on the training plots with one), and those
+    // without (judged on every training plot, among candidates that read no
+    // position).
+    auto groups_for = [&](const torch::Tensor& train_located, const torch::Tensor& query_located,
+                          const torch::Tensor& query_unlocated) {
+        std::vector<RunGroup> out_groups;
+        if (any_located) out_groups.push_back({"located", true, train_located, query_located});
+        if (any_unlocated) {
+            out_groups.push_back({"unlocated", false, torch::ones_like(train_located), query_unlocated});
+        }
+        return out_groups;
     };
-    const Group groups[] = {
-        {"located", located, cal_located, true},
-        {"unlocated", located.logical_not(), torch::ones({fold.n_cal()}, torch::kBool), false},
-    };
-    for (const Group& group : groups) {
-        const int64_t n_gaps = group.gaps.sum().item<int64_t>();
-        if (n_gaps == 0) continue;
-        // Judged on the complete plots the group's gaps resemble: those with a
-        // position for gaps with one. A complete plot left without any
-        // neighbour at the gaps' distance is read as the local constant,
-        // which is all the dataset says about it there.
-        const torch::Tensor truth = fold.truth_cal.index({group.rows});
-        GapGroupChoice choice;
-        choice.group = group.name;
-        choice.n_complete = truth.size(0);
-        choice.n_gaps = n_gaps;
-        std::optional<std::size_t> best;
-        double best_error = kNaN;
-        for (std::size_t c = 0; c < usable.size(); ++c) {
-            if (usable[c]->reads[kSpatial] && !group.spatial) continue;
-            const torch::Tensor cal = fits[c].cal.index({group.rows});
-            const torch::Tensor judged =
-                torch::where(torch::isfinite(cal), cal, centre.unsqueeze(0).expand_as(cal));
-            const double error = plane.aggregate(plane.errors(judged, truth));
-            choice.matched_error.emplace_back(usable[c]->method, error);
-            if (!best || error < best_error) {
-                best = c;
-                best_error = error;
+
+    // Every complete plot predicted from the other folds; the gaps from all.
+    Run top;
+    top.train = torch::arange(n_cal, kLong);
+    top.train_folds = fold_of;
+    top.train_neighbours = prepared.search->out_of_fold(prepared.folds, -1);
+    top.query_neighbours.resize(kNeighbourKinds);
+    for (std::size_t kind = 0; kind < kNeighbourKinds; ++kind) {
+        if (top.train_neighbours[kind].defined()) {
+            top.query_neighbours[kind] = prepared.search->gap_neighbours(static_cast<NeighbourKind>(kind),
+                                                                         top.train_neighbours[kind].size(1));
+        }
+    }
+    top.query_raw = split.raw_test;
+    const RunResult chosen =
+        CrossValidation(split, top, config).choose(groups_for(cal_located, located, located.logical_not()));
+    out.report.neighbours = chosen.neighbours;
+
+    // The whole procedure repeated with each fold held out, scored on it.
+    const int64_t n_folds = prepared.layout.n_folds;
+    std::vector<torch::Tensor> estimate(chosen.groups.size());
+    for (torch::Tensor& e : estimate) e = torch::full({n_cal, split.truth_cal.size(1)}, kNaN, kDouble);
+    if (n_folds >= 3) {
+        for (int64_t f = 0; f < n_folds; ++f) {
+            const torch::Tensor held = fold_of == f;
+            const torch::Tensor rest = held.logical_not();
+            const std::vector<torch::Tensor> neighbours = prepared.search->out_of_fold(prepared.folds, f);
+            Run run;
+            run.train = rest.nonzero().select(1, 0);
+            run.train_folds = fold_of.index({rest});
+            run.train_neighbours.resize(kNeighbourKinds);
+            run.query_neighbours.resize(kNeighbourKinds);
+            for (std::size_t kind = 0; kind < kNeighbourKinds; ++kind) {
+                if (!neighbours[kind].defined()) continue;
+                run.train_neighbours[kind] = neighbours[kind].index({rest});
+                run.query_neighbours[kind] = neighbours[kind].index({held});
+            }
+            run.query_raw = split.raw_cal.index({held});
+            const torch::Tensor held_located = cal_located.index({held});
+            const RunResult nested = CrossValidation(split, run, config)
+                                         .choose(groups_for(cal_located.index({rest}), held_located,
+                                                            torch::ones_like(held_located)));
+            const torch::Tensor held_rows = held.nonzero().select(1, 0);
+            for (std::size_t g = 0; g < nested.groups.size(); ++g) {
+                const torch::Tensor predicted = torch::isfinite(nested.groups[g].query).all(1);
+                estimate[g].index_put_({held_rows.index({predicted})}, nested.groups[g].query.index({predicted}));
             }
         }
-        if (!best) {
-            throw std::invalid_argument(
-                "gap fitting: target '" + target.name + "' has " + std::to_string(n_gaps) + " " +
-                group.name + " gaps and no candidate for them" +
-                (group.spatial ? "" : "; gaps without coordinates need a candidate that reads no position"));
+    }
+
+    torch::Tensor test_rows = torch::full({n_test, split.truth_cal.size(1)}, kNaN, kDouble);
+    torch::Tensor test_method = torch::full({n_test}, kGapRecorded, kLong);
+    for (std::size_t g = 0; g < chosen.groups.size(); ++g) {
+        GapGroupChoice choice = chosen.groups[g].choice;
+        const torch::Tensor scored = torch::isfinite(estimate[g]).all(1);
+        choice.n_estimated = scored.sum().item<int64_t>();
+        if (choice.n_estimated > 0) {
+            choice.estimated_error =
+                plane.aggregate(plane.errors(estimate[g].index({scored}), split.truth_cal.index({scored})));
         }
-        const CandidateFit& chosen = fits[*best];
-        choice.method = usable[*best]->method;
-        choice.coefficients = chosen.coefficients;
-        choice.n_fitted = chosen.n_fitted;
-        choice.k = chosen.k;
-        test_rows.index_put_({group.gaps}, chosen.test.index({group.gaps}));
-        test_method.index_put_({group.gaps}, static_cast<int64_t>(choice.method));
+        const torch::Tensor predicted = torch::isfinite(chosen.groups[g].query).all(1);
+        test_rows.index_put_({predicted}, chosen.groups[g].query.index({predicted}));
+        test_method.index_put_({predicted}, static_cast<int64_t>(choice.method));
         out.report.groups.push_back(std::move(choice));
     }
 

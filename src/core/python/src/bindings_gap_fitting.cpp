@@ -21,32 +21,20 @@ nb::object json_to_python(const json::Value& value) {
     return nb::module_::import_("json").attr("loads")(json::dump(value, 0));
 }
 
-HidingRadii radii_from(const nb::object& radii) {
-    HidingRadii out;
-    if (radii.is_none()) return out;
-    const nb::dict d = nb::cast<nb::dict>(radii);
-    for (auto [key, value] : d) {
-        const std::string name = nb::cast<std::string>(key);
-        const nb::object v = nb::borrow(value);
-        if (name == "similarity") {
-            out.similarity = unpack_optional_tensor(v);
-        } else if (name == "km") {
-            out.km = unpack_optional_tensor(v);
-        } else if (name == "years") {
-            out.years = unpack_optional_tensor(v);
-        } else {
-            throw nb::value_error(("radii: unknown axis '" + name +
-                                   "'; accepted: similarity, km, years").c_str());
-        }
-    }
-    return out;
-}
-
-nb::dict radii_to_python(const HidingRadii& radii) {
+nb::dict layout_to_python(const GapFoldLayout& layout) {
     nb::dict out;
-    out["similarity"] = tensor_or_none(radii.similarity);
-    out["km"] = tensor_or_none(radii.km);
-    out["years"] = tensor_or_none(radii.years);
+    out["n_folds"] = layout.n_folds;
+    out["block_km"] = layout.block_km;
+    out["block_years"] = layout.block_years;
+    out["buffer_km"] = layout.buffer_km;
+    out["buffer_years"] = layout.buffer_years;
+    out["injected"] = layout.injected;
+    nb::dict mismatch;
+    for (const auto& [axis, w] : layout.mismatch) mismatch[axis.c_str()] = w;
+    out["mismatch"] = mismatch;
+    out["total_mismatch"] = layout.total_mismatch;
+    out["n_layouts"] = layout.n_layouts;
+    out["n_matching_plots"] = layout.n_matching_plots;
     return out;
 }
 
@@ -100,29 +88,30 @@ void register_gap_fitting(nb::module_& m) {
                      "Per plot: 'recorded' for a complete plot, the method's name for a gap.")
         .def_prop_ro("report", [](const GapFit& f) { return json_to_python(gap_fit_report_to_json(f.report)); },
                      "What was chosen and why: n complete / n gaps, the gaps' distance per axis, "
-                     "the k chosen per neighbour kind, every candidate's matched error and the "
-                     "chosen method's coefficients, per group of gaps (located / unlocated).");
+                     "the fold layout, the k chosen per neighbour kind, and per group of gaps "
+                     "(located / unlocated) every candidate's cross-validated error, the error "
+                     "estimated for the whole procedure and the chosen method's coefficients.");
 
     m.def(
         "fit_gaps",
         [](const GapTarget& target, const nb::object& raw, const nb::object& recorded,
            const nb::object& species, const nb::object& coordinates, const nb::object& years,
-           const GapFittingConfig& config, const nb::object& radii) {
+           const GapFittingConfig& config, const nb::object& folds) {
             const torch::Tensor raw_values = unpack_required_tensor(raw, "raw");
             const torch::Tensor recorded_values = unpack_required_tensor(recorded, "recorded");
             const GapPlots plots = plots_from(species, coordinates, years);
-            const HidingRadii injected = radii_from(radii);
+            const torch::Tensor injected = unpack_optional_tensor(folds);
             GapFit fit;
             {
                 nb::gil_scoped_release release;
                 fit = fit_gaps(target, raw_values, recorded_values, plots, config,
-                               radii.is_none() ? nullptr : &injected);
+                               injected.defined() ? &injected : nullptr);
             }
             return fit;
         },
         nb::arg("target"), nb::arg("raw"), nb::arg("recorded"), nb::arg("species"),
         nb::arg("coordinates") = nb::none(), nb::arg("years") = nb::none(),
-        nb::arg("config") = GapFittingConfig{}, nb::arg("radii") = nb::none(),
+        nb::arg("config") = GapFittingConfig{}, nb::arg("folds") = nb::none(),
         "Fit the gaps of one target from the dataset's own complete plots.\n"
         "\n"
         "raw, recorded: the model's prediction and the recorded value per plot in\n"
@@ -132,38 +121,35 @@ void register_gap_fitting(nb::module_& m) {
         "than 0 marks a species present.\n"
         "coordinates: (n, 2) latitude / longitude, NaN where unknown; years: (n,)\n"
         "survey years, NaN where unknown.\n"
-        "radii: a dict {similarity, km, years} of one hiding distance per complete\n"
-        "plot, replacing the drawn ones (reproduces another implementation's draw).");
+        "folds: (n_complete,) int64, the fold of each complete plot in plot order\n"
+        "(numbered from 0), replacing the matched layout (reproduces another\n"
+        "implementation's layout).");
 
     m.def(
-        "matched_gap_neighbours",
+        "gap_folds",
         [](const GapTarget& target, const nb::object& recorded, const nb::object& species,
-           const nb::object& coordinates, const nb::object& years, const GapFittingConfig& config,
-           const nb::object& radii) {
+           const nb::object& coordinates, const nb::object& years, const GapFittingConfig& config) {
             const torch::Tensor recorded_values = unpack_required_tensor(recorded, "recorded");
             const GapPlots plots = plots_from(species, coordinates, years);
-            const HidingRadii injected = radii_from(radii);
-            MatchedGapNeighbours found;
+            GapFolds found;
             {
                 nb::gil_scoped_release release;
-                found = matched_gap_neighbours(target, recorded_values, plots, config,
-                                               radii.is_none() ? nullptr : &injected);
+                found = gap_folds(target, recorded_values, plots, config);
             }
             nb::dict out;
             out["complete"] = tensor_or_none(found.complete);
             out["gaps"] = tensor_or_none(found.gaps);
-            out["radii"] = radii_to_python(found.radii);
-            out["species"] = tensor_or_none(found.species);
-            out["spatial"] = tensor_or_none(found.spatial);
+            out["folds"] = tensor_or_none(found.folds);
+            out["layout"] = layout_to_python(found.layout);
             return out;
         },
         nb::arg("target"), nb::arg("recorded"), nb::arg("species"),
         nb::arg("coordinates") = nb::none(), nb::arg("years") = nb::none(),
-        nb::arg("config") = GapFittingConfig{}, nb::arg("radii") = nb::none(),
-        "The neighbours fit_gaps's matched test reads: a dict of complete / gaps\n"
-        "(plot rows), radii (the drawn distances per complete plot), species and\n"
-        "spatial ((n_complete, k) indices into complete, -1 padded; spatial None\n"
-        "without the spatial axis).");
+        nb::arg("config") = GapFittingConfig{},
+        "The fold layout fit_gaps matches to the gaps: a dict of complete / gaps\n"
+        "(plot rows), folds ((n_complete,) fold of each complete plot) and layout\n"
+        "(n_folds, block_km, block_years, mismatch per axis, total_mismatch,\n"
+        "n_layouts, n_matching_plots).");
 
     nb::class_<GapColumns>(m, "GapColumns", "The columns of a dataset's tables gap fitting reads.")
         .def(nb::init<>())

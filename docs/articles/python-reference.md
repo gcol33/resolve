@@ -320,7 +320,7 @@ Several trained models released as one directory and scored together.
 
 ## [Gap fitting](https://gillescolling.com/resolve/articles/python-gap-fitting.md)
 
-Filling a dataset’s missing values from its own complete plots, beside
+Imputing a dataset’s missing values from its own complete plots, beside
 the raw imputed value.
 
 - [`fit_gaps()`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#fit_gaps):
@@ -333,8 +333,9 @@ the raw imputed value.
   What gap fitting reads about a dataset’s plots, from DataFrames or CSV
   paths.
 - [`GapFittingConfig`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapFittingConfig):
-  The candidates, the neighbour counts, spatial neighbours on or off and
-  the matching seed.
+  The candidates, the neighbour counts, spatial neighbours on or off,
+  the folds and the fold layout’s seed, largest fold share and matching
+  sample.
 - [`GapTarget`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapTarget):
   A target’s name, scale and period.
 - [`GapScale`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapScale):
@@ -343,8 +344,8 @@ the raw imputed value.
   The methods a gap can be imputed by.
 - [`GapFit`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapFit):
   The fitted values, the method per plot and the report.
-- [`matched_gap_neighbours()`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#matched_gap_neighbours):
-  The neighbours the choice is tested with.
+- [`gap_folds()`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#gap_folds):
+  The fold layout the choice is judged on.
 - [`GapColumns`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapColumns),
   [`GapTables`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapTables),
   [`GapFitRequest`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapFitRequest)

@@ -66,7 +66,7 @@
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
     <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
-    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
+    <li><a class="dropdown-item" href="../articles/gap-fitting.html">Imputing a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
     <li><hr class="dropdown-divider"></li>
@@ -408,7 +408,7 @@ value. No target column is read, except the ones
 a <code>&lt;target&gt;_recorded</code> column in <code>to_pandas</code>,
 or with <code>gap_fitting</code> (<code>True</code>, a
 <code>GapFittingConfig</code> or a <code>dict</code> of its fields) is
-fitted from the dataset’s own complete plots instead (<a href="gap-fitting.html">Filling a dataset’s gaps</a>). With
+fitted from the dataset’s own complete plots instead (<a href="gap-fitting.html">Imputing a dataset’s gaps</a>). With
 <code>terrain</code> (<code>"field"</code> or <code>True</code>,
 <code>"columns"</code>, a <code>dict</code> of <code>source</code>,
 <code>grids</code> and <code>device</code>, or a

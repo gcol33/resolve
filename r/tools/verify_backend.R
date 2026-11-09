@@ -24,11 +24,7 @@ if (!file.exists(lib)) {
 
 suppressPackageStartupMessages(library(resolveR))
 
-if (!resolve.available()) {
-  err <- tryCatch(resolveR:::resolve_capi_load_error(),
-                  error = function(e) "<no load-error accessor>")
-  stop("resolve_c backend failed to load from ", home, ": ", err)
-}
+if (!resolve.available()) stop(resolveR:::.resolve_backend_message(), call. = FALSE)
 
 cat("OK: resolve_c backend loaded from", home, "\n")
 cat("engine version:", resolve.version(), "\n")

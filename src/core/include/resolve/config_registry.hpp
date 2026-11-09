@@ -426,10 +426,13 @@ RESOLVE_DEFINE_FIELD_REGISTRY(SpatialBlockConfig, RESOLVE_SPATIAL_BLOCK_CONFIG_F
 RESOLVE_DEFINE_FIELD_REGISTRY(RetrievalConfig, RESOLVE_RETRIEVAL_CONFIG_FIELDS)
 
 #define RESOLVE_GAP_FITTING_CONFIG_FIELDS(F) \
-    F(candidates,    "")                     \
-    F(k_grid,        "")                     \
-    F(spatial,       "")                     \
-    F(matching_seed, "")
+    F(candidates,      "")                   \
+    F(k_grid,          "")                   \
+    F(spatial,         "")                   \
+    F(matching_seed,   "")                   \
+    F(n_folds,         "")                   \
+    F(max_fold_share,  "")                   \
+    F(matching_sample, "")
 
 RESOLVE_DEFINE_FIELD_REGISTRY(GapFittingConfig, RESOLVE_GAP_FITTING_CONFIG_FIELDS)
 
