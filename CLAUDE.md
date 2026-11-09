@@ -80,7 +80,7 @@ The research paper using RESOLVE spans two repos:
 - **Title**: Species composition as ecological memory: decoding environment from 1.9 million European vegetation plots
 - **Data**: European Vegetation Archive (~1.9M plots, ~20M species-plot records)
 - **Targets**: area, altitude, slope, aspect, survey year, geographic location (regression) + EUNIS habitat (classification)
-- **EUNIS levels**: one level-3 model; levels 2 and 1 are read from it by summing its class probabilities by code prefix, more accurate than models trained for those levels (decided 2026-11-09, table in `resolve-2026/CLAUDE.md`). The app and the R/Python helpers sum, they do not load per-level models.
+- **EUNIS levels**: one model per level (1, 2, 3); level 3 uses the `transformer_4x256` encoder. Summing a level-3 model's probabilities to a coarser level wins only on plots with a level-3 class and loses on the rest (coastal M and five level-2 units have none), so the app and helpers load the level-1 and level-2 models for those levels (checked 2026-11-09, table in `resolve-2026/CLAUDE.md`).
 - **Results tree**: `$RESEARCH_DATA/projects/resolve-2026/results` on E:, mirrored on LiSC
 
 Read `resolve-2026/PROVENANCE.md` before quoting any manuscript number. The J:
