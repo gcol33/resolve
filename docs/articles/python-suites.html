@@ -402,14 +402,16 @@ given it decides which plots are scored and in what order.
 of its fields, renames the contract’s columns for a table that spells
 them differently. <code>batch_size</code> is the forward chunk of each
 member; <code>keep_members</code> keeps every member’s own imputed
-value. No target column is read, except with <code>gap_fitting</code>
-(<code>True</code>, a <code>GapFittingConfig</code> or a
-<code>dict</code> of its fields): each target
-<code>columns["recorded"]</code> names is then fitted from the dataset’s
-own complete plots (<a href="gap-fitting.html">Filling a dataset’s
-gaps</a>). With <code>terrain</code> (<code>"field"</code> or
-<code>True</code>, <code>"columns"</code>, a <code>dict</code> of
-<code>source</code>, <code>grids</code> and <code>device</code>, or a
+value. No target column is read, except the ones
+<code>columns["recorded"]</code> names: each such target gets
+<code>recorded</code> (<code>True</code> where the plot records it) and
+a <code>&lt;target&gt;_recorded</code> column in <code>to_pandas</code>,
+or with <code>gap_fitting</code> (<code>True</code>, a
+<code>GapFittingConfig</code> or a <code>dict</code> of its fields) is
+fitted from the dataset’s own complete plots instead (<a href="gap-fitting.html">Filling a dataset’s gaps</a>). With
+<code>terrain</code> (<code>"field"</code> or <code>True</code>,
+<code>"columns"</code>, a <code>dict</code> of <code>source</code>,
+<code>grids</code> and <code>device</code>, or a
 <code>SuiteTerrainOptions</code>), every target the manifest gives a
 terrain correction is corrected by an elevation model read at the plots
 (<a href="terrain-correction.html">Correcting altitude and slope with an
@@ -435,14 +437,14 @@ are the forms over string columns and CSV paths that
 <code>abundance</code>, <code>genus</code>, <code>family</code>,
 <code>latitude</code>, <code>longitude</code>, and
 <code>covariates</code> and <code>categoricals</code>, which replace the
-whole list and must match its length. For gap fitting,
-<code>recorded</code> lists <code>(target, [column])</code> pairs,
-<code>(target, [latitude, longitude])</code> for a location (a
-<code>dict</code> passed to <code>predict</code> may give
-<code>{target: column}</code>), and <code>survey_year</code> names the
-survey-year column; a suite that reads no coordinates may still name
-<code>latitude</code> and <code>longitude</code> for gap fitting
-alone.</p>
+whole list and must match its length. <code>recorded</code> lists
+<code>(target, [column])</code> pairs naming each regression target’s
+recorded value, <code>(target, [latitude, longitude])</code> for a
+location (a <code>dict</code> passed to <code>predict</code> may give
+<code>{target: column}</code>); for gap fitting,
+<code>survey_year</code> names the survey-year column; a suite that
+reads no coordinates may still name <code>latitude</code> and
+<code>longitude</code> for gap fitting alone.</p>
 </div>
 <div class="section level2">
 <h2 id="SuitePredictions">
@@ -513,6 +515,11 @@ own imputed value, <code>(n_members, n_plots)</code> or
 <li>
 <code>recognition</code> (<code>SpeciesRecognition</code>): how much
 of each plot the target’s vocabulary recognises.</li>
+<li>
+<code>recorded</code> (<code>(n_plots,)</code> bool tensor or
+<code>None</code>): for a target <code>columns["recorded"]</code> names,
+<code>True</code> where the plot records the target, so
+<code>value</code> is imputed where it is <code>False</code>.</li>
 <li>
 <code>gap_fit</code> (<code>GapFit</code> or <code>None</code>):
 with gap fitting, the fitted values, the method per plot and the report

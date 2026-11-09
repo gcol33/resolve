@@ -345,6 +345,13 @@ scale when the model learned it on log1p;
 `--gap-target location=geographic:lat,lon` names the scale and the heads
 otherwise.
 
+`<target>_fit_method` reads `recorded` on the plots that record the
+target, so it also tells which values were imputed. Without gap fitting,
+the recorded columns alone (`columns$recorded` in R,
+`columns["recorded"]` in Python, `--recorded` without `--fit-gaps`) add
+`<target>_recorded` instead: `TRUE` where the plot records the target,
+`FALSE` where `<target>` is imputed.
+
 ## Settings
 
 Four settings change the choice (`gapFitting` in R, `gap_fitting` in

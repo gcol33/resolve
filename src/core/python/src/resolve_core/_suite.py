@@ -87,7 +87,7 @@ def _terrain(terrain):
 
 
 def _recorded(value):
-    """Gap fitting's recorded columns as (target, [column, ...]) pairs, from a
+    """The recorded columns as (target, [column, ...]) pairs, from a
     dict or pairs whose column is one name or a list of names."""
     items = value.items() if isinstance(value, dict) else value
     out = []
@@ -156,9 +156,11 @@ def predict(
     columns : SuiteColumns or dict, optional
         Renames the manifest's input columns (keys ``plot_id``, ``species_id``,
         ``abundance``, ``genus``, ``family``, ``latitude``, ``longitude``,
-        ``covariates``, ``categoricals``), for gap fitting ``recorded``
-        (``{target: column}``, ``{"location": [lat, lon]}``) and
-        ``survey_year``, and for terrain correction ``terrain``
+        ``covariates``, ``categoricals``), ``recorded`` (``{target: column}``,
+        ``{"location": [lat, lon]}``: the column holding each regression
+        target's recorded value, which adds ``<target>_recorded``, or the gap
+        fit with ``gap_fitting``), for gap fitting ``survey_year``, and for
+        terrain correction ``terrain``
         (``{"elevation": col, "elevation_1km": col, "slope": col,
         "slope_1km": col, "uncertainty": col}``).
     batch_size : int
@@ -253,9 +255,11 @@ def to_pandas(self, probabilities=False):
     per member when the members were kept (``<target>_seed<N>_latitude`` and
     ``_longitude`` for a spherical mean); a gap-fitted target adds
     ``<target>_fitted`` (``_fitted_latitude`` / ``_fitted_longitude``) and
-    ``<target>_fit_method``; a terrain-corrected target ``<target>_terrain``,
-    ``<target>_terrain_w_resolve``, ``_w_dem``, ``_w_dem_1km``, ``<target>_dem``
-    and ``<target>_dem_1km``. The table is the engine's
+    ``<target>_fit_method``, and a target with recorded values but no gap fit
+    ``<target>_recorded`` (bool) there instead; a terrain-corrected target
+    ``<target>_terrain``, ``<target>_terrain_w_resolve``, ``_w_dem``,
+    ``_w_dem_1km``, ``<target>_dem`` and ``<target>_dem_1km``. The table is the
+    engine's
     (``suite_prediction_columns``).
     """
     import pandas as pd

@@ -1412,6 +1412,9 @@ TEST_CASE("suite gap fitting fits the named targets from the dataset's complete 
     CHECK(column("y_fit_method").text[1] == "recorded");
     CHECK(column("y_fit_method").text[0] != "recorded");
     CHECK(column("aspect_fit_method").text[0] != "recorded");
+    // The fit method already says which plots record the target.
+    for (const auto& c : table) CHECK(c.name.find("_recorded") == std::string::npos);
+    CHECK(torch::equal(y.recorded, y.gap_fit->method == kGapRecorded));
 
     // Gap fitting reads regression targets only, and needs the recorded column.
     SuitePredictOptions vote = opts;
@@ -1420,6 +1423,85 @@ TEST_CASE("suite gap fitting fits the named targets from the dataset's complete 
     SuitePredictOptions none = opts;
     none.columns.recorded.clear();
     CHECK_THROWS_AS(suite.predict(input, none), std::invalid_argument);
+}
+
+TEST_CASE("suite recorded columns without gap fitting flag the plots that record each target",
+          "[suite][predict][gap_fitting]") {
+    TempDir dir;
+    build_suite(dir);
+    // y recorded on every plot but every fourth, the bearing on every plot but
+    // every fifth.
+    const auto plots = corpus();
+    std::ostringstream header;
+    header << "plot,lat,lon,cov1,y_rec,asp_rec\n";
+    for (size_t i = 0; i < plots.size(); ++i) {
+        const auto& p = plots[i];
+        header << p.id << "," << p.lat << "," << p.lon << "," << p.cov << ","
+               << (i % 4 == 0 ? std::string("NA") : std::to_string(p.y)) << ","
+               << (i % 5 == 0 ? std::string("") : std::to_string(p.bearing)) << "\n";
+    }
+    dir.write("score/header_rec.csv", header.str());
+    dir.write("score/species_rec.csv", species_csv(plots));
+    const SuiteInput input =
+        SuiteInput::csv(dir.file("score/header_rec.csv"), dir.file("score/species_rec.csv"));
+
+    SuitePredictor suite = SuitePredictor::load(dir.path());
+    SuitePredictOptions opts;
+    opts.columns.recorded = {{"y", {"y_rec"}}, {"aspect", {"asp_rec"}}};
+    const SuitePredictions out = suite.predict(input, opts);
+
+    const auto& y = out.target("y");
+    const auto& asp = out.target("aspect");
+    CHECK_FALSE(y.gap_fit.has_value());
+    CHECK_FALSE(out.target("hab").recorded.defined());
+    REQUIRE(y.recorded.defined());
+    REQUIRE(asp.recorded.defined());
+    REQUIRE(y.recorded.size(0) == static_cast<int64_t>(plots.size()));
+    // Plots keep the header's order here, so plot i is row i.
+    REQUIRE(out.plot_ids[1] == plots[1].id);
+    for (int64_t i = 0; i < y.recorded.size(0); ++i) {
+        INFO(i);
+        CHECK(y.recorded[i].item<bool>() == (i % 4 != 0));
+        CHECK(asp.recorded[i].item<bool>() == (i % 5 != 0));
+    }
+    // The prediction itself is the one without recorded columns.
+    CHECK(torch::equal(y.value, suite.predict(input, SuitePredictOptions{}).target("y").value));
+
+    const auto table = suite_prediction_columns(out, false);
+    auto column = [&](const std::string& name) -> const SuiteColumn& {
+        for (const auto& c : table) {
+            if (c.name == name) return c;
+        }
+        FAIL("no column " << name);
+        return table.front();
+    };
+    const SuiteColumn& flag = column("y_recorded");
+    CHECK(flag.kind == SuiteColumn::Kind::Logical);
+    REQUIRE(flag.logical.size() == plots.size());
+    CHECK(flag.logical[0] == 0);
+    CHECK(flag.logical[1] == 1);
+    CHECK(column("aspect_recorded").logical[5] == 0);
+    // Right after the target's dispersion, before the recognition columns.
+    auto position = [&](const std::string& name) {
+        return std::find_if(table.begin(), table.end(), [&](const SuiteColumn& c) { return c.name == name; }) -
+               table.begin();
+    };
+    CHECK(position("y_recorded") == position("y_sd") + 1);
+    CHECK(position("y_n_species") == position("y_recorded") + 1);
+
+    // A classification, a column count that does not fit the target, an
+    // unknown target and a target named twice are refused.
+    SuitePredictOptions bad = opts;
+    bad.columns.recorded = {{"hab", {"y_rec"}}};
+    CHECK_THROWS_WITH(suite.predict(input, bad), ContainsSubstring("is a classification"));
+    bad.columns.recorded = {{"y", {"y_rec", "asp_rec"}}};
+    CHECK_THROWS_WITH(suite.predict(input, bad), ContainsSubstring("needs one recorded column"));
+    bad.columns.recorded = {{"nope", {"y_rec"}}};
+    CHECK_THROWS_WITH(suite.predict(input, bad), ContainsSubstring("no loaded target 'nope'"));
+    bad.columns.recorded = {{"y", {"y_rec"}}, {"y", {"y_rec"}}};
+    CHECK_THROWS_WITH(suite.predict(input, bad), ContainsSubstring("named twice"));
+    bad.columns.recorded = {{"y", {"no_such_column"}}};
+    CHECK_THROWS(suite.predict(input, bad));
 }
 
 TEST_CASE("suite names resolve per target vocabulary and predict as the tokens would",

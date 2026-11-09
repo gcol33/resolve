@@ -248,13 +248,15 @@ struct SuiteColumns {
     // length, since the members' input width is fixed.
     std::optional<std::vector<std::string>> covariates;
     std::optional<std::vector<std::string>> categoricals;
-    // Gap fitting (SuitePredictOptions::gap_fitting) only: per target fitted,
-    // the column(s) holding its recorded value -- one, or latitude and
-    // longitude for a position -- and the survey-year column of the time
-    // axis. Gap fitting reads positions from latitude / longitude above, or
-    // the contract's; a suite that reads no coordinates may still name them
-    // here for gap fitting alone.
+    // Per regression target, the column(s) holding its recorded value -- one,
+    // or latitude and longitude for a position. Each target named here gets
+    // SuiteTargetPrediction::recorded; with gap fitting
+    // (SuitePredictOptions::gap_fitting) these are the targets fitted.
     std::vector<std::pair<std::string, std::vector<std::string>>> recorded;
+    // Gap fitting only: the survey-year column of the time axis. Gap fitting
+    // reads positions from latitude / longitude above, or the contract's; a
+    // suite that reads no coordinates may still name them here for gap
+    // fitting alone.
     std::optional<std::string> survey_year;
     // Terrain correction (SuitePredictOptions::terrain) only: the columns
     // holding the elevation-model descriptors (TerrainSourceKind::Columns; an
@@ -394,6 +396,10 @@ struct SuiteTargetPrediction {
     // With SuitePredictOptions::names: the names the target's vocabulary read
     // as another token or left unresolved.
     SpeciesNameReport species_names;
+    // For a target SuiteColumns::recorded names: (n_plots,) bool, true where
+    // the plot records a value (recorded_plots), so `value` is imputed where
+    // it is false. Undefined for any other target.
+    torch::Tensor recorded;
     // With gap fitting for this target: `value` combined with the dataset's
     // own complete plots, the method per plot and the report. `value` itself
     // is left as the members' combined prediction.
@@ -508,14 +514,16 @@ struct SuiteCombineRule {
 // ============================================================================
 
 // One named column of a suite prediction table: text (plot IDs, class
-// labels), integers (class codes) or numbers (NaN where undefined).
+// labels), integers (class codes), logicals (0 / 1: whether a plot records a
+// value) or numbers (NaN where undefined).
 struct SuiteColumn {
-    enum class Kind { Text, Integer, Number };
+    enum class Kind { Text, Integer, Logical, Number };
     std::string name;
     Kind kind = Kind::Number;
     bool probability = false;  // a class-probability column
     std::vector<std::string> text;
     std::vector<int64_t> integers;
+    std::vector<uint8_t> logical;
     std::vector<float> numbers;
 };
 
@@ -528,7 +536,10 @@ struct SuiteColumn {
 // and with kept members `<t>_seed<N>` per member (a label for a vote,
 // `_latitude` / `_longitude` for a spherical mean). A gap-fitted target adds
 // `<t>_fitted` (`<t>_fitted_latitude` / `<t>_fitted_longitude`) and
-// `<t>_fit_method` after its prediction and dispersion; a terrain-corrected target
+// `<t>_fit_method` after its prediction and dispersion, and a target with
+// recorded values but no gap fit `<t>_recorded` there instead (the fit
+// method, "recorded" or a method, already says which plots record it); a
+// terrain-corrected target
 // `<t>_terrain`, `<t>_terrain_w_resolve`, `<t>_terrain_w_dem`,
 // `<t>_terrain_w_dem_1km`, `<t>_dem` and `<t>_dem_1km` after those. A class code is labelled
 // by class_label. The CLI writes this table, and the Python and R data frames
@@ -571,8 +582,15 @@ private:
     // latitude / longitude the contract does not read may be named: gap
     // fitting reads it, the members do not.
     [[nodiscard]] RoleMapping roles_for(const SuiteColumns& columns, bool gap_fitting) const;
+    // The index in targets_ of each target SuiteColumns::recorded names, in
+    // its order, checked against the target's combine rule.
+    [[nodiscard]] std::vector<std::size_t> recorded_targets(const SuiteColumns& columns) const;
+    // SuiteTargetPrediction::recorded of every target the columns name a
+    // recorded value for, read from the input's plot-level columns.
+    void mark_recorded(const SuiteInput& input, const SuiteColumns& columns,
+                       SuitePredictions& result) const;
     // Gap fitting over the combined predictions of every target the columns
-    // name a recorded value for.
+    // name a recorded value for; sets their `recorded` too.
     void fit_gaps(const SuiteInput& input, const SuiteColumns& columns,
                   const GapFittingConfig& config, SuitePredictions& result) const;
     // Terrain correction of every loaded target the manifest gives one.

@@ -258,10 +258,12 @@ given it decides which plots are scored and in what order. `columns`, a
 `SuiteColumns` or a `dict` of its fields, renames the contract’s columns
 for a table that spells them differently. `batch_size` is the forward
 chunk of each member; `keep_members` keeps every member’s own imputed
-value. No target column is read, except with `gap_fitting` (`True`, a
-`GapFittingConfig` or a `dict` of its fields): each target
-`columns["recorded"]` names is then fitted from the dataset’s own
-complete plots ([Filling a dataset’s
+value. No target column is read, except the ones `columns["recorded"]`
+names: each such target gets `recorded` (`True` where the plot records
+it) and a `<target>_recorded` column in `to_pandas`, or with
+`gap_fitting` (`True`, a `GapFittingConfig` or a `dict` of its fields)
+is fitted from the dataset’s own complete plots instead ([Filling a
+dataset’s
 gaps](https://gillescolling.com/resolve/articles/gap-fitting.md)). With
 `terrain` (`"field"` or `True`, `"columns"`, a `dict` of `source`,
 `grids` and `device`, or a `SuiteTerrainOptions`), every target the
@@ -290,9 +292,10 @@ Renames the manifest’s input columns at imputation time; a field left
 `None` keeps the manifest’s name. The fields follow `RoleMapping`:
 `plot_id`, `species_id`, `abundance`, `genus`, `family`, `latitude`,
 `longitude`, and `covariates` and `categoricals`, which replace the
-whole list and must match its length. For gap fitting, `recorded` lists
-`(target, [column])` pairs, `(target, [latitude, longitude])` for a
-location (a `dict` passed to `predict` may give `{target: column}`), and
+whole list and must match its length. `recorded` lists
+`(target, [column])` pairs naming each regression target’s recorded
+value, `(target, [latitude, longitude])` for a location (a `dict` passed
+to `predict` may give `{target: column}`); for gap fitting,
 `survey_year` names the survey-year column; a suite that reads no
 coordinates may still name `latitude` and `longitude` for gap fitting
 alone.
@@ -348,6 +351,9 @@ One target’s imputed values for every plot.
   `(n_members, n_plots)` or `(n_members, n_plots, 2)`.
 - `recognition` (`SpeciesRecognition`): how much of each plot the
   target’s vocabulary recognises.
+- `recorded` (`(n_plots,)` bool tensor or `None`): for a target
+  `columns["recorded"]` names, `True` where the plot records the target,
+  so `value` is imputed where it is `False`.
 - `gap_fit` (`GapFit` or `None`): with gap fitting, the fitted values,
   the method per plot and the report
   ([`GapFit`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapFit)).

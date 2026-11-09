@@ -231,8 +231,34 @@ int predict_command(const ParsedArgs& args) {
 
     // Gap fitting: each --recorded target from the dataset's own complete
     // plots, read from the same tables in the predictions' plot order.
+    // Without it, each --recorded target says which plots record it.
     std::vector<GapFit> gap_fits;
     std::vector<GapFitRequest> gap_requests;
+    std::vector<std::pair<std::string, torch::Tensor>> recorded_flags;
+    if (!gap_fitting && args.has("--recorded")) {
+        try {
+            const auto recorded = resolve_cli::read_recorded(args);
+            std::vector<std::string> recorded_columns;
+            for (const auto& [name, cols] : recorded) {
+                recorded_columns.insert(recorded_columns.end(), cols.begin(), cols.end());
+            }
+            std::optional<TableSource> header_source;
+            if (!header_path.empty()) header_source = TableSource::csv(header_path);
+            const auto values = read_plot_columns(header_source, TableSource::csv(species_path), roles.plot_id,
+                                                  recorded_columns, predictions.plot_ids, "recorded values");
+            std::size_t next = 0;
+            for (const auto& [name, cols] : recorded) {
+                std::vector<torch::Tensor> parts;
+                for (std::size_t c = 0; c < cols.size(); ++c) {
+                    parts.push_back(torch::tensor(values[next++], torch::kFloat64));
+                }
+                recorded_flags.emplace_back(name, recorded_plots(torch::stack(parts, 1)).contiguous());
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error reading recorded values: " << e.what() << std::endl;
+            return 1;
+        }
+    }
     if (gap_fitting) {
         try {
             GapColumns gap_columns;
@@ -322,6 +348,7 @@ int predict_command(const ParsedArgs& args) {
         }
         out << "," << csv_field(name + "_fit_method");
     }
+    for (const auto& [name, flags] : recorded_flags) out << "," << csv_field(name + "_recorded");
     out << "\n";
 
     // Each target's outputs as contiguous CPU tensors in the dtype the writer
@@ -394,6 +421,9 @@ int predict_command(const ParsedArgs& args) {
             const float* values = fitted.data_ptr<float>() + row * fitted.size(1);
             for (int64_t c = 0; c < fitted.size(1); ++c) out << "," << resolve_cli::csv_number(values[c]);
             out << "," << csv_field(gap_method_label(gap_methods[g].data_ptr<int64_t>()[row]));
+        }
+        for (const auto& [name, flags] : recorded_flags) {
+            out << "," << (flags.data_ptr<bool>()[row] ? "TRUE" : "FALSE");
         }
         out << "\n";
     }

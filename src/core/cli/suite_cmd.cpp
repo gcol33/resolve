@@ -39,6 +39,7 @@ void write_columns(std::ostream& out, const std::vector<resolve::SuiteColumn>& c
             switch (column.kind) {
                 case Kind::Text: out << csv_field(column.text[i]); break;
                 case Kind::Integer: out << column.integers[i]; break;
+                case Kind::Logical: out << (column.logical[i] ? "TRUE" : "FALSE"); break;
                 case Kind::Number: out << csv_number(column.numbers[i]); break;
             }
         }
@@ -103,8 +104,8 @@ int predict_suite_command(const ParsedArgs& args) {
     predict.columns = resolve_cli::read_suite_columns(args);
     try {
         predict.gap_fitting = resolve_cli::read_gap_fitting(args);
+        predict.columns.recorded = resolve_cli::read_recorded(args);
         if (predict.gap_fitting) {
-            predict.columns.recorded = resolve_cli::read_recorded(args);
             predict.columns.survey_year = resolve_cli::role_flag(args, "--survey-year");
         }
         predict.names = resolve_cli::read_species_names(args);

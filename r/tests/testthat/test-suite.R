@@ -258,6 +258,19 @@ test_that("suite gap fitting adds fitted columns and a report per fitted target"
   expect_error(suppressMessages(resolve.predict.suite(
     suite, species = data$species, header = header,
     columns = list(recorded = list(hab = "y_rec")), gapFitting = TRUE)), "regression")
+  expect_false("y_recorded" %in% names(frame))
+
+  # Without gap fitting, a recorded column flags the plots that record it.
+  flagged <- suppressMessages(resolve.predict.suite(
+    suite, species = data$species, header = header,
+    columns = list(recorded = list(y = "y_rec"))))
+  expect_null(flagged$targets$y$gap_fit)
+  expect_null(flagged$targets$hab$recorded)
+  expect_identical(flagged$targets$y$recorded, !is.na(header$y_rec))
+  flat <- as.data.frame(flagged)
+  expect_type(flat$y_recorded, "logical")
+  expect_identical(flat$y_recorded, !is.na(header$y_rec))
+  expect_identical(match("y_recorded", names(flat)), match("y_sd", names(flat)) + 1L)
 
   # The single-model path over one member's predictions.
   member <- file.path(root, suite$manifest()$targets[[2]]$members[[1]]$file)

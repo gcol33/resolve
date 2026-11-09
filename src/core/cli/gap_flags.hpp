@@ -40,9 +40,10 @@ inline void append_gap_flags(std::vector<FlagSpec>& flags) {
                      "'<target>_fit_method' beside the raw prediction,\n"
                      "and a report of what was chosen (--gap-report)."});
     flags.push_back({"--recorded", Arity::Repeatable, "T=COL", "",
-                     "With --fit-gaps: the column holding target T's\n"
-                     "recorded value, missing on the plots to fill;\n"
-                     "T=LAT,LON for a location. Repeat per target."});
+                     "The column holding target T's recorded value,\n"
+                     "missing on the plots to impute; T=LAT,LON for a\n"
+                     "location. Repeat per target. Adds '<target>_recorded'\n"
+                     "(TRUE / FALSE), or with --fit-gaps the gap fit."});
     flags.push_back({"--survey-year", Arity::Value, "COL", "",
                      "With --fit-gaps: the survey-year column; the\n"
                      "matched test then also hides plots closer in time\n"
@@ -83,10 +84,10 @@ inline std::vector<std::pair<std::string, std::vector<std::string>>> read_record
 }
 
 // The gap-fitting config, or nullopt without --fit-gaps (where a gap flag
-// given anyway is an error).
+// given anyway is an error; --recorded stands on its own).
 inline std::optional<resolve::GapFittingConfig> read_gap_fitting(const ParsedArgs& args) {
     if (!args.has("--fit-gaps")) {
-        for (const char* flag : {"--recorded", "--survey-year", "--gap-target", "--gap-report",
+        for (const char* flag : {"--survey-year", "--gap-target", "--gap-report",
                                  "--gap-candidates", "--gap-k-grid", "--spatial", "--no-spatial",
                                  "--gap-seed"}) {
             if (args.has(flag)) throw ArgError(std::string(flag) + " needs --fit-gaps");

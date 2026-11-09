@@ -572,7 +572,12 @@ TEST_CASE("The gap-fitting flags of predict land on GapFittingConfig and the rec
     CHECK(recorded[1].second == std::vector<std::string>{"lat_rec", "lon_rec"});
 
     CHECK_FALSE(read_gap_fitting(parse_args(predict_spec(), {})).has_value());
-    CHECK_THROWS_AS(read_gap_fitting(parse_args(predict_spec(), {"--recorded", "a=b"})), ArgError);
+    // --recorded stands on its own (it adds '<target>_recorded'); the other
+    // gap flags need --fit-gaps.
+    const auto alone = parse_args(predict_spec(), {"--recorded", "a=b"});
+    CHECK_FALSE(read_gap_fitting(alone).has_value());
+    CHECK(read_recorded(alone) == std::vector<std::pair<std::string, std::vector<std::string>>>{{"a", {"b"}}});
+    CHECK_THROWS_AS(read_gap_fitting(parse_args(predict_spec(), {"--survey-year", "y"})), ArgError);
     CHECK_THROWS_AS(read_gap_fitting(parse_args(predict_spec(), {"--fit-gaps"})), ArgError);
     CHECK_THROWS_AS(read_gap_fitting(parse_args(predict_spec(), {"--fit-gaps", "--recorded", "a=b",
                                                                  "--gap-candidates", "sideways"})),

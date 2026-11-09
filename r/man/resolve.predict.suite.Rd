@@ -31,8 +31,10 @@ Must be the same kind (data.frame or path) as \code{species}.}
 \item{columns}{Named list renaming the manifest's input columns, with keys
 among \code{plot_id}, \code{species_id}, \code{abundance}, \code{latitude}, \code{longitude},
 \code{genus}, \code{family}, \code{covariates}, \code{categoricals} (another key is an
-error), for gap fitting \code{recorded} (a named list of target ->
-recorded column, \code{c(latitude, longitude)} for a location) and
+error), \code{recorded} (a named list of regression target -> the column
+holding its recorded value, \code{c(latitude, longitude)} for a location;
+adds \verb{<target>_recorded} to \code{\link[=as.data.frame]{as.data.frame()}} and \code{recorded} to the
+target, or with \code{gapFitting} the gap fit), for gap fitting
 \code{survey_year}, and for terrain correction \code{terrain} (a named list of
 \code{elevation}, \code{elevation_1km}, \code{slope}, \code{slope_1km} and \code{uncertainty}
 column names).}
@@ -75,7 +77,9 @@ named list with one entry per target holding \code{value} (the combined
 prediction; class codes for a vote, with the class labels in \code{label}; a
 plots x 2 matrix of \code{latitude} and \code{longitude} in degrees for a spherical
 mean), \code{agreement}, \code{probabilities}, \code{dispersion}, the recognition columns
-above, \code{members} (plots x members, with \code{keepMembers}; for a spherical
+above, \code{recorded} (for a target \code{columns$recorded} names: logical, \code{TRUE}
+where the plot records a value, so \code{value} is imputed where it is
+\code{FALSE}), \code{members} (plots x members, with \code{keepMembers}; for a spherical
 mean a list of \code{latitude} and \code{longitude}, each plots x members), and the
 target's \code{units}, \code{dispersion_units}, \code{status} and \code{limit}.
 \code{\link[=as.data.frame]{as.data.frame()}} flattens it to one row per plot.

@@ -2496,6 +2496,7 @@ resolve_value* suite_predictions_to_value(const SuitePredictions& p) {
         v_put(m, "recognised_share", defined_or_null(t.recognition.count_share, RESOLVE_VALUE_DOUBLE_ARRAY));
         v_put(m, "recognised_abundance_share",
               defined_or_null(t.recognition.abundance_share, RESOLVE_VALUE_DOUBLE_ARRAY));
+        v_put(m, "recorded", t.recorded.defined() ? tensor_to_ivec(t.recorded) : v_null());
         v_put(m, "gap_fit", t.gap_fit ? gap_fit_to_value(*t.gap_fit) : v_null());
         if (t.terrain) {
             auto* tm = v_map();
@@ -2516,6 +2517,7 @@ resolve_value* suite_predictions_to_value(const SuitePredictions& p) {
     auto* columns = v_map();
     v_put(result, "columns", columns);
     std::vector<std::string> probability_columns;
+    std::vector<std::string> logical_columns;
     for (const auto& column : suite_prediction_columns(p, /*probabilities=*/true)) {
         switch (column.kind) {
             case SuiteColumn::Kind::Text:
@@ -2524,6 +2526,11 @@ resolve_value* suite_predictions_to_value(const SuitePredictions& p) {
             case SuiteColumn::Kind::Integer:
                 v_put(columns, column.name, v_int_array(column.integers));
                 break;
+            case SuiteColumn::Kind::Logical:
+                v_put(columns, column.name,
+                      v_int_array(std::vector<int64_t>(column.logical.begin(), column.logical.end())));
+                logical_columns.push_back(column.name);
+                break;
             case SuiteColumn::Kind::Number:
                 v_put(columns, column.name, v_double_array(column.numbers));
                 break;
@@ -2531,6 +2538,7 @@ resolve_value* suite_predictions_to_value(const SuitePredictions& p) {
         if (column.probability) probability_columns.push_back(column.name);
     }
     v_put(result, "probability_columns", v_string_array(probability_columns));
+    v_put(result, "logical_columns", v_string_array(logical_columns));
     return g.release();
 }
 

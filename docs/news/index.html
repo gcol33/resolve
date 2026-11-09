@@ -76,6 +76,14 @@
     </div>
 
     <div class="section level2">
+<h2 class="pkg-version" data-toc-text="development version" id="resolver-development-version">resolveR (development version)<a class="anchor" aria-label="anchor" href="#resolver-development-version"></a></h2>
+<div class="section level3">
+<h3 id="added-development-version">Added<a class="anchor" aria-label="anchor" href="#added-development-version"></a></h3>
+<ul><li>
+<strong>Which values were imputed.</strong> Naming a regression target’s recorded column without gap fitting (<code>columns$recorded</code> in R, <code>columns["recorded"]</code> in Python, <code>resolve predict --recorded T=COL</code> without <code>--fit-gaps</code>, for <code>--suite</code> and <code>--model</code>) adds <code>&lt;target&gt;_recorded</code> to the suite table: <code>TRUE</code> where the plot records the target, <code>FALSE</code> where its value is imputed. Each such target also carries <code>recorded</code> (a logical per plot). With gap fitting, <code>&lt;target&gt;_fit_method</code> already says it (<code>recorded</code> or the method), so no flag column is added. The browser app adds the same column, <code>&lt;variable&gt;, recorded</code>, for a variable the header records on some plots when its gaps are not fitted. <code>SuiteColumn</code> gains a <code>Logical</code> kind; the C ABI writes it as 0 / 1 and lists it in <code>logical_columns</code>.</li>
+</ul></div>
+</div>
+    <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.1.0" id="resolver-110">resolveR 1.1.0<a class="anchor" aria-label="anchor" href="#resolver-110"></a></h2>
 <div class="section level3">
 <h3 id="added-1-1-0">Added<a class="anchor" aria-label="anchor" href="#added-1-1-0"></a></h3>

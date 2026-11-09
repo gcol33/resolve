@@ -710,6 +710,22 @@ async function predictTargets(result, targets, header, species) {
   }
 }
 
+// A target the tables record on some plots but not all, whose gaps were not
+// fitted: whether each plot records it, in the prediction's plot order, as the
+// engine's `<target>_recorded` column (TRUE / FALSE). A gap fit's method
+// column says it otherwise, and a target recorded on no plot is imputed on
+// every one.
+function pushRecorded(result, target) {
+  const count = recordedCount(target);
+  if (!count || count.recorded === 0 || count.recorded === count.total) return;
+  const { num } = gapPlots(result);
+  const values = target.outputs.map(num);
+  result.columns.push({
+    name: `${label(target)}, recorded`,
+    values: Array.from(values[0], (_, p) => (values.every((v) => Number.isFinite(v[p])) ? "TRUE" : "FALSE")),
+  });
+}
+
 // A unit as the manifest writes it (m^2), in the page's typography (m²).
 const unitText = (u) => u.replace(/\^2\b/g, "²").replace(/\^3\b/g, "³");
 
@@ -745,6 +761,8 @@ async function addTarget(result, target, meta, outputs, encoded) {
                           { name: "Longitude, gaps filled", values: Array.from(c.lat, (_, p) => fit.fitted[2 * p + 1]), digits: 4 },
                           { name: "Location, gap method", values: Array.from(fit.method, gapMethodLabel) });
       result.filledCoords = Array.from(c.lat, (_, p) => [fit.fitted[2 * p], fit.fitted[2 * p + 1]]);
+    } else {
+      pushRecorded(result, target);
     }
   } else {
     const name = target.outputs[0];
@@ -757,6 +775,8 @@ async function addTarget(result, target, meta, outputs, encoded) {
     if (fit) {
       result.columns.push({ name: `${label(target)}${units}, gaps filled`, values: Array.from(fit.fitted), digits: 1 },
                           { name: `${label(target)}, gap method`, values: Array.from(fit.method, gapMethodLabel) });
+    } else {
+      pushRecorded(result, target);
     }
     if (target.terrain && terrainOn()) await addTerrain(result, target, c, encoded, units);
   }

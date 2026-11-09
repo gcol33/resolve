@@ -177,6 +177,11 @@ struct GapFitReport {
 // recorded value.
 inline constexpr int64_t kGapRecorded = -1;
 
+// The plots that record a value: (n,) bool, true where every value of the
+// plot's row of `recorded` ((n,), or (n, 2) latitude / longitude) is finite.
+// The rest are the gaps.
+[[nodiscard]] torch::Tensor recorded_plots(const torch::Tensor& recorded);
+
 struct GapFit {
     // Per plot in the target's units, like the raw prediction: (n,) float64,
     // or (n, 2) latitude / longitude for a position. A complete plot carries

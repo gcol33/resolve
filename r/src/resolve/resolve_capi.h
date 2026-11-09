@@ -560,9 +560,10 @@ RESOLVE_CAPI resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const 
  *   columns       MAP  renames the manifest's input columns; keys as in a
  *                      roles tree (plot_id species_id abundance latitude
  *                      longitude genus family covariates categoricals)
- *                      plus, for gap fitting, recorded (MAP target name ->
- *                      STRING, or STRING_ARRAY latitude, longitude) and
- *                      survey_year (STRING)
+ *                      plus recorded (MAP regression target name ->
+ *                      STRING, or STRING_ARRAY latitude, longitude: the
+ *                      column holding its recorded value) and, for gap
+ *                      fitting, survey_year (STRING)
  *   batch_size    INT  per-member forward chunk (default 4096)
  *   keep_members  BOOL keep every member's own prediction (default false)
  *   gap_fitting   MAP  a GapFittingConfig (candidates, k_grid, spatial,
@@ -584,17 +585,20 @@ RESOLVE_CAPI resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const 
  * longitude in degrees; DOUBLE_ARRAY otherwise) agreement probabilities
  * dispersion members (members x plots; for a spherical mean a MAP of
  * "latitude" and "longitude", each members x plots) n_species n_recognised
- * recognised_share recognised_abundance_share gap_fit (NULL-kind, or with gap
+ * recognised_share recognised_abundance_share recorded (NULL-kind, or for a
+ * target columns.recorded names an INT_ARRAY of 1 where the plot records a
+ * value, 0 where it does not) gap_fit (NULL-kind, or with gap
  * fitting a MAP as resolve_fit_gaps returns) terrain (NULL-kind, or with
  * terrain correction a MAP: descriptor source dem dem_1km and the MAP
  * resolve_terrain_correction_apply returns under "result") species_names (as
  * resolve_dataset_get's species_names; empty without names). A statistic the target's
  * combine rule does not define is NULL-kind; NaN marks an undefined value.
  * "columns" is the same prediction as an ordered MAP of column name -> array,
- * one entry per plot (STRING_ARRAY labels, INT_ARRAY codes, DOUBLE_ARRAY
- * numbers), the columns `resolve predict --suite --probabilities --members`
- * writes; "probability_columns" (STRING_ARRAY) names its class-probability
- * columns. */
+ * one entry per plot (STRING_ARRAY labels, INT_ARRAY codes and 0 / 1
+ * logicals, DOUBLE_ARRAY numbers), the columns `resolve predict --suite
+ * --probabilities --members` writes; "probability_columns" (STRING_ARRAY)
+ * names its class-probability columns and "logical_columns" (STRING_ARRAY)
+ * its logical ones. */
 RESOLVE_CAPI resolve_value_t* resolve_suite_predict_dataframe(
     resolve_suite_t* s, const resolve_value_t* header, const resolve_value_t* species,
     const resolve_value_t* options);

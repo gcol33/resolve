@@ -635,6 +635,13 @@ void GapFittingConfig::validate() const {
     for (const GapMethod method : candidates) (void)candidate_spec(method);
 }
 
+torch::Tensor recorded_plots(const torch::Tensor& recorded) {
+    if (!recorded.defined() || recorded.dim() < 1 || recorded.dim() > 2) {
+        throw std::invalid_argument("recorded values: expected (n,) or (n, 2) values");
+    }
+    return finite_rows(recorded.dim() == 1 ? recorded.unsqueeze(1) : recorded);
+}
+
 std::string gap_method_label(int64_t code) {
     if (code == kGapRecorded) return "recorded";
     return enum_to_name(static_cast<GapMethod>(code));
@@ -730,8 +737,7 @@ void validate_inputs(const GapTarget& target, const torch::Tensor& raw, const to
 
 // The complete plots (every recorded value finite) and the gaps, as rows.
 std::pair<torch::Tensor, torch::Tensor> divide(const torch::Tensor& recorded_values) {
-    const torch::Tensor rows = recorded_values.dim() == 1 ? recorded_values.unsqueeze(1) : recorded_values;
-    const torch::Tensor complete = finite_rows(rows);
+    const torch::Tensor complete = recorded_plots(recorded_values);
     return {complete.nonzero().select(1, 0), complete.logical_not().nonzero().select(1, 0)};
 }
 

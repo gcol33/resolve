@@ -144,8 +144,10 @@ resolve.seal_suite <- function(dir) {
 #' @param columns Named list renaming the manifest's input columns, with keys
 #'   among `plot_id`, `species_id`, `abundance`, `latitude`, `longitude`,
 #'   `genus`, `family`, `covariates`, `categoricals` (another key is an
-#'   error), for gap fitting `recorded` (a named list of target ->
-#'   recorded column, `c(latitude, longitude)` for a location) and
+#'   error), `recorded` (a named list of regression target -> the column
+#'   holding its recorded value, `c(latitude, longitude)` for a location;
+#'   adds `<target>_recorded` to [as.data.frame()] and `recorded` to the
+#'   target, or with `gapFitting` the gap fit), for gap fitting
 #'   `survey_year`, and for terrain correction `terrain` (a named list of
 #'   `elevation`, `elevation_1km`, `slope`, `slope_1km` and `uncertainty`
 #'   column names).
@@ -181,7 +183,9 @@ resolve.seal_suite <- function(dir) {
 #'   prediction; class codes for a vote, with the class labels in `label`; a
 #'   plots x 2 matrix of `latitude` and `longitude` in degrees for a spherical
 #'   mean), `agreement`, `probabilities`, `dispersion`, the recognition columns
-#'   above, `members` (plots x members, with `keepMembers`; for a spherical
+#'   above, `recorded` (for a target `columns$recorded` names: logical, `TRUE`
+#'   where the plot records a value, so `value` is imputed where it is
+#'   `FALSE`), `members` (plots x members, with `keepMembers`; for a spherical
 #'   mean a list of `latitude` and `longitude`, each plots x members), and the
 #'   target's `units`, `dispersion_units`, `status` and `limit`.
 #'   [as.data.frame()] flattens it to one row per plot.
@@ -255,6 +259,7 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
       n_recognised = t$n_recognised,
       recognised_share = t$recognised_share,
       recognised_abundance_share = t$recognised_abundance_share,
+      recorded = if (is.null(t$recorded)) NULL else as.logical(unlist(t$recorded)),
       members = NULL,
       combine = t$combine,
       units = t$units,
@@ -307,7 +312,11 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
   for (name in names(experimental)) {
     message(sprintf("'%s' is released as experimental: %s", name, experimental[[name]]$limit))
   }
-  structure(list(plot_ids = plot_ids, targets = targets, columns = raw$columns,
+  columns <- raw$columns
+  for (name in as.character(unlist(raw$logical_columns))) {
+    columns[[name]] <- as.logical(unlist(columns[[name]]))
+  }
+  structure(list(plot_ids = plot_ids, targets = targets, columns = columns,
                  probability_columns = as.character(unlist(raw$probability_columns))),
             class = "resolve_suite_predictions")
 }
@@ -325,7 +334,9 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
 #' for each member (`<target>_seed<N>_latitude` and `_longitude` for a
 #' spherical mean); a gap-fitted target adds `<target>_fitted`
 #' (`<target>_fitted_latitude` / `_fitted_longitude`) and
-#' `<target>_fit_method`; a terrain-corrected target `<target>_terrain`,
+#' `<target>_fit_method`, and a target with recorded values but no gap fit
+#' `<target>_recorded` (logical) there instead; a terrain-corrected target
+#' `<target>_terrain`,
 #' `<target>_terrain_w_resolve`, `_w_dem`, `_w_dem_1km`, `<target>_dem` and
 #' `<target>_dem_1km`.
 #'

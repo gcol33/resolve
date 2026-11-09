@@ -1,5 +1,22 @@
 # Changelog
 
+## resolveR (development version)
+
+### Added
+
+- **Which values were imputed.** Naming a regression target’s recorded
+  column without gap fitting (`columns$recorded` in R,
+  `columns["recorded"]` in Python, `resolve predict --recorded T=COL`
+  without `--fit-gaps`, for `--suite` and `--model`) adds
+  `<target>_recorded` to the suite table: `TRUE` where the plot records
+  the target, `FALSE` where its value is imputed. Each such target also
+  carries `recorded` (a logical per plot). With gap fitting,
+  `<target>_fit_method` already says it (`recorded` or the method), so
+  no flag column is added. The browser app adds the same column,
+  `<variable>, recorded`, for a variable the header records on some
+  plots when its gaps are not fitted. `SuiteColumn` gains a `Logical`
+  kind; the C ABI writes it as 0 / 1 and lists it in `logical_columns`.
+
 ## resolveR 1.1.0
 
 ### Added

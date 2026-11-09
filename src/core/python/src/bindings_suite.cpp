@@ -304,8 +304,9 @@ void register_suite(nb::module_& m) {
         .def_rw("covariates", &SuiteColumns::covariates)
         .def_rw("categoricals", &SuiteColumns::categoricals)
         .def_rw("recorded", &SuiteColumns::recorded,
-                "Gap fitting: per target fitted, (target, [column]) or (target, [latitude, "
-                "longitude]) naming its recorded value.")
+                "Per regression target, (target, [column]) or (target, [latitude, longitude]) "
+                "naming its recorded value: each gets SuiteTargetPrediction.recorded, and with "
+                "gap fitting these are the targets fitted.")
         .def_rw("survey_year", &SuiteColumns::survey_year,
                 "Gap fitting: the survey-year column of the time axis.")
         .def_rw("terrain", &SuiteColumns::terrain,
@@ -328,6 +329,9 @@ void register_suite(nb::module_& m) {
         .def_prop_ro("dispersion", [](const SuiteTargetPrediction& t) { return tensor_or_none(t.dispersion); })
         .def_prop_ro("members", [](const SuiteTargetPrediction& t) { return tensor_or_none(t.members); })
         .def_ro("recognition", &SuiteTargetPrediction::recognition)
+        .def_prop_ro("recorded", [](const SuiteTargetPrediction& t) { return tensor_or_none(t.recorded); },
+                     "For a target columns['recorded'] names: (n_plots,) bool, True where the plot "
+                     "records a value, so `value` is imputed where it is False; None otherwise.")
         .def_ro("gap_fit", &SuiteTargetPrediction::gap_fit,
                 "The GapFit of a gap-fitted target (fitted, method, report), or None.")
         .def_ro("terrain", &SuiteTargetPrediction::terrain,
@@ -346,23 +350,31 @@ void register_suite(nb::module_& m) {
               nb::list out;
               for (auto& column : suite_prediction_columns(predictions, probabilities)) {
                   nb::object values;
-                  const auto n = static_cast<int64_t>(column.kind == SuiteColumn::Kind::Text
-                                                          ? column.text.size()
-                                                          : column.kind == SuiteColumn::Kind::Integer
-                                                              ? column.integers.size()
-                                                              : column.numbers.size());
                   switch (column.kind) {
                       case SuiteColumn::Kind::Text:
                           values = nb::cast(column.text);
                           break;
-                      case SuiteColumn::Kind::Integer:
+                      case SuiteColumn::Kind::Integer: {
+                          const auto n = static_cast<int64_t>(column.integers.size());
                           values = tensor_or_none(
                               torch::tensor(column.integers, torch::kInt64).reshape({n}));
                           break;
-                      case SuiteColumn::Kind::Number:
+                      }
+                      case SuiteColumn::Kind::Logical: {
+                          const auto n = static_cast<int64_t>(column.logical.size());
+                          values = tensor_or_none(
+                              torch::tensor(std::vector<int64_t>(column.logical.begin(), column.logical.end()),
+                                            torch::kInt64)
+                                  .reshape({n})
+                                  .to(torch::kBool));
+                          break;
+                      }
+                      case SuiteColumn::Kind::Number: {
+                          const auto n = static_cast<int64_t>(column.numbers.size());
                           values = tensor_or_none(
                               torch::tensor(column.numbers, torch::kFloat32).reshape({n}));
                           break;
+                      }
                   }
                   out.append(nb::make_tuple(column.name, values));
               }
@@ -371,7 +383,8 @@ void register_suite(nb::module_& m) {
           nb::arg("predictions"), nb::arg("probabilities") = false,
           "The predictions as (column name, values) pairs, one value per plot: the columns "
           "`resolve predict --suite` writes. Labels and plot IDs are lists of str, class "
-          "codes int64 tensors, every other column a float32 tensor (NaN where undefined).");
+          "codes int64 tensors, `<target>_recorded` bool tensors, every other column a float32 "
+          "tensor (NaN where undefined).");
 
     nb::class_<SuitePredictor>(m, "SuitePredictor",
                                "A model suite loaded from its directory, scored as one model.")

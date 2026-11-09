@@ -438,6 +438,14 @@ name, on a log scale when the model learned it on log1p;
 <code>--gap-target aspect=circular:360:asp_sin,asp_cos</code> or
 <code>--gap-target location=geographic:lat,lon</code> names the scale
 and the heads otherwise.</p>
+<p><code>&lt;target&gt;_fit_method</code> reads <code>recorded</code> on
+the plots that record the target, so it also tells which values were
+imputed. Without gap fitting, the recorded columns alone
+(<code>columns$recorded</code> in R, <code>columns["recorded"]</code> in
+Python, <code>--recorded</code> without <code>--fit-gaps</code>) add
+<code>&lt;target&gt;_recorded</code> instead: <code>TRUE</code> where
+the plot records the target, <code>FALSE</code> where
+<code>&lt;target&gt;</code> is imputed.</p>
 </div>
 <div class="section level2">
 <h2 id="settings">Settings<a class="anchor" aria-label="anchor" href="#settings"></a>

@@ -715,6 +715,34 @@ def test_suite_gap_fitting_adds_fitted_columns_and_reports(suite_dir, tmp_path):
         suite.predict(s, h, columns={"recorded": {"hab": "y_rec"}}, gap_fitting=True)
 
 
+def test_suite_recorded_columns_without_gap_fitting_flag_recorded_plots(suite_dir, tmp_path):
+    h, s = _recorded_scoring(tmp_path)
+    suite = rc.SuitePredictor.load(str(suite_dir))
+    out = suite.predict(s, h, columns={"recorded": {"y": "y_rec", "aspect": "asp_rec"}})
+    y = out.target("y")
+    assert y.gap_fit is None
+    assert out.target("hab").recorded is None
+    assert y.recorded.dtype == torch.bool
+    expected_y = [i % 4 != 0 for i in range(len(h))]
+    assert y.recorded.tolist() == expected_y
+    assert out.target("aspect").recorded.tolist() == [i % 5 != 0 for i in range(len(h))]
+
+    frame = out.to_pandas()
+    assert frame["y_recorded"].dtype == bool
+    assert frame["y_recorded"].tolist() == expected_y
+    assert "y_fit_method" not in frame.columns
+    names = list(frame.columns)
+    assert names.index("y_recorded") == names.index("y_sd") + 1
+
+    # With gap fitting the fit method carries it, and no flag column is added.
+    fitted = suite.predict(s, h, columns={"recorded": {"y": "y_rec"}}, gap_fitting=True)
+    assert fitted.target("y").recorded.tolist() == expected_y
+    assert "y_recorded" not in fitted.to_pandas().columns
+
+    with pytest.raises(ValueError, match="classification"):
+        suite.predict(s, h, columns={"recorded": {"hab": "y_rec"}})
+
+
 def test_a_single_model_fits_its_gaps_from_its_predictions(suite_dir, tmp_path):
     h, s = _recorded_scoring(tmp_path)
     h.to_csv(tmp_path / "rec_header.csv", index=False)

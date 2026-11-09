@@ -967,6 +967,16 @@ SuiteColumn label_column(std::string name, const torch::Tensor& codes,
     return column;
 }
 
+SuiteColumn logical_column(std::string name, const torch::Tensor& flags) {
+    SuiteColumn column;
+    column.name = std::move(name);
+    column.kind = SuiteColumn::Kind::Logical;
+    const auto f = flags.to(torch::kCPU, torch::kBool).contiguous();
+    const bool* data = f.numel() > 0 ? f.data_ptr<bool>() : nullptr;
+    column.logical.assign(data, data + f.numel());
+    return column;
+}
+
 // Component `i` of a value laid out as `rule.value_columns`: the tensor itself
 // for one column, its column i for two.
 torch::Tensor value_component(const torch::Tensor& value, const SuiteCombineRule& rule, std::size_t i) {
@@ -1027,6 +1037,8 @@ std::vector<SuiteColumn> suite_prediction_columns(const SuitePredictions& predic
             method.text.reserve(static_cast<std::size_t>(codes.numel()));
             for (int64_t i = 0; i < codes.numel(); ++i) method.text.push_back(gap_method_label(data[i]));
             columns.push_back(std::move(method));
+        } else if (t.recorded.defined()) {
+            columns.push_back(logical_column(name + "_recorded", t.recorded));
         }
         if (t.terrain) {
             const TerrainCorrectionResult& r = t.terrain->result;
@@ -1541,9 +1553,59 @@ SuitePredictions SuitePredictor::predict(const SuiteInput& input,
             out.species_names = dataset.species_names();
         }
     }
-    if (options.gap_fitting) fit_gaps(input, options.columns, *options.gap_fitting, result);
+    if (options.gap_fitting) {
+        fit_gaps(input, options.columns, *options.gap_fitting, result);
+    } else if (!options.columns.recorded.empty()) {
+        mark_recorded(input, options.columns, result);
+    }
     if (options.terrain) correct_terrain(input, options.columns, *options.terrain, result);
     return result;
+}
+
+std::vector<std::size_t> SuitePredictor::recorded_targets(const SuiteColumns& columns) const {
+    std::vector<std::size_t> out;
+    for (const auto& [name, cols] : columns.recorded) {
+        std::size_t t = 0;
+        while (t < targets_.size() && manifest_.targets[targets_[t].spec].name != name) ++t;
+        if (t == targets_.size()) {
+            throw std::invalid_argument("recorded values: the suite has no loaded target '" + name + "'");
+        }
+        if (std::find(out.begin(), out.end(), t) != out.end()) {
+            throw std::invalid_argument("recorded values: target '" + name + "' is named twice");
+        }
+        const SuiteTarget& spec = manifest_.targets[targets_[t].spec];
+        if (spec.combine == SuiteCombine::Vote) {
+            throw std::invalid_argument(
+                "recorded values: target '" + name + "' is a classification; recorded values are "
+                "read for regression targets only");
+        }
+        const std::size_t expected = spec.combine == SuiteCombine::SphericalMean ? 2 : 1;
+        if (cols.size() != expected) {
+            throw std::invalid_argument(
+                "recorded values: target '" + name + "' needs " +
+                (expected == 2 ? "two recorded columns (latitude, longitude)" : "one recorded column") +
+                ", got " + std::to_string(cols.size()));
+        }
+        out.push_back(t);
+    }
+    return out;
+}
+
+void SuitePredictor::mark_recorded(const SuiteInput& input, const SuiteColumns& columns,
+                                   SuitePredictions& result) const {
+    const std::vector<std::size_t> indices = recorded_targets(columns);
+    std::vector<std::string> names;
+    for (const auto& [target, cols] : columns.recorded) names.insert(names.end(), cols.begin(), cols.end());
+    const std::vector<std::vector<double>> values = input.plot_columns(
+        columns.plot_id.value_or(manifest_.inputs.plot_id), names, result.plot_ids, "recorded values");
+    std::size_t next = 0;
+    for (std::size_t i = 0; i < indices.size(); ++i) {
+        std::vector<torch::Tensor> parts;
+        for (std::size_t c = 0; c < columns.recorded[i].second.size(); ++c) {
+            parts.push_back(torch::tensor(values[next++], torch::kFloat64));
+        }
+        result.targets[indices[i]].recorded = recorded_plots(torch::stack(parts, 1));
+    }
 }
 
 void SuitePredictor::fit_gaps(const SuiteInput& input, const SuiteColumns& columns,
@@ -1554,6 +1616,7 @@ void SuitePredictor::fit_gaps(const SuiteInput& input, const SuiteColumns& colum
             "gap fitting: name the column holding each fitted target's recorded value "
             "(SuiteColumns::recorded)");
     }
+    const std::vector<std::size_t> indices = recorded_targets(columns);
     const SuiteInputContract& in = manifest_.inputs;
     GapColumns gap_columns;
     gap_columns.plot_id = columns.plot_id.value_or(in.plot_id);
@@ -1576,20 +1639,14 @@ void SuitePredictor::fit_gaps(const SuiteInput& input, const SuiteColumns& colum
         GapTarget target;
     };
     std::vector<Fitted> fitted;
-    for (const auto& [name, cols] : columns.recorded) {
-        std::size_t t = 0;
-        while (t < targets_.size() && manifest_.targets[targets_[t].spec].name != name) ++t;
-        if (t == targets_.size()) {
-            throw std::invalid_argument("gap fitting: the suite has no loaded target '" + name + "'");
-        }
+    for (const std::size_t t : indices) {
         const SuiteTarget& spec = manifest_.targets[targets_[t].spec];
         GapTarget target;
-        target.name = name;
+        target.name = spec.name;
         switch (spec.combine) {
             case SuiteCombine::Vote:
-                throw std::invalid_argument(
-                    "gap fitting: target '" + name + "' is a classification; gap fitting fits "
-                    "regression targets only");
+                throw std::logic_error("gap fitting: recorded_targets admitted classification target '" +
+                                       spec.name + "'");
             case SuiteCombine::SphericalMean: target.scale = GapScale::Geographic; break;
             case SuiteCombine::CircularMean:
                 target.scale = GapScale::Circular;
@@ -1608,13 +1665,6 @@ void SuitePredictor::fit_gaps(const SuiteInput& input, const SuiteColumns& colum
                 break;
             }
         }
-        const std::size_t expected = target.scale == GapScale::Geographic ? 2 : 1;
-        if (cols.size() != expected) {
-            throw std::invalid_argument(
-                "gap fitting: target '" + name + "' needs " +
-                (expected == 2 ? "two recorded columns (latitude, longitude)" : "one recorded column") +
-                ", got " + std::to_string(cols.size()));
-        }
         fitted.push_back({t, std::move(target)});
     }
     gap_columns.recorded = columns.recorded;
@@ -1622,8 +1672,9 @@ void SuitePredictor::fit_gaps(const SuiteInput& input, const SuiteColumns& colum
     const GapTables tables = input.gap_tables(gap_columns, result.plot_ids);
     for (const Fitted& f : fitted) {
         SuiteTargetPrediction& out = result.targets[f.index];
-        out.gap_fit = resolve::fit_gaps(f.target, out.value, tables.recorded.at(f.target.name),
-                                        tables.plots, config);
+        const torch::Tensor& recorded = tables.recorded.at(f.target.name);
+        out.recorded = recorded_plots(recorded);
+        out.gap_fit = resolve::fit_gaps(f.target, out.value, recorded, tables.plots, config);
     }
 }
 
