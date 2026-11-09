@@ -8,20 +8,22 @@
 #   Rscript tools/site_digest.R --write    write it to docs/site-digest.txt
 #   Rscript tools/site_digest.R --check    compare docs/site-digest.txt with the sources
 
+# The sources are the files git tracks under these paths, so a file present in one working tree
+# only (a backup, an editor's scratch file) changes neither the local digest nor the workflow's.
 site_sources <- function(root = ".") {
   roots <- c("R", "man", "vignettes", "pkgdown", "inst/CITATION", "../NEWS.md",
              "README.md", "_pkgdown.yml", "DESCRIPTION")
-  files <- unlist(lapply(file.path(root, roots), function(p) {
-    if (dir.exists(p)) list.files(p, recursive = TRUE, full.names = TRUE) else p
-  }))
-  files <- files[file.exists(files)]
+  files <- system2("git", c("-C", shQuote(root), "-c", "core.quotepath=off", "ls-files", "--", roots),
+                   stdout = TRUE)
+  if (!is.null(attr(files, "status"))) stop("git ls-files failed in ", root)
+  files <- files[file.exists(file.path(root, files))]
   files <- files[!grepl("_cache/", files, fixed = TRUE)]
-  sort(sub("^[.]/", "", files), method = "radix")
+  sort(files, method = "radix")
 }
 
 site_digest <- function(root = ".") {
   files <- site_sources(root)
-  sums <- unname(tools::md5sum(files))
+  sums <- unname(tools::md5sum(file.path(root, files)))
   listing <- tempfile()
   on.exit(unlink(listing), add = TRUE)
   con <- file(listing, open = "wb")
