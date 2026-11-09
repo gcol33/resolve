@@ -82,10 +82,10 @@ resolve.fit_gaps <- function(raw, recorded, species, scale = "linear", period = 
   if (!is.null(radii) && (!is.list(radii) || is.null(names(radii)))) {
     stop("radii must be a named list of similarity, km, years", call. = FALSE)
   }
-  .resolve_require_backend()
-  target <- list(name = as.character(name), scale = scale, period = as.numeric(period))
   config <- .resolve_gap_config(gapFitting)
   if (is.null(config)) config <- list()
+  .resolve_require_backend()
+  target <- list(name = as.character(name), scale = scale, period = as.numeric(period))
   .resolve_gap_fit(.resolve_module()$fit_gaps(
     target, .resolve_na_real(raw), .resolve_na_real(recorded), species * 1,
     if (is.null(coordinates)) NULL else .resolve_na_real(coordinates),
