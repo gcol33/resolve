@@ -91,9 +91,10 @@ drive the paper used to live on is retired.
 Write in the vocabulary of vegetation ecology and of the paper, never a plain-language paraphrase of a standard term. A paraphrase ("which species grow at a site and how much ground each covers") reads as AI-written to an ecologist.
 
 - **impute**, never "predict", "fill in" or "read from", for what RESOLVE does with missing values. Function names (`resolve.predict.dataset()`) stay as they are.
-- **metadata** for the seven targets, grouped as in the paper: habitat (EUNIS), site metadata (altitude, slope, aspect), survey metadata (plot area, survey year) and location. Name all seven when listing them, never a subset.
+- **metadata** for the seven targets, grouped as in the paper: habitat (EUNIS), site metadata (altitude, slope, aspect, location) and survey metadata (plot area, survey year). Name all seven when listing them, never a subset.
 - **species composition** and **cover-abundance** (or **cover**), never "species list with amounts" in ecological text. The general-sample sentence (any list of names with an amount) is the one place outside ecology.
 - **vegetation plot** / **plot**, never "relevé" or "survey" for the plot itself; **plot area**, never "relevé area"; **contributing databases** for EVA's sources; **European Vegetation Archive (EVA)**.
+- **WFO version**: the docs and the app give one World Flora Online date, the release taxify reads for the name table (2026.06, 21 June 2026). The user treats it as equivalent to the backbone EVA's records were standardized to (WFO v.2.1, 22 January 2024, the version the paper cites), so the docs never set the two side by side (decided 2026-11-09).
 - Take the wording from `paper_resolve_2026/abstract.md` and `introduction.md` before inventing one; the tagline is *Imputing metadata of vegetation surveys*.
 
 Why: 2026-11-09 the README tagline listed three of seven targets, used "read from its species list", and paraphrased cover as "how much ground each covers"; the user asked for the paper's terms throughout.

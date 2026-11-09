@@ -2,14 +2,14 @@
 
 The released models were trained on species names in the European
 Vegetation Archive (EVA) standardized to the World Flora Online (WFO)
-taxonomic backbone, v.2.1 of 22 January 2024. A table of new plots names
-its species as they were entered in the field, by a current accepted
-name, or by a name from another checklist, and the models read a name
-only when it is exactly one they learnt. The name table, `names.json`,
-maps the names a user may write to the names the models learnt. This
-article explains where its links come from, which taxonomic backbones it
-reads, and how a name is matched through it. Reading a table’s names
-through it during imputation is covered in [Imputing new
+taxonomic backbone (21 June 2026). A table of new plots names its
+species as they were entered in the field, by a current accepted name,
+or by a name from another checklist, and the models read a name only
+when it is exactly one they learnt. The name table, `names.json`, maps
+the names a user may write to the names the models learnt. This article
+explains where its links come from, which taxonomic backbones it reads,
+and how a name is matched through it. Reading a table’s names through it
+during imputation is covered in [Imputing new
 plots](https://gillescolling.com/resolve/articles/prediction.html#species-names);
 installation in [Installing the
 engine](https://gillescolling.com/resolve/articles/installation.md).
@@ -17,16 +17,14 @@ engine](https://gillescolling.com/resolve/articles/installation.md).
 ## Why a name can differ from the model’s name
 
 EVA’s contributing databases enter each species under their own
-checklist’s name, and EVA standardized every record to the WFO backbone
-v.2.1 of 22 January 2024. The two need not agree. EVA resolved its
-71,014 records entered as *Anemone nemorosa* to *Anemone altaica*, so a
-model knows wood anemone only under that name. A table written today may
-also use a newer accepted name: the WFO release the name table reads
-through taxify (2026.06, of 21 June 2026) accepts *Anemonoides
-nemorosa*, and an older table may call pedunculate oak *Quercus
-pedunculata*, which WFO lists as a synonym of *Quercus robur*. Without
-the table, all three names count as species the model never saw, and
-their records are left out of the imputation.
+checklist’s name, and EVA standardized every record to WFO. The two need
+not agree. EVA resolved its 71,014 records entered as *Anemone nemorosa*
+to *Anemone altaica*, so a model knows wood anemone only under that
+name. A table may also use the accepted name, *Anemonoides nemorosa* in
+WFO, and an older table may call pedunculate oak *Quercus pedunculata*,
+which WFO lists as a synonym of *Quercus robur*. Without the table, all
+three names count as species the model never saw, and their records are
+left out of the imputation.
 
 ## How the table is built
 
