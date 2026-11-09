@@ -6,7 +6,48 @@
 import { COLUMNS, combineMean, combineSpherical, combineVote, encode, parseDouble, parseNumber, parseTable,
          resolveName, sumByAncestor } from "./resolve.js";
 import { gapMethodLabel } from "./gaps.js";
-import { HttpRangeSource, HttpStatusError, TerrainCorrection, TerrainField, describePlots, withRetry } from "./terrain.js";
+import { HttpRangeSource, HttpStatusError, TerrainCorrection, TerrainField, describePlots, fetchRange,
+         withRetry } from "./terrain.js";
+
+// ---------------------------------------------------------------------------
+// Cross-origin isolation, so the gap fitting's workers can share memory
+// ---------------------------------------------------------------------------
+
+// A host that sends the isolating headers (serve.py) needs nothing. Otherwise
+// the site's service worker (coi_sw.js) adds them, and the page reloads once
+// so that the worker serves it. A browser without service workers, or one
+// where the reload did not isolate the page, carries on unisolated: the gap
+// fitting then searches on one thread, with the same results.
+const ISOLATION_RELOAD = "resolve-isolation-reload";
+
+async function isolate() {
+  if (self.crossOriginIsolated || !("serviceWorker" in navigator)) return;
+  try {
+    if (sessionStorage.getItem(ISOLATION_RELOAD)) return;
+  } catch {
+    return;
+  }
+  const controlled = navigator.serviceWorker.controller !== null;
+  try {
+    await navigator.serviceWorker.register(new URL("../coi_sw.js", import.meta.url),
+                                           { scope: new URL("../", import.meta.url).href });
+  } catch {
+    return;
+  }
+  if (controlled) return;
+  const ready = await Promise.race([navigator.serviceWorker.ready.then(() => true),
+                                    new Promise((r) => setTimeout(() => r(false), 5000))]);
+  if (!ready) return;
+  try {
+    sessionStorage.setItem(ISOLATION_RELOAD, "1");
+  } catch {
+    return;
+  }
+  location.reload();
+  await new Promise(() => {});
+}
+
+await isolate();
 
 // Where the page's files are: the model pack and its index, the terrain field
 // and the example data, named on the page's element (data-models-pack,
@@ -85,35 +126,10 @@ async function cached(path, onBytes) {
     return kept.bytes;
   }
   const [begin, end] = await packRange(path);
-  const bytes = await withRetry(async () => {
-    const response = await fetch(PACK, { headers: { Range: `bytes=${begin}-${end - 1}` }, cache: "no-store" });
-    if (response.status !== 206) throw new HttpStatusError(PACK, response.status, 206);
-    return readBody(response, onBytes);
-  });
+  const bytes = (await withRetry(() => fetchRange(fetch, PACK, `bytes=${begin}-${end - 1}`, { onBytes }))).buffer;
   if (bytes.byteLength !== end - begin) throw new Error(`${path}: ${bytes.byteLength} bytes read from the pack, not ${end - begin}`);
   if (db) stored(db, "readwrite", (s) => s.put({ version, bytes }, key)).catch(() => { /* quota */ });
   return bytes;
-}
-
-// A response's bytes, with the count received so far reported as they arrive.
-async function readBody(response, onBytes) {
-  if (!onBytes || !response.body) return response.arrayBuffer();
-  const total = Number(response.headers.get("Content-Length")) || 0;
-  const reader = response.body.getReader();
-  const parts = [];
-  let received = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    parts.push(value);
-    received += value.length;
-    onBytes(received, Math.max(total, received));
-  }
-  const bytes = new Uint8Array(received);
-  let at = 0;
-  for (const part of parts) { bytes.set(part, at); at += part.length; }
-  onBytes(received, received);
-  return bytes.buffer;
 }
 
 // Model graphs download a few at a time, in the order asked for, so the first
@@ -154,12 +170,13 @@ function file(path) {
   return state.files.get(path);
 }
 
-// The graph a member is run with: by default the one storing its weights in
-// float16, cast back to float32 where read, which halves the download and on
-// the released members' check plots moves no EUNIS class and a regression
-// value by far less than its error (port/export_onnx.py); or the float32
-// graph, held to the engine's own output.
-const graphOf = (meta) => ($("o-precision").value === "full" ? meta.graph : meta.graph_half ?? meta.graph);
+// The graph a member is run with: the one storing its weights in float16,
+// cast back to float32 where read, which halves the download and on the
+// released members' check plots moves no EUNIS class and a regression value
+// by far less than its error (port/export_onnx.py). For a check against the
+// engine, ?precision=full in the address runs the float32 graph instead.
+const FULL_PRECISION = PARAMS.get("precision") === "full";
+const graphOf = (meta) => (FULL_PRECISION ? meta.graph : meta.graph_half ?? meta.graph);
 
 // Members in the order a page needs them: the targets in the order chosen,
 // EUNIS first by default. A preload stops once `wanted` says its targets are
@@ -179,7 +196,7 @@ function progress() {
   if (!state.suites) return;
   const members = chosenTargets().flatMap((t) => t.members);
   const done = members.filter((m) => receivedOf(m) === 1).length;
-  $("download-status").textContent = `Models: ${done} of ${members.length} downloaded`;
+  $("download-status").textContent = done < members.length ? `Downloading the models: ${done} of ${members.length}` : "";
 }
 
 // ---------------------------------------------------------------------------
@@ -293,7 +310,7 @@ function renderFields(which) {
   const box = $(`${which}-fields`), src = which === "header" ? headerSource() : raw.species;
   if (!src || !chosen[which]) { box.innerHTML = ""; return; }
   box.innerHTML = FIELDS[which].map((f) =>
-    `<label>${escape(f.label)} <select data-role="${escape(f.role)}">` +
+    `<label>${escape(f.label)} <select class="form-select form-select-sm" data-role="${escape(f.role)}">` +
     `<option value="">${f.required ? "(choose a column)" : "(none)"}</option>` +
     src.cols.map((c) => `<option value="${escape(c)}"${c === chosen[which][f.role] ? " selected" : ""}>${escape(c)}</option>`).join("") +
     "</select></label>").join("");
@@ -559,10 +576,11 @@ function infer(job) {
 }
 
 function showWorkers() {
-  const busyWorkers = pool.workers.filter((w) => w.job).length;
+  const n = pool.workers.length, busyWorkers = pool.workers.filter((w) => w.job).length;
   $("o-workers").placeholder = `auto: ${Math.min(CORES, 4)}`;
-  $("workers-note").textContent = pool.workers.length
-    ? `${pool.workers.length} running, ${busyWorkers} busy` : "running in parallel, one per processor core";
+  $("workers").textContent = n
+    ? `${n} worker${n > 1 ? "s" : ""}${busyWorkers ? `, ${busyWorkers} busy` : ""}`
+    : "workers start with the first prediction";
 }
 
 // Words shown beside the progress bar while the models work, one picked at
@@ -575,55 +593,71 @@ const VERBS = [
   "Sorting the seedlings", "Cross-checking Ellenberg", "Pacing out the plot", "Germinating",
 ];
 
-const busy = { timer: null, done: 0, total: 1, members: [], partial: new Map() };
+const busy = { timer: null, members: [], start: new Map(), done: 0, partial: new Map(), targets: 0, combined: 0 };
 
-function startBusy(members) {
-  Object.assign(busy, { done: 0, total: Math.max(1, members.length), members, partial: new Map() });
+function startBusy(members, targets) {
+  Object.assign(busy, { members, start: new Map(members.map((m) => [m, receivedOf(m)])), done: 0,
+                        partial: new Map(), targets, combined: 0 });
   $("busy").hidden = false;
+  $("status").hidden = true;
+  $("download-status").hidden = true;
   const pick = () => { $("busy-verb").textContent = `${VERBS[Math.floor(Math.random() * VERBS.length)]}…`; };
   pick();
   busy.timer = setInterval(pick, 2800);
   showBusy();
 }
 
-// The share of the run done: each model counts once for its download (the
-// share of its graph received) and once for its predictions (finished, or the
-// share of its batches run).
+// The share of the run done, in steps: each model's download still to come
+// at the start (the share of its graph received since), each model's
+// predictions (finished, or the share of its batches run), and each
+// variable's combining of its seeds with its gap fitting and terrain
+// correction.
 function showBusy() {
   if ($("busy").hidden) return;
-  let partial = 0;
-  for (const f of busy.partial.values()) partial += f;
-  let downloaded = 0;
-  for (const m of busy.members) downloaded += receivedOf(m);
-  const share = Math.min(1, (downloaded + busy.done + partial) / (2 * busy.total));
-  $("busy-bar").value = share;
-  $("busy-share").textContent = `${Math.round(100 * share)}%`;
+  let steps = busy.members.length + busy.targets, done = busy.done + busy.combined;
+  for (const f of busy.partial.values()) done += f;
+  for (const m of busy.members) {
+    const r0 = busy.start.get(m);
+    if (r0 >= 1) continue;
+    steps += 1;
+    done += Math.max(0, receivedOf(m) - r0) / (1 - r0);
+  }
+  const share = Math.min(1, done / Math.max(1, steps));
+  const percent = Math.floor(100 * share);
+  $("busy-bar").style.width = `${percent}%`;
+  $("busy-bar").parentElement.setAttribute("aria-valuenow", percent);
+  $("busy-share").textContent = `${busy.done} of ${busy.members.length} models · ${percent}%`;
 }
 
 function stopBusy() {
   clearInterval(busy.timer);
   $("busy").hidden = true;
+  $("status").hidden = false;
+  $("download-status").hidden = false;
 }
 
 async function run() {
   const targets = chosenTargets();
   const header = headerRows(), species = state.tables.species.rows;
   $("run").disabled = true;
-  $("results").hidden = false;
   status("Starting…");
   const result = { plotIds: null, columns: [], recognised: null, coords: null, eunis: null };
   state.result = result;
+  const started = performance.now();
+  $("s-time").textContent = "…";
   preload(targets).catch((e) => status(`Download failed: ${e.message}`));
-  startBusy(targets.flatMap((t) => t.members));
+  startBusy(targets.flatMap((t) => t.members), targets.length);
   try {
     await predictTargets(result, targets, header, species);
   } finally {
     stopBusy();
     $("run").disabled = false;
   }
-  status(`Done: ${result.plotIds.length.toLocaleString()} plots, ${targets.length} variables.` +
-         (result.notes ? ` ${result.notes.join(" ")}` : ""));
+  $("s-time").textContent = duration((performance.now() - started) / 1000);
+  status(result.notes ? result.notes.join(" ") : "");
 }
+
+const duration = (s) => (s < 60 ? `${s.toFixed(1)} s` : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`);
 
 let runs = 0;
 
@@ -633,7 +667,6 @@ async function predictTargets(result, targets, header, species) {
   const runId = ++runs;
   const aliases = await nameLookup();
   const encodings = new Map();
-  const total = targets.reduce((a, t) => a + t.members.length, 0);
   const member = async (name) => {
     const meta = JSON.parse(new TextDecoder().decode(await file(`${name}/model.json`)));
     // Members sharing a vocabulary and settings share one encoding.
@@ -652,11 +685,11 @@ async function predictTargets(result, targets, header, species) {
     busy.partial.delete(name);
     busy.done += 1;
     showBusy();
-    status(`Predicting: ${busy.done} of ${total} models done`);
     return { meta, sig, out };
   };
   const pending = targets.map((t) => Promise.all(t.members.map(member)));
   pending.forEach((p) => p.catch(() => {}));
+  result.variables = { done: 0, total: targets.length };
   for (const [i, target] of targets.entries()) {
     const done = await pending[i];
     const meta0 = done[0].meta, outputs = done.map((d) => d.out);
@@ -670,6 +703,9 @@ async function predictTargets(result, targets, header, species) {
       result.coords = encoded.plotIds.map((_, p) => [encoded.continuous[p * meta0.continuous_width + 1],
                                                      encoded.continuous[p * meta0.continuous_width]]);
     }
+    result.variables.done = i + 1;
+    busy.combined += 1;
+    showBusy();
     render();
   }
 }
@@ -766,7 +802,7 @@ async function addTerrain(result, target, c, encoded, units) {
     const r = correction.apply({
       prediction: c.value, dem: elevation ? d.elevation : d.slope, dem_1km: elevation ? d.elevation_1km : d.slope_1km,
       uncertainty_m: num(UNCERTAINTY), spread: c.sd, recognised_share: recognised, n_species: encoded.nSpecies });
-    const model = elevation ? "elevation model" : "elevation model slope";
+    const model = "elevation model";
     result.columns.push(
       { name: `${label(target)}, terrain corrected${units}`, values: Array.from(r.corrected), digits: 1 },
       { name: `${label(target)}, ${model}${units}`, values: Array.from(elevation ? d.elevation : d.slope), digits: 1 },
@@ -883,7 +919,9 @@ function render() {
   }
   $("table").innerHTML = `<thead>${head}</thead><tbody>${body.join("")}</tbody>`;
   $("table-note").textContent = n > ROWS_SHOWN
-    ? `Showing the first ${ROWS_SHOWN} of ${n.toLocaleString()} plots; the download holds all of them.` : "";
+    ? `Showing ${ROWS_SHOWN} of ${n.toLocaleString()} plots; the CSV has all of them.` : "";
+  $("results").hidden = false;
+  renderStats(r);
   renderSummary(r);
   renderGaps(r);
   renderUnknown(r);
@@ -896,13 +934,21 @@ function render() {
 // no vocabulary holds, each with the model token it stands for and the source
 // of the link ("eva" or a backbone). Without the file, names are matched as
 // written.
-let lookup = null;
+let lookup = null, nameBackbones = 0;
 async function nameLookup() {
   lookup ??= file("names.json.gz")
     .then((b) => new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream("gzip"))).json())
-    .then((names) => names.aliases)
+    .then((names) => { nameBackbones = names.backbones?.length ?? 0; return names.aliases; })
     .catch(() => ({}));
   return lookup;
+}
+
+// Where a name is looked for before it counts as not recognised.
+function nameRoutes() {
+  const routes = ["EVA's own records"];
+  if (nameBackbones) routes.push(`the synonymy of ${nameBackbones} taxonomic backbones`);
+  if (spellingEdits()) routes.push(`a spelling up to ${spellingEdits()} letter${spellingEdits() > 1 ? "s" : ""} off`);
+  return routes.length > 1 ? `${routes.slice(0, -1).join(", ")} or ${routes.at(-1)}` : routes[0];
 }
 
 // The edits a misspelled name may be away from a name the models know:
@@ -955,6 +1001,8 @@ function renderUnknown(r) {
   const records = r.unknown.reduce((a, [, k]) => a + k, 0);
   box.querySelector("summary").textContent =
     `${r.unknown.length.toLocaleString()} species names not recognised (${records.toLocaleString()} records, left out of the prediction)`;
+  box.querySelector("p").textContent =
+    `None of these names is a name the models were trained on, and none was found through ${nameRoutes()}.`;
   box.querySelector("ul").innerHTML = r.unknown.slice(0, 200)
     .map(([name, k]) => `<li>${escape(name || "(empty)")} <span class="count">${k.toLocaleString()}</span></li>`).join("") +
     (r.unknown.length > 200 ? `<li class="count">and ${(r.unknown.length - 200).toLocaleString()} more</li>` : "");
@@ -978,27 +1026,59 @@ function renderMoved(r) {
   box.hidden = false;
   const records = moved.reduce((a, [, m]) => a + m.records, 0);
   box.querySelector("summary").textContent =
-    `${moved.length.toLocaleString()} species names read as the name the models know them by (${records.toLocaleString()} records)`;
+    `${moved.length.toLocaleString()} species names renamed (${records.toLocaleString()} records)`;
+  box.querySelector("p").textContent =
+    "The models were trained on the names the European Vegetation Archive (EVA) gives its records. Each name below " +
+    `was renamed to one of these through ${nameRoutes()}; the source is given beside it.`;
   box.querySelector("ul").innerHTML = moved.slice(0, 200)
     .map(([name, m]) => `<li>${escape(name)} → ${escape(m.token)} <span class="count">${escape(route(m))}, ${m.records.toLocaleString()}</span></li>`).join("") +
     (moved.length > 200 ? `<li class="count">and ${(moved.length - 200).toLocaleString()} more</li>` : "");
 }
 
+// The map and habitat panels share a row; a panel with nothing to show is
+// hidden and the other takes the whole row.
+function showPanel(id, shown) {
+  $(id).hidden = !shown;
+  const panels = ["map-panel", "habitat-panel"].map($);
+  for (const p of panels) p.classList.toggle("col-lg-12", panels.some((q) => q.hidden));
+}
+
+function renderStats(r) {
+  const { done, total } = r.variables;
+  $("s-plots").textContent = r.plotIds.length.toLocaleString();
+  $("s-variables").textContent = done === total ? String(total) : `${done} of ${total}`;
+  $("s-unknown").textContent = r.unknown.length.toLocaleString();
+}
+
+// The habitats predicted, most plots first, each with its share of the plots
+// as a bar scaled to the most frequent.
 function renderSummary(r) {
+  showPanel("habitat-panel", !!r.eunis);
   if (!r.eunis) { $("summary").innerHTML = ""; return; }
   const counts = new Map(r.eunis.classes.map((c) => [c, 0]));
   for (const v of r.eunis.value) counts.set(r.eunis.classes[v], counts.get(r.eunis.classes[v]) + 1);
   const n = r.eunis.value.length;
-  const shown = 20;
   const present = [...counts].filter(([, k]) => k > 0).sort((a, b) => b[1] - a[1]);
-  const rest = present.slice(shown);
-  const restPlots = rest.reduce((sum, [, k]) => sum + k, 0);
-  $("summary").innerHTML = present.slice(0, shown)
-    .map(([c, k]) => `<li><span class="swatch" style="background:${colour(c)}"></span>` +
-                     `<b>${escape(c)}</b> ${escape(r.eunis.names[c] ?? "")} <span class="count">${k.toLocaleString()} ` +
-                     `(${((100 * k) / n).toFixed(1)}%)</span></li>`).join("") +
-    (rest.length ? `<li class="count">and ${rest.length.toLocaleString()} more classes, ${restPlots.toLocaleString()} plots ` +
-                   `(${((100 * restPlots) / n).toFixed(1)}%); the table and the download name each plot's</li>` : "");
+  const most = present[0]?.[1] ?? 1;
+  $("summary").innerHTML = present
+    .map(([c, k]) => `<li><span class="sw" style="background:${colour(c)}"></span><b>${escape(c)}</b>` +
+                     `<span class="mid"><span class="nm">${escape(r.eunis.names[c] ?? "")}</span>` +
+                     `<span class="bar" style="width:${((100 * k) / most).toFixed(1)}%"></span></span>` +
+                     `<span class="n">${k.toLocaleString()} <span class="count">(${((100 * k) / n).toFixed(1)}%)</span></span></li>`)
+    .join("");
+}
+
+// The level-1 habitat groups among the given plots, most plots first, as the
+// map legend shows them.
+function habitatGroups(r, plots) {
+  if (!r.eunis) return [];
+  const present = new Map();
+  for (const p of plots) {
+    const group = r.eunis.classes[r.eunis.value[p]][0];
+    present.set(group, (present.get(group) ?? 0) + 1);
+  }
+  return [...present].sort((a, b) => b[1] - a[1])
+    .map(([group]) => ({ colour: colour(group), label: `${group} ${r.eunis.names[group] ?? ""}`.trim() }));
 }
 
 // Per fitted target: how many gaps, which method filled them and its error on
@@ -1030,11 +1110,8 @@ const colour = (c) => PALETTE[c?.[0]] ?? "#718096";
 let map = null, layer = null;
 function renderMap(r) {
   const coords = r.filledCoords ?? r.coords ?? r.predictedCoords;
-  if (!coords || !window.L) { $("map").hidden = true; return; }
-  $("map").hidden = false;
-  $("map-note").textContent = r.filledCoords ? "Plots at the coordinates given in the header, the others at their fitted location."
-    : r.coords ? "Plots at the coordinates given in the header."
-    : "Plots at their predicted location.";
+  showPanel("map-panel", !!coords && !!window.L);
+  if (!coords || !window.L) return;
   if (!map) {
     map = L.map("map", { preferCanvas: true });
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -1051,6 +1128,10 @@ function renderMap(r) {
     pts.push([la, lo]);
   });
   if (pts.length) map.fitBounds(pts, { padding: [16, 16], maxZoom: 9 });
+  map.invalidateSize();
+  const located = coords.flatMap(([la, lo], p) => (Number.isFinite(la) && Number.isFinite(lo) ? [p] : []));
+  $("legend").innerHTML = habitatGroups(r, located)
+    .map((l) => `<span><i style="background:${l.colour}"></i>${escape(l.label)}</span>`).join("");
   $("download-map").disabled = !pts.length;
 }
 
@@ -1117,7 +1198,7 @@ async function downloadMap() {
     const land = outlinePaths(await countryOutlines(scale), W, H);
     const coords = r.filledCoords ?? r.coords ?? r.predictedCoords;
     const spots = new Map();
-    const present = new Map();
+    const inView = [];
     coords.forEach(([la, lo], p) => {
       if (!Number.isFinite(la) || !Number.isFinite(lo)) return;
       const cls = r.eunis ? r.eunis.classes[r.eunis.value[p]] : null;
@@ -1126,10 +1207,9 @@ async function downloadMap() {
       if (q.x < -4 || q.y < -4 || q.x > W + 4 || q.y > H + 4) return;
       if (!spots.has(fill)) spots.set(fill, new Set());
       spots.get(fill).add(`${q.x.toFixed(1)} ${q.y.toFixed(1)}`);
-      if (cls) present.set(cls[0], (present.get(cls[0]) ?? 0) + 1);
+      inView.push(p);
     });
-    const items = [...present].sort((a, b) => b[1] - a[1])
-      .map(([group]) => ({ colour: colour(group), label: `${group} ${r.eunis.names[group] ?? ""}`.trim() }));
+    const items = habitatGroups(r, inView);
     const notice = "© EuroGeographics for the administrative boundaries";
     const total = H + 12 + 16 * (items.length + 1) + 6;
     const source = `Country boundaries: Eurostat GISCO, ${notice}`;
@@ -1155,7 +1235,7 @@ async function downloadMap() {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   } catch (e) {
-    $("map-note").textContent = `Could not draw the map: ${e.message}`;
+    status(`Could not draw the map: ${e.message}`);
   } finally {
     button.disabled = false;
   }
@@ -1195,11 +1275,10 @@ function renderTargets() {
     const c = t.combine === "vote" ? null : recordedCount(t);
     const gaps = c && c.recorded >= 2
       ? `; ${(c.total - c.recorded).toLocaleString()} gaps fitted on the ${c.recorded.toLocaleString()} plots recording it` : "";
-    const terrain = t.terrain && t.suite.terrain_field && terrainOn() && t.inputs.includes(COLUMNS.latitude)
-      ? "; corrected with the elevation model at the coordinates" : "";
-    return `<label class="chip"><input type="checkbox" name="target" value="${escape(name)}"${off.has(name) ? "" : " checked"}>` +
-      `${escape(LABELS[name] ?? name)}${name === "eunis" ? levelChoice() : ""}` +
-      `<small>from ${escape(reads(t))}${escape(gaps)}${escape(terrain)}</small></label>`;
+    return `<label class="choice"><input class="form-check-input" type="checkbox" name="target" value="${escape(name)}"` +
+      `${off.has(name) ? "" : " checked"}> ${escape(LABELS[name] ?? name)}` +
+      `<span class="hint">from ${escape(reads(t))}${escape(gaps)}</span>` +
+      `${name === "eunis" ? levelChoice() : ""}</label>`;
   }).join("");
   for (const input of box.querySelectorAll("input[name=target]")) input.addEventListener("change", startPreload);
   $("o-level")?.addEventListener("change", (e) => {
@@ -1218,7 +1297,7 @@ function levelChoice() {
   const levels = habitatChoices();
   if (levels.length < 2) {
     const n = Object.keys(levels[0]?.target.class_names ?? {}).length;
-    return ` <small>level 1${n ? ` (${n} groups)` : ""}; levels 2 and 3 are still to come</small>`;
+    return `<span class="hint">level 1${n ? ` (${n} groups)` : ""}</span>`;
   }
   const chosen = habitatChoice();
   const options = levels.map((c) => {
@@ -1228,10 +1307,10 @@ function levelChoice() {
       `${n ? ` (${n} ${c.level === 3 ? "habitats" : "groups"}${read})` : ""}</option>`;
   }).join("");
   const provisional = chosen.target.source === "canonical"
-    ? ` <small>from level ${chosen.target.level} models of the pooled species encoder trained on ` +
-      `${Math.round(100 * chosen.target.train_share)}% of the plots; the release's own fits are still to come</small>`
+    ? `<span class="hint">from level ${chosen.target.level} models of the pooled species encoder trained on ` +
+      `${Math.round(100 * chosen.target.train_share)}% of the plots; the release's own fits are still to come</span>`
     : "";
-  return ` <select id="o-level" aria-label="EUNIS level">${options}</select>${provisional}`;
+  return `<select class="form-select form-select-sm" id="o-level" aria-label="EUNIS level">${options}</select>${provisional}`;
 }
 
 // What a target's models read, in words: species, and coordinates and date
@@ -1249,13 +1328,39 @@ function startPreload() {
   const order = ["eunis", "altitude", "year", "area", "slope", "location"];
   const rank = (t) => order.indexOf(t.level ? "eunis" : t.name);
   const targets = chosenTargets().sort((a, b) => rank(a) - rank(b));
-  const members = `${$("o-precision").value}:${targets.flatMap((t) => t.members).join()}`;
+  const members = targets.flatMap((t) => t.members).join();
   if (members === preloaded) return progress();
   preloaded = members;
   preload(targets, () => preloaded === members).catch((e) => { $("download-status").textContent = `Download failed: ${e.message}`; });
 }
 
+// The loader: the logo fills from the bottom as the page starts, one step at a
+// time, each filling to its share over the time it is expected to take; the
+// page appears when the last step is done.
+let loaderDone = false;
+
+function loaderStep(text, share, seconds) {
+  if (loaderDone) return;
+  $("loader-step").textContent = text;
+  $("hex-fill").style.setProperty("--dur", `${seconds}s`);
+  $("hex-fill").style.setProperty("--p", `${(100 * share).toFixed(1)}%`);
+}
+
+function loaderFinish() {
+  if (loaderDone) return;
+  loaderStep("Ready.", 1, 0.3);
+  setTimeout(() => { loaderDone = true; $("loader").classList.add("done"); }, 350);
+  setTimeout(() => { $("loader").hidden = true; $("tool").hidden = false; }, 750);
+}
+
+function loaderFail(text) {
+  if (loaderDone) { $("download-status").textContent = text; return; }
+  $("loader-step").textContent = text;
+  $("loader").classList.add("error");
+}
+
 async function start() {
+  loaderStep("Reading the model list…", 0.5, 4);
   showWorkers();
   $("o-workers").addEventListener("change", () => {
     const v = $("o-workers").value.trim();
@@ -1263,7 +1368,6 @@ async function start() {
     $("o-workers").value = pool.manual ?? "";
     dispatch();
   });
-  $("o-precision").addEventListener("change", startPreload);
   $("o-terrain").addEventListener("change", renderTargets);
   for (const which of Object.keys(DATA_INPUTS)) $(DATA_INPUTS[which]).addEventListener("change", () => onDataInput(which));
   $("reset-data").addEventListener("click", resetData);
@@ -1273,11 +1377,12 @@ async function start() {
   try {
     state.suites = JSON.parse(new TextDecoder().decode(await file("suites.json"))).suites;
   } catch (e) {
-    $("download-status").textContent = `Could not read the model list: ${e.message}`;
+    loaderFail(`Could not read the model list: ${e.message}`);
     return;
   }
   $("terrain-option").hidden = !state.suites.some((s) => s.terrain_field);
   refreshInputs();
+  loaderStep("Reading the example plots…", 0.9, 2);
   const params = PARAMS;
   if (params.has("species")) {
     for (const which of ["species", "header"]) {
@@ -1291,7 +1396,8 @@ async function start() {
   // chosen is the species-only one, which tables with coordinates replace.
   state.tablesRead = true;
   refreshInputs();
+  loaderFinish();
   if (params.has("run") && state.tables.species) await run();
 }
 
-start().catch((e) => { $("download-status").textContent = `Could not start: ${e.message}`; });
+start().catch((e) => loaderFail(`Could not start: ${e.message}`));

@@ -100,7 +100,6 @@
 <li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="search.json">
 </form></li>
-<li class="nav-item"><a class="nav-link" href="articles/app.html">RESOLVE App</a></li>
 <li class="nav-item"><a class="external-link nav-link" href="https://github.com/gcol33/resolve" aria-label="GitHub"><span class="fa fa-github"></span></a></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-lightswitch" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true" aria-label="Light switch"><span class="fa fa-sun"></span></button>
@@ -110,6 +109,7 @@
     <li><button class="dropdown-item" data-bs-theme-value="auto"><span class="fa fa-adjust"></span> Auto</button></li>
   </ul>
 </li>
+<li class="nav-item"><a class="nav-link" href="articles/app.html">RESOLVE App ✨</a></li>
       </ul>
 </div>
 
@@ -122,12 +122,12 @@
 <img src="logo.svg" class="logo" alt=""><h1 id="resolve-">RESOLVE <a class="anchor" aria-label="anchor" href="#resolve-"></a>
 </h1>
 </div>
-<p><em>the elevation, area or habitat of a plot, read from its species list</em></p>
+<p><em>Imputing metadata of vegetation surveys</em></p>
 <!-- badges: start -->
 
 <p align="center">
 <img src="reference/figures/resolve-hero.svg" alt="Species and cover of held-out example plot A139 pooled into one latent vector, read out as elevation (predicted 713 m, observed 679 m; R squared 0.85 over 30 held-out plots) and habitat (observed forest, probability 0.89)" width="100%"></p>
-<p>RESOLVE predicts properties of a vegetation plot from the species recorded in it: the plot’s area, elevation, slope, survey year or habitat type, from the species list and, where recorded, the cover of each species. Any sample described by a list of items with counts fits the same model.</p>
+<p>RESOLVE predicts properties of a vegetation plot from the species recorded in it: the plot’s area, elevation, slope, aspect, survey year, location or habitat type, from the species list and, where recorded, the cover of each species. The same model works for any sample recorded as a list of names with an amount for each, such as the insects caught in a trap or the birds counted at a site.</p>
 <p>A species list has no fixed length, so the model pools the species of a plot, each weighted by its cover, into one vector and reads every target off that vector. Elevation (a regression) and habitat (a classification) are then fitted by one model. Training holds out a share of the plots and reports each target’s error on them, which is how you compare encodings and inputs on your own data before deciding which model to keep.</p>
 <p>RESOLVE lets you:</p>
 <ul>
@@ -145,6 +145,7 @@
 <strong>Use R, Python or the command line.</strong> The engine is a C++ library on libtorch, the C++ core of <a href="https://pytorch.org/" class="external-link">PyTorch</a>. The R package, the Python package and the <code>resolve</code> executable call it, so a model trained in one loads in the others.</li>
 </ul>
 <p>On every push the <a href="https://github.com/gcol33/resolve/actions/workflows/tests.yml" class="external-link">tests workflow</a> builds the engine and runs the C++ tests, the command-line end-to-end tests and the Python binding tests; the R package goes through R CMD check. Feature hashing follows <a href="https://doi.org/10.1145/1553374.1553516" class="external-link">Weinberger et al. (2009)</a>, the transformer encoder <a href="https://doi.org/10.48550/arXiv.1706.03762" class="external-link">Vaswani et al. (2017)</a>. Report the RESOLVE version with an analysis, since defaults have changed between versions.</p>
+<p>The <a href="https://gillescolling.com/resolve/articles/app.html">RESOLVE App</a> runs the released models in your browser, without installing anything. It predicts the EUNIS habitat, altitude, slope, plot area, survey year and location of the example plots or of your own tables, and maps the plots.</p>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
 </h2>

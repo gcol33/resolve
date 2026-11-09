@@ -29,15 +29,69 @@ export class HttpStatusError extends Error {
   }
 }
 
-// A request run again after a server error (5xx) or a dropped connection
-// (fetch and reading a body fail with a TypeError), which a hosting site gives
-// now and then under load: up to `tries` times, waiting 1, 2, 4 ... s between.
+// A response that sent no bytes for `ms` milliseconds; the request is
+// cancelled and counts as a dropped connection.
+export class StalledError extends Error {
+  constructor(url, ms) {
+    super(`${url}: no data for ${ms / 1000} s`);
+  }
+}
+
+export const STALL_MS = 30000;
+
+// The body of a 206 answer to one Range request, its byte count so far
+// reported as it arrives (`onBytes(received, total)`). A response that
+// stalls for `stallMs` is cancelled with a StalledError.
+export async function fetchRange(fetchImpl, url, range, { onBytes, stallMs = STALL_MS } = {}) {
+  const abort = new AbortController();
+  let timer = null;
+  const arm = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => abort.abort(new StalledError(url, stallMs)), stallMs);
+  };
+  arm();
+  try {
+    const response = await fetchImpl(url, { headers: { Range: range }, signal: abort.signal, cache: "no-store" });
+    if (response.status !== 206) {
+      abort.abort();
+      throw new HttpStatusError(url, response.status, 206);
+    }
+    if (!response.body) return new Uint8Array(await response.arrayBuffer());
+    const total = Number(response.headers.get("Content-Length")) || 0;
+    const reader = response.body.getReader();
+    const parts = [];
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      arm();
+      parts.push(value);
+      received += value.length;
+      onBytes?.(received, Math.max(total, received));
+    }
+    const bytes = new Uint8Array(received);
+    let at = 0;
+    for (const part of parts) { bytes.set(part, at); at += part.length; }
+    onBytes?.(received, received);
+    return bytes;
+  } catch (e) {
+    throw abort.signal.reason instanceof StalledError ? abort.signal.reason : e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// A request run again after a server error (5xx), a dropped connection
+// (fetch and reading a body fail with a TypeError) or a stalled response,
+// which a hosting site gives now and then under load: up to `tries` times,
+// waiting 1, 2, 4 ... s between.
 export async function withRetry(task, { tries = 4, wait = (k) => 1000 * 2 ** k } = {}) {
   for (let k = 0; ; k++) {
     try {
       return await task();
     } catch (e) {
-      const transient = e instanceof TypeError || (e instanceof HttpStatusError && e.status >= 500);
+      const transient = e instanceof TypeError || e instanceof StalledError ||
+        (e instanceof HttpStatusError && e.status >= 500);
       if (!transient || k + 1 >= tries) throw e;
       await new Promise((r) => setTimeout(r, wait(k)));
     }
@@ -82,14 +136,8 @@ export class HttpRangeSource {
     const ranges = asked.map(([b, e]) => [b + this.offset, e + this.offset]);
     const header = "bytes=" + ranges.map(([b, e]) => `${b}-${e - 1}`).join(",");
     return withRetry(async () => {
-      const abort = new AbortController();
-      const response = await this.fetch(this.url, { headers: { Range: header }, signal: abort.signal, cache: "no-store" });
       this.requests += 1;
-      if (response.status !== 206) {
-        abort.abort();
-        throw new HttpStatusError(this.url, response.status, 206);
-      }
-      const body = new Uint8Array(await response.arrayBuffer());
+      const body = await fetchRange(this.fetch, this.url, header);
       this.bytes += body.length;
       return splitRangeResponse(body, ranges);
     });

@@ -57,7 +57,7 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="nav-item dropdown">
+<li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><hr class="dropdown-divider"></li>
@@ -95,7 +95,6 @@
 <li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="../search.json">
 </form></li>
-<li class="nav-item"><a class="nav-link" href="../articles/app.html">RESOLVE App</a></li>
 <li class="nav-item"><a class="external-link nav-link" href="https://github.com/gcol33/resolve" aria-label="GitHub"><span class="fa fa-github"></span></a></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-lightswitch" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true" aria-label="Light switch"><span class="fa fa-sun"></span></button>
@@ -105,6 +104,7 @@
     <li><button class="dropdown-item" data-bs-theme-value="auto"><span class="fa fa-adjust"></span> Auto</button></li>
   </ul>
 </li>
+<li class="nav-item"><a class="nav-link" href="../articles/app.html">RESOLVE App ✨</a></li>
       </ul>
 </div>
 
@@ -137,92 +137,141 @@ from Eurostat GISCO.</p>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="../app/app.css">
 <div id="resolve-app" data-models-pack="https://zenodo.org/api/records/24077609/files/models.tar/content" data-models-index="https://zenodo.org/api/records/24077609/files/models.index.json/content" data-terrain-field="https://zenodo.org/api/records/24075925/files/terrain_field.bin/content" data-examples="../app/examples/">
-  <div class="panel">
-    <h2 id="plots">1. Your plots</h2>
-    <p class="hint" id="example-note" hidden></p>
-    <div class="grid">
-      <div>
-        <label class="file" for="species-file">Species table</label>
-        <input type="file" id="species-file" accept=".csv,.tsv,.txt"><div class="hint">One row per species record: plot ID, species name (World Flora Online),
-          and optionally cover (%), genus and family. Columns are recognised by name, Darwin Core terms included;
-          change any choice below.</div>
-        <div class="fields" id="species-fields"></div>
-        <div class="info" id="species-info"></div>
-        <div class="error" id="species-error"></div>
-      </div>
-      <div>
-        <label class="file" for="header-file">Header table <span class="hint">(optional)</span></label>
-        <input type="file" id="header-file" accept=".csv,.tsv,.txt"><div class="hint">One row per plot: plot ID, latitude and longitude (WGS84), and year and month
-          or a date. Each variable uses the coordinates and date where the tables give them; section 2 names
-          what each is predicted from. A variable the header records on some plots (survey year, coordinates,
-          altitude, slope, plot area) has its gaps fitted on the plots that record it.</div>
-        <div class="fields" id="header-fields"></div>
-        <div class="info" id="header-info"></div>
-        <div class="error" id="header-error"></div>
+  <div id="loader" role="status" aria-live="polite">
+    <div class="hex">
+      <img class="logo base" src="../logo.svg" alt=""><img class="logo fill" id="hex-fill" src="../logo.svg" alt="RESOLVE">
+</div>
+    <p id="loader-step">Reading the model list…</p>
+  </div>
+
+  <div id="tool" hidden>
+    <div class="card mt-3" role="region" aria-labelledby="data-h">
+      <div class="card-body">
+        <p class="card-title h5" id="data-h">Data</p>
+        <p class="small text-body-secondary" id="example-note" hidden></p>
+        <div class="tables">
+          <div>
+            <label class="form-label small d-block" for="species-file">Species table: one row per species record, with
+              plot ID, species name (World Flora Online), and optionally cover (%), genus and family. Columns are
+              matched by name (Darwin Core names too); change them below if needed.</label>
+            <input class="form-control form-control-sm" type="file" id="species-file" accept=".csv,.tsv,.txt"><div class="fields small" id="species-fields"></div>
+            <div class="info small text-body-secondary" id="species-info"></div>
+            <div class="error small" id="species-error"></div>
+          </div>
+          <div>
+            <label class="form-label small d-block" for="header-file">Header table (optional): one row per plot, with
+              plot ID, latitude and longitude (WGS84), and year and month or a date. Where the header records
+              survey year, coordinates, altitude, slope or plot area on only some plots, the missing values are
+              estimated from the plots that have them.</label>
+            <input class="form-control form-control-sm" type="file" id="header-file" accept=".csv,.tsv,.txt"><div class="fields small" id="header-fields"></div>
+            <div class="info small text-body-secondary" id="header-info"></div>
+            <div class="error small" id="header-error"></div>
+          </div>
+        </div>
+        <div class="options">
+          <label>Correct misspelled species names
+            <select class="form-select form-select-sm" id="o-spelling"><option value="0">off</option>
+<option value="1" selected>up to 1 letter off</option>
+<option value="2">up to 2 letters off</option></select></label>
+        </div>
+        <button type="button" class="btn btn-link btn-sm p-0 mt-2" id="reset-data" hidden>Use the example data again</button>
       </div>
     </div>
-    <label class="hint spelling">Misspelled species names: read as the nearest known name within
-      <select id="o-spelling"><option value="0">no edits (names as written)</option>
-<option value="1" selected>1 edit</option>
-<option value="2">2 edits (can also rename species the models never saw)</option></select></label>
-    <button type="button" class="link" id="reset-data" hidden>Use the example data again</button>
-  </div>
 
-  <div class="panel">
-    <h2 id="models">2. Models</h2>
-    <div id="targets"></div>
-    <div class="actions">
-      <button id="run" disabled>Predict</button>
-      <label class="hint">Workers <input type="number" id="o-workers" min="1" max="16" step="1" aria-describedby="workers-note"></label>
-      <span id="workers-note" class="hint"></span>
-      <label class="hint">Weights
-        <select id="o-precision"><option value="half" selected>half precision (half the download)</option>
-<option value="full">full precision (the engine's own)</option></select></label>
-      <label class="hint" id="terrain-option" hidden><input type="checkbox" id="o-terrain" checked>
-        Terrain correction of altitude and slope</label>
-      <span id="download-status"></span>
+    <div class="card mt-3" role="region" aria-labelledby="models-h">
+      <div class="card-body">
+        <p class="card-title h5" id="models-h">Models</p>
+        <div class="choices" id="targets"></div>
+        <div class="options">
+          <label class="form-check-label" id="terrain-option" hidden><input class="form-check-input" type="checkbox" id="o-terrain" checked> Terrain correction of altitude and slope</label>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn btn-primary" id="run" disabled>Predict</button>
+          <label class="small">Workers <input class="form-control form-control-sm d-inline-block" type="number" id="o-workers" min="1" max="16" step="1"></label>
+          <span id="status" class="small text-body-secondary" role="status"></span>
+        </div>
+        <div id="busy" class="mt-2" hidden>
+          <div class="busy-line small">
+<span id="busy-verb"></span><span id="busy-share"></span>
+</div>
+          <div class="progress" role="progressbar" aria-label="Share of the run done" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" id="busy-bar"></div></div>
+        </div>
+        <p id="download-status" class="small text-body-secondary mt-2 mb-0"></p>
+      </div>
     </div>
-  </div>
 
-  <div class="panel" id="results" hidden>
-    <h2 id="predictions">3. Predictions</h2>
-    <div id="busy" hidden>
-<span class="spinner" aria-hidden="true"></span><span id="busy-verb"></span>
-      <progress id="busy-bar" max="1" value="0"></progress><span id="busy-share"></span>
+    <div id="results" hidden>
+      <div class="stats mt-3">
+        <div class="stat">
+<b id="s-plots"></b><span>plots</span>
 </div>
-    <div id="status" role="status"></div>
-    <ul id="summary"></ul>
-<ul id="gaps" hidden></ul>
-<details id="unknown" hidden><summary></summary><p class="hint">Names are matched exactly against the World Flora Online names the models were trained on;
-        check the spelling and the accepted name of each.</p>
-<ul></ul></details><details id="moved" hidden><summary></summary><p class="hint">The models know these species by the name the European Vegetation Archive resolved its records to.
-        Each name is matched through EVA's own records, the synonymy of a taxonomic backbone, or its spelling,
-        named beside it.</p>
-<ul></ul></details><div class="table-wrap"><table id="table" class="table"></table></div>
-    <div id="table-note"></div>
-    <div id="map-note"></div>
-    <div id="map" hidden></div>
-    <div class="actions">
-<button id="download" class="secondary" disabled>Download all predictions (CSV)</button>
-      <button id="download-map" class="secondary" disabled>Download map (SVG)</button>
+        <div class="stat">
+<b id="s-variables"></b><span>variables predicted</span>
 </div>
-  </div>
+        <div class="stat">
+<b id="s-unknown"></b><span>species names not recognised</span>
+</div>
+        <div class="stat">
+<b id="s-time"></b><span>to predict</span>
+</div>
+      </div>
 
-  <div class="notes">
-    <p>Habitat combines its five seeds by majority vote (agreement is the share of seeds naming the class);
-    numeric variables by their mean and standard deviation across seeds; location by the spherical mean and the
-    median distance of the seeds from it. "Species recognised" is the share of the plot's cover held by species
-    the models know. A terrain-corrected altitude or slope weighs the prediction against the elevation model
-    (GLO-30) at the plot and over the square kilometre around it, by the plot's location uncertainty, the seeds'
-    spread and how many of its species the models know; the elevation model's own values stand beside it.</p>
-    <p>Terrain values produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space
-    GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved. The organisations
-    in charge of the Copernicus programme by law or by delegation do not incur any liability for any use of the
-    Copernicus WorldDEM-30.</p>
+      <div class="row g-3 mt-0">
+        <div class="col-lg-7" id="map-panel"><div class="card h-100">
+          <div class="card-body">
+            <p class="card-title h5">Plots</p>
+            <div id="map" role="region" aria-label="Map of the plots coloured by habitat"></div>
+            <div class="legend" id="legend"></div>
+            <div class="actions">
+              <button type="button" class="btn btn-outline-primary btn-sm" id="download-map" disabled>Download map (SVG)</button>
+            </div>
+          </div>
+        </div></div>
+
+        <div class="col-lg-5" id="habitat-panel"><div class="card h-100">
+          <div class="card-body">
+            <p class="card-title h5">Habitats</p>
+            <ul class="types" id="summary"></ul>
+</div>
+        </div></div>
+      </div>
+
+      <div class="card mt-3">
+        <div class="card-body">
+          <p class="card-title h5">Predictions</p>
+          <div class="tablewrap"><table class="table table table-sm table-hover mb-0" id="table"></table></div>
+          <div class="actions">
+            <button type="button" class="btn btn-outline-primary btn-sm" id="download" disabled>Download all predictions (CSV)</button>
+            <span id="table-note" class="small text-body-secondary"></span>
+          </div>
+          <ul class="warn small text-body-secondary" id="gaps" hidden></ul>
+<details class="small mt-3" id="unknown" hidden><summary></summary><p class="text-body-secondary mt-2"></p>
+<ul></ul></details><details class="small mt-3" id="moved" hidden><summary></summary><p class="text-body-secondary mt-2"></p>
+<ul></ul></details>
+</div>
+      </div>
+    </div>
+
+    <div class="notes small text-body-secondary mt-4">
+      <p>Each variable is predicted by five models, trained in the same way from different random starting points
+      (seeds), and the page combines their five predictions: habitat by majority vote (seed agreement is the share of
+      the five naming the habitat), numeric variables by their mean and standard deviation, and location by the
+      spherical mean and the median distance of the five from it.</p>
+      <p>Altitude and slope can also be corrected with an elevation model (Copernicus GLO-30). The correction weighs
+      the prediction against the elevation model's value at the plot and over the square kilometre around it,
+      depending on the plot's location uncertainty, the spread of the five predictions and how many of the plot's
+      species the models know. The table gives the elevation model's own values beside the corrected ones.</p>
+      <p>Terrain values produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space
+      GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved. The organisations
+      in charge of the Copernicus programme by law or by delegation do not incur any liability for any use of the
+      Copernicus WorldDEM-30.</p>
+    </div>
+
+    <p id="footer" class="small text-body-secondary mt-3">runs on
+      <a href="https://onnxruntime.ai/" class="external-link">ONNX Runtime Web</a> · <span id="workers"></span></p>
   </div>
 </div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script><script type="module" src="../app/app.js"></script></main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
-    </nav></aside>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script><script type="module" src="../app/app.js"></script></main>
 </div>
 
 

@@ -178,7 +178,9 @@ def latent_column(fit: dict, th: dict) -> tuple[str, float, float, float]:
     top = H / 2 - height / 2
     cell = height / n
     scale = max(abs(v) for v in values) or 1.0
-    out = []
+    out = [
+        f'<rect x="{fmt(x)}" y="{fmt(top)}" width="{fmt(w)}" height="{fmt(height)}" fill="{th["background"]}"/>'
+    ]
     for k, v in enumerate(values):
         a = min(abs(v) / scale, 1.0)
         colour = th["pool"] if v >= 0 else th["neg"]
@@ -288,9 +290,9 @@ def build(fit: dict) -> str:
 {readout_curve(x_out, y_mid, elev_anchor[0], elev_anchor[1], th)}
 {readout_curve(x_out, y_mid, hab_anchor[0], hab_anchor[1], th)}
 {species}
-{latent}
 {elevation}
 {habitat}
+{latent}
 </svg>
 """
 

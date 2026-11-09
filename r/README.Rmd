@@ -9,7 +9,7 @@ if (requireNamespace("resolveR", quietly = TRUE)) suppressPackageStartupMessages
 
 # RESOLVE <img src="man/figures/logo.svg" align="right" height="139" alt="RESOLVE logo" />
 
-*the elevation, area or habitat of a plot, read from its species list*
+*Imputing metadata of vegetation surveys*
 
 <!-- badges: start -->
 [![R-CMD-check](https://github.com/gcol33/resolve/actions/workflows/r-cmd-check.yml/badge.svg)](https://github.com/gcol33/resolve/actions/workflows/r-cmd-check.yml)
@@ -22,7 +22,7 @@ if (requireNamespace("resolveR", quietly = TRUE)) suppressPackageStartupMessages
 
 <p align="center"><img src="man/figures/resolve-hero.svg" alt="Species and cover of held-out example plot A139 pooled into one latent vector, read out as elevation (predicted 713 m, observed 679 m; R squared 0.85 over 30 held-out plots) and habitat (observed forest, probability 0.89)" width="100%"></p>
 
-RESOLVE predicts properties of a vegetation plot from the species recorded in it: the plot's area, elevation, slope, survey year or habitat type, from the species list and, where recorded, the cover of each species. Any sample described by a list of items with counts fits the same model.
+RESOLVE predicts properties of a vegetation plot from the species recorded in it: the plot's area, elevation, slope, aspect, survey year, location or habitat type, from the species list and, where recorded, the cover of each species. The same model works for any sample recorded as a list of names with an amount for each, such as the insects caught in a trap or the birds counted at a site.
 
 A species list has no fixed length, so the model pools the species of a plot, each weighted by its cover, into one vector and reads every target off that vector. Elevation (a regression) and habitat (a classification) are then fitted by one model. Training holds out a share of the plots and reports each target's error on them, which is how you compare encodings and inputs on your own data before deciding which model to keep.
 
@@ -36,6 +36,8 @@ RESOLVE lets you:
 - **Use R, Python or the command line.** The engine is a C++ library on libtorch, the C++ core of [PyTorch](https://pytorch.org/). The R package, the Python package and the `resolve` executable call it, so a model trained in one loads in the others.
 
 On every push the [tests workflow](https://github.com/gcol33/resolve/actions/workflows/tests.yml) builds the engine and runs the C++ tests, the command-line end-to-end tests and the Python binding tests; the R package goes through R CMD check. Feature hashing follows [Weinberger et al. (2009)](https://doi.org/10.1145/1553374.1553516), the transformer encoder [Vaswani et al. (2017)](https://doi.org/10.48550/arXiv.1706.03762). Report the RESOLVE version with an analysis, since defaults have changed between versions.
+
+The [RESOLVE App](https://gillescolling.com/resolve/articles/app.html) runs the released models in your browser, without installing anything. It predicts the EUNIS habitat, altitude, slope, plot area, survey year and location of the example plots or of your own tables, and maps the plots.
 
 ## Installation
 

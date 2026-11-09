@@ -13,7 +13,10 @@
   corrects altitude and slope with the elevation model, and downloads
   the predictions as a CSV and the map as an SVG. On the 300 example
   plots it gives the same CSV, byte for byte, as the page checked
-  against the engine.
+  against the engine. A service worker (`coi_sw.js`) makes the page
+  cross-origin isolated on hosts that cannot send the headers for it,
+  such as GitHub Pages, so the gap fitting’s neighbour searches run on
+  several threads there too.
 
 - **Seeding the starting weights from R and Python.** Training seeds its
   split and shuffle with its `seed` argument, but a new model’s weights
@@ -228,6 +231,13 @@
 
 ### Fixed
 
+- **Neighbour searches over plots without species.** The species-set
+  neighbour search read a plot’s species through a subscript one past
+  the end of its rank table when the plot was the last with species or
+  no plot had any; builds with standard-library assertions (GCC 15 on
+  Ubuntu 26.04) aborted there, for example in gap fitting without a
+  species composition.
+
 - **Training in R on Linux with a system BLAS.** libtorch calls the BLAS
   of the MKL it carries, but R had already loaded its own BLAS, and on
   Linux the backend’s calls bound to that one. With OpenBLAS 0.3.32
@@ -236,6 +246,7 @@
   backend so that libtorch’s calls stay inside libtorch
   (`RTLD_DEEPBIND`, as the torch package loads lantern); a test preloads
   a stand-in BLAS and checks the fit never reaches it.
+
 - **Terrain descriptors near 50, 60, 70 and 80 degrees north.** GLO-30’s
   tiles widen their columns at these parallels (3,600 to 2,400 columns
   per degree at 50 N, and so on). A cell one row past a tile’s edge kept
@@ -253,6 +264,7 @@
   training error stays at 28.5 m and 6.73 degrees, and the 100 km
   grouped cross-fits move by 0.02 m or less except one fold split (37.6
   to 38.2 m).
+
 - **Tied neighbours go to the lower row.** `nearest_by_cosine` and
   `nearest_by_great_circle` took torch’s `topk`, which leaves the order
   of equal scores to the platform, so a plot with several equally

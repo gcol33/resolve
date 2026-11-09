@@ -1,7 +1,7 @@
 
 # RESOLVE <img src="r/man/figures/logo.svg" align="right" height="139" alt="RESOLVE logo" />
 
-*the elevation, area or habitat of a plot, read from its species list*
+*Imputing metadata of vegetation surveys*
 
 <!-- badges: start -->
 
@@ -22,10 +22,11 @@ MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.or
 </p>
 
 RESOLVE predicts properties of a vegetation plot from the species
-recorded in it: the plot’s area, elevation, slope, survey year or
-habitat type, from the species list and, where recorded, the cover of
-each species. Any sample described by a list of items with counts fits
-the same model.
+recorded in it: the plot’s area, elevation, slope, aspect, survey year,
+location or habitat type, from the species list and, where recorded, the
+cover of each species. The same model works for any sample recorded as a
+list of names with an amount for each, such as the insects caught in a
+trap or the birds counted at a site.
 
 A species list has no fixed length, so the model pools the species of a
 plot, each weighted by its cover, into one vector and reads every target
@@ -68,6 +69,12 @@ encoder [Vaswani et
 al. (2017)](https://doi.org/10.48550/arXiv.1706.03762). Report the
 RESOLVE version with an analysis, since defaults have changed between
 versions.
+
+The [RESOLVE App](https://gillescolling.com/resolve/articles/app.html)
+runs the released models in your browser, without installing anything.
+It predicts the EUNIS habitat, altitude, slope, plot area, survey year
+and location of the example plots or of your own tables, and maps the
+plots.
 
 ## Installation
 

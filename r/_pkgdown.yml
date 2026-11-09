@@ -75,12 +75,12 @@ navbar:
     - news
     right:
     - search
-    - app
     - github
     - lightswitch
+    - app
   components:
     app:
-      text: RESOLVE App
+      text: RESOLVE App ✨
       href: articles/app.html
     reference:
       text: Reference
@@ -189,9 +189,7 @@ articles:
 - title: Setup
   navbar: Setup
   contents: articles/installation
-- title: App
-  desc: |
-    The released models in the browser, on your own tables.
+- title: internal
   navbar: ~
   contents: articles/app
 - title: Python reference
