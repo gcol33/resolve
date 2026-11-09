@@ -52,8 +52,11 @@
 // The layout chosen is the one whose held-out plots lie from the plots they
 // may read as the gaps lie from the complete plots: the smallest sum over the
 // axes of the Wasserstein distance between the two distributions of
-// nearest-neighbour distances, each divided by the sum of the two
-// distributions' means.
+// nearest-neighbour distances, each taken on the rank scale of the two pooled
+// (the mean over the pooled distances of the absolute difference between the
+// two empirical distribution functions), so every axis lies in [0, 1] and an
+// axis on which the gaps all sit at one distance costs a layout only the share
+// of its held-out plots moved off it.
 //
 // Every fitted part is fitted without the plot it is judged on: a held-out
 // plot's neighbours come from the other folds, the least-squares coefficients
@@ -198,7 +201,7 @@ struct GapFoldLayout {
     double buffer_km = std::numeric_limits<double>::quiet_NaN();
     double buffer_years = std::numeric_limits<double>::quiet_NaN();
     bool injected = false;
-    // Per matched axis, the relative Wasserstein distance between the held-out
+    // Per matched axis, the rank-scale Wasserstein distance between the held-out
     // plots' and the gaps' nearest-neighbour distances, and their sum.
     std::vector<std::pair<std::string, double>> mismatch;
     double total_mismatch = std::numeric_limits<double>::quiet_NaN();

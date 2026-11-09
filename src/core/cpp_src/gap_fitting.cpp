@@ -406,6 +406,17 @@ struct FoldHiding {
         }
         return buffer_years != nullptr && std::abs(years[a] - years[b]) < (*buffer_years)[a];
     }
+
+    // Per query row, the km within which this rule hides every plot from it
+    // (its km buffer, NaN for none), as PlaceIndex::nearest takes it; empty
+    // without km buffers.
+    [[nodiscard]] std::vector<double> radius(const std::vector<int64_t>& rows) const {
+        std::vector<double> out;
+        if (buffer_km == nullptr) return out;
+        out.reserve(rows.size());
+        for (const int64_t u : rows) out.push_back((*buffer_km)[static_cast<std::size_t>(u)]);
+        return out;
+    }
 };
 
 // A fold layout: each complete plot's fold, and its buffers (empty: none).
@@ -483,9 +494,11 @@ public:
         if (places_ && k_spatial_ >= 1) {
             std::vector<int64_t> rows(static_cast<std::size_t>(n_cal_));
             std::iota(rows.begin(), rows.end(), 0);
-            out[kSpatial] =
-                places_->nearest(rows, k_spatial_, [&](int64_t u, int64_t v, double km) { return rule.hides(u, v, km); })
-                    .indices;
+            out[kSpatial] = places_
+                                ->nearest(rows, k_spatial_,
+                                          [&](int64_t u, int64_t v, double km) { return rule.hides(u, v, km); },
+                                          rule.radius(rows))
+                                .indices;
         }
         return out;
     }
@@ -708,15 +721,15 @@ public:
         return {std::move(folds), *std::max_element(counts.begin(), counts.end())};
     }
 
-    // Per matched axis, the relative Wasserstein distance between the
+    // Per matched axis, the rank-scale Wasserstein distance between the
     // matching plots' distances to the other folds and the gaps' distances to
     // the complete plots.
     [[nodiscard]] std::vector<std::pair<std::string, double>> mismatch(const Layout& layout) const {
         const FoldHiding rule = search_.hiding(layout.folds, -1, layout.km(), layout.yrs());
         std::vector<std::pair<std::string, double>> out;
-        out.emplace_back("similarity", relative_wasserstein(held_dissimilarity(rule), gap_dissimilarity_));
-        if (split_.km_axis) out.emplace_back("km", relative_wasserstein(held_km(rule), gap_km_));
-        if (split_.time_axis) out.emplace_back("years", relative_wasserstein(held_years(rule), gap_years_));
+        out.emplace_back("similarity", rank_wasserstein(held_dissimilarity(rule), gap_dissimilarity_));
+        if (split_.km_axis) out.emplace_back("km", rank_wasserstein(held_km(rule), gap_km_));
+        if (split_.time_axis) out.emplace_back("years", rank_wasserstein(held_years(rule), gap_years_));
         return out;
     }
 
@@ -885,7 +898,7 @@ private:
         std::vector<double> out;
         if (rows.empty()) return out;
         const PlaceNeighbours found = search_.places()->nearest(
-            rows, 1, [&](int64_t u, int64_t v, double km) { return rule.hides(u, v, km); });
+            rows, 1, [&](int64_t u, int64_t v, double km) { return rule.hides(u, v, km); }, rule.radius(rows));
         for (const double km : values_of(found.km.select(1, 0))) {
             if (std::isfinite(km)) out.push_back(km);
         }
@@ -921,27 +934,28 @@ private:
         return out;
     }
 
-    // The area between two samples' empirical distribution functions, divided
-    // by the sum of their means; 0 when both are all zero, NaN when either is
-    // empty.
-    static double relative_wasserstein(std::vector<double> a, std::vector<double> b) {
+    // The Wasserstein distance between two samples on the rank scale of the
+    // two pooled: the mean over the pooled values of the absolute difference
+    // between the samples' empirical distribution functions there. It lies in
+    // [0, 1] whatever the axis's units, so the axes add up; a share p of one
+    // sample moved off a value the other holds entirely costs about p. NaN
+    // when either is empty.
+    static double rank_wasserstein(std::vector<double> a, std::vector<double> b) {
         if (a.empty() || b.empty()) return kNaN;
         std::sort(a.begin(), a.end());
         std::sort(b.begin(), b.end());
         const double na = static_cast<double>(a.size()), nb = static_cast<double>(b.size());
         std::size_t i = 0, j = 0;
-        double area = 0.0;
-        double x = std::min(a.front(), b.front());
+        double sum = 0.0;
         while (i < a.size() || j < b.size()) {
-            const double next = j >= b.size() || (i < a.size() && a[i] <= b[j]) ? a[i] : b[j];
-            area += std::abs(static_cast<double>(i) / na - static_cast<double>(j) / nb) * (next - x);
-            x = next;
+            const double x = j >= b.size() || (i < a.size() && a[i] <= b[j]) ? a[i] : b[j];
+            const std::size_t i0 = i, j0 = j;
             while (i < a.size() && a[i] == x) ++i;
             while (j < b.size() && b[j] == x) ++j;
+            const double mass = static_cast<double>((i - i0) + (j - j0));
+            sum += mass * std::abs(static_cast<double>(i) / na - static_cast<double>(j) / nb);
         }
-        const double means = std::accumulate(a.begin(), a.end(), 0.0) / na +
-                             std::accumulate(b.begin(), b.end(), 0.0) / nb;
-        return means > 0.0 ? area / means : 0.0;
+        return sum / (na + nb);
     }
 
     const Split& split_;

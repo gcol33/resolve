@@ -672,9 +672,13 @@ export class PlaceIndex {
   }
 }
 
-function placeNearest(index, lo, hi, { queries, k, indices, km: kmOut }, ctx) {
+function placeNearest(index, lo, hi, { queries, k, indices, km: kmOut, rules }, ctx) {
   const { lat, lon, xyz, order, lo: boxLo, hi: boxHi, left, right, begin, end } = index;
   const hides = ctx.hides;
+  // A query's km buffer hides every candidate within it: boxes wholly inside
+  // are passed over.
+  const bufferKm = rules ? rules.bufferKm : null;
+  let hiddenWithin = NaN;
   const foundKm = ctx.scratch.km, foundRow = ctx.scratch.rows;
   let q = 0, px = 0, py = 0, pz = 0, found = 0;
   const boxKm = (id, far) => {
@@ -688,6 +692,7 @@ function placeNearest(index, lo, hi, { queries, k, indices, km: kmOut }, ctx) {
   };
   const visit = (id) => {
     if (boxKm(id, false) - BOUND_SLACK_KM > (found === k ? foundKm[k - 1] : Infinity)) return;
+    if (!Number.isNaN(hiddenWithin) && boxKm(id, true) + BOUND_SLACK_KM < hiddenWithin) return;
     if (left[id] < 0) {
       for (let i = begin[id]; i < end[id]; i++) {
         const v = order[i];
@@ -711,6 +716,7 @@ function placeNearest(index, lo, hi, { queries, k, indices, km: kmOut }, ctx) {
     q = queries[qi];
     if (!Number.isFinite(lat[q]) || !Number.isFinite(lon[q])) continue;
     px = xyz[3 * q]; py = xyz[3 * q + 1]; pz = xyz[3 * q + 2];
+    hiddenWithin = bufferKm ? bufferKm[q] : NaN;
     found = 0;
     visit(0);
     for (let m = 0; m < found; m++) { indices[qi * k + m] = foundRow[m]; kmOut[qi * k + m] = foundKm[m]; }

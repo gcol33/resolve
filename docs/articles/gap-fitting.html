@@ -57,7 +57,7 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="nav-item dropdown">
+<li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
@@ -407,8 +407,10 @@ fitted.</p>
 number of folds, the side of the squares (<code>block_km</code>) and the
 length of the survey-year periods (<code>block_years</code>), the median
 buffer in km and in years, and how far the held-out plots’ distances
-still lie from the gaps’ on each axis (<code>mismatch</code>, 0 where
-they match).</p>
+still lie from the gaps’ on each axis (<code>mismatch</code>: the
+Wasserstein distance between the two distributions on the rank scale of
+both together, from 0 where they match to 1 where they do not
+overlap).</p>
 <p>A chosen least-squares method also reports its coefficients
 (<code>coefficients</code>, one per term: <code>resolve</code>,
 <code>species</code>, <code>spatial</code>), the complete plots it was

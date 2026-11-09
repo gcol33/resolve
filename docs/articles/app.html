@@ -93,7 +93,7 @@
     <li><button class="dropdown-item" data-bs-theme-value="auto"><span class="fa fa-adjust"></span> Auto</button></li>
   </ul>
 </li>
-<li class="nav-item"><a class="nav-link" href="../articles/app.html">RESOLVE App ✨</a></li>
+<li class="active nav-item"><a class="nav-link" href="../articles/app.html">RESOLVE App ✨</a></li>
       </ul>
 </div>
 
@@ -121,12 +121,15 @@ area, survey year) of vegetation plots from their species composition
 and cover-abundance, with the released RESOLVE models trained on the
 plots of the European Vegetation Archive (EVA). The models run locally
 in your browser; your files are not uploaded. The page downloads the
-models and the elevation model from Zenodo (<a href="https://doi.org/10.5281/zenodo.24077609" class="external-link">models</a>, <a href="https://doi.org/10.5281/zenodo.24075925" class="external-link">elevation model</a>), the
-map from OpenStreetMap and, for a map download, the country boundaries
-from Eurostat GISCO.</p>
+models and the elevation model from Zenodo (<a href="https://doi.org/10.5281/zenodo.24077609" class="external-link">models</a>, <a href="https://doi.org/10.5281/zenodo.24075925" class="external-link">elevation model</a>), or
+the models from their copy on <a href="https://huggingface.co/gcol33/resolve-models" class="external-link">Hugging Face</a>
+when Zenodo does not answer, the map from OpenStreetMap and, for a map
+download, the country boundaries from Eurostat GISCO.</p>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="../app/app.css">
-<div id="resolve-app" data-models-pack="https://zenodo.org/api/records/24077609/files/models.tar/content" data-models-index="https://zenodo.org/api/records/24077609/files/models.index.json/content" data-terrain-field="https://zenodo.org/api/records/24075925/files/terrain_field.bin/content" data-examples="../app/examples/">
+<div id="resolve-app" data-models-pack="https://zenodo.org/api/records/24077609/files/models.tar/content
+                       https://huggingface.co/gcol33/resolve-models/resolve/zenodo-24077609/models.tar" data-models-index="https://zenodo.org/api/records/24077609/files/models.index.json/content
+                        https://huggingface.co/gcol33/resolve-models/resolve/zenodo-24077609/models.index.json" data-terrain-field="https://zenodo.org/api/records/24075925/files/terrain_field.bin/content" data-examples="../app/examples/">
   <div id="loader" role="status" aria-live="polite">
     <div class="hex">
       <img class="logo base" src="../logo.svg" alt=""><img class="logo fill" id="hex-fill" src="../logo.svg" alt="RESOLVE">

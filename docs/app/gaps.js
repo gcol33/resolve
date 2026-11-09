@@ -22,9 +22,9 @@
 // nearest-neighbour distance matching, Linnenbrink et al. 2024, Geoscientific
 // Model Development): squares of the equal-area plane, survey-year periods,
 // both, or plot by plot, at a range of sizes, the layout whose held-out plots
-// lie from the other folds as the gaps lie from the complete plots (relative
+// lie from the other folds as the gaps lie from the complete plots (the
 // Wasserstein distance of the nearest-neighbour distances in species
-// dissimilarity, km and years). Every fitted part is fitted on the other folds;
+// dissimilarity, km and years, each on the rank scale of the two pooled). Every fitted part is fitted on the other folds;
 // the candidate with the lowest out-of-fold error is refitted on every
 // complete plot and predicts the gaps, and the whole procedure, repeated with
 // each fold held out, gives the error it is reported with (nested
@@ -405,22 +405,23 @@ const highWord = (v) => Math.floor(v / 4294967296) >>> 0;
 const GROUP_STREAM = 1, SAMPLE_STREAM = 2, BUFFER_STREAM = 3;
 const BLOCK_SIZES = 10, PERIOD_LENGTHS = 8, SIMILAR_LIST = 256;
 
-// The area between two samples' empirical distribution functions, divided by
-// the sum of their means; 0 when both are all zero, NaN when either is empty.
-function relativeWasserstein(a, b) {
+// The Wasserstein distance between two samples on the rank scale of the two
+// pooled: the mean over the pooled values of the absolute difference between
+// the samples' empirical distribution functions there, in [0, 1] whatever the
+// axis's units; NaN when either is empty.
+function rankWasserstein(a, b) {
   if (!a.length || !b.length) return NaN;
   a = Float64Array.from(a).sort();
   b = Float64Array.from(b).sort();
-  let i = 0, j = 0, area = 0, x = Math.min(a[0], b[0]);
+  let i = 0, j = 0, sum = 0;
   while (i < a.length || j < b.length) {
-    const next = j >= b.length || (i < a.length && a[i] <= b[j]) ? a[i] : b[j];
-    area += Math.abs(i / a.length - j / b.length) * (next - x);
-    x = next;
+    const x = j >= b.length || (i < a.length && a[i] <= b[j]) ? a[i] : b[j];
+    const i0 = i, j0 = j;
     while (i < a.length && a[i] === x) i++;
     while (j < b.length && b[j] === x) j++;
+    sum += (i - i0 + (j - j0)) * Math.abs(i / a.length - j / b.length);
   }
-  const means = a.reduce((s, v) => s + v, 0) / a.length + b.reduce((s, v) => s + v, 0) / b.length;
-  return means > 0 ? area / means : 0;
+  return sum / (a.length + b.length);
 }
 
 const moreSimilar = (x, y) => (x[0] !== y[0] ? y[0] - x[0] : x[1] - y[1]);
@@ -523,9 +524,9 @@ class LayoutMatcher {
 
   async mismatch(layout) {
     const rules = foldRules(this.split, layout, -1), hides = foldHiding(rules);
-    const out = [["similarity", relativeWasserstein(this.heldDissimilarity(hides), this.gapDissimilarity)]];
-    if (this.split.kmAxis) out.push(["km", relativeWasserstein(await this.heldKm(rules), this.gapKm)]);
-    if (this.split.timeAxis) out.push(["years", relativeWasserstein(this.heldYears(hides), this.gapYears)]);
+    const out = [["similarity", rankWasserstein(this.heldDissimilarity(hides), this.gapDissimilarity)]];
+    if (this.split.kmAxis) out.push(["km", rankWasserstein(await this.heldKm(rules), this.gapKm)]);
+    if (this.split.timeAxis) out.push(["years", rankWasserstein(this.heldYears(hides), this.gapYears)]);
     return out;
   }
 

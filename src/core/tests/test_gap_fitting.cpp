@@ -241,6 +241,63 @@ TEST_CASE("Gaps surveyed long before the complete plots are matched in years", "
     CHECK(axis_mismatch(f.layout, "years") < 0.2);
 }
 
+TEST_CASE("Whole cells of sites held out as gaps are matched by squares though the years axis is flat",
+          "[gap_fitting]") {
+    torch::manual_seed(13);
+    // 300 sites of 4 plots at one position, surveyed in one year; a plot keeps
+    // most of its site's species, and a site draws them from the species whose
+    // centres lie near it. The gaps are whole cells of one degree, so a gap
+    // has no site sibling among the complete plots, and every gap site shares
+    // its survey year with some complete site.
+    const int64_t n_sites = 300, per_site = 4, n = n_sites * per_site, n_species = 400;
+    const torch::Tensor site_lat = 45.0 + 4.0 * torch::rand({n_sites}, kDouble);
+    const torch::Tensor site_lon = 10.0 + 6.0 * torch::rand({n_sites}, kDouble);
+    const torch::Tensor site_cell = torch::floor(site_lat - 45.0) * 6 + torch::floor(site_lon - 10.0);
+    const torch::Tensor gap_site = torch::remainder(site_cell, 5) == 0;
+    const torch::Tensor complete_sites = torch::nonzero(gap_site.logical_not()).squeeze(1);
+    const torch::Tensor drawn_year = 1950.0 + torch::randint(0, 71, {n_sites}, kDouble);
+    const torch::Tensor shared_year = drawn_year.index(
+        {complete_sites.index({torch::randint(0, complete_sites.size(0), {n_sites}, torch::kInt64)})});
+    const torch::Tensor site_year = torch::where(gap_site, shared_year, drawn_year);
+    const torch::Tensor centre_lat = 45.0 + 4.0 * torch::rand({n_species}, kDouble);
+    const torch::Tensor centre_lon = 10.0 + 6.0 * torch::rand({n_species}, kDouble);
+    const torch::Tensor d = torch::sqrt((site_lat.unsqueeze(1) - centre_lat).pow(2) +
+                                        (site_lon.unsqueeze(1) - centre_lon).pow(2));
+    const torch::Tensor base = torch::multinomial(torch::exp(-d / 0.7), 14, /*replacement=*/false);
+    const torch::Tensor site = torch::div(torch::arange(n), per_site, "floor");
+    torch::Tensor species = torch::zeros({n, n_species}, torch::kFloat32);
+    species.scatter_(1, base.index({site}), 1.0f);
+    species *= (torch::rand({n, n_species}) > 0.15).to(torch::kFloat32);
+    const torch::Tensor lat = site_lat.index({site}), lon = site_lon.index({site});
+    const torch::Tensor coords = torch::stack({lat, lon}, 1);
+    const torch::Tensor gaps = gap_site.index({site});
+    const torch::Tensor recorded = with_gaps(coords, gaps);
+    GapPlots plots{species, recorded, {}};
+    plots.years = site_year.index({site});
+
+    const GapFolds f = gap_folds({"location", GapScale::Geographic}, recorded, plots);
+    // Plot by plot, a held-out plot reads its site's other plots; squares of
+    // about a cell take them away as the gaps lack them. A held-out plot that
+    // loses every plot of its own survey year costs the years axis only the
+    // share of such plots.
+    INFO("squares " << f.layout.block_km << " km, buffer " << f.layout.buffer_km << " km, mismatch "
+                    << axis_mismatch(f.layout, "similarity") << " similarity, " << axis_mismatch(f.layout, "years")
+                    << " years");
+    CHECK(std::isfinite(f.layout.block_km));
+    CHECK(axis_mismatch(f.layout, "years") < 0.1);
+
+    // The raw prediction places each plot about 110 km off at random; the
+    // estimated error of the choice meets the gaps' error.
+    const torch::Tensor raw = coords + torch::randn({n, 2}, kDouble);
+    const GapFit fit = fit_gaps({"location", GapScale::Geographic}, raw, recorded, plots);
+    const GapGroupChoice g = group(fit, "unlocated");
+    const torch::Tensor fitted = fit.fitted.index({gaps}), truth = coords.index({gaps});
+    const double gap_km = great_circle_km(fitted.select(1, 0), fitted.select(1, 1), truth.select(1, 0),
+                                          truth.select(1, 1)).median().item<double>();
+    CHECK(g.estimated_error > 0.6 * gap_km);
+    CHECK(g.estimated_error < 1.6 * gap_km);
+}
+
 TEST_CASE("Scattered gaps are matched by a fine layout and the estimated error meets the gaps' error",
           "[gap_fitting]") {
     const int seed = GENERATE(0, 1, 2);

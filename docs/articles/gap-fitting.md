@@ -311,7 +311,9 @@ elevation.report["axes"]["km"]["gap_distance"]["median"]
 the side of the squares (`block_km`) and the length of the survey-year
 periods (`block_years`), the median buffer in km and in years, and how
 far the held-out plots’ distances still lie from the gaps’ on each axis
-(`mismatch`, 0 where they match).
+(`mismatch`: the Wasserstein distance between the two distributions on
+the rank scale of both together, from 0 where they match to 1 where they
+do not overlap).
 
 A chosen least-squares method also reports its coefficients
 (`coefficients`, one per term: `resolve`, `species`, `spatial`), the
