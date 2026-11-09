@@ -22,9 +22,9 @@ GISCO.
 <link rel="stylesheet" href="../app/app.css">
 <div id="resolve-app"
      data-models-pack="https://zenodo.org/api/records/24077609/files/models.tar/content
-                       https://huggingface.co/gcol33/resolve-models/resolve/main/models.tar"
+                       https://huggingface.co/gcol33/resolve-models/resolve/zenodo-24077609/models.tar"
      data-models-index="https://zenodo.org/api/records/24077609/files/models.index.json/content
-                        https://huggingface.co/gcol33/resolve-models/resolve/main/models.index.json"
+                        https://huggingface.co/gcol33/resolve-models/resolve/zenodo-24077609/models.index.json"
      data-terrain-field="https://zenodo.org/api/records/24075925/files/terrain_field.bin/content"
      data-examples="../app/examples/">
   <div id="loader" role="status" aria-live="polite">
