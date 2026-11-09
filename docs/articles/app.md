@@ -56,7 +56,8 @@ to impute
 
 Plots
 
-Cells by zoom 10 km cells 50 km cells 100 km cells
+Cells by zoom 10 km cells 50 km cells 100 km cells 200 km cells 500 km
+cells
 
 Points Grid
 

@@ -118,6 +118,8 @@ GISCO.
                   <option value="10">10 km cells</option>
                   <option value="50">50 km cells</option>
                   <option value="100">100 km cells</option>
+                  <option value="200">200 km cells</option>
+                  <option value="500">500 km cells</option>
                 </select>
                 <div class="btn-group btn-group-sm" role="group" aria-label="Map view">
                   <input type="radio" class="btn-check" name="map-view" id="map-view-points" value="points" autocomplete="off" checked>
