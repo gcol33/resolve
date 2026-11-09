@@ -1,11 +1,13 @@
-"""Build the RESOLVE hex logo: one vegetation plot of the example survey seen
-at an angle, its plants drawn on a quadrat grid that bends away below them.
+"""Build the RESOLVE hex logo: the species of one vegetation plot flowing into
+a single point, the plot's representation, and out again into the seven
+things the model reads from it (area, elevation, slope, aspect, survey year,
+location, habitat).
 
-The plants are the species of the most species-rich plot in
-``r/inst/extdata`` (ties broken by plot id), each species given a number of
-plants in proportion to its cover and coloured by growth form. The grid's
-horizontal lines drift towards the viewer by one cell per cycle, so the loop
-closes on its own first frame; everything else is still.
+The species are those of the most species-rich plot in ``r/inst/extdata``
+(ties broken by plot id), sized by cover and coloured by growth form. Small
+pulses travel along the curves from the species to the outputs, each on a
+loop of one cycle, so the animation closes on its own first frame; the dots
+and the name are still.
 
 Writes ``r/man/figures/logo.svg``.
 Run from anywhere: ``python tools/figures/logo.py``.
@@ -15,7 +17,6 @@ from __future__ import annotations
 
 import csv
 import math
-import random
 from collections import defaultdict
 
 from palette import (
@@ -23,9 +24,7 @@ from palette import (
     BORDER,
     EXAMPLE_DATA,
     FORM_COLOUR,
-    GREY,
     GROWTH_FORM,
-    PAPER,
     R_FIGURES,
     SERIF,
     fmt,
@@ -34,53 +33,18 @@ from palette import (
 WIDTH, HEIGHT = 520, 600
 CX, CY = 260.0, 300.0
 
-# Plane (unbent) coordinates: x across the hex from its centre, v down from
-# the top of the viewBox. The plane is flat down to BEND_START and then turns
-# away from the viewer over BEND_LENGTH plane units, like the surface of a
-# globe below its equator.
-BEND_START = 150.0
-BEND_LENGTH = 330.0
-TURN = 1.25
-LIFT = 55.0
-NARROW = 0.16
-PLANE_END = BEND_START + BEND_LENGTH
+SKY = "#E4ECEF"
+EDGE = "#5C6166"
 
-CELL = 46.0
-CYCLE_SECONDS = 8
-FRAMES = 16
-LINE_POINTS = 25
-N_PLANTS = 16
-PLANT_RADIUS = 12.0
-POOL_POINT = (CX, 384.0)
-
-
-def bend(v: float) -> float:
-    """Bend parameter t in [0, 1] of plane row v."""
-    return min(max((v - BEND_START) / BEND_LENGTH, 0.0), 1.0)
-
-
-def project(x: float, v: float) -> tuple[float, float]:
-    t = bend(v)
-    if t == 0.0:
-        y = v
-    else:
-        y = BEND_START + BEND_LENGTH * math.sin(t * TURN) / TURN
-    u = x / (WIDTH / 2)
-    scale = 1.0 - NARROW * (1.0 - math.cos(t * TURN))
-    return CX + x * scale, y - LIFT * u * u * t * t
-
-
-def foreshortening(v: float) -> tuple[float, float]:
-    """Horizontal and vertical scale of a small circle lying on the plane."""
-    t = bend(v)
-    return 1.0 - NARROW * (1.0 - math.cos(t * TURN)), math.cos(t * TURN)
-
-
-def polyline(points: list[tuple[float, float]]) -> str:
-    head, *rest = points
-    return f"M{fmt(head[0])} {fmt(head[1])}" + "".join(
-        f"L{fmt(x)} {fmt(y)}" for x, y in rest
-    )
+N_TARGETS = 7
+LATENT = (CX, 262.0)
+INPUT_ARC = (CX, 345.0, 250.0)  # centre x, centre y, radius of the arc the species sit on
+INPUT_SPREAD = 56.0  # degrees either side of straight up
+OUTPUT_Y, OUTPUT_HALF = 374.0, 174.0
+OUTPUT_SAG = 22.0
+OUTPUT_RADIUS = 14.0
+CYCLE_SECONDS = 6
+PULSE_RADIUS = 4.5
 
 
 def hex_points(r: float) -> str:
@@ -91,156 +55,99 @@ def hex_points(r: float) -> str:
     return " ".join(pts)
 
 
-def richest_plot() -> list[tuple[str, str, float]]:
+def richest_plot() -> list[tuple[str, float]]:
     rows = defaultdict(list)
     with open(EXAMPLE_DATA / "species.csv", newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
-            rows[r["plot_id"]].append((r["species"], r["family"], float(r["cover"])))
+            rows[r["plot_id"]].append((GROWTH_FORM[r["family"]], float(r["cover"])))
     plot = min(rows, key=lambda p: (-len(rows[p]), p))
-    return sorted(rows[plot], key=lambda s: -s[2])
+    return sorted(rows[plot], key=lambda s: -s[1])
 
 
-def plant_counts(species: list[tuple[str, str, float]]) -> list[tuple[str, int]]:
-    total = sum(c for _, _, c in species)
-    counts = [max(1, round(N_PLANTS * c / total)) for _, _, c in species]
-    return [(GROWTH_FORM[f], n) for (_, f, _), n in zip(species, counts)]
+def input_nodes(species: list[tuple[str, float]]) -> list[tuple[float, float, float, str]]:
+    """Species on an arc across the top, largest cover in the middle."""
+    n = len(species)
+    order = sorted(range(n), key=lambda i: abs(i - (n - 1) / 2))
+    top = max(c for _, c in species)
+    cx, cy, r = INPUT_ARC
+    nodes = []
+    for slot, (form, cover) in zip(order, species):
+        angle = math.radians(-90 - INPUT_SPREAD + 2 * INPUT_SPREAD * slot / max(n - 1, 1))
+        radius = 7.0 + 7.0 * math.sqrt(cover / top)
+        nodes.append((cx + r * math.cos(angle), cy + r * math.sin(angle), radius, FORM_COLOUR[form]))
+    return nodes
 
 
-def place_plants(counts: list[tuple[str, int]]) -> list[tuple[float, float, str]]:
-    rng = random.Random(20261031)
-    placed: list[tuple[float, float, str]] = []
-    for form, n in counts:
-        for _ in range(n):
-            for _attempt in range(4000):
-                x = rng.uniform(-205.0, 205.0)
-                v = rng.uniform(70.0, 330.0)
-                sx, sy = project(x, v)
-                if not inside_hex(sx, sy, 250.0):
-                    continue
-                if all(math.hypot(x - px, v - pv) > 3.1 * PLANT_RADIUS for px, pv, _ in placed):
-                    placed.append((x, v, form))
-                    break
-            else:
-                raise RuntimeError("could not place every plant; lower N_PLANTS")
-    return placed
+def output_nodes() -> list[tuple[float, float]]:
+    nodes = []
+    for k in range(N_TARGETS):
+        u = -1 + 2 * k / (N_TARGETS - 1)
+        nodes.append((CX + OUTPUT_HALF * u, OUTPUT_Y - OUTPUT_SAG * (1 - u * u)))
+    return nodes
 
 
-def inside_hex(x: float, y: float, r: float) -> bool:
-    dx, dy = abs(x - CX), abs(y - CY)
-    half = r * math.sqrt(3) / 2
-    return dx <= half and dy <= r - dx / math.sqrt(3)
-
-
-def vertical_lines() -> list[str]:
-    paths = []
-    j_max = int(WIDTH / CELL) + 1
-    for j in range(-j_max, j_max + 1):
-        x = j * CELL
-        pts = [project(x, PLANE_END * k / (LINE_POINTS - 1)) for k in range(LINE_POINTS)]
-        paths.append(polyline(pts))
-    return paths
-
-
-def horizontal_line(v: float) -> str:
-    v = min(v, PLANE_END)
-    half = WIDTH * 0.62
-    xs = [-half + 2 * half * k / (LINE_POINTS - 1) for k in range(LINE_POINTS)]
-    return polyline([project(x, v) for x in xs])
-
-
-def horizontal_lines(offset: float) -> list[str]:
-    n = int(PLANE_END / CELL) + 2
-    return [horizontal_line(-CELL + k * CELL + offset) for k in range(n)]
-
-
-def fade_mask() -> str:
-    """Opacity strips that fade the plane out over the far part of its bend."""
-    strips = []
-    steps = 9
-    t0 = 0.55
-    half = WIDTH * 0.7
-    for s in range(steps + 1):
-        ta = t0 + (1 - t0) * s / (steps + 1)
-        tb = t0 + (1 - t0) * (s + 1) / (steps + 1)
-        va, vb = BEND_START + ta * BEND_LENGTH, BEND_START + tb * BEND_LENGTH
-        xs = [-half + 2 * half * k / 20 for k in range(21)]
-        top = [project(x, va) for x in xs]
-        bottom = [project(x, vb) for x in reversed(xs)]
-        opacity = 1 - (s + 1) / (steps + 1)
-        strips.append(
-            f'<path d="{polyline(top + bottom)}Z" fill="#fff" fill-opacity="{opacity:.1f}"/>'
-        )
-    full_end = BEND_START + t0 * BEND_LENGTH
-    xs = [-half + 2 * half * k / 20 for k in range(21)]
-    lower = [project(x, full_end) for x in reversed(xs)]
-    top_rect = [(CX - half, -10.0), (CX + half, -10.0)] + lower
-    return f'<path d="{polyline(top_rect)}Z" fill="#fff"/>' + "".join(strips)
-
-
-def pooling_lines(plants: list[tuple[float, float, str]]) -> str:
-    """Lines from every plant to the one point the plot is pooled into."""
-    px, py = POOL_POINT
-    out = []
-    for x, v, form in plants:
-        sx, sy = project(x, v)
-        out.append(
-            f'<path d="M{fmt(sx)} {fmt(sy)}L{fmt(px)} {fmt(py)}" stroke="{FORM_COLOUR[form]}"/>'
-        )
+def curve(a: tuple[float, float], b: tuple[float, float]) -> str:
+    """Cubic from a to b leaving and arriving vertically."""
+    (x0, y0), (x1, y1) = a, b
+    k = 0.55 * (y1 - y0)
     return (
-        f'<g fill="none" stroke-width="2.5" stroke-opacity="0.55">{"".join(out)}</g>'
-        f'<circle cx="{fmt(px)}" cy="{fmt(py)}" r="10" fill="{BLUE}" stroke="{PAPER}" stroke-width="4"/>'
+        f"M{fmt(x0)} {fmt(y0)}C{fmt(x0)} {fmt(y0 + k)} "
+        f"{fmt(x1)} {fmt(y1 - k)} {fmt(x1)} {fmt(y1)}"
     )
 
 
-def plant_marks(plants: list[tuple[float, float, str]]) -> str:
-    out = []
-    for x, v, form in sorted(plants, key=lambda p: p[1]):
-        sx, sy = project(x, v)
-        fx, fy = foreshortening(v)
-        colour = FORM_COLOUR[form]
-        out.append(
-            f'<ellipse cx="{fmt(sx)}" cy="{fmt(sy)}" rx="{fmt(PLANT_RADIUS * fx)}" '
-            f'ry="{fmt(PLANT_RADIUS * fy)}" fill="{colour}" stroke="{PAPER}" stroke-width="3"/>'
-        )
-    return "".join(out)
+def pulse(path_id: str, colour: str, offset: float) -> str:
+    """A dot travelling the path once per cycle, starting `offset` of the way in."""
+    begin = -offset * CYCLE_SECONDS
+    return (
+        f'<circle r="{fmt(PULSE_RADIUS)}" fill="{colour}">'
+        f'<animateMotion dur="{CYCLE_SECONDS}s" begin="{begin:.2f}s" repeatCount="indefinite" '
+        f'calcMode="linear" keyPoints="0;1" keyTimes="0;1"><mpath href="#{path_id}"/></animateMotion>'
+        "</circle>"
+    )
 
 
 def build() -> str:
-    plants = place_plants(plant_counts(richest_plot()))
+    inputs = input_nodes(richest_plot())
+    outputs = output_nodes()
 
-    frames = [horizontal_lines(CELL * f / FRAMES) for f in range(FRAMES + 1)]
-    moving = []
-    for k in range(len(frames[0])):
-        values = ";".join(frame[k] for frame in frames)
-        moving.append(
-            f'<path d="{frames[0][k]}"><animate attributeName="d" values="{values}" '
-            f'dur="{CYCLE_SECONDS}s" calcMode="linear" repeatCount="indefinite"/></path>'
-        )
-    still = "".join(f'<path d="{d}"/>' for d in frames[0])
-    verticals = "".join(f'<path d="{d}"/>' for d in vertical_lines())
+    edges, moving = [], []
+    for i, (x, y, _, colour) in enumerate(inputs):
+        pid = f"in{i}"
+        edges.append(f'<path id="{pid}" d="{curve((x, y), LATENT)}"/>')
+        moving.append(pulse(pid, colour, (i * 0.37) % 1.0 * 0.5))
+    for j, (x, y) in enumerate(outputs):
+        pid = f"out{j}"
+        edges.append(f'<path id="{pid}" d="{curve(LATENT, (x, y))}"/>')
+        moving.append(pulse(pid, BLUE, 0.5 + (j * 0.29) % 1.0 * 0.5))
+
+    species_marks = "".join(
+        f'<circle cx="{fmt(x)}" cy="{fmt(y)}" r="{fmt(r)}" fill="{c}" stroke="{SKY}" stroke-width="3"/>'
+        for x, y, r, c in inputs
+    )
+    target_marks = "".join(
+        f'<circle cx="{fmt(x)}" cy="{fmt(y)}" r="{fmt(OUTPUT_RADIUS)}" fill="{SKY}" '
+        f'stroke="{BLUE}" stroke-width="5"/>'
+        for x, y in outputs
+    )
+    lx, ly = LATENT
 
     return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {WIDTH} {HEIGHT}" role="img" aria-label="RESOLVE logo">
 <title>RESOLVE logo</title>
 <style>
-.still {{ display: none; }}
-@media (prefers-reduced-motion: reduce) {{ .moving {{ display: none; }} .still {{ display: inline; }} }}
+@media (prefers-reduced-motion: reduce) {{ .moving {{ display: none; }} }}
 </style>
 <defs>
 <clipPath id="hex"><polygon points="{hex_points(288)}"/></clipPath>
-<mask id="fade" maskUnits="userSpaceOnUse" x="0" y="0" width="{WIDTH}" height="{HEIGHT}">{fade_mask()}</mask>
 </defs>
-<polygon points="{hex_points(288)}" fill="{PAPER}"/>
+<polygon points="{hex_points(288)}" fill="{SKY}"/>
 <g clip-path="url(#hex)">
-<g mask="url(#fade)">
-<g fill="none" stroke="{GREY}" stroke-width="2" stroke-opacity="0.45" stroke-linecap="round">
-{verticals}
+<g fill="none" stroke="{EDGE}" stroke-width="2.5" stroke-opacity="0.35" stroke-linecap="round">{"".join(edges)}</g>
 <g class="moving">{"".join(moving)}</g>
-<g class="still">{still}</g>
-</g>
-</g>
-{pooling_lines(plants)}
-{plant_marks(plants)}
-<text x="{fmt(CX)}" y="472" text-anchor="middle" font-family="{SERIF}" font-size="66" font-weight="bold" font-style="italic" fill="{BLUE}" stroke="{PAPER}" stroke-width="10" stroke-linejoin="round" paint-order="stroke">RESOLVE</text>
+{species_marks}
+<circle cx="{fmt(lx)}" cy="{fmt(ly)}" r="15" fill="{BLUE}" stroke="{SKY}" stroke-width="4"/>
+{target_marks}
+<text x="{fmt(CX)}" y="472" text-anchor="middle" font-family="{SERIF}" font-size="70" font-weight="bold" font-style="italic" fill="{BLUE}" stroke="{SKY}" stroke-width="10" stroke-linejoin="round" paint-order="stroke">RESOLVE</text>
 </g>
 <polygon points="{hex_points(291)}" fill="none" stroke="{BORDER}" stroke-width="18" stroke-linejoin="round"/>
 </svg>
