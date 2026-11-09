@@ -5,14 +5,14 @@ survey year, coordinates or an elevation, and some do not. The plots
 that carry it are labelled examples from the same surveys, recorded by
 the same people, as the plots that lack it. *Gap fitting* reads them: on
 the plots where the value is recorded (the *complete plots*) it chooses
-how to combine the model’s prediction with the dataset’s own neighbours,
-and applies that choice to the plots where it is missing (the *gaps*).
-The model’s prediction is never replaced; the fitted value comes back
-beside it, with a report of what was chosen and why.
+how to combine the model’s imputed value with the dataset’s own
+neighbours, and applies that choice to the plots where it is missing
+(the *gaps*). The model’s imputed value is never replaced; the fitted
+value comes back beside it, with a report of what was chosen and why.
 
 This article covers the candidates gap fitting chooses among, how the
 choice is tested at the distance the gaps actually are, fitting a single
-model’s predictions, reading the report, model suites and the command
+model’s imputed values, reading the report, model suites and the command
 line, the settings, and the gaps the dataset cannot inform.
 
 ## Installation
@@ -33,49 +33,49 @@ pip install resolve-core
 
 ## What gap fitting chooses among
 
-Seven candidates predict a gap, from the dataset alone, from the model
+Seven candidates impute a gap, from the dataset alone, from the model
 alone, or from both:
 
 - `local_constant`: the complete plots’ mean (their median on a log
   scale, their mean direction for a bearing, their geographic median for
   a location);
-- `resolve`: the model’s prediction as it stands;
-- `offset_slope`: the model’s prediction calibrated on the complete
+- `resolve`: the model’s imputed value as it stands;
+- `offset_slope`: the model’s imputed value calibrated on the complete
   plots, `y = mean(y) + b (raw - mean(raw))`, with `b` fitted by least
-  squares; `b = 1` shifts the prediction by its mean error there,
+  squares; `b = 1` shifts the imputed value by its mean error there,
   `b = 0` is the local constant;
 - `knn_species`: the median recorded value of the `k` complete plots
   most similar in species composition (the Ochiai similarity of their
   species lists);
 - `knn_spatial`: the median recorded value of the `k` nearest complete
   plots by great-circle distance;
-- `stack_species` and `stack_species_spatial`: the model’s prediction
+- `stack_species` and `stack_species_spatial`: the model’s imputed value
   and those neighbour medians combined by least squares on the complete
   plots.
 
 `k` is chosen from 1, 3, 5, 10, 20 and 50 by how well the neighbours
-predict the complete plots.
+impute the complete plots.
 
 ## Testing the choice at the gaps’ distance
 
 A complete plot’s nearest other complete plots are as near as complete
 plots are to one another. A gap can be much farther from them: a region
 nobody georeferenced, or the oldest surveys. Judging the neighbours by
-how well they predict a complete plot from its own nearest plots would
+how well they impute a complete plot from its own nearest plots would
 trust them more than they deserve at the gaps.
 
 Gap fitting therefore measures each gap’s distance to its nearest
 complete plot on every axis it can be measured on: species similarity,
 km where the gaps carry coordinates, and survey years where they carry a
-year. Each complete plot is then predicted with the complete plots
-nearer to it than a gap is to its nearest complete plot hidden, one gap
+year. Each complete plot is then imputed with the complete plots nearer
+to it than a gap is to its nearest complete plot hidden, one gap
 distance drawn per complete plot and axis (nearest-neighbour distance
 matching, Milà et al. 2022). A complete plot left with no neighbour at
-that distance counts as predicted by the local constant, which is all
-the dataset says about it there. Each candidate is scored on the
-complete plots by the target’s own error: the mean absolute error, on a
-log scale that of log1p, the circular error of a bearing, the median
-distance in km for a location. The best candidate predicts the gaps.
+that distance counts as imputed by the local constant, which is all the
+dataset says about it there. Each candidate is scored on the complete
+plots by the target’s own error: the mean absolute error, on a log scale
+that of log1p, the circular error of a bearing, the median distance in
+km for a location. The best candidate imputes the gaps.
 
 Gaps with coordinates and gaps without them choose apart: the second
 group only among the candidates that read no position.
@@ -83,10 +83,9 @@ group only among the candidates that read no position.
 ## The survey and its gaps
 
 The examples use the survey of 150 plots in the Alps that ships with the
-R package. A model trained on another survey predicts plots it never
-saw, so the first 75 plots train it and the other 75 are the dataset
-whose elevation has gaps: every fifth of them lacks its recorded
-elevation.
+R package. A model trained on another survey imputes plots it never saw,
+so the first 75 plots train it and the other 75 are the dataset whose
+elevation has gaps: every fifth of them lacks its recorded elevation.
 
 ``` r
 
@@ -130,7 +129,7 @@ my_plots["elevation_recorded"] = my_plots.elevation.where(~is_gap)
 #> {'complete': 60, 'gaps': 15}
 ```
 
-The model predicts elevation from the species alone and is saved to a
+The model imputes elevation from the species alone and is saved to a
 checkpoint.
 
 ``` r
@@ -166,7 +165,7 @@ trainer.save(path, trainer.run_metadata)
 ```
 
 The dataset’s plots are encoded with the model’s vocabularies and
-predicted, all of them: the complete plots are what the choice is tested
+imputed, all of them: the complete plots are what the choice is tested
 on.
 
 ``` r
@@ -227,9 +226,9 @@ pd.Series(elevation.method).value_counts()
 ```
 
 A complete plot keeps its recorded value (`recorded`); every gap carries
-the method that predicted it. The gaps’ recorded elevation is known
-here, so the fitted values can be checked against it beside the model’s
-own prediction.
+the method that imputed it. The gaps’ recorded elevation is known here,
+so the fitted values can be checked against it beside the model’s own
+imputed value.
 
 ``` r
 
@@ -298,7 +297,7 @@ reported as its `modulus` (how much it shrinks the term) and its
 
 A suite fits its targets after combining its members. `columns` names
 the recorded column of each target to fit (two, latitude and longitude,
-for a location) and optionally the survey-year column; the prediction
+for a location) and optionally the survey-year column; the imputation
 table then carries `<target>_fitted` and `<target>_fit_method` beside
 `<target>`, and each fitted target a `gap_fit` with its report. The
 scale follows the target: a bearing is fitted as a direction, a location
@@ -329,8 +328,8 @@ preds.target("year").gap_fit.report["groups"]
 
 These lines are shown and not run here. On the command line,
 `--fit-gaps` with one `--recorded` per target does the same for
-`--suite` and for `--model`, and writes the report beside the
-predictions:
+`--suite` and for `--model`, and writes the report beside the imputed
+values:
 
 ``` bash
 resolve predict --suite resolve-suite --header plots.csv --species species.csv \
@@ -382,8 +381,9 @@ composition_only["elevation"].report["groups"]["unlocated"]["method"]
 
 [`resolve.fit_gaps()`](https://gillescolling.com/resolve/reference/resolve.fit_gaps.md)
 (R) and `rc.fit_gaps()` (Python) take the same choice on vectors: the
-raw prediction, the recorded values, a matrix of species and optionally
-the coordinates and survey years, for a prediction made anywhere.
+raw imputed value, the recorded values, a matrix of species and
+optionally the coordinates and survey years, for a value imputed
+anywhere.
 
 ## Gaps the dataset cannot inform
 
@@ -392,7 +392,7 @@ the gaps resemble them. Two kinds of gap do not:
 
 - **Undated plots that are probably older than the dated ones.** When
   the undated plots are the oldest surveys, nothing on the dated plots
-  shows how far off they are, and the model’s own prediction is the
+  shows how far off they are, and the model’s own imputed value is the
   better estimate: keep `<target>` rather than `<target>_fitted` for
   them. For other targets an old survey is visible through the
   survey-year axis, and gap fitting allows for it.
@@ -400,4 +400,4 @@ the gaps resemble them. Two kinds of gap do not:
   georeferenced plots.** A location’s gaps have no position, so the test
   hides plots by species and survey year only, and a missing region
   still looks near in species terms. Such plots are better served by the
-  model’s prediction, or by the species stack alone.
+  model’s imputed value, or by the species stack alone.

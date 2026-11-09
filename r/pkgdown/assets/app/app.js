@@ -580,14 +580,14 @@ function showWorkers() {
   $("o-workers").placeholder = `auto: ${Math.min(CORES, 4)}`;
   $("workers").textContent = n
     ? `${n} worker${n > 1 ? "s" : ""}${busyWorkers ? `, ${busyWorkers} busy` : ""}`
-    : "workers start with the first prediction";
+    : "workers start with the first run";
 }
 
 // Words shown beside the progress bar while the models work, one picked at
 // random every few seconds.
 const VERBS = [
   "Botanising", "Keying out", "Pressing specimens", "Counting quadrats", "Photosynthesising",
-  "Consulting the herbarium", "Squinting at sedges", "Laying out relevés", "Checking the flora",
+  "Consulting the herbarium", "Squinting at sedges", "Marking the plot corners","Checking the flora",
   "Untangling grasses", "Reading the understorey", "Sniffing the mint", "Measuring the turf",
   "Asking the lichens", "Weighing the evidence", "Rooting around", "Leafing through", "Branching out",
   "Sorting the seedlings", "Cross-checking Ellenberg", "Pacing out the plot", "Germinating",
@@ -710,9 +710,12 @@ async function predictTargets(result, targets, header, species) {
   }
 }
 
+// A unit as the manifest writes it (m^2), in the page's typography (m²).
+const unitText = (u) => u.replace(/\^2\b/g, "²").replace(/\^3\b/g, "³");
+
 async function addTarget(result, target, meta, outputs, encoded) {
   const n = encoded.n;
-  const units = target.units ? ` (${target.units})` : "";
+  const units = target.units ? ` (${unitText(target.units)})` : "";
   if (target.combine === "vote") {
     const head = meta.targets[0];
     const coarse = target.readAt ? target.read_at[target.readAt] : null;
@@ -724,13 +727,16 @@ async function addTarget(result, target, meta, outputs, encoded) {
                         { name: `${label(target)} seed agreement`, values: Array.from(c.agreement), digits: 2 },
                         { name: `${label(target)} probability`, digits: 3,
                           values: Array.from(c.value, (v, p) => c.mean[p * classes.length + v]) });
+    (result.summary ??= []).push({ kind: "class", label: label(target), classes, value: c.value,
+                                   names: result.eunis.names, agreement: c.agreement });
   } else if (target.combine === "spherical_mean") {
     const [latName, lonName] = target.outputs;
     const c = combineSpherical(outputs.map((o) => o[latName]), outputs.map((o) => o[lonName]), n);
-    result.columns.push({ name: "Predicted latitude", values: Array.from(c.lat), digits: 4 },
-                        { name: "Predicted longitude", values: Array.from(c.lon), digits: 4 },
+    result.columns.push({ name: "Imputed latitude", values: Array.from(c.lat), digits: 4 },
+                        { name: "Imputed longitude", values: Array.from(c.lon), digits: 4 },
                         { name: "Location seed spread (km)", values: Array.from(c.km), digits: 1 });
     result.predictedCoords = Array.from(c.lat, (la, p) => [la, c.lon[p]]);
+    (result.summary ??= []).push({ kind: "location", label: "Location", spread: c.km });
     const raw = new Float64Array(2 * n);
     c.lat.forEach((la, p) => { raw[2 * p] = la; raw[2 * p + 1] = c.lon[p]; });
     const fit = await fillGaps(result, target, "geographic", raw);
@@ -745,6 +751,8 @@ async function addTarget(result, target, meta, outputs, encoded) {
     const c = combineMean(outputs.map((o) => o[name]), n);
     result.columns.push({ name: `${label(target)}${units}`, values: Array.from(c.value), digits: 1 },
                         { name: `${label(target)} seed SD`, values: Array.from(c.sd), digits: 1 });
+    (result.summary ??= []).push({ kind: "number", label: label(target), units: unitText(target.units ?? ""), value: c.value,
+                                   spread: c.sd });
     const fit = await fillGaps(result, target, meta.targets[0].log1p ? "log" : "linear", c.value);
     if (fit) {
       result.columns.push({ name: `${label(target)}${units}, gaps filled`, values: Array.from(fit.fitted), digits: 1 },
@@ -870,10 +878,20 @@ function fitInWorker(message) {
   });
 }
 
+const gapsOn = () => $("o-gaps").checked;
+
+// A target recorded on some plots, where at least two record it: gap fitting
+// has complete plots to choose its method on.
+const partlyRecorded = (t) => {
+  const c = t.combine === "vote" ? null : recordedCount(t);
+  return c !== null && c.recorded >= 2 && c.recorded < c.total;
+};
+
 // A target the tables record on some plots: the gaps fitted from the
 // complete plots (gaps.js, the engine's gap fitting), its report kept for the
 // summary. Null when the tables record it on no plot or on every plot.
 async function fillGaps(result, target, scale, raw) {
+  if (!gapsOn()) return null;
   const count = recordedCount(target);
   if (!count || count.recorded === 0 || count.recorded === count.total) return null;
   const { num, ...plots } = gapPlots(result);
@@ -898,7 +916,10 @@ function status(text) { $("status").textContent = text; }
 // Output
 // ---------------------------------------------------------------------------
 
-const ROWS_SHOWN = 200;
+// The results table shows one page of ROWS_PAGE plots at a time; the pager
+// above it moves between pages and names the range on screen.
+const ROWS_PAGE = 200;
+const tablePage = { cols: [], n: 0, page: 0 };
 
 function format(v, digits) {
   if (typeof v === "string") return v;
@@ -906,22 +927,39 @@ function format(v, digits) {
   return digits === undefined ? String(v) : v.toFixed(digits);
 }
 
+function tablePageCount() { return Math.max(1, Math.ceil(tablePage.n / ROWS_PAGE)); }
+
+function showTablePage(page) {
+  const { cols, n } = tablePage;
+  const last = tablePageCount() - 1;
+  tablePage.page = Math.min(Math.max(page, 0), last);
+  const start = tablePage.page * ROWS_PAGE;
+  const end = Math.min(n, start + ROWS_PAGE);
+  const rows = [];
+  for (let p = start; p < end; p++) {
+    rows.push(`<tr>${cols.map((c) => `<td>${escape(format(c.values[p], c.digits))}</td>`).join("")}</tr>`);
+  }
+  $("table").tBodies[0].innerHTML = rows.join("");
+  $("table").parentElement.scrollTop = 0;
+  $("pager").hidden = n <= ROWS_PAGE;
+  $("pager-range").textContent =
+    `Plots ${(start + 1).toLocaleString()}–${end.toLocaleString()} of ${n.toLocaleString()}`;
+  $("pager-first").disabled = $("pager-prev").disabled = tablePage.page === 0;
+  $("pager-next").disabled = $("pager-last").disabled = tablePage.page === last;
+}
+
 function render() {
   const r = state.result;
   const cols = [{ name: "Plot", values: r.plotIds },
                 { name: "Species recognised (share of cover)", values: Array.from(r.recognised), digits: 2 },
                 ...r.columns];
-  const n = r.plotIds.length;
   const head = `<tr>${cols.map((c) => `<th scope="col">${escape(c.name)}</th>`).join("")}</tr>`;
-  const body = [];
-  for (let p = 0; p < Math.min(n, ROWS_SHOWN); p++) {
-    body.push(`<tr>${cols.map((c) => `<td>${escape(format(c.values[p], c.digits))}</td>`).join("")}</tr>`);
-  }
-  $("table").innerHTML = `<thead>${head}</thead><tbody>${body.join("")}</tbody>`;
-  $("table-note").textContent = n > ROWS_SHOWN
-    ? `Showing ${ROWS_SHOWN} of ${n.toLocaleString()} plots; the CSV has all of them.` : "";
+  $("table").innerHTML = `<thead>${head}</thead><tbody></tbody>`;
+  Object.assign(tablePage, { cols, n: r.plotIds.length });
+  showTablePage(0);
   $("results").hidden = false;
   renderStats(r);
+  renderOverview(r);
   renderSummary(r);
   renderGaps(r);
   renderUnknown(r);
@@ -934,25 +972,42 @@ function render() {
 // no vocabulary holds, each with the model token it stands for and the source
 // of the link ("eva" or a backbone). Without the file, names are matched as
 // written.
-let lookup = null, nameBackbones = 0;
+let lookup = null, nameBackbones = [];
 async function nameLookup() {
   lookup ??= file("names.json.gz")
     .then((b) => new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream("gzip"))).json())
-    .then((names) => { nameBackbones = names.backbones?.length ?? 0; return names.aliases; })
+    .then((names) => {
+      nameBackbones = backbonesUsed(names);
+      return names.aliases;
+    })
     .catch(() => ({}));
   return lookup;
 }
 
-// Where a name is looked for before it counts as not recognised.
+// The backbones that link at least one name to a model token, in the
+// lookup's priority order.
+function backbonesUsed(names) {
+  const used = new Set(Object.values(names.aliases).map(([, source]) => source));
+  return (names.sources ?? []).filter((s) => s !== "eva" && used.has(s));
+}
+
+// The backbones named in the text; the others are behind one link to the
+// species names article's list of backbones.
+const NAMED_BACKBONES = ["euromed", "wfo"];
+
+// Where a name is looked for before it counts as not recognised, as HTML.
 function nameRoutes() {
-  const routes = ["EVA's own records"];
-  if (nameBackbones) routes.push(`the synonymy of ${nameBackbones} taxonomic backbones`);
-  if (spellingEdits()) routes.push(`a spelling up to ${spellingEdits()} letter${spellingEdits() > 1 ? "s" : ""} off`);
+  const named = NAMED_BACKBONES.filter((b) => nameBackbones.includes(b)).map((b) => escape(SOURCE_NAMES[b]));
+  const others = nameBackbones.length > named.length
+    ? `the synonyms in the <a href="species-names.html#backbones">other taxonomies</a>` : "";
+  const routes = ["EVA's records", ...named, ...(others ? [others] : [])];
+  const k = spellingEdits();
+  if (k) routes.push(`a fuzzy match within ${k} edit${k > 1 ? "s" : ""}`);
   return routes.length > 1 ? `${routes.slice(0, -1).join(", ")} or ${routes.at(-1)}` : routes[0];
 }
 
 // The edits a misspelled name may be away from a name the models know:
-// one by default; two also renames some species the models never saw.
+// one by default; two or three also rename some species the models never saw.
 const spellingEdits = () => Number($("o-spelling").value);
 
 // Each vocabulary's spelling index (resolveName's cache), kept across runs.
@@ -1000,17 +1055,25 @@ function renderUnknown(r) {
   box.hidden = false;
   const records = r.unknown.reduce((a, [, k]) => a + k, 0);
   box.querySelector("summary").textContent =
-    `${r.unknown.length.toLocaleString()} species names not recognised (${records.toLocaleString()} records, left out of the prediction)`;
-  box.querySelector("p").textContent =
-    `None of these names is a name the models were trained on, and none was found through ${nameRoutes()}.`;
+    `${r.unknown.length.toLocaleString()} species names not recognised (${records.toLocaleString()} records, left out)`;
+  box.querySelector("p").innerHTML =
+    `None of these names was found through ${nameRoutes()}.`;
   box.querySelector("ul").innerHTML = r.unknown.slice(0, 200)
     .map(([name, k]) => `<li>${escape(name || "(empty)")} <span class="count">${k.toLocaleString()}</span></li>`).join("") +
     (r.unknown.length > 200 ? `<li class="count">and ${(r.unknown.length - 200).toLocaleString()} more</li>` : "");
 }
 
+// Each name source's short label (in the text and beside a renamed name) and
+// full name (on hover).
 const SOURCES = {
-  eva: "EVA", wfo: "WFO", euromed: "Euro+Med", wcvp: "WCVP", lcvp: "LCVP", col: "COL",
-  gbif: "GBIF", itis: "ITIS", ncbi: "NCBI", ott: "Open Tree",
+  eva: "EVA", wfo: "WFO", euromed: "Euro+Med", wcvp: "WCVP", lcvp: "LCVP", col: "COL", colxr: "COL XR",
+  gbif: "GBIF", itis: "ITIS", ncbi: "NCBI", ott: "Open Tree", worms: "WoRMS",
+};
+const SOURCE_NAMES = {
+  wfo: "World Flora Online", euromed: "Euro+Med PlantBase", wcvp: "World Checklist of Vascular Plants",
+  lcvp: "Leipzig Catalogue of Vascular Plants", col: "Catalogue of Life", colxr: "Catalogue of Life Extended Release",
+  gbif: "GBIF Backbone Taxonomy", itis: "Integrated Taxonomic Information System", ncbi: "NCBI Taxonomy",
+  ott: "Open Tree of Life", worms: "World Register of Marine Species",
 };
 
 function route(m) {
@@ -1027,9 +1090,10 @@ function renderMoved(r) {
   const records = moved.reduce((a, [, m]) => a + m.records, 0);
   box.querySelector("summary").textContent =
     `${moved.length.toLocaleString()} species names renamed (${records.toLocaleString()} records)`;
-  box.querySelector("p").textContent =
-    "The models were trained on the names the European Vegetation Archive (EVA) gives its records. Each name below " +
-    `was renamed to one of these through ${nameRoutes()}; the source is given beside it.`;
+  box.querySelector("p").innerHTML =
+    "The models know species by the World Flora Online name the European Vegetation Archive (EVA) matched its " +
+    "records to; EVA files Anemone nemorosa under Anemone altaica, for example. These names were renamed through " +
+    `${nameRoutes()}; the source is given beside each name.`;
   box.querySelector("ul").innerHTML = moved.slice(0, 200)
     .map(([name, m]) => `<li>${escape(name)} → ${escape(m.token)} <span class="count">${escape(route(m))}, ${m.records.toLocaleString()}</span></li>`).join("") +
     (moved.length > 200 ? `<li class="count">and ${(moved.length - 200).toLocaleString()} more</li>` : "");
@@ -1041,6 +1105,41 @@ function showPanel(id, shown) {
   $(id).hidden = !shown;
   const panels = ["map-panel", "habitat-panel"].map($);
   for (const p of panels) p.classList.toggle("col-lg-12", panels.some((q) => q.hidden));
+}
+
+// The value below which a share q of the finite values lies (linear
+// interpolation between order statistics), or NaN without finite values.
+function quantile(values, q) {
+  const v = Array.from(values).filter(Number.isFinite).sort((a, b) => a - b);
+  if (!v.length) return NaN;
+  const at = q * (v.length - 1), lo = Math.floor(at), hi = Math.ceil(at);
+  return v[lo] + (v[hi] - v[lo]) * (at - lo);
+}
+
+// One row per variable imputed: its typical value over the plots, the range
+// holding the middle 80% of them, and how far the five seeds part.
+function renderOverview(r) {
+  const fmt = (x, digits = 1) => (Number.isFinite(x) ? x.toLocaleString(undefined, { maximumFractionDigits: digits }) : "");
+  const rows = (r.summary ?? []).map((s) => {
+    if (s.kind === "class") {
+      const counts = new Map();
+      for (const v of s.value) counts.set(v, (counts.get(v) ?? 0) + 1);
+      const [top, k] = [...counts].sort((a, b) => b[1] - a[1])[0] ?? [];
+      const code = s.classes[top];
+      const typical = code === undefined ? "" : `${code} ${s.names[code] ?? ""} (${((100 * k) / s.value.length).toFixed(1)}% of plots)`;
+      let agreement = 0;
+      for (const a of s.agreement) agreement += a;
+      return [s.label, typical.trim(), "", `agreement ${fmt(agreement / s.agreement.length, 2)} (mean)`];
+    }
+    if (s.kind === "location") return [s.label, "", "", `${fmt(quantile(s.spread, 0.5))} km (median)`];
+    const u = s.units ? ` ${s.units}` : "";
+    return [s.label, `${fmt(quantile(s.value, 0.5))}${u} (median)`,
+            `${fmt(quantile(s.value, 0.1))} to ${fmt(quantile(s.value, 0.9))}${u}`,
+            `SD ${fmt(quantile(s.spread, 0.5))}${u} (median)`];
+  });
+  $("overview").innerHTML = "<thead><tr><th>Variable</th><th>Typical value</th><th>Middle 80% of plots</th>" +
+    "<th>Spread across seeds</th></tr></thead><tbody>" +
+    rows.map((row) => `<tr>${row.map((cell) => `<td>${escape(cell)}</td>`).join("")}</tr>`).join("") + "</tbody>";
 }
 
 function renderStats(r) {
@@ -1090,12 +1189,12 @@ function renderGaps(r) {
                    circular: "°", geographic: " km (median)" }[scale];
     const digits = scale === "log" ? 3 : 1;
     const head = `${label(target)}: ${report.n_gaps.toLocaleString()} of ${(report.n_gaps + report.n_complete).toLocaleString()} plots without it`;
-    if (report.skipped) return `<li>${escape(head)}, filled with the raw prediction (${escape(report.skipped)})</li>`;
+    if (report.skipped) return `<li>${escape(head)}, filled with the model's value (${escape(report.skipped)})</li>`;
     const groups = report.groups.map((g) => {
       const err = (m) => g.matched_error.find(([x]) => x === m)?.[1];
       const where = report.groups.length > 1 ? `${g.n_gaps.toLocaleString()} ${g.group === "located" ? "with" : "without"} coordinates: ` : "";
       const k = g.k.length ? ` (k = ${g.k.map(([, v]) => v).join(", ")})` : "";
-      return `${where}${gapMethodLabel(g.method)}${k}, error ${err(g.method).toFixed(digits)}${unit} against ${err(1).toFixed(digits)} for the raw prediction`;
+      return `${where}${gapMethodLabel(g.method)}${k}, error ${err(g.method).toFixed(digits)}${unit} against ${err(1).toFixed(digits)} for the model's value`;
     });
     return `<li>${escape(head)}; ${escape(groups.join("; "))}, judged on the ${report.n_complete.toLocaleString()} plots recording it</li>`;
   }).join("");
@@ -1253,7 +1352,7 @@ function download() {
   }
   const blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv" });
   const a = Object.assign(document.createElement("a"),
-                          { href: URL.createObjectURL(blob), download: "predictions.csv" });
+                          { href: URL.createObjectURL(blob), download: "imputed.csv" });
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -1269,11 +1368,11 @@ const escape = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": 
 function renderTargets() {
   const box = $("targets");
   const off = new Set([...box.querySelectorAll("input[name=target]:not(:checked)")].map((i) => i.value));
-  box.innerHTML = targetNames().map((name) => {
-    const t = chosenModel(name);
-    if (!t) return "";
-    const c = t.combine === "vote" ? null : recordedCount(t);
-    const gaps = c && c.recorded >= 2
+  const models = targetNames().map((name) => [name, chosenModel(name)]).filter(([, t]) => t);
+  $("gaps-option").hidden = !models.some(([, t]) => partlyRecorded(t));
+  box.innerHTML = models.map(([name, t]) => {
+    const c = partlyRecorded(t) ? recordedCount(t) : null;
+    const gaps = c && gapsOn()
       ? `; ${(c.total - c.recorded).toLocaleString()} gaps fitted on the ${c.recorded.toLocaleString()} plots recording it` : "";
     return `<label class="choice"><input class="form-check-input" type="checkbox" name="target" value="${escape(name)}"` +
       `${off.has(name) ? "" : " checked"}> ${escape(LABELS[name] ?? name)}` +
@@ -1369,10 +1468,15 @@ async function start() {
     dispatch();
   });
   $("o-terrain").addEventListener("change", renderTargets);
+  $("o-gaps").addEventListener("change", renderTargets);
   for (const which of Object.keys(DATA_INPUTS)) $(DATA_INPUTS[which]).addEventListener("change", () => onDataInput(which));
   $("reset-data").addEventListener("click", resetData);
   $("run").addEventListener("click", () => run().catch((e) => { status(`Error: ${e.message}`); $("run").disabled = false; }));
   $("download").addEventListener("click", download);
+  $("pager-first").addEventListener("click", () => showTablePage(0));
+  $("pager-prev").addEventListener("click", () => showTablePage(tablePage.page - 1));
+  $("pager-next").addEventListener("click", () => showTablePage(tablePage.page + 1));
+  $("pager-last").addEventListener("click", () => showTablePage(tablePageCount() - 1));
   $("download-map").addEventListener("click", () => downloadMap());
   try {
     state.suites = JSON.parse(new TextDecoder().decode(await file("suites.json"))).suites;

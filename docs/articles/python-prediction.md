@@ -1,9 +1,9 @@
-# Python: saving and predicting
+# Python: saving and imputing
 
-Checkpoints, what they record about the run, and predictions for new
-plots: the predictor, its predictions, retrieval of the nearest training
-plots, the scalers, the run record, and the helpers that rebuild a
-checkpoint’s loader settings and targets.
+Checkpoints, what they record about the run, and imputed values for new
+plots: the predictor, its imputed values, retrieval of the nearest
+training plots, the scalers, the run record, and the helpers that
+rebuild a checkpoint’s loader settings and targets.
 
 [All of the Python
 reference](https://gillescolling.com/resolve/articles/python-reference.md)
@@ -27,7 +27,7 @@ pip install resolve-core
 The examples on this page run in order on the survey that ships with the
 R package: 150 plots in the Alps, with one table of plots and one of the
 species recorded on them. They start from a short fit saved as a
-checkpoint; [Predicting new
+checkpoint; [Imputing new
 plots](https://gillescolling.com/resolve/articles/prediction.md) walks
 through the same steps with their output.
 
@@ -70,7 +70,7 @@ Predictor.load(path, device="cpu", vram_fraction=1.0)
 Predictor(model, scalers, device="cpu")
 ```
 
-Predictions from a trained model. `load` reads a checkpoint
+Imputed values from a trained model. `load` reads a checkpoint
 `Trainer.save` wrote; `device` is `"cpu"`, `"cuda"` (the current GPU) or
 `"cuda:N"`, and anything else raises `ValueError`. The checkpoint is
 read onto that device, so one trained on a GPU loads on a machine
@@ -90,7 +90,7 @@ predictor.schema.n_species_vocab
 predict_dataset(dataset, return_latent=False, batch_size=4096)
 ```
 
-The predictions for every plot of a dataset, as `ResolvePredictions`.
+The imputed values for every plot of a dataset, as `ResolvePredictions`.
 The dataset has to be coded with the checkpoint’s vocabularies, or its
 integer codes would index the wrong rows of the embedding tables: load
 new plots with `ResolveDataset.from_csv_with_vocabs` (or another
@@ -123,8 +123,8 @@ predict(*, coordinates=None, covariates=None, unknown_fraction=None,
         return_latent=False, batch_size=4096)
 ```
 
-The predictions from tensors, every argument by keyword; leave out what
-the encoding does not use. The first five are the parts of the
+The imputed values from tensors, every argument by keyword; leave out
+what the encoding does not use. The first five are the parts of the
 continuous block, assembled and standardised as in training;
 `unknown_fraction` and `unknown_count` are required where the model
 reads them. The other inputs are the `ResolveDataset` tensors of the
@@ -168,20 +168,21 @@ clear_retrieval()
 ```
 
 Retrieval augmentation (Gorishniy and others 2024, TabR): every later
-prediction is blended with the labels of the plot’s nearest reference
+imputed value is blended with the labels of the plot’s nearest reference
 plots in the latent space. `reference` is a dataset coded with the
 checkpoint’s vocabularies and carrying every target’s labels, normally
 the training plots; `target_specs_from_schema` gives its targets. For
 each plot the `k_neighbors` reference plots of highest cosine similarity
 of their latents are weighted by a softmax of similarity over
 `temperature`. Only neighbours labelled for a target count for it, and a
-plot with none keeps the model’s prediction. A regression target becomes
+plot with none keeps the model’s imputed value. A regression target
+becomes
 `(1 - alpha) * prediction + alpha * the neighbours' weighted label`, in
 original units; a classification target blends its probabilities with
-the neighbours’ label distribution and predicts the largest. The latent
+the neighbours’ label distribution and imputes the largest. The latent
 and `get_embeddings` are not blended. The search is exact. A reference
 plot that is also scored finds itself first. `clear_retrieval` returns
-to the model’s own predictions.
+to the model’s own imputed values.
 
 ``` python
 reference = rc.ResolveDataset.from_pandas(plots, species, roles,
@@ -202,7 +203,7 @@ optimize_for_inference()
 ```
 
 Folds the batch-normalisation layers into the linear layers before them.
-Call it after loading and before a large prediction run.
+Call it after loading and before a large imputation run.
 
 ### Attributes
 
@@ -227,7 +228,7 @@ What `predict_dataset` and `predict` return.
   `class_names` in `predictor.schema.targets`.
 - `probabilities` (`dict[str, Tensor]`): one `(n_plots, n_classes)`
   entry per classification target, column `j` the probability of code
-  `j`; each row sums to one and its largest entry is the predicted code.
+  `j`; each row sums to one and its largest entry is the imputed code.
   Regression targets have no entry.
 - `targets` (`dict[str, Tensor]`): the recorded values, where the
   dataset carried them.
@@ -259,7 +260,7 @@ RetrievalConfig()
 ```
 
 The settings of `Predictor.set_retrieval`: `k_neighbors` (`int`, default
-`96`), the reference plots each prediction reads; `alpha` (`float`,
+`96`), the reference plots each imputation reads; `alpha` (`float`,
 default `0.3`), the neighbours’ share of the blend; `temperature`
 (`float`, default `1.0`), of the softmax over cosine similarity.
 `validate()` raises for a value out of range.

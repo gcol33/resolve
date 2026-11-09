@@ -4,7 +4,7 @@ title: "Python: species names"
 
 <!-- Python blocks run by tools/python_twins.py (md5 cf36e5edb179b48e2b180eb9df889249). -->
 
-Reading a table's species names as the names a model learnt: the release's name table, the resolver, the setting a load or a suite prediction takes, and the report of the names not found as written. [Species names a model knows by another name](prediction.html#species-names) walks through it.
+Reading a table's species names as the names a model learnt: the release's name table, the resolver, the setting a load or a suite imputation takes, and the report of the names not found as written. [Species names a model knows by another name](prediction.html#species-names) walks through it.
 
 [All of the Python reference](python-reference.html)
 
@@ -64,7 +64,7 @@ The release's name table: each name a user may write for a species, the token it
 SpeciesNames(table=None, max_edit_distance=1)
 ```
 
-How a load or a suite prediction resolves species names: the `NameTable` (`None`: the vocabulary alone) and the edits a misspelling may be away (0 turns the spelling step off). `SuitePredictor.predict(names=...)` builds one from a path, a `NameTable` or `True`; the `*_with_vocabs` loaders of `ResolveDataset` take one as `names`.
+How a load or a suite imputation resolves species names: the `NameTable` (`None`: the vocabulary alone) and the edits a misspelling may be away (0 turns the spelling step off). `SuitePredictor.predict(names=...)` builds one from a path, a `NameTable` or `True`; the `*_with_vocabs` loaders of `ResolveDataset` take one as `names`.
 
 ## `NameResolver` {#NameResolver}
 

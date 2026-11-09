@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Preparing the two tables • resolveR</title>
+<title>Preparing the two tables • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="../favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
@@ -38,7 +38,7 @@
 
     <nav class="navbar navbar-expand-lg fixed-top " aria-label="Site navigation"><div class="container">
 
-    <a class="navbar-brand me-2" href="../index.html">resolveR</a>
+    <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
     <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
@@ -60,12 +60,12 @@
 <li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
+<li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
     <li><a class="dropdown-item" href="../articles/data-preparation.html">Preparing the two tables</a></li>
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
-    <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
@@ -76,18 +76,6 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
     <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
-    <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
-    <li><a class="dropdown-item" href="../articles/python-data.html">Python: loading data</a></li>
-    <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
-    <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
-    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
-    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
-    <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
-    <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
-    <li><hr class="dropdown-divider"></li>
-    <li><a class="dropdown-item" href="../articles/index.html">More articles...</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -130,9 +118,9 @@
 <!-- Python blocks run by tools/python_twins.py (md5 edb020cce7c6b2266f6a0faf207e1605). -->
 <p>RESOLVE reads vegetation plots from two tables: one row per plot, and
 one row per species recorded on a plot. Loading turns them into a
-<em>dataset</em>, the encoded form a model trains on and predicts from.
+<em>dataset</em>, the encoded form a model trains on and imputes from.
 The loader needs to be told which column plays which part, which columns
-to predict, and what to do with cells that are empty.</p>
+to impute, and what to do with cells that are empty.</p>
 <p>This article covers the shape of the two tables and the single long
 table that can replace them, every column role, regression and
 classification targets, the handling of missing values, targets labelled
@@ -218,7 +206,7 @@ an input to the model.</p>
 <tbody>
 <tr class="odd">
 <td><code>plot_id</code></td>
-<td>Joins the two tables and labels every prediction</td>
+<td>Joins the two tables and labels every imputed value</td>
 </tr>
 <tr class="even">
 <td><code>species_id</code></td>
@@ -267,7 +255,7 @@ targets a list of <code>TargetSpec</code> and the dataset settings a
 <code>DatasetConfig</code>. A role left unset is the empty string.</p>
 </div>
 <p>The roles below read every column of the survey, with elevation as a
-covariate and habitat as the column to predict.</p>
+covariate and habitat as the column to impute.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">roles</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>plot_id <span class="op">=</span> <span class="st">"plot_id"</span>, species_id <span class="op">=</span> <span class="st">"species"</span>,</span>
@@ -347,17 +335,17 @@ column stops the load instead of training without the input.</p>
 <div class="section level2">
 <h2 id="targets">Targets<a class="anchor" aria-label="anchor" href="#targets"></a>
 </h2>
-<p>A <em>target</em> is a header column the model learns to predict. A
+<p>A <em>target</em> is a header column the model learns to impute. A
 regression target is a number; a classification target is one class out
 of a fixed set.</p>
 <p>A regression target can be transformed on load. With the
 <code>log1p</code> transform the model trains on
-<code>log(1 + value)</code>, and every prediction and regression metric
-is transformed back, so all numbers you read are in the column’s own
-units.</p>
+<code>log(1 + value)</code>, and every imputed value and regression
+metric is transformed back, so all numbers you read are in the column’s
+own units.</p>
 <p>A classification column of text is coded in sorted order unless you
 give the codes yourself. The class names are recorded on the dataset’s
-schema, so predicted codes can be turned back into labels.</p>
+schema, so imputed codes can be turned back into labels.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">two_targets</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/resolve.dataset.frame.html">resolve.dataset.frame</a></span><span class="op">(</span></span>
@@ -700,9 +688,9 @@ embedding per species, shows the effect; <a href="encoding.html">Encoding the sp
 <span id="cb28-13"><a href="#cb28-13" tabindex="-1"></a>train_set.n_plots, train_vocab.n_plots</span>
 <span id="cb28-14"><a href="#cb28-14" tabindex="-1"></a><span class="co">#&gt; (100, 50)</span></span></code></pre></div>
 </div>
-<p>A saved model checks the vocabulary of every dataset it predicts. The
+<p>A saved model checks the vocabulary of every dataset it imputes. The
 set built with its own vocabulary is refused; the set built against the
-training vocabulary is predicted.</p>
+training vocabulary is imputed.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb29"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">fit</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/resolve.train.dataset.html">resolve.train.dataset</a></span><span class="op">(</span><span class="va">train_set</span>, maxEpochs <span class="op">=</span> <span class="fl">50L</span>, verbose <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span>
@@ -762,9 +750,9 @@ loaded with them.</p>
 <span id="cb34-8"><a href="#cb34-8" tabindex="-1"></a>preds.predictions[<span class="st">"elevation"</span>][:<span class="dv">6</span>].<span class="bu">round</span>()</span>
 <span id="cb34-9"><a href="#cb34-9" tabindex="-1"></a><span class="co">#&gt; tensor([1185., 1046., 1497., 1670., 1024., 1076.])</span></span></code></pre></div>
 </div>
-<p>A dataset built to be predicted needs no target, so the target list
-is empty here. <a href="prediction.html">Predicting new plots</a>
-continues from this point.</p>
+<p>A dataset built to be imputed needs no target, so the target list is
+empty here. <a href="prediction.html">Imputing new plots</a> continues
+from this point.</p>
 </div>
 <div class="section level2">
 <h2 id="next-steps">Next steps<a class="anchor" aria-label="anchor" href="#next-steps"></a>
@@ -777,7 +765,7 @@ encodings and the settings of each.</li>
 <a href="training.html">Training and reading the fit</a>: the
 training settings, the held-out plots and cross-validation.</li>
 <li>
-<a href="prediction.html">Predicting new plots</a>: output formats,
+<a href="prediction.html">Imputing new plots</a>: output formats,
 class probabilities and unseen species.</li>
 </ul>
 </div>

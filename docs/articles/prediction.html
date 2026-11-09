@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Predicting new plots • resolveR</title>
+<title>Imputing new plots • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="../favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
@@ -16,7 +16,7 @@
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><link href="../extra.css" rel="stylesheet">
-<script src="../extra.js"></script><meta property="og:title" content="Predicting new plots">
+<script src="../extra.js"></script><meta property="og:title" content="Imputing new plots">
 <script>
 (function () {
   var D = String.fromCharCode(36);
@@ -38,7 +38,7 @@
 
     <nav class="navbar navbar-expand-lg fixed-top " aria-label="Site navigation"><div class="container">
 
-    <a class="navbar-brand me-2" href="../index.html">resolveR</a>
+    <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
     <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
@@ -60,12 +60,12 @@
 <li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
+<li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
     <li><a class="dropdown-item" href="../articles/data-preparation.html">Preparing the two tables</a></li>
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
-    <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
@@ -76,18 +76,6 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
     <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
-    <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
-    <li><a class="dropdown-item" href="../articles/python-data.html">Python: loading data</a></li>
-    <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
-    <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
-    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
-    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
-    <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
-    <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
-    <li><hr class="dropdown-divider"></li>
-    <li><a class="dropdown-item" href="../articles/index.html">More articles...</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -118,7 +106,7 @@
 
 <div class="row">
   <main id="main" class="col-md-9"><div class="page-header">
-      <img src="../logo.svg" class="logo" alt=""><h1>Predicting new plots</h1>
+      <img src="../logo.svg" class="logo" alt=""><h1>Imputing new plots</h1>
             
       
       <small class="dont-index">Source: <a href="https://github.com/gcol33/resolve/blob/HEAD/vignettes/articles/prediction.Rmd" class="external-link"><code>vignettes/articles/prediction.Rmd</code></a></small>
@@ -130,17 +118,17 @@
 <!-- Python blocks run by tools/python_twins.py (md5 d5e79e39459e9f07ef2be6593aaaf710). -->
 <p>A trained model is used on plots it has never seen: a new survey,
 plots held back from training, or plots whose elevation or habitat was
-never recorded. Predicting them takes three steps. You load the saved
+never recorded. Imputing them takes three steps. You load the saved
 model, encode the new species lists with the species the model was
-trained on, and read the predictions off the result.</p>
+trained on, and read the imputed values off the result.</p>
 <p>This article covers loading a model, encoding new plots against the
 training vocabulary, reading regression values and class labels, class
 probabilities and the confidence measures built from them, writing the
-predictions to a file, the latent representation of each plot, species
-the model never saw, prediction in chunks, blending predictions with the
-labels of similar training plots, and model suites, where several models
-trained on the same recipe predict together and report how far they
-agree.</p>
+imputed values to a file, the latent representation of each plot,
+species the model never saw, imputation in chunks, blending imputed
+values with the labels of similar training plots, and model suites,
+where several models trained on the same recipe impute together and
+report how far they agree.</p>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
 </h2>
@@ -164,7 +152,7 @@ coordinates, elevation in metres and habitat; <code>species</code> holds
 one row per species recorded on a plot, with its genus, family and cover
 in percent.</p>
 <p>Every fifth plot is set aside as a new plot. The model trains on the
-other 120 and never sees these 30, so its predictions on them can be
+other 120 and never sees these 30, so its imputed values on them can be
 checked against the recorded values.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
@@ -211,9 +199,9 @@ of <em>Carex firma</em>, a sedge the survey never recorded. Its genus,
 <span id="cb6-3"><a href="#cb6-3" tabindex="-1"></a>                      <span class="st">"family"</span>: [<span class="st">"Cyperaceae"</span>], <span class="st">"cover"</span>: [<span class="dv">20</span>]})</span>
 <span id="cb6-4"><a href="#cb6-4" tabindex="-1"></a>new_species <span class="op">=</span> pd.concat([new_species, novel], ignore_index<span class="op">=</span><span class="va">True</span>)</span></code></pre></div>
 </div>
-<p>The model predicts elevation, a regression target, and habitat, a
+<p>The model imputes elevation, a regression target, and habitat, a
 classification target, from the species alone. A <em>target</em> is a
-column the model learns to predict. Setting
+column the model learns to impute. Setting
 <code>track_unknown_count</code> makes the dataset count, per plot, the
 species outside the training vocabulary, beside the share of cover they
 make up, which it records by default. Training saves the model to a
@@ -341,9 +329,9 @@ still in memory through
 <code>from_pandas(..., schema_source=dataset)</code>.</p>
 </div>
 <p>A dataset that fitted its own vocabulary is refused before anything
-is predicted, even with the training run’s loading settings. Here a
-batch of five new plots is encoded on its own; it holds fewer genera
-than the training plots, so its genus codes differ from the model’s.</p>
+is imputed, even with the training run’s loading settings. Here a batch
+of five new plots is encoded on its own; it holds fewer genera than the
+training plots, so its genus codes differ from the model’s.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb15"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">batch</span> <span class="op">&lt;-</span> <span class="va">new_plots</span><span class="op">$</span><span class="va">plot_id</span><span class="op">[</span><span class="fl">1</span><span class="op">:</span><span class="fl">5</span><span class="op">]</span></span>
@@ -369,7 +357,7 @@ through its name, so the species vocabulary is exempt; the genus and
 family codes are still checked.</p>
 </div>
 <div class="section level2">
-<h2 id="reading-the-predictions">Reading the predictions<a class="anchor" aria-label="anchor" href="#reading-the-predictions"></a>
+<h2 id="reading-the-imputed-values">Reading the imputed values<a class="anchor" aria-label="anchor" href="#reading-the-imputed-values"></a>
 </h2>
 <p>The result holds the plot identifiers in row order and one entry per
 target. A regression target comes back in its original units, here
@@ -419,10 +407,10 @@ records.</p>
 <span id="cb18-20"><a href="#cb18-20" tabindex="-1"></a><span class="co">#&gt; 4    A025      670.0  grassland                1235        grassland</span></span>
 <span id="cb18-21"><a href="#cb18-21" tabindex="-1"></a><span class="co">#&gt; 5    A030     1570.0  grassland                1840        grassland</span></span></code></pre></div>
 </div>
-<p>The predictions are joined to the recorded values by plot identifier.
-Since the model never saw these plots, the mean absolute error in metres
-and the share of plots given their recorded habitat measure how it does
-on new data.</p>
+<p>The imputed values are joined to the recorded values by plot
+identifier. Since the model never saw these plots, the mean absolute
+error in metres and the share of plots given their recorded habitat
+measure how it does on new data.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb19"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>mae <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/mean.html" class="external-link">mean</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/MathFun.html" class="external-link">abs</a></span><span class="op">(</span><span class="va">out</span><span class="op">$</span><span class="va">elevation</span> <span class="op">-</span> <span class="va">out</span><span class="op">$</span><span class="va">elevation_observed</span><span class="op">)</span><span class="op">)</span>,</span>
@@ -439,8 +427,8 @@ on new data.</p>
 </h2>
 <p>Each classification target also comes with its <em>class
 probabilities</em>: one row per plot and one column per class, the
-softmax output the predicted code was taken from. Column j holds the
-probability of class code j, every row sums to one, and the predicted
+softmax output the imputed code was taken from. Column j holds the
+probability of class code j, every row sums to one, and the imputed
 class is the column with the largest value.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb21"><pre class="downlit sourceCode r">
@@ -506,7 +494,7 @@ share of correct classes on a labelled set. Regression targets have no
 probabilities.</p>
 </div>
 <div class="section level2">
-<h2 id="writing-predictions-to-a-file">Writing predictions to a file<a class="anchor" aria-label="anchor" href="#writing-predictions-to-a-file"></a>
+<h2 id="writing-imputed-values-to-a-file">Writing imputed values to a file<a class="anchor" aria-label="anchor" href="#writing-imputed-values-to-a-file"></a>
 </h2>
 <p>One row per plot, with the class label, its code and the probability
 of each class, writes to a CSV file.</p>
@@ -536,8 +524,8 @@ of each class, writes to a CSV file.</p>
 <span id="cb26-10"><a href="#cb26-10" tabindex="-1"></a><span class="bu">list</span>(table.columns)</span>
 <span id="cb26-11"><a href="#cb26-11" tabindex="-1"></a><span class="co">#&gt; ['plot_id', 'elevation', 'habitat', 'habitat_code', 'habitat_prob_alpine', 'habitat_prob_forest', 'habitat_prob_grassland', 'habitat_prob_wetland']</span></span></code></pre></div>
 </div>
-<p>The probability columns are bound to the predictions in the order of
-<code>plot_ids</code>, which is the row order of both.</p>
+<p>The probability columns are bound to the imputed values in the order
+of <code>plot_ids</code>, which is the row order of both.</p>
 <p>The command-line tool writes the same layout from the same
 checkpoint, and rebuilds the vocabularies from it.
 <code>--probabilities</code> appends the probability columns.</p>
@@ -593,14 +581,14 @@ counted over the plot’s full species list.</p>
 <span id="cb31-6"><a href="#cb31-6" tabindex="-1"></a><span class="co">#&gt; 0    A005  0.322581    1.0</span></span></code></pre></div>
 </div>
 <p>The first new plot is the only one with an unknown species, the
-<em>Carex firma</em> record. A plot whose fraction is high was predicted
-from a small part of its species list, so its prediction deserves less
-trust than the rest.</p>
+<em>Carex firma</em> record. A plot whose fraction is high was imputed
+from a small part of its species list, so its imputed value deserves
+less trust than the rest.</p>
 <p>Both values are also inputs to the model: the fraction by default,
 the count with <code>track_unknown_count</code>. Here every training
 plot was fully known, so both inputs stayed at 0 during training. An
 input that never varied in training is held at its training value at
-prediction, and the model’s output does not depend on it; the values
+imputation, and the model’s output does not depend on it; the values
 above are for you to read.</p>
 </div>
 <div class="section level2">
@@ -611,7 +599,7 @@ resolved to, and reads a plot’s species by matching names exactly. A
 table may name a species as it was entered in the field, by a current
 accepted name, or misspelled, and each of these counts as a species the
 model never saw. The <code>names</code> argument of the loaders and of
-suite prediction reads each name first as written, then through the
+suite imputation reads each name first as written, then through the
 release’s name table (<code>names.json</code>, which maps the names
 EVA’s records were entered under and the synonymy of the plant backbones
 to the names the models learnt), then as the nearest known name within
@@ -644,10 +632,10 @@ resolves each target against that target’s own vocabulary and reports
 per target (<code>species_names</code>).</p>
 </div>
 <div class="section level2">
-<h2 id="predicting-in-chunks">Predicting in chunks<a class="anchor" aria-label="anchor" href="#predicting-in-chunks"></a>
+<h2 id="imputing-in-chunks">Imputing in chunks<a class="anchor" aria-label="anchor" href="#imputing-in-chunks"></a>
 </h2>
-<p>Prediction runs the model over the plots in chunks of 4096 by default
-and gathers the results in CPU memory, so the GPU memory a prediction
+<p>Imputation runs the model over the plots in chunks of 4096 by default
+and gathers the results in CPU memory, so the GPU memory an imputation
 needs does not grow with the number of plots. A smaller chunk suits a
 wide model on a small GPU; -1 runs all plots in one pass. Each chunk
 goes through the same forward pass, so the results agree whatever the
@@ -673,22 +661,22 @@ order given; the forward then spends little on padding.</p>
 on.</p>
 <p>Optimising a predictor for inference folds its batch-normalisation
 layers into the linear layers before them, so each forward pass does
-less work. Call it once after loading, before a large prediction run:
+less work. Call it once after loading, before a large imputation run:
 <code>predictor$optimize_for_inference()</code> in R,
 <code>predictor.optimize_for_inference()</code> in Python.</p>
 </div>
 <div class="section level2">
 <h2 id="blending-with-similar-training-plots">Blending with similar training plots<a class="anchor" aria-label="anchor" href="#blending-with-similar-training-plots"></a>
 </h2>
-<p><em>Retrieval</em> blends each prediction with the recorded values of
-the training plots most similar to the plot in the latent space. For
+<p><em>Retrieval</em> blends each imputed value with the recorded values
+of the training plots most similar to the plot in the latent space. For
 each plot, the k reference plots with the highest cosine similarity of
 their latent vectors are weighted by a softmax of similarity over
-temperature. A regression prediction becomes (1 - alpha) times the
+temperature. An imputed regression value becomes (1 - alpha) times the
 model’s value plus alpha times the weighted mean of the neighbours’
 values, in original units. A classification target blends its
 probabilities with the neighbours’ weighted class shares, and the
-predicted class is the largest of the blend. The method follows TabR
+imputed class is the largest of the blend. The method follows TabR
 (Gorishniy et al. 2024).</p>
 <p>The reference set has to be encoded with the model’s vocabularies and
 carry every target. The training dataset is both.</p>
@@ -735,22 +723,22 @@ carry every target. The training dataset is both.</p>
 </div>
 <p>Only neighbours labelled for a target count for it, their weights
 renormalised; a plot with no labelled neighbour keeps the model’s
-prediction. The latent vectors themselves are not blended. The search is
-exact: every reference plot is compared, in blocks, on the predictor’s
-device. A reference plot that is also scored finds itself as its own
-nearest neighbour, so blend new plots against training plots, never
-against themselves. Settings you leave out take the engine’s
+imputed value. The latent vectors themselves are not blended. The search
+is exact: every reference plot is compared, in blocks, on the
+predictor’s device. A reference plot that is also scored finds itself as
+its own nearest neighbour, so blend new plots against training plots,
+never against themselves. Settings you leave out take the engine’s
 defaults.</p>
 </div>
 <div class="section level2">
 <h2 id="model-suites">Model suites<a class="anchor" aria-label="anchor" href="#model-suites"></a>
 </h2>
-<p>A <em>model suite</em> is a directory of models that predict
-together: for each target, several <em>members</em> trained on the same
-recipe under different seeds. Each plot gets the members’ combined
-prediction and a measure of how far they disagree. A
+<p>A <em>model suite</em> is a directory of models that impute together:
+for each target, several <em>members</em> trained on the same recipe
+under different seeds. Each plot gets the members’ combined imputed
+value and a measure of how far they disagree. A
 <code>manifest.json</code> names the members, the input columns they
-read and how their predictions combine; here the members vote on the
+read and how their imputed values combine; here the members vote on the
 habitat.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb38"><pre class="downlit sourceCode r">
@@ -837,7 +825,7 @@ altered without loading any model.</p>
 </div>
 <p>Loading the suite checks each member against the manifest: its
 checksum, its prediction heads and the columns it was trained to read.
-Prediction takes the species table and, when the members read plot-level
+Imputation takes the species table and, when the members read plot-level
 columns such as coordinates, the header. No target column is read.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb42"><pre class="downlit sourceCode r">
@@ -900,12 +888,12 @@ its <em>Carex firma</em> record, sits below 1.</p>
 <span id="cb45-3"><a href="#cb45-3" tabindex="-1"></a><span class="co">#&gt; ['plot_id', 'habitat', 'habitat_code', 'habitat_agreement', 'habitat_n_species', 'habitat_n_recognised', 'habitat_recognised_share', 'habitat_recognised_abundance_share']</span></span></code></pre></div>
 </div>
 <div class="lang-r-only">
-<p><code>keepMembers = TRUE</code> adds every member’s own prediction,
-and <code>as.data.frame(suite_preds, probabilities = TRUE)</code> adds
-the members’ mean probability of each class.</p>
+<p><code>keepMembers = TRUE</code> adds every member’s own imputed
+value, and <code>as.data.frame(suite_preds, probabilities = TRUE)</code>
+adds the members’ mean probability of each class.</p>
 </div>
 <div class="lang-py-only">
-<p><code>keep_members=True</code> adds every member’s own prediction,
+<p><code>keep_members=True</code> adds every member’s own imputed value,
 and <code>suite_preds.to_pandas(probabilities=True)</code> adds the
 members’ mean probability of each class.</p>
 </div>
@@ -919,7 +907,7 @@ members’ mean probability of each class.</p>
 latent space, species and genus embeddings, and what they are used
 for.</li>
 <li>
-<a href="performance.html">Large data and GPUs</a>: prediction on
+<a href="performance.html">Large data and GPUs</a>: imputation on
 large surveys and on the GPU.</li>
 <li>
 <a href="command-line.html">The command line</a>:

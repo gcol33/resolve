@@ -1,4 +1,5 @@
 url: https://gillescolling.com/resolve/
+title: RESOLVE
 destination: ../docs
 template:
   bootstrap: 5
@@ -25,7 +26,7 @@ figures:
   fig.ext: svg
   bg: '#F5F6F8'
 home:
-  title: 'RESOLVE: Predicting Sample Attributes from the Species Observed in Them'
+  title: 'RESOLVE: Imputing Sample Attributes from the Species Observed in Them'
   description: |
     Learns one representation of each sample's species composition and reads several attributes off it at once, such as the area, elevation and habitat of a vegetation plot. In R, Python and on the command line over one C++ engine on libtorch.
 authors:
@@ -89,6 +90,36 @@ navbar:
         href: reference/index.html
       - text: Python reference
         href: articles/python-reference.html
+    articles:
+      text: Articles
+      menu:
+      - text: Workflows
+      - text: Preparing the two tables
+        href: articles/data-preparation.html
+      - text: Encoding the species set
+        href: articles/encoding.html
+      - text: Training and reading the fit
+        href: articles/training.html
+      - text: Imputing new plots
+        href: articles/prediction.html
+      - text: Species names and the name table
+        href: articles/species-names.html
+      - text: Filling a dataset's gaps
+        href: articles/gap-fitting.html
+      - text: Correcting altitude and slope with an elevation model
+        href: articles/terrain-correction.html
+      - text: Latent and species embeddings
+        href: articles/embeddings.html
+      - text: '---'
+      - text: Scaling up
+      - text: Large data and GPUs
+        href: articles/performance.html
+      - text: The command line
+        href: articles/command-line.html
+      - text: '---'
+      - text: Setup
+      - text: Installing the engine
+        href: articles/installation.html
     github:
       icon: fa-github
       href: https://github.com/gcol33/resolve
@@ -110,9 +141,9 @@ reference:
   - resolve.pretrain_vae
   - resolve.default_config
   - resolve.progress
-- title: Saving and predicting
+- title: Saving and imputing
   desc: |
-    Checkpoints, what they record about the run, and predictions for new plots.
+    Checkpoints, what they record about the run, and imputed values for new plots.
   contents:
   - resolve.save
   - resolve.load
@@ -133,7 +164,7 @@ reference:
   - as.data.frame.resolve_suite_predictions
 - title: Gap fitting
   desc: |
-    Filling a dataset's missing values from its own complete plots, beside the raw prediction.
+    Filling a dataset's missing values from its own complete plots, beside the raw imputed value.
   contents:
   - resolve.fit_gaps
   - resolve.fit_prediction_gaps
@@ -149,7 +180,7 @@ reference:
   - resolve.fit_terrain_tile
 - title: Scoring
   desc: |
-    The metrics training reports, for predictions made anywhere.
+    The metrics training reports, for values imputed anywhere.
   contents: resolve_metrics
 - title: Name matching
   desc: |
@@ -172,12 +203,13 @@ articles:
 - title: Workflows
   navbar: Workflows
   desc: |
-    One topic each, with every code block in R and in Python: the input tables, the species encodings, training and the fit, prediction and the latent space.
+    One topic each, with every code block in R and in Python: the input tables, the species encodings, training and the fit, imputation and the latent space.
   contents:
   - articles/data-preparation
   - articles/encoding
   - articles/training
   - articles/prediction
+  - articles/species-names
   - articles/gap-fitting
   - articles/terrain-correction
   - articles/embeddings

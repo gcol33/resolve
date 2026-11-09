@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Python reference • resolveR</title>
+<title>Python reference • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="../favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
@@ -38,7 +38,7 @@
 
     <nav class="navbar navbar-expand-lg fixed-top " aria-label="Site navigation"><div class="container">
 
-    <a class="navbar-brand me-2" href="../index.html">resolveR</a>
+    <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
     <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
@@ -60,12 +60,12 @@
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
+<li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
     <li><a class="dropdown-item" href="../articles/data-preparation.html">Preparing the two tables</a></li>
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
-    <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
@@ -76,18 +76,6 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
     <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
-    <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
-    <li><a class="dropdown-item" href="../articles/python-data.html">Python: loading data</a></li>
-    <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
-    <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
-    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
-    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
-    <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
-    <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
-    <li><hr class="dropdown-divider"></li>
-    <li><a class="dropdown-item" href="../articles/index.html">More articles...</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -131,8 +119,8 @@
 <p>The Python package’s classes, functions and values, under the
 sections of <a href="../reference/index.html">the R reference</a> and in
 its order. <code>import resolve_core as rc</code> reaches every name
-below. <a href="resolveR.html?lang=python">Predicting plot attributes
-from species lists</a> runs them on the survey that ships with the R
+below. <a href="resolveR.html?lang=python">Imputing plot attributes from
+species lists</a> runs them on the survey that ships with the R
 package.</p>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
@@ -161,7 +149,7 @@ Names the columns of the two tables by the part they play in a dataset.
 </dd>
 <dt><a href="python-data.html#TargetSpec"><code>TargetSpec</code></a></dt>
 <dd>
-One target, a plot-table column the model learns to predict, and how its
+One target, a plot-table column the model learns to impute, and how its
 values are read.
 </dd>
 <dt><a href="python-data.html#TaskType"><code>TaskType</code></a></dt>
@@ -384,8 +372,8 @@ The residuals of a regression target on the held-out fold.
 </dd>
 <dt><a href="python-training.html#ClassificationPredictions"><code>ClassificationPredictions</code></a></dt>
 <dd>
-The class predictions and probabilities of a classification target on
-the held-out fold.
+The imputed classes and probabilities of a classification target on the
+held-out fold.
 </dd>
 <dt><a href="python-training.html#CalibrationResult"><code>CalibrationResult</code></a></dt>
 <dd>
@@ -393,7 +381,7 @@ How well a classifier’s probabilities match how often it is right.
 </dd>
 <dt><a href="python-training.html#CalibrationBin"><code>CalibrationBin</code></a></dt>
 <dd>
-One bin of predicted probability.
+One bin of the probability given to the imputed class.
 </dd>
 <dt><a href="python-training.html#NetworkDiagnostics"><code>NetworkDiagnostics</code></a></dt>
 <dd>
@@ -504,20 +492,20 @@ How a parallel block combines its branches.
 </dl>
 </div>
 <div class="section level2">
-<h2 id="saving-and-predicting">
-<a href="python-prediction.html">Saving and predicting</a><a class="anchor" aria-label="anchor" href="#saving-and-predicting"></a>
+<h2 id="saving-and-imputing">
+<a href="python-prediction.html">Saving and imputing</a><a class="anchor" aria-label="anchor" href="#saving-and-imputing"></a>
 </h2>
-<p>Checkpoints, what they record about the run, and predictions for new
-plots.</p>
+<p>Checkpoints, what they record about the run, and imputed values for
+new plots.</p>
 <dl>
 <dt><a href="python-prediction.html#Predictor"><code>Predictor</code></a></dt>
 <dd>
-Predictions, latent representations and embedding tables from a trained
-model.
+Imputed values, latent representations and embedding tables from a
+trained model.
 </dd>
 <dt><a href="python-prediction.html#ResolvePredictions"><code>ResolvePredictions</code></a></dt>
 <dd>
-The predictions and class probabilities for every plot.
+The imputed values and class probabilities for every plot.
 </dd>
 <dt><a href="python-prediction.html#RetrievalConfig"><code>RetrievalConfig</code></a></dt>
 <dd>
@@ -593,28 +581,28 @@ A suite loaded from its directory, scored as one model.
 </dd>
 <dt><a href="python-suites.html#SuiteColumns"><code>SuiteColumns</code></a></dt>
 <dd>
-Renames the manifest’s input columns at prediction time.
+Renames the manifest’s input columns at imputation time.
 </dd>
 <dt><a href="python-suites.html#SuitePredictions"><code>SuitePredictions</code></a></dt>
 <dd>
-Every target’s predictions, and the table they are written as.
+Every target’s imputed values, and the table they are written as.
 </dd>
 <dt><a href="python-suites.html#SuiteTargetPrediction"><code>SuiteTargetPrediction</code></a></dt>
 <dd>
-One target’s combined prediction, the members’ agreement or spread, and
-the species recognition.
+One target’s combined imputed value, the members’ agreement or spread,
+and the species recognition.
 </dd>
 <dt><a href="python-suites.html#suite_prediction_columns"><code>suite_prediction_columns()</code></a></dt>
 <dd>
-The predictions as named columns, one value per plot.
+The imputed values as named columns, one value per plot.
 </dd>
 <dt><a href="python-suites.html#CombinedPrediction"><code>CombinedPrediction</code></a></dt>
 <dd>
-A combined prediction with its agreement or dispersion.
+A combined imputed value with its agreement or dispersion.
 </dd>
 <dt><a href="python-suites.html#combine_vote"><code>combine_vote()</code></a></dt>
 <dd>
-The class most members predict.
+The class most members impute.
 </dd>
 <dt><a href="python-suites.html#combine_mean"><code>combine_mean()</code></a></dt>
 <dd>
@@ -647,16 +635,16 @@ The SHA-256 digest of a file.
 <a href="python-gap-fitting.html">Gap fitting</a><a class="anchor" aria-label="anchor" href="#gap-fitting"></a>
 </h2>
 <p>Filling a dataset’s missing values from its own complete plots,
-beside the raw prediction.</p>
+beside the raw imputed value.</p>
 <dl>
 <dt><a href="python-gap-fitting.html#fit_gaps"><code>fit_gaps()</code></a></dt>
 <dd>
-One target’s gaps from the raw prediction, the recorded values and the
-plots’ composition, positions and years.
+One target’s gaps from the raw imputed value, the recorded values and
+the plots’ composition, positions and years.
 </dd>
 <dt><a href="python-gap-fitting.html#fit_prediction_gaps"><code>fit_prediction_gaps()</code></a></dt>
 <dd>
-A single model’s gaps from its predictions and the dataset’s tables.
+A single model’s gaps from its imputed values and the dataset’s tables.
 </dd>
 <dt><a href="python-gap-fitting.html#read_gap_tables"><code>read_gap_tables()</code></a></dt>
 <dd>
@@ -678,7 +666,7 @@ How a target’s values lie: linear, log, circular or geographic.
 </dd>
 <dt><a href="python-gap-fitting.html#GapMethod"><code>GapMethod</code></a></dt>
 <dd>
-The methods a gap can be predicted by.
+The methods a gap can be imputed by.
 </dd>
 <dt><a href="python-gap-fitting.html#GapFit"><code>GapFit</code></a></dt>
 <dd>
@@ -760,7 +748,7 @@ stands for.
 </dd>
 <dt><a href="python-names.html#SpeciesNames"><code>SpeciesNames</code></a></dt>
 <dd>
-How a load or a suite prediction resolves species names.
+How a load or a suite imputation resolves species names.
 </dd>
 <dt><a href="python-names.html#NameResolver"><code>NameResolver</code></a></dt>
 <dd>
@@ -784,7 +772,7 @@ The names a load or a suite target did not find as written.
 <h2 id="scoring">
 <a href="python-scoring.html">Scoring</a><a class="anchor" aria-label="anchor" href="#scoring"></a>
 </h2>
-<p>The metrics training reports, for predictions made anywhere.</p>
+<p>The metrics training reports, for values imputed anywhere.</p>
 <dl>
 <dt><a href="python-scoring.html#Metrics"><code>Metrics</code></a></dt>
 <dd>
@@ -796,7 +784,7 @@ Accuracy, F1 scores and the confusion matrix of a classification.
 </dd>
 <dt><a href="python-scoring.html#ConfidenceMetrics"><code>ConfidenceMetrics</code></a></dt>
 <dd>
-The accuracy and coverage of the predictions above a confidence
+The accuracy and coverage of the imputed values above a confidence
 threshold.
 </dd>
 <dt><a href="python-scoring.html#compute_species_recognition"><code>compute_species_recognition()</code></a></dt>

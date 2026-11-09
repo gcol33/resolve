@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Predicting plot attributes from species lists • resolveR</title>
+<title>Imputing plot attributes from species lists • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="../favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
@@ -16,7 +16,7 @@
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><link href="../extra.css" rel="stylesheet">
-<script src="../extra.js"></script><meta property="og:title" content="Predicting plot attributes from species lists">
+<script src="../extra.js"></script><meta property="og:title" content="Imputing plot attributes from species lists">
 <script>
 (function () {
   var D = String.fromCharCode(36);
@@ -38,7 +38,7 @@
 
     <nav class="navbar navbar-expand-lg fixed-top " aria-label="Site navigation"><div class="container">
 
-    <a class="navbar-brand me-2" href="../index.html">resolveR</a>
+    <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
     <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
@@ -60,12 +60,12 @@
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
+<li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
     <li><a class="dropdown-item" href="../articles/data-preparation.html">Preparing the two tables</a></li>
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
-    <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
@@ -76,18 +76,6 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
     <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
-    <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
-    <li><a class="dropdown-item" href="../articles/python-data.html">Python: loading data</a></li>
-    <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
-    <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
-    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
-    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
-    <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
-    <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
-    <li><hr class="dropdown-divider"></li>
-    <li><a class="dropdown-item" href="../articles/index.html">More articles...</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -118,7 +106,7 @@
 
 <div class="row">
   <main id="main" class="col-md-9"><div class="page-header">
-      <img src="../logo.svg" class="logo" alt=""><h1>Predicting plot attributes from species lists</h1>
+      <img src="../logo.svg" class="logo" alt=""><h1>Imputing plot attributes from species lists</h1>
             
       
       <small class="dont-index">Source: <a href="https://github.com/gcol33/resolve/blob/HEAD/vignettes/resolveR.Rmd" class="external-link"><code>vignettes/resolveR.Rmd</code></a></small>
@@ -135,7 +123,7 @@ observed in each sample into one latent representation and reads several
 attributes off it, here the elevation and the habitat of a plot.</p>
 <p>This article runs the whole path on a small survey that ships with
 the R package: loading two tables, training a model, reading how well it
-predicts plots it did not train on, and predicting new plots.</p>
+imputes plots it did not train on, and imputing new plots.</p>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
 </h2>
@@ -200,7 +188,7 @@ plot identifier links the two tables.</p>
 <p>The <em>roles</em> name the columns: which one identifies the plot,
 which one the species, and which optional columns hold the abundance,
 the taxonomy and the coordinates. Each <em>target</em> is a column to
-predict, with its task. Elevation is a regression target and habitat a
+impute, with its task. Elevation is a regression target and habitat a
 classification target.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
@@ -225,8 +213,8 @@ classification target.</p>
 <span id="cb6-9"><a href="#cb6-9" tabindex="-1"></a>           rc.TargetSpec.classification(<span class="st">"habitat"</span>, <span class="dv">4</span>)]</span>
 <span id="cb6-10"><a href="#cb6-10" tabindex="-1"></a>dataset <span class="op">=</span> rc.ResolveDataset.from_pandas(plots, species, roles, targets)</span></code></pre></div>
 </div>
-<p>The coordinates stay out of the roles here, so the predictions come
-from the species alone.</p>
+<p>The coordinates stay out of the roles here, so the imputed values
+come from the species alone.</p>
 </div>
 <div class="section level2">
 <h2 id="training">Training<a class="anchor" aria-label="anchor" href="#training"></a>
@@ -256,8 +244,8 @@ are computed on these held-out plots.</p>
 <span id="cb8-10"><a href="#cb8-10" tabindex="-1"></a><span class="co">#&gt; 0.8</span></span></code></pre></div>
 </div>
 <p>For elevation, <code>mae</code> and <code>rmse</code> are in metres,
-<code>r2</code> is the share of the variance the predictions explain,
-and <code>band_25</code> is the share of plots predicted within 25 % of
+<code>r2</code> is the share of the variance the imputed values explain,
+and <code>band_25</code> is the share of plots imputed within 25 % of
 their elevation; <code>band_10</code> and <code>band_50</code> give the
 same at 10 and 50 %. For habitat, <code>accuracy</code> is the share of
 plots assigned their recorded habitat, and the per-class precision,
@@ -270,10 +258,10 @@ slightly different numbers, since each reaches the engine through its
 own torch build.</p>
 </div>
 <div class="section level2">
-<h2 id="predicting-new-plots">Predicting new plots<a class="anchor" aria-label="anchor" href="#predicting-new-plots"></a>
+<h2 id="imputing-new-plots">Imputing new plots<a class="anchor" aria-label="anchor" href="#imputing-new-plots"></a>
 </h2>
 <p>A saved model carries the species vocabulary it was trained with, so
-a new table is encoded against the same species. Here the model predicts
+a new table is encoded against the same species. Here the model imputes
 the survey’s own plots again.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
@@ -311,9 +299,9 @@ the survey’s own plots again.</p>
 <span id="cb10-17"><a href="#cb10-17" tabindex="-1"></a><span class="co">#&gt; 4  A005       2004                2145</span></span>
 <span id="cb10-18"><a href="#cb10-18" tabindex="-1"></a><span class="co">#&gt; 5  A006       1950                1799</span></span></code></pre></div>
 </div>
-<p>A plot with a species the model never saw still gets a prediction:
-the unknown species is encoded through its genus and family where those
-are known.</p>
+<p>A plot with a species the model never saw still gets an imputed
+value: the unknown species is encoded through its genus and family where
+those are known.</p>
 </div>
 <div class="section level2">
 <h2 id="next-steps">Next steps<a class="anchor" aria-label="anchor" href="#next-steps"></a>
@@ -327,8 +315,8 @@ encodings and when each fits.</p></li>
 <li><p><a href="training.html">Training and reading the fit</a>: the
 training settings, the held-out fold, cross-validation and
 checkpoints.</p></li>
-<li><p><a href="prediction.html">Predicting new plots</a>: output
-formats, class probabilities, new species and model suites.</p></li>
+<li><p><a href="prediction.html">Imputing new plots</a>: output formats,
+class probabilities, new species and model suites.</p></li>
 </ul>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

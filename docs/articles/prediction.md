@@ -1,19 +1,19 @@
-# Predicting new plots
+# Imputing new plots
 
 A trained model is used on plots it has never seen: a new survey, plots
 held back from training, or plots whose elevation or habitat was never
-recorded. Predicting them takes three steps. You load the saved model,
+recorded. Imputing them takes three steps. You load the saved model,
 encode the new species lists with the species the model was trained on,
-and read the predictions off the result.
+and read the imputed values off the result.
 
 This article covers loading a model, encoding new plots against the
 training vocabulary, reading regression values and class labels, class
 probabilities and the confidence measures built from them, writing the
-predictions to a file, the latent representation of each plot, species
-the model never saw, prediction in chunks, blending predictions with the
-labels of similar training plots, and model suites, where several models
-trained on the same recipe predict together and report how far they
-agree.
+imputed values to a file, the latent representation of each plot,
+species the model never saw, imputation in chunks, blending imputed
+values with the labels of similar training plots, and model suites,
+where several models trained on the same recipe impute together and
+report how far they agree.
 
 ## Installation
 
@@ -39,7 +39,7 @@ elevation in metres and habitat; `species` holds one row per species
 recorded on a plot, with its genus, family and cover in percent.
 
 Every fifth plot is set aside as a new plot. The model trains on the
-other 120 and never sees these 30, so its predictions on them can be
+other 120 and never sees these 30, so its imputed values on them can be
 checked against the recorded values.
 
 ``` r
@@ -96,9 +96,9 @@ novel = pd.DataFrame({"plot_id": [new_plots.plot_id.iloc[0]],
 new_species = pd.concat([new_species, novel], ignore_index=True)
 ```
 
-The model predicts elevation, a regression target, and habitat, a
+The model imputes elevation, a regression target, and habitat, a
 classification target, from the species alone. A *target* is a column
-the model learns to predict. Setting `track_unknown_count` makes the
+the model learns to impute. Setting `track_unknown_count` makes the
 dataset count, per plot, the species outside the training vocabulary,
 beside the share of cover they make up, which it records by default.
 Training saves the model to a checkpoint file at the end.
@@ -241,8 +241,8 @@ columns as lists of strings, or against a training dataset still in
 memory through `from_pandas(..., schema_source=dataset)`.
 
 A dataset that fitted its own vocabulary is refused before anything is
-predicted, even with the training run’s loading settings. Here a batch
-of five new plots is encoded on its own; it holds fewer genera than the
+imputed, even with the training run’s loading settings. Here a batch of
+five new plots is encoded on its own; it holds fewer genera than the
 training plots, so its genus codes differ from the model’s.
 
 ``` r
@@ -273,7 +273,7 @@ carries them. Under the default hash encoding a species is located
 through its name, so the species vocabulary is exempt; the genus and
 family codes are still checked.
 
-## Reading the predictions
+## Reading the imputed values
 
 The result holds the plot identifiers in row order and one entry per
 target. A regression target comes back in its original units, here
@@ -327,7 +327,7 @@ out.head(6)
 #> 5    A030     1570.0  grassland                1840        grassland
 ```
 
-The predictions are joined to the recorded values by plot identifier.
+The imputed values are joined to the recorded values by plot identifier.
 Since the model never saw these plots, the mean absolute error in metres
 and the share of plots given their recorded habitat measure how it does
 on new data.
@@ -350,9 +350,9 @@ c(mae = mean(abs(out$elevation - out$elevation_observed)),
 
 Each classification target also comes with its *class probabilities*:
 one row per plot and one column per class, the softmax output the
-predicted code was taken from. Column j holds the probability of class
-code j, every row sums to one, and the predicted class is the column
-with the largest value.
+imputed code was taken from. Column j holds the probability of class
+code j, every row sums to one, and the imputed class is the column with
+the largest value.
 
 ``` r
 
@@ -425,7 +425,7 @@ alone is enough to check how well the probabilities match the observed
 share of correct classes on a labelled set. Regression targets have no
 probabilities.
 
-## Writing predictions to a file
+## Writing imputed values to a file
 
 One row per plot, with the class label, its code and the probability of
 each class, writes to a CSV file.
@@ -460,7 +460,7 @@ list(table.columns)
 #> ['plot_id', 'elevation', 'habitat', 'habitat_code', 'habitat_prob_alpine', 'habitat_prob_forest', 'habitat_prob_grassland', 'habitat_prob_wetland']
 ```
 
-The probability columns are bound to the predictions in the order of
+The probability columns are bound to the imputed values in the order of
 `plot_ids`, which is the row order of both.
 
 The command-line tool writes the same layout from the same checkpoint,
@@ -532,14 +532,14 @@ unknown[unknown["count"] > 0]
 ```
 
 The first new plot is the only one with an unknown species, the *Carex
-firma* record. A plot whose fraction is high was predicted from a small
-part of its species list, so its prediction deserves less trust than the
-rest.
+firma* record. A plot whose fraction is high was imputed from a small
+part of its species list, so its imputed value deserves less trust than
+the rest.
 
 Both values are also inputs to the model: the fraction by default, the
 count with `track_unknown_count`. Here every training plot was fully
 known, so both inputs stayed at 0 during training. An input that never
-varied in training is held at its training value at prediction, and the
+varied in training is held at its training value at imputation, and the
 model’s output does not depend on it; the values above are for you to
 read.
 
@@ -550,7 +550,7 @@ resolved to, and reads a plot’s species by matching names exactly. A
 table may name a species as it was entered in the field, by a current
 accepted name, or misspelled, and each of these counts as a species the
 model never saw. The `names` argument of the loaders and of suite
-prediction reads each name first as written, then through the release’s
+imputation reads each name first as written, then through the release’s
 name table (`names.json`, which maps the names EVA’s records were
 entered under and the synonymy of the plant backbones to the names the
 models learnt), then as the nearest known name within one edit, and
@@ -586,10 +586,10 @@ some species the models never saw to a different species. A model suite
 resolves each target against that target’s own vocabulary and reports
 per target (`species_names`).
 
-## Predicting in chunks
+## Imputing in chunks
 
-Prediction runs the model over the plots in chunks of 4096 by default
-and gathers the results in CPU memory, so the GPU memory a prediction
+Imputation runs the model over the plots in chunks of 4096 by default
+and gathers the results in CPU memory, so the GPU memory an imputation
 needs does not grow with the number of plots. A smaller chunk suits a
 wide model on a small GPU; -1 runs all plots in one pass. Each chunk
 goes through the same forward pass, so the results agree whatever the
@@ -620,20 +620,20 @@ Results come back in CPU memory whichever device the predictor runs on.
 
 Optimising a predictor for inference folds its batch-normalisation
 layers into the linear layers before them, so each forward pass does
-less work. Call it once after loading, before a large prediction run:
+less work. Call it once after loading, before a large imputation run:
 `predictor$optimize_for_inference()` in R,
 `predictor.optimize_for_inference()` in Python.
 
 ## Blending with similar training plots
 
-*Retrieval* blends each prediction with the recorded values of the
+*Retrieval* blends each imputed value with the recorded values of the
 training plots most similar to the plot in the latent space. For each
 plot, the k reference plots with the highest cosine similarity of their
 latent vectors are weighted by a softmax of similarity over temperature.
-A regression prediction becomes (1 - alpha) times the model’s value plus
-alpha times the weighted mean of the neighbours’ values, in original
-units. A classification target blends its probabilities with the
-neighbours’ weighted class shares, and the predicted class is the
+An imputed regression value becomes (1 - alpha) times the model’s value
+plus alpha times the weighted mean of the neighbours’ values, in
+original units. A classification target blends its probabilities with
+the neighbours’ weighted class shares, and the imputed class is the
 largest of the blend. The method follows TabR (Gorishniy et al. 2024).
 
 The reference set has to be encoded with the model’s vocabularies and
@@ -686,19 +686,20 @@ predictor.clear_retrieval()
 
 Only neighbours labelled for a target count for it, their weights
 renormalised; a plot with no labelled neighbour keeps the model’s
-prediction. The latent vectors themselves are not blended. The search is
-exact: every reference plot is compared, in blocks, on the predictor’s
-device. A reference plot that is also scored finds itself as its own
-nearest neighbour, so blend new plots against training plots, never
-against themselves. Settings you leave out take the engine’s defaults.
+imputed value. The latent vectors themselves are not blended. The search
+is exact: every reference plot is compared, in blocks, on the
+predictor’s device. A reference plot that is also scored finds itself as
+its own nearest neighbour, so blend new plots against training plots,
+never against themselves. Settings you leave out take the engine’s
+defaults.
 
 ## Model suites
 
-A *model suite* is a directory of models that predict together: for each
+A *model suite* is a directory of models that impute together: for each
 target, several *members* trained on the same recipe under different
-seeds. Each plot gets the members’ combined prediction and a measure of
-how far they disagree. A `manifest.json` names the members, the input
-columns they read and how their predictions combine; here the members
+seeds. Each plot gets the members’ combined imputed value and a measure
+of how far they disagree. A `manifest.json` names the members, the input
+columns they read and how their imputed values combine; here the members
 vote on the habitat.
 
 ``` r
@@ -794,7 +795,7 @@ rc.SuiteManifest.read(suite_dir).verify(suite_dir)
 ```
 
 Loading the suite checks each member against the manifest: its checksum,
-its prediction heads and the columns it was trained to read. Prediction
+its prediction heads and the columns it was trained to read. Imputation
 takes the species table and, when the members read plot-level columns
 such as coordinates, the header. No target column is read.
 
@@ -868,11 +869,11 @@ list(suite_table.columns)
 #> ['plot_id', 'habitat', 'habitat_code', 'habitat_agreement', 'habitat_n_species', 'habitat_n_recognised', 'habitat_recognised_share', 'habitat_recognised_abundance_share']
 ```
 
-`keepMembers = TRUE` adds every member’s own prediction, and
+`keepMembers = TRUE` adds every member’s own imputed value, and
 `as.data.frame(suite_preds, probabilities = TRUE)` adds the members’
 mean probability of each class.
 
-`keep_members=True` adds every member’s own prediction, and
+`keep_members=True` adds every member’s own imputed value, and
 `suite_preds.to_pandas(probabilities=True)` adds the members’ mean
 probability of each class.
 
@@ -884,7 +885,7 @@ probability of each class.
   for.
 - [Large data and
   GPUs](https://gillescolling.com/resolve/articles/performance.md):
-  prediction on large surveys and on the GPU.
+  imputation on large surveys and on the GPU.
 - [The command
   line](https://gillescolling.com/resolve/articles/command-line.md):
   `resolve predict`, with and without a suite.

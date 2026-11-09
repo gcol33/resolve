@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Python: terrain correction • resolveR</title>
+<title>Python: terrain correction • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="../favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
@@ -38,7 +38,7 @@
 
     <nav class="navbar navbar-expand-lg fixed-top " aria-label="Site navigation"><div class="container">
 
-    <a class="navbar-brand me-2" href="../index.html">resolveR</a>
+    <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
     <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
@@ -57,15 +57,15 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="active nav-item dropdown">
+<li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
+<li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
     <li><a class="dropdown-item" href="../articles/data-preparation.html">Preparing the two tables</a></li>
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
-    <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
@@ -76,18 +76,6 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
     <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
-    <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
-    <li><a class="dropdown-item" href="../articles/python-data.html">Python: loading data</a></li>
-    <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
-    <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
-    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
-    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
-    <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
-    <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
-    <li><hr class="dropdown-divider"></li>
-    <li><a class="dropdown-item" href="../articles/index.html">More articles...</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -238,7 +226,7 @@ coded field; suites ship the coded field.</p>
 is <code>truth</code> (<code>NaN</code>: unrecorded, left out).
 <code>descriptor</code> is <code>TerrainDescriptor.Elevation</code> (an
 altitude target) or <code>TerrainDescriptor.Slope</code>. Every input is
-an <code>(n,)</code> tensor, one value per plot: the prediction, the
+an <code>(n,)</code> tensor, one value per plot: the imputed value, the
 descriptor at the coordinate and over 1 km, the recorded location
 uncertainty in m, the members’ standard deviation, the share of species
 recognised and the number of species.
@@ -259,15 +247,15 @@ Returns a <code>TerrainCorrection</code>.</p>
 <span id="cb8-3"><a href="#cb8-3" tabindex="-1"></a>                 recognised_share<span class="op">=</span><span class="va">None</span>, n_species<span class="op">=</span><span class="va">None</span>)</span>
 <span id="cb8-4"><a href="#cb8-4" tabindex="-1"></a>correction.save(path)</span></code></pre></div>
 <p><code>apply</code> returns a <code>TerrainCorrectionResult</code>:
-<code>corrected</code> (the prediction where the correction cannot
-apply: no prediction or no descriptor), <code>weights</code>
-(<code>(n, 3)</code>, the weight of the prediction, the descriptor and
-the 1 km descriptor; <code>TerrainCorrection.weight_names</code>),
+<code>corrected</code> (the imputed value where the correction cannot
+apply: no imputed value or no descriptor), <code>weights</code>
+(<code>(n, 3)</code>, the weight of the imputed value, the descriptor
+and the 1 km descriptor; <code>TerrainCorrection.weight_names</code>),
 <code>offset</code> and <code>applied</code>. An input not given reads
 as the training plots’ median. The correction also has
 <code>target</code>, <code>descriptor</code>, <code>config</code> and
 <code>report</code> (the training plots and the mean absolute error of
-the prediction, the descriptor and the corrected value on them).</p>
+the imputed value, the descriptor and the corrected value on them).</p>
 <div class="sourceCode" id="cb9"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a><span class="im">import</span> numpy <span class="im">as</span> np</span>
 <span id="cb9-2"><a href="#cb9-2" tabindex="-1"></a><span class="im">import</span> torch</span>
 <span id="cb9-3"><a href="#cb9-3" tabindex="-1"></a><span class="im">import</span> resolve_core <span class="im">as</span> rc</span>

@@ -1,7 +1,7 @@
 # Training and reading the fit
 
 Training fits a model to a dataset: it holds out part of the plots,
-adjusts the network on the rest and stops when its predictions on the
+adjusts the network on the rest and stops when its imputed values on the
 held-out plots no longer improve. This article covers the settings a run
 takes, what the run returns and how to read the fit on the plots it did
 not train on.
@@ -35,7 +35,7 @@ The examples use the survey that ships with the R package: 150 plots in
 the Alps, with their elevation in metres and their habitat, and the
 species recorded on each plot with its genus, family and cover. The
 *roles* name the columns of the two tables, and each *target* is a
-column to predict. Elevation is a regression target and habitat a
+column to impute. Elevation is a regression target and habitat a
 classification target with four classes.
 
 ``` r
@@ -276,9 +276,9 @@ on a `log1p` scale is transformed back first.
 |----|----|
 | `mae` | Mean absolute error |
 | `rmse` | Root mean squared error |
-| `r2` | Coefficient of determination: the share of the variance the predictions explain |
+| `r2` | Coefficient of determination: the share of the variance the imputed values explain |
 | `smape` | Symmetric mean absolute percentage error, between 0 and 2 |
-| `band_10`, `band_25`, `band_50` | Share of plots predicted within 10, 25 and 50 % of their value, one key per entry in `band_thresholds` |
+| `band_10`, `band_25`, `band_50` | Share of plots imputed within 10, 25 and 50 % of their value, one key per entry in `band_thresholds` |
 
 Classification targets:
 
@@ -289,7 +289,7 @@ Classification targets:
 | `weighted_f1` | Mean of the per-class F1 scores, each class weighted by its number of plots |
 | `precision_<c>`, `recall_<c>`, `f1_<c>` | Per class |
 
-The same metrics are available on their own, for predictions made
+The same metrics are available on their own, for values imputed
 elsewhere:
 [`resolve_mae()`](https://gillescolling.com/resolve/reference/resolve_metrics.md),
 [`resolve_rmse()`](https://gillescolling.com/resolve/reference/resolve_metrics.md),
@@ -438,7 +438,7 @@ checkpoint a resumed run reads.
 ### Warming up the rate
 
 A large transformer encoder trained at its full rate from the first step
-can collapse onto predicting one class. A *warmup* starts the rate near
+can collapse onto imputing one class. A *warmup* starts the rate near
 zero and raises it linearly over the first `warmup_steps` optimizer
 steps (or `warmup_epochs` epochs) to whatever the schedule sets; after
 it, the schedule runs as it would have. The linear schedule then lowers
@@ -511,9 +511,9 @@ Under `combined`, the regression loss moves through three phases at
     \mathcal{L}_\text{SMAPE} = \frac{1}{n} \sum_{i=1}^{n} \frac{|y_i - \hat{y}_i|}{(|y_i| + |\hat{y}_i|)/2 + \epsilon}
     ```
 
-3.  After it, a hinge penalizes predictions whose ratio to the observed
-    value leaves the band $`[1 - \tau, 1 + \tau]`$, with $`\tau`$ =
-    `band_threshold` (default 0.25)
+3.  After it, a hinge penalizes imputed values whose ratio to the
+    observed value leaves the band $`[1 - \tau, 1 + \tau]`$, with
+    $`\tau`$ = `band_threshold` (default 0.25)
 
     ``` math
     \mathcal{L}_\text{band} = \frac{1}{n} \sum_{i=1}^{n} \max\left(0,\ \left|\frac{\hat{y}_i}{y_i} - 1\right| - \tau\right)
@@ -567,8 +567,8 @@ does not do.
 Cross-entropy stays in the sum because the NCA term does not change when
 the head’s output coordinates are permuted: it constrains which plots
 lie near each other and says nothing about which coordinate belongs to
-which class. On its own it would leave the predicted class, the
-coordinate with the largest output, without meaning.
+which class. On its own it would leave the imputed class, the coordinate
+with the largest output, without meaning.
 
 Three settings tune it, and they act only under the `nca` preset:
 
@@ -817,7 +817,7 @@ sub-config in Python:
 | `mlp` | `hidden_dims` and the fields above | A stack of fully connected layers (default) |
 | `ft_transformer` | `ft_transformer` | Turns each input feature into a token and applies self-attention over the features |
 | `tabnet` | `tabnet` | Selects features in sequential attention steps; `use_sparsemax = FALSE` selects 1.5-entmax |
-| `saint` | `saint` | Attention over the features and over rows; at prediction a plot attends to a fixed set of training plots |
+| `saint` | `saint` | Attention over the features and over rows; at imputation a plot attends to a fixed set of training plots |
 | `excelformer` | `excelformer` | Attention restricted by a learned importance of the features |
 | `trait_net` | `trait_net` | Interaction of environment and species traits; needs traits set on the model |
 | `gnn` | `gnn` | A graph over the plots, by space, taxonomy or co-occurrence; the spatial graph needs coordinates and trains on the full batch |
@@ -954,8 +954,8 @@ elsewhere and combines with either of the other two.
 ## Reading the held-out fold
 
 The trainer keeps its held-out fold after the run, so you can read the
-predictions on it plot by plot. The first run of this article, `fit` in
-R and `trainer` in Python, serves as the example.
+imputed values on it plot by plot. The first run of this article, `fit`
+in R and `trainer` in Python, serves as the example.
 
 ``` r
 
@@ -978,7 +978,7 @@ languages.
 
 ### Regression residuals
 
-A *residual* is the observed value minus the predicted one. The residual
+A *residual* is the observed value minus the imputed one. The residual
 analysis holds both, per plot and in original units, with the mean, the
 standard deviation, the skewness, the kurtosis and quantiles of the
 residuals.
@@ -992,11 +992,11 @@ round(unlist(res[c("mean_residual", "std_residual", "q05", "q50", "q95")]))
 
 lims <- range(res$actuals, res$predictions)
 plot(res$actuals, res$predictions, pch = 19, xlim = lims, ylim = lims,
-     xlab = "Observed elevation (m)", ylab = "Predicted elevation (m)")
+     xlab = "Observed elevation (m)", ylab = "Imputed elevation (m)")
 abline(0, 1, col = "grey50")
 ```
 
-![Predicted against observed elevation on the held-out
+![Imputed against observed elevation on the held-out
 plots.](training_files/figure-html/residuals-1.svg)
 
 ``` python
@@ -1011,19 +1011,19 @@ fig, ax = plt.subplots(figsize=(6.5, 4.5))
 ax.scatter(observed, predicted, color="black");
 ax.plot(lims, lims, color="grey");
 ax.set_xlabel("Observed elevation (m)");
-ax.set_ylabel("Predicted elevation (m)");
+ax.set_ylabel("Imputed elevation (m)");
 ```
 
-![Predicted against observed elevation on the held-out
+![Imputed against observed elevation on the held-out
 plots.](training_files/py-figure-2.svg)
 
-A point above the line is a plot predicted higher than it lies.
+A point above the line is a plot imputed higher than it lies.
 
-### Classification predictions
+### Imputed classes
 
-For a classification target, the trainer returns the predicted class,
-the probability of every class and the recorded class of each held-out
-plot. Classes are numbered from 0, in the order of `class_names`.
+For a classification target, the trainer returns the imputed class, the
+probability of every class and the recorded class of each held-out plot.
+Classes are numbered from 0, in the order of `class_names`.
 
 ``` r
 
@@ -1057,13 +1057,13 @@ tuple(cls.probabilities.shape)
 
 ### Calibration
 
-A classifier is *calibrated* when, of the plots whose predicted class it
+A classifier is *calibrated* when, of the plots whose imputed class it
 gives a probability of 0.7, 70 % are assigned their recorded class. The
 calibration groups the held-out plots into bins by the probability of
-their predicted class and compares each bin’s mean probability with the
-share of its plots whose predicted class is the recorded one. The
-expected calibration error is the average gap, weighted by the plots per
-bin, and the maximum calibration error the largest gap.
+their imputed class and compares each bin’s mean probability with the
+share of its plots whose imputed class is the recorded one. The expected
+calibration error is the average gap, weighted by the plots per bin, and
+the maximum calibration error the largest gap.
 
 ``` r
 
@@ -1301,7 +1301,7 @@ round(fresh.compute_residuals("elevation").mean_residual) == round(res.mean_resi
 #> True
 ```
 
-[Predicting new
+[Imputing new
 plots](https://gillescolling.com/resolve/articles/prediction.md) covers
 what to do with the loaded model.
 
@@ -1323,7 +1323,7 @@ of memory.
 - [Large data and
   GPUs](https://gillescolling.com/resolve/articles/performance.md): the
   learning rate, the batch size, the model size and the GPU settings.
-- [Predicting new
+- [Imputing new
   plots](https://gillescolling.com/resolve/articles/prediction.md):
   output formats, class probabilities, new species and model suites.
 - [Latent and species

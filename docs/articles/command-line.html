@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>The command line • resolveR</title>
+<title>The command line • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="../favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
@@ -38,7 +38,7 @@
 
     <nav class="navbar navbar-expand-lg fixed-top " aria-label="Site navigation"><div class="container">
 
-    <a class="navbar-brand me-2" href="../index.html">resolveR</a>
+    <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
     <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
@@ -60,12 +60,12 @@
 <li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
+<li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
     <li><a class="dropdown-item" href="../articles/data-preparation.html">Preparing the two tables</a></li>
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
-    <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
@@ -76,18 +76,6 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
     <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
-    <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
-    <li><a class="dropdown-item" href="../articles/python-data.html">Python: loading data</a></li>
-    <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
-    <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
-    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
-    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
-    <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
-    <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
-    <li><hr class="dropdown-divider"></li>
-    <li><a class="dropdown-item" href="../articles/index.html">More articles...</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -128,17 +116,16 @@
     
     
 <!-- Python blocks run by tools/python_twins.py (md5 cf36e5edb179b48e2b180eb9df889249). -->
-<p>The <code>resolve</code> executable trains a model, predicts new
-plots and describes a saved model, all from CSV files and without R or
-Python. It runs the same engine as the two packages, so a checkpoint
-written by <code>resolve train</code> loads in R with
-<code><a href="../reference/resolve.load.html">resolve.load()</a></code> and in Python with
-<code>Predictor.load()</code>, and a checkpoint saved from either
-package scores with <code>resolve predict</code>.</p>
+<p>The <code>resolve</code> executable trains a model, imputes new plots
+and describes a saved model, all from CSV files and without R or Python.
+It runs the same engine as the two packages, so a checkpoint written by
+<code>resolve train</code> loads in R with <code><a href="../reference/resolve.load.html">resolve.load()</a></code>
+and in Python with <code>Predictor.load()</code>, and a checkpoint saved
+from either package scores with <code>resolve predict</code>.</p>
 <p>This article runs each command on the survey that ships with the R
 package: training with the column flags and targets, covariates and
 coordinates, the model settings, the held-out fold and the seed,
-cross-validation, checkpoints and resuming, devices, prediction and
+cross-validation, checkpoints and resuming, devices, imputation and
 reading a checkpoint.</p>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
@@ -197,7 +184,7 @@ percent. Copy both into the directory you run the commands from.</p>
 <p><code>resolve train</code> reads the two tables, fits a model and
 saves it. The <em>roles</em> name the columns: which one identifies the
 plot, which one the species, and which optional columns hold the
-abundance and the taxonomy. Each <em>target</em> is a column to predict,
+abundance and the taxonomy. Each <em>target</em> is a column to impute,
 with its task: elevation is a regression target and habitat a
 classification target with four classes.</p>
 <div class="sourceCode" id="cb7"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a><span class="ex">resolve</span> train <span class="at">--header</span> plots.csv <span class="at">--species</span> species.csv <span class="dt">\</span></span>
@@ -271,9 +258,9 @@ in total and per target. It ends with the best epoch, the time it took
 and the metrics of the best epoch on the held-out plots, the 20 % of
 plots it did not train on. For elevation, <code>mae</code> and
 <code>rmse</code> are in metres, <code>r2</code> is the share of the
-variance the predictions explain and <code>band_10</code>,
+variance the imputed values explain and <code>band_10</code>,
 <code>band_25</code> and <code>band_50</code> are the shares of plots
-predicted within 10, 25 and 50 % of their elevation. For habitat,
+imputed within 10, 25 and 50 % of their elevation. For habitat,
 <code>accuracy</code> is the share of plots assigned their recorded
 habitat, followed by the precision, recall and F1 score of each class
 code and their macro and weighted means. The metrics are printed in no
@@ -369,7 +356,7 @@ after the task are modifiers in any order:</p>
 <ul>
 <li>
 <strong><code>log1p</code></strong> fits a regression target on
-<code>log(1 + y)</code> and returns predictions in the column’s own
+<code>log(1 + y)</code> and returns imputed values in the column’s own
 units.</li>
 <li>
 <strong><code>mask</code></strong> keeps a plot that has no label
@@ -398,13 +385,13 @@ classification target.</li>
 <span id="cb11-5"><a href="#cb11-5" tabindex="-1"></a><span class="co">#&gt; Error: --target habitat:classification: classification needs a class count &gt;= 2, e.g. habitat:classification:9</span></span></code></pre></div>
 <p>A label column may hold text, as <code>habitat</code> does: the
 loader codes the labels as integers, and the checkpoint keeps the
-labels, so predictions come back as habitat names.</p>
+labels, so imputed values come back as habitat names.</p>
 </div>
 <div class="section level2">
 <h2 id="covariates-and-coordinates">Covariates and coordinates<a class="anchor" aria-label="anchor" href="#covariates-and-coordinates"></a>
 </h2>
 <p>Coordinates and covariates enter the same encoder as the species.
-This run predicts habitat from the species, the plot’s coordinates and
+This run imputes habitat from the species, the plot’s coordinates and
 its elevation as a covariate. <code>grep -v</code> leaves out the epoch
 lines.</p>
 <div class="sourceCode" id="cb12"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" tabindex="-1"></a><span class="ex">resolve</span> train <span class="at">--header</span> plots.csv <span class="at">--species</span> species.csv <span class="dt">\</span></span>
@@ -533,7 +520,7 @@ epochs (50 by default). <code>--test-size</code> sets the fraction.</p>
 <p><code>--seed</code> (42 by default) seeds the starting weights, the
 held-out draw, the order the training plots are drawn in and the
 cross-validation folds. On the CPU, two runs with the same flags and
-seed train the same model, so their predictions match:</p>
+seed train the same model, so their imputed values match:</p>
 <div class="sourceCode" id="cb15"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a><span class="cf">for</span> run <span class="kw">in</span> a b<span class="kw">;</span> <span class="cf">do</span></span>
 <span id="cb15-2"><a href="#cb15-2" tabindex="-1"></a>  <span class="ex">resolve</span> train <span class="at">--header</span> plots.csv <span class="at">--species</span> species.csv <span class="dt">\</span></span>
 <span id="cb15-3"><a href="#cb15-3" tabindex="-1"></a>    <span class="at">--species-id</span> species <span class="at">--abundance</span> cover <span class="at">--target</span> elevation <span class="dt">\</span></span>
@@ -810,10 +797,10 @@ mixed precision. <a href="performance.html">Large data and GPUs</a>
 covers these settings.</p>
 </div>
 <div class="section level2">
-<h2 id="predicting">Predicting<a class="anchor" aria-label="anchor" href="#predicting"></a>
+<h2 id="imputing">Imputing<a class="anchor" aria-label="anchor" href="#imputing"></a>
 </h2>
 <p><code>resolve predict</code> scores a header and a species table with
-a saved model and writes one row per plot. Here the model predicts the
+a saved model and writes one row per plot. Here the model imputes the
 survey’s own plots again.</p>
 <div class="sourceCode" id="cb22"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb22-1"><a href="#cb22-1" tabindex="-1"></a><span class="ex">resolve</span> predict <span class="at">--model</span> model.pt <span class="at">--header</span> plots.csv <span class="at">--species</span> species.csv <span class="dt">\</span></span>
 <span id="cb22-2"><a href="#cb22-2" tabindex="-1"></a>  <span class="at">--species-id</span> species <span class="at">--abundance</span> cover <span class="at">--genus</span> genus <span class="at">--family</span> family <span class="dt">\</span></span>
@@ -836,7 +823,7 @@ survey’s own plots again.</p>
 <p>The first column is the plot identifier, followed by one column per
 target. A classification target gets two columns: <code>habitat</code>
 holds the class label and <code>habitat_code</code> the integer code the
-model predicted. <code>--probabilities</code> adds one column per class
+model imputed. <code>--probabilities</code> adds one column per class
 with the probability behind the code; the columns of one target sum to
 one in every row:</p>
 <div class="sourceCode" id="cb23"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb23-1"><a href="#cb23-1" tabindex="-1"></a><span class="ex">resolve</span> predict <span class="at">--model</span> model.pt <span class="at">--header</span> plots.csv <span class="at">--species</span> species.csv <span class="dt">\</span></span>
@@ -850,27 +837,27 @@ one in every row:</p>
 <p>The checkpoint carries the species, genus and family vocabularies of
 its training data, so the new tables are encoded against the same
 species. It also records the covariate and categorical columns, so a
-covariate model predicts without <code>--covariate</code> flags; pass
+covariate model imputes without <code>--covariate</code> flags; pass
 them only to rename the columns, one flag per column the model was
 trained on. The abundance, coordinate and taxonomy columns are read only
 when their flags are given, so pass <code>resolve predict</code> the
 same flags for them as <code>resolve train</code>.</p>
 <p><code>--predict-batch-size</code> sets how many plots go through the
-model at once (4096 by default). The retrieval flags blend each
-prediction with the labels of its nearest plots from a reference set, in
-the model’s latent representation; <a href="prediction.html">Predicting
-new plots</a> describes them.</p>
+model at once (4096 by default). The retrieval flags blend each imputed
+value with the labels of its nearest plots from a reference set, in the
+model’s latent representation; <a href="prediction.html">Imputing new
+plots</a> describes them.</p>
 <p>A <em>model suite</em> is a directory of several trained models with
 a <code>manifest.json</code> that lists them.
 <code>resolve predict --suite DIR</code> scores every target of the
-suite, combines its members’ predictions and reports how far they agree
-and how much of each plot’s species list the target’s vocabulary
+suite, combines its members’ imputed values and reports how far they
+agree and how much of each plot’s species list the target’s vocabulary
 recognises. <code>--target</code> limits the output to some targets,
-<code>--members</code> adds every member’s own prediction and
+<code>--members</code> adds every member’s own imputed value and
 <code>--no-verify</code> skips checking each member file against the
 size and SHA-256 checksum in the manifest.
 <code>resolve info --suite DIR</code> prints the manifest and checks
-every member. <a href="prediction.html">Predicting new plots</a> covers
+every member. <a href="prediction.html">Imputing new plots</a> covers
 suites.</p>
 </div>
 <div class="section level2">
@@ -961,7 +948,7 @@ package:</p>
 <span id="cb26-14"><a href="#cb26-14" tabindex="-1"></a>preds <span class="op">=</span> predictor.predict_dataset(dataset)</span>
 <span id="cb26-15"><a href="#cb26-15" tabindex="-1"></a><span class="bu">print</span>(preds.predictions[<span class="st">"elevation"</span>][:<span class="dv">6</span>].<span class="bu">round</span>())</span></code></pre></div>
 </div>
-<p>The predicted elevations match the <code>elevation</code> column of
+<p>The imputed elevations match the <code>elevation</code> column of
 <code>predictions.csv</code> above.</p>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

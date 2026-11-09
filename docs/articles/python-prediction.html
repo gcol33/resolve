@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Python: saving and predicting • resolveR</title>
+<title>Python: saving and imputing • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="../favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
@@ -16,7 +16,7 @@
 <script src="../deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="../deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="../deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="../deps/headroom-0.11.0/headroom.min.js"></script><script src="../deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="../deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="../deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="../deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="../deps/search-1.0.0/fuse.min.js"></script><script src="../deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="../pkgdown.js"></script><link href="../extra.css" rel="stylesheet">
-<script src="../extra.js"></script><meta property="og:title" content="Python: saving and predicting">
+<script src="../extra.js"></script><meta property="og:title" content="Python: saving and imputing">
 <script>
 (function () {
   var D = String.fromCharCode(36);
@@ -38,7 +38,7 @@
 
     <nav class="navbar navbar-expand-lg fixed-top " aria-label="Site navigation"><div class="container">
 
-    <a class="navbar-brand me-2" href="../index.html">resolveR</a>
+    <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
     <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
@@ -57,15 +57,15 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="active nav-item dropdown">
+<li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
+<li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
     <li><a class="dropdown-item" href="../articles/data-preparation.html">Preparing the two tables</a></li>
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
-    <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
@@ -76,18 +76,6 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
     <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
-    <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
-    <li><a class="dropdown-item" href="../articles/python-data.html">Python: loading data</a></li>
-    <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
-    <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
-    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
-    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
-    <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
-    <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
-    <li><hr class="dropdown-divider"></li>
-    <li><a class="dropdown-item" href="../articles/index.html">More articles...</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -118,7 +106,7 @@
 
 <div class="row">
   <main id="main" class="col-md-9"><div class="page-header">
-      <img src="../logo.svg" class="logo" alt=""><h1>Python: saving and predicting</h1>
+      <img src="../logo.svg" class="logo" alt=""><h1>Python: saving and imputing</h1>
             
       
       <small class="dont-index">Source: <a href="https://github.com/gcol33/resolve/blob/HEAD/vignettes/articles/python-prediction.Rmd" class="external-link"><code>vignettes/articles/python-prediction.Rmd</code></a></small>
@@ -128,10 +116,10 @@
     
     
 <!-- Python blocks run by tools/python_twins.py (md5 cf36e5edb179b48e2b180eb9df889249). -->
-<p>Checkpoints, what they record about the run, and predictions for new
-plots: the predictor, its predictions, retrieval of the nearest training
-plots, the scalers, the run record, and the helpers that rebuild a
-checkpoint’s loader settings and targets.</p>
+<p>Checkpoints, what they record about the run, and imputed values for
+new plots: the predictor, its imputed values, retrieval of the nearest
+training plots, the scalers, the run record, and the helpers that
+rebuild a checkpoint’s loader settings and targets.</p>
 <p><a href="python-reference.html">All of the Python reference</a></p>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
@@ -149,7 +137,7 @@ checkpoint’s loader settings and targets.</p>
 <p>The examples on this page run in order on the survey that ships with
 the R package: 150 plots in the Alps, with one table of plots and one of
 the species recorded on them. They start from a short fit saved as a
-checkpoint; <a href="prediction.html">Predicting new plots</a> walks
+checkpoint; <a href="prediction.html">Imputing new plots</a> walks
 through the same steps with their output.</p>
 <div class="sourceCode" id="cb3"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="im">import</span> os</span>
 <span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a><span class="im">import</span> tempfile</span>
@@ -187,7 +175,7 @@ through the same steps with their output.</p>
 </h2>
 <div class="sourceCode" id="cb4"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a>Predictor.load(path, device<span class="op">=</span><span class="st">"cpu"</span>, vram_fraction<span class="op">=</span><span class="fl">1.0</span>)</span>
 <span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a>Predictor(model, scalers, device<span class="op">=</span><span class="st">"cpu"</span>)</span></code></pre></div>
-<p>Predictions from a trained model. <code>load</code> reads a
+<p>Imputed values from a trained model. <code>load</code> reads a
 checkpoint <code>Trainer.save</code> wrote; <code>device</code> is
 <code>"cpu"</code>, <code>"cuda"</code> (the current GPU) or
 <code>"cuda:N"</code>, and anything else raises <code>ValueError</code>.
@@ -204,7 +192,7 @@ from a model and its <code>Scalers</code>.</p>
 <code>predict_dataset()</code><a class="anchor" aria-label="anchor" href="#Predictor-predict_dataset"></a>
 </h3>
 <div class="sourceCode" id="cb6"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>predict_dataset(dataset, return_latent<span class="op">=</span><span class="va">False</span>, batch_size<span class="op">=</span><span class="dv">4096</span>)</span></code></pre></div>
-<p>The predictions for every plot of a dataset, as
+<p>The imputed values for every plot of a dataset, as
 <code>ResolvePredictions</code>. The dataset has to be coded with the
 checkpoint’s vocabularies, or its integer codes would index the wrong
 rows of the embedding tables: load new plots with
@@ -236,7 +224,7 @@ not depend on the chunk size.</p>
 <span id="cb8-4"><a href="#cb8-4" tabindex="-1"></a>        pool_genus_ids<span class="op">=</span><span class="va">None</span>, pool_family_ids<span class="op">=</span><span class="va">None</span>, pool_weights<span class="op">=</span><span class="va">None</span>,</span>
 <span id="cb8-5"><a href="#cb8-5" tabindex="-1"></a>        pool_mask<span class="op">=</span><span class="va">None</span>, pool_has_cover<span class="op">=</span><span class="va">None</span>, categorical_ids<span class="op">=</span><span class="va">None</span>,</span>
 <span id="cb8-6"><a href="#cb8-6" tabindex="-1"></a>        return_latent<span class="op">=</span><span class="va">False</span>, batch_size<span class="op">=</span><span class="dv">4096</span>)</span></code></pre></div>
-<p>The predictions from tensors, every argument by keyword; leave out
+<p>The imputed values from tensors, every argument by keyword; leave out
 what the encoding does not use. The first five are the parts of the
 continuous block, assembled and standardised as in training;
 <code>unknown_fraction</code> and <code>unknown_count</code> are
@@ -280,7 +268,7 @@ for the hash and sparse encodings.</li>
 <div class="sourceCode" id="cb11"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb11-1"><a href="#cb11-1" tabindex="-1"></a>set_retrieval(reference, config<span class="op">=</span>RetrievalConfig(), batch_size<span class="op">=</span><span class="dv">4096</span>)</span>
 <span id="cb11-2"><a href="#cb11-2" tabindex="-1"></a>clear_retrieval()</span></code></pre></div>
 <p>Retrieval augmentation (Gorishniy and others 2024, TabR): every later
-prediction is blended with the labels of the plot’s nearest reference
+imputed value is blended with the labels of the plot’s nearest reference
 plots in the latent space. <code>reference</code> is a dataset coded
 with the checkpoint’s vocabularies and carrying every target’s labels,
 normally the training plots; <code>target_specs_from_schema</code> gives
@@ -288,13 +276,14 @@ its targets. For each plot the <code>k_neighbors</code> reference plots
 of highest cosine similarity of their latents are weighted by a softmax
 of similarity over <code>temperature</code>. Only neighbours labelled
 for a target count for it, and a plot with none keeps the model’s
-prediction. A regression target becomes
+imputed value. A regression target becomes
 <code>(1 - alpha) * prediction + alpha * the neighbours' weighted label</code>,
 in original units; a classification target blends its probabilities with
-the neighbours’ label distribution and predicts the largest. The latent
+the neighbours’ label distribution and imputes the largest. The latent
 and <code>get_embeddings</code> are not blended. The search is exact. A
 reference plot that is also scored finds itself first.
-<code>clear_retrieval</code> returns to the model’s own predictions.</p>
+<code>clear_retrieval</code> returns to the model’s own imputed
+values.</p>
 <div class="sourceCode" id="cb12"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb12-1"><a href="#cb12-1" tabindex="-1"></a>reference <span class="op">=</span> rc.ResolveDataset.from_pandas(plots, species, roles,</span>
 <span id="cb12-2"><a href="#cb12-2" tabindex="-1"></a>                                          rc.target_specs_from_schema(predictor.schema),</span>
 <span id="cb12-3"><a href="#cb12-3" tabindex="-1"></a>                                          predictor.dataset_config,</span>
@@ -311,7 +300,7 @@ reference plot that is also scored finds itself first.
 </h3>
 <div class="sourceCode" id="cb13"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb13-1"><a href="#cb13-1" tabindex="-1"></a>optimize_for_inference()</span></code></pre></div>
 <p>Folds the batch-normalisation layers into the linear layers before
-them. Call it after loading and before a large prediction run.</p>
+them. Call it after loading and before a large imputation run.</p>
 </div>
 <div class="section level3">
 <h3 id="Predictor-attributes">Attributes<a class="anchor" aria-label="anchor" href="#Predictor-attributes"></a>
@@ -359,7 +348,7 @@ class code, indexing the target’s <code>class_names</code> in
 <code>probabilities</code> (<code>dict[str, Tensor]</code>): one
 <code>(n_plots, n_classes)</code> entry per classification target,
 column <code>j</code> the probability of code <code>j</code>; each row
-sums to one and its largest entry is the predicted code. Regression
+sums to one and its largest entry is the imputed code. Regression
 targets have no entry.</li>
 <li>
 <code>targets</code> (<code>dict[str, Tensor]</code>): the recorded
@@ -393,7 +382,7 @@ probability, the margin between the two largest, or the entropy.</p>
 <div class="sourceCode" id="cb15"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a>RetrievalConfig()</span></code></pre></div>
 <p>The settings of <code>Predictor.set_retrieval</code>:
 <code>k_neighbors</code> (<code>int</code>, default <code>96</code>),
-the reference plots each prediction reads; <code>alpha</code>
+the reference plots each imputation reads; <code>alpha</code>
 (<code>float</code>, default <code>0.3</code>), the neighbours’ share of
 the blend; <code>temperature</code> (<code>float</code>, default
 <code>1.0</code>), of the softmax over cosine similarity.

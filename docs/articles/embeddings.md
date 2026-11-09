@@ -3,8 +3,8 @@
 A trained RESOLVE model holds three kinds of learned vectors, called
 *embeddings*: one per plot, one per species, and one per genus and per
 family. The plot vector is the model’s summary of a plot, from which it
-predicts every target. The species, genus and family vectors are the
-rows of the tables the model looks species up in.
+imputes every target. The species, genus and family vectors are the rows
+of the tables the model looks species up in.
 
 This article covers getting each kind out of a trained model, projecting
 the plot vectors onto two axes to look at them, comparing species and
@@ -34,7 +34,7 @@ pip install resolve-core
 The examples use the survey of 150 plots in the Alps that ships with the
 R package: `plots` with one row per plot (coordinates, elevation in
 metres, habitat) and `species` with one row per species recorded on a
-plot (genus, family, cover in percent). The model predicts elevation and
+plot (genus, family, cover in percent). The model imputes elevation and
 habitat from the species alone.
 
 The *encoding* is how the model turns a plot’s species list into
@@ -106,7 +106,7 @@ predictor = rc.Predictor.load(path)
 The model’s *encoder* turns a plot’s species composition, and its
 coordinates and covariates when it has them, into one vector, the plot’s
 *latent representation*. Each target has a *head*, a small network that
-reads its prediction off that vector. Predicting with the latent
+reads its imputed value off that vector. Imputing with the latent
 representation switched on returns it, one row per plot, in the
 dataset’s plot order.
 
@@ -315,7 +315,7 @@ similarity["Quercus"].drop("Quercus").sort_values(ascending=False).head(5).round
 ```
 
 Two genera end up close when the model found them interchangeable for
-predicting its targets on this dataset. That can match ecological or
+imputing its targets on this dataset. That can match ecological or
 phylogenetic similarity, and it measures neither.
 
 The same table clusters hierarchically. Ward’s method joins, at each
@@ -416,9 +416,9 @@ plot_similarity["A001"].drop("A001").nlargest(5).round(3)
 #> Name: A001, dtype: float32
 ```
 
-[Predicting new
+[Imputing new
 plots](https://gillescolling.com/resolve/articles/prediction.md) shows
-retrieval, which blends a prediction with the recorded values of the
+retrieval, which blends an imputed value with the recorded values of the
 most similar training plots.
 
 ### Unusual plots
@@ -446,8 +446,8 @@ nearest.nsmallest(5).round(3)
 #> dtype: float32
 ```
 
-Read an isolated plot next to its prediction error before calling it an
-outlier: it may be rare in the survey and still well predicted.
+Read an isolated plot next to its imputation error before calling it an
+outlier: it may be rare in the survey and still well imputed.
 
 ### Gradients
 
@@ -480,7 +480,7 @@ A predictor also computes the latent vectors from the encoded inputs
 directly, the tensors a dataset holds, which is what a custom analysis
 on modified inputs needs. It assembles and standardises the inputs as
 training did, so the result equals the latent representation from
-prediction.
+imputation.
 
 ``` python
 inputs = dict(unknown_fraction=dataset.unknown_fraction,
@@ -513,7 +513,7 @@ route is shown in Python.
 
 ## Next steps
 
-- [Predicting new
+- [Imputing new
   plots](https://gillescolling.com/resolve/articles/prediction.md):
   scoring new plots, class probabilities and retrieval.
 - [Encoding the species

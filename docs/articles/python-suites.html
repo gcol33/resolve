@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Python: model suites • resolveR</title>
+<title>Python: model suites • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="../favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
@@ -38,7 +38,7 @@
 
     <nav class="navbar navbar-expand-lg fixed-top " aria-label="Site navigation"><div class="container">
 
-    <a class="navbar-brand me-2" href="../index.html">resolveR</a>
+    <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
     <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
@@ -57,15 +57,15 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="active nav-item dropdown">
+<li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
+<li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
     <li><a class="dropdown-item" href="../articles/data-preparation.html">Preparing the two tables</a></li>
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
-    <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
@@ -76,18 +76,6 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
     <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
-    <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
-    <li><a class="dropdown-item" href="../articles/python-data.html">Python: loading data</a></li>
-    <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
-    <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
-    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
-    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
-    <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
-    <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
-    <li><hr class="dropdown-divider"></li>
-    <li><a class="dropdown-item" href="../articles/index.html">More articles...</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -129,9 +117,9 @@
     
 <!-- Python blocks run by tools/python_twins.py (md5 cf36e5edb179b48e2b180eb9df889249). -->
 <p>Several trained models released as one directory and scored together:
-the suite predictor and its predictions, the manifest that describes a
-release, the rules that combine the members’ predictions, and the table
-the predictions are written as.</p>
+the suite predictor and its imputed values, the manifest that describes
+a release, the rules that combine the members’ imputed values, and the
+table the imputed values are written as.</p>
 <p><a href="python-reference.html">All of the Python reference</a></p>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
@@ -148,12 +136,12 @@ the predictions are written as.</p>
 </div>
 <p>A <em>model suite</em> is a directory holding a manifest,
 <code>manifest.json</code>, and the checkpoints it names. Each target of
-the suite is predicted by several <em>members</em>, the same recipe
+the suite is imputed by several <em>members</em>, the same recipe
 trained under different seeds, and the suite reports for each plot the
-members’ combined prediction beside how far the members agree. The
+members’ combined imputed value beside how far the members agree. The
 examples on this page run in order: they train two members for each of
 two targets on the survey that ships with the R package, release them as
-a suite and score it. <a href="prediction.html">Predicting new plots</a>
+a suite and score it. <a href="prediction.html">Imputing new plots</a>
 covers scoring a released suite.</p>
 <div class="sourceCode" id="cb3"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="im">import</span> json</span>
 <span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a><span class="im">import</span> os</span>
@@ -306,10 +294,10 @@ columns, so scoring needs the plot table.</p>
 <code>task</code> (<code>TaskType</code>).</li>
 <li>
 <code>combine</code> (<code>SuiteCombine</code>): how the members’
-predictions combine.</li>
+imputed values combine.</li>
 <li>
 <code>outputs</code> (<code>list[str]</code>): the members’ target
-heads the prediction is read from: one for a vote or a mean; one
+heads the imputed value is read from: one for a vote or a mean; one
 bearing, or a sine and a cosine in that order, for a circular mean;
 latitude and longitude, in degrees, for a spherical mean.</li>
 <li>
@@ -363,7 +351,7 @@ read at in training; loading compares it with the contract.</p>
 <code>SuiteCombine</code><a class="anchor" aria-label="anchor" href="#SuiteCombine"></a>
 </h2>
 <p>How a suite target combines its members: <code>Vote</code> (the class
-most members predict), <code>Mean</code>, <code>CircularMean</code> (the
+most members impute), <code>Mean</code>, <code>CircularMean</code> (the
 mean direction of bearings, such as aspect) or
 <code>SphericalMean</code> (the mean point of latitude and longitude on
 the sphere). In a manifest they are spelled <code>vote</code>,
@@ -413,8 +401,8 @@ given it decides which plots are scored and in what order.
 <code>columns</code>, a <code>SuiteColumns</code> or a <code>dict</code>
 of its fields, renames the contract’s columns for a table that spells
 them differently. <code>batch_size</code> is the forward chunk of each
-member; <code>keep_members</code> keeps every member’s own prediction.
-No target column is read, except with <code>gap_fitting</code>
+member; <code>keep_members</code> keeps every member’s own imputed
+value. No target column is read, except with <code>gap_fitting</code>
 (<code>True</code>, a <code>GapFittingConfig</code> or a
 <code>dict</code> of its fields): each target
 <code>columns["recorded"]</code> names is then fitted from the dataset’s
@@ -441,7 +429,7 @@ are the forms over string columns and CSV paths that
 <code>SuiteColumns</code><a class="anchor" aria-label="anchor" href="#SuiteColumns"></a>
 </h2>
 <div class="sourceCode" id="cb12"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb12-1"><a href="#cb12-1" tabindex="-1"></a>SuiteColumns()</span></code></pre></div>
-<p>Renames the manifest’s input columns at prediction time; a field left
+<p>Renames the manifest’s input columns at imputation time; a field left
 <code>None</code> keeps the manifest’s name. The fields follow
 <code>RoleMapping</code>: <code>plot_id</code>, <code>species_id</code>,
 <code>abundance</code>, <code>genus</code>, <code>family</code>,
@@ -472,8 +460,8 @@ alone.</p>
 <p>One row per plot, with the columns
 <code>resolve predict --suite</code> writes
 (<code>suite_prediction_columns</code>): <code>plot_id</code>, then per
-target the prediction, its dispersion and the four recognition columns.
-A vote writes the class label under the target’s name,
+target the imputed value, its dispersion and the four recognition
+columns. A vote writes the class label under the target’s name,
 <code>&lt;target&gt;_code</code> and
 <code>&lt;target&gt;_agreement</code>, and with
 <code>probabilities</code> a
@@ -492,7 +480,7 @@ writes <code>&lt;target&gt;_sd</code>, a circular mean
 <h2 id="SuiteTargetPrediction">
 <code>SuiteTargetPrediction</code><a class="anchor" aria-label="anchor" href="#SuiteTargetPrediction"></a>
 </h2>
-<p>One target’s predictions for every plot.</p>
+<p>One target’s imputed values for every plot.</p>
 <ul>
 <li>
 <code>name</code>, <code>task</code>, <code>combine</code>,
@@ -500,8 +488,8 @@ writes <code>&lt;target&gt;_sd</code>, a circular mean
 <code>class_names</code> (a vote’s labels in code order) and
 <code>member_seeds</code>.</li>
 <li>
-<code>value</code>: the combined prediction: an int64 class code for
-a vote; a number in the target’s units for a mean, or a bearing in
+<code>value</code>: the combined imputed value: an int64 class code
+for a vote; a number in the target’s units for a mean, or a bearing in
 <code>[0, period)</code> for a circular mean, each
 <code>(n_plots,)</code>; latitude and longitude in degrees,
 <code>(n_plots, 2)</code>, for a spherical mean.</li>
@@ -520,7 +508,7 @@ spherical mean (in km). <code>NaN</code> for a single member and where
 the members’ directions cancel; <code>None</code> for a vote.</li>
 <li>
 <code>members</code>: with <code>keep_members</code>, each member’s
-own prediction, <code>(n_members, n_plots)</code> or
+own imputed value, <code>(n_members, n_plots)</code> or
 <code>(n_members, n_plots, 2)</code>.</li>
 <li>
 <code>recognition</code> (<code>SpeciesRecognition</code>): how much
@@ -533,7 +521,7 @@ with gap fitting, the fitted values, the method per plot and the report
 <p>None of these is combined into a single level of support, and none is
 a calibrated interval: the spread across seeds measures how much the
 members disagree, which is a different quantity from how far the
-combined prediction lies from the truth.</p>
+combined imputed value lies from the truth.</p>
 <div class="sourceCode" id="cb15"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a>habitat <span class="op">=</span> scored.target(<span class="st">"habitat"</span>)</span>
 <span id="cb15-2"><a href="#cb15-2" tabindex="-1"></a>habitat.agreement[:<span class="dv">5</span>]</span>
 <span id="cb15-3"><a href="#cb15-3" tabindex="-1"></a>scored.target(<span class="st">"elevation"</span>).dispersion[:<span class="dv">5</span>]</span></code></pre></div>
@@ -543,7 +531,7 @@ combined prediction lies from the truth.</p>
 <code>suite_prediction_columns()</code><a class="anchor" aria-label="anchor" href="#suite_prediction_columns"></a>
 </h2>
 <div class="sourceCode" id="cb16"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb16-1"><a href="#cb16-1" tabindex="-1"></a>suite_prediction_columns(predictions, probabilities<span class="op">=</span><span class="va">False</span>)</span></code></pre></div>
-<p>The predictions as <code>(column name, values)</code> pairs, one
+<p>The imputed values as <code>(column name, values)</code> pairs, one
 value per plot: the table <code>SuitePredictions.to_pandas</code> and
 the command line write. Labels and plot identifiers are lists of
 <code>str</code>, class codes int64 tensors, every other column a
@@ -563,12 +551,12 @@ fill is <code>None</code>.</p>
 <code>combine_vote()</code><a class="anchor" aria-label="anchor" href="#combine_vote"></a>
 </h2>
 <div class="sourceCode" id="cb17"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb17-1"><a href="#cb17-1" tabindex="-1"></a>combine_vote(member_codes, n_classes, mean_probabilities<span class="op">=</span><span class="va">None</span>)</span></code></pre></div>
-<p>The class most members predict, over a
+<p>The class most members impute, over a
 <code>(n_members, n_plots)</code> stack of int64 codes, with the share
 of members naming it as <code>agreement</code>. A tie goes to the class
 of higher mean probability when <code>mean_probabilities</code>
 (<code>(n_plots, n_classes)</code>) is given, else to the lowest code.
-These functions combine member predictions made anywhere exactly as a
+These functions combine values members imputed anywhere exactly as a
 suite does.</p>
 <div class="sourceCode" id="cb18"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb18-1"><a href="#cb18-1" tabindex="-1"></a>votes <span class="op">=</span> rc.combine_vote(torch.tensor([[<span class="dv">0</span>, <span class="dv">1</span>], [<span class="dv">0</span>, <span class="dv">2</span>], [<span class="dv">1</span>, <span class="dv">2</span>]]), <span class="dv">3</span>)</span>
 <span id="cb18-2"><a href="#cb18-2" tabindex="-1"></a>votes.value, votes.agreement</span></code></pre></div>

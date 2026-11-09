@@ -1,6 +1,6 @@
 # Python: scoring
 
-The metrics training reports, for predictions made anywhere, and the
+The metrics training reports, for values imputed anywhere, and the
 measures of how much of a plot’s species list a vocabulary recognises.
 
 [All of the Python
@@ -25,30 +25,31 @@ pip install resolve-core
 ## `Metrics`
 
 The metrics `TrainResult.final_metrics` reports, as static functions of
-a prediction tensor `pred` and a tensor of recorded values `target`.
+a tensor of imputed values `pred` and a tensor of recorded values
+`target`.
 
 Regression:
 
 - `mae(pred, target)`: the mean absolute error.
 - `rmse(pred, target)`: the root mean squared error.
 - `r_squared(pred, target)`: the coefficient of determination, the share
-  of the variance of `target` the predictions explain.
+  of the variance of `target` the imputed values explain.
 - `smape(pred, target, eps=1e-8)`: the symmetric mean absolute
   percentage error, the mean of `|p - t| / ((|p| + |t|) / 2 + eps)`, in
   `[0, 2]`.
-- `band_accuracy(pred, target, threshold=0.25)`: the share of
-  predictions within a relative band of `threshold` around the recorded
+- `band_accuracy(pred, target, threshold=0.25)`: the share of imputed
+  values within a relative band of `threshold` around the recorded
   value.
 
 Classification, on int64 class codes:
 
-- `accuracy(pred, target)`: the share of codes predicted correctly.
+- `accuracy(pred, target)`: the share of codes imputed correctly.
 - `confusion_matrix(pred, target, num_classes)`: the
   `(num_classes, num_classes)` counts.
 - `classification_metrics(pred, target, num_classes)`: a
   `ClassificationMetrics`.
 - `accuracy_at_threshold(pred, target, confidence, threshold)`: a
-  `ConfidenceMetrics` over the predictions whose `confidence` reaches
+  `ConfidenceMetrics` over the imputed values whose `confidence` reaches
   `threshold`, such as the largest class probability.
 - `accuracy_coverage_curve(pred, target, confidence, thresholds=[0.0, 0.5, 0.8, 0.9, 0.95])`:
   one `ConfidenceMetrics` per threshold.
@@ -71,9 +72,9 @@ and `confusion_matrix`.
 
 ## `ConfidenceMetrics`
 
-The predictions at or above one confidence threshold: `accuracy` (among
-them), `coverage` (their share of all predictions), `n_samples` (their
-number) and `n_total` (the number of predictions).
+The imputed values at or above one confidence threshold: `accuracy`
+(among them), `coverage` (their share of all imputed values),
+`n_samples` (their number) and `n_total` (the number of imputed values).
 
 ## `compute_species_recognition()`
 
@@ -85,8 +86,8 @@ How much of each plot’s species list a species vocabulary recognises,
 for the plots `plot_ids`, in that order, from their `SpeciesRecord`s and
 a `SpeciesVocab`, such as the one a model was trained with. The example
 fits a vocabulary on the forest plots of the survey and measures the
-other plots against it. It is reported beside a prediction: a plot whose
-species the model never saw is predicted from less of its list. A
+other plots against it. It is reported beside an imputed value: a plot
+whose species the model never saw is imputed from less of its list. A
 species’ records within a plot count once.
 
 ``` python

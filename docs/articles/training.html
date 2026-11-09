@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Training and reading the fit • resolveR</title>
+<title>Training and reading the fit • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="../favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
@@ -38,7 +38,7 @@
 
     <nav class="navbar navbar-expand-lg fixed-top " aria-label="Site navigation"><div class="container">
 
-    <a class="navbar-brand me-2" href="../index.html">resolveR</a>
+    <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
     <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
@@ -60,12 +60,12 @@
 <li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
+<li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
     <li><a class="dropdown-item" href="../articles/data-preparation.html">Preparing the two tables</a></li>
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
-    <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
@@ -76,18 +76,6 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
     <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
-    <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
-    <li><a class="dropdown-item" href="../articles/python-data.html">Python: loading data</a></li>
-    <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
-    <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
-    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
-    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
-    <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
-    <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
-    <li><hr class="dropdown-divider"></li>
-    <li><a class="dropdown-item" href="../articles/index.html">More articles...</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -127,9 +115,9 @@
 
     
     
-<!-- Python blocks run by tools/python_twins.py (md5 7070aabecab90c1fac629bf96a9703a6). -->
+<!-- Python blocks run by tools/python_twins.py (md5 94f4e0632bd41035f15ac137e3ab290f). -->
 <p>Training fits a model to a dataset: it holds out part of the plots,
-adjusts the network on the rest and stops when its predictions on the
+adjusts the network on the rest and stops when its imputed values on the
 held-out plots no longer improve. This article covers the settings a run
 takes, what the run returns and how to read the fit on the plots it did
 not train on.</p>
@@ -160,7 +148,7 @@ GPUs</a>.</p>
 in the Alps, with their elevation in metres and their habitat, and the
 species recorded on each plot with its genus, family and cover. The
 <em>roles</em> name the columns of the two tables, and each
-<em>target</em> is a column to predict. Elevation is a regression target
+<em>target</em> is a column to impute. Elevation is a regression target
 and habitat a classification target with four classes.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
@@ -571,7 +559,7 @@ L 0 3.5
      </g>
      <g id="text_1">
       <!-- 0 -->
-      <g style="fill: currentColor" transform="translate(68.294713 305.236953) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(69.249088 302.957656) scale(0.1 -0.1)">
        <defs>
         <path id="DejaVuSans-13" d="M 2034 4250 
 Q 1547 4250 1301 3770 
@@ -607,7 +595,7 @@ z
      </g>
      <g id="text_2">
       <!-- 20 -->
-      <g style="fill: currentColor" transform="translate(115.279596 305.236953) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(117.188346 302.957656) scale(0.1 -0.1)">
        <defs>
         <path id="DejaVuSans-15" d="M 1228 531 
 L 3431 531 
@@ -647,7 +635,7 @@ z
      </g>
      <g id="text_3">
       <!-- 40 -->
-      <g style="fill: currentColor" transform="translate(166.400103 305.236953) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(168.308853 302.957656) scale(0.1 -0.1)">
        <defs>
         <path id="DejaVuSans-17" d="M 2419 4116 
 L 825 1625 
@@ -682,7 +670,7 @@ z
      </g>
      <g id="text_4">
       <!-- 60 -->
-      <g style="fill: currentColor" transform="translate(217.52061 305.236953) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(219.42936 302.957656) scale(0.1 -0.1)">
        <defs>
         <path id="DejaVuSans-19" d="M 2113 2584 
 Q 1688 2584 1439 2293 
@@ -728,7 +716,7 @@ z
      </g>
      <g id="text_5">
       <!-- 80 -->
-      <g style="fill: currentColor" transform="translate(268.641118 305.236953) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(270.549868 302.957656) scale(0.1 -0.1)">
        <defs>
         <path id="DejaVuSans-1b" d="M 2034 2216 
 Q 1584 2216 1326 1975 
@@ -783,7 +771,7 @@ z
      </g>
      <g id="text_6">
       <!-- 100 -->
-      <g style="fill: currentColor" transform="translate(315.626 305.236953) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(318.489125 302.957656) scale(0.1 -0.1)">
        <defs>
         <path id="DejaVuSans-14" d="M 794 531 
 L 1825 531 
@@ -814,7 +802,7 @@ z
      </g>
      <g id="text_7">
       <!-- 120 -->
-      <g style="fill: currentColor" transform="translate(366.746508 305.236953) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(369.609633 302.957656) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-14"/>
        <use xlink:href="#DejaVuSans-15" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-13" transform="translate(127.25 0)"/>
@@ -823,7 +811,7 @@ z
     </g>
     <g id="text_8">
      <!-- Epoch -->
-     <g style="fill: currentColor" transform="translate(219.945781 322.237969) scale(0.13 -0.13)">
+     <g style="fill: currentColor" transform="translate(224.539062 316.958438) scale(0.1 -0.1)">
       <defs>
        <path id="DejaVuSans-28" d="M 628 4666 
 L 3578 4666 
@@ -950,7 +938,7 @@ L -3.5 0
      </g>
      <g id="text_9">
       <!-- 0.5 -->
-      <g style="fill: currentColor" transform="translate(30.825937 250.463518) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(35.596875 249.323869) scale(0.1 -0.1)">
        <defs>
         <path id="DejaVuSans-11" d="M 684 794 
 L 1344 794 
@@ -999,7 +987,7 @@ z
      </g>
      <g id="text_10">
       <!-- 1.0 -->
-      <g style="fill: currentColor" transform="translate(30.825937 200.667638) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(35.596875 199.527989) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-14"/>
        <use xlink:href="#DejaVuSans-11" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-13" transform="translate(95.40625 0)"/>
@@ -1014,7 +1002,7 @@ z
      </g>
      <g id="text_11">
       <!-- 1.5 -->
-      <g style="fill: currentColor" transform="translate(30.825937 150.871758) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(35.596875 149.73211) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-14"/>
        <use xlink:href="#DejaVuSans-11" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-18" transform="translate(95.40625 0)"/>
@@ -1029,7 +1017,7 @@ z
      </g>
      <g id="text_12">
       <!-- 2.0 -->
-      <g style="fill: currentColor" transform="translate(30.825937 101.075878) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(35.596875 99.93623) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-15"/>
        <use xlink:href="#DejaVuSans-11" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-13" transform="translate(95.40625 0)"/>
@@ -1044,7 +1032,7 @@ z
      </g>
      <g id="text_13">
       <!-- 2.5 -->
-      <g style="fill: currentColor" transform="translate(30.825937 51.279998) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(35.596875 50.14035) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-15"/>
        <use xlink:href="#DejaVuSans-11" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-18" transform="translate(95.40625 0)"/>
@@ -1053,7 +1041,7 @@ z
     </g>
     <g id="text_14">
      <!-- Loss -->
-     <g style="fill: currentColor" transform="translate(23.702891 177.877344) rotate(-90) scale(0.13 -0.13)">
+     <g style="fill: currentColor" transform="translate(29.194531 174.587187) rotate(-90) scale(0.1 -0.1)">
       <defs>
        <path id="DejaVuSans-2f" d="M 628 4666 
 L 1259 4666 
@@ -1375,14 +1363,14 @@ L 421.2 38.88
    </g>
    <g id="legend_1">
     <g id="line2d_16">
-     <path d="M 318.77625 55.907969 
-L 331.77625 55.907969 
-L 344.77625 55.907969 
+     <path d="M 342.4125 51.978437 
+L 352.4125 51.978437 
+L 362.4125 51.978437 
 " style="fill: none; stroke: #1f77b4; stroke-width: 2; stroke-linecap: square"/>
     </g>
     <g id="text_15">
      <!-- training -->
-     <g style="fill: currentColor" transform="translate(355.17625 60.457969) scale(0.13 -0.13)">
+     <g style="fill: currentColor" transform="translate(370.4125 55.478437) scale(0.1 -0.1)">
       <defs>
        <path id="DejaVuSans-57" d="M 1172 4494 
 L 1172 3500 
@@ -1533,14 +1521,14 @@ z
      </g>
     </g>
     <g id="line2d_17">
-     <path d="M 318.77625 75.408984 
-L 331.77625 75.408984 
-L 344.77625 75.408984 
+     <path d="M 342.4125 66.979219 
+L 352.4125 66.979219 
+L 362.4125 66.979219 
 " style="fill: none; stroke-dasharray: 7.4,3.2; stroke-dashoffset: 0; stroke: #ff7f0e; stroke-width: 2"/>
     </g>
     <g id="text_16">
      <!-- held-out -->
-     <g style="fill: currentColor" transform="translate(355.17625 79.958984) scale(0.13 -0.13)">
+     <g style="fill: currentColor" transform="translate(370.4125 70.479219) scale(0.1 -0.1)">
       <defs>
        <path id="DejaVuSans-48" d="M 3597 1894 
 L 3597 1613 
@@ -1711,8 +1699,8 @@ trained on a <code>log1p</code> scale is transformed back first.</p>
 </tr>
 <tr class="odd">
 <td><code>r2</code></td>
-<td>Coefficient of determination: the share of the variance the
-predictions explain</td>
+<td>Coefficient of determination: the share of the variance the imputed
+values explain</td>
 </tr>
 <tr class="even">
 <td><code>smape</code></td>
@@ -1723,7 +1711,7 @@ predictions explain</td>
 <code>band_10</code>, <code>band_25</code>,
 <code>band_50</code>
 </td>
-<td>Share of plots predicted within 10, 25 and 50 % of their value, one
+<td>Share of plots imputed within 10, 25 and 50 % of their value, one
 key per entry in <code>band_thresholds</code>
 </td>
 </tr>
@@ -1762,7 +1750,7 @@ of plots</td>
 </tr>
 </tbody>
 </table>
-<p>The same metrics are available on their own, for predictions made
+<p>The same metrics are available on their own, for values imputed
 elsewhere: <code><a href="../reference/resolve_metrics.html">resolve_mae()</a></code>, <code><a href="../reference/resolve_metrics.html">resolve_rmse()</a></code>,
 <code><a href="../reference/resolve_metrics.html">resolve_r_squared()</a></code>, <code><a href="../reference/resolve_metrics.html">resolve_smape()</a></code>,
 <code><a href="../reference/resolve_metrics.html">resolve_band_accuracy()</a></code> and <code><a href="../reference/resolve_metrics.html">resolve_accuracy()</a></code>
@@ -1896,8 +1884,8 @@ reads.</p>
 <h3 id="warming-up-the-rate">Warming up the rate<a class="anchor" aria-label="anchor" href="#warming-up-the-rate"></a>
 </h3>
 <p>A large transformer encoder trained at its full rate from the first
-step can collapse onto predicting one class. A <em>warmup</em> starts
-the rate near zero and raises it linearly over the first
+step can collapse onto imputing one class. A <em>warmup</em> starts the
+rate near zero and raises it linearly over the first
 <code>warmup_steps</code> optimizer steps (or <code>warmup_epochs</code>
 epochs) to whatever the schedule sets; after it, the schedule runs as it
 would have. The linear schedule then lowers the rate at every step to
@@ -1989,7 +1977,7 @@ value</p>
 <p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi mathvariant="script">ℒ</mi><mtext mathvariant="normal">SMAPE</mtext></msub><mo>=</mo><mfrac><mn>1</mn><mi>n</mi></mfrac><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>n</mi></munderover><mfrac><mrow><mo stretchy="false" form="prefix">|</mo><msub><mi>y</mi><mi>i</mi></msub><mo>−</mo><msub><mover><mi>y</mi><mo accent="true">̂</mo></mover><mi>i</mi></msub><mo stretchy="false" form="prefix">|</mo></mrow><mrow><mo stretchy="false" form="prefix">(</mo><mo stretchy="false" form="prefix">|</mo><msub><mi>y</mi><mi>i</mi></msub><mo stretchy="false" form="prefix">|</mo><mi>+</mi><mo stretchy="false" form="prefix">|</mo><msub><mover><mi>y</mi><mo accent="true">̂</mo></mover><mi>i</mi></msub><mo stretchy="false" form="prefix">|</mo><mo stretchy="false" form="postfix">)</mo><mi>/</mi><mn>2</mn><mo>+</mo><mi>ϵ</mi></mrow></mfrac></mrow><annotation encoding="application/x-tex">\mathcal{L}_\text{SMAPE} = \frac{1}{n} \sum_{i=1}^{n} \frac{|y_i - \hat{y}_i|}{(|y_i| + |\hat{y}_i|)/2 + \epsilon}</annotation></semantics></math></p>
 </li>
 <li>
-<p>After it, a hinge penalizes predictions whose ratio to the
+<p>After it, a hinge penalizes imputed values whose ratio to the
 observed value leaves the band
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false" form="prefix">[</mo><mn>1</mn><mo>−</mo><mi>τ</mi><mo>,</mo><mn>1</mn><mo>+</mo><mi>τ</mi><mo stretchy="false" form="postfix">]</mo></mrow><annotation encoding="application/x-tex">[1 - \tau, 1 + \tau]</annotation></semantics></math>,
 with
@@ -2043,8 +2031,8 @@ which cross-entropy alone does not do.</p>
 <p>Cross-entropy stays in the sum because the NCA term does not change
 when the head’s output coordinates are permuted: it constrains which
 plots lie near each other and says nothing about which coordinate
-belongs to which class. On its own it would leave the predicted class,
-the coordinate with the largest output, without meaning.</p>
+belongs to which class. On its own it would leave the imputed class, the
+coordinate with the largest output, without meaning.</p>
 <p>Three settings tune it, and they act only under the <code>nca</code>
 preset:</p>
 <ul>
@@ -2371,7 +2359,7 @@ over the features</td>
 <tr class="even">
 <td><code>saint</code></td>
 <td><code>saint</code></td>
-<td>Attention over the features and over rows; at prediction a plot
+<td>Attention over the features and over rows; at imputation a plot
 attends to a fixed set of training plots</td>
 </tr>
 <tr class="odd">
@@ -2524,7 +2512,7 @@ the other two.</p>
 <h2 id="reading-the-held-out-fold">Reading the held-out fold<a class="anchor" aria-label="anchor" href="#reading-the-held-out-fold"></a>
 </h2>
 <p>The trainer keeps its held-out fold after the run, so you can read
-the predictions on it plot by plot. The first run of this article,
+the imputed values on it plot by plot. The first run of this article,
 <code>fit</code> in R and <code>trainer</code> in Python, serves as the
 example.</p>
 <div class="lang-pair">
@@ -2544,10 +2532,10 @@ from 0 in both languages.</p>
 <div class="section level3">
 <h3 id="regression-residuals">Regression residuals<a class="anchor" aria-label="anchor" href="#regression-residuals"></a>
 </h3>
-<p>A <em>residual</em> is the observed value minus the predicted one.
-The residual analysis holds both, per plot and in original units, with
-the mean, the standard deviation, the skewness, the kurtosis and
-quantiles of the residuals.</p>
+<p>A <em>residual</em> is the observed value minus the imputed one. The
+residual analysis holds both, per plot and in original units, with the
+mean, the standard deviation, the skewness, the kurtosis and quantiles
+of the residuals.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb43"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">res</span> <span class="op">&lt;-</span> <span class="va">fit</span><span class="op">$</span><span class="va">trainer</span><span class="op">$</span><span class="fu">compute_residuals</span><span class="op">(</span><span class="st">"elevation"</span><span class="op">)</span></span>
@@ -2557,10 +2545,10 @@ quantiles of the residuals.</p>
 <span></span>
 <span><span class="va">lims</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/range.html" class="external-link">range</a></span><span class="op">(</span><span class="va">res</span><span class="op">$</span><span class="va">actuals</span>, <span class="va">res</span><span class="op">$</span><span class="va">predictions</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">res</span><span class="op">$</span><span class="va">actuals</span>, <span class="va">res</span><span class="op">$</span><span class="va">predictions</span>, pch <span class="op">=</span> <span class="fl">19</span>, xlim <span class="op">=</span> <span class="va">lims</span>, ylim <span class="op">=</span> <span class="va">lims</span>,</span>
-<span>     xlab <span class="op">=</span> <span class="st">"Observed elevation (m)"</span>, ylab <span class="op">=</span> <span class="st">"Predicted elevation (m)"</span><span class="op">)</span></span>
+<span>     xlab <span class="op">=</span> <span class="st">"Observed elevation (m)"</span>, ylab <span class="op">=</span> <span class="st">"Imputed elevation (m)"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/graphics/abline.html" class="external-link">abline</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">1</span>, col <span class="op">=</span> <span class="st">"grey50"</span><span class="op">)</span></span></code></pre></div>
 <p><div class="svg-container"><button type="button" class="btn btn-primary btn-copy-svg" title="Copy SVG to clipboard" aria-label="Copy SVG to clipboard" data-bs-toggle="tooltip" data-bs-placement="left"><i class="fa fa-copy"></i></button>
-<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' width='468.00pt' height='324.00pt' viewBox='0 0 468.00 324.00' class="r-plt inline-svg" style="width:100%;height:auto;" role="img" aria-label="Predicted against observed elevation on the held-out plots."><title>Predicted against observed elevation on the held-out plots.</title>
+<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' width='468.00pt' height='324.00pt' viewBox='0 0 468.00 324.00' class="r-plt inline-svg" style="width:100%;height:auto;" role="img" aria-label="Imputed against observed elevation on the held-out plots."><title>Imputed against observed elevation on the held-out plots.</title>
 <g class='svglite'>
 <defs>
   <style type='text/css'><![CDATA[
@@ -2654,14 +2642,14 @@ quantiles of the residuals.</p>
 <text transform='translate(48.72,103.71) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>2000</text>
 <polygon points='68.88,238.32 432.72,238.32 432.72,68.88 68.88,68.88 ' style='stroke-width: 0.75;' />
 <text x='250.80' y='302.16' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>Observed elevation (m)</text>
-<text transform='translate(15.12,153.60) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>Predicted elevation (m)</text>
+<text transform='translate(15.12,153.60) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>Imputed elevation (m)</text>
 </g>
 <g clip-path='url(#cpNjguODh8NDMyLjcyfDY4Ljg4fDIzOC4zMg==)'>
 <line x1='68.88' y1='238.32' x2='432.72' y2='68.88' style='stroke-width: 0.75; stroke: #7F7F7F;' />
 </g>
 </g>
 </svg></div></p>
-<div class="sourceCode" id="cb44" fig-alt="Predicted against observed elevation on the held-out plots."><pre class="sourceCode python"><code class="sourceCode python"><span id="cb44-1"><a href="#cb44-1" tabindex="-1"></a>res <span class="op">=</span> trainer.compute_residuals(<span class="st">"elevation"</span>)</span>
+<div class="sourceCode" id="cb44" fig-alt="Imputed against observed elevation on the held-out plots."><pre class="sourceCode python"><code class="sourceCode python"><span id="cb44-1"><a href="#cb44-1" tabindex="-1"></a>res <span class="op">=</span> trainer.compute_residuals(<span class="st">"elevation"</span>)</span>
 <span id="cb44-2"><a href="#cb44-2" tabindex="-1"></a>{name: <span class="bu">round</span>(<span class="bu">getattr</span>(res, name))</span>
 <span id="cb44-3"><a href="#cb44-3" tabindex="-1"></a> <span class="cf">for</span> name <span class="kw">in</span> [<span class="st">"mean_residual"</span>, <span class="st">"std_residual"</span>, <span class="st">"q05"</span>, <span class="st">"q50"</span>, <span class="st">"q95"</span>]}</span>
 <span id="cb44-4"><a href="#cb44-4" tabindex="-1"></a><span class="co">#&gt; {'mean_residual': 68, 'std_residual': 299, 'q05': -434, 'q50': 97, 'q95': 492}</span></span>
@@ -2672,11 +2660,11 @@ quantiles of the residuals.</p>
 <span id="cb44-9"><a href="#cb44-9" tabindex="-1"></a>ax.scatter(observed, predicted, color<span class="op">=</span><span class="st">"black"</span>)<span class="op">;</span></span>
 <span id="cb44-10"><a href="#cb44-10" tabindex="-1"></a>ax.plot(lims, lims, color<span class="op">=</span><span class="st">"grey"</span>)<span class="op">;</span></span>
 <span id="cb44-11"><a href="#cb44-11" tabindex="-1"></a>ax.set_xlabel(<span class="st">"Observed elevation (m)"</span>)<span class="op">;</span></span>
-<span id="cb44-12"><a href="#cb44-12" tabindex="-1"></a>ax.set_ylabel(<span class="st">"Predicted elevation (m)"</span>)<span class="op">;</span></span></code></pre></div>
+<span id="cb44-12"><a href="#cb44-12" tabindex="-1"></a>ax.set_ylabel(<span class="st">"Imputed elevation (m)"</span>)<span class="op">;</span></span></code></pre></div>
 <p><div class="svg-container"><button type="button" class="btn btn-primary btn-copy-svg" title="Copy SVG to clipboard" aria-label="Copy SVG to clipboard" data-bs-toggle="tooltip" data-bs-placement="left"><i class="fa fa-copy"></i></button>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="468pt" height="324pt" viewBox="0 0 468 324" xmlns="http://www.w3.org/2000/svg" version="1.1" class="inline-svg" style="width:100%;height:auto;" role="img" aria-label="Predicted against observed elevation on the held-out plots."><title>Predicted against observed elevation on the held-out plots.</title>
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="468pt" height="324pt" viewBox="0 0 468 324" xmlns="http://www.w3.org/2000/svg" version="1.1" class="inline-svg" style="width:100%;height:auto;" role="img" aria-label="Imputed against observed elevation on the held-out plots."><title>Imputed against observed elevation on the held-out plots.</title>
  <metadata>
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
@@ -2774,7 +2762,7 @@ L 0 3.5
      </g>
      <g id="text_1">
       <!-- 500 -->
-      <g style="fill: currentColor" transform="translate(78.006317 305.236953) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(80.869442 302.957656) scale(0.1 -0.1)">
        <defs>
         <path id="DejaVuSans-18" d="M 691 4666 
 L 3169 4666 
@@ -2837,7 +2825,7 @@ z
      </g>
      <g id="text_2">
       <!-- 750 -->
-      <g style="fill: currentColor" transform="translate(120.387715 305.236953) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(123.25084 302.957656) scale(0.1 -0.1)">
        <defs>
         <path id="DejaVuSans-1a" d="M 525 4666 
 L 3525 4666 
@@ -2864,7 +2852,7 @@ z
      </g>
      <g id="text_3">
       <!-- 1000 -->
-      <g style="fill: currentColor" transform="translate(158.633487 305.236953) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(162.450987 302.957656) scale(0.1 -0.1)">
        <defs>
         <path id="DejaVuSans-14" d="M 794 531 
 L 1825 531 
@@ -2896,7 +2884,7 @@ z
      </g>
      <g id="text_4">
       <!-- 1250 -->
-      <g style="fill: currentColor" transform="translate(201.014885 305.236953) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(204.832385 302.957656) scale(0.1 -0.1)">
        <defs>
         <path id="DejaVuSans-15" d="M 1228 531 
 L 3431 531 
@@ -2938,7 +2926,7 @@ z
      </g>
      <g id="text_5">
       <!-- 1500 -->
-      <g style="fill: currentColor" transform="translate(243.396282 305.236953) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(247.213782 302.957656) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-14"/>
        <use xlink:href="#DejaVuSans-18" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-13" transform="translate(127.25 0)"/>
@@ -2954,7 +2942,7 @@ z
      </g>
      <g id="text_6">
       <!-- 1750 -->
-      <g style="fill: currentColor" transform="translate(285.77768 305.236953) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(289.59518 302.957656) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-14"/>
        <use xlink:href="#DejaVuSans-1a" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-18" transform="translate(127.25 0)"/>
@@ -2970,7 +2958,7 @@ z
      </g>
      <g id="text_7">
       <!-- 2000 -->
-      <g style="fill: currentColor" transform="translate(328.159077 305.236953) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(331.976577 302.957656) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-15"/>
        <use xlink:href="#DejaVuSans-13" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-13" transform="translate(127.25 0)"/>
@@ -2986,7 +2974,7 @@ z
      </g>
      <g id="text_8">
       <!-- 2250 -->
-      <g style="fill: currentColor" transform="translate(370.540475 305.236953) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(374.357975 302.957656) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-15"/>
        <use xlink:href="#DejaVuSans-15" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-18" transform="translate(127.25 0)"/>
@@ -2996,7 +2984,7 @@ z
     </g>
     <g id="text_9">
      <!-- Observed elevation (m) -->
-     <g style="fill: currentColor" transform="translate(162.955 322.237969) scale(0.13 -0.13)">
+     <g style="fill: currentColor" transform="translate(180.7 316.958438) scale(0.1 -0.1)">
       <defs>
        <path id="DejaVuSans-32" d="M 2522 4238 
 Q 1834 4238 1429 3725 
@@ -3365,7 +3353,7 @@ L -3.5 0
      </g>
      <g id="text_10">
       <!-- 500 -->
-      <g style="fill: currentColor" transform="translate(26.68625 271.347268) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(32.4125 270.20762) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-18"/>
        <use xlink:href="#DejaVuSans-13" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-13" transform="translate(127.25 0)"/>
@@ -3380,7 +3368,7 @@ L -3.5 0
      </g>
      <g id="text_11">
       <!-- 750 -->
-      <g style="fill: currentColor" transform="translate(26.68625 242.195597) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(32.4125 241.055949) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-1a"/>
        <use xlink:href="#DejaVuSans-18" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-13" transform="translate(127.25 0)"/>
@@ -3395,7 +3383,7 @@ L -3.5 0
      </g>
      <g id="text_12">
       <!-- 1000 -->
-      <g style="fill: currentColor" transform="translate(18.415 213.043926) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(26.05 211.904278) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-14"/>
        <use xlink:href="#DejaVuSans-13" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-13" transform="translate(127.25 0)"/>
@@ -3411,7 +3399,7 @@ L -3.5 0
      </g>
      <g id="text_13">
       <!-- 1250 -->
-      <g style="fill: currentColor" transform="translate(18.415 183.892255) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(26.05 182.752607) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-14"/>
        <use xlink:href="#DejaVuSans-15" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-18" transform="translate(127.25 0)"/>
@@ -3427,7 +3415,7 @@ L -3.5 0
      </g>
      <g id="text_14">
       <!-- 1500 -->
-      <g style="fill: currentColor" transform="translate(18.415 154.740585) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(26.05 153.600936) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-14"/>
        <use xlink:href="#DejaVuSans-18" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-13" transform="translate(127.25 0)"/>
@@ -3443,7 +3431,7 @@ L -3.5 0
      </g>
      <g id="text_15">
       <!-- 1750 -->
-      <g style="fill: currentColor" transform="translate(18.415 125.588914) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(26.05 124.449265) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-14"/>
        <use xlink:href="#DejaVuSans-1a" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-18" transform="translate(127.25 0)"/>
@@ -3459,7 +3447,7 @@ L -3.5 0
      </g>
      <g id="text_16">
       <!-- 2000 -->
-      <g style="fill: currentColor" transform="translate(18.415 96.437243) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(26.05 95.297594) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-15"/>
        <use xlink:href="#DejaVuSans-13" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-13" transform="translate(127.25 0)"/>
@@ -3475,7 +3463,7 @@ L -3.5 0
      </g>
      <g id="text_17">
       <!-- 2250 -->
-      <g style="fill: currentColor" transform="translate(18.415 67.285572) scale(0.13 -0.13)">
+      <g style="fill: currentColor" transform="translate(26.05 66.145923) scale(0.1 -0.1)">
        <use xlink:href="#DejaVuSans-15"/>
        <use xlink:href="#DejaVuSans-15" transform="translate(63.625 0)"/>
        <use xlink:href="#DejaVuSans-18" transform="translate(127.25 0)"/>
@@ -3484,75 +3472,86 @@ L -3.5 0
      </g>
     </g>
     <g id="text_18">
-     <!-- Predicted elevation (m) -->
-     <g style="fill: currentColor" transform="translate(11.291953 239.755313) rotate(-90) scale(0.13 -0.13)">
+     <!-- Imputed elevation (m) -->
+     <g style="fill: currentColor" transform="translate(19.647656 219.612188) rotate(-90) scale(0.1 -0.1)">
       <defs>
-       <path id="DejaVuSans-33" d="M 1259 4147 
-L 1259 2394 
-L 2053 2394 
-Q 2494 2394 2734 2622 
-Q 2975 2850 2975 3272 
-Q 2975 3691 2734 3919 
-Q 2494 4147 2053 4147 
-L 1259 4147 
-z
-M 628 4666 
-L 2053 4666 
-Q 2838 4666 3239 4311 
-Q 3641 3956 3641 3272 
-Q 3641 2581 3239 2228 
-Q 2838 1875 2053 1875 
-L 1259 1875 
+       <path id="DejaVuSans-2c" d="M 628 4666 
+L 1259 4666 
 L 1259 0 
 L 628 0 
 L 628 4666 
 z
 " transform="scale(0.015625)"/>
-       <path id="DejaVuSans-46" d="M 3122 3366 
-L 3122 2828 
-Q 2878 2963 2633 3030 
-Q 2388 3097 2138 3097 
-Q 1578 3097 1268 2742 
-Q 959 2388 959 1747 
-Q 959 1106 1268 751 
-Q 1578 397 2138 397 
-Q 2388 397 2633 464 
-Q 2878 531 3122 666 
-L 3122 134 
-Q 2881 22 2623 -34 
-Q 2366 -91 2075 -91 
-Q 1284 -91 818 406 
-Q 353 903 353 1747 
-Q 353 2603 823 3093 
-Q 1294 3584 2113 3584 
-Q 2378 3584 2631 3529 
-Q 2884 3475 3122 3366 
+       <path id="DejaVuSans-53" d="M 1159 525 
+L 1159 -1331 
+L 581 -1331 
+L 581 3500 
+L 1159 3500 
+L 1159 2969 
+Q 1341 3281 1617 3432 
+Q 1894 3584 2278 3584 
+Q 2916 3584 3314 3078 
+Q 3713 2572 3713 1747 
+Q 3713 922 3314 415 
+Q 2916 -91 2278 -91 
+Q 1894 -91 1617 61 
+Q 1341 213 1159 525 
+z
+M 3116 1747 
+Q 3116 2381 2855 2742 
+Q 2594 3103 2138 3103 
+Q 1681 3103 1420 2742 
+Q 1159 2381 1159 1747 
+Q 1159 1113 1420 752 
+Q 1681 391 2138 391 
+Q 2594 391 2855 752 
+Q 3116 1113 3116 1747 
+z
+" transform="scale(0.015625)"/>
+       <path id="DejaVuSans-58" d="M 544 1381 
+L 544 3500 
+L 1119 3500 
+L 1119 1403 
+Q 1119 906 1312 657 
+Q 1506 409 1894 409 
+Q 2359 409 2629 706 
+Q 2900 1003 2900 1516 
+L 2900 3500 
+L 3475 3500 
+L 3475 0 
+L 2900 0 
+L 2900 538 
+Q 2691 219 2414 64 
+Q 2138 -91 1772 -91 
+Q 1169 -91 856 284 
+Q 544 659 544 1381 
+z
+M 1991 3584 
+L 1991 3584 
 z
 " transform="scale(0.015625)"/>
       </defs>
-      <use xlink:href="#DejaVuSans-33"/>
-      <use xlink:href="#DejaVuSans-55" transform="translate(58.546875 0)"/>
-      <use xlink:href="#DejaVuSans-48" transform="translate(97.453125 0)"/>
-      <use xlink:href="#DejaVuSans-47" transform="translate(158.984375 0)"/>
-      <use xlink:href="#DejaVuSans-4c" transform="translate(222.46875 0)"/>
-      <use xlink:href="#DejaVuSans-46" transform="translate(250.25 0)"/>
-      <use xlink:href="#DejaVuSans-57" transform="translate(305.234375 0)"/>
-      <use xlink:href="#DejaVuSans-48" transform="translate(344.4375 0)"/>
-      <use xlink:href="#DejaVuSans-47" transform="translate(405.96875 0)"/>
-      <use xlink:href="#DejaVuSans-3" transform="translate(469.453125 0)"/>
-      <use xlink:href="#DejaVuSans-48" transform="translate(501.234375 0)"/>
-      <use xlink:href="#DejaVuSans-4f" transform="translate(562.765625 0)"/>
-      <use xlink:href="#DejaVuSans-48" transform="translate(590.546875 0)"/>
-      <use xlink:href="#DejaVuSans-59" transform="translate(652.078125 0)"/>
-      <use xlink:href="#DejaVuSans-44" transform="translate(711.265625 0)"/>
-      <use xlink:href="#DejaVuSans-57" transform="translate(772.546875 0)"/>
-      <use xlink:href="#DejaVuSans-4c" transform="translate(811.75 0)"/>
-      <use xlink:href="#DejaVuSans-52" transform="translate(839.53125 0)"/>
-      <use xlink:href="#DejaVuSans-51" transform="translate(900.71875 0)"/>
-      <use xlink:href="#DejaVuSans-3" transform="translate(964.09375 0)"/>
-      <use xlink:href="#DejaVuSans-b" transform="translate(995.875 0)"/>
-      <use xlink:href="#DejaVuSans-50" transform="translate(1034.890625 0)"/>
-      <use xlink:href="#DejaVuSans-c" transform="translate(1132.296875 0)"/>
+      <use xlink:href="#DejaVuSans-2c"/>
+      <use xlink:href="#DejaVuSans-50" transform="translate(29.5 0)"/>
+      <use xlink:href="#DejaVuSans-53" transform="translate(126.90625 0)"/>
+      <use xlink:href="#DejaVuSans-58" transform="translate(190.390625 0)"/>
+      <use xlink:href="#DejaVuSans-57" transform="translate(253.765625 0)"/>
+      <use xlink:href="#DejaVuSans-48" transform="translate(292.96875 0)"/>
+      <use xlink:href="#DejaVuSans-47" transform="translate(354.5 0)"/>
+      <use xlink:href="#DejaVuSans-3" transform="translate(417.984375 0)"/>
+      <use xlink:href="#DejaVuSans-48" transform="translate(449.765625 0)"/>
+      <use xlink:href="#DejaVuSans-4f" transform="translate(511.296875 0)"/>
+      <use xlink:href="#DejaVuSans-48" transform="translate(539.078125 0)"/>
+      <use xlink:href="#DejaVuSans-59" transform="translate(600.609375 0)"/>
+      <use xlink:href="#DejaVuSans-44" transform="translate(659.796875 0)"/>
+      <use xlink:href="#DejaVuSans-57" transform="translate(721.078125 0)"/>
+      <use xlink:href="#DejaVuSans-4c" transform="translate(760.28125 0)"/>
+      <use xlink:href="#DejaVuSans-52" transform="translate(788.0625 0)"/>
+      <use xlink:href="#DejaVuSans-51" transform="translate(849.25 0)"/>
+      <use xlink:href="#DejaVuSans-3" transform="translate(912.625 0)"/>
+      <use xlink:href="#DejaVuSans-b" transform="translate(944.40625 0)"/>
+      <use xlink:href="#DejaVuSans-50" transform="translate(983.421875 0)"/>
+      <use xlink:href="#DejaVuSans-c" transform="translate(1080.828125 0)"/>
      </g>
     </g>
    </g>
@@ -3590,12 +3589,12 @@ L 421.2 38.88
  </defs>
 </svg></div></p>
 </div>
-<p>A point above the line is a plot predicted higher than it lies.</p>
+<p>A point above the line is a plot imputed higher than it lies.</p>
 </div>
 <div class="section level3">
-<h3 id="classification-predictions">Classification predictions<a class="anchor" aria-label="anchor" href="#classification-predictions"></a>
+<h3 id="imputed-classes">Imputed classes<a class="anchor" aria-label="anchor" href="#imputed-classes"></a>
 </h3>
-<p>For a classification target, the trainer returns the predicted class,
+<p>For a classification target, the trainer returns the imputed class,
 the probability of every class and the recorded class of each held-out
 plot. Classes are numbered from 0, in the order of
 <code>class_names</code>.</p>
@@ -3629,11 +3628,11 @@ plot. Classes are numbered from 0, in the order of
 <div class="section level3">
 <h3 id="calibration">Calibration<a class="anchor" aria-label="anchor" href="#calibration"></a>
 </h3>
-<p>A classifier is <em>calibrated</em> when, of the plots whose
-predicted class it gives a probability of 0.7, 70 % are assigned their
-recorded class. The calibration groups the held-out plots into bins by
-the probability of their predicted class and compares each bin’s mean
-probability with the share of its plots whose predicted class is the
+<p>A classifier is <em>calibrated</em> when, of the plots whose imputed
+class it gives a probability of 0.7, 70 % are assigned their recorded
+class. The calibration groups the held-out plots into bins by the
+probability of their imputed class and compares each bin’s mean
+probability with the share of its plots whose imputed class is the
 recorded one. The expected calibration error is the average gap,
 weighted by the plots per bin, and the maximum calibration error the
 largest gap.</p>
@@ -3849,7 +3848,7 @@ gives the prepared trainer.</p>
 <span id="cb58-5"><a href="#cb58-5" tabindex="-1"></a><span class="bu">round</span>(fresh.compute_residuals(<span class="st">"elevation"</span>).mean_residual) <span class="op">==</span> <span class="bu">round</span>(res.mean_residual)</span>
 <span id="cb58-6"><a href="#cb58-6" tabindex="-1"></a><span class="co">#&gt; True</span></span></code></pre></div>
 </div>
-<p><a href="prediction.html">Predicting new plots</a> covers what to do
+<p><a href="prediction.html">Imputing new plots</a> covers what to do
 with the loaded model.</p>
 </div>
 <div class="section level2">
@@ -3872,7 +3871,7 @@ encodings and their settings.</li>
 <a href="performance.html">Large data and GPUs</a>: the learning
 rate, the batch size, the model size and the GPU settings.</li>
 <li>
-<a href="prediction.html">Predicting new plots</a>: output formats,
+<a href="prediction.html">Imputing new plots</a>: output formats,
 class probabilities, new species and model suites.</li>
 <li>
 <a href="embeddings.html">Latent and species embeddings</a>: reading

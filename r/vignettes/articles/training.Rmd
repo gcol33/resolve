@@ -5,7 +5,7 @@ resource_files:
   - training_files/py-figure-2.svg
 ---
 
-<!-- Python blocks run by tools/python_twins.py (md5 7070aabecab90c1fac629bf96a9703a6). -->
+<!-- Python blocks run by tools/python_twins.py (md5 94f4e0632bd41035f15ac137e3ab290f). -->
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6.5, fig.height = 4.5,
@@ -15,7 +15,7 @@ if (nzchar(Sys.getenv("RESOLVE_DOCS_CACHE"))) source(Sys.getenv("RESOLVE_DOCS_CA
 if (resolve.available()) resolve.manual_seed(42)
 ```
 
-Training fits a model to a dataset: it holds out part of the plots, adjusts the network on the rest and stops when its predictions on the held-out plots no longer improve. This article covers the settings a run takes, what the run returns and how to read the fit on the plots it did not train on.
+Training fits a model to a dataset: it holds out part of the plots, adjusts the network on the rest and stops when its imputed values on the held-out plots no longer improve. This article covers the settings a run takes, what the run returns and how to read the fit on the plots it did not train on.
 
 It also covers the ways a run can be shaped: resuming an interrupted run, refitting on every plot for a fixed number of epochs, stopping on a fold you name, learning-rate schedules, the loss, the encoder architectures, cross-validation and checkpoints. Running on a GPU and on large data is the subject of [Large data and GPUs](performance.html).
 
@@ -38,7 +38,7 @@ pip install resolve-core
 
 ## The survey
 
-The examples use the survey that ships with the R package: 150 plots in the Alps, with their elevation in metres and their habitat, and the species recorded on each plot with its genus, family and cover. The *roles* name the columns of the two tables, and each *target* is a column to predict. Elevation is a regression target and habitat a classification target with four classes.
+The examples use the survey that ships with the R package: 150 plots in the Alps, with their elevation in metres and their habitat, and the species recorded on each plot with its genus, family and cover. The *roles* name the columns of the two tables, and each *target* is a column to impute. Elevation is a regression target and habitat a classification target with four classes.
 
 ::: {.lang-pair}
 ```{r data}
@@ -224,9 +224,9 @@ Regression targets are scored in their original units; a target trained on a `lo
 |-----|---------|
 | `mae` | Mean absolute error |
 | `rmse` | Root mean squared error |
-| `r2` | Coefficient of determination: the share of the variance the predictions explain |
+| `r2` | Coefficient of determination: the share of the variance the imputed values explain |
 | `smape` | Symmetric mean absolute percentage error, between 0 and 2 |
-| `band_10`, `band_25`, `band_50` | Share of plots predicted within 10, 25 and 50 % of their value, one key per entry in `band_thresholds` |
+| `band_10`, `band_25`, `band_50` | Share of plots imputed within 10, 25 and 50 % of their value, one key per entry in `band_thresholds` |
 
 Classification targets:
 
@@ -237,7 +237,7 @@ Classification targets:
 | `weighted_f1` | Mean of the per-class F1 scores, each class weighted by its number of plots |
 | `precision_<c>`, `recall_<c>`, `f1_<c>` | Per class |
 
-The same metrics are available on their own, for predictions made elsewhere: `resolve_mae()`, `resolve_rmse()`, `resolve_r_squared()`, `resolve_smape()`, `resolve_band_accuracy()` and `resolve_accuracy()` in R ([reference](../reference/index.html)).
+The same metrics are available on their own, for values imputed elsewhere: `resolve_mae()`, `resolve_rmse()`, `resolve_r_squared()`, `resolve_smape()`, `resolve_band_accuracy()` and `resolve_accuracy()` in R ([reference](../reference/index.html)).
 
 ### Baselines
 
@@ -333,7 +333,7 @@ An epoch counts against the rate only where it would count against `patience`, a
 
 ### Warming up the rate
 
-A large transformer encoder trained at its full rate from the first step can collapse onto predicting one class. A *warmup* starts the rate near zero and raises it linearly over the first `warmup_steps` optimizer steps (or `warmup_epochs` epochs) to whatever the schedule sets; after it, the schedule runs as it would have. The linear schedule then lowers the rate at every step to `lr_min` at the end of `max_epochs`, the warmup-then-linear-decay schedule transformer encoders are often fine-tuned with.
+A large transformer encoder trained at its full rate from the first step can collapse onto imputing one class. A *warmup* starts the rate near zero and raises it linearly over the first `warmup_steps` optimizer steps (or `warmup_epochs` epochs) to whatever the schedule sets; after it, the schedule runs as it would have. The linear schedule then lowers the rate at every step to `lr_min` at the end of `max_epochs`, the warmup-then-linear-decay schedule transformer encoders are often fine-tuned with.
 
 ::: {.lang-pair}
 ```{r warmup}
@@ -387,7 +387,7 @@ Under `combined`, the regression loss moves through three phases at `phase_bound
 
     $$\mathcal{L}_\text{SMAPE} = \frac{1}{n} \sum_{i=1}^{n} \frac{|y_i - \hat{y}_i|}{(|y_i| + |\hat{y}_i|)/2 + \epsilon}$$
 
-3. After it, a hinge penalizes predictions whose ratio to the observed value leaves the band $[1 - \tau, 1 + \tau]$, with $\tau$ = `band_threshold` (default 0.25)
+3. After it, a hinge penalizes imputed values whose ratio to the observed value leaves the band $[1 - \tau, 1 + \tau]$, with $\tau$ = `band_threshold` (default 0.25)
 
     $$\mathcal{L}_\text{band} = \frac{1}{n} \sum_{i=1}^{n} \max\left(0,\ \left|\frac{\hat{y}_i}{y_i} - 1\right| - \tau\right)$$
 
@@ -424,7 +424,7 @@ $$p_{ij} = \frac{\exp(u_i \cdot u_j / T)}{\sum_{k \neq i} \exp(u_i \cdot u_k / T
 
 over the head outputs $u$, scaled to unit length, and the term is $-\log \sum_{j \in C_i} p_{ij}$, with $C_i$ the plots of the same class, averaged over the plots that have a same-class neighbour in the batch. It pulls plots of the same class together and pushes plots of different classes apart on the unit sphere, which cross-entropy alone does not do.
 
-Cross-entropy stays in the sum because the NCA term does not change when the head's output coordinates are permuted: it constrains which plots lie near each other and says nothing about which coordinate belongs to which class. On its own it would leave the predicted class, the coordinate with the largest output, without meaning.
+Cross-entropy stays in the sum because the NCA term does not change when the head's output coordinates are permuted: it constrains which plots lie near each other and says nothing about which coordinate belongs to which class. On its own it would leave the imputed class, the coordinate with the largest output, without meaning.
 
 Three settings tune it, and they act only under the `nca` preset:
 
@@ -628,7 +628,7 @@ round(small.fit().final_metrics["elevation"]["mae"])
 | `mlp` | `hidden_dims` and the fields above | A stack of fully connected layers (default) |
 | `ft_transformer` | `ft_transformer` | Turns each input feature into a token and applies self-attention over the features |
 | `tabnet` | `tabnet` | Selects features in sequential attention steps; `use_sparsemax = FALSE` selects 1.5-entmax |
-| `saint` | `saint` | Attention over the features and over rows; at prediction a plot attends to a fixed set of training plots |
+| `saint` | `saint` | Attention over the features and over rows; at imputation a plot attends to a fixed set of training plots |
 | `excelformer` | `excelformer` | Attention restricted by a learned importance of the features |
 | `trait_net` | `trait_net` | Interaction of environment and species traits; needs traits set on the model |
 | `gnn` | `gnn` | A graph over the plots, by space, taxonomy or co-occurrence; the spatial graph needs coordinates and trains on the full batch |
@@ -737,7 +737,7 @@ TabM (an ensemble of layers sharing most weights, `tabm`), a mixture placed at `
 
 ## Reading the held-out fold
 
-The trainer keeps its held-out fold after the run, so you can read the predictions on it plot by plot. The first run of this article, `fit` in R and `trainer` in Python, serves as the example.
+The trainer keeps its held-out fold after the run, so you can read the imputed values on it plot by plot. The first run of this article, `fit` in R and `trainer` in Python, serves as the example.
 
 ::: {.lang-pair}
 ```{r folds}
@@ -757,20 +757,20 @@ The positions of the plots in the dataset are available as well (`test_indices()
 
 ### Regression residuals
 
-A *residual* is the observed value minus the predicted one. The residual analysis holds both, per plot and in original units, with the mean, the standard deviation, the skewness, the kurtosis and quantiles of the residuals.
+A *residual* is the observed value minus the imputed one. The residual analysis holds both, per plot and in original units, with the mean, the standard deviation, the skewness, the kurtosis and quantiles of the residuals.
 
 ::: {.lang-pair}
-```{r residuals, fig.alt = "Predicted against observed elevation on the held-out plots."}
+```{r residuals, fig.alt = "Imputed against observed elevation on the held-out plots."}
 res <- fit$trainer$compute_residuals("elevation")
 round(unlist(res[c("mean_residual", "std_residual", "q05", "q50", "q95")]))
 
 lims <- range(res$actuals, res$predictions)
 plot(res$actuals, res$predictions, pch = 19, xlim = lims, ylim = lims,
-     xlab = "Observed elevation (m)", ylab = "Predicted elevation (m)")
+     xlab = "Observed elevation (m)", ylab = "Imputed elevation (m)")
 abline(0, 1, col = "grey50")
 ```
 
-```{.python fig-alt="Predicted against observed elevation on the held-out plots."}
+```{.python fig-alt="Imputed against observed elevation on the held-out plots."}
 res = trainer.compute_residuals("elevation")
 {name: round(getattr(res, name))
  for name in ["mean_residual", "std_residual", "q05", "q50", "q95"]}
@@ -782,17 +782,17 @@ fig, ax = plt.subplots(figsize=(6.5, 4.5))
 ax.scatter(observed, predicted, color="black");
 ax.plot(lims, lims, color="grey");
 ax.set_xlabel("Observed elevation (m)");
-ax.set_ylabel("Predicted elevation (m)");
+ax.set_ylabel("Imputed elevation (m)");
 ```
 
-<img src="training_files/py-figure-2.svg" alt="Predicted against observed elevation on the held-out plots." />
+<img src="training_files/py-figure-2.svg" alt="Imputed against observed elevation on the held-out plots." />
 :::
 
-A point above the line is a plot predicted higher than it lies.
+A point above the line is a plot imputed higher than it lies.
 
-### Classification predictions
+### Imputed classes
 
-For a classification target, the trainer returns the predicted class, the probability of every class and the recorded class of each held-out plot. Classes are numbered from 0, in the order of `class_names`.
+For a classification target, the trainer returns the imputed class, the probability of every class and the recorded class of each held-out plot. Classes are numbered from 0, in the order of `class_names`.
 
 ::: {.lang-pair}
 ```{r classified}
@@ -820,7 +820,7 @@ tuple(cls.probabilities.shape)
 
 ### Calibration
 
-A classifier is *calibrated* when, of the plots whose predicted class it gives a probability of 0.7, 70 % are assigned their recorded class. The calibration groups the held-out plots into bins by the probability of their predicted class and compares each bin's mean probability with the share of its plots whose predicted class is the recorded one. The expected calibration error is the average gap, weighted by the plots per bin, and the maximum calibration error the largest gap.
+A classifier is *calibrated* when, of the plots whose imputed class it gives a probability of 0.7, 70 % are assigned their recorded class. The calibration groups the held-out plots into bins by the probability of their imputed class and compares each bin's mean probability with the share of its plots whose imputed class is the recorded one. The expected calibration error is the average gap, weighted by the plots per bin, and the maximum calibration error the largest gap.
 
 ::: {.lang-pair}
 ```{r calibration}
@@ -1004,7 +1004,7 @@ round(fresh.compute_residuals("elevation").mean_residual) == round(res.mean_resi
 ```
 :::
 
-[Predicting new plots](prediction.html) covers what to do with the loaded model.
+[Imputing new plots](prediction.html) covers what to do with the loaded model.
 
 ## GPU training
 
@@ -1014,5 +1014,5 @@ Set the device to `cuda` to train on a GPU; this needs the CUDA build of the eng
 
 - [Encoding the species set](encoding.html): the five encodings and their settings.
 - [Large data and GPUs](performance.html): the learning rate, the batch size, the model size and the GPU settings.
-- [Predicting new plots](prediction.html): output formats, class probabilities, new species and model suites.
+- [Imputing new plots](prediction.html): output formats, class probabilities, new species and model suites.
 - [Latent and species embeddings](embeddings.html): reading the latent representation.

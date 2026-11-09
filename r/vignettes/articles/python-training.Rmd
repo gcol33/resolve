@@ -158,7 +158,7 @@ Pooled and transformer encodings:
 
 - `cover_dropout` (`float`, default `0.0`): the probability of replacing a plot's pool weights with its presence mask during training.
 - `plot_totals` (`bool`, default `False`): add each plot's combined cover and log(1 + species count) to the pooled features, with a flag saying they are present.
-- `plot_totals_dropout` (`float`, default `0.0`): with `plot_totals`, the probability of withholding a training plot's totals, so the model also predicts without them (`Predictor.plot_totals = False`).
+- `plot_totals_dropout` (`float`, default `0.0`): with `plot_totals`, the probability of withholding a training plot's totals, so the model also imputes without them (`Predictor.plot_totals = False`).
 - `freeze_composition` (`bool`, default `False`): keep the species, genus and family tables at their initial values. Needs the MLP architecture and an encoding with such a table.
 - `d_model` (`int`, default `128`), `n_heads` (`int`, default `4`), `n_attention_layers` (`int`, default `0`, pooling alone), `transformer_ff_dim` (`int`, default `256`), `transformer_dropout` (`float`, default `0.1`), `transformer_pooling` (`TransformerPooling`, default `Attention`).
 
@@ -186,7 +186,7 @@ The settings of `EncoderArchitecture.TabNet`, `ModelConfig.tabnet`: `n_steps` (`
 
 ## `SAINTConfig` {#SAINTConfig}
 
-The settings of `EncoderArchitecture.SAINT`, `ModelConfig.saint`: `d_model` (`128`), `n_heads` (`8`), `n_layers` (`6`), `attention_dropout` (`0.1`), `use_row_attention` (`True`) and `row_attention_rows` (`256`). SAINT attends across rows as well as features. In training a batch is cut into groups of `row_attention_rows` rows; at inference each plot attends over a fixed reference set of `row_attention_rows - 1` training rows plus itself, saved with the weights, so a plot's prediction does not depend on which plots share its batch.
+The settings of `EncoderArchitecture.SAINT`, `ModelConfig.saint`: `d_model` (`128`), `n_heads` (`8`), `n_layers` (`6`), `attention_dropout` (`0.1`), `use_row_attention` (`True`) and `row_attention_rows` (`256`). SAINT attends across rows as well as features. In training a batch is cut into groups of `row_attention_rows` rows; at inference each plot attends over a fixed reference set of `row_attention_rows - 1` training rows plus itself, saved with the weights, so a plot's imputed value does not depend on which plots share its batch.
 
 ## `ExcelFormerConfig` {#ExcelFormerConfig}
 
@@ -427,7 +427,7 @@ Attributes:
 
 ## `BaselineMetrics` {#BaselineMetrics}
 
-A target's naive baseline beside the model: `baseline_mae`, `baseline_mse` (predicting the training mean), `model_mae`, `model_mse`, `skill_score` (`1 - model_mse / baseline_mse`), `r_squared`, `training_mean`; for a classification target `baseline_accuracy` (predicting the most frequent training class), `model_accuracy`, `accuracy_lift` and `training_mode`. Regression values are in original units and match `final_metrics`.
+A target's naive baseline beside the model: `baseline_mae`, `baseline_mse` (imputing the training mean), `model_mae`, `model_mse`, `skill_score` (`1 - model_mse / baseline_mse`), `r_squared`, `training_mean`; for a classification target `baseline_accuracy` (imputing the most frequent training class), `model_accuracy`, `accuracy_lift` and `training_mode`. Regression values are in original units and match `final_metrics`.
 
 ## `CrossValidationResult` {#CrossValidationResult}
 
@@ -451,7 +451,7 @@ What `compute_calibration` returns: `target_name`, `class_idx`, `bins` (`list[Ca
 
 ## `CalibrationBin` {#CalibrationBin}
 
-One bin of predicted probability: `bin_start`, `bin_end`, `count` (the plots in it), `mean_predicted_prob` and `actual_frequency` (the share of them predicted correctly).
+One bin of the probability given to the imputed class: `bin_start`, `bin_end`, `count` (the plots in it), `mean_predicted_prob` and `actual_frequency` (the share of them imputed correctly).
 
 ## `NetworkDiagnostics` {#NetworkDiagnostics}
 

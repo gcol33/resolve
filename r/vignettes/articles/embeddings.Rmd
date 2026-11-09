@@ -15,7 +15,7 @@ if (nzchar(Sys.getenv("RESOLVE_DOCS_CACHE"))) source(Sys.getenv("RESOLVE_DOCS_CA
 if (resolve.available()) resolve.manual_seed(42)
 ```
 
-A trained RESOLVE model holds three kinds of learned vectors, called *embeddings*: one per plot, one per species, and one per genus and per family. The plot vector is the model's summary of a plot, from which it predicts every target. The species, genus and family vectors are the rows of the tables the model looks species up in.
+A trained RESOLVE model holds three kinds of learned vectors, called *embeddings*: one per plot, one per species, and one per genus and per family. The plot vector is the model's summary of a plot, from which it imputes every target. The species, genus and family vectors are the rows of the tables the model looks species up in.
 
 This article covers getting each kind out of a trained model, projecting the plot vectors onto two axes to look at them, comparing species and genera by their vectors, which encodings keep the effect of each species separate, finding similar and unusual plots and reading gradients from the vectors, and computing plot vectors from the encoded inputs directly.
 
@@ -38,7 +38,7 @@ pip install resolve-core
 
 ## A model to read
 
-The examples use the survey of 150 plots in the Alps that ships with the R package: `plots` with one row per plot (coordinates, elevation in metres, habitat) and `species` with one row per species recorded on a plot (genus, family, cover in percent). The model predicts elevation and habitat from the species alone.
+The examples use the survey of 150 plots in the Alps that ships with the R package: `plots` with one row per plot (coordinates, elevation in metres, habitat) and `species` with one row per species recorded on a plot (genus, family, cover in percent). The model imputes elevation and habitat from the species alone.
 
 The *encoding* is how the model turns a plot's species list into numbers. The rank-pool encoding used here gives every species its own row in one table and averages the rows of a plot's species, weighted by their cover, so it has a species table to read. [Encoding the species set](encoding.html) compares the encodings.
 
@@ -102,7 +102,7 @@ predictor = rc.Predictor.load(path)
 
 ## Plot embeddings
 
-The model's *encoder* turns a plot's species composition, and its coordinates and covariates when it has them, into one vector, the plot's *latent representation*. Each target has a *head*, a small network that reads its prediction off that vector. Predicting with the latent representation switched on returns it, one row per plot, in the dataset's plot order.
+The model's *encoder* turns a plot's species composition, and its coordinates and covariates when it has them, into one vector, the plot's *latent representation*. Each target has a *head*, a small network that reads its imputed value off that vector. Imputing with the latent representation switched on returns it, one row per plot, in the dataset's plot order.
 
 ::: {.lang-pair}
 ```{r latent}
@@ -267,7 +267,7 @@ similarity["Quercus"].drop("Quercus").sort_values(ascending=False).head(5).round
 ```
 :::
 
-Two genera end up close when the model found them interchangeable for predicting its targets on this dataset. That can match ecological or phylogenetic similarity, and it measures neither.
+Two genera end up close when the model found them interchangeable for imputing its targets on this dataset. That can match ecological or phylogenetic similarity, and it measures neither.
 
 The same table clusters hierarchically. Ward's method joins, at each step, the two groups whose merger adds the least within-group variance.
 
@@ -350,7 +350,7 @@ plot_similarity["A001"].drop("A001").nlargest(5).round(3)
 ```
 :::
 
-[Predicting new plots](prediction.html) shows retrieval, which blends a prediction with the recorded values of the most similar training plots.
+[Imputing new plots](prediction.html) shows retrieval, which blends an imputed value with the recorded values of the most similar training plots.
 
 ### Unusual plots
 
@@ -374,7 +374,7 @@ nearest.nsmallest(5).round(3)
 ```
 :::
 
-Read an isolated plot next to its prediction error before calling it an outlier: it may be rare in the survey and still well predicted.
+Read an isolated plot next to its imputation error before calling it an outlier: it may be rare in the survey and still well imputed.
 
 ### Gradients
 
@@ -398,7 +398,7 @@ elevation = pd.Series(out.plot_ids).map(plots.set_index("plot_id").elevation)
 
 ## Embeddings from the encoded inputs
 
-A predictor also computes the latent vectors from the encoded inputs directly, the tensors a dataset holds, which is what a custom analysis on modified inputs needs. It assembles and standardises the inputs as training did, so the result equals the latent representation from prediction.
+A predictor also computes the latent vectors from the encoded inputs directly, the tensors a dataset holds, which is what a custom analysis on modified inputs needs. It assembles and standardises the inputs as training did, so the result equals the latent representation from imputation.
 
 ::: {.lang-py-only}
 ```python
@@ -427,6 +427,6 @@ In R, `predictor$get_embeddings()` takes the encoded inputs as positional argume
 
 ## Next steps
 
-- [Predicting new plots](prediction.html): scoring new plots, class probabilities and retrieval.
+- [Imputing new plots](prediction.html): scoring new plots, class probabilities and retrieval.
 - [Encoding the species set](encoding.html): which encodings build which tables.
 - [Training and reading the fit](training.html): the settings of the encoder these vectors come from.

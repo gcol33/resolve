@@ -1,8 +1,8 @@
 # The command line
 
-The `resolve` executable trains a model, predicts new plots and
-describes a saved model, all from CSV files and without R or Python. It
-runs the same engine as the two packages, so a checkpoint written by
+The `resolve` executable trains a model, imputes new plots and describes
+a saved model, all from CSV files and without R or Python. It runs the
+same engine as the two packages, so a checkpoint written by
 `resolve train` loads in R with
 [`resolve.load()`](https://gillescolling.com/resolve/reference/resolve.load.md)
 and in Python with `Predictor.load()`, and a checkpoint saved from
@@ -11,7 +11,7 @@ either package scores with `resolve predict`.
 This article runs each command on the survey that ships with the R
 package: training with the column flags and targets, covariates and
 coordinates, the model settings, the held-out fold and the seed,
-cross-validation, checkpoints and resuming, devices, prediction and
+cross-validation, checkpoints and resuming, devices, imputation and
 reading a checkpoint.
 
 ## Installation
@@ -83,7 +83,7 @@ head -n 3 plots.csv species.csv
 `resolve train` reads the two tables, fits a model and saves it. The
 *roles* name the columns: which one identifies the plot, which one the
 species, and which optional columns hold the abundance and the taxonomy.
-Each *target* is a column to predict, with its task: elevation is a
+Each *target* is a column to impute, with its task: elevation is a
 regression target and habitat a classification target with four classes.
 
 ``` bash
@@ -159,8 +159,8 @@ and a line every ten epochs with the training and held-out loss, in
 total and per target. It ends with the best epoch, the time it took and
 the metrics of the best epoch on the held-out plots, the 20 % of plots
 it did not train on. For elevation, `mae` and `rmse` are in metres, `r2`
-is the share of the variance the predictions explain and `band_10`,
-`band_25` and `band_50` are the shares of plots predicted within 10, 25
+is the share of the variance the imputed values explain and `band_10`,
+`band_25` and `band_50` are the shares of plots imputed within 10, 25
 and 50 % of their elevation. For habitat, `accuracy` is the share of
 plots assigned their recorded habitat, followed by the precision, recall
 and F1 score of each class code and their macro and weighted means. The
@@ -218,7 +218,7 @@ target with `N` classes. A bare `COL` is a regression target. The fields
 after the task are modifiers in any order:
 
 - **`log1p`** fits a regression target on `log(1 + y)` and returns
-  predictions in the column’s own units.
+  imputed values in the column’s own units.
 - **`mask`** keeps a plot that has no label for this target: it trains
   the other targets only. The default, `drop`, leaves the plot out of
   the run.
@@ -250,13 +250,13 @@ resolve train --header plots.csv --species species.csv \
 ```
 
 A label column may hold text, as `habitat` does: the loader codes the
-labels as integers, and the checkpoint keeps the labels, so predictions
-come back as habitat names.
+labels as integers, and the checkpoint keeps the labels, so imputed
+values come back as habitat names.
 
 ## Covariates and coordinates
 
 Coordinates and covariates enter the same encoder as the species. This
-run predicts habitat from the species, the plot’s coordinates and its
+run imputes habitat from the species, the plot’s coordinates and its
 elevation as a covariate. `grep -v` leaves out the epoch lines.
 
 ``` bash
@@ -395,7 +395,7 @@ default). `--test-size` sets the fraction.
 `--seed` (42 by default) seeds the starting weights, the held-out draw,
 the order the training plots are drawn in and the cross-validation
 folds. On the CPU, two runs with the same flags and seed train the same
-model, so their predictions match:
+model, so their imputed values match:
 
 ``` bash
 for run in a b; do
@@ -687,10 +687,10 @@ kernels. `--amp` turns on mixed precision. [Large data and
 GPUs](https://gillescolling.com/resolve/articles/performance.md) covers
 these settings.
 
-## Predicting
+## Imputing
 
 `resolve predict` scores a header and a species table with a saved model
-and writes one row per plot. Here the model predicts the survey’s own
+and writes one row per plot. Here the model imputes the survey’s own
 plots again.
 
 ``` bash
@@ -716,7 +716,7 @@ head -n 4 predictions.csv
 
 The first column is the plot identifier, followed by one column per
 target. A classification target gets two columns: `habitat` holds the
-class label and `habitat_code` the integer code the model predicted.
+class label and `habitat_code` the integer code the model imputed.
 `--probabilities` adds one column per class with the probability behind
 the code; the columns of one target sum to one in every row:
 
@@ -734,28 +734,28 @@ head -n 4 probabilities.csv
 The checkpoint carries the species, genus and family vocabularies of its
 training data, so the new tables are encoded against the same species.
 It also records the covariate and categorical columns, so a covariate
-model predicts without `--covariate` flags; pass them only to rename the
+model imputes without `--covariate` flags; pass them only to rename the
 columns, one flag per column the model was trained on. The abundance,
 coordinate and taxonomy columns are read only when their flags are
 given, so pass `resolve predict` the same flags for them as
 `resolve train`.
 
 `--predict-batch-size` sets how many plots go through the model at once
-(4096 by default). The retrieval flags blend each prediction with the
+(4096 by default). The retrieval flags blend each imputed value with the
 labels of its nearest plots from a reference set, in the model’s latent
-representation; [Predicting new
+representation; [Imputing new
 plots](https://gillescolling.com/resolve/articles/prediction.md)
 describes them.
 
 A *model suite* is a directory of several trained models with a
 `manifest.json` that lists them. `resolve predict --suite DIR` scores
-every target of the suite, combines its members’ predictions and reports
-how far they agree and how much of each plot’s species list the target’s
-vocabulary recognises. `--target` limits the output to some targets,
-`--members` adds every member’s own prediction and `--no-verify` skips
-checking each member file against the size and SHA-256 checksum in the
-manifest. `resolve info --suite DIR` prints the manifest and checks
-every member. [Predicting new
+every target of the suite, combines its members’ imputed values and
+reports how far they agree and how much of each plot’s species list the
+target’s vocabulary recognises. `--target` limits the output to some
+targets, `--members` adds every member’s own imputed value and
+`--no-verify` skips checking each member file against the size and
+SHA-256 checksum in the manifest. `resolve info --suite DIR` prints the
+manifest and checks every member. [Imputing new
 plots](https://gillescolling.com/resolve/articles/prediction.md) covers
 suites.
 
@@ -851,5 +851,5 @@ preds = predictor.predict_dataset(dataset)
 print(preds.predictions["elevation"][:6].round())
 ```
 
-The predicted elevations match the `elevation` column of
-`predictions.csv` above.
+The imputed elevations match the `elevation` column of `predictions.csv`
+above.

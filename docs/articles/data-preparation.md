@@ -2,9 +2,9 @@
 
 RESOLVE reads vegetation plots from two tables: one row per plot, and
 one row per species recorded on a plot. Loading turns them into a
-*dataset*, the encoded form a model trains on and predicts from. The
+*dataset*, the encoded form a model trains on and imputes from. The
 loader needs to be told which column plays which part, which columns to
-predict, and what to do with cells that are empty.
+impute, and what to do with cells that are empty.
 
 This article covers the shape of the two tables and the single long
 table that can replace them, every column role, regression and
@@ -88,7 +88,7 @@ to the model.
 
 | Role | Effect when present |
 |----|----|
-| `plot_id` | Joins the two tables and labels every prediction |
+| `plot_id` | Joins the two tables and labels every imputed value |
 | `species_id` | The species whose set describes the plot |
 | `abundance` | Weights each species; without it every species weighs 1 |
 | `latitude`, `longitude` | Two continuous inputs, and the coordinates spatial cross-validation folds are cut on |
@@ -109,7 +109,7 @@ list of `TargetSpec` and the dataset settings a `DatasetConfig`. A role
 left unset is the empty string.
 
 The roles below read every column of the survey, with elevation as a
-covariate and habitat as the column to predict.
+covariate and habitat as the column to impute.
 
 ``` r
 
@@ -203,18 +203,18 @@ finally:
 
 ## Targets
 
-A *target* is a header column the model learns to predict. A regression
+A *target* is a header column the model learns to impute. A regression
 target is a number; a classification target is one class out of a fixed
 set.
 
 A regression target can be transformed on load. With the `log1p`
-transform the model trains on `log(1 + value)`, and every prediction and
-regression metric is transformed back, so all numbers you read are in
-the column’s own units.
+transform the model trains on `log(1 + value)`, and every imputed value
+and regression metric is transformed back, so all numbers you read are
+in the column’s own units.
 
 A classification column of text is coded in sorted order unless you give
 the codes yourself. The class names are recorded on the dataset’s
-schema, so predicted codes can be turned back into labels.
+schema, so imputed codes can be turned back into labels.
 
 ``` r
 
@@ -563,9 +563,9 @@ train_set.n_plots, train_vocab.n_plots
 #> (100, 50)
 ```
 
-A saved model checks the vocabulary of every dataset it predicts. The
-set built with its own vocabulary is refused; the set built against the
-training vocabulary is predicted.
+A saved model checks the vocabulary of every dataset it imputes. The set
+built with its own vocabulary is refused; the set built against the
+training vocabulary is imputed.
 
 ``` r
 
@@ -639,8 +639,8 @@ preds.predictions["elevation"][:6].round()
 #> tensor([1185., 1046., 1497., 1670., 1024., 1076.])
 ```
 
-A dataset built to be predicted needs no target, so the target list is
-empty here. [Predicting new
+A dataset built to be imputed needs no target, so the target list is
+empty here. [Imputing new
 plots](https://gillescolling.com/resolve/articles/prediction.md)
 continues from this point.
 
@@ -652,6 +652,6 @@ continues from this point.
 - [Training and reading the
   fit](https://gillescolling.com/resolve/articles/training.md): the
   training settings, the held-out plots and cross-validation.
-- [Predicting new
+- [Imputing new
   plots](https://gillescolling.com/resolve/articles/prediction.md):
   output formats, class probabilities and unseen species.

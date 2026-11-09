@@ -4,7 +4,7 @@ The Python package’s classes, functions and values, under the sections
 of [the R
 reference](https://gillescolling.com/resolve/reference/index.md) and in
 its order. `import resolve_core as rc` reaches every name below.
-[Predicting plot attributes from species
+[Imputing plot attributes from species
 lists](https://gillescolling.com/resolve/articles/resolveR.html?lang=python)
 runs them on the survey that ships with the R package.
 
@@ -34,7 +34,7 @@ frames, into an engine dataset.
   dataset.
 
 - [`TargetSpec`](https://gillescolling.com/resolve/articles/python-data.html#TargetSpec):
-  One target, a plot-table column the model learns to predict, and how
+  One target, a plot-table column the model learns to impute, and how
   its values are read.
 
 - [`TaskType`](https://gillescolling.com/resolve/articles/python-data.html#TaskType):
@@ -182,12 +182,12 @@ labels.
 - [`ResidualAnalysis`](https://gillescolling.com/resolve/articles/python-training.html#ResidualAnalysis):
   The residuals of a regression target on the held-out fold.
 - [`ClassificationPredictions`](https://gillescolling.com/resolve/articles/python-training.html#ClassificationPredictions):
-  The class predictions and probabilities of a classification target on
+  The imputed classes and probabilities of a classification target on
   the held-out fold.
 - [`CalibrationResult`](https://gillescolling.com/resolve/articles/python-training.html#CalibrationResult):
   How well a classifier’s probabilities match how often it is right.
 - [`CalibrationBin`](https://gillescolling.com/resolve/articles/python-training.html#CalibrationBin):
-  One bin of predicted probability.
+  One bin of the probability given to the imputed class.
 - [`NetworkDiagnostics`](https://gillescolling.com/resolve/articles/python-training.html#NetworkDiagnostics):
   The activations of the species encoder’s hidden layers.
 - [`LayerDiagnostics`](https://gillescolling.com/resolve/articles/python-training.html#LayerDiagnostics):
@@ -244,16 +244,16 @@ labels.
 - [`ParallelAggregation`](https://gillescolling.com/resolve/articles/python-training.html#ParallelAggregation):
   How a parallel block combines its branches.
 
-## [Saving and predicting](https://gillescolling.com/resolve/articles/python-prediction.md)
+## [Saving and imputing](https://gillescolling.com/resolve/articles/python-prediction.md)
 
-Checkpoints, what they record about the run, and predictions for new
+Checkpoints, what they record about the run, and imputed values for new
 plots.
 
 - [`Predictor`](https://gillescolling.com/resolve/articles/python-prediction.html#Predictor):
-  Predictions, latent representations and embedding tables from a
+  Imputed values, latent representations and embedding tables from a
   trained model.
 - [`ResolvePredictions`](https://gillescolling.com/resolve/articles/python-prediction.html#ResolvePredictions):
-  The predictions and class probabilities for every plot.
+  The imputed values and class probabilities for every plot.
 - [`RetrievalConfig`](https://gillescolling.com/resolve/articles/python-prediction.html#RetrievalConfig):
   The settings of retrieval augmentation.
 - [`nearest_by_cosine()`](https://gillescolling.com/resolve/articles/python-prediction.html#nearest_by_cosine):
@@ -293,18 +293,18 @@ Several trained models released as one directory and scored together.
 - [`SuitePredictor`](https://gillescolling.com/resolve/articles/python-suites.html#SuitePredictor):
   A suite loaded from its directory, scored as one model.
 - [`SuiteColumns`](https://gillescolling.com/resolve/articles/python-suites.html#SuiteColumns):
-  Renames the manifest’s input columns at prediction time.
+  Renames the manifest’s input columns at imputation time.
 - [`SuitePredictions`](https://gillescolling.com/resolve/articles/python-suites.html#SuitePredictions):
-  Every target’s predictions, and the table they are written as.
+  Every target’s imputed values, and the table they are written as.
 - [`SuiteTargetPrediction`](https://gillescolling.com/resolve/articles/python-suites.html#SuiteTargetPrediction):
-  One target’s combined prediction, the members’ agreement or spread,
+  One target’s combined imputed value, the members’ agreement or spread,
   and the species recognition.
 - [`suite_prediction_columns()`](https://gillescolling.com/resolve/articles/python-suites.html#suite_prediction_columns):
-  The predictions as named columns, one value per plot.
+  The imputed values as named columns, one value per plot.
 - [`CombinedPrediction`](https://gillescolling.com/resolve/articles/python-suites.html#CombinedPrediction):
-  A combined prediction with its agreement or dispersion.
+  A combined imputed value with its agreement or dispersion.
 - [`combine_vote()`](https://gillescolling.com/resolve/articles/python-suites.html#combine_vote):
-  The class most members predict.
+  The class most members impute.
 - [`combine_mean()`](https://gillescolling.com/resolve/articles/python-suites.html#combine_mean):
   The members’ mean and standard deviation.
 - [`combine_circular()`](https://gillescolling.com/resolve/articles/python-suites.html#combine_circular):
@@ -321,13 +321,14 @@ Several trained models released as one directory and scored together.
 ## [Gap fitting](https://gillescolling.com/resolve/articles/python-gap-fitting.md)
 
 Filling a dataset’s missing values from its own complete plots, beside
-the raw prediction.
+the raw imputed value.
 
 - [`fit_gaps()`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#fit_gaps):
-  One target’s gaps from the raw prediction, the recorded values and the
-  plots’ composition, positions and years.
+  One target’s gaps from the raw imputed value, the recorded values and
+  the plots’ composition, positions and years.
 - [`fit_prediction_gaps()`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#fit_prediction_gaps):
-  A single model’s gaps from its predictions and the dataset’s tables.
+  A single model’s gaps from its imputed values and the dataset’s
+  tables.
 - [`read_gap_tables()`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#read_gap_tables):
   What gap fitting reads about a dataset’s plots, from DataFrames or CSV
   paths.
@@ -339,7 +340,7 @@ the raw prediction.
 - [`GapScale`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapScale):
   How a target’s values lie: linear, log, circular or geographic.
 - [`GapMethod`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapMethod):
-  The methods a gap can be predicted by.
+  The methods a gap can be imputed by.
 - [`GapFit`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#GapFit):
   The fitted values, the method per plot and the report.
 - [`matched_gap_neighbours()`](https://gillescolling.com/resolve/articles/python-gap-fitting.html#matched_gap_neighbours):
@@ -387,7 +388,7 @@ Species names read as the names a model learnt.
   The release’s name table: entered names and synonyms with the token
   each stands for.
 - [`SpeciesNames`](https://gillescolling.com/resolve/articles/python-names.html#SpeciesNames):
-  How a load or a suite prediction resolves species names.
+  How a load or a suite imputation resolves species names.
 - [`NameResolver`](https://gillescolling.com/resolve/articles/python-names.html#NameResolver):
   Resolves names against one vocabulary.
 - [`ResolvedName`](https://gillescolling.com/resolve/articles/python-names.html#ResolvedName):
@@ -399,14 +400,14 @@ Species names read as the names a model learnt.
 
 ## [Scoring](https://gillescolling.com/resolve/articles/python-scoring.md)
 
-The metrics training reports, for predictions made anywhere.
+The metrics training reports, for values imputed anywhere.
 
 - [`Metrics`](https://gillescolling.com/resolve/articles/python-scoring.html#Metrics):
   The regression and classification metrics as functions of two tensors.
 - [`ClassificationMetrics`](https://gillescolling.com/resolve/articles/python-scoring.html#ClassificationMetrics):
   Accuracy, F1 scores and the confusion matrix of a classification.
 - [`ConfidenceMetrics`](https://gillescolling.com/resolve/articles/python-scoring.html#ConfidenceMetrics):
-  The accuracy and coverage of the predictions above a confidence
+  The accuracy and coverage of the imputed values above a confidence
   threshold.
 - [`compute_species_recognition()`](https://gillescolling.com/resolve/articles/python-scoring.html#compute_species_recognition):
   How much of each plot’s species list a vocabulary recognises.

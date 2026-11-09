@@ -114,7 +114,7 @@ Fits the gated correction of one target on plots whose recorded value is
 `truth` (`NaN`: unrecorded, left out). `descriptor` is
 `TerrainDescriptor.Elevation` (an altitude target) or
 `TerrainDescriptor.Slope`. Every input is an `(n,)` tensor, one value
-per plot: the prediction, the descriptor at the coordinate and over 1
+per plot: the imputed value, the descriptor at the coordinate and over 1
 km, the recorded location uncertainty in m, the members’ standard
 deviation, the share of species recognised and the number of species.
 `TerrainCorrectionConfig` has `scale` (the target’s scale: 500 for
@@ -131,14 +131,14 @@ correction.apply(prediction, dem, dem_1km=None, uncertainty_m=None, spread=None,
 correction.save(path)
 ```
 
-`apply` returns a `TerrainCorrectionResult`: `corrected` (the prediction
-where the correction cannot apply: no prediction or no descriptor),
-`weights` (`(n, 3)`, the weight of the prediction, the descriptor and
-the 1 km descriptor; `TerrainCorrection.weight_names`), `offset` and
-`applied`. An input not given reads as the training plots’ median. The
-correction also has `target`, `descriptor`, `config` and `report` (the
-training plots and the mean absolute error of the prediction, the
-descriptor and the corrected value on them).
+`apply` returns a `TerrainCorrectionResult`: `corrected` (the imputed
+value where the correction cannot apply: no imputed value or no
+descriptor), `weights` (`(n, 3)`, the weight of the imputed value, the
+descriptor and the 1 km descriptor; `TerrainCorrection.weight_names`),
+`offset` and `applied`. An input not given reads as the training plots’
+median. The correction also has `target`, `descriptor`, `config` and
+`report` (the training plots and the mean absolute error of the imputed
+value, the descriptor and the corrected value on them).
 
 ``` python
 import numpy as np

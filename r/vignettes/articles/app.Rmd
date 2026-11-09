@@ -2,9 +2,12 @@
 title: "RESOLVE App"
 ---
 
-Predict a vegetation plot's EUNIS habitat, altitude, slope, plot area, survey
-year and location from the species recorded on it, with the released models
-trained on the European Vegetation Archive's plots. The models run in your
+Impute the habitat
+([EUNIS](https://www.eea.europa.eu/en/datahub/datahubitem-view/123d0c9a-a6fa-4f2d-b887-5d8e5468faed)),
+site metadata (altitude, slope), survey metadata (plot area, survey year) and
+location of vegetation plots from their species composition and
+cover-abundance, with the released RESOLVE models trained on the plots of the
+European Vegetation Archive (EVA). The models run in your
 browser: your files are read inside this tab and are not uploaded anywhere.
 The page downloads the models and the elevation model from Zenodo
 ([models](https://doi.org/10.5281/zenodo.24077609),
@@ -36,7 +39,7 @@ GISCO.
         <div class="tables">
           <div>
             <label class="form-label small d-block" for="species-file">Species table: one row per species record, with
-              plot ID, species name (World Flora Online), and optionally cover (%), genus and family. Columns are
+              plot ID, species name (World Flora Online), and optionally cover-abundance (%), genus and family. Columns are
               matched by name (Darwin Core names too); change them below if needed.</label>
             <input class="form-control form-control-sm" type="file" id="species-file" accept=".csv,.tsv,.txt">
             <div class="fields small" id="species-fields"></div>
@@ -47,7 +50,7 @@ GISCO.
             <label class="form-label small d-block" for="header-file">Header table (optional): one row per plot, with
               plot ID, latitude and longitude (WGS84), and year and month or a date. Where the header records
               survey year, coordinates, altitude, slope or plot area on only some plots, the missing values are
-              estimated from the plots that have them.</label>
+              imputed from the plots that record them.</label>
             <input class="form-control form-control-sm" type="file" id="header-file" accept=".csv,.tsv,.txt">
             <div class="fields small" id="header-fields"></div>
             <div class="info small text-body-secondary" id="header-info"></div>
@@ -55,11 +58,12 @@ GISCO.
           </div>
         </div>
         <div class="options">
-          <label>Correct misspelled species names
+          <label>Fuzzy match species names
             <select class="form-select form-select-sm" id="o-spelling">
               <option value="0">off</option>
-              <option value="1" selected>up to 1 letter off</option>
-              <option value="2">up to 2 letters off</option>
+              <option value="1" selected>up to 1 edit</option>
+              <option value="2">up to 2 edits</option>
+              <option value="3">up to 3 edits</option>
             </select></label>
         </div>
         <button type="button" class="btn btn-link btn-sm p-0 mt-2" id="reset-data" hidden>Use the example data again</button>
@@ -73,9 +77,11 @@ GISCO.
         <div class="options">
           <label class="form-check-label" id="terrain-option" hidden><input class="form-check-input" type="checkbox"
             id="o-terrain" checked> Terrain correction of altitude and slope</label>
+          <label class="form-check-label" id="gaps-option" hidden><input class="form-check-input" type="checkbox"
+            id="o-gaps" checked> Gap fitting of variables recorded on some plots</label>
         </div>
         <div class="actions">
-          <button type="button" class="btn btn-primary" id="run" disabled>Predict</button>
+          <button type="button" class="btn btn-primary" id="run" disabled>Impute</button>
           <label class="small">Workers <input class="form-control form-control-sm d-inline-block" type="number"
             id="o-workers" min="1" max="16" step="1"></label>
           <span id="status" class="small text-body-secondary" role="status"></span>
@@ -92,9 +98,16 @@ GISCO.
     <div id="results" hidden>
       <div class="stats mt-3">
         <div class="stat"><b id="s-plots"></b><span>plots</span></div>
-        <div class="stat"><b id="s-variables"></b><span>variables predicted</span></div>
+        <div class="stat"><b id="s-variables"></b><span>variables imputed</span></div>
         <div class="stat"><b id="s-unknown"></b><span>species names not recognised</span></div>
-        <div class="stat"><b id="s-time"></b><span>to predict</span></div>
+        <div class="stat"><b id="s-time"></b><span>to impute</span></div>
+      </div>
+
+      <div class="card mt-3">
+        <div class="card-body">
+          <p class="card-title h5">Summary</p>
+          <div class="tablewrap"><table class="table table-sm mb-0" id="overview"></table></div>
+        </div>
       </div>
 
       <div class="row g-3 mt-0">
@@ -119,11 +132,21 @@ GISCO.
 
       <div class="card mt-3">
         <div class="card-body">
-          <p class="card-title h5">Predictions</p>
+          <div class="tablehead">
+            <p class="card-title h5 mb-0">Imputed values</p>
+            <nav class="pager" id="pager" aria-label="Table pages" hidden>
+              <span id="pager-range" class="small text-body-secondary" aria-live="polite"></span>
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn btn-outline-secondary" id="pager-first" aria-label="First page">&laquo;</button>
+                <button type="button" class="btn btn-outline-secondary" id="pager-prev" aria-label="Previous page">&lsaquo;</button>
+                <button type="button" class="btn btn-outline-secondary" id="pager-next" aria-label="Next page">&rsaquo;</button>
+                <button type="button" class="btn btn-outline-secondary" id="pager-last" aria-label="Last page">&raquo;</button>
+              </div>
+            </nav>
+          </div>
           <div class="tablewrap"><table class="table table-sm table-hover mb-0" id="table"></table></div>
           <div class="actions">
-            <button type="button" class="btn btn-outline-primary btn-sm" id="download" disabled>Download all predictions (CSV)</button>
-            <span id="table-note" class="small text-body-secondary"></span>
+            <button type="button" class="btn btn-outline-primary btn-sm" id="download" disabled>Download all imputed values (CSV)</button>
           </div>
           <ul class="warn small text-body-secondary" id="gaps" hidden></ul>
           <details class="small mt-3" id="unknown" hidden><summary></summary>
@@ -135,13 +158,13 @@ GISCO.
     </div>
 
     <div class="notes small text-body-secondary mt-4">
-      <p>Each variable is predicted by five models, trained in the same way from different random starting points
-      (seeds), and the page combines their five predictions: habitat by majority vote (seed agreement is the share of
+      <p>Each variable is imputed by five models, trained in the same way from different random starting points
+      (seeds), and the page combines their five values: habitat by majority vote (seed agreement is the share of
       the five naming the habitat), numeric variables by their mean and standard deviation, and location by the
       spherical mean and the median distance of the five from it.</p>
       <p>Altitude and slope can also be corrected with an elevation model (Copernicus GLO-30). The correction weighs
-      the prediction against the elevation model's value at the plot and over the square kilometre around it,
-      depending on the plot's location uncertainty, the spread of the five predictions and how many of the plot's
+      the imputed value against the elevation model's value at the plot and over the square kilometre around it,
+      depending on the plot's location uncertainty, the spread of the five values and how many of the plot's
       species the models know. The table gives the elevation model's own values beside the corrected ones.</p>
       <p>Terrain values produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space
       GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved. The organisations

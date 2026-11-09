@@ -1,4 +1,4 @@
-# Predicting plot attributes from species lists
+# Imputing plot attributes from species lists
 
 A vegetation plot’s species list says a lot about the place it was
 recorded: alpine species grow high up, wetland species where the ground
@@ -8,7 +8,7 @@ attributes off it, here the elevation and the habitat of a plot.
 
 This article runs the whole path on a small survey that ships with the R
 package: loading two tables, training a model, reading how well it
-predicts plots it did not train on, and predicting new plots.
+imputes plots it did not train on, and imputing new plots.
 
 ## Installation
 
@@ -79,9 +79,8 @@ print(species.head(3))
 
 The *roles* name the columns: which one identifies the plot, which one
 the species, and which optional columns hold the abundance, the taxonomy
-and the coordinates. Each *target* is a column to predict, with its
-task. Elevation is a regression target and habitat a classification
-target.
+and the coordinates. Each *target* is a column to impute, with its task.
+Elevation is a regression target and habitat a classification target.
 
 ``` r
 
@@ -110,8 +109,8 @@ targets = [rc.TargetSpec.regression("elevation"),
 dataset = rc.ResolveDataset.from_pandas(plots, species, roles, targets)
 ```
 
-The coordinates stay out of the roles here, so the predictions come from
-the species alone.
+The coordinates stay out of the roles here, so the imputed values come
+from the species alone.
 
 ## Training
 
@@ -145,9 +144,9 @@ round(metrics["habitat"]["accuracy"], 3)
 ```
 
 For elevation, `mae` and `rmse` are in metres, `r2` is the share of the
-variance the predictions explain, and `band_25` is the share of plots
-predicted within 25 % of their elevation; `band_10` and `band_50` give
-the same at 10 and 50 %. For habitat, `accuracy` is the share of plots
+variance the imputed values explain, and `band_25` is the share of plots
+imputed within 25 % of their elevation; `band_10` and `band_50` give the
+same at 10 and 50 %. For habitat, `accuracy` is the share of plots
 assigned their recorded habitat, and the per-class precision, recall and
 F1 scores sit beside it in the same list. Training’s own seed fixes the
 held-out plots and the order the training plots are drawn in, and
@@ -157,10 +156,10 @@ run on the same machine ends at the same numbers. The R and the Python
 run here still end at slightly different numbers, since each reaches the
 engine through its own torch build.
 
-## Predicting new plots
+## Imputing new plots
 
 A saved model carries the species vocabulary it was trained with, so a
-new table is encoded against the same species. Here the model predicts
+new table is encoded against the same species. Here the model imputes
 the survey’s own plots again.
 
 ``` r
@@ -203,9 +202,9 @@ out.merge(plots[["plot_id", "elevation"]], left_on="plot", right_on="plot_id",
 #> 5  A006       1950                1799
 ```
 
-A plot with a species the model never saw still gets a prediction: the
-unknown species is encoded through its genus and family where those are
-known.
+A plot with a species the model never saw still gets an imputed value:
+the unknown species is encoded through its genus and family where those
+are known.
 
 ## Next steps
 
@@ -223,6 +222,6 @@ known.
   training settings, the held-out fold, cross-validation and
   checkpoints.
 
-- [Predicting new
+- [Imputing new
   plots](https://gillescolling.com/resolve/articles/prediction.md):
   output formats, class probabilities, new species and model suites.

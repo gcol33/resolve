@@ -232,7 +232,7 @@ Pooled and transformer encodings:
   saying they are present.
 - `plot_totals_dropout` (`float`, default `0.0`): with `plot_totals`,
   the probability of withholding a training plot’s totals, so the model
-  also predicts without them (`Predictor.plot_totals = False`).
+  also imputes without them (`Predictor.plot_totals = False`).
 - `freeze_composition` (`bool`, default `False`): keep the species,
   genus and family tables at their initial values. Needs the MLP
   architecture and an encoding with such a table.
@@ -306,8 +306,8 @@ The settings of `EncoderArchitecture.SAINT`, `ModelConfig.saint`:
 features. In training a batch is cut into groups of `row_attention_rows`
 rows; at inference each plot attends over a fixed reference set of
 `row_attention_rows - 1` training rows plus itself, saved with the
-weights, so a plot’s prediction does not depend on which plots share its
-batch.
+weights, so a plot’s imputed value does not depend on which plots share
+its batch.
 
 ## `ExcelFormerConfig`
 
@@ -699,10 +699,10 @@ Attributes:
 ## `BaselineMetrics`
 
 A target’s naive baseline beside the model: `baseline_mae`,
-`baseline_mse` (predicting the training mean), `model_mae`, `model_mse`,
+`baseline_mse` (imputing the training mean), `model_mae`, `model_mse`,
 `skill_score` (`1 - model_mse / baseline_mse`), `r_squared`,
 `training_mean`; for a classification target `baseline_accuracy`
-(predicting the most frequent training class), `model_accuracy`,
+(imputing the most frequent training class), `model_accuracy`,
 `accuracy_lift` and `training_mode`. Regression values are in original
 units and match `final_metrics`.
 
@@ -745,9 +745,9 @@ gives a probability p are right a share p of the time.
 
 ## `CalibrationBin`
 
-One bin of predicted probability: `bin_start`, `bin_end`, `count` (the
-plots in it), `mean_predicted_prob` and `actual_frequency` (the share of
-them predicted correctly).
+One bin of the probability given to the imputed class: `bin_start`,
+`bin_end`, `count` (the plots in it), `mean_predicted_prob` and
+`actual_frequency` (the share of them imputed correctly).
 
 ## `NetworkDiagnostics`
 

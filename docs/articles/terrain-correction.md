@@ -5,7 +5,7 @@ elevation at the coordinate, and the slope of the ground around it.
 Where the coordinate is precise, that reading is close to the altitude a
 surveyor would record. Where it is coarse, or wrong, the elevation model
 reads a different hillside, and the reading can be off by hundreds of
-metres. A prediction from species composition errs the other way round:
+metres. An imputation from species composition errs the other way round:
 it never reads the wrong hillside, but it cannot tell two plots with the
 same species apart by a few metres of altitude.
 
@@ -13,8 +13,8 @@ same species apart by a few metres of altitude.
 whose altitude or slope was recorded, how much to trust each source
 given what the plot shows about itself: how precise its coordinate is,
 how far the two sources disagree, how much the members of a suite
-disagree among themselves. The suite’s prediction is never replaced; the
-corrected value comes back beside it, with the weight each source
+disagree among themselves. The suite’s imputed value is never replaced;
+the corrected value comes back beside it, with the weight each source
 received.
 
 This article covers what the correction reads, fitting and applying one,
@@ -57,12 +57,12 @@ slopes. The 1 km descriptor is what the ground around a plot looks like
 when its coordinate is only known to within a kilometre.
 
 The correction is a small network that returns three weights summing to
-one, for the suite’s prediction, the descriptor at the coordinate and
+one, for the suite’s imputed value, the descriptor at the coordinate and
 the descriptor over 1 km, and a small bounded offset. A weight of one
 returns a source exactly, so where the coordinate is precise and the two
 sources agree, the correction can return the elevation model’s reading
-unchanged. It reads, per plot: the prediction and both descriptors with
-their differences from the prediction, the recorded location
+unchanged. It reads, per plot: the imputed value and both descriptors
+with their differences from the imputed value, the recorded location
 uncertainty, the spread of the suite’s members, the share of the plot’s
 species the suite recognises, and the number of species. It is fitted by
 the mean absolute error.
@@ -72,8 +72,8 @@ the mean absolute error.
 A simulated survey shows the mechanics. Each plot has a true altitude;
 its elevation-model reading is right to a few metres, except on a share
 of plots that grows with the location uncertainty, where it reads a
-hillside hundreds of metres away; its prediction errs by tens of metres,
-more where the members disagree.
+hillside hundreds of metres away; its imputed value errs by tens of
+metres, more where the members disagree.
 
 ``` r
 
@@ -157,7 +157,7 @@ print(f"corrected {mae(corrected.corrected):.1f} m")
 ```
 
 The weights show where it trusts which source: the elevation model where
-the coordinate is precise, the prediction where the coordinate is
+the coordinate is precise, the imputed value where the coordinate is
 coarse.
 
 ``` r
@@ -185,8 +185,8 @@ for label, lo, hi in [("up to 10 m", 0, 10), ("10-100 m", 10, 100),
 #> over 1 km [0.49 0.5  0.01]
 ```
 
-A plot without a reading keeps its prediction, and a plot without the 1
-km descriptor or the uncertainty is still corrected: a caller who has
+A plot without a reading keeps its imputed value, and a plot without the
+1 km descriptor or the uncertainty is still corrected: a caller who has
 the elevation at the coordinate alone is served.
 
 ## Your own elevation model
@@ -249,14 +249,14 @@ what suites ship.
 
 ## What it changes on the archive
 
-The released context suite (species, coordinates and date) predicts each
+The released context suite (species, coordinates and date) imputes each
 archive plot from models that never saw it: in a random split, and in
-two splits that hold out whole 100 km blocks. On those held-out
-predictions the correction was fitted in five folds, grouped by 100 km
-block, and scored on the fold it did not see, with the descriptors read
-from the coded field the suite ships. Mean absolute error:
+two splits that hold out whole 100 km blocks. On those held-out imputed
+values the correction was fitted in five folds, grouped by 100 km block,
+and scored on the fold it did not see, with the descriptors read from
+the coded field the suite ships. Mean absolute error:
 
-| Split | Target | Plots | Prediction | Elevation model | Corrected |
+| Split | Target | Plots | Imputation | Elevation model | Corrected |
 |----|----|---:|---:|---:|---:|
 | random | altitude (m) | 346,597 | 42.9 | 33.9 | 22.6 |
 | 100 km blocks, seed 42 | altitude (m) | 363,880 | 99.5 | 40.7 | 37.6 |
@@ -269,7 +269,7 @@ For altitude, the corrected value is closer to the recorded one than
 either source in every split. The recorded location uncertainty shows
 where the gain comes from (random split):
 
-| Location uncertainty |   Plots | Prediction | Elevation model | Corrected |
+| Location uncertainty |   Plots | Imputation | Elevation model | Corrected |
 |----------------------|--------:|-----------:|----------------:|----------:|
 | up to 10 m           | 124,476 |       20.3 |             8.0 |       7.0 |
 | 10 m to 100 m        |  26,979 |       49.4 |            23.8 |      19.0 |
@@ -280,14 +280,14 @@ where the gain comes from (random split):
 Where the coordinate is precise, the corrected value stays close to the
 elevation model; where it is coarser than a kilometre, the elevation
 model errs by 100 m on average, and the corrected value by half of that,
-below the prediction alone.
+below the imputed value alone.
 
 For slope, the elevation model’s reading at the coordinate errs by about
-twice as much as the prediction, at every location uncertainty, and the
-correction keeps the prediction nearly unchanged: the gain is at most
-two tenths of a degree. A slope read from a 30 m elevation model may
-describe a different patch of ground than the few square metres a plot
-covers.
+twice as much as the imputed value, at every location uncertainty, and
+the correction keeps the imputed value nearly unchanged: the gain is at
+most two tenths of a degree. A slope read from a 30 m elevation model
+may describe a different patch of ground than the few square metres a
+plot covers.
 
 The descriptors read from the original grids give the same picture:
 altitude 22.6, 37.7 and 28.0 m, slope 5.41, 7.10 and 7.71 degrees. The
@@ -334,6 +334,6 @@ each epoch, so that callers without it are served), `seed` and `device`.
   elevation model of the bare ground would need a correction trained on
   it.
 - A plot outside the field’s tiles, or without coordinates, keeps its
-  prediction (`applied` is `FALSE`).
+  imputed value (`applied` is `FALSE`).
 - The weights describe how the correction combined the sources on a
   plot; they are not probabilities that a source is right.

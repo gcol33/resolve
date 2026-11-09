@@ -38,7 +38,7 @@ covers the GPU build.
 The survey has 150 plots in the Alps, each with its elevation and
 habitat, and the species recorded on each plot with its genus, family
 and cover. The *roles* name the columns of the two tables, and each
-*target* is a column to predict.
+*target* is a column to impute.
 
 ``` r
 
@@ -777,6 +777,6 @@ result = pooled.fit()
 - [Training and reading the
   fit](https://gillescolling.com/resolve/articles/training.md): every
   training setting and how to read the result.
-- [Predicting new
+- [Imputing new
   plots](https://gillescolling.com/resolve/articles/prediction.md):
-  prediction in chunks and on the GPU.
+  imputation in chunks and on the GPU.

@@ -90,7 +90,7 @@ TargetSpec.classification(column, num_classes)
 TargetSpec.classification_with_mapping(column, mapping)
 ```
 
-One *target*, a plot-table column the model learns to predict, and how
+One *target*, a plot-table column the model learns to impute, and how
 its values are read. A regression target is a number; a classification
 target is a class label. `classification` codes the labels in
 alphabetical order; `classification_with_mapping` takes the code of
@@ -116,7 +116,7 @@ Attributes:
   column name by default.
 - `task` (`TaskType`): regression or classification.
 - `transform` (`TransformType`): `Log1p` stores `log(1 + y)` and trains
-  on it; predictions and metrics come back in the original units.
+  on it; imputed values and metrics come back in the original units.
 - `num_classes` (`int`): the class count of a classification target.
 - `class_mapping` (`dict[str, int]`): the label-to-code map; empty when
   the codes are fitted alphabetically.

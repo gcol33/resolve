@@ -2,7 +2,7 @@
 
 Reading a table’s species names as the names a model learnt: the
 release’s name table, the resolver, the setting a load or a suite
-prediction takes, and the report of the names not found as written.
+imputation takes, and the report of the names not found as written.
 [Species names a model knows by another
 name](https://gillescolling.com/resolve/articles/prediction.html#species-names)
 walks through it.
@@ -89,7 +89,7 @@ it.
 SpeciesNames(table=None, max_edit_distance=1)
 ```
 
-How a load or a suite prediction resolves species names: the `NameTable`
+How a load or a suite imputation resolves species names: the `NameTable`
 (`None`: the vocabulary alone) and the edits a misspelling may be away
 (0 turns the spelling step off). `SuitePredictor.predict(names=...)`
 builds one from a path, a `NameTable` or `True`; the `*_with_vocabs`

@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Filling a dataset's gaps • resolveR</title>
+<title>Filling a dataset's gaps • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="../favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
@@ -38,7 +38,7 @@
 
     <nav class="navbar navbar-expand-lg fixed-top " aria-label="Site navigation"><div class="container">
 
-    <a class="navbar-brand me-2" href="../index.html">resolveR</a>
+    <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
     <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
@@ -60,12 +60,12 @@
 <li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
+<li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
     <li><a class="dropdown-item" href="../articles/data-preparation.html">Preparing the two tables</a></li>
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
-    <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
@@ -76,18 +76,6 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
     <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
-    <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
-    <li><a class="dropdown-item" href="../articles/python-data.html">Python: loading data</a></li>
-    <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
-    <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
-    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
-    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
-    <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
-    <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
-    <li><hr class="dropdown-divider"></li>
-    <li><a class="dropdown-item" href="../articles/index.html">More articles...</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -133,14 +121,14 @@ survey year, coordinates or an elevation, and some do not. The plots
 that carry it are labelled examples from the same surveys, recorded by
 the same people, as the plots that lack it. <em>Gap fitting</em> reads
 them: on the plots where the value is recorded (the <em>complete
-plots</em>) it chooses how to combine the model’s prediction with the
+plots</em>) it chooses how to combine the model’s imputed value with the
 dataset’s own neighbours, and applies that choice to the plots where it
-is missing (the <em>gaps</em>). The model’s prediction is never
+is missing (the <em>gaps</em>). The model’s imputed value is never
 replaced; the fitted value comes back beside it, with a report of what
 was chosen and why.</p>
 <p>This article covers the candidates gap fitting chooses among, how the
 choice is tested at the distance the gaps actually are, fitting a single
-model’s predictions, reading the report, model suites and the command
+model’s imputed values, reading the report, model suites and the command
 line, the settings, and the gaps the dataset cannot inform.</p>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
@@ -159,20 +147,20 @@ line, the settings, and the gaps the dataset cannot inform.</p>
 <div class="section level2">
 <h2 id="what-gap-fitting-chooses-among">What gap fitting chooses among<a class="anchor" aria-label="anchor" href="#what-gap-fitting-chooses-among"></a>
 </h2>
-<p>Seven candidates predict a gap, from the dataset alone, from the
-model alone, or from both:</p>
+<p>Seven candidates impute a gap, from the dataset alone, from the model
+alone, or from both:</p>
 <ul>
 <li>
 <code>local_constant</code>: the complete plots’ mean (their median
 on a log scale, their mean direction for a bearing, their geographic
 median for a location);</li>
 <li>
-<code>resolve</code>: the model’s prediction as it stands;</li>
+<code>resolve</code>: the model’s imputed value as it stands;</li>
 <li>
-<code>offset_slope</code>: the model’s prediction calibrated on the
-complete plots, <code>y = mean(y) + b (raw - mean(raw))</code>, with
+<code>offset_slope</code>: the model’s imputed value calibrated on
+the complete plots, <code>y = mean(y) + b (raw - mean(raw))</code>, with
 <code>b</code> fitted by least squares; <code>b = 1</code> shifts the
-prediction by its mean error there, <code>b = 0</code> is the local
+imputed value by its mean error there, <code>b = 0</code> is the local
 constant;</li>
 <li>
 <code>knn_species</code>: the median recorded value of the
@@ -183,11 +171,11 @@ Ochiai similarity of their species lists);</li>
 <code>k</code> nearest complete plots by great-circle distance;</li>
 <li>
 <code>stack_species</code> and <code>stack_species_spatial</code>:
-the model’s prediction and those neighbour medians combined by least
+the model’s imputed value and those neighbour medians combined by least
 squares on the complete plots.</li>
 </ul>
 <p><code>k</code> is chosen from 1, 3, 5, 10, 20 and 50 by how well the
-neighbours predict the complete plots.</p>
+neighbours impute the complete plots.</p>
 </div>
 <div class="section level2">
 <h2 id="testing-the-choice-at-the-gaps-distance">Testing the choice at the gaps’ distance<a class="anchor" aria-label="anchor" href="#testing-the-choice-at-the-gaps-distance"></a>
@@ -195,20 +183,20 @@ neighbours predict the complete plots.</p>
 <p>A complete plot’s nearest other complete plots are as near as
 complete plots are to one another. A gap can be much farther from them:
 a region nobody georeferenced, or the oldest surveys. Judging the
-neighbours by how well they predict a complete plot from its own nearest
+neighbours by how well they impute a complete plot from its own nearest
 plots would trust them more than they deserve at the gaps.</p>
 <p>Gap fitting therefore measures each gap’s distance to its nearest
 complete plot on every axis it can be measured on: species similarity,
 km where the gaps carry coordinates, and survey years where they carry a
-year. Each complete plot is then predicted with the complete plots
-nearer to it than a gap is to its nearest complete plot hidden, one gap
+year. Each complete plot is then imputed with the complete plots nearer
+to it than a gap is to its nearest complete plot hidden, one gap
 distance drawn per complete plot and axis (nearest-neighbour distance
 matching, Milà et al. 2022). A complete plot left with no neighbour at
-that distance counts as predicted by the local constant, which is all
-the dataset says about it there. Each candidate is scored on the
-complete plots by the target’s own error: the mean absolute error, on a
-log scale that of log1p, the circular error of a bearing, the median
-distance in km for a location. The best candidate predicts the gaps.</p>
+that distance counts as imputed by the local constant, which is all the
+dataset says about it there. Each candidate is scored on the complete
+plots by the target’s own error: the mean absolute error, on a log scale
+that of log1p, the circular error of a bearing, the median distance in
+km for a location. The best candidate imputes the gaps.</p>
 <p>Gaps with coordinates and gaps without them choose apart: the second
 group only among the candidates that read no position.</p>
 </div>
@@ -216,7 +204,7 @@ group only among the candidates that read no position.</p>
 <h2 id="the-survey-and-its-gaps">The survey and its gaps<a class="anchor" aria-label="anchor" href="#the-survey-and-its-gaps"></a>
 </h2>
 <p>The examples use the survey of 150 plots in the Alps that ships with
-the R package. A model trained on another survey predicts plots it never
+the R package. A model trained on another survey imputes plots it never
 saw, so the first 75 plots train it and the other 75 are the dataset
 whose elevation has gaps: every fifth of them lacks its recorded
 elevation.</p>
@@ -258,7 +246,7 @@ elevation.</p>
 <span id="cb4-20"><a href="#cb4-20" tabindex="-1"></a>{<span class="st">"complete"</span>: <span class="bu">int</span>((<span class="op">~</span>is_gap).<span class="bu">sum</span>()), <span class="st">"gaps"</span>: <span class="bu">int</span>(is_gap.<span class="bu">sum</span>())}</span>
 <span id="cb4-21"><a href="#cb4-21" tabindex="-1"></a><span class="co">#&gt; {'complete': 60, 'gaps': 15}</span></span></code></pre></div>
 </div>
-<p>The model predicts elevation from the species alone and is saved to a
+<p>The model imputes elevation from the species alone and is saved to a
 checkpoint.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
@@ -289,7 +277,7 @@ checkpoint.</p>
 <span id="cb6-17"><a href="#cb6-17" tabindex="-1"></a>trainer.save(path, trainer.run_metadata)</span></code></pre></div>
 </div>
 <p>The dataset’s plots are encoded with the model’s vocabularies and
-predicted, all of them: the complete plots are what the choice is tested
+imputed, all of them: the complete plots are what the choice is tested
 on.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
@@ -342,9 +330,9 @@ here elevation on its own scale.</p>
 <span id="cb10-10"><a href="#cb10-10" tabindex="-1"></a><span class="co">#&gt; Name: count, dtype: int64</span></span></code></pre></div>
 </div>
 <p>A complete plot keeps its recorded value (<code>recorded</code>);
-every gap carries the method that predicted it. The gaps’ recorded
+every gap carries the method that imputed it. The gaps’ recorded
 elevation is known here, so the fitted values can be checked against it
-beside the model’s own prediction.</p>
+beside the model’s own imputed value.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">order</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/match.html" class="external-link">match</a></span><span class="op">(</span><span class="va">preds</span><span class="op">$</span><span class="va">plot_ids</span>, <span class="va">my_plots</span><span class="op">$</span><span class="va">plot_id</span><span class="op">)</span></span>
@@ -408,7 +396,7 @@ its <code>angle_deg</code> (how far it turns it).</p>
 <p>A suite fits its targets after combining its members.
 <code>columns</code> names the recorded column of each target to fit
 (two, latitude and longitude, for a location) and optionally the
-survey-year column; the prediction table then carries
+survey-year column; the imputation table then carries
 <code>&lt;target&gt;_fitted</code> and
 <code>&lt;target&gt;_fit_method</code> beside
 <code>&lt;target&gt;</code>, and each fitted target a
@@ -439,7 +427,7 @@ members learned on log1p on that scale.</p>
 <p>These lines are shown and not run here. On the command line,
 <code>--fit-gaps</code> with one <code>--recorded</code> per target does
 the same for <code>--suite</code> and for <code>--model</code>, and
-writes the report beside the predictions:</p>
+writes the report beside the imputed values:</p>
 <div class="sourceCode" id="cb17"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" tabindex="-1"></a><span class="ex">resolve</span> predict <span class="at">--suite</span> resolve-suite <span class="at">--header</span> plots.csv <span class="at">--species</span> species.csv <span class="dt">\</span></span>
 <span id="cb17-2"><a href="#cb17-2" tabindex="-1"></a>  <span class="at">--fit-gaps</span> <span class="at">--recorded</span> year=Year <span class="at">--recorded</span> location=Latitude,Longitude <span class="dt">\</span></span>
 <span id="cb17-3"><a href="#cb17-3" tabindex="-1"></a>  <span class="at">--survey-year</span> Year <span class="at">--output</span> predictions.csv</span>
@@ -489,9 +477,9 @@ per complete plot.</li>
 <span id="cb19-8"><a href="#cb19-8" tabindex="-1"></a><span class="co">#&gt; stack_species</span></span></code></pre></div>
 </div>
 <p><code><a href="../reference/resolve.fit_gaps.html">resolve.fit_gaps()</a></code> (R) and <code>rc.fit_gaps()</code>
-(Python) take the same choice on vectors: the raw prediction, the
+(Python) take the same choice on vectors: the raw imputed value, the
 recorded values, a matrix of species and optionally the coordinates and
-survey years, for a prediction made anywhere.</p>
+survey years, for a value imputed anywhere.</p>
 </div>
 <div class="section level2">
 <h2 id="gaps-the-dataset-cannot-inform">Gaps the dataset cannot inform<a class="anchor" aria-label="anchor" href="#gaps-the-dataset-cannot-inform"></a>
@@ -502,17 +490,17 @@ the gaps resemble them. Two kinds of gap do not:</p>
 <li>
 <strong>Undated plots that are probably older than the dated
 ones.</strong> When the undated plots are the oldest surveys, nothing on
-the dated plots shows how far off they are, and the model’s own
-prediction is the better estimate: keep <code>&lt;target&gt;</code>
-rather than <code>&lt;target&gt;_fitted</code> for them. For other
-targets an old survey is visible through the survey-year axis, and gap
-fitting allows for it.</li>
+the dated plots shows how far off they are, and the model’s own imputed
+value is the better estimate: keep <code>&lt;target&gt;</code> rather
+than <code>&lt;target&gt;_fitted</code> for them. For other targets an
+old survey is visible through the survey-year axis, and gap fitting
+allows for it.</li>
 <li>
 <strong>Plots without coordinates that probably come from an area
 with no georeferenced plots.</strong> A location’s gaps have no
 position, so the test hides plots by species and survey year only, and a
 missing region still looks near in species terms. Such plots are better
-served by the model’s prediction, or by the species stack alone.</li>
+served by the model’s imputed value, or by the species stack alone.</li>
 </ul>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

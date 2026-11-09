@@ -12,7 +12,7 @@ if (nzchar(Sys.getenv("RESOLVE_DOCS_CACHE"))) source(Sys.getenv("RESOLVE_DOCS_CA
 if (resolve.available()) resolve.manual_seed(42)
 ```
 
-RESOLVE reads vegetation plots from two tables: one row per plot, and one row per species recorded on a plot. Loading turns them into a *dataset*, the encoded form a model trains on and predicts from. The loader needs to be told which column plays which part, which columns to predict, and what to do with cells that are empty.
+RESOLVE reads vegetation plots from two tables: one row per plot, and one row per species recorded on a plot. Loading turns them into a *dataset*, the encoded form a model trains on and imputes from. The loader needs to be told which column plays which part, which columns to impute, and what to do with cells that are empty.
 
 This article covers the shape of the two tables and the single long table that can replace them, every column role, regression and classification targets, the handling of missing values, targets labelled on only some plots, loading from files or from data frames, checking what was loaded, and encoding new plots against the species vocabulary of a training set.
 
@@ -75,7 +75,7 @@ A *role* tells the loader what a column means. The plot and species identifiers 
 
 | Role | Effect when present |
 |------|---------------------|
-| `plot_id` | Joins the two tables and labels every prediction |
+| `plot_id` | Joins the two tables and labels every imputed value |
 | `species_id` | The species whose set describes the plot |
 | `abundance` | Weights each species; without it every species weighs 1 |
 | `latitude`, `longitude` | Two continuous inputs, and the coordinates spatial cross-validation folds are cut on |
@@ -93,7 +93,7 @@ In R the roles, the targets and the dataset settings are named lists whose keys 
 In Python the roles are the fields of a `RoleMapping`, the targets a list of `TargetSpec` and the dataset settings a `DatasetConfig`. A role left unset is the empty string.
 :::
 
-The roles below read every column of the survey, with elevation as a covariate and habitat as the column to predict.
+The roles below read every column of the survey, with elevation as a covariate and habitat as the column to impute.
 
 ::: {.lang-pair}
 ```{r roles}
@@ -180,11 +180,11 @@ finally:
 
 ## Targets
 
-A *target* is a header column the model learns to predict. A regression target is a number; a classification target is one class out of a fixed set.
+A *target* is a header column the model learns to impute. A regression target is a number; a classification target is one class out of a fixed set.
 
-A regression target can be transformed on load. With the `log1p` transform the model trains on `log(1 + value)`, and every prediction and regression metric is transformed back, so all numbers you read are in the column's own units.
+A regression target can be transformed on load. With the `log1p` transform the model trains on `log(1 + value)`, and every imputed value and regression metric is transformed back, so all numbers you read are in the column's own units.
 
-A classification column of text is coded in sorted order unless you give the codes yourself. The class names are recorded on the dataset's schema, so predicted codes can be turned back into labels.
+A classification column of text is coded in sorted order unless you give the codes yourself. The class names are recorded on the dataset's schema, so imputed codes can be turned back into labels.
 
 ::: {.lang-pair}
 ```{r targets}
@@ -480,7 +480,7 @@ train_set.n_plots, train_vocab.n_plots
 ```
 :::
 
-A saved model checks the vocabulary of every dataset it predicts. The set built with its own vocabulary is refused; the set built against the training vocabulary is predicted.
+A saved model checks the vocabulary of every dataset it imputes. The set built with its own vocabulary is refused; the set built against the training vocabulary is imputed.
 
 ::: {.lang-pair}
 ```{r reject, error = TRUE}
@@ -551,10 +551,10 @@ preds.predictions["elevation"][:6].round()
 ```
 :::
 
-A dataset built to be predicted needs no target, so the target list is empty here. [Predicting new plots](prediction.html) continues from this point.
+A dataset built to be imputed needs no target, so the target list is empty here. [Imputing new plots](prediction.html) continues from this point.
 
 ## Next steps
 
 - [Encoding the species set](encoding.html): the five encodings and the settings of each.
 - [Training and reading the fit](training.html): the training settings, the held-out plots and cross-validation.
-- [Predicting new plots](prediction.html): output formats, class probabilities and unseen species.
+- [Imputing new plots](prediction.html): output formats, class probabilities and unseen species.

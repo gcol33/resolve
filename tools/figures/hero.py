@@ -279,7 +279,7 @@ def build(fit: dict) -> str:
     m = fit["metrics"]
     alt = (
         f"Species and cover of held-out example plot {fit['plot']} pooled into one latent vector, "
-        f"read out as elevation (predicted {shown['predicted']:.0f} m, observed {shown['observed']:.0f} m; "
+        f"read out as elevation (imputed {shown['predicted']:.0f} m, observed {shown['observed']:.0f} m; "
         f"R squared {m['elevation_r2']:.2f} over {len(fit['held_out'])} held-out plots) and habitat "
         f"(observed {fit['habitat_observed']}, probability {fit['habitat_probabilities'][fit['habitat_observed']]:.2f})"
     )

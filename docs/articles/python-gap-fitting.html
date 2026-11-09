@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Python: gap fitting • resolveR</title>
+<title>Python: gap fitting • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="../favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
@@ -38,7 +38,7 @@
 
     <nav class="navbar navbar-expand-lg fixed-top " aria-label="Site navigation"><div class="container">
 
-    <a class="navbar-brand me-2" href="../index.html">resolveR</a>
+    <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
     <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
@@ -57,15 +57,15 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="active nav-item dropdown">
+<li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
+<li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
     <li><a class="dropdown-item" href="../articles/data-preparation.html">Preparing the two tables</a></li>
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
-    <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
@@ -76,18 +76,6 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
     <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
-    <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
-    <li><a class="dropdown-item" href="../articles/python-data.html">Python: loading data</a></li>
-    <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
-    <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
-    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
-    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
-    <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
-    <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
-    <li><hr class="dropdown-divider"></li>
-    <li><a class="dropdown-item" href="../articles/index.html">More articles...</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -156,8 +144,8 @@ gaps</a> walks through a fit; a model suite fits its targets through <a href="py
 <span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a>         config<span class="op">=</span>GapFittingConfig(), radii<span class="op">=</span><span class="va">None</span>)</span></code></pre></div>
 <p>Fits one target’s gaps. <code>target</code> is a
 <code>GapTarget</code>. <code>raw</code> and <code>recorded</code> are
-the model’s prediction and the dataset’s recorded value per plot in the
-target’s units, <code>(n,)</code> tensors, or <code>(n, 2)</code>
+the model’s imputed value and the dataset’s recorded value per plot in
+the target’s units, <code>(n,)</code> tensors, or <code>(n, 2)</code>
 latitude and longitude for a geographic target; a <code>NaN</code>
 recorded value marks a gap. <code>species</code> is the
 <code>(n, n_species)</code> composition, dense or sparse CSR, an entry
@@ -169,8 +157,8 @@ may be <code>None</code>. <code>radii</code>, a <code>dict</code> of
 with one value per complete plot, replaces the drawn hiding distances,
 so a fit reproduces another implementation’s draw. Returns a
 <code>GapFit</code>. With no gap the recorded values come back; with
-fewer than two complete plots the gaps keep the raw prediction and the
-report says why.</p>
+fewer than two complete plots the gaps keep the raw imputed value and
+the report says why.</p>
 <div class="sourceCode" id="cb4"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a><span class="im">import</span> numpy <span class="im">as</span> np</span>
 <span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a><span class="im">import</span> torch</span>
 <span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a><span class="im">import</span> resolve_core <span class="im">as</span> rc</span>
@@ -189,7 +177,7 @@ report says why.</p>
 </h2>
 <div class="sourceCode" id="cb5"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a>fit_prediction_gaps(predictions, species, header<span class="op">=</span><span class="va">None</span>, columns<span class="op">=</span><span class="va">None</span>, targets<span class="op">=</span><span class="va">None</span>,</span>
 <span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a>                    gap_fitting<span class="op">=</span><span class="va">None</span>)</span></code></pre></div>
-<p>Fits a single model’s targets from its predictions
+<p>Fits a single model’s targets from its imputed values
 (<code>Predictor.predict_dataset</code>) and the dataset’s tables, read
 in the order of <code>predictions.plot_ids</code> by
 <code>read_gap_tables</code>. <code>targets</code> maps each target to
@@ -269,10 +257,10 @@ the target’s units.</p>
 (the value), <code>Log</code> (log1p of the value, for a target whose
 error is measured on that scale; its local constant is the median),
 <code>Circular</code> (a bearing as its sine and cosine; a least-squares
-coefficient is a complex number that turns and shrinks the prediction)
-and <code>Geographic</code> (latitude and longitude projected to km of a
-Lambert azimuthal equal-area plane centred on the complete plots’
-geographic median, one coefficient for both axes).</p>
+coefficient is a complex number that turns and shrinks the imputed
+value) and <code>Geographic</code> (latitude and longitude projected to
+km of a Lambert azimuthal equal-area plane centred on the complete
+plots’ geographic median, one coefficient for both axes).</p>
 </div>
 <div class="section level2">
 <h2 id="GapMethod">

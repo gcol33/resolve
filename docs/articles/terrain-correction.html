@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Correcting altitude and slope with an elevation model • resolveR</title>
+<title>Correcting altitude and slope with an elevation model • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="../favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
@@ -38,7 +38,7 @@
 
     <nav class="navbar navbar-expand-lg fixed-top " aria-label="Site navigation"><div class="container">
 
-    <a class="navbar-brand me-2" href="../index.html">resolveR</a>
+    <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
     <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
@@ -60,12 +60,12 @@
 <li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
+<li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
     <li><a class="dropdown-item" href="../articles/data-preparation.html">Preparing the two tables</a></li>
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
-    <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
@@ -76,18 +76,6 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
     <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
-    <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
-    <li><a class="dropdown-item" href="../articles/python-data.html">Python: loading data</a></li>
-    <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
-    <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
-    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
-    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
-    <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
-    <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
-    <li><hr class="dropdown-divider"></li>
-    <li><a class="dropdown-item" href="../articles/index.html">More articles...</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -133,14 +121,14 @@ the elevation at the coordinate, and the slope of the ground around it.
 Where the coordinate is precise, that reading is close to the altitude a
 surveyor would record. Where it is coarse, or wrong, the elevation model
 reads a different hillside, and the reading can be off by hundreds of
-metres. A prediction from species composition errs the other way round:
+metres. An imputation from species composition errs the other way round:
 it never reads the wrong hillside, but it cannot tell two plots with the
 same species apart by a few metres of altitude.</p>
 <p><em>Terrain correction</em> combines the two per plot. It learns,
 from plots whose altitude or slope was recorded, how much to trust each
 source given what the plot shows about itself: how precise its
 coordinate is, how far the two sources disagree, how much the members of
-a suite disagree among themselves. The suite’s prediction is never
+a suite disagree among themselves. The suite’s imputed value is never
 replaced; the corrected value comes back beside it, with the weight each
 source received.</p>
 <p>This article covers what the correction reads, fitting and applying
@@ -185,15 +173,15 @@ the 1 km square.</li>
 slopes. The 1 km descriptor is what the ground around a plot looks like
 when its coordinate is only known to within a kilometre.</p>
 <p>The correction is a small network that returns three weights summing
-to one, for the suite’s prediction, the descriptor at the coordinate and
-the descriptor over 1 km, and a small bounded offset. A weight of one
-returns a source exactly, so where the coordinate is precise and the two
-sources agree, the correction can return the elevation model’s reading
-unchanged. It reads, per plot: the prediction and both descriptors with
-their differences from the prediction, the recorded location
-uncertainty, the spread of the suite’s members, the share of the plot’s
-species the suite recognises, and the number of species. It is fitted by
-the mean absolute error.</p>
+to one, for the suite’s imputed value, the descriptor at the coordinate
+and the descriptor over 1 km, and a small bounded offset. A weight of
+one returns a source exactly, so where the coordinate is precise and the
+two sources agree, the correction can return the elevation model’s
+reading unchanged. It reads, per plot: the imputed value and both
+descriptors with their differences from the imputed value, the recorded
+location uncertainty, the spread of the suite’s members, the share of
+the plot’s species the suite recognises, and the number of species. It
+is fitted by the mean absolute error.</p>
 </div>
 <div class="section level2">
 <h2 id="fitting-and-applying-a-correction">Fitting and applying a correction<a class="anchor" aria-label="anchor" href="#fitting-and-applying-a-correction"></a>
@@ -201,8 +189,8 @@ the mean absolute error.</p>
 <p>A simulated survey shows the mechanics. Each plot has a true
 altitude; its elevation-model reading is right to a few metres, except
 on a share of plots that grows with the location uncertainty, where it
-reads a hillside hundreds of metres away; its prediction errs by tens of
-metres, more where the members disagree.</p>
+reads a hillside hundreds of metres away; its imputed value errs by tens
+of metres, more where the members disagree.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">4</span><span class="op">)</span></span>
@@ -276,8 +264,8 @@ altitude (20 degrees for slope).</p>
 <span id="cb6-11"><a href="#cb6-11" tabindex="-1"></a><span class="co">#&gt; corrected 8.2 m</span></span></code></pre></div>
 </div>
 <p>The weights show where it trusts which source: the elevation model
-where the coordinate is precise, the prediction where the coordinate is
-coarse.</p>
+where the coordinate is precise, the imputed value where the coordinate
+is coarse.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">precision</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/cut.html" class="external-link">cut</a></span><span class="op">(</span><span class="va">new_plots</span><span class="op">$</span><span class="va">uncertainty</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">0</span>, <span class="fl">10</span>, <span class="fl">100</span>, <span class="fl">1000</span>, <span class="cn">Inf</span><span class="op">)</span>,</span>
@@ -299,9 +287,9 @@ coarse.</p>
 <span id="cb8-9"><a href="#cb8-9" tabindex="-1"></a><span class="co">#&gt; 100 m-1 km [0.37 0.62 0.02]</span></span>
 <span id="cb8-10"><a href="#cb8-10" tabindex="-1"></a><span class="co">#&gt; over 1 km [0.49 0.5  0.01]</span></span></code></pre></div>
 </div>
-<p>A plot without a reading keeps its prediction, and a plot without the
-1 km descriptor or the uncertainty is still corrected: a caller who has
-the elevation at the coordinate alone is served.</p>
+<p>A plot without a reading keeps its imputed value, and a plot without
+the 1 km descriptor or the uncertainty is still corrected: a caller who
+has the elevation at the coordinate alone is served.</p>
 </div>
 <div class="section level2">
 <h2 id="your-own-elevation-model">Your own elevation model<a class="anchor" aria-label="anchor" href="#your-own-elevation-model"></a>
@@ -356,12 +344,12 @@ ship.</p>
 <div class="section level2">
 <h2 id="what-it-changes-on-the-archive">What it changes on the archive<a class="anchor" aria-label="anchor" href="#what-it-changes-on-the-archive"></a>
 </h2>
-<p>The released context suite (species, coordinates and date) predicts
+<p>The released context suite (species, coordinates and date) imputes
 each archive plot from models that never saw it: in a random split, and
 in two splits that hold out whole 100 km blocks. On those held-out
-predictions the correction was fitted in five folds, grouped by 100 km
-block, and scored on the fold it did not see, with the descriptors read
-from the coded field the suite ships. Mean absolute error:</p>
+imputed values the correction was fitted in five folds, grouped by 100
+km block, and scored on the fold it did not see, with the descriptors
+read from the coded field the suite ships. Mean absolute error:</p>
 <table class="table">
 <colgroup>
 <col width="13%">
@@ -375,7 +363,7 @@ from the coded field the suite ships. Mean absolute error:</p>
 <th>Split</th>
 <th>Target</th>
 <th align="right">Plots</th>
-<th align="right">Prediction</th>
+<th align="right">Imputation</th>
 <th align="right">Elevation model</th>
 <th align="right">Corrected</th>
 </tr></thead>
@@ -444,7 +432,7 @@ where the gain comes from (random split):</p>
 <thead><tr class="header">
 <th>Location uncertainty</th>
 <th align="right">Plots</th>
-<th align="right">Prediction</th>
+<th align="right">Imputation</th>
 <th align="right">Elevation model</th>
 <th align="right">Corrected</th>
 </tr></thead>
@@ -489,11 +477,11 @@ where the gain comes from (random split):</p>
 <p>Where the coordinate is precise, the corrected value stays close to
 the elevation model; where it is coarser than a kilometre, the elevation
 model errs by 100 m on average, and the corrected value by half of that,
-below the prediction alone.</p>
+below the imputed value alone.</p>
 <p>For slope, the elevation model’s reading at the coordinate errs by
-about twice as much as the prediction, at every location uncertainty,
-and the correction keeps the prediction nearly unchanged: the gain is at
-most two tenths of a degree. A slope read from a 30 m elevation model
+about twice as much as the imputed value, at every location uncertainty,
+and the correction keeps the imputed value nearly unchanged: the gain is
+at most two tenths of a degree. A slope read from a 30 m elevation model
 may describe a different patch of ground than the few square metres a
 plot covers.</p>
 <p>The descriptors read from the original grids give the same picture:
@@ -547,7 +535,7 @@ The correction learned what that costs on the archive’s plots; an
 elevation model of the bare ground would need a correction trained on
 it.</li>
 <li>A plot outside the field’s tiles, or without coordinates, keeps its
-prediction (<code>applied</code> is <code>FALSE</code>).</li>
+imputed value (<code>applied</code> is <code>FALSE</code>).</li>
 <li>The weights describe how the correction combined the sources on a
 plot; they are not probabilities that a source is right.</li>
 </ul>

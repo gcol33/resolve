@@ -246,7 +246,7 @@ pooled.pool_weights.shape
 0) replaces a training plot’s weights with plain presence at the given
 probability, each epoch. The model also receives a flag saying whether a
 plot’s weights carry cover, so a model trained with cover dropout learns
-to predict plots that come without abundances.
+to impute plots that come without abundances.
 
 *Plot totals* (`plotTotals` in R, `plot_totals` in Python, default off)
 add two numbers per plot to the pooled features: the combined cover of
@@ -257,11 +257,11 @@ count, although both can matter: the EUNIS expert system, for one,
 assigns most sparsely vegetated habitats only below 30% total cover.
 With *totals dropout* (`plotTotalsDropout`, `plot_totals_dropout`) a
 training plot’s totals are withheld at the given probability, and the
-model learns to predict without them as well;
+model learns to impute without them as well;
 `resolve.plot_totals(predictor, FALSE)` (R) or
 `predictor.plot_totals = False` (Python) then withholds them at
-prediction, so that a prediction does not depend on how many species a
-plot records, as an analysis of species richness may require.
+imputation, so that an imputed value does not depend on how many species
+a plot records, as an analysis of species richness may require.
 
 A sum ignores the order of the species, so the encoding holds which
 species are present and how strongly, and nothing about how they
@@ -391,9 +391,9 @@ instead of at its pool weight.
 
 The *encoder* is the network that reads the encoded plot, together with
 the coordinates and covariates, and produces the plot’s latent
-representation, the vector every target is predicted from. The default
-is a multilayer perceptron (MLP), a stack of fully connected layers
-whose widths `hiddenDims` / `hidden_dims` sets. `encoder_architecture`
+representation, the vector every target is imputed from. The default is
+a multilayer perceptron (MLP), a stack of fully connected layers whose
+widths `hiddenDims` / `hidden_dims` sets. `encoder_architecture`
 replaces it with a network from the literature on tabular data, each
 with its own settings under the name in the table.
 
@@ -402,7 +402,7 @@ with its own settings under the name in the table.
 | `"mlp"` (default) | Fully connected layers |
 | `"ft_transformer"` | FT-Transformer: one token per input feature, with self-attention across features |
 | `"tabnet"` | TabNet: sequential attention that selects features step by step |
-| `"saint"` | SAINT: attention across features and across rows; at prediction, rows attend to a fixed set of training rows |
+| `"saint"` | SAINT: attention across features and across rows; at imputation, rows attend to a fixed set of training rows |
 | `"excelformer"` | ExcelFormer: attention guided by learned feature importance |
 | `"trait_net"` | TraitNet: combines the plot’s environment with a trait table per species |
 | `"gnn"` | A graph network over plots, joined by coordinates, taxonomy or composition; trains on all plots at once |

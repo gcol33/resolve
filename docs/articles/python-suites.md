@@ -1,9 +1,9 @@
 # Python: model suites
 
 Several trained models released as one directory and scored together:
-the suite predictor and its predictions, the manifest that describes a
-release, the rules that combine the members’ predictions, and the table
-the predictions are written as.
+the suite predictor and its imputed values, the manifest that describes
+a release, the rules that combine the members’ imputed values, and the
+table the imputed values are written as.
 
 [All of the Python
 reference](https://gillescolling.com/resolve/articles/python-reference.md)
@@ -25,12 +25,12 @@ pip install resolve-core
 ```
 
 A *model suite* is a directory holding a manifest, `manifest.json`, and
-the checkpoints it names. Each target of the suite is predicted by
-several *members*, the same recipe trained under different seeds, and
-the suite reports for each plot the members’ combined prediction beside
-how far the members agree. The examples on this page run in order: they
-train two members for each of two targets on the survey that ships with
-the R package, release them as a suite and score it. [Predicting new
+the checkpoints it names. Each target of the suite is imputed by several
+*members*, the same recipe trained under different seeds, and the suite
+reports for each plot the members’ combined imputed value beside how far
+the members agree. The examples on this page run in order: they train
+two members for each of two targets on the survey that ships with the R
+package, release them as a suite and score it. [Imputing new
 plots](https://gillescolling.com/resolve/articles/prediction.md) covers
 scoring a released suite.
 
@@ -163,9 +163,9 @@ members read plot-table columns, so scoring needs the plot table.
 One released target of a suite.
 
 - `name` (`str`): the suite’s name for it. `task` (`TaskType`).
-- `combine` (`SuiteCombine`): how the members’ predictions combine.
-- `outputs` (`list[str]`): the members’ target heads the prediction is
-  read from: one for a vote or a mean; one bearing, or a sine and a
+- `combine` (`SuiteCombine`): how the members’ imputed values combine.
+- `outputs` (`list[str]`): the members’ target heads the imputed value
+  is read from: one for a vote or a mean; one bearing, or a sine and a
   cosine in that order, for a circular mean; latitude and longitude, in
   degrees, for a spherical mean.
 - `units` (`str`): the output units, such as `"m"` or `"degrees"`; empty
@@ -208,9 +208,9 @@ with the contract.
 ## `SuiteCombine`
 
 How a suite target combines its members: `Vote` (the class most members
-predict), `Mean`, `CircularMean` (the mean direction of bearings, such
-as aspect) or `SphericalMean` (the mean point of latitude and longitude
-on the sphere). In a manifest they are spelled `vote`, `mean`,
+impute), `Mean`, `CircularMean` (the mean direction of bearings, such as
+aspect) or `SphericalMean` (the mean point of latitude and longitude on
+the sphere). In a manifest they are spelled `vote`, `mean`,
 `circular_mean` and `spherical_mean`.
 
 ## `SuiteTargetStatus`
@@ -257,9 +257,9 @@ when the suite reads coordinates, covariates or categoricals, and when
 given it decides which plots are scored and in what order. `columns`, a
 `SuiteColumns` or a `dict` of its fields, renames the contract’s columns
 for a table that spells them differently. `batch_size` is the forward
-chunk of each member; `keep_members` keeps every member’s own
-prediction. No target column is read, except with `gap_fitting` (`True`,
-a `GapFittingConfig` or a `dict` of its fields): each target
+chunk of each member; `keep_members` keeps every member’s own imputed
+value. No target column is read, except with `gap_fitting` (`True`, a
+`GapFittingConfig` or a `dict` of its fields): each target
 `columns["recorded"]` names is then fitted from the dataset’s own
 complete plots ([Filling a dataset’s
 gaps](https://gillescolling.com/resolve/articles/gap-fitting.md)). With
@@ -286,7 +286,7 @@ renamed = suite.predict(species.rename(columns={"species": "taxon"}),
 SuiteColumns()
 ```
 
-Renames the manifest’s input columns at prediction time; a field left
+Renames the manifest’s input columns at imputation time; a field left
 `None` keeps the manifest’s name. The fields follow `RoleMapping`:
 `plot_id`, `species_id`, `abundance`, `genus`, `family`, `latitude`,
 `longitude`, and `covariates` and `categoricals`, which replace the
@@ -310,13 +310,14 @@ to_pandas(probabilities=False)
 ```
 
 One row per plot, with the columns `resolve predict --suite` writes
-(`suite_prediction_columns`): `plot_id`, then per target the prediction,
-its dispersion and the four recognition columns. A vote writes the class
-label under the target’s name, `<target>_code` and `<target>_agreement`,
-and with `probabilities` a `<target>_prob_<class>` column per class. A
-mean writes `<target>_sd`, a circular mean `<target>_circular_sd`, a
-spherical mean `<target>_latitude`, `<target>_longitude` and
-`<target>_spread_km`. With kept members each adds `<target>_seed<N>`.
+(`suite_prediction_columns`): `plot_id`, then per target the imputed
+value, its dispersion and the four recognition columns. A vote writes
+the class label under the target’s name, `<target>_code` and
+`<target>_agreement`, and with `probabilities` a `<target>_prob_<class>`
+column per class. A mean writes `<target>_sd`, a circular mean
+`<target>_circular_sd`, a spherical mean `<target>_latitude`,
+`<target>_longitude` and `<target>_spread_km`. With kept members each
+adds `<target>_seed<N>`.
 
 ``` python
 table = scored.to_pandas()
@@ -325,11 +326,11 @@ table.columns.tolist()
 
 ## `SuiteTargetPrediction`
 
-One target’s predictions for every plot.
+One target’s imputed values for every plot.
 
 - `name`, `task`, `combine`, `status`, `limit`, `units`, `class_names`
   (a vote’s labels in code order) and `member_seeds`.
-- `value`: the combined prediction: an int64 class code for a vote; a
+- `value`: the combined imputed value: an int64 class code for a vote; a
   number in the target’s units for a mean, or a bearing in `[0, period)`
   for a circular mean, each `(n_plots,)`; latitude and longitude in
   degrees, `(n_plots, 2)`, for a spherical mean.
@@ -343,7 +344,7 @@ One target’s predictions for every plot.
   members from the combined point for a spherical mean (in km). `NaN`
   for a single member and where the members’ directions cancel; `None`
   for a vote.
-- `members`: with `keep_members`, each member’s own prediction,
+- `members`: with `keep_members`, each member’s own imputed value,
   `(n_members, n_plots)` or `(n_members, n_plots, 2)`.
 - `recognition` (`SpeciesRecognition`): how much of each plot the
   target’s vocabulary recognises.
@@ -354,7 +355,7 @@ One target’s predictions for every plot.
 None of these is combined into a single level of support, and none is a
 calibrated interval: the spread across seeds measures how much the
 members disagree, which is a different quantity from how far the
-combined prediction lies from the truth.
+combined imputed value lies from the truth.
 
 ``` python
 habitat = scored.target("habitat")
@@ -368,7 +369,7 @@ scored.target("elevation").dispersion[:5]
 suite_prediction_columns(predictions, probabilities=False)
 ```
 
-The predictions as `(column name, values)` pairs, one value per plot:
+The imputed values as `(column name, values)` pairs, one value per plot:
 the table `SuitePredictions.to_pandas` and the command line write.
 Labels and plot identifiers are lists of `str`, class codes int64
 tensors, every other column a float32 tensor, `NaN` where undefined.
@@ -385,11 +386,11 @@ field a rule does not fill is `None`.
 combine_vote(member_codes, n_classes, mean_probabilities=None)
 ```
 
-The class most members predict, over a `(n_members, n_plots)` stack of
+The class most members impute, over a `(n_members, n_plots)` stack of
 int64 codes, with the share of members naming it as `agreement`. A tie
 goes to the class of higher mean probability when `mean_probabilities`
 (`(n_plots, n_classes)`) is given, else to the lowest code. These
-functions combine member predictions made anywhere exactly as a suite
+functions combine values members imputed anywhere exactly as a suite
 does.
 
 ``` python

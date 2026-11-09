@@ -69,7 +69,7 @@ resolve.install_backend(force = TRUE)
 
 When the package loads without an engine library, it says so and names
 the call that installs one. Loading the package works either way; the
-functions that load data, train and predict stop with an error until the
+functions that load data, train and impute stop with an error until the
 engine library is there.
 
 ### GPU builds
@@ -310,7 +310,7 @@ to do about each.
 - Without an engine library,
   [`library(resolveR)`](https://gillescolling.com/resolve/) prints that
   the backend is not installed, and the functions that load data, train
-  or predict stop with the same message. Run
+  or impute stop with the same message. Run
   [`resolve.install_backend()`](https://gillescolling.com/resolve/reference/resolve.install_backend.md),
   or set `RESOLVE_C_HOME`.
 - When a download fails,

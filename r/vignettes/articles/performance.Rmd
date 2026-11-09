@@ -37,7 +37,7 @@ pip install resolve-core
 
 ## The survey
 
-The survey has 150 plots in the Alps, each with its elevation and habitat, and the species recorded on each plot with its genus, family and cover. The *roles* name the columns of the two tables, and each *target* is a column to predict.
+The survey has 150 plots in the Alps, each with its elevation and habitat, and the species recorded on each plot with its genus, family and cover. The *roles* name the columns of the two tables, and each *target* is a column to impute.
 
 ::: {.lang-pair}
 ```{r data}
@@ -640,4 +640,4 @@ result = pooled.fit()
 
 - [Encoding the species set](encoding.html): what each encoding does with the species of a plot.
 - [Training and reading the fit](training.html): every training setting and how to read the result.
-- [Predicting new plots](prediction.html): prediction in chunks and on the GPU.
+- [Imputing new plots](prediction.html): imputation in chunks and on the GPU.

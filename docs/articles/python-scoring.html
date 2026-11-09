@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>Python: scoring • resolveR</title>
+<title>Python: scoring • RESOLVE</title>
 <!-- favicons --><link rel="icon" type="image/png" sizes="96x96" href="../favicon-96x96.png">
 <link rel="icon" type="”image/svg+xml”" href="../favicon.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
@@ -38,7 +38,7 @@
 
     <nav class="navbar navbar-expand-lg fixed-top " aria-label="Site navigation"><div class="container">
 
-    <a class="navbar-brand me-2" href="../index.html">resolveR</a>
+    <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
     <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
 
@@ -57,15 +57,15 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="active nav-item dropdown">
+<li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><hr class="dropdown-divider"></li>
-    <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
+<li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
     <li><a class="dropdown-item" href="../articles/data-preparation.html">Preparing the two tables</a></li>
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
-    <li><a class="dropdown-item" href="../articles/prediction.html">Predicting new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Filling a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
     <li><a class="dropdown-item" href="../articles/embeddings.html">Latent and species embeddings</a></li>
@@ -76,18 +76,6 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
     <li><a class="dropdown-item" href="../articles/installation.html">Installing the engine</a></li>
-    <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
-    <li><a class="dropdown-item" href="../articles/python-data.html">Python: loading data</a></li>
-    <li><a class="dropdown-item" href="../articles/python-training.html">Python: training</a></li>
-    <li><a class="dropdown-item" href="../articles/python-prediction.html">Python: saving and predicting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-suites.html">Python: model suites</a></li>
-    <li><a class="dropdown-item" href="../articles/python-gap-fitting.html">Python: gap fitting</a></li>
-    <li><a class="dropdown-item" href="../articles/python-terrain-correction.html">Python: terrain correction</a></li>
-    <li><a class="dropdown-item" href="../articles/python-names.html">Python: species names</a></li>
-    <li><a class="dropdown-item" href="../articles/python-scoring.html">Python: scoring</a></li>
-    <li><a class="dropdown-item" href="../articles/python-engine.html">Python: the engine</a></li>
-    <li><hr class="dropdown-divider"></li>
-    <li><a class="dropdown-item" href="../articles/index.html">More articles...</a></li>
   </ul>
 </li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
@@ -128,7 +116,7 @@
     
     
 <!-- Python blocks run by tools/python_twins.py (md5 cf36e5edb179b48e2b180eb9df889249). -->
-<p>The metrics training reports, for predictions made anywhere, and the
+<p>The metrics training reports, for values imputed anywhere, and the
 measures of how much of a plot’s species list a vocabulary
 recognises.</p>
 <p><a href="python-reference.html">All of the Python reference</a></p>
@@ -151,8 +139,8 @@ recognises.</p>
 <code>Metrics</code><a class="anchor" aria-label="anchor" href="#Metrics"></a>
 </h2>
 <p>The metrics <code>TrainResult.final_metrics</code> reports, as static
-functions of a prediction tensor <code>pred</code> and a tensor of
-recorded values <code>target</code>.</p>
+functions of a tensor of imputed values <code>pred</code> and a tensor
+of recorded values <code>target</code>.</p>
 <p>Regression:</p>
 <ul>
 <li>
@@ -162,7 +150,7 @@ recorded values <code>target</code>.</p>
 <li>
 <code>r_squared(pred, target)</code>: the coefficient of
 determination, the share of the variance of <code>target</code> the
-predictions explain.</li>
+imputed values explain.</li>
 <li>
 <code>smape(pred, target, eps=1e-8)</code>: the symmetric mean
 absolute percentage error, the mean of
@@ -170,13 +158,13 @@ absolute percentage error, the mean of
 <code>[0, 2]</code>.</li>
 <li>
 <code>band_accuracy(pred, target, threshold=0.25)</code>: the share
-of predictions within a relative band of <code>threshold</code> around
-the recorded value.</li>
+of imputed values within a relative band of <code>threshold</code>
+around the recorded value.</li>
 </ul>
 <p>Classification, on int64 class codes:</p>
 <ul>
 <li>
-<code>accuracy(pred, target)</code>: the share of codes predicted
+<code>accuracy(pred, target)</code>: the share of codes imputed
 correctly.</li>
 <li>
 <code>confusion_matrix(pred, target, num_classes)</code>: the
@@ -186,7 +174,7 @@ correctly.</li>
 <code>ClassificationMetrics</code>.</li>
 <li>
 <code>accuracy_at_threshold(pred, target, confidence, threshold)</code>:
-a <code>ConfidenceMetrics</code> over the predictions whose
+a <code>ConfidenceMetrics</code> over the imputed values whose
 <code>confidence</code> reaches <code>threshold</code>, such as the
 largest class probability.</li>
 <li>
@@ -220,10 +208,10 @@ class size), <code>per_class_precision</code>,
 <h2 id="ConfidenceMetrics">
 <code>ConfidenceMetrics</code><a class="anchor" aria-label="anchor" href="#ConfidenceMetrics"></a>
 </h2>
-<p>The predictions at or above one confidence threshold:
+<p>The imputed values at or above one confidence threshold:
 <code>accuracy</code> (among them), <code>coverage</code> (their share
-of all predictions), <code>n_samples</code> (their number) and
-<code>n_total</code> (the number of predictions).</p>
+of all imputed values), <code>n_samples</code> (their number) and
+<code>n_total</code> (the number of imputed values).</p>
 </div>
 <div class="section level2">
 <h2 id="compute_species_recognition">
@@ -235,9 +223,9 @@ for the plots <code>plot_ids</code>, in that order, from their
 <code>SpeciesRecord</code>s and a <code>SpeciesVocab</code>, such as the
 one a model was trained with. The example fits a vocabulary on the
 forest plots of the survey and measures the other plots against it. It
-is reported beside a prediction: a plot whose species the model never
-saw is predicted from less of its list. A species’ records within a plot
-count once.</p>
+is reported beside an imputed value: a plot whose species the model
+never saw is imputed from less of its list. A species’ records within a
+plot count once.</p>
 <div class="sourceCode" id="cb4"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a><span class="im">import</span> pandas <span class="im">as</span> pd</span>
 <span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a><span class="im">import</span> resolve_core <span class="im">as</span> rc</span>
 <span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a></span>

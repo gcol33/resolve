@@ -35,17 +35,18 @@ fit_gaps(target, raw, recorded, species, coordinates=None, years=None,
 ```
 
 Fits one target’s gaps. `target` is a `GapTarget`. `raw` and `recorded`
-are the model’s prediction and the dataset’s recorded value per plot in
-the target’s units, `(n,)` tensors, or `(n, 2)` latitude and longitude
-for a geographic target; a `NaN` recorded value marks a gap. `species`
-is the `(n, n_species)` composition, dense or sparse CSR, an entry other
-than 0 a species present. `coordinates` is `(n, 2)` latitude and
-longitude (`NaN` where unknown) and `years` `(n,)` survey years; either
-may be `None`. `radii`, a `dict` of `similarity`, `km` and `years`
-tensors with one value per complete plot, replaces the drawn hiding
-distances, so a fit reproduces another implementation’s draw. Returns a
-`GapFit`. With no gap the recorded values come back; with fewer than two
-complete plots the gaps keep the raw prediction and the report says why.
+are the model’s imputed value and the dataset’s recorded value per plot
+in the target’s units, `(n,)` tensors, or `(n, 2)` latitude and
+longitude for a geographic target; a `NaN` recorded value marks a gap.
+`species` is the `(n, n_species)` composition, dense or sparse CSR, an
+entry other than 0 a species present. `coordinates` is `(n, 2)` latitude
+and longitude (`NaN` where unknown) and `years` `(n,)` survey years;
+either may be `None`. `radii`, a `dict` of `similarity`, `km` and
+`years` tensors with one value per complete plot, replaces the drawn
+hiding distances, so a fit reproduces another implementation’s draw.
+Returns a `GapFit`. With no gap the recorded values come back; with
+fewer than two complete plots the gaps keep the raw imputed value and
+the report says why.
 
 ``` python
 import numpy as np
@@ -68,7 +69,7 @@ fit_prediction_gaps(predictions, species, header=None, columns=None, targets=Non
                     gap_fitting=None)
 ```
 
-Fits a single model’s targets from its predictions
+Fits a single model’s targets from its imputed values
 (`Predictor.predict_dataset`) and the dataset’s tables, read in the
 order of `predictions.plot_ids` by `read_gap_tables`. `targets` maps
 each target to `{"scale": ..., "period": ..., "outputs": [...]}`: the
@@ -134,7 +135,7 @@ How a target’s values are laid out for fitting: `Linear` (the value),
 `Log` (log1p of the value, for a target whose error is measured on that
 scale; its local constant is the median), `Circular` (a bearing as its
 sine and cosine; a least-squares coefficient is a complex number that
-turns and shrinks the prediction) and `Geographic` (latitude and
+turns and shrinks the imputed value) and `Geographic` (latitude and
 longitude projected to km of a Lambert azimuthal equal-area plane
 centred on the complete plots’ geographic median, one coefficient for
 both axes).
