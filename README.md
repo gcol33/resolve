@@ -1,7 +1,7 @@
 
 # RESOLVE <img src="r/man/figures/logo.svg" align="right" height="139" alt="RESOLVE logo" />
 
-*predicting sample attributes from the species or items observed in it*
+*the elevation, area or habitat of a plot, read from its species list*
 
 <!-- badges: start -->
 
@@ -21,50 +21,53 @@ MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.or
 <img src="r/man/figures/resolve-hero.svg" alt="Species and cover of held-out example plot A139 pooled into one latent vector, read out as elevation (predicted 713 m, observed 679 m; R squared 0.85 over 30 held-out plots) and habitat (observed forest, probability 0.89)" width="100%">
 </p>
 
-RESOLVE predicts attributes of a sample from the set of things observed
-in it, such as the area, elevation or habitat type of a vegetation plot
-from its species list.
+RESOLVE predicts properties of a vegetation plot from the species
+recorded in it: the plot’s area, elevation, slope, survey year or
+habitat type, from the species list and, where recorded, the cover of
+each species. Any sample described by a list of items with counts fits
+the same model.
 
-A sample’s composition is a variable-length set, and the model pools the
-effect of each entity, weighted by its abundance, into one latent
-representation of the sample. Every target is read off that
-representation, so a continuous target and a categorical one are fitted
-together. The fit holds out a share of the samples and reports metrics
-per target, so you can compare encodings and inputs on your own data and
-choose the model to keep.
+A species list has no fixed length, so the model pools the species of a
+plot, each weighted by its cover, into one vector and reads every target
+off that vector. Elevation (a regression) and habitat (a classification)
+are then fitted by one model. Training holds out a share of the plots
+and reports each target’s error on them, which is how you compare
+encodings and inputs on your own data before deciding which model to
+keep.
 
 RESOLVE lets you:
 
 - **Predict several targets from one encoder.** Regression and
-  classification targets share the latent representation. A target
-  labelled on only some of the samples keeps the rest in the fit when
-  its missing labels are masked.
-- **Encode the species set five ways.** Feature hashing, learned
-  embeddings, an explicit abundance vector, rank pooling over shared
-  species, genus and family tables, and a transformer over species
+  classification targets share the pooled vector. A target labelled on
+  part of the plots can be masked where the label is missing, and those
+  plots still train the other targets.
+- **Encode the species list five ways.** Feature hashing, learned
+  species embeddings, a cover vector over the vocabulary, rank pooling
+  over species, genus and family tables, or a transformer over species
   tokens.
 - **Add covariates, coordinates and taxonomy.** Numeric covariates,
-  string covariates and coordinates enter the same encoder. Genus and
-  family give a species the model never saw a fallback identity.
-- **Pretrain without labels.** Self-supervised tasks train the encoder
-  on composition alone before a supervised fit.
-- **Score with several models at once.** A model suite combines trained
-  models and reports, per sample, the combined prediction and how far
-  the models agree.
+  string covariates and coordinates go into the same encoder. Genus and
+  family stand in for a species that was absent from the training data.
+- **Pretrain without labels.** Self-supervised tasks fit the encoder on
+  species lists alone before the supervised fit.
+- **Score with several models at once.** A suite of trained models
+  reports, per plot, the combined prediction and how far its members
+  agree.
 - **Use R, Python or the command line.** The engine is a C++ library on
-  libtorch, the C++ core of [PyTorch](https://pytorch.org/), and the R
-  package, the Python package and the `resolve` executable are bindings
-  over it, so a model trained from one loads in any other.
+  libtorch, the C++ core of [PyTorch](https://pytorch.org/). The R
+  package, the Python package and the `resolve` executable call it, so a
+  model trained in one loads in the others.
 
-The [tests
+On every push the [tests
 workflow](https://github.com/gcol33/resolve/actions/workflows/tests.yml)
-builds the engine and runs its C++ tests, the command-line end-to-end
-tests and the Python binding tests on every push, and the R package goes
-through R CMD check. The feature-hashing encoder follows [Weinberger et
-al. (2009)](https://doi.org/10.1145/1553374.1553516) and the transformer
+builds the engine and runs the C++ tests, the command-line end-to-end
+tests and the Python binding tests; the R package goes through R CMD
+check. Feature hashing follows [Weinberger et
+al. (2009)](https://doi.org/10.1145/1553374.1553516), the transformer
 encoder [Vaswani et
-al. (2017)](https://doi.org/10.48550/arXiv.1706.03762). Cite the RESOLVE
-version to identify the implementation and defaults used in an analysis.
+al. (2017)](https://doi.org/10.48550/arXiv.1706.03762). Report the
+RESOLVE version with an analysis, since defaults have changed between
+versions.
 
 ## Installation
 
@@ -217,48 +220,48 @@ result.final_metrics
 
 ## Encoding the species set
 
-The species set is encoded before the sample encoder sees it: feature
-hashing (`"hash"`), learned embeddings of the most abundant species
-(`"embed"`), an abundance vector over the vocabulary (`"sparse"`),
-species, genus and family tables pooled by an abundance-weighted mean
+A plot’s species list becomes a fixed-width input in one of five ways:
+feature hashing (`"hash"`), learned embeddings of the most abundant
+species (`"embed"`), a cover vector over the vocabulary (`"sparse"`),
+species, genus and family tables pooled by a cover-weighted mean
 (`"rank_pool"`), or species tokens with self-attention
 (`"transformer"`). The mode is set in the dataset’s `config`, as
-`config = list(species_encoding = "rank_pool")`. Above it, the sample
-encoder can be a multilayer perceptron, FT-Transformer, TabNet, SAINT,
-ExcelFormer, TraitNet or a graph network. [Encoding the species
+`config = list(species_encoding = "rank_pool")`. The encoder that takes
+this input can be a multilayer perceptron, FT-Transformer, TabNet,
+SAINT, ExcelFormer, TraitNet or a graph network. [Encoding the species
 set](https://gillescolling.com/resolve/articles/encoding.html) compares
-the modes on the survey.
+the five modes on the survey from the example above.
 
 ## Reading the fit
 
-The trainer keeps the held-out plots and gives per-plot residuals, class
-probabilities and calibration bins, and `resolve.cross_validate()`
-refits the model on each of k folds, with spatial blocks when the plots
-have coordinates. A predictor also returns each plot’s latent
-representation, to cluster, project or pass to another model. [Training
-and reading the
-fit](https://gillescolling.com/resolve/articles/training.html) covers
-the settings and the held-out fold, and [Latent and species
-embeddings](https://gillescolling.com/resolve/articles/embeddings.html)
-the latent space.
+The trainer keeps the held-out plots and gives their residuals, class
+probabilities and calibration bins. `resolve.cross_validate()` refits
+the model on each of k folds, in spatial blocks when the plots have
+coordinates. A predictor can also return the pooled vector of each plot,
+which clusters, projects or feeds another model like any other
+embedding. The settings and the held-out fold are in [Training and
+reading the
+fit](https://gillescolling.com/resolve/articles/training.html); what the
+pooled vectors look like on the survey is in [Latent and species
+embeddings](https://gillescolling.com/resolve/articles/embeddings.html).
 
 ## Large data and GPUs
 
 The engine runs on CUDA when its build has it. A run that exhausts
-device memory halves its batch size and retries, and an interrupted run
-resumes from its last checkpoint. [Large data and
-GPUs](https://gillescolling.com/resolve/articles/performance.html)
-covers batch size, learning-rate schedules, mixed precision and the
-memory settings, and [The command
+device memory halves its batch size and retries; an interrupted run
+resumes from its last checkpoint. Batch size, learning-rate schedules,
+mixed precision and the memory settings are in [Large data and
+GPUs](https://gillescolling.com/resolve/articles/performance.html). [The
+command
 line](https://gillescolling.com/resolve/articles/command-line.html)
-trains and predicts without R or Python.
+trains and predicts with no R or Python installed.
 
 ## Documentation
 
 Start with [Predicting plot attributes from species
 lists](https://gillescolling.com/resolve/articles/resolveR.html): one
 path from two tables to a trained model and its predictions. Every code
-block has an R and a Python version, and the [Python view of Get
+block on the site has an R and a Python version; the [Python view of Get
 started](https://gillescolling.com/resolve/articles/resolveR.html?lang=python)
 opens with Python selected.
 
@@ -294,10 +297,11 @@ opens with Python selected.
 ## Getting help
 
 Questions and bug reports go to the [GitHub
-issues](https://github.com/gcol33/resolve/issues). A bug report is
-easiest to act on with a small reproducible example, for instance made
-with [reprex](https://reprex.tidyverse.org/), and the output of
-`resolve.version()` or `resolve_core.__version__`.
+issues](https://github.com/gcol33/resolve/issues). For a bug, a small
+reproducible example (for instance made with
+[reprex](https://reprex.tidyverse.org/)) and the output of
+`resolve.version()` or `resolve_core.__version__` make it much quicker
+to find.
 
 ## Contributing
 

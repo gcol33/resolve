@@ -33,6 +33,12 @@ latent space.
 - [Installing the
   engine](https://gillescolling.com/resolve/articles/installation.md):
 
+### App
+
+The released models in the browser, on your own tables.
+
+- [RESOLVE App](https://gillescolling.com/resolve/articles/app.md):
+
 ### Python reference
 
 The Python package’s classes and functions, grouped as the R reference

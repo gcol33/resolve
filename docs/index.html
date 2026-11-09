@@ -81,6 +81,7 @@
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Setup</h6></li>
     <li><a class="dropdown-item" href="articles/installation.html">Installing the engine</a></li>
+    <li><a class="dropdown-item" href="articles/app.html">RESOLVE App</a></li>
     <li><a class="dropdown-item" href="articles/python-reference.html">Python reference</a></li>
     <li><a class="dropdown-item" href="articles/python-data.html">Python: loading data</a></li>
     <li><a class="dropdown-item" href="articles/python-training.html">Python: training</a></li>
@@ -99,6 +100,7 @@
 <li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="search.json">
 </form></li>
+<li class="nav-item"><a class="nav-link" href="articles/app.html">RESOLVE App</a></li>
 <li class="nav-item"><a class="external-link nav-link" href="https://github.com/gcol33/resolve" aria-label="GitHub"><span class="fa fa-github"></span></a></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-lightswitch" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true" aria-label="Light switch"><span class="fa fa-sun"></span></button>
@@ -120,38 +122,29 @@
 <img src="logo.svg" class="logo" alt=""><h1 id="resolve-">RESOLVE <a class="anchor" aria-label="anchor" href="#resolve-"></a>
 </h1>
 </div>
-<p><em>predicting sample attributes from the species or items observed in it</em></p>
+<p><em>the elevation, area or habitat of a plot, read from its species list</em></p>
 <!-- badges: start -->
 
 <p align="center">
-<div class="svg-container"><button type="button" class="btn btn-primary btn-copy-svg" title="Copy SVG to clipboard" aria-label="Copy SVG to clipboard" data-bs-toggle="tooltip" data-bs-placement="left"><i class="fa fa-copy"></i></button><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 640" role="img" aria-label="Species and cover of held-out example plot A139 pooled into one latent vector, read out as elevation (predicted 713 m, observed 679 m; R squared 0.85 over 30 held-out plots) and habitat (observed forest, probability 0.89)" font-family="'Segoe UI', Helvetica, Arial, sans-serif" class="inline-svg" style="width:100%;height:auto;" role="img" aria-label="Species and cover of held-out example plot A139 pooled into one latent vector, read out as elevation (predicted 713 m, observed 679 m; R squared 0.85 over 30 held-out plots) and habitat (observed forest, probability 0.89)"><title>Species and cover of held-out example plot A139 pooled into one latent vector, read out as elevation (predicted 713 m, observed 679 m; R squared 0.85 over 30 held-out plots) and habitat (observed forest, probability 0.89)</title>
-<title>Species and cover of held-out example plot A139 pooled into one latent vector, read out as elevation (predicted 713 m, observed 679 m; R squared 0.85 over 30 held-out plots) and habitat (observed forest, probability 0.89)</title>
-<g fill="none" stroke="#4F8C4B" stroke-opacity="0.45" stroke-linecap="round"><path d="M580 96C701.5 96 701.5 293.1 823 293.1" stroke-width="14"/><path d="M580 160C701.5 160 701.5 300.8 823 300.8" stroke-width="13"/><path d="M580 224C701.5 224 701.5 308.5 823 308.5" stroke-width="9.7"/><path d="M580 288C701.5 288 701.5 316.2 823 316.2" stroke-width="8.6"/><path d="M580 352C701.5 352 701.5 323.8 823 323.8" stroke-width="7.6"/><path d="M580 416C701.5 416 701.5 331.5 823 331.5" stroke-width="6.3"/><path d="M580 480C701.5 480 701.5 339.2 823 339.2" stroke-width="5.6"/><path d="M580 544C701.5 544 701.5 346.9 823 346.9" stroke-width="3.5"/></g>
-<path d="M857 320C978.5 320 978.5 212 1100 212" fill="none" stroke="#3C80B5" stroke-width="5" stroke-opacity="0.6" stroke-linecap="round"/>
-<path d="M857 320C978.5 320 978.5 478 1100 478" fill="none" stroke="#3C80B5" stroke-width="5" stroke-opacity="0.6" stroke-linecap="round"/>
-<text x="80" y="107" font-size="30" fill="#868C92" text-anchor="start" font-weight="normal" font-style="italic">Quercus robur</text><rect x="400" y="85" width="150" height="22" rx="4" fill="#4F8C4B"/><text x="80" y="171" font-size="30" fill="#868C92" text-anchor="start" font-weight="normal" font-style="italic">Dactylis glomerata</text><rect x="400" y="149" width="137.2" height="22" rx="4" fill="#4F8C4B"/><text x="80" y="235" font-size="30" fill="#868C92" text-anchor="start" font-weight="normal" font-style="italic">Quercus petraea</text><rect x="400" y="213" width="95.7" height="22" rx="4" fill="#4F8C4B"/><text x="80" y="299" font-size="30" fill="#868C92" text-anchor="start" font-weight="normal" font-style="italic">Trifolium pratense</text><rect x="400" y="277" width="83" height="22" rx="4" fill="#4F8C4B"/><text x="80" y="363" font-size="30" fill="#868C92" text-anchor="start" font-weight="normal" font-style="italic">Fagus sylvatica</text><rect x="400" y="341" width="70.2" height="22" rx="4" fill="#4F8C4B"/><text x="80" y="427" font-size="30" fill="#868C92" text-anchor="start" font-weight="normal" font-style="italic">Picea abies</text><rect x="400" y="405" width="54.3" height="22" rx="4" fill="#4F8C4B"/><text x="80" y="491" font-size="30" fill="#868C92" text-anchor="start" font-weight="normal" font-style="italic">Acer pseudoplatanus</text><rect x="400" y="469" width="44.7" height="22" rx="4" fill="#4F8C4B"/><text x="80" y="555" font-size="30" fill="#868C92" text-anchor="start" font-weight="normal" font-style="italic">Abies alba</text><rect x="400" y="533" width="19.1" height="22" rx="4" fill="#4F8C4B"/>
-<rect x="823" y="76" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.86"/><rect x="823" y="83.6" width="34" height="7.9" fill="#C2554C" fill-opacity="0.16"/><rect x="823" y="91.2" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.77"/><rect x="823" y="98.9" width="34" height="7.9" fill="#C2554C" fill-opacity="0.19"/><rect x="823" y="106.5" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="114.1" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="121.8" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="129.4" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="137" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="144.6" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="152.2" width="34" height="7.9" fill="#C2554C" fill-opacity="0.19"/><rect x="823" y="159.9" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.71"/><rect x="823" y="167.5" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="175.1" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.64"/><rect x="823" y="182.8" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="190.4" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.17"/><rect x="823" y="198" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="205.6" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.17"/><rect x="823" y="213.2" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.60"/><rect x="823" y="220.9" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.93"/><rect x="823" y="228.5" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="236.1" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="243.8" width="34" height="7.9" fill="#C2554C" fill-opacity="0.15"/><rect x="823" y="251.4" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="259" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.70"/><rect x="823" y="266.6" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="274.2" width="34" height="7.9" fill="#C2554C" fill-opacity="0.18"/><rect x="823" y="281.9" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.88"/><rect x="823" y="289.5" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.28"/><rect x="823" y="297.1" width="34" height="7.9" fill="#3C80B5" fill-opacity="1.00"/><rect x="823" y="304.8" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.78"/><rect x="823" y="312.4" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="320" width="34" height="7.9" fill="#C2554C" fill-opacity="0.19"/><rect x="823" y="327.6" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="335.2" width="34" height="7.9" fill="#C2554C" fill-opacity="0.18"/><rect x="823" y="342.9" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="350.5" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="358.1" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.15"/><rect x="823" y="365.8" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="373.4" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="381" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="388.6" width="34" height="7.9" fill="#C2554C" fill-opacity="0.16"/><rect x="823" y="396.2" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.18"/><rect x="823" y="403.9" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.87"/><rect x="823" y="411.5" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="419.1" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.73"/><rect x="823" y="426.8" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="434.4" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="442" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="449.6" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="457.2" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="464.9" width="34" height="7.9" fill="#C2554C" fill-opacity="0.15"/><rect x="823" y="472.5" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.50"/><rect x="823" y="480.1" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.26"/><rect x="823" y="487.8" width="34" height="7.9" fill="#C2554C" fill-opacity="0.19"/><rect x="823" y="495.4" width="34" height="7.9" fill="#C2554C" fill-opacity="0.19"/><rect x="823" y="503" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="510.6" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="518.2" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.62"/><rect x="823" y="525.9" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="533.5" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.84"/><rect x="823" y="541.1" width="34" height="7.9" fill="#C2554C" fill-opacity="0.20"/><rect x="823" y="548.8" width="34" height="7.9" fill="#3C80B5" fill-opacity="0.16"/><rect x="823" y="556.4" width="34" height="7.9" fill="#C2554C" fill-opacity="0.17"/><rect x="823" y="76" width="34" height="488" fill="none" stroke="#8C9298" stroke-width="2" rx="3"/>
-<rect x="1140" y="122" width="380" height="180" fill="none" stroke="#9AA0A6" stroke-width="2"/><path d="M1140 302L1520 122" stroke="#9AA0A6" stroke-width="2" stroke-dasharray="8 7"/><text x="1140" y="100" font-size="36" fill="#868C92" text-anchor="start" font-weight="bold" font-style="normal">elevation</text><circle cx="1377.3" cy="198.7" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1242" cy="266.7" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1283" cy="252.1" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1182.4" cy="258.6" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1295.8" cy="224.3" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1311.8" cy="214.7" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1208.6" cy="281.4" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1437.7" cy="161.8" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1238" cy="279" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1289.6" cy="244.7" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1170.2" cy="269" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1383.8" cy="200.5" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1172.8" cy="268.9" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1181.5" cy="271.1" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1465.2" cy="147.1" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1310.2" cy="244.7" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1157.3" cy="240.9" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1353.3" cy="191.7" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1327.2" cy="214.9" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1234.5" cy="269.6" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1303.6" cy="227.2" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1439.2" cy="146.7" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1389.5" cy="160.6" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1348.8" cy="205.1" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1277.6" cy="257.2" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1421.5" cy="171.4" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1392.1" cy="186.1" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1171" cy="279.8" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1263.3" cy="267.9" r="7" fill="#8C959F" fill-opacity="0.8"/><circle cx="1200" cy="271" r="11" fill="#3C80B5"/><circle cx="1200" cy="271" r="20" fill="none" stroke="#3C80B5" stroke-width="4"/>
-<text x="1140" y="422" font-size="30" fill="#868C92" text-anchor="start" font-weight="normal" font-style="normal">alpine</text><rect x="1300" y="400" width="220" height="24" rx="4" fill="#9AA0A6" fill-opacity="0.5"/><rect x="1300" y="400" width="7.3" height="24" rx="4" fill="#8C959F"/><text x="1140" y="466" font-size="30" fill="#868C92" text-anchor="start" font-weight="normal" font-style="normal">forest</text><rect x="1300" y="444" width="220" height="24" rx="4" fill="#9AA0A6" fill-opacity="0.5"/><rect x="1300" y="444" width="195.6" height="24" rx="4" fill="#3C80B5"/><text x="1140" y="510" font-size="30" fill="#868C92" text-anchor="start" font-weight="normal" font-style="normal">grassland</text><rect x="1300" y="488" width="220" height="24" rx="4" fill="#9AA0A6" fill-opacity="0.5"/><rect x="1300" y="488" width="7.7" height="24" rx="4" fill="#8C959F"/><text x="1140" y="554" font-size="30" fill="#868C92" text-anchor="start" font-weight="normal" font-style="normal">wetland</text><rect x="1300" y="532" width="220" height="24" rx="4" fill="#9AA0A6" fill-opacity="0.5"/><rect x="1300" y="532" width="9.4" height="24" rx="4" fill="#8C959F"/><text x="1140" y="364" font-size="36" fill="#868C92" text-anchor="start" font-weight="bold" font-style="normal">habitat</text>
-</svg></div></p>
-<p>RESOLVE predicts attributes of a sample from the set of things observed in it, such as the area, elevation or habitat type of a vegetation plot from its species list.</p>
-<p>A sample’s composition is a variable-length set, and the model pools the effect of each entity, weighted by its abundance, into one latent representation of the sample. Every target is read off that representation, so a continuous target and a categorical one are fitted together. The fit holds out a share of the samples and reports metrics per target, so you can compare encodings and inputs on your own data and choose the model to keep.</p>
+<img src="reference/figures/resolve-hero.svg" alt="Species and cover of held-out example plot A139 pooled into one latent vector, read out as elevation (predicted 713 m, observed 679 m; R squared 0.85 over 30 held-out plots) and habitat (observed forest, probability 0.89)" width="100%"></p>
+<p>RESOLVE predicts properties of a vegetation plot from the species recorded in it: the plot’s area, elevation, slope, survey year or habitat type, from the species list and, where recorded, the cover of each species. Any sample described by a list of items with counts fits the same model.</p>
+<p>A species list has no fixed length, so the model pools the species of a plot, each weighted by its cover, into one vector and reads every target off that vector. Elevation (a regression) and habitat (a classification) are then fitted by one model. Training holds out a share of the plots and reports each target’s error on them, which is how you compare encodings and inputs on your own data before deciding which model to keep.</p>
 <p>RESOLVE lets you:</p>
 <ul>
 <li>
-<strong>Predict several targets from one encoder.</strong> Regression and classification targets share the latent representation. A target labelled on only some of the samples keeps the rest in the fit when its missing labels are masked.</li>
+<strong>Predict several targets from one encoder.</strong> Regression and classification targets share the pooled vector. A target labelled on part of the plots can be masked where the label is missing, and those plots still train the other targets.</li>
 <li>
-<strong>Encode the species set five ways.</strong> Feature hashing, learned embeddings, an explicit abundance vector, rank pooling over shared species, genus and family tables, and a transformer over species tokens.</li>
+<strong>Encode the species list five ways.</strong> Feature hashing, learned species embeddings, a cover vector over the vocabulary, rank pooling over species, genus and family tables, or a transformer over species tokens.</li>
 <li>
-<strong>Add covariates, coordinates and taxonomy.</strong> Numeric covariates, string covariates and coordinates enter the same encoder. Genus and family give a species the model never saw a fallback identity.</li>
+<strong>Add covariates, coordinates and taxonomy.</strong> Numeric covariates, string covariates and coordinates go into the same encoder. Genus and family stand in for a species that was absent from the training data.</li>
 <li>
-<strong>Pretrain without labels.</strong> Self-supervised tasks train the encoder on composition alone before a supervised fit.</li>
+<strong>Pretrain without labels.</strong> Self-supervised tasks fit the encoder on species lists alone before the supervised fit.</li>
 <li>
-<strong>Score with several models at once.</strong> A model suite combines trained models and reports, per sample, the combined prediction and how far the models agree.</li>
+<strong>Score with several models at once.</strong> A suite of trained models reports, per plot, the combined prediction and how far its members agree.</li>
 <li>
-<strong>Use R, Python or the command line.</strong> The engine is a C++ library on libtorch, the C++ core of <a href="https://pytorch.org/" class="external-link">PyTorch</a>, and the R package, the Python package and the <code>resolve</code> executable are bindings over it, so a model trained from one loads in any other.</li>
+<strong>Use R, Python or the command line.</strong> The engine is a C++ library on libtorch, the C++ core of <a href="https://pytorch.org/" class="external-link">PyTorch</a>. The R package, the Python package and the <code>resolve</code> executable call it, so a model trained in one loads in the others.</li>
 </ul>
-<p>The <a href="https://github.com/gcol33/resolve/actions/workflows/tests.yml" class="external-link">tests workflow</a> builds the engine and runs its C++ tests, the command-line end-to-end tests and the Python binding tests on every push, and the R package goes through R CMD check. The feature-hashing encoder follows <a href="https://doi.org/10.1145/1553374.1553516" class="external-link">Weinberger et al. (2009)</a> and the transformer encoder <a href="https://doi.org/10.48550/arXiv.1706.03762" class="external-link">Vaswani et al. (2017)</a>. Cite the RESOLVE version to identify the implementation and defaults used in an analysis.</p>
+<p>On every push the <a href="https://github.com/gcol33/resolve/actions/workflows/tests.yml" class="external-link">tests workflow</a> builds the engine and runs the C++ tests, the command-line end-to-end tests and the Python binding tests; the R package goes through R CMD check. Feature hashing follows <a href="https://doi.org/10.1145/1553374.1553516" class="external-link">Weinberger et al. (2009)</a>, the transformer encoder <a href="https://doi.org/10.48550/arXiv.1706.03762" class="external-link">Vaswani et al. (2017)</a>. Report the RESOLVE version with an analysis, since defaults have changed between versions.</p>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
 </h2>
@@ -279,22 +272,22 @@
 <div class="section level2">
 <h2 id="encoding-the-species-set">Encoding the species set<a class="anchor" aria-label="anchor" href="#encoding-the-species-set"></a>
 </h2>
-<p>The species set is encoded before the sample encoder sees it: feature hashing (<code>"hash"</code>), learned embeddings of the most abundant species (<code>"embed"</code>), an abundance vector over the vocabulary (<code>"sparse"</code>), species, genus and family tables pooled by an abundance-weighted mean (<code>"rank_pool"</code>), or species tokens with self-attention (<code>"transformer"</code>). The mode is set in the dataset’s <code>config</code>, as <code>config = list(species_encoding = "rank_pool")</code>. Above it, the sample encoder can be a multilayer perceptron, FT-Transformer, TabNet, SAINT, ExcelFormer, TraitNet or a graph network. <a href="https://gillescolling.com/resolve/articles/encoding.html">Encoding the species set</a> compares the modes on the survey.</p>
+<p>A plot’s species list becomes a fixed-width input in one of five ways: feature hashing (<code>"hash"</code>), learned embeddings of the most abundant species (<code>"embed"</code>), a cover vector over the vocabulary (<code>"sparse"</code>), species, genus and family tables pooled by a cover-weighted mean (<code>"rank_pool"</code>), or species tokens with self-attention (<code>"transformer"</code>). The mode is set in the dataset’s <code>config</code>, as <code>config = list(species_encoding = "rank_pool")</code>. The encoder that takes this input can be a multilayer perceptron, FT-Transformer, TabNet, SAINT, ExcelFormer, TraitNet or a graph network. <a href="https://gillescolling.com/resolve/articles/encoding.html">Encoding the species set</a> compares the five modes on the survey from the example above.</p>
 </div>
 <div class="section level2">
 <h2 id="reading-the-fit">Reading the fit<a class="anchor" aria-label="anchor" href="#reading-the-fit"></a>
 </h2>
-<p>The trainer keeps the held-out plots and gives per-plot residuals, class probabilities and calibration bins, and <code><a href="reference/resolve.cross_validate.html">resolve.cross_validate()</a></code> refits the model on each of k folds, with spatial blocks when the plots have coordinates. A predictor also returns each plot’s latent representation, to cluster, project or pass to another model. <a href="https://gillescolling.com/resolve/articles/training.html">Training and reading the fit</a> covers the settings and the held-out fold, and <a href="https://gillescolling.com/resolve/articles/embeddings.html">Latent and species embeddings</a> the latent space.</p>
+<p>The trainer keeps the held-out plots and gives their residuals, class probabilities and calibration bins. <code><a href="reference/resolve.cross_validate.html">resolve.cross_validate()</a></code> refits the model on each of k folds, in spatial blocks when the plots have coordinates. A predictor can also return the pooled vector of each plot, which clusters, projects or feeds another model like any other embedding. The settings and the held-out fold are in <a href="https://gillescolling.com/resolve/articles/training.html">Training and reading the fit</a>; what the pooled vectors look like on the survey is in <a href="https://gillescolling.com/resolve/articles/embeddings.html">Latent and species embeddings</a>.</p>
 </div>
 <div class="section level2">
 <h2 id="large-data-and-gpus">Large data and GPUs<a class="anchor" aria-label="anchor" href="#large-data-and-gpus"></a>
 </h2>
-<p>The engine runs on CUDA when its build has it. A run that exhausts device memory halves its batch size and retries, and an interrupted run resumes from its last checkpoint. <a href="https://gillescolling.com/resolve/articles/performance.html">Large data and GPUs</a> covers batch size, learning-rate schedules, mixed precision and the memory settings, and <a href="https://gillescolling.com/resolve/articles/command-line.html">The command line</a> trains and predicts without R or Python.</p>
+<p>The engine runs on CUDA when its build has it. A run that exhausts device memory halves its batch size and retries; an interrupted run resumes from its last checkpoint. Batch size, learning-rate schedules, mixed precision and the memory settings are in <a href="https://gillescolling.com/resolve/articles/performance.html">Large data and GPUs</a>. <a href="https://gillescolling.com/resolve/articles/command-line.html">The command line</a> trains and predicts with no R or Python installed.</p>
 </div>
 <div class="section level2">
 <h2 id="documentation">Documentation<a class="anchor" aria-label="anchor" href="#documentation"></a>
 </h2>
-<p>Start with <a href="https://gillescolling.com/resolve/articles/resolveR.html">Predicting plot attributes from species lists</a>: one path from two tables to a trained model and its predictions. Every code block has an R and a Python version, and the <a href="https://gillescolling.com/resolve/articles/resolveR.html?lang=python">Python view of Get started</a> opens with Python selected.</p>
+<p>Start with <a href="https://gillescolling.com/resolve/articles/resolveR.html">Predicting plot attributes from species lists</a>: one path from two tables to a trained model and its predictions. Every code block on the site has an R and a Python version; the <a href="https://gillescolling.com/resolve/articles/resolveR.html?lang=python">Python view of Get started</a> opens with Python selected.</p>
 <ul>
 <li>
 <a href="https://gillescolling.com/resolve/articles/data-preparation.html">Preparing the two tables</a>: roles, targets, missing values and reusing a training vocabulary.</li>
@@ -317,7 +310,7 @@
 <div class="section level2">
 <h2 id="getting-help">Getting help<a class="anchor" aria-label="anchor" href="#getting-help"></a>
 </h2>
-<p>Questions and bug reports go to the <a href="https://github.com/gcol33/resolve/issues" class="external-link">GitHub issues</a>. A bug report is easiest to act on with a small reproducible example, for instance made with <a href="https://reprex.tidyverse.org/" class="external-link">reprex</a>, and the output of <code><a href="reference/resolve.version.html">resolve.version()</a></code> or <code>resolve_core.__version__</code>.</p>
+<p>Questions and bug reports go to the <a href="https://github.com/gcol33/resolve/issues" class="external-link">GitHub issues</a>. For a bug, a small reproducible example (for instance made with <a href="https://reprex.tidyverse.org/" class="external-link">reprex</a>) and the output of <code><a href="reference/resolve.version.html">resolve.version()</a></code> or <code>resolve_core.__version__</code> make it much quicker to find.</p>
 </div>
 <div class="section level2">
 <h2 id="contributing">Contributing<a class="anchor" aria-label="anchor" href="#contributing"></a>
@@ -420,83 +413,5 @@ Compositional Data_. R package version 1.1.0,
 
 
 
-  <script>
-/* SVG Copy Button Functionality */
-(function() {
-  "use strict";
-
-  // Initialize SVG copy buttons after DOM is ready
-  document.addEventListener("DOMContentLoaded", function() {
-    if (typeof ClipboardJS === "undefined") {
-      console.warn("ClipboardJS not loaded - SVG copy buttons disabled");
-      return;
-    }
-
-    // Initialize clipboard for SVG copy buttons
-    var svgClipboard = new ClipboardJS(".btn-copy-svg", {
-      text: function(trigger) {
-        var container = trigger.closest(".svg-container");
-        if (!container) return "";
-
-        var svg = container.querySelector("svg");
-        if (!svg) return "";
-
-        // Clone SVG to avoid modifying the original
-        var clone = svg.cloneNode(true);
-
-        // Remove inline-svg class (not needed in copied version)
-        clone.classList.remove("inline-svg");
-
-        // Add XML declaration and serialize
-        var serializer = new XMLSerializer();
-        var svgString = serializer.serializeToString(clone);
-
-        // Add XML declaration if not present
-        if (!svgString.startsWith("<?xml")) {
-          svgString = '<?xml version="1.0" encoding="UTF-8"?>\n' + svgString;
-        }
-
-        return svgString;
-      }
-    });
-
-    // Handle success
-    svgClipboard.on("success", function(e) {
-      var btn = e.trigger;
-      var originalTitle = btn.getAttribute("data-bs-original-title") || btn.getAttribute("title");
-
-      // Update tooltip to show "Copied!"
-      btn.setAttribute("data-bs-original-title", "Copied!");
-      var tooltip = bootstrap.Tooltip.getInstance(btn);
-      if (tooltip) {
-        tooltip.show();
-      }
-
-      // Reset after delay
-      setTimeout(function() {
-        btn.setAttribute("data-bs-original-title", originalTitle);
-      }, 1500);
-
-      e.clearSelection();
-    });
-
-    // Handle error
-    svgClipboard.on("error", function(e) {
-      var btn = e.trigger;
-      btn.setAttribute("data-bs-original-title", "Press Ctrl+C to copy");
-      var tooltip = bootstrap.Tooltip.getInstance(btn);
-      if (tooltip) {
-        tooltip.show();
-      }
-    });
-
-    // Initialize tooltips for SVG copy buttons
-    var svgCopyButtons = document.querySelectorAll(".btn-copy-svg");
-    svgCopyButtons.forEach(function(btn) {
-      new bootstrap.Tooltip(btn, { container: "body" });
-    });
-  });
-})();
-</script>
-</body>
+  </body>
 </html>

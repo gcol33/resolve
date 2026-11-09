@@ -4,6 +4,17 @@
 
 ### Added
 
+- **The released models in the browser.** The site’s new “RESOLVE App”
+  page predicts habitat, altitude, slope, plot area, survey year and
+  location for your own species and header tables with the released
+  suites, inside the browser tab: the tables are not uploaded, and the
+  models, the terrain field and its corrections are read from Zenodo. It
+  fills a variable’s gaps where the header records it on some plots,
+  corrects altitude and slope with the elevation model, and downloads
+  the predictions as a CSV and the map as an SVG. On the 300 example
+  plots it gives the same CSV, byte for byte, as the page checked
+  against the engine.
+
 - **Seeding the starting weights from R and Python.** Training seeds its
   split and shuffle with its `seed` argument, but a new model’s weights
   and its dropout draw from torch’s own generator, which only the CLI
@@ -217,6 +228,14 @@
 
 ### Fixed
 
+- **Training in R on Linux with a system BLAS.** libtorch calls the BLAS
+  of the MKL it carries, but R had already loaded its own BLAS, and on
+  Linux the backend’s calls bound to that one. With OpenBLAS 0.3.32
+  (Ubuntu 26.04) every batched matrix product crashed, so an
+  FT-Transformer fit ended in a segfault. The R package now loads the
+  backend so that libtorch’s calls stay inside libtorch
+  (`RTLD_DEEPBIND`, as the torch package loads lantern); a test preloads
+  a stand-in BLAS and checks the fit never reaches it.
 - **Terrain descriptors near 50, 60, 70 and 80 degrees north.** GLO-30’s
   tiles widen their columns at these parallels (3,600 to 2,400 columns
   per degree at 50 N, and so on). A cell one row past a tile’s edge kept

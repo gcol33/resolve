@@ -1,0 +1,72 @@
+#resolve-app {
+  --panel: #ffffff; --text: #1d2321; --muted: #5d6763; --line: #dcdfd9;
+  --accent: #2f6b4f; --accent-text: #ffffff; --soft: #eaf1ec; --warn: #9a5b13; --error: #a2322b;
+  color: var(--text); margin-top: 16px;
+}
+[data-bs-theme="dark"] #resolve-app {
+  --panel: #1c211f; --text: #e6ebe8; --muted: #9ba6a1; --line: #303835;
+  --accent: #6fb38f; --accent-text: #0e1411; --soft: #22302a; --warn: #e0a95a; --error: #ef8a80;
+}
+#resolve-app * { box-sizing: border-box; }
+#resolve-app [hidden] { display: none !important; }
+#resolve-app h2 { font-size: 1.05rem; margin: 0 0 12px; }
+#resolve-app .panel { min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+                      padding: 18px; margin-bottom: 16px; }
+#resolve-app .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; }
+#resolve-app label.file { display: block; font-weight: 600; margin-bottom: 6px; }
+#resolve-app .hint, #resolve-app small, #resolve-app .note, #resolve-app #table-note, #resolve-app #map-note,
+#resolve-app #download-status { color: var(--muted); font-size: 0.86rem; }
+#resolve-app .info { font-size: 0.86rem; color: var(--muted); min-height: 1.3em; margin-top: 6px; word-break: break-word; }
+#resolve-app .error { color: var(--error); font-size: 0.86rem; min-height: 1.3em; }
+#resolve-app input[type=file] { width: 100%; font: inherit; color: var(--muted); }
+#resolve-app code { font-size: 0.85em; background: var(--soft); padding: 1px 4px; border-radius: 4px; }
+#resolve-app .fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; margin-top: 10px;
+                       font-size: 0.86rem; }
+#resolve-app .fields label { display: contents; }
+#resolve-app .fields select { font: inherit; padding: 3px 6px; min-width: 0; max-width: 100%; border: 1px solid var(--line);
+                              border-radius: 6px; background: var(--panel); color: inherit; }
+#resolve-app .chip small { color: var(--muted); }
+#resolve-app .chip select { font: inherit; font-size: 0.85rem; padding: 1px 4px; border: 1px solid var(--line);
+                            border-radius: 6px; background: var(--panel); color: inherit; }
+#resolve-app .spelling { display: block; margin-top: 12px; }
+#resolve-app .spelling select { font: inherit; padding: 3px 6px; max-width: 100%; border: 1px solid var(--line);
+                                border-radius: 6px; background: var(--panel); color: inherit; }
+#resolve-app #targets { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+#resolve-app .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--line);
+                     border-radius: 999px; cursor: pointer; font-size: 0.9rem; margin: 0; }
+#resolve-app .chip:has(input:checked) { border-color: var(--accent); background: var(--soft); }
+#resolve-app .actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 14px; }
+#resolve-app button { font: inherit; font-weight: 600; padding: 9px 18px; border-radius: 8px; border: 1px solid var(--accent);
+                      background: var(--accent); color: var(--accent-text); cursor: pointer; }
+#resolve-app button.secondary { background: transparent; color: var(--accent); }
+#resolve-app button.link { background: none; border: 0; padding: 0; margin-top: 10px; color: var(--accent);
+                           font-weight: 500; font-size: 0.86rem; text-decoration: underline; }
+#resolve-app #busy { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
+#resolve-app #busy-verb { color: var(--accent); font-weight: 600; min-width: 15ch; }
+#resolve-app #busy-bar { flex: 1 1 200px; height: 10px; accent-color: var(--accent); }
+#resolve-app #busy-share { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 0.86rem; }
+#resolve-app .spinner { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent);
+                        border-radius: 50%; animation: resolve-app-spin 0.9s linear infinite; }
+@keyframes resolve-app-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { #resolve-app .spinner { animation: none; } }
+#resolve-app button:disabled { opacity: 0.45; cursor: not-allowed; }
+#resolve-app #status { font-size: 0.92rem; }
+#resolve-app .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; max-height: 480px; }
+#resolve-app table { border-collapse: collapse; width: 100%; font-size: 0.86rem; font-variant-numeric: tabular-nums;
+                     margin: 0; color: inherit; }
+#resolve-app th, #resolve-app td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+#resolve-app th { position: sticky; top: 0; background: var(--panel); font-weight: 600; }
+#resolve-app #summary { list-style: none; padding: 0; margin: 0 0 12px; display: grid;
+                        grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 4px 16px; }
+#resolve-app #summary li { font-size: 0.9rem; }
+#resolve-app #gaps { margin: 0 0 12px; padding-left: 18px; font-size: 0.9rem; }
+#resolve-app .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+#resolve-app .count { color: var(--muted); }
+#resolve-app #unknown { margin: 0 0 12px; font-size: 0.9rem; }
+#resolve-app #unknown summary { cursor: pointer; color: var(--warn); }
+#resolve-app #unknown ul, #resolve-app #moved ul { columns: 2 220px; padding-left: 18px; margin: 6px 0 0; }
+#resolve-app #moved { margin: 0 0 12px; font-size: 0.9rem; }
+#resolve-app #moved summary { cursor: pointer; color: var(--muted); }
+#resolve-app #o-workers { width: 5.5em; font: inherit; padding: 4px 6px; margin-left: 4px; }
+#resolve-app #map { height: 380px; border-radius: 8px; border: 1px solid var(--line); margin-top: 8px; }
+#resolve-app .notes { color: var(--muted); font-size: 0.82rem; margin-top: 24px; }
