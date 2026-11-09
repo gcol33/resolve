@@ -1,0 +1,6 @@
+{
+  "description": "vegetation plots from 40 European countries in sPlotOpen (Sabatini et al. 2021, CC BY 4.0)",
+  "source": "https://doi.org/10.25829/idiv.3474-40-3292",
+  "species": "species.csv",
+  "header": "header.csv"
+}

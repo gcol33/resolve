@@ -75,9 +75,13 @@ navbar:
     - news
     right:
     - search
+    - app
     - github
     - lightswitch
   components:
+    app:
+      text: RESOLVE App
+      href: articles/app.html
     reference:
       text: Reference
       menu:
@@ -185,6 +189,11 @@ articles:
 - title: Setup
   navbar: Setup
   contents: articles/installation
+- title: App
+  desc: |
+    The released models in the browser, on your own tables.
+  navbar: ~
+  contents: articles/app
 - title: Python reference
   desc: |
     The Python package's classes and functions, grouped as the R reference is.

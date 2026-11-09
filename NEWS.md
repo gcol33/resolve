@@ -4,6 +4,208 @@
 
 ### Added
 
+- **The released models in the browser.** The site's new "RESOLVE App"
+  page predicts habitat, altitude, slope, plot area, survey year and location
+  for your own species and header tables with the released suites, inside
+  the browser tab: the tables are not uploaded, and the models, the terrain
+  field and its corrections are read from Zenodo. It fills a variable's gaps
+  where the header records it on some plots, corrects altitude and slope with
+  the elevation model, and downloads the predictions as a CSV and the map as
+  an SVG. On the 300 example plots it gives the same CSV, byte for byte, as
+  the page checked against the engine.
+- **Seeding the starting weights from R and Python.** Training seeds its
+  split and shuffle with its `seed` argument, but a new model's weights and
+  its dropout draw from torch's own generator, which only the CLI seeded, so
+  two identical runs from R or Python ended at different numbers.
+  `resolve.manual_seed()` (R), `resolve_core.manual_seed()` (Python) and
+  `resolve_capi_manual_seed()` (C ABI) seed it, the CPU and CUDA generators
+  alike, and `resolve train --seed` goes through the same function. A fit after
+  the same seed now ends at the same weights. The documentation's examples run
+  after `manual_seed(42)`, so their numbers stay put from one site build to
+  the next.
+- **Checkpoints with their weights in half precision.**
+  `resolve_core.write_half_checkpoint(source, destination)` stores a
+  checkpoint's float32 weights as float16 and keeps every other entry
+  (configuration, scalers, vocabularies) as written. Loading casts each
+  weight back into the float32 model, so the arithmetic is unchanged and only
+  the weights' rounding differs; a released member's file halves (24.8 to
+  12.7 MB). On the released suites' seed-0 members, each on 3,594 to 14,802
+  plots, the half-precision checkpoints give the same EUNIS class on every
+  plot and move altitude by a median 0.13 m (at most 1 m), survey year by at
+  most 0.3 years, latitude and longitude by at most 0.09 degrees and plot
+  area by a median 0.02 m2.
+
+- **Terrain correction: altitude and slope combined with an elevation
+  model.** An elevation model read at a precise coordinate is close to a
+  plot's recorded altitude, and far off where the coordinate is coarse or
+  wrong; a prediction from species composition errs the other way round. A
+  suite target can now ship a correction (manifest format 4) that learns,
+  per plot, how much to trust each: a small network returns softmax weights
+  over the suite's prediction, the elevation-model descriptor at the
+  coordinate and the same descriptor over 1 km, plus a bounded offset, from
+  the prediction, the descriptors, the recorded location uncertainty, the
+  members' spread and species recognition, fitted by the mean absolute
+  error. The descriptors come from the elevation model the suite ships, from
+  elevation grids, or from the caller's own columns:
+  `resolve.predict.suite(terrain = "field" | "columns" | list(source =
+  "grids", grids = dir))`, `SuitePredictor.predict(terrain=...)`,
+  `resolve predict --suite --terrain field|grids|columns`. The prediction is
+  never replaced: `<target>_terrain` comes back beside it with the weight of
+  each source (`<target>_terrain_w_resolve`, `_w_dem`, `_w_dem_1km`) and the
+  descriptors read (`<target>_dem`, `<target>_dem_1km`). A plot without a
+  descriptor keeps its prediction.
+- **Terrain fields: an elevation model a suite can ship.** Four descriptors
+  (elevation, the 1 km mean, the four-neighbour slope of the nearest cell and
+  the inclination of the 1 km square) are read through one definition from
+  elevation grids (`.npy` tiles listed in a `tiles.json`) or from a terrain
+  field file. The shipped format codes each tile with a bounded error, as the
+  SZ compressor does: cells rounded to multiples of twice `max_error`,
+  Lorenzo prediction in 64 x 64 blocks, Golomb-Rice codes with a run mode
+  for flat ground, no compression library; on the GLO-30 tiles measured,
+  0.76 to 1.97 bits per cell at a 2 m bound (1.15 m RMSE), against 32 for
+  the delivered floats. A neural format (a multiresolution hash encoding per
+  tile) is built too; at equal size it stayed 4 to 10 times further from the
+  grid, without a bound, and is kept as a format, not shipped.
+  `resolve.terrain_descriptors()`, `resolve.encode_terrain_grids()`,
+  `resolve.fit_terrain_correction()`, `resolve.terrain_correction()`,
+  `resolve.fit_terrain_tile()`, `resolve.assemble_terrain_field()`; the same
+  in Python and the C ABI; `resolve terrain encode | fit-field | assemble |
+  describe | fit-correction`. See the article *Correcting altitude and slope
+  with an elevation model*.
+
+- **Species names resolved before prediction.** A model reads a plot's
+  species by matching names exactly against the names its training records
+  were resolved to, so a species written as it was entered in the field, by a
+  current accepted name, or misspelled counted as a species the model never
+  saw. With `names`, each name is read as written where the vocabulary holds
+  it, else through the release's name table (`names.json`: EVA's entered
+  names, then the synonymy of the plant backbones, each row naming its
+  source), else as the nearest token or table name within
+  `max_edit_distance` edits (Damerau-Levenshtein, letter case ignored, the
+  name's genus first; default 1, 0 turns it off), used only when every
+  nearest name stands for one species, and otherwise left as written. The
+  names not found as written are reported with their route, the name a
+  spelling was read via, its distance and their record counts. Every load
+  that encodes against a trained vocabulary takes it
+  (`ResolveDataset::load(..., names)`), and a suite resolves each target
+  against its own vocabulary (`SuitePredictOptions::names`,
+  `SuiteTargetPrediction::species_names`). Python:
+  `SuitePredictor.predict(names=path, max_edit_distance=1)`,
+  `ResolveDataset.from_csv_with_vocabs(..., names=SpeciesNames(...))`,
+  `resolve_names()`, `NameTable`, `NameResolver`. R:
+  `resolve.predict.suite(names = path)`, `resolve.dataset.csv(names = )` /
+  `resolve.dataset.frame(names = )`, `dataset$species_names()`,
+  `resolve.names()`. CLI: `resolve predict --names names.json`
+  (`--spelling-only`, `--max-edit-distance`, `--names-report`). C ABI:
+  `resolve_dataset_load` takes a `names` argument, suite predict a `names`
+  option, `resolve_names_resolve` resolves a list. Without `names` every name
+  is read as written and the encoding is unchanged.
+
+- **Plot totals as model inputs.** `ModelConfig.plot_totals` adds two numbers
+  per plot to the rank-pool and transformer features: the combined cover of
+  every species the plot records, taken as overlapping at random
+  (1 - prod(1 - cover / 100)), and log(1 + its species count), with a flag
+  saying they are present. Both are counted before any species budget or cap.
+  The rank-pool encoding's weights sum to one over each plot and the
+  transformer's attention pooling averages over its species, so neither saw
+  how many species a plot holds, and the rank-pool encoding not how much they
+  cover. A plot read without cover (no abundance column, or under cover
+  dropout) has a combined cover of 0. `ModelConfig.plot_totals_dropout`
+  withholds a training plot's totals at the given probability, so the model
+  also predicts without them; `Predictor.plot_totals = False` (Python),
+  `resolve.plot_totals(predictor, FALSE)` (R) or
+  `resolve_predictor_set_plot_totals` (C ABI) then withholds them at
+  prediction. Off by default: a model without it is built and trained exactly
+  as before, and older checkpoints load unchanged.
+  `ResolveDataset.pool_totals` exposes the per-plot values.
+
+- **Exact cosine nearest neighbours in every binding.** The search retrieval
+  augmentation runs is now public: `resolve_core.nearest_by_cosine(queries,
+  reference, k, exclude_self=False)` (Python, returns `(indices,
+  similarities)`), `resolve.nearest_by_cosine(queries, reference, k,
+  excludeSelf = FALSE, device = "cpu")` (R, 1-based indices) and
+  `resolve_nearest_by_cosine` (C ABI). For each query row it returns the `k`
+  most similar reference rows by cosine similarity, most similar first; on
+  rows of species presence that is the Ochiai index. `exclude_self` is the
+  leave-one-out search over one set of plots: query row i is reference row i
+  and is never its own neighbour, while a plot with an identical species list
+  still is. The search is exact and blocked over both the queries (4096 rows
+  at a time) and the reference, so a set of several hundred thousand plots is
+  searched in bounded memory; it runs on the reference's device, and queries
+  held in host memory are moved over one block at a time. Its products are
+  full float32 on the GPU even after a training run in the same process has
+  turned TF32 on (`TrainConfig.allow_tf32`), which moved similarities by about
+  1e-3 and could reorder near ties; this also holds for the neighbours
+  `Predictor.set_retrieval` blends.
+
+- **Gap fitting.** A dataset that records a target on most of its plots and
+  lacks it on some can now fill the gaps from its own complete plots. Gap
+  fitting chooses, on the complete plots, among the complete plots' centre,
+  the raw prediction, the prediction calibrated by least squares, the median
+  of the most similar plots in species composition or of the nearest plots by
+  great-circle distance, and the prediction stacked with those medians, with
+  the neighbour count chosen from 1, 3, 5, 10, 20, 50. The choice is tested at
+  the distance the gaps actually are: each complete plot is predicted with the
+  complete plots nearer to it than a gap is to its nearest complete plot
+  hidden, in species similarity, km and survey years (nearest-neighbour
+  distance matching), and judged by the target's own error (mean absolute
+  error; log1p for a log-scale target; circular error for a bearing; median km
+  for a location). Gaps with and without coordinates choose apart. The raw
+  prediction is never replaced: `<target>_fitted` and `<target>_fit_method`
+  come back beside it, with a report of every candidate's error and the
+  coefficients and neighbour count chosen. Suites:
+  `SuitePredictor.predict(gap_fitting=True, columns={"recorded": {...},
+  "survey_year": ...})` (Python), `resolve.predict.suite(gapFitting = TRUE,
+  columns = list(recorded = ...))` (R), `resolve predict --suite ...
+  --fit-gaps --recorded year=Year` (CLI, report in
+  `<output>.gap_fitting.json`; `--no-spatial` reads composition only). A
+  single model: `resolve_core.fit_prediction_gaps`,
+  `resolve.fit_prediction_gaps`, `resolve predict --model ... --fit-gaps`.
+  On vectors: `resolve_core.fit_gaps`, `resolve.fit_gaps`,
+  `resolve_fit_gaps` (C ABI). Regression targets only. Undated plots that are
+  probably older than the dated ones, and plots without coordinates from an
+  area with no georeferenced plots, are better served by the raw prediction;
+  the article "Filling a dataset's gaps" says why.
+
+- **Gap fitting reaches a continent's plots.** The matched test compares
+  every complete plot with the others, and by species an exact search does
+  that pair by pair: at the similarities plots share (the 50th neighbour near
+  0.45 in EVA) no bound prunes enough to change it. Gap fitting now finds its
+  species neighbours in a neighbour graph built by nearest-neighbour descent
+  (Dong, Charikar & Li 2011): each plot's neighbours' neighbours are compared
+  with it, round after round, under each plot's hiding rules, beside an
+  unrestricted graph that leads the search past the hidden plots. The lists
+  are the same on any thread count. Its spatial neighbours come from an exact
+  k-d tree over positions on the sphere. On EVA's altitude, with its own
+  blanks as the gaps, 50,000 plots took 3.9 s against 106 s for the exact
+  search, with the same method and `k` on every gap and the fitted values a
+  median 0.15 m apart (95% within 0.47 m); all 1,485,542 plots took 212 s on
+  one workstation. A plot sharing a species with fewer than `k` complete
+  plots lists the lowest-row plots sharing none after them, as before.
+
+- **Great-circle nearest neighbours.** `nearest_by_great_circle` is the
+  exact blocked search by haversine distance
+  (`resolve_core.nearest_by_great_circle`), and `nearest_by_cosine` takes
+  sparse rows. A row without coordinates has no neighbours and lists -1.
+
+- **Faster prediction for rank_pool and transformer models.** These
+  encodings pad every plot's species list to the widest plot of the
+  dataset, so a forward over plots of mixed size spent most of its work on
+  padding. Prediction now takes the plots in order of how many species they
+  hold, in chunks of at most 512 cut to each chunk's widest plot, and hands
+  the results back in the input order; the predictions are unchanged. The
+  context suite's altitude and slope for 5,000 EVA plots, with terrain
+  correction, take 2.75 s on the CPU instead of 6.2 s.
+
+- **Python 3.14.** The wheels cover CPython 3.10 to 3.14 (cibuildwheel
+  4.3.5; the free-threaded 3.14t build is not made), and CI runs the
+  `resolve_core` suite on 3.11 to 3.14. The extension compiles with the
+  nanobind that pip installs for the interpreter (2.11 or newer, a build
+  requirement) instead of a copy fetched from git at v2.4.0; the suite passes
+  on 3.14.4 with nanobind 3.0.1, torch 2.14 and pandas 3.0.
+
+### Fixed
+
 - **Seeding the starting weights from R and Python.** Training seeds its
   split and shuffle with its `seed` argument, but a new model's weights and
   its dropout draw from torch's own generator, which only the CLI seeded, so

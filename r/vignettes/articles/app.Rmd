@@ -1,0 +1,114 @@
+---
+title: "RESOLVE App"
+---
+
+Predict a vegetation plot's EUNIS habitat, altitude, slope, plot area, survey
+year and location from the species recorded on it, with the released models
+trained on the European Vegetation Archive's plots. The models run in your
+browser: your files are read inside this tab and are not uploaded anywhere.
+The page downloads the models and the elevation model from Zenodo
+([models](https://doi.org/10.5281/zenodo.24077609),
+[elevation model](https://doi.org/10.5281/zenodo.24075925)), the map from
+OpenStreetMap and, for a map download, the country boundaries from Eurostat
+GISCO.
+
+```{=html}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="../app/app.css">
+<div id="resolve-app"
+     data-models-pack="https://zenodo.org/api/records/24077609/files/models.tar/content"
+     data-models-index="https://zenodo.org/api/records/24077609/files/models.index.json/content"
+     data-terrain-field="https://zenodo.org/api/records/24075925/files/terrain_field.bin/content"
+     data-examples="../app/examples/">
+  <div class="panel">
+    <h2 id="plots">1. Your plots</h2>
+    <p class="hint" id="example-note" hidden></p>
+    <div class="grid">
+      <div>
+        <label class="file" for="species-file">Species table</label>
+        <input type="file" id="species-file" accept=".csv,.tsv,.txt">
+        <div class="hint">One row per species record: plot ID, species name (World Flora Online),
+          and optionally cover (%), genus and family. Columns are recognised by name, Darwin Core terms included;
+          change any choice below.</div>
+        <div class="fields" id="species-fields"></div>
+        <div class="info" id="species-info"></div>
+        <div class="error" id="species-error"></div>
+      </div>
+      <div>
+        <label class="file" for="header-file">Header table <span class="hint">(optional)</span></label>
+        <input type="file" id="header-file" accept=".csv,.tsv,.txt">
+        <div class="hint">One row per plot: plot ID, latitude and longitude (WGS84), and year and month
+          or a date. Each variable uses the coordinates and date where the tables give them; section 2 names
+          what each is predicted from. A variable the header records on some plots (survey year, coordinates,
+          altitude, slope, plot area) has its gaps fitted on the plots that record it.</div>
+        <div class="fields" id="header-fields"></div>
+        <div class="info" id="header-info"></div>
+        <div class="error" id="header-error"></div>
+      </div>
+    </div>
+    <label class="hint spelling">Misspelled species names: read as the nearest known name within
+      <select id="o-spelling">
+        <option value="0">no edits (names as written)</option>
+        <option value="1" selected>1 edit</option>
+        <option value="2">2 edits (can also rename species the models never saw)</option>
+      </select></label>
+    <button type="button" class="link" id="reset-data" hidden>Use the example data again</button>
+  </div>
+
+  <div class="panel">
+    <h2 id="models">2. Models</h2>
+    <div id="targets"></div>
+    <div class="actions">
+      <button id="run" disabled>Predict</button>
+      <label class="hint">Workers <input type="number" id="o-workers" min="1" max="16" step="1"
+        aria-describedby="workers-note"></label>
+      <span id="workers-note" class="hint"></span>
+      <label class="hint">Weights
+        <select id="o-precision">
+          <option value="half" selected>half precision (half the download)</option>
+          <option value="full">full precision (the engine's own)</option>
+        </select></label>
+      <label class="hint" id="terrain-option" hidden><input type="checkbox" id="o-terrain" checked>
+        Terrain correction of altitude and slope</label>
+      <span id="download-status"></span>
+    </div>
+  </div>
+
+  <div class="panel" id="results" hidden>
+    <h2 id="predictions">3. Predictions</h2>
+    <div id="busy" hidden><span class="spinner" aria-hidden="true"></span><span id="busy-verb"></span>
+      <progress id="busy-bar" max="1" value="0"></progress><span id="busy-share"></span></div>
+    <div id="status" role="status"></div>
+    <ul id="summary"></ul>
+    <ul id="gaps" hidden></ul>
+    <details id="unknown" hidden><summary></summary>
+      <p class="hint">Names are matched exactly against the World Flora Online names the models were trained on;
+        check the spelling and the accepted name of each.</p><ul></ul></details>
+    <details id="moved" hidden><summary></summary>
+      <p class="hint">The models know these species by the name the European Vegetation Archive resolved its records to.
+        Each name is matched through EVA's own records, the synonymy of a taxonomic backbone, or its spelling,
+        named beside it.</p><ul></ul></details>
+    <div class="table-wrap"><table id="table"></table></div>
+    <div id="table-note"></div>
+    <div id="map-note"></div>
+    <div id="map" hidden></div>
+    <div class="actions"><button id="download" class="secondary" disabled>Download all predictions (CSV)</button>
+      <button id="download-map" class="secondary" disabled>Download map (SVG)</button></div>
+  </div>
+
+  <div class="notes">
+    <p>Habitat combines its five seeds by majority vote (agreement is the share of seeds naming the class);
+    numeric variables by their mean and standard deviation across seeds; location by the spherical mean and the
+    median distance of the seeds from it. "Species recognised" is the share of the plot's cover held by species
+    the models know. A terrain-corrected altitude or slope weighs the prediction against the elevation model
+    (GLO-30) at the plot and over the square kilometre around it, by the plot's location uncertainty, the seeds'
+    spread and how many of its species the models know; the elevation model's own values stand beside it.</p>
+    <p>Terrain values produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space
+    GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved. The organisations
+    in charge of the Copernicus programme by law or by delegation do not incur any liability for any use of the
+    Copernicus WorldDEM-30.</p>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script type="module" src="../app/app.js"></script>
+```
