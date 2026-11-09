@@ -1,6 +1,6 @@
 # RESOLVE Changelog
 
-## v1.1.0 (unreleased)
+## v1.1.0 (2026-11-09)
 
 ### Added
 
@@ -12,7 +12,10 @@
   where the header records it on some plots, corrects altitude and slope with
   the elevation model, and downloads the predictions as a CSV and the map as
   an SVG. On the 300 example plots it gives the same CSV, byte for byte, as
-  the page checked against the engine.
+  the page checked against the engine. A service worker (`coi_sw.js`) makes
+  the page cross-origin isolated on hosts that cannot send the headers for
+  it, such as GitHub Pages, so the gap fitting's neighbour searches run on
+  several threads there too.
 - **Seeding the starting weights from R and Python.** Training seeds its
   split and shuffle with its `seed` argument, but a new model's weights and
   its dropout draw from torch's own generator, which only the CLI seeded, so
@@ -205,6 +208,12 @@
   on 3.14.4 with nanobind 3.0.1, torch 2.14 and pandas 3.0.
 
 ### Fixed
+
+- **Neighbour searches over plots without species.** The species-set
+  neighbour search read a plot's species through a subscript one past the end
+  of its rank table when the plot was the last with species or no plot had
+  any; builds with standard-library assertions (GCC 15 on Ubuntu 26.04)
+  aborted there, for example in gap fitting without a species composition.
 
 - **Training in R on Linux with a system BLAS.** libtorch calls the BLAS of
   the MKL it carries, but R had already loaded its own BLAS, and on Linux the
