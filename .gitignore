@@ -100,7 +100,7 @@ Thumbs.db
 .mypy_cache/
 
 # Reference implementation (untracked)
-reference/
+/reference/
 
 # Build artifacts and logs
 *.bat
