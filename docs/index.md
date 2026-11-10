@@ -191,9 +191,9 @@ fit <- resolve.train.dataset(dataset, verbose = FALSE)
 metrics <- fit$result$final_metrics
 round(unlist(metrics$elevation[c("mae", "r2")]), 3)
 #>     mae      r2 
-#> 285.938   0.625
+#> 207.150   0.799
 round(metrics$habitat$accuracy, 3)
-#> [1] 0.733
+#> [1] 0.9
 ```
 
 Training holds out 20 % of the plots and stops when their loss no longer

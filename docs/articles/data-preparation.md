@@ -386,7 +386,7 @@ describes them.
 
 fit <- resolve.train.dataset(masked, maxEpochs = 50L, verbose = FALSE)
 fit$result$final_metrics$habitat$n_labelled
-#> [1] 23
+#> [1] 21
 ```
 
 ``` python
@@ -624,7 +624,7 @@ new_plots <- resolve.dataset.csv(
 )
 preds <- resolve.predict.dataset(predictor, new_plots)
 head(round(preds$predictions$elevation))
-#> [1]  940 1106 1351 1445  912  568
+#> [1] 1339 1070 1318 1399  935  804
 ```
 
 ``` python

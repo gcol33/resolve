@@ -125,7 +125,7 @@ fit <- resolve.train.dataset(dataset, verbose = FALSE)
 metrics <- fit$result$final_metrics
 round(unlist(metrics$elevation[c("mae", "rmse", "r2", "band_25")]), 3)
 #>     mae    rmse      r2 band_25 
-#> 247.110 317.298   0.691   0.600
+#> 184.887 263.782   0.835   0.800
 round(metrics$habitat$accuracy, 3)
 #> [1] 0.8
 ```
@@ -173,12 +173,12 @@ head(data.frame(plot = preds$plot_ids,
                 elevation = round(preds$predictions$elevation),
                 observed = plots$elevation[match(preds$plot_ids, plots$plot_id)]))
 #>   plot elevation observed
-#> 1 A001      2258     2188
-#> 2 A002      1283      568
-#> 3 A003      1969     2129
-#> 4 A004      2284     2267
-#> 5 A005      2074     2145
-#> 6 A006      1785     1799
+#> 1 A001      2245     2188
+#> 2 A002       589      568
+#> 3 A003      2170     2129
+#> 4 A004      2300     2267
+#> 5 A005      2031     2145
+#> 6 A006      1753     1799
 ```
 
 ``` python

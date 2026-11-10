@@ -259,9 +259,9 @@ tuned <- resolve.train.dataset(mine, initFrom = parent, maxEpochs = 200L,
                                savePath = tuned_path, verbose = FALSE)
 round(unlist(tuned$result$final_metrics$elevation[c("mae", "r2")]), 3)
 #>     mae      r2 
-#> 230.266   0.793
+#> 330.691   0.559
 round(tuned$result$final_metrics$belt$accuracy, 3)
-#> [1] 0.6
+#> [1] 0.9
 ```
 
 ``` python
@@ -306,7 +306,7 @@ difference:
 resolve.train.dataset(mine, initFrom = parent, hiddenDims = c(128L, 64L),
                       maxEpochs = 1L, verbose = FALSE)
 #> Error:
-#> ! Trainer::init_from: the model cannot start from 'C:\Users\GILLES~1\AppData\Local\Temp\Rtmp6f90Wc/habitat_suite\seed_1.pt':
+#> ! Trainer::init_from: the model cannot start from 'C:\Users\GILLES~1\AppData\Local\Temp\RtmpIfbnF4/habitat_suite\seed_1.pt':
 #>   - model config 'hidden_dims' is [128,64] here and [64,32] in the parent
 #>   - parameter 'encoder.mlp.0.weight' is [128, 84] here and [64, 84] in the parent
 #>   - parameter 'encoder.mlp.0.bias' is [128] here and [64] in the parent
@@ -428,13 +428,13 @@ manifest names.
 regional <- resolve.load_suite(derived_dir)
 imputed <- as.data.frame(resolve.predict.suite(regional, my_species, header = my_plots))
 head(imputed[, c("plot_id", "elevation", "elevation_sd", "belt", "belt_agreement")])
-#>   plot_id elevation elevation_sd    belt belt_agreement
-#> 1    A101 1226.5195    242.57042 montane            1.0
-#> 2    A102 1058.5676    303.69885 montane            1.0
-#> 3    A103 1257.6179     38.15796 montane            1.0
-#> 4    A104 1368.0400    434.61578 montane            0.5
-#> 5    A105 1064.0995     10.84846 montane            1.0
-#> 6    A106  997.3163    345.45728 montane            1.0
+#>   plot_id elevation elevation_sd      belt belt_agreement
+#> 1    A101 1099.3857     93.83761   montane              1
+#> 2    A102  796.1698     86.63970   montane              1
+#> 3    A103 1315.7102     21.52360   montane              1
+#> 4    A104 1655.3939     22.68698 subalpine              1
+#> 5    A105 1204.4548     82.34686   montane              1
+#> 6    A106  708.1572     31.01231   montane              1
 ```
 
 ``` python

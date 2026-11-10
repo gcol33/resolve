@@ -335,8 +335,8 @@ here elevation on its own scale.</p>
 <span><span class="va">elevation</span> <span class="op">&lt;-</span> <span class="va">fits</span><span class="op">$</span><span class="va">elevation</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/table.html" class="external-link">table</a></span><span class="op">(</span><span class="va">elevation</span><span class="op">$</span><span class="va">method</span><span class="op">)</span></span>
 <span><span class="co">#&gt; </span></span>
-<span><span class="co">#&gt;              recorded stack_species_spatial </span></span>
-<span><span class="co">#&gt;                    60                    15</span></span></code></pre></div>
+<span><span class="co">#&gt;      recorded stack_species </span></span>
+<span><span class="co">#&gt;            60            15</span></span></code></pre></div>
 <div class="sourceCode" id="cb10"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a>columns <span class="op">=</span> {<span class="st">"plot_id"</span>: <span class="st">"plot_id"</span>, <span class="st">"species_id"</span>: <span class="st">"species"</span>,</span>
 <span id="cb10-2"><a href="#cb10-2" tabindex="-1"></a>           <span class="st">"latitude"</span>: <span class="st">"lat"</span>, <span class="st">"longitude"</span>: <span class="st">"lon"</span>,</span>
 <span id="cb10-3"><a href="#cb10-3" tabindex="-1"></a>           <span class="st">"recorded"</span>: {<span class="st">"elevation"</span>: <span class="st">"elevation_recorded"</span>}}</span>
@@ -360,7 +360,7 @@ beside the model’s own imputed value.</p>
 <span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>model <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/mean.html" class="external-link">mean</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/MathFun.html" class="external-link">abs</a></span><span class="op">(</span><span class="va">preds</span><span class="op">$</span><span class="va">predictions</span><span class="op">$</span><span class="va">elevation</span><span class="op">[</span><span class="va">gaps</span><span class="op">]</span> <span class="op">-</span> <span class="va">truth</span><span class="op">[</span><span class="va">gaps</span><span class="op">]</span><span class="op">)</span><span class="op">)</span>,</span>
 <span>  fitted <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/mean.html" class="external-link">mean</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/MathFun.html" class="external-link">abs</a></span><span class="op">(</span><span class="va">elevation</span><span class="op">$</span><span class="va">fitted</span><span class="op">[</span><span class="va">gaps</span><span class="op">]</span> <span class="op">-</span> <span class="va">truth</span><span class="op">[</span><span class="va">gaps</span><span class="op">]</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt;    model   fitted </span></span>
-<span><span class="co">#&gt; 274.8799 154.4564</span></span></code></pre></div>
+<span><span class="co">#&gt; 252.8713 157.1722</span></span></code></pre></div>
 <div class="sourceCode" id="cb12"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb12-1"><a href="#cb12-1" tabindex="-1"></a>order <span class="op">=</span> pd.Index(my_plots.plot_id.astype(<span class="bu">str</span>)).get_indexer(<span class="bu">list</span>(preds.plot_ids))</span>
 <span id="cb12-2"><a href="#cb12-2" tabindex="-1"></a>truth <span class="op">=</span> my_plots.elevation.to_numpy()[order]</span>
 <span id="cb12-3"><a href="#cb12-3" tabindex="-1"></a>gaps <span class="op">=</span> my_plots.elevation_recorded.isna().to_numpy()[order]</span>
@@ -386,16 +386,16 @@ plots), the method chosen and what it fitted.</p>
 <div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">located</span> <span class="op">&lt;-</span> <span class="va">elevation</span><span class="op">$</span><span class="va">report</span><span class="op">$</span><span class="va">groups</span><span class="op">$</span><span class="va">located</span></span>
 <span><span class="va">located</span><span class="op">$</span><span class="va">method</span></span>
-<span><span class="co">#&gt; [1] "stack_species_spatial"</span></span>
+<span><span class="co">#&gt; [1] "stack_species"</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="va">located</span><span class="op">$</span><span class="va">cv_error</span><span class="op">)</span>, <span class="fl">1</span><span class="op">)</span></span>
 <span><span class="co">#&gt;        local_constant               resolve          offset_slope </span></span>
-<span><span class="co">#&gt;                 576.0                 158.6                 160.4 </span></span>
+<span><span class="co">#&gt;                 576.0                 150.3                 153.7 </span></span>
 <span><span class="co">#&gt;           knn_species         stack_species           knn_spatial </span></span>
-<span><span class="co">#&gt;                 121.5                 109.5                 580.8 </span></span>
+<span><span class="co">#&gt;                 121.5                 106.6                 580.8 </span></span>
 <span><span class="co">#&gt; stack_species_spatial </span></span>
-<span><span class="co">#&gt;                 108.4</span></span>
+<span><span class="co">#&gt;                 109.3</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">located</span><span class="op">$</span><span class="va">estimated_error</span>, <span class="fl">1</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] 111.2</span></span>
+<span><span class="co">#&gt; [1] 108.4</span></span>
 <span><span class="va">elevation</span><span class="op">$</span><span class="va">report</span><span class="op">$</span><span class="va">axes</span><span class="op">$</span><span class="va">km</span><span class="op">$</span><span class="va">gap_distance</span><span class="op">$</span><span class="va">median</span></span>
 <span><span class="co">#&gt; [1] 7.379892</span></span></code></pre></div>
 <div class="sourceCode" id="cb14"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb14-1"><a href="#cb14-1" tabindex="-1"></a>located <span class="op">=</span> elevation.report[<span class="st">"groups"</span>][<span class="st">"located"</span>]</span>

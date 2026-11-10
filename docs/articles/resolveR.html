@@ -231,7 +231,7 @@ are computed on these held-out plots.</p>
 <span><span class="va">metrics</span> <span class="op">&lt;-</span> <span class="va">fit</span><span class="op">$</span><span class="va">result</span><span class="op">$</span><span class="va">final_metrics</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="va">metrics</span><span class="op">$</span><span class="va">elevation</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"mae"</span>, <span class="st">"rmse"</span>, <span class="st">"r2"</span>, <span class="st">"band_25"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt;     mae    rmse      r2 band_25 </span></span>
-<span><span class="co">#&gt; 247.110 317.298   0.691   0.600</span></span>
+<span><span class="co">#&gt; 184.887 263.782   0.835   0.800</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">metrics</span><span class="op">$</span><span class="va">habitat</span><span class="op">$</span><span class="va">accuracy</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 0.8</span></span></code></pre></div>
 <div class="sourceCode" id="cb8"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a>rc.manual_seed(<span class="dv">42</span>)</span>
@@ -276,12 +276,12 @@ the survey’s own plots again.</p>
 <span>                elevation <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">preds</span><span class="op">$</span><span class="va">predictions</span><span class="op">$</span><span class="va">elevation</span><span class="op">)</span>,</span>
 <span>                observed <span class="op">=</span> <span class="va">plots</span><span class="op">$</span><span class="va">elevation</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/match.html" class="external-link">match</a></span><span class="op">(</span><span class="va">preds</span><span class="op">$</span><span class="va">plot_ids</span>, <span class="va">plots</span><span class="op">$</span><span class="va">plot_id</span><span class="op">)</span><span class="op">]</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   plot elevation observed</span></span>
-<span><span class="co">#&gt; 1 A001      2258     2188</span></span>
-<span><span class="co">#&gt; 2 A002      1283      568</span></span>
-<span><span class="co">#&gt; 3 A003      1969     2129</span></span>
-<span><span class="co">#&gt; 4 A004      2284     2267</span></span>
-<span><span class="co">#&gt; 5 A005      2074     2145</span></span>
-<span><span class="co">#&gt; 6 A006      1785     1799</span></span></code></pre></div>
+<span><span class="co">#&gt; 1 A001      2245     2188</span></span>
+<span><span class="co">#&gt; 2 A002       589      568</span></span>
+<span><span class="co">#&gt; 3 A003      2170     2129</span></span>
+<span><span class="co">#&gt; 4 A004      2300     2267</span></span>
+<span><span class="co">#&gt; 5 A005      2031     2145</span></span>
+<span><span class="co">#&gt; 6 A006      1753     1799</span></span></code></pre></div>
 <div class="sourceCode" id="cb10"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a><span class="im">import</span> os, tempfile</span>
 <span id="cb10-2"><a href="#cb10-2" tabindex="-1"></a></span>
 <span id="cb10-3"><a href="#cb10-3" tabindex="-1"></a>path <span class="op">=</span> os.path.join(tempfile.gettempdir(), <span class="st">"model.pt"</span>)</span>

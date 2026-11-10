@@ -227,8 +227,8 @@ fits <- resolve.fit_prediction_gaps(preds, my_species, my_plots, columns = colum
 elevation <- fits$elevation
 table(elevation$method)
 #> 
-#>              recorded stack_species_spatial 
-#>                    60                    15
+#>      recorded stack_species 
+#>            60            15
 ```
 
 ``` python
@@ -257,7 +257,7 @@ gaps <- is.na(my_plots$elevation_recorded[order])
 c(model = mean(abs(preds$predictions$elevation[gaps] - truth[gaps])),
   fitted = mean(abs(elevation$fitted[gaps] - truth[gaps])))
 #>    model   fitted 
-#> 274.8799 154.4564
+#> 252.8713 157.1722
 ```
 
 ``` python
@@ -285,16 +285,16 @@ the method chosen and what it fitted.
 
 located <- elevation$report$groups$located
 located$method
-#> [1] "stack_species_spatial"
+#> [1] "stack_species"
 round(unlist(located$cv_error), 1)
 #>        local_constant               resolve          offset_slope 
-#>                 576.0                 158.6                 160.4 
+#>                 576.0                 150.3                 153.7 
 #>           knn_species         stack_species           knn_spatial 
-#>                 121.5                 109.5                 580.8 
+#>                 121.5                 106.6                 580.8 
 #> stack_species_spatial 
-#>                 108.4
+#>                 109.3
 round(located$estimated_error, 1)
-#> [1] 111.2
+#> [1] 108.4
 elevation$report$axes$km$gap_distance$median
 #> [1] 7.379892
 ```

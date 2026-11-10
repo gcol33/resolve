@@ -153,7 +153,8 @@ par(mar = c(4.5, 4.5, 3, 1))
 plot(pcs$x[, 1], pcs$x[, 2], col = colours[habitat], pch = shapes[habitat],
      xlab = "Principal component 1", ylab = "Principal component 2")
 legend("top", legend = levels(habitat), col = colours, pch = shapes,
-       horiz = TRUE, bty = "n", inset = c(0, -0.14), xpd = TRUE)
+       horiz = TRUE, bty = "n", inset = c(0, -0.14), xpd = TRUE,
+       text.width = 1.65 * strwidth(levels(habitat)))
 ```
 
 ![Scatter plot of the 150 plots on the first two principal components of
@@ -294,7 +295,7 @@ rownames(genera) <- genus_names[-1]
 similarity <- cosine(genera)
 round(sort(similarity["Quercus", ], decreasing = TRUE)[2:6], 3)
 #>     Trifolium Arrhenatherum       Festuca         Abies         Picea 
-#>         0.731         0.668         0.575         0.487         0.480
+#>         0.735         0.671         0.574         0.487         0.477
 ```
 
 ``` python
@@ -355,7 +356,7 @@ known <- species_table[-1, ]
 rownames(known) <- species_names[-1]
 round(sort(cosine(known)["Carex curvula", ], decreasing = TRUE)[2:4], 3)
 #>   Vaccinium myrtillus Arrhenatherum elatius        Silene acaulis 
-#>                 0.273                 0.221                 0.204
+#>                 0.274                 0.220                 0.201
 ```
 
 ``` python
@@ -400,8 +401,8 @@ have the highest cosine similarity to its vector.
 rownames(latent) <- out$plot_ids
 plot_similarity <- cosine(latent)
 round(sort(plot_similarity["A001", ], decreasing = TRUE)[2:6], 3)
-#>  A015  A108  A149  A098  A063 
-#> 0.992 0.991 0.987 0.987 0.986
+#>  A149  A015  A134  A121  A132 
+#> 0.999 0.998 0.998 0.998 0.998
 ```
 
 ``` python
@@ -431,8 +432,8 @@ neighbours ranks the plots by how isolated they are.
 
 nearest <- apply(plot_similarity, 1, function(s) mean(sort(s, decreasing = TRUE)[2:6]))
 round(sort(nearest)[1:5], 3)
-#>  A128  A092  A067  A140  A030 
-#> 0.703 0.773 0.866 0.880 0.901
+#>  A136  A067  A130  A114  A120 
+#> 0.643 0.694 0.800 0.819 0.823
 ```
 
 ``` python
@@ -459,11 +460,11 @@ correlates with a target is a gradient along that target.
 
 round(summary(pcs)$importance["Proportion of Variance", 1:3], 3)
 #>   PC1   PC2   PC3 
-#> 0.318 0.289 0.229
+#> 0.331 0.274 0.235
 elevation <- plots$elevation[match(out$plot_ids, plots$plot_id)]
 round(cor(pcs$x[, 1:3], elevation)[, 1], 3)
 #>    PC1    PC2    PC3 
-#> -0.686 -0.334  0.282
+#> -0.569 -0.557  0.119
 ```
 
 ``` python

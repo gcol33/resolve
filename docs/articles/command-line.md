@@ -121,7 +121,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 50
-#> Training time: 2.05709s
+#> Training time: 2.1004s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -286,7 +286,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 19
-#> Training time: 1.44837s
+#> Training time: 1.54174s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -353,7 +353,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 99
-#> Training time: 2.13898s
+#> Training time: 2.2866s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -444,7 +444,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 41
-#> Training time: 1.89428s
+#> Training time: 2.06707s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -489,7 +489,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 49
-#> Training time: 0.780039s
+#> Training time: 0.771352s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -535,9 +535,9 @@ resolve train --header plots.csv --species species.csv \
 #> Early stopping at epoch 74
 #> Cross-validation fold 3/3
 #>   Train: 97 plots, Test: 53 plots
-#> Spatial CV complete (3 folds, 5.229573s)
+#> Spatial CV complete (3 folds, 5.747937s)
 #> 
-#> Cross-validation (3 folds, 5.22957s):
+#> Cross-validation (3 folds, 5.74794s):
 #>   Fold 1 (best epoch 42):
 #>     elevation:
 #>       mae: 179.673
@@ -580,7 +580,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 73
-#> Training time: 1.94186s
+#> Training time: 2.11561s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -647,7 +647,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 18
-#> Training time: 2.39804s
+#> Training time: 2.69057s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -773,9 +773,9 @@ resolve info --model north.pt | head -n 40
 #> 
 #> Run:
 #>   resolve_version: 1.2.0
-#>   created_at: 2026-11-10T01:51:05Z
-#>   completed_at: 2026-11-10T01:51:07Z
-#>   train_time_seconds: 1.8942763
+#>   created_at: 2026-11-10T10:59:29Z
+#>   completed_at: 2026-11-10T10:59:31Z
+#>   train_time_seconds: 2.0670717
 #>   n_plots_train: 107
 #>   n_plots_test: 43
 #>   hold_out: explicit

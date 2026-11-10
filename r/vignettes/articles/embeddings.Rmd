@@ -139,7 +139,8 @@ par(mar = c(4.5, 4.5, 3, 1))
 plot(pcs$x[, 1], pcs$x[, 2], col = colours[habitat], pch = shapes[habitat],
      xlab = "Principal component 1", ylab = "Principal component 2")
 legend("top", legend = levels(habitat), col = colours, pch = shapes,
-       horiz = TRUE, bty = "n", inset = c(0, -0.14), xpd = TRUE)
+       horiz = TRUE, bty = "n", inset = c(0, -0.14), xpd = TRUE,
+       text.width = 1.65 * strwidth(levels(habitat)))
 ```
 
 ```{.python fig-alt="Scatter plot of the 150 plots on the first two principal components of their latent vectors, with one colour and point shape per habitat."}

@@ -171,7 +171,7 @@ fit <- resolve.train.dataset(dataset, maxEpochs = 200L, patience = 30L,
                              testSize = 0.2, seed = 42L, verbose = FALSE)
 result <- fit$result
 result$best_epoch
-#> [1] 94
+#> [1] 81
 length(result$train_loss)
 #> [1] 130
 ```
@@ -248,14 +248,14 @@ result$train_time_seconds > 0
 #> [1] TRUE
 round(unlist(result$final_metrics$elevation), 3)
 #> band_10 band_25 band_50     mae      r2    rmse   smape 
-#>   0.367   0.600   0.867 247.110   0.691 317.298   0.247
+#>   0.600   0.800   0.900 184.887   0.835 263.782   0.169
 round(unlist(result$final_metrics$habitat), 3)
 #>    accuracy        f1_0        f1_1        f1_2        f1_3    macro_f1 
-#>       0.800       0.857       0.818       0.842       0.667       0.796 
+#>       0.800       0.857       0.846       0.600       0.800       0.776 
 #> precision_0 precision_1 precision_2 precision_3    recall_0    recall_1 
-#>       0.750       0.818       0.800       0.800       1.000       0.818 
+#>       0.857       0.786       0.750       0.800       0.857       0.917 
 #>    recall_2    recall_3 weighted_f1 
-#>       0.889       0.571       0.794
+#>       0.500       0.800       0.792
 ```
 
 ``` python
@@ -315,12 +315,12 @@ baseline’s.
 elevation <- result$baselines$elevation
 round(unlist(elevation[c("baseline_mae", "model_mae", "skill_score")]), 3)
 #> baseline_mae    model_mae  skill_score 
-#>      531.731      247.110        0.741
+#>      561.847      184.887        0.838
 habitat <- result$baselines$habitat
 round(unlist(habitat[c("baseline_accuracy", "model_accuracy",
                        "accuracy_lift")]), 3)
 #> baseline_accuracy    model_accuracy     accuracy_lift 
-#>             0.367             0.800             0.433
+#>               0.4               0.8               0.4
 ```
 
 ``` python
@@ -349,8 +349,8 @@ the terms add up to the total.
 held_out <- result$test_loss_by_target
 sapply(held_out, function(h) round(c(first = h[1], last = h[length(h)]), 3))
 #>       elevation habitat
-#> first     0.880   1.391
-#> last      0.467   0.878
+#> first     0.962   1.387
+#> last      0.307   0.709
 ```
 
 ``` python
@@ -585,7 +585,7 @@ fit_nca <- resolve.train.dataset(dataset, maxEpochs = 100L, verbose = FALSE,
                                  lossConfig = "nca", ncaTemperature = 0.2,
                                  ncaNeighbors = 16L, ncaWeight = 0.3)
 round(fit_nca$result$final_metrics$habitat$accuracy, 3)
-#> [1] 0.8
+#> [1] 0.733
 ```
 
 ``` python
@@ -787,7 +787,7 @@ fit_small <- resolve.train.dataset(
                      normalization = "layer_norm", use_residual = TRUE)
 )
 round(fit_small$result$final_metrics$elevation$mae)
-#> [1] 260
+#> [1] 209
 ```
 
 ``` python
@@ -831,7 +831,7 @@ fit_ft <- resolve.train.dataset(
                      ft_transformer = list(d_model = 64L, n_layers = 2L))
 )
 round(fit_ft$result$final_metrics$habitat$accuracy, 3)
-#> [1] 0.833
+#> [1] 0.867
 ```
 
 ``` python
@@ -960,7 +960,7 @@ in R and `trainer` in Python, serves as the example.
 ``` r
 
 head(fit$trainer$test_plot_ids())
-#> [1] "A006" "A131" "A065" "A002" "A020" "A107"
+#> [1] "A148" "A105" "A016" "A018" "A129" "A043"
 length(fit$trainer$train_plot_ids())
 #> [1] 120
 ```
@@ -988,7 +988,7 @@ residuals.
 res <- fit$trainer$compute_residuals("elevation")
 round(unlist(res[c("mean_residual", "std_residual", "q05", "q50", "q95")]))
 #> mean_residual  std_residual           q05           q50           q95 
-#>            21           322          -618            19           482
+#>            66           260          -439            58           392
 
 lims <- range(res$actuals, res$predictions)
 plot(res$actuals, res$predictions, pch = 19, xlim = lims, ylim = lims,
@@ -1032,10 +1032,10 @@ table(observed = cls$class_names[cls$actuals + 1],
       predicted = cls$class_names[cls$predicted_classes + 1])
 #>            predicted
 #> observed    alpine forest grassland wetland
-#>   alpine         3      0         0       0
-#>   forest         0      9         2       0
-#>   grassland      0      0         8       1
-#>   wetland        1      2         0       4
+#>   alpine         6      1         0       0
+#>   forest         1     11         0       0
+#>   grassland      0      2         3       1
+#>   wetland        0      0         1       4
 dim(cls$probabilities)
 #> [1] 30  4
 ```
@@ -1071,15 +1071,15 @@ cal <- fit$trainer$compute_calibration("habitat", 5L)
 round(c(ece = cal$expected_calibration_error,
         mce = cal$max_calibration_error), 3)
 #>   ece   mce 
-#> 0.110 0.471
+#> 0.095 0.381
 bins <- do.call(rbind, lapply(cal$bins, as.data.frame))
 round(bins, 2)
 #>   bin_start bin_end mean_predicted_prob actual_frequency count
 #> 1       0.0     0.2                0.00             0.00     0
-#> 2       0.2     0.4                0.00             0.00     0
-#> 3       0.4     0.6                0.47             0.00     1
-#> 4       0.6     0.8                0.69             0.75     4
-#> 5       0.8     1.0                0.94             0.84    25
+#> 2       0.2     0.4                0.38             0.00     1
+#> 3       0.4     0.6                0.55             0.50     2
+#> 4       0.6     0.8                0.67             0.75     4
+#> 5       0.8     1.0                0.96             0.87    23
 ```
 
 ``` python
@@ -1163,10 +1163,10 @@ cv$n_folds
 #> [1] 5
 round(unlist(cv$mean_metrics$elevation[c("mae", "r2")]), 3)
 #>     mae      r2 
-#> 194.694   0.808
+#> 192.138   0.823
 round(unlist(cv$std_metrics$elevation[c("mae", "r2")]), 3)
 #>    mae     r2 
-#> 38.466  0.075
+#> 39.307  0.072
 ```
 
 ``` python
@@ -1210,7 +1210,7 @@ blocks <- resolve.cross_validate(
 )
 round(unlist(blocks$mean_metrics$elevation[c("mae", "r2")]), 3)
 #>     mae      r2 
-#> 190.908   0.832
+#> 182.434   0.846
 ```
 
 ``` python
@@ -1253,7 +1253,7 @@ resolve.load_train_config(path)$max_epochs
 meta <- resolve.load_run_metadata(path)
 str(meta[c("best_epoch", "n_plots_train", "n_plots_test", "hold_out")])
 #> List of 4
-#>  $ best_epoch   : int 94
+#>  $ best_epoch   : int 81
 #>  $ n_plots_train: int 120
 #>  $ n_plots_test : int 30
 #>  $ hold_out     : chr "random"

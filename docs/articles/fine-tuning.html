@@ -359,9 +359,9 @@ together with the new heads.</p>
 <span>                               savePath <span class="op">=</span> <span class="va">tuned_path</span>, verbose <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="va">tuned</span><span class="op">$</span><span class="va">result</span><span class="op">$</span><span class="va">final_metrics</span><span class="op">$</span><span class="va">elevation</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"mae"</span>, <span class="st">"r2"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt;     mae      r2 </span></span>
-<span><span class="co">#&gt; 230.266   0.793</span></span>
+<span><span class="co">#&gt; 330.691   0.559</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">tuned</span><span class="op">$</span><span class="va">result</span><span class="op">$</span><span class="va">final_metrics</span><span class="op">$</span><span class="va">belt</span><span class="op">$</span><span class="va">accuracy</span>, <span class="fl">3</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] 0.6</span></span></code></pre></div>
+<span><span class="co">#&gt; [1] 0.9</span></span></code></pre></div>
 <div class="sourceCode" id="cb12"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb12-1"><a href="#cb12-1" tabindex="-1"></a>model <span class="op">=</span> rc.ResolveModel(mine.schema, rc.model_config_for_dataset(mine, parent.model_config))</span>
 <span id="cb12-2"><a href="#cb12-2" tabindex="-1"></a>config <span class="op">=</span> rc.TrainConfig()</span>
 <span id="cb12-3"><a href="#cb12-3" tabindex="-1"></a>config.max_epochs <span class="op">=</span> <span class="dv">200</span></span>
@@ -401,7 +401,7 @@ refused, and the error lists every difference:</p>
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/resolve.train.dataset.html">resolve.train.dataset</a></span><span class="op">(</span><span class="va">mine</span>, initFrom <span class="op">=</span> <span class="va">parent</span>, hiddenDims <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">128L</span>, <span class="fl">64L</span><span class="op">)</span>,</span>
 <span>                      maxEpochs <span class="op">=</span> <span class="fl">1L</span>, verbose <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #BBBB00; font-weight: bold;">Error</span><span style="font-weight: bold;">:</span></span></span>
-<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> Trainer::init_from: the model cannot start from 'C:\Users\GILLES~1\AppData\Local\Temp\Rtmp6f90Wc/habitat_suite\seed_1.pt':</span></span>
+<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> Trainer::init_from: the model cannot start from 'C:\Users\GILLES~1\AppData\Local\Temp\RtmpIfbnF4/habitat_suite\seed_1.pt':</span></span>
 <span><span class="co">#&gt;   - model config 'hidden_dims' is [128,64] here and [64,32] in the parent</span></span>
 <span><span class="co">#&gt;   - parameter 'encoder.mlp.0.weight' is [128, 84] here and [64, 84] in the parent</span></span>
 <span><span class="co">#&gt;   - parameter 'encoder.mlp.0.bias' is [128] here and [64] in the parent</span></span>
@@ -513,13 +513,13 @@ manifest names.</p>
 <code class="sourceCode R"><span><span class="va">regional</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/resolve.load_suite.html">resolve.load_suite</a></span><span class="op">(</span><span class="va">derived_dir</span><span class="op">)</span></span>
 <span><span class="va">imputed</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/as.data.frame.html" class="external-link">as.data.frame</a></span><span class="op">(</span><span class="fu"><a href="../reference/resolve.predict.suite.html">resolve.predict.suite</a></span><span class="op">(</span><span class="va">regional</span>, <span class="va">my_species</span>, header <span class="op">=</span> <span class="va">my_plots</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">imputed</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"plot_id"</span>, <span class="st">"elevation"</span>, <span class="st">"elevation_sd"</span>, <span class="st">"belt"</span>, <span class="st">"belt_agreement"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span></span>
-<span><span class="co">#&gt;   plot_id elevation elevation_sd    belt belt_agreement</span></span>
-<span><span class="co">#&gt; 1    A101 1226.5195    242.57042 montane            1.0</span></span>
-<span><span class="co">#&gt; 2    A102 1058.5676    303.69885 montane            1.0</span></span>
-<span><span class="co">#&gt; 3    A103 1257.6179     38.15796 montane            1.0</span></span>
-<span><span class="co">#&gt; 4    A104 1368.0400    434.61578 montane            0.5</span></span>
-<span><span class="co">#&gt; 5    A105 1064.0995     10.84846 montane            1.0</span></span>
-<span><span class="co">#&gt; 6    A106  997.3163    345.45728 montane            1.0</span></span></code></pre></div>
+<span><span class="co">#&gt;   plot_id elevation elevation_sd      belt belt_agreement</span></span>
+<span><span class="co">#&gt; 1    A101 1099.3857     93.83761   montane              1</span></span>
+<span><span class="co">#&gt; 2    A102  796.1698     86.63970   montane              1</span></span>
+<span><span class="co">#&gt; 3    A103 1315.7102     21.52360   montane              1</span></span>
+<span><span class="co">#&gt; 4    A104 1655.3939     22.68698 subalpine              1</span></span>
+<span><span class="co">#&gt; 5    A105 1204.4548     82.34686   montane              1</span></span>
+<span><span class="co">#&gt; 6    A106  708.1572     31.01231   montane              1</span></span></code></pre></div>
 <div class="sourceCode" id="cb18"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb18-1"><a href="#cb18-1" tabindex="-1"></a>regional <span class="op">=</span> rc.SuitePredictor.load(derived_dir)</span>
 <span id="cb18-2"><a href="#cb18-2" tabindex="-1"></a>imputed <span class="op">=</span> regional.predict(my_species, header<span class="op">=</span>my_plots).to_pandas()</span>
 <span id="cb18-3"><a href="#cb18-3" tabindex="-1"></a>imputed[[<span class="st">"plot_id"</span>, <span class="st">"elevation"</span>, <span class="st">"elevation_sd"</span>, <span class="st">"belt"</span>, <span class="st">"belt_agreement"</span>]].head()</span>

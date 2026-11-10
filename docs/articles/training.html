@@ -376,7 +376,7 @@ costs more epochs.</p>
 <span>                             testSize <span class="op">=</span> <span class="fl">0.2</span>, seed <span class="op">=</span> <span class="fl">42L</span>, verbose <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span>
 <span><span class="va">result</span> <span class="op">&lt;-</span> <span class="va">fit</span><span class="op">$</span><span class="va">result</span></span>
 <span><span class="va">result</span><span class="op">$</span><span class="va">best_epoch</span></span>
-<span><span class="co">#&gt; [1] 94</span></span>
+<span><span class="co">#&gt; [1] 81</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="va">result</span><span class="op">$</span><span class="va">train_loss</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 130</span></span></code></pre></div>
 <div class="sourceCode" id="cb8"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a>model <span class="op">=</span> rc.ResolveModel(dataset.schema, rc.model_config_for_dataset(dataset))</span>
@@ -453,7 +453,7 @@ watches.</p>
   </clipPath>
 </defs>
 <g clip-path='url(#cpNjguODh8NDMyLjcyfDY4Ljg4fDIzOC4zMg==)'>
-<polyline points='82.36,75.16 84.97,105.74 87.58,118.80 90.19,132.42 92.80,141.50 95.41,144.67 98.02,151.54 100.64,159.39 103.25,164.62 105.86,169.50 108.47,172.35 111.08,175.01 113.69,175.96 116.31,180.03 118.92,185.19 121.53,187.39 124.14,188.69 126.75,189.73 129.36,192.36 131.97,193.79 134.59,197.51 137.20,199.32 139.81,202.06 142.42,206.04 145.03,203.58 147.64,205.03 150.26,207.33 152.87,206.77 155.48,210.81 158.09,211.18 160.70,211.87 163.31,212.23 165.92,211.81 168.54,212.59 171.15,216.12 173.76,217.83 176.37,216.75 178.98,216.39 181.59,220.14 184.21,220.71 186.82,219.28 189.43,218.66 192.04,219.92 194.65,223.14 197.26,220.04 199.87,222.25 202.49,223.36 205.10,221.57 207.71,223.74 210.32,222.27 212.93,223.50 215.54,223.77 218.16,223.34 220.77,225.34 223.38,225.09 225.99,225.90 228.60,226.13 231.21,223.24 233.82,224.01 236.44,224.99 239.05,225.68 241.66,226.44 244.27,224.35 246.88,228.24 249.49,223.99 252.11,228.42 254.72,227.97 257.33,225.00 259.94,228.95 262.55,227.02 265.16,228.01 267.78,229.61 270.39,229.52 273.00,229.06 275.61,227.40 278.22,230.73 280.83,227.71 283.44,228.41 286.06,230.10 288.67,228.45 291.28,228.83 293.89,227.79 296.50,230.01 299.11,228.47 301.73,229.28 304.34,229.77 306.95,231.23 309.56,230.12 312.17,230.17 314.78,228.17 317.39,229.81 320.01,230.13 322.62,229.50 325.23,230.43 327.84,230.94 330.45,230.68 333.06,232.04 335.68,230.78 338.29,230.64 340.90,229.03 343.51,228.82 346.12,230.34 348.73,229.69 351.34,229.67 353.96,228.28 356.57,228.54 359.18,229.76 361.79,228.23 364.40,229.56 367.01,228.63 369.63,230.35 372.24,230.35 374.85,231.38 377.46,229.46 380.07,229.59 382.68,230.34 385.29,228.12 387.91,230.36 390.52,230.47 393.13,231.81 395.74,230.03 398.35,230.86 400.96,229.21 403.58,227.82 406.19,230.97 408.80,229.83 411.41,230.08 414.02,230.70 416.63,229.91 419.24,230.24 ' style='stroke-width: 1.50;' />
+<polyline points='82.36,75.16 84.97,103.14 87.58,122.69 90.19,132.64 92.80,141.95 95.41,146.44 98.02,151.91 100.64,160.20 103.25,163.69 105.86,166.58 108.47,171.89 111.08,176.70 113.69,180.18 116.31,185.32 118.92,184.06 121.53,187.13 124.14,188.57 126.75,193.28 129.36,189.83 131.97,196.89 134.59,199.80 137.20,199.19 139.81,199.63 142.42,200.33 145.03,206.10 147.64,205.17 150.26,207.96 152.87,206.82 155.48,208.73 158.09,212.43 160.70,211.40 163.31,214.16 165.92,212.63 168.54,214.17 171.15,215.83 173.76,219.16 176.37,217.72 178.98,217.02 181.59,218.93 184.21,218.94 186.82,221.06 189.43,219.51 192.04,220.14 194.65,219.79 197.26,220.94 199.87,222.99 202.49,219.84 205.10,223.89 207.71,220.05 210.32,221.49 212.93,219.79 215.54,221.39 218.16,223.61 220.77,220.50 223.38,225.01 225.99,224.99 228.60,225.68 231.21,226.60 233.82,226.14 236.44,225.40 239.05,225.66 241.66,223.56 244.27,221.91 246.88,226.71 249.49,225.07 252.11,226.49 254.72,224.97 257.33,226.14 259.94,228.19 262.55,227.34 265.16,226.23 267.78,227.18 270.39,226.14 273.00,225.87 275.61,226.85 278.22,227.15 280.83,226.63 283.44,225.74 286.06,227.70 288.67,227.58 291.28,229.36 293.89,227.54 296.50,228.33 299.11,230.41 301.73,228.10 304.34,227.12 306.95,229.20 309.56,229.50 312.17,231.12 314.78,229.33 317.39,230.21 320.01,231.29 322.62,229.57 325.23,229.72 327.84,231.51 330.45,229.23 333.06,229.52 335.68,230.36 338.29,230.30 340.90,229.45 343.51,229.54 346.12,227.24 348.73,228.13 351.34,227.63 353.96,229.16 356.57,229.21 359.18,229.53 361.79,227.65 364.40,231.20 367.01,227.55 369.63,229.08 372.24,229.34 374.85,229.08 377.46,230.19 380.07,229.67 382.68,228.88 385.29,230.45 387.91,230.38 390.52,232.04 393.13,230.29 395.74,231.51 398.35,229.81 400.96,230.75 403.58,231.25 406.19,230.78 408.80,229.53 411.41,229.06 414.02,230.73 416.63,231.02 419.24,229.37 ' style='stroke-width: 1.50;' />
 </g>
 <g clip-path='url(#cpMC4wMHw0NjguMDB8MC4wMHwzMjQuMDA=)'>
 <line x1='79.74' y1='238.32' x2='393.13' y2='238.32' style='stroke-width: 0.75;' />
@@ -471,24 +471,24 @@ watches.</p>
 <text x='288.67' y='268.56' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>80</text>
 <text x='340.90' y='268.56' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>100</text>
 <text x='393.13' y='268.56' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>120</text>
-<line x1='68.88' y1='211.79' x2='68.88' y2='78.07' style='stroke-width: 0.75;' />
-<line x1='68.88' y1='211.79' x2='60.48' y2='211.79' style='stroke-width: 0.75;' />
-<line x1='68.88' y1='178.36' x2='60.48' y2='178.36' style='stroke-width: 0.75;' />
-<line x1='68.88' y1='144.93' x2='60.48' y2='144.93' style='stroke-width: 0.75;' />
-<line x1='68.88' y1='111.50' x2='60.48' y2='111.50' style='stroke-width: 0.75;' />
-<line x1='68.88' y1='78.07' x2='60.48' y2='78.07' style='stroke-width: 0.75;' />
-<text transform='translate(48.72,211.79) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>0.5</text>
-<text transform='translate(48.72,178.36) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>1.0</text>
-<text transform='translate(48.72,144.93) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>1.5</text>
-<text transform='translate(48.72,111.50) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>2.0</text>
-<text transform='translate(48.72,78.07) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>2.5</text>
+<line x1='68.88' y1='211.33' x2='68.88' y2='73.49' style='stroke-width: 0.75;' />
+<line x1='68.88' y1='211.33' x2='60.48' y2='211.33' style='stroke-width: 0.75;' />
+<line x1='68.88' y1='176.87' x2='60.48' y2='176.87' style='stroke-width: 0.75;' />
+<line x1='68.88' y1='142.41' x2='60.48' y2='142.41' style='stroke-width: 0.75;' />
+<line x1='68.88' y1='107.95' x2='60.48' y2='107.95' style='stroke-width: 0.75;' />
+<line x1='68.88' y1='73.49' x2='60.48' y2='73.49' style='stroke-width: 0.75;' />
+<text transform='translate(48.72,211.33) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>0.5</text>
+<text transform='translate(48.72,176.87) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>1.0</text>
+<text transform='translate(48.72,142.41) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>1.5</text>
+<text transform='translate(48.72,107.95) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>2.0</text>
+<text transform='translate(48.72,73.49) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>2.5</text>
 <polygon points='68.88,238.32 432.72,238.32 432.72,68.88 68.88,68.88 ' style='stroke-width: 0.75;' />
 <text x='250.80' y='302.16' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>Epoch</text>
 <text transform='translate(15.12,153.60) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>Loss</text>
 </g>
 <g clip-path='url(#cpNjguODh8NDMyLjcyfDY4Ljg4fDIzOC4zMg==)'>
-<polyline points='82.36,93.38 84.97,93.81 87.58,94.42 90.19,95.38 92.80,96.87 95.41,98.99 98.02,101.85 100.64,105.58 103.25,109.80 105.86,115.00 108.47,120.61 111.08,126.66 113.69,133.23 116.31,139.23 118.92,144.29 121.53,147.66 124.14,149.88 126.75,151.50 129.36,152.84 131.97,154.45 134.59,155.87 137.20,156.99 139.81,158.21 142.42,158.82 145.03,158.92 147.64,159.37 150.26,160.04 152.87,160.09 155.48,160.64 158.09,160.30 160.70,159.73 163.31,159.45 165.92,159.57 168.54,159.92 171.15,160.16 173.76,159.94 176.37,158.91 178.98,156.83 181.59,155.03 184.21,153.82 186.82,153.21 189.43,153.25 192.04,154.25 194.65,155.08 197.26,156.55 199.87,157.58 202.49,158.49 205.10,159.12 207.71,159.67 210.32,160.07 212.93,159.50 215.54,158.74 218.16,158.15 220.77,158.21 223.38,158.16 225.99,158.55 228.60,158.60 231.21,159.21 233.82,159.84 236.44,160.66 239.05,161.37 241.66,161.75 244.27,162.08 246.88,162.28 249.49,161.93 252.11,161.21 254.72,160.48 257.33,160.10 259.94,159.98 262.55,159.65 265.16,159.54 267.78,159.47 270.39,159.55 273.00,159.29 275.61,159.10 278.22,159.13 280.83,159.12 283.44,159.26 286.06,159.57 288.67,159.77 291.28,159.38 293.89,159.34 296.50,159.71 299.11,160.28 301.73,160.54 304.34,160.83 306.95,160.60 309.56,160.76 312.17,160.92 314.78,161.34 317.39,161.70 320.01,162.41 322.62,163.47 325.23,163.87 327.84,164.17 330.45,163.79 333.06,163.11 335.68,162.86 338.29,162.50 340.90,162.05 343.51,161.95 346.12,161.63 348.73,161.60 351.34,160.82 353.96,160.00 356.57,159.09 359.18,158.51 361.79,157.99 364.40,157.18 367.01,157.03 369.63,157.10 372.24,156.63 374.85,157.10 377.46,158.03 380.07,159.04 382.68,159.97 385.29,160.11 387.91,159.78 390.52,159.05 393.13,158.27 395.74,157.68 398.35,157.30 400.96,157.28 403.58,157.27 406.19,157.35 408.80,157.04 411.41,156.46 414.02,156.10 416.63,155.82 419.24,155.28 ' style='stroke-width: 1.50; stroke-dasharray: 8.00,8.00;' />
-<line x1='327.84' y1='238.32' x2='327.84' y2='68.88' style='stroke-width: 0.75; stroke: #7F7F7F;' />
+<polyline points='82.36,83.96 84.97,84.31 87.58,85.00 90.19,86.25 92.80,88.16 95.41,90.88 98.02,94.60 100.64,99.52 103.25,105.77 105.86,113.96 108.47,123.55 111.08,133.60 113.69,142.70 116.31,149.79 118.92,155.58 121.53,159.97 124.14,163.53 126.75,166.59 129.36,167.57 131.97,168.21 134.59,168.75 137.20,169.79 139.81,172.28 142.42,174.58 145.03,176.69 147.64,178.19 150.26,179.35 152.87,179.95 155.48,180.26 158.09,180.32 160.70,180.02 163.31,180.01 165.92,180.86 168.54,182.31 171.15,183.69 173.76,184.87 176.37,185.70 178.98,186.08 181.59,186.02 184.21,186.13 186.82,185.54 189.43,184.47 192.04,182.74 194.65,180.91 197.26,179.98 199.87,178.50 202.49,177.80 205.10,177.29 207.71,177.25 210.32,177.16 212.93,177.76 215.54,178.32 218.16,178.60 220.77,178.18 223.38,177.98 225.99,178.42 228.60,178.99 231.21,179.71 233.82,180.62 236.44,180.92 239.05,181.51 241.66,182.33 244.27,183.03 246.88,183.78 249.49,184.39 252.11,184.36 254.72,184.33 257.33,183.97 259.94,183.84 262.55,183.66 265.16,184.05 267.78,184.17 270.39,183.80 273.00,183.89 275.61,184.06 278.22,184.29 280.83,184.66 283.44,184.82 286.06,185.38 288.67,185.87 291.28,186.57 293.89,186.79 296.50,186.37 299.11,185.56 301.73,185.19 304.34,185.44 306.95,185.97 309.56,186.40 312.17,186.53 314.78,185.99 317.39,185.33 320.01,184.61 322.62,183.59 325.23,182.36 327.84,180.93 330.45,180.14 333.06,179.48 335.68,178.76 338.29,178.08 340.90,177.83 343.51,178.40 346.12,178.96 348.73,179.40 351.34,180.02 353.96,180.36 356.57,180.69 359.18,181.47 361.79,182.12 364.40,182.20 367.01,182.05 369.63,181.35 372.24,180.30 374.85,179.79 377.46,179.38 380.07,179.45 382.68,179.73 385.29,180.10 387.91,180.49 390.52,181.03 393.13,181.65 395.74,181.99 398.35,182.11 400.96,181.53 403.58,180.32 406.19,179.15 408.80,178.25 411.41,177.27 414.02,176.63 416.63,176.04 419.24,175.79 ' style='stroke-width: 1.50; stroke-dasharray: 8.00,8.00;' />
+<line x1='293.89' y1='238.32' x2='293.89' y2='68.88' style='stroke-width: 0.75; stroke: #7F7F7F;' />
 <line x1='338.06' y1='85.68' x2='363.26' y2='85.68' style='stroke-width: 1.50;' />
 <line x1='338.06' y1='102.48' x2='363.26' y2='102.48' style='stroke-width: 1.50; stroke-dasharray: 8.00,8.00;' />
 <text x='375.86' y='90.69' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>training</text>
@@ -1660,14 +1660,14 @@ fold.</p>
 <span><span class="co">#&gt; [1] TRUE</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="va">result</span><span class="op">$</span><span class="va">final_metrics</span><span class="op">$</span><span class="va">elevation</span><span class="op">)</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt; band_10 band_25 band_50     mae      r2    rmse   smape </span></span>
-<span><span class="co">#&gt;   0.367   0.600   0.867 247.110   0.691 317.298   0.247</span></span>
+<span><span class="co">#&gt;   0.600   0.800   0.900 184.887   0.835 263.782   0.169</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="va">result</span><span class="op">$</span><span class="va">final_metrics</span><span class="op">$</span><span class="va">habitat</span><span class="op">)</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt;    accuracy        f1_0        f1_1        f1_2        f1_3    macro_f1 </span></span>
-<span><span class="co">#&gt;       0.800       0.857       0.818       0.842       0.667       0.796 </span></span>
+<span><span class="co">#&gt;       0.800       0.857       0.846       0.600       0.800       0.776 </span></span>
 <span><span class="co">#&gt; precision_0 precision_1 precision_2 precision_3    recall_0    recall_1 </span></span>
-<span><span class="co">#&gt;       0.750       0.818       0.800       0.800       1.000       0.818 </span></span>
+<span><span class="co">#&gt;       0.857       0.786       0.750       0.800       0.857       0.917 </span></span>
 <span><span class="co">#&gt;    recall_2    recall_3 weighted_f1 </span></span>
-<span><span class="co">#&gt;       0.889       0.571       0.794</span></span></code></pre></div>
+<span><span class="co">#&gt;       0.500       0.800       0.792</span></span></code></pre></div>
 <div class="sourceCode" id="cb12"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb12-1"><a href="#cb12-1" tabindex="-1"></a>result.train_time_seconds <span class="op">&gt;</span> <span class="dv">0</span></span>
 <span id="cb12-2"><a href="#cb12-2" tabindex="-1"></a><span class="co">#&gt; True</span></span>
 <span id="cb12-3"><a href="#cb12-3" tabindex="-1"></a>{name: <span class="bu">round</span>(value, <span class="dv">3</span>) <span class="cf">for</span> name, value <span class="kw">in</span> result.final_metrics[<span class="st">"elevation"</span>].items()}</span>
@@ -1771,12 +1771,12 @@ model’s accuracy minus the baseline’s.</p>
 <code class="sourceCode R"><span><span class="va">elevation</span> <span class="op">&lt;-</span> <span class="va">result</span><span class="op">$</span><span class="va">baselines</span><span class="op">$</span><span class="va">elevation</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="va">elevation</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"baseline_mae"</span>, <span class="st">"model_mae"</span>, <span class="st">"skill_score"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt; baseline_mae    model_mae  skill_score </span></span>
-<span><span class="co">#&gt;      531.731      247.110        0.741</span></span>
+<span><span class="co">#&gt;      561.847      184.887        0.838</span></span>
 <span><span class="va">habitat</span> <span class="op">&lt;-</span> <span class="va">result</span><span class="op">$</span><span class="va">baselines</span><span class="op">$</span><span class="va">habitat</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="va">habitat</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"baseline_accuracy"</span>, <span class="st">"model_accuracy"</span>,</span>
 <span>                       <span class="st">"accuracy_lift"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt; baseline_accuracy    model_accuracy     accuracy_lift </span></span>
-<span><span class="co">#&gt;             0.367             0.800             0.433</span></span></code></pre></div>
+<span><span class="co">#&gt;               0.4               0.8               0.4</span></span></code></pre></div>
 <div class="sourceCode" id="cb14"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb14-1"><a href="#cb14-1" tabindex="-1"></a>elevation <span class="op">=</span> result.baselines[<span class="st">"elevation"</span>]</span>
 <span id="cb14-2"><a href="#cb14-2" tabindex="-1"></a>{<span class="st">"baseline_mae"</span>: <span class="bu">round</span>(elevation.baseline_mae, <span class="dv">3</span>),</span>
 <span id="cb14-3"><a href="#cb14-3" tabindex="-1"></a> <span class="st">"model_mae"</span>: <span class="bu">round</span>(elevation.model_mae, <span class="dv">3</span>),</span>
@@ -1802,8 +1802,8 @@ the terms add up to the total.</p>
 <code class="sourceCode R"><span><span class="va">held_out</span> <span class="op">&lt;-</span> <span class="va">result</span><span class="op">$</span><span class="va">test_loss_by_target</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/lapply.html" class="external-link">sapply</a></span><span class="op">(</span><span class="va">held_out</span>, <span class="kw">function</span><span class="op">(</span><span class="va">h</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>first <span class="op">=</span> <span class="va">h</span><span class="op">[</span><span class="fl">1</span><span class="op">]</span>, last <span class="op">=</span> <span class="va">h</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="va">h</span><span class="op">)</span><span class="op">]</span><span class="op">)</span>, <span class="fl">3</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt;       elevation habitat</span></span>
-<span><span class="co">#&gt; first     0.880   1.391</span></span>
-<span><span class="co">#&gt; last      0.467   0.878</span></span></code></pre></div>
+<span><span class="co">#&gt; first     0.962   1.387</span></span>
+<span><span class="co">#&gt; last      0.307   0.709</span></span></code></pre></div>
 <div class="sourceCode" id="cb16"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb16-1"><a href="#cb16-1" tabindex="-1"></a>{target: (<span class="bu">round</span>(history[<span class="dv">0</span>], <span class="dv">3</span>), <span class="bu">round</span>(history[<span class="op">-</span><span class="dv">1</span>], <span class="dv">3</span>))</span>
 <span id="cb16-2"><a href="#cb16-2" tabindex="-1"></a> <span class="cf">for</span> target, history <span class="kw">in</span> result.test_loss_history_by_target.items()}</span>
 <span id="cb16-3"><a href="#cb16-3" tabindex="-1"></a><span class="co">#&gt; {'elevation': (0.88, 0.443), 'habitat': (1.391, 0.869)}</span></span></code></pre></div>
@@ -2056,7 +2056,7 @@ term against the cross-entropy it is added to.</li>
 <span>                                 lossConfig <span class="op">=</span> <span class="st">"nca"</span>, ncaTemperature <span class="op">=</span> <span class="fl">0.2</span>,</span>
 <span>                                 ncaNeighbors <span class="op">=</span> <span class="fl">16L</span>, ncaWeight <span class="op">=</span> <span class="fl">0.3</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">fit_nca</span><span class="op">$</span><span class="va">result</span><span class="op">$</span><span class="va">final_metrics</span><span class="op">$</span><span class="va">habitat</span><span class="op">$</span><span class="va">accuracy</span>, <span class="fl">3</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] 0.8</span></span></code></pre></div>
+<span><span class="co">#&gt; [1] 0.733</span></span></code></pre></div>
 <div class="sourceCode" id="cb24"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb24-1"><a href="#cb24-1" tabindex="-1"></a>cfg <span class="op">=</span> rc.TrainConfig()</span>
 <span id="cb24-2"><a href="#cb24-2" tabindex="-1"></a>cfg.max_epochs <span class="op">=</span> <span class="dv">100</span></span>
 <span id="cb24-3"><a href="#cb24-3" tabindex="-1"></a>cfg.loss_config <span class="op">=</span> rc.LossConfigMode.NCA</span>
@@ -2306,7 +2306,7 @@ every head reads. The enum values are written in lower case in R
 <span>                     normalization <span class="op">=</span> <span class="st">"layer_norm"</span>, use_residual <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">fit_small</span><span class="op">$</span><span class="va">result</span><span class="op">$</span><span class="va">final_metrics</span><span class="op">$</span><span class="va">elevation</span><span class="op">$</span><span class="va">mae</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] 260</span></span></code></pre></div>
+<span><span class="co">#&gt; [1] 209</span></span></code></pre></div>
 <div class="sourceCode" id="cb34"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb34-1"><a href="#cb34-1" tabindex="-1"></a>model_config <span class="op">=</span> rc.ModelConfig()</span>
 <span id="cb34-2"><a href="#cb34-2" tabindex="-1"></a>model_config.hidden_dims <span class="op">=</span> [<span class="dv">256</span>, <span class="dv">128</span>, <span class="dv">64</span>]</span>
 <span id="cb34-3"><a href="#cb34-3" tabindex="-1"></a>model_config.dropout <span class="op">=</span> <span class="fl">0.2</span></span>
@@ -2396,7 +2396,7 @@ co-occurrence</td>
 <span>                     ft_transformer <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>d_model <span class="op">=</span> <span class="fl">64L</span>, n_layers <span class="op">=</span> <span class="fl">2L</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">fit_ft</span><span class="op">$</span><span class="va">result</span><span class="op">$</span><span class="va">final_metrics</span><span class="op">$</span><span class="va">habitat</span><span class="op">$</span><span class="va">accuracy</span>, <span class="fl">3</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] 0.833</span></span></code></pre></div>
+<span><span class="co">#&gt; [1] 0.867</span></span></code></pre></div>
 <div class="sourceCode" id="cb36"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb36-1"><a href="#cb36-1" tabindex="-1"></a>model_config <span class="op">=</span> rc.ModelConfig()</span>
 <span id="cb36-2"><a href="#cb36-2" tabindex="-1"></a>model_config.encoder_architecture <span class="op">=</span> rc.EncoderArchitecture.FTTransformer</span>
 <span id="cb36-3"><a href="#cb36-3" tabindex="-1"></a>model_config.ft_transformer.d_model <span class="op">=</span> <span class="dv">64</span></span>
@@ -2519,7 +2519,7 @@ example.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb41"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">fit</span><span class="op">$</span><span class="va">trainer</span><span class="op">$</span><span class="fu">test_plot_ids</span><span class="op">(</span><span class="op">)</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] "A006" "A131" "A065" "A002" "A020" "A107"</span></span>
+<span><span class="co">#&gt; [1] "A148" "A105" "A016" "A018" "A129" "A043"</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="va">fit</span><span class="op">$</span><span class="va">trainer</span><span class="op">$</span><span class="fu">train_plot_ids</span><span class="op">(</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 120</span></span></code></pre></div>
 <div class="sourceCode" id="cb42"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb42-1"><a href="#cb42-1" tabindex="-1"></a>trainer.test_plot_ids()[:<span class="dv">6</span>]</span>
@@ -2542,7 +2542,7 @@ of the residuals.</p>
 <code class="sourceCode R"><span><span class="va">res</span> <span class="op">&lt;-</span> <span class="va">fit</span><span class="op">$</span><span class="va">trainer</span><span class="op">$</span><span class="fu">compute_residuals</span><span class="op">(</span><span class="st">"elevation"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="va">res</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"mean_residual"</span>, <span class="st">"std_residual"</span>, <span class="st">"q05"</span>, <span class="st">"q50"</span>, <span class="st">"q95"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; mean_residual  std_residual           q05           q50           q95 </span></span>
-<span><span class="co">#&gt;            21           322          -618            19           482</span></span>
+<span><span class="co">#&gt;            66           260          -439            58           392</span></span>
 <span></span>
 <span><span class="va">lims</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/range.html" class="external-link">range</a></span><span class="op">(</span><span class="va">res</span><span class="op">$</span><span class="va">actuals</span>, <span class="va">res</span><span class="op">$</span><span class="va">predictions</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">res</span><span class="op">$</span><span class="va">actuals</span>, <span class="va">res</span><span class="op">$</span><span class="va">predictions</span>, pch <span class="op">=</span> <span class="fl">19</span>, xlim <span class="op">=</span> <span class="va">lims</span>, ylim <span class="op">=</span> <span class="va">lims</span>,</span>
@@ -2592,55 +2592,58 @@ of the residuals.</p>
   </clipPath>
 </defs>
 <g clip-path='url(#cpNjguODh8NDMyLjcyfDY4Ljg4fDIzOC4zMg==)'>
-<circle class='theme-fill-fg' cx='323.11' cy='121.08' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='175.02' cy='200.04' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='219.88' cy='212.95' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='109.90' cy='161.54' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='233.91' cy='161.05' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='251.41' cy='152.20' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='138.47' cy='214.65' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='389.11' cy='98.02' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='170.69' cy='195.91' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='227.16' cy='197.04' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='96.56' cy='203.39' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='330.22' cy='115.27' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='99.33' cy='207.07' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='108.86' cy='195.07' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='419.24' cy='89.23' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='249.67' cy='196.58' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='82.36' cy='183.69' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='129.12' cy='207.77' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='296.79' cy='123.31' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='268.21' cy='184.34' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='166.88' cy='204.36' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='242.40' cy='107.63' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='390.84' cy='89.95' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='336.45' cy='92.72' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='291.94' cy='156.49' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='213.99' cy='194.18' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='371.44' cy='117.38' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='339.22' cy='126.52' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='97.42' cy='206.66' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
-<circle class='theme-fill-fg' cx='198.40' cy='202.28' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='82.36' cy='222.45' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='189.84' cy='181.80' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='419.24' cy='104.77' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='186.59' cy='223.46' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='238.70' cy='156.41' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='194.38' cy='197.60' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='87.55' cy='180.98' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='354.14' cy='111.67' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='151.84' cy='206.24' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='396.51' cy='88.64' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='203.15' cy='223.53' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='83.17' cy='198.44' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='103.46' cy='229.79' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='392.29' cy='88.49' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='266.63' cy='175.61' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='175.39' cy='193.50' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='201.52' cy='202.57' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='320.04' cy='123.97' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='340.01' cy='121.45' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='309.00' cy='119.46' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='418.60' cy='99.09' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='349.76' cy='104.44' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='378.17' cy='104.61' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='238.06' cy='165.27' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='227.50' cy='164.36' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='204.77' cy='169.81' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='112.88' cy='222.24' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='350.89' cy='115.64' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='275.23' cy='117.53' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
+<circle class='theme-fill-fg' cx='369.40' cy='99.13' r='3.15' style='stroke-width: 0.75; fill: #3E3F3A;' />
 </g>
 <g clip-path='url(#cpMC4wMHw0NjguMDB8MC4wMHwzMjQuMDA=)'>
-<line x1='98.12' y1='238.32' x2='357.93' y2='238.32' style='stroke-width: 0.75;' />
-<line x1='98.12' y1='238.32' x2='98.12' y2='246.72' style='stroke-width: 0.75;' />
-<line x1='184.72' y1='238.32' x2='184.72' y2='246.72' style='stroke-width: 0.75;' />
-<line x1='271.33' y1='238.32' x2='271.33' y2='246.72' style='stroke-width: 0.75;' />
-<line x1='357.93' y1='238.32' x2='357.93' y2='246.72' style='stroke-width: 0.75;' />
-<text x='98.12' y='268.56' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>500</text>
-<text x='184.72' y='268.56' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>1000</text>
-<text x='271.33' y='268.56' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>1500</text>
-<text x='357.93' y='268.56' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>2000</text>
-<line x1='68.88' y1='224.70' x2='68.88' y2='103.71' style='stroke-width: 0.75;' />
-<line x1='68.88' y1='224.70' x2='60.48' y2='224.70' style='stroke-width: 0.75;' />
-<line x1='68.88' y1='184.37' x2='60.48' y2='184.37' style='stroke-width: 0.75;' />
-<line x1='68.88' y1='144.04' x2='60.48' y2='144.04' style='stroke-width: 0.75;' />
-<line x1='68.88' y1='103.71' x2='60.48' y2='103.71' style='stroke-width: 0.75;' />
-<text transform='translate(48.72,224.70) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>500</text>
-<text transform='translate(48.72,184.37) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>1000</text>
-<text transform='translate(48.72,103.71) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>2000</text>
+<line x1='83.82' y1='238.32' x2='408.53' y2='238.32' style='stroke-width: 0.75;' />
+<line x1='83.82' y1='238.32' x2='83.82' y2='246.72' style='stroke-width: 0.75;' />
+<line x1='164.99' y1='238.32' x2='164.99' y2='246.72' style='stroke-width: 0.75;' />
+<line x1='246.17' y1='238.32' x2='246.17' y2='246.72' style='stroke-width: 0.75;' />
+<line x1='327.35' y1='238.32' x2='327.35' y2='246.72' style='stroke-width: 0.75;' />
+<line x1='408.53' y1='238.32' x2='408.53' y2='246.72' style='stroke-width: 0.75;' />
+<text x='83.82' y='268.56' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>500</text>
+<text x='164.99' y='268.56' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>1000</text>
+<text x='246.17' y='268.56' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>1500</text>
+<text x='327.35' y='268.56' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>2000</text>
+<text x='408.53' y='268.56' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>2500</text>
+<line x1='68.88' y1='231.36' x2='68.88' y2='80.15' style='stroke-width: 0.75;' />
+<line x1='68.88' y1='231.36' x2='60.48' y2='231.36' style='stroke-width: 0.75;' />
+<line x1='68.88' y1='193.56' x2='60.48' y2='193.56' style='stroke-width: 0.75;' />
+<line x1='68.88' y1='155.75' x2='60.48' y2='155.75' style='stroke-width: 0.75;' />
+<line x1='68.88' y1='117.95' x2='60.48' y2='117.95' style='stroke-width: 0.75;' />
+<line x1='68.88' y1='80.15' x2='60.48' y2='80.15' style='stroke-width: 0.75;' />
+<text transform='translate(48.72,231.36) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>500</text>
+<text transform='translate(48.72,155.75) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>1500</text>
+<text transform='translate(48.72,80.15) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>2500</text>
 <polygon points='68.88,238.32 432.72,238.32 432.72,68.88 68.88,68.88 ' style='stroke-width: 0.75;' />
 <text x='250.80' y='302.16' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>Observed elevation (m)</text>
 <text transform='translate(15.12,153.60) rotate(-90)' text-anchor='middle' style='font-size: 1.4em; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;'>Imputed elevation (m)</text>
@@ -3606,10 +3609,10 @@ plot. Classes are numbered from 0, in the order of
 <span>      predicted <span class="op">=</span> <span class="va">cls</span><span class="op">$</span><span class="va">class_names</span><span class="op">[</span><span class="va">cls</span><span class="op">$</span><span class="va">predicted_classes</span> <span class="op">+</span> <span class="fl">1</span><span class="op">]</span><span class="op">)</span></span>
 <span><span class="co">#&gt;            predicted</span></span>
 <span><span class="co">#&gt; observed    alpine forest grassland wetland</span></span>
-<span><span class="co">#&gt;   alpine         3      0         0       0</span></span>
-<span><span class="co">#&gt;   forest         0      9         2       0</span></span>
-<span><span class="co">#&gt;   grassland      0      0         8       1</span></span>
-<span><span class="co">#&gt;   wetland        1      2         0       4</span></span>
+<span><span class="co">#&gt;   alpine         6      1         0       0</span></span>
+<span><span class="co">#&gt;   forest         1     11         0       0</span></span>
+<span><span class="co">#&gt;   grassland      0      2         3       1</span></span>
+<span><span class="co">#&gt;   wetland        0      0         1       4</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/dim.html" class="external-link">dim</a></span><span class="op">(</span><span class="va">cls</span><span class="op">$</span><span class="va">probabilities</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 30  4</span></span></code></pre></div>
 <div class="sourceCode" id="cb46"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb46-1"><a href="#cb46-1" tabindex="-1"></a>cls <span class="op">=</span> trainer.compute_classification_predictions(<span class="st">"habitat"</span>)</span>
@@ -3643,15 +3646,15 @@ largest gap.</p>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>ece <span class="op">=</span> <span class="va">cal</span><span class="op">$</span><span class="va">expected_calibration_error</span>,</span>
 <span>        mce <span class="op">=</span> <span class="va">cal</span><span class="op">$</span><span class="va">max_calibration_error</span><span class="op">)</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   ece   mce </span></span>
-<span><span class="co">#&gt; 0.110 0.471</span></span>
+<span><span class="co">#&gt; 0.095 0.381</span></span>
 <span><span class="va">bins</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/do.call.html" class="external-link">do.call</a></span><span class="op">(</span><span class="va">rbind</span>, <span class="fu"><a href="https://rdrr.io/r/base/lapply.html" class="external-link">lapply</a></span><span class="op">(</span><span class="va">cal</span><span class="op">$</span><span class="va">bins</span>, <span class="va">as.data.frame</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="va">bins</span>, <span class="fl">2</span><span class="op">)</span></span>
 <span><span class="co">#&gt;   bin_start bin_end mean_predicted_prob actual_frequency count</span></span>
 <span><span class="co">#&gt; 1       0.0     0.2                0.00             0.00     0</span></span>
-<span><span class="co">#&gt; 2       0.2     0.4                0.00             0.00     0</span></span>
-<span><span class="co">#&gt; 3       0.4     0.6                0.47             0.00     1</span></span>
-<span><span class="co">#&gt; 4       0.6     0.8                0.69             0.75     4</span></span>
-<span><span class="co">#&gt; 5       0.8     1.0                0.94             0.84    25</span></span></code></pre></div>
+<span><span class="co">#&gt; 2       0.2     0.4                0.38             0.00     1</span></span>
+<span><span class="co">#&gt; 3       0.4     0.6                0.55             0.50     2</span></span>
+<span><span class="co">#&gt; 4       0.6     0.8                0.67             0.75     4</span></span>
+<span><span class="co">#&gt; 5       0.8     1.0                0.96             0.87    23</span></span></code></pre></div>
 <div class="sourceCode" id="cb48"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb48-1"><a href="#cb48-1" tabindex="-1"></a>cal <span class="op">=</span> trainer.compute_calibration(<span class="st">"habitat"</span>, n_bins<span class="op">=</span><span class="dv">5</span>)</span>
 <span id="cb48-2"><a href="#cb48-2" tabindex="-1"></a><span class="bu">round</span>(cal.expected_calibration_error, <span class="dv">3</span>), <span class="bu">round</span>(cal.max_calibration_error, <span class="dv">3</span>)</span>
 <span id="cb48-3"><a href="#cb48-3" tabindex="-1"></a><span class="co">#&gt; (0.134, 0.289)</span></span>
@@ -3728,10 +3731,10 @@ already saw their held-out plots.</p>
 <span><span class="co">#&gt; [1] 5</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="va">cv</span><span class="op">$</span><span class="va">mean_metrics</span><span class="op">$</span><span class="va">elevation</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"mae"</span>, <span class="st">"r2"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt;     mae      r2 </span></span>
-<span><span class="co">#&gt; 194.694   0.808</span></span>
+<span><span class="co">#&gt; 192.138   0.823</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="va">cv</span><span class="op">$</span><span class="va">std_metrics</span><span class="op">$</span><span class="va">elevation</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"mae"</span>, <span class="st">"r2"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt;    mae     r2 </span></span>
-<span><span class="co">#&gt; 38.466  0.075</span></span></code></pre></div>
+<span><span class="co">#&gt; 39.307  0.072</span></span></code></pre></div>
 <div class="sourceCode" id="cb52"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb52-1"><a href="#cb52-1" tabindex="-1"></a>cfg <span class="op">=</span> rc.TrainConfig()</span>
 <span id="cb52-2"><a href="#cb52-2" tabindex="-1"></a>cfg.max_epochs <span class="op">=</span> <span class="dv">100</span></span>
 <span id="cb52-3"><a href="#cb52-3" tabindex="-1"></a>model <span class="op">=</span> rc.ResolveModel(dataset.schema, rc.model_config_for_dataset(dataset))</span>
@@ -3770,7 +3773,7 @@ loaded again with the latitude and longitude roles.</p>
 <span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Round.html" class="external-link">round</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/unlist.html" class="external-link">unlist</a></span><span class="op">(</span><span class="va">blocks</span><span class="op">$</span><span class="va">mean_metrics</span><span class="op">$</span><span class="va">elevation</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"mae"</span>, <span class="st">"r2"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span>, <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt;     mae      r2 </span></span>
-<span><span class="co">#&gt; 190.908   0.832</span></span></code></pre></div>
+<span><span class="co">#&gt; 182.434   0.846</span></span></code></pre></div>
 <div class="sourceCode" id="cb54"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb54-1"><a href="#cb54-1" tabindex="-1"></a>roles.latitude <span class="op">=</span> <span class="st">"lat"</span></span>
 <span id="cb54-2"><a href="#cb54-2" tabindex="-1"></a>roles.longitude <span class="op">=</span> <span class="st">"lon"</span></span>
 <span id="cb54-3"><a href="#cb54-3" tabindex="-1"></a>located <span class="op">=</span> rc.ResolveDataset.from_pandas(plots, species, roles, targets)</span>
@@ -3810,7 +3813,7 @@ also records the split and the metrics.</p>
 <span><span class="va">meta</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/resolve.load_run_metadata.html">resolve.load_run_metadata</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="va">meta</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"best_epoch"</span>, <span class="st">"n_plots_train"</span>, <span class="st">"n_plots_test"</span>, <span class="st">"hold_out"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span></span>
 <span><span class="co">#&gt; List of 4</span></span>
-<span><span class="co">#&gt;  $ best_epoch   : int 94</span></span>
+<span><span class="co">#&gt;  $ best_epoch   : int 81</span></span>
 <span><span class="co">#&gt;  $ n_plots_train: int 120</span></span>
 <span><span class="co">#&gt;  $ n_plots_test : int 30</span></span>
 <span><span class="co">#&gt;  $ hold_out     : chr "random"</span></span></code></pre></div>

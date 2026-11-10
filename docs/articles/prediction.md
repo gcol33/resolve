@@ -295,12 +295,12 @@ out <- merge(out, new_plots[c("plot_id", "elevation", "habitat")],
              by = "plot_id", suffixes = c("", "_observed"))
 head(out)
 #>   plot_id elevation   habitat elevation_observed habitat_observed
-#> 1    A005      2126    alpine               2145        grassland
-#> 2    A010      1695    forest               1632          wetland
-#> 3    A015      2193    alpine               2165           alpine
-#> 4    A020      1369    forest               1284           forest
-#> 5    A025      1028 grassland               1235        grassland
-#> 6    A030      1597 grassland               1840        grassland
+#> 1    A005      2172    alpine               2145        grassland
+#> 2    A010      1602    forest               1632          wetland
+#> 3    A015      2163    alpine               2165           alpine
+#> 4    A020      1373    forest               1284           forest
+#> 5    A025       871 grassland               1235        grassland
+#> 6    A030      1476 grassland               1840        grassland
 ```
 
 ``` python
@@ -337,7 +337,7 @@ on new data.
 c(mae = mean(abs(out$elevation - out$elevation_observed)),
   accuracy = mean(out$habitat == out$habitat_observed))
 #>         mae    accuracy 
-#> 205.0333333   0.7333333
+#> 219.6333333   0.7333333
 ```
 
 ``` python
@@ -359,9 +359,9 @@ the largest value.
 probs <- preds$probabilities$habitat
 round(head(probs, 3), 3)
 #>      alpine forest grassland wetland
-#> [1,]  0.586  0.081     0.202   0.131
-#> [2,]  0.169  0.578     0.122   0.132
-#> [3,]  0.639  0.198     0.072   0.090
+#> [1,]  0.905  0.034     0.033   0.028
+#> [2,]  0.135  0.625     0.083   0.158
+#> [3,]  0.782  0.140     0.035   0.043
 range(rowSums(probs))
 #> [1] 0.9999999 1.0000001
 all(max.col(probs) - 1 == preds$predictions$habitat)
@@ -399,10 +399,10 @@ sure <- data.frame(
   entropy = -rowSums(probs * log(pmax(probs, 1e-12)))
 )
 head(sure[order(sure$confidence), ], 3)
-#>    plot_id confidence      margin  entropy
-#> 23    A115  0.3018674 0.032638878 1.365252
-#> 29    A145  0.3158222 0.002814889 1.351019
-#> 17    A085  0.3432915 0.035432905 1.337810
+#>    plot_id confidence    margin  entropy
+#> 16    A080  0.4876763 0.2399530 1.212886
+#> 17    A085  0.5751043 0.3790680 1.116095
+#> 2     A010  0.6246127 0.4664977 1.061643
 ```
 
 ``` python
@@ -651,12 +651,12 @@ head(data.frame(plot_id = preds$plot_ids,
                 model = round(preds$predictions$elevation),
                 blended = round(blended$predictions$elevation)))
 #>   plot_id model blended
-#> 1    A005  2126    2156
-#> 2    A010  1695    1723
-#> 3    A015  2193    2219
-#> 4    A020  1369    1320
-#> 5    A025  1028     978
-#> 6    A030  1597    1492
+#> 1    A005  2172    2209
+#> 2    A010  1602    1665
+#> 3    A015  2163    2204
+#> 4    A020  1373    1336
+#> 5    A025   871     877
+#> 6    A030  1476    1415
 
 resolve.retrieval(predictor, NULL)
 ```
@@ -812,11 +812,11 @@ head(data.frame(plot_id = suite_preds$plot_ids, habitat = habitat$label,
                 agreement = habitat$agreement,
                 recognised = habitat$recognised_share))
 #>   plot_id   habitat agreement recognised
-#> 1    A005 grassland 0.6666667  0.6666667
-#> 2    A010    forest 0.6666667  1.0000000
-#> 3    A015    forest 0.3333333  1.0000000
-#> 4    A020    forest 0.6666667  1.0000000
-#> 5    A025 grassland 1.0000000  1.0000000
+#> 1    A005    alpine 0.6666667  0.6666667
+#> 2    A010    forest 1.0000000  1.0000000
+#> 3    A015    alpine 1.0000000  1.0000000
+#> 4    A020    forest 1.0000000  1.0000000
+#> 5    A025 grassland 0.6666667  1.0000000
 #> 6    A030 grassland 1.0000000  1.0000000
 ```
 

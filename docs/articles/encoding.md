@@ -299,7 +299,7 @@ fit <- resolve.train.dataset(attended, dModel = 64L, nHeads = 4L,
                              nAttentionLayers = 2L, transformerFfDim = 128L,
                              lr = 3e-4, maxEpochs = 100L, verbose = FALSE)
 fit$result$best_epoch
-#> [1] 87
+#> [1] 99
 ```
 
 ``` python
@@ -420,7 +420,7 @@ fit <- resolve.train.dataset(
   modelConfig = list(encoder_architecture = "ft_transformer")
 )
 round(fit$result$final_metrics$habitat$accuracy, 3)
-#> [1] 0.767
+#> [1] 0.9
 ```
 
 ``` python
@@ -458,7 +458,7 @@ mae <- sapply(encodings, function(encoding) {
 })
 round(mae)
 #>        hash       embed      sparse   rank_pool transformer 
-#>         261         205         215         177         185
+#>         185         203         161         138         103
 ```
 
 ``` python

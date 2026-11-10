@@ -685,7 +685,7 @@ quick <- resolve.train.dataset(quick_data, hiddenDims = c(256L, 128L, 64L),
                                maxEpochs = 50L, patience = 10L,
                                batchSize = 4096L, verbose = FALSE)
 round(quick$result$final_metrics$habitat$accuracy, 3)
-#> [1] 0.767
+#> [1] 0.9
 ```
 
 ``` python
@@ -716,7 +716,7 @@ standard <- resolve.train.dataset(quick_data, hiddenDims = c(512L, 256L, 128L),
                                   maxEpochs = 200L, patience = 30L,
                                   batchSize = 4096L, verbose = FALSE)
 round(standard$result$final_metrics$habitat$accuracy, 3)
-#> [1] 0.833
+#> [1] 0.8
 ```
 
 ``` python
