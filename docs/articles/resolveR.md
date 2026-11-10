@@ -27,7 +27,7 @@ pip install resolve-core
 ```
 
 [Installing the RESOLVE
-engine](https://gillescolling.com/resolve/articles/installation.md)
+engine](https://gillescolling.com/resolve/articles/installation.html)
 covers the GPU build, building from source and the command line.
 
 ## Two tables
@@ -209,19 +209,19 @@ are known.
 ## Next steps
 
 - [Preparing the two
-  tables](https://gillescolling.com/resolve/articles/data-preparation.md):
+  tables](https://gillescolling.com/resolve/articles/data-preparation.html):
   every role, missing values, targets labelled on some plots and reusing
   a training vocabulary.
 
 - [Encoding the species
-  set](https://gillescolling.com/resolve/articles/encoding.md): the five
-  encodings and when each fits.
+  set](https://gillescolling.com/resolve/articles/encoding.html): the
+  five encodings and when each fits.
 
 - [Training and reading the
-  fit](https://gillescolling.com/resolve/articles/training.md): the
+  fit](https://gillescolling.com/resolve/articles/training.html): the
   training settings, the held-out fold, cross-validation and
   checkpoints.
 
 - [Imputing new
-  plots](https://gillescolling.com/resolve/articles/prediction.md):
+  plots](https://gillescolling.com/resolve/articles/prediction.html):
   output formats, class probabilities, new species and model suites.

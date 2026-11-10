@@ -41,7 +41,7 @@ pip install resolve-core
 ```
 :::
 
-[Installing the RESOLVE engine](installation.html) covers the GPU build, building from source and the command line.
+[Installing the RESOLVE engine](https://gillescolling.com/resolve/articles/installation.html) covers the GPU build, building from source and the command line.
 
 ## Two tables
 
@@ -182,10 +182,10 @@ A plot with a species the model never saw still gets an imputed value: the unkno
 
 ## Next steps
 
-- [Preparing the two tables](data-preparation.html): every role, missing values, targets labelled on some plots and reusing a training vocabulary.
+- [Preparing the two tables](https://gillescolling.com/resolve/articles/data-preparation.html): every role, missing values, targets labelled on some plots and reusing a training vocabulary.
 
-- [Encoding the species set](encoding.html): the five encodings and when each fits.
+- [Encoding the species set](https://gillescolling.com/resolve/articles/encoding.html): the five encodings and when each fits.
 
-- [Training and reading the fit](training.html): the training settings, the held-out fold, cross-validation and checkpoints.
+- [Training and reading the fit](https://gillescolling.com/resolve/articles/training.html): the training settings, the held-out fold, cross-validation and checkpoints.
 
-- [Imputing new plots](prediction.html): output formats, class probabilities, new species and model suites.
+- [Imputing new plots](https://gillescolling.com/resolve/articles/prediction.html): output formats, class probabilities, new species and model suites.

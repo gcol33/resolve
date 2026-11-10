@@ -1,9 +1,12 @@
 ## Resubmission
 
-This is a resubmission of resolveR 0.10.0 (submitted 2026-09-09). The version
-is now 1.1.0 because development of the engine continued after the review, and
-the package's version follows the engine's: `resolve.install_backend()`
-downloads the engine build of the same version.
+This is a resubmission of resolveR 0.10.0 (submitted 2026-09-09), and it
+replaces resolveR 1.1.0 (submitted 2026-11-09), which is still waiting in the
+queue. The version is now 1.2.0 because development of the engine continued,
+and the package's version follows the engine's: `resolve.install_backend()`
+downloads the engine build of the same version. 1.2.0 adds fine-tuning of a
+trained model (`resolve.parent()`, `resolve.derive_suite()`); its examples are
+guarded like the others and write only under `tempdir()`.
 
 Response to the review of 2026-09-17:
 
