@@ -12,6 +12,7 @@
 #include "rcpp_trainer.h"
 #include "rcpp_predictor.h"
 #include "rcpp_suite.h"
+#include "rcpp_parent.h"
 
 // =============================================================================
 // Expose module-managed wrapper classes to non-module Rcpp machinery so the
@@ -26,6 +27,7 @@ RCPP_EXPOSED_CLASS_NODECL(RTrainer)
 RCPP_EXPOSED_CLASS_NODECL(RPredictor)
 RCPP_EXPOSED_CLASS_NODECL(RSuite)
 RCPP_EXPOSED_CLASS_NODECL(RFuzzyIndex)
+RCPP_EXPOSED_CLASS_NODECL(RParent)
 
 namespace {
 
@@ -327,6 +329,7 @@ RCPP_MODULE(resolve_module) {
         .method("compute_residuals", &RTrainer::compute_residuals, "Compute residual analysis for a target")
         .method("compute_classification_predictions", &RTrainer::compute_classification_predictions, "Per-plot test-fold predictions for a classification target")
         .method("load_state", &RTrainer::load_state, "Load checkpoint weights/scalers/vocab into this trainer in place")
+        .method("init_from", &RTrainer::init_from, "Start the model from a parent's encoder (fine-tuning)")
         .method("test_indices", &RTrainer::test_indices, "Global plot indices of the held-out test fold")
         .method("train_indices", &RTrainer::train_indices, "Global plot indices of the training fold")
         .method("test_plot_ids", &RTrainer::test_plot_ids, "Plot IDs of the held-out test fold")
@@ -398,7 +401,21 @@ RCPP_MODULE(resolve_module) {
         .method("predict_csv", &RSuite::predict_csv, "Score CSV files")
         ;
 
+    class_<RParent>("Parent")
+        .method("vocabs", &RParent::vocabs, "The vocabularies a fine-tuning dataset is loaded with")
+        .method("dataset_config", &RParent::dataset_config,
+                "The loader settings a fine-tuning dataset is loaded with")
+        .method("model_config", &RParent::model_config, "The parent's ModelConfig")
+        .method("schema", &RParent::schema, "The parent's schema")
+        .method("scalers", &RParent::scalers, "The parent's scalers")
+        .method("record", &RParent::record, "The record a fine-tuned checkpoint keeps of the parent")
+        ;
+
     function("Predictor_load", &RPredictor::load, "Load predictor from checkpoint");
+    function("Parent_open", &RParent::open,
+             "Open the trained model a fine-tuned model starts from");
+    function("Suite_derive", &RSuite::derive,
+             "Release fine-tuned checkpoints as a suite derived from their parent suite");
     function("Suite_load", &RSuite::load, "Load a model suite from its directory");
     function("Suite_verify", &RSuite::verify,
              "Read a suite's manifest and compare every member file with it");

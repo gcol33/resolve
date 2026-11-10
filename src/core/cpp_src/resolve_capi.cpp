@@ -1025,13 +1025,35 @@ value_to_nested_metrics(const resolve_value* v) {
     return out;
 }
 
+// Inverse of parent_record_to_value.
+ParentRecord parse_parent_record(const resolve_value* c) {
+    reject_unknown_keys(c, "parent record",
+                        {"checkpoint", "sha256", "bytes", "resolve_version", "reuse", "n_tensors",
+                         "heads", "suite", "suite_target", "suite_seed", "licence",
+                         "training_scope"});
+    ParentRecord p;
+    if (vhas(c, "checkpoint")) p.checkpoint = vstr(c, "checkpoint");
+    if (vhas(c, "sha256")) p.sha256 = vstr(c, "sha256");
+    if (vhas(c, "bytes")) p.bytes = vnum<int64_t>(c, "bytes");
+    if (vhas(c, "resolve_version")) p.resolve_version = vstr(c, "resolve_version");
+    if (vhas(c, "reuse")) p.reuse = enum_from_name<InitReuse>(vstr(c, "reuse"));
+    if (vhas(c, "n_tensors")) p.n_tensors = vnum<int64_t>(c, "n_tensors");
+    if (vhas(c, "heads")) p.heads = vstr_vec(c, "heads");
+    if (vhas(c, "suite")) p.suite = vstr(c, "suite");
+    if (vhas(c, "suite_target")) p.suite_target = vstr(c, "suite_target");
+    if (vhas(c, "suite_seed")) p.suite_seed = vnum<int64_t>(c, "suite_seed");
+    if (vhas(c, "licence")) p.licence = vstr(c, "licence");
+    if (vhas(c, "training_scope")) p.training_scope = vstr(c, "training_scope");
+    return p;
+}
+
 // Inverse of run_metadata_to_value: reads every key it writes, so a metadata
 // map handed back from R round-trips.
 RunMetadata parse_run_metadata(const resolve_value* c) {
     reject_unknown_keys(c, "run metadata",
                         {"resolve_version", "created_at", "completed_at", "train_time_seconds",
                          "n_plots_train", "n_plots_test", "hold_out", "test_size", "split_seed",
-                         "best_epoch", "total_epochs", "final_metrics"});
+                         "best_epoch", "total_epochs", "final_metrics", "parent"});
     RunMetadata rm;
     if (vhas(c, "resolve_version")) rm.resolve_version = vstr(c, "resolve_version");
     if (vhas(c, "created_at")) rm.created_at = vstr(c, "created_at");
@@ -1045,6 +1067,9 @@ RunMetadata parse_run_metadata(const resolve_value* c) {
     if (vhas(c, "best_epoch")) rm.best_epoch = vnum<int>(c, "best_epoch");
     if (vhas(c, "total_epochs")) rm.total_epochs = vnum<int>(c, "total_epochs");
     if (vhas(c, "final_metrics")) rm.final_metrics = value_to_nested_metrics(vget(c, "final_metrics"));
+    if (vhas(c, "parent") && vget(c, "parent")->kind != RESOLVE_VALUE_NULL) {
+        rm.parent = parse_parent_record(vget(c, "parent"));
+    }
     return rm;
 }
 
@@ -1346,6 +1371,24 @@ ExternalVocabs value_to_external_vocabs(const resolve_value* v) {
     return out;
 }
 
+resolve_value* parent_record_to_value(const ParentRecord& p) {
+    ValueGuard g(v_map());
+    resolve_value* m = g.p;
+    v_put(m, "checkpoint", v_string(p.checkpoint));
+    v_put(m, "sha256", v_string(p.sha256));
+    v_put(m, "bytes", v_int(p.bytes));
+    v_put(m, "resolve_version", v_string(p.resolve_version));
+    v_put(m, "reuse", v_string(enum_to_name(p.reuse)));
+    v_put(m, "n_tensors", v_int(p.n_tensors));
+    v_put(m, "heads", v_string_array(p.heads));
+    v_put(m, "suite", v_string(p.suite));
+    v_put(m, "suite_target", v_string(p.suite_target));
+    v_put(m, "suite_seed", v_int(p.suite_seed));
+    v_put(m, "licence", v_string(p.licence));
+    v_put(m, "training_scope", v_string(p.training_scope));
+    return g.release();
+}
+
 resolve_value* run_metadata_to_value(const RunMetadata& m0) {
     ValueGuard g(v_map());
     resolve_value* m = g.p;
@@ -1361,6 +1404,7 @@ resolve_value* run_metadata_to_value(const RunMetadata& m0) {
     v_put(m, "best_epoch", v_int(m0.best_epoch));
     v_put(m, "total_epochs", v_int(m0.total_epochs));
     v_put(m, "final_metrics", nested_metrics_to_value(m0.final_metrics));
+    v_put(m, "parent", m0.parent ? parent_record_to_value(*m0.parent) : v_null());
     return g.release();
 }
 
@@ -1384,6 +1428,7 @@ struct resolve_model     { resolve::ResolveModel model; };
 struct resolve_trainer   { std::unique_ptr<resolve::Trainer> trainer; };
 struct resolve_predictor { resolve::Predictor predictor; };
 struct resolve_suite     { resolve::SuitePredictor suite; };
+struct resolve_parent    { resolve::ParentModel parent; };
 struct resolve_fuzzy     { resolve::fuzzy::FuzzyIndex index; };
 
 namespace {
@@ -1411,6 +1456,7 @@ constexpr DefaultConfig kDefaultConfigs[] = {
     {"spatial_block", &default_config_value<SpatialBlockConfig>},
     {"retrieval", &default_config_value<RetrievalConfig>},
     {"gap_fitting", &default_config_value<GapFittingConfig>},
+    {"init_from", &default_config_value<InitFromConfig>},
     {"terrain_correction", &default_config_value<TerrainCorrectionConfig>},
     {"terrain_field", &default_config_value<TerrainFieldConfig>},
     {"terrain_codec", &default_config_value<TerrainCodecConfig>},
@@ -2071,6 +2117,40 @@ int resolve_trainer_load_state(resolve_trainer_t* t, const char* path, const cha
     })
 }
 
+int resolve_trainer_init_from(resolve_trainer_t* t, const resolve_parent_t* parent, const char* reuse) {
+    CAPI_BODY_INT({
+        if (!t || !parent) throw std::invalid_argument("init_from: null handle");
+        t->trainer->init_from(parent->parent,
+                              reuse ? enum_from_name<InitReuse>(reuse) : InitReuse::Encoder);
+        return 0;
+    })
+}
+
+resolve_parent_t* resolve_parent_open(const char* source, const resolve_value_t* config) {
+    CAPI_BODY_PTR({
+        if (!source) throw std::invalid_argument("parent_open: null source");
+        return new resolve_parent{
+            ParentModel::open(source, parse_config<InitFromConfig>(config, "init_from"))};
+    })
+}
+
+void resolve_parent_free(resolve_parent_t* p) { delete p; }
+
+resolve_value_t* resolve_parent_get(const resolve_parent_t* p, const char* what) {
+    CAPI_BODY_PTR({
+        if (!p) throw std::invalid_argument("parent_get: null handle");
+        const std::string w = what ? what : "";
+        const ParentModel& parent = p->parent;
+        if (w == "vocabs") return external_vocabs_to_value(parent.vocabs());
+        if (w == "dataset_config") return config_to_value(parent.dataset_config());
+        if (w == "model_config") return config_to_value(parent.model_config());
+        if (w == "schema") return schema_to_value(parent.schema());
+        if (w == "scalers") return scalers_to_value(parent.scalers());
+        if (w == "record") return parent_record_to_value(parent.record());
+        throw std::invalid_argument("parent_get: unknown accessor '" + w + "'");
+    })
+}
+
 resolve_value_t* resolve_trainer_get(const resolve_trainer_t* t, const char* what) {
     CAPI_BODY_PTR({
         if (!t) throw std::invalid_argument("trainer_get: null handle");
@@ -2293,6 +2373,46 @@ resolve_value_t* resolve_predictor_get(const resolve_predictor_t* p, const char*
 // ============================================================================
 
 namespace {
+
+// A value tree as a JSON document, the inverse of json_to_value; an array
+// of one kind becomes a JSON array. A matrix has no JSON form.
+json::Value value_to_json(const resolve_value* v, const std::string& where) {
+    if (v == nullptr) return json::Value();
+    switch (v->kind) {
+        case RESOLVE_VALUE_NULL: return json::Value();
+        case RESOLVE_VALUE_BOOL: return json::Value(v->b);
+        case RESOLVE_VALUE_INT: return json::Value(static_cast<double>(v->i));
+        case RESOLVE_VALUE_DOUBLE: return json::Value(v->d);
+        case RESOLVE_VALUE_STRING: return json::Value(v->s);
+        case RESOLVE_VALUE_INT_ARRAY: {
+            json::Value out = json::Value::array();
+            for (const int64_t x : v->iarr) out.push_back(json::Value(static_cast<double>(x)));
+            return out;
+        }
+        case RESOLVE_VALUE_DOUBLE_ARRAY: {
+            json::Value out = json::Value::array();
+            for (const double x : v->darr) out.push_back(json::Value(x));
+            return out;
+        }
+        case RESOLVE_VALUE_STRING_ARRAY: return json::Value::array_of(v->sarr);
+        case RESOLVE_VALUE_LIST: {
+            json::Value out = json::Value::array();
+            for (std::size_t i = 0; i < v->items.size(); ++i) {
+                out.push_back(value_to_json(v->items[i], where + "[" + std::to_string(i) + "]"));
+            }
+            return out;
+        }
+        case RESOLVE_VALUE_MAP: {
+            json::Value out = json::Value::object();
+            for (std::size_t i = 0; i < v->keys.size(); ++i) {
+                out.set(v->keys[i], value_to_json(v->vals[i], where + "." + v->keys[i]));
+            }
+            return out;
+        }
+        default:
+            throw std::invalid_argument(where + ": a matrix has no place here");
+    }
+}
 
 // A JSON document as a value tree: objects keep their member order.
 resolve_value* json_to_value(const json::Value& j) {
@@ -2796,6 +2916,15 @@ resolve_value_t* resolve_suite_verify(const char* dir) {
         v_put(g.p, "manifest", json_to_value(manifest.to_json()));
         v_put(g.p, "problems", v_string_array(manifest.verify(dir)));
         return g.release();
+    })
+}
+
+resolve_value_t* resolve_suite_derive(const char* dir, const resolve_value_t* spec) {
+    CAPI_BODY_PTR({
+        if (!dir) throw std::invalid_argument("suite_derive: null directory");
+        if (!spec || spec->kind != RESOLVE_VALUE_MAP) wrong_kind("derived suite spec", "a map");
+        const DerivedSuiteSpec parsed = derived_suite_spec_from_json(value_to_json(spec, "spec"));
+        return json_to_value(write_derived_suite(dir, parsed).to_json());
     })
 }
 

@@ -236,6 +236,10 @@ Pooled and transformer encodings:
 - `freeze_composition` (`bool`, default `False`): keep the species,
   genus and family tables at their initial values. Needs the MLP
   architecture and an encoding with such a table.
+- `freeze_encoder` (`bool`, default `False`): keep every parameter
+  outside the task heads at its value, and run that part in evaluation
+  mode while the heads train. With `Trainer.init_from`, the heads learn
+  on the encoder of a trained parent.
 - `d_model` (`int`, default `128`), `n_heads` (`int`, default `4`),
   `n_attention_layers` (`int`, default `0`, pooling alone),
   `transformer_ff_dim` (`int`, default `256`), `transformer_dropout`
@@ -537,6 +541,25 @@ spatial = trainer.cross_validate_spatial(blocks, n_folds=3, seed=1)
 spatial.mean_metrics["elevation"]["mae"]
 ```
 
+### `init_from()`
+
+``` python
+init_from(parent, reuse=InitReuse.Encoder)
+```
+
+Starts the model from a
+[`ParentModel`](https://gillescolling.com/resolve/articles/python-fine-tuning.html#ParentModel):
+every parameter and buffer outside the task heads is copied from it, and
+with `InitReuse.EncoderHeads` also the head of each target the parent
+shares under the same name, task, transform and classes. Every other
+head keeps its fresh initialisation. From then on the continuous block
+is scaled with the parent’s scalers, so the encoder reads each plot on
+the scale it was trained on, and a split already prepared is scaled
+again. `cross_validate` starts every fold from these weights, and `save`
+records the parent. The model must read the plots as the parent does
+([`fine_tune_mismatches`](https://gillescolling.com/resolve/articles/python-fine-tuning.html#fine_tune_mismatches));
+otherwise a `ValueError` lists every difference.
+
 ### `predict()`
 
 ``` python
@@ -585,6 +608,8 @@ rc.Trainer.load_run_metadata(path).n_plots_train
   recorded by `prepare_data`.
 - `run_metadata` (`RunMetadata`): the split `prepare_data` made and,
   after `fit`, the run’s timing, epochs and final metrics.
+- `parent` (`ParentRecord` or `None`): the parent `init_from` started
+  the model from.
 - `effective_batch_size` (`int`): the batch size the last `fit` trained
   at; 0 before the first.
 

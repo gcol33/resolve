@@ -48,6 +48,8 @@ set(RESOLVE_CORE_SOURCES
     ${RESOLVE_CORE_DIR}/cpp_src/terrain_field.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/terrain_codec.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/suite.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/suite_derive.cpp
+    ${RESOLVE_CORE_DIR}/cpp_src/fine_tune.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/json.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/sha256.cpp
     ${RESOLVE_CORE_DIR}/cpp_src/loss.cpp
@@ -125,6 +127,7 @@ set(RESOLVE_CORE_HEADERS
     ${RESOLVE_CORE_DIR}/include/resolve/terrain_codec.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/row_cells.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/suite.hpp
+    ${RESOLVE_CORE_DIR}/include/resolve/fine_tune.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/json.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/sha256.hpp
     ${RESOLVE_CORE_DIR}/include/resolve/loss.hpp

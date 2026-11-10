@@ -27,6 +27,7 @@ using resolve_cli::ParsedArgs;
 int train_command(const ParsedArgs& args);
 int predict_command(const ParsedArgs& args);
 int info_command(const ParsedArgs& args);
+int suite_derive_command(const ParsedArgs& args);
 int terrain_fit_field_command(const ParsedArgs& args);
 int terrain_assemble_command(const ParsedArgs& args);
 int terrain_encode_command(const ParsedArgs& args);
@@ -74,6 +75,7 @@ Usage:
   resolve train [options]     Train a new model
   resolve predict [options]   Make predictions with a trained model
   resolve info [options]      Display model information
+  resolve suite derive [...]  Release fine-tuned models as a suite
   resolve version             Print version
 
 Pass --help after a subcommand for that command's flags only.
@@ -82,6 +84,7 @@ Pass --help after a subcommand for that command's flags only.
     std::cout << resolve_cli::render_usage(resolve_cli::train_spec()) << "\n";
     std::cout << resolve_cli::render_usage(resolve_cli::predict_spec()) << "\n";
     std::cout << resolve_cli::render_usage(resolve_cli::info_spec()) << "\n";
+    std::cout << resolve_cli::render_usage(resolve_cli::suite_derive_spec()) << "\n";
     std::cout << resolve_cli::render_usage(resolve_cli::terrain_fit_field_spec()) << "\n";
     std::cout << resolve_cli::render_usage(resolve_cli::terrain_assemble_spec()) << "\n";
     std::cout << resolve_cli::render_usage(resolve_cli::terrain_encode_spec()) << "\n";
@@ -150,6 +153,13 @@ int run_cli(int argc, char* argv[]) {
     }
     if (cmd == "info") {
         return run_command(resolve_cli::info_spec(), tokens, &info_command);
+    }
+    if (cmd == "suite") {
+        const std::string action = tokens.empty() ? "" : tokens.front();
+        const std::vector<std::string> rest(tokens.empty() ? tokens.end() : tokens.begin() + 1, tokens.end());
+        if (action == "derive") return run_command(resolve_cli::suite_derive_spec(), rest, &suite_derive_command);
+        std::cerr << "Unknown suite action: '" << action << "'; one of derive" << std::endl;
+        return 1;
     }
     if (cmd == "terrain") {
         // `resolve terrain <action> [flags]`: one flag table per action.

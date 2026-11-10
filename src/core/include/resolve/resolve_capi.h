@@ -86,6 +86,7 @@ typedef struct resolve_model     resolve_model_t;
 typedef struct resolve_trainer   resolve_trainer_t;
 typedef struct resolve_predictor resolve_predictor_t;
 typedef struct resolve_suite     resolve_suite_t;
+typedef struct resolve_parent    resolve_parent_t;
 typedef struct resolve_fuzzy     resolve_fuzzy_t;
 
 /* Tag returned by resolve_value_kind(). */
@@ -440,6 +441,17 @@ RESOLVE_CAPI int resolve_trainer_save(
 RESOLVE_CAPI int resolve_trainer_load_state(
     resolve_trainer_t* t, const char* path, const char* device, double vram_fraction);
 
+/* Start the trainer's model from a parent (resolve_parent_open): every
+ * parameter and buffer outside the task heads is copied from it, and with
+ * `reuse` "encoder_heads" (NULL or "encoder": none) also the head of each
+ * target the parent shares with the same task, transform and classes. The
+ * continuous block is standardised with the parent's scalers from then on.
+ * The model must be built for a dataset loaded with the parent's "vocabs" and
+ * "dataset_config", from its "model_config" with only the head, dropout and
+ * freeze settings changed; every departure is listed in the error. 0 / -1. */
+RESOLVE_CAPI int resolve_trainer_init_from(
+    resolve_trainer_t* t, const resolve_parent_t* parent, const char* reuse);
+
 /* Zero-arg accessor. `what`: scalers config test_indices train_indices
  * test_plot_ids train_plot_ids categorical_vocab effective_batch_size
  * run_metadata (a MAP shaped like resolve_load_run_metadata's: the split
@@ -470,6 +482,28 @@ RESOLVE_CAPI resolve_value_t* resolve_trainer_predict(
  * model. Returns a MAP value tree / NULL. */
 RESOLVE_CAPI resolve_value_t* resolve_load_train_config(const char* path);
 RESOLVE_CAPI resolve_value_t* resolve_load_run_metadata(const char* path);
+
+/* ========================================================================== */
+/* Fine-tuning                                                                */
+/* ========================================================================== */
+
+/* The parent a fine-tuned model starts from: a checkpoint path, or a suite
+ * directory whose member `config` names. `config` is an InitFromConfig MAP or
+ * NULL: suite_target (STRING; may be empty for a suite of one target),
+ * suite_seed (INT, -1 = the target's first member); reuse is read by
+ * resolve_trainer_init_from instead. A suite member's size and SHA-256 are
+ * checked against the manifest first. NULL on error. */
+RESOLVE_CAPI resolve_parent_t* resolve_parent_open(const char* source, const resolve_value_t* config);
+
+RESOLVE_CAPI void resolve_parent_free(resolve_parent_t* p);
+
+/* Zero-arg accessor. `what`: vocabs and dataset_config (what a fine-tuning
+ * dataset is loaded with: pass them to resolve_dataset_load as `vocabs` and
+ * `config`), model_config (the ModelConfig MAP to change the head, dropout
+ * and freeze settings of), schema, scalers, record (the ParentRecord MAP a
+ * fine-tuned checkpoint keeps: checkpoint sha256 bytes resolve_version suite
+ * suite_target suite_seed licence training_scope). Returns value / NULL. */
+RESOLVE_CAPI resolve_value_t* resolve_parent_get(const resolve_parent_t* p, const char* what);
 
 /* ========================================================================== */
 /* Predictor                                                                  */
@@ -718,6 +752,16 @@ RESOLVE_CAPI resolve_value_t* resolve_suite_verify(const char* dir);
  * write the manifest back. Returns the sealed manifest (value tree as above) /
  * NULL. */
 RESOLVE_CAPI resolve_value_t* resolve_suite_seal(const char* dir);
+
+/* Release fine-tuned checkpoints as a suite in `dir` (resolve::write_derived_suite):
+ * each member copied in, a manifest derived from the parent suite written and
+ * sealed, and the suite loaded once to check every member. `spec` is a MAP:
+ * parent (STRING, the parent suite's directory), name, description, licence,
+ * training_scope (STRING), targets (LIST of MAPs: name, outputs STRING_ARRAY
+ * optional, combine optional, period, units, status, limit, training and
+ * validation MAPs optional, members LIST of {checkpoint STRING, seed INT}).
+ * Returns the manifest written (value tree as resolve_suite_get's) / NULL. */
+RESOLVE_CAPI resolve_value_t* resolve_suite_derive(const char* dir, const resolve_value_t* spec);
 
 /* ========================================================================== */
 /* Fuzzy string index                                                         */

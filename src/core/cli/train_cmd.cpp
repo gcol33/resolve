@@ -18,6 +18,7 @@
 #include "arg_parser.hpp"
 #include "cli_common.hpp"
 #include "config_flags.hpp"
+#include "init_flags.hpp"
 
 using resolve_cli::ArgError;
 using resolve_cli::ParsedArgs;
@@ -235,12 +236,35 @@ int train_command(const ParsedArgs& args) {
         targets.push_back(std::move(spec));
     }
 
+    // ------------------------------------------------------------- parent
+    // A fine-tuned model reads the plots as its parent does and takes its
+    // configuration; the flags below are laid over the parent's, and
+    // Trainer::init_from refuses any that change what the parent fixes.
+    std::optional<ParentModel> parent;
+    InitReuse init_reuse = InitReuse::Encoder;
+    if (const auto init = resolve_cli::read_init_from(args)) {
+        try {
+            parent = ParentModel::open(init->first, init->second);
+        } catch (const std::exception& e) {
+            std::cerr << "Error: --init-from: " << e.what() << std::endl;
+            return 1;
+        }
+        init_reuse = init->second.reuse;
+        const ParentRecord& record = parent->record();
+        std::cout << "Fine-tuning from " << record.checkpoint;
+        if (!record.suite.empty()) {
+            std::cout << " (suite '" << record.suite << "', target '" << record.suite_target
+                      << "', seed " << record.suite_seed << ")";
+        }
+        std::cout << std::endl;
+    }
+
     // -------------------------------------------------------------- configs
     // Every field from its registry-generated flag; a field whose flag is not
-    // given keeps its struct default.
-    DatasetConfig dataset_config;
+    // given keeps its struct default, or the parent's value when fine-tuning.
+    DatasetConfig dataset_config = parent ? parent->dataset_config() : DatasetConfig{};
     resolve_cli::read_top_level_flags(dataset_config, args);
-    ModelConfig model_config;
+    ModelConfig model_config = parent ? parent->model_config() : ModelConfig{};
     resolve_cli::read_top_level_flags(model_config, args);
     resolve_cli::read_architecture_flags(model_config, args);
     TrainConfig train_config;
@@ -276,8 +300,9 @@ int train_command(const ParsedArgs& args) {
     std::cout << "\nLoading data..." << std::endl;
     ResolveDataset dataset;
     try {
+        const ExternalVocabs parent_vocabs = parent ? parent->vocabs() : ExternalVocabs{};
         dataset = resolve_cli::load_dataset(header_path, species_path, roles, targets,
-                                            dataset_config);
+                                            dataset_config, parent ? &parent_vocabs : nullptr);
     } catch (const std::exception& e) {
         std::cerr << "Error loading data: " << e.what() << std::endl;
         return 1;
@@ -307,6 +332,14 @@ int train_command(const ParsedArgs& args) {
 
     // ------------------------------------------------------- prepare + train
     Trainer trainer(model, train_config);
+    if (parent) {
+        try {
+            trainer.init_from(*parent, init_reuse);
+        } catch (const std::invalid_argument& e) {
+            std::cerr << "Error: --init-from: " << e.what() << std::endl;
+            return 1;
+        }
+    }
     std::string stopping_plots_path;
     if (args.get_if_present("--stopping-plots", stopping_plots_path)) {
         if (args.has("--test-size")) {

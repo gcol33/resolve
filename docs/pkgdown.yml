@@ -7,12 +7,14 @@ articles:
   articles/data-preparation: data-preparation.html
   articles/embeddings: embeddings.html
   articles/encoding: encoding.html
+  articles/fine-tuning: fine-tuning.html
   articles/gap-fitting: gap-fitting.html
   articles/installation: installation.html
   articles/performance: performance.html
   articles/prediction: prediction.html
   articles/python-data: python-data.html
   articles/python-engine: python-engine.html
+  articles/python-fine-tuning: python-fine-tuning.html
   articles/python-gap-fitting: python-gap-fitting.html
   articles/python-names: python-names.html
   articles/python-prediction: python-prediction.html
@@ -25,7 +27,7 @@ articles:
   articles/species-names: species-names.html
   articles/terrain-correction: terrain-correction.html
   articles/training: training.html
-last_built: 2026-11-09T22:47Z
+last_built: 2026-11-10T01:05Z
 urls:
   reference: https://gillescolling.com/resolve/reference
   article: https://gillescolling.com/resolve/articles

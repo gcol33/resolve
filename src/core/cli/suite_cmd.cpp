@@ -1,4 +1,5 @@
-// RESOLVE CLI - model suites: `resolve predict --suite` and `resolve info --suite`.
+// RESOLVE CLI - model suites: `resolve predict --suite`, `resolve info --suite`
+// and `resolve suite derive`.
 //
 // Reads its values from the ParsedArgs produced by the `predict` and `info`
 // flag tables in cli_spec.hpp.
@@ -56,7 +57,114 @@ void print_limits(const resolve::SuitePredictions& p) {
     }
 }
 
+// Split "KEY=VALUE" at the first '='.
+std::pair<std::string, std::string> key_value(const std::string& flag, const std::string& item) {
+    const auto eq = item.find('=');
+    if (eq == std::string::npos || eq == 0 || eq + 1 == item.size()) {
+        throw resolve_cli::ArgError(flag + " expects KEY=VALUE, got '" + item + "'");
+    }
+    return {item.substr(0, eq), item.substr(eq + 1)};
+}
+
 }  // namespace
+
+int suite_derive_command(const ParsedArgs& args) {
+    using namespace resolve;
+    DerivedSuiteSpec spec;
+    spec.parent = args.get("--parent");
+    spec.name = args.get("--name");
+    spec.description = args.get("--description");
+    spec.licence = args.get("--licence");
+    spec.training_scope = args.get("--training-scope");
+    const std::string output = args.get("--output");
+    for (const auto& [flag, value] : {std::pair<const char*, const std::string*>{"--parent", &spec.parent},
+                                      {"--output", &output},
+                                      {"--name", &spec.name},
+                                      {"--licence", &spec.licence},
+                                      {"--training-scope", &spec.training_scope}}) {
+        if (value->empty()) {
+            std::cerr << "Error: " << flag << " is required" << std::endl;
+            return 1;
+        }
+    }
+
+    auto target = [&spec](const std::string& name) -> DerivedSuiteTarget& {
+        for (auto& t : spec.targets) {
+            if (t.name == name) return t;
+        }
+        spec.targets.push_back(DerivedSuiteTarget{});
+        spec.targets.back().name = name;
+        return spec.targets.back();
+    };
+    auto known = [&spec](const char* flag, const std::string& name) -> DerivedSuiteTarget& {
+        for (auto& t : spec.targets) {
+            if (t.name == name) return t;
+        }
+        throw resolve_cli::ArgError(std::string(flag) + " names target '" + name +
+                                    "', which no --member names");
+    };
+
+    try {
+        for (const auto& item : args.get_all("--member")) {
+            const auto [key, path] = key_value("--member", item);
+            const auto colon = key.rfind(':');
+            if (colon == std::string::npos || colon == 0 || colon + 1 == key.size()) {
+                throw resolve_cli::ArgError("--member expects TARGET:SEED=PATH, got '" + item + "'");
+            }
+            target(key.substr(0, colon))
+                .members.push_back({path, resolve_cli::parse_int_value("--member", key.substr(colon + 1))});
+        }
+        if (spec.targets.empty()) {
+            std::cerr << "Error: at least one --member is required" << std::endl;
+            return 1;
+        }
+        for (const auto& item : args.get_all("--units")) {
+            const auto [name, units] = key_value("--units", item);
+            known("--units", name).units = units;
+        }
+        for (const auto& item : args.get_all("--outputs")) {
+            const auto [name, heads] = key_value("--outputs", item);
+            auto& t = known("--outputs", name);
+            std::size_t start = 0;
+            while (start <= heads.size()) {
+                const std::size_t end = std::min(heads.find(',', start), heads.size());
+                t.outputs.push_back(heads.substr(start, end - start));
+                start = end + 1;
+            }
+        }
+        for (const auto& item : args.get_all("--combine")) {
+            const auto [name, rule] = key_value("--combine", item);
+            known("--combine", name).combine = enum_from_name<SuiteCombine>(rule);
+        }
+        for (const auto& item : args.get_all("--period")) {
+            const auto [name, period] = key_value("--period", item);
+            known("--period", name).period = resolve_cli::parse_float_value("--period", period);
+        }
+        for (const auto& item : args.get_all("--experimental")) {
+            const auto [name, limit] = key_value("--experimental", item);
+            auto& t = known("--experimental", name);
+            t.status = SuiteTargetStatus::Experimental;
+            t.limit = limit;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+
+    try {
+        const SuiteManifest manifest = write_derived_suite(output, spec);
+        std::cout << "Derived suite '" << manifest.name << "' written to " << output << std::endl;
+        for (const auto& t : manifest.targets) {
+            std::cout << "  " << t.name << ": " << t.members.size() << " member(s) from '"
+                      << t.derived_from->suite << "' target '" << t.derived_from->target << "'"
+                      << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+    return 0;
+}
 
 int predict_suite_command(const ParsedArgs& args) {
     using namespace resolve;
@@ -231,6 +339,21 @@ int info_suite_command(const ParsedArgs& args) {
                 std::cout << std::endl;
             }
             if (!t.limit.empty()) std::cout << "    limit: " << t.limit << std::endl;
+            if (!t.classes.empty()) {
+                std::cout << "    classes:";
+                for (const auto& c : t.classes) std::cout << " " << c;
+                std::cout << std::endl;
+            }
+            if (t.derived_from) {
+                const SuiteDerivation& d = *t.derived_from;
+                std::cout << "    fine-tuned from suite '" << d.suite << "' target '" << d.target
+                          << "'";
+                if (!d.licence.empty()) std::cout << " (" << d.licence << ")";
+                std::cout << std::endl;
+                if (!d.training_scope.empty()) {
+                    std::cout << "    parent training scope: " << d.training_scope << std::endl;
+                }
+            }
             if (t.terrain_correction) {
                 std::cout << "    terrain correction: " << t.terrain_correction->file << std::endl;
             }

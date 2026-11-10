@@ -41,6 +41,7 @@
 #include "resolve/types.hpp"
 #include "resolve/dataset.hpp"
 #include "resolve/enum_names.hpp"
+#include "resolve/fine_tune.hpp"
 #include "resolve/gap_fitting.hpp"
 #include "resolve/pretraining.hpp"
 #include "resolve/retrieval.hpp"
@@ -289,7 +290,8 @@ inline std::string parallel_branch_prefix(std::size_t i) {
     F(plot_totals,           "plot_totals")                 \
     F(plot_totals_dropout,   "plot_totals_dropout")         \
     F(freeze_composition,    "freeze_composition")          \
-    F(d_model,               "d_model")                     \
+    F(freeze_encoder,        "freeze_encoder")              \
+    F(d_model,              "d_model")                     \
     F(n_heads,               "n_heads")                     \
     F(n_attention_layers,    "n_attention_layers")          \
     F(transformer_ff_dim,    "transformer_ff_dim")          \
@@ -435,6 +437,14 @@ RESOLVE_DEFINE_FIELD_REGISTRY(RetrievalConfig, RESOLVE_RETRIEVAL_CONFIG_FIELDS)
     F(matching_sample, "")
 
 RESOLVE_DEFINE_FIELD_REGISTRY(GapFittingConfig, RESOLVE_GAP_FITTING_CONFIG_FIELDS)
+
+// Recorded in the fine-tuned checkpoint as its ParentRecord, not as keys.
+#define RESOLVE_INIT_FROM_CONFIG_FIELDS(F) \
+    F(reuse,        "")                    \
+    F(suite_target, "")                    \
+    F(suite_seed,   "")
+
+RESOLVE_DEFINE_FIELD_REGISTRY(InitFromConfig, RESOLVE_INIT_FROM_CONFIG_FIELDS)
 
 // Persisted in the terrain correction file (terrain_correction.hpp), so the
 // keys carry the settings a fitted correction was trained with.

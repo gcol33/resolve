@@ -271,6 +271,31 @@ plots.
 - [`target_specs_from_schema()`](https://gillescolling.com/resolve/articles/python-prediction.html#target_specs_from_schema):
   The targets a checkpoint was trained on.
 
+## [Fine-tuning](https://gillescolling.com/resolve/articles/python-fine-tuning.md)
+
+New heads for your own targets on the encoder of a trained model or a
+suite member, and the fine-tuned models released as a suite.
+
+- [`ParentModel`](https://gillescolling.com/resolve/articles/python-fine-tuning.html#ParentModel):
+  The trained model a fine-tuned model starts from.
+- [`InitFromConfig`](https://gillescolling.com/resolve/articles/python-fine-tuning.html#InitFromConfig):
+  Which suite member a warm start reads, and what it carries over.
+- [`InitReuse`](https://gillescolling.com/resolve/articles/python-fine-tuning.html#InitReuse):
+  The encoder alone, or the encoder and the shared heads.
+- [`ParentRecord`](https://gillescolling.com/resolve/articles/python-fine-tuning.html#ParentRecord):
+  The parent a fine-tuned checkpoint records.
+- [`fine_tune_mismatches()`](https://gillescolling.com/resolve/articles/python-fine-tuning.html#fine_tune_mismatches):
+  Every way a model departs from what its parent fixes.
+- [`FINE_TUNE_MODEL_FIELDS`](https://gillescolling.com/resolve/articles/python-fine-tuning.html#FINE_TUNE_MODEL_FIELDS):
+  The model settings a fine-tuned model may change.
+- [`write_derived_suite()`](https://gillescolling.com/resolve/articles/python-fine-tuning.html#write_derived_suite):
+  Fine-tuned checkpoints released as a suite derived from their
+  parent’s.
+- [`DerivedSuiteSpec`](https://gillescolling.com/resolve/articles/python-fine-tuning.html#DerivedSuiteSpec),
+  [`DerivedSuiteTarget`](https://gillescolling.com/resolve/articles/python-fine-tuning.html#DerivedSuiteTarget),
+  [`DerivedSuiteMember`](https://gillescolling.com/resolve/articles/python-fine-tuning.html#DerivedSuiteMember)
+  : The suite, its targets and their members.
+
 ## [Model suites](https://gillescolling.com/resolve/articles/python-suites.md)
 
 Several trained models released as one directory and scored together.
@@ -286,6 +311,8 @@ Several trained models released as one directory and scored together.
   The part of the input contract a target’s members read.
 - [`SuiteMember`](https://gillescolling.com/resolve/articles/python-suites.html#SuiteMember):
   One checkpoint of a suite target.
+- [`SuiteDerivation`](https://gillescolling.com/resolve/articles/python-suites.html#SuiteDerivation):
+  The suite and target a fine-tuned target’s members started from.
 - [`SuiteCombine`](https://gillescolling.com/resolve/articles/python-suites.html#SuiteCombine):
   How a suite target combines its members.
 - [`SuiteTargetStatus`](https://gillescolling.com/resolve/articles/python-suites.html#SuiteTargetStatus):

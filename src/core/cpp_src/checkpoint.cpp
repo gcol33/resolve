@@ -647,6 +647,64 @@ void save_run_metadata(
         }
         target_idx++;
     }
+
+    if (metadata.parent) save_parent_record(archive, *metadata.parent);
+}
+
+void save_parent_record(torch::serialize::OutputArchive& archive, const ParentRecord& parent) {
+    write_string(archive, "parent_checkpoint", parent.checkpoint);
+    write_string(archive, "parent_sha256", parent.sha256);
+    archive.write("parent_bytes", torch::tensor(parent.bytes));
+    write_string(archive, "parent_resolve_version", parent.resolve_version);
+    write_string(archive, "parent_reuse", enum_to_name(parent.reuse));
+    archive.write("parent_n_tensors", torch::tensor(parent.n_tensors));
+    write_string_list(archive, "parent_heads", parent.heads);
+    write_string(archive, "parent_suite", parent.suite);
+    write_string(archive, "parent_suite_target", parent.suite_target);
+    archive.write("parent_suite_seed", torch::tensor(parent.suite_seed));
+    write_string(archive, "parent_licence", parent.licence);
+    write_string(archive, "parent_training_scope", parent.training_scope);
+}
+
+std::optional<ParentRecord> load_parent_record(torch::serialize::InputArchive& archive) {
+    ParentRecord parent;
+    if (!try_read_string(archive, "parent_sha256", parent.sha256)) return std::nullopt;
+    try_read_string(archive, "parent_checkpoint", parent.checkpoint);
+    { torch::Tensor x; if (archive.try_read("parent_bytes", x)) parent.bytes = x.item<int64_t>(); }
+    try_read_string(archive, "parent_resolve_version", parent.resolve_version);
+    {
+        std::string reuse;
+        if (try_read_string(archive, "parent_reuse", reuse) && !reuse.empty()) {
+            parent.reuse = enum_from_name<InitReuse>(reuse);
+        }
+    }
+    { torch::Tensor x; if (archive.try_read("parent_n_tensors", x)) parent.n_tensors = x.item<int64_t>(); }
+    try_read_string_list(archive, "parent_heads", parent.heads);
+    try_read_string(archive, "parent_suite", parent.suite);
+    try_read_string(archive, "parent_suite_target", parent.suite_target);
+    { torch::Tensor x; if (archive.try_read("parent_suite_seed", x)) parent.suite_seed = x.item<int64_t>(); }
+    try_read_string(archive, "parent_licence", parent.licence);
+    try_read_string(archive, "parent_training_scope", parent.training_scope);
+    return parent;
+}
+
+json::Value parent_record_json(const ParentRecord& parent) {
+    json::Value out = json::Value::object();
+    out.set("checkpoint", parent.checkpoint);
+    out.set("sha256", parent.sha256);
+    out.set("bytes", parent.bytes);
+    out.set("resolve_version", parent.resolve_version);
+    out.set("reuse", enum_to_name(parent.reuse));
+    out.set("n_tensors", parent.n_tensors);
+    out.set("heads", json::Value::array_of(parent.heads));
+    if (!parent.suite.empty()) {
+        out.set("suite", parent.suite);
+        out.set("suite_target", parent.suite_target);
+        out.set("suite_seed", parent.suite_seed);
+        out.set("licence", parent.licence);
+        out.set("training_scope", parent.training_scope);
+    }
+    return out;
 }
 
 TrainConfig load_train_config(
@@ -714,6 +772,7 @@ RunMetadata load_run_metadata(
             meta.final_metrics[target_name] = std::move(metrics);
         }
     }
+    meta.parent = load_parent_record(archive);
     return meta;
 }
 
@@ -793,6 +852,7 @@ json::Value checkpoint_description(
     train.set("effective_batch_size", effective_batch_size);
     out.set("train_config", std::move(train));
     out.set("final_metrics", metrics_json(metadata.final_metrics));
+    if (metadata.parent) out.set("parent", parent_record_json(*metadata.parent));
     return out;
 }
 

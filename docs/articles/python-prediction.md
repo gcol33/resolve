@@ -319,6 +319,9 @@ The run as a checkpoint records it, from `Trainer.run_metadata` or
   seeds the epoch shuffle).
 - `best_epoch`, `total_epochs` (`int`) and `final_metrics`
   (`dict[str, dict[str, float]]`).
+- `parent`
+  ([`ParentRecord`](https://gillescolling.com/resolve/articles/python-fine-tuning.html#ParentRecord)
+  or `None`): the model a fine-tuned run started from.
 
 ``` python
 record = rc.Trainer.load_run_metadata(path)

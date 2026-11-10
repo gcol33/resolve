@@ -178,8 +178,20 @@ One released target of a suite.
   is released or experimental, and the limit an experimental release
   states, which it requires.
 - `members` (`list[SuiteMember]`).
+- `classes` (`list[str]`): a vote’s classes in code order, as the
+  members’ checkpoints name them; loading compares them. Empty when not
+  stated.
+- `derived_from` (`SuiteDerivation` or `None`): for a target fine-tuned
+  from another suite (`write_derived_suite`), the suite and target its
+  members started from.
 - `training` (`dict`) and `validation` (`dict` of regime to metrics):
   free-form records of how the members were trained and scored.
+
+## `SuiteDerivation`
+
+The suite and target a fine-tuned target’s members started from:
+`suite`, `target`, `engine_version` (the engine that trained the parent
+members), and that suite’s `licence` and `training_scope`.
 
 ## `SuiteTargetInputs`
 
@@ -195,7 +207,7 @@ of the survey year, for instance, cannot read the year.
 ## `SuiteMember`
 
 ``` python
-SuiteMember(seed, file, sha256="", bytes=0, zero_abundance_as=None)
+SuiteMember(seed, file, sha256="", bytes=0, zero_abundance_as=None, parent_sha256="")
 ```
 
 One checkpoint of a suite target: its `seed`, its `file` (relative to
@@ -203,7 +215,9 @@ the suite directory, `/`-separated), its `sha256` digest (lower-case
 hex) and its size in `bytes`, both filled in by `SuiteManifest.seal`.
 `zero_abundance_as` states, for a checkpoint that does not record it,
 the abundance a recorded 0 was read at in training; loading compares it
-with the contract.
+with the contract. `parent_sha256`, for a fine-tuned member, is the
+SHA-256 of its parent checkpoint; loading compares it with the parent
+the checkpoint records.
 
 ## `SuiteCombine`
 

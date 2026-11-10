@@ -14,6 +14,7 @@
 #include "arg_parser.hpp"
 #include "config_flags.hpp"
 #include "gap_flags.hpp"
+#include "init_flags.hpp"
 #include "terrain_flags.hpp"
 #include "names_flags.hpp"
 
@@ -83,6 +84,7 @@ inline const CommandSpec& train_spec() {
                          "Needs --parallel-enabled; the block then replaces\n"
                          "the encoder's MLP tail."});
 
+        append_init_flags(flags);
         flags.push_back({"--resume", Arity::Value, "PATH", "",
                          "Continue the run that wrote PATH (best.pt or\n"
                          "checkpoint_<N>.pt under its --checkpoint-dir) at\n"
@@ -216,6 +218,44 @@ inline const CommandSpec& info_spec() {
                          "Directory of a model suite: print its manifest and\n"
                          "check every member's size and SHA-256"});
         return CommandSpec("info", "Info Options:", std::move(flags));
+    }();
+    return spec;
+}
+
+inline const CommandSpec& suite_derive_spec() {
+    static const CommandSpec spec = [] {
+        std::vector<FlagSpec> flags;
+        flags.push_back({"--parent", Arity::Value, "DIR", "",
+                         "Directory of the suite the members were fine-tuned\n"
+                         "from (resolve train --init-from DIR)"});
+        flags.push_back({"--output", Arity::Value, "DIR", "",
+                         "Directory the derived suite is written to"});
+        flags.push_back({"--name", Arity::Value, "NAME", "", "The derived suite's name"});
+        flags.push_back({"--description", Arity::Value, "TEXT", "", "What the suite predicts"});
+        flags.push_back({"--licence", Arity::Value, "TEXT", "",
+                         "The licence the derived suite is released under"});
+        flags.push_back({"--training-scope", Arity::Value, "TEXT", "",
+                         "The plots the fine-tuned members were trained on"});
+        flags.push_back({"--member", Arity::Repeatable, "T:SEED=PATH", "",
+                         "A fine-tuned checkpoint of target T and its seed.\n"
+                         "Repeat per member; the targets are written in the\n"
+                         "order they first appear."});
+        flags.push_back({"--units", Arity::Repeatable, "T=UNITS", "",
+                         "The units of regression target T, e.g. pH=pH or\n"
+                         "depth=cm"});
+        flags.push_back({"--outputs", Arity::Repeatable, "T=HEAD[,HEAD]", "",
+                         "The head(s) target T reads (default the head named\n"
+                         "T): two for a circular mean of sine and cosine or a\n"
+                         "spherical mean of latitude and longitude"});
+        flags.push_back({"--combine", Arity::Repeatable, "T=RULE", "",
+                         "How target T's members combine: vote, mean,\n"
+                         "circular_mean or spherical_mean (default vote for\n"
+                         "classification, mean for regression)"});
+        flags.push_back({"--period", Arity::Repeatable, "T=PERIOD", "",
+                         "A circular mean's full turn, e.g. aspect=360"});
+        flags.push_back({"--experimental", Arity::Repeatable, "T=LIMIT", "",
+                         "Release target T as experimental, stating its limit"});
+        return CommandSpec("suite derive", "Suite derive Options:", std::move(flags));
     }();
     return spec;
 }

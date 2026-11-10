@@ -85,6 +85,15 @@ RunMetadata load_run_metadata(
     torch::serialize::InputArchive& archive
 );
 
+// The parent a fine-tuned model started from, under parent_* keys. Written
+// by save_run_metadata for metadata that carries one, and by Trainer::save for
+// a warm-started trainer saved without metadata; read by load_run_metadata.
+void save_parent_record(torch::serialize::OutputArchive& archive, const ParentRecord& parent);
+std::optional<ParentRecord> load_parent_record(torch::serialize::InputArchive& archive);
+
+// A parent record as JSON, as the checkpoint description carries it.
+json::Value parent_record_json(const ParentRecord& parent);
+
 // What a checkpoint holds, as one JSON document: the run metadata, the schema
 // (its loader settings included), the model config, the persisted train config
 // (`batch_size` as requested beside `effective_batch_size`) and the final

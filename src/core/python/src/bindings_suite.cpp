@@ -120,18 +120,32 @@ void register_suite(nb::module_& m) {
         .def("__init__",
              [](SuiteMember* self, int64_t seed, const std::string& file,
                 const std::string& sha256, int64_t bytes,
-                std::optional<float> zero_abundance_as) {
-                 new (self) SuiteMember{seed, file, sha256, bytes, zero_abundance_as};
+                std::optional<float> zero_abundance_as, const std::string& parent_sha256) {
+                 new (self) SuiteMember{seed, file, sha256, bytes, zero_abundance_as, parent_sha256};
              },
              nb::arg("seed"), nb::arg("file"), nb::arg("sha256") = "", nb::arg("bytes") = 0,
-             nb::arg("zero_abundance_as") = nb::none())
+             nb::arg("zero_abundance_as") = nb::none(), nb::arg("parent_sha256") = "")
         .def_rw("seed", &SuiteMember::seed)
         .def_rw("file", &SuiteMember::file)
         .def_rw("sha256", &SuiteMember::sha256)
         .def_rw("bytes", &SuiteMember::bytes)
         .def_rw("zero_abundance_as", &SuiteMember::zero_abundance_as,
                 "For a checkpoint that does not record it: the abundance a recorded 0 was "
-                "read at while the member trained.");
+                "read at while the member trained.")
+        .def_rw("parent_sha256", &SuiteMember::parent_sha256,
+                "For a fine-tuned member: the SHA-256 of its parent checkpoint, which the "
+                "member records too; empty otherwise.");
+
+    nb::class_<SuiteDerivation>(m, "SuiteDerivation",
+                                "The suite and target a fine-tuned target's members started "
+                                "from, with that suite's terms.")
+        .def(nb::init<>())
+        .def_rw("suite", &SuiteDerivation::suite)
+        .def_rw("target", &SuiteDerivation::target)
+        .def_rw("engine_version", &SuiteDerivation::engine_version)
+        .def_rw("licence", &SuiteDerivation::licence)
+        .def_rw("training_scope", &SuiteDerivation::training_scope)
+        .def(nb::self == nb::self);
 
     nb::class_<SuiteTarget>(m, "SuiteTarget", "One released target of a suite.")
         .def(nb::init<>())
@@ -147,6 +161,10 @@ void register_suite(nb::module_& m) {
         .def_rw("status", &SuiteTarget::status)
         .def_rw("limit", &SuiteTarget::limit)
         .def_rw("members", &SuiteTarget::members)
+        .def_rw("classes", &SuiteTarget::classes,
+                "A vote's classes in code order; empty when not stated.")
+        .def_rw("derived_from", &SuiteTarget::derived_from,
+                "The SuiteDerivation of a fine-tuned target; None otherwise.")
         .def_prop_rw(
             "training", [](const SuiteTarget& t) { return json_to_py(t.training); },
             [](SuiteTarget& t, nb::handle v) { t.training = py_to_json_object(v, "training"); },
@@ -195,6 +213,56 @@ void register_suite(nb::module_& m) {
              nb::call_guard<nb::gil_scoped_release>(),
              "Problems with the member files under dir (of `targets` only, when given); "
              "empty when intact.");
+
+    nb::class_<DerivedSuiteMember>(m, "DerivedSuiteMember",
+                                   "One fine-tuned checkpoint of a derived target and its seed.")
+        .def("__init__",
+             [](DerivedSuiteMember* self, std::string checkpoint, int64_t seed) {
+                 new (self) DerivedSuiteMember{std::move(checkpoint), seed};
+             },
+             nb::arg("checkpoint"), nb::arg("seed"))
+        .def_rw("checkpoint", &DerivedSuiteMember::checkpoint)
+        .def_rw("seed", &DerivedSuiteMember::seed);
+
+    nb::class_<DerivedSuiteTarget>(m, "DerivedSuiteTarget",
+                                   "One target of a derived suite and how the release "
+                                   "describes it.")
+        .def(nb::init<>())
+        .def_rw("name", &DerivedSuiteTarget::name)
+        .def_rw("outputs", &DerivedSuiteTarget::outputs)
+        .def_rw("combine", &DerivedSuiteTarget::combine)
+        .def_rw("period", &DerivedSuiteTarget::period)
+        .def_rw("units", &DerivedSuiteTarget::units)
+        .def_rw("status", &DerivedSuiteTarget::status)
+        .def_rw("limit", &DerivedSuiteTarget::limit)
+        .def_rw("members", &DerivedSuiteTarget::members)
+        .def_prop_rw(
+            "training", [](const DerivedSuiteTarget& t) { return json_to_py(t.training); },
+            [](DerivedSuiteTarget& t, nb::handle v) { t.training = py_to_json_object(v, "training"); })
+        .def_prop_rw(
+            "validation", [](const DerivedSuiteTarget& t) { return json_to_py(t.validation); },
+            [](DerivedSuiteTarget& t, nb::handle v) {
+                t.validation = py_to_json_object(v, "validation");
+            });
+
+    nb::class_<DerivedSuiteSpec>(m, "DerivedSuiteSpec",
+                                 "A suite of fine-tuned checkpoints, released beside the suite "
+                                 "they started from.")
+        .def(nb::init<>())
+        .def_rw("parent", &DerivedSuiteSpec::parent)
+        .def_rw("name", &DerivedSuiteSpec::name)
+        .def_rw("description", &DerivedSuiteSpec::description)
+        .def_rw("licence", &DerivedSuiteSpec::licence)
+        .def_rw("training_scope", &DerivedSuiteSpec::training_scope)
+        .def_rw("targets", &DerivedSuiteSpec::targets,
+                "The targets. A copy: assign a whole list to change them.");
+
+    m.def("write_derived_suite", &write_derived_suite, nb::arg("dir"), nb::arg("spec"),
+          nb::call_guard<nb::gil_scoped_release>(),
+          "Release fine-tuned checkpoints as a suite in dir: copy each member in, write a "
+          "manifest derived from the parent suite (each target's derived_from, the members' "
+          "parent_sha256, a vote's classes), seal it and load it once to check every member. "
+          "Returns the SuiteManifest.");
 
     m.def("sha256_file", &sha256_file, nb::arg("path"),
           nb::call_guard<nb::gil_scoped_release>(),

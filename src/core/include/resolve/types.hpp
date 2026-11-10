@@ -175,6 +175,14 @@ enum class HoldOutMode {
               // database, or the fold a published protocol selects on.
 };
 
+// What a warm start (Trainer::init_from) carries over from its parent besides
+// every tensor outside the task heads.
+enum class InitReuse {
+    Encoder,      // nothing more: every head of the new model starts fresh
+    EncoderHeads  // also each parent head whose target the new model shares
+                  // (same name, task, transform and classes), with its scaler
+};
+
 // How a model suite combines the predictions of a target's members (suite.hpp).
 enum class SuiteCombine {
     Mean,          // arithmetic mean on the target's own scale
@@ -849,6 +857,15 @@ struct ModelConfig {
     // (ResolveModelImpl::composition_parameters). Encoder-architecture MLP only.
     bool freeze_composition = false;
 
+    // Keep every parameter outside the task heads at its value: the encoder,
+    // the composition tables, the categorical embeddings and any mixture of
+    // experts. The frozen part also runs in evaluation mode while the heads
+    // train (dropout off, batch normalisation on its running statistics), so
+    // it computes the same latent for a plot in every epoch. With a warm start
+    // (Trainer::init_from) the heads learn on the latent of a trained model;
+    // without one, on that of a randomly initialised encoder.
+    bool freeze_encoder = false;
+
     // Transformer-specific
     int d_model = 128;
     int n_heads = 4;
@@ -1173,6 +1190,28 @@ struct ClassificationPredictions {
     std::vector<std::string> class_names;
 };
 
+// The model a fine-tuned run started from (Trainer::init_from), as its
+// checkpoint records it.
+struct ParentRecord {
+    std::string checkpoint;       // the parent checkpoint's path as opened
+    std::string sha256;           // its SHA-256, lower-case hex
+    int64_t bytes = 0;            // its size
+    std::string resolve_version;  // the engine that trained the parent
+    InitReuse reuse = InitReuse::Encoder;
+    int64_t n_tensors = 0;        // parameters and buffers copied from it
+    std::vector<std::string> heads;  // the parent heads carried over
+    // The suite the parent was a member of: its name, the target and the
+    // member's seed, and the suite's licence and training scope. `suite` is
+    // empty for a checkpoint opened directly.
+    std::string suite;
+    std::string suite_target;
+    int64_t suite_seed = 0;
+    std::string licence;
+    std::string training_scope;
+
+    bool operator==(const ParentRecord&) const = default;
+};
+
 // Run metadata for reproducibility and provenance tracking
 struct RunMetadata {
     std::string resolve_version = VERSION;
@@ -1190,6 +1229,8 @@ struct RunMetadata {
     int best_epoch = 0;
     int total_epochs = 0;
     std::unordered_map<std::string, std::unordered_map<std::string, float>> final_metrics;
+    // The model the run started from; unset for a run from a fresh model.
+    std::optional<ParentRecord> parent;
 };
 
 // Predictions output

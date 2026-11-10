@@ -228,6 +228,7 @@ The run as a checkpoint records it, from `Trainer.run_metadata` or `Trainer.load
 - `n_plots_train`, `n_plots_test` (`int`): the fitting and held-out plots.
 - `hold_out` (`HoldOutMode`), `test_size` (`float`, 0 for an explicit fold) and `split_seed` (`int`, the `prepare_data` seed, which also seeds the epoch shuffle).
 - `best_epoch`, `total_epochs` (`int`) and `final_metrics` (`dict[str, dict[str, float]]`).
+- `parent` ([`ParentRecord`](python-fine-tuning.html#ParentRecord) or `None`): the model a fine-tuned run started from.
 
 ```python
 record = rc.Trainer.load_run_metadata(path)

@@ -53,7 +53,13 @@ def _df_to_columns(df, what: str):
 
 
 def from_pandas(
-    header, species=None, roles=None, targets=None, config=None, schema_source=None
+    header,
+    species=None,
+    roles=None,
+    targets=None,
+    config=None,
+    schema_source=None,
+    vocabs=None,
 ):
     """Load a :class:`ResolveDataset` from in-memory pandas DataFrame(s).
 
@@ -74,6 +80,11 @@ def from_pandas(
         Reuse this dataset's vocabularies / class mappings (the in-memory analog
         of ``from_csv_with_schema``). Only valid when ``species`` is a
         DataFrame.
+    vocabs : ExternalVocabs, optional
+        Encode the plots in a trained model's namespace: a predictor's
+        ``external_vocabs``, or a fine-tuning parent's ``vocabs()`` (pass its
+        ``dataset_config()`` as ``config``). Only valid when ``species`` is a
+        DataFrame, and not combined with ``schema_source``.
 
     Returns
     -------
@@ -83,6 +94,10 @@ def from_pandas(
         raise TypeError("from_pandas requires `roles` and `targets`")
     targets = list(targets)
     kw = {} if config is None else {"config": config}
+    if vocabs is not None and schema_source is not None:
+        raise ValueError("pass schema_source or vocabs, not both")
+    if vocabs is not None and (species is None or isinstance(species, str)):
+        raise ValueError("vocabs needs both header and species as DataFrames")
 
     # Single-table mode: `header` is the long-format species frame.
     if species is None:
@@ -112,6 +127,10 @@ def from_pandas(
     if schema_source is not None:
         return _ResolveDataset.from_columns_with_schema(
             h_names, h_cols, s_names, s_cols, roles, targets, schema_source, **kw
+        )
+    if vocabs is not None:
+        return _ResolveDataset.from_columns_with_vocabs(
+            h_names, h_cols, s_names, s_cols, roles, targets, vocabs, **kw
         )
     return _ResolveDataset.from_columns(
         h_names, h_cols, s_names, s_cols, roles, targets, **kw

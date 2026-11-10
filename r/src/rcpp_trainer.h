@@ -5,6 +5,7 @@
 #include "rcpp_common.h"
 #include "rcpp_model.h"
 #include "rcpp_dataset.h"
+#include "rcpp_parent.h"
 
 class RTrainer {
 public:
@@ -123,6 +124,10 @@ public:
     }
     RObject compute_classification_predictions(std::string target_name) {
         return compute("classification_predictions", target_name.c_str(), -1);
+    }
+
+    void init_from(const RParent& parent, std::string reuse) {
+        capi_check_status(resolve_trainer_init_from(trainer_.get(), parent.handle(), reuse.c_str()));
     }
 
     void load_state(std::string path, std::string device = "cpu", double vram_fraction = 1.0) {

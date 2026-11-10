@@ -22,6 +22,7 @@
 #include "resolve/predictor.hpp"
 #include "resolve/retrieval.hpp"
 #include "resolve/suite.hpp"
+#include "resolve/fine_tune.hpp"
 #include "resolve/plot_columns.hpp"
 #include "resolve/tensor_pack.hpp"
 #include "resolve/terrain_codec.hpp"

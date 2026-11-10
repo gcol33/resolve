@@ -57,7 +57,7 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="active nav-item dropdown">
+<li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
@@ -65,6 +65,7 @@
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/fine-tuning.html">Fine-tuning a trained model</a></li>
     <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Imputing a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
@@ -321,12 +322,12 @@ only, since a new plot carries no recorded elevation or habitat.</p>
 already in memory need no CSV files.</p>
 </div>
 <div class="lang-py-only">
-<p><code>from_pandas()</code> has no argument for a predictor’s
-vocabularies. Data frames in memory are encoded against a predictor
-through <code>from_columns_with_vocabs()</code>, which takes the column
-names and the columns as lists of strings, or against a training dataset
-still in memory through
-<code>from_pandas(..., schema_source=dataset)</code>.</p>
+<p><code>from_pandas()</code> takes the same vocabularies as
+<code>vocabs=predictor.external_vocabs</code>, with
+<code>config=predictor.dataset_config</code>, so data frames already in
+memory need no CSV files. Against a training dataset still in memory,
+<code>from_pandas(..., schema_source=dataset)</code> reuses its
+vocabularies.</p>
 </div>
 <p>A dataset that fitted its own vocabulary is refused before anything
 is imputed, even with the training run’s loading settings. Here a batch

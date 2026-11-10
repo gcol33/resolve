@@ -104,6 +104,7 @@ add_executable(resolve_tests
     test_moe_placement.cpp
     test_info_report.cpp
     test_missing_values.cpp
+    test_fine_tune.cpp
     test_freeze_composition.cpp
     test_architecture_knobs.cpp
     test_species_graph.cpp

@@ -46,6 +46,7 @@ resolve.train.dataset(
   plotTotals = NULL,
   plotTotalsDropout = NULL,
   freezeComposition = NULL,
+  freezeEncoder = NULL,
   dModel = NULL,
   nHeads = NULL,
   nAttentionLayers = NULL,
@@ -55,6 +56,8 @@ resolve.train.dataset(
   modelConfig = list(),
   trainConfig = list(),
   pretrain = NULL,
+  initFrom = NULL,
+  initReuse = NULL,
   verbose = TRUE
 )
 }
@@ -216,6 +219,10 @@ given without them (\code{\link{resolve.plot_totals}}).}
 \item{freezeComposition}{Keep the species, genus and family embedding tables
 at their initialisation instead of learning them.}
 
+\item{freezeEncoder}{Keep every parameter outside the task heads at its
+value, and run that part in evaluation mode while the heads train. With
+\code{initFrom}, the heads learn on the encoder of the trained parent.}
+
 \item{dModel}{Model dimension for the transformer / rank-pool encoder.}
 
 \item{nHeads}{Number of attention heads in the transformer encoder.
@@ -244,6 +251,21 @@ dataset's plots before training (optional): a list with \code{method},
 \code{"jepa"}, \code{"scarf"} or \code{"masked_species"} (a transformer-encoded model),
 and any of that method's settings (\code{\link[=resolve.default_config]{resolve.default_config()}}
 \code{"pretrain"}, or \code{"masked_species"}), e.g. \code{list(method = "scarf", pretrain_epochs = 20)}.}
+
+\item{initFrom}{Fine-tune: start from a trained model, a parent from
+\code{\link[=resolve.parent]{resolve.parent()}} or the path of a checkpoint. \code{dataset} must be loaded
+with the parent's \code{vocabs()} and \code{dataset_config()}; the model takes the
+parent's configuration, and only the head settings (\code{head_hidden_dims},
+\code{head_activation}, \code{head_dropout}), the dropout rates and the freeze
+settings may differ. The encoder starts from the parent's weights, the
+coordinates and covariates are scaled as the parent scaled them, and the
+checkpoint records the parent (\code{\link[=resolve.load_run_metadata]{resolve.load_run_metadata()}} \code{parent}).
+Not combined with \code{pretrain}.}
+
+\item{initReuse}{With \code{initFrom}: what is carried over besides the encoder,
+\code{"encoder"} (the default: every head starts fresh) or \code{"encoder_heads"}
+(also the head of each target the parent shares under the same name,
+task, transform and classes, with its scaling).}
 
 \item{verbose}{Print training progress (default TRUE)}
 }

@@ -49,6 +49,7 @@ resolve.train.dataset(
   plotTotals = NULL,
   plotTotalsDropout = NULL,
   freezeComposition = NULL,
+  freezeEncoder = NULL,
   dModel = NULL,
   nHeads = NULL,
   nAttentionLayers = NULL,
@@ -58,6 +59,8 @@ resolve.train.dataset(
   modelConfig = list(),
   trainConfig = list(),
   pretrain = NULL,
+  initFrom = NULL,
+  initReuse = NULL,
   verbose = TRUE
 )
 ```
@@ -298,6 +301,12 @@ resolve.train.dataset(
   Keep the species, genus and family embedding tables at their
   initialisation instead of learning them.
 
+- freezeEncoder:
+
+  Keep every parameter outside the task heads at its value, and run that
+  part in evaluation mode while the heads train. With `initFrom`, the
+  heads learn on the encoder of the trained parent.
+
 - dModel:
 
   Model dimension for the transformer / rank-pool encoder.
@@ -346,6 +355,27 @@ resolve.train.dataset(
   ([`resolve.default_config()`](https://gillescolling.com/resolve/reference/resolve.default_config.md)
   `"pretrain"`, or `"masked_species"`), e.g.
   `list(method = "scarf", pretrain_epochs = 20)`.
+
+- initFrom:
+
+  Fine-tune: start from a trained model, a parent from
+  [`resolve.parent()`](https://gillescolling.com/resolve/reference/resolve.parent.md)
+  or the path of a checkpoint. `dataset` must be loaded with the
+  parent's `vocabs()` and `dataset_config()`; the model takes the
+  parent's configuration, and only the head settings
+  (`head_hidden_dims`, `head_activation`, `head_dropout`), the dropout
+  rates and the freeze settings may differ. The encoder starts from the
+  parent's weights, the coordinates and covariates are scaled as the
+  parent scaled them, and the checkpoint records the parent
+  ([`resolve.load_run_metadata()`](https://gillescolling.com/resolve/reference/resolve.load_run_metadata.md)
+  `parent`). Not combined with `pretrain`.
+
+- initReuse:
+
+  With `initFrom`: what is carried over besides the encoder, `"encoder"`
+  (the default: every head starts fresh) or `"encoder_heads"` (also the
+  head of each target the parent shares under the same name, task,
+  transform and classes, with its scaling).
 
 - verbose:
 

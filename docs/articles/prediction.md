@@ -234,11 +234,11 @@ No targets are named, because the new plots have none to read.
 takes the same `vocabs` and `config` arguments, so data frames already
 in memory need no CSV files.
 
-`from_pandas()` has no argument for a predictor’s vocabularies. Data
-frames in memory are encoded against a predictor through
-`from_columns_with_vocabs()`, which takes the column names and the
-columns as lists of strings, or against a training dataset still in
-memory through `from_pandas(..., schema_source=dataset)`.
+`from_pandas()` takes the same vocabularies as
+`vocabs=predictor.external_vocabs`, with
+`config=predictor.dataset_config`, so data frames already in memory need
+no CSV files. Against a training dataset still in memory,
+`from_pandas(..., schema_source=dataset)` reuses its vocabularies.
 
 A dataset that fitted its own vocabulary is refused before anything is
 imputed, even with the training run’s loading settings. Here a batch of

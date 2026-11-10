@@ -65,6 +65,7 @@
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/fine-tuning.html">Fine-tuning a trained model</a></li>
     <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Imputing a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
@@ -453,6 +454,9 @@ seed, which also seeds the epoch shuffle).</li>
 <code>best_epoch</code>, <code>total_epochs</code>
 (<code>int</code>) and <code>final_metrics</code>
 (<code>dict[str, dict[str, float]]</code>).</li>
+<li>
+<code>parent</code> (<a href="python-fine-tuning.html#ParentRecord"><code>ParentRecord</code></a>
+or <code>None</code>): the model a fine-tuned run started from.</li>
 </ul>
 <div class="sourceCode" id="cb19"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb19-1"><a href="#cb19-1" tabindex="-1"></a>record <span class="op">=</span> rc.Trainer.load_run_metadata(path)</span>
 <span id="cb19-2"><a href="#cb19-2" tabindex="-1"></a>record.hold_out, record.n_plots_test</span></code></pre></div>

@@ -12,6 +12,7 @@
 #include "resolve/traitnet.hpp"
 #include <torch/torch.h>
 
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -113,6 +114,20 @@ public:
     // architecture or TraitNet). ModelConfig::freeze_composition stops their
     // gradient at construction.
     [[nodiscard]] std::vector<torch::Tensor> composition_parameters() const;
+
+    // The target whose task head a parameter or buffer belongs to, from its
+    // name in named_parameters() / named_buffers(); empty for a tensor outside
+    // the heads.
+    [[nodiscard]] std::optional<std::string> head_of(const std::string& name) const;
+
+    // Every parameter outside the task heads: the part of the model
+    // ModelConfig::freeze_encoder keeps at its value, and the part a warm
+    // start (Trainer::init_from) carries over from a trained model.
+    [[nodiscard]] std::vector<torch::Tensor> encoder_parameters() const;
+
+    // Training or evaluation mode. Under freeze_encoder only the task heads
+    // follow `on`; everything else stays in evaluation mode.
+    void train(bool on = true) override;
 
     // Set species trait matrix (for TraitNet architecture). Stored in a
     // buffer, so it moves with the model and is saved in the checkpoint.

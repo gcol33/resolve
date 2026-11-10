@@ -402,7 +402,9 @@ void register_types(nb::module_& m) {
         .def_rw("split_seed", &resolve::RunMetadata::split_seed)
         .def_rw("best_epoch", &resolve::RunMetadata::best_epoch)
         .def_rw("total_epochs", &resolve::RunMetadata::total_epochs)
-        .def_rw("final_metrics", &resolve::RunMetadata::final_metrics);
+        .def_rw("final_metrics", &resolve::RunMetadata::final_metrics)
+        .def_rw("parent", &resolve::RunMetadata::parent,
+                "The model the run started from (ParentRecord); None for a fresh model.");
 
     nb::class_<resolve::ModelForwardResult>(m, "ModelForwardResult")
         .def(nb::init<>())

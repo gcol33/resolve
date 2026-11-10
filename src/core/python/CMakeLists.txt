@@ -123,6 +123,7 @@ set(BINDING_SOURCES
     src/bindings_retrieval.cpp
     src/bindings_gap_fitting.cpp
     src/bindings_terrain.cpp
+    src/bindings_fine_tune.cpp
 )
 nanobind_add_module(_resolve_core ${BINDING_SOURCES})
 

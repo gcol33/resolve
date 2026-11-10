@@ -305,6 +305,34 @@ Checkpoints, what they record about the run, and imputed values for new plots.
 [`target_specs_from_schema()`](python-prediction.html#target_specs_from_schema)
 : The targets a checkpoint was trained on.
 
+## [Fine-tuning](python-fine-tuning.html)
+
+New heads for your own targets on the encoder of a trained model or a suite member, and the fine-tuned models released as a suite.
+
+[`ParentModel`](python-fine-tuning.html#ParentModel)
+: The trained model a fine-tuned model starts from.
+
+[`InitFromConfig`](python-fine-tuning.html#InitFromConfig)
+: Which suite member a warm start reads, and what it carries over.
+
+[`InitReuse`](python-fine-tuning.html#InitReuse)
+: The encoder alone, or the encoder and the shared heads.
+
+[`ParentRecord`](python-fine-tuning.html#ParentRecord)
+: The parent a fine-tuned checkpoint records.
+
+[`fine_tune_mismatches()`](python-fine-tuning.html#fine_tune_mismatches)
+: Every way a model departs from what its parent fixes.
+
+[`FINE_TUNE_MODEL_FIELDS`](python-fine-tuning.html#FINE_TUNE_MODEL_FIELDS)
+: The model settings a fine-tuned model may change.
+
+[`write_derived_suite()`](python-fine-tuning.html#write_derived_suite)
+: Fine-tuned checkpoints released as a suite derived from their parent's.
+
+[`DerivedSuiteSpec`](python-fine-tuning.html#DerivedSuiteSpec), [`DerivedSuiteTarget`](python-fine-tuning.html#DerivedSuiteTarget), [`DerivedSuiteMember`](python-fine-tuning.html#DerivedSuiteMember)
+: The suite, its targets and their members.
+
 ## [Model suites](python-suites.html)
 
 Several trained models released as one directory and scored together.
@@ -323,6 +351,9 @@ Several trained models released as one directory and scored together.
 
 [`SuiteMember`](python-suites.html#SuiteMember)
 : One checkpoint of a suite target.
+
+[`SuiteDerivation`](python-suites.html#SuiteDerivation)
+: The suite and target a fine-tuned target's members started from.
 
 [`SuiteCombine`](python-suites.html#SuiteCombine)
 : How a suite target combines its members.

@@ -23,7 +23,10 @@
 //     experimental release states, and free-form training and validation
 //     records (the validation metrics by regime the release reports).
 //   * provenance: the engine version that trained the members, the species
-//     taxonomy, the training scope and the licence.
+//     taxonomy, the training scope and the licence; for a target fine-tuned
+//     from another suite (fine_tune.hpp), that suite, the target its members
+//     started from, its licence and training scope, and per member the
+//     SHA-256 of its parent checkpoint, which the member records too.
 //
 // Loading verifies every member's checksum before anything is read, so a
 // truncated download or a swapped file fails loudly rather than predicting.
@@ -85,9 +88,10 @@ inline constexpr const char* kSuiteManifestFile = "manifest.json";
 inline constexpr const char* kSuiteFormat = "resolve-suite";
 // Version 2 adds per-target inputs and the spherical mean, version 3 a
 // member's own zero_abundance_as, version 4 the terrain field and the
-// per-target terrain correction. A manifest is written as the lowest version
+// per-target terrain correction, version 5 a target's class list and a target
+// derived from another suite. A manifest is written as the lowest version
 // that holds it, so an older engine still reads one that uses none of these.
-inline constexpr int kSuiteFormatVersion = 4;
+inline constexpr int kSuiteFormatVersion = 5;
 
 // The columns a suite reads and how their raw values are interpreted. Column
 // names are the defaults a caller's table is read with; a caller whose table
@@ -141,6 +145,22 @@ struct SuiteMember {
     // had the setting). Loading compares it with the input contract. Unset for
     // a checkpoint that records its own; when both are given they must agree.
     std::optional<float> zero_abundance_as = std::nullopt;
+    // For a member fine-tuned from another suite's member: the SHA-256 of that
+    // parent checkpoint, which the member's own checkpoint records
+    // (RunMetadata::parent) and loading compares. Empty otherwise.
+    std::string parent_sha256;
+};
+
+// The suite and target a fine-tuned target's members started from, with the
+// terms that suite was released under.
+struct SuiteDerivation {
+    std::string suite;           // the parent suite's name
+    std::string target;          // its target the members started from
+    std::string engine_version;  // the engine that trained the parent members
+    std::string licence;         // the parent suite's licence
+    std::string training_scope;  // the plots the parent members were trained on
+
+    bool operator==(const SuiteDerivation&) const = default;
 };
 
 // A file of the release other than a member: its path relative to the suite
@@ -168,6 +188,12 @@ struct SuiteTarget {
     SuiteTargetStatus status = SuiteTargetStatus::Released;
     std::string limit;            // required for an experimental target
     std::vector<SuiteMember> members;
+    // A vote's classes in code order, as the members' checkpoints name them;
+    // loading compares them. Empty: not stated.
+    std::vector<std::string> classes;
+    // Set for a target fine-tuned from another suite; every member then
+    // states its parent_sha256.
+    std::optional<SuiteDerivation> derived_from;
     // The terrain correction of this target (terrain_correction.hpp): a
     // mean-combined altitude or slope target corrected by an elevation model
     // read at the plot's coordinates. Unset: none.
@@ -204,8 +230,8 @@ struct SuiteManifest {
     // What a target's members read: its declared inputs, or the whole contract.
     [[nodiscard]] SuiteTargetInputs inputs_of(const SuiteTarget& target) const;
 
-    // The lowest format version that holds this manifest: 4 with a terrain
-    // field or a terrain correction, 3 when a member states its
+    // The lowest format version that holds this manifest: 5 with a class list
+    // or a derived target, 4 with a terrain field or a terrain correction, 3 when a member states its
     // zero_abundance_as, 2 when a target declares its inputs or combines by a
     // spherical mean, else 1.
     [[nodiscard]] int format_version() const;
@@ -227,6 +253,12 @@ struct SuiteManifest {
     // checked).
     [[nodiscard]] std::vector<std::string> verify(
         const std::string& dir, const std::vector<std::string>& targets = {}) const;
+
+    // What is wrong with one member's file under `dir` against its entry (of
+    // target `target`): missing, another size, another digest. Empty when it
+    // matches.
+    [[nodiscard]] static std::string member_problem(const std::string& dir, const std::string& target,
+                                                    const SuiteMember& member);
 };
 
 // ============================================================================
@@ -546,6 +578,65 @@ struct SuiteColumn {
 // are built from it.
 [[nodiscard]] std::vector<SuiteColumn> suite_prediction_columns(const SuitePredictions& predictions,
                                                                 bool probabilities);
+
+// ============================================================================
+// Derived suites
+// ============================================================================
+
+// One member of a derived target: a fine-tuned checkpoint and its seed.
+struct DerivedSuiteMember {
+    std::string checkpoint;
+    int64_t seed = 0;
+};
+
+// One target of a derived suite and how the release describes it.
+struct DerivedSuiteTarget {
+    std::string name;                  // the suite's name for it
+    // The checkpoints' heads it reads; empty reads the head named `name`.
+    std::vector<std::string> outputs;
+    // Unset: a vote for a classification head, a mean for a regression head.
+    std::optional<SuiteCombine> combine;
+    double period = 0.0;               // circular mean only
+    std::string units;
+    SuiteTargetStatus status = SuiteTargetStatus::Released;
+    std::string limit;                 // required for an experimental target
+    std::vector<DerivedSuiteMember> members;
+    json::Value training = json::Value::object();
+    json::Value validation = json::Value::object();
+};
+
+// A suite of fine-tuned checkpoints, released beside the suite they started
+// from.
+struct DerivedSuiteSpec {
+    std::string parent;          // the directory of the suite the members started from
+    std::string name;
+    std::string description;
+    std::string licence;
+    std::string training_scope;  // the plots the fine-tuned members were trained on
+    std::vector<DerivedSuiteTarget> targets;
+};
+
+// Release fine-tuned checkpoints (Trainer::init_from from a member of the
+// suite in `spec.parent`) as a suite in `dir`: copy each member to
+// members/<target>/seed_<seed>.pt, and write a manifest whose input contract
+// is the part of the parent's its targets read, with each target derived from
+// the parent target its members started from (derived_from, each member's
+// parent_sha256), a vote's class list, and the parent's taxonomy. The
+// manifest is sealed, and the suite is loaded once (SuitePredictor::load) so
+// every member is checked against it. Returns the manifest written.
+//
+// Throws std::invalid_argument when `dir` already holds a manifest, and for a
+// member that records no parent, one started from another suite or from a
+// checkpoint that is not the parent suite's member of the seed it records, or
+// members of one target started from different parent targets.
+SuiteManifest write_derived_suite(const std::string& dir, const DerivedSuiteSpec& spec);
+
+// A derived-suite spec from JSON: an object with parent, name, description,
+// licence, training_scope and targets, each target an object with name,
+// members (objects with checkpoint and seed) and optionally outputs, combine,
+// period, units, status, limit, training and validation. A member the format
+// does not define is an error. What the C ABI and R hand over.
+[[nodiscard]] DerivedSuiteSpec derived_suite_spec_from_json(const json::Value& value);
 
 class SuitePredictor {
 public:

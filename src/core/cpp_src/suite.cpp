@@ -6,6 +6,7 @@
 #include "resolve/plot_columns.hpp"
 #include "resolve/sha256.hpp"
 #include "resolve/terrain_codec.hpp"
+#include "resolve/trainer.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -49,8 +50,9 @@ private:
 // than silently taking its default.
 class ObjectReader {
 public:
-    ObjectReader(const json::Value& object, std::string where)
-        : object_(object), where_(std::move(where)) {
+    ObjectReader(const json::Value& object, std::string where,
+                 const char* document = "suite manifest")
+        : object_(object), where_(std::move(where)), document_(document) {
         if (!object_.is_object()) fail("", std::string("expected an object, found ") +
                                               json::kind_name(object_.kind()));
     }
@@ -130,18 +132,22 @@ public:
     void finish() const {
         for (const auto& [key, value] : object_.members()) {
             (void)value;
-            if (!seen_.count(key)) fail(key, "is not a member of the suite manifest format");
+            if (!seen_.count(key)) fail(key, std::string("is not a member of the ") + document_ + " format");
         }
     }
 
     [[noreturn]] void fail(const std::string& key, const std::string& what) const {
-        const std::string where = key.empty() ? (where_.empty() ? "manifest" : where_) : path(key);
-        throw std::runtime_error("suite manifest: " + where + " " + what);
+        const std::string document_name =
+            std::string(document_) == "suite manifest" ? "manifest" : "document";
+        const std::string where =
+            key.empty() ? (where_.empty() ? document_name : where_) : path(key);
+        throw std::runtime_error(std::string(document_) + ": " + where + " " + what);
     }
 
 private:
     const json::Value& object_;
     std::string where_;
+    const char* document_;
     std::unordered_set<std::string> seen_;
 };
 
@@ -314,9 +320,20 @@ json::Value target_to_json(const SuiteTarget& t) {
         mo.set("sha256", m.sha256);
         mo.set("bytes", m.bytes);
         if (m.zero_abundance_as) mo.set("zero_abundance_as", *m.zero_abundance_as);
+        if (!m.parent_sha256.empty()) mo.set("parent_sha256", m.parent_sha256);
         members.push_back(std::move(mo));
     }
     o.set("members", std::move(members));
+    if (!t.classes.empty()) o.set("classes", json::Value::array_of(t.classes));
+    if (t.derived_from) {
+        json::Value d = json::Value::object();
+        d.set("suite", t.derived_from->suite);
+        d.set("target", t.derived_from->target);
+        d.set("engine_version", t.derived_from->engine_version);
+        d.set("licence", t.derived_from->licence);
+        d.set("training_scope", t.derived_from->training_scope);
+        o.set("derived_from", std::move(d));
+    }
     if (t.terrain_correction) o.set("terrain_correction", suite_file_to_json(*t.terrain_correction));
     o.set("training", t.training);
     o.set("validation", t.validation);
@@ -349,8 +366,21 @@ SuiteTarget target_from_json(const json::Value& value, const std::string& where)
         if (mr.get("zero_abundance_as") != nullptr) {
             m.zero_abundance_as = static_cast<float>(mr.number("zero_abundance_as", 0.0));
         }
+        m.parent_sha256 = mr.string("parent_sha256", false);
         mr.finish();
         t.members.push_back(std::move(m));
+    }
+    t.classes = r.strings("classes");
+    if (const json::Value* d = r.get("derived_from")) {
+        ObjectReader dr(*d, r.path("derived_from"));
+        SuiteDerivation derivation;
+        derivation.suite = dr.string("suite", true);
+        derivation.target = dr.string("target", true);
+        derivation.engine_version = dr.string("engine_version", false);
+        derivation.licence = dr.string("licence", false);
+        derivation.training_scope = dr.string("training_scope", false);
+        dr.finish();
+        t.derived_from = std::move(derivation);
     }
     if (const json::Value* tc = r.get("terrain_correction")) {
         t.terrain_correction = suite_file_from_json(*tc, r.path("terrain_correction"));
@@ -413,7 +443,8 @@ SuiteManifest SuiteManifest::from_json(const json::Value& value) {
         r.fail("format_version", "is " + std::to_string(version) + ", but the manifest uses "
                "features that need version " + std::to_string(m.format_version()) +
                " (per-target inputs and the spherical mean need version 2, a member's own "
-               "zero_abundance_as version 3, a terrain field or correction version 4)");
+               "zero_abundance_as version 3, a terrain field or correction version 4, a "
+               "class list or a derived target version 5)");
     }
     return m;
 }
@@ -432,6 +463,10 @@ int SuiteManifest::format_version() const {
             if (m.zero_abundance_as) version = std::max(version, 3);
         }
         if (t.terrain_correction) version = std::max(version, 4);
+        if (!t.classes.empty() || t.derived_from) version = std::max(version, 5);
+        for (const auto& m : t.members) {
+            if (!m.parent_sha256.empty()) version = std::max(version, 5);
+        }
     }
     if (terrain_field) version = std::max(version, 4);
     return version;
@@ -518,6 +553,29 @@ void SuiteManifest::validate() const {
                 !(std::isfinite(*m.zero_abundance_as) && *m.zero_abundance_as >= 0.0f)) {
                 problems.add(mw + ".zero_abundance_as", "must be a finite value >= 0");
             }
+            if (t.derived_from && !is_hex_digest(m.parent_sha256)) {
+                problems.add(mw + ".parent_sha256", "a member of a derived target states the "
+                             "SHA-256 of its parent checkpoint (64 lower-case hex digits)");
+            } else if (!t.derived_from && !m.parent_sha256.empty()) {
+                problems.add(mw + ".parent_sha256", "is stated, but the target names no derived_from");
+            }
+        }
+
+        if (!t.classes.empty()) {
+            if (t.combine != SuiteCombine::Vote) {
+                problems.add(where + ".classes", "only a vote's classes are listed");
+            }
+            std::unordered_set<std::string> seen;
+            for (const auto& c : t.classes) {
+                if (c.empty()) problems.add(where + ".classes", "a class name is empty");
+                else if (!seen.insert(c).second) {
+                    problems.add(where + ".classes", "'" + c + "' appears twice");
+                }
+            }
+        }
+        if (t.derived_from) {
+            if (t.derived_from->suite.empty()) problems.add(where + ".derived_from.suite", "is required");
+            if (t.derived_from->target.empty()) problems.add(where + ".derived_from.target", "is required");
         }
 
         if (t.terrain_correction) {
@@ -627,15 +685,52 @@ void SuiteManifest::seal(const std::string& dir) {
     if (terrain_field) seal_file(dir, "terrain field", *terrain_field);
 }
 
-namespace {
+DerivedSuiteSpec derived_suite_spec_from_json(const json::Value& value) {
+    constexpr const char* kDocument = "derived suite spec";
+    ObjectReader r(value, "", kDocument);
+    DerivedSuiteSpec spec;
+    spec.parent = r.string("parent", true);
+    spec.name = r.string("name", true);
+    spec.description = r.string("description", false);
+    spec.licence = r.string("licence", true);
+    spec.training_scope = r.string("training_scope", true);
+    const json::Value& targets = r.required("targets");
+    if (!targets.is_array()) r.fail("targets", "must be an array");
+    for (std::size_t i = 0; i < targets.items().size(); ++i) {
+        ObjectReader tr(targets.items()[i], "targets[" + std::to_string(i) + "]", kDocument);
+        DerivedSuiteTarget t;
+        t.name = tr.string("name", true);
+        t.outputs = tr.strings("outputs");
+        if (tr.get("combine") != nullptr) t.combine = enum_member<SuiteCombine>(tr, "combine");
+        t.period = tr.number("period", 0.0);
+        t.units = tr.string("units", false);
+        if (tr.get("status") != nullptr) t.status = enum_member<SuiteTargetStatus>(tr, "status");
+        t.limit = tr.string("limit", false);
+        t.training = tr.object_or_empty("training");
+        t.validation = tr.object_or_empty("validation");
+        const json::Value& members = tr.required("members");
+        if (!members.is_array()) tr.fail("members", "must be an array");
+        for (std::size_t j = 0; j < members.items().size(); ++j) {
+            ObjectReader mr(members.items()[j], tr.path("members") + "[" + std::to_string(j) + "]",
+                            kDocument);
+            DerivedSuiteMember m;
+            m.checkpoint = mr.string("checkpoint", true);
+            m.seed = mr.integer("seed", true);
+            mr.finish();
+            t.members.push_back(std::move(m));
+        }
+        tr.finish();
+        spec.targets.push_back(std::move(t));
+    }
+    r.finish();
+    return spec;
+}
 
-std::string member_problem(const std::string& dir, const std::string& target,
-                           const SuiteMember& m) {
+std::string SuiteManifest::member_problem(const std::string& dir, const std::string& target,
+                                          const SuiteMember& m) {
     return file_problem(dir, "target '" + target + "' seed " + std::to_string(m.seed) + " (" + m.file + ")", m.file,
                         m.bytes, m.sha256);
 }
-
-}  // namespace
 
 std::vector<std::string> SuiteManifest::verify(const std::string& dir,
                                                const std::vector<std::string>& names) const {
@@ -1167,9 +1262,11 @@ std::string joined(const std::vector<std::string>& names) {
     return s;
 }
 
-// Check one loaded member against the manifest's contract and target entry.
+// Check one loaded member (read from `path`) against the manifest's contract
+// and target entry.
 void check_member(const SuiteManifest& manifest, const SuiteTarget& target,
-                  const SuiteMember& member, const Predictor& predictor) {
+                  const SuiteMember& member, const Predictor& predictor,
+                  const std::string& path) {
     const ResolveSchema& schema = predictor.schema();
     const SuiteInputContract& in = manifest.inputs;
     const SuiteTargetInputs reads = manifest.inputs_of(target);
@@ -1195,6 +1292,30 @@ void check_member(const SuiteManifest& manifest, const SuiteTarget& target,
         if (head->task != target.task) {
             fail("output '" + out + "' is a " + enum_to_name(head->task) + " head, the manifest "
                  "declares " + enum_to_name(target.task));
+        }
+    }
+    if (!target.classes.empty()) {
+        for (const auto& t : schema.targets) {
+            if (t.name == target.outputs.front() && t.class_names != target.classes) {
+                fail("the checkpoint's classes [" + joined(t.class_names) + "] differ from the "
+                     "manifest's [" + joined(target.classes) + "]");
+            }
+        }
+    }
+    if (!member.parent_sha256.empty()) {
+        const std::optional<ParentRecord> parent = Trainer::load_run_metadata(path).parent;
+        if (!parent) {
+            fail("the manifest states a parent checkpoint, the checkpoint records none");
+        }
+        if (parent->sha256 != member.parent_sha256) {
+            fail("the checkpoint started from a parent of SHA-256 " + parent->sha256 +
+                 ", the manifest states " + member.parent_sha256);
+        }
+        if (target.derived_from && (parent->suite != target.derived_from->suite ||
+                                    parent->suite_target != target.derived_from->target)) {
+            fail("the checkpoint started from suite '" + parent->suite + "' target '" +
+                 parent->suite_target + "', the manifest derives the target from suite '" +
+                 target.derived_from->suite + "' target '" + target.derived_from->target + "'");
         }
     }
     if (schema.covariate_names != reads.covariates) {
@@ -1318,9 +1439,9 @@ SuitePredictor SuitePredictor::load(const std::string& dir, const SuiteLoadOptio
         loaded.spec = i;
         std::optional<std::size_t> encoding;
         for (const auto& member : spec.members) {
-            Predictor predictor = Predictor::load(member_location(dir, member.file).string(),
-                                                  options.device, options.vram_fraction);
-            check_member(manifest, spec, member, predictor);
+            const std::string path = member_location(dir, member.file).string();
+            Predictor predictor = Predictor::load(path, options.device, options.vram_fraction);
+            check_member(manifest, spec, member, predictor, path);
 
             if (spec.combine == SuiteCombine::Vote) {
                 const std::string& out = spec.outputs.front();

@@ -240,9 +240,17 @@ void Trainer::save_checkpoint(const std::string& path, const RunMetadata* metada
     }
     save_train_config(archive, persisted_config, requested_batch_size_);
 
-    // Save run metadata if provided (final checkpoint only)
+    // Save run metadata if provided (final checkpoint only). A warm-started
+    // model records its parent in every checkpoint, so the provenance survives
+    // a save without metadata and the checkpoints fit() writes while it
+    // trains; metadata naming no parent is given the trainer's.
+    std::optional<RunMetadata> recorded;
     if (metadata != nullptr) {
-        save_run_metadata(archive, *metadata);
+        recorded = *metadata;
+        if (!recorded->parent) recorded->parent = parent_record_;
+        save_run_metadata(archive, *recorded);
+    } else if (parent_record_) {
+        save_parent_record(archive, *parent_record_);
     }
 
     if (progress != nullptr) {
@@ -252,8 +260,8 @@ void Trainer::save_checkpoint(const std::string& path, const RunMetadata* metada
     write_checkpoint_archive(archive, path);
 
     // Write human-readable JSON metadata alongside checkpoint
-    if (metadata != nullptr) {
-        write_metadata_json(path, model_->config(), persisted_config, *metadata,
+    if (recorded) {
+        write_metadata_json(path, model_->config(), persisted_config, *recorded,
                             model_->schema(), requested_batch_size_);
     }
 }

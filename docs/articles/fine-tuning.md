@@ -1,0 +1,517 @@
+# Fine-tuning a trained model
+
+A model trained on many vegetation plots has learned how species
+composition varies with habitat and site metadata, and most of that is
+held in its encoder, the part that turns a plot’s species and
+cover-abundance into a latent representation. A variable the model was
+never trained on, such as a national habitat typology, a soil property,
+or a target recorded more densely in one region, often varies with the
+same composition. *Fine-tuning* trains a new head for such a variable on
+the encoder of the trained model, the *parent*, so a few hundred plots
+of your own can carry what the parent learned from the whole archive.
+
+The fine-tuned model reads plots exactly as its parent does: with the
+parent’s species, genus, family and categorical vocabularies, its loader
+settings, and the scaling of its coordinates and covariates. It starts
+from the parent’s encoder, which is either kept fixed while the new
+heads train or trained further from the parent’s weights. Its checkpoint
+records which model it started from, and fine-tuned checkpoints are
+released as a model suite of their own, scored like the released EVA
+suites.
+
+This article covers opening a parent (a checkpoint or a suite member),
+loading your plots in its namespace, training new heads with a frozen or
+a trainable encoder, what may differ from the parent, releasing the
+result as a derived suite, the command line, and the provenance the
+checkpoints and manifest keep.
+
+## Installation
+
+``` r
+
+# install.packages("pak")
+pak::pak("gcol33/resolve/r")
+
+# The RESOLVE engine library, downloaded once
+library(resolveR)
+resolve.install_backend()
+```
+
+``` bash
+pip install resolve-core
+```
+
+## A parent suite
+
+The examples use the survey of 150 plots in the Alps that ships with the
+R package. The first 100 plots stand in for an archive: two habitat
+models, trained under two seeds, are released as a suite, the way the
+EVA suites are released. The other 50 plots are a regional survey that
+records two variables the suite never imputes: elevation, and the
+elevation belt, a three-class scheme of the kind a regional typology
+uses.
+
+``` r
+
+plots <- read.csv(system.file("extdata", "plots.csv", package = "resolveR"))
+species <- read.csv(system.file("extdata", "species.csv", package = "resolveR"))
+plots$belt <- cut(plots$elevation, breaks = c(-Inf, 1500, 2000, Inf),
+                  labels = c("montane", "subalpine", "alpine"))
+plots$belt <- as.character(plots$belt)
+
+archive <- seq_len(nrow(plots)) <= 100
+archive_plots <- plots[archive, ]
+archive_species <- species[species$plot_id %in% archive_plots$plot_id, ]
+my_plots <- plots[!archive, ]
+my_species <- species[species$plot_id %in% my_plots$plot_id, ]
+table(my_plots$belt)
+#> 
+#>    alpine   montane subalpine 
+#>        15        28         7
+```
+
+``` python
+import os
+import shutil
+import tempfile
+
+import numpy as np
+import pandas as pd
+import resolve_core as rc
+
+data = "https://raw.githubusercontent.com/gcol33/resolve/master/r/inst/extdata/"
+plots = pd.read_csv(data + "plots.csv")
+species = pd.read_csv(data + "species.csv")
+plots["belt"] = pd.cut(plots.elevation, bins=[-np.inf, 1500, 2000, np.inf],
+                       labels=["montane", "subalpine", "alpine"]).astype(str)
+
+archive = plots.index < 100
+archive_plots = plots[archive]
+archive_species = species[species.plot_id.isin(archive_plots.plot_id)]
+my_plots = plots[~archive].reset_index(drop=True)
+my_species = species[species.plot_id.isin(my_plots.plot_id)]
+my_plots.belt.value_counts().sort_index()
+#> belt
+#> alpine       15
+#> montane      28
+#> subalpine     7
+#> Name: count, dtype: int64
+```
+
+Each member of the parent suite imputes the habitat from species
+composition and coordinates. The manifest names the members and the
+input contract, and sealing it records each member’s size and SHA-256.
+
+``` r
+
+roles <- list(plot_id = "plot_id", species_id = "species", abundance = "cover",
+              genus = "genus", family = "family", latitude = "lat", longitude = "lon")
+habitat <- resolve.dataset.frame(archive_plots, archive_species, roles = roles,
+                                 targets = list(habitat = list(column = "habitat",
+                                                               task = "classification")))
+suite_dir <- file.path(tempdir(), "habitat_suite")
+unlink(suite_dir, recursive = TRUE)
+dir.create(suite_dir)
+members <- lapply(1:2, function(seed) {
+  file <- sprintf("seed_%d.pt", seed)
+  resolve.train.dataset(habitat, hiddenDims = c(64L, 32L), maxEpochs = 100L, seed = seed,
+                        savePath = file.path(suite_dir, file), verbose = FALSE)
+  list(seed = seed, file = file)
+})
+manifest <- list(
+  format = "resolve-suite", format_version = 1L, name = "alpine_habitat",
+  description = "Habitat from species composition", licence = "CC-BY-4.0",
+  engine_version = resolve.version(), taxonomy = "as in the example data",
+  training_scope = "100 plots of the example survey",
+  inputs = list(plot_id = "plot_id", species = "species", abundance = "cover",
+                genus = "genus", family = "family", latitude = "lat", longitude = "lon"),
+  targets = list(list(name = "habitat", task = "classification", combine = "vote",
+                      outputs = list("habitat"), status = "released", members = members))
+)
+jsonlite::write_json(manifest, file.path(suite_dir, "manifest.json"),
+                     auto_unbox = TRUE, pretty = TRUE, digits = NA)
+invisible(resolve.seal_suite(suite_dir))
+```
+
+``` python
+roles = rc.RoleMapping()
+roles.plot_id, roles.species_id, roles.abundance = "plot_id", "species", "cover"
+roles.genus, roles.family = "genus", "family"
+roles.latitude, roles.longitude = "lat", "lon"
+
+habitat = rc.ResolveDataset.from_pandas(
+    archive_plots, archive_species, roles,
+    [rc.TargetSpec.classification("habitat", int(archive_plots.habitat.nunique()))])
+suite_dir = os.path.join(tempfile.gettempdir(), "habitat_suite_py")
+shutil.rmtree(suite_dir, ignore_errors=True)
+os.makedirs(suite_dir)
+members = []
+for seed in (1, 2):
+    rc.manual_seed(seed)
+    model_config = rc.ModelConfig()
+    model_config.hidden_dims = [64, 32]
+    model = rc.ResolveModel(habitat.schema,
+                            rc.model_config_for_dataset(habitat, model_config))
+    config = rc.TrainConfig()
+    config.max_epochs = 100
+    trainer = rc.Trainer(model, config)
+    trainer.prepare_data(habitat, 0.2, seed)
+    trainer.fit()
+    trainer.save(os.path.join(suite_dir, f"seed_{seed}.pt"), trainer.run_metadata)
+    members.append(rc.SuiteMember(seed, f"seed_{seed}.pt"))
+
+manifest = rc.SuiteManifest()
+manifest.name = "alpine_habitat"
+manifest.description = "Habitat from species composition"
+manifest.licence = "CC-BY-4.0"
+manifest.engine_version = rc.__version__
+manifest.taxonomy = "as in the example data"
+manifest.training_scope = "100 plots of the example survey"
+inputs = rc.SuiteInputContract()
+inputs.plot_id, inputs.species, inputs.abundance = "plot_id", "species", "cover"
+inputs.genus, inputs.family = "genus", "family"
+inputs.latitude, inputs.longitude = "lat", "lon"
+manifest.inputs = inputs
+target = rc.SuiteTarget()
+target.name, target.task = "habitat", rc.TaskType.Classification
+target.combine, target.outputs = rc.SuiteCombine.Vote, ["habitat"]
+target.members = members
+manifest.targets = [target]
+manifest.seal(suite_dir)
+manifest.write(suite_dir)
+```
+
+## Opening the parent
+
+[`resolve.parent()`](https://gillescolling.com/resolve/reference/resolve.parent.md)
+opens the model a fine-tuned model starts from: a checkpoint file, or a
+suite directory with the target and the member’s seed. A suite member’s
+size and SHA-256 are checked against the manifest before it is read, so
+a fine-tuned model never starts from a file that differs from the
+release. Its `record()` is what the fine-tuned checkpoint will keep of
+it.
+
+``` r
+
+parent <- resolve.parent(suite_dir, target = "habitat", seed = 1L)
+record <- parent$record()
+record[c("suite", "suite_target", "suite_seed", "licence")]
+#> $suite
+#> [1] "alpine_habitat"
+#> 
+#> $suite_target
+#> [1] "habitat"
+#> 
+#> $suite_seed
+#> [1] 1
+#> 
+#> $licence
+#> [1] "CC-BY-4.0"
+```
+
+``` python
+config = rc.InitFromConfig()
+config.suite_target = "habitat"
+config.suite_seed = 1
+parent = rc.ParentModel.open(suite_dir, config)
+record = parent.record
+{"suite": record.suite, "suite_target": record.suite_target,
+ "suite_seed": record.suite_seed, "licence": record.licence}
+#> {'suite': 'alpine_habitat', 'suite_target': 'habitat', 'suite_seed': 1, 'licence': 'CC-BY-4.0'}
+```
+
+## Your plots in the parent’s namespace
+
+The encoder reads a species through the row of its embedding table that
+the parent’s vocabulary gives it, so your plots are loaded with the
+parent’s vocabularies and loader settings: `vocabs()` and
+`dataset_config()`. A species the parent never saw is read as the
+unknown species, as it is when the parent itself imputes new plots. A
+classification target the parent does not have gets its classes from
+your plots.
+
+``` r
+
+my_targets <- list(elevation = list(column = "elevation", task = "regression"),
+                   belt = list(column = "belt", task = "classification"))
+mine <- resolve.dataset.frame(my_plots, my_species, roles = roles, targets = my_targets,
+                              vocabs = parent$vocabs(), config = parent$dataset_config())
+```
+
+``` python
+my_targets = [rc.TargetSpec.regression("elevation"),
+              rc.TargetSpec.classification("belt", 3)]
+mine = rc.ResolveDataset.from_pandas(my_plots, my_species, roles, my_targets,
+                                    config=parent.dataset_config(), vocabs=parent.vocabs())
+```
+
+## Training new heads
+
+`initFrom` starts the model from the parent: every parameter outside the
+task heads is copied, the heads for elevation and belt start fresh, and
+the coordinates are scaled as the parent scaled them. The encoder then
+trains further from the parent’s weights, together with the new heads.
+
+``` r
+
+tuned_path <- file.path(tempdir(), "elevation_belt.pt")
+tuned <- resolve.train.dataset(mine, initFrom = parent, maxEpochs = 200L,
+                               savePath = tuned_path, verbose = FALSE)
+round(unlist(tuned$result$final_metrics$elevation[c("mae", "r2")]), 3)
+#>     mae      r2 
+#> 230.266   0.793
+round(tuned$result$final_metrics$belt$accuracy, 3)
+#> [1] 0.6
+```
+
+``` python
+model = rc.ResolveModel(mine.schema, rc.model_config_for_dataset(mine, parent.model_config))
+config = rc.TrainConfig()
+config.max_epochs = 200
+trainer = rc.Trainer(model, config)
+trainer.init_from(parent)
+trainer.prepare_data(mine, 0.2, 42)
+result = trainer.fit()
+tuned_path = os.path.join(tempfile.gettempdir(), "elevation_belt_py.pt")
+trainer.save(tuned_path, trainer.run_metadata)
+metrics = result.final_metrics
+{"mae": round(metrics["elevation"]["mae"], 3), "r2": round(metrics["elevation"]["r2"], 3),
+ "accuracy": round(metrics["belt"]["accuracy"], 3)}
+#> {'mae': 243.741, 'r2': 0.784, 'accuracy': 0.8}
+```
+
+These metrics are read on the plots the fit held out for early stopping,
+10 of the 50.
+
+`freezeEncoder = TRUE` keeps the copied part fixed instead and runs it
+in evaluation mode, so the heads learn on the latent representation the
+parent computes for each plot. That suits a parent whose own targets
+vary with yours, such as a released suite’s habitat model under a
+national habitat typology. Here the parent learned four habitat classes
+from 100 plots, and elevation varies with composition in ways those
+classes do not separate, so an encoder that trains further fits
+elevation more closely than a frozen one.
+
+## What may differ from the parent
+
+The fine-tuned model takes the parent’s configuration. Only the settings
+that leave the encoder as it is may differ: the heads
+(`head_hidden_dims`, `head_activation`, `head_dropout`), the dropout
+rates, and what is frozen. A dataset loaded with its own vocabulary, or
+a model of other widths, is refused, and the error lists every
+difference:
+
+``` r
+
+resolve.train.dataset(mine, initFrom = parent, hiddenDims = c(128L, 64L),
+                      maxEpochs = 1L, verbose = FALSE)
+#> Error:
+#> ! Trainer::init_from: the model cannot start from 'C:\Users\GILLES~1\AppData\Local\Temp\RtmpYXgAFi/habitat_suite\seed_1.pt':
+#>   - model config 'hidden_dims' is [128,64] here and [64,32] in the parent
+#>   - parameter 'encoder.mlp.0.weight' is [128, 84] here and [64, 84] in the parent
+#>   - parameter 'encoder.mlp.0.bias' is [128] here and [64] in the parent
+#>   - parameter 'encoder.mlp.1.inner.weight' is [128] here and [64] in the parent
+#>   - parameter 'encoder.mlp.1.inner.bias' is [128] here and [64] in the parent
+#>   - parameter 'encoder.mlp.4.weight' is [64, 128] here and [32, 64] in the parent
+#>   - parameter 'encoder.mlp.4.bias' is [64] here and [32] in the parent
+#>   - parameter 'encoder.mlp.5.inner.weight' is [64] here and [32] in the parent
+#>   - parameter 'encoder.mlp.5.inner.bias' is [64] here and [32] in the parent
+#>   - buffer 'encoder.mlp.1.inner.running_mean' is [128] here and [64] in the parent
+#>   - buffer 'encoder.mlp.1.inner.running_var' is [128] here and [64] in the parent
+#>   - buffer 'encoder.mlp.5.inner.running_mean' is [64] here and [32] in the parent
+#>   - buffer 'encoder.mlp.5.inner.running_var' is [64] here and [32] in the parent
+```
+
+``` python
+wide = parent.model_config
+wide.hidden_dims = [128, 64]
+rc.fine_tune_mismatches(parent, wide, mine.schema)
+#> ["model config 'hidden_dims' is [128,64] here and [64,32] in the parent"]
+```
+
+A target the parent shares, under the same name, task, transform and
+classes, can keep its head too: `initReuse = "encoder_heads"` carries
+that head and its scaling over, and refits a released target on your
+plots from where the parent left it. Every other head starts fresh.
+
+## Releasing fine-tuned models as a suite
+
+One fine-tuned model per parent member gives a suite whose members
+differ by seed, so it reports the members’ agreement as the parent suite
+does.
+[`resolve.derive_suite()`](https://gillescolling.com/resolve/reference/resolve.derive_suite.md)
+copies the checkpoints into a new directory and writes a manifest whose
+input contract is the part of the parent’s its targets read; each target
+names the suite and target its members started from, with that suite’s
+licence and training scope, and each member the SHA-256 of its parent
+checkpoint.
+
+``` r
+
+tuned_members <- c()
+for (seed in 1:2) {
+  member_parent <- resolve.parent(suite_dir, target = "habitat", seed = seed)
+  member_data <- resolve.dataset.frame(my_plots, my_species, roles = roles,
+                                       targets = my_targets,
+                                       vocabs = member_parent$vocabs(),
+                                       config = member_parent$dataset_config())
+  path <- file.path(tempdir(), sprintf("tuned_seed_%d.pt", seed))
+  resolve.train.dataset(member_data, initFrom = member_parent, maxEpochs = 200L,
+                        seed = seed, savePath = path, verbose = FALSE)
+  tuned_members[as.character(seed)] <- path
+}
+
+derived_dir <- file.path(tempdir(), "regional_suite")
+unlink(derived_dir, recursive = TRUE)
+derived <- resolve.derive_suite(
+  derived_dir, parent = suite_dir, name = "alpine_regional",
+  licence = "CC-BY-4.0", trainingScope = "50 plots of the regional survey",
+  targets = list(elevation = list(members = tuned_members, units = "m"),
+                 belt = list(members = tuned_members))
+)
+derived$targets[[1]]$derived_from[c("suite", "target")]
+#> $suite
+#> [1] "alpine_habitat"
+#> 
+#> $target
+#> [1] "habitat"
+```
+
+``` python
+tuned_members = []
+for seed in (1, 2):
+    config = rc.InitFromConfig()
+    config.suite_target = "habitat"
+    config.suite_seed = seed
+    member_parent = rc.ParentModel.open(suite_dir, config)
+    member_data = rc.ResolveDataset.from_pandas(
+        my_plots, my_species, roles, my_targets,
+        config=member_parent.dataset_config(), vocabs=member_parent.vocabs())
+    rc.manual_seed(seed)
+    model = rc.ResolveModel(member_data.schema,
+                            rc.model_config_for_dataset(member_data, member_parent.model_config))
+    config = rc.TrainConfig()
+    config.max_epochs = 200
+    trainer = rc.Trainer(model, config)
+    trainer.init_from(member_parent)
+    trainer.prepare_data(member_data, 0.2, seed)
+    trainer.fit()
+    path = os.path.join(tempfile.gettempdir(), f"tuned_seed_{seed}_py.pt")
+    trainer.save(path, trainer.run_metadata)
+    tuned_members.append(rc.DerivedSuiteMember(path, seed))
+
+spec = rc.DerivedSuiteSpec()
+spec.parent = suite_dir
+spec.name = "alpine_regional"
+spec.licence = "CC-BY-4.0"
+spec.training_scope = "50 plots of the regional survey"
+elevation = rc.DerivedSuiteTarget()
+elevation.name, elevation.units, elevation.members = "elevation", "m", tuned_members
+belt = rc.DerivedSuiteTarget()
+belt.name, belt.members = "belt", tuned_members
+spec.targets = [elevation, belt]
+derived_dir = os.path.join(tempfile.gettempdir(), "regional_suite_py")
+shutil.rmtree(derived_dir, ignore_errors=True)
+derived = rc.write_derived_suite(derived_dir, spec)
+{"suite": derived.targets[0].derived_from.suite,
+ "target": derived.targets[0].derived_from.target}
+#> {'suite': 'alpine_habitat', 'target': 'habitat'}
+```
+
+The derived suite is scored like any other. Loading it checks each
+member’s checksum, its input contract, the classes the manifest lists
+for a vote, and that the parent the member records is the one the
+manifest names.
+
+``` r
+
+regional <- resolve.load_suite(derived_dir)
+imputed <- as.data.frame(resolve.predict.suite(regional, my_species, header = my_plots))
+head(imputed[, c("plot_id", "elevation", "elevation_sd", "belt", "belt_agreement")])
+#>   plot_id elevation elevation_sd    belt belt_agreement
+#> 1    A101 1226.5195    242.57042 montane            1.0
+#> 2    A102 1058.5676    303.69885 montane            1.0
+#> 3    A103 1257.6179     38.15796 montane            1.0
+#> 4    A104 1368.0400    434.61578 montane            0.5
+#> 5    A105 1064.0995     10.84846 montane            1.0
+#> 6    A106  997.3163    345.45728 montane            1.0
+```
+
+``` python
+regional = rc.SuitePredictor.load(derived_dir)
+imputed = regional.predict(my_species, header=my_plots).to_pandas()
+imputed[["plot_id", "elevation", "elevation_sd", "belt", "belt_agreement"]].head()
+#>   plot_id    elevation  elevation_sd     belt  belt_agreement
+#> 0    A101  1006.021179    133.246735  montane             1.0
+#> 1    A102   849.546631     37.175499  montane             1.0
+#> 2    A103  1300.825195     12.485113  montane             1.0
+#> 3    A104  1354.236816    163.125534  montane             1.0
+#> 4    A105  1064.018066    106.157082  montane             1.0
+```
+
+## The command line
+
+`resolve train --init-from` takes a checkpoint or a suite directory
+(`--init-target`, `--init-seed`); the data is read with the parent’s
+vocabularies and loader settings, and only the head, dropout and freeze
+flags may be given. `resolve suite derive` releases the checkpoints:
+
+``` bash
+for seed in 1 2; do
+  resolve train --init-from habitat_suite --init-target habitat --init-seed $seed \
+    --header my_plots.csv --species my_species.csv \
+    --plot-id plot_id --species-id species --abundance cover \
+    --genus genus --family family --lat lat --lon lon \
+    --target elevation:regression --target belt:classification:3 \
+    --seed $seed --output tuned_seed_$seed.pt
+done
+
+resolve suite derive --parent habitat_suite --output regional_suite \
+  --name alpine_regional --licence CC-BY-4.0 \
+  --training-scope "50 plots of the regional survey" \
+  --member elevation:1=tuned_seed_1.pt --member elevation:2=tuned_seed_2.pt \
+  --member belt:1=tuned_seed_1.pt --member belt:2=tuned_seed_2.pt \
+  --units elevation=m
+```
+
+## Provenance
+
+A fine-tuned checkpoint records its parent: the path it was opened from,
+its SHA-256 and size, the engine that trained it, what was carried over,
+and the suite, target and seed it came from with that suite’s licence
+and training scope. \[resolve.load_run_metadata()\] reads it back, and
+the JSON file written beside the checkpoint carries it as `parent`.
+
+``` r
+
+saved <- resolve.load_run_metadata(tuned_path)
+saved$parent[c("suite", "suite_target", "suite_seed", "reuse", "n_tensors")]
+#> $suite
+#> [1] "alpine_habitat"
+#> 
+#> $suite_target
+#> [1] "habitat"
+#> 
+#> $suite_seed
+#> [1] 1
+#> 
+#> $reuse
+#> [1] "encoder"
+#> 
+#> $n_tensors
+#> [1] 20
+identical(saved$parent$sha256, record$sha256)
+#> [1] TRUE
+```
+
+``` python
+saved = rc.Trainer.load_run_metadata(tuned_path)
+{"suite": saved.parent.suite, "suite_target": saved.parent.suite_target,
+ "suite_seed": saved.parent.suite_seed, "reuse": saved.parent.reuse,
+ "n_tensors": saved.parent.n_tensors, "same_parent": saved.parent.sha256 == record.sha256}
+#> {'suite': 'alpine_habitat', 'suite_target': 'habitat', 'suite_seed': 1, 'reuse': InitReuse.Encoder, 'n_tensors': 20, 'same_parent': True}
+```
+
+A model fine-tuned from a released suite inherits that suite’s terms.
+The derived manifest states them under each target’s `derived_from`,
+beside the licence of the derived suite itself.

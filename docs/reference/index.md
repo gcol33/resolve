@@ -65,6 +65,16 @@ Several trained models released as one directory and scored together.
 - [`as.data.frame(`*`<resolve_suite_predictions>`*`)`](https://gillescolling.com/resolve/reference/as.data.frame.resolve_suite_predictions.md)
   : Flatten Suite Predictions to One Row per Plot
 
+## Fine-tuning
+
+New heads for your own targets on the encoder of a trained model or a
+suite member, and the fine-tuned models released as a suite.
+
+- [`resolve.parent()`](https://gillescolling.com/resolve/reference/resolve.parent.md)
+  : Open a Trained Model to Fine-Tune From
+- [`resolve.derive_suite()`](https://gillescolling.com/resolve/reference/resolve.derive_suite.md)
+  : Release Fine-Tuned Models as a Suite
+
 ## Gap fitting
 
 Imputing a dataset’s missing values from its own complete plots, beside

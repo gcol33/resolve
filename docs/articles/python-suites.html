@@ -65,6 +65,7 @@
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/fine-tuning.html">Fine-tuning a trained model</a></li>
     <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Imputing a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
@@ -318,10 +319,28 @@ requires.</li>
 <li>
 <code>members</code> (<code>list[SuiteMember]</code>).</li>
 <li>
+<code>classes</code> (<code>list[str]</code>): a vote’s classes in
+code order, as the members’ checkpoints name them; loading compares
+them. Empty when not stated.</li>
+<li>
+<code>derived_from</code> (<code>SuiteDerivation</code> or
+<code>None</code>): for a target fine-tuned from another suite
+(<code>write_derived_suite</code>), the suite and target its members
+started from.</li>
+<li>
 <code>training</code> (<code>dict</code>) and
 <code>validation</code> (<code>dict</code> of regime to metrics):
 free-form records of how the members were trained and scored.</li>
 </ul>
+</div>
+<div class="section level2">
+<h2 id="SuiteDerivation">
+<code>SuiteDerivation</code><a class="anchor" aria-label="anchor" href="#SuiteDerivation"></a>
+</h2>
+<p>The suite and target a fine-tuned target’s members started from:
+<code>suite</code>, <code>target</code>, <code>engine_version</code>
+(the engine that trained the parent members), and that suite’s
+<code>licence</code> and <code>training_scope</code>.</p>
 </div>
 <div class="section level2">
 <h2 id="SuiteTargetInputs">
@@ -337,14 +356,17 @@ of the survey year, for instance, cannot read the year.</p>
 <h2 id="SuiteMember">
 <code>SuiteMember</code><a class="anchor" aria-label="anchor" href="#SuiteMember"></a>
 </h2>
-<div class="sourceCode" id="cb7"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a>SuiteMember(seed, <span class="bu">file</span>, sha256<span class="op">=</span><span class="st">""</span>, <span class="bu">bytes</span><span class="op">=</span><span class="dv">0</span>, zero_abundance_as<span class="op">=</span><span class="va">None</span>)</span></code></pre></div>
+<div class="sourceCode" id="cb7"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a>SuiteMember(seed, <span class="bu">file</span>, sha256<span class="op">=</span><span class="st">""</span>, <span class="bu">bytes</span><span class="op">=</span><span class="dv">0</span>, zero_abundance_as<span class="op">=</span><span class="va">None</span>, parent_sha256<span class="op">=</span><span class="st">""</span>)</span></code></pre></div>
 <p>One checkpoint of a suite target: its <code>seed</code>, its
 <code>file</code> (relative to the suite directory,
 <code>/</code>-separated), its <code>sha256</code> digest (lower-case
 hex) and its size in <code>bytes</code>, both filled in by
 <code>SuiteManifest.seal</code>. <code>zero_abundance_as</code> states,
 for a checkpoint that does not record it, the abundance a recorded 0 was
-read at in training; loading compares it with the contract.</p>
+read at in training; loading compares it with the contract.
+<code>parent_sha256</code>, for a fine-tuned member, is the SHA-256 of
+its parent checkpoint; loading compares it with the parent the
+checkpoint records.</p>
 </div>
 <div class="section level2">
 <h2 id="SuiteCombine">

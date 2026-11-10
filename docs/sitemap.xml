@@ -5,6 +5,7 @@
 <url><loc>https://gillescolling.com/resolve/articles/data-preparation.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/articles/embeddings.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/articles/encoding.html</loc></url>
+<url><loc>https://gillescolling.com/resolve/articles/fine-tuning.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/articles/gap-fitting.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/articles/index.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/articles/installation.html</loc></url>
@@ -12,6 +13,7 @@
 <url><loc>https://gillescolling.com/resolve/articles/prediction.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/articles/python-data.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/articles/python-engine.html</loc></url>
+<url><loc>https://gillescolling.com/resolve/articles/python-fine-tuning.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/articles/python-gap-fitting.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/articles/python-names.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/articles/python-prediction.html</loc></url>
@@ -36,6 +38,7 @@
 <url><loc>https://gillescolling.com/resolve/reference/resolve.dataset.csv.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/reference/resolve.dataset.frame.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/reference/resolve.default_config.html</loc></url>
+<url><loc>https://gillescolling.com/resolve/reference/resolve.derive_suite.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/reference/resolve.encode_terrain_grids.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/reference/resolve.fit_gaps.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/reference/resolve.fit_prediction_gaps.html</loc></url>
@@ -51,6 +54,7 @@
 <url><loc>https://gillescolling.com/resolve/reference/resolve.manual_seed.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/reference/resolve.names.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/reference/resolve.nearest_by_cosine.html</loc></url>
+<url><loc>https://gillescolling.com/resolve/reference/resolve.parent.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/reference/resolve.plot_totals.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/reference/resolve.predict.dataset.html</loc></url>
 <url><loc>https://gillescolling.com/resolve/reference/resolve.predict.suite.html</loc></url>

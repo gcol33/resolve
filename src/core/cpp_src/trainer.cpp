@@ -318,6 +318,22 @@ void Trainer::prepare_from_dataset(
     // copy the vocab would be a dangling reference at save time.
     categorical_vocab_ = dataset.categorical_vocab();
 
+    // A warm-started model reads each categorical value at the code its
+    // parent learned it under, so the dataset must carry the parent's maps
+    // (loaded with ParentModel::vocabs()).
+    if (parent_categorical_vocab_) {
+        for (const auto& column : parent_categorical_vocab_->column_names()) {
+            const auto& names = categorical_vocab_.column_names();
+            if (std::find(names.begin(), names.end(), column) == names.end() ||
+                categorical_vocab_.column_map(column) != parent_categorical_vocab_->column_map(column)) {
+                throw std::invalid_argument(
+                    "Trainer::prepare_data: categorical column '" + column + "' is not coded "
+                    "as in the parent the model was started from (init_from); load the "
+                    "dataset with the parent's vocabularies (ParentModel::vocabs())");
+            }
+        }
+    }
+
     // Capture plot IDs so test_plot_ids() / train_plot_ids() can recover which
     // plots landed in each split. The raw-tensor prepare_data overload has no
     // plot IDs, so this is the only place plot_ids_ is populated.
@@ -569,6 +585,7 @@ void Trainer::prepare_split(
     run_metadata_.test_size =
         hold_out.mode == HoldOutMode::Random ? hold_out.test_size : 0.0f;
     run_metadata_.split_seed = seed;
+    run_metadata_.parent = parent_record_;
 }
 
 void Trainer::apply_split(
@@ -589,15 +606,7 @@ void Trainer::apply_split(
     const LabelledPlots fitting = plots.index_select(fit_rows);
     require_labelled_fitting_rows(model_->schema().targets, fitting.targets);
 
-    // The fill and scalers come from the fitting rows alone.
-    Scalers scalers;
-    fit_continuous_scalers(scalers, fitting.inputs.continuous);
-    for (const auto& cfg : model_->schema().targets) {
-        if (cfg.task != TaskType::Regression) continue;
-        auto it = fitting.targets.find(cfg.name);
-        if (it == fitting.targets.end()) continue;
-        scalers.target_scalers[cfg.name] = fit_target_scaler(cfg, it->second);
-    }
+    Scalers scalers = split_scalers(fitting);
 
     const LabelledPlots scaled = standardized(plots, scalers);
     release_training_state();
@@ -609,6 +618,33 @@ void Trainer::apply_split(
     test_indices_ = global_index.defined() ? global_index.index_select(0, held_rows)
                                            : held_rows.clone();
     data_prepared_ = true;
+}
+
+Scalers Trainer::split_scalers(const LabelledPlots& fitting) const {
+    // The fill and scalers come from the fitting rows alone, except those a
+    // warm start inherited from its parent.
+    Scalers scalers;
+    if (inherited_scalers_) {
+        scalers.continuous_fill = inherited_scalers_->continuous_fill;
+        scalers.continuous_mean = inherited_scalers_->continuous_mean;
+        scalers.continuous_scale = inherited_scalers_->continuous_scale;
+    } else {
+        fit_continuous_scalers(scalers, fitting.inputs.continuous);
+    }
+    for (const auto& cfg : model_->schema().targets) {
+        if (cfg.task != TaskType::Regression) continue;
+        if (inherited_scalers_) {
+            auto kept = inherited_scalers_->target_scalers.find(cfg.name);
+            if (kept != inherited_scalers_->target_scalers.end()) {
+                scalers.target_scalers[cfg.name] = kept->second;
+                continue;
+            }
+        }
+        auto it = fitting.targets.find(cfg.name);
+        if (it == fitting.targets.end()) continue;
+        scalers.target_scalers[cfg.name] = fit_target_scaler(cfg, it->second);
+    }
+    return scalers;
 }
 
 Trainer::LabelledPlots Trainer::standardized(LabelledPlots plots, const Scalers& scalers) const {
@@ -1185,6 +1221,7 @@ TrainResult Trainer::train(const RunProgress* resume_from) {
     run_metadata_.best_epoch = result.best_epoch;
     run_metadata_.total_epochs = static_cast<int>(result.train_loss_history.size());
     run_metadata_.final_metrics = result.final_metrics;
+    run_metadata_.parent = parent_record_;
     if (plan.use_checkpoints) {
         save(config_.checkpoint_dir + "/checkpoint.pt", &run_metadata_);
     }

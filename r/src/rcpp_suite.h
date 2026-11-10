@@ -47,6 +47,12 @@ public:
         return value_to_r_owned(resolve_suite_seal(dir.c_str()));
     }
 
+    static RObject derive(std::string dir, List spec) {
+        capi_require_loaded();
+        ValuePtr s = owned_value(r_list_to_value_map(spec, "spec"));
+        return value_to_r_owned(resolve_suite_derive(dir.c_str(), s.get()));
+    }
+
 private:
     RSuite() = default;
     RObject get(const char* what) const {

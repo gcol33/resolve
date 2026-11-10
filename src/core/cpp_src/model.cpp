@@ -139,6 +139,44 @@ ResolveModelImpl::ResolveModelImpl(
             TaskHead(latent_dim(), target.task, target.num_classes, target.transform,
                      config.head_hidden_dims, config.head_activation, config.head_dropout)));
     }
+
+    if (config.freeze_encoder) {
+        // As under freeze_composition, AdamW skips a parameter without a
+        // gradient, so each keeps its value; train() keeps the modules in
+        // evaluation mode.
+        for (const auto& parameter : encoder_parameters()) parameter.requires_grad_(false);
+        train(is_training());
+    }
+}
+
+std::optional<std::string> ResolveModelImpl::head_of(const std::string& name) const {
+    // The longest matching target name, so a target named "a" never claims
+    // the head of a target named "a.b".
+    std::optional<std::string> found;
+    for (const auto& [target, head] : heads_) {
+        (void)head;
+        const std::string prefix = "head_" + target + ".";
+        if (name.rfind(prefix, 0) == 0 && (!found || target.size() > found->size())) {
+            found = target;
+        }
+    }
+    return found;
+}
+
+std::vector<torch::Tensor> ResolveModelImpl::encoder_parameters() const {
+    std::vector<torch::Tensor> out;
+    for (const auto& pair : named_parameters()) {
+        if (!head_of(pair.key())) out.push_back(pair.value());
+    }
+    return out;
+}
+
+void ResolveModelImpl::train(bool on) {
+    torch::nn::Module::train(on);
+    if (!config_.freeze_encoder) return;
+    for (const auto& child : named_children()) {
+        if (child.key().rfind("head_", 0) != 0) child.value()->eval();
+    }
 }
 
 PlotInputs ResolveModelImpl::fuse_categoricals_(const PlotInputs& inputs) {
@@ -212,7 +250,8 @@ int64_t ResolveModelImpl::latent_dim() const {
 
 ResolveModelImpl::EncodedPlots ResolveModelImpl::encode_all(
     const PlotInputs& raw, std::vector<torch::Tensor>* activations) {
-    if (is_training() && row_reference_rows_ > 0) {
+    // A frozen encoder keeps the reference rows it was trained with.
+    if (is_training() && row_reference_rows_ > 0 && !config_.freeze_encoder) {
         capture_row_reference(raw);
     }
     const PlotInputs inputs = fuse_categoricals_(raw);

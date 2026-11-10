@@ -65,6 +65,7 @@
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/fine-tuning.html">Fine-tuning a trained model</a></li>
     <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Imputing a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
@@ -402,6 +403,12 @@ them (<code>Predictor.plot_totals = False</code>).</li>
 <code>False</code>): keep the species, genus and family tables at their
 initial values. Needs the MLP architecture and an encoding with such a
 table.</li>
+<li>
+<code>freeze_encoder</code> (<code>bool</code>, default
+<code>False</code>): keep every parameter outside the task heads at its
+value, and run that part in evaluation mode while the heads train. With
+<code>Trainer.init_from</code>, the heads learn on the encoder of a
+trained parent.</li>
 <li>
 <code>d_model</code> (<code>int</code>, default <code>128</code>),
 <code>n_heads</code> (<code>int</code>, default <code>4</code>),
@@ -768,10 +775,27 @@ blocks than folds is an error.</p>
 <span id="cb20-6"><a href="#cb20-6" tabindex="-1"></a>spatial.mean_metrics[<span class="st">"elevation"</span>][<span class="st">"mae"</span>]</span></code></pre></div>
 </div>
 <div class="section level3">
+<h3 id="Trainer-init_from">
+<code>init_from()</code><a class="anchor" aria-label="anchor" href="#Trainer-init_from"></a>
+</h3>
+<div class="sourceCode" id="cb21"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb21-1"><a href="#cb21-1" tabindex="-1"></a>init_from(parent, reuse<span class="op">=</span>InitReuse.Encoder)</span></code></pre></div>
+<p>Starts the model from a <a href="python-fine-tuning.html#ParentModel"><code>ParentModel</code></a>:
+every parameter and buffer outside the task heads is copied from it, and
+with <code>InitReuse.EncoderHeads</code> also the head of each target
+the parent shares under the same name, task, transform and classes.
+Every other head keeps its fresh initialisation. From then on the
+continuous block is scaled with the parent’s scalers, so the encoder
+reads each plot on the scale it was trained on, and a split already
+prepared is scaled again. <code>cross_validate</code> starts every fold
+from these weights, and <code>save</code> records the parent. The model
+must read the plots as the parent does (<a href="python-fine-tuning.html#fine_tune_mismatches"><code>fine_tune_mismatches</code></a>);
+otherwise a <code>ValueError</code> lists every difference.</p>
+</div>
+<div class="section level3">
 <h3 id="Trainer-predict">
 <code>predict()</code><a class="anchor" aria-label="anchor" href="#Trainer-predict"></a>
 </h3>
-<div class="sourceCode" id="cb21"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb21-1"><a href="#cb21-1" tabindex="-1"></a>predict(continuous, genus_ids<span class="op">=</span><span class="va">None</span>, family_ids<span class="op">=</span><span class="va">None</span>, ...)</span></code></pre></div>
+<div class="sourceCode" id="cb22"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb22-1"><a href="#cb22-1" tabindex="-1"></a>predict(continuous, genus_ids<span class="op">=</span><span class="va">None</span>, family_ids<span class="op">=</span><span class="va">None</span>, ...)</span></code></pre></div>
 <p>The model’s outputs in evaluation mode, from the unstandardised
 continuous block, standardised here with the fitted scalers, and the
 other inputs of <code>ResolveModel.forward</code>: a regression target
@@ -781,11 +805,11 @@ dataset, save a checkpoint and use <code>Predictor</code>.</p>
 <div class="section level3">
 <h3 id="Trainer-checkpoints">Checkpoints<a class="anchor" aria-label="anchor" href="#Trainer-checkpoints"></a>
 </h3>
-<div class="sourceCode" id="cb22"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb22-1"><a href="#cb22-1" tabindex="-1"></a>save(path, metadata<span class="op">=</span><span class="va">None</span>)</span>
-<span id="cb22-2"><a href="#cb22-2" tabindex="-1"></a>load_state(path, device<span class="op">=</span><span class="st">"cpu"</span>, vram_fraction<span class="op">=</span><span class="fl">1.0</span>)</span>
-<span id="cb22-3"><a href="#cb22-3" tabindex="-1"></a>Trainer.load(path, device<span class="op">=</span><span class="st">"cpu"</span>, vram_fraction<span class="op">=</span><span class="fl">1.0</span>)</span>
-<span id="cb22-4"><a href="#cb22-4" tabindex="-1"></a>Trainer.load_train_config(path)</span>
-<span id="cb22-5"><a href="#cb22-5" tabindex="-1"></a>Trainer.load_run_metadata(path)</span></code></pre></div>
+<div class="sourceCode" id="cb23"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb23-1"><a href="#cb23-1" tabindex="-1"></a>save(path, metadata<span class="op">=</span><span class="va">None</span>)</span>
+<span id="cb23-2"><a href="#cb23-2" tabindex="-1"></a>load_state(path, device<span class="op">=</span><span class="st">"cpu"</span>, vram_fraction<span class="op">=</span><span class="fl">1.0</span>)</span>
+<span id="cb23-3"><a href="#cb23-3" tabindex="-1"></a>Trainer.load(path, device<span class="op">=</span><span class="st">"cpu"</span>, vram_fraction<span class="op">=</span><span class="fl">1.0</span>)</span>
+<span id="cb23-4"><a href="#cb23-4" tabindex="-1"></a>Trainer.load_train_config(path)</span>
+<span id="cb23-5"><a href="#cb23-5" tabindex="-1"></a>Trainer.load_run_metadata(path)</span></code></pre></div>
 <p><code>save</code> writes the model, the scalers and the vocabularies
 to a checkpoint, with the run’s <code>RunMetadata</code> when
 <code>metadata</code> is given (<code>trainer.run_metadata</code>).
@@ -800,9 +824,9 @@ directory, mixed-precision and cuDNN flags) keep their defaults.
 <code>load_run_metadata</code> returns its <code>RunMetadata</code>. A
 file that cannot be read or written raises
 <code>StorageError</code>.</p>
-<div class="sourceCode" id="cb23"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb23-1"><a href="#cb23-1" tabindex="-1"></a>path <span class="op">=</span> os.path.join(tempfile.mkdtemp(), <span class="st">"model.pt"</span>)</span>
-<span id="cb23-2"><a href="#cb23-2" tabindex="-1"></a>trainer.save(path, metadata<span class="op">=</span>trainer.run_metadata)</span>
-<span id="cb23-3"><a href="#cb23-3" tabindex="-1"></a>rc.Trainer.load_run_metadata(path).n_plots_train</span></code></pre></div>
+<div class="sourceCode" id="cb24"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb24-1"><a href="#cb24-1" tabindex="-1"></a>path <span class="op">=</span> os.path.join(tempfile.mkdtemp(), <span class="st">"model.pt"</span>)</span>
+<span id="cb24-2"><a href="#cb24-2" tabindex="-1"></a>trainer.save(path, metadata<span class="op">=</span>trainer.run_metadata)</span>
+<span id="cb24-3"><a href="#cb24-3" tabindex="-1"></a>rc.Trainer.load_run_metadata(path).n_plots_train</span></code></pre></div>
 </div>
 <div class="section level3">
 <h3 id="Trainer-attributes">Attributes<a class="anchor" aria-label="anchor" href="#Trainer-attributes"></a>
@@ -822,6 +846,10 @@ categorical codes recorded by <code>prepare_data</code>.</li>
 <code>prepare_data</code> made and, after <code>fit</code>, the run’s
 timing, epochs and final metrics.</li>
 <li>
+<code>parent</code> (<code>ParentRecord</code> or
+<code>None</code>): the parent <code>init_from</code> started the model
+from.</li>
+<li>
 <code>effective_batch_size</code> (<code>int</code>): the batch size
 the last <code>fit</code> trained at; 0 before the first.</li>
 </ul>
@@ -831,7 +859,7 @@ the last <code>fit</code> trained at; 0 before the first.</li>
 <h2 id="TrainConfig">
 <code>TrainConfig</code><a class="anchor" aria-label="anchor" href="#TrainConfig"></a>
 </h2>
-<div class="sourceCode" id="cb24"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb24-1"><a href="#cb24-1" tabindex="-1"></a>TrainConfig()</span></code></pre></div>
+<div class="sourceCode" id="cb25"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb25-1"><a href="#cb25-1" tabindex="-1"></a>TrainConfig()</span></code></pre></div>
 <p>The settings of a training run.</p>
 <p>Run length and selection:</p>
 <ul>
@@ -1141,8 +1169,8 @@ off.</li>
 <h2 id="JEPAPretrainer">
 <code>JEPAPretrainer</code><a class="anchor" aria-label="anchor" href="#JEPAPretrainer"></a>
 </h2>
-<div class="sourceCode" id="cb25"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb25-1"><a href="#cb25-1" tabindex="-1"></a>JEPAPretrainer(model, config<span class="op">=</span>PretrainConfig())</span>
-<span id="cb25-2"><a href="#cb25-2" tabindex="-1"></a>pretrain(continuous, genus_ids<span class="op">=</span><span class="va">None</span>, family_ids<span class="op">=</span><span class="va">None</span>, ...)</span></code></pre></div>
+<div class="sourceCode" id="cb26"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb26-1"><a href="#cb26-1" tabindex="-1"></a>JEPAPretrainer(model, config<span class="op">=</span>PretrainConfig())</span>
+<span id="cb26-2"><a href="#cb26-2" tabindex="-1"></a>pretrain(continuous, genus_ids<span class="op">=</span><span class="va">None</span>, family_ids<span class="op">=</span><span class="va">None</span>, ...)</span></code></pre></div>
 <p>Pretrains a model’s encoder in place by joint-embedding prediction
 (T-JEPA): the encoder reads a masked view of each plot and learns to
 predict the latent a slowly updated copy of itself gives the whole plot.
@@ -1155,18 +1183,18 @@ unstandardised and required, and returns a
 <h2 id="SCARFPretrainer">
 <code>SCARFPretrainer</code><a class="anchor" aria-label="anchor" href="#SCARFPretrainer"></a>
 </h2>
-<div class="sourceCode" id="cb26"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb26-1"><a href="#cb26-1" tabindex="-1"></a>SCARFPretrainer(model, config<span class="op">=</span>PretrainConfig())</span>
-<span id="cb26-2"><a href="#cb26-2" tabindex="-1"></a>pretrain(continuous, genus_ids<span class="op">=</span><span class="va">None</span>, family_ids<span class="op">=</span><span class="va">None</span>, ...)</span></code></pre></div>
+<div class="sourceCode" id="cb27"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb27-1"><a href="#cb27-1" tabindex="-1"></a>SCARFPretrainer(model, config<span class="op">=</span>PretrainConfig())</span>
+<span id="cb27-2"><a href="#cb27-2" tabindex="-1"></a>pretrain(continuous, genus_ids<span class="op">=</span><span class="va">None</span>, family_ids<span class="op">=</span><span class="va">None</span>, ...)</span></code></pre></div>
 <p>Pretrains a model’s encoder in place by contrastive learning (SCARF):
 each plot and a corrupted copy of it, with a share of its inputs
 replaced by values from other plots, form the pair the encoder learns to
 match. The inputs are those of <code>JEPAPretrainer.pretrain</code>.</p>
-<div class="sourceCode" id="cb27"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb27-1"><a href="#cb27-1" tabindex="-1"></a>pretrain_config <span class="op">=</span> rc.PretrainConfig()</span>
-<span id="cb27-2"><a href="#cb27-2" tabindex="-1"></a>pretrain_config.pretrain_epochs <span class="op">=</span> <span class="dv">5</span></span>
-<span id="cb27-3"><a href="#cb27-3" tabindex="-1"></a>fresh <span class="op">=</span> rc.ResolveModel(dataset.schema, model.config)</span>
-<span id="cb27-4"><a href="#cb27-4" tabindex="-1"></a>scarf <span class="op">=</span> rc.SCARFPretrainer(fresh, pretrain_config)</span>
-<span id="cb27-5"><a href="#cb27-5" tabindex="-1"></a>pretrained <span class="op">=</span> scarf.pretrain(dataset.continuous_block(<span class="va">True</span>), <span class="op">**</span>inputs)</span>
-<span id="cb27-6"><a href="#cb27-6" tabindex="-1"></a>pretrained.loss_history</span></code></pre></div>
+<div class="sourceCode" id="cb28"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb28-1"><a href="#cb28-1" tabindex="-1"></a>pretrain_config <span class="op">=</span> rc.PretrainConfig()</span>
+<span id="cb28-2"><a href="#cb28-2" tabindex="-1"></a>pretrain_config.pretrain_epochs <span class="op">=</span> <span class="dv">5</span></span>
+<span id="cb28-3"><a href="#cb28-3" tabindex="-1"></a>fresh <span class="op">=</span> rc.ResolveModel(dataset.schema, model.config)</span>
+<span id="cb28-4"><a href="#cb28-4" tabindex="-1"></a>scarf <span class="op">=</span> rc.SCARFPretrainer(fresh, pretrain_config)</span>
+<span id="cb28-5"><a href="#cb28-5" tabindex="-1"></a>pretrained <span class="op">=</span> scarf.pretrain(dataset.continuous_block(<span class="va">True</span>), <span class="op">**</span>inputs)</span>
+<span id="cb28-6"><a href="#cb28-6" tabindex="-1"></a>pretrained.loss_history</span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="PretrainResult">
@@ -1204,27 +1232,27 @@ masked), <code>pretrain_epochs</code> (<code>50</code>),
 <h2 id="MaskedSpeciesPretrainer">
 <code>MaskedSpeciesPretrainer</code><a class="anchor" aria-label="anchor" href="#MaskedSpeciesPretrainer"></a>
 </h2>
-<div class="sourceCode" id="cb28"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb28-1"><a href="#cb28-1" tabindex="-1"></a>MaskedSpeciesPretrainer(model, config<span class="op">=</span>MLMPretrainConfig())</span>
-<span id="cb28-2"><a href="#cb28-2" tabindex="-1"></a>pretrain(<span class="op">*</span>, species_ids, pool_mask, pool_genus_ids<span class="op">=</span><span class="va">None</span>, pool_family_ids<span class="op">=</span><span class="va">None</span>,</span>
-<span id="cb28-3"><a href="#cb28-3" tabindex="-1"></a>         pool_weights<span class="op">=</span><span class="va">None</span>, ...)</span></code></pre></div>
+<div class="sourceCode" id="cb29"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb29-1"><a href="#cb29-1" tabindex="-1"></a>MaskedSpeciesPretrainer(model, config<span class="op">=</span>MLMPretrainConfig())</span>
+<span id="cb29-2"><a href="#cb29-2" tabindex="-1"></a>pretrain(<span class="op">*</span>, species_ids, pool_mask, pool_genus_ids<span class="op">=</span><span class="va">None</span>, pool_family_ids<span class="op">=</span><span class="va">None</span>,</span>
+<span id="cb29-3"><a href="#cb29-3" tabindex="-1"></a>         pool_weights<span class="op">=</span><span class="va">None</span>, ...)</span></code></pre></div>
 <p>Pretrains the species encoder of a <code>Transformer</code>-encoding
 model in place by masked-species prediction: a share of each plot’s
 species is hidden and the encoder learns to name them from the rest.
 <code>pretrain</code> takes the model inputs by keyword,
 <code>species_ids</code> and <code>pool_mask</code> required, and
 returns a <code>PretrainResult</code>.</p>
-<div class="sourceCode" id="cb29"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb29-1"><a href="#cb29-1" tabindex="-1"></a>transformer <span class="op">=</span> rc.DatasetConfig()</span>
-<span id="cb29-2"><a href="#cb29-2" tabindex="-1"></a>transformer.species_encoding <span class="op">=</span> rc.SpeciesEncodingMode.Transformer</span>
-<span id="cb29-3"><a href="#cb29-3" tabindex="-1"></a>tokens <span class="op">=</span> rc.ResolveDataset.from_pandas(plots, species, roles, targets, transformer)</span>
-<span id="cb29-4"><a href="#cb29-4" tabindex="-1"></a>token_model <span class="op">=</span> rc.ResolveModel(</span>
-<span id="cb29-5"><a href="#cb29-5" tabindex="-1"></a>    tokens.schema, rc.model_config_for_dataset(tokens, rc.ModelConfig()))</span>
-<span id="cb29-6"><a href="#cb29-6" tabindex="-1"></a>masked <span class="op">=</span> rc.MLMPretrainConfig()</span>
-<span id="cb29-7"><a href="#cb29-7" tabindex="-1"></a>masked.pretrain_epochs <span class="op">=</span> <span class="dv">5</span></span>
-<span id="cb29-8"><a href="#cb29-8" tabindex="-1"></a>rc.MaskedSpeciesPretrainer(token_model, masked).pretrain(</span>
-<span id="cb29-9"><a href="#cb29-9" tabindex="-1"></a>    species_ids<span class="op">=</span>tokens.species_ids, pool_mask<span class="op">=</span>tokens.pool_mask,</span>
-<span id="cb29-10"><a href="#cb29-10" tabindex="-1"></a>    pool_genus_ids<span class="op">=</span>tokens.pool_genus_ids,</span>
-<span id="cb29-11"><a href="#cb29-11" tabindex="-1"></a>    pool_family_ids<span class="op">=</span>tokens.pool_family_ids,</span>
-<span id="cb29-12"><a href="#cb29-12" tabindex="-1"></a>    pool_weights<span class="op">=</span>tokens.pool_weights)</span></code></pre></div>
+<div class="sourceCode" id="cb30"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb30-1"><a href="#cb30-1" tabindex="-1"></a>transformer <span class="op">=</span> rc.DatasetConfig()</span>
+<span id="cb30-2"><a href="#cb30-2" tabindex="-1"></a>transformer.species_encoding <span class="op">=</span> rc.SpeciesEncodingMode.Transformer</span>
+<span id="cb30-3"><a href="#cb30-3" tabindex="-1"></a>tokens <span class="op">=</span> rc.ResolveDataset.from_pandas(plots, species, roles, targets, transformer)</span>
+<span id="cb30-4"><a href="#cb30-4" tabindex="-1"></a>token_model <span class="op">=</span> rc.ResolveModel(</span>
+<span id="cb30-5"><a href="#cb30-5" tabindex="-1"></a>    tokens.schema, rc.model_config_for_dataset(tokens, rc.ModelConfig()))</span>
+<span id="cb30-6"><a href="#cb30-6" tabindex="-1"></a>masked <span class="op">=</span> rc.MLMPretrainConfig()</span>
+<span id="cb30-7"><a href="#cb30-7" tabindex="-1"></a>masked.pretrain_epochs <span class="op">=</span> <span class="dv">5</span></span>
+<span id="cb30-8"><a href="#cb30-8" tabindex="-1"></a>rc.MaskedSpeciesPretrainer(token_model, masked).pretrain(</span>
+<span id="cb30-9"><a href="#cb30-9" tabindex="-1"></a>    species_ids<span class="op">=</span>tokens.species_ids, pool_mask<span class="op">=</span>tokens.pool_mask,</span>
+<span id="cb30-10"><a href="#cb30-10" tabindex="-1"></a>    pool_genus_ids<span class="op">=</span>tokens.pool_genus_ids,</span>
+<span id="cb30-11"><a href="#cb30-11" tabindex="-1"></a>    pool_family_ids<span class="op">=</span>tokens.pool_family_ids,</span>
+<span id="cb30-12"><a href="#cb30-12" tabindex="-1"></a>    pool_weights<span class="op">=</span>tokens.pool_weights)</span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="VAEConfig">
@@ -1249,8 +1277,8 @@ which that weight rises from 0), <code>pretrain_epochs</code>
 <h2 id="VAEPretrainer">
 <code>VAEPretrainer</code><a class="anchor" aria-label="anchor" href="#VAEPretrainer"></a>
 </h2>
-<div class="sourceCode" id="cb30"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb30-1"><a href="#cb30-1" tabindex="-1"></a>VAEPretrainer(n_species, config<span class="op">=</span>VAEConfig())</span>
-<span id="cb30-2"><a href="#cb30-2" tabindex="-1"></a>pretrain(species_vector)</span></code></pre></div>
+<div class="sourceCode" id="cb31"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb31-1"><a href="#cb31-1" tabindex="-1"></a>VAEPretrainer(n_species, config<span class="op">=</span>VAEConfig())</span>
+<span id="cb31-2"><a href="#cb31-2" tabindex="-1"></a>pretrain(species_vector)</span></code></pre></div>
 <p>A variational autoencoder, a network that compresses each plot’s
 species vector to <code>latent_dim</code> numbers and reconstructs it,
 trained on the plots alone. <code>n_species</code> is the vocabulary
@@ -1260,14 +1288,14 @@ reads the sparse encoding’s <code>species_vector</code> and returns a
 the latent width and <code>get_projection_weights()</code> the encoder’s
 first layer, one row per unit of its first hidden layer and one column
 per species.</p>
-<div class="sourceCode" id="cb31"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb31-1"><a href="#cb31-1" tabindex="-1"></a>sparse <span class="op">=</span> rc.DatasetConfig()</span>
-<span id="cb31-2"><a href="#cb31-2" tabindex="-1"></a>sparse.species_encoding <span class="op">=</span> rc.SpeciesEncodingMode.Sparse</span>
-<span id="cb31-3"><a href="#cb31-3" tabindex="-1"></a>vectors <span class="op">=</span> rc.ResolveDataset.from_pandas(plots, species, roles, targets, sparse)</span>
-<span id="cb31-4"><a href="#cb31-4" tabindex="-1"></a>vae_config <span class="op">=</span> rc.VAEConfig()</span>
-<span id="cb31-5"><a href="#cb31-5" tabindex="-1"></a>vae_config.latent_dim <span class="op">=</span> <span class="dv">8</span></span>
-<span id="cb31-6"><a href="#cb31-6" tabindex="-1"></a>vae_config.pretrain_epochs <span class="op">=</span> <span class="dv">20</span></span>
-<span id="cb31-7"><a href="#cb31-7" tabindex="-1"></a>vae <span class="op">=</span> rc.VAEPretrainer(vectors.schema.n_species_vocab, vae_config)</span>
-<span id="cb31-8"><a href="#cb31-8" tabindex="-1"></a>vae.pretrain(vectors.species_vector).loss_history[<span class="op">-</span><span class="dv">1</span>]</span></code></pre></div>
+<div class="sourceCode" id="cb32"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb32-1"><a href="#cb32-1" tabindex="-1"></a>sparse <span class="op">=</span> rc.DatasetConfig()</span>
+<span id="cb32-2"><a href="#cb32-2" tabindex="-1"></a>sparse.species_encoding <span class="op">=</span> rc.SpeciesEncodingMode.Sparse</span>
+<span id="cb32-3"><a href="#cb32-3" tabindex="-1"></a>vectors <span class="op">=</span> rc.ResolveDataset.from_pandas(plots, species, roles, targets, sparse)</span>
+<span id="cb32-4"><a href="#cb32-4" tabindex="-1"></a>vae_config <span class="op">=</span> rc.VAEConfig()</span>
+<span id="cb32-5"><a href="#cb32-5" tabindex="-1"></a>vae_config.latent_dim <span class="op">=</span> <span class="dv">8</span></span>
+<span id="cb32-6"><a href="#cb32-6" tabindex="-1"></a>vae_config.pretrain_epochs <span class="op">=</span> <span class="dv">20</span></span>
+<span id="cb32-7"><a href="#cb32-7" tabindex="-1"></a>vae <span class="op">=</span> rc.VAEPretrainer(vectors.schema.n_species_vocab, vae_config)</span>
+<span id="cb32-8"><a href="#cb32-8" tabindex="-1"></a>vae.pretrain(vectors.species_vector).loss_history[<span class="op">-</span><span class="dv">1</span>]</span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="VAEPretrainResult">

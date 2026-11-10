@@ -288,7 +288,7 @@ loaders below; it has no public constructor.
 
 ``` python
 ResolveDataset.from_pandas(header, species=None, roles=None, targets=None,
-                           config=None, schema_source=None)
+                           config=None, schema_source=None, vocabs=None)
 ```
 
 A dataset from pandas data frames. `header` is the plot table and
@@ -296,8 +296,11 @@ A dataset from pandas data frames. `header` is the plot table and
 to a CSV file, the plot table stays in memory and the species table is
 read from the file. With `species=None`, `header` is a single long table
 holding both, as `from_species_csv` reads it. `schema_source`, a
-dataset, reuses its vocabularies and class codes; it needs both tables
-as data frames. `from_dataframe` is the same function.
+dataset, reuses its vocabularies and class codes; `vocabs`, an
+`ExternalVocabs` (a predictor’s `external_vocabs`, or a fine-tuning
+parent’s `vocabs()`), codes the plots in a trained model’s namespace.
+Both need the two tables as data frames, and only one of them is given.
+`from_dataframe` is the same function.
 
 The cells are written as text the way `DataFrame.to_csv` writes them, a
 missing value as the empty string, so the dataset equals the one

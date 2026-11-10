@@ -18,6 +18,9 @@ latent space.
 - [Imputing new
   plots](https://gillescolling.com/resolve/articles/prediction.md):
 
+- [Fine-tuning a trained
+  model](https://gillescolling.com/resolve/articles/fine-tuning.md):
+
 - [Species names and the name
   table](https://gillescolling.com/resolve/articles/species-names.md):
 
@@ -61,6 +64,8 @@ is.
   imputing](https://gillescolling.com/resolve/articles/python-prediction.md):
 - [Python: model
   suites](https://gillescolling.com/resolve/articles/python-suites.md):
+- [Python reference:
+  fine-tuning](https://gillescolling.com/resolve/articles/python-fine-tuning.md):
 - [Python: gap
   fitting](https://gillescolling.com/resolve/articles/python-gap-fitting.md):
 - [Python: terrain

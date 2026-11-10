@@ -754,6 +754,7 @@ resolve.dataset.frame <- function(header,
   moeNoiseStd = "moe_noise_std", moeAuxLossWeight = "moe_aux_loss_weight",
   coverDropout = "cover_dropout", plotTotals = "plot_totals",
   plotTotalsDropout = "plot_totals_dropout", freezeComposition = "freeze_composition",
+  freezeEncoder = "freeze_encoder",
   dModel = "d_model", nHeads = "n_heads", nAttentionLayers = "n_attention_layers",
   transformerFfDim = "transformer_ff_dim", transformerPooling = "transformer_pooling",
   transformerDropout = "transformer_dropout"
@@ -832,6 +833,16 @@ resolve.dataset.frame <- function(header,
   trainConfig <- .resolve_merge_config(if (is.null(args$trainConfig)) list() else args$trainConfig,
                                        args, .resolve_train_args, "trainConfig")
   .resolve_require_backend()
+  # A fine-tuned model takes its parent's configuration, with the settings
+  # given here laid over it; the engine refuses any that change what the
+  # parent fixes.
+  parent <- .resolve_parent_arg(args$initFrom)
+  if (!is.null(parent)) {
+    if (!is.null(args$pretrain)) stop("pass initFrom or pretrain, not both")
+    modelConfig <- .resolve_overlay(parent$model_config(), modelConfig)
+  } else if (!is.null(args$initReuse)) {
+    stop("initReuse needs initFrom")
+  }
   model <- .resolve_module()$ResolveModel_for_dataset(dataset, modelConfig)
   pretrained <- NULL
   if (!is.null(args$pretrain)) {
@@ -843,9 +854,12 @@ resolve.dataset.frame <- function(header,
     settings <- pretrain[names(pretrain) != "method"]
     pretrained <- model$pretrain(pretrain$method, dataset, settings)
   }
-  list(model = model,
-       trainer = new(.resolve_module()$Trainer, model, trainConfig),
-       pretrain = pretrained)
+  trainer <- new(.resolve_module()$Trainer, model, trainConfig)
+  if (!is.null(parent)) {
+    reuse <- if (is.null(args$initReuse)) "encoder" else args$initReuse
+    trainer$init_from(parent, reuse)
+  }
+  list(model = model, trainer = trainer, pretrain = pretrained)
 }
 
 
@@ -981,6 +995,22 @@ resolve.dataset.frame <- function(header,
 #'   given without them (\code{\link{resolve.plot_totals}}).
 #' @param freezeComposition Keep the species, genus and family embedding tables
 #'   at their initialisation instead of learning them.
+#' @param freezeEncoder Keep every parameter outside the task heads at its
+#'   value, and run that part in evaluation mode while the heads train. With
+#'   `initFrom`, the heads learn on the encoder of the trained parent.
+#' @param initFrom Fine-tune: start from a trained model, a parent from
+#'   [resolve.parent()] or the path of a checkpoint. `dataset` must be loaded
+#'   with the parent's `vocabs()` and `dataset_config()`; the model takes the
+#'   parent's configuration, and only the head settings (`head_hidden_dims`,
+#'   `head_activation`, `head_dropout`), the dropout rates and the freeze
+#'   settings may differ. The encoder starts from the parent's weights, the
+#'   coordinates and covariates are scaled as the parent scaled them, and the
+#'   checkpoint records the parent ([resolve.load_run_metadata()] `parent`).
+#'   Not combined with `pretrain`.
+#' @param initReuse With `initFrom`: what is carried over besides the encoder,
+#'   `"encoder"` (the default: every head starts fresh) or `"encoder_heads"`
+#'   (also the head of each target the parent shares under the same name,
+#'   task, transform and classes, with its scaling).
 #' @param dModel Model dimension for the transformer / rank-pool encoder.
 #' @param nHeads Number of attention heads in the transformer encoder.
 #'   Ignored unless `nAttentionLayers > 0`.
@@ -1083,6 +1113,7 @@ resolve.train.dataset <- function(dataset,
                                   plotTotals = NULL,
                                   plotTotalsDropout = NULL,
                                   freezeComposition = NULL,
+                                  freezeEncoder = NULL,
                                   dModel = NULL,
                                   nHeads = NULL,
                                   nAttentionLayers = NULL,
@@ -1092,10 +1123,12 @@ resolve.train.dataset <- function(dataset,
                                   modelConfig = list(),
                                   trainConfig = list(),
                                   pretrain = NULL,
+                                  initFrom = NULL,
+                                  initReuse = NULL,
                                   verbose = TRUE) {
   .resolve_check_dataset(dataset)
   args <- mget(c(names(.resolve_model_args), names(.resolve_train_args),
-                 "modelConfig", "trainConfig", "pretrain"))
+                 "modelConfig", "trainConfig", "pretrain", "initFrom", "initReuse"))
   if (!is.null(checkpointEvery) && checkpointEvery > 0 && is.null(checkpointDir) &&
       is.null(trainConfig$checkpoint_dir)) {
     stop("checkpointEvery needs checkpointDir")
@@ -1227,7 +1260,7 @@ resolve.cross_validate <- function(dataset, nFolds = 5L, seed = 42L, spatial = N
   .resolve_check_dataset(dataset)
   args <- list(...)
   known <- c(names(.resolve_model_args), names(.resolve_train_args),
-             "modelConfig", "trainConfig", "pretrain")
+             "modelConfig", "trainConfig", "pretrain", "initFrom", "initReuse")
   unknown <- setdiff(names(args), known)
   if (length(args) > 0 && (is.null(names(args)) || any(!nzchar(names(args))))) {
     stop("the model and training arguments in ... must be named")

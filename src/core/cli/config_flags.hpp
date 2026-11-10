@@ -435,6 +435,8 @@ inline constexpr FieldFlag kModelConfigFlags[] = {
      &flag_gates::pooled},
     {"freeze_composition", nullptr,
      "Keep the species, genus and family tables at their\ninitialisation instead of learning them"},
+    {"freeze_encoder", nullptr,
+     "Keep every parameter outside the task heads at its\nvalue (with --init-from: train new heads on a\nreleased encoder)"},
     {"d_model", nullptr, "Transformer token dimension", &flag_gates::transformer},
     {"n_heads", nullptr, "Transformer attention heads", &flag_gates::transformer},
     {"n_attention_layers", nullptr,

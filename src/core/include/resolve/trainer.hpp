@@ -14,6 +14,8 @@
 
 namespace resolve {
 
+class ParentModel;
+
 // =============================================================================
 // Spatial Block Splitter for cross-validation
 // =============================================================================
@@ -235,6 +237,33 @@ public:
         torch::Device device = torch::kCPU,
         float vram_fraction = 1.0f
     );
+
+    // Start this trainer's model from a trained parent (fine_tune.hpp): copy
+    // every parameter and buffer outside the task heads from it, and with
+    // InitReuse::EncoderHeads also the head of each target the parent shares
+    // (same name, task, transform and classes). Every other head keeps its
+    // fresh initialisation. From here on the continuous block is standardised
+    // with the parent's scalers instead of scalers fitted on the fitting rows,
+    // so the encoder reads each plot on the scale it was trained on; a carried
+    // head keeps its target scaler too, and every other regression target is
+    // scaled on the fitting rows as before. A split already prepared is
+    // re-expressed in these scalers. cross_validate starts every fold from the
+    // weights this leaves, and save() records the parent (ParentRecord).
+    //
+    // The model must read the plots as the parent does (fine_tune_mismatches:
+    // loaded with parent.vocabs() and parent.dataset_config(), and built from
+    // parent.model_config() with only the kFineTuneModelFields changed) and
+    // hold every parent tensor outside the heads at its shape. Throws
+    // std::invalid_argument listing every departure: a mismatch, a tensor the
+    // parent lacks or holds at another shape, a parent tensor the model has no
+    // place for, and under EncoderHeads a shared target whose task, transform
+    // or classes differ from the parent's.
+    void init_from(const ParentModel& parent, InitReuse reuse = InitReuse::Encoder);
+
+    // The parent init_from() started the model from; unset for a fresh model.
+    [[nodiscard]] const std::optional<ParentRecord>& parent() const noexcept {
+        return parent_record_;
+    }
 
     // Global plot indices (into the dataset's original plot order) that
     // prepare_data assigned to the train / test split. int64, shapes
@@ -592,6 +621,18 @@ private:
     // What run_metadata() reports: the split fields are set by prepare_split,
     // the rest by fit().
     RunMetadata run_metadata_;
+
+    // Set by init_from(): the parent record save() writes, the scalers the
+    // split is standardised with in place of fitted ones (the parent's
+    // continuous block, and the target scaler of each carried head), and the
+    // parent's categorical maps, which a prepared dataset must share.
+    std::optional<ParentRecord> parent_record_;
+    std::optional<Scalers> inherited_scalers_;
+    std::optional<CategoricalVocab> parent_categorical_vocab_;
+
+    // The scalers of a split from its fitting rows: the inherited ones where
+    // init_from() set them, the rest fitted on `fitting`.
+    [[nodiscard]] Scalers split_scalers(const LabelledPlots& fitting) const;
 
     // Raw coordinates stored for spatial CV (before scaling/concatenation)
     torch::Tensor coordinates_;

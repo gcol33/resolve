@@ -43,6 +43,7 @@ fold of its plots for early stopping, and train."><meta property="og:image" cont
     <li><a class="dropdown-item" href="../articles/encoding.html">Encoding the species set</a></li>
     <li><a class="dropdown-item" href="../articles/training.html">Training and reading the fit</a></li>
     <li><a class="dropdown-item" href="../articles/prediction.html">Imputing new plots</a></li>
+    <li><a class="dropdown-item" href="../articles/fine-tuning.html">Fine-tuning a trained model</a></li>
     <li><a class="dropdown-item" href="../articles/species-names.html">Species names and the name table</a></li>
     <li><a class="dropdown-item" href="../articles/gap-fitting.html">Imputing a dataset's gaps</a></li>
     <li><a class="dropdown-item" href="../articles/terrain-correction.html">Correcting altitude and slope with an elevation model</a></li>
@@ -127,6 +128,7 @@ fold of its plots for early stopping, and train.</p>
 <span>  plotTotals <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  plotTotalsDropout <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  freezeComposition <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  freezeEncoder <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  dModel <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  nHeads <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  nAttentionLayers <span class="op">=</span> <span class="cn">NULL</span>,</span>
@@ -136,6 +138,8 @@ fold of its plots for early stopping, and train.</p>
 <span>  modelConfig <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="op">)</span>,</span>
 <span>  trainConfig <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="op">)</span>,</span>
 <span>  pretrain <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  initFrom <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  initReuse <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  verbose <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
@@ -383,6 +387,12 @@ given without them (<code><a href="resolve.plot_totals.html">resolve.plot_totals
 at their initialisation instead of learning them.</p></dd>
 
 
+<dt id="arg-freezeencoder">freezeEncoder<a class="anchor" aria-label="anchor" href="#arg-freezeencoder"></a></dt>
+<dd><p>Keep every parameter outside the task heads at its
+value, and run that part in evaluation mode while the heads train. With
+<code>initFrom</code>, the heads learn on the encoder of the trained parent.</p></dd>
+
+
 <dt id="arg-dmodel">dModel<a class="anchor" aria-label="anchor" href="#arg-dmodel"></a></dt>
 <dd><p>Model dimension for the transformer / rank-pool encoder.</p></dd>
 
@@ -428,6 +438,25 @@ dataset's plots before training (optional): a list with <code>method</code>,
 <code>"jepa"</code>, <code>"scarf"</code> or <code>"masked_species"</code> (a transformer-encoded model),
 and any of that method's settings (<code><a href="resolve.default_config.html">resolve.default_config()</a></code>
 <code>"pretrain"</code>, or <code>"masked_species"</code>), e.g. <code>list(method = "scarf", pretrain_epochs = 20)</code>.</p></dd>
+
+
+<dt id="arg-initfrom">initFrom<a class="anchor" aria-label="anchor" href="#arg-initfrom"></a></dt>
+<dd><p>Fine-tune: start from a trained model, a parent from
+<code><a href="resolve.parent.html">resolve.parent()</a></code> or the path of a checkpoint. <code>dataset</code> must be loaded
+with the parent's <code>vocabs()</code> and <code>dataset_config()</code>; the model takes the
+parent's configuration, and only the head settings (<code>head_hidden_dims</code>,
+<code>head_activation</code>, <code>head_dropout</code>), the dropout rates and the freeze
+settings may differ. The encoder starts from the parent's weights, the
+coordinates and covariates are scaled as the parent scaled them, and the
+checkpoint records the parent (<code><a href="resolve.load_run_metadata.html">resolve.load_run_metadata()</a></code> <code>parent</code>).
+Not combined with <code>pretrain</code>.</p></dd>
+
+
+<dt id="arg-initreuse">initReuse<a class="anchor" aria-label="anchor" href="#arg-initreuse"></a></dt>
+<dd><p>With <code>initFrom</code>: what is carried over besides the encoder,
+<code>"encoder"</code> (the default: every head starts fresh) or <code>"encoder_heads"</code>
+(also the head of each target the parent shares under the same name,
+task, transform and classes, with its scaling).</p></dd>
 
 
 <dt id="arg-verbose">verbose<a class="anchor" aria-label="anchor" href="#arg-verbose"></a></dt>

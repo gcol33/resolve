@@ -166,6 +166,12 @@ void register_enums(nb::module_& m) {
         .value("Explicit", resolve::HoldOutMode::Explicit)
         .export_values();
 
+    // What a warm start carries over (Trainer.init_from). Not exported to
+    // module scope, where "Encoder" would read as a class.
+    nb::enum_<resolve::InitReuse>(m, "InitReuse")
+        .value("Encoder", resolve::InitReuse::Encoder)
+        .value("EncoderHeads", resolve::InitReuse::EncoderHeads);
+
     // Not exported to module scope: "Mean" would collide with other enums'
     // value names there.
     nb::enum_<resolve::SuiteCombine>(m, "SuiteCombine")

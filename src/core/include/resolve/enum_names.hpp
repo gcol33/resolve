@@ -129,6 +129,11 @@ inline constexpr EnumName<HoldOutMode> kHoldOutModeNames[] = {
     {"explicit", HoldOutMode::Explicit},
 };
 
+inline constexpr EnumName<InitReuse> kInitReuseNames[] = {
+    {"encoder", InitReuse::Encoder},
+    {"encoder_heads", InitReuse::EncoderHeads},
+};
+
 inline constexpr EnumName<LossConfigMode> kLossConfigModeNames[] = {
     {"mae", LossConfigMode::MAE},
     {"smape", LossConfigMode::SMAPE},
@@ -323,6 +328,8 @@ RESOLVE_DECLARE_ENUM_NAMES(TargetMissingPolicy, kTargetMissingPolicyNames,
                            "target missing-label policy", "drop")
 RESOLVE_DECLARE_ENUM_NAMES(HoldOutMode, kHoldOutModeNames,
                            "hold-out mode", "random")
+RESOLVE_DECLARE_ENUM_NAMES(InitReuse, kInitReuseNames,
+                           "warm-start reuse", "encoder")
 RESOLVE_DECLARE_ENUM_NAMES(LossConfigMode, kLossConfigModeNames,
                            "loss config mode", "combined")
 RESOLVE_DECLARE_ENUM_NAMES(LRSchedulerType, kLRSchedulerTypeNames,

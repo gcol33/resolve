@@ -53,6 +53,12 @@ int info_command(const ParsedArgs& args) {
             return !v.is_object() && !v.is_array();
         });
 
+        // The model a fine-tuned run started from.
+        if (const json::Value* parent = description.find("parent")) {
+            std::cout << "\nParent:" << std::endl;
+            resolve_cli::print_block(std::cout, *parent, "");
+        }
+
         json::Value schema = description.at("schema");
         const json::Value dataset_config = schema.at("dataset_config");
         schema.erase("dataset_config");

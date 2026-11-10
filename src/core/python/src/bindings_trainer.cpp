@@ -120,6 +120,17 @@ void register_trainer(nb::module_& m) {
              nb::call_guard<nb::gil_scoped_release>(),
              "Per-plot test-fold predictions for a classification target "
              "(predicted_classes, probabilities, actuals).")
+        .def("init_from", &resolve::Trainer::init_from, nb::arg("parent"),
+             nb::arg("reuse") = resolve::InitReuse::Encoder,
+             nb::call_guard<nb::gil_scoped_release>(),
+             "Start the model from a ParentModel: copy every parameter and buffer outside "
+             "the task heads (with InitReuse.EncoderHeads also the head of each target the "
+             "parent shares with the same task, transform and classes), and standardise the "
+             "continuous block with the parent's scalers from then on. Raises ValueError "
+             "listing every way the model departs from what the parent fixes.")
+        .def_prop_ro("parent",
+                     [](const resolve::Trainer& self) { return self.parent(); },
+                     "The ParentRecord init_from() started the model from, or None.")
         .def("load_state", [](resolve::Trainer& self, const std::string& path,
                               const std::string& device, float vram_fraction) {
             self.load_state(path, resolve::parse_device(device), vram_fraction);
