@@ -65,8 +65,9 @@
 #'   its recorded value), `method` (per plot, `"recorded"` for a complete plot)
 #'   and `report` (the gaps' distance per axis, the fold layout, the k chosen
 #'   per neighbour kind, and per group of gaps every candidate's
-#'   cross-validated error, the estimated error of the whole choice and the
-#'   chosen method's coefficients).
+#'   cross-validated error, the estimated error of the whole choice, the same
+#'   error per held-out fold (`fold_error`, over `fold_n_estimated` complete
+#'   plots) and the chosen method's coefficients).
 #' @seealso [resolve.predict.suite()] with `gapFitting`, which fits a suite's
 #'   targets after combining them.
 #' @examplesIf resolveR::resolve.available()

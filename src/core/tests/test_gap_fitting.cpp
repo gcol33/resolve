@@ -22,6 +22,7 @@
 
 using namespace resolve;
 using Catch::Matchers::WithinAbs;
+using Catch::Matchers::WithinRel;
 
 namespace {
 
@@ -316,6 +317,18 @@ TEST_CASE("Scattered gaps are matched by a fine layout and the estimated error m
     const GapGroupChoice g = group(fit, "located");
     REQUIRE(std::isfinite(g.estimated_error));
     CHECK(g.n_estimated == fit.report.n_complete);
+    // The per-fold errors split the pooled one: a mean absolute error is the
+    // plot-weighted mean of the folds' mean absolute errors.
+    REQUIRE(g.fold_error.size() == static_cast<std::size_t>(fit.report.folds.n_folds));
+    REQUIRE(g.fold_n_estimated.size() == g.fold_error.size());
+    int64_t n_in_folds = 0;
+    double weighted = 0.0;
+    for (std::size_t f = 0; f < g.fold_error.size(); ++f) {
+        n_in_folds += g.fold_n_estimated[f];
+        if (g.fold_n_estimated[f] > 0) weighted += static_cast<double>(g.fold_n_estimated[f]) * g.fold_error[f];
+    }
+    CHECK(n_in_folds == g.n_estimated);
+    CHECK_THAT(weighted / static_cast<double>(n_in_folds), WithinRel(g.estimated_error, 1e-9));
     // Nothing but the raw prediction carries the truth, so the procedure's
     // error is the raw prediction's (MAE of N(0, 6) is 4.8) on the gaps too.
     CHECK_THAT(g.estimated_error, WithinAbs(gap_mae(fit, truth, gaps), 0.5));

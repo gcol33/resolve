@@ -1398,6 +1398,10 @@ json::Value gap_fit_report_to_json(const GapFitReport& report) {
         g.set("cv_error", std::move(errors));
         g.set("estimated_error", group.estimated_error);
         g.set("n_estimated", group.n_estimated);
+        g.set("fold_error", json::Value::array_of(group.fold_error));
+        json::Value fold_n = json::Value::array();
+        for (const int64_t n : group.fold_n_estimated) fold_n.push_back(n);
+        g.set("fold_n_estimated", std::move(fold_n));
         if (!group.coefficients.empty()) {
             json::Value coefficients = json::Value::object();
             for (const auto& c : group.coefficients) {
@@ -1649,6 +1653,19 @@ GapFit fit_gaps(const GapTarget& target, const torch::Tensor& raw, const torch::
         if (choice.n_estimated > 0) {
             choice.estimated_error =
                 plane.aggregate(plane.errors(estimate[g].index({scored}), split.truth_cal.index({scored})));
+        }
+        if (n_folds >= 3) {
+            choice.fold_error.assign(static_cast<std::size_t>(n_folds), kNaN);
+            choice.fold_n_estimated.assign(static_cast<std::size_t>(n_folds), 0);
+            for (int64_t f = 0; f < n_folds; ++f) {
+                const torch::Tensor in_fold = scored.logical_and(fold_of == f);
+                const int64_t n_in_fold = in_fold.sum().item<int64_t>();
+                choice.fold_n_estimated[static_cast<std::size_t>(f)] = n_in_fold;
+                if (n_in_fold > 0) {
+                    choice.fold_error[static_cast<std::size_t>(f)] = plane.aggregate(
+                        plane.errors(estimate[g].index({in_fold}), split.truth_cal.index({in_fold})));
+                }
+            }
         }
         const torch::Tensor predicted = torch::isfinite(chosen.groups[g].query).all(1);
         test_rows.index_put_({predicted}, chosen.groups[g].query.index({predicted}));

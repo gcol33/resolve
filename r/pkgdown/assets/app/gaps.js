@@ -880,7 +880,7 @@ class CrossValidation {
       const truth = pick(this.truth, group.judged);
       const fallback = pick(this.constantTrain, group.judged);
       const choice = { group: group.name, n_complete: truth.n, n_gaps: group.predicted.length, method: 1,
-                       cv_error: [], estimated_error: NaN, n_estimated: 0, coefficients: [], n_fitted: 0, k: [] };
+                       cv_error: [], estimated_error: NaN, n_estimated: 0, fold_error: [], fold_n_estimated: [], coefficients: [], n_fitted: 0, k: [] };
       let best = null, bestError = NaN;
       for (const u of usable) {
         if (u.spec.reads[SPATIAL] && !group.spatial) continue;
@@ -1025,6 +1025,13 @@ export async function fitGaps(target, raw, recorded, plots, options = {}) {
     const scored = range(nCal).filter((i) => rowFinite(estimate[g], i));
     choice.n_estimated = scored.length;
     if (scored.length) choice.estimated_error = plane.aggregate(plane.errors(pick(estimate[g], scored), pick(split.truthCal, scored)));
+    if (layout.n_folds >= 3) {
+      for (let f = 0; f < layout.n_folds; f++) {
+        const inFold = scored.filter((i) => folds[i] === f);
+        choice.fold_n_estimated.push(inFold.length);
+        choice.fold_error.push(inFold.length ? plane.aggregate(plane.errors(pick(estimate[g], inFold), pick(split.truthCal, inFold))) : NaN);
+      }
+    }
     for (let q = 0; q < nTest; q++) {
       if (!rowFinite(query, q)) continue;
       for (let j = 0; j < query.d; j++) testRows.v[q * query.d + j] = query.v[q * query.d + j];

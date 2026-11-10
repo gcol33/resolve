@@ -57,8 +57,9 @@ A \code{resolve_gap_fit} list: \code{fitted} (as \code{raw}; a complete plot kee
 its recorded value), \code{method} (per plot, \code{"recorded"} for a complete plot)
 and \code{report} (the gaps' distance per axis, the fold layout, the k chosen
 per neighbour kind, and per group of gaps every candidate's
-cross-validated error, the estimated error of the whole choice and the
-chosen method's coefficients).
+cross-validated error, the estimated error of the whole choice, the same
+error per held-out fold (\code{fold_error}, over \code{fold_n_estimated} complete
+plots) and the chosen method's coefficients).
 }
 \description{
 A dataset usually records a variable on most of its plots and lacks it on

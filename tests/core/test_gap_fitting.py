@@ -160,6 +160,8 @@ def test_injected_folds_reproduce_the_matched_fit_and_the_report_is_plain_data()
     assert isinstance(group["cv_error"]["resolve"], float)
     assert isinstance(group["estimated_error"], float)
     assert group["n_estimated"] == report["n_complete"]
+    assert len(group["fold_error"]) == report["folds"]["n_folds"]
+    assert sum(group["fold_n_estimated"]) == group["n_estimated"]
     with pytest.raises(ValueError):
         rc.fit_gaps(rc.GapTarget("slope"), raw, _gapped(truth, gaps), species, folds=torch.zeros(3, dtype=torch.int64))
 

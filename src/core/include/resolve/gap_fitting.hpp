@@ -223,6 +223,13 @@ struct GapGroupChoice {
     // was scored on; NaN with fewer than three folds.
     double estimated_error = std::numeric_limits<double>::quiet_NaN();
     int64_t n_estimated = 0;
+    // The same error per held-out fold, over that fold's complete plots:
+    // fold_error[f] (NaN where the fold scored none) over fold_n_estimated[f]
+    // plots; empty with fewer than three folds. Their spread is how far the
+    // error of one fold's plots, a region of a blocked layout, falls from the
+    // pooled estimate.
+    std::vector<double> fold_error;
+    std::vector<int64_t> fold_n_estimated;
     // What the chosen method fitted on every complete plot: its coefficients
     // (least squares), the complete plots they were fitted on, and the k of
     // each neighbour term.
