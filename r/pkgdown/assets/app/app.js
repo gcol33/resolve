@@ -1796,7 +1796,7 @@ function levelChoice() {
       `${n ? ` (${n} ${c.level === 3 ? "habitats" : "groups"}${read})` : ""}</option>`;
   }).join("");
   const provisional = chosen.target.source === "canonical"
-    ? `<span class="hint">from level ${chosen.target.level} models of the pooled species encoder trained on ` +
+    ? `<span class="hint">from level ${chosen.target.level} models (${escape(chosen.target.encoder ?? "")}) trained on ` +
       `${Math.round(100 * chosen.target.train_share)}% of the plots; the release's own fits are still to come</span>`
     : "";
   return `<select class="form-select form-select-sm" id="o-level" aria-label="EUNIS level">${options}</select>${provisional}`;
