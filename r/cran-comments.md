@@ -47,8 +47,8 @@ by any example, test or vignette. This is the same delayed-binary model the
 
 ## Test environments
 
-* local: Windows 11, R 4.6.1, without the backend (as on CRAN)
-* win-builder: R-devel (2026-11-07 r90850 ucrt), R 4.6.2: 1 NOTE each (new submission;
+* local: Windows 11, R 4.6.1, without the backend (as on CRAN): Status OK
+* win-builder: R-devel (2026-11-07 r90850 ucrt): 1 NOTE (new submission;
   the flagged words are author names, "et al", "embeddings" and "prebuilt")
 * GitHub Actions: Ubuntu (R-devel, R-release), macOS and Windows (R-release)
 
