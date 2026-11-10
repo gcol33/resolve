@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -212,7 +212,10 @@ gaps.</p>
 <p>The lowest of seven errors reads lower than the error the chosen
 method then makes. The report therefore estimates the error of the whole
 choice by repeating it with each fold held out and scoring it on that
-fold (nested cross-validation).</p>
+fold (nested cross-validation). The same error is reported for each fold
+on its own: under a blocked layout a fold is a region or a period, and
+how far its error falls from the pooled one shows how much the error of
+the gaps can vary from one part of the dataset to another.</p>
 <p>Gaps with coordinates and gaps without them choose apart: the second
 group only among the candidates that read no position.</p>
 </div>
@@ -376,8 +379,9 @@ and gaps, the gaps’ distance to their nearest complete plot on each
 axis, the fold layout, the <code>k</code> each kind of neighbour chose,
 and per group of gaps every candidate’s cross-validated error
 (<code>cv_error</code>), the error estimated for the whole choice
-(<code>estimated_error</code>), the method chosen and what it
-fitted.</p>
+(<code>estimated_error</code>) and per held-out fold
+(<code>fold_error</code>, over <code>fold_n_estimated</code> complete
+plots), the method chosen and what it fitted.</p>
 <div class="lang-pair">
 <div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">located</span> <span class="op">&lt;-</span> <span class="va">elevation</span><span class="op">$</span><span class="va">report</span><span class="op">$</span><span class="va">groups</span><span class="op">$</span><span class="va">located</span></span>

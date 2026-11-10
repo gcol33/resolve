@@ -91,7 +91,10 @@ error is fitted again on every complete plot and imputes the gaps.
 The lowest of seven errors reads lower than the error the chosen method
 then makes. The report therefore estimates the error of the whole choice
 by repeating it with each fold held out and scoring it on that fold
-(nested cross-validation).
+(nested cross-validation). The same error is reported for each fold on
+its own: under a blocked layout a fold is a region or a period, and how
+far its error falls from the pooled one shows how much the error of the
+gaps can vary from one part of the dataset to another.
 
 Gaps with coordinates and gaps without them choose apart: the second
 group only among the candidates that read no position.
@@ -274,8 +277,9 @@ The report says what was chosen and why: the number of complete plots
 and gaps, the gaps’ distance to their nearest complete plot on each
 axis, the fold layout, the `k` each kind of neighbour chose, and per
 group of gaps every candidate’s cross-validated error (`cv_error`), the
-error estimated for the whole choice (`estimated_error`), the method
-chosen and what it fitted.
+error estimated for the whole choice (`estimated_error`) and per
+held-out fold (`fold_error`, over `fold_n_estimated` complete plots),
+the method chosen and what it fitted.
 
 ``` r
 

@@ -163,7 +163,7 @@ library(resolveR)
 resolve.available()
 #> [1] TRUE
 resolve.version()
-#> [1] "1.1.0"
+#> [1] "1.2.0"
 ```
 
 ``` python
@@ -171,7 +171,7 @@ import torch
 import resolve_core as rc
 
 rc.__version__
-#> 1.1.0
+#> 1.2.0
 torch.cuda.is_available()
 #> True
 ```

@@ -37,7 +37,7 @@ gives the build. The commands below assume `resolve` is on the `PATH`:
 
 ``` bash
 resolve version
-#> resolve 1.1.0
+#> resolve 1.2.0
 ```
 
 `resolve` alone prints every command with its flags, and `--help` after
@@ -121,7 +121,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 50
-#> Training time: 2.12459s
+#> Training time: 2.05709s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -286,7 +286,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 19
-#> Training time: 1.42545s
+#> Training time: 1.44837s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -353,7 +353,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 99
-#> Training time: 2.10602s
+#> Training time: 2.13898s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -444,7 +444,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 41
-#> Training time: 1.86945s
+#> Training time: 1.89428s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -489,7 +489,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 49
-#> Training time: 0.797391s
+#> Training time: 0.780039s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -535,9 +535,9 @@ resolve train --header plots.csv --species species.csv \
 #> Early stopping at epoch 74
 #> Cross-validation fold 3/3
 #>   Train: 97 plots, Test: 53 plots
-#> Spatial CV complete (3 folds, 5.183505s)
+#> Spatial CV complete (3 folds, 5.229573s)
 #> 
-#> Cross-validation (3 folds, 5.1835s):
+#> Cross-validation (3 folds, 5.22957s):
 #>   Fold 1 (best epoch 42):
 #>     elevation:
 #>       mae: 179.673
@@ -580,7 +580,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 73
-#> Training time: 1.83122s
+#> Training time: 1.94186s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -647,7 +647,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 18
-#> Training time: 2.39132s
+#> Training time: 2.39804s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -772,10 +772,10 @@ resolve info --model north.pt | head -n 40
 #> Model: north.pt
 #> 
 #> Run:
-#>   resolve_version: 1.1.0
-#>   created_at: 2026-11-10T01:03:24Z
-#>   completed_at: 2026-11-10T01:03:26Z
-#>   train_time_seconds: 1.8694458
+#>   resolve_version: 1.2.0
+#>   created_at: 2026-11-10T01:51:05Z
+#>   completed_at: 2026-11-10T01:51:07Z
+#>   train_time_seconds: 1.8942763
 #>   n_plots_train: 107
 #>   n_plots_test: 43
 #>   hold_out: explicit

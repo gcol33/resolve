@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -321,9 +321,12 @@ group of gaps (<code>located</code>, <code>unlocated</code>) the method
 chosen, every candidate’s cross-validated error (<code>cv_error</code>),
 the error estimated for the whole choice by nested cross-validation
 (<code>estimated_error</code>, over <code>n_estimated</code> complete
-plots), and for the method chosen its <code>coefficients</code>,
-<code>n_fitted</code> and <code>k</code>. <code>skipped</code> says why
-nothing was chosen when that happened.</li>
+plots) and per held-out fold (<code>fold_error</code>, NaN for a fold
+with no complete plot, over <code>fold_n_estimated</code> plots; empty
+with fewer than three folds), and for the method chosen its
+<code>coefficients</code>, <code>n_fitted</code> and <code>k</code>.
+<code>skipped</code> says why nothing was chosen when that
+happened.</li>
 </ul>
 </div>
 <div class="section level2">

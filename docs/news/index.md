@@ -1,9 +1,54 @@
 # Changelog
 
-## resolveR (development version)
+## resolveR 1.2.0
 
 ### Added
 
+- **Fine-tuning a trained model on your own targets**
+  ([\#120](https://github.com/gcol33/resolve/issues/120)). A released
+  suite member or any checkpoint is opened as a parent
+  (`ParentModel.open` in Python,
+  [`resolve.parent()`](https://gillescolling.com/resolve/reference/resolve.parent.md)
+  in R, `resolve train --init-from` on the command line); your plots are
+  loaded with its vocabularies and loader settings, and
+  `Trainer.init_from` (R: `resolve.train.dataset(initFrom =)`) starts a
+  model from its encoder with fresh heads for your targets, the
+  coordinates and covariates scaled as the parent scaled them. With
+  `freeze_encoder` (R `freezeEncoder`, CLI `--freeze-encoder`) the
+  encoder stays fixed and only the heads train; `encoder_heads` also
+  carries over the head of a target the parent shares. A model that
+  reads the plots differently from its parent is refused, with every
+  difference listed. Every checkpoint of such a run records its parent
+  (`RunMetadata.parent`: its SHA-256, and the suite, target and seed it
+  came from), also in the JSON sidecar and `resolve info`.
+  `write_derived_suite` (R
+  [`resolve.derive_suite()`](https://gillescolling.com/resolve/reference/resolve.derive_suite.md),
+  CLI `resolve suite derive`) releases fine-tuned checkpoints as a suite
+  of their own, which loads and scores like the released ones. New
+  article: “Fine-tuning a trained model”.
+- **Suite manifest format 5**, written only when used: a vote’s
+  `classes`, a fine-tuned target’s `derived_from` (the parent suite and
+  target, with its licence and training scope) and each member’s
+  `parent_sha256`. Loading checks all three against the member
+  checkpoints.
+- **`from_pandas(..., vocabs=)`** in Python loads data frames in a
+  trained model’s namespace, as `from_csv_with_vocabs` does for CSV
+  files.
+- **Gap fitting chooses by fold-matched cross-validation.** The
+  candidates are judged on folds of the complete plots laid out so that
+  a held-out plot lies from the plots it may read as the gaps lie from
+  the complete plots (k-fold nearest-neighbour distance matching over
+  species similarity, km and survey years, with buffers where the gaps
+  lie farther than any fold can reach). Every fitted part is fitted out
+  of fold, and the report gives the error of the whole choice estimated
+  by nested cross-validation (`estimated_error`), and the same error per
+  held-out fold (`fold_error`, `fold_n_estimated`). New settings
+  `n_folds`, `max_fold_share` and `matching_sample` (CLI `--gap-folds`,
+  `--gap-max-fold-share`, `--gap-matching-sample`); `gap_folds()`
+  replaces `matched_gap_neighbours()`, and `fit_gaps(folds =)` takes a
+  layout of your own. The browser app fits gaps the same way. A gap
+  fit’s choice and errors differ from 1.1.0’s, so refit before comparing
+  them.
 - **Which values were imputed.** Naming a regression target’s recorded
   column without gap fitting (`columns$recorded` in R,
   `columns["recorded"]` in Python, `resolve predict --recorded T=COL`
@@ -16,6 +61,22 @@
   `<variable>, recorded`, for a variable the header records on some
   plots when its gaps are not fitted. `SuiteColumn` gains a `Logical`
   kind; the C ABI writes it as 0 / 1 and lists it in `logical_columns`.
+
+### Fixed
+
+- **Gap fitting reported blocked gaps’ error far too low.** The fold
+  layout was chosen by a relative Wasserstein distance that breaks down
+  where both distributions sit near zero (survey years), so blocked gaps
+  fell to plot-by-plot folds, which read plots at the same coordinates.
+  Each axis is now compared on the rank scale. On the withheld-database
+  benchmark the median of true over reported error for blocked location
+  gaps went from 1.66 to 1.25 (Britain: 3.3 km reported against 195 km
+  true before, 285.6 against 165.6 after). The km buffers are pruned
+  inside the place search, which cut a blocked altitude fit from about
+  800 s to about 530 s per seed.
+- [`resolve.fit_gaps()`](https://gillescolling.com/resolve/reference/resolve.fit_gaps.md)
+  checks `gapFitting` before requiring the engine.
+- The Linux backends are built on ubuntu-24.04 (glibc 2.38) again.
 
 ## resolveR 1.1.0
 

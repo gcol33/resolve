@@ -20,7 +20,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -77,11 +77,27 @@
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="development version" id="resolver-development-version">resolveR (development version)<a class="anchor" aria-label="anchor" href="#resolver-development-version"></a></h2>
+<h2 class="pkg-version" data-toc-text="1.2.0" id="resolver-120">resolveR 1.2.0<a class="anchor" aria-label="anchor" href="#resolver-120"></a></h2>
 <div class="section level3">
-<h3 id="added-development-version">Added<a class="anchor" aria-label="anchor" href="#added-development-version"></a></h3>
+<h3 id="added-1-2-0">Added<a class="anchor" aria-label="anchor" href="#added-1-2-0"></a></h3>
 <ul><li>
+<strong>Fine-tuning a trained model on your own targets</strong> (<a href="https://github.com/gcol33/resolve/issues/120" class="external-link">#120</a>). A released suite member or any checkpoint is opened as a parent (<code>ParentModel.open</code> in Python, <code><a href="../reference/resolve.parent.html">resolve.parent()</a></code> in R, <code>resolve train --init-from</code> on the command line); your plots are loaded with its vocabularies and loader settings, and <code>Trainer.init_from</code> (R: <code>resolve.train.dataset(initFrom =)</code>) starts a model from its encoder with fresh heads for your targets, the coordinates and covariates scaled as the parent scaled them. With <code>freeze_encoder</code> (R <code>freezeEncoder</code>, CLI <code>--freeze-encoder</code>) the encoder stays fixed and only the heads train; <code>encoder_heads</code> also carries over the head of a target the parent shares. A model that reads the plots differently from its parent is refused, with every difference listed. Every checkpoint of such a run records its parent (<code>RunMetadata.parent</code>: its SHA-256, and the suite, target and seed it came from), also in the JSON sidecar and <code>resolve info</code>. <code>write_derived_suite</code> (R <code><a href="../reference/resolve.derive_suite.html">resolve.derive_suite()</a></code>, CLI <code>resolve suite derive</code>) releases fine-tuned checkpoints as a suite of their own, which loads and scores like the released ones. New article: “Fine-tuning a trained model”.</li>
+<li>
+<strong>Suite manifest format 5</strong>, written only when used: a vote’s <code>classes</code>, a fine-tuned target’s <code>derived_from</code> (the parent suite and target, with its licence and training scope) and each member’s <code>parent_sha256</code>. Loading checks all three against the member checkpoints.</li>
+<li>
+<strong><code>from_pandas(..., vocabs=)</code></strong> in Python loads data frames in a trained model’s namespace, as <code>from_csv_with_vocabs</code> does for CSV files.</li>
+<li>
+<strong>Gap fitting chooses by fold-matched cross-validation.</strong> The candidates are judged on folds of the complete plots laid out so that a held-out plot lies from the plots it may read as the gaps lie from the complete plots (k-fold nearest-neighbour distance matching over species similarity, km and survey years, with buffers where the gaps lie farther than any fold can reach). Every fitted part is fitted out of fold, and the report gives the error of the whole choice estimated by nested cross-validation (<code>estimated_error</code>), and the same error per held-out fold (<code>fold_error</code>, <code>fold_n_estimated</code>). New settings <code>n_folds</code>, <code>max_fold_share</code> and <code>matching_sample</code> (CLI <code>--gap-folds</code>, <code>--gap-max-fold-share</code>, <code>--gap-matching-sample</code>); <code>gap_folds()</code> replaces <code>matched_gap_neighbours()</code>, and <code>fit_gaps(folds =)</code> takes a layout of your own. The browser app fits gaps the same way. A gap fit’s choice and errors differ from 1.1.0’s, so refit before comparing them.</li>
+<li>
 <strong>Which values were imputed.</strong> Naming a regression target’s recorded column without gap fitting (<code>columns$recorded</code> in R, <code>columns["recorded"]</code> in Python, <code>resolve predict --recorded T=COL</code> without <code>--fit-gaps</code>, for <code>--suite</code> and <code>--model</code>) adds <code>&lt;target&gt;_recorded</code> to the suite table: <code>TRUE</code> where the plot records the target, <code>FALSE</code> where its value is imputed. Each such target also carries <code>recorded</code> (a logical per plot). With gap fitting, <code>&lt;target&gt;_fit_method</code> already says it (<code>recorded</code> or the method), so no flag column is added. The browser app adds the same column, <code>&lt;variable&gt;, recorded</code>, for a variable the header records on some plots when its gaps are not fitted. <code>SuiteColumn</code> gains a <code>Logical</code> kind; the C ABI writes it as 0 / 1 and lists it in <code>logical_columns</code>.</li>
+</ul></div>
+<div class="section level3">
+<h3 id="fixed-1-2-0">Fixed<a class="anchor" aria-label="anchor" href="#fixed-1-2-0"></a></h3>
+<ul><li>
+<strong>Gap fitting reported blocked gaps’ error far too low.</strong> The fold layout was chosen by a relative Wasserstein distance that breaks down where both distributions sit near zero (survey years), so blocked gaps fell to plot-by-plot folds, which read plots at the same coordinates. Each axis is now compared on the rank scale. On the withheld-database benchmark the median of true over reported error for blocked location gaps went from 1.66 to 1.25 (Britain: 3.3 km reported against 195 km true before, 285.6 against 165.6 after). The km buffers are pruned inside the place search, which cut a blocked altitude fit from about 800 s to about 530 s per seed.</li>
+<li>
+<code><a href="../reference/resolve.fit_gaps.html">resolve.fit_gaps()</a></code> checks <code>gapFitting</code> before requiring the engine.</li>
+<li>The Linux backends are built on ubuntu-24.04 (glibc 2.38) again.</li>
 </ul></div>
 </div>
     <div class="section level2">

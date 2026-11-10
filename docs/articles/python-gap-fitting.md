@@ -174,9 +174,11 @@ The methods, in the order a tie between equal errors is broken:
   each `k`; `groups`, per group of gaps (`located`, `unlocated`) the
   method chosen, every candidate’s cross-validated error (`cv_error`),
   the error estimated for the whole choice by nested cross-validation
-  (`estimated_error`, over `n_estimated` complete plots), and for the
-  method chosen its `coefficients`, `n_fitted` and `k`. `skipped` says
-  why nothing was chosen when that happened.
+  (`estimated_error`, over `n_estimated` complete plots) and per
+  held-out fold (`fold_error`, NaN for a fold with no complete plot,
+  over `fold_n_estimated` plots; empty with fewer than three folds), and
+  for the method chosen its `coefficients`, `n_fitted` and `k`.
+  `skipped` says why nothing was chosen when that happened.
 
 ## `gap_folds()`
 

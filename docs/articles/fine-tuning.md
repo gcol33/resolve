@@ -306,7 +306,7 @@ difference:
 resolve.train.dataset(mine, initFrom = parent, hiddenDims = c(128L, 64L),
                       maxEpochs = 1L, verbose = FALSE)
 #> Error:
-#> ! Trainer::init_from: the model cannot start from 'C:\Users\GILLES~1\AppData\Local\Temp\RtmpYXgAFi/habitat_suite\seed_1.pt':
+#> ! Trainer::init_from: the model cannot start from 'C:\Users\GILLES~1\AppData\Local\Temp\Rtmp6f90Wc/habitat_suite\seed_1.pt':
 #>   - model config 'hidden_dims' is [128,64] here and [64,32] in the parent
 #>   - parameter 'encoder.mlp.0.weight' is [128, 84] here and [64, 84] in the parent
 #>   - parameter 'encoder.mlp.0.bias' is [128] here and [64] in the parent
