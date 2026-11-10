@@ -148,7 +148,7 @@ struct SuiteMember {
     // For a member fine-tuned from another suite's member: the SHA-256 of that
     // parent checkpoint, which the member's own checkpoint records
     // (RunMetadata::parent) and loading compares. Empty otherwise.
-    std::string parent_sha256;
+    std::string parent_sha256 = {};
 };
 
 // The suite and target a fine-tuned target's members started from, with the
@@ -190,10 +190,10 @@ struct SuiteTarget {
     std::vector<SuiteMember> members;
     // A vote's classes in code order, as the members' checkpoints name them;
     // loading compares them. Empty: not stated.
-    std::vector<std::string> classes;
+    std::vector<std::string> classes = {};
     // Set for a target fine-tuned from another suite; every member then
     // states its parent_sha256.
-    std::optional<SuiteDerivation> derived_from;
+    std::optional<SuiteDerivation> derived_from = std::nullopt;
     // The terrain correction of this target (terrain_correction.hpp): a
     // mean-combined altitude or slope target corrected by an elevation model
     // read at the plot's coordinates. Unset: none.
@@ -595,12 +595,12 @@ struct DerivedSuiteTarget {
     // The checkpoints' heads it reads; empty reads the head named `name`.
     std::vector<std::string> outputs;
     // Unset: a vote for a classification head, a mean for a regression head.
-    std::optional<SuiteCombine> combine;
+    std::optional<SuiteCombine> combine = std::nullopt;
     double period = 0.0;               // circular mean only
     std::string units;
     SuiteTargetStatus status = SuiteTargetStatus::Released;
     std::string limit;                 // required for an experimental target
-    std::vector<DerivedSuiteMember> members;
+    std::vector<DerivedSuiteMember> members = {};
     json::Value training = json::Value::object();
     json::Value validation = json::Value::object();
 };

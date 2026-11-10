@@ -1199,7 +1199,7 @@ struct ParentRecord {
     std::string resolve_version;  // the engine that trained the parent
     InitReuse reuse = InitReuse::Encoder;
     int64_t n_tensors = 0;        // parameters and buffers copied from it
-    std::vector<std::string> heads;  // the parent heads carried over
+    std::vector<std::string> heads = {};  // the parent heads carried over
     // The suite the parent was a member of: its name, the target and the
     // member's seed, and the suite's licence and training scope. `suite` is
     // empty for a checkpoint opened directly.
@@ -1230,7 +1230,7 @@ struct RunMetadata {
     int total_epochs = 0;
     std::unordered_map<std::string, std::unordered_map<std::string, float>> final_metrics;
     // The model the run started from; unset for a run from a fresh model.
-    std::optional<ParentRecord> parent;
+    std::optional<ParentRecord> parent = std::nullopt;
 };
 
 // Predictions output

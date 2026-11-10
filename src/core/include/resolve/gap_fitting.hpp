@@ -228,8 +228,8 @@ struct GapGroupChoice {
     // plots; empty with fewer than three folds. Their spread is how far the
     // error of one fold's plots, a region of a blocked layout, falls from the
     // pooled estimate.
-    std::vector<double> fold_error;
-    std::vector<int64_t> fold_n_estimated;
+    std::vector<double> fold_error = {};
+    std::vector<int64_t> fold_n_estimated = {};
     // What the chosen method fitted on every complete plot: its coefficients
     // (least squares), the complete plots they were fitted on, and the k of
     // each neighbour term.
