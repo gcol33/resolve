@@ -397,6 +397,10 @@ void register_suite(nb::module_& m) {
         .def_prop_ro("dispersion", [](const SuiteTargetPrediction& t) { return tensor_or_none(t.dispersion); })
         .def_prop_ro("members", [](const SuiteTargetPrediction& t) { return tensor_or_none(t.members); })
         .def_ro("recognition", &SuiteTargetPrediction::recognition)
+        .def_prop_ro("imputed", [](const SuiteTargetPrediction& t) { return tensor_or_none(t.imputed); },
+                     "(n_plots,) bool, True where the target's vocabulary recognises at least one of "
+                     "the plot's species. Where it is False the plot is not imputed: every value is "
+                     "NaN there, a class code -1.")
         .def_prop_ro("recorded", [](const SuiteTargetPrediction& t) { return tensor_or_none(t.recorded); },
                      "For a target columns['recorded'] names: (n_plots,) bool, True where the plot "
                      "records a value, so `value` is imputed where it is False; None otherwise.")

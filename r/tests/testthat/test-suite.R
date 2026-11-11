@@ -288,6 +288,48 @@ test_that("suite gap fitting adds fitted columns and a report per fitted target"
   expect_equal(sum(single$y$method == "recorded"), 30)
 })
 
+test_that("a plot with no recognised species is not imputed", {
+  skip_if_no_backend()
+  skip_on_cran()
+
+  root <- local_dir("suite_alien_")
+  .build_suite(root)
+  suite <- resolve.load_suite(root)
+  data <- .suite_plots(40L, with_targets = FALSE)
+  header <- rbind(data$header, data.frame(plot = "ALIEN", lat = 46.3, lon = 9.2, elev = 140))
+  header$y_rec <- c(ifelse(seq_len(40L) %% 4L == 1L, NA, 1 + 0.2 * (seq_len(40L) - 1L)), NA)
+  species <- rbind(data$species, data.frame(plot = "ALIEN", taxon = c("sp_q", "sp_r"),
+                                            cover = c(2, 1), genus = c("gq", "gr"),
+                                            family = "fam", stringsAsFactors = FALSE))
+
+  preds <- suppressMessages(resolve.predict.suite(suite, species = species, header = header,
+                                                  keepMembers = TRUE))
+  a <- match("ALIEN", preds$plot_ids)
+  for (name in names(preds$targets)) {
+    imputed <- preds$targets[[name]]$imputed
+    expect_type(imputed, "logical")
+    expect_false(imputed[a], info = name)
+    expect_equal(sum(!imputed), 1L, info = name)
+  }
+  expect_true(is.na(preds$targets$hab$label[a]))
+  expect_equal(preds$targets$hab$value[a], -1L)
+  expect_true(is.na(preds$targets$y$value[a]))
+  expect_true(all(is.na(preds$targets$y$members[a, ])))
+  flat <- as.data.frame(preds)
+  expect_true(is.na(flat$hab[a]))
+  expect_false(flat$hab_imputed[a])
+  expect_true(flat$y_imputed[1])
+
+  fitted <- suppressMessages(resolve.predict.suite(
+    suite, species = species, header = header,
+    columns = list(recorded = list(y = "y_rec")), gapFitting = TRUE))
+  fit <- fitted$targets$y$gap_fit
+  expect_equal(fit$report$n_not_imputed, 1)
+  expect_equal(fit$report$n_gaps, 10)
+  expect_equal(fit$method[a], "not_imputed")
+  expect_true(is.na(fit$fitted[a]))
+})
+
 test_that("suite and dataset names resolve per vocabulary and predict as the tokens", {
   skip_if_no_backend()
   skip_on_cran()

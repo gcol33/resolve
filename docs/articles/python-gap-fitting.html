@@ -297,23 +297,27 @@ plots’ geographic median, one coefficient for both axes).</p>
 <ul>
 <li>
 <code>fitted</code>: per plot in the target’s units, shaped as
-<code>raw</code>: a complete plot’s recorded value, a gap’s fitted
-value.</li>
+<code>raw</code>: a recorded value where the plot has one, a gap’s
+fitted value, <code>NaN</code> for a plot lacking the value whose
+<code>raw</code> is <code>NaN</code> (a plot the model did not impute,
+which is neither a gap nor a complete plot).</li>
 <li>
 <code>method</code> (<code>list[str]</code>):
-<code>"recorded"</code> for a complete plot, the method’s name for a
-gap; <code>method_codes</code> is the same as an int64 tensor, -1 for a
-complete plot.</li>
+<code>"recorded"</code> for a plot recording the value,
+<code>"not_imputed"</code> for a plot lacking it whose <code>raw</code>
+is <code>NaN</code>, the method’s name for a gap;
+<code>method_codes</code> is the same as an int64 tensor, -1 for a
+recorded plot and -2 for one not imputed.</li>
 <li>
 <code>report</code> (<code>dict</code>): <code>target</code>,
-<code>scale</code>, <code>n_complete</code>, <code>n_gaps</code>;
-<code>axes</code>, per axis (<code>similarity</code>, <code>km</code>,
-<code>years</code>) whether the fold layout was matched on it and the
-quantiles of the gaps’ distance to their nearest complete plot;
-<code>folds</code>, the layout (<code>n_folds</code>,
-<code>block_km</code>, <code>block_years</code>, <code>buffer_km</code>,
-<code>buffer_years</code>, <code>mismatch</code> per axis,
-<code>total_mismatch</code>, <code>n_layouts</code>,
+<code>scale</code>, <code>n_complete</code>, <code>n_gaps</code>,
+<code>n_not_imputed</code>; <code>axes</code>, per axis
+(<code>similarity</code>, <code>km</code>, <code>years</code>) whether
+the fold layout was matched on it and the quantiles of the gaps’
+distance to their nearest complete plot; <code>folds</code>, the layout
+(<code>n_folds</code>, <code>block_km</code>, <code>block_years</code>,
+<code>buffer_km</code>, <code>buffer_years</code>, <code>mismatch</code>
+per axis, <code>total_mismatch</code>, <code>n_layouts</code>,
 <code>n_matching_plots</code>, <code>injected</code>);
 <code>neighbours</code>, per kind the <code>k</code> chosen and the
 cross-validated error of each <code>k</code>; <code>groups</code>, per

@@ -365,6 +365,11 @@ One target’s imputed values for every plot.
   `(n_members, n_plots)` or `(n_members, n_plots, 2)`.
 - `recognition` (`SpeciesRecognition`): how much of each plot the
   target’s vocabulary recognises.
+- `imputed` (`(n_plots,)` bool tensor): `False` where the target’s
+  vocabulary recognises none of the plot’s species (or the plot has
+  none). Such a plot is not imputed: `value`, `agreement`,
+  `probabilities`, `dispersion`, `members`, the gap fit’s value and the
+  terrain-corrected value are `NaN` there, a class code -1.
 - `recorded` (`(n_plots,)` bool tensor or `None`): for a target
   `columns["recorded"]` names, `True` where the plot records the target,
   so `value` is imputed where it is `False`.

@@ -2616,6 +2616,7 @@ resolve_value* suite_predictions_to_value(const SuitePredictions& p) {
         v_put(m, "recognised_share", defined_or_null(t.recognition.count_share, RESOLVE_VALUE_DOUBLE_ARRAY));
         v_put(m, "recognised_abundance_share",
               defined_or_null(t.recognition.abundance_share, RESOLVE_VALUE_DOUBLE_ARRAY));
+        v_put(m, "imputed", t.imputed.defined() ? tensor_to_ivec(t.imputed) : v_null());
         v_put(m, "recorded", t.recorded.defined() ? tensor_to_ivec(t.recorded) : v_null());
         v_put(m, "gap_fit", t.gap_fit ? gap_fit_to_value(*t.gap_fit) : v_null());
         if (t.terrain) {

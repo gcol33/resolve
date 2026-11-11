@@ -54,6 +54,12 @@
 // no spread, so every dispersion of a one-member target is NaN; the share of
 // members naming the winning class is then 1.
 //
+// A plot none of whose species the target's vocabulary recognises (or with no
+// species at all) is not imputed: every member was trained on plots holding
+// species it knows, so its output for such a plot reads an input it never saw.
+// The target reports the plot as not imputed (SuiteTargetPrediction::imputed)
+// and leaves every per-plot output undefined there.
+//
 // Each combine rule is one SuiteCombineRule (combine_rule): what it reads,
 // how it combines, and the columns its prediction is written as. The manifest
 // validation, the predictor, suite_prediction_columns and the CLI usage text
@@ -65,6 +71,7 @@
 #include "resolve/json.hpp"
 #include "resolve/predictor.hpp"
 #include "resolve/row_source.hpp"
+#include "resolve/target_labels.hpp"
 #include "resolve/terrain_correction.hpp"
 #include "resolve/terrain_source.hpp"
 #include "resolve/types.hpp"
@@ -425,6 +432,12 @@ struct SuiteTargetPrediction {
     // Recognition of each plot by the target's vocabulary, after the names
     // were resolved.
     SpeciesRecognition recognition;
+    // (n_plots,) bool: true where the target's vocabulary recognises at least
+    // one of the plot's species. Where it is false the plot is not imputed:
+    // `value`, `agreement`, `probabilities`, `dispersion`, `members`, the gap
+    // fit's value and the terrain-corrected value are NaN there, a class code
+    // kUnlabelledClass (-1) and its label empty.
+    torch::Tensor imputed;
     // With SuitePredictOptions::names: the names the target's vocabulary read
     // as another token or left unresolved.
     SpeciesNameReport species_names;
@@ -563,8 +576,9 @@ struct SuiteColumn {
 // the prediction (for a classification rule `<t>` the class label, `<t>_code`
 // and `<t>_agreement`, with `probabilities` `<t>_prob_<label>` per class; for
 // a spherical mean `<t>_latitude` and `<t>_longitude`), its dispersion
-// (`<t>_sd`, `<t>_circular_sd`, `<t>_spread_km`), `<t>_n_species`,
-// `<t>_n_recognised`, `<t>_recognised_share`, `<t>_recognised_abundance_share`,
+// (`<t>_sd`, `<t>_circular_sd`, `<t>_spread_km`), `<t>_imputed`,
+// `<t>_n_species`, `<t>_n_recognised`, `<t>_recognised_share`,
+// `<t>_recognised_abundance_share`,
 // and with kept members `<t>_seed<N>` per member (a label for a vote,
 // `_latitude` / `_longitude` for a spherical mean). A gap-fitted target adds
 // `<t>_fitted` (`<t>_fitted_latitude` / `<t>_fitted_longitude`) and
@@ -574,8 +588,9 @@ struct SuiteColumn {
 // terrain-corrected target
 // `<t>_terrain`, `<t>_terrain_w_resolve`, `<t>_terrain_w_dem`,
 // `<t>_terrain_w_dem_1km`, `<t>_dem` and `<t>_dem_1km` after those. A class code is labelled
-// by class_label. The CLI writes this table, and the Python and R data frames
-// are built from it.
+// by class_label, and kUnlabelledClass (a plot not imputed) by an empty text
+// cell, which every binding reads as missing. The CLI writes this table, and
+// the Python and R data frames are built from it.
 [[nodiscard]] std::vector<SuiteColumn> suite_prediction_columns(const SuitePredictions& predictions,
                                                                 bool probabilities);
 

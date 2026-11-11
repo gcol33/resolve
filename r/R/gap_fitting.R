@@ -38,7 +38,8 @@
 #'
 #' @param raw The model's prediction per plot in the target's units: a numeric
 #'   vector, or for `scale = "geographic"` a plots x 2 matrix of latitude and
-#'   longitude.
+#'   longitude. `NA` marks a plot the model did not impute: it is neither a gap
+#'   nor a complete plot.
 #' @param recorded The dataset's recorded value per plot, shaped as `raw`;
 #'   `NA` marks a gap.
 #' @param species A plots x species numeric matrix; an entry other than 0
@@ -57,13 +58,16 @@
 #'   `matching_sample` (complete plots the layouts are compared on, default
 #'   1000).
 #' @param name The target's name, as the report states it.
-#' @param folds `NULL`, or an integer fold per complete plot (in plot order,
+#' @param folds `NULL`, or an integer fold per complete plot (a plot with both
+#'   `recorded` and `raw`; in plot order,
 #'   numbered from 0) replacing the matched layout (to reproduce another
 #'   implementation's layout).
 #'
-#' @return A `resolve_gap_fit` list: `fitted` (as `raw`; a complete plot keeps
-#'   its recorded value), `method` (per plot, `"recorded"` for a complete plot)
-#'   and `report` (the gaps' distance per axis, the fold layout, the k chosen
+#' @return A `resolve_gap_fit` list: `fitted` (as `raw`; a plot recording the
+#'   value keeps it, a plot lacking it that was not imputed is `NA`), `method`
+#'   (per plot, `"recorded"` for a plot recording the value, `"not_imputed"`
+#'   for one lacking it whose `raw` is `NA`) and `report` (`n_complete`,
+#'   `n_gaps`, `n_not_imputed`, the gaps' distance per axis, the fold layout, the k chosen
 #'   per neighbour kind, and per group of gaps every candidate's
 #'   cross-validated error, the estimated error of the whole choice, the same
 #'   error per held-out fold (`fold_error`, over `fold_n_estimated` complete

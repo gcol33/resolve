@@ -241,6 +241,14 @@ int predict_suite_command(const ParsedArgs& args) {
 
     std::cout << "Wrote " << predictions->plot_ids.size() << " plots to " << output_path
               << std::endl;
+    for (const auto& t : predictions->targets) {
+        if (!t.imputed.defined()) continue;
+        const int64_t skipped = t.imputed.logical_not().sum().item<int64_t>();
+        if (skipped > 0) {
+            std::cout << "Not imputed '" << t.name << "': " << skipped << (skipped == 1 ? " plot" : " plots")
+                      << " whose species the target's models do not recognise" << std::endl;
+        }
+    }
     if (predict.names) {
         std::vector<std::pair<std::string, const SpeciesNameReport*>> reports;
         for (const auto& t : predictions->targets) {

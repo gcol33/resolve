@@ -1338,6 +1338,7 @@ torch::Tensor recorded_plots(const torch::Tensor& recorded) {
 
 std::string gap_method_label(int64_t code) {
     if (code == kGapRecorded) return "recorded";
+    if (code == kGapNotImputed) return "not_imputed";
     return enum_to_name(static_cast<GapMethod>(code));
 }
 
@@ -1347,6 +1348,7 @@ json::Value gap_fit_report_to_json(const GapFitReport& report) {
     out.set("scale", enum_to_name(report.scale));
     out.set("n_complete", report.n_complete);
     out.set("n_gaps", report.n_gaps);
+    out.set("n_not_imputed", report.n_not_imputed);
     if (!report.skipped.empty()) out.set("skipped", report.skipped);
     json::Value axes = json::Value::object();
     for (const auto& axis : report.axes) {
@@ -1452,10 +1454,24 @@ void validate_inputs(const GapTarget& target, const torch::Tensor& raw, const to
     }
 }
 
-// The complete plots (every recorded value finite) and the gaps, as rows.
-std::pair<torch::Tensor, torch::Tensor> divide(const torch::Tensor& recorded_values) {
-    const torch::Tensor complete = recorded_plots(recorded_values);
-    return {complete.nonzero().select(1, 0), complete.logical_not().nonzero().select(1, 0)};
+// The plots of a fit, as rows: the complete plots (every recorded value
+// finite), the gaps, and the plots lacking the value that were not imputed
+// (a raw value not finite). With `raw_values` undefined every plot counts as
+// imputed. A plot recording the value without a raw prediction is in none.
+struct Division {
+    torch::Tensor complete;
+    torch::Tensor gaps;
+    torch::Tensor not_imputed;
+};
+
+Division divide_plots(const torch::Tensor& recorded_values, const torch::Tensor& raw_values) {
+    const torch::Tensor recorded = recorded_plots(recorded_values);
+    const torch::Tensor imputed = raw_values.defined() ? recorded_plots(raw_values)
+                                                       : torch::ones_like(recorded);
+    const torch::Tensor lacking = recorded.logical_not();
+    auto rows = [](const torch::Tensor& mask) { return mask.nonzero().select(1, 0); };
+    return {rows(recorded.logical_and(imputed)), rows(lacking.logical_and(imputed)),
+            rows(lacking.logical_and(imputed.logical_not()))};
 }
 
 // One target's plots in the plane, its searches, the gaps' distances and the
@@ -1520,7 +1536,9 @@ GapFolds gap_folds(const GapTarget& target, const torch::Tensor& recorded, const
     config.validate();
     validate_inputs(target, torch::Tensor(), recorded, plots);
     const torch::Tensor recorded_values = as_double(recorded);
-    const auto [cal_index, test_index] = divide(recorded_values);
+    const Division division = divide_plots(recorded_values, torch::Tensor());
+    const torch::Tensor& cal_index = division.complete;
+    const torch::Tensor& test_index = division.gaps;
     if (cal_index.size(0) < 2 || test_index.size(0) == 0) {
         throw std::invalid_argument("gap fitting: a fold layout needs at least two complete plots and one gap");
     }
@@ -1542,15 +1560,19 @@ GapFit fit_gaps(const GapTarget& target, const torch::Tensor& raw, const torch::
     const int64_t n = plots.species.size(0);
     const torch::Tensor raw_values = as_double(raw);
     const torch::Tensor recorded_values = as_double(recorded);
-    const auto [cal_index, test_index] = divide(recorded_values);
+    const Division division = divide_plots(recorded_values, raw_values);
+    const torch::Tensor& cal_index = division.complete;
+    const torch::Tensor& test_index = division.gaps;
 
     GapFit out;
     out.report.target = target.name;
     out.report.scale = target.scale;
     out.report.n_complete = cal_index.size(0);
     out.report.n_gaps = test_index.size(0);
+    out.report.n_not_imputed = division.not_imputed.size(0);
     out.fitted = recorded_values.clone();
     out.method = torch::full({n}, kGapRecorded, kLong);
+    out.method.index_put_({division.not_imputed}, kGapNotImputed);
     if (out.report.n_gaps == 0) return out;
     if (out.report.n_complete < 2) {
         out.report.skipped = "fewer than two complete plots";

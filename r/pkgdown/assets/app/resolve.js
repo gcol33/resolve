@@ -288,9 +288,11 @@ export function encode(meta, header, species) {
 
   const value = (ranking) => (presence ? 1 : ranking);
   const lengths = entries.map((e) => e.size);
+  // A capped model reads exactly `pool_species_cap` slots: some exported
+  // graphs fix the slot axis at the cap, and the masked padding of a
+  // narrower plot leaves every output unchanged.
   const widest = Math.max(1, ...lengths);
-  const cap = meta.pool_species_cap > 0 ? meta.pool_species_cap : widest;
-  const width = Math.min(cap, widest);
+  const width = meta.pool_species_cap > 0 ? meta.pool_species_cap : widest;
 
   const speciesIds = new BigInt64Array(n * width);
   const genusIds = new BigInt64Array(n * width);
@@ -355,9 +357,12 @@ export function encode(meta, header, species) {
     for (let c = 0; c < columns.length; c++) continuous[p * columns.length + c] = columns[c][p];
   }
   const hasCover = new Float32Array(n).fill(hasAbundance && !presence ? 1 : 0);
+  // A plot none of whose species the vocabulary holds is not imputed
+  // (suite.cpp, withhold_unimputed): the models never saw such a plot.
+  const imputed = Uint8Array.from(nSpecies, (s, p) => (s - unknownCount[p] > 0 ? 1 : 0));
 
   return { plotIds, n, width, continuous, speciesIds, genusIds, familyIds, weights, mask,
-           hasCover, unknownFraction, unknownCount, nSpecies };
+           hasCover, unknownFraction, unknownCount, nSpecies, imputed };
 }
 
 // ---------------------------------------------------------------------------
@@ -412,6 +417,19 @@ export function sumByAncestor(probs, n, index, nCoarse) {
     for (let c = 0; c < nFine; c++) out[p * nCoarse + index[c]] += probs[p * nFine + c];
   }
   return out;
+}
+
+// A combined prediction (combineVote, combineMean, combineSpherical) with
+// every plot that is not imputed blanked in place, as suite.cpp does: NaN for
+// a number, -1 for a class code. Each array holds n plots of equal width.
+export function withholdUnimputed(combined, imputed) {
+  const n = imputed.length;
+  for (const values of Object.values(combined)) {
+    const width = values.length / n;
+    const blank = values instanceof Int32Array ? -1 : NaN;
+    for (let p = 0; p < n; p++) if (!imputed[p]) values.fill(blank, p * width, (p + 1) * width);
+  }
+  return combined;
 }
 
 export function combineVote(members, nClasses, n) {

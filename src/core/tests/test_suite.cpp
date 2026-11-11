@@ -1425,6 +1425,103 @@ TEST_CASE("suite gap fitting fits the named targets from the dataset's complete 
     CHECK_THROWS_AS(suite.predict(input, none), std::invalid_argument);
 }
 
+TEST_CASE("a plot none of whose species a target recognises is not imputed",
+          "[suite][predict][imputed]") {
+    TempDir dir;
+    build_suite(dir);
+    // The 30 corpus plots, then ALIEN, holding only species no vocabulary
+    // knows, with y recorded on every corpus plot but every fourth and not on
+    // ALIEN.
+    auto plots = corpus();
+    Plot alien{};
+    alien.id = "ALIEN";
+    alien.species = {"sp_q", "sp_z"};
+    alien.lat = 46.2;
+    alien.lon = 9.4;
+    alien.cov = 0.5;
+    plots.push_back(alien);
+    std::ostringstream header;
+    header << "plot,lat,lon,cov1,y_rec\n";
+    for (size_t i = 0; i < plots.size(); ++i) {
+        const auto& p = plots[i];
+        const bool recorded = i % 4 != 0 && p.id != "ALIEN";
+        header << p.id << "," << p.lat << "," << p.lon << "," << p.cov << ","
+               << (recorded ? std::to_string(p.y) : std::string("NA")) << "\n";
+    }
+    dir.write("score/header_alien.csv", header.str());
+    dir.write("score/species_alien.csv", species_csv(plots));
+    const SuiteInput input =
+        SuiteInput::csv(dir.file("score/header_alien.csv"), dir.file("score/species_alien.csv"));
+
+    SuitePredictor suite = SuitePredictor::load(dir.path());
+    SuitePredictOptions opts;
+    opts.keep_members = true;
+    const SuitePredictions out = suite.predict(input, opts);
+    const int64_t a = index_of(out.plot_ids).at("ALIEN");
+    const auto n = static_cast<int64_t>(out.plot_ids.size());
+
+    for (const auto& t : out.targets) {
+        INFO(t.name);
+        REQUIRE(t.imputed.defined());
+        CHECK_FALSE(t.imputed[a].item<bool>());
+        CHECK(t.imputed.sum().item<int64_t>() == n - 1);
+    }
+    const auto& hab = out.target("hab");
+    const auto& y = out.target("y");
+    const auto& asp = out.target("aspect");
+    CHECK(hab.value[a].item<int64_t>() == kUnlabelledClass);
+    CHECK(std::isnan(hab.agreement[a].item<float>()));
+    CHECK(torch::isnan(hab.probabilities[a]).all().item<bool>());
+    CHECK((hab.members.select(1, a) == kUnlabelledClass).all().item<bool>());
+    CHECK(std::isnan(y.value[a].item<float>()));
+    CHECK(std::isnan(y.dispersion[a].item<float>()));
+    CHECK(torch::isnan(y.members.select(1, a)).all().item<bool>());
+    CHECK(std::isnan(asp.value[a].item<float>()));
+
+    // Every other plot scores as it does without ALIEN in the table.
+    const ScoringFiles plain = scoring_files(dir);
+    const SuitePredictions without = suite.predict(SuiteInput::csv(plain.header, plain.species), opts);
+    const auto at = index_of(without.plot_ids);
+    std::vector<int64_t> rows;
+    for (const auto& id : out.plot_ids) {
+        if (id != "ALIEN") rows.push_back(at.at(id));
+    }
+    const auto same = torch::tensor(rows, torch::kLong);
+    const auto kept = out.target("y").imputed.nonzero().select(1, 0);
+    CHECK(torch::allclose(y.value.index_select(0, kept), without.target("y").value.index_select(0, same)));
+    CHECK(torch::equal(hab.value.index_select(0, kept), without.target("hab").value.index_select(0, same)));
+
+    // The table leaves the class label empty and flags the plot.
+    const auto table = suite_prediction_columns(out, false);
+    auto column = [&](const std::string& name) -> const SuiteColumn& {
+        for (const auto& c : table) {
+            if (c.name == name) return c;
+        }
+        FAIL("no column " << name);
+        return table.front();
+    };
+    CHECK(column("hab").text[static_cast<size_t>(a)].empty());
+    CHECK(column("hab_seed0").text[static_cast<size_t>(a)].empty());
+    CHECK(column("hab_code").integers[static_cast<size_t>(a)] == kUnlabelledClass);
+    CHECK(column("hab_imputed").kind == SuiteColumn::Kind::Logical);
+    CHECK(column("hab_imputed").logical[static_cast<size_t>(a)] == 0);
+    CHECK(column("y_imputed").logical[0] == 1);
+
+    // Gap fitting reads neither ALIEN's missing value as a gap nor it as a
+    // complete plot.
+    SuitePredictOptions fit = opts;
+    fit.gap_fitting = GapFittingConfig{};
+    fit.columns.recorded = {{"y", {"y_rec"}}};
+    const SuitePredictions fitted = suite.predict(input, fit);
+    const GapFit& g = *fitted.target("y").gap_fit;
+    CHECK(g.report.n_not_imputed == 1);
+    CHECK(g.report.n_gaps == 8);
+    CHECK(g.method[a].item<int64_t>() == kGapNotImputed);
+    CHECK(std::isnan(g.fitted[a].item<double>()));
+    CHECK(gap_method_label(kGapNotImputed) == "not_imputed");
+    CHECK(gap_fit_report_to_json(g.report).at("n_not_imputed").as_int() == 1);
+}
+
 TEST_CASE("suite recorded columns without gap fitting flag the plots that record each target",
           "[suite][predict][gap_fitting]") {
     TempDir dir;
@@ -1481,13 +1578,15 @@ TEST_CASE("suite recorded columns without gap fitting flag the plots that record
     CHECK(flag.logical[0] == 0);
     CHECK(flag.logical[1] == 1);
     CHECK(column("aspect_recorded").logical[5] == 0);
-    // Right after the target's dispersion, before the recognition columns.
+    // Right after the target's dispersion, before the imputed flag and the
+    // recognition columns.
     auto position = [&](const std::string& name) {
         return std::find_if(table.begin(), table.end(), [&](const SuiteColumn& c) { return c.name == name; }) -
                table.begin();
     };
     CHECK(position("y_recorded") == position("y_sd") + 1);
-    CHECK(position("y_n_species") == position("y_recorded") + 1);
+    CHECK(position("y_imputed") == position("y_recorded") + 1);
+    CHECK(position("y_n_species") == position("y_imputed") + 1);
 
     // A classification, a column count that does not fit the target, an
     // unknown target and a target named twice are refused.

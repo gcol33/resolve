@@ -848,7 +848,10 @@ median distance in kilometres of the members from the combined point.
 These measure how far the members disagree and are not calibrated
 intervals. The recognised share is the share of a plot’s distinct
 species the members’ vocabulary knows; the first new plot, with its
-*Carex firma* record, sits below 1.
+*Carex firma* record, sits below 1. A plot none of whose species the
+vocabulary knows is not imputed, since every member was trained on plots
+holding species it knows: `imputed` is `FALSE` for it, and its values
+are missing.
 
 The whole result flattens to one row per plot, the table
 `resolve predict --suite` writes on the command line.
@@ -866,7 +869,7 @@ names(suite_table)
 ``` python
 suite_table = suite_preds.to_pandas()
 list(suite_table.columns)
-#> ['plot_id', 'habitat', 'habitat_code', 'habitat_agreement', 'habitat_n_species', 'habitat_n_recognised', 'habitat_recognised_share', 'habitat_recognised_abundance_share']
+#> ['plot_id', 'habitat', 'habitat_code', 'habitat_agreement', 'habitat_imputed', 'habitat_n_species', 'habitat_n_recognised', 'habitat_recognised_share', 'habitat_recognised_abundance_share']
 ```
 
 `keepMembers = TRUE` adds every member’s own imputed value, and

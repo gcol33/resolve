@@ -20,7 +20,8 @@ resolve.fit_gaps(
 \arguments{
 \item{raw}{The model's prediction per plot in the target's units: a numeric
 vector, or for \code{scale = "geographic"} a plots x 2 matrix of latitude and
-longitude.}
+longitude. \code{NA} marks a plot the model did not impute: it is neither a gap
+nor a complete plot.}
 
 \item{recorded}{The dataset's recorded value per plot, shaped as \code{raw};
 \code{NA} marks a gap.}
@@ -48,14 +49,17 @@ largest share of the complete plots one fold may hold, default 0.5) and
 
 \item{name}{The target's name, as the report states it.}
 
-\item{folds}{\code{NULL}, or an integer fold per complete plot (in plot order,
+\item{folds}{\code{NULL}, or an integer fold per complete plot (a plot with both
+\code{recorded} and \code{raw}; in plot order,
 numbered from 0) replacing the matched layout (to reproduce another
 implementation's layout).}
 }
 \value{
-A \code{resolve_gap_fit} list: \code{fitted} (as \code{raw}; a complete plot keeps
-its recorded value), \code{method} (per plot, \code{"recorded"} for a complete plot)
-and \code{report} (the gaps' distance per axis, the fold layout, the k chosen
+A \code{resolve_gap_fit} list: \code{fitted} (as \code{raw}; a plot recording the
+value keeps it, a plot lacking it that was not imputed is \code{NA}), \code{method}
+(per plot, \code{"recorded"} for a plot recording the value, \code{"not_imputed"}
+for one lacking it whose \code{raw} is \code{NA}) and \code{report} (\code{n_complete},
+\code{n_gaps}, \code{n_not_imputed}, the gaps' distance per axis, the fold layout, the k chosen
 per neighbour kind, and per group of gaps every candidate's
 cross-validated error, the estimated error of the whole choice, the same
 error per held-out fold (\code{fold_error}, over \code{fold_n_estimated} complete

@@ -1058,7 +1058,9 @@ SuiteColumn label_column(std::string name, const torch::Tensor& codes,
     const auto c = codes.to(torch::kCPU).to(torch::kLong).contiguous();
     const int64_t* data = c.numel() > 0 ? c.data_ptr<int64_t>() : nullptr;
     column.text.reserve(static_cast<size_t>(c.numel()));
-    for (int64_t i = 0; i < c.numel(); ++i) column.text.push_back(class_label(class_names, data[i]));
+    for (int64_t i = 0; i < c.numel(); ++i) {
+        column.text.push_back(data[i] == kUnlabelledClass ? std::string() : class_label(class_names, data[i]));
+    }
     return column;
 }
 
@@ -1146,6 +1148,7 @@ std::vector<SuiteColumn> suite_prediction_columns(const SuitePredictions& predic
             columns.push_back(number_column(name + "_dem", t.terrain->dem, n));
             columns.push_back(number_column(name + "_dem_1km", t.terrain->dem_1km, n));
         }
+        if (t.imputed.defined()) columns.push_back(logical_column(name + "_imputed", t.imputed));
         columns.push_back(number_column(name + "_n_species", t.recognition.n_species, n));
         columns.push_back(number_column(name + "_n_recognised", t.recognition.n_recognised, n));
         columns.push_back(number_column(name + "_recognised_share", t.recognition.count_share, n));
@@ -1397,6 +1400,36 @@ torch::Tensor alignment(const std::vector<std::string>& reference,
 torch::Tensor reorder(const torch::Tensor& t, const torch::Tensor& perm, int64_t dim) {
     if (!t.defined() || !perm.defined()) return t;
     return t.index_select(dim, perm);
+}
+
+// `values` with every plot that is not imputed blanked: NaN for a number,
+// kUnlabelledClass for a class code. `plot_dim` is the dimension running over
+// plots. Undefined tensors pass through.
+torch::Tensor withhold(const torch::Tensor& values, const torch::Tensor& imputed, int64_t plot_dim) {
+    if (!values.defined()) return values;
+    std::vector<int64_t> shape(static_cast<std::size_t>(values.dim()), 1);
+    shape[static_cast<std::size_t>(plot_dim)] = imputed.size(0);
+    const torch::Tensor keep = imputed.to(values.device()).view(shape);
+    const torch::Tensor blank =
+        values.is_floating_point()
+            ? torch::full({}, std::numeric_limits<double>::quiet_NaN(), values.options())
+            : torch::full({}, kUnlabelledClass, values.options());
+    return torch::where(keep, values, blank);
+}
+
+// A target's imputed mask from its recognition, and every per-plot output it
+// has so far blanked where the plot is not imputed.
+void withhold_unimputed(SuiteTargetPrediction& out) {
+    const auto n = out.value.size(0);
+    out.imputed = out.recognition.n_recognised.defined()
+                      ? (out.recognition.n_recognised.to(torch::kCPU) > 0)
+                      : torch::ones({n}, torch::kBool);
+    if (out.imputed.all().item<bool>()) return;
+    out.value = withhold(out.value, out.imputed, 0);
+    out.agreement = withhold(out.agreement, out.imputed, 0);
+    out.probabilities = withhold(out.probabilities, out.imputed, 0);
+    out.dispersion = withhold(out.dispersion, out.imputed, 0);
+    out.members = withhold(out.members, out.imputed, 1);
 }
 
 }  // namespace
@@ -1672,6 +1705,7 @@ SuitePredictions SuitePredictor::predict(const SuiteInput& input,
                 reorder(r.n_species, perm, 0), reorder(r.n_recognised, perm, 0),
                 reorder(r.count_share, perm, 0), reorder(r.abundance_share, perm, 0)};
             out.species_names = dataset.species_names();
+            withhold_unimputed(out);
         }
     }
     if (options.gap_fitting) {

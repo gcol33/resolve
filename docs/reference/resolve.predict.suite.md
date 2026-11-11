@@ -109,14 +109,15 @@ A `resolve_suite_predictions` list: `plot_ids`, and `targets`, a named
 list with one entry per target holding `value` (the combined prediction;
 class codes for a vote, with the class labels in `label`; a plots x 2
 matrix of `latitude` and `longitude` in degrees for a spherical mean),
-`agreement`, `probabilities`, `dispersion`, the recognition columns
-above, `recorded` (for a target `columns$recorded` names: logical,
-`TRUE` where the plot records a value, so `value` is imputed where it is
-`FALSE`), `members` (plots x members, with `keepMembers`; for a
-spherical mean a list of `latitude` and `longitude`, each plots x
-members), and the target's `units`, `dispersion_units`, `status` and
-`limit`. [`as.data.frame()`](https://rdrr.io/r/base/as.data.frame.html)
-flattens it to one row per plot.
+`agreement`, `probabilities`, `dispersion`, `imputed` (logical, `FALSE`
+where the plot is not imputed), the recognition columns above,
+`recorded` (for a target `columns$recorded` names: logical, `TRUE` where
+the plot records a value, so `value` is imputed where it is `FALSE`),
+`members` (plots x members, with `keepMembers`; for a spherical mean a
+list of `latitude` and `longitude`, each plots x members), and the
+target's `units`, `dispersion_units`, `status` and `limit`.
+[`as.data.frame()`](https://rdrr.io/r/base/as.data.frame.html) flattens
+it to one row per plot.
 
 ## Details
 
@@ -143,6 +144,12 @@ on its own:
 Agreement and dispersion measure how far the members disagree; they are
 not calibrated intervals. `NA` marks a value that is undefined for the
 plot (a plot with no recorded species has no recognised share).
+
+A plot none of whose species the target's vocabulary recognises (or with
+no species at all) is not imputed: the models were trained on plots
+holding species they know. `imputed` is `FALSE` for it, and its
+prediction, agreement, probabilities, dispersion, members, gap fit and
+terrain-corrected value are `NA` (a class code `-1`).
 
 ## See also
 

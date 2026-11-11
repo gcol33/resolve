@@ -97,6 +97,9 @@ main#main + aside { display: none; }
 #resolve-app th { position: sticky; top: 0; background: var(--bs-body-bg); font-weight: 500; }
 #resolve-app th, #resolve-app td { white-space: nowrap; }
 #resolve-app .warn { margin: 12px 0 0; padding-left: 18px; }
+/* Plots none of whose species the models recognise: no values imputed. */
+#resolve-app p.not-imputed { color: var(--bs-danger); }
+#resolve-app #table tr.not-imputed > td { --bs-table-color: var(--bs-danger-text-emphasis); --bs-table-bg: var(--bs-danger-bg-subtle); }
 #resolve-app details summary { cursor: pointer; color: var(--bs-secondary-color); }
 #resolve-app #unknown summary { color: var(--bs-warning-text-emphasis); }
 #resolve-app details ul { columns: 2 220px; padding-left: 18px; margin: 6px 0 0; }

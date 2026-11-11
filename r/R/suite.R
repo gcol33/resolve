@@ -134,6 +134,12 @@ resolve.seal_suite <- function(dir) {
 #' calibrated intervals. `NA` marks a value that is undefined for the plot (a
 #' plot with no recorded species has no recognised share).
 #'
+#' A plot none of whose species the target's vocabulary recognises (or with no
+#' species at all) is not imputed: the models were trained on plots holding
+#' species they know. `imputed` is `FALSE` for it, and its prediction,
+#' agreement, probabilities, dispersion, members, gap fit and terrain-corrected
+#' value are `NA` (a class code `-1`).
+#'
 #' @param suite A `Suite` from [resolve.load_suite()].
 #' @param species The species records, one row per record: a data.frame or the
 #'   path of a CSV file.
@@ -183,8 +189,9 @@ resolve.seal_suite <- function(dir) {
 #'   named list with one entry per target holding `value` (the combined
 #'   prediction; class codes for a vote, with the class labels in `label`; a
 #'   plots x 2 matrix of `latitude` and `longitude` in degrees for a spherical
-#'   mean), `agreement`, `probabilities`, `dispersion`, the recognition columns
-#'   above, `recorded` (for a target `columns$recorded` names: logical, `TRUE`
+#'   mean), `agreement`, `probabilities`, `dispersion`, `imputed` (logical,
+#'   `FALSE` where the plot is not imputed), the recognition columns above,
+#'   `recorded` (for a target `columns$recorded` names: logical, `TRUE`
 #'   where the plot records a value, so `value` is imputed where it is
 #'   `FALSE`), `members` (plots x members, with `keepMembers`; for a spherical
 #'   mean a list of `latitude` and `longitude`, each plots x members), and the
@@ -246,7 +253,12 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
 # plots x members.
 .resolve_suite_predictions <- function(raw) {
   plot_ids <- as.character(unlist(raw$plot_ids))
-  label_of <- function(column) as.character(unlist(raw$columns[[column]]))
+  # An empty label is the class of a plot that was not imputed.
+  missing_text <- function(x) {
+    x[!is.na(x) & x == ""] <- NA_character_
+    x
+  }
+  label_of <- function(column) missing_text(as.character(unlist(raw$columns[[column]])))
   targets <- Map(function(t, name) {
     classes <- as.character(unlist(t$class_names))
     seeds <- as.integer(unlist(t$member_seeds))
@@ -256,6 +268,7 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
       agreement = t$agreement,
       probabilities = t$probabilities,
       dispersion = t$dispersion,
+      imputed = if (is.null(t$imputed)) NULL else as.logical(unlist(t$imputed)),
       n_species = t$n_species,
       n_recognised = t$n_recognised,
       recognised_share = t$recognised_share,
@@ -317,6 +330,9 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
   for (name in as.character(unlist(raw$logical_columns))) {
     columns[[name]] <- as.logical(unlist(columns[[name]]))
   }
+  for (name in setdiff(names(columns), "plot_id")) {
+    if (is.character(unlist(columns[[name]]))) columns[[name]] <- missing_text(as.character(unlist(columns[[name]])))
+  }
   structure(list(plot_ids = plot_ids, targets = targets, columns = columns,
                  probability_columns = as.character(unlist(raw$probability_columns))),
             class = "resolve_suite_predictions")
@@ -331,7 +347,9 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
 #' `<target>_agreement`; for a spherical mean `<target>_latitude` and
 #' `<target>_longitude`), its dispersion (`<target>_sd` for a mean,
 #' `<target>_circular_sd` for a bearing, `<target>_spread_km` for a spherical
-#' mean), the four recognition columns, and, when present, `<target>_seed<N>`
+#' mean), `<target>_imputed` (logical, `FALSE` where none of the plot's species
+#' is recognised, so its values are `NA`), the four recognition columns, and,
+#' when present, `<target>_seed<N>`
 #' for each member (`<target>_seed<N>_latitude` and `_longitude` for a
 #' spherical mean); a gap-fitted target adds `<target>_fitted`
 #' (`<target>_fitted_latitude` / `_fitted_longitude`) and

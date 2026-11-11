@@ -123,6 +123,40 @@ TEST_CASE("offset_slope recovers the local relation of raw prediction and truth"
     CHECK((fit.method.slice(0, 2400) == static_cast<int64_t>(GapMethod::OffsetSlope)).all().item<bool>());
 }
 
+TEST_CASE("a plot without a raw prediction is neither a gap nor a complete plot", "[gap_fitting]") {
+    torch::manual_seed(7);
+    const int64_t n = 600;
+    const torch::Tensor pred = 1950.0 + 70.0 * torch::rand({n}, kDouble);
+    const torch::Tensor truth = 1990.0 + 0.5 * (pred - pred.mean()) + 3.0 * torch::randn({n}, kDouble);
+    const torch::Tensor gaps = torch::arange(n) >= 450;
+    // Every 7th plot was not imputed: some record the value, some lack it.
+    const torch::Tensor not_imputed = torch::remainder(torch::arange(n), 7) == 0;
+    const torch::Tensor raw = torch::where(not_imputed, torch::full({n}, kNaN, kDouble), pred);
+    const GapFit fit = fit_gaps({"year"}, raw, with_gaps(truth, gaps), {no_species(n), {}, {}},
+                                only({GapMethod::OffsetSlope}));
+
+    const int64_t lacking = not_imputed.logical_and(gaps).sum().item<int64_t>();
+    CHECK(fit.report.n_not_imputed == lacking);
+    CHECK(fit.report.n_gaps == gaps.sum().item<int64_t>() - lacking);
+    CHECK(fit.report.n_complete == gaps.logical_not().logical_and(not_imputed.logical_not()).sum().item<int64_t>());
+    const torch::Tensor skipped = not_imputed.logical_and(gaps);
+    CHECK((fit.method.index({skipped}) == kGapNotImputed).all().item<bool>());
+    CHECK(torch::isnan(fit.fitted.index({skipped})).all().item<bool>());
+    // A plot recording the value keeps it, imputed or not.
+    const torch::Tensor recorded = gaps.logical_not();
+    CHECK((fit.method.index({recorded}) == kGapRecorded).all().item<bool>());
+    CHECK(torch::equal(fit.fitted.index({recorded}), truth.index({recorded})));
+
+    // The fit is the one over the imputed plots alone.
+    const torch::Tensor keep = not_imputed.logical_not().nonzero().select(1, 0);
+    const int64_t m = keep.size(0);
+    const GapFit alone = fit_gaps({"year"}, pred.index({keep}), with_gaps(truth, gaps).index({keep}),
+                                  {no_species(m), {}, {}}, only({GapMethod::OffsetSlope}));
+    CHECK(torch::allclose(fit.fitted.index({keep}), alone.fitted, 0.0, 1e-9, /*equal_nan=*/true));
+    CHECK(torch::equal(fit.method.index({keep}), alone.method));
+    CHECK(alone.report.n_not_imputed == 0);
+}
+
 TEST_CASE("A bearing offset is recovered as a complex coefficient: a turn and no shrink",
           "[gap_fitting]") {
     const int seed = GENERATE(0, 1, 2, 3, 4);

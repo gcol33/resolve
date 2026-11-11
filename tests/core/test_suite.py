@@ -715,6 +715,41 @@ def test_suite_gap_fitting_adds_fitted_columns_and_reports(suite_dir, tmp_path):
         suite.predict(s, h, columns={"recorded": {"hab": "y_rec"}}, gap_fitting=True)
 
 
+def test_a_plot_with_no_recognised_species_is_not_imputed(suite_dir, tmp_path):
+    h, s = _recorded_scoring(tmp_path)
+    alien = pd.DataFrame([["ALIEN", "46.3", "9.2", 140.0, None, None, 2001]], columns=h.columns)
+    h = pd.concat([h, alien], ignore_index=True)
+    s = pd.concat(
+        [s, pd.DataFrame([["ALIEN", "sp_q", 2.0, "gq", "fam"], ["ALIEN", "sp_r", 1.0, "gr", "fam"]],
+                         columns=s.columns)],
+        ignore_index=True,
+    )
+    suite = rc.SuitePredictor.load(str(suite_dir))
+    out = suite.predict(s, h, keep_members=True)
+    a = out.plot_ids.index("ALIEN")
+    for t in out.targets:
+        assert not bool(t.imputed[a]), t.name
+        assert int(t.imputed.sum()) == len(out.plot_ids) - 1
+    assert int(out.target("hab").value[a]) == -1
+    assert math.isnan(float(out.target("y").value[a]))
+    assert torch.isnan(out.target("y").members[:, a]).all()
+    assert math.isnan(float(out.target("aspect").value[a]))
+
+    frame = out.to_pandas()
+    row = frame.index[frame["plot_id"] == "ALIEN"][0]
+    assert pd.isna(frame["hab"].iloc[row])
+    assert not frame["hab_imputed"].iloc[row]
+    assert frame["y_imputed"].iloc[0]
+    assert math.isnan(frame["y"].iloc[row])
+
+    fitted = suite.predict(s, h, columns={"recorded": {"y": "y_rec"}}, gap_fitting=True)
+    fit = fitted.target("y").gap_fit
+    assert fit.report["n_not_imputed"] == 1
+    assert fit.report["n_gaps"] == 10
+    assert fit.method[a] == "not_imputed"
+    assert math.isnan(float(fit.fitted[a]))
+
+
 def test_suite_recorded_columns_without_gap_fitting_flag_recorded_plots(suite_dir, tmp_path):
     h, s = _recorded_scoring(tmp_path)
     suite = rc.SuitePredictor.load(str(suite_dir))

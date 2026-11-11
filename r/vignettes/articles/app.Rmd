@@ -167,6 +167,7 @@ GISCO.
           <div class="actions">
             <button type="button" class="btn btn-outline-primary btn-sm" id="download" disabled>Download all imputed values (CSV)</button>
           </div>
+          <p class="not-imputed small mt-3 mb-0" id="not-imputed" role="status" hidden></p>
           <ul class="warn small text-body-secondary" id="gaps" hidden></ul>
           <details class="small mt-3" id="unknown" hidden><summary></summary>
             <p class="text-body-secondary mt-2"></p><ul></ul></details>

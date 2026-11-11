@@ -240,6 +240,7 @@ One target's imputed values for every plot.
 - `dispersion` and `dispersion_units`: the members' standard deviation for a mean, their circular standard deviation for a circular mean (both in the target's units), the median great-circle distance of the members from the combined point for a spherical mean (in km). `NaN` for a single member and where the members' directions cancel; `None` for a vote.
 - `members`: with `keep_members`, each member's own imputed value, `(n_members, n_plots)` or `(n_members, n_plots, 2)`.
 - `recognition` (`SpeciesRecognition`): how much of each plot the target's vocabulary recognises.
+- `imputed` (`(n_plots,)` bool tensor): `False` where the target's vocabulary recognises none of the plot's species (or the plot has none). Such a plot is not imputed: `value`, `agreement`, `probabilities`, `dispersion`, `members`, the gap fit's value and the terrain-corrected value are `NaN` there, a class code -1.
 - `recorded` (`(n_plots,)` bool tensor or `None`): for a target `columns["recorded"]` names, `True` where the plot records the target, so `value` is imputed where it is `False`.
 - `gap_fit` (`GapFit` or `None`): with gap fitting, the fitted values, the method per plot and the report ([`GapFit`](python-gap-fitting.html#GapFit)).
 

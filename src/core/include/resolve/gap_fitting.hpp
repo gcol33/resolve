@@ -243,6 +243,9 @@ struct GapFitReport {
     GapScale scale = GapScale::Linear;
     int64_t n_complete = 0;
     int64_t n_gaps = 0;
+    // Plots lacking the value whose raw prediction is not finite (a plot the
+    // model did not impute): neither a gap nor a complete plot.
+    int64_t n_not_imputed = 0;
     // Why nothing was chosen (fewer than two complete plots), empty otherwise.
     std::string skipped;
     std::vector<GapAxisSummary> axes;
@@ -254,6 +257,9 @@ struct GapFitReport {
 // The method code a complete plot carries in GapFit::method: it keeps its
 // recorded value.
 inline constexpr int64_t kGapRecorded = -1;
+// The method code of a plot lacking the value whose raw prediction is not
+// finite: it has no fitted value.
+inline constexpr int64_t kGapNotImputed = -2;
 
 // The plots that record a value: (n,) bool, true where every value of the
 // plot's row of `recorded` ((n,), or (n, 2) latitude / longitude) is finite.
@@ -262,16 +268,19 @@ inline constexpr int64_t kGapRecorded = -1;
 
 struct GapFit {
     // Per plot in the target's units, like the raw prediction: (n,) float64,
-    // or (n, 2) latitude / longitude for a position. A complete plot carries
-    // its recorded value, a gap the chosen method's value.
+    // or (n, 2) latitude / longitude for a position. A plot recording the
+    // value carries it, a gap the chosen method's value, a plot that is not
+    // imputed NaN.
     torch::Tensor fitted;
-    // (n,) int64: kGapRecorded for a complete plot, the GapMethod (as its
+    // (n,) int64: kGapRecorded for a plot recording the value, kGapNotImputed
+    // for one lacking it without a raw prediction, the GapMethod (as its
     // integer) that predicted each gap otherwise.
     torch::Tensor method;
     GapFitReport report;
 };
 
-// "recorded" for kGapRecorded, the GapMethod's name otherwise.
+// "recorded" for kGapRecorded, "not_imputed" for kGapNotImputed, the
+// GapMethod's name otherwise.
 [[nodiscard]] std::string gap_method_label(int64_t code);
 
 // The report as JSON, every number locale-free (number_text.hpp).
@@ -281,10 +290,14 @@ struct GapFit {
 // the dataset's value per plot, both in the target's units: (n,) for a linear,
 // log or circular scale, (n, 2) latitude / longitude in degrees for a
 // geographic one. A plot whose recorded value is NaN (either coordinate of a
-// position) is a gap, every other plot a complete one.
+// position) is a gap, every other plot a complete one. A plot whose raw
+// prediction is not finite (either coordinate of a position) was not imputed:
+// it is neither a gap nor a complete plot, so no method reads it and it keeps
+// its recorded value, or NaN with kGapNotImputed.
 //
 // `folds`, when given, replaces the matched layout: (n_complete,) int64, the
-// fold of each complete plot in plot order, numbered from 0 with every fold
+// fold of each complete plot (recorded value and raw prediction finite) in
+// plot order, numbered from 0 with every fold
 // from 0 to its largest number holding a plot, so a run reproduces another
 // implementation's layout.
 //

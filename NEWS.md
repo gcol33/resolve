@@ -1,5 +1,35 @@
 # RESOLVE Changelog
 
+## Unreleased
+
+### Changed
+
+- **A plot with no recognised species is not imputed.** A suite target whose
+  vocabulary recognises none of a plot's species (or a plot with no species)
+  leaves every value of that plot missing: `NaN`, a class code -1 and an
+  empty label, for the combined value, agreement, probabilities, dispersion,
+  members, gap fit and terrain correction. The members were trained on plots
+  holding species they know, so their output for such a plot read an input
+  they never saw. Each target reports the mask as `imputed`
+  (`SuiteTargetPrediction.imputed`, R `imputed`, the column
+  `<target>_imputed`), and `resolve predict --suite` prints the count per
+  target. The browser app shows those plots in red, in the table and on the
+  map.
+- **Gap fitting leaves out plots without a raw prediction.** A plot whose raw
+  value is `NaN` is neither a gap nor a complete plot: it keeps its recorded
+  value, or reads `not_imputed` (method code -2) with no fitted value, and
+  the report counts it in `n_not_imputed`. A circular or spherical mean
+  whose members cancel (`NaN`) is left out the same way.
+
+### Fixed
+
+- **The browser app imputes tables whose plots hold few species.** Some of
+  the page's model graphs read exactly as many species slots as their
+  model's species cap, so a table whose richest plot held fewer species
+  stopped with an ONNX reshape error. The app now always passes the cap's
+  width, with the extra slots masked; on the graphs that accept any width
+  the outputs are unchanged.
+
 ## v1.2.0 (2026-11-10)
 
 ### Added

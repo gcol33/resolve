@@ -77,6 +77,21 @@
     </div>
 
     <div class="section level2">
+<h2 class="pkg-version" data-toc-text="development version" id="resolver-development-version">resolveR (development version)<a class="anchor" aria-label="anchor" href="#resolver-development-version"></a></h2>
+<div class="section level3">
+<h3 id="changed-development-version">Changed<a class="anchor" aria-label="anchor" href="#changed-development-version"></a></h3>
+<ul><li>
+<strong>A plot with no recognised species is not imputed.</strong> A suite target whose vocabulary recognises none of a plot’s species (or a plot with no species) leaves every value of that plot missing: <code>NaN</code>, a class code -1 and an empty label, for the combined value, agreement, probabilities, dispersion, members, gap fit and terrain correction. The members were trained on plots holding species they know, so their output for such a plot read an input they never saw. Each target reports the mask as <code>imputed</code> (<code>SuiteTargetPrediction.imputed</code>, R <code>imputed</code>, the column <code>&lt;target&gt;_imputed</code>), and <code>resolve predict --suite</code> prints the count per target. The browser app shows those plots in red, in the table and on the map.</li>
+<li>
+<strong>Gap fitting leaves out plots without a raw prediction.</strong> A plot whose raw value is <code>NaN</code> is neither a gap nor a complete plot: it keeps its recorded value, or reads <code>not_imputed</code> (method code -2) with no fitted value, and the report counts it in <code>n_not_imputed</code>. A circular or spherical mean whose members cancel (<code>NaN</code>) is left out the same way.</li>
+</ul></div>
+<div class="section level3">
+<h3 id="fixed-development-version">Fixed<a class="anchor" aria-label="anchor" href="#fixed-development-version"></a></h3>
+<ul><li>
+<strong>The browser app imputes tables whose plots hold few species.</strong> Some of the page’s model graphs read exactly as many species slots as their model’s species cap, so a table whose richest plot held fewer species stopped with an ONNX reshape error. The app now always passes the cap’s width, with the extra slots masked; on the graphs that accept any width the outputs are unchanged.</li>
+</ul></div>
+</div>
+    <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.2.0" id="resolver-120">resolveR 1.2.0<a class="anchor" aria-label="anchor" href="#resolver-120"></a></h2>
 <div class="section level3">
 <h3 id="added-1-2-0">Added<a class="anchor" aria-label="anchor" href="#added-1-2-0"></a></h3>

@@ -190,8 +190,9 @@ coordinates, <code>list(source = "grids", grids = dir)</code> elevation grids,
 named list with one entry per target holding <code>value</code> (the combined
 prediction; class codes for a vote, with the class labels in <code>label</code>; a
 plots x 2 matrix of <code>latitude</code> and <code>longitude</code> in degrees for a spherical
-mean), <code>agreement</code>, <code>probabilities</code>, <code>dispersion</code>, the recognition columns
-above, <code>recorded</code> (for a target <code>columns$recorded</code> names: logical, <code>TRUE</code>
+mean), <code>agreement</code>, <code>probabilities</code>, <code>dispersion</code>, <code>imputed</code> (logical,
+<code>FALSE</code> where the plot is not imputed), the recognition columns above,
+<code>recorded</code> (for a target <code>columns$recorded</code> names: logical, <code>TRUE</code>
 where the plot records a value, so <code>value</code> is imputed where it is
 <code>FALSE</code>), <code>members</code> (plots x members, with <code>keepMembers</code>; for a spherical
 mean a list of <code>latitude</code> and <code>longitude</code>, each plots x members), and the
@@ -216,6 +217,11 @@ the members from the combined point (<code>dispersion</code>), in km;</p></li>
 </ul><p>Agreement and dispersion measure how far the members disagree; they are not
 calibrated intervals. <code>NA</code> marks a value that is undefined for the plot (a
 plot with no recorded species has no recognised share).</p>
+<p>A plot none of whose species the target's vocabulary recognises (or with no
+species at all) is not imputed: the models were trained on plots holding
+species they know. <code>imputed</code> is <code>FALSE</code> for it, and its prediction,
+agreement, probabilities, dispersion, members, gap fit and terrain-corrected
+value are <code>NA</code> (a class code <code>-1</code>).</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

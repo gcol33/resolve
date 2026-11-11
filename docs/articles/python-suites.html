@@ -538,6 +538,14 @@ own imputed value, <code>(n_members, n_plots)</code> or
 <code>recognition</code> (<code>SpeciesRecognition</code>): how much
 of each plot the target’s vocabulary recognises.</li>
 <li>
+<code>imputed</code> (<code>(n_plots,)</code> bool tensor):
+<code>False</code> where the target’s vocabulary recognises none of the
+plot’s species (or the plot has none). Such a plot is not imputed:
+<code>value</code>, <code>agreement</code>, <code>probabilities</code>,
+<code>dispersion</code>, <code>members</code>, the gap fit’s value and
+the terrain-corrected value are <code>NaN</code> there, a class code
+-1.</li>
+<li>
 <code>recorded</code> (<code>(n_plots,)</code> bool tensor or
 <code>None</code>): for a target <code>columns["recorded"]</code> names,
 <code>True</code> where the plot records the target, so

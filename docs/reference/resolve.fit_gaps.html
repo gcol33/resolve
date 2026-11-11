@@ -131,7 +131,8 @@ combined with those medians by least squares (<code>stack_species</code>,
 <dl><dt id="arg-raw">raw<a class="anchor" aria-label="anchor" href="#arg-raw"></a></dt>
 <dd><p>The model's prediction per plot in the target's units: a numeric
 vector, or for <code>scale = "geographic"</code> a plots x 2 matrix of latitude and
-longitude.</p></dd>
+longitude. <code>NA</code> marks a plot the model did not impute: it is neither a gap
+nor a complete plot.</p></dd>
 
 
 <dt id="arg-recorded">recorded<a class="anchor" aria-label="anchor" href="#arg-recorded"></a></dt>
@@ -177,16 +178,19 @@ largest share of the complete plots one fold may hold, default 0.5) and
 
 
 <dt id="arg-folds">folds<a class="anchor" aria-label="anchor" href="#arg-folds"></a></dt>
-<dd><p><code>NULL</code>, or an integer fold per complete plot (in plot order,
+<dd><p><code>NULL</code>, or an integer fold per complete plot (a plot with both
+<code>recorded</code> and <code>raw</code>; in plot order,
 numbered from 0) replacing the matched layout (to reproduce another
 implementation's layout).</p></dd>
 
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>A <code>resolve_gap_fit</code> list: <code>fitted</code> (as <code>raw</code>; a complete plot keeps
-its recorded value), <code>method</code> (per plot, <code>"recorded"</code> for a complete plot)
-and <code>report</code> (the gaps' distance per axis, the fold layout, the k chosen
+    <p>A <code>resolve_gap_fit</code> list: <code>fitted</code> (as <code>raw</code>; a plot recording the
+value keeps it, a plot lacking it that was not imputed is <code>NA</code>), <code>method</code>
+(per plot, <code>"recorded"</code> for a plot recording the value, <code>"not_imputed"</code>
+for one lacking it whose <code>raw</code> is <code>NA</code>) and <code>report</code> (<code>n_complete</code>,
+<code>n_gaps</code>, <code>n_not_imputed</code>, the gaps' distance per axis, the fold layout, the k chosen
 per neighbour kind, and per group of gaps every candidate's
 cross-validated error, the estimated error of the whole choice, the same
 error per held-out fold (<code>fold_error</code>, over <code>fold_n_estimated</code> complete

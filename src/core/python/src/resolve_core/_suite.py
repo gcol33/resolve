@@ -252,7 +252,9 @@ def to_pandas(self, probabilities=False):
     ``<target>_prob_<class>``; for a spherical mean ``<target>_latitude`` and
     ``<target>_longitude``), its dispersion (``<target>_sd`` for a mean,
     ``<target>_circular_sd`` for a bearing, ``<target>_spread_km`` for a
-    spherical mean), the four recognition columns, and ``<target>_seed<N>``
+    spherical mean), ``<target>_imputed`` (bool, False where none of the
+    plot's species is recognised, so every value of the plot is missing), the
+    four recognition columns, and ``<target>_seed<N>``
     per member when the members were kept (``<target>_seed<N>_latitude`` and
     ``_longitude`` for a spherical mean); a gap-fitted target adds
     ``<target>_fitted`` (``_fitted_latitude`` / ``_fitted_longitude``) and
@@ -265,9 +267,10 @@ def to_pandas(self, probabilities=False):
     """
     import pandas as pd
 
+    # An empty text cell is a class label of a plot that was not imputed.
     return pd.DataFrame(
         {
-            name: values if isinstance(values, list) else values.numpy()
+            name: [v if v != "" else None for v in values] if isinstance(values, list) else values.numpy()
             for name, values in _core.suite_prediction_columns(self, probabilities)
         }
     )

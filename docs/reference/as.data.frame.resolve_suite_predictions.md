@@ -6,10 +6,12 @@ prediction (`<target>`; for a vote also `<target>_code` and
 `<target>_agreement`; for a spherical mean `<target>_latitude` and
 `<target>_longitude`), its dispersion (`<target>_sd` for a mean,
 `<target>_circular_sd` for a bearing, `<target>_spread_km` for a
-spherical mean), the four recognition columns, and, when present,
-`<target>_seed<N>` for each member (`<target>_seed<N>_latitude` and
-`_longitude` for a spherical mean); a gap-fitted target adds
-`<target>_fitted` (`<target>_fitted_latitude` / `_fitted_longitude`) and
+spherical mean), `<target>_imputed` (logical, `FALSE` where none of the
+plot's species is recognised, so its values are `NA`), the four
+recognition columns, and, when present, `<target>_seed<N>` for each
+member (`<target>_seed<N>_latitude` and `_longitude` for a spherical
+mean); a gap-fitted target adds `<target>_fitted`
+(`<target>_fitted_latitude` / `_fitted_longitude`) and
 `<target>_fit_method`, and a target with recorded values but no gap fit
 `<target>_recorded` (logical) there instead; a terrain-corrected target
 `<target>_terrain`, `<target>_terrain_w_resolve`, `_w_dem`,

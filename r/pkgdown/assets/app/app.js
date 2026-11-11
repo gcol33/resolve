@@ -4,7 +4,7 @@
 // browser except the requests for the model files.
 
 import { COLUMNS, combineMean, combineSpherical, combineVote, encode, parseDouble, parseNumber, parseTable,
-         resolveName, sumByAncestor } from "./resolve.js";
+         resolveName, sumByAncestor, withholdUnimputed } from "./resolve.js";
 import { describeGapMethod, gapSource } from "./gaps.js";
 import { eeaCell, eeaCellCode, eeaCellOutline } from "./geo.js";
 import { HttpRangeSource, HttpStatusError, TerrainCorrection, TerrainField, describePlots, fetchRange,
@@ -873,21 +873,24 @@ const unitText = (u) => u.replace(/\^2\b/g, "²").replace(/\^3\b/g, "³");
 async function addTarget(result, target, meta, outputs, encoded) {
   const n = encoded.n;
   const units = target.units ? ` (${unitText(target.units)})` : "";
+  const imputed = encoded.imputed;
+  (result.imputed ??= []).push({ label: label(target), mask: imputed });
   if (target.combine === "vote") {
     const head = meta.targets[0];
     const coarse = target.readAt ? target.read_at[target.readAt] : null;
     const classes = coarse ? coarse.classes : head.classes;
     const probs = outputs.map((o) => (coarse ? sumByAncestor(o[head.name], n, coarse.index, classes.length) : o[head.name]));
-    const c = combineVote(probs, classes.length, n);
+    const c = withholdUnimputed(combineVote(probs, classes.length, n), imputed);
     result.columns.push({ name: `${label(target)}`, values: Array.from(c.value, (v) => classes[v]) },
                         { name: `${label(target)} seed agreement`, values: Array.from(c.agreement), digits: 2 },
                         { name: `${label(target)} probability`, digits: 3,
-                          values: Array.from(c.value, (v, p) => c.mean[p * classes.length + v]) });
+                          values: Array.from(c.value, (v, p) => (v < 0 ? NaN : c.mean[p * classes.length + v])) });
     (result.summary ??= []).push({ kind: "class", name: target.name, label: label(target), classes, value: c.value,
-                                   names: coarse ? coarse.names : target.class_names ?? {} });
+                                   imputed, names: coarse ? coarse.names : target.class_names ?? {} });
   } else if (target.combine === "spherical_mean") {
     const [latName, lonName] = target.outputs;
-    const c = combineSpherical(outputs.map((o) => o[latName]), outputs.map((o) => o[lonName]), n);
+    const c = withholdUnimputed(combineSpherical(outputs.map((o) => o[latName]), outputs.map((o) => o[lonName]), n),
+                                imputed);
     result.columns.push({ name: "Imputed latitude", values: Array.from(c.lat), digits: 4 },
                         { name: "Imputed longitude", values: Array.from(c.lon), digits: 4 },
                         { name: "Location seed spread (km)", values: Array.from(c.km), digits: 1 });
@@ -905,11 +908,11 @@ async function addTarget(result, target, meta, outputs, encoded) {
     }
   } else {
     const name = target.outputs[0];
-    const c = combineMean(outputs.map((o) => o[name]), n);
+    const c = withholdUnimputed(combineMean(outputs.map((o) => o[name]), n), imputed);
     result.columns.push({ name: `${label(target)}${units}`, values: Array.from(c.value), digits: 1 },
                         { name: `${label(target)} seed SD`, values: Array.from(c.sd), digits: 1 });
     const entry = { kind: "number", name: target.name, label: label(target), units: unitText(target.units ?? ""),
-                    value: c.value };
+                    value: c.value, imputed };
     (result.summary ??= []).push(entry);
     const fit = await fillGaps(result, target, meta.targets[0].log1p ? "log" : "linear", c.value);
     const mask = recordedMask(result, target);
@@ -922,9 +925,9 @@ async function addTarget(result, target, meta, outputs, encoded) {
     // Each plot's value as the map shows it: the recorded one where the
     // tables hold it, else the gap fit's, else the combined prediction.
     const recorded = mask && gapPlots(result).num(target.outputs[0]);
-    const imputed = fit ? fit.fitted : c.value;
+    const filled = fit ? fit.fitted : c.value;
     Object.assign(entry, { recorded: mask,
-                           plotValue: Float64Array.from(imputed, (v, p) => (mask?.[p] ? recorded[p] : v)) });
+                           plotValue: Float64Array.from(filled, (v, p) => (mask?.[p] ? recorded[p] : v)) });
     if (target.terrain && terrainOn()) await addTerrain(result, target, c, encoded, units);
   }
 }
@@ -1106,7 +1109,8 @@ function showTablePage(page) {
   const end = Math.min(n, start + ROWS_PAGE);
   const rows = [];
   for (let p = start; p < end; p++) {
-    rows.push(`<tr>${cols.map((c) => `<td>${escape(format(c.values[p], c.digits))}</td>`).join("")}</tr>`);
+    const flag = tablePage.flagged?.[p] ? ' class="not-imputed"' : "";
+    rows.push(`<tr${flag}>${cols.map((c) => `<td>${escape(format(c.values[p], c.digits))}</td>`).join("")}</tr>`);
   }
   $("table").tBodies[0].innerHTML = rows.join("");
   $("table").parentElement.scrollTop = 0;
@@ -1119,17 +1123,20 @@ function showTablePage(page) {
 
 function render() {
   const r = state.result;
+  const imputed = imputedColumn(r);
   const cols = [{ name: "Plot", values: r.plotIds },
+                { name: "Imputed", values: imputed },
                 { name: "Species recognised (share of cover)", values: Array.from(r.recognised), digits: 2 },
                 ...r.columns];
   const head = `<tr>${cols.map((c) => `<th scope="col">${escape(c.name)}</th>`).join("")}</tr>`;
   $("table").innerHTML = `<thead>${head}</thead><tbody></tbody>`;
-  Object.assign(tablePage, { cols, n: r.plotIds.length });
+  Object.assign(tablePage, { cols, n: r.plotIds.length, flagged: imputed.map((v) => v !== "yes") });
   showTablePage(0);
   $("results").hidden = false;
   renderStats(r);
   renderVariable(r);
   renderGaps(r);
+  renderNotImputed(r, imputed);
   renderUnknown(r);
   renderMoved(r);
   renderMap(r);
@@ -1217,13 +1224,36 @@ function unrecognised(meta, species, plots) {
   return [...counts].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
 }
 
+// Per plot whether it was imputed: "yes"; "no" where no variable's models
+// recognise any of its species (the models never saw such a plot); or the
+// variables whose models recognise none of them.
+function imputedColumn(r) {
+  const by = r.imputed ?? [];
+  return Array.from(r.plotIds, (_, p) => {
+    const missing = by.filter((t) => !t.mask[p]).map((t) => t.label);
+    return !missing.length ? "yes" : missing.length === by.length ? "no" : `no: ${missing.join(", ")}`;
+  });
+}
+
+function renderNotImputed(r, imputed) {
+  const box = $("not-imputed");
+  const none = imputed.filter((v) => v === "no").length;
+  const some = imputed.filter((v) => v !== "yes" && v !== "no").length;
+  const parts = [
+    ...(none ? [`${none.toLocaleString()} ${none === 1 ? "plot is" : "plots are"} not imputed: none of ${none === 1 ? "its" : "their"} species is recognised`] : []),
+    ...(some ? [`${some.toLocaleString()} ${some === 1 ? "plot is" : "plots are"} not imputed for some variables, whose models recognise none of ${some === 1 ? "its" : "their"} species`] : []),
+  ];
+  box.hidden = !parts.length;
+  box.textContent = parts.length ? `${parts.join(". ")}.` : "";
+}
+
 function renderUnknown(r) {
   const box = $("unknown");
   if (!r.unknown.length) { box.hidden = true; return; }
   box.hidden = false;
   const records = r.unknown.reduce((a, [, k]) => a + k, 0);
   box.querySelector("summary").textContent =
-    `${r.unknown.length.toLocaleString()} species names not recognised: ${records.toLocaleString()} records not used, their plots imputed from the other species`;
+    `${r.unknown.length.toLocaleString()} species names not recognised: ${records.toLocaleString()} records not used`;
   box.querySelector("p").innerHTML =
     `None of these names was found through ${nameRoutes()}.`;
   box.querySelector("ul").innerHTML = r.unknown.slice(0, 200)
@@ -1292,6 +1322,9 @@ const PALETTE = { M: "#2b6cb0", N: "#d69e2e", P: "#3182ce", Q: "#2c7a7b", R: "#6
                   S: "#b7791f", T: "#276749", U: "#a0aec0", V: "#c05621" };
 const colour = (c) => PALETTE[c?.[0]] ?? "#718096";
 const NO_VALUE = "#4a5568";
+// The legend entry of the plots a variable's models recognise none of the
+// species of.
+const NOT_IMPUTED = { label: "not imputed (no species recognised)", colour: "#c53030" };
 
 // Fixed class breaks per target, in its units, so that a colour stands for
 // the same values in every run: plot area on a roughly logarithmic scale,
@@ -1367,7 +1400,7 @@ function variableView(s) {
       return { code: c, label: s.names[c] ?? "", colour: colour(c), group: groups.get(c[0]) };
     });
     return { kind: "class", label: s.label, byCount: true, classes, classOf: Int32Array.from(s.value), recorded: null,
-             tip: (p) => habitatName(s.classes[s.value[p]], s.names) };
+             imputed: s.imputed, tip: (p) => (s.value[p] < 0 ? "" : habitatName(s.classes[s.value[p]], s.names)) };
   }
   const { classes, classify } = numberClasses(s);
   for (const c of classes) c.group = c;
@@ -1376,7 +1409,7 @@ function variableView(s) {
   const text = (v) => withUnit(v.toLocaleString(undefined, format), u);
   return {
     kind: "number", label: s.label, byCount: false, classes, classOf: Int32Array.from(s.plotValue, classify),
-    recorded: s.recorded, value: s.plotValue, classify, text, circular: s.name === "aspect",
+    recorded: s.recorded, imputed: s.imputed, value: s.plotValue, classify, text, circular: s.name === "aspect",
     tip: (p) => (Number.isFinite(s.plotValue[p]) ? `${s.label} ${text(s.plotValue[p])}${s.recorded?.[p] ? ", recorded" : ""}` : ""),
   };
 }
@@ -1409,14 +1442,20 @@ function renderVariable(r) {
   if (!view) { $("summary").innerHTML = ""; return; }
   $("variable-title").textContent = view.label;
   const counts = new Array(view.classes.length).fill(0);
-  for (const k of view.classOf) if (k >= 0) counts[k] += 1;
+  let skipped = 0;
+  view.classOf.forEach((k, p) => {
+    if (k >= 0) counts[k] += 1;
+    else if (notImputed(view, p)) skipped += 1;
+  });
   const n = r.plotIds.length;
   const rows = view.classes.map((c, k) => [c, counts[k]]).filter(([, k]) => k > 0);
   if (view.byCount) rows.sort((a, b) => b[1] - a[1]);
+  if (skipped) rows.push([NOT_IMPUTED, skipped]);
   const most = Math.max(1, ...rows.map(([, k]) => k));
   $("summary").classList.toggle("bins", !view.byCount);
+  const coded = rows.some(([c]) => c.code);
   $("summary").innerHTML = rows
-    .map(([c, k]) => `<li><span class="sw" style="background:${c.colour}"></span>${c.code ? `<b>${escape(c.code)}</b>` : ""}` +
+    .map(([c, k]) => `<li><span class="sw" style="background:${c.colour}"></span>${coded ? `<b>${escape(c.code ?? "")}</b>` : ""}` +
                      `<span class="mid"><span class="nm">${escape(c.label)}</span>` +
                      `<span class="bar" style="width:${((100 * k) / most).toFixed(1)}%"></span></span>` +
                      `<span class="n">${k.toLocaleString()} <span class="count">(${((100 * k) / n).toFixed(1)}%)</span></span></li>`)
@@ -1460,9 +1499,14 @@ function circularMean(degrees) {
 // numeric classes by value.
 function legendGroups(view, counts) {
   if (!view) return [];
-  return view.byCount ? [...counts].sort((a, b) => b[1] - a[1]).map(([g]) => g)
+  const groups = view.byCount ? [...counts].sort((a, b) => b[1] - a[1]).map(([g]) => g)
     : [...new Set(view.classes.map((c) => c.group))].filter((g) => counts.has(g));
+  return [...groups.filter((g) => g !== NOT_IMPUTED), ...(counts.has(NOT_IMPUTED) ? [NOT_IMPUTED] : [])];
 }
+
+// Whether plot p has no value of the view's variable because its models
+// recognise none of its species (a recorded value still counts as a value).
+const notImputed = (view, p) => view.classOf[p] < 0 && !!view.imputed && !view.imputed[p];
 
 // What the map draws of the located plots that `keep` accepts, in latitude
 // and longitude, with its legend: the groups shown and the keys to the marks.
@@ -1487,9 +1531,12 @@ function plotMarks(r, view, coords, located) {
     const k = view ? view.classOf[p] : -1;
     const ring = !!view?.recorded?.[p];
     if (ring) rings = true; else dots = true;
+    const skipped = !!view && notImputed(view, p);
     if (k >= 0) tally(counts, view.classes[k].group, 1);
-    const tip = view?.tip(p);
-    return { kind: ring ? "ring" : "dot", at: coords[p], fill: k >= 0 ? view.classes[k].colour : NO_VALUE,
+    else if (skipped) tally(counts, NOT_IMPUTED, 1);
+    const tip = skipped ? "not imputed, no species recognised" : view?.tip(p);
+    return { kind: ring ? "ring" : "dot", at: coords[p],
+             fill: k >= 0 ? view.classes[k].colour : skipped ? NOT_IMPUTED.colour : NO_VALUE,
              tip: `${r.plotIds[p]}${tip ? `: ${tip}` : ""}` };
   });
   const keys = rings ? [...(dots ? [{ shape: "dot", label: "imputed" }] : []), { shape: "ring", label: "recorded" }] : [];
@@ -1550,7 +1597,8 @@ function renderGaps(r) {
     const unit = { linear: target.units ? ` ${target.units}` : "", log: " (absolute error of log1p)",
                    circular: "°", geographic: " km (median)" }[scale];
     const digits = scale === "log" ? 3 : 1;
-    const head = `${label(target)}: missing in ${report.n_gaps.toLocaleString()} of ${(report.n_gaps + report.n_complete).toLocaleString()} plots`;
+    const skipped = report.n_not_imputed ? ` (and in ${report.n_not_imputed.toLocaleString()} not imputed)` : "";
+    const head = `${label(target)}: missing in ${report.n_gaps.toLocaleString()} of ${(report.n_gaps + report.n_complete).toLocaleString()} plots${skipped}`;
     if (report.skipped) return `<li>${escape(head)}, imputed with the model's value (${escape(report.skipped)}).</li>`;
     const several = report.groups.length > 1;
     const groups = report.groups.map((g) => {
@@ -1737,6 +1785,7 @@ async function downloadMap() {
 function download() {
   const r = state.result;
   const cols = [{ name: "PlotObservationID", values: r.plotIds },
+                { name: "Imputed", values: imputedColumn(r) },
                 { name: "Species recognised (share of cover)", values: Array.from(r.recognised), digits: 4 },
                 ...r.columns.map((c) => ({ ...c, digits: c.digits === undefined ? undefined : c.digits + 2 }))];
   const quote = (s) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);

@@ -57,7 +57,7 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="nav-item dropdown">
+<li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
@@ -873,7 +873,10 @@ location the median distance in kilometres of the members from the
 combined point. These measure how far the members disagree and are not
 calibrated intervals. The recognised share is the share of a plot’s
 distinct species the members’ vocabulary knows; the first new plot, with
-its <em>Carex firma</em> record, sits below 1.</p>
+its <em>Carex firma</em> record, sits below 1. A plot none of whose
+species the vocabulary knows is not imputed, since every member was
+trained on plots holding species it knows: <code>imputed</code> is
+<code>FALSE</code> for it, and its values are missing.</p>
 <p>The whole result flattens to one row per plot, the table
 <code>resolve predict --suite</code> writes on the command line.</p>
 <div class="lang-pair">
@@ -886,7 +889,7 @@ its <em>Carex firma</em> record, sits below 1.</p>
 <span><span class="co">#&gt; [7] "habitat_recognised_share"           "habitat_recognised_abundance_share"</span></span></code></pre></div>
 <div class="sourceCode" id="cb45"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb45-1"><a href="#cb45-1" tabindex="-1"></a>suite_table <span class="op">=</span> suite_preds.to_pandas()</span>
 <span id="cb45-2"><a href="#cb45-2" tabindex="-1"></a><span class="bu">list</span>(suite_table.columns)</span>
-<span id="cb45-3"><a href="#cb45-3" tabindex="-1"></a><span class="co">#&gt; ['plot_id', 'habitat', 'habitat_code', 'habitat_agreement', 'habitat_n_species', 'habitat_n_recognised', 'habitat_recognised_share', 'habitat_recognised_abundance_share']</span></span></code></pre></div>
+<span id="cb45-3"><a href="#cb45-3" tabindex="-1"></a><span class="co">#&gt; ['plot_id', 'habitat', 'habitat_code', 'habitat_agreement', 'habitat_imputed', 'habitat_n_species', 'habitat_n_recognised', 'habitat_recognised_share', 'habitat_recognised_abundance_share']</span></span></code></pre></div>
 </div>
 <div class="lang-r-only">
 <p><code>keepMembers = TRUE</code> adds every member’s own imputed

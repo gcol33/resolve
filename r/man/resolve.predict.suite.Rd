@@ -77,8 +77,9 @@ A \code{resolve_suite_predictions} list: \code{plot_ids}, and \code{targets}, a
 named list with one entry per target holding \code{value} (the combined
 prediction; class codes for a vote, with the class labels in \code{label}; a
 plots x 2 matrix of \code{latitude} and \code{longitude} in degrees for a spherical
-mean), \code{agreement}, \code{probabilities}, \code{dispersion}, the recognition columns
-above, \code{recorded} (for a target \code{columns$recorded} names: logical, \code{TRUE}
+mean), \code{agreement}, \code{probabilities}, \code{dispersion}, \code{imputed} (logical,
+\code{FALSE} where the plot is not imputed), the recognition columns above,
+\code{recorded} (for a target \code{columns$recorded} names: logical, \code{TRUE}
 where the plot records a value, so \code{value} is imputed where it is
 \code{FALSE}), \code{members} (plots x members, with \code{keepMembers}; for a spherical
 mean a list of \code{latitude} and \code{longitude}, each plots x members), and the
@@ -112,6 +113,12 @@ the members from the combined point (\code{dispersion}), in km;
 Agreement and dispersion measure how far the members disagree; they are not
 calibrated intervals. \code{NA} marks a value that is undefined for the plot (a
 plot with no recorded species has no recognised share).
+
+A plot none of whose species the target's vocabulary recognises (or with no
+species at all) is not imputed: the models were trained on plots holding
+species they know. \code{imputed} is \code{FALSE} for it, and its prediction,
+agreement, probabilities, dispersion, members, gap fit and terrain-corrected
+value are \code{NA} (a class code \code{-1}).
 }
 \examples{
 \dontshow{if (resolveR::resolve.available()) withAutoprint(\{ # examplesIf}

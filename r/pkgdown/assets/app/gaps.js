@@ -53,7 +53,10 @@ const CANDIDATES = [
 ];
 
 // Where a plot's calibrated value comes from: its own record or the fit.
-export const gapSource = (code) => (code === GAP_RECORDED ? "recorded" : "imputed");
+// A plot lacking the value whose raw prediction is not finite: not imputed.
+export const GAP_NOT_IMPUTED = -2;
+export const gapSource = (code) =>
+  (code === GAP_RECORDED ? "recorded" : code === GAP_NOT_IMPUTED ? "not imputed" : "imputed");
 
 // The chosen method in words, with the k it chose per neighbour kind
 // ([kind, k] pairs, as in the report) and the centre the scale takes.
@@ -913,6 +916,8 @@ class CrossValidation {
 //   raw       the model's prediction per plot: Float64Array(n), or (2n)
 //             latitude / longitude pairs for a geographic target
 //   recorded  the dataset's value per plot, laid out as raw; NaN marks a gap
+//             (a plot whose raw value is NaN was not imputed: it is neither a
+//             gap nor a complete plot)
 //   plots     { species: per plot the sorted ids of the species present,
 //               coordinates?: Float64Array(2n) latitude / longitude, NaN
 //               where unknown, years?: Float64Array(n), NaN where unknown }
@@ -924,7 +929,8 @@ class CrossValidation {
 //
 // Resolves to { fitted, method, report, folds } as the engine's GapFit:
 // fitted laid out as raw, a complete plot carrying its recorded value and a
-// gap the chosen method's; method GAP_RECORDED or the index into GAP_METHODS.
+// gap the chosen method's, a plot not imputed NaN; method GAP_RECORDED,
+// GAP_NOT_IMPUTED or the index into GAP_METHODS.
 export async function fitGaps(target, raw, recorded, plots, options = {}) {
   const { spatial = true, seed = GAP_SEED, kGrid = K_GRID, nFolds = 10, maxFoldShare = 0.5, matchingSample = 1000,
           candidates = null, folds: injected = null, pool = new RowPool() } = options;
@@ -935,13 +941,17 @@ export async function fitGaps(target, raw, recorded, plots, options = {}) {
     throw new Error(`gap fitting: target '${target.name}' needs ${d === 2 ? "latitude / longitude pairs" : "one value"} per plot`);
   }
   const rec = { n, d, v: Float64Array.from(recorded) }, rawRows = { n, d, v: Float64Array.from(raw) };
-  const cal = [], test = [];
-  for (let i = 0; i < n; i++) (rowFinite(rec, i) ? cal : test).push(i);
+  const cal = [], test = [], notImputed = [];
+  for (let i = 0; i < n; i++) {
+    const imputed = rowFinite(rawRows, i);
+    if (rowFinite(rec, i)) { if (imputed) cal.push(i); } else (imputed ? test : notImputed).push(i);
+  }
 
   const report = { target: target.name, scale: target.scale, n_complete: cal.length, n_gaps: test.length,
-                   skipped: "", axes: [], folds: null, neighbours: [], groups: [] };
+                   n_not_imputed: notImputed.length, skipped: "", axes: [], folds: null, neighbours: [], groups: [] };
   const fitted = Float64Array.from(recorded);
   const method = new Int32Array(n).fill(GAP_RECORDED);
+  for (const i of notImputed) method[i] = GAP_NOT_IMPUTED;
   if (!test.length) return { fitted, method, report, folds: null };
   if (cal.length < 2) {
     report.skipped = "fewer than two complete plots";
