@@ -1550,17 +1550,20 @@ function renderGaps(r) {
     const unit = { linear: target.units ? ` ${target.units}` : "", log: " (absolute error of log1p)",
                    circular: "°", geographic: " km (median)" }[scale];
     const digits = scale === "log" ? 3 : 1;
-    const head = `${label(target)}: ${report.n_gaps.toLocaleString()} of ${(report.n_gaps + report.n_complete).toLocaleString()} plots without it`;
-    if (report.skipped) return `<li>${escape(head)}, imputed with the model's value (${escape(report.skipped)})</li>`;
+    const head = `${label(target)}: missing in ${report.n_gaps.toLocaleString()} of ${(report.n_gaps + report.n_complete).toLocaleString()} plots`;
+    if (report.skipped) return `<li>${escape(head)}, imputed with the model's value (${escape(report.skipped)}).</li>`;
+    const several = report.groups.length > 1;
     const groups = report.groups.map((g) => {
       const modelError = g.cv_error.find(([m]) => m === 1)?.[1];
-      const where = report.groups.length > 1 ? `${g.n_gaps.toLocaleString()} ${g.group === "located" ? "with" : "without"} coordinates: ` : "";
+      const where = several ? `${g.n_gaps.toLocaleString()} ${g.group === "located" ? "with" : "without"} coordinates ` : "";
       const how = `${where}imputed from ${describeGapMethod(g.method, g.k, scale)}`;
       if (!Number.isFinite(g.estimated_error)) return how;
-      const versus = g.method === 1 || !Number.isFinite(modelError) ? "" : ` against ${modelError.toFixed(digits)} for the model's value`;
+      const versus = g.method === 1 || !Number.isFinite(modelError) ? "" : `, ${modelError.toFixed(digits)}${unit} with the model's value alone`;
       return `${how}, estimated error ${g.estimated_error.toFixed(digits)}${unit}${versus}`;
     });
-    return `<li>${escape(head)}; ${escape(groups.join("; "))}, judged on the ${report.n_complete.toLocaleString()} plots recording it</li>`;
+    const basis = report.groups.some((g) => Number.isFinite(g.estimated_error))
+      ? ` Errors are cross-validated on the ${report.n_complete.toLocaleString()} plots that record it.` : "";
+    return `<li>${escape(`${head}${several ? ". " : ", "}${groups.join("; ")}.${basis}`)}</li>`;
   }).join("");
   box.hidden = !box.innerHTML;
 }
