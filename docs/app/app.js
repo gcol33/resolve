@@ -1223,7 +1223,7 @@ function renderUnknown(r) {
   box.hidden = false;
   const records = r.unknown.reduce((a, [, k]) => a + k, 0);
   box.querySelector("summary").textContent =
-    `${r.unknown.length.toLocaleString()} species names not recognised (${records.toLocaleString()} records, left out)`;
+    `${r.unknown.length.toLocaleString()} species names not recognised: ${records.toLocaleString()} records not used, their plots imputed from the other species`;
   box.querySelector("p").innerHTML =
     `None of these names was found through ${nameRoutes()}.`;
   box.querySelector("ul").innerHTML = r.unknown.slice(0, 200)
