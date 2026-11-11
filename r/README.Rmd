@@ -37,7 +37,7 @@ RESOLVE lets you:
 
 On every push the [tests workflow](https://github.com/gcol33/resolve/actions/workflows/tests.yml) builds the RESOLVE engine and runs the C++ tests, the command-line end-to-end tests and the Python binding tests; the R package goes through R CMD check. Feature hashing follows [Weinberger et al. (2009)](https://doi.org/10.1145/1553374.1553516), the transformer encoder [Vaswani et al. (2017)](https://doi.org/10.48550/arXiv.1706.03762). Report the RESOLVE version with an analysis, since defaults have changed between versions.
 
-The [RESOLVE App](https://gillescolling.com/resolve/articles/app.html) runs the released models in your browser, without installing anything. It imputes the EUNIS habitat, altitude, slope, plot area, survey year and location of the example plots or of your own tables, and maps the plots.
+The [RESOLVE App](https://gillescolling.com/resolve/articles/app.html) runs the released models in your browser, without installing anything. It imputes the EUNIS habitat, the phytosociological alliance, altitude, slope, plot area, survey year and location of the example plots or of your own tables, and maps the plots.
 
 ## Installation
 

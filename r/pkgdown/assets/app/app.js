@@ -1074,6 +1074,7 @@ async function fillGaps(result, target, scale, raw) {
 }
 
 const LABELS = { eunis: "EUNIS habitat", eunis_l2: "EUNIS habitat, level 2", eunis_l3: "EUNIS habitat, level 3",
+                 alliance: "Alliance (EuroVegChecklist)",
                  altitude: "Altitude", slope: "Slope", area: "Plot area", year: "Survey year", location: "Location" };
 const label = (t) => (t.readAt ? `EUNIS habitat, level ${t.readAt}` : LABELS[t.name] ?? t.name);
 const habitatName = (code, names) => (names[code] ? `${code} (${names[code]})` : code);
@@ -1814,7 +1815,7 @@ function reads(t) {
 let preloaded = "";
 
 function startPreload() {
-  const order = ["eunis", "altitude", "year", "area", "slope", "location"];
+  const order = ["eunis", "alliance", "altitude", "year", "area", "slope", "location"];
   const rank = (t) => order.indexOf(t.level ? "eunis" : t.name);
   const targets = chosenTargets().sort((a, b) => rank(a) - rank(b));
   const members = targets.flatMap((t) => t.members).join();
