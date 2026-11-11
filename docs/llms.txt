@@ -62,9 +62,9 @@ versions.
 
 The [RESOLVE App](https://gillescolling.com/resolve/articles/app.html)
 runs the released models in your browser, without installing anything.
-It imputes the EUNIS habitat, altitude, slope, plot area, survey year
-and location of the example plots or of your own tables, and maps the
-plots.
+It imputes the EUNIS habitat, the phytosociological alliance, altitude,
+slope, plot area, survey year and location of the example plots or of
+your own tables, and maps the plots.
 
 ## Installation
 
