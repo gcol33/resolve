@@ -2,18 +2,21 @@
 
 Impute the habitat
 ([EUNIS](https://www.eea.europa.eu/en/datahub/datahubitem-view/123d0c9a-a6fa-4f2d-b887-5d8e5468faed)),
-the phytosociological alliance (EuroVegChecklist), site metadata
-(altitude, slope, location) and survey metadata (plot area, survey year)
-of vegetation plots from their species composition and cover-abundance,
-with the released RESOLVE models trained on the plots of the European
-Vegetation Archive (EVA). The models run locally in your browser; your
-files are not uploaded. The page downloads the models and the elevation
-model from Zenodo ([models](https://doi.org/10.5281/zenodo.24079624),
-[elevation model](https://doi.org/10.5281/zenodo.24075925)), or the
-models from their copy on [Hugging
-Face](https://huggingface.co/gcol33/resolve-models) when Zenodo does not
-answer, the map from OpenStreetMap and, for a map download, the country
-boundaries from Eurostat GISCO.
+the phytosociological alliance, site metadata (altitude, slope,
+location) and survey metadata (plot area, survey year) of vegetation
+plots from their species composition and cover-abundance, with the
+released RESOLVE models. The models were trained on the plots of the
+[European Vegetation Archive (EVA)](https://euroveg.org/eva-database)
+([Chytrý et al. 2016](https://doi.org/10.1111/avsc.12191)), which brings
+together the plots of national and regional vegetation databases; the
+models exist thanks to their custodians and the many people who recorded
+and contributed these plots. The models run locally in your browser;
+your files are not uploaded. The page downloads the models and the
+elevation model from Zenodo
+([models](https://doi.org/10.5281/zenodo.24079624), [elevation
+model](https://doi.org/10.5281/zenodo.24075925)), the map from
+OpenStreetMap and, for a map download, the country boundaries from
+Eurostat GISCO.
 
 ![](../logo.svg)![RESOLVE](../logo.svg)
 

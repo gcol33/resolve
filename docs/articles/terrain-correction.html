@@ -346,11 +346,13 @@ ship.</p>
 <h2 id="what-it-changes-on-the-archive">What it changes on the archive<a class="anchor" aria-label="anchor" href="#what-it-changes-on-the-archive"></a>
 </h2>
 <p>The released context suite (species, coordinates and date) imputes
-each archive plot from models that never saw it: in a random split, and
-in two splits that hold out whole 100 km blocks. On those held-out
-imputed values the correction was fitted in five folds, grouped by 100
-km block, and scored on the fold it did not see, with the descriptors
-read from the coded field the suite ships. Mean absolute error:</p>
+each archive plot from models that never saw it: in a random split, in
+two splits that hold out whole 100 km blocks, and with each of 15
+contributing databases held out of training. Each plot’s corrected value
+comes from a correction fitted without it: for the three splits, in five
+folds grouped by 100 km block; for a withheld database, with all of that
+database’s plots left out. The descriptors are read from the coded field
+the suite ships. Mean absolute error:</p>
 <table class="table">
 <colgroup>
 <col width="13%">
@@ -375,7 +377,7 @@ read from the coded field the suite ships. Mean absolute error:</p>
 <td align="right">346,597</td>
 <td align="right">42.9</td>
 <td align="right">33.9</td>
-<td align="right">22.6</td>
+<td align="right">24.6</td>
 </tr>
 <tr class="even">
 <td>100 km blocks, seed 42</td>
@@ -383,7 +385,7 @@ read from the coded field the suite ships. Mean absolute error:</p>
 <td align="right">363,880</td>
 <td align="right">99.5</td>
 <td align="right">40.7</td>
-<td align="right">37.6</td>
+<td align="right">37.0</td>
 </tr>
 <tr class="odd">
 <td>100 km blocks, seed 7</td>
@@ -391,7 +393,7 @@ read from the coded field the suite ships. Mean absolute error:</p>
 <td align="right">363,049</td>
 <td align="right">76.0</td>
 <td align="right">32.1</td>
-<td align="right">28.1</td>
+<td align="right">27.8</td>
 </tr>
 <tr class="even">
 <td>random</td>
@@ -399,15 +401,15 @@ read from the coded field the suite ships. Mean absolute error:</p>
 <td align="right">119,738</td>
 <td align="right">5.42</td>
 <td align="right">10.94</td>
-<td align="right">5.41</td>
+<td align="right">5.40</td>
 </tr>
 <tr class="odd">
 <td>100 km blocks, seed 42</td>
 <td>slope (degrees)</td>
 <td align="right">128,817</td>
 <td align="right">7.20</td>
-<td align="right">11.05</td>
-<td align="right">7.14</td>
+<td align="right">11.03</td>
+<td align="right">7.06</td>
 </tr>
 <tr class="even">
 <td>100 km blocks, seed 7</td>
@@ -443,42 +445,48 @@ where the gain comes from (random split):</p>
 <td align="right">124,476</td>
 <td align="right">20.3</td>
 <td align="right">8.0</td>
-<td align="right">7.0</td>
+<td align="right">7.3</td>
 </tr>
 <tr class="even">
 <td>10 m to 100 m</td>
 <td align="right">26,979</td>
 <td align="right">49.4</td>
 <td align="right">23.8</td>
-<td align="right">19.0</td>
+<td align="right">19.9</td>
 </tr>
 <tr class="odd">
 <td>100 m to 1 km</td>
 <td align="right">30,658</td>
 <td align="right">64.7</td>
 <td align="right">51.9</td>
-<td align="right">39.6</td>
+<td align="right">43.1</td>
 </tr>
 <tr class="even">
 <td>over 1 km</td>
 <td align="right">46,241</td>
 <td align="right">63.5</td>
-<td align="right">100.1</td>
-<td align="right">49.9</td>
+<td align="right">100.0</td>
+<td align="right">55.9</td>
 </tr>
 <tr class="odd">
 <td>not recorded</td>
 <td align="right">118,243</td>
 <td align="right">51.4</td>
 <td align="right">33.0</td>
-<td align="right">24.7</td>
+<td align="right">26.9</td>
 </tr>
 </tbody>
 </table>
 <p>Where the coordinate is precise, the corrected value stays close to
 the elevation model; where it is coarser than a kilometre, the elevation
-model errs by 100 m on average, and the corrected value by half of that,
-below the imputed value alone.</p>
+model errs by 100 m on average, and the corrected value by about half of
+that, below the imputed value alone.</p>
+<p>On the 15 withheld databases, the corrected altitude is the closest
+of the three in 11. In three it stays slightly behind the elevation
+model: Britain (16.5 m against 16.2 m), Slovenia (37.9 m against 37.4 m)
+and France (30.0 m against 28.3 m). In the Turkey Oak-Forest Database
+the elevation model errs by 436 m, and the imputed value alone (141 m)
+is closer than the corrected one (255 m).</p>
 <p>For slope, the elevation model’s reading at the coordinate errs by
 about twice as much as the imputed value, at every location uncertainty,
 and the correction keeps the imputed value nearly unchanged: the gain is
@@ -486,12 +494,15 @@ at most two tenths of a degree. A slope read from a 30 m elevation model
 may describe a different patch of ground than the few square metres a
 plot covers.</p>
 <p>The descriptors read from the original grids give the same picture:
-altitude 22.6, 37.7 and 28.0 m, slope 5.41, 7.10 and 7.71 degrees. The
+altitude 24.6, 37.0 and 27.8 m, slope 5.40, 7.06 and 7.71 degrees. The
 coded field (1.95 GB for the 1,368 tiles over the archive’s extent, 1.09
 bits per cell, root mean square error 0.99 m against the grids, no cell
-off by more than 2 m) changes the corrected error by at most 0.13 m and
-0.04 degrees. The corrections the suite ships were fitted on the three
-splits pooled.</p>
+off by more than 2 m) changes the corrected error by at most 0.08 m and
+0.01 degrees. The altitude correction the suite ships was fitted on the
+three splits and the 15 withheld databases pooled; the slope correction
+was fitted on the three splits alone, since adding the withheld
+databases made the corrected slope worse than the imputed value alone on
+the random split.</p>
 </div>
 <div class="section level2">
 <h2 id="the-command-line">The command line<a class="anchor" aria-label="anchor" href="#the-command-line"></a>
