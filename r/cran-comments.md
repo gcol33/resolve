@@ -1,12 +1,12 @@
 ## Resubmission
 
 This is a resubmission of resolveR 0.10.0 (submitted 2026-09-09), and it
-replaces resolveR 1.1.0 (submitted 2026-11-09), which is still waiting in the
-queue. The version is now 1.2.0 because development of the engine continued,
+replaces resolveR 1.2.0 (submitted 2026-11-10), which is still waiting in the
+queue. The version is now 1.3.0 because development of the engine continued,
 and the package's version follows the engine's: `resolve.install_backend()`
-downloads the engine build of the same version. 1.2.0 adds fine-tuning of a
-trained model (`resolve.parent()`, `resolve.derive_suite()`); its examples are
-guarded like the others and write only under `tempdir()`.
+downloads the engine build of the same version. 1.3.0 leaves a plot without
+any recognised species unimputed and reports which plots were imputed; it adds
+no exported function and no example.
 
 Response to the review of 2026-09-17:
 
@@ -48,7 +48,7 @@ by any example, test or vignette. This is the same delayed-binary model the
 ## Test environments
 
 * local: Windows 11, R 4.6.1, without the backend (as on CRAN): Status OK
-* win-builder: R-devel (2026-11-07 r90850 ucrt): 1 NOTE (new submission;
+* win-builder: R-devel (2026-11-16 r90914 ucrt): 1 NOTE (new submission;
   the flagged words are author names, "et al", "embeddings" and "prebuilt")
 * GitHub Actions: Ubuntu (R-devel, R-release), macOS and Windows (R-release)
 
