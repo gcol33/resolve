@@ -274,12 +274,12 @@ out = out.merge(new_plots[["plot_id", "elevation", "habitat"]],
                 on="plot_id", suffixes=("", "_observed"))
 out.head(6)
 #>   plot_id  elevation    habitat  elevation_observed habitat_observed
-#> 0    A005     2217.0     alpine                2145        grassland
-#> 1    A010     1802.0     forest                1632          wetland
-#> 2    A015     2288.0     alpine                2165           alpine
-#> 3    A020     1276.0     forest                1284           forest
-#> 4    A025      670.0  grassland                1235        grassland
-#> 5    A030     1570.0  grassland                1840        grassland
+#> 0    A005     2180.0     alpine                2145        grassland
+#> 1    A010     1649.0     forest                1632          wetland
+#> 2    A015     2229.0     alpine                2165           alpine
+#> 3    A020     1399.0     forest                1284           forest
+#> 4    A025      900.0  grassland                1235        grassland
+#> 5    A030     1463.0  grassland                1840        grassland
 ```
 :::
 
@@ -294,7 +294,7 @@ c(mae = mean(abs(out$elevation - out$elevation_observed)),
 ```python
 {"mae": (out.elevation - out.elevation_observed).abs().mean(),
  "accuracy": (out.habitat == out.habitat_observed).mean()}
-#> {'mae': np.float64(206.2), 'accuracy': np.float64(0.7666666666666667)}
+#> {'mae': np.float64(209.23333333333332), 'accuracy': np.float64(0.7333333333333333)}
 ```
 :::
 
@@ -313,9 +313,9 @@ all(max.col(probs) - 1 == preds$predictions$habitat)
 ```python
 probs = preds.probabilities["habitat"]
 probs[:3].round(decimals=3)
-#> tensor([[0.7450, 0.0440, 0.1500, 0.0610],
-#>         [0.1900, 0.5470, 0.1170, 0.1450],
-#>         [0.9210, 0.0360, 0.0180, 0.0250]])
+#> tensor([[0.8230, 0.0530, 0.0740, 0.0500],
+#>         [0.0930, 0.7170, 0.0680, 0.1220],
+#>         [0.8100, 0.0920, 0.0400, 0.0580]])
 probs.sum(dim=1).aminmax()
 #> torch.return_types.aminmax(
 #> min=tensor(1.0000),
@@ -353,9 +353,9 @@ sure = pd.DataFrame({
 })
 sure.sort_values("confidence").head(3)
 #>    plot_id  confidence    margin   entropy
-#> 22    A115    0.371325  0.033685  1.292142
-#> 21    A110    0.469217  0.181195  1.222800
-#> 29    A150    0.546224  0.330326  1.167729
+#> 16    A085    0.363409  0.037384  1.279009
+#> 24    A125    0.519176  0.140828  1.010332
+#> 29    A150    0.520104  0.271364  1.183309
 ```
 :::
 
@@ -528,12 +528,12 @@ pd.DataFrame({"plot_id": preds.plot_ids,
               "model": preds.predictions["elevation"].numpy().round(),
               "blended": blended.predictions["elevation"].numpy().round()}).head(6)
 #>   plot_id   model  blended
-#> 0    A005  2217.0   2247.0
-#> 1    A010  1802.0   1844.0
-#> 2    A015  2288.0   2308.0
-#> 3    A020  1276.0   1232.0
-#> 4    A025   670.0    714.0
-#> 5    A030  1570.0   1542.0
+#> 0    A005  2180.0   2209.0
+#> 1    A010  1649.0   1700.0
+#> 2    A015  2229.0   2242.0
+#> 3    A020  1399.0   1339.0
+#> 4    A025   900.0    898.0
+#> 5    A030  1463.0   1396.0
 
 predictor.clear_retrieval()
 ```
@@ -662,11 +662,11 @@ pd.DataFrame({"plot_id": suite_preds.plot_ids,
               "recognised": habitat.recognition.count_share.numpy()}).head(6)
 #>   plot_id    habitat  agreement  recognised
 #> 0    A005     alpine   0.666667    0.666667
-#> 1    A010    wetland   0.666667    1.000000
-#> 2    A015     alpine   0.333333    1.000000
+#> 1    A010     forest   1.000000    1.000000
+#> 2    A015     alpine   1.000000    1.000000
 #> 3    A020     forest   1.000000    1.000000
-#> 4    A025  grassland   0.666667    1.000000
-#> 5    A030  grassland   1.000000    1.000000
+#> 4    A025  grassland   1.000000    1.000000
+#> 5    A030  grassland   0.666667    1.000000
 ```
 :::
 
@@ -698,5 +698,7 @@ list(suite_table.columns)
 ## Next steps
 
 - [Latent and species embeddings](embeddings.html): the latent space, species and genus embeddings, and what they are used for.
+
 - [Large data and GPUs](performance.html): imputation on large surveys and on the GPU.
+
 - [The command line](command-line.html): `resolve predict`, with and without a suite.

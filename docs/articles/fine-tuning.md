@@ -277,7 +277,7 @@ trainer.save(tuned_path, trainer.run_metadata)
 metrics = result.final_metrics
 {"mae": round(metrics["elevation"]["mae"], 3), "r2": round(metrics["elevation"]["r2"], 3),
  "accuracy": round(metrics["belt"]["accuracy"], 3)}
-#> {'mae': 243.741, 'r2': 0.784, 'accuracy': 0.8}
+#> {'mae': 330.552, 'r2': 0.429, 'accuracy': 0.9}
 ```
 
 These metrics are read on the plots the fit held out for early stopping,
@@ -306,7 +306,7 @@ difference:
 resolve.train.dataset(mine, initFrom = parent, hiddenDims = c(128L, 64L),
                       maxEpochs = 1L, verbose = FALSE)
 #> Error:
-#> ! Trainer::init_from: the model cannot start from 'C:\Users\GILLES~1\AppData\Local\Temp\RtmpW2XCkt/habitat_suite\seed_1.pt':
+#> ! Trainer::init_from: the model cannot start from 'C:\Users\GILLES~1\AppData\Local\Temp\Rtmp8WaSd5/habitat_suite\seed_1.pt':
 #>   - model config 'hidden_dims' is [128,64] here and [64,32] in the parent
 #>   - parameter 'encoder.mlp.0.weight' is [128, 84] here and [64, 84] in the parent
 #>   - parameter 'encoder.mlp.0.bias' is [128] here and [64] in the parent
@@ -441,12 +441,12 @@ head(imputed[, c("plot_id", "elevation", "elevation_sd", "belt", "belt_agreement
 regional = rc.SuitePredictor.load(derived_dir)
 imputed = regional.predict(my_species, header=my_plots).to_pandas()
 imputed[["plot_id", "elevation", "elevation_sd", "belt", "belt_agreement"]].head()
-#>   plot_id    elevation  elevation_sd     belt  belt_agreement
-#> 0    A101  1006.021179    133.246735  montane             1.0
-#> 1    A102   849.546631     37.175499  montane             1.0
-#> 2    A103  1300.825195     12.485113  montane             1.0
-#> 3    A104  1354.236816    163.125534  montane             1.0
-#> 4    A105  1064.018066    106.157082  montane             1.0
+#>   plot_id    elevation  elevation_sd       belt  belt_agreement
+#> 0    A101  1071.679443      9.147159    montane             1.0
+#> 1    A102   779.587769     28.783226    montane             1.0
+#> 2    A103  1299.252686     13.909081    montane             1.0
+#> 3    A104  1620.115479     21.122658  subalpine             1.0
+#> 4    A105  1019.817627    116.048767    montane             1.0
 ```
 
 ## The command line

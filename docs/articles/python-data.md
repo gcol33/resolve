@@ -63,18 +63,25 @@ Attributes:
 
 - `plot_id` (`str`): the plot identifier, a column of both tables.
   Required.
+
 - `species_id` (`str`): the species name in the species table. Required.
+
 - `abundance` (`str` or `None`): the abundance or cover column of the
   species table.
+
 - `genus`, `family` (`str` or `None`): the genus and family columns of
   the species table.
+
 - `latitude`, `longitude` (`str` or `None`): the coordinate columns of
   the plot table, in degrees.
+
 - `covariates` (`list[str]`): numeric plot-table columns the model
   reads, standardised on the fitting plots.
+
 - `categoricals` (`list[str]`): text plot-table columns, each coded as
   integers when the data is loaded. A column is a covariate or a
   categorical, never both.
+
 - `targets` (`list[str]`): a list of column names the loaders do not
   read; they take the targets from the `TargetSpec` list.
 
@@ -112,16 +119,23 @@ elevation.weight = 2.0
 Attributes:
 
 - `column_name` (`str`): the column read from the plot table.
+
 - `target_name` (`str`): the name the target is reported under, the
   column name by default.
+
 - `task` (`TaskType`): regression or classification.
+
 - `transform` (`TransformType`): `Log1p` stores `log(1 + y)` and trains
   on it; imputed values and metrics come back in the original units.
+
 - `num_classes` (`int`): the class count of a classification target.
+
 - `class_mapping` (`dict[str, int]`): the label-to-code map; empty when
   the codes are fitted alphabetically.
+
 - `weight` (`float`, default `1.0`): the target’s weight in the loss
   summed over targets.
+
 - `missing` (`TargetMissingPolicy`, default `Drop`): what happens to a
   plot with no value for this target.
 
@@ -168,45 +182,61 @@ Attributes:
 
 - `species_encoding` (`SpeciesEncodingMode`, default `Hash`): the
   encoding.
+
 - `hash_dim` (`int`, default `32`): the width of the hashed vector.
+
 - `top_k` (`int`, default `3`): the species per plot the hash encoding
   keeps, and the number of genus and family slots of the hash, sparse
   and embed encodings.
+
 - `top_k_species` (`int`, default `10`): the species slots of the embed
   encoding.
+
 - `selection` (`SelectionMode`, default `Top`): which species of a plot
   survive its budget, ranked by recorded abundance, ties by name.
+
 - `species_budget` (`int`, default `0`): the species per plot kept under
   `RankPool`, `Transformer` and `Sparse`, taken from the end of the
   ranking `selection` names; `0` keeps every species.
+
 - `representation` (`RepresentationMode`, default `Abundance`): the
   value each species carries into every encoding, its abundance or
   `1.0`. The selection still ranks by recorded abundance.
+
 - `normalization` (`NormalizationMode`, default `Raw`): how the hash
   weights of a plot’s selected species are rescaled.
+
 - `aggregation` (`AggregationMode`, default `Abundance`): how the genus
   and family slots rank a plot’s taxa, and how `RankPool` and
   `Transformer` weight each species’ genus and family.
+
 - `pool_weighting` (`PoolWeighting`, default `Log1p`): the weight each
   species pools with under `RankPool` and `Transformer`.
+
 - `pool_species_cap` (`int`, default `0`): the most species per plot
   `RankPool` and `Transformer` read. `0` is no cap; a positive number
   caps at that many; `-x` caps at the `(100 - x)`th percentile of the
   plots’ species counts (`-1` the 99th). A longer plot keeps its most
   abundant species.
+
 - `track_unknown_fraction` (`bool`, default `True`): add an input column
   with each plot’s share of abundance from species outside the
   vocabulary.
+
 - `track_unknown_count` (`bool`, default `False`): add an input column
   with each plot’s number of such species.
+
 - `use_taxonomy` (`bool`, default `True`): read the genus and family
   when the roles name them.
+
 - `missing_values` (`MissingValuePolicy`, default `Indicate`): how a
   blank covariate or coordinate cell enters the model.
+
 - `zero_abundance_as` (`float`, default `0.0`): the abundance a record
   of exactly 0 is read at. Archives that write a presence without a
   cover estimate as 0 read as absent under `log1p` weighting; `1.0`
   reads them at the weight of a record with no cover.
+
 - `use_cuda_hash` (`bool`, default `False`): compute the hash encoding
   on the GPU for each batch instead of storing it at load.
 
@@ -407,13 +437,19 @@ from_strings = rc.ResolveDataset.from_columns_with_vocabs(
 
 - `schema` (`ResolveSchema`): the structure of the dataset, which a
   model is built from and a checkpoint carries.
+
 - `config` (`DatasetConfig`): the settings the loader ran with.
+
 - `n_plots` (`int`): the plots after the target-driven drops.
+
 - `plot_ids` (`list[str]`): the plot identifiers, in row order.
+
 - `species_vocab` (`list[str]`): the species vocabulary in code order;
   code 0 is `"<UNK>"`, the unknown species.
+
 - `taxonomy_vocab` (`TaxonomyVocab`) and `categorical_vocab`
   (`CategoricalVocab`): the fitted genus, family and categorical codes.
+
 - `targets` (`dict[str, Tensor]`): the target values, in the space the
   loader stored them.
 
@@ -423,25 +459,33 @@ not produce them:
 - `coordinates` (`(n_plots, 2)`) and `covariates`
   (`(n_plots, n_covariates)`), missing cells `NaN`; `categorical_ids`
   (`(n_plots, n_categoricals)`).
+
 - `hash_embedding` (`(n_plots, hash_dim)`): the hash encoding, without
   `use_cuda_hash`.
+
 - `species_ids`: the species codes of the embed slots
   (`(n_plots, top_k_species)`) or of every pooled species
   (`(n_plots, max_species)`).
+
 - `species_vector` (`(n_plots, n_species_vocab)`): the sparse encoding,
   a torch sparse CSR tensor. `crow_indices()` delimits the plots,
   `col_indices()` holds each plot’s species codes in increasing order
   and `values()` their values; `to_dense()` gives the matrix.
+
 - `genus_ids`, `family_ids` (`(n_plots, n_taxonomy_slots)`): the genus
   and family slots of the hash, sparse and embed encodings.
+
 - `pool_genus_ids`, `pool_family_ids`, `pool_weights`, `pool_mask`
   (`(n_plots, max_species)`) and `pool_has_cover` (`(n_plots,)`): the
   pooled species of `RankPool` and `Transformer`.
+
 - `unknown_fraction`, `unknown_count` (`(n_plots,)`): the
   unknown-species columns.
+
 - `species_genus_ids`, `species_family_ids` (`(n_species_vocab,)`): the
   genus and family code of each species of the vocabulary, 0 where its
   records name none.
+
 - `raw_species_ids`, `raw_weights`, `plot_offsets`: under
   `use_cuda_hash`, each plot’s selected species in flat compressed form:
   plot `p` holds entries `plot_offsets[p]` to `plot_offsets[p + 1]`.
@@ -457,13 +501,16 @@ carry information on the loaders that reuse a vocabulary.
   `plot_ids`, in the order given, the held-out fold
   `Trainer.prepare_data` takes. Raises `ValueError` for an identifier
   the dataset does not hold.
+
 - `continuous_block(include_hash)`: the unstandardised *continuous
   block*, the numeric input columns side by side: coordinates,
   covariates, their missingness columns, the unknown-species columns
   and, with `include_hash`, the hash encoding. This is the `continuous`
   argument of `ResolveModel.forward`.
+
 - `external_vocabs()`: an `ExternalVocabs` holding every vocabulary the
   dataset fitted.
+
 - `has_pool_data()`: true under `RankPool` and `Transformer`.
   `has_raw_species_data()`: true under `use_cuda_hash`.
 
@@ -486,24 +533,33 @@ schema.n_species_vocab
 Attributes:
 
 - `n_plots` (`int`): the plots after the target-driven drops.
+
 - `n_species` (`int`): the distinct species. `n_species_vocab` (`int`):
   the vocabulary size, the unknown slot included.
+
 - `n_genera`, `n_families` (`int`): the taxonomy vocabulary sizes, the
   unknown slot included.
+
 - `covariate_names`, `categorical_names` (`list[str]`): the plot-level
   columns, in input order.
+
 - `categorical_vocab_sizes` (`list[int]`) and `categorical_embed_dim`
   (`int`): the code count of each categorical column and its embedding
   width.
+
 - `targets` (`list[TargetConfig]`): one per target.
+
 - `has_coordinates`, `has_abundance`, `has_taxonomy` (`bool`): what the
   data carried.
+
 - `species_vocab`, `genus_vocab`, `family_vocab` (`list[str]`): the
   vocabularies in code order, `"<UNK>"` first.
+
 - `dataset_config` (`DatasetConfig`): the loader settings the dataset
   was coded with. `selection` is the selection applied
   (`effective_selection`), and `pool_species_cap` the width a pooled
   load truncated to.
+
 - `unrecorded_dataset_settings` (`list[str]`): the `DatasetConfig`
   fields a checkpoint written before they existed does not carry; each
   reads as the RESOLVE engine’s behaviour before the setting existed.
@@ -522,11 +578,15 @@ Attributes:
 
 - `name` (`str`), `task` (`TaskType`), `transform` (`TransformType`),
   `weight` (`float`): as on the `TargetSpec`.
+
 - `num_classes` (`int`): the class count of a classification target.
+
 - `class_names` (`list[str]`): the labels in code order; empty for a
   regression target.
+
 - `class_weights` (`list[float]`): per-class weights of the
   cross-entropy; empty for an unweighted target.
+
 - `missing` (`TargetMissingPolicy`): the policy the target was loaded
   and trained under.
 
@@ -545,9 +605,12 @@ len(vocabs.species_vocab)
 Attributes:
 
 - `species_vocab` (`list[str]`): the species names in code order.
+
 - `taxonomy` (`TaxonomyVocab`) and `categorical` (`CategoricalVocab`):
   the genus, family and categorical codes.
+
 - `targets` (`list[TargetConfig]`): the targets, with their class codes.
+
 - `pool_species_cap` (`int`): the pooled width the source’s records were
   truncated to, or 0. A dataset coded with these vocabularies is
   truncated to it in place of its own `pool_species_cap`.

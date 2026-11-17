@@ -318,7 +318,7 @@ train_config.max_epochs = 100
 trainer = rc.Trainer(model, train_config)
 trainer.prepare_data(attended)
 trainer.fit().best_epoch
-#> 95
+#> 87
 ```
 
 `best_epoch` is the epoch whose weights the fit kept. The cost of
@@ -433,7 +433,7 @@ train_config.max_epochs = 50
 trainer = rc.Trainer(model, train_config)
 trainer.prepare_data(hashed)
 round(trainer.fit().final_metrics["habitat"]["accuracy"], 3)
-#> 0.867
+#> 0.933
 ```
 
 [Training and reading the
@@ -476,7 +476,7 @@ def held_out_mae(encoding):
 encodings = ["Hash", "Embed", "Sparse", "RankPool", "Transformer"]
 {name: round(held_out_mae(getattr(rc.SpeciesEncodingMode, name)))
  for name in encodings}
-#> {'Hash': 222, 'Embed': 173, 'Sparse': 228, 'RankPool': 179, 'Transformer': 152}
+#> {'Hash': 187, 'Embed': 171, 'Sparse': 148, 'RankPool': 119, 'Transformer': 150}
 ```
 
 These numbers say little about the encodings. The survey has 150 plots
@@ -513,9 +513,11 @@ fit](https://gillescolling.com/resolve/articles/training.md) shows how.
 - [Training and reading the
   fit](https://gillescolling.com/resolve/articles/training.md): the
   training settings, the held-out plots and cross-validation.
+
 - [Latent and species
   embeddings](https://gillescolling.com/resolve/articles/embeddings.md):
   reading what the encoders learned.
+
 - [Large data and
   GPUs](https://gillescolling.com/resolve/articles/performance.md):
   speed and memory of each encoding.

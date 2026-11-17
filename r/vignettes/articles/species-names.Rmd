@@ -23,6 +23,7 @@ EVA's contributing databases enter each species under their own checklist's name
 Each link in the table maps one name to one token, a name some released model holds in its vocabulary. The links come from two sources, read in order:
 
 1. **EVA's records.** Each name a vascular plant record was entered under is linked to the token most of that name's records were resolved to. This gives *Anemone nemorosa* → *Anemone altaica*.
+
 2. **The synonymy of the taxonomic backbones.** In each backbone, every entered name and every token is looked up; its accepted name and all synonyms of that accepted name are linked to the token those records were resolved to. This gives *Anemonoides nemorosa* → *Anemone altaica* and *Quercus pedunculata* → *Quercus robur*. A backbone spanning several kingdoms is read for plants only.
 
 A name that several sources link to different tokens takes the link from the earliest source (EVA, then the backbones in the order of the table below), then the token with most records. A name that is itself a token is never in the table, so a name a model holds is always read as written. A model renames a name only when its own vocabulary lacks the name and holds the token; the released models differ in vocabulary, so the same table can rename a name for one model and not for another.
@@ -82,13 +83,13 @@ vocabulary = ["<UNK>", "Anemone altaica", "Quercus robur"]
 rc.resolve_names(["Anemone altaica", "Anemone nemorosa", "Anemonoides nemorosa",
                   "Quercus pedunculata", "Quercus robru", "Carex firma"],
                  vocabulary, table=table.name)
-#>                    name            token  ...            via distance
-#> 0       Anemone altaica  Anemone altaica  ...                       0
-#> 1      Anemone nemorosa  Anemone altaica  ...                       0
-#> 2  Anemonoides nemorosa  Anemone altaica  ...                       0
-#> 3   Quercus pedunculata    Quercus robur  ...                       0
-#> 4         Quercus robru    Quercus robur  ...  Quercus robur        1
-#> 5           Carex firma      Carex firma  ...                       0
+#>                    name            token  ...            via  distance
+#> 0       Anemone altaica  Anemone altaica  ...                        0
+#> 1      Anemone nemorosa  Anemone altaica  ...                        0
+#> 2  Anemonoides nemorosa  Anemone altaica  ...                        0
+#> 3   Quercus pedunculata    Quercus robur  ...                        0
+#> 4         Quercus robru    Quercus robur  ...  Quercus robur         1
+#> 5           Carex firma      Carex firma  ...                        0
 #>
 #> [6 rows x 6 columns]
 ```
@@ -101,5 +102,7 @@ The released `names.json` ships with the models in the [Zenodo record of the bro
 ## Where next
 
 - [Imputing new plots](prediction.html#species-names): reading a table's names through `names` during imputation, and the report of the names not found as written.
+
 - [Python: species names](python-names.html): the name table, resolver and report classes in Python.
+
 - [The browser app](app.html): imputes plots in the browser and lists the names it renamed and the ones it did not recognise.

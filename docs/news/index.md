@@ -1,6 +1,6 @@
 # Changelog
 
-## resolveR (development version)
+## resolveR 1.3.0
 
 ### Changed
 

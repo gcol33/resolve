@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -168,34 +168,27 @@ tables carry.</p>
 <span id="cb4-16"><a href="#cb4-16" tabindex="-1"></a>roles.has_coordinates()</span></code></pre></div>
 <p>Attributes:</p>
 <ul>
-<li>
-<code>plot_id</code> (<code>str</code>): the plot identifier, a
-column of both tables. Required.</li>
-<li>
-<code>species_id</code> (<code>str</code>): the species name in the
-species table. Required.</li>
-<li>
-<code>abundance</code> (<code>str</code> or <code>None</code>): the
-abundance or cover column of the species table.</li>
-<li>
-<code>genus</code>, <code>family</code> (<code>str</code> or
+<li><p><code>plot_id</code> (<code>str</code>): the plot identifier, a
+column of both tables. Required.</p></li>
+<li><p><code>species_id</code> (<code>str</code>): the species name in
+the species table. Required.</p></li>
+<li><p><code>abundance</code> (<code>str</code> or <code>None</code>):
+the abundance or cover column of the species table.</p></li>
+<li><p><code>genus</code>, <code>family</code> (<code>str</code> or
 <code>None</code>): the genus and family columns of the species
-table.</li>
-<li>
-<code>latitude</code>, <code>longitude</code> (<code>str</code> or
-<code>None</code>): the coordinate columns of the plot table, in
-degrees.</li>
-<li>
-<code>covariates</code> (<code>list[str]</code>): numeric plot-table
-columns the model reads, standardised on the fitting plots.</li>
-<li>
-<code>categoricals</code> (<code>list[str]</code>): text plot-table
-columns, each coded as integers when the data is loaded. A column is a
-covariate or a categorical, never both.</li>
-<li>
-<code>targets</code> (<code>list[str]</code>): a list of column
+table.</p></li>
+<li><p><code>latitude</code>, <code>longitude</code> (<code>str</code>
+or <code>None</code>): the coordinate columns of the plot table, in
+degrees.</p></li>
+<li><p><code>covariates</code> (<code>list[str]</code>): numeric
+plot-table columns the model reads, standardised on the fitting
+plots.</p></li>
+<li><p><code>categoricals</code> (<code>list[str]</code>): text
+plot-table columns, each coded as integers when the data is loaded. A
+column is a covariate or a categorical, never both.</p></li>
+<li><p><code>targets</code> (<code>list[str]</code>): a list of column
 names the loaders do not read; they take the targets from the
-<code>TargetSpec</code> list.</li>
+<code>TargetSpec</code> list.</p></li>
 </ul>
 <p>Methods: <code>has_coordinates()</code> is true when both coordinate
 columns are set, <code>has_taxonomy()</code> when the genus or the
@@ -227,32 +220,26 @@ count off the data.</p>
 <span id="cb6-9"><a href="#cb6-9" tabindex="-1"></a>elevation.weight <span class="op">=</span> <span class="fl">2.0</span></span></code></pre></div>
 <p>Attributes:</p>
 <ul>
-<li>
-<code>column_name</code> (<code>str</code>): the column read from
-the plot table.</li>
-<li>
-<code>target_name</code> (<code>str</code>): the name the target is
-reported under, the column name by default.</li>
-<li>
-<code>task</code> (<code>TaskType</code>): regression or
-classification.</li>
-<li>
-<code>transform</code> (<code>TransformType</code>):
+<li><p><code>column_name</code> (<code>str</code>): the column read from
+the plot table.</p></li>
+<li><p><code>target_name</code> (<code>str</code>): the name the target
+is reported under, the column name by default.</p></li>
+<li><p><code>task</code> (<code>TaskType</code>): regression or
+classification.</p></li>
+<li><p><code>transform</code> (<code>TransformType</code>):
 <code>Log1p</code> stores <code>log(1 + y)</code> and trains on it;
-imputed values and metrics come back in the original units.</li>
-<li>
-<code>num_classes</code> (<code>int</code>): the class count of a
-classification target.</li>
-<li>
-<code>class_mapping</code> (<code>dict[str, int]</code>): the
-label-to-code map; empty when the codes are fitted alphabetically.</li>
-<li>
-<code>weight</code> (<code>float</code>, default <code>1.0</code>):
-the target’s weight in the loss summed over targets.</li>
-<li>
-<code>missing</code> (<code>TargetMissingPolicy</code>, default
+imputed values and metrics come back in the original units.</p></li>
+<li><p><code>num_classes</code> (<code>int</code>): the class count of a
+classification target.</p></li>
+<li><p><code>class_mapping</code> (<code>dict[str, int]</code>): the
+label-to-code map; empty when the codes are fitted
+alphabetically.</p></li>
+<li><p><code>weight</code> (<code>float</code>, default
+<code>1.0</code>): the target’s weight in the loss summed over
+targets.</p></li>
+<li><p><code>missing</code> (<code>TargetMissingPolicy</code>, default
 <code>Drop</code>): what happens to a plot with no value for this
-target.</li>
+target.</p></li>
 </ul>
 </div>
 <div class="section level2">
@@ -300,81 +287,64 @@ set</a> compares them.</p>
 <span id="cb8-3"><a href="#cb8-3" tabindex="-1"></a>config.top_k_species <span class="op">=</span> <span class="dv">10</span></span></code></pre></div>
 <p>Attributes:</p>
 <ul>
-<li>
-<code>species_encoding</code> (<code>SpeciesEncodingMode</code>,
-default <code>Hash</code>): the encoding.</li>
-<li>
-<code>hash_dim</code> (<code>int</code>, default <code>32</code>):
-the width of the hashed vector.</li>
-<li>
-<code>top_k</code> (<code>int</code>, default <code>3</code>): the
-species per plot the hash encoding keeps, and the number of genus and
-family slots of the hash, sparse and embed encodings.</li>
-<li>
-<code>top_k_species</code> (<code>int</code>, default
-<code>10</code>): the species slots of the embed encoding.</li>
-<li>
-<code>selection</code> (<code>SelectionMode</code>, default
+<li><p><code>species_encoding</code> (<code>SpeciesEncodingMode</code>,
+default <code>Hash</code>): the encoding.</p></li>
+<li><p><code>hash_dim</code> (<code>int</code>, default
+<code>32</code>): the width of the hashed vector.</p></li>
+<li><p><code>top_k</code> (<code>int</code>, default <code>3</code>):
+the species per plot the hash encoding keeps, and the number of genus
+and family slots of the hash, sparse and embed encodings.</p></li>
+<li><p><code>top_k_species</code> (<code>int</code>, default
+<code>10</code>): the species slots of the embed encoding.</p></li>
+<li><p><code>selection</code> (<code>SelectionMode</code>, default
 <code>Top</code>): which species of a plot survive its budget, ranked by
-recorded abundance, ties by name.</li>
-<li>
-<code>species_budget</code> (<code>int</code>, default
+recorded abundance, ties by name.</p></li>
+<li><p><code>species_budget</code> (<code>int</code>, default
 <code>0</code>): the species per plot kept under <code>RankPool</code>,
 <code>Transformer</code> and <code>Sparse</code>, taken from the end of
 the ranking <code>selection</code> names; <code>0</code> keeps every
-species.</li>
-<li>
-<code>representation</code> (<code>RepresentationMode</code>,
+species.</p></li>
+<li><p><code>representation</code> (<code>RepresentationMode</code>,
 default <code>Abundance</code>): the value each species carries into
 every encoding, its abundance or <code>1.0</code>. The selection still
-ranks by recorded abundance.</li>
-<li>
-<code>normalization</code> (<code>NormalizationMode</code>, default
-<code>Raw</code>): how the hash weights of a plot’s selected species are
-rescaled.</li>
-<li>
-<code>aggregation</code> (<code>AggregationMode</code>, default
+ranks by recorded abundance.</p></li>
+<li><p><code>normalization</code> (<code>NormalizationMode</code>,
+default <code>Raw</code>): how the hash weights of a plot’s selected
+species are rescaled.</p></li>
+<li><p><code>aggregation</code> (<code>AggregationMode</code>, default
 <code>Abundance</code>): how the genus and family slots rank a plot’s
 taxa, and how <code>RankPool</code> and <code>Transformer</code> weight
-each species’ genus and family.</li>
-<li>
-<code>pool_weighting</code> (<code>PoolWeighting</code>, default
+each species’ genus and family.</p></li>
+<li><p><code>pool_weighting</code> (<code>PoolWeighting</code>, default
 <code>Log1p</code>): the weight each species pools with under
-<code>RankPool</code> and <code>Transformer</code>.</li>
-<li>
-<code>pool_species_cap</code> (<code>int</code>, default
+<code>RankPool</code> and <code>Transformer</code>.</p></li>
+<li><p><code>pool_species_cap</code> (<code>int</code>, default
 <code>0</code>): the most species per plot <code>RankPool</code> and
 <code>Transformer</code> read. <code>0</code> is no cap; a positive
 number caps at that many; <code>-x</code> caps at the
 <code>(100 - x)</code>th percentile of the plots’ species counts
 (<code>-1</code> the 99th). A longer plot keeps its most abundant
-species.</li>
-<li>
-<code>track_unknown_fraction</code> (<code>bool</code>, default
+species.</p></li>
+<li><p><code>track_unknown_fraction</code> (<code>bool</code>, default
 <code>True</code>): add an input column with each plot’s share of
-abundance from species outside the vocabulary.</li>
-<li>
-<code>track_unknown_count</code> (<code>bool</code>, default
+abundance from species outside the vocabulary.</p></li>
+<li><p><code>track_unknown_count</code> (<code>bool</code>, default
 <code>False</code>): add an input column with each plot’s number of such
-species.</li>
-<li>
-<code>use_taxonomy</code> (<code>bool</code>, default
+species.</p></li>
+<li><p><code>use_taxonomy</code> (<code>bool</code>, default
 <code>True</code>): read the genus and family when the roles name
-them.</li>
-<li>
-<code>missing_values</code> (<code>MissingValuePolicy</code>,
+them.</p></li>
+<li><p><code>missing_values</code> (<code>MissingValuePolicy</code>,
 default <code>Indicate</code>): how a blank covariate or coordinate cell
-enters the model.</li>
-<li>
-<code>zero_abundance_as</code> (<code>float</code>, default
+enters the model.</p></li>
+<li><p><code>zero_abundance_as</code> (<code>float</code>, default
 <code>0.0</code>): the abundance a record of exactly 0 is read at.
 Archives that write a presence without a cover estimate as 0 read as
 absent under <code>log1p</code> weighting; <code>1.0</code> reads them
-at the weight of a record with no cover.</li>
-<li>
-<code>use_cuda_hash</code> (<code>bool</code>, default
+at the weight of a record with no cover.</p></li>
+<li><p><code>use_cuda_hash</code> (<code>bool</code>, default
 <code>False</code>): compute the hash encoding on the GPU for each batch
-instead of storing it at load.</li>
+instead of storing it at load.</p></li>
 </ul>
 <p>A species recorded several times on one plot, such as once per
 vegetation layer, is one entry of that plot: its abundances are summed
@@ -580,75 +550,60 @@ reuse an <code>ExternalVocabs</code> on data in memory.</p>
 <h3 id="ResolveDataset-attributes">Attributes<a class="anchor" aria-label="anchor" href="#ResolveDataset-attributes"></a>
 </h3>
 <ul>
-<li>
-<code>schema</code> (<code>ResolveSchema</code>): the structure of
-the dataset, which a model is built from and a checkpoint carries.</li>
-<li>
-<code>config</code> (<code>DatasetConfig</code>): the settings the
-loader ran with.</li>
-<li>
-<code>n_plots</code> (<code>int</code>): the plots after the
-target-driven drops.</li>
-<li>
-<code>plot_ids</code> (<code>list[str]</code>): the plot
-identifiers, in row order.</li>
-<li>
-<code>species_vocab</code> (<code>list[str]</code>): the species
+<li><p><code>schema</code> (<code>ResolveSchema</code>): the structure
+of the dataset, which a model is built from and a checkpoint
+carries.</p></li>
+<li><p><code>config</code> (<code>DatasetConfig</code>): the settings
+the loader ran with.</p></li>
+<li><p><code>n_plots</code> (<code>int</code>): the plots after the
+target-driven drops.</p></li>
+<li><p><code>plot_ids</code> (<code>list[str]</code>): the plot
+identifiers, in row order.</p></li>
+<li><p><code>species_vocab</code> (<code>list[str]</code>): the species
 vocabulary in code order; code 0 is <code>"&lt;UNK&gt;"</code>, the
-unknown species.</li>
-<li>
-<code>taxonomy_vocab</code> (<code>TaxonomyVocab</code>) and
+unknown species.</p></li>
+<li><p><code>taxonomy_vocab</code> (<code>TaxonomyVocab</code>) and
 <code>categorical_vocab</code> (<code>CategoricalVocab</code>): the
-fitted genus, family and categorical codes.</li>
-<li>
-<code>targets</code> (<code>dict[str, Tensor]</code>): the target
-values, in the space the loader stored them.</li>
+fitted genus, family and categorical codes.</p></li>
+<li><p><code>targets</code> (<code>dict[str, Tensor]</code>): the target
+values, in the space the loader stored them.</p></li>
 </ul>
 <p>The model inputs are torch tensors, or <code>None</code> where the
 encoding does not produce them:</p>
 <ul>
-<li>
-<code>coordinates</code> (<code>(n_plots, 2)</code>) and
+<li><p><code>coordinates</code> (<code>(n_plots, 2)</code>) and
 <code>covariates</code> (<code>(n_plots, n_covariates)</code>), missing
 cells <code>NaN</code>; <code>categorical_ids</code>
-(<code>(n_plots, n_categoricals)</code>).</li>
-<li>
-<code>hash_embedding</code> (<code>(n_plots, hash_dim)</code>): the
-hash encoding, without <code>use_cuda_hash</code>.</li>
-<li>
-<code>species_ids</code>: the species codes of the embed slots
+(<code>(n_plots, n_categoricals)</code>).</p></li>
+<li><p><code>hash_embedding</code> (<code>(n_plots, hash_dim)</code>):
+the hash encoding, without <code>use_cuda_hash</code>.</p></li>
+<li><p><code>species_ids</code>: the species codes of the embed slots
 (<code>(n_plots, top_k_species)</code>) or of every pooled species
-(<code>(n_plots, max_species)</code>).</li>
-<li>
-<code>species_vector</code>
+(<code>(n_plots, max_species)</code>).</p></li>
+<li><p><code>species_vector</code>
 (<code>(n_plots, n_species_vocab)</code>): the sparse encoding, a torch
 sparse CSR tensor. <code>crow_indices()</code> delimits the plots,
 <code>col_indices()</code> holds each plot’s species codes in increasing
 order and <code>values()</code> their values; <code>to_dense()</code>
-gives the matrix.</li>
-<li>
-<code>genus_ids</code>, <code>family_ids</code>
+gives the matrix.</p></li>
+<li><p><code>genus_ids</code>, <code>family_ids</code>
 (<code>(n_plots, n_taxonomy_slots)</code>): the genus and family slots
-of the hash, sparse and embed encodings.</li>
-<li>
-<code>pool_genus_ids</code>, <code>pool_family_ids</code>,
+of the hash, sparse and embed encodings.</p></li>
+<li><p><code>pool_genus_ids</code>, <code>pool_family_ids</code>,
 <code>pool_weights</code>, <code>pool_mask</code>
 (<code>(n_plots, max_species)</code>) and <code>pool_has_cover</code>
 (<code>(n_plots,)</code>): the pooled species of <code>RankPool</code>
-and <code>Transformer</code>.</li>
-<li>
-<code>unknown_fraction</code>, <code>unknown_count</code>
-(<code>(n_plots,)</code>): the unknown-species columns.</li>
-<li>
-<code>species_genus_ids</code>, <code>species_family_ids</code>
+and <code>Transformer</code>.</p></li>
+<li><p><code>unknown_fraction</code>, <code>unknown_count</code>
+(<code>(n_plots,)</code>): the unknown-species columns.</p></li>
+<li><p><code>species_genus_ids</code>, <code>species_family_ids</code>
 (<code>(n_species_vocab,)</code>): the genus and family code of each
-species of the vocabulary, 0 where its records name none.</li>
-<li>
-<code>raw_species_ids</code>, <code>raw_weights</code>,
+species of the vocabulary, 0 where its records name none.</p></li>
+<li><p><code>raw_species_ids</code>, <code>raw_weights</code>,
 <code>plot_offsets</code>: under <code>use_cuda_hash</code>, each plot’s
 selected species in flat compressed form: plot <code>p</code> holds
 entries <code>plot_offsets[p]</code> to
-<code>plot_offsets[p + 1]</code>.</li>
+<code>plot_offsets[p + 1]</code>.</p></li>
 </ul>
 <p>The unknown-species columns are measured against the vocabulary the
 dataset is coded with, over each plot’s whole species list. A training
@@ -659,25 +614,22 @@ carry information on the loaders that reuse a vocabulary.</p>
 <h3 id="ResolveDataset-methods">Methods<a class="anchor" aria-label="anchor" href="#ResolveDataset-methods"></a>
 </h3>
 <ul>
-<li>
-<code>plot_indices(ids)</code>: the position of each plot identifier
-in <code>plot_ids</code>, in the order given, the held-out fold
-<code>Trainer.prepare_data</code> takes. Raises <code>ValueError</code>
-for an identifier the dataset does not hold.</li>
-<li>
-<code>continuous_block(include_hash)</code>: the unstandardised
+<li><p><code>plot_indices(ids)</code>: the position of each plot
+identifier in <code>plot_ids</code>, in the order given, the held-out
+fold <code>Trainer.prepare_data</code> takes. Raises
+<code>ValueError</code> for an identifier the dataset does not
+hold.</p></li>
+<li><p><code>continuous_block(include_hash)</code>: the unstandardised
 <em>continuous block</em>, the numeric input columns side by side:
 coordinates, covariates, their missingness columns, the unknown-species
 columns and, with <code>include_hash</code>, the hash encoding. This is
 the <code>continuous</code> argument of
-<code>ResolveModel.forward</code>.</li>
-<li>
-<code>external_vocabs()</code>: an <code>ExternalVocabs</code>
-holding every vocabulary the dataset fitted.</li>
-<li>
-<code>has_pool_data()</code>: true under <code>RankPool</code> and
-<code>Transformer</code>. <code>has_raw_species_data()</code>: true
-under <code>use_cuda_hash</code>.</li>
+<code>ResolveModel.forward</code>.</p></li>
+<li><p><code>external_vocabs()</code>: an <code>ExternalVocabs</code>
+holding every vocabulary the dataset fitted.</p></li>
+<li><p><code>has_pool_data()</code>: true under <code>RankPool</code>
+and <code>Transformer</code>. <code>has_raw_species_data()</code>: true
+under <code>use_cuda_hash</code>.</p></li>
 </ul>
 <div class="sourceCode" id="cb19"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb19-1"><a href="#cb19-1" tabindex="-1"></a>dataset.plot_indices([<span class="st">"A001"</span>, <span class="st">"A003"</span>])</span>
 <span id="cb19-2"><a href="#cb19-2" tabindex="-1"></a>dataset.continuous_block(<span class="va">False</span>).shape</span></code></pre></div>
@@ -695,44 +647,38 @@ it.</p>
 <span id="cb20-3"><a href="#cb20-3" tabindex="-1"></a>[t.name <span class="cf">for</span> t <span class="kw">in</span> schema.targets]</span></code></pre></div>
 <p>Attributes:</p>
 <ul>
-<li>
-<code>n_plots</code> (<code>int</code>): the plots after the
-target-driven drops.</li>
-<li>
-<code>n_species</code> (<code>int</code>): the distinct species.
+<li><p><code>n_plots</code> (<code>int</code>): the plots after the
+target-driven drops.</p></li>
+<li><p><code>n_species</code> (<code>int</code>): the distinct species.
 <code>n_species_vocab</code> (<code>int</code>): the vocabulary size,
-the unknown slot included.</li>
-<li>
-<code>n_genera</code>, <code>n_families</code> (<code>int</code>):
-the taxonomy vocabulary sizes, the unknown slot included.</li>
-<li>
-<code>covariate_names</code>, <code>categorical_names</code>
-(<code>list[str]</code>): the plot-level columns, in input order.</li>
-<li>
-<code>categorical_vocab_sizes</code> (<code>list[int]</code>) and
+the unknown slot included.</p></li>
+<li><p><code>n_genera</code>, <code>n_families</code>
+(<code>int</code>): the taxonomy vocabulary sizes, the unknown slot
+included.</p></li>
+<li><p><code>covariate_names</code>, <code>categorical_names</code>
+(<code>list[str]</code>): the plot-level columns, in input
+order.</p></li>
+<li><p><code>categorical_vocab_sizes</code> (<code>list[int]</code>) and
 <code>categorical_embed_dim</code> (<code>int</code>): the code count of
-each categorical column and its embedding width.</li>
-<li>
-<code>targets</code> (<code>list[TargetConfig]</code>): one per
-target.</li>
-<li>
-<code>has_coordinates</code>, <code>has_abundance</code>,
+each categorical column and its embedding width.</p></li>
+<li><p><code>targets</code> (<code>list[TargetConfig]</code>): one per
+target.</p></li>
+<li><p><code>has_coordinates</code>, <code>has_abundance</code>,
 <code>has_taxonomy</code> (<code>bool</code>): what the data
-carried.</li>
-<li>
-<code>species_vocab</code>, <code>genus_vocab</code>,
+carried.</p></li>
+<li><p><code>species_vocab</code>, <code>genus_vocab</code>,
 <code>family_vocab</code> (<code>list[str]</code>): the vocabularies in
-code order, <code>"&lt;UNK&gt;"</code> first.</li>
-<li>
-<code>dataset_config</code> (<code>DatasetConfig</code>): the loader
-settings the dataset was coded with. <code>selection</code> is the
-selection applied (<code>effective_selection</code>), and
-<code>pool_species_cap</code> the width a pooled load truncated to.</li>
-<li>
-<code>unrecorded_dataset_settings</code> (<code>list[str]</code>):
-the <code>DatasetConfig</code> fields a checkpoint written before they
-existed does not carry; each reads as the RESOLVE engine’s behaviour
-before the setting existed. Empty for a dataset’s own schema.</li>
+code order, <code>"&lt;UNK&gt;"</code> first.</p></li>
+<li><p><code>dataset_config</code> (<code>DatasetConfig</code>): the
+loader settings the dataset was coded with. <code>selection</code> is
+the selection applied (<code>effective_selection</code>), and
+<code>pool_species_cap</code> the width a pooled load truncated
+to.</p></li>
+<li><p><code>unrecorded_dataset_settings</code>
+(<code>list[str]</code>): the <code>DatasetConfig</code> fields a
+checkpoint written before they existed does not carry; each reads as the
+RESOLVE engine’s behaviour before the setting existed. Empty for a
+dataset’s own schema.</p></li>
 </ul>
 <p>Methods: <code>has_categoricals()</code>,
 <code>n_categoricals()</code>, <code>has_species_vocab()</code> and
@@ -748,23 +694,18 @@ the number of missingness columns the continuous block holds.</p>
 dataset loaded it.</p>
 <p>Attributes:</p>
 <ul>
-<li>
-<code>name</code> (<code>str</code>), <code>task</code>
+<li><p><code>name</code> (<code>str</code>), <code>task</code>
 (<code>TaskType</code>), <code>transform</code>
 (<code>TransformType</code>), <code>weight</code> (<code>float</code>):
-as on the <code>TargetSpec</code>.</li>
-<li>
-<code>num_classes</code> (<code>int</code>): the class count of a
-classification target.</li>
-<li>
-<code>class_names</code> (<code>list[str]</code>): the labels in
-code order; empty for a regression target.</li>
-<li>
-<code>class_weights</code> (<code>list[float]</code>): per-class
-weights of the cross-entropy; empty for an unweighted target.</li>
-<li>
-<code>missing</code> (<code>TargetMissingPolicy</code>): the policy
-the target was loaded and trained under.</li>
+as on the <code>TargetSpec</code>.</p></li>
+<li><p><code>num_classes</code> (<code>int</code>): the class count of a
+classification target.</p></li>
+<li><p><code>class_names</code> (<code>list[str]</code>): the labels in
+code order; empty for a regression target.</p></li>
+<li><p><code>class_weights</code> (<code>list[float]</code>): per-class
+weights of the cross-entropy; empty for an unweighted target.</p></li>
+<li><p><code>missing</code> (<code>TargetMissingPolicy</code>): the
+policy the target was loaded and trained under.</p></li>
 </ul>
 </div>
 <div class="section level2">
@@ -780,21 +721,17 @@ checkpoint, the categorical codes included;
 <span id="cb21-2"><a href="#cb21-2" tabindex="-1"></a><span class="bu">len</span>(vocabs.species_vocab)</span></code></pre></div>
 <p>Attributes:</p>
 <ul>
-<li>
-<code>species_vocab</code> (<code>list[str]</code>): the species
-names in code order.</li>
-<li>
-<code>taxonomy</code> (<code>TaxonomyVocab</code>) and
+<li><p><code>species_vocab</code> (<code>list[str]</code>): the species
+names in code order.</p></li>
+<li><p><code>taxonomy</code> (<code>TaxonomyVocab</code>) and
 <code>categorical</code> (<code>CategoricalVocab</code>): the genus,
-family and categorical codes.</li>
-<li>
-<code>targets</code> (<code>list[TargetConfig]</code>): the targets,
-with their class codes.</li>
-<li>
-<code>pool_species_cap</code> (<code>int</code>): the pooled width
-the source’s records were truncated to, or 0. A dataset coded with these
-vocabularies is truncated to it in place of its own
-<code>pool_species_cap</code>.</li>
+family and categorical codes.</p></li>
+<li><p><code>targets</code> (<code>list[TargetConfig]</code>): the
+targets, with their class codes.</p></li>
+<li><p><code>pool_species_cap</code> (<code>int</code>): the pooled
+width the source’s records were truncated to, or 0. A dataset coded with
+these vocabularies is truncated to it in place of its own
+<code>pool_species_cap</code>.</p></li>
 </ul>
 </div>
 <div class="section level2">

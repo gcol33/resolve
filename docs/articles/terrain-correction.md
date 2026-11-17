@@ -45,10 +45,13 @@ coordinate:
 
 - `elevation`: the elevation at the coordinate, interpolated between the
   four surrounding cell centres;
+
 - `elevation_1km`: the mean elevation over the 1 km square centred on
   the coordinate;
+
 - `slope`: the slope of the cell nearest the coordinate, from its four
   edge neighbours (as Earth Engine’s `ee.Terrain.slope` computes it);
+
 - `slope_1km`: the inclination of the plane fitted through the 1 km
   square.
 
@@ -340,12 +343,15 @@ each epoch, so that callers without it are served), `seed` and `device`.
 
 - The correction covers altitude and slope. Aspect is a bearing with its
   own error, and is not corrected.
+
 - GLO-30 is a surface model: in forest its elevation includes the
   canopy, metres to tens of metres above the ground a surveyor stands
   on. The correction learned what that costs on the archive’s plots; an
   elevation model of the bare ground would need a correction trained on
   it.
+
 - A plot outside the field’s tiles, or without coordinates, keeps its
   imputed value (`applied` is `FALSE`).
+
 - The weights describe how the correction combined the sources on a
   plot; they are not probabilities that a source is right.

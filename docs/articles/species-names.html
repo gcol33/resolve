@@ -43,7 +43,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -154,19 +154,17 @@ the imputation.</p>
 released model holds in its vocabulary. The links come from two sources,
 read in order:</p>
 <ol style="list-style-type: decimal">
-<li>
-<strong>EVA’s records.</strong> Each name a vascular plant record
+<li><p><strong>EVA’s records.</strong> Each name a vascular plant record
 was entered under is linked to the token most of that name’s records
 were resolved to. This gives <em>Anemone nemorosa</em> → <em>Anemone
-altaica</em>.</li>
-<li>
-<strong>The synonymy of the taxonomic backbones.</strong> In each
+altaica</em>.</p></li>
+<li><p><strong>The synonymy of the taxonomic backbones.</strong> In each
 backbone, every entered name and every token is looked up; its accepted
 name and all synonyms of that accepted name are linked to the token
 those records were resolved to. This gives <em>Anemonoides nemorosa</em>
 → <em>Anemone altaica</em> and <em>Quercus pedunculata</em> →
 <em>Quercus robur</em>. A backbone spanning several kingdoms is read for
-plants only.</li>
+plants only.</p></li>
 </ol>
 <p>A name that several sources link to different tokens takes the link
 from the earliest source (EVA, then the backbones in the order of the
@@ -338,13 +336,13 @@ against a vocabulary of two species.</p>
 <span id="cb2-12"><a href="#cb2-12" tabindex="-1"></a>rc.resolve_names([<span class="st">"Anemone altaica"</span>, <span class="st">"Anemone nemorosa"</span>, <span class="st">"Anemonoides nemorosa"</span>,</span>
 <span id="cb2-13"><a href="#cb2-13" tabindex="-1"></a>                  <span class="st">"Quercus pedunculata"</span>, <span class="st">"Quercus robru"</span>, <span class="st">"Carex firma"</span>],</span>
 <span id="cb2-14"><a href="#cb2-14" tabindex="-1"></a>                 vocabulary, table<span class="op">=</span>table.name)</span>
-<span id="cb2-15"><a href="#cb2-15" tabindex="-1"></a><span class="co">#&gt;                    name            token  ...            via distance</span></span>
-<span id="cb2-16"><a href="#cb2-16" tabindex="-1"></a><span class="co">#&gt; 0       Anemone altaica  Anemone altaica  ...                       0</span></span>
-<span id="cb2-17"><a href="#cb2-17" tabindex="-1"></a><span class="co">#&gt; 1      Anemone nemorosa  Anemone altaica  ...                       0</span></span>
-<span id="cb2-18"><a href="#cb2-18" tabindex="-1"></a><span class="co">#&gt; 2  Anemonoides nemorosa  Anemone altaica  ...                       0</span></span>
-<span id="cb2-19"><a href="#cb2-19" tabindex="-1"></a><span class="co">#&gt; 3   Quercus pedunculata    Quercus robur  ...                       0</span></span>
-<span id="cb2-20"><a href="#cb2-20" tabindex="-1"></a><span class="co">#&gt; 4         Quercus robru    Quercus robur  ...  Quercus robur        1</span></span>
-<span id="cb2-21"><a href="#cb2-21" tabindex="-1"></a><span class="co">#&gt; 5           Carex firma      Carex firma  ...                       0</span></span>
+<span id="cb2-15"><a href="#cb2-15" tabindex="-1"></a><span class="co">#&gt;                    name            token  ...            via  distance</span></span>
+<span id="cb2-16"><a href="#cb2-16" tabindex="-1"></a><span class="co">#&gt; 0       Anemone altaica  Anemone altaica  ...                        0</span></span>
+<span id="cb2-17"><a href="#cb2-17" tabindex="-1"></a><span class="co">#&gt; 1      Anemone nemorosa  Anemone altaica  ...                        0</span></span>
+<span id="cb2-18"><a href="#cb2-18" tabindex="-1"></a><span class="co">#&gt; 2  Anemonoides nemorosa  Anemone altaica  ...                        0</span></span>
+<span id="cb2-19"><a href="#cb2-19" tabindex="-1"></a><span class="co">#&gt; 3   Quercus pedunculata    Quercus robur  ...                        0</span></span>
+<span id="cb2-20"><a href="#cb2-20" tabindex="-1"></a><span class="co">#&gt; 4         Quercus robru    Quercus robur  ...  Quercus robur         1</span></span>
+<span id="cb2-21"><a href="#cb2-21" tabindex="-1"></a><span class="co">#&gt; 5           Carex firma      Carex firma  ...                        0</span></span>
 <span id="cb2-22"><a href="#cb2-22" tabindex="-1"></a><span class="co">#&gt;</span></span>
 <span id="cb2-23"><a href="#cb2-23" tabindex="-1"></a><span class="co">#&gt; [6 rows x 6 columns]</span></span></code></pre></div>
 </div>
@@ -365,16 +363,14 @@ argument of the loaders and of suite imputation.</p>
 <h2 id="where-next">Where next<a class="anchor" aria-label="anchor" href="#where-next"></a>
 </h2>
 <ul>
-<li>
-<a href="prediction.html#species-names">Imputing new plots</a>:
+<li><p><a href="prediction.html#species-names">Imputing new plots</a>:
 reading a table’s names through <code>names</code> during imputation,
-and the report of the names not found as written.</li>
-<li>
-<a href="python-names.html">Python: species names</a>: the name
-table, resolver and report classes in Python.</li>
-<li>
-<a href="app.html">The browser app</a>: imputes plots in the browser
-and lists the names it renamed and the ones it did not recognise.</li>
+and the report of the names not found as written.</p></li>
+<li><p><a href="python-names.html">Python: species names</a>: the name
+table, resolver and report classes in Python.</p></li>
+<li><p><a href="app.html">The browser app</a>: imputes plots in the
+browser and lists the names it renamed and the ones it did not
+recognise.</p></li>
 </ul>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

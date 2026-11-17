@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -133,25 +133,22 @@ directory whose member <code>config.suite_target</code> and
 are checked against the manifest before it is read. A checkpoint that
 carries no species vocabulary, only its size, is refused.</p>
 <ul>
-<li>
-<code>vocabs()</code> (<code>ExternalVocabs</code>) and
+<li><p><code>vocabs()</code> (<code>ExternalVocabs</code>) and
 <code>dataset_config()</code> (<code>DatasetConfig</code>): what the
 fine-tuning plots are loaded with, so each species is read through the
 row of the embedding table the parent gives it. The vocabularies also
-replay the classes of a target the parent shares.</li>
-<li>
-<code>model_config</code> (<code>ModelConfig</code>): the
+replay the classes of a target the parent shares.</p></li>
+<li><p><code>model_config</code> (<code>ModelConfig</code>): the
 configuration the fine-tuned model takes. Only the fields in
-<code>FINE_TUNE_MODEL_FIELDS</code> may be changed.</li>
-<li>
-<code>schema</code> (<code>ResolveSchema</code>),
+<code>FINE_TUNE_MODEL_FIELDS</code> may be changed.</p></li>
+<li><p><code>schema</code> (<code>ResolveSchema</code>),
 <code>scalers</code> (<code>Scalers</code>) and
 <code>categorical_vocab</code> (<code>CategoricalVocab</code>): the
-parent’s.</li>
-<li>
-<code>record</code> (<code>ParentRecord</code>): what a fine-tuned
-checkpoint keeps of it; <code>reuse</code>, <code>n_tensors</code> and
-<code>heads</code> are set by <code>Trainer.init_from</code>.</li>
+parent’s.</p></li>
+<li><p><code>record</code> (<code>ParentRecord</code>): what a
+fine-tuned checkpoint keeps of it; <code>reuse</code>,
+<code>n_tensors</code> and <code>heads</code> are set by
+<code>Trainer.init_from</code>.</p></li>
 </ul>
 <div class="sourceCode" id="cb2"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a>config <span class="op">=</span> rc.InitFromConfig()</span>
 <span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a>config.suite_target, config.suite_seed <span class="op">=</span> <span class="st">"habitat"</span>, <span class="dv">1</span></span>
@@ -172,17 +169,14 @@ checkpoint keeps of it; <code>reuse</code>, <code>n_tensors</code> and
 <p>Where a warm start reads its parent from and what it carries
 over.</p>
 <ul>
-<li>
-<code>reuse</code> (<code>InitReuse</code>, default
-<code>Encoder</code>): read by <code>Trainer.init_from</code>.</li>
-<li>
-<code>suite_target</code> (<code>str</code>): with a suite
+<li><p><code>reuse</code> (<code>InitReuse</code>, default
+<code>Encoder</code>): read by <code>Trainer.init_from</code>.</p></li>
+<li><p><code>suite_target</code> (<code>str</code>): with a suite
 directory, the target whose member to start from; may stay empty for a
-suite of one target.</li>
-<li>
-<code>suite_seed</code> (<code>int</code>, default <code>-1</code>):
-that member’s seed; <code>-1</code> takes the target’s first
-member.</li>
+suite of one target.</p></li>
+<li><p><code>suite_seed</code> (<code>int</code>, default
+<code>-1</code>): that member’s seed; <code>-1</code> takes the target’s
+first member.</p></li>
 </ul>
 </div>
 <div class="section level2">
@@ -203,24 +197,20 @@ classes, with its target scaler). In a config they are spelled
 <p>The parent a fine-tuned checkpoint records
 (<code>RunMetadata.parent</code>, <code>Trainer.parent</code>).</p>
 <ul>
-<li>
-<code>checkpoint</code> (<code>str</code>), <code>sha256</code>
+<li><p><code>checkpoint</code> (<code>str</code>), <code>sha256</code>
 (<code>str</code>, lower-case hex) and <code>bytes</code>
-(<code>int</code>): the parent file as opened.</li>
-<li>
-<code>resolve_version</code> (<code>str</code>): the engine that
-trained the parent.</li>
-<li>
-<code>reuse</code> (<code>InitReuse</code>), <code>n_tensors</code>
-(<code>int</code>, the parameters and buffers copied) and
-<code>heads</code> (<code>list[str]</code>, the parent heads carried
-over).</li>
-<li>
-<code>suite</code>, <code>suite_target</code> (<code>str</code>) and
-<code>suite_seed</code> (<code>int</code>): the suite member it came
+(<code>int</code>): the parent file as opened.</p></li>
+<li><p><code>resolve_version</code> (<code>str</code>): the engine that
+trained the parent.</p></li>
+<li><p><code>reuse</code> (<code>InitReuse</code>),
+<code>n_tensors</code> (<code>int</code>, the parameters and buffers
+copied) and <code>heads</code> (<code>list[str]</code>, the parent heads
+carried over).</p></li>
+<li><p><code>suite</code>, <code>suite_target</code> (<code>str</code>)
+and <code>suite_seed</code> (<code>int</code>): the suite member it came
 from; <code>suite</code> is empty for a checkpoint opened directly.
 <code>licence</code> and <code>training_scope</code> (<code>str</code>):
-that suite’s terms.</li>
+that suite’s terms.</p></li>
 </ul>
 </div>
 <div class="section level2">

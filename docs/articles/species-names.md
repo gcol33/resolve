@@ -35,6 +35,7 @@ order:
 1.  **EVA’s records.** Each name a vascular plant record was entered
     under is linked to the token most of that name’s records were
     resolved to. This gives *Anemone nemorosa* → *Anemone altaica*.
+
 2.  **The synonymy of the taxonomic backbones.** In each backbone, every
     entered name and every token is looked up; its accepted name and all
     synonyms of that accepted name are linked to the token those records
@@ -132,13 +133,13 @@ vocabulary = ["<UNK>", "Anemone altaica", "Quercus robur"]
 rc.resolve_names(["Anemone altaica", "Anemone nemorosa", "Anemonoides nemorosa",
                   "Quercus pedunculata", "Quercus robru", "Carex firma"],
                  vocabulary, table=table.name)
-#>                    name            token  ...            via distance
-#> 0       Anemone altaica  Anemone altaica  ...                       0
-#> 1      Anemone nemorosa  Anemone altaica  ...                       0
-#> 2  Anemonoides nemorosa  Anemone altaica  ...                       0
-#> 3   Quercus pedunculata    Quercus robur  ...                       0
-#> 4         Quercus robru    Quercus robur  ...  Quercus robur        1
-#> 5           Carex firma      Carex firma  ...                       0
+#>                    name            token  ...            via  distance
+#> 0       Anemone altaica  Anemone altaica  ...                        0
+#> 1      Anemone nemorosa  Anemone altaica  ...                        0
+#> 2  Anemonoides nemorosa  Anemone altaica  ...                        0
+#> 3   Quercus pedunculata    Quercus robur  ...                        0
+#> 4         Quercus robru    Quercus robur  ...  Quercus robur         1
+#> 5           Carex firma      Carex firma  ...                        0
 #>
 #> [6 rows x 6 columns]
 ```
@@ -163,9 +164,11 @@ loaders and of suite imputation.
   plots](https://gillescolling.com/resolve/articles/prediction.html#species-names):
   reading a table’s names through `names` during imputation, and the
   report of the names not found as written.
+
 - [Python: species
   names](https://gillescolling.com/resolve/articles/python-names.md):
   the name table, resolver and report classes in Python.
+
 - [The browser app](https://gillescolling.com/resolve/articles/app.md):
   imputes plots in the browser and lists the names it renamed and the
   ones it did not recognise.

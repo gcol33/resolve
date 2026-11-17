@@ -167,6 +167,7 @@ Methods:
   sorted by distance, then by entry position. With `bucket_hint`, the
   matches in that bucket are returned when there are any; otherwise the
   whole index is searched.
+
 - `query_batch(needles, max_edit_distance=2, top_n=5, bucket_fn=None, bucket_hint=None)`:
   `query` over a list of needles, on several threads. `bucket_fn` gives
   each needle its bucket hint; otherwise `bucket_hint` is used for every

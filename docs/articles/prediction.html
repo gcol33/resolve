@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -401,12 +401,12 @@ records.</p>
 <span id="cb18-13"><a href="#cb18-13" tabindex="-1"></a>                on<span class="op">=</span><span class="st">"plot_id"</span>, suffixes<span class="op">=</span>(<span class="st">""</span>, <span class="st">"_observed"</span>))</span>
 <span id="cb18-14"><a href="#cb18-14" tabindex="-1"></a>out.head(<span class="dv">6</span>)</span>
 <span id="cb18-15"><a href="#cb18-15" tabindex="-1"></a><span class="co">#&gt;   plot_id  elevation    habitat  elevation_observed habitat_observed</span></span>
-<span id="cb18-16"><a href="#cb18-16" tabindex="-1"></a><span class="co">#&gt; 0    A005     2217.0     alpine                2145        grassland</span></span>
-<span id="cb18-17"><a href="#cb18-17" tabindex="-1"></a><span class="co">#&gt; 1    A010     1802.0     forest                1632          wetland</span></span>
-<span id="cb18-18"><a href="#cb18-18" tabindex="-1"></a><span class="co">#&gt; 2    A015     2288.0     alpine                2165           alpine</span></span>
-<span id="cb18-19"><a href="#cb18-19" tabindex="-1"></a><span class="co">#&gt; 3    A020     1276.0     forest                1284           forest</span></span>
-<span id="cb18-20"><a href="#cb18-20" tabindex="-1"></a><span class="co">#&gt; 4    A025      670.0  grassland                1235        grassland</span></span>
-<span id="cb18-21"><a href="#cb18-21" tabindex="-1"></a><span class="co">#&gt; 5    A030     1570.0  grassland                1840        grassland</span></span></code></pre></div>
+<span id="cb18-16"><a href="#cb18-16" tabindex="-1"></a><span class="co">#&gt; 0    A005     2180.0     alpine                2145        grassland</span></span>
+<span id="cb18-17"><a href="#cb18-17" tabindex="-1"></a><span class="co">#&gt; 1    A010     1649.0     forest                1632          wetland</span></span>
+<span id="cb18-18"><a href="#cb18-18" tabindex="-1"></a><span class="co">#&gt; 2    A015     2229.0     alpine                2165           alpine</span></span>
+<span id="cb18-19"><a href="#cb18-19" tabindex="-1"></a><span class="co">#&gt; 3    A020     1399.0     forest                1284           forest</span></span>
+<span id="cb18-20"><a href="#cb18-20" tabindex="-1"></a><span class="co">#&gt; 4    A025      900.0  grassland                1235        grassland</span></span>
+<span id="cb18-21"><a href="#cb18-21" tabindex="-1"></a><span class="co">#&gt; 5    A030     1463.0  grassland                1840        grassland</span></span></code></pre></div>
 </div>
 <p>The imputed values are joined to the recorded values by plot
 identifier. Since the model never saw these plots, the mean absolute
@@ -420,7 +420,7 @@ measure how it does on new data.</p>
 <span><span class="co">#&gt; 219.6333333   0.7333333</span></span></code></pre></div>
 <div class="sourceCode" id="cb20"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb20-1"><a href="#cb20-1" tabindex="-1"></a>{<span class="st">"mae"</span>: (out.elevation <span class="op">-</span> out.elevation_observed).<span class="bu">abs</span>().mean(),</span>
 <span id="cb20-2"><a href="#cb20-2" tabindex="-1"></a> <span class="st">"accuracy"</span>: (out.habitat <span class="op">==</span> out.habitat_observed).mean()}</span>
-<span id="cb20-3"><a href="#cb20-3" tabindex="-1"></a><span class="co">#&gt; {'mae': np.float64(206.2), 'accuracy': np.float64(0.7666666666666667)}</span></span></code></pre></div>
+<span id="cb20-3"><a href="#cb20-3" tabindex="-1"></a><span class="co">#&gt; {'mae': np.float64(209.23333333333332), 'accuracy': np.float64(0.7333333333333333)}</span></span></code></pre></div>
 </div>
 </div>
 <div class="section level2">
@@ -445,9 +445,9 @@ class is the column with the largest value.</p>
 <span><span class="co">#&gt; [1] TRUE</span></span></code></pre></div>
 <div class="sourceCode" id="cb22"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb22-1"><a href="#cb22-1" tabindex="-1"></a>probs <span class="op">=</span> preds.probabilities[<span class="st">"habitat"</span>]</span>
 <span id="cb22-2"><a href="#cb22-2" tabindex="-1"></a>probs[:<span class="dv">3</span>].<span class="bu">round</span>(decimals<span class="op">=</span><span class="dv">3</span>)</span>
-<span id="cb22-3"><a href="#cb22-3" tabindex="-1"></a><span class="co">#&gt; tensor([[0.7450, 0.0440, 0.1500, 0.0610],</span></span>
-<span id="cb22-4"><a href="#cb22-4" tabindex="-1"></a><span class="co">#&gt;         [0.1900, 0.5470, 0.1170, 0.1450],</span></span>
-<span id="cb22-5"><a href="#cb22-5" tabindex="-1"></a><span class="co">#&gt;         [0.9210, 0.0360, 0.0180, 0.0250]])</span></span>
+<span id="cb22-3"><a href="#cb22-3" tabindex="-1"></a><span class="co">#&gt; tensor([[0.8230, 0.0530, 0.0740, 0.0500],</span></span>
+<span id="cb22-4"><a href="#cb22-4" tabindex="-1"></a><span class="co">#&gt;         [0.0930, 0.7170, 0.0680, 0.1220],</span></span>
+<span id="cb22-5"><a href="#cb22-5" tabindex="-1"></a><span class="co">#&gt;         [0.8100, 0.0920, 0.0400, 0.0580]])</span></span>
 <span id="cb22-6"><a href="#cb22-6" tabindex="-1"></a>probs.<span class="bu">sum</span>(dim<span class="op">=</span><span class="dv">1</span>).aminmax()</span>
 <span id="cb22-7"><a href="#cb22-7" tabindex="-1"></a><span class="co">#&gt; torch.return_types.aminmax(</span></span>
 <span id="cb22-8"><a href="#cb22-8" tabindex="-1"></a><span class="co">#&gt; min=tensor(1.0000),</span></span>
@@ -485,9 +485,9 @@ grows as it spreads over more classes.</p>
 <span id="cb24-7"><a href="#cb24-7" tabindex="-1"></a>})</span>
 <span id="cb24-8"><a href="#cb24-8" tabindex="-1"></a>sure.sort_values(<span class="st">"confidence"</span>).head(<span class="dv">3</span>)</span>
 <span id="cb24-9"><a href="#cb24-9" tabindex="-1"></a><span class="co">#&gt;    plot_id  confidence    margin   entropy</span></span>
-<span id="cb24-10"><a href="#cb24-10" tabindex="-1"></a><span class="co">#&gt; 22    A115    0.371325  0.033685  1.292142</span></span>
-<span id="cb24-11"><a href="#cb24-11" tabindex="-1"></a><span class="co">#&gt; 21    A110    0.469217  0.181195  1.222800</span></span>
-<span id="cb24-12"><a href="#cb24-12" tabindex="-1"></a><span class="co">#&gt; 29    A150    0.546224  0.330326  1.167729</span></span></code></pre></div>
+<span id="cb24-10"><a href="#cb24-10" tabindex="-1"></a><span class="co">#&gt; 16    A085    0.363409  0.037384  1.279009</span></span>
+<span id="cb24-11"><a href="#cb24-11" tabindex="-1"></a><span class="co">#&gt; 24    A125    0.519176  0.140828  1.010332</span></span>
+<span id="cb24-12"><a href="#cb24-12" tabindex="-1"></a><span class="co">#&gt; 29    A150    0.520104  0.271364  1.183309</span></span></code></pre></div>
 </div>
 <p>The rows are computed on whichever plots are scored, so a checkpoint
 alone is enough to check how well the probabilities match the observed
@@ -713,12 +713,12 @@ carry every target. The training dataset is both.</p>
 <span id="cb37-10"><a href="#cb37-10" tabindex="-1"></a>              <span class="st">"model"</span>: preds.predictions[<span class="st">"elevation"</span>].numpy().<span class="bu">round</span>(),</span>
 <span id="cb37-11"><a href="#cb37-11" tabindex="-1"></a>              <span class="st">"blended"</span>: blended.predictions[<span class="st">"elevation"</span>].numpy().<span class="bu">round</span>()}).head(<span class="dv">6</span>)</span>
 <span id="cb37-12"><a href="#cb37-12" tabindex="-1"></a><span class="co">#&gt;   plot_id   model  blended</span></span>
-<span id="cb37-13"><a href="#cb37-13" tabindex="-1"></a><span class="co">#&gt; 0    A005  2217.0   2247.0</span></span>
-<span id="cb37-14"><a href="#cb37-14" tabindex="-1"></a><span class="co">#&gt; 1    A010  1802.0   1844.0</span></span>
-<span id="cb37-15"><a href="#cb37-15" tabindex="-1"></a><span class="co">#&gt; 2    A015  2288.0   2308.0</span></span>
-<span id="cb37-16"><a href="#cb37-16" tabindex="-1"></a><span class="co">#&gt; 3    A020  1276.0   1232.0</span></span>
-<span id="cb37-17"><a href="#cb37-17" tabindex="-1"></a><span class="co">#&gt; 4    A025   670.0    714.0</span></span>
-<span id="cb37-18"><a href="#cb37-18" tabindex="-1"></a><span class="co">#&gt; 5    A030  1570.0   1542.0</span></span>
+<span id="cb37-13"><a href="#cb37-13" tabindex="-1"></a><span class="co">#&gt; 0    A005  2180.0   2209.0</span></span>
+<span id="cb37-14"><a href="#cb37-14" tabindex="-1"></a><span class="co">#&gt; 1    A010  1649.0   1700.0</span></span>
+<span id="cb37-15"><a href="#cb37-15" tabindex="-1"></a><span class="co">#&gt; 2    A015  2229.0   2242.0</span></span>
+<span id="cb37-16"><a href="#cb37-16" tabindex="-1"></a><span class="co">#&gt; 3    A020  1399.0   1339.0</span></span>
+<span id="cb37-17"><a href="#cb37-17" tabindex="-1"></a><span class="co">#&gt; 4    A025   900.0    898.0</span></span>
+<span id="cb37-18"><a href="#cb37-18" tabindex="-1"></a><span class="co">#&gt; 5    A030  1463.0   1396.0</span></span>
 <span id="cb37-19"><a href="#cb37-19" tabindex="-1"></a></span>
 <span id="cb37-20"><a href="#cb37-20" tabindex="-1"></a>predictor.clear_retrieval()</span></code></pre></div>
 </div>
@@ -768,7 +768,7 @@ habitat.</p>
 <span>                      combine <span class="op">=</span> <span class="st">"vote"</span>, outputs <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="st">"habitat"</span><span class="op">)</span>,</span>
 <span>                      status <span class="op">=</span> <span class="st">"released"</span>, members <span class="op">=</span> <span class="va">members</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
-<span><span class="fu">jsonlite</span><span class="fu">::</span><span class="fu"><a href="https://jeroen.r-universe.dev/jsonlite/reference/read_json.html" class="external-link">write_json</a></span><span class="op">(</span><span class="va">manifest</span>, <span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">suite_dir</span>, <span class="st">"manifest.json"</span><span class="op">)</span>,</span>
+<span><span class="fu">jsonlite</span><span class="fu">::</span><span class="fu"><a href="https://rdrr.io/pkg/jsonlite/man/read_json.html" class="external-link">write_json</a></span><span class="op">(</span><span class="va">manifest</span>, <span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">suite_dir</span>, <span class="st">"manifest.json"</span><span class="op">)</span>,</span>
 <span>                     auto_unbox <span class="op">=</span> <span class="cn">TRUE</span>, pretty <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div>
 <div class="sourceCode" id="cb39"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb39-1"><a href="#cb39-1" tabindex="-1"></a><span class="im">import</span> json</span>
 <span id="cb39-2"><a href="#cb39-2" tabindex="-1"></a></span>
@@ -859,11 +859,11 @@ columns such as coordinates, the header. No target column is read.</p>
 <span id="cb43-10"><a href="#cb43-10" tabindex="-1"></a>              <span class="st">"recognised"</span>: habitat.recognition.count_share.numpy()}).head(<span class="dv">6</span>)</span>
 <span id="cb43-11"><a href="#cb43-11" tabindex="-1"></a><span class="co">#&gt;   plot_id    habitat  agreement  recognised</span></span>
 <span id="cb43-12"><a href="#cb43-12" tabindex="-1"></a><span class="co">#&gt; 0    A005     alpine   0.666667    0.666667</span></span>
-<span id="cb43-13"><a href="#cb43-13" tabindex="-1"></a><span class="co">#&gt; 1    A010    wetland   0.666667    1.000000</span></span>
-<span id="cb43-14"><a href="#cb43-14" tabindex="-1"></a><span class="co">#&gt; 2    A015     alpine   0.333333    1.000000</span></span>
+<span id="cb43-13"><a href="#cb43-13" tabindex="-1"></a><span class="co">#&gt; 1    A010     forest   1.000000    1.000000</span></span>
+<span id="cb43-14"><a href="#cb43-14" tabindex="-1"></a><span class="co">#&gt; 2    A015     alpine   1.000000    1.000000</span></span>
 <span id="cb43-15"><a href="#cb43-15" tabindex="-1"></a><span class="co">#&gt; 3    A020     forest   1.000000    1.000000</span></span>
-<span id="cb43-16"><a href="#cb43-16" tabindex="-1"></a><span class="co">#&gt; 4    A025  grassland   0.666667    1.000000</span></span>
-<span id="cb43-17"><a href="#cb43-17" tabindex="-1"></a><span class="co">#&gt; 5    A030  grassland   1.000000    1.000000</span></span></code></pre></div>
+<span id="cb43-16"><a href="#cb43-16" tabindex="-1"></a><span class="co">#&gt; 4    A025  grassland   1.000000    1.000000</span></span>
+<span id="cb43-17"><a href="#cb43-17" tabindex="-1"></a><span class="co">#&gt; 5    A030  grassland   0.666667    1.000000</span></span></code></pre></div>
 </div>
 <p>The <em>agreement</em> of a vote is the share of members naming the
 winning class; a tie goes to the tied class with the higher mean
@@ -885,8 +885,9 @@ trained on plots holding species it knows: <code>imputed</code> is
 <span><span class="fu"><a href="https://rdrr.io/r/base/names.html" class="external-link">names</a></span><span class="op">(</span><span class="va">suite_table</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] "plot_id"                            "habitat"                           </span></span>
 <span><span class="co">#&gt; [3] "habitat_code"                       "habitat_agreement"                 </span></span>
-<span><span class="co">#&gt; [5] "habitat_n_species"                  "habitat_n_recognised"              </span></span>
-<span><span class="co">#&gt; [7] "habitat_recognised_share"           "habitat_recognised_abundance_share"</span></span></code></pre></div>
+<span><span class="co">#&gt; [5] "habitat_imputed"                    "habitat_n_species"                 </span></span>
+<span><span class="co">#&gt; [7] "habitat_n_recognised"               "habitat_recognised_share"          </span></span>
+<span><span class="co">#&gt; [9] "habitat_recognised_abundance_share"</span></span></code></pre></div>
 <div class="sourceCode" id="cb45"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb45-1"><a href="#cb45-1" tabindex="-1"></a>suite_table <span class="op">=</span> suite_preds.to_pandas()</span>
 <span id="cb45-2"><a href="#cb45-2" tabindex="-1"></a><span class="bu">list</span>(suite_table.columns)</span>
 <span id="cb45-3"><a href="#cb45-3" tabindex="-1"></a><span class="co">#&gt; ['plot_id', 'habitat', 'habitat_code', 'habitat_agreement', 'habitat_imputed', 'habitat_n_species', 'habitat_n_recognised', 'habitat_recognised_share', 'habitat_recognised_abundance_share']</span></span></code></pre></div>
@@ -906,16 +907,13 @@ members’ mean probability of each class.</p>
 <h2 id="next-steps">Next steps<a class="anchor" aria-label="anchor" href="#next-steps"></a>
 </h2>
 <ul>
-<li>
-<a href="embeddings.html">Latent and species embeddings</a>: the
+<li><p><a href="embeddings.html">Latent and species embeddings</a>: the
 latent space, species and genus embeddings, and what they are used
-for.</li>
-<li>
-<a href="performance.html">Large data and GPUs</a>: imputation on
-large surveys and on the GPU.</li>
-<li>
-<a href="command-line.html">The command line</a>:
-<code>resolve predict</code>, with and without a suite.</li>
+for.</p></li>
+<li><p><a href="performance.html">Large data and GPUs</a>: imputation on
+large surveys and on the GPU.</p></li>
+<li><p><a href="command-line.html">The command line</a>:
+<code>resolve predict</code>, with and without a suite.</p></li>
 </ul>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

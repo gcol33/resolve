@@ -142,9 +142,11 @@ from_tensors = predictor.predict(
 - `get_embeddings(*, ..., batch_size=4096)`: each plot’s latent
   representation, `(n_plots, latent_dim)`, from the keyword inputs of
   `predict`.
+
 - `get_species_embeddings()`: the species table,
   `(n_species_vocab, species_embed_dim)`, or `None` for the hash and
   sparse encodings.
+
 - `get_genus_embeddings()`, `get_family_embeddings()`: the genus and
   family tables, or `None` without taxonomy.
 
@@ -209,12 +211,16 @@ Call it after loading and before a large imputation run.
 
 - `model` (`ResolveModel`), `scalers` (`Scalers`), `schema`
   (`ResolveSchema`) and `device` (`str`).
+
 - `external_vocabs` (`ExternalVocabs`): every training vocabulary, the
   categorical codes included, for the `*_with_vocabs` loaders.
+
 - `dataset_config` (`DatasetConfig`): the loader settings the checkpoint
   was trained under (`dataset_config_from_checkpoint`).
+
 - `categorical_vocab` (`CategoricalVocab`), `species_vocab`,
   `genus_vocab`, `family_vocab` (`list[str]`, `"<UNK>"` first).
+
 - `retrieval` (`RetrievalConfig` or `None`) and `n_retrieval_reference`
   (`int`): the active retrieval and the size of its reference set.
 
@@ -226,13 +232,17 @@ What `predict_dataset` and `predict` return.
   regression target is in its original units, a `Log1p` target inverted.
   A classification target is an int64 class code, indexing the target’s
   `class_names` in `predictor.schema.targets`.
+
 - `probabilities` (`dict[str, Tensor]`): one `(n_plots, n_classes)`
   entry per classification target, column `j` the probability of code
   `j`; each row sums to one and its largest entry is the imputed code.
   Regression targets have no entry.
+
 - `targets` (`dict[str, Tensor]`): the recorded values, where the
   dataset carried them.
+
 - `plot_ids` (`list[str]`): the plot identifiers, in row order.
+
 - `latent` (`Tensor` or `None`): `(n_plots, latent_dim)` with
   `return_latent=True`.
 
@@ -312,13 +322,17 @@ The run as a checkpoint records it, from `Trainer.run_metadata` or
 
 - `resolve_version` (`str`), `created_at`, `completed_at` (`str`) and
   `train_time_seconds` (`float`).
+
 - `n_plots_train`, `n_plots_test` (`int`): the fitting and held-out
   plots.
+
 - `hold_out` (`HoldOutMode`), `test_size` (`float`, 0 for an explicit
   fold) and `split_seed` (`int`, the `prepare_data` seed, which also
   seeds the epoch shuffle).
+
 - `best_epoch`, `total_epochs` (`int`) and `final_metrics`
   (`dict[str, dict[str, float]]`).
+
 - `parent`
   ([`ParentRecord`](https://gillescolling.com/resolve/articles/python-fine-tuning.html#ParentRecord)
   or `None`): the model a fine-tuned run started from.

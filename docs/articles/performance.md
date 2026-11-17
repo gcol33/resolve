@@ -120,8 +120,10 @@ The loss curve tells you which way to move it:
 
 - **The loss jumps or turns to NaN within a few epochs**: lower the rate
   by a factor of 3 to 10.
+
 - **The loss falls slowly and levels off high**: raise it by a factor of
   3 to 10.
+
 - **The loss swings up and down without a downward trend**: lower it by
   a factor of 2 to 3.
 
@@ -132,10 +134,13 @@ the rate stays at `lr`. Four schedules are available:
 
 - **`step`** multiplies the rate by `lr_gamma` (default 0.1) every
   `lr_step_size` epochs (default 100).
+
 - **`cosine`** lowers the rate along a cosine from `lr` to `lr_min`
   (default 0.000001), reached at the last epoch of `max_epochs`.
+
 - **`linear`** lowers the rate at every optimizer step to `lr_min` at
   the end of `max_epochs`.
+
 - **`plateau`** follows the held-out fold and lowers the rate when the
   held-out value stops improving.
 
@@ -270,9 +275,12 @@ small_result = small.fit()
 - **Small datasets (under 5,000 plots)**: the deep default can overfit
   before it converges; three layers of 256, 128 and 64 units are a
   better start.
+
 - **Mid-size datasets**: 512, 256 and 128 units, or the default.
+
 - **Large datasets**: the default, made wider if the training loss
   levels off above the held-out loss.
+
 - **With the transformer encoding**: the attention layers already carry
   capacity, so a shallower stack above them is usually enough.
 
@@ -356,8 +364,10 @@ memory these encodings use:
 
 - **0** (default): no cap; the plot with the most species sets the
   width.
+
 - **A negative value**: a percentile cap, read as 100 minus the value:
   -1 caps at the 99th percentile of species per plot, -5 at the 95th.
+
 - **A positive value**: a fixed cap.
 
 A plot longer than the cap keeps its most abundant species, so the kept
@@ -705,7 +715,7 @@ model_config = rc.model_config_for_dataset(quick_data, model_config)
 quick = rc.Trainer(rc.ResolveModel(quick_data.schema, model_config), cfg)
 quick.prepare_data(quick_data, test_size=0.2, seed=42)
 round(quick.fit().final_metrics["habitat"]["accuracy"], 3)
-#> 0.8
+#> 0.767
 ```
 
 Standard training: a mid-size encoder and a longer run.
@@ -774,9 +784,11 @@ result = pooled.fit()
 - [Encoding the species
   set](https://gillescolling.com/resolve/articles/encoding.md): what
   each encoding does with the species of a plot.
+
 - [Training and reading the
   fit](https://gillescolling.com/resolve/articles/training.md): every
   training setting and how to read the result.
+
 - [Imputing new
   plots](https://gillescolling.com/resolve/articles/prediction.md):
   imputation in chunks and on the GPU.

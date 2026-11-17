@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -309,14 +309,14 @@ GPU.</p>
 <span><span class="fu"><a href="../reference/resolve.available.html">resolve.available</a></span><span class="op">(</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] TRUE</span></span>
 <span><span class="fu"><a href="../reference/resolve.version.html">resolve.version</a></span><span class="op">(</span><span class="op">)</span></span>
-<span><span class="co">#&gt; [1] "1.2.0"</span></span></code></pre></div>
+<span><span class="co">#&gt; [1] "1.3.0"</span></span></code></pre></div>
 <div class="sourceCode" id="cb7"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a><span class="im">import</span> torch</span>
 <span id="cb7-2"><a href="#cb7-2" tabindex="-1"></a><span class="im">import</span> resolve_core <span class="im">as</span> rc</span>
 <span id="cb7-3"><a href="#cb7-3" tabindex="-1"></a></span>
 <span id="cb7-4"><a href="#cb7-4" tabindex="-1"></a>rc.__version__</span>
-<span id="cb7-5"><a href="#cb7-5" tabindex="-1"></a><span class="co">#&gt; 1.2.0</span></span>
+<span id="cb7-5"><a href="#cb7-5" tabindex="-1"></a><span class="co">#&gt; 1.3.0</span></span>
 <span id="cb7-6"><a href="#cb7-6" tabindex="-1"></a>torch.cuda.is_available()</span>
-<span id="cb7-7"><a href="#cb7-7" tabindex="-1"></a><span class="co">#&gt; True</span></span></code></pre></div>
+<span id="cb7-7"><a href="#cb7-7" tabindex="-1"></a><span class="co">#&gt; False</span></span></code></pre></div>
 </div>
 </div>
 <div class="section level2">
@@ -436,12 +436,12 @@ RESOLVE engine library from elsewhere</a>).</p>
 <p>These are the messages the packages print when a step fails, with
 what to do about each.</p>
 <ul>
-<li>Without a RESOLVE engine library, <code><a href="https://gillescolling.com/resolve/">library(resolveR)</a></code>
+<li><p>Without a RESOLVE engine library, <code><a href="https://gillescolling.com/resolve/">library(resolveR)</a></code>
 prints that the backend is not installed, and the functions that load
 data, train or impute stop with the same message. Run
 <code><a href="../reference/resolve.install_backend.html">resolve.install_backend()</a></code>, or set
-<code>RESOLVE_C_HOME</code>.</li>
-<li>When a library is found but does not load,
+<code>RESOLVE_C_HOME</code>.</p></li>
+<li><p>When a library is found but does not load,
 <code><a href="https://gillescolling.com/resolve/">library(resolveR)</a></code> prints its path and the loader’s reason
 instead, and the functions stop with the same text.
 <code>is missing symbols:</code> followed by function names means the
@@ -449,32 +449,32 @@ library was built before the installed resolveR and lacks functions the
 package calls; reinstall it with
 <code>resolve.install_backend(force = TRUE)</code>.
 <code><a href="../reference/resolve.install_backend.html">resolve.install_backend()</a></code> without <code>force</code> warns
-with this text when the library it finds does not load.</li>
-<li>When a download fails, <code><a href="../reference/resolve.install_backend.html">resolve.install_backend()</a></code> stops
-with <code>cannot open URL</code> and the address it tried. The file
-name in the address names the build,
+with this text when the library it finds does not load.</p></li>
+<li><p>When a download fails, <code><a href="../reference/resolve.install_backend.html">resolve.install_backend()</a></code>
+stops with <code>cannot open URL</code> and the address it tried. The
+file name in the address names the build,
 <code>resolve_c-&lt;system&gt;-&lt;architecture&gt;-&lt;variant&gt;.zip</code>,
 and <code>HTTP status was '404 Not Found'</code> means the release of
 that version has no such file. The call raises R’s download timeout to
-at least an hour for these files.</li>
-<li>With <code>variant = "cuda"</code>, the call stops when
+at least an hour for these files.</p></li>
+<li><p>With <code>variant = "cuda"</code>, the call stops when
 <code>nvidia-smi</code> finds no NVIDIA card; install the CPU build. It
 also stops when the driver supports only a CUDA version older than 12.8;
-update the driver.</li>
-<li>On macOS, a GPU variant stops the call, since CUDA builds do not
-exist there.</li>
-<li>When the library downloads but does not load, the call stops with
+update the driver.</p></li>
+<li><p>On macOS, a GPU variant stops the call, since CUDA builds do not
+exist there.</p></li>
+<li><p>When the library downloads but does not load, the call stops with
 <code>Downloaded resolve_c but could not load it:</code> and the reason
-the system’s loader gives.</li>
-<li>With the CPU build loaded on a machine with an NVIDIA card,
+the system’s loader gives.</p></li>
+<li><p>With the CPU build loaded on a machine with an NVIDIA card,
 <code><a href="https://gillescolling.com/resolve/">library(resolveR)</a></code> prints that a GPU was detected and names
-the call that installs the GPU build.</li>
-<li>When the Python extension does not import,
+the call that installs the GPU build.</p></li>
+<li><p>When the Python extension does not import,
 <code>import resolve_core</code> fails with
 <code>Failed to import resolve_core C++ extension</code> and the error
 underneath it. Reinstall <code>resolve-core</code> in the environment
 whose torch it runs with, or build it there with
-<code>--no-build-isolation</code>.</li>
+<code>--no-build-isolation</code>.</p></li>
 </ul>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

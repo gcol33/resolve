@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -151,29 +151,25 @@ line, the settings, and the gaps the dataset cannot inform.</p>
 <p>Seven candidates impute a gap, from the dataset alone, from the model
 alone, or from both:</p>
 <ul>
-<li>
-<code>local_constant</code>: the complete plots’ mean (their median
-on a log scale, their mean direction for a bearing, their geographic
-median for a location);</li>
-<li>
-<code>resolve</code>: the model’s imputed value as it stands;</li>
-<li>
-<code>offset_slope</code>: the model’s imputed value calibrated on
-the complete plots, <code>y = mean(y) + b (raw - mean(raw))</code>, with
-<code>b</code> fitted by least squares; <code>b = 1</code> shifts the
-imputed value by its mean error there, <code>b = 0</code> is the local
-constant;</li>
-<li>
-<code>knn_species</code>: the median recorded value of the
+<li><p><code>local_constant</code>: the complete plots’ mean (their
+median on a log scale, their mean direction for a bearing, their
+geographic median for a location);</p></li>
+<li><p><code>resolve</code>: the model’s imputed value as it
+stands;</p></li>
+<li><p><code>offset_slope</code>: the model’s imputed value calibrated
+on the complete plots, <code>y = mean(y) + b (raw - mean(raw))</code>,
+with <code>b</code> fitted by least squares; <code>b = 1</code> shifts
+the imputed value by its mean error there, <code>b = 0</code> is the
+local constant;</p></li>
+<li><p><code>knn_species</code>: the median recorded value of the
 <code>k</code> complete plots most similar in species composition (the
-Ochiai similarity of their species lists);</li>
-<li>
-<code>knn_spatial</code>: the median recorded value of the
-<code>k</code> nearest complete plots by great-circle distance;</li>
-<li>
-<code>stack_species</code> and <code>stack_species_spatial</code>:
-the model’s imputed value and those neighbour medians combined by least
-squares on the complete plots.</li>
+Ochiai similarity of their species lists);</p></li>
+<li><p><code>knn_spatial</code>: the median recorded value of the
+<code>k</code> nearest complete plots by great-circle distance;</p></li>
+<li><p><code>stack_species</code> and
+<code>stack_species_spatial</code>: the model’s imputed value and those
+neighbour medians combined by least squares on the complete
+plots.</p></li>
 </ul>
 <p><code>k</code> is chosen from 1, 3, 5, 10, 20 and 50 by how well the
 neighbours impute the complete plots.</p>
@@ -368,7 +364,7 @@ beside the model’s own imputed value.</p>
 <span id="cb12-5"><a href="#cb12-5" tabindex="-1"></a>fitted <span class="op">=</span> elevation.fitted.numpy()</span>
 <span id="cb12-6"><a href="#cb12-6" tabindex="-1"></a>{<span class="st">"model"</span>: <span class="bu">float</span>(np.<span class="bu">abs</span>(raw[gaps] <span class="op">-</span> truth[gaps]).mean()),</span>
 <span id="cb12-7"><a href="#cb12-7" tabindex="-1"></a> <span class="st">"fitted"</span>: <span class="bu">float</span>(np.<span class="bu">abs</span>(fitted[gaps] <span class="op">-</span> truth[gaps]).mean())}</span>
-<span id="cb12-8"><a href="#cb12-8" tabindex="-1"></a><span class="co">#&gt; {'model': 252.3594970703125, 'fitted': 150.94150117990975}</span></span></code></pre></div>
+<span id="cb12-8"><a href="#cb12-8" tabindex="-1"></a><span class="co">#&gt; {'model': 276.0214314778646, 'fitted': 156.3113714593291}</span></span></code></pre></div>
 </div>
 </div>
 <div class="section level2">
@@ -402,9 +398,9 @@ plots), the method chosen and what it fitted.</p>
 <span id="cb14-2"><a href="#cb14-2" tabindex="-1"></a>located[<span class="st">"method"</span>]</span>
 <span id="cb14-3"><a href="#cb14-3" tabindex="-1"></a><span class="co">#&gt; stack_species</span></span>
 <span id="cb14-4"><a href="#cb14-4" tabindex="-1"></a>{m: <span class="bu">round</span>(e, <span class="dv">1</span>) <span class="cf">for</span> m, e <span class="kw">in</span> located[<span class="st">"cv_error"</span>].items()}</span>
-<span id="cb14-5"><a href="#cb14-5" tabindex="-1"></a><span class="co">#&gt; {'local_constant': 576.0, 'resolve': 167.7, 'offset_slope': 171.9, 'knn_species': 121.5, 'stack_species': 114.4, 'knn_spatial': 580.8, 'stack_species_spatial': 115.6}</span></span>
+<span id="cb14-5"><a href="#cb14-5" tabindex="-1"></a><span class="co">#&gt; {'local_constant': 576.0, 'resolve': 164.2, 'offset_slope': 162.3, 'knn_species': 121.5, 'stack_species': 105.2, 'knn_spatial': 580.8, 'stack_species_spatial': 108.5}</span></span>
 <span id="cb14-6"><a href="#cb14-6" tabindex="-1"></a><span class="bu">round</span>(located[<span class="st">"estimated_error"</span>], <span class="dv">1</span>)</span>
-<span id="cb14-7"><a href="#cb14-7" tabindex="-1"></a><span class="co">#&gt; 119.3</span></span>
+<span id="cb14-7"><a href="#cb14-7" tabindex="-1"></a><span class="co">#&gt; 106.6</span></span>
 <span id="cb14-8"><a href="#cb14-8" tabindex="-1"></a>elevation.report[<span class="st">"axes"</span>][<span class="st">"km"</span>][<span class="st">"gap_distance"</span>][<span class="st">"median"</span>]</span>
 <span id="cb14-9"><a href="#cb14-9" tabindex="-1"></a><span class="co">#&gt; 7.379891561267665</span></span></code></pre></div>
 </div>
@@ -492,27 +488,22 @@ the plot records the target, <code>FALSE</code> where
 <code>gap_fitting</code> in Python, the <code>--gap-*</code> flags on
 the command line):</p>
 <ul>
-<li>
-<code>candidates</code>: the methods to choose among, by name; the
-gaps without coordinates need at least one that reads no position;</li>
-<li>
-<code>k_grid</code>: the neighbour counts <code>k</code> is chosen
-from;</li>
-<li>
-<code>spatial = FALSE</code> (<code>--no-spatial</code>):
-composition only, no spatial neighbours;</li>
-<li>
-<code>n_folds</code>: the number of folds, 10 by default; the
-estimated error needs at least 3;</li>
-<li>
-<code>max_fold_share</code>: the largest share of the complete plots
-one fold may hold, 0.5 by default;</li>
-<li>
-<code>matching_sample</code>: the number of complete plots the
-layouts are compared on, 1000 by default;</li>
-<li>
-<code>matching_seed</code>: the seed of the order the groups are
-dealt out in, the buffers drawn and the complete plots compared.</li>
+<li><p><code>candidates</code>: the methods to choose among, by name;
+the gaps without coordinates need at least one that reads no
+position;</p></li>
+<li><p><code>k_grid</code>: the neighbour counts <code>k</code> is
+chosen from;</p></li>
+<li><p><code>spatial = FALSE</code> (<code>--no-spatial</code>):
+composition only, no spatial neighbours;</p></li>
+<li><p><code>n_folds</code>: the number of folds, 10 by default; the
+estimated error needs at least 3;</p></li>
+<li><p><code>max_fold_share</code>: the largest share of the complete
+plots one fold may hold, 0.5 by default;</p></li>
+<li><p><code>matching_sample</code>: the number of complete plots the
+layouts are compared on, 1000 by default;</p></li>
+<li><p><code>matching_seed</code>: the seed of the order the groups are
+dealt out in, the buffers drawn and the complete plots
+compared.</p></li>
 </ul>
 <div class="lang-pair">
 <div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
@@ -542,21 +533,19 @@ survey years, for a value imputed anywhere.</p>
 <p>The complete plots show how far off a gap’s candidates are only where
 the gaps resemble them. Two kinds of gap do not:</p>
 <ul>
-<li>
-<strong>Undated plots that are probably older than the dated
+<li><p><strong>Undated plots that are probably older than the dated
 ones.</strong> When the undated plots are the oldest surveys, nothing on
 the dated plots shows how far off they are, and the model’s own imputed
 value is the better estimate: keep <code>&lt;target&gt;</code> rather
 than <code>&lt;target&gt;_fitted</code> for them. For other targets an
 old survey is visible through the survey-year axis, and gap fitting
-allows for it.</li>
-<li>
-<strong>Plots without coordinates that probably come from an area
+allows for it.</p></li>
+<li><p><strong>Plots without coordinates that probably come from an area
 with no georeferenced plots.</strong> A location’s gaps have no
 position, so the folds are matched in species similarity and survey year
 only, and a missing region still looks near in species terms. Such plots
 are better served by the model’s imputed value, or by the species stack
-alone.</li>
+alone.</p></li>
 </ul>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

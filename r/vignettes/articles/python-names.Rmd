@@ -34,8 +34,11 @@ resolve_names(names, model, target=None, table=True, max_edit_distance=1)
 Resolves a list of species names against a model's vocabulary and returns a `pandas.DataFrame`, one row per name in order: `name`, `token` (the name the model reads), `route`, `source`, `via`, `distance`. `model` is a `SuitePredictor` with `target`, a `Predictor`, or a vocabulary as a checkpoint orders it (`"<UNK>"` first). `table` is the path of the release's `names.json` or a `NameTable`; `None` or `True` resolves against the vocabulary alone. Each name takes the first route that reaches a token:
 
 - `exact`: the vocabulary holds the name as written;
+
 - `alias`: the name table maps the name to a token the vocabulary holds, `source` naming what linked them (`eva` for the names EVA's records were entered under, else the backbone, e.g. `wfo`);
+
 - `spelling`: within `max_edit_distance` edits (Damerau-Levenshtein, letter case ignored) of a token or a table name whose token the vocabulary holds, searched within the name's genus first and across every name only when the genus holds none, and used only when every nearest name stands for one species; `via` is the name it was read through and `distance` the edits;
+
 - `unresolved`: none of these; the name stays as written and counts as a species the model does not know.
 
 At one edit, misspelled copies of the example plots' names resolved 99.5% to the right species and none to a wrong one; two edits also renamed some species the models never saw, so 1 is the default.

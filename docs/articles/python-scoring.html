@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -144,43 +144,34 @@ functions of a tensor of imputed values <code>pred</code> and a tensor
 of recorded values <code>target</code>.</p>
 <p>Regression:</p>
 <ul>
-<li>
-<code>mae(pred, target)</code>: the mean absolute error.</li>
-<li>
-<code>rmse(pred, target)</code>: the root mean squared error.</li>
-<li>
-<code>r_squared(pred, target)</code>: the coefficient of
+<li><p><code>mae(pred, target)</code>: the mean absolute error.</p></li>
+<li><p><code>rmse(pred, target)</code>: the root mean squared
+error.</p></li>
+<li><p><code>r_squared(pred, target)</code>: the coefficient of
 determination, the share of the variance of <code>target</code> the
-imputed values explain.</li>
-<li>
-<code>smape(pred, target, eps=1e-8)</code>: the symmetric mean
+imputed values explain.</p></li>
+<li><p><code>smape(pred, target, eps=1e-8)</code>: the symmetric mean
 absolute percentage error, the mean of
 <code>|p - t| / ((|p| + |t|) / 2 + eps)</code>, in
-<code>[0, 2]</code>.</li>
-<li>
-<code>band_accuracy(pred, target, threshold=0.25)</code>: the share
-of imputed values within a relative band of <code>threshold</code>
-around the recorded value.</li>
+<code>[0, 2]</code>.</p></li>
+<li><p><code>band_accuracy(pred, target, threshold=0.25)</code>: the
+share of imputed values within a relative band of <code>threshold</code>
+around the recorded value.</p></li>
 </ul>
 <p>Classification, on int64 class codes:</p>
 <ul>
-<li>
-<code>accuracy(pred, target)</code>: the share of codes imputed
-correctly.</li>
-<li>
-<code>confusion_matrix(pred, target, num_classes)</code>: the
-<code>(num_classes, num_classes)</code> counts.</li>
-<li>
-<code>classification_metrics(pred, target, num_classes)</code>: a
-<code>ClassificationMetrics</code>.</li>
-<li>
-<code>accuracy_at_threshold(pred, target, confidence, threshold)</code>:
+<li><p><code>accuracy(pred, target)</code>: the share of codes imputed
+correctly.</p></li>
+<li><p><code>confusion_matrix(pred, target, num_classes)</code>: the
+<code>(num_classes, num_classes)</code> counts.</p></li>
+<li><p><code>classification_metrics(pred, target, num_classes)</code>: a
+<code>ClassificationMetrics</code>.</p></li>
+<li><p><code>accuracy_at_threshold(pred, target, confidence, threshold)</code>:
 a <code>ConfidenceMetrics</code> over the imputed values whose
 <code>confidence</code> reaches <code>threshold</code>, such as the
-largest class probability.</li>
-<li>
-<code>accuracy_coverage_curve(pred, target, confidence, thresholds=[0.0, 0.5, 0.8, 0.9, 0.95])</code>:
-one <code>ConfidenceMetrics</code> per threshold.</li>
+largest class probability.</p></li>
+<li><p><code>accuracy_coverage_curve(pred, target, confidence, thresholds=[0.0, 0.5, 0.8, 0.9, 0.95])</code>:
+one <code>ConfidenceMetrics</code> per threshold.</p></li>
 </ul>
 <p>Every metric of one target:</p>
 <ul>

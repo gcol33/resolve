@@ -42,15 +42,18 @@ resolves against the vocabulary alone. Each name takes the first route
 that reaches a token:
 
 - `exact`: the vocabulary holds the name as written;
+
 - `alias`: the name table maps the name to a token the vocabulary holds,
   `source` naming what linked them (`eva` for the names EVA’s records
   were entered under, else the backbone, e.g. `wfo`);
+
 - `spelling`: within `max_edit_distance` edits (Damerau-Levenshtein,
   letter case ignored) of a token or a table name whose token the
   vocabulary holds, searched within the name’s genus first and across
   every name only when the genus holds none, and used only when every
   nearest name stands for one species; `via` is the name it was read
   through and `distance` the edits;
+
 - `unresolved`: none of these; the name stays as written and counts as a
   species the model does not know.
 

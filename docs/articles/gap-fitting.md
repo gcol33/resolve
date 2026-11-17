@@ -39,16 +39,21 @@ alone, or from both:
 - `local_constant`: the complete plots’ mean (their median on a log
   scale, their mean direction for a bearing, their geographic median for
   a location);
+
 - `resolve`: the model’s imputed value as it stands;
+
 - `offset_slope`: the model’s imputed value calibrated on the complete
   plots, `y = mean(y) + b (raw - mean(raw))`, with `b` fitted by least
   squares; `b = 1` shifts the imputed value by its mean error there,
   `b = 0` is the local constant;
+
 - `knn_species`: the median recorded value of the `k` complete plots
   most similar in species composition (the Ochiai similarity of their
   species lists);
+
 - `knn_spatial`: the median recorded value of the `k` nearest complete
   plots by great-circle distance;
+
 - `stack_species` and `stack_species_spatial`: the model’s imputed value
   and those neighbour medians combined by least squares on the complete
   plots.
@@ -268,7 +273,7 @@ raw = preds.predictions["elevation"].numpy()
 fitted = elevation.fitted.numpy()
 {"model": float(np.abs(raw[gaps] - truth[gaps]).mean()),
  "fitted": float(np.abs(fitted[gaps] - truth[gaps]).mean())}
-#> {'model': 252.3594970703125, 'fitted': 150.94150117990975}
+#> {'model': 276.0214314778646, 'fitted': 156.3113714593291}
 ```
 
 ## Reading the report
@@ -304,9 +309,9 @@ located = elevation.report["groups"]["located"]
 located["method"]
 #> stack_species
 {m: round(e, 1) for m, e in located["cv_error"].items()}
-#> {'local_constant': 576.0, 'resolve': 167.7, 'offset_slope': 171.9, 'knn_species': 121.5, 'stack_species': 114.4, 'knn_spatial': 580.8, 'stack_species_spatial': 115.6}
+#> {'local_constant': 576.0, 'resolve': 164.2, 'offset_slope': 162.3, 'knn_species': 121.5, 'stack_species': 105.2, 'knn_spatial': 580.8, 'stack_species_spatial': 108.5}
 round(located["estimated_error"], 1)
-#> 119.3
+#> 106.6
 elevation.report["axes"]["km"]["gap_distance"]["median"]
 #> 7.379891561267665
 ```
@@ -395,15 +400,21 @@ Python, the `--gap-*` flags on the command line):
 
 - `candidates`: the methods to choose among, by name; the gaps without
   coordinates need at least one that reads no position;
+
 - `k_grid`: the neighbour counts `k` is chosen from;
+
 - `spatial = FALSE` (`--no-spatial`): composition only, no spatial
   neighbours;
+
 - `n_folds`: the number of folds, 10 by default; the estimated error
   needs at least 3;
+
 - `max_fold_share`: the largest share of the complete plots one fold may
   hold, 0.5 by default;
+
 - `matching_sample`: the number of complete plots the layouts are
   compared on, 1000 by default;
+
 - `matching_seed`: the seed of the order the groups are dealt out in,
   the buffers drawn and the complete plots compared.
 
@@ -445,6 +456,7 @@ the gaps resemble them. Two kinds of gap do not:
   better estimate: keep `<target>` rather than `<target>_fitted` for
   them. For other targets an old survey is visible through the
   survey-year axis, and gap fitting allows for it.
+
 - **Plots without coordinates that probably come from an area with no
   georeferenced plots.** A location’s gaps have no position, so the
   folds are matched in species similarity and survey year only, and a

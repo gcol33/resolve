@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -156,19 +156,15 @@ command line, and its limits.</p>
 <p>Four <em>descriptors</em> are read from the elevation model at each
 plot’s coordinate:</p>
 <ul>
-<li>
-<code>elevation</code>: the elevation at the coordinate,
-interpolated between the four surrounding cell centres;</li>
-<li>
-<code>elevation_1km</code>: the mean elevation over the 1 km square
-centred on the coordinate;</li>
-<li>
-<code>slope</code>: the slope of the cell nearest the coordinate,
+<li><p><code>elevation</code>: the elevation at the coordinate,
+interpolated between the four surrounding cell centres;</p></li>
+<li><p><code>elevation_1km</code>: the mean elevation over the 1 km
+square centred on the coordinate;</p></li>
+<li><p><code>slope</code>: the slope of the cell nearest the coordinate,
 from its four edge neighbours (as Earth Engine’s
-<code>ee.Terrain.slope</code> computes it);</li>
-<li>
-<code>slope_1km</code>: the inclination of the plane fitted through
-the 1 km square.</li>
+<code>ee.Terrain.slope</code> computes it);</p></li>
+<li><p><code>slope_1km</code>: the inclination of the plane fitted
+through the 1 km square.</p></li>
 </ul>
 <p>An altitude target reads the two elevations, a slope target the two
 slopes. The 1 km descriptor is what the ground around a plot looks like
@@ -539,17 +535,17 @@ defaults.</p>
 <h2 id="limits">Limits<a class="anchor" aria-label="anchor" href="#limits"></a>
 </h2>
 <ul>
-<li>The correction covers altitude and slope. Aspect is a bearing with
-its own error, and is not corrected.</li>
-<li>GLO-30 is a surface model: in forest its elevation includes the
+<li><p>The correction covers altitude and slope. Aspect is a bearing
+with its own error, and is not corrected.</p></li>
+<li><p>GLO-30 is a surface model: in forest its elevation includes the
 canopy, metres to tens of metres above the ground a surveyor stands on.
 The correction learned what that costs on the archive’s plots; an
 elevation model of the bare ground would need a correction trained on
-it.</li>
-<li>A plot outside the field’s tiles, or without coordinates, keeps its
-imputed value (<code>applied</code> is <code>FALSE</code>).</li>
-<li>The weights describe how the correction combined the sources on a
-plot; they are not probabilities that a source is right.</li>
+it.</p></li>
+<li><p>A plot outside the field’s tiles, or without coordinates, keeps
+its imputed value (<code>applied</code> is <code>FALSE</code>).</p></li>
+<li><p>The weights describe how the correction combined the sources on a
+plot; they are not probabilities that a source is right.</p></li>
 </ul>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

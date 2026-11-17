@@ -307,11 +307,11 @@ genera = pd.DataFrame(genus_table[1:], index=genus_names[1:])
 similarity = pd.DataFrame(cosine(genera.to_numpy()),
                           index=genera.index, columns=genera.index)
 similarity["Quercus"].drop("Quercus").sort_values(ascending=False).head(5).round(3)
-#> Trifolium        0.731
-#> Arrhenatherum    0.665
-#> Festuca          0.577
-#> Picea            0.487
-#> Abies            0.478
+#> Trifolium        0.734
+#> Arrhenatherum    0.669
+#> Festuca          0.572
+#> Abies            0.496
+#> Caltha           0.483
 #> Name: Quercus, dtype: float32
 ```
 
@@ -365,8 +365,8 @@ names = pd.Index(species_names[1:])
 row = cosine(known)[names.get_loc("Carex curvula")]
 pd.Series(row, index=names).drop("Carex curvula").nlargest(3).round(3)
 #> Vaccinium myrtillus      0.271
-#> Arrhenatherum elatius    0.220
-#> Silene acaulis           0.204
+#> Arrhenatherum elatius    0.218
+#> Silene acaulis           0.200
 #> dtype: float32
 ```
 
@@ -378,7 +378,9 @@ non-linear layer mixes them:
 - **hash** adds each species’ cover, with a sign of +1 or -1, to the
   column its name hashes to, so a plot’s hashed vector is a signed sum
   of one term per species;
+
 - **rank pool** takes the cover-weighted mean of the species’ rows;
+
 - **sparse** passes the plot’s vector of species covers to a linear
   layer, which adds one column of weights per species.
 
@@ -409,11 +411,11 @@ round(sort(plot_similarity["A001", ], decreasing = TRUE)[2:6], 3)
 plot_similarity = pd.DataFrame(cosine(latent), index=out.plot_ids,
                                columns=out.plot_ids)
 plot_similarity["A001"].drop("A001").nlargest(5).round(3)
-#> A050    0.996
-#> A063    0.996
-#> A108    0.995
-#> A099    0.995
-#> A045    0.995
+#> A015    0.996
+#> A063    0.992
+#> A149    0.992
+#> A108    0.987
+#> A099    0.982
 #> Name: A001, dtype: float32
 ```
 
@@ -439,11 +441,11 @@ round(sort(nearest)[1:5], 3)
 ``` python
 nearest = plot_similarity.apply(lambda s: s.nlargest(6).iloc[1:].mean())
 nearest.nsmallest(5).round(3)
-#> A067    0.599
-#> A092    0.763
-#> A107    0.906
-#> A148    0.910
-#> A140    0.922
+#> A094    0.747
+#> A136    0.788
+#> A130    0.791
+#> A120    0.835
+#> A047    0.859
 #> dtype: float32
 ```
 
@@ -469,10 +471,10 @@ round(cor(pcs$x[, 1:3], elevation)[, 1], 3)
 
 ``` python
 np.round(s[:3] ** 2 / np.sum(s ** 2), 3)
-#> array([0.329, 0.276, 0.24 ], dtype=float32)
+#> array([0.329, 0.25 , 0.221], dtype=float32)
 elevation = pd.Series(out.plot_ids).map(plots.set_index("plot_id").elevation)
 [round(np.corrcoef(pcs[:, i], elevation)[0, 1], 3) for i in range(3)]
-#> [np.float64(-0.428), np.float64(-0.678), np.float64(-0.086)]
+#> [np.float64(-0.741), np.float64(-0.424), np.float64(-0.064)]
 ```
 
 ## Embeddings from the encoded inputs
@@ -517,9 +519,11 @@ route is shown in Python.
 - [Imputing new
   plots](https://gillescolling.com/resolve/articles/prediction.md):
   scoring new plots, class probabilities and retrieval.
+
 - [Encoding the species
   set](https://gillescolling.com/resolve/articles/encoding.md): which
   encodings build which tables.
+
 - [Training and reading the
   fit](https://gillescolling.com/resolve/articles/training.md): the
   settings of the encoder these vectors come from.

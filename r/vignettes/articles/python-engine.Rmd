@@ -123,6 +123,7 @@ An index over a list of strings, such as the species names of a vocabulary, that
 Methods:
 
 - `query(needle, max_edit_distance=2, top_n=5, bucket_hint=None)`: the `top_n` entries within `max_edit_distance` of `needle`, as `Match`es sorted by distance, then by entry position. With `bucket_hint`, the matches in that bucket are returned when there are any; otherwise the whole index is searched.
+
 - `query_batch(needles, max_edit_distance=2, top_n=5, bucket_fn=None, bucket_hint=None)`: `query` over a list of needles, on several threads. `bucket_fn` gives each needle its bucket hint; otherwise `bucket_hint` is used for every needle.
 
 Attributes: `bucket_count` and `max_supported_distance`.

@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -241,9 +241,9 @@ are computed on these held-out plots.</p>
 <span id="cb8-5"><a href="#cb8-5" tabindex="-1"></a>result <span class="op">=</span> trainer.fit()</span>
 <span id="cb8-6"><a href="#cb8-6" tabindex="-1"></a>metrics <span class="op">=</span> result.final_metrics</span>
 <span id="cb8-7"><a href="#cb8-7" tabindex="-1"></a>{name: <span class="bu">round</span>(metrics[<span class="st">"elevation"</span>][name], <span class="dv">3</span>) <span class="cf">for</span> name <span class="kw">in</span> [<span class="st">"mae"</span>, <span class="st">"rmse"</span>, <span class="st">"r2"</span>, <span class="st">"band_25"</span>]}</span>
-<span id="cb8-8"><a href="#cb8-8" tabindex="-1"></a><span class="co">#&gt; {'mae': 260.756, 'rmse': 301.784, 'r2': 0.721, 'band_25': 0.433}</span></span>
+<span id="cb8-8"><a href="#cb8-8" tabindex="-1"></a><span class="co">#&gt; {'mae': 177.853, 'rmse': 255.3, 'r2': 0.845, 'band_25': 0.833}</span></span>
 <span id="cb8-9"><a href="#cb8-9" tabindex="-1"></a><span class="bu">round</span>(metrics[<span class="st">"habitat"</span>][<span class="st">"accuracy"</span>], <span class="dv">3</span>)</span>
-<span id="cb8-10"><a href="#cb8-10" tabindex="-1"></a><span class="co">#&gt; 0.8</span></span></code></pre></div>
+<span id="cb8-10"><a href="#cb8-10" tabindex="-1"></a><span class="co">#&gt; 0.833</span></span></code></pre></div>
 </div>
 <p>For elevation, <code>mae</code> and <code>rmse</code> are in metres,
 <code>r2</code> is the share of the variance the imputed values explain,
@@ -294,12 +294,12 @@ the survey’s own plots again.</p>
 <span id="cb10-10"><a href="#cb10-10" tabindex="-1"></a>out.merge(plots[[<span class="st">"plot_id"</span>, <span class="st">"elevation"</span>]], left_on<span class="op">=</span><span class="st">"plot"</span>, right_on<span class="op">=</span><span class="st">"plot_id"</span>,</span>
 <span id="cb10-11"><a href="#cb10-11" tabindex="-1"></a>          suffixes<span class="op">=</span>(<span class="st">""</span>, <span class="st">"_observed"</span>)).drop(columns<span class="op">=</span><span class="st">"plot_id"</span>).head(<span class="dv">6</span>)</span>
 <span id="cb10-12"><a href="#cb10-12" tabindex="-1"></a><span class="co">#&gt;    plot  elevation  elevation_observed</span></span>
-<span id="cb10-13"><a href="#cb10-13" tabindex="-1"></a><span class="co">#&gt; 0  A001       2248                2188</span></span>
-<span id="cb10-14"><a href="#cb10-14" tabindex="-1"></a><span class="co">#&gt; 1  A002       1002                 568</span></span>
-<span id="cb10-15"><a href="#cb10-15" tabindex="-1"></a><span class="co">#&gt; 2  A003       2105                2129</span></span>
-<span id="cb10-16"><a href="#cb10-16" tabindex="-1"></a><span class="co">#&gt; 3  A004       2319                2267</span></span>
-<span id="cb10-17"><a href="#cb10-17" tabindex="-1"></a><span class="co">#&gt; 4  A005       2004                2145</span></span>
-<span id="cb10-18"><a href="#cb10-18" tabindex="-1"></a><span class="co">#&gt; 5  A006       1950                1799</span></span></code></pre></div>
+<span id="cb10-13"><a href="#cb10-13" tabindex="-1"></a><span class="co">#&gt; 0  A001       2332                2188</span></span>
+<span id="cb10-14"><a href="#cb10-14" tabindex="-1"></a><span class="co">#&gt; 1  A002        450                 568</span></span>
+<span id="cb10-15"><a href="#cb10-15" tabindex="-1"></a><span class="co">#&gt; 2  A003       1983                2129</span></span>
+<span id="cb10-16"><a href="#cb10-16" tabindex="-1"></a><span class="co">#&gt; 3  A004       2333                2267</span></span>
+<span id="cb10-17"><a href="#cb10-17" tabindex="-1"></a><span class="co">#&gt; 4  A005       2110                2145</span></span>
+<span id="cb10-18"><a href="#cb10-18" tabindex="-1"></a><span class="co">#&gt; 5  A006       1738                1799</span></span></code></pre></div>
 </div>
 <p>A plot with a species the model never saw still gets an imputed
 value: the unknown species is encoded through its genus and family where

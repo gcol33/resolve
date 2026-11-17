@@ -122,7 +122,9 @@ Without `--header`, the species table is read alone, and its rows also carry the
 `--target` takes a column and its task, separated by colons: `COL:regression` for a continuous target, `COL:classification:N` for a target with `N` classes. A bare `COL` is a regression target. The fields after the task are modifiers in any order:
 
 - **`log1p`** fits a regression target on `log(1 + y)` and returns imputed values in the column's own units.
+
 - **`mask`** keeps a plot that has no label for this target: it trains the other targets only. The default, `drop`, leaves the plot out of the run.
+
 - **An integer** sets the number of classes of a classification target.
 
 `resolve train --help` gives the same grammar:

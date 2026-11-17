@@ -23,10 +23,13 @@ carries no species vocabulary, only its size, is refused.
   species is read through the row of the embedding table the parent
   gives it. The vocabularies also replay the classes of a target the
   parent shares.
+
 - `model_config` (`ModelConfig`): the configuration the fine-tuned model
   takes. Only the fields in `FINE_TUNE_MODEL_FIELDS` may be changed.
+
 - `schema` (`ResolveSchema`), `scalers` (`Scalers`) and
   `categorical_vocab` (`CategoricalVocab`): the parent’s.
+
 - `record` (`ParentRecord`): what a fine-tuned checkpoint keeps of it;
   `reuse`, `n_tensors` and `heads` are set by `Trainer.init_from`.
 
@@ -49,8 +52,10 @@ trainer.init_from(parent)
 Where a warm start reads its parent from and what it carries over.
 
 - `reuse` (`InitReuse`, default `Encoder`): read by `Trainer.init_from`.
+
 - `suite_target` (`str`): with a suite directory, the target whose
   member to start from; may stay empty for a suite of one target.
+
 - `suite_seed` (`int`, default `-1`): that member’s seed; `-1` takes the
   target’s first member.
 
@@ -69,9 +74,12 @@ The parent a fine-tuned checkpoint records (`RunMetadata.parent`,
 
 - `checkpoint` (`str`), `sha256` (`str`, lower-case hex) and `bytes`
   (`int`): the parent file as opened.
+
 - `resolve_version` (`str`): the engine that trained the parent.
+
 - `reuse` (`InitReuse`), `n_tensors` (`int`, the parameters and buffers
   copied) and `heads` (`list[str]`, the parent heads carried over).
+
 - `suite`, `suite_target` (`str`) and `suite_seed` (`int`): the suite
   member it came from; `suite` is empty for a checkpoint opened
   directly. `licence` and `training_scope` (`str`): that suite’s terms.

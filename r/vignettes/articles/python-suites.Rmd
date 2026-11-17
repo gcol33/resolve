@@ -78,9 +78,13 @@ A suite's manifest: the input contract, the targets and their members, and the p
 Methods:
 
 - `seal(dir)`: fill in every member's SHA-256 digest and size in bytes from the files under `dir`, what a release builder calls after listing the files and seeds.
+
 - `validate()`: raise listing every structural problem, such as a missing field, a repeated target name, a combine rule that does not fit the task and outputs, or a repeated seed.
+
 - `write(dir)`: check, then write `<dir>/manifest.json`.
+
 - `verify(dir, targets=[])`: the problems with the member files under `dir`, a file that is missing, of the wrong size or with another digest; empty when the suite is intact. `targets` narrows the check to those targets.
+
 - `to_json(indent=2)`, `target(name)` and `inputs_of(target)`, the part of the contract a target's members read.
 
 Attributes: `name`, `description`, `licence`, `engine_version` (the RESOLVE engine that trained the members), `taxonomy` (the species naming the vocabularies follow), `training_scope` (the plots the members were trained on), `inputs` (`SuiteInputContract`), `targets` (`list[SuiteTarget]`, a copy: assign a whole list to change them) and `format_version`, the lowest manifest format that holds the manifest.
@@ -117,11 +121,17 @@ manifest.verify(root)
 The columns a suite reads and how their values are read, `SuiteManifest.inputs`. Every member is checked against it when the suite loads.
 
 - `plot_id`, `species` (`str`): the plot identifier and species name columns.
+
 - `abundance`, `genus`, `family` (`str`): the species-table columns read; empty for none.
+
 - `latitude`, `longitude` (`str`): the coordinate columns; empty when the members read no coordinates.
+
 - `covariates`, `categoricals` (`list[str]`): the plot-table columns, in the members' order.
+
 - `abundance_units` (`str`): what an abundance measures, such as `"percent cover"`; the RESOLVE engine does not convert units.
+
 - `zero_abundance_as` (`float`): the abundance a recorded 0 is read at (`DatasetConfig.zero_abundance_as`).
+
 - `notes` (`str`): anything else a caller has to know about the inputs.
 
 Methods: `reads_coordinates()`, and `needs_header()`, true when the members read plot-table columns, so scoring needs the plot table.
@@ -131,15 +141,25 @@ Methods: `reads_coordinates()`, and `needs_header()`, true when the members read
 One released target of a suite.
 
 - `name` (`str`): the suite's name for it. `task` (`TaskType`).
+
 - `combine` (`SuiteCombine`): how the members' imputed values combine.
+
 - `outputs` (`list[str]`): the members' target heads the imputed value is read from: one for a vote or a mean; one bearing, or a sine and a cosine in that order, for a circular mean; latitude and longitude, in degrees, for a spherical mean.
+
 - `units` (`str`): the output units, such as `"m"` or `"degrees"`; empty for classes.
+
 - `period` (`float`): the length of a full turn of a circular mean, such as 360.
+
 - `inputs` (`SuiteTargetInputs` or `None`): the columns the members read; `None` reads the whole contract.
+
 - `status` (`SuiteTargetStatus`) and `limit` (`str`): whether the target is released or experimental, and the limit an experimental release states, which it requires.
+
 - `members` (`list[SuiteMember]`).
+
 - `classes` (`list[str]`): a vote's classes in code order, as the members' checkpoints name them; loading compares them. Empty when not stated.
+
 - `derived_from` (`SuiteDerivation` or `None`): for a target fine-tuned from another suite (`write_derived_suite`), the suite and target its members started from.
+
 - `training` (`dict`) and `validation` (`dict` of regime to metrics): free-form records of how the members were trained and scored.
 
 ## `SuiteDerivation` {#SuiteDerivation}
@@ -234,14 +254,23 @@ table.columns.tolist()
 One target's imputed values for every plot.
 
 - `name`, `task`, `combine`, `status`, `limit`, `units`, `class_names` (a vote's labels in code order) and `member_seeds`.
+
 - `value`: the combined imputed value: an int64 class code for a vote; a number in the target's units for a mean, or a bearing in `[0, period)` for a circular mean, each `(n_plots,)`; latitude and longitude in degrees, `(n_plots, 2)`, for a spherical mean.
+
 - `agreement`: for a vote, the share of members naming the winning class.
+
 - `probabilities`: for a vote, the members' mean class probabilities, `(n_plots, n_classes)`.
+
 - `dispersion` and `dispersion_units`: the members' standard deviation for a mean, their circular standard deviation for a circular mean (both in the target's units), the median great-circle distance of the members from the combined point for a spherical mean (in km). `NaN` for a single member and where the members' directions cancel; `None` for a vote.
+
 - `members`: with `keep_members`, each member's own imputed value, `(n_members, n_plots)` or `(n_members, n_plots, 2)`.
+
 - `recognition` (`SpeciesRecognition`): how much of each plot the target's vocabulary recognises.
+
 - `imputed` (`(n_plots,)` bool tensor): `False` where the target's vocabulary recognises none of the plot's species (or the plot has none). Such a plot is not imputed: `value`, `agreement`, `probabilities`, `dispersion`, `members`, the gap fit's value and the terrain-corrected value are `NaN` there, a class code -1.
+
 - `recorded` (`(n_plots,)` bool tensor or `None`): for a target `columns["recorded"]` names, `True` where the plot records the target, so `value` is imputed where it is `False`.
+
 - `gap_fit` (`GapFit` or `None`): with gap fitting, the fitted values, the method per plot and the report ([`GapFit`](python-gap-fitting.html#GapFit)).
 
 None of these is combined into a single level of support, and none is a calibrated interval: the spread across seeds measures how much the members disagree, which is a different quantity from how far the combined imputed value lies from the truth.

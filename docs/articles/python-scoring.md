@@ -31,12 +31,16 @@ a tensor of imputed values `pred` and a tensor of recorded values
 Regression:
 
 - `mae(pred, target)`: the mean absolute error.
+
 - `rmse(pred, target)`: the root mean squared error.
+
 - `r_squared(pred, target)`: the coefficient of determination, the share
   of the variance of `target` the imputed values explain.
+
 - `smape(pred, target, eps=1e-8)`: the symmetric mean absolute
   percentage error, the mean of `|p - t| / ((|p| + |t|) / 2 + eps)`, in
   `[0, 2]`.
+
 - `band_accuracy(pred, target, threshold=0.25)`: the share of imputed
   values within a relative band of `threshold` around the recorded
   value.
@@ -44,13 +48,17 @@ Regression:
 Classification, on int64 class codes:
 
 - `accuracy(pred, target)`: the share of codes imputed correctly.
+
 - `confusion_matrix(pred, target, num_classes)`: the
   `(num_classes, num_classes)` counts.
+
 - `classification_metrics(pred, target, num_classes)`: a
   `ClassificationMetrics`.
+
 - `accuracy_at_threshold(pred, target, confidence, threshold)`: a
   `ConfidenceMetrics` over the imputed values whose `confidence` reaches
   `threshold`, such as the largest class probability.
+
 - `accuracy_coverage_curve(pred, target, confidence, thresholds=[0.0, 0.5, 0.8, 0.9, 0.95])`:
   one `ConfidenceMetrics` per threshold.
 

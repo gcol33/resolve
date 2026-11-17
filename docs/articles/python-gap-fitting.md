@@ -110,17 +110,23 @@ GapFittingConfig()
   the choice is made among. A method that reads spatial neighbours is a
   candidate only where the gaps carry coordinates, so the gaps without
   coordinates need one that reads no position.
+
 - `k_grid` (`list[int]`, default `[1, 3, 5, 10, 20, 50]`): the neighbour
   counts `k` is chosen from.
+
 - `spatial` (`bool`, default `True`): spatial neighbours as candidates;
   `False` reads composition only.
+
 - `matching_seed` (`int`, default `20261106`): the seed of the order the
   fold layout deals its groups in, the buffers it draws and the complete
   plots it is compared on.
+
 - `n_folds` (`int`, default `10`): the folds of the cross-validation;
   the estimated error needs at least 3.
+
 - `max_fold_share` (`float`, default `0.5`): the largest share of the
   complete plots one fold of a layout may hold.
+
 - `matching_sample` (`int`, default `1000`): the complete plots whose
   distances the layouts are compared on.
 
@@ -163,10 +169,12 @@ The methods, in the order a tie between equal errors is broken:
   value where the plot has one, a gap’s fitted value, `NaN` for a plot
   lacking the value whose `raw` is `NaN` (a plot the model did not
   impute, which is neither a gap nor a complete plot).
+
 - `method` (`list[str]`): `"recorded"` for a plot recording the value,
   `"not_imputed"` for a plot lacking it whose `raw` is `NaN`, the
   method’s name for a gap; `method_codes` is the same as an int64
   tensor, -1 for a recorded plot and -2 for one not imputed.
+
 - `report` (`dict`): `target`, `scale`, `n_complete`, `n_gaps`,
   `n_not_imputed`; `axes`, per axis (`similarity`, `km`, `years`)
   whether the fold layout was matched on it and the quantiles of the

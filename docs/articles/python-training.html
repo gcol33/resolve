@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -199,25 +199,20 @@ model, <code>model(...)</code>, is the same as <code>forward</code>.</p>
 <p>The other forward methods take the same inputs, positionally in this
 order or by keyword:</p>
 <ul>
-<li>
-<code>get_latent(...)</code>: the latent representation,
-<code>(batch, latent_dim)</code>.</li>
-<li>
-<code>forward_with_aux(...)</code>: a
+<li><p><code>get_latent(...)</code>: the latent representation,
+<code>(batch, latent_dim)</code>.</p></li>
+<li><p><code>forward_with_aux(...)</code>: a
 <code>ModelForwardResult</code>, the outputs with the auxiliary loss
-terms.</li>
-<li>
-<code>forward_single(target, ...)</code>: the output of one target’s
-head.</li>
-<li>
-<code>encode_with_activations(...)</code>: the latent and a list
+terms.</p></li>
+<li><p><code>forward_single(target, ...)</code>: the output of one
+target’s head.</p></li>
+<li><p><code>encode_with_activations(...)</code>: the latent and a list
 with the activations of every hidden layer of the species encoder’s
 final stage, each <code>(rows, neurons)</code>; empty for the tabular
-architectures and TraitNet.</li>
-<li>
-<code>get_gate_probs(...)</code>: the mixture-of-experts gate
+architectures and TraitNet.</p></li>
+<li><p><code>get_gate_probs(...)</code>: the mixture-of-experts gate
 probabilities, <code>(batch, n_experts)</code>; <code>None</code>
-without a mixture.</li>
+without a mixture.</p></li>
 </ul>
 <div class="sourceCode" id="cb6"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>inputs <span class="op">=</span> <span class="bu">dict</span>(genus_ids<span class="op">=</span>dataset.genus_ids, family_ids<span class="op">=</span>dataset.family_ids)</span>
 <span id="cb6-2"><a href="#cb6-2" tabindex="-1"></a>model.<span class="bu">eval</span>()</span>
@@ -228,71 +223,60 @@ without a mixture.</li>
 <h3 id="ResolveModel-attributes">Attributes<a class="anchor" aria-label="anchor" href="#ResolveModel-attributes"></a>
 </h3>
 <ul>
-<li>
-<code>schema</code> (<code>ResolveSchema</code>) and
+<li><p><code>schema</code> (<code>ResolveSchema</code>) and
 <code>config</code> (<code>ModelConfig</code>): what the model was built
-from.</li>
-<li>
-<code>latent_dim</code> (<code>int</code>): the width of the latent
-representation.</li>
-<li>
-<code>species_encoding</code> (<code>SpeciesEncodingMode</code>) and
-<code>uses_explicit_vector</code> (<code>bool</code>): the species
-encoder, and whether it reads <code>species_vector</code>.</li>
-<li>
-<code>uses_moe</code> (<code>bool</code>) and <code>n_experts</code>
-(<code>int</code>): whether a mixture of experts routes the plots, and
-over how many experts.</li>
-<li>
-<code>aux_loss_names</code> (<code>list[str]</code>): the auxiliary
-loss terms the model reports: <code>moe</code> with a mixture of
-experts, <code>tabnet_sparsity</code> for TabNet.</li>
-<li>
-<code>row_reference_rows</code> (<code>int</code>): the training
+from.</p></li>
+<li><p><code>latent_dim</code> (<code>int</code>): the width of the
+latent representation.</p></li>
+<li><p><code>species_encoding</code> (<code>SpeciesEncodingMode</code>)
+and <code>uses_explicit_vector</code> (<code>bool</code>): the species
+encoder, and whether it reads <code>species_vector</code>.</p></li>
+<li><p><code>uses_moe</code> (<code>bool</code>) and
+<code>n_experts</code> (<code>int</code>): whether a mixture of experts
+routes the plots, and over how many experts.</p></li>
+<li><p><code>aux_loss_names</code> (<code>list[str]</code>): the
+auxiliary loss terms the model reports: <code>moe</code> with a mixture
+of experts, <code>tabnet_sparsity</code> for TabNet.</p></li>
+<li><p><code>row_reference_rows</code> (<code>int</code>): the training
 rows SAINT’s row attention keeps as the reference set inference attends
-over; 0 for other architectures.</li>
-<li>
-<code>requires_species_graph</code>, <code>has_species_graph</code>
-(<code>bool</code>), <code>species_graph_edge_index</code> and
+over; 0 for other architectures.</p></li>
+<li><p><code>requires_species_graph</code>,
+<code>has_species_graph</code> (<code>bool</code>),
+<code>species_graph_edge_index</code> and
 <code>species_graph_edge_type</code>: the species graph of a
-heterogeneous GNN.</li>
+heterogeneous GNN.</p></li>
 </ul>
 </div>
 <div class="section level3">
 <h3 id="ResolveModel-methods">Methods<a class="anchor" aria-label="anchor" href="#ResolveModel-methods"></a>
 </h3>
 <ul>
-<li>
-<code>parameters()</code> (<code>list[Tensor]</code>, ready for a
+<li><p><code>parameters()</code> (<code>list[Tensor]</code>, ready for a
 torch optimiser), <code>named_parameters()</code> (<code>dict</code>),
 <code>state_dict()</code> (<code>dict</code> of cloned parameters and
 buffers), <code>load_state_dict(state_dict, strict=True)</code> (returns
 the missing and the unexpected keys) and
-<code>n_parameters()</code>.</li>
-<li>
-<code>train(mode=True)</code>, <code><a href="https://rdrr.io/r/base/eval.html" class="external-link">eval()</a></code>,
+<code>n_parameters()</code>.</p></li>
+<li><p><code>train(mode=True)</code>, <code><a href="https://rdrr.io/r/base/eval.html" class="external-link">eval()</a></code>,
 <code>zero_grad()</code>,
 <code>requires_grad_(requires_grad=True)</code> and
 <code>to(device)</code>, where <code>device</code> is
-<code>"cpu"</code>, <code>"cuda"</code> or <code>"cuda:N"</code>.</li>
-<li>
-<code>get_species_weights()</code>,
+<code>"cpu"</code>, <code>"cuda"</code> or
+<code>"cuda:N"</code>.</p></li>
+<li><p><code>get_species_weights()</code>,
 <code>get_genus_weights()</code>, <code>get_family_weights()</code>: the
 embedding tables, <code>(n_species_vocab, species_embed_dim)</code> and
 the like, or <code>None</code> where the encoding has no such
-table.</li>
-<li>
-<code>composition_parameters()</code>: the species, genus and family
-tables the species encoder reads a plot’s composition through, as the
-parameters themselves.</li>
-<li>
-<code>set_traits(traits)</code>: attach the species trait matrix of
-the TraitNet architecture; the model keeps it in a buffer and saves it
-in the checkpoint.</li>
-<li>
-<code>set_species_graph(edge_index, edge_type)</code>: replace the
-species graph of a heterogeneous GNN (see
-<code>build_species_graph</code>).</li>
+table.</p></li>
+<li><p><code>composition_parameters()</code>: the species, genus and
+family tables the species encoder reads a plot’s composition through, as
+the parameters themselves.</p></li>
+<li><p><code>set_traits(traits)</code>: attach the species trait matrix
+of the TraitNet architecture; the model keeps it in a buffer and saves
+it in the checkpoint.</p></li>
+<li><p><code>set_species_graph(edge_index, edge_type)</code>: replace
+the species graph of a heterogeneous GNN (see
+<code>build_species_graph</code>).</p></li>
 </ul>
 </div>
 </div>
@@ -333,46 +317,40 @@ width of its genus slots. Build a model for a dataset as
 <span id="cb9-4"><a href="#cb9-4" tabindex="-1"></a>model_config.activation <span class="op">=</span> rc.ActivationType.SiLU</span></code></pre></div>
 <p>Species encoding:</p>
 <ul>
-<li>
-<code>species_encoding</code> (<code>SpeciesEncodingMode</code>,
+<li><p><code>species_encoding</code> (<code>SpeciesEncodingMode</code>,
 default <code>Hash</code>), <code>hash_dim</code> (<code>int</code>,
 default <code>32</code>), <code>top_k</code> (<code>int</code>, default
 <code>3</code>), <code>top_k_species</code> (<code>int</code>, default
 <code>10</code>): as on the dataset;
-<code>model_config_for_dataset</code> copies them.</li>
-<li>
-<code>n_taxonomy_slots</code> (<code>int</code>, default
+<code>model_config_for_dataset</code> copies them.</p></li>
+<li><p><code>n_taxonomy_slots</code> (<code>int</code>, default
 <code>3</code>): the genus and family slots per plot, twice
-<code>top_k</code> under <code>TopBottom</code>.</li>
-<li>
-<code>uses_explicit_vector</code> (<code>bool</code>, default
+<code>top_k</code> under <code>TopBottom</code>.</p></li>
+<li><p><code>uses_explicit_vector</code> (<code>bool</code>, default
 <code>False</code>): read the sparse species vector, which turns
 <code>Hash</code> into <code>Sparse</code>; refused with
 <code>Embed</code>, <code>RankPool</code> and
-<code>Transformer</code>.</li>
-<li>
-<code>species_embed_dim</code> (<code>int</code>, default
+<code>Transformer</code>.</p></li>
+<li><p><code>species_embed_dim</code> (<code>int</code>, default
 <code>32</code>), <code>genus_emb_dim</code> and
 <code>family_emb_dim</code> (<code>int</code>, default <code>8</code>),
 <code>categorical_embed_dim</code> (<code>int</code>, default
-<code>8</code>): embedding widths.</li>
+<code>8</code>): embedding widths.</p></li>
 </ul>
 <p>Shared encoder:</p>
 <ul>
-<li>
-<code>hidden_dims</code> (<code>list[int]</code>, default
+<li><p><code>hidden_dims</code> (<code>list[int]</code>, default
 <code>[2048, 1024, 512, 256, 128, 64]</code>): the layer widths; the
-last is the latent width.</li>
-<li>
-<code>dropout</code> (<code>float</code>, default <code>0.3</code>),
-<code>activation</code> (<code>ActivationType</code>, default
-<code>GELU</code>), <code>normalization</code>
+last is the latent width.</p></li>
+<li><p><code>dropout</code> (<code>float</code>, default
+<code>0.3</code>), <code>activation</code> (<code>ActivationType</code>,
+default <code>GELU</code>), <code>normalization</code>
 (<code>NormLayerType</code>, default <code>BatchNorm</code>),
 <code>norm_groups</code> (<code>int</code>, default <code>32</code>, for
 <code>GroupNorm</code>), <code>use_residual</code> (<code>bool</code>,
 default <code>False</code>), <code>leaky_relu_slope</code>
 (<code>float</code>, default <code>0.01</code>), <code>elu_alpha</code>
-(<code>float</code>, default <code>1.0</code>).</li>
+(<code>float</code>, default <code>1.0</code>).</p></li>
 </ul>
 <p>Heads:</p>
 <ul>
@@ -385,48 +363,42 @@ default <code>0.0</code>).</li>
 </ul>
 <p>Pooled and transformer encodings:</p>
 <ul>
-<li>
-<code>cover_dropout</code> (<code>float</code>, default
+<li><p><code>cover_dropout</code> (<code>float</code>, default
 <code>0.0</code>): the probability of replacing a plot’s pool weights
-with its presence mask during training.</li>
-<li>
-<code>plot_totals</code> (<code>bool</code>, default
+with its presence mask during training.</p></li>
+<li><p><code>plot_totals</code> (<code>bool</code>, default
 <code>False</code>): add each plot’s combined cover and log(1 + species
-count) to the pooled features, with a flag saying they are present.</li>
-<li>
-<code>plot_totals_dropout</code> (<code>float</code>, default
+count) to the pooled features, with a flag saying they are
+present.</p></li>
+<li><p><code>plot_totals_dropout</code> (<code>float</code>, default
 <code>0.0</code>): with <code>plot_totals</code>, the probability of
 withholding a training plot’s totals, so the model also imputes without
-them (<code>Predictor.plot_totals = False</code>).</li>
-<li>
-<code>freeze_composition</code> (<code>bool</code>, default
+them (<code>Predictor.plot_totals = False</code>).</p></li>
+<li><p><code>freeze_composition</code> (<code>bool</code>, default
 <code>False</code>): keep the species, genus and family tables at their
 initial values. Needs the MLP architecture and an encoding with such a
-table.</li>
-<li>
-<code>freeze_encoder</code> (<code>bool</code>, default
+table.</p></li>
+<li><p><code>freeze_encoder</code> (<code>bool</code>, default
 <code>False</code>): keep every parameter outside the task heads at its
 value, and run that part in evaluation mode while the heads train. With
 <code>Trainer.init_from</code>, the heads learn on the encoder of a
-trained parent.</li>
-<li>
-<code>d_model</code> (<code>int</code>, default <code>128</code>),
-<code>n_heads</code> (<code>int</code>, default <code>4</code>),
-<code>n_attention_layers</code> (<code>int</code>, default
-<code>0</code>, pooling alone), <code>transformer_ff_dim</code>
+trained parent.</p></li>
+<li><p><code>d_model</code> (<code>int</code>, default
+<code>128</code>), <code>n_heads</code> (<code>int</code>, default
+<code>4</code>), <code>n_attention_layers</code> (<code>int</code>,
+default <code>0</code>, pooling alone), <code>transformer_ff_dim</code>
 (<code>int</code>, default <code>256</code>),
 <code>transformer_dropout</code> (<code>float</code>, default
 <code>0.1</code>), <code>transformer_pooling</code>
-(<code>TransformerPooling</code>, default <code>Attention</code>).</li>
+(<code>TransformerPooling</code>, default
+<code>Attention</code>).</p></li>
 </ul>
 <p>Mixture of experts:</p>
 <ul>
-<li>
-<code>moe_routing</code> (<code>MoERoutingType</code>, default
+<li><p><code>moe_routing</code> (<code>MoERoutingType</code>, default
 <code>None_</code>): no mixture, <code>Soft</code> or <code>TopK</code>
-routing.</li>
-<li>
-<code>moe_placement</code> (<code>MoEPlacement</code>, default
+routing.</p></li>
+<li><p><code>moe_placement</code> (<code>MoEPlacement</code>, default
 <code>Tail</code>), <code>n_experts</code> (<code>int</code>, default
 <code>4</code>, at least 2), <code>expert_hidden_dims</code>
 (<code>list[int]</code>, default <code>[256, 128]</code>),
@@ -434,21 +406,19 @@ routing.</li>
 <code>moe_noise_std</code> (<code>float</code>, default
 <code>0.1</code>, routing noise during training),
 <code>moe_aux_loss_weight</code> (<code>float</code>, default
-<code>0.01</code>, the weight of the load-balancing loss).</li>
+<code>0.01</code>, the weight of the load-balancing loss).</p></li>
 </ul>
 <p>Architecture:</p>
 <ul>
-<li>
-<code>encoder_architecture</code> (<code>EncoderArchitecture</code>,
-default <code>MLP</code>): replaces the shared MLP; each architecture
-reads its settings from its own sub-configuration:
-<code>ft_transformer</code>, <code>tabnet</code>, <code>saint</code>,
-<code>excelformer</code>, <code>trait_net</code>, <code>gnn</code>,
-<code>heterogeneous_gnn</code>.</li>
-<li>
-<code>parallel_layers</code> (<code>ParallelLayersConfig</code>) and
-<code>tabm</code> (<code>TabMConfig</code>): alternative final stages of
-the MLP encoder.</li>
+<li><p><code>encoder_architecture</code>
+(<code>EncoderArchitecture</code>, default <code>MLP</code>): replaces
+the shared MLP; each architecture reads its settings from its own
+sub-configuration: <code>ft_transformer</code>, <code>tabnet</code>,
+<code>saint</code>, <code>excelformer</code>, <code>trait_net</code>,
+<code>gnn</code>, <code>heterogeneous_gnn</code>.</p></li>
+<li><p><code>parallel_layers</code> (<code>ParallelLayersConfig</code>)
+and <code>tabm</code> (<code>TabMConfig</code>): alternative final
+stages of the MLP encoder.</p></li>
 </ul>
 <p>The final stage of the MLP encoder is one of four: the plain MLP, a
 tail-placed mixture of experts, TabM, or a block of parallel branches.
@@ -721,27 +691,23 @@ run’s.</p>
 <h3 id="Trainer-evaluations">Evaluations of the held-out fold<a class="anchor" aria-label="anchor" href="#Trainer-evaluations"></a>
 </h3>
 <ul>
-<li>
-<code>compute_residuals(target_name)</code>: a
-<code>ResidualAnalysis</code> of a regression target.</li>
-<li>
-<code>compute_classification_predictions(target_name)</code>: a
-<code>ClassificationPredictions</code> of a classification target.</li>
-<li>
-<code>compute_calibration(target_name, n_bins=10)</code>: a
+<li><p><code>compute_residuals(target_name)</code>: a
+<code>ResidualAnalysis</code> of a regression target.</p></li>
+<li><p><code>compute_classification_predictions(target_name)</code>: a
+<code>ClassificationPredictions</code> of a classification
+target.</p></li>
+<li><p><code>compute_calibration(target_name, n_bins=10)</code>: a
 <code>CalibrationResult</code> of a classification target; no bins for a
-regression target.</li>
-<li>
-<code>compute_diagnostics()</code>: a
+regression target.</p></li>
+<li><p><code>compute_diagnostics()</code>: a
 <code>NetworkDiagnostics</code> of the species encoder’s final stage,
 under every species encoding; not for the tabular architectures or
-TraitNet.</li>
-<li>
-<code>test_plot_ids()</code>, <code>train_plot_ids()</code>: the
+TraitNet.</p></li>
+<li><p><code>test_plot_ids()</code>, <code>train_plot_ids()</code>: the
 plot identifiers of the held-out and the fitting plots, after
 <code>prepare_data(dataset)</code>; <code>test_indices()</code>,
 <code>train_indices()</code>: their positions in the dataset, as int64
-tensors.</li>
+tensors.</p></li>
 </ul>
 <div class="sourceCode" id="cb18"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb18-1"><a href="#cb18-1" tabindex="-1"></a>trainer.prepare_data(dataset, test_size<span class="op">=</span><span class="fl">0.2</span>, seed<span class="op">=</span><span class="dv">42</span>)</span>
 <span id="cb18-2"><a href="#cb18-2" tabindex="-1"></a>result <span class="op">=</span> trainer.fit()</span>
@@ -832,26 +798,20 @@ file that cannot be read or written raises
 <h3 id="Trainer-attributes">Attributes<a class="anchor" aria-label="anchor" href="#Trainer-attributes"></a>
 </h3>
 <ul>
-<li>
-<code>model</code> (<code>ResolveModel</code>) and
-<code>config</code> (<code>TrainConfig</code>).</li>
-<li>
-<code>scalers</code> (<code>Scalers</code>): the scaling fitted on
-the fitting plots.</li>
-<li>
-<code>categorical_vocab</code> (<code>CategoricalVocab</code>): the
-categorical codes recorded by <code>prepare_data</code>.</li>
-<li>
-<code>run_metadata</code> (<code>RunMetadata</code>): the split
+<li><p><code>model</code> (<code>ResolveModel</code>) and
+<code>config</code> (<code>TrainConfig</code>).</p></li>
+<li><p><code>scalers</code> (<code>Scalers</code>): the scaling fitted
+on the fitting plots.</p></li>
+<li><p><code>categorical_vocab</code> (<code>CategoricalVocab</code>):
+the categorical codes recorded by <code>prepare_data</code>.</p></li>
+<li><p><code>run_metadata</code> (<code>RunMetadata</code>): the split
 <code>prepare_data</code> made and, after <code>fit</code>, the run’s
-timing, epochs and final metrics.</li>
-<li>
-<code>parent</code> (<code>ParentRecord</code> or
+timing, epochs and final metrics.</p></li>
+<li><p><code>parent</code> (<code>ParentRecord</code> or
 <code>None</code>): the parent <code>init_from</code> started the model
-from.</li>
-<li>
-<code>effective_batch_size</code> (<code>int</code>): the batch size
-the last <code>fit</code> trained at; 0 before the first.</li>
+from.</p></li>
+<li><p><code>effective_batch_size</code> (<code>int</code>): the batch
+size the last <code>fit</code> trained at; 0 before the first.</p></li>
 </ul>
 </div>
 </div>
@@ -863,45 +823,37 @@ the last <code>fit</code> trained at; 0 before the first.</li>
 <p>The settings of a training run.</p>
 <p>Run length and selection:</p>
 <ul>
-<li>
-<code>max_epochs</code> (<code>int</code>, default
+<li><p><code>max_epochs</code> (<code>int</code>, default
 <code>500</code>), <code>patience</code> (<code>int</code>, default
 <code>50</code>): the epoch limit, and the epochs without improvement
-that stop the run.</li>
-<li>
-<code>fixed_epochs</code> (<code>int</code>, default
+that stop the run.</p></li>
+<li><p><code>fixed_epochs</code> (<code>int</code>, default
 <code>0</code>): run this many epochs of the <code>max_epochs</code>
-schedule and keep the final weights; 0 stops early.</li>
-<li>
-<code>selection_metric</code> (<code>SelectionMetric</code>, default
-<code>Loss</code>): the held-out value early stopping, the best epoch
-and <code>ReduceOnPlateau</code> follow.</li>
-<li>
-<code>batch_size</code> (<code>int</code>, default
+schedule and keep the final weights; 0 stops early.</p></li>
+<li><p><code>selection_metric</code> (<code>SelectionMetric</code>,
+default <code>Loss</code>): the held-out value early stopping, the best
+epoch and <code>ReduceOnPlateau</code> follow.</p></li>
+<li><p><code>batch_size</code> (<code>int</code>, default
 <code>4096</code>), <code>batch_size_floor</code> (<code>int</code>,
 default <code>1024</code>): the plots per optimiser step, and the
-smallest batch the out-of-memory retry drops to.</li>
+smallest batch the out-of-memory retry drops to.</p></li>
 </ul>
 <p>Optimiser and learning rate:</p>
 <ul>
-<li>
-<code>lr</code> (<code>float</code>, default <code>0.001</code>),
+<li><p><code>lr</code> (<code>float</code>, default <code>0.001</code>),
 <code>weight_decay</code> (<code>float</code>, default
-<code>0.0001</code>): the AdamW learning rate and weight decay.</li>
-<li>
-<code>lr_scheduler</code> (<code>LRSchedulerType</code>, default
-<code>None_</code>): how the rate changes over the run.</li>
-<li>
-<code>lr_step_size</code> (<code>int</code>, default
+<code>0.0001</code>): the AdamW learning rate and weight decay.</p></li>
+<li><p><code>lr_scheduler</code> (<code>LRSchedulerType</code>, default
+<code>None_</code>): how the rate changes over the run.</p></li>
+<li><p><code>lr_step_size</code> (<code>int</code>, default
 <code>100</code>), <code>lr_gamma</code> (<code>float</code>, default
-<code>0.1</code>): the period and factor of <code>StepLR</code>.</li>
-<li>
-<code>lr_min</code> (<code>float</code>, default <code>1e-6</code>):
-the end point of <code>CosineAnnealing</code> and
+<code>0.1</code>): the period and factor of
+<code>StepLR</code>.</p></li>
+<li><p><code>lr_min</code> (<code>float</code>, default
+<code>1e-6</code>): the end point of <code>CosineAnnealing</code> and
 <code>LinearDecay</code>, and the floor of
-<code>ReduceOnPlateau</code>.</li>
-<li>
-<code>lr_plateau_factor</code> (<code>float</code>, default
+<code>ReduceOnPlateau</code>.</p></li>
+<li><p><code>lr_plateau_factor</code> (<code>float</code>, default
 <code>0.1</code>), <code>lr_plateau_patience</code> (<code>int</code>,
 default <code>10</code>), <code>lr_plateau_threshold</code>
 (<code>float</code>, default <code>0.0</code>),
@@ -909,68 +861,60 @@ default <code>10</code>), <code>lr_plateau_threshold</code>
 <code>0</code>): <code>ReduceOnPlateau</code>, PyTorch’s
 <code>ReduceLROnPlateau</code> on the held-out value
 <code>selection_metric</code> names. With threshold 0 it counts
-improvement by early stopping’s rule.</li>
-<li>
-<code>warmup_steps</code> (<code>int</code>, default <code>0</code>)
-or <code>warmup_epochs</code> (<code>int</code>, default
+improvement by early stopping’s rule.</p></li>
+<li><p><code>warmup_steps</code> (<code>int</code>, default
+<code>0</code>) or <code>warmup_epochs</code> (<code>int</code>, default
 <code>0</code>), not both: a linear warmup over that many optimiser
-steps or epochs, which scales every schedule.</li>
+steps or epochs, which scales every schedule.</p></li>
 </ul>
 <p>Loss:</p>
 <ul>
-<li>
-<code>loss_config</code> (<code>LossConfigMode</code>, default
-<code>Combined</code>): the regression loss.</li>
-<li>
-<code>phase_boundaries</code> (<code>(int, int)</code>, default
+<li><p><code>loss_config</code> (<code>LossConfigMode</code>, default
+<code>Combined</code>): the regression loss.</p></li>
+<li><p><code>phase_boundaries</code> (<code>(int, int)</code>, default
 <code>(100, 300)</code>): the epochs at which the <code>Combined</code>
 regression loss changes phase: mean absolute error, then with the
 symmetric mean absolute percentage error added, then with a penalty
-outside the tolerance band added.</li>
-<li>
-<code>band_threshold</code> (<code>float</code>, default
+outside the tolerance band added.</p></li>
+<li><p><code>band_threshold</code> (<code>float</code>, default
 <code>0.25</code>): the tolerance band of that penalty.
 <code>band_thresholds</code> (<code>list[float]</code>, default
 <code>[0.1, 0.25, 0.5]</code>): the relative bands with a reported
 accuracy (<code>band_10</code>, <code>band_25</code>,
-<code>band_50</code>).</li>
-<li>
-<code>nca_temperature</code> (<code>float</code>, default
+<code>band_50</code>).</p></li>
+<li><p><code>nca_temperature</code> (<code>float</code>, default
 <code>0.1</code>), <code>nca_neighbors</code> (<code>int</code>, default
 <code>32</code>), <code>nca_weight</code> (<code>float</code>, default
 <code>0.1</code>): the neighbourhood components analysis term of
-<code>LossConfigMode.NCA</code>.</li>
+<code>LossConfigMode.NCA</code>.</p></li>
 </ul>
 <p>Device and precision:</p>
 <ul>
-<li>
-<code>device</code> (<code>str</code>, default <code>"cpu"</code>):
-<code>"cpu"</code>, <code>"cuda"</code> or <code>"cuda:N"</code>.</li>
-<li>
-<code>use_amp</code> (<code>bool</code>, default
+<li><p><code>device</code> (<code>str</code>, default
+<code>"cpu"</code>): <code>"cpu"</code>, <code>"cuda"</code> or
+<code>"cuda:N"</code>.</p></li>
+<li><p><code>use_amp</code> (<code>bool</code>, default
 <code>False</code>): mixed precision on CUDA, with
 <code>amp_init_scale</code> (<code>65536.0</code>),
 <code>amp_growth_factor</code> (<code>2.0</code>),
 <code>amp_backoff_factor</code> (<code>0.5</code>) and
 <code>amp_growth_interval</code> (<code>2000</code>) for the gradient
-scale.</li>
-<li>
-<code>cudnn_benchmark</code> (<code>bool</code>, default
+scale.</p></li>
+<li><p><code>cudnn_benchmark</code> (<code>bool</code>, default
 <code>True</code>), <code>allow_tf32</code> (<code>bool</code>, default
 <code>True</code>), <code>vram_fraction</code> (<code>float</code>,
-default <code>1.0</code>, the share of GPU memory the run may use).</li>
+default <code>1.0</code>, the share of GPU memory the run may
+use).</p></li>
 </ul>
 <p>Checkpoints:</p>
 <ul>
-<li>
-<code>checkpoint_dir</code> (<code>str</code>, default
+<li><p><code>checkpoint_dir</code> (<code>str</code>, default
 <code>""</code>): the directory for <code>best.pt</code>,
 <code>checkpoint_&lt;N&gt;.pt</code>, <code>progress.json</code> and the
-final <code>checkpoint.pt</code>; empty writes none.</li>
-<li>
-<code>checkpoint_every</code> (<code>int</code>, default
+final <code>checkpoint.pt</code>; empty writes none.</p></li>
+<li><p><code>checkpoint_every</code> (<code>int</code>, default
 <code>0</code>): write <code>checkpoint_&lt;N&gt;.pt</code> every N
-epochs; 0 writes only <code>best.pt</code>.</li>
+epochs; 0 writes only <code>best.pt</code>.</p></li>
 </ul>
 </div>
 <div class="section level2">
@@ -980,8 +924,7 @@ epochs; 0 writes only <code>best.pt</code>.</li>
 <p>What <code>fit</code> and <code>resume</code> return.</p>
 <p>Attributes:</p>
 <ul>
-<li>
-<code>final_metrics</code>
+<li><p><code>final_metrics</code>
 (<code>dict[str, dict[str, float]]</code>): per target, the metrics on
 the held-out fold. A regression target reports <code>mae</code>,
 <code>rmse</code>, <code>r2</code>, <code>smape</code> (range 0 to 2)
@@ -991,40 +934,33 @@ classification target reports <code>accuracy</code>,
 <code>macro_f1</code>, <code>weighted_f1</code> and
 <code>precision_&lt;c&gt;</code>, <code>recall_&lt;c&gt;</code>,
 <code>f1_&lt;c&gt;</code> per class. A target with
-<code>missing = Mask</code> also reports <code>n_labelled</code>.</li>
-<li>
-<code>best_epoch</code> (<code>int</code>): the epoch with the best
-held-out value of <code>selection_metric</code>.</li>
-<li>
-<code>train_loss_history</code>, <code>test_loss_history</code>
+<code>missing = Mask</code> also reports
+<code>n_labelled</code>.</p></li>
+<li><p><code>best_epoch</code> (<code>int</code>): the epoch with the
+best held-out value of <code>selection_metric</code>.</p></li>
+<li><p><code>train_loss_history</code>, <code>test_loss_history</code>
 (<code>list[float]</code>): one entry per epoch; the second is empty
-when nothing is held out.</li>
-<li>
-<code>train_loss_history_by_target</code>,
+when nothing is held out.</p></li>
+<li><p><code>train_loss_history_by_target</code>,
 <code>test_loss_history_by_target</code>
 (<code>dict[str, list[float]]</code>): those losses split into each
-target’s weighted term.</li>
-<li>
-<code>train_aux_loss_history</code>
+target’s weighted term.</p></li>
+<li><p><code>train_aux_loss_history</code>
 (<code>dict[str, list[float]]</code>): the auxiliary terms of the
-training loss, <code>moe</code> and <code>tabnet_sparsity</code>.</li>
-<li>
-<code>lr_history</code> (<code>list[float]</code>): the learning
-rate of each epoch’s last step.</li>
-<li>
-<code>selection_history</code> (<code>list[float]</code>): the
-held-out value of <code>selection_metric</code> at each epoch.</li>
-<li>
-<code>baselines</code> (<code>dict[str, BaselineMetrics]</code>): a
-naive baseline per target.</li>
-<li>
-<code>diagnostics</code> (<code>NetworkDiagnostics</code>): the
-network’s state at the end of the fit.</li>
-<li>
-<code>train_time_seconds</code> (<code>float</code>),
+training loss, <code>moe</code> and
+<code>tabnet_sparsity</code>.</p></li>
+<li><p><code>lr_history</code> (<code>list[float]</code>): the learning
+rate of each epoch’s last step.</p></li>
+<li><p><code>selection_history</code> (<code>list[float]</code>): the
+held-out value of <code>selection_metric</code> at each epoch.</p></li>
+<li><p><code>baselines</code> (<code>dict[str, BaselineMetrics]</code>):
+a naive baseline per target.</p></li>
+<li><p><code>diagnostics</code> (<code>NetworkDiagnostics</code>): the
+network’s state at the end of the fit.</p></li>
+<li><p><code>train_time_seconds</code> (<code>float</code>),
 <code>effective_batch_size</code> (<code>int</code>),
 <code>resumed_from_epoch</code> (<code>int</code>, 0 for a run trained
-from the start).</li>
+from the start).</p></li>
 </ul>
 </div>
 <div class="section level2">
@@ -1140,7 +1076,7 @@ activate), <code>n_saturated</code> and <code>saturated_fraction</code>,
 a task built from the inputs alone, with no target, before the model is
 fitted.</p>
 <ul>
-<li>Shared: <code>pretrain_epochs</code> (<code>100</code>),
+<li><p>Shared: <code>pretrain_epochs</code> (<code>100</code>),
 <code>pretrain_lr</code> (<code>1e-4</code>),
 <code>pretrain_weight_decay</code> (<code>1e-4</code>),
 <code>batch_size</code> (<code>4096</code>),
@@ -1148,21 +1084,21 @@ fitted.</p>
 <code>warmup_steps</code> (<code>0</code>), <code>device</code>
 (<code>"cpu"</code>), <code>vram_fraction</code> (<code>1.0</code>) and
 <code>seed</code> (<code>42</code>), which seeds every draw the
-pretraining makes.</li>
-<li>Masking, for JEPA: <code>mask_ratio</code> (<code>0.3</code>, the
+pretraining makes.</p></li>
+<li><p>Masking, for JEPA: <code>mask_ratio</code> (<code>0.3</code>, the
 share of features masked) and <code>mask_strategy</code>
-(<code>MaskStrategy</code>, <code>Random</code>).</li>
-<li>JEPA: <code>ema_decay</code> (<code>0.996</code>) and
+(<code>MaskStrategy</code>, <code>Random</code>).</p></li>
+<li><p>JEPA: <code>ema_decay</code> (<code>0.996</code>) and
 <code>ema_decay_end</code> (<code>1.0</code>), the decay of the slowly
 updated target encoder; <code>predictor_hidden_dim</code>
 (<code>256</code>), <code>predictor_n_layers</code> (<code>2</code>) and
-<code>predictor_dropout</code> (<code>0.1</code>).</li>
-<li>SCARF: <code>corruption_rate</code> (<code>0.6</code>, the share of
-features replaced), <code>temperature</code> (<code>0.1</code>),
+<code>predictor_dropout</code> (<code>0.1</code>).</p></li>
+<li><p>SCARF: <code>corruption_rate</code> (<code>0.6</code>, the share
+of features replaced), <code>temperature</code> (<code>0.1</code>),
 <code>projection_dim</code> (<code>128</code>) and
 <code>mixup_alpha</code> (<code>0.0</code>), the strength of a mixup of
 the corrupted view with another plot of the batch; 0 switches it
-off.</li>
+off.</p></li>
 </ul>
 </div>
 <div class="section level2">

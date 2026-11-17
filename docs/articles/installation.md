@@ -163,7 +163,7 @@ library(resolveR)
 resolve.available()
 #> [1] TRUE
 resolve.version()
-#> [1] "1.2.0"
+#> [1] "1.3.0"
 ```
 
 ``` python
@@ -171,9 +171,9 @@ import torch
 import resolve_core as rc
 
 rc.__version__
-#> 1.2.0
+#> 1.3.0
 torch.cuda.is_available()
-#> True
+#> False
 ```
 
 ## Training on a GPU
@@ -317,6 +317,7 @@ to do about each.
   or impute stop with the same message. Run
   [`resolve.install_backend()`](https://gillescolling.com/resolve/reference/resolve.install_backend.md),
   or set `RESOLVE_C_HOME`.
+
 - When a library is found but does not load,
   [`library(resolveR)`](https://gillescolling.com/resolve/) prints its
   path and the loader’s reason instead, and the functions stop with the
@@ -327,6 +328,7 @@ to do about each.
   [`resolve.install_backend()`](https://gillescolling.com/resolve/reference/resolve.install_backend.md)
   without `force` warns with this text when the library it finds does
   not load.
+
 - When a download fails,
   [`resolve.install_backend()`](https://gillescolling.com/resolve/reference/resolve.install_backend.md)
   stops with `cannot open URL` and the address it tried. The file name
@@ -335,17 +337,22 @@ to do about each.
   `HTTP status was '404 Not Found'` means the release of that version
   has no such file. The call raises R’s download timeout to at least an
   hour for these files.
+
 - With `variant = "cuda"`, the call stops when `nvidia-smi` finds no
   NVIDIA card; install the CPU build. It also stops when the driver
   supports only a CUDA version older than 12.8; update the driver.
+
 - On macOS, a GPU variant stops the call, since CUDA builds do not exist
   there.
+
 - When the library downloads but does not load, the call stops with
   `Downloaded resolve_c but could not load it:` and the reason the
   system’s loader gives.
+
 - With the CPU build loaded on a machine with an NVIDIA card,
   [`library(resolveR)`](https://gillescolling.com/resolve/) prints that
   a GPU was detected and names the call that installs the GPU build.
+
 - When the Python extension does not import, `import resolve_core` fails
   with `Failed to import resolve_core C++ extension` and the error
   underneath it. Reinstall `resolve-core` in the environment whose torch

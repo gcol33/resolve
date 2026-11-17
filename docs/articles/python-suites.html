@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -193,26 +193,21 @@ parses a manifest from JSON text without checking it; <code>read</code>
 reads and checks <code>&lt;dir&gt;/manifest.json</code>.</p>
 <p>Methods:</p>
 <ul>
-<li>
-<code>seal(dir)</code>: fill in every member’s SHA-256 digest and
+<li><p><code>seal(dir)</code>: fill in every member’s SHA-256 digest and
 size in bytes from the files under <code>dir</code>, what a release
-builder calls after listing the files and seeds.</li>
-<li>
-<code>validate()</code>: raise listing every structural problem,
+builder calls after listing the files and seeds.</p></li>
+<li><p><code>validate()</code>: raise listing every structural problem,
 such as a missing field, a repeated target name, a combine rule that
-does not fit the task and outputs, or a repeated seed.</li>
-<li>
-<code>write(dir)</code>: check, then write
-<code>&lt;dir&gt;/manifest.json</code>.</li>
-<li>
-<code>verify(dir, targets=[])</code>: the problems with the member
-files under <code>dir</code>, a file that is missing, of the wrong size
-or with another digest; empty when the suite is intact.
-<code>targets</code> narrows the check to those targets.</li>
-<li>
-<code>to_json(indent=2)</code>, <code>target(name)</code> and
+does not fit the task and outputs, or a repeated seed.</p></li>
+<li><p><code>write(dir)</code>: check, then write
+<code>&lt;dir&gt;/manifest.json</code>.</p></li>
+<li><p><code>verify(dir, targets=[])</code>: the problems with the
+member files under <code>dir</code>, a file that is missing, of the
+wrong size or with another digest; empty when the suite is intact.
+<code>targets</code> narrows the check to those targets.</p></li>
+<li><p><code>to_json(indent=2)</code>, <code>target(name)</code> and
 <code>inputs_of(target)</code>, the part of the contract a target’s
-members read.</li>
+members read.</p></li>
 </ul>
 <p>Attributes: <code>name</code>, <code>description</code>,
 <code>licence</code>, <code>engine_version</code> (the RESOLVE engine
@@ -255,30 +250,25 @@ manifest format that holds the manifest.</p>
 <code>SuiteManifest.inputs</code>. Every member is checked against it
 when the suite loads.</p>
 <ul>
-<li>
-<code>plot_id</code>, <code>species</code> (<code>str</code>): the
-plot identifier and species name columns.</li>
-<li>
-<code>abundance</code>, <code>genus</code>, <code>family</code>
-(<code>str</code>): the species-table columns read; empty for none.</li>
-<li>
-<code>latitude</code>, <code>longitude</code> (<code>str</code>):
-the coordinate columns; empty when the members read no coordinates.</li>
-<li>
-<code>covariates</code>, <code>categoricals</code>
+<li><p><code>plot_id</code>, <code>species</code> (<code>str</code>):
+the plot identifier and species name columns.</p></li>
+<li><p><code>abundance</code>, <code>genus</code>, <code>family</code>
+(<code>str</code>): the species-table columns read; empty for
+none.</p></li>
+<li><p><code>latitude</code>, <code>longitude</code> (<code>str</code>):
+the coordinate columns; empty when the members read no
+coordinates.</p></li>
+<li><p><code>covariates</code>, <code>categoricals</code>
 (<code>list[str]</code>): the plot-table columns, in the members’
-order.</li>
-<li>
-<code>abundance_units</code> (<code>str</code>): what an abundance
-measures, such as <code>"percent cover"</code>; the RESOLVE engine does
-not convert units.</li>
-<li>
-<code>zero_abundance_as</code> (<code>float</code>): the abundance a
-recorded 0 is read at
-(<code>DatasetConfig.zero_abundance_as</code>).</li>
-<li>
-<code>notes</code> (<code>str</code>): anything else a caller has to
-know about the inputs.</li>
+order.</p></li>
+<li><p><code>abundance_units</code> (<code>str</code>): what an
+abundance measures, such as <code>"percent cover"</code>; the RESOLVE
+engine does not convert units.</p></li>
+<li><p><code>zero_abundance_as</code> (<code>float</code>): the
+abundance a recorded 0 is read at
+(<code>DatasetConfig.zero_abundance_as</code>).</p></li>
+<li><p><code>notes</code> (<code>str</code>): anything else a caller has
+to know about the inputs.</p></li>
 </ul>
 <p>Methods: <code>reads_coordinates()</code>, and
 <code>needs_header()</code>, true when the members read plot-table
@@ -290,47 +280,36 @@ columns, so scoring needs the plot table.</p>
 </h2>
 <p>One released target of a suite.</p>
 <ul>
-<li>
-<code>name</code> (<code>str</code>): the suite’s name for it.
-<code>task</code> (<code>TaskType</code>).</li>
-<li>
-<code>combine</code> (<code>SuiteCombine</code>): how the members’
-imputed values combine.</li>
-<li>
-<code>outputs</code> (<code>list[str]</code>): the members’ target
-heads the imputed value is read from: one for a vote or a mean; one
-bearing, or a sine and a cosine in that order, for a circular mean;
-latitude and longitude, in degrees, for a spherical mean.</li>
-<li>
-<code>units</code> (<code>str</code>): the output units, such as
-<code>"m"</code> or <code>"degrees"</code>; empty for classes.</li>
-<li>
-<code>period</code> (<code>float</code>): the length of a full turn
-of a circular mean, such as 360.</li>
-<li>
-<code>inputs</code> (<code>SuiteTargetInputs</code> or
+<li><p><code>name</code> (<code>str</code>): the suite’s name for it.
+<code>task</code> (<code>TaskType</code>).</p></li>
+<li><p><code>combine</code> (<code>SuiteCombine</code>): how the
+members’ imputed values combine.</p></li>
+<li><p><code>outputs</code> (<code>list[str]</code>): the members’
+target heads the imputed value is read from: one for a vote or a mean;
+one bearing, or a sine and a cosine in that order, for a circular mean;
+latitude and longitude, in degrees, for a spherical mean.</p></li>
+<li><p><code>units</code> (<code>str</code>): the output units, such as
+<code>"m"</code> or <code>"degrees"</code>; empty for classes.</p></li>
+<li><p><code>period</code> (<code>float</code>): the length of a full
+turn of a circular mean, such as 360.</p></li>
+<li><p><code>inputs</code> (<code>SuiteTargetInputs</code> or
 <code>None</code>): the columns the members read; <code>None</code>
-reads the whole contract.</li>
-<li>
-<code>status</code> (<code>SuiteTargetStatus</code>) and
+reads the whole contract.</p></li>
+<li><p><code>status</code> (<code>SuiteTargetStatus</code>) and
 <code>limit</code> (<code>str</code>): whether the target is released or
 experimental, and the limit an experimental release states, which it
-requires.</li>
-<li>
-<code>members</code> (<code>list[SuiteMember]</code>).</li>
-<li>
-<code>classes</code> (<code>list[str]</code>): a vote’s classes in
-code order, as the members’ checkpoints name them; loading compares
-them. Empty when not stated.</li>
-<li>
-<code>derived_from</code> (<code>SuiteDerivation</code> or
+requires.</p></li>
+<li><p><code>members</code> (<code>list[SuiteMember]</code>).</p></li>
+<li><p><code>classes</code> (<code>list[str]</code>): a vote’s classes
+in code order, as the members’ checkpoints name them; loading compares
+them. Empty when not stated.</p></li>
+<li><p><code>derived_from</code> (<code>SuiteDerivation</code> or
 <code>None</code>): for a target fine-tuned from another suite
 (<code>write_derived_suite</code>), the suite and target its members
-started from.</li>
-<li>
-<code>training</code> (<code>dict</code>) and
+started from.</p></li>
+<li><p><code>training</code> (<code>dict</code>) and
 <code>validation</code> (<code>dict</code> of regime to metrics):
-free-form records of how the members were trained and scored.</li>
+free-form records of how the members were trained and scored.</p></li>
 </ul>
 </div>
 <div class="section level2">
@@ -506,54 +485,44 @@ writes <code>&lt;target&gt;_sd</code>, a circular mean
 </h2>
 <p>One target’s imputed values for every plot.</p>
 <ul>
-<li>
-<code>name</code>, <code>task</code>, <code>combine</code>,
+<li><p><code>name</code>, <code>task</code>, <code>combine</code>,
 <code>status</code>, <code>limit</code>, <code>units</code>,
 <code>class_names</code> (a vote’s labels in code order) and
-<code>member_seeds</code>.</li>
-<li>
-<code>value</code>: the combined imputed value: an int64 class code
-for a vote; a number in the target’s units for a mean, or a bearing in
-<code>[0, period)</code> for a circular mean, each
+<code>member_seeds</code>.</p></li>
+<li><p><code>value</code>: the combined imputed value: an int64 class
+code for a vote; a number in the target’s units for a mean, or a bearing
+in <code>[0, period)</code> for a circular mean, each
 <code>(n_plots,)</code>; latitude and longitude in degrees,
-<code>(n_plots, 2)</code>, for a spherical mean.</li>
-<li>
-<code>agreement</code>: for a vote, the share of members naming the
-winning class.</li>
-<li>
-<code>probabilities</code>: for a vote, the members’ mean class
-probabilities, <code>(n_plots, n_classes)</code>.</li>
-<li>
-<code>dispersion</code> and <code>dispersion_units</code>: the
+<code>(n_plots, 2)</code>, for a spherical mean.</p></li>
+<li><p><code>agreement</code>: for a vote, the share of members naming
+the winning class.</p></li>
+<li><p><code>probabilities</code>: for a vote, the members’ mean class
+probabilities, <code>(n_plots, n_classes)</code>.</p></li>
+<li><p><code>dispersion</code> and <code>dispersion_units</code>: the
 members’ standard deviation for a mean, their circular standard
 deviation for a circular mean (both in the target’s units), the median
 great-circle distance of the members from the combined point for a
 spherical mean (in km). <code>NaN</code> for a single member and where
-the members’ directions cancel; <code>None</code> for a vote.</li>
-<li>
-<code>members</code>: with <code>keep_members</code>, each member’s
-own imputed value, <code>(n_members, n_plots)</code> or
-<code>(n_members, n_plots, 2)</code>.</li>
-<li>
-<code>recognition</code> (<code>SpeciesRecognition</code>): how much
-of each plot the target’s vocabulary recognises.</li>
-<li>
-<code>imputed</code> (<code>(n_plots,)</code> bool tensor):
+the members’ directions cancel; <code>None</code> for a vote.</p></li>
+<li><p><code>members</code>: with <code>keep_members</code>, each
+member’s own imputed value, <code>(n_members, n_plots)</code> or
+<code>(n_members, n_plots, 2)</code>.</p></li>
+<li><p><code>recognition</code> (<code>SpeciesRecognition</code>): how
+much of each plot the target’s vocabulary recognises.</p></li>
+<li><p><code>imputed</code> (<code>(n_plots,)</code> bool tensor):
 <code>False</code> where the target’s vocabulary recognises none of the
 plot’s species (or the plot has none). Such a plot is not imputed:
 <code>value</code>, <code>agreement</code>, <code>probabilities</code>,
 <code>dispersion</code>, <code>members</code>, the gap fit’s value and
 the terrain-corrected value are <code>NaN</code> there, a class code
--1.</li>
-<li>
-<code>recorded</code> (<code>(n_plots,)</code> bool tensor or
+-1.</p></li>
+<li><p><code>recorded</code> (<code>(n_plots,)</code> bool tensor or
 <code>None</code>): for a target <code>columns["recorded"]</code> names,
 <code>True</code> where the plot records the target, so
-<code>value</code> is imputed where it is <code>False</code>.</li>
-<li>
-<code>gap_fit</code> (<code>GapFit</code> or <code>None</code>):
+<code>value</code> is imputed where it is <code>False</code>.</p></li>
+<li><p><code>gap_fit</code> (<code>GapFit</code> or <code>None</code>):
 with gap fitting, the fitted values, the method per plot and the report
-(<a href="python-gap-fitting.html#GapFit"><code>GapFit</code></a>).</li>
+(<a href="python-gap-fitting.html#GapFit"><code>GapFit</code></a>).</p></li>
 </ul>
 <p>None of these is combined into a single level of support, and none is
 a calibrated interval: the spread across seeds measures how much the

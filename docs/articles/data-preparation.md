@@ -396,7 +396,7 @@ trainer = rc.Trainer(rc.ResolveModel(masked.schema), config)
 trainer.prepare_data(masked)
 result = trainer.fit()
 result.final_metrics["habitat"]["n_labelled"]
-#> 23.0
+#> 21.0
 ```
 
 Within a batch, a masked target’s loss is the mean over the rows that
@@ -636,7 +636,7 @@ new_plots = rc.ResolveDataset.from_csv_with_vocabs(
     predictor.external_vocabs, predictor.dataset_config)
 preds = predictor.predict_dataset(new_plots)
 preds.predictions["elevation"][:6].round()
-#> tensor([1185., 1046., 1497., 1670., 1024., 1076.])
+#> tensor([1297., 1086., 1454., 1483.,  958., 1068.])
 ```
 
 A dataset built to be imputed needs no target, so the target list is
@@ -649,9 +649,11 @@ continues from this point.
 - [Encoding the species
   set](https://gillescolling.com/resolve/articles/encoding.md): the five
   encodings and the settings of each.
+
 - [Training and reading the
   fit](https://gillescolling.com/resolve/articles/training.md): the
   training settings, the held-out plots and cross-validation.
+
 - [Imputing new
   plots](https://gillescolling.com/resolve/articles/prediction.md):
   output formats, class probabilities and unseen species.

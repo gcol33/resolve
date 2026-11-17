@@ -121,7 +121,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 50
-#> Training time: 2.14356s
+#> Training time: 2.47986s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -219,9 +219,11 @@ after the task are modifiers in any order:
 
 - **`log1p`** fits a regression target on `log(1 + y)` and returns
   imputed values in the column’s own units.
+
 - **`mask`** keeps a plot that has no label for this target: it trains
   the other targets only. The default, `drop`, leaves the plot out of
   the run.
+
 - **An integer** sets the number of classes of a classification target.
 
 `resolve train --help` gives the same grammar:
@@ -286,7 +288,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 19
-#> Training time: 1.47474s
+#> Training time: 1.57129s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -353,7 +355,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 99
-#> Training time: 2.14987s
+#> Training time: 2.19613s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -444,7 +446,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 41
-#> Training time: 1.92378s
+#> Training time: 2.05301s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -489,7 +491,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 49
-#> Training time: 0.771996s
+#> Training time: 0.802345s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -535,9 +537,9 @@ resolve train --header plots.csv --species species.csv \
 #> Early stopping at epoch 74
 #> Cross-validation fold 3/3
 #>   Train: 97 plots, Test: 53 plots
-#> Spatial CV complete (3 folds, 5.362040s)
+#> Spatial CV complete (3 folds, 5.432326s)
 #> 
-#> Cross-validation (3 folds, 5.36204s):
+#> Cross-validation (3 folds, 5.43233s):
 #>   Fold 1 (best epoch 42):
 #>     elevation:
 #>       mae: 179.673
@@ -580,7 +582,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 73
-#> Training time: 2.05685s
+#> Training time: 2.20947s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -647,7 +649,7 @@ resolve train --header plots.csv --species species.csv \
 #> ================
 #> Training complete!
 #> Best epoch: 18
-#> Training time: 2.56639s
+#> Training time: 2.48735s
 #> Effective batch size: 4096
 #> 
 #> Final metrics:
@@ -773,9 +775,9 @@ resolve info --model north.pt | head -n 40
 #> 
 #> Run:
 #>   resolve_version: 1.2.0
-#>   created_at: 2026-11-11T10:55:33Z
-#>   completed_at: 2026-11-11T10:55:35Z
-#>   train_time_seconds: 1.9237844
+#>   created_at: 2026-11-17T17:53:53Z
+#>   completed_at: 2026-11-17T17:53:55Z
+#>   train_time_seconds: 2.0530097
 #>   n_plots_train: 107
 #>   n_plots_test: 43
 #>   hold_out: explicit

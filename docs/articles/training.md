@@ -185,7 +185,7 @@ trainer = rc.Trainer(model, cfg)
 trainer.prepare_data(dataset, test_size=0.2, seed=42)
 result = trainer.fit()
 result.best_epoch
-#> 50
+#> 46
 len(result.train_loss_history)
 #> 130
 ```
@@ -262,9 +262,9 @@ round(unlist(result$final_metrics$habitat), 3)
 result.train_time_seconds > 0
 #> True
 {name: round(value, 3) for name, value in result.final_metrics["elevation"].items()}
-#> {'band_25': 0.433, 'band_10': 0.333, 'mae': 260.756, 'rmse': 301.784, 'r2': 0.721, 'smape': 0.278, 'band_50': 0.867}
+#> {'band_25': 0.833, 'band_10': 0.567, 'mae': 177.853, 'rmse': 255.3, 'r2': 0.845, 'smape': 0.164, 'band_50': 0.9}
 {name: round(value, 3) for name, value in result.final_metrics["habitat"].items()}
-#> {'recall_1': 0.818, 'accuracy': 0.8, 'f1_2': 0.842, 'macro_f1': 0.796, 'precision_0': 0.75, 'weighted_f1': 0.794, 'f1_0': 0.857, 'recall_0': 1.0, 'precision_1': 0.818, 'f1_1': 0.818, 'precision_2': 0.8, 'recall_2': 0.889, 'precision_3': 0.8, 'recall_3': 0.571, 'f1_3': 0.667}
+#> {'recall_1': 0.833, 'accuracy': 0.833, 'f1_2': 0.727, 'macro_f1': 0.818, 'precision_0': 0.778, 'weighted_f1': 0.831, 'f1_0': 0.875, 'recall_0': 1.0, 'precision_1': 0.909, 'f1_1': 0.87, 'precision_2': 0.8, 'recall_2': 0.667, 'precision_3': 0.8, 'recall_3': 0.8, 'f1_3': 0.8}
 ```
 
 ### Metrics
@@ -328,12 +328,12 @@ elevation = result.baselines["elevation"]
 {"baseline_mae": round(elevation.baseline_mae, 3),
  "model_mae": round(elevation.model_mae, 3),
  "skill_score": round(elevation.skill_score, 3)}
-#> {'baseline_mae': 531.731, 'model_mae': 260.756, 'skill_score': 0.765}
+#> {'baseline_mae': 561.847, 'model_mae': 177.853, 'skill_score': 0.848}
 habitat = result.baselines["habitat"]
 {"baseline_accuracy": round(habitat.baseline_accuracy, 3),
  "model_accuracy": round(habitat.model_accuracy, 3),
  "accuracy_lift": round(habitat.accuracy_lift, 3)}
-#> {'baseline_accuracy': 0.367, 'model_accuracy': 0.8, 'accuracy_lift': 0.433}
+#> {'baseline_accuracy': 0.4, 'model_accuracy': 0.833, 'accuracy_lift': 0.433}
 ```
 
 ### Loss by target
@@ -356,7 +356,7 @@ sapply(held_out, function(h) round(c(first = h[1], last = h[length(h)]), 3))
 ``` python
 {target: (round(history[0], 3), round(history[-1], 3))
  for target, history in result.test_loss_history_by_target.items()}
-#> {'elevation': (0.88, 0.443), 'habitat': (1.391, 0.869)}
+#> {'elevation': (0.962, 0.334), 'habitat': (1.387, 0.66)}
 ```
 
 A mixture of experts adds a load-balancing term to the training loss and
@@ -574,8 +574,10 @@ Three settings tune it, and they act only under the `nca` preset:
 
 - **`nca_temperature`** ($`T`$, default 0.1) sets how many neighbours
   each plot spreads its probability over.
+
 - **`nca_neighbors`** (default 32) is the number of nearest plots in the
   batch the term sums over; 0 or less keeps the whole batch.
+
 - **`nca_weight`** (default 0.1) scales the term against the
   cross-entropy it is added to.
 
@@ -599,7 +601,7 @@ model = rc.ResolveModel(dataset.schema, rc.model_config_for_dataset(dataset))
 nca = rc.Trainer(model, cfg)
 nca.prepare_data(dataset, test_size=0.2, seed=42)
 round(nca.fit().final_metrics["habitat"]["accuracy"], 3)
-#> 0.833
+#> 0.8
 ```
 
 ## Refitting on every plot
@@ -803,7 +805,7 @@ model_config = rc.model_config_for_dataset(dataset, model_config)
 small = rc.Trainer(rc.ResolveModel(dataset.schema, model_config), cfg)
 small.prepare_data(dataset, test_size=0.2, seed=42)
 round(small.fit().final_metrics["elevation"]["mae"])
-#> 274
+#> 189
 ```
 
 ### Encoder architectures
@@ -845,7 +847,7 @@ model_config = rc.model_config_for_dataset(dataset, model_config)
 ft = rc.Trainer(rc.ResolveModel(dataset.schema, model_config), cfg)
 ft.prepare_data(dataset, test_size=0.2, seed=42)
 round(ft.fit().final_metrics["habitat"]["accuracy"], 3)
-#> 0.8
+#> 0.767
 ```
 
 `resolve.default_config("model")` lists every nested field with its
@@ -967,7 +969,7 @@ length(fit$trainer$train_plot_ids())
 
 ``` python
 trainer.test_plot_ids()[:6]
-#> ['A006', 'A131', 'A065', 'A002', 'A020', 'A107']
+#> ['A148', 'A105', 'A016', 'A018', 'A129', 'A043']
 len(trainer.train_plot_ids())
 #> 120
 ```
@@ -1003,7 +1005,7 @@ plots.](training_files/figure-html/residuals-1.svg)
 res = trainer.compute_residuals("elevation")
 {name: round(getattr(res, name))
  for name in ["mean_residual", "std_residual", "q05", "q50", "q95"]}
-#> {'mean_residual': 68, 'std_residual': 299, 'q05': -434, 'q50': 97, 'q95': 492}
+#> {'mean_residual': 53, 'std_residual': 254, 'q05': -313, 'q50': 37, 'q95': 400}
 
 observed, predicted = list(res.actuals), list(res.predictions)
 lims = (min(observed + predicted), max(observed + predicted))
@@ -1047,10 +1049,10 @@ pd.crosstab(pd.Series([names[i] for i in cls.actuals], name="observed"),
             pd.Series([names[i] for i in cls.predicted_classes], name="predicted"))
 #> predicted  alpine  forest  grassland  wetland
 #> observed
-#> alpine          3       0          0        0
-#> forest          0       9          2        0
-#> grassland       0       0          8        1
-#> wetland         1       2          0        4
+#> alpine          7       0          0        0
+#> forest          2      10          0        0
+#> grassland       0       1          4        1
+#> wetland         0       0          1        4
 tuple(cls.probabilities.shape)
 #> (30, 4)
 ```
@@ -1085,17 +1087,17 @@ round(bins, 2)
 ``` python
 cal = trainer.compute_calibration("habitat", n_bins=5)
 round(cal.expected_calibration_error, 3), round(cal.max_calibration_error, 3)
-#> (0.134, 0.289)
+#> (0.11, 0.344)
 pd.DataFrame([{"bin_start": b.bin_start, "bin_end": b.bin_end,
                "mean_predicted_prob": b.mean_predicted_prob,
                "actual_frequency": b.actual_frequency, "count": b.count}
               for b in cal.bins]).round(2)
 #>    bin_start  bin_end  mean_predicted_prob  actual_frequency  count
 #> 0        0.0      0.2                 0.00              0.00      0
-#> 1        0.2      0.4                 0.00              0.00      0
-#> 2        0.4      0.6                 0.46              0.75      4
-#> 3        0.6      0.8                 0.72              0.67      3
-#> 4        0.8      1.0                 0.94              0.83     23
+#> 1        0.2      0.4                 0.36              0.50      2
+#> 2        0.4      0.6                 0.51              0.67      3
+#> 3        0.6      0.8                 0.66              1.00      2
+#> 4        0.8      1.0                 0.95              0.87     23
 ```
 
 A regression target returns no bins.
@@ -1179,9 +1181,9 @@ cv = cv_trainer.cross_validate(n_folds=5, seed=42)
 cv.n_folds
 #> 5
 {name: round(cv.mean_metrics["elevation"][name], 3) for name in ["mae", "r2"]}
-#> {'mae': 172.233, 'r2': 0.857}
+#> {'mae': 192.537, 'r2': 0.824}
 {name: round(cv.std_metrics["elevation"][name], 3) for name in ["mae", "r2"]}
-#> {'mae': 25.861, 'r2': 0.042}
+#> {'mae': 23.138, 'r2': 0.037}
 ```
 
 The per-fold results, each a training result like the one above, are in
@@ -1227,7 +1229,7 @@ block_trainer = rc.Trainer(model, cfg)
 block_trainer.prepare_data(located, test_size=0.2, seed=42)
 blocks = block_trainer.cross_validate_spatial(spatial, n_folds=5, seed=42)
 {name: round(blocks.mean_metrics["elevation"][name], 3) for name in ["mae", "r2"]}
-#> {'mae': 201.168, 'r2': 0.814}
+#> {'mae': 184.85, 'r2': 0.837}
 ```
 
 Block sizes are in degrees. `balance` assigns the blocks to folds so the
@@ -1269,7 +1271,7 @@ rc.Trainer.load_train_config(path).max_epochs
 meta = rc.Trainer.load_run_metadata(path)
 {"best_epoch": meta.best_epoch, "n_plots_train": meta.n_plots_train,
  "n_plots_test": meta.n_plots_test, "hold_out": meta.hold_out}
-#> {'best_epoch': 50, 'n_plots_train': 120, 'n_plots_test': 30, 'hold_out': HoldOutMode.Random}
+#> {'best_epoch': 46, 'n_plots_train': 120, 'n_plots_test': 30, 'hold_out': HoldOutMode.Random}
 ```
 
 `resolve.train.dataset(..., savePath = path)` saves with the metadata at
@@ -1320,12 +1322,15 @@ of memory.
 - [Encoding the species
   set](https://gillescolling.com/resolve/articles/encoding.md): the five
   encodings and their settings.
+
 - [Large data and
   GPUs](https://gillescolling.com/resolve/articles/performance.md): the
   learning rate, the batch size, the model size and the GPU settings.
+
 - [Imputing new
   plots](https://gillescolling.com/resolve/articles/prediction.md):
   output formats, class probabilities, new species and model suites.
+
 - [Latent and species
   embeddings](https://gillescolling.com/resolve/articles/embeddings.md):
   reading the latent representation.
