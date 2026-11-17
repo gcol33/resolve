@@ -81,18 +81,8 @@ build_site <- function() {
 
   source("tools/build_readme.R")
 
-  # The changelog is the engine's, at the repository root. pkgdown reads one release per top-level
-  # heading naming the package and version, where the root file has `## v1.0.3 (2026-10-25)` under a
-  # `# RESOLVE Changelog` title, so each heading moves up a level on the way. `## Unreleased`, the
-  # changes since the last release, becomes pkgdown's `(development version)`.
-  news <- readLines("../NEWS.md", encoding = "UTF-8")
-  news <- news[!grepl("^# ", news)]
-  news <- sub("^## v?([0-9][^ ]*)( .*)?$", "# resolveR \\1", news)
-  news <- sub("^## Unreleased$", "# resolveR (development version)", news)
-  news <- sub("^#(#{2,5}) ", "\\1 ", news)
-  con <- file("NEWS.md", open = "wb")
-  writeLines(enc2utf8(news), con, sep = "\n", useBytes = TRUE)
-  close(con)
+  source("tools/build_news.R")
+  build_news()
 
   # Marks the site build for the articles; pkgdown/docs_cache.R holds their chunk settings.
   Sys.setenv(RESOLVE_DOCS_CACHE = normalizePath("pkgdown/docs_cache.R"))
