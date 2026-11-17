@@ -491,8 +491,14 @@ function recordedCount(t) {
   return { recorded, total: header.rows.length };
 }
 
+// Every EUNIS model is the one variable "eunis": a model trained at one level
+// (`level`) and a model of each plot's deepest code, offered only as read at
+// each level (`read_at`).
+const isHabitat = (t) => Boolean(t.level || t.read_at);
+const choiceName = (t) => (isHabitat(t) ? "eunis" : t.name);
+
 function fullyRecorded(name) {
-  const t = state.suites.flatMap((s) => s.targets).find((x) => x.name === name);
+  const t = state.suites.flatMap((s) => s.targets).find((x) => choiceName(x) === name);
   const c = recordedCount(t);
   return c !== null && c.total > 0 && c.recorded === c.total;
 }
@@ -500,14 +506,13 @@ function fullyRecorded(name) {
 // Habitat is one choice whatever its EUNIS level; the level is chosen beside
 // it. A level is predicted by the models trained at it, or else read from a
 // finer level's models by summing their class probabilities (`read_at`).
-const targetNames = () => [...new Set(state.suites.flatMap((s) => s.targets.filter((t) => !(t.level > 1))
-                                                                      .map((t) => t.name)))]
+const targetNames = () => [...new Set(state.suites.flatMap((s) => s.targets.map(choiceName)))]
   .filter((name) => !fullyRecorded(name));
 
 const habitatChoices = () => {
-  const habitat = state.suites.flatMap((s) => s.targets).filter((t) => t.level);
+  const habitat = state.suites.flatMap((s) => s.targets).filter(isHabitat);
   const levels = new Map();
-  for (const t of habitat) if (!levels.has(t.level)) levels.set(t.level, { level: t.level, target: t });
+  for (const t of habitat) if (t.level && !levels.has(t.level)) levels.set(t.level, { level: t.level, target: t });
   for (const t of habitat) {
     for (const level of Object.keys(t.read_at ?? {}).map(Number)) {
       if (!levels.has(level)) levels.set(level, { level, target: t, readAt: level });
@@ -1844,12 +1849,14 @@ function levelChoice() {
   const chosen = habitatChoice();
   const options = levels.map((c) => {
     const n = c.readAt ? c.target.read_at[c.readAt].classes.length : Object.keys(c.target.class_names ?? {}).length;
-    const read = c.readAt ? `, read from level ${c.target.level}` : "";
+    const read = !c.readAt ? "" : c.target.level ? `, read from level ${c.target.level}`
+                                                : ", read from each plot's deepest level";
     return `<option value="${c.level}"${c.level === chosen.level ? " selected" : ""}>level ${c.level}` +
       `${n ? ` (${n} ${c.level === 3 ? "habitats" : "groups"}${read})` : ""}</option>`;
   }).join("");
   const provisional = chosen.target.source === "canonical"
-    ? `<span class="hint">from level ${chosen.target.level} models (${escape(chosen.target.encoder ?? "")}) trained on ` +
+    ? `<span class="hint">from ${chosen.target.level ? `level ${chosen.target.level}` : "deepest-level"} models ` +
+      `(${escape(chosen.target.encoder ?? "")}) trained on ` +
       `${Math.round(100 * chosen.target.train_share)}% of the plots; the release's own fits are still to come</span>`
     : "";
   return `<select class="form-select form-select-sm" id="o-level" aria-label="EUNIS level">${options}</select>${provisional}`;
@@ -1868,7 +1875,7 @@ let preloaded = "";
 
 function startPreload() {
   const order = ["eunis", "alliance", "altitude", "year", "area", "slope", "location"];
-  const rank = (t) => order.indexOf(t.level ? "eunis" : t.name);
+  const rank = (t) => order.indexOf(choiceName(t));
   const targets = chosenTargets().sort((a, b) => rank(a) - rank(b));
   const members = targets.flatMap((t) => t.members).join();
   if (members === preloaded) return progress();

@@ -409,12 +409,13 @@ const CANCELLED_RESULTANT = 1e-12;
 
 // One member's class probabilities read at a coarser level: each plot's
 // probability of a coarser class is the sum over the finer classes whose
-// ancestor it is (`index[c]`, the ancestor of fine class c).
+// ancestor it is (`index[c]`, the ancestor of fine class c); a fine class
+// with no ancestor at that level (index -1) is left out.
 export function sumByAncestor(probs, n, index, nCoarse) {
   const nFine = index.length;
   const out = new Float32Array(n * nCoarse);
   for (let p = 0; p < n; p++) {
-    for (let c = 0; c < nFine; c++) out[p * nCoarse + index[c]] += probs[p * nFine + c];
+    for (let c = 0; c < nFine; c++) if (index[c] >= 0) out[p * nCoarse + index[c]] += probs[p * nFine + c];
   }
   return out;
 }
