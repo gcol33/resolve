@@ -1,5 +1,22 @@
 # RESOLVE Changelog
 
+## v1.4.0 (2026-11-24)
+
+### Changed
+
+- **Gap fitting is the default wherever a recorded column is named.** A suite
+  target whose recorded column is named (`columns$recorded` in R,
+  `columns["recorded"]` in Python, `--recorded` on the command line) has its
+  gaps fitted from the dataset's own complete plots without a further
+  argument, as the browser app already did: the imputation table carries
+  `<target>_fitted` and `<target>_fit_method` beside `<target>`. Turn it off
+  with `gapFitting = FALSE` (R), `gap_fitting=False` (Python) or
+  `--no-fit-gaps` (`resolve predict`, with `--suite` and with `--model`); the
+  table then carries `<target>_recorded` as before. `--fit-gaps` is still
+  read. A call that names no recorded column is unchanged. In the engine,
+  `SuitePredictOptions::gap_fitting` starts as a default `GapFittingConfig`,
+  and the C ABI reads `gap_fitting = false` as no fit.
+
 ## v1.3.0 (2026-11-17)
 
 ### Changed

@@ -260,10 +260,18 @@ test_that("suite gap fitting adds fitted columns and a report per fitted target"
     columns = list(recorded = list(hab = "y_rec")), gapFitting = TRUE)), "regression")
   expect_false("y_recorded" %in% names(frame))
 
+  # Naming a recorded column fits its gaps unless gap fitting is turned off.
+  default <- suppressMessages(resolve.predict.suite(
+    suite, species = data$species, header = header,
+    columns = list(recorded = list(y = "y_rec"))))
+  expect_false(is.null(default$targets$y$gap_fit))
+  expect_null(suppressMessages(resolve.predict.suite(
+    suite, species = data$species, header = header))$targets$y$gap_fit)
+
   # Without gap fitting, a recorded column flags the plots that record it.
   flagged <- suppressMessages(resolve.predict.suite(
     suite, species = data$species, header = header,
-    columns = list(recorded = list(y = "y_rec"))))
+    columns = list(recorded = list(y = "y_rec")), gapFitting = FALSE))
   expect_null(flagged$targets$y$gap_fit)
   expect_null(flagged$targets$hab$recorded)
   expect_identical(flagged$targets$y$recorded, !is.na(header$y_rec))

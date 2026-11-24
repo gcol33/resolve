@@ -603,7 +603,9 @@ RESOLVE_CAPI resolve_value_t* resolve_suite_get(const resolve_suite_t* s, const 
  *   gap_fitting   MAP  a GapFittingConfig (candidates, k_grid, spatial,
  *                      matching_seed, n_folds, max_fold_share,
  *                      matching_sample; an empty MAP for the defaults): fit
- *                      every target columns.recorded names
+ *                      every target columns.recorded names. Fitted with
+ *                      the defaults when the key is absent; BOOL false
+ *                      fits nothing and only marks the recorded plots
  *   names         MAP  resolve the species names against each target's
  *                      vocabulary first, as resolve_dataset_load's names
  *   terrain       MAP  correct every target the manifest gives a terrain

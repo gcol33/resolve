@@ -577,10 +577,17 @@ TEST_CASE("The gap-fitting flags of predict land on GapFittingConfig and the rec
     CHECK(recorded[1].second == std::vector<std::string>{"lat_rec", "lon_rec"});
 
     CHECK_FALSE(read_gap_fitting(parse_args(predict_spec(), {})).has_value());
-    // --recorded stands on its own (it adds '<target>_recorded'); the other
-    // gap flags need --fit-gaps.
+    // Naming a recorded column fits its gaps. With --no-fit-gaps, --recorded
+    // stands on its own (it adds '<target>_recorded') and the other gap flags
+    // have nothing to act on; the later of --fit-gaps / --no-fit-gaps wins.
     const auto alone = parse_args(predict_spec(), {"--recorded", "a=b"});
-    CHECK_FALSE(read_gap_fitting(alone).has_value());
+    CHECK(read_gap_fitting(alone).has_value());
+    CHECK_FALSE(read_gap_fitting(parse_args(predict_spec(), {"--recorded", "a=b", "--no-fit-gaps"})).has_value());
+    CHECK(read_gap_fitting(parse_args(predict_spec(), {"--no-fit-gaps", "--recorded", "a=b", "--fit-gaps"}))
+              .has_value());
+    CHECK_THROWS_AS(read_gap_fitting(parse_args(predict_spec(), {"--recorded", "a=b", "--no-fit-gaps",
+                                                                 "--gap-folds", "5"})),
+                    ArgError);
     CHECK(read_recorded(alone) == std::vector<std::pair<std::string, std::vector<std::string>>>{{"a", {"b"}}});
     CHECK_THROWS_AS(read_gap_fitting(parse_args(predict_spec(), {"--survey-year", "y"})), ArgError);
     CHECK_THROWS_AS(read_gap_fitting(parse_args(predict_spec(), {"--fit-gaps"})), ArgError);

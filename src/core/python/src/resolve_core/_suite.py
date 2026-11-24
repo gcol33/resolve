@@ -97,8 +97,8 @@ def _recorded(value):
 
 
 def _gap_fitting(gap_fitting):
-    """A GapFittingConfig from None, True, a GapFittingConfig or a dict of its
-    fields; None and False fit nothing."""
+    """A GapFittingConfig from True (the defaults), a GapFittingConfig or a
+    dict of its fields; None and False fit nothing."""
     if gap_fitting is None or gap_fitting is False:
         return None
     if gap_fitting is True:
@@ -138,7 +138,7 @@ def predict(
     columns=None,
     batch_size=4096,
     keep_members=False,
-    gap_fitting=None,
+    gap_fitting=True,
     names=None,
     max_edit_distance=1,
     terrain=None,
@@ -158,8 +158,9 @@ def predict(
         ``abundance``, ``genus``, ``family``, ``latitude``, ``longitude``,
         ``covariates``, ``categoricals``), ``recorded`` (``{target: column}``,
         ``{"location": [lat, lon]}``: the column holding each regression
-        target's recorded value, which adds ``<target>_recorded``, or the gap
-        fit with ``gap_fitting``), for gap fitting ``survey_year``, and for
+        target's recorded value, whose gaps are fitted, or which adds
+        ``<target>_recorded`` with ``gap_fitting=False``), for gap fitting
+        ``survey_year``, and for
         terrain correction ``terrain``
         (``{"elevation": col, "elevation_1km": col, "slope": col,
         "slope_1km": col, "uncertainty": col}``).
@@ -169,9 +170,10 @@ def predict(
         Keep every member's own prediction in ``members``.
     gap_fitting : GapFittingConfig or dict or bool, optional
         Fit each target ``columns["recorded"]`` names from the dataset's own
-        complete plots (``True`` for the defaults; a dict sets
-        ``candidates``, ``k_grid``, ``spatial``, ``matching_seed``,
-        ``n_folds``, ``max_fold_share``, ``matching_sample``). Adds
+        complete plots (``True``, the default, for the default settings; a
+        dict sets ``candidates``, ``k_grid``, ``spatial``, ``matching_seed``,
+        ``n_folds``, ``max_fold_share``, ``matching_sample``; ``False`` or
+        ``None`` fits nothing). Adds
         ``<target>_fitted`` and ``<target>_fit_method`` to ``to_pandas`` and
         a ``gap_fit`` (with its ``report``) to each fitted target.
     names : str or os.PathLike or NameTable or SpeciesNames or bool, optional

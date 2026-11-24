@@ -2537,7 +2537,12 @@ SuitePredictOptions parse_suite_predict_options(const resolve_value* o) {
     if (vhas(o, "batch_size")) out.batch_size = vnum<int64_t>(o, "batch_size");
     if (vhas(o, "keep_members")) out.keep_members = vbool(o, "keep_members");
     if (vhas(o, "gap_fitting")) {
-        out.gap_fitting = parse_config<GapFittingConfig>(vget(o, "gap_fitting"), "gap_fitting");
+        const resolve_value* gaps = vget(o, "gap_fitting");
+        if (gaps->kind == RESOLVE_VALUE_BOOL) {
+            if (!gaps->b) out.gap_fitting.reset();
+        } else {
+            out.gap_fitting = parse_config<GapFittingConfig>(gaps, "gap_fitting");
+        }
     }
     if (vhas(o, "terrain")) out.terrain = parse_terrain_options(vget(o, "terrain"));
     const resolve_value* c = vget(o, "columns");

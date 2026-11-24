@@ -384,8 +384,14 @@ struct SuitePredictOptions {
     // Keep every member's own prediction in SuiteTargetPrediction::members.
     bool keep_members = false;
     // Gap fitting (gap_fitting.hpp) after combining, for every target
-    // columns.recorded names; unset fits nothing.
-    std::optional<GapFittingConfig> gap_fitting;
+    // columns.recorded names: the default wherever a recorded column is
+    // named. Unset fits nothing, and the named targets are only marked
+    // (SuiteTargetPrediction::recorded).
+    std::optional<GapFittingConfig> gap_fitting = GapFittingConfig{};
+
+    // Whether this call fits gaps: gap fitting is set and a target names its
+    // recorded column.
+    [[nodiscard]] bool fits_gaps() const { return gap_fitting.has_value() && !columns.recorded.empty(); }
     // Resolve the species names against each target's vocabulary before
     // encoding (name_resolution.hpp): the release's name table and the edits
     // a misspelling may be away. Unset reads every name as written. Gap

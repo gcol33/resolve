@@ -152,21 +152,22 @@ resolve.seal_suite <- function(dir) {
 #'   `genus`, `family`, `covariates`, `categoricals` (another key is an
 #'   error), `recorded` (a named list of regression target -> the column
 #'   holding its recorded value, `c(latitude, longitude)` for a location;
-#'   adds `<target>_recorded` to [as.data.frame()] and `recorded` to the
-#'   target, or with `gapFitting` the gap fit), for gap fitting
+#'   the gaps of each target named are fitted, see `gapFitting`, and
+#'   `recorded` is added to the target), for gap fitting
 #'   `survey_year`, and for terrain correction `terrain` (a named list of
 #'   `elevation`, `elevation_1km`, `slope`, `slope_1km` and `uncertainty`
 #'   column names).
 #' @param batchSize Forward-pass chunk size per member (default 4096).
 #' @param keepMembers Also return every member's own prediction (default
 #'   `FALSE`).
-#' @param gapFitting `NULL` (default), `TRUE`, or a list of gap fitting
-#'   settings (`candidates`, `k_grid`, `spatial`, `matching_seed`, `n_folds`,
-#'   `max_fold_share`, `matching_sample`; see
-#'   [resolve.fit_gaps()]): fit each target `columns$recorded` names from the
-#'   dataset's own complete plots. Adds `<target>_fitted` and
+#' @param gapFitting Fit each target `columns$recorded` names from the
+#'   dataset's own complete plots: `NULL` (default) or `TRUE` with the
+#'   engine's settings, or a list of gap fitting settings (`candidates`,
+#'   `k_grid`, `spatial`, `matching_seed`, `n_folds`, `max_fold_share`,
+#'   `matching_sample`; see [resolve.fit_gaps()]). Adds `<target>_fitted` and
 #'   `<target>_fit_method` to [as.data.frame()] and a `gap_fit` (`fitted`,
-#'   `method`, `report`) to each fitted target.
+#'   `method`, `report`) to each fitted target. `FALSE` fits nothing, and
+#'   [as.data.frame()] then carries `<target>_recorded` instead.
 #' @param names Resolve the species names against each target's vocabulary
 #'   before encoding: the path of the release's `names.json`, which maps
 #'   entered names and synonyms to the names the models learnt, or `TRUE` for
@@ -225,8 +226,12 @@ resolve.predict.suite <- function(suite, species, header = NULL, columns = NULL,
     if (!is.list(columns)) stop("columns must be a named list")
     options$columns <- columns
   }
-  gap_config <- .resolve_gap_config(gapFitting)
-  if (!is.null(gap_config)) options$gap_fitting <- gap_config
+  if (isFALSE(gapFitting)) {
+    options$gap_fitting <- FALSE
+  } else {
+    gap_config <- .resolve_gap_config(gapFitting)
+    if (!is.null(gap_config)) options$gap_fitting <- gap_config
+  }
   names_option <- .resolve_names_option(names, maxEditDistance)
   if (!is.null(names_option)) options$names <- names_option
   terrain_option <- .resolve_terrain_option(terrain)

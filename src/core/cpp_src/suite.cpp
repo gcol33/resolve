@@ -1628,7 +1628,7 @@ SuitePredictions SuitePredictor::predict(const SuiteInput& input,
             "suite '" + manifest_.name + "' reads plot-level columns (coordinates or "
             "covariates), so a header table is required");
     }
-    const RoleMapping roles = roles_for(options.columns, options.gap_fitting.has_value());
+    const RoleMapping roles = roles_for(options.columns, options.fits_gaps());
 
     SuitePredictions result;
     result.targets.resize(targets_.size());
@@ -1708,7 +1708,7 @@ SuitePredictions SuitePredictor::predict(const SuiteInput& input,
             withhold_unimputed(out);
         }
     }
-    if (options.gap_fitting) {
+    if (options.fits_gaps()) {
         fit_gaps(input, options.columns, *options.gap_fitting, result);
     } else if (!options.columns.recorded.empty()) {
         mark_recorded(input, options.columns, result);
@@ -1766,11 +1766,6 @@ void SuitePredictor::mark_recorded(const SuiteInput& input, const SuiteColumns& 
 void SuitePredictor::fit_gaps(const SuiteInput& input, const SuiteColumns& columns,
                               const GapFittingConfig& config, SuitePredictions& result) const {
     config.validate();
-    if (columns.recorded.empty()) {
-        throw std::invalid_argument(
-            "gap fitting: name the column holding each fitted target's recorded value "
-            "(SuiteColumns::recorded)");
-    }
     const std::vector<std::size_t> indices = recorded_targets(columns);
     const SuiteInputContract& in = manifest_.inputs;
     GapColumns gap_columns;

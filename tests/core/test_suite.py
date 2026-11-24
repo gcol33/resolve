@@ -753,9 +753,14 @@ def test_a_plot_with_no_recognised_species_is_not_imputed(suite_dir, tmp_path):
 def test_suite_recorded_columns_without_gap_fitting_flag_recorded_plots(suite_dir, tmp_path):
     h, s = _recorded_scoring(tmp_path)
     suite = rc.SuitePredictor.load(str(suite_dir))
-    out = suite.predict(s, h, columns={"recorded": {"y": "y_rec", "aspect": "asp_rec"}})
+    columns = {"recorded": {"y": "y_rec", "aspect": "asp_rec"}}
+    out = suite.predict(s, h, columns=columns, gap_fitting=False)
     y = out.target("y")
     assert y.gap_fit is None
+    assert suite.predict(s, h, columns=columns, gap_fitting=None).target("y").gap_fit is None
+    # Naming a recorded column fits its gaps unless gap fitting is turned off.
+    assert suite.predict(s, h, columns=columns).target("y").gap_fit is not None
+    assert suite.predict(s, h).target("y").gap_fit is None
     assert out.target("hab").recorded is None
     assert y.recorded.dtype == torch.bool
     expected_y = [i % 4 != 0 for i in range(len(h))]

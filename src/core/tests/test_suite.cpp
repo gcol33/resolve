@@ -1344,7 +1344,7 @@ TEST_CASE("each target reads its own part of the contract", "[suite][predict]") 
     }
 }
 
-TEST_CASE("suite gap fitting fits the named targets from the dataset's complete plots",
+TEST_CASE("suite gap fitting fits the named targets from the dataset's complete plots by default",
           "[suite][predict][gap_fitting]") {
     TempDir dir;
     build_suite(dir);
@@ -1368,9 +1368,11 @@ TEST_CASE("suite gap fitting fits the named targets from the dataset's complete 
 
     SuitePredictor suite = SuitePredictor::load(dir.path());
     SuitePredictOptions opts;
-    opts.gap_fitting = GapFittingConfig{};
+    REQUIRE(opts.gap_fitting.has_value());
+    CHECK_FALSE(opts.fits_gaps());
     opts.columns.recorded = {{"y", {"y_rec"}}, {"aspect", {"asp_rec"}}};
     opts.columns.survey_year = "year";
+    CHECK(opts.fits_gaps());
     const SuitePredictions out = suite.predict(input, opts);
 
     const auto& y = out.target("y");
@@ -1416,13 +1418,16 @@ TEST_CASE("suite gap fitting fits the named targets from the dataset's complete 
     for (const auto& c : table) CHECK(c.name.find("_recorded") == std::string::npos);
     CHECK(torch::equal(y.recorded, y.gap_fit->method == kGapRecorded));
 
-    // Gap fitting reads regression targets only, and needs the recorded column.
+    // Gap fitting reads regression targets only; with no recorded column
+    // named there is nothing to fit.
     SuitePredictOptions vote = opts;
     vote.columns.recorded = {{"hab", {"y_rec"}}};
     CHECK_THROWS_AS(suite.predict(input, vote), std::invalid_argument);
     SuitePredictOptions none = opts;
     none.columns.recorded.clear();
-    CHECK_THROWS_AS(suite.predict(input, none), std::invalid_argument);
+    const SuitePredictions unfitted = suite.predict(input, none);
+    CHECK_FALSE(unfitted.target("y").gap_fit.has_value());
+    CHECK_FALSE(unfitted.target("y").recorded.defined());
 }
 
 TEST_CASE("a plot none of whose species a target recognises is not imputed",
@@ -1544,6 +1549,7 @@ TEST_CASE("suite recorded columns without gap fitting flag the plots that record
 
     SuitePredictor suite = SuitePredictor::load(dir.path());
     SuitePredictOptions opts;
+    opts.gap_fitting.reset();
     opts.columns.recorded = {{"y", {"y_rec"}}, {"aspect", {"asp_rec"}}};
     const SuitePredictions out = suite.predict(input, opts);
 

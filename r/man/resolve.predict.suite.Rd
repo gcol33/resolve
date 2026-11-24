@@ -33,8 +33,8 @@ among \code{plot_id}, \code{species_id}, \code{abundance}, \code{latitude}, \cod
 \code{genus}, \code{family}, \code{covariates}, \code{categoricals} (another key is an
 error), \code{recorded} (a named list of regression target -> the column
 holding its recorded value, \code{c(latitude, longitude)} for a location;
-adds \verb{<target>_recorded} to \code{\link[=as.data.frame]{as.data.frame()}} and \code{recorded} to the
-target, or with \code{gapFitting} the gap fit), for gap fitting
+the gaps of each target named are fitted, see \code{gapFitting}, and
+\code{recorded} is added to the target), for gap fitting
 \code{survey_year}, and for terrain correction \code{terrain} (a named list of
 \code{elevation}, \code{elevation_1km}, \code{slope}, \code{slope_1km} and \code{uncertainty}
 column names).}
@@ -44,13 +44,14 @@ column names).}
 \item{keepMembers}{Also return every member's own prediction (default
 \code{FALSE}).}
 
-\item{gapFitting}{\code{NULL} (default), \code{TRUE}, or a list of gap fitting
-settings (\code{candidates}, \code{k_grid}, \code{spatial}, \code{matching_seed}, \code{n_folds},
-\code{max_fold_share}, \code{matching_sample}; see
-\code{\link[=resolve.fit_gaps]{resolve.fit_gaps()}}): fit each target \code{columns$recorded} names from the
-dataset's own complete plots. Adds \verb{<target>_fitted} and
+\item{gapFitting}{Fit each target \code{columns$recorded} names from the
+dataset's own complete plots: \code{NULL} (default) or \code{TRUE} with the
+engine's settings, or a list of gap fitting settings (\code{candidates},
+\code{k_grid}, \code{spatial}, \code{matching_seed}, \code{n_folds}, \code{max_fold_share},
+\code{matching_sample}; see \code{\link[=resolve.fit_gaps]{resolve.fit_gaps()}}). Adds \verb{<target>_fitted} and
 \verb{<target>_fit_method} to \code{\link[=as.data.frame]{as.data.frame()}} and a \code{gap_fit} (\code{fitted},
-\code{method}, \code{report}) to each fitted target.}
+\code{method}, \code{report}) to each fitted target. \code{FALSE} fits nothing, and
+\code{\link[=as.data.frame]{as.data.frame()}} then carries \verb{<target>_recorded} instead.}
 
 \item{names}{Resolve the species names against each target's vocabulary
 before encoding: the path of the release's \code{names.json}, which maps

@@ -1,12 +1,13 @@
 ## Resubmission
 
 This is a resubmission of resolveR 0.10.0 (submitted 2026-09-09), and it
-replaces resolveR 1.2.0 (submitted 2026-11-10), which is still waiting in the
-queue. The version is now 1.3.0 because development of the engine continued,
+replaces resolveR 1.3.0 (submitted 2026-11-17), which is still waiting in the
+queue. The version is now 1.4.0 because development of the engine continued,
 and the package's version follows the engine's: `resolve.install_backend()`
-downloads the engine build of the same version. 1.3.0 leaves a plot without
-any recognised species unimputed and reports which plots were imputed; it adds
-no exported function and no example.
+downloads the engine build of the same version. 1.4.0 changes one default:
+`resolve.predict.suite()` now fits the gaps of every target whose recorded
+column is named, where 1.3.0 did so on request (`gapFitting = FALSE` turns it
+off). It adds no exported function and no example.
 
 Response to the review of 2026-09-17:
 

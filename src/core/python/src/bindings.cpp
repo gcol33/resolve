@@ -38,9 +38,9 @@ NB_MODULE(_resolve_core, m) {
     register_metrics(m);
     register_pretraining(m);
     register_fuzzy(m);
+    register_gap_fitting(m);
     register_suite(m);
     register_retrieval(m);
-    register_gap_fitting(m);
     register_names(m);
     register_terrain(m);
     register_fine_tune(m);

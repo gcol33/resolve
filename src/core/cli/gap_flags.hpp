@@ -1,6 +1,6 @@
 // RESOLVE CLI - gap fitting for `resolve predict` (--model and --suite): the
 // flags, the recorded columns they name, and the report written beside the
-// predictions.
+// predictions. Gaps are fitted wherever --recorded names a target.
 
 #ifndef RESOLVE_CLI_GAP_FLAGS_HPP
 #define RESOLVE_CLI_GAP_FLAGS_HPP
@@ -23,45 +23,49 @@ namespace resolve_cli {
 // GapFittingConfig's flags.
 inline constexpr FieldFlag kGapFittingConfigFlags[] = {
     {"candidates", "--gap-candidates",
-     "With --fit-gaps: the methods the choice is made\namong (default all)"},
+     "With gap fitting: the methods the choice is made\namong (default all)"},
     {"k_grid", "--gap-k-grid",
-     "With --fit-gaps: the neighbour counts k is chosen\nfrom by the out-of-fold error"},
+     "With gap fitting: the neighbour counts k is chosen\nfrom by the out-of-fold error"},
     {"spatial", "--spatial",
-     "With --fit-gaps: spatial neighbours as candidates\nwhere the gaps carry coordinates; --no-spatial\nreads composition only"},
+     "With gap fitting: spatial neighbours as candidates\nwhere the gaps carry coordinates; --no-spatial\nreads composition only"},
     {"matching_seed", "--gap-seed",
-     "With --fit-gaps: seed of the fold layout (the order\ngroups are dealt in, the plots it is matched on)"},
+     "With gap fitting: seed of the fold layout (the order\ngroups are dealt in, the plots it is matched on)"},
     {"n_folds", "--gap-folds",
-     "With --fit-gaps: folds of the cross-validation the\nchoice is judged by (the error estimate needs 3)"},
+     "With gap fitting: folds of the cross-validation the\nchoice is judged by (the error estimate needs 3)"},
     {"max_fold_share", "--gap-max-fold-share",
-     "With --fit-gaps: the largest share of the complete\nplots one fold of a candidate layout may hold"},
+     "With gap fitting: the largest share of the complete\nplots one fold of a candidate layout may hold"},
     {"matching_sample", "--gap-matching-sample",
-     "With --fit-gaps: complete plots the layouts'\ndistances are compared with the gaps' on"},
+     "With gap fitting: complete plots the layouts'\ndistances are compared with the gaps' on"},
 };
 
 // The gap-fitting rows of the `predict` flag table.
 inline void append_gap_flags(std::vector<FlagSpec>& flags) {
     flags.push_back({"--fit-gaps", Arity::Flag, "", "",
                      "Fit each target --recorded names from the dataset's\n"
-                     "own complete plots: '<target>_fitted' and\n"
-                     "'<target>_fit_method' beside the raw prediction,\n"
-                     "and a report of what was chosen (--gap-report)."});
+                     "own complete plots, the default with --recorded:\n"
+                     "'<target>_fitted' and '<target>_fit_method' beside\n"
+                     "the raw prediction, and a report of what was chosen\n"
+                     "(--gap-report)."});
+    flags.push_back({"--no-fit-gaps", Arity::Flag, "", "",
+                     "With --recorded: fit nothing, and add only\n"
+                     "'<target>_recorded' (TRUE / FALSE)."});
     flags.push_back({"--recorded", Arity::Repeatable, "T=COL", "",
                      "The column holding target T's recorded value,\n"
                      "missing on the plots to impute; T=LAT,LON for a\n"
-                     "location. Repeat per target. Adds '<target>_recorded'\n"
-                     "(TRUE / FALSE), or with --fit-gaps the gap fit."});
+                     "location. Repeat per target. The gaps of each\n"
+                     "target named are fitted (--fit-gaps)."});
     flags.push_back({"--survey-year", Arity::Value, "COL", "",
-                     "With --fit-gaps: the survey-year column; the fold\n"
+                     "With gap fitting: the survey-year column; the fold\n"
                      "layout is then also matched to how far in time the\n"
                      "gaps are from the complete plots."});
     flags.push_back({"--gap-target", Arity::Repeatable, "T=SCALE[:PERIOD]:HEADS", "",
-                     "With --fit-gaps and --model: how target T's values\n"
+                     "With gap fitting and --model: how target T's values\n"
                      "lie and the head(s) it reads, e.g.\n"
                      "aspect=circular:360:asp_sin,asp_cos or\n"
                      "location=geographic:lat,lon. Default: the head\n"
                      "named T, log scale when it was trained on log1p."});
     flags.push_back({"--gap-report", Arity::Value, "PATH", "",
-                     "With --fit-gaps: where the report is written (JSON;\n"
+                     "With gap fitting: where the report is written (JSON;\n"
                      "default '<output>.gap_fitting.json')."});
     append_config_flags(flags, "Gap fitting", resolve::GapFittingConfig{},
                         FlagNaming::members(kGapFittingConfigFlags));
@@ -89,20 +93,28 @@ inline std::vector<std::pair<std::string, std::vector<std::string>>> read_record
     return out;
 }
 
-// The gap-fitting config, or nullopt without --fit-gaps (where a gap flag
-// given anyway is an error; --recorded stands on its own).
+// The flags read only when gaps are fitted.
+inline constexpr const char* kGapFitOnlyFlags[] = {
+    "--survey-year",        "--gap-target",        "--gap-report", "--gap-candidates",
+    "--gap-k-grid",         "--spatial",           "--no-spatial", "--gap-seed",
+    "--gap-folds",          "--gap-max-fold-share", "--gap-matching-sample"};
+
+// The gap-fitting config: set wherever --recorded names a target, unless
+// --no-fit-gaps (the later of --fit-gaps / --no-fit-gaps wins). Without a
+// fit a gap flag given anyway is an error; --recorded then stands on its own.
 inline std::optional<resolve::GapFittingConfig> read_gap_fitting(const ParsedArgs& args) {
-    if (!args.has("--fit-gaps")) {
-        for (const char* flag : {"--survey-year", "--gap-target", "--gap-report",
-                                 "--gap-candidates", "--gap-k-grid", "--spatial", "--no-spatial",
-                                 "--gap-seed", "--gap-folds", "--gap-max-fold-share",
-                                 "--gap-matching-sample"}) {
-            if (args.has(flag)) throw ArgError(std::string(flag) + " needs --fit-gaps");
+    const bool recorded = args.has("--recorded");
+    const bool fit = args.get_switch("--fit-gaps", "--no-fit-gaps", true);
+    if (!recorded && args.has("--fit-gaps")) {
+        throw ArgError("--fit-gaps needs --recorded TARGET=COLUMN for each target to fit");
+    }
+    if (!recorded || !fit) {
+        const char* reason = recorded ? " is read only when gaps are fitted, and --no-fit-gaps was given"
+                                      : " needs --recorded TARGET=COLUMN for each target to fit";
+        for (const char* flag : kGapFitOnlyFlags) {
+            if (args.has(flag)) throw ArgError(std::string(flag) + reason);
         }
         return std::nullopt;
-    }
-    if (!args.has("--recorded")) {
-        throw ArgError("--fit-gaps needs --recorded TARGET=COLUMN for each target to fit");
     }
     resolve::GapFittingConfig config;
     read_config_flags(config, args, FlagNaming::members(kGapFittingConfigFlags));

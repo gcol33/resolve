@@ -497,7 +497,7 @@ void register_suite(nb::module_& m) {
              },
              nb::arg("species_path"), nb::arg("header_path") = "",
              nb::arg("columns") = SuiteColumns{}, nb::arg("batch_size") = 4096,
-             nb::arg("keep_members") = false, nb::arg("gap_fitting") = nb::none(),
+             nb::arg("keep_members") = false, nb::arg("gap_fitting").none() = GapFittingConfig{},
              nb::arg("names") = nb::none(), nb::arg("terrain") = nb::none())
         .def("predict_columns",
              [](SuitePredictor& s, std::vector<std::string> species_names,
@@ -526,7 +526,7 @@ void register_suite(nb::module_& m) {
              nb::arg("species_names"), nb::arg("species_columns"),
              nb::arg("header_names") = nb::none(), nb::arg("header_columns") = nb::none(),
              nb::arg("columns") = SuiteColumns{}, nb::arg("batch_size") = 4096,
-             nb::arg("keep_members") = false, nb::arg("gap_fitting") = nb::none(),
+             nb::arg("keep_members") = false, nb::arg("gap_fitting").none() = GapFittingConfig{},
              nb::arg("names") = nb::none(), nb::arg("terrain") = nb::none(),
              "Low-level entry point over string columns; SuitePredictor.predict wraps it "
              "for pandas DataFrames.");

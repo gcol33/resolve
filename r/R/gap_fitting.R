@@ -164,7 +164,7 @@ resolve.fit_prediction_gaps <- function(predictions, species, header = NULL, col
   if (is.null(gapFitting) || isFALSE(gapFitting)) return(NULL)
   if (isTRUE(gapFitting)) return(structure(list(), names = character(0)))
   if (!is.list(gapFitting) || (length(gapFitting) > 0 && is.null(names(gapFitting)))) {
-    stop("gapFitting must be TRUE, NULL or a named list of settings", call. = FALSE)
+    stop("gapFitting must be TRUE, FALSE, NULL or a named list of settings", call. = FALSE)
   }
   if (length(gapFitting) == 0) return(structure(list(), names = character(0)))
   if (!is.null(gapFitting$candidates)) gapFitting$candidates <- as.list(as.character(gapFitting$candidates))
