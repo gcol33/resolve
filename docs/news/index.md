@@ -27,6 +27,14 @@
   now copies the files only. The CPU builds and the Windows CUDA builds
   were not affected.
 
+- **The Linux backends load on older distributions.** The `resolve_c`
+  libraries for Linux (CPU, cu128, cu130) were compiled on Ubuntu 24.04
+  and needed glibc 2.38, so they did not load on RHEL 9 (glibc 2.34) or
+  Ubuntu 22.04. They are now compiled on a glibc 2.28 baseline, the one
+  PyTorch’s own Linux builds use, and need glibc 2.27. The assets of
+  this release were replaced on 2026-11-25;
+  `resolve.install_backend(force = TRUE)` fetches the new ones.
+
 ## resolveR 1.4.0
 
 ### Changed
