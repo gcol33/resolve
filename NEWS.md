@@ -1,8 +1,20 @@
 # RESOLVE Changelog
 
-## v1.4.1 (unreleased)
+## v1.4.1 (2026-11-25)
 
 ### Fixed
+
+- **`resolve.install_backend(force = TRUE)` no longer breaks the installed
+  backend.** A reinstall deleted the installed files before downloading the
+  new ones; on Windows the libraries a session has loaded cannot be deleted,
+  so the call removed the rest, stopped with "Permission denied", and left a
+  backend that no longer loaded. The new build is now put together in a
+  directory beside the installed one and takes its place whole once the
+  download is complete, so a failed or interrupted install leaves the backend
+  as it was. A session that has a backend loaded keeps it and is told to
+  restart R; the replaced build is removed the next time the package is
+  loaded. `resolve.install_backend()` also refuses a `dir` that holds other
+  files, since the backend is installed as the whole content of its directory.
 
 - **`resolve.install_backend()` installs the CUDA builds on Linux.** The
   Linux libtorch archive holds two directories beside its runtime libraries

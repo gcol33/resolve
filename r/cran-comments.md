@@ -1,13 +1,14 @@
 ## Resubmission
 
 This is a resubmission of resolveR 0.10.0 (submitted 2026-09-09), and it
-replaces resolveR 1.3.0 (submitted 2026-11-17), which is still waiting in the
-queue. The version is now 1.4.0 because development of the engine continued,
-and the package's version follows the engine's: `resolve.install_backend()`
-downloads the engine build of the same version. 1.4.0 changes one default:
-`resolve.predict.suite()` now fits the gaps of every target whose recorded
-column is named, where 1.3.0 did so on request (`gapFitting = FALSE` turns it
-off). It adds no exported function and no example.
+replaces resolveR 1.4.0 (submitted 2026-11-25), which is still waiting in the
+queue. 1.4.1 fixes two faults in `resolve.install_backend()` found right after
+that upload: a reinstall (`force = TRUE`) deleted the installed backend before
+the new one was downloaded and left it broken on Windows, and the CUDA builds
+did not install on Linux. The backend is now downloaded beside the installed
+one and takes its place only when complete. The version follows the engine's,
+because `resolve.install_backend()` downloads the engine build of the same
+version. 1.4.1 adds no exported function and no example.
 
 Response to the review of 2026-09-17:
 

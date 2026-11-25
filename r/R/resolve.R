@@ -80,7 +80,10 @@ resolve.available <- function() {
 #' @param dir Destination directory (default: the package's user data dir).
 #' @param quiet Suppress progress messages (default `FALSE`).
 #' @param force Reinstall even if the backend is already present (default
-#'   `FALSE`).
+#'   `FALSE`). The new build is downloaded beside the installed one and takes
+#'   its place whole. A session that has a backend loaded keeps it, so restart
+#'   R afterwards; where the installed files are in use (on Windows), the new
+#'   build replaces them the next time the package is loaded.
 #' @return (Invisibly) the directory the backend was installed into.
 #' @seealso [resolve.available()]
 #' @examplesIf interactive()
@@ -128,11 +131,26 @@ resolve.install_backend <- function(version = NULL,
     )
   }
 
-  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
-  if (force) unlink(list.files(dir, full.names = TRUE), recursive = TRUE)
+  # The destination is replaced whole, so it has to be the backend's own
+  # directory: one that is new, empty, or already holds a backend.
+  if (length(list.files(dir, all.files = TRUE, no.. = TRUE)) && !file.exists(dest_lib)) {
+    stop("'", dir, "' holds other files and no ", libname, ". Name a new or an empty ",
+         "directory: the backend is installed as the whole content of its directory.",
+         call. = FALSE)
+  }
+
+  # The build is put together beside its destination and takes its place only
+  # when it is complete, so an interrupted or failed install leaves the
+  # installed backend as it was.
+  staged <- .resolve_staged_dir(dir)
+  unlink(staged, recursive = TRUE)
+  dir.create(staged, recursive = TRUE, showWarnings = FALSE)
+  on.exit(if (!file.exists(file.path(staged, .resolve_staged_marker))) {
+    unlink(staged, recursive = TRUE)
+  }, add = TRUE)
 
   if (!quiet) message("Installing resolve_c backend '", variant, "' into ", dir)
-  .resolve_download_unzip(url, dir, quiet)
+  .resolve_download_unzip(url, staged, quiet)
 
   # CUDA variants ship only resolve_c on GitHub (the >2 GB libtorch cannot be a
   # release asset). Fetch the matching official libtorch from PyTorch's CDN,
@@ -143,7 +161,7 @@ resolve.install_backend <- function(version = NULL,
       message("Fetching matching libtorch (", variant, ", ~2-4 GB, one-time) ",
               "from download.pytorch.org ...")
     }
-    lt_dir <- file.path(dir, ".libtorch_tmp")
+    lt_dir <- file.path(staged, ".libtorch_tmp")
     unlink(lt_dir, recursive = TRUE)
     dir.create(lt_dir, showWarnings = FALSE)
     on.exit(unlink(lt_dir, recursive = TRUE), add = TRUE)
@@ -156,9 +174,10 @@ resolve.install_backend <- function(version = NULL,
     # also holds directories there (libshm), which no library is loaded from.
     lt_files <- list.files(lt_lib, full.names = TRUE)
     lt_files <- lt_files[!dir.exists(lt_files)]
-    if (!all(file.copy(lt_files, dir, overwrite = TRUE))) {
+    if (!all(file.copy(lt_files, staged, overwrite = TRUE))) {
       stop("failed to place the libtorch runtime libraries next to resolve_c.")
     }
+    unlink(lt_dir, recursive = TRUE)
   }
 
   # Linux CUDA: PyTorch's libtorch links several NVIDIA math libraries by
@@ -171,11 +190,28 @@ resolve.install_backend <- function(version = NULL,
       message("Fetching CUDA runtime libraries from NVIDIA (",
               length(entry$cuda_redist), " components, ~1.4 GB, one-time) ...")
     }
-    for (u in entry$cuda_redist) .resolve_fetch_cuda_lib(u, dir, quiet)
+    for (u in entry$cuda_redist) .resolve_fetch_cuda_lib(u, staged, quiet)
   }
 
-  if (!file.exists(dest_lib)) {
-    stop("The downloaded archive did not contain ", libname, " under ", dir, ".")
+  if (!file.exists(file.path(staged, libname))) {
+    stop("The downloaded archive did not contain ", libname, ".")
+  }
+  file.create(file.path(staged, .resolve_staged_marker))
+
+  # A session that has a backend bound keeps it: a loaded library cannot be
+  # exchanged in place, and on Windows its files cannot be moved either. The
+  # new build then takes its place when the package is next loaded.
+  bound <- isTRUE(tryCatch(resolve_capi_is_available(), error = function(e) FALSE))
+  swapped <- .resolve_swap_staged(dir)
+  if (bound || !swapped) {
+    if (!quiet) {
+      message("resolve_c backend '", variant, "' downloaded",
+              if (swapped) paste0(" into ", dir) else paste0(" to ", staged),
+              if (swapped) "." else "; it replaces the installed build when resolveR is next loaded.",
+              if (bound) "\nThis session keeps the backend it has loaded. Restart R to use the new one."
+              else "\nThe installed build is in use by another R session. Close it and load resolveR again.")
+    }
+    return(invisible(dir))
   }
 
   .resolve_prepend_loader_path(dir)

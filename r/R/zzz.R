@@ -256,11 +256,61 @@ NULL
   invisible()
 }
 
+# A backend is put together in a directory beside its destination
+# (resolve.install_backend) and takes the destination's place whole. The
+# marker file is written last, so a directory without it is an unfinished
+# download.
+.resolve_staged_marker <- "STAGED_COMPLETE"
+.resolve_sibling_dir <- function(dir, suffix) {
+  paste0(sub("[/\\\\]+$", "", dir), suffix)
+}
+.resolve_staged_dir <- function(dir) .resolve_sibling_dir(dir, ".staged")
+
+# Remove the builds a swap moved out of `dir`. A library a running session
+# still has loaded cannot be deleted on Windows; its directory stays until a
+# later call finds it free.
+.resolve_clear_retired <- function(dir) {
+  unlink(Sys.glob(paste0(.resolve_sibling_dir(dir, ".retired"), "*")), recursive = TRUE)
+  invisible()
+}
+
+# Put a completed staged build in the place of `dir`. Returns FALSE, with
+# `dir` and the staged build both left as they were, when nothing complete is
+# staged or the files in `dir` are in use and cannot be moved (a library
+# loaded on Windows).
+.resolve_swap_staged <- function(dir) {
+  staged <- .resolve_staged_dir(dir)
+  if (!file.exists(file.path(staged, .resolve_staged_marker))) return(FALSE)
+  .resolve_clear_retired(dir)
+  retired <- .resolve_sibling_dir(
+    dir, sprintf(".retired.%d.%s", Sys.getpid(), format(Sys.time(), "%Y%m%d%H%M%S")))
+  had_dir <- dir.exists(dir)
+  if (had_dir && !isTRUE(suppressWarnings(file.rename(dir, retired)))) return(FALSE)
+  if (!isTRUE(suppressWarnings(file.rename(staged, dir)))) {
+    if (had_dir) suppressWarnings(file.rename(retired, dir))
+    return(FALSE)
+  }
+  unlink(file.path(dir, .resolve_staged_marker))
+  unlink(retired, recursive = TRUE)
+  TRUE
+}
+
+# The directories a backend is installed into: RESOLVE_C_HOME and the user
+# data directory, without the copy a package build may carry.
+.resolve_installed_backend_dirs <- function() {
+  setdiff(.resolve_backend_dirs(), system.file("resolve_c", package = "resolveR"))
+}
+
 # Locate and bind the resolve_c backend. Returns TRUE on success. Idempotent:
-# resolve_capi_load_lib() is a no-op once the library is already bound.
+# resolve_capi_load_lib() is a no-op once the library is already bound. A build
+# staged by a reinstall takes its directory's place first.
 .resolve_load_backend <- function() {
   if (isTRUE(tryCatch(resolve_capi_is_available(), error = function(e) FALSE))) {
     return(TRUE)
+  }
+  for (d in .resolve_installed_backend_dirs()) {
+    .resolve_clear_retired(d)
+    .resolve_swap_staged(d)
   }
   path <- .resolve_find_backend()
   if (!nzchar(path)) return(FALSE)
