@@ -295,8 +295,9 @@ def with_resources(header: list[str], paths: list[str]) -> list[str]:
     for line in header[:-1]:
         if line.startswith("resource_files:"):
             in_list = True
-        elif in_list and line.startswith("  - "):
-            if FIGURE_NAME not in line:
+        elif in_list and (line.startswith("  - ") or not line.strip()):
+            # A blank line between entries belongs to the list and is not kept.
+            if line.strip() and FIGURE_NAME not in line:
                 kept.append(line)
         else:
             in_list = False

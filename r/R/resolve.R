@@ -152,7 +152,11 @@ resolve.install_backend <- function(version = NULL,
     if (!dir.exists(lt_lib)) {
       stop("the downloaded libtorch archive had no libtorch/lib directory.")
     }
-    if (!all(file.copy(list.files(lt_lib, full.names = TRUE), dir, overwrite = TRUE))) {
+    # The runtime libraries are the files of libtorch/lib; the Linux archive
+    # also holds directories there (libshm), which no library is loaded from.
+    lt_files <- list.files(lt_lib, full.names = TRUE)
+    lt_files <- lt_files[!dir.exists(lt_files)]
+    if (!all(file.copy(lt_files, dir, overwrite = TRUE))) {
       stop("failed to place the libtorch runtime libraries next to resolve_c.")
     }
   }

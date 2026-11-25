@@ -1,5 +1,17 @@
 # RESOLVE Changelog
 
+## v1.4.1 (unreleased)
+
+### Fixed
+
+- **`resolve.install_backend()` installs the CUDA builds on Linux.** The
+  Linux libtorch archive holds two directories beside its runtime libraries
+  (`libtorch/lib/libshm`, `libshm_windows`); the installer counted them as
+  libraries it had failed to copy and stopped with "failed to place the
+  libtorch runtime libraries next to resolve_c", although every library was
+  in place. It now copies the files only. The CPU builds and the Windows
+  CUDA builds were not affected.
+
 ## v1.4.0 (2026-11-24)
 
 ### Changed
