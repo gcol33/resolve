@@ -48,12 +48,10 @@ resolve.predict.suite(
   `genus`, `family`, `covariates`, `categoricals` (another key is an
   error), `recorded` (a named list of regression target -\> the column
   holding its recorded value, `c(latitude, longitude)` for a location;
-  adds `<target>_recorded` to
-  [`as.data.frame()`](https://rdrr.io/r/base/as.data.frame.html) and
-  `recorded` to the target, or with `gapFitting` the gap fit), for gap
-  fitting `survey_year`, and for terrain correction `terrain` (a named
-  list of `elevation`, `elevation_1km`, `slope`, `slope_1km` and
-  `uncertainty` column names).
+  the gaps of each target named are fitted, see `gapFitting`, and
+  `recorded` is added to the target), for gap fitting `survey_year`, and
+  for terrain correction `terrain` (a named list of `elevation`,
+  `elevation_1km`, `slope`, `slope_1km` and `uncertainty` column names).
 
 - batchSize:
 
@@ -65,14 +63,17 @@ resolve.predict.suite(
 
 - gapFitting:
 
-  `NULL` (default), `TRUE`, or a list of gap fitting settings
-  (`candidates`, `k_grid`, `spatial`, `matching_seed`, `n_folds`,
-  `max_fold_share`, `matching_sample`; see
-  [`resolve.fit_gaps()`](https://gillescolling.com/resolve/reference/resolve.fit_gaps.md)):
-  fit each target `columns$recorded` names from the dataset's own
-  complete plots. Adds `<target>_fitted` and `<target>_fit_method` to
+  Fit each target `columns$recorded` names from the dataset's own
+  complete plots: `NULL` (default) or `TRUE` with the engine's settings,
+  or a list of gap fitting settings (`candidates`, `k_grid`, `spatial`,
+  `matching_seed`, `n_folds`, `max_fold_share`, `matching_sample`; see
+  [`resolve.fit_gaps()`](https://gillescolling.com/resolve/reference/resolve.fit_gaps.md)).
+  Adds `<target>_fitted` and `<target>_fit_method` to
   [`as.data.frame()`](https://rdrr.io/r/base/as.data.frame.html) and a
   `gap_fit` (`fitted`, `method`, `report`) to each fitted target.
+  `FALSE` fits nothing, and
+  [`as.data.frame()`](https://rdrr.io/r/base/as.data.frame.html) then
+  carries `<target>_recorded` instead.
 
 - names:
 

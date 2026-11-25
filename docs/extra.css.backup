@@ -1,7 +1,3 @@
-/* The RESOLVE App has its own button in the navbar, so it is left out of the
-   Articles menu. */
-.dropdown-item[href$="articles/app.html"] { display: none; }
-
 /* Plot styling - match code block borders */
 /* Bootstrap 5 Sandstone uses --bs-border-radius: .375rem for pre/code */
 /* Figures fill the column, flush with the code blocks. Text size is handled */

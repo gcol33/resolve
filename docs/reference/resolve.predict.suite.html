@@ -26,7 +26,7 @@ score carry no answer."><meta property="og:image" content="https://gillescolling
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.4.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -132,8 +132,8 @@ among <code>plot_id</code>, <code>species_id</code>, <code>abundance</code>, <co
 <code>genus</code>, <code>family</code>, <code>covariates</code>, <code>categoricals</code> (another key is an
 error), <code>recorded</code> (a named list of regression target -&gt; the column
 holding its recorded value, <code>c(latitude, longitude)</code> for a location;
-adds <code>&lt;target&gt;_recorded</code> to <code><a href="https://rdrr.io/r/base/as.data.frame.html" class="external-link">as.data.frame()</a></code> and <code>recorded</code> to the
-target, or with <code>gapFitting</code> the gap fit), for gap fitting
+the gaps of each target named are fitted, see <code>gapFitting</code>, and
+<code>recorded</code> is added to the target), for gap fitting
 <code>survey_year</code>, and for terrain correction <code>terrain</code> (a named list of
 <code>elevation</code>, <code>elevation_1km</code>, <code>slope</code>, <code>slope_1km</code> and <code>uncertainty</code>
 column names).</p></dd>
@@ -149,13 +149,14 @@ column names).</p></dd>
 
 
 <dt id="arg-gapfitting">gapFitting<a class="anchor" aria-label="anchor" href="#arg-gapfitting"></a></dt>
-<dd><p><code>NULL</code> (default), <code>TRUE</code>, or a list of gap fitting
-settings (<code>candidates</code>, <code>k_grid</code>, <code>spatial</code>, <code>matching_seed</code>, <code>n_folds</code>,
-<code>max_fold_share</code>, <code>matching_sample</code>; see
-<code><a href="resolve.fit_gaps.html">resolve.fit_gaps()</a></code>): fit each target <code>columns$recorded</code> names from the
-dataset's own complete plots. Adds <code>&lt;target&gt;_fitted</code> and
+<dd><p>Fit each target <code>columns$recorded</code> names from the
+dataset's own complete plots: <code>NULL</code> (default) or <code>TRUE</code> with the
+engine's settings, or a list of gap fitting settings (<code>candidates</code>,
+<code>k_grid</code>, <code>spatial</code>, <code>matching_seed</code>, <code>n_folds</code>, <code>max_fold_share</code>,
+<code>matching_sample</code>; see <code><a href="resolve.fit_gaps.html">resolve.fit_gaps()</a></code>). Adds <code>&lt;target&gt;_fitted</code> and
 <code>&lt;target&gt;_fit_method</code> to <code><a href="https://rdrr.io/r/base/as.data.frame.html" class="external-link">as.data.frame()</a></code> and a <code>gap_fit</code> (<code>fitted</code>,
-<code>method</code>, <code>report</code>) to each fitted target.</p></dd>
+<code>method</code>, <code>report</code>) to each fitted target. <code>FALSE</code> fits nothing, and
+<code><a href="https://rdrr.io/r/base/as.data.frame.html" class="external-link">as.data.frame()</a></code> then carries <code>&lt;target&gt;_recorded</code> instead.</p></dd>
 
 
 <dt id="arg-names">names<a class="anchor" aria-label="anchor" href="#arg-names"></a></dt>

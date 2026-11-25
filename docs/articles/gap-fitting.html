@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.4.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -57,7 +57,7 @@
     <li><a class="dropdown-item" href="../articles/python-reference.html">Python reference</a></li>
   </ul>
 </li>
-<li class="active nav-item dropdown">
+<li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
 <li><h6 class="dropdown-header" data-toc-skip>Workflows</h6></li>
@@ -423,11 +423,11 @@ its <code>angle_deg</code> (how far it turns it).</p>
 <div class="section level2">
 <h2 id="model-suites-and-the-command-line">Model suites and the command line<a class="anchor" aria-label="anchor" href="#model-suites-and-the-command-line"></a>
 </h2>
-<p>A suite fits its targets after combining its members.
-<code>columns</code> names the recorded column of each target to fit
-(two, latitude and longitude, for a location) and optionally the
-survey-year column; the imputation table then carries
-<code>&lt;target&gt;_fitted</code> and
+<p>A suite fits its targets after combining its members, by default for
+every target whose recorded column is named. <code>columns</code> names
+the recorded column of each target to fit (two, latitude and longitude,
+for a location) and optionally the survey-year column; the imputation
+table then carries <code>&lt;target&gt;_fitted</code> and
 <code>&lt;target&gt;_fit_method</code> beside
 <code>&lt;target&gt;</code>, and each fitted target a
 <code>gap_fit</code> with its report. The scale follows the target: a
@@ -439,8 +439,7 @@ members learned on log1p on that scale.</p>
 <span><span class="va">preds</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/resolve.predict.suite.html">resolve.predict.suite</a></span><span class="op">(</span></span>
 <span>  <span class="va">suite</span>, species <span class="op">=</span> <span class="va">my_species</span>, header <span class="op">=</span> <span class="va">my_plots</span>,</span>
 <span>  columns <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>recorded <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>year <span class="op">=</span> <span class="st">"Year"</span>, location <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"Latitude"</span>, <span class="st">"Longitude"</span><span class="op">)</span><span class="op">)</span>,</span>
-<span>                 survey_year <span class="op">=</span> <span class="st">"Year"</span><span class="op">)</span>,</span>
-<span>  gapFitting <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span>                 survey_year <span class="op">=</span> <span class="st">"Year"</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/as.data.frame.html" class="external-link">as.data.frame</a></span><span class="op">(</span><span class="va">preds</span><span class="op">)</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"plot_id"</span>, <span class="st">"year"</span>, <span class="st">"year_fitted"</span>, <span class="st">"year_fit_method"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span></span>
 <span><span class="va">preds</span><span class="op">$</span><span class="va">targets</span><span class="op">$</span><span class="va">year</span><span class="op">$</span><span class="va">gap_fit</span><span class="op">$</span><span class="va">report</span><span class="op">$</span><span class="va">groups</span></span></code></pre></div>
 </div>
@@ -449,17 +448,16 @@ members learned on log1p on that scale.</p>
 <span id="cb16-2"><a href="#cb16-2" tabindex="-1"></a>preds <span class="op">=</span> suite.predict(</span>
 <span id="cb16-3"><a href="#cb16-3" tabindex="-1"></a>    my_species, my_plots,</span>
 <span id="cb16-4"><a href="#cb16-4" tabindex="-1"></a>    columns<span class="op">=</span>{<span class="st">"recorded"</span>: {<span class="st">"year"</span>: <span class="st">"Year"</span>, <span class="st">"location"</span>: [<span class="st">"Latitude"</span>, <span class="st">"Longitude"</span>]},</span>
-<span id="cb16-5"><a href="#cb16-5" tabindex="-1"></a>             <span class="st">"survey_year"</span>: <span class="st">"Year"</span>},</span>
-<span id="cb16-6"><a href="#cb16-6" tabindex="-1"></a>    gap_fitting<span class="op">=</span><span class="va">True</span>)</span>
-<span id="cb16-7"><a href="#cb16-7" tabindex="-1"></a>preds.to_pandas()[[<span class="st">"plot_id"</span>, <span class="st">"year"</span>, <span class="st">"year_fitted"</span>, <span class="st">"year_fit_method"</span>]].head()</span>
-<span id="cb16-8"><a href="#cb16-8" tabindex="-1"></a>preds.target(<span class="st">"year"</span>).gap_fit.report[<span class="st">"groups"</span>]</span></code></pre></div>
+<span id="cb16-5"><a href="#cb16-5" tabindex="-1"></a>             <span class="st">"survey_year"</span>: <span class="st">"Year"</span>})</span>
+<span id="cb16-6"><a href="#cb16-6" tabindex="-1"></a>preds.to_pandas()[[<span class="st">"plot_id"</span>, <span class="st">"year"</span>, <span class="st">"year_fitted"</span>, <span class="st">"year_fit_method"</span>]].head()</span>
+<span id="cb16-7"><a href="#cb16-7" tabindex="-1"></a>preds.target(<span class="st">"year"</span>).gap_fit.report[<span class="st">"groups"</span>]</span></code></pre></div>
 </div>
-<p>These lines are shown and not run here. On the command line,
-<code>--fit-gaps</code> with one <code>--recorded</code> per target does
-the same for <code>--suite</code> and for <code>--model</code>, and
-writes the report beside the imputed values:</p>
+<p>These lines are shown and not run here. On the command line, one
+<code>--recorded</code> per target does the same for
+<code>--suite</code> and for <code>--model</code>, and writes the report
+beside the imputed values:</p>
 <div class="sourceCode" id="cb17"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" tabindex="-1"></a><span class="ex">resolve</span> predict <span class="at">--suite</span> resolve-suite <span class="at">--header</span> plots.csv <span class="at">--species</span> species.csv <span class="dt">\</span></span>
-<span id="cb17-2"><a href="#cb17-2" tabindex="-1"></a>  <span class="at">--fit-gaps</span> <span class="at">--recorded</span> year=Year <span class="at">--recorded</span> location=Latitude,Longitude <span class="dt">\</span></span>
+<span id="cb17-2"><a href="#cb17-2" tabindex="-1"></a>  <span class="at">--recorded</span> year=Year <span class="at">--recorded</span> location=Latitude,Longitude <span class="dt">\</span></span>
 <span id="cb17-3"><a href="#cb17-3" tabindex="-1"></a>  <span class="at">--survey-year</span> Year <span class="at">--output</span> predictions.csv</span>
 <span id="cb17-4"><a href="#cb17-4" tabindex="-1"></a><span class="co"># predictions.csv: &lt;target&gt;_fitted and &lt;target&gt;_fit_method beside each target</span></span>
 <span id="cb17-5"><a href="#cb17-5" tabindex="-1"></a><span class="co"># predictions.csv.gap_fitting.json: the report (--gap-report names another path)</span></span></code></pre></div>
@@ -473,13 +471,12 @@ the plots that record the target, so it also tells which values were
 imputed. A plot the suite did not impute, because none of its species is
 recognised, is neither a gap nor a complete plot: it reads
 <code>not_imputed</code> there when it lacks the target, and the report
-counts it in <code>n_not_imputed</code>. Without gap fitting, the
-recorded columns alone (<code>columns$recorded</code> in R,
-<code>columns["recorded"]</code> in Python, <code>--recorded</code>
-without <code>--fit-gaps</code>) add
-<code>&lt;target&gt;_recorded</code> instead: <code>TRUE</code> where
-the plot records the target, <code>FALSE</code> where
-<code>&lt;target&gt;</code> is imputed.</p>
+counts it in <code>n_not_imputed</code>. With gap fitting turned off
+(<code>gapFitting = FALSE</code> in R, <code>gap_fitting=False</code> in
+Python, <code>--no-fit-gaps</code> on the command line), the recorded
+columns add <code>&lt;target&gt;_recorded</code> instead:
+<code>TRUE</code> where the plot records the target, <code>FALSE</code>
+where <code>&lt;target&gt;</code> is imputed.</p>
 </div>
 <div class="section level2">
 <h2 id="settings">Settings<a class="anchor" aria-label="anchor" href="#settings"></a>

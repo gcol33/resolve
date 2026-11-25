@@ -163,7 +163,7 @@ library(resolveR)
 resolve.available()
 #> [1] TRUE
 resolve.version()
-#> [1] "1.3.0"
+#> [1] "1.4.0"
 ```
 
 ``` python

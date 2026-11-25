@@ -333,10 +333,11 @@ reported as its `modulus` (how much it shrinks the term) and its
 
 ## Model suites and the command line
 
-A suite fits its targets after combining its members. `columns` names
-the recorded column of each target to fit (two, latitude and longitude,
-for a location) and optionally the survey-year column; the imputation
-table then carries `<target>_fitted` and `<target>_fit_method` beside
+A suite fits its targets after combining its members, by default for
+every target whose recorded column is named. `columns` names the
+recorded column of each target to fit (two, latitude and longitude, for
+a location) and optionally the survey-year column; the imputation table
+then carries `<target>_fitted` and `<target>_fit_method` beside
 `<target>`, and each fitted target a `gap_fit` with its report. The
 scale follows the target: a bearing is fitted as a direction, a location
 in a plane, a target the members learned on log1p on that scale.
@@ -347,8 +348,7 @@ suite <- resolve.load_suite("resolve-suite")
 preds <- resolve.predict.suite(
   suite, species = my_species, header = my_plots,
   columns = list(recorded = list(year = "Year", location = c("Latitude", "Longitude")),
-                 survey_year = "Year"),
-  gapFitting = TRUE)
+                 survey_year = "Year"))
 head(as.data.frame(preds)[c("plot_id", "year", "year_fitted", "year_fit_method")])
 preds$targets$year$gap_fit$report$groups
 ```
@@ -358,20 +358,18 @@ suite = rc.SuitePredictor.load("resolve-suite")
 preds = suite.predict(
     my_species, my_plots,
     columns={"recorded": {"year": "Year", "location": ["Latitude", "Longitude"]},
-             "survey_year": "Year"},
-    gap_fitting=True)
+             "survey_year": "Year"})
 preds.to_pandas()[["plot_id", "year", "year_fitted", "year_fit_method"]].head()
 preds.target("year").gap_fit.report["groups"]
 ```
 
-These lines are shown and not run here. On the command line,
-`--fit-gaps` with one `--recorded` per target does the same for
-`--suite` and for `--model`, and writes the report beside the imputed
-values:
+These lines are shown and not run here. On the command line, one
+`--recorded` per target does the same for `--suite` and for `--model`,
+and writes the report beside the imputed values:
 
 ``` bash
 resolve predict --suite resolve-suite --header plots.csv --species species.csv \
-  --fit-gaps --recorded year=Year --recorded location=Latitude,Longitude \
+  --recorded year=Year --recorded location=Latitude,Longitude \
   --survey-year Year --output predictions.csv
 # predictions.csv: <target>_fitted and <target>_fit_method beside each target
 # predictions.csv.gap_fitting.json: the report (--gap-report names another path)
@@ -387,9 +385,9 @@ otherwise.
 target, so it also tells which values were imputed. A plot the suite did
 not impute, because none of its species is recognised, is neither a gap
 nor a complete plot: it reads `not_imputed` there when it lacks the
-target, and the report counts it in `n_not_imputed`. Without gap
-fitting, the recorded columns alone (`columns$recorded` in R,
-`columns["recorded"]` in Python, `--recorded` without `--fit-gaps`) add
+target, and the report counts it in `n_not_imputed`. With gap fitting
+turned off (`gapFitting = FALSE` in R, `gap_fitting=False` in Python,
+`--no-fit-gaps` on the command line), the recorded columns add
 `<target>_recorded` instead: `TRUE` where the plot records the target,
 `FALSE` where `<target>` is imputed.
 

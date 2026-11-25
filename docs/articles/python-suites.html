@@ -40,7 +40,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.4.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -392,7 +392,7 @@ members need.</p>
 <code>predict()</code><a class="anchor" aria-label="anchor" href="#SuitePredictor-predict"></a>
 </h3>
 <div class="sourceCode" id="cb10"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a>predict(species, header<span class="op">=</span><span class="va">None</span>, columns<span class="op">=</span><span class="va">None</span>, batch_size<span class="op">=</span><span class="dv">4096</span>, keep_members<span class="op">=</span><span class="va">False</span>,</span>
-<span id="cb10-2"><a href="#cb10-2" tabindex="-1"></a>        gap_fitting<span class="op">=</span><span class="va">None</span>, names<span class="op">=</span><span class="va">None</span>, max_edit_distance<span class="op">=</span><span class="dv">1</span>, terrain<span class="op">=</span><span class="va">None</span>)</span></code></pre></div>
+<span id="cb10-2"><a href="#cb10-2" tabindex="-1"></a>        gap_fitting<span class="op">=</span><span class="va">True</span>, names<span class="op">=</span><span class="va">None</span>, max_edit_distance<span class="op">=</span><span class="dv">1</span>, terrain<span class="op">=</span><span class="va">None</span>)</span></code></pre></div>
 <p>Scores plots with every loaded target and returns
 <code>SuitePredictions</code>. <code>species</code> is the species
 table, one row per record, as a data frame or a CSV path.
@@ -406,20 +406,21 @@ member; <code>keep_members</code> keeps every member’s own imputed
 value. No target column is read, except the ones
 <code>columns["recorded"]</code> names: each such target gets
 <code>recorded</code> (<code>True</code> where the plot records it) and
-a <code>&lt;target&gt;_recorded</code> column in <code>to_pandas</code>,
-or with <code>gap_fitting</code> (<code>True</code>, a
-<code>GapFittingConfig</code> or a <code>dict</code> of its fields) is
-fitted from the dataset’s own complete plots instead (<a href="gap-fitting.html">Imputing a dataset’s gaps</a>). With
-<code>terrain</code> (<code>"field"</code> or <code>True</code>,
-<code>"columns"</code>, a <code>dict</code> of <code>source</code>,
-<code>grids</code> and <code>device</code>, or a
+is fitted from the dataset’s own complete plots (<a href="gap-fitting.html">Imputing a dataset’s gaps</a>), with the
+settings of <code>gap_fitting</code> (<code>True</code> for the
+defaults, a <code>GapFittingConfig</code> or a <code>dict</code> of its
+fields); <code>gap_fitting=False</code> fits nothing and adds a
+<code>&lt;target&gt;_recorded</code> column to <code>to_pandas</code>
+instead. With <code>terrain</code> (<code>"field"</code> or
+<code>True</code>, <code>"columns"</code>, a <code>dict</code> of
+<code>source</code>, <code>grids</code> and <code>device</code>, or a
 <code>SuiteTerrainOptions</code>), every target the manifest gives a
 terrain correction is corrected by an elevation model read at the plots
 (<a href="terrain-correction.html">Correcting altitude and slope with an
 elevation model</a>).</p>
-<p><code>predict_columns(species_names, species_columns, header_names=None, header_columns=None, columns=SuiteColumns(), batch_size=4096, keep_members=False, gap_fitting=None, names=None, terrain=None)</code>
+<p><code>predict_columns(species_names, species_columns, header_names=None, header_columns=None, columns=SuiteColumns(), batch_size=4096, keep_members=False, gap_fitting=GapFittingConfig(), names=None, terrain=None)</code>
 and
-<code>predict_csv(species_path, header_path="", columns=SuiteColumns(), batch_size=4096, keep_members=False, gap_fitting=None, names=None, terrain=None)</code>
+<code>predict_csv(species_path, header_path="", columns=SuiteColumns(), batch_size=4096, keep_members=False, gap_fitting=GapFittingConfig(), names=None, terrain=None)</code>
 are the forms over string columns and CSV paths that
 <code>predict</code> calls.</p>
 <div class="sourceCode" id="cb11"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb11-1"><a href="#cb11-1" tabindex="-1"></a>scored <span class="op">=</span> suite.predict(species)</span>

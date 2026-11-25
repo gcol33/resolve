@@ -20,7 +20,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.4.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -76,6 +76,22 @@
       <small>Source: <a href="https://github.com/gcol33/resolve/blob/HEAD/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="1.4.1" id="resolver-141">resolveR 1.4.1<a class="anchor" aria-label="anchor" href="#resolver-141"></a></h2>
+<div class="section level3">
+<h3 id="fixed-1-4-1">Fixed<a class="anchor" aria-label="anchor" href="#fixed-1-4-1"></a></h3>
+<ul><li>
+<strong><code><a href="../reference/resolve.install_backend.html">resolve.install_backend()</a></code> installs the CUDA builds on Linux.</strong> The Linux libtorch archive holds two directories beside its runtime libraries (<code>libtorch/lib/libshm</code>, <code>libshm_windows</code>); the installer counted them as libraries it had failed to copy and stopped with “failed to place the libtorch runtime libraries next to resolve_c”, although every library was in place. It now copies the files only. The CPU builds and the Windows CUDA builds were not affected.</li>
+</ul></div>
+</div>
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="1.4.0" id="resolver-140">resolveR 1.4.0<a class="anchor" aria-label="anchor" href="#resolver-140"></a></h2>
+<div class="section level3">
+<h3 id="changed-1-4-0">Changed<a class="anchor" aria-label="anchor" href="#changed-1-4-0"></a></h3>
+<ul><li>
+<strong>Gap fitting is the default wherever a recorded column is named.</strong> A suite target whose recorded column is named (<code>columns$recorded</code> in R, <code>columns["recorded"]</code> in Python, <code>--recorded</code> on the command line) has its gaps fitted from the dataset’s own complete plots without a further argument, as the browser app already did: the imputation table carries <code>&lt;target&gt;_fitted</code> and <code>&lt;target&gt;_fit_method</code> beside <code>&lt;target&gt;</code>. Turn it off with <code>gapFitting = FALSE</code> (R), <code>gap_fitting=False</code> (Python) or <code>--no-fit-gaps</code> (<code>resolve predict</code>, with <code>--suite</code> and with <code>--model</code>); the table then carries <code>&lt;target&gt;_recorded</code> as before. <code>--fit-gaps</code> is still read. A call that names no recorded column is unchanged. In the engine, <code>SuitePredictOptions::gap_fitting</code> starts as a default <code>GapFittingConfig</code>, and the C ABI reads <code>gap_fitting = false</code> as no fit.</li>
+</ul></div>
+</div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="1.3.0" id="resolver-130">resolveR 1.3.0<a class="anchor" aria-label="anchor" href="#resolver-130"></a></h2>
 <div class="section level3">

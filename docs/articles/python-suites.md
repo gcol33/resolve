@@ -281,7 +281,7 @@ suite.target_names
 
 ``` python
 predict(species, header=None, columns=None, batch_size=4096, keep_members=False,
-        gap_fitting=None, names=None, max_edit_distance=1, terrain=None)
+        gap_fitting=True, names=None, max_edit_distance=1, terrain=None)
 ```
 
 Scores plots with every loaded target and returns `SuitePredictions`.
@@ -294,20 +294,21 @@ for a table that spells them differently. `batch_size` is the forward
 chunk of each member; `keep_members` keeps every member’s own imputed
 value. No target column is read, except the ones `columns["recorded"]`
 names: each such target gets `recorded` (`True` where the plot records
-it) and a `<target>_recorded` column in `to_pandas`, or with
-`gap_fitting` (`True`, a `GapFittingConfig` or a `dict` of its fields)
-is fitted from the dataset’s own complete plots instead ([Imputing a
+it) and is fitted from the dataset’s own complete plots ([Imputing a
 dataset’s
-gaps](https://gillescolling.com/resolve/articles/gap-fitting.md)). With
-`terrain` (`"field"` or `True`, `"columns"`, a `dict` of `source`,
+gaps](https://gillescolling.com/resolve/articles/gap-fitting.md)), with
+the settings of `gap_fitting` (`True` for the defaults, a
+`GapFittingConfig` or a `dict` of its fields); `gap_fitting=False` fits
+nothing and adds a `<target>_recorded` column to `to_pandas` instead.
+With `terrain` (`"field"` or `True`, `"columns"`, a `dict` of `source`,
 `grids` and `device`, or a `SuiteTerrainOptions`), every target the
 manifest gives a terrain correction is corrected by an elevation model
 read at the plots ([Correcting altitude and slope with an elevation
 model](https://gillescolling.com/resolve/articles/terrain-correction.md)).
 
-`predict_columns(species_names, species_columns, header_names=None, header_columns=None, columns=SuiteColumns(), batch_size=4096, keep_members=False, gap_fitting=None, names=None, terrain=None)`
+`predict_columns(species_names, species_columns, header_names=None, header_columns=None, columns=SuiteColumns(), batch_size=4096, keep_members=False, gap_fitting=GapFittingConfig(), names=None, terrain=None)`
 and
-`predict_csv(species_path, header_path="", columns=SuiteColumns(), batch_size=4096, keep_members=False, gap_fitting=None, names=None, terrain=None)`
+`predict_csv(species_path, header_path="", columns=SuiteColumns(), batch_size=4096, keep_members=False, gap_fitting=GapFittingConfig(), names=None, terrain=None)`
 are the forms over string columns and CSV paths that `predict` calls.
 
 ``` python
