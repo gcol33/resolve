@@ -51,6 +51,10 @@ resolve.install_backend(
 - force:
 
   Reinstall even if the backend is already present (default `FALSE`).
+  The new build is downloaded beside the installed one and takes its
+  place whole. A session that has a backend loaded keeps it, so restart
+  R afterwards; where the installed files are in use (on Windows), the
+  new build replaces them the next time the package is loaded.
 
 ## Value
 

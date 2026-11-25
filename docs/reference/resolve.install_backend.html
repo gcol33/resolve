@@ -28,7 +28,7 @@ user's data directory (tools::R_user_dir(&quot;resolveR&quot;, &quot;data&quot;)
 
     <a class="navbar-brand me-2" href="../index.html">RESOLVE</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.4.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.4.1</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -136,7 +136,10 @@ runtime dependencies. Overrides <code>version</code> / <code>variant</code>.</p>
 
 <dt id="arg-force">force<a class="anchor" aria-label="anchor" href="#arg-force"></a></dt>
 <dd><p>Reinstall even if the backend is already present (default
-<code>FALSE</code>).</p></dd>
+<code>FALSE</code>). The new build is downloaded beside the installed one and takes
+its place whole. A session that has a backend loaded keeps it, so restart
+R afterwards; where the installed files are in use (on Windows), the new
+build replaces them the next time the package is loaded.</p></dd>
 
 </dl></div>
     <div class="section level2">

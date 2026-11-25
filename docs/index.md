@@ -349,7 +349,7 @@ If you use RESOLVE, please cite it as below.
 
 ``` text
 Colling G (2026). _resolveR: Predicting Sample Outcomes from
-Compositional Data_. R package version 1.4.0,
+Compositional Data_. R package version 1.4.1,
 <https://github.com/gcol33/resolve>.
 ```
 
@@ -361,7 +361,7 @@ BibTeX:
   author = {Gilles Colling},
   year = {2026},
   url = {https://github.com/gcol33/resolve},
-  note = {R package version 1.4.0},
+  note = {R package version 1.4.1},
 }
 ```
 
