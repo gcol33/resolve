@@ -13,7 +13,7 @@ models exist thanks to their custodians and the many people who recorded
 and contributed these plots. The models run locally in your browser;
 your files are not uploaded. The page downloads the models and the
 elevation model from Zenodo
-([models](https://doi.org/10.5281/zenodo.24444983), [elevation
+([models](https://doi.org/10.5281/zenodo.24545078), [elevation
 model](https://doi.org/10.5281/zenodo.24075925)), the map from
 OpenStreetMap and, for a map download, the country boundaries from
 Eurostat GISCO.
